@@ -29,7 +29,7 @@ import { actingFor } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 import { holdsNothing } from "./stored-skills.ts";
-import { leaveTeam, newTeam } from "./teams.ts";
+import { joinTeam, leaveTeam, newTeam } from "./teams.ts";
 
 // Sharing skills, every step of every operation held while another runs,
 // failed, or its reply lost (GRA-1754, from review round 9's probe): the
@@ -70,7 +70,8 @@ const idp = mockIdp();
 /** Every sequence is short; the whole sweep is what takes time. */
 const sweepTime = { timeout: 600_000 };
 
-type Op =
+/** The operations on the company's shares, and on the person and their skill. */
+type CompanyOp =
   | "approve"
   | "askAgain"
   | "askOld"
@@ -79,23 +80,32 @@ type Op =
   | "delete"
   | "remove"
   | "erase"
-  | "decline"
+  | "decline";
+
+/** The operations on the teams' shares: a sequence with one sets the teams up. */
+type TeamOp =
   | "approveTeam"
   | "askTeam"
   | "retireTeam"
   | "leave"
   | "askTeamB"
-  | "approveTeamB";
+  | "approveTeamB"
+  | "rejoin";
 
-/** The operations on the teams' shares: a sequence with one sets the teams up. */
-const teamOps: ReadonlySet<Op> = new Set<Op>([
+type Op = CompanyOp | TeamOp;
+
+const teamOps: ReadonlySet<string> = new Set<TeamOp>([
   "approveTeam",
   "askTeam",
   "retireTeam",
   "leave",
   "askTeamB",
   "approveTeamB",
+  "rejoin",
 ]);
+
+/** Whether `op` is one of the teams' operations. */
+const isTeamOp = (op: Op): op is TeamOp => teamOps.has(op);
 
 /** What happens at a step of an operation. */
 type Kind = "hold" | "fail" | "lose";
@@ -186,6 +196,14 @@ interface World {
    * there were then. Any other is one decided after they left.
    */
   decidedBeforeLeaving: Set<string> | undefined;
+  /**
+   * Once the asker rejoined team A: the decisions of their shares with it
+   * there were then. One here but not before leaving was decided while
+   * they were out.
+   */
+  decidedBeforeRejoining: Set<string> | undefined;
+  /** What an operation found as it ran: a refused ask that changed something. */
+  refusals: string[];
 }
 
 /** The audience a share or decision of team `team` is stored as. */
@@ -348,23 +366,49 @@ const saveNew = async (w: World): Promise<number> => {
   return saved.version;
 };
 
-/** Asks again to share the asker's skill with team `team`, at a new version. */
-const askTeam = async (w: World, team: string, e: Env): Promise<void> => {
-  const version = await saveNew(w);
-  const asked = await shareOwnSkill(e, w.asker.ident, w.name, version, {
-    team,
-  });
-  w.lastTeamShare.set(teamKey(team), asked.id);
+/** The asker's shares with team `team` that wait now, by ID. */
+const waitingWith = async (w: World, team: string): Promise<string[]> => {
+  const rows = await drizzle(env.DB)
+    .select({ id: skillShares.id })
+    .from(skillShares)
+    .where(
+      and(
+        eq(skillShares.requestedBy, w.asker.userId),
+        eq(skillShares.name, w.name),
+        eq(skillShares.audience, teamKey(team)),
+        eq(skillShares.status, "pending")
+      )
+    );
+  return rows.map(({ id }) => id);
 };
 
 /**
- * The asker leaves team A, and the decisions of their shares with it made
- * by then are noted: nothing else runs meanwhile (a hold waits for its
- * operations), so any other found later was decided after they left.
+ * Asks again to share the asker's skill with team `team`, at a new
+ * version. Refused, it must have changed nothing: the share that waited
+ * still does.
  */
-const leaveTeamA = async (w: World): Promise<void> => {
-  const team = teamsOf(w).a;
-  await leaveTeam(team, w.asker.userId);
+const askTeam = async (w: World, team: string, e: Env): Promise<void> => {
+  const version = await saveNew(w);
+  const before = await waitingWith(w, team);
+  try {
+    const asked = await shareOwnSkill(e, w.asker.ident, w.name, version, {
+      team,
+    });
+    w.lastTeamShare.set(teamKey(team), asked.id);
+  } catch (error) {
+    const after = new Set(await waitingWith(w, team));
+    if (before.some((id) => !after.has(id))) {
+      w.refusals.push("a refused ask took away the share that waited");
+    }
+    throw error;
+  }
+};
+
+/** The decisions of the asker's shares with `team` there are now, by ID. */
+const askersDecisions = async (
+  w: World,
+  team: string
+): Promise<Set<string>> => {
   const decided = await drizzle(env.DB)
     .select({ id: skillDecisions.id })
     .from(skillDecisions)
@@ -375,11 +419,79 @@ const leaveTeamA = async (w: World): Promise<void> => {
         eq(skillShares.requestedBy, w.asker.userId)
       )
     );
-  w.decidedBeforeLeaving = new Set(decided.map(({ id }) => id));
+  return new Set(decided.map(({ id }) => id));
+};
+
+/**
+ * The asker leaves team A, and the decisions of their shares with it made
+ * by then are noted: nothing else runs meanwhile (a hold waits for its
+ * operations), so any other found later was decided after they left.
+ */
+const leaveTeamA = async (w: World): Promise<void> => {
+  const team = teamsOf(w).a;
+  await leaveTeam(team, w.asker.userId);
+  w.decidedBeforeLeaving = await askersDecisions(w, team);
+};
+
+/** The asker joins team A again, once they left it; what was decided while they were out is noted. */
+const rejoinTeamA = async (w: World): Promise<void> => {
+  const team = teamsOf(w).a;
+  w.decidedBeforeRejoining = await askersDecisions(w, team);
+  await joinTeam(team, w.asker.userId);
+};
+
+/** Team operation `op` in `w`, on `e`: none for an operation that isn't one. */
+const teamOperation = async (w: World, op: TeamOp, e: Env): Promise<void> => {
+  switch (op) {
+    case "approveTeam": {
+      const card = await cardOf(w, teamKey(teamsOf(w).a));
+      await approveShare(e, w.first.ident, card);
+      return;
+    }
+    case "askTeam": {
+      await askTeam(w, teamsOf(w).a, e);
+      return;
+    }
+    case "retireTeam": {
+      await retireSkill(e, w.second.ident, w.name, { team: teamsOf(w).a });
+      return;
+    }
+    case "leave": {
+      if (w.decidedBeforeLeaving === undefined) {
+        await leaveTeamA(w);
+      }
+      return;
+    }
+    case "rejoin": {
+      if (
+        w.decidedBeforeLeaving !== undefined &&
+        w.decidedBeforeRejoining === undefined
+      ) {
+        await rejoinTeamA(w);
+      }
+      return;
+    }
+    case "askTeamB": {
+      await askTeam(w, teamsOf(w).b, e);
+      return;
+    }
+    case "approveTeamB": {
+      const card = await cardOf(w, teamKey(teamsOf(w).b));
+      await approveShare(e, w.first.ident, card);
+      return;
+    }
+    default: {
+      throw new Error("Not a team operation");
+    }
+  }
 };
 
 /** Operation `op` in `w`, on `e`. */
 const operation = async (w: World, op: Op, e: Env): Promise<void> => {
+  if (isTeamOp(op)) {
+    await teamOperation(w, op, e);
+    return;
+  }
   switch (op) {
     case "approve": {
       await approveShare(e, w.first.ident, await cardOf(w));
@@ -445,34 +557,6 @@ const operation = async (w: World, op: Op, e: Env): Promise<void> => {
       await w.first.api.members.erase(w.asker.userId, w.asker.name);
       return;
     }
-    case "approveTeam": {
-      const card = await cardOf(w, teamKey(teamsOf(w).a));
-      await approveShare(e, w.first.ident, card);
-      return;
-    }
-    case "askTeam": {
-      await askTeam(w, teamsOf(w).a, e);
-      return;
-    }
-    case "retireTeam": {
-      await retireSkill(e, w.second.ident, w.name, { team: teamsOf(w).a });
-      return;
-    }
-    case "leave": {
-      if (w.decidedBeforeLeaving === undefined) {
-        await leaveTeamA(w);
-      }
-      return;
-    }
-    case "askTeamB": {
-      await askTeam(w, teamsOf(w).b, e);
-      return;
-    }
-    case "approveTeamB": {
-      const card = await cardOf(w, teamKey(teamsOf(w).b));
-      await approveShare(e, w.first.ident, card);
-      return;
-    }
     default: {
       throw new Error("Unknown operation");
     }
@@ -532,6 +616,8 @@ const worldOf = async (withTeams = false): Promise<World> => {
     teams: undefined,
     lastTeamShare: new Map(),
     decidedBeforeLeaving: undefined,
+    decidedBeforeRejoining: undefined,
+    refusals: [],
   };
   const added = await shareOwnSkill(
     env,
@@ -672,8 +758,14 @@ const shareViolations = (
     );
   }
   const left = w.decidedBeforeLeaving;
+  const back = w.decidedBeforeRejoining;
   const ofTeamA = w.teams !== undefined && a.key === teamKey(w.teams.a);
-  if (ofTeamA && left !== undefined && askers && !left.has(decision.id)) {
+  // Decided after they left, and before they were back if they came back.
+  const whileOut =
+    left !== undefined &&
+    !left.has(decision.id) &&
+    (back === undefined || back.has(decision.id));
+  if (ofTeamA && askers && whileOut) {
     found.push(
       `${a.key}: decision ${decision.seq} decided after its asker left the team`
     );
@@ -829,7 +921,10 @@ const teamViolations = async (
       `a team-mate is given ${mate.join(",") || "nothing"}, not ${mateExpected.join(",") || "nothing"}`
     );
   }
-  if (w.decidedBeforeLeaving !== undefined) {
+  if (
+    w.decidedBeforeLeaving !== undefined &&
+    w.decidedBeforeRejoining === undefined
+  ) {
     const shown = await waitingShares(env, w.first.ident);
     if (
       shown.some(
@@ -888,6 +983,7 @@ const violationsOf = async (w: World, head: number): Promise<string[]> => {
     ...found,
     ...(await personalViolations(w, shares, events)),
     ...(await teamViolations(w, live)),
+    ...w.refusals,
   ];
 };
 
@@ -1199,6 +1295,34 @@ describe("sharing skills, every step against every other", () => {
         }
       }
       expect(violations).toStrictEqual([]);
+    }
+  );
+
+  it(
+    "holds asking again after leaving the team, refused, then rejoining: the first ask waits again, and is decided",
+    sweepTime,
+    async () => {
+      const violations: string[] = [];
+      // As it happens one after another, then with the leave inside each
+      // step of the ask.
+      const sequences: Sequence[] = [
+        { ops: ["leave", "askTeam", "rejoin", "approveTeam"], placements: [] },
+      ];
+      const steps = await stepsOf("askTeam");
+      for (let step = 1; step <= steps; step += 1) {
+        sequences.push({
+          ops: ["askTeam", "leave", "rejoin", "approveTeam"],
+          placements: [{ op: 0, step, kind: "hold", inner: [1] }],
+        });
+      }
+      for (const s of sequences) {
+        // oxlint-disable-next-line no-await-in-loop -- a world at a time
+        violations.push(...(await runSequence(s)));
+      }
+      expect({ violations, ran: sequences.length > 1 }).toStrictEqual({
+        violations: [],
+        ran: true,
+      });
     }
   );
 });

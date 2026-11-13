@@ -106,22 +106,32 @@ export interface ListedTeamSkill extends ListedSkill {
 }
 
 /**
- * A team's skill as core's decisions have it, for admins: its team (its
- * name null once the team is gone), its name, the version in use, and
- * whether a newer one is on its way.
+ * Where a shared skill stands, as core's decisions have it: the version
+ * its audience's agents use now (null while none is), and what an admin's
+ * latest decision on it is bringing, not added yet: a new version, its
+ * retirement, or nothing (null).
  */
-export interface DecidedTeamSkill {
-  team: { id: string; name: string | null };
-  name: string;
-  /** The version its members' agents use now; null while none is. */
+export interface SkillInUse {
   version: number | null;
-  /** Whether a newer approved version is on its way. */
-  newVersionOnItsWay: boolean;
+  onItsWay: "version" | "retirement" | null;
 }
 
-/** A company skill as the skills page lists it, and whether a newer approved version is on its way. */
-export interface CompanySkill extends ListedSkill {
-  newVersionOnItsWay: boolean;
+/**
+ * A team's skill as core's decisions have it, for admins: its team (its
+ * name null once the team is gone), its name, and where it stands.
+ */
+export interface DecidedTeamSkill extends SkillInUse {
+  team: { id: string; name: string | null };
+  name: string;
+}
+
+/**
+ * A company skill as the skills page lists it: its name, when to use it
+ * (null until a version is in use), and where it stands.
+ */
+export interface CompanySkill extends SkillInUse {
+  name: string;
+  description: string | null;
 }
 
 /** What the skills page shows the signed-in person. */

@@ -8,12 +8,14 @@ import { isMemberAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { skillErrors } from "@grasp-os/shared/skills";
 import type {
+  CompanySkill,
   DecidedTeamSkill,
   ListedSkill,
   ListedTeamSkill,
   OwnSkillShare,
   SkillShare,
   SkillShareRequest,
+  SkillInUse,
   SkillsOverview,
   SkillText,
 } from "@grasp-os/shared/skills";
@@ -349,9 +351,20 @@ interface DecisionState {
   approved: boolean;
   /** The version in use now: the latest that landed, if an approval's. */
   inUse: number | null;
-  /** Whether its latest decision is an approval not added yet. */
-  onItsWay: boolean;
+  /** What its latest decision brings while not added yet: a new version, or its retirement. */
+  onItsWay: SkillInUse["onItsWay"];
 }
+
+/** What a latest decision brings while it has no outcome: a new version, or a retirement. */
+const onItsWayOf = (
+  shareId: string | null,
+  outcome: string | null
+): SkillInUse["onItsWay"] => {
+  if (outcome !== null) {
+    return null;
+  }
+  return shareId === null ? "retirement" : "version";
+};
 
 /** The latest decision, or the latest that landed (`landed`), of each audience and name. */
 const latestDecisions = async (env: Env, landed: boolean) =>
@@ -407,32 +420,64 @@ const decisionStates = async (
         teamName,
         approved: shareId !== null,
         inUse: inUse.get(key) ?? null,
-        onItsWay: shareId !== null && outcome === null,
+        onItsWay: onItsWayOf(shareId, outcome),
       };
       return [key, state];
     })
   );
 };
 
-/** Of `states`, the teams' skills an admin may retire: those whose latest decision is an approval. */
+/**
+ * Where `state`'s skill stands, for a list of what is in use: the one
+ * answer both the company's list and every team's give. Listed while a
+ * version is in use, a retirement on its way included (its members' agents
+ * still use it until the retirement lands), or while its first version is
+ * on its way; not once nothing is in use and nothing comes.
+ */
+const inUseOf = (state: DecisionState): SkillInUse | null =>
+  state.inUse === null && state.onItsWay !== "version"
+    ? null
+    : { version: state.inUse, onItsWay: state.onItsWay };
+
+/** Of `states`, every team's skill in use or on its way: for admins, to retire. */
 const teamSkillsOf = (
   states: ReadonlyMap<string, DecisionState>
 ): DecidedTeamSkill[] =>
-  [...states.values()].flatMap(
-    ({ audience, name, teamName, approved, inUse, onItsWay }) => {
-      const of = audienceOf(audience);
-      return of?.kind === "team" && approved
-        ? [
-            {
-              team: { id: of.team, name: teamName },
-              name,
-              version: inUse,
-              newVersionOnItsWay: onItsWay,
-            },
-          ]
-        : [];
-    }
-  );
+  [...states.values()].flatMap((state) => {
+    const of = audienceOf(state.audience);
+    const inUse = inUseOf(state);
+    return of?.kind === "team" && inUse !== null
+      ? [
+          {
+            team: { id: of.team, name: state.teamName },
+            name: state.name,
+            ...inUse,
+          },
+        ]
+      : [];
+  });
+
+/**
+ * Of `states`, the company's skills in use or on its way, each with when
+ * to use it as the Brain gives it (`described`, by name) while one of its
+ * versions is.
+ */
+const companySkillsOf = (
+  states: ReadonlyMap<string, DecisionState>,
+  described: ReadonlyMap<string, string>
+): CompanySkill[] =>
+  [...states.values()].flatMap((state) => {
+    const inUse = inUseOf(state);
+    return state.audience === companyKey && inUse !== null
+      ? [
+          {
+            name: state.name,
+            description: described.get(state.name) ?? null,
+            ...inUse,
+          },
+        ]
+      : [];
+  });
 
 /**
  * What the skills page shows `by`: their own skills, the company's, their
@@ -522,11 +567,10 @@ export const skillsOverview = async (
   const asked = await Promise.all(shares.map(ownOf));
   return {
     own: listed.filter(({ scope }) => scope === "person").map(listedOf),
-    company: company.map((skill) => ({
-      ...listedOf(skill),
-      newVersionOnItsWay:
-        states.get(`${companyKey} ${skill.name}`)?.onItsWay === true,
-    })),
+    company: companySkillsOf(
+      states,
+      new Map(company.map(({ name, description }) => [name, description]))
+    ),
     team,
     teams: by.teams.map(({ id, name }) => ({ id, name })),
     shares: asked.flat(),
@@ -629,7 +673,7 @@ export const removeOwnSkill = async (
  * Asks to share `by`'s own skill `name`, exactly as it is at `version`,
  * with `audience` (the company, or one of their teams): it waits for an
  * admin, in place of the share of it for that audience that waited, which
- * goes. Written only while they are a member, no erasure of them has
+ * goes, only when the new one is written: a refused ask changes nothing. Written only while they are a member, no erasure of them has
  * begun, they haven't deleted the skill and, for a team, they are in it,
  * all checked in the write itself: `permission.person_inactive`,
  * `skills.not_found` or `skills.not_in_team` otherwise (a team they
@@ -665,6 +709,9 @@ export const shareOwnSkill = async (
       AND ${skillDeletions.name} = ${read.name})`;
   const askable = sql`${stillHere(by.userId)} AND NOT ${deleted}
     AND ${inAudience(by.userId, key)}`;
+  // One decision for both: the share that waited goes only when the new
+  // one is written, under the same conditions in the same batch, so a
+  // refused ask leaves everything as it was.
   await auditedBatch(env, db, [
     db
       .delete(skillShares)
@@ -673,7 +720,8 @@ export const shareOwnSkill = async (
           eq(skillShares.requestedBy, by.userId),
           eq(skillShares.name, read.name),
           eq(skillShares.audience, key),
-          eq(skillShares.status, "pending")
+          eq(skillShares.status, "pending"),
+          askable
         )
       ),
     db.insert(skillShares).select(

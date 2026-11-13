@@ -1249,6 +1249,10 @@ msgstr "{team}, versión {version}"
 msgid "{team}, version {version}; a new version is on its way"
 msgstr "{team}, versión {version}; hay una versión nueva en camino"
 
+#: src/brain/skills-page.tsx
+msgid "{team}, version {version}; being taken out of use"
+msgstr "{team}, versión {version}; se está retirando"
+
 #: src/brain/thinking/use-thinking.ts
 msgid "{team}: “{words}”"
 msgstr "{team}: «{words}»"
@@ -9121,6 +9125,10 @@ msgstr "Ninguno: su proveedor se eliminó."
 msgid "None."
 msgstr "Ninguno."
 
+#: src/brain/skills-page.tsx
+msgid "Not added yet"
+msgstr "Aún no añadida"
+
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/workflows/workflow-triggers.tsx
 msgid "Not allowed"
@@ -15447,6 +15455,10 @@ msgstr "Versión {version}, la que se ejecuta ahora"
 #: src/brain/skills-page.tsx
 msgid "Version {version}; a new version is on its way"
 msgstr "Versión {version}; hay una versión nueva en camino"
+
+#: src/brain/skills-page.tsx
+msgid "Version {version}; being taken out of use"
+msgstr "Versión {version}; se está retirando"
 
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/workflows/workflow-status.tsx

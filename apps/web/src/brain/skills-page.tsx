@@ -1,5 +1,6 @@
 import { failureText } from "@grasp-os/shared/errors";
 import type {
+  CompanySkill,
   DecidedTeamSkill,
   ListedSkill,
   ListedTeamSkill,
@@ -7,6 +8,7 @@ import type {
   SkillAudienceAsked,
   SkillShare,
   SkillShareAudience,
+  SkillInUse,
   SkillShareRequest,
   SkillsOverview,
   SkillTeam,
@@ -556,29 +558,92 @@ const TeamSkill = ({ skill }: { skill: ListedTeamSkill }) => {
 };
 
 /**
- * Which version of a team's skill its members' agents use, and whether a
- * newer one is on its way, in a whole sentence.
+ * Where a shared skill stands, in a whole sentence: the version in use,
+ * and a new version or its retirement on its way; a team's by its name.
  */
-const DecidedVersion = ({
+const InUseLine = ({
   team,
-  version,
-  newVersionOnItsWay,
+  inUse,
 }: {
-  team: string;
-  version: number | null;
-  newVersionOnItsWay: boolean;
+  /** The team's name, or null for the company's. */
+  team: string | null;
+  inUse: SkillInUse;
 }) => {
+  const { version, onItsWay } = inUse;
   if (version === null) {
-    return <Trans>{team}, not added yet</Trans>;
+    return team === null ? (
+      <Trans>Not added yet</Trans>
+    ) : (
+      <Trans>{team}, not added yet</Trans>
+    );
   }
-  return newVersionOnItsWay ? (
-    <Trans>
-      {team}, version {version}; a new version is on its way
-    </Trans>
+  if (onItsWay === "version") {
+    return team === null ? (
+      <Trans>Version {version}; a new version is on its way</Trans>
+    ) : (
+      <Trans>
+        {team}, version {version}; a new version is on its way
+      </Trans>
+    );
+  }
+  if (onItsWay === "retirement") {
+    return team === null ? (
+      <Trans>Version {version}; being taken out of use</Trans>
+    ) : (
+      <Trans>
+        {team}, version {version}; being taken out of use
+      </Trans>
+    );
+  }
+  return team === null ? (
+    <Trans>Version {version}</Trans>
   ) : (
     <Trans>
       {team}, version {version}
     </Trans>
+  );
+};
+
+/** One of the company's skills; for admins, with Retire while no retirement is on its way. */
+const CompanySkillItem = ({
+  skill,
+  admin,
+  busy,
+  onRetire,
+}: {
+  skill: CompanySkill;
+  admin: boolean;
+  busy: boolean;
+  onRetire: () => void;
+}) => {
+  const { t } = useLingui();
+  const { name } = skill;
+  return (
+    <Item size="sm" variant="outline">
+      <ItemContent>
+        <span className="text-sm font-medium">{name}</span>
+        {skill.description === null ? null : (
+          <span className="text-muted-foreground text-sm">
+            {skill.description}
+          </span>
+        )}
+        <span className="text-muted-foreground text-xs">
+          <InUseLine inUse={skill} team={null} />
+        </span>
+      </ItemContent>
+      {admin && skill.onItsWay !== "retirement" ? (
+        <ItemActions>
+          <Confirmed
+            confirm={t`Retire`}
+            description={t`Nobody's agents use ${name} from then on. Its versions stay as history, and a new approved share of its name brings it back.`}
+            disabled={busy}
+            label={t`Retire`}
+            onConfirm={onRetire}
+            title={t`Retire ${name}?`}
+          />
+        </ItemActions>
+      ) : null}
+    </Item>
   );
 };
 
@@ -593,30 +658,28 @@ const DecidedSkill = ({
   onRetire: () => void;
 }) => {
   const { t } = useLingui();
-  const { name, version } = skill;
+  const { name } = skill;
   const team = teamName(skill.team);
   return (
     <Item size="sm" variant="outline">
       <ItemContent>
         <span className="text-sm font-medium">{name}</span>
         <span className="text-muted-foreground text-xs">
-          <DecidedVersion
-            newVersionOnItsWay={skill.newVersionOnItsWay}
-            team={team}
-            version={version}
-          />
+          <InUseLine inUse={skill} team={team} />
         </span>
       </ItemContent>
-      <ItemActions>
-        <Confirmed
-          confirm={t`Retire`}
-          description={t`The agents of ${team}'s members no longer use ${name}. Its versions stay as history, and a new approved share of its name with the team brings it back.`}
-          disabled={busy}
-          label={t`Retire`}
-          onConfirm={onRetire}
-          title={t`Retire ${name} for ${team}?`}
-        />
-      </ItemActions>
+      {skill.onItsWay === "retirement" ? null : (
+        <ItemActions>
+          <Confirmed
+            confirm={t`Retire`}
+            description={t`The agents of ${team}'s members no longer use ${name}. Its versions stay as history, and a new approved share of its name with the team brings it back.`}
+            disabled={busy}
+            label={t`Retire`}
+            onConfirm={onRetire}
+            title={t`Retire ${name} for ${team}?`}
+          />
+        </ItemActions>
+      )}
     </Item>
   );
 };
@@ -729,7 +792,6 @@ const TeamSkills = ({ data }: { data: SkillsOverview | undefined }) => {
 
 /** The skills page: the person's own, their shares, the company's and their teams', and for admins what waits. */
 export const SkillsPage = () => {
-  const { t } = useLingui();
   const core = useCore();
   const editorId = useId();
   const ownHeading = useId();
@@ -1028,46 +1090,20 @@ export const SkillsPage = () => {
             </p>
           ) : null}
           <ItemGroup render={<ul />} spacing="tight">
-            {data?.company.map((skill) => {
-              const { name, version } = skill;
-              return (
-                <li key={name}>
-                  <Item size="sm" variant="outline">
-                    <ItemContent>
-                      <span className="text-sm font-medium">{name}</span>
-                      <span className="text-muted-foreground text-sm">
-                        {skill.description}
-                      </span>
-                      <span className="text-muted-foreground text-xs">
-                        {skill.newVersionOnItsWay ? (
-                          <Trans>
-                            Version {version}; a new version is on its way
-                          </Trans>
-                        ) : (
-                          <Trans>Version {version}</Trans>
-                        )}
-                      </span>
-                    </ItemContent>
-                    {data.requests === null ? null : (
-                      <ItemActions>
-                        <Confirmed
-                          confirm={t`Retire`}
-                          description={t`Nobody's agents use ${name} from then on. Its versions stay as history, and a new approved share of its name brings it back.`}
-                          disabled={busy}
-                          label={t`Retire`}
-                          onConfirm={() => {
-                            act(async (skills) => {
-                              await skills.retire(name, "company");
-                            });
-                          }}
-                          title={t`Retire ${name}?`}
-                        />
-                      </ItemActions>
-                    )}
-                  </Item>
-                </li>
-              );
-            })}
+            {data?.company.map((skill) => (
+              <li key={skill.name}>
+                <CompanySkillItem
+                  admin={data.requests !== null}
+                  busy={busy}
+                  onRetire={() => {
+                    act(async (skills) => {
+                      await skills.retire(skill.name, "company");
+                    });
+                  }}
+                  skill={skill}
+                />
+              </li>
+            ))}
           </ItemGroup>
         </section>
 

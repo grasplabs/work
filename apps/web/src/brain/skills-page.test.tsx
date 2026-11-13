@@ -104,6 +104,7 @@ const shown = async ({
   approveRefusal,
   company = ["file-expenses"],
   replacing = [],
+  retiring = [],
   overviewRefusals = [],
   teams = [],
   team = [],
@@ -123,6 +124,8 @@ const shown = async ({
   company?: string[];
   /** Of the company's skills, those with a newer approved version on its way. */
   replacing?: string[];
+  /** Of the company's skills, those with a retirement on its way. */
+  retiring?: string[];
   /** Which reads of the page core refuses, counting from 1. */
   overviewRefusals?: number[];
   /** The teams the person is in. */
@@ -134,6 +137,12 @@ const shown = async ({
 }) => {
   const calls: string[] = [];
   const owned = [own, other];
+  const onItsWayOf = (name: string) => {
+    if (replacing.includes(name)) {
+      return "version" as const;
+    }
+    return retiring.includes(name) ? ("retirement" as const) : null;
+  };
   const shares: OwnSkillShare[] = [...existing];
   let requests = [waiting];
   const skills = {
@@ -150,10 +159,10 @@ const shown = async ({
       return {
         own: [...owned],
         company: company.map((name) => ({
-          newVersionOnItsWay: replacing.includes(name),
           name,
-          version: 1,
           description: "File",
+          version: 1,
+          onItsWay: onItsWayOf(name),
         })),
         team,
         teams,
@@ -701,19 +710,19 @@ describe("the skills page", () => {
           team: { id: "t-2", name: "Legal" },
           name: "check-a-contract",
           version: 2,
-          newVersionOnItsWay: false,
+          onItsWay: null,
         },
         {
           team: { id: "t-3", name: null },
           name: "close-a-deal",
           version: null,
-          newVersionOnItsWay: true,
+          onItsWay: "version",
         },
         {
           team: { id: "t-2", name: "Legal" },
           name: "file-a-claim",
           version: 4,
-          newVersionOnItsWay: true,
+          onItsWay: "version",
         },
       ],
     });
@@ -757,5 +766,27 @@ describe("the skills page", () => {
           line?.startsWith("file-expenses") && line.endsWith("Version 1")
       ),
     }).toStrictEqual({ replacing: true, settled: true });
+  });
+
+  it("keeps a skill whose retirement is on its way listed as in use, being taken out of use, with no Retire, for the company's and a team's alike", async () => {
+    await shown({
+      admin: true,
+      company: ["file-expenses"],
+      retiring: ["file-expenses"],
+      teamSkills: [
+        {
+          team: { id: "t-2", name: "Legal" },
+          name: "check-a-contract",
+          version: 3,
+          onItsWay: "retirement",
+        },
+      ],
+    });
+    const text = document.body.textContent ?? "";
+    expect({
+      company: text.includes("Version 1; being taken out of use"),
+      team: text.includes("Legal, version 3; being taken out of use"),
+      retire: buttons("Retire").length,
+    }).toStrictEqual({ company: true, team: true, retire: 0 });
   });
 });

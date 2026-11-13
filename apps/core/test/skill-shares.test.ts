@@ -1,7 +1,11 @@
 import { brainOf, personalBrainOf } from "@grasp-os/brain-next/contract";
 import type { Authority } from "@grasp-os/shared/permissions";
 import type { SessionApi } from "@grasp-os/shared/rpc";
-import type { SkillsOverview } from "@grasp-os/shared/skills";
+import type {
+  SkillAudienceAsked,
+  SkillInUse,
+  SkillsOverview,
+} from "@grasp-os/shared/skills";
 import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -16,12 +20,18 @@ import {
   skillsReachOf,
 } from "../src/brain-skills.ts";
 import type { SkillAt, SkillsReach } from "../src/brain-skills.ts";
-import { skillDecisions, skillShares } from "../src/db/core/schema.ts";
+import {
+  personErasures,
+  skillDecisions,
+  skillDeletions,
+  skillShares,
+} from "../src/db/core/schema.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
 import { personalWorkspaceId } from "../src/personal-workspace.ts";
 import {
   approveShare,
   reconcileSkills,
+  retireSkill,
   shareOwnSkill,
 } from "../src/skill-shares.ts";
 import { chatOf, codeResults, codeStep, model, says } from "./agent-chat.ts";
@@ -280,6 +290,25 @@ const hooked = (
 /** A fresh skill name. */
 const nameOf = (what: string): string => `${what}-${unique()}`;
 
+/** Where each of `skills` stands: its version in use and what is on its way. */
+const standingOf = (skills: readonly SkillInUse[]) =>
+  skills.map(({ version, onItsWay }) => ({ version, onItsWay }));
+
+/** The same standing for the company's skill and the team's. */
+const both = (version: number | null, onItsWay: SkillInUse["onItsWay"]) => ({
+  company: [{ version, onItsWay }],
+  team: [{ version, onItsWay }],
+});
+
+/** What is kept of the share `id`: its status, or nothing. */
+const statusOf = async (id: string) => {
+  const rows = await drizzle(env.DB)
+    .select({ status: skillShares.status })
+    .from(skillShares)
+    .where(eq(skillShares.id, id));
+  return rows.map(({ status }) => status);
+};
+
 /** A hook that fails its call, as a store out of reach does. */
 const outOfReach = async (): Promise<void> => {
   await Promise.resolve();
@@ -411,9 +440,9 @@ describe("writing and sharing skills", setUpTime, () => {
       memberUses: [["company", name]],
       company: {
         name,
-        version: 1,
         description: "Close the month",
-        newVersionOnItsWay: false,
+        version: 1,
+        onItsWay: null,
       },
       read: asked,
       selected: [["company", name]],
@@ -1379,7 +1408,7 @@ describe("sharing a skill with a team", setUpTime, () => {
             team: { id: team, name: `Team ${team}` },
             name,
             version: 1,
-            newVersionOnItsWay: false,
+            onItsWay: null,
           },
         ],
         author: null,
@@ -1511,73 +1540,90 @@ describe("sharing a skill with a team", setUpTime, () => {
     });
   });
 
-  it("tells an admin a newer approved version is on its way beside the one in use, for a team's skill and the company's alike", async () => {
-    const [author, admin] = await Promise.all([
+  it("lists a skill as in use until a retirement lands, and a version on its way until it lands, for a team's skill and the company's alike", async () => {
+    const [author, admin, mate, member] = await Promise.all([
       signedInApi(idp, "user"),
       signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
     ]);
-    const team = await newTeam(author.userId);
+    const team = await newTeam(author.userId, mate.userId);
     const name = nameOf("count-the-stock");
-    const first = await author.api.skills.save(skillText(name, "First way"));
-    for (const audience of ["company", { team }] as const) {
-      // oxlint-disable-next-line no-await-in-loop -- one audience at a time
-      const share = await author.api.skills.share(
-        name,
-        first.version,
-        audience
-      );
-      // oxlint-disable-next-line no-await-in-loop -- one audience at a time
-      await admin.api.skills.approve(share.id);
-    }
-    const second = await author.api.skills.save(skillText(name, "Second way"));
-    // Approved, and each Brain write fails: on its way until the clock.
-    const failing = hooked({
-      before: { addInstructions: { 1: outOfReach, 2: outOfReach } },
-    });
     const decider = await admin.api.whoami();
+    /** An env whose Brain refuses its first write: the decision waits for the clock. */
+    const failingOnce = () =>
+      hooked({ before: { addInstructions: { 1: outOfReach } } });
+    /** Where the company's and the team's skill of the name stand, as the admin's page lists them. */
+    const standing = async () => {
+      const { company, teamSkills } = await overviewOf(admin.api);
+      return {
+        company: standingOf(company.filter((skill) => skill.name === name)),
+        team: standingOf(
+          teamSkills?.filter((skill) => skill.name === name) ?? []
+        ),
+      };
+    };
+    /** Whether the member and the team-mate are given the skill now. */
+    const given = async () => ({
+      company: await usable(member.userId, false, [name]),
+      team: await usable(mate.userId, false, [name]),
+    });
+    /** Asks for `how` with both audiences and approves each while the Brain fails. */
+    const approvedPending = async (how: string) => {
+      const saved = await author.api.skills.save(skillText(name, how));
+      for (const audience of ["company", { team }] as const) {
+        // oxlint-disable-next-line no-await-in-loop -- one audience at a time
+        const share = await author.api.skills.share(
+          name,
+          saved.version,
+          audience
+        );
+        // oxlint-disable-next-line no-await-in-loop -- one audience at a time
+        await approveShare(failingOnce(), decider, share.id);
+      }
+    };
+
+    await approvedPending("First way");
+    const firstOnItsWay = { listed: await standing(), given: await given() };
+    await reconcileSkills(env);
+    const firstLanded = await standing();
+    await approvedPending("Second way");
+    const secondOnItsWay = await standing();
+    await reconcileSkills(env);
+    const secondLanded = await standing();
     for (const audience of ["company", { team }] as const) {
       // oxlint-disable-next-line no-await-in-loop -- one audience at a time
-      const share = await author.api.skills.share(
-        name,
-        second.version,
-        audience
-      );
-      // oxlint-disable-next-line no-await-in-loop -- one audience at a time
-      await approveShare(failing, decider, share.id);
+      await retireSkill(failingOnce(), decider, name, audience);
     }
-    const { company, teamSkills } = await overviewOf(admin.api);
-    const onItsWay = {
-      company: company
-        .filter((skill) => skill.name === name)
-        .map(({ version, newVersionOnItsWay }) => ({
-          version,
-          newVersionOnItsWay,
-        })),
-      team: teamSkills
-        ?.filter((skill) => skill.name === name)
-        .map(({ version, newVersionOnItsWay }) => ({
-          version,
-          newVersionOnItsWay,
-        })),
-    };
+    const retiring = { listed: await standing(), given: await given() };
     await reconcileSkills(env);
-    const after = await overviewOf(admin.api);
 
     expect({
-      onItsWay,
-      landed: after.teamSkills
-        ?.filter((skill) => skill.name === name)
-        .map(({ version, newVersionOnItsWay }) => ({
-          version,
-          newVersionOnItsWay,
-        })),
+      firstOnItsWay,
+      firstLanded,
+      secondOnItsWay,
+      secondLanded,
+      retiring,
+      retired: { listed: await standing(), given: await given() },
     }).toStrictEqual({
-      // The first versions are in use while the second ones are on their way.
-      onItsWay: {
-        company: [{ version: 1, newVersionOnItsWay: true }],
-        team: [{ version: 1, newVersionOnItsWay: true }],
+      // Approved, not added yet: listed as on its way, given to nobody.
+      firstOnItsWay: {
+        listed: both(null, "version"),
+        given: { company: [], team: [] },
       },
-      landed: [{ version: 2, newVersionOnItsWay: false }],
+      firstLanded: both(1, null),
+      // The first versions in use while the second ones are on their way.
+      secondOnItsWay: both(1, "version"),
+      secondLanded: both(2, null),
+      // Retired, not yet in the Brain: still in use, and listed so.
+      retiring: {
+        listed: both(2, "retirement"),
+        given: { company: [["company", name]], team: [["team", name]] },
+      },
+      retired: {
+        listed: { company: [], team: [] },
+        given: { company: [], team: [] },
+      },
     });
   });
 
@@ -1614,5 +1660,74 @@ describe("sharing a skill with a team", setUpTime, () => {
       })(),
       approved: await inUseOf(mate.api, theirs.id),
     }).toStrictEqual({ declined: false, waiting: false, approved: true });
+  });
+
+  it("never takes away a waiting share when an ask of its skill is refused: out of the team, the skill deleted, an erasure begun", async () => {
+    const [author, admin, deleting, erasing] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+    ]);
+    const name = nameOf("brief-a-client");
+    const team = await newTeam(author.userId);
+    /** `api`'s person saves `how` as the skill and asks to share it with `audience`. */
+    const asked = async (
+      api: SessionApi,
+      how: string,
+      audience: SkillAudienceAsked
+    ) => {
+      const saved = await api.skills.save(skillText(name, how));
+      return await api.skills.share(name, saved.version, audience);
+    };
+    const db = drizzle(env.DB);
+
+    // Out of the team: asked again from a stale page, refused.
+    const first = await asked(author.api, "First", { team });
+    await leaveTeam(team, author.userId);
+    const outOfTeam = await outcome(asked(author.api, "Second", { team }));
+    await joinTeam(team, author.userId);
+    const shownAgain = await requestedIds(admin.api);
+    const approved = await outcome(admin.api.skills.approve(first.id));
+
+    // The skill deleted while an ask was on its way: the deletion is
+    // recorded first, then the ask is refused.
+    const toDelete = await asked(deleting.api, "Mine", "company");
+    await db.insert(skillDeletions).values({ personId: deleting.userId, name });
+    const afterDeletion = await outcome(
+      deleting.api.skills.share(name, 1, "company")
+    );
+
+    // An erasure begun, as it is before the removal is done.
+    const toErase = await asked(erasing.api, "Theirs", "company");
+    await db.insert(personErasures).values({
+      userId: erasing.userId,
+      name: "Erasing",
+      emailKeyVersion: 1,
+      requestedBy: admin.userId,
+      requestedAt: new Date(),
+    });
+    const erasureBegun = await outcome(
+      erasing.api.skills.share(name, 1, "company")
+    );
+
+    expect({
+      outOfTeam,
+      shownAgain: shownAgain.includes(first.id),
+      approved,
+      afterDeletion,
+      deletedKept: await statusOf(toDelete.id),
+      erasureBegun,
+      erasingKept: await statusOf(toErase.id),
+    }).toStrictEqual({
+      outOfTeam: "skills.not_in_team",
+      // The first ask waits again once they are back, and is decided.
+      shownAgain: true,
+      approved: "ok",
+      afterDeletion: "skills.not_found",
+      deletedKept: ["pending"],
+      erasureBegun: "permission.person_inactive",
+      erasingKept: ["pending"],
+    });
   });
 });
