@@ -686,7 +686,8 @@ const delivered = async (store: OpenStore) => {
   await vi.waitFor(
     async () => {
       const entries = await settledOf(store);
-      expect(entries.every(({ settled }) => settled)).toBeTruthy();
+      // Whatever is still owed shows in the failure, not just that one is.
+      expect(entries.filter(({ settled }) => !settled)).toStrictEqual([]);
     },
     { timeout: 30_000, interval: 100 }
   );
