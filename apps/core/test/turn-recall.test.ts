@@ -565,16 +565,17 @@ describe("a recall before a question that doesn't hand over", setUpTime, () => {
     const fact = `Depot ${depot} opens at seven`;
     const chat = await recallingChat(says("I can't say."), says("Nor now."));
     await added(fact, owner(chat.personId));
-    /** What the model got, with the Brain's stores finding as `recall` does. */
+    /** What the model got, with the Brain's stores finding passages as `recall` does. */
     const askedWith = async (recall: Call) => {
       const before = chat.provider.requests.length;
       await withEnv(
         chat,
         {
-          // A person's own chat recalls from both stores (`find`).
+          // A person's own chat recalls passages alone from both stores
+          // (`findPassages`).
           BRAIN_STORE: answering(
             env.BRAIN_STORE,
-            "find",
+            "findPassages",
             async () => await recall()
           ),
         },
