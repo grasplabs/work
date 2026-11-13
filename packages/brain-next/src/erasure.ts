@@ -1001,19 +1001,29 @@ export const erase = async (
   const { sql } = storage;
   const subject = await subjectOf(id);
   // A source's erasure recorded before is the same erasure: its key was
-  // closed then, so nothing was added to the source since.
+  // closed then, so nothing was added to the source since. One not yet
+  // written first, so a repeat after a failed write writes it.
   const before =
     kind === "source"
       ? sql
           .exec<Recorded & { confirmed: number }>(
             `SELECT key, kind, confirmed FROM erasures
-            WHERE kind = 'source' AND subject = ? LIMIT 1`,
+            WHERE kind = 'source' AND subject = ?
+            ORDER BY confirmed, key LIMIT 1`,
             subject
           )
           .toArray()
           .at(0)
       : undefined;
-  if (before?.confirmed === 1) {
+  // Erased before as its key alone, now said to be a group's: a second
+  // entry records it as one (the ledger is never rewritten), marked
+  // (`confirm`), so a replay keeps it a group's too.
+  const markingGroup =
+    before !== undefined &&
+    asGroup &&
+    store.groups &&
+    !isKnownGroup(sql, subject);
+  if (before?.confirmed === 1 && !markingGroup) {
     return;
   }
   // A person's erasures recorded and not yet written (a call that failed)
@@ -1037,7 +1047,7 @@ export const erase = async (
   } catch {
     throw new Error(notRecorded);
   }
-  let recorded: Recorded | undefined = before;
+  let recorded: Recorded | undefined = markingGroup ? undefined : before;
   if (recorded === undefined) {
     const hid = storage.transactionSync(() => {
       const at = nextAt(sql);

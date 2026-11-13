@@ -2009,6 +2009,48 @@ describe("a group in a person's own store", () => {
     ).rejects.toThrow(erasedSource);
   });
 
+  // Greptile, second paid review: a key erased as its own first, then
+  // said to be a group's, becomes one, and stays one across a restore.
+  it("makes a key erased alone a group's when erased again as one, across a restore too", async () => {
+    await add(own(), "Before the group", theirs());
+    const group = newGroup();
+    const copy = await copyOf(own());
+    await own().eraseSource({ source: group, reason: "deleted" });
+    await own().eraseSource({
+      source: group,
+      reason: "deleted",
+      asGroup: true,
+    });
+
+    const refusedOf = async () =>
+      await called(
+        own().addSource({
+          source: `${group}/1`,
+          change: "1",
+          text: "Pademelon",
+          access: theirs(),
+        })
+      ).then(
+        () => "added",
+        (error: unknown) =>
+          error instanceof Error ? error.message : String(error)
+      );
+    const live = {
+      state: await own().keyState(`${group}/1`),
+      add: await refusedOf(),
+    };
+    await restore(own(), copy);
+    const restored = {
+      state: await own().keyState(`${group}/1`),
+      add: await refusedOf(),
+    };
+
+    expect({ live, restored }).toStrictEqual({
+      live: { state: "erased", add: erasedSource },
+      restored: { state: "erased", add: erasedSource },
+    });
+  });
+
   // An entry an older release wrote has no mark: it replays as its key's
   // alone, as it always did.
   it("replays a group's entry without the mark as its key's alone", async () => {
