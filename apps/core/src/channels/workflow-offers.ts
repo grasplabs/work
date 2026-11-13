@@ -15,7 +15,7 @@ import { memberOf } from "../auth/identity.ts";
 import { chatWorkflowOffers, workflowResources } from "../db/core/schema.ts";
 import { notNullFailed } from "../db/d1.ts";
 import { isRestricted } from "../restricted.ts";
-import { liveWorkflow, requireWorkflowRole } from "../workflow-resources.ts";
+import { requireWorkflowRole } from "../workflow-resources.ts";
 import { acceptedInput, pinned, startWorkflow } from "../workflow-starts.ts";
 import { startOfferCard } from "./cards.tsx";
 import type { Conversation } from "./connect-own.ts";
@@ -280,17 +280,13 @@ export const pressOffer = async (
     return { line: "startRefused", workflow };
   }
   try {
-    // The version live now, which the start checks the input against.
-    const live = await liveWorkflow(env, offer.workflowId);
-    if (live?.currentVersion === null || live === undefined) {
-      throw workflowResourceErrors.create("workflow.resource_unavailable");
-    }
+    // The version live as it is admitted, which the start checks the
+    // input against.
     const start = await startWorkflow(
       env,
       { type: "person", person: actingIn(person, press.platform) },
       offer.workflowId,
       {
-        version: live.currentVersion,
         args: z.json().parse(JSON.parse(offer.input)),
         key: `chat-offer-${offer.id}`,
       },

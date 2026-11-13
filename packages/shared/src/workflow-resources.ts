@@ -151,7 +151,7 @@ export const workflowResourceErrors = defineErrorFamily({
     "That isn't a workflow version this App can bind.",
   "workflow.app_binding_unavailable": "This App has no such workflow binding.",
   "workflow.app_binding_contract_changed":
-    "This workflow version's events, decisions or listen tasks aren't the ones the App declares. Bind it in the App's draft instead, which declares them, then publish the App.",
+    "An App relies on events, decisions or listen tasks the workflow's live version wouldn't have.",
   "workflow.app_version_binding_unavailable":
     "This App version binds a workflow version that can't be bound now: the workflow was deleted, or whoever bound it in the draft, or whoever makes the App version current, has no role in it. Bind one in the App's draft again, then publish.",
   "workflow.call_denied":
@@ -556,16 +556,15 @@ export interface WorkflowState {
   bytes: number;
 }
 
-/**
- * An App's binding of a workflow, by an alias of the App's: its starts
- * run the workflow's live version.
- */
-export const appWorkflowBindingSchema = z.strictObject({
-  app: identifierSchema,
-  alias: z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u),
-});
+/** The alias an App names a workflow it binds by, in its code. */
+export const workflowAliasSchema = z
+  .string()
+  .regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u);
 
-/** An App's binding of a workflow. */
+/**
+ * An App's binding of a workflow, by an alias of the App's, made by the
+ * App version that binds it: its starts run the workflow's live version.
+ */
 export interface AppWorkflowBinding {
   id: string;
   app: string;
@@ -577,14 +576,17 @@ export interface AppWorkflowBinding {
 }
 
 /**
- * A start of an independent workflow: the exact version (a publication
- * number, never an alias such as "latest"), its args, and a key of the
- * invoker's own, so the same start sent again is the same start.
+ * A start of an independent workflow: its args and a key of the invoker's
+ * own, so the same start sent again is the same start. It starts the
+ * version live as it is admitted; `expected`, if given, is the version
+ * the person filled the start in for, refused once another went live
+ * (`workflow.version_not_live`), so nobody starts unawares a version they
+ * never saw.
  */
 export const workflowStartSchema = z.strictObject({
-  version: z.number().int().positive(),
   args: z.json(),
   key: identifierSchema,
+  expected: z.number().int().positive().optional(),
 });
 
 /** A start the host admitted: its receipt. */
@@ -632,7 +634,7 @@ export const workflowStartIntentSchema = z.strictObject({
   app: identifierSchema,
   appVersion: z.int().min(1),
   principal: identifierSchema,
-  alias: appWorkflowBindingSchema.shape.alias,
+  alias: workflowAliasSchema,
   input: z.json(),
   /**
    * The agent whose call of the App staged it (a chat's code), whose
@@ -1170,14 +1172,14 @@ export interface WorkflowResourcesApi {
    */
   releaseName: (name: string) => Promise<void>;
   /**
-   * Starts an exact version of a workflow the caller has a role in, acting
-   * for them (`workflowStartSchema`): its admitted receipt.
-   */
-  /**
    * How to start it by hand (`WorkflowStartForm`): the version a start
    * from its page runs and the input it takes; for anyone with a role.
    */
   startForm: (id: string) => Promise<WorkflowStartForm>;
+  /**
+   * Starts the live version of a workflow the caller has a role in,
+   * acting for them (`workflowStartSchema`): its admitted receipt.
+   */
   start: (id: string, input: unknown) => Promise<WorkflowStart>;
   /** One of its runs, for anyone with a role (`WorkflowResourceRun`). */
   run: (id: string, runId: string) => Promise<WorkflowResourceRun>;
@@ -1264,10 +1266,6 @@ export interface WorkflowResourcesApi {
    * admins, never Grasp staff.
    */
   pendingBindingsOf: (id: string) => Promise<PendingWorkflowBindings[]>;
-  /** Binds an exact version to an App; for the App's builders. */
-  bindToApp: (id: string, input: unknown) => Promise<AppWorkflowBinding>;
-  /** Removes an App's binding; for the App's builders. */
-  unbindFromApp: (binding: string) => Promise<void>;
   /**
    * The workflows App `app` binds, by alias: for the App's builders,
    * archived or not, never Grasp staff.

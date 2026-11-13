@@ -87,8 +87,7 @@ import type { StateSnapshot } from "./workflows/state-snapshots.ts";
 // - A person: anyone with a role in it (`user` or `builder`), acting for
 //   themselves.
 // - An App: only with a permission of its own, `start` on the workflow,
-//   granted by an admin, from a version of the App an admin approved
-//   (starting changes things), acting for the person its call acts for.
+//   granted by an admin, acting for the person its call acts for.
 //   The App's role or grouping gives it nothing else.
 // - An agent: with a permission of its own, `start` on the workflow
 //   (a chat's own only in that chat), and only for a person who could
@@ -100,18 +99,17 @@ import type { StateSnapshot } from "./workflows/state-snapshots.ts";
 //
 // Threat model, and how each is closed:
 //
-// - A start naming "latest", a range, an unpublished version or one no
-//   longer live: a start names a publication number, an integer, and must
-//   match the live workflow's current version and its manifest hash in the
-//   admitting statement (`workflow.start_invalid`,
-//   `workflow.version_not_found`, `workflow.version_not_live`; to code,
-//   `workflow.start_denied`). A version rolled back, or one never made
-//   live, starts nothing; a publish between the decision and the admission
-//   refuses the start as stale, so a trigger decides again on the new one.
+// - A start of a version that isn't live: a start names no version; it
+//   runs the live one, read as it is decided and required, with its
+//   manifest hash, in the admitting statement (`workflow.version_not_found`
+//   while none is live; to code, `workflow.start_denied`). A version rolled
+//   back, or one never made live, starts nothing; a publish between the
+//   decision and the admission refuses the start as stale, so a trigger
+//   decides again on the new one. A person's start form names the version
+//   they filled it in for, and is refused once another went live
+//   (`workflow.version_not_live`).
 // - A stale grant: the admitting statement requires the permission active
-//   then (and, for an App, the version approved then); a revoked grant, or
-//   one asked for again when an unapproved App version was made current,
-//   admits nothing (`workflow.start_denied`).
+//   then; a revoked grant admits nothing (`workflow.start_denied`).
 // - A revoked App release: an App's start requires its version's release
 //   not revoked, read in the admitting statement, so the kill switch stops
 //   starts its code made, or staged before, as it stops its calls.
@@ -133,9 +131,8 @@ import type { StateSnapshot } from "./workflows/state-snapshots.ts";
 //   (`workflow.paused`), and a pause moves the policy generation on, so
 //   one decided before it is refused as it is admitted.
 // - The same start sent twice: one receipt per invoker, person acted for
-//   and idempotency key; the same key with the same input and, for a
-//   person, who names it, version is the same start (an App's, an agent's
-//   or a trigger's follows the live version, so one sent again after a
+//   and idempotency key; the same key with the same input is the same
+//   start (every start follows the live version, so one sent again after a
 //   publish is the start it made), with another is refused
 //   (`workflow.start_conflict`). One person never gets another's receipt
 //   through the same App, agent or trigger. A start sent again is
@@ -436,7 +433,6 @@ const appGrantHoldsSql = (
   AND ${grantSql(
     allowingPermissionSql(
       { type: "app", appId: app },
-      appVersion,
       { type: "workflow", workflowId: workflow },
       action
     )
@@ -445,7 +441,7 @@ const appGrantHoldsSql = (
 /**
  * That App `app`, at `appVersion`, may start workflow `workflow` for
  * `person` now, as SQL: the App's own grant, from a version the App has
- * (one no admin approved changes nothing) whose release isn't revoked,
+ * whose release isn't revoked,
  * for someone who may use the App now. What a start by the App is
  * admitted on, and what a page is told it may do (page-workflows.ts),
  * so the two never differ.
@@ -478,8 +474,11 @@ export const appSendHoldsSql = (
 export const pinned = async (
   env: Env,
   id: string,
-  version: number
+  /** The version; without one, the one live now. */
+  version?: number
 ): Promise<{
+  /** The version read. */
+  version: number;
   generation: number;
   configRevision: number;
   /** The version live now, if any. */
@@ -491,6 +490,7 @@ export const pinned = async (
 }> => {
   const row = await drizzle(env.DB)
     .select({
+      version: workflowResourceVersions.version,
       generation: workflowResources.policyGeneration,
       configRevision: workflowResources.configRevision,
       currentVersion: workflowResources.currentVersion,
@@ -503,7 +503,10 @@ export const pinned = async (
       workflowResourceVersions,
       and(
         eq(workflowResourceVersions.workflowResourceId, workflowResources.id),
-        eq(workflowResourceVersions.version, version)
+        eq(
+          workflowResourceVersions.version,
+          version ?? workflowResources.currentVersion
+        )
       )
     )
     .where(
@@ -514,6 +517,7 @@ export const pinned = async (
     throw workflowResourceErrors.create("workflow.resource_unavailable");
   }
   if (
+    row.version === null ||
     row.manifestHash === null ||
     row.contract === null ||
     row.manifest === null
@@ -534,6 +538,7 @@ export const pinned = async (
   // Read once its manifest is of this host's format (`buildOf`).
   const { args } = contractArgsSchema.parse(JSON.parse(row.contract));
   return {
+    version: row.version,
     generation: row.generation,
     configRevision: row.configRevision,
     currentVersion: row.currentVersion,
@@ -701,7 +706,7 @@ const ruleOf = async (
         principal: onBehalfOf,
         actor: delegateActorOf(invoker.authority),
         holds: sql`(${workflowRoleSql(onBehalfOf, id)} AND ${grantSql(
-          allowingPermissionSql(subject, undefined, object, "start", true, {
+          allowingPermissionSql(subject, object, "start", {
             context: invoker.context,
             onBehalfOf,
           })
@@ -730,9 +735,7 @@ const ruleOf = async (
               AND live.enabled = 1
               AND live.workflow_resource_id = ${id}
               AND live.principal_binding = ${trigger.principal})
-          AND ${grantSql(
-            allowingPermissionSql(subject, undefined, object, "start")
-          )})`,
+          AND ${grantSql(allowingPermissionSql(subject, object, "start"))})`,
       };
     }
     default: {
@@ -824,7 +827,6 @@ const sameStart = (
   row: typeof workflowStartReceipts.$inferSelect,
   start: {
     workflowId: string;
-    version: number;
     principal: string;
     originAppVersion: number | null;
   },
@@ -838,13 +840,10 @@ const sameStart = (
     row.invokerType === "app"
       ? row.originAppVersion !== null && start.originAppVersion !== null
       : row.originAppVersion === start.originAppVersion;
-  // An App's, an agent's and a trigger's start follow the workflow's live
-  // version: one sent again after a publish is the start it made, on the
-  // version it started on. A person names the version they start.
-  const namesVersion = row.invokerType === "person";
+  // Every start follows the workflow's live version: one sent again after
+  // a publish is the start it made, on the version it started on.
   if (
     row.workflowResourceId !== start.workflowId ||
-    (namesVersion && row.workflowResourceVersion !== start.version) ||
     row.principalId !== start.principal ||
     !sameOrigin ||
     row.inputHash !== inputHash
@@ -1096,8 +1095,24 @@ const lineageOf = (
 };
 
 /**
- * Decides on `request` (`workflowStartSchema`: the exact version, the
- * args and the invoker's idempotency key) to start workflow `id` for
+ * That `key`, which a person or an agent chose, isn't one core derives
+ * (`coreStartKeyPrefix`): `workflow.start_invalid` otherwise.
+ */
+const requireOwnKey = (invoker: StartInvoker, key: string): void => {
+  if (
+    (invoker.type === "person" || invoker.type === "agent") &&
+    key.startsWith(coreStartKeyPrefix)
+  ) {
+    throw workflowResourceErrors.create("workflow.start_invalid", {
+      issues: [`key: Keys beginning with "${coreStartKeyPrefix}" are core's.`],
+    });
+  }
+};
+
+/**
+ * Decides on `request` (`workflowStartSchema`: the args, the invoker's
+ * idempotency key and the version a person expects) to start the live
+ * version of workflow `id` for
  * `invoker` (see the rules above). The invoker's own access is checked
  * first, every time; then the version and the input; then a start already
  * admitted under the key is answered as it was (`workflow.start_conflict`
@@ -1123,9 +1138,9 @@ export const decideWorkflowStart = async (
   files?: StartFiles
 ): Promise<StartDecision> => {
   const {
-    version,
     args: input,
     key,
+    expected,
   } = workflowResourceErrors.parse(
     "workflow.start_invalid",
     workflowStartSchema,
@@ -1134,15 +1149,7 @@ export const decideWorkflowStart = async (
   if (typeof id !== "string" || id.length === 0 || id.length > 128) {
     throw workflowResourceErrors.create("workflow.resource_unavailable");
   }
-  // A key a person or an agent chose never takes one core derives.
-  if (
-    (invoker.type === "person" || invoker.type === "agent") &&
-    key.startsWith(coreStartKeyPrefix)
-  ) {
-    throw workflowResourceErrors.create("workflow.start_invalid", {
-      issues: [`key: Keys beginning with "${coreStartKeyPrefix}" are core's.`],
-    });
-  }
+  requireOwnKey(invoker, key);
   const rule = await ruleOf(env, invoker, id);
   if (invoker.type !== "person") {
     // Code and triggers learn nothing of a workflow they may not start:
@@ -1154,9 +1161,10 @@ export const decideWorkflowStart = async (
       throw denied();
     }
   }
+  // The version live now: what every start runs.
   let found: Awaited<ReturnType<typeof pinned>>;
   try {
-    found = await pinned(env, id, version);
+    found = await pinned(env, id);
   } catch (error) {
     if (invoker.type !== "person" && isExpectedError(error)) {
       throw denied();
@@ -1164,9 +1172,9 @@ export const decideWorkflowStart = async (
     throw error;
   }
   const {
+    version,
     generation,
     configRevision,
-    currentVersion,
     manifestHash,
     inputDescriptor,
     buildHash,
@@ -1215,11 +1223,7 @@ export const decideWorkflowStart = async (
   if (existing !== undefined) {
     try {
       return {
-        start: sameStart(
-          existing,
-          { workflowId: id, version, ...rule },
-          inputHash
-        ),
+        start: sameStart(existing, { workflowId: id, ...rule }, inputHash),
       };
     } catch (error) {
       await refusedStart(
@@ -1234,8 +1238,9 @@ export const decideWorkflowStart = async (
   }
   // A new start only: one admitted before, retried under its key, answers
   // what it admitted, whatever was revoked since (its run, if it hasn't
-  // ended, stops at its next call).
-  if (currentVersion !== version) {
+  // ended, stops at its next call). Another version live than the one the
+  // person filled the start in for: they are told.
+  if (expected !== undefined && expected !== version) {
     await refusedStart(
       env,
       rule.actor,

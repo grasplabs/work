@@ -72,7 +72,7 @@ const shown = async (
     },
     start: async (
       workflow: string,
-      start: { version: number; args: unknown; key: string }
+      start: { expected: number; args: unknown; key: string }
     ) => {
       await Promise.resolve();
       if (refusal !== undefined) {
@@ -80,7 +80,7 @@ const shown = async (
       }
       asked.push({
         workflow,
-        version: start.version,
+        expected: start.expected,
         input: start.args,
         keyed: start.key.length > 0,
       });
@@ -222,7 +222,7 @@ describe("starting a workflow by hand", () => {
       asked: [
         {
           workflow: "workflow-1",
-          version: 3,
+          expected: 3,
           input: { who: "Ada", times: 2 },
           keyed: true,
         },
@@ -287,7 +287,7 @@ describe("starting a workflow by hand", () => {
       asked: [
         {
           workflow: "workflow-1",
-          version: 3,
+          expected: 3,
           input: { approver: "person:user-ada" },
           keyed: true,
         },

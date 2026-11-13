@@ -8,10 +8,7 @@ import { triggerIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { valueAtPointer } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import {
-  coreStartKeyPrefix,
-  workflowResourceErrors,
-} from "@grasp-os/shared/workflow-resources";
+import { coreStartKeyPrefix } from "@grasp-os/shared/workflow-resources";
 import { inputMappingSchema } from "@grasp-os/shared/workflow-triggers";
 import type { InputMapping } from "@grasp-os/shared/workflow-triggers";
 import type { ConnectorEvent } from "@grasp-os/shared/workflows";
@@ -29,7 +26,6 @@ import {
   workflowStartReceipts,
 } from "../db/core/schema.ts";
 import { allowingPermissionSql } from "../permissions.ts";
-import { liveWorkflow } from "../workflow-resources.ts";
 import { isStaleRefusal, startWorkflow } from "../workflow-starts.ts";
 import type { TriggerCause } from "../workflow-starts.ts";
 import type { StampedRun } from "./mail-stamps.ts";
@@ -155,7 +151,6 @@ export const maxHeldMs = 24 * 60 * 60 * 1000;
 const hearsSql = (id: string, event: ConnectorEvent): SQL =>
   sql`EXISTS (SELECT 1 FROM ${permissions} WHERE ${allowingPermissionSql(
     { type: "trigger", triggerId: triggerIdSchema.parse(id) },
-    undefined,
     {
       type: "connection",
       connectionId: event.connection,
@@ -561,13 +556,9 @@ export const startOnce = async (
           : { emittingRun: arrival.stamped.runId }),
       });
     }
-    // The version live now: a publish before it is admitted refuses it as
-    // stale, and it is tried again on the new one.
-    const workflow = await liveWorkflow(env, taker.workflowId);
-    const version = workflow?.currentVersion;
-    if (version === undefined || version === null) {
-      throw workflowResourceErrors.create("workflow.start_denied");
-    }
+    // The version live as it is admitted: a publish between its decision
+    // and its admission refuses it as stale, and it is tried again on the
+    // new one.
     await startWorkflow(
       env,
       {
@@ -576,7 +567,7 @@ export const startOnce = async (
         ...(cause === undefined ? {} : { cause }),
       },
       taker.workflowId,
-      { version, args: arrival.input, key },
+      { args: arrival.input, key },
       // Read again as it is admitted: what else it needs.
       arrival.also,
       {

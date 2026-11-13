@@ -11,14 +11,14 @@ import { z } from "zod";
 import type { Release } from "../app-releases.ts";
 import { appTestRuns } from "../db/core/schema.ts";
 import {
+  boundWorkflowOf,
   failureOf,
   resultAsDeclared,
-  pinOf,
   startCallIn,
 } from "../page-workflows.ts";
 import { loadWorkflowBuild } from "../workflow-builds.ts";
 import { fixtureParams } from "../workflow-params.ts";
-import { liveWorkflow, versionContract } from "../workflow-resources.ts";
+import { versionContract } from "../workflow-resources.ts";
 import { acceptedInput, pinned } from "../workflow-starts.ts";
 import { runEngine } from "./engine.ts";
 import type { PinnedResourceRun } from "./engine.ts";
@@ -172,15 +172,10 @@ export const startFixtureRun = async (
   test: FixtureStart
 ): Promise<FixtureRunStarted> => {
   const { resolved, args: declared } = await startCallIn(release, request);
-  const pin = pinOf(resolved);
-  const workflow = workflowResourceIdSchema.parse(pin.workflowId);
+  const workflow = workflowResourceIdSchema.parse(boundWorkflowOf(resolved));
   // The workflow's live version, as a page's start runs.
-  const live = await liveWorkflow(env, workflow);
-  const version = live?.currentVersion;
-  if (version === undefined || version === null) {
-    throw workflowResourceErrors.create("workflow.app_binding_unavailable");
-  }
-  const found = await pinned(env, workflow, version);
+  const found = await pinned(env, workflow);
+  const { version } = found;
   const input = acceptedInput(found.inputDescriptor, declared);
   const params = await fixtureParams(env, workflow, version, test.params);
   // A fault after a task the version doesn't have, or that no test run

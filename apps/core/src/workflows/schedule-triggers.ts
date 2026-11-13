@@ -118,8 +118,6 @@ interface DueSchedule {
    */
   awaitingStart: boolean;
   workflowId: string;
-  /** The workflow's live version, which its occurrence starts. */
-  workflowVersion: number;
   cron: string;
   timeZone: string;
   input: string;
@@ -345,7 +343,6 @@ const skipped = async (
             type: "trigger",
             triggerId: triggerIdSchema.parse(schedule.triggerId),
           },
-          undefined,
           {
             type: "workflow",
             workflowId: workflowResourceIdSchema.parse(schedule.workflowId),
@@ -396,7 +393,6 @@ const startScheduled = async (
       { type: "trigger", triggerId: schedule.triggerId },
       schedule.workflowId,
       {
-        version: schedule.workflowVersion,
         args: z.json().parse(JSON.parse(schedule.input)),
         key: startKeyOf(schedule),
       },
@@ -450,7 +446,8 @@ export const startDueScheduleTriggers = async (
       attempts: triggerSchedules.attempts,
       awaitingStart: sql`${startStatusSql} = 'requested'`.mapWith(Boolean),
       workflowId: workflowResources.id,
-      workflowVersion: workflowResources.currentVersion,
+      // None while no version is live: nothing to start yet.
+      liveVersion: workflowResources.currentVersion,
       cron: triggerResources.scheduleCron,
       timeZone: triggerResources.scheduleTimeZone,
       input: triggerResources.scheduleInput,
@@ -474,17 +471,17 @@ export const startDueScheduleTriggers = async (
     .limit(schedulesPerRun);
   await Promise.all(
     due.flatMap(
-      ({ nextAt, cron, timeZone, input, workflowVersion, ...schedule }) =>
+      ({ nextAt, cron, timeZone, input, liveVersion, ...schedule }) =>
         nextAt === null ||
         cron === null ||
         timeZone === null ||
         input === null ||
-        workflowVersion === null
+        liveVersion === null
           ? []
           : [
               startScheduled(
                 env,
-                { ...schedule, nextAt, cron, timeZone, input, workflowVersion },
+                { ...schedule, nextAt, cron, timeZone, input },
                 now
               ),
             ]

@@ -34,7 +34,7 @@ import {
   workflowResources,
   workflowStartReceipts,
 } from "./db/core/schema.ts";
-import { liveWorkflow, requireWorkflowRole } from "./workflow-resources.ts";
+import { requireWorkflowRole } from "./workflow-resources.ts";
 import {
   decideWorkflowStart,
   isStaleRefusal,
@@ -243,9 +243,6 @@ export const holdStart = async (
   // What the person sees, as they'd see it: a workflow they have no role
   // in is one that doesn't exist.
   const workflow = await requireWorkflowRole(env, person, workflowId, "user");
-  if (workflow.currentVersion === null) {
-    throw workflowResourceErrors.create("workflow.version_not_found");
-  }
   const invoker = invokerOf({
     agentId: scope.agentId,
     personId: scope.personId,
@@ -255,7 +252,6 @@ export const holdStart = async (
   // As the start would be decided, admitting nothing: its grant, its
   // person's role, its input as the version takes it.
   const decided = await decideWorkflowStart(env, invoker, workflow.id, {
-    version: workflow.currentVersion,
     args: input,
     key: startKeyOf(scope.chatId, key),
   });
@@ -419,20 +415,14 @@ export const confirmHeldStart = async (
   const stillConfirmed = sql`EXISTS (SELECT 1 FROM ${agentHeldStarts} WHERE ${agentHeldStarts.id} = ${row.id} AND ${agentHeldStarts.decision} = 'confirmed')`;
   let started: Awaited<ReturnType<typeof startWorkflow>>;
   try {
-    // The version live now: a publish since the start was held starts the
-    // new one, and one landing before it is admitted refuses it as stale,
-    // left open to confirm again. Gone, it starts nothing, as any start
-    // of its agent's would be refused.
-    const workflow = await liveWorkflow(env, row.workflowResourceId);
-    if (workflow?.currentVersion === null || workflow === undefined) {
-      throw workflowResourceErrors.create("workflow.start_denied");
-    }
+    // The version live as it is admitted: a publish since the start was
+    // held starts the new one, and one landing between its decision and
+    // its admission refuses it as stale, left open to confirm again.
     started = await startWorkflow(
       env,
       invokerOf(row),
       row.workflowResourceId,
       {
-        version: workflow.currentVersion,
         args: inputOf(row),
         key: startKeyOf(row.chatId, row.key),
       },
