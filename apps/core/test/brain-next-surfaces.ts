@@ -4037,7 +4037,8 @@ export const storeProbes = {
     await eraseFiller(replaced, kept);
     return asked;
   },
-  addInstructions: async ({ markers }) => {
+  addInstructions: async (probing) => {
+    const { markers } = probing;
     const text = markedText(markers);
     const add = async (
       name: string,
@@ -4055,7 +4056,36 @@ export const storeProbes = {
             access,
           })
       );
+    // A person's own file, kept in their own store alone: the shared store
+    // refuses it alike whether that person wrote one or not.
+    const ownFiles: Answer[] = [];
+    for (const id of hiddenIdsOf(probing, "person")) {
+      const like = `a person's own file in the shared store, ${id}`;
+      const written = async (about: "hidden" | "nothing", personId: string) =>
+        await answer(
+          `${like}, ${about}`,
+          async () =>
+            await refusedWith(
+              async () =>
+                await store().addInstructions({
+                  source: instructionKeyOf({ scope: "person", personId }),
+                  change: crypto.randomUUID(),
+                  text: "Not the markers",
+                  access: { kind: "owner", person: personId },
+                })
+            ),
+          about,
+          like
+        );
+      ownFiles.push(
+        // oxlint-disable-next-line no-await-in-loop -- one at a time
+        await written("nothing", stranger()),
+        // oxlint-disable-next-line no-await-in-loop -- one at a time
+        await written("hidden", id)
+      );
+    }
     return [
+      ...ownFiles,
       await add("for someone else", { kind: "owner", person: stranger() }),
       await add("for a group", { kind: "audience", group: stranger() }),
       await add(
