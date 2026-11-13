@@ -56,8 +56,11 @@ export const drainMaxBatches = 50;
 export interface Outbox {
   /** Named in logs. */
   name: "core" | "knowledge" | "connect" | "workspace";
-  /** Its oldest events, at most {@link auditOutboxTakeMax}, in order. */
-  take: () => Promise<readonly OutboxedAuditEvent[]>;
+  /**
+   * Its oldest events past the first `past` (those a drain holds, below),
+   * at most {@link auditOutboxTakeMax}, in order.
+   */
+  take: (past: number) => Promise<readonly OutboxedAuditEvent[]>;
   /**
    * Removes the events the log now has, and moves those it can't take to
    * `audit_outbox_rejected`, all at once.
@@ -75,10 +78,13 @@ export interface Outbox {
   appended?: (events: readonly AuditEvent[]) => Promise<void>;
   /**
    * What must be done with the events the log now has before they leave
-   * the outbox: one that fails keeps them in it for the next drain, which
-   * does it again, so it must do the same thing twice over.
+   * the outbox, done again by the next drain for those still in it, so it
+   * must do the same thing twice over. One that throws keeps all of them
+   * in the outbox. It answers the IDs of the events it could not finish
+   * yet (held): only those stay, and the drain takes the rows past them,
+   * so a held event never keeps any other from the log.
    */
-  required?: (events: readonly AuditEvent[]) => Promise<void>;
+  required?: (events: readonly AuditEvent[]) => Promise<readonly string[]>;
 }
 
 /**
@@ -91,12 +97,12 @@ export const databaseOutbox = (
   database: D1Database
 ): Outbox => ({
   name,
-  take: async () => {
+  take: async (past) => {
     const { results } = await database
       .prepare(
-        "SELECT id, event, created_at AS createdAt FROM audit_outbox ORDER BY rowid LIMIT ?"
+        "SELECT id, event, created_at AS createdAt FROM audit_outbox ORDER BY rowid LIMIT ? OFFSET ?"
       )
-      .bind(auditOutboxTakeMax)
+      .bind(auditOutboxTakeMax, past)
       .all<OutboxedAuditEvent>();
     return results;
   },
@@ -128,6 +134,8 @@ export const coreOutbox = (env: OutboxEnv): Outbox => ({
   ...databaseOutbox("core", env.DB),
   required: async (events) => {
     await noteHandOvers(env, events);
+    // It holds none: one that fails keeps the whole batch.
+    return [];
   },
 });
 
@@ -144,13 +152,16 @@ const objectOutbox = (env: Pick<Env, "DB">, storage: SqlStorage): Outbox => ({
   name: "workspace",
   required: async (events) => {
     await noteHandOvers(env, events);
+    // It holds none: one that fails keeps the whole batch.
+    return [];
   },
-  take: async () =>
+  take: async (past) =>
     await Promise.resolve(
       storage
         .exec<{ id: string; event: string; createdAt: number }>(
-          "SELECT id, event, created_at AS createdAt FROM audit_outbox ORDER BY rowid LIMIT ?",
-          auditOutboxTakeMax
+          "SELECT id, event, created_at AS createdAt FROM audit_outbox ORDER BY rowid LIMIT ? OFFSET ?",
+          auditOutboxTakeMax,
+          past
         )
         .toArray()
     ),
@@ -175,7 +186,7 @@ export const connectOutbox = (
   name: "connect",
   ...(besides === undefined ? {} : { appended: besides }),
   required,
-  take: async () => await env.CONNECT.takeAuditEvents(),
+  take: async (past) => await env.CONNECT.takeAuditEvents(past),
   settle: async (appended, rejected) => {
     await env.CONNECT.ackAuditEvents([...appended], [...rejected]);
   },
@@ -282,13 +293,16 @@ const handOver = async (
  *   release, or over the size cap);
  * - `conflict`: one whose ID the log already holds with other content, a
  *   bug or a forgery.
- * Returns how many it took and how many the log appended.
+ * Its `required` step may hold events it could not finish: they stay in
+ * the outbox, and the rest settle. Returns how many it took, how many the
+ * log appended, and how many it held.
  */
 const drainBatch = async (
   env: AuditLogEnv,
-  outbox: Outbox
-): Promise<{ taken: number; appended: number }> => {
-  const rows = await outbox.take();
+  outbox: Outbox,
+  past: number
+): Promise<{ taken: number; appended: number; held: number }> => {
+  const rows = await outbox.take(past);
   const events: AuditEvent[] = [];
   const rejected: (OutboxRejected & { row: OutboxedAuditEvent })[] = [];
   // Each event's row, by the event's ID as the log knows it.
@@ -303,6 +317,7 @@ const drainBatch = async (
     }
   }
   let appended = 0;
+  let held = 0;
   if (events.length > 0) {
     const result = await auditLog(env).append(events);
     log.info("audit.appended", {
@@ -320,11 +335,18 @@ const drainBatch = async (
     }
     ({ appended } = result);
     const kept = events.filter(({ id }) => rowOf.has(id));
-    if (kept.length > 0) {
-      // Not caught: the events stay in the outbox until it is done.
-      await outbox.required?.(kept);
+    // Not caught: the events stay in the outbox until it is done.
+    const unfinished =
+      kept.length > 0 ? new Set(await outbox.required?.(kept)) : new Set();
+    // What it could not finish stays, to be done again by the next drain;
+    // the rest settle, and are handed over once.
+    for (const id of unfinished) {
+      held += rowOf.delete(String(id)) ? 1 : 0;
     }
-    await handOver(outbox, kept);
+    await handOver(
+      outbox,
+      kept.filter(({ id }) => rowOf.has(id))
+    );
   }
   // The chain records what leaves it out before it is moved aside.
   const gaps = await Promise.all(
@@ -341,7 +363,8 @@ const drainBatch = async (
   if (recorded.length > 0) {
     await auditLog(env).append(recorded);
   }
-  if (rows.length > 0) {
+  // Held rows alone settle nothing.
+  if (rowOf.size + rejected.length > 0) {
     await outbox.settle(
       [...rowOf.values()].map(({ id }) => id),
       rejected.map(({ id, reason }) => ({ id, reason }))
@@ -358,7 +381,7 @@ const drainBatch = async (
       });
     }
   }
-  return { taken: rows.length, appended };
+  return { taken: rows.length, appended, held };
 };
 
 /**
@@ -371,14 +394,21 @@ const drain = async (
   maxBatches: number
 ): Promise<number> => {
   let appended = 0;
+  // The rows held so far: the oldest left in the outbox, taken past.
+  let past = 0;
   for (let batch = 0; batch < maxBatches; batch += 1) {
     // Each batch after the one before it, so events keep their order.
     // oxlint-disable-next-line no-await-in-loop
-    const result = await drainBatch(env, outbox);
+    const result = await drainBatch(env, outbox, past);
     appended += result.appended;
+    past += result.held;
     if (result.taken < auditOutboxTakeMax) {
       break;
     }
+  }
+  if (past > 0) {
+    // Once a drain, however many: the next drain tries them again.
+    log.warn("audit.outbox.held", { outbox: outbox.name, held: past });
   }
   return appended;
 };

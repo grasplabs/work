@@ -10,19 +10,31 @@ import { nativeItemReads } from "./native-tool-classes.gen.ts";
 // (GRA-1827). The Brain knows no connector: to it, this is one producer's
 // id like any other.
 
+/** A connection, as capture and its erasure read whose it is. */
+type Owned = Pick<ConnectionOwner, "source" | "provider" | "ownerUserId">;
+
+/**
+ * Whether captures may have been kept through `connection` for
+ * `personId`, by this release or an earlier one: their own native
+ * connection, to any provider. What disconnecting it erases by, so a
+ * provider an earlier release kept reads from, and this one doesn't (a
+ * rollback), still has its captures erased.
+ */
+export const mayHoldCapturesOf = (
+  connection: Owned,
+  personId: string
+): boolean =>
+  connection.source === "native" && connection.ownerUserId === personId;
+
 /**
  * Whether the Brain keeps what agents read through `connection` for
  * `personId` (connection-capture.ts): their own native connection, to a
  * provider with a tool that answers one item's content
- * (`nativeItemReads`), the only reads capture keeps. The Brain page says
- * so by it, and disconnecting such a connection erases its captures.
+ * (`nativeItemReads`). Capture keeps only such reads, and the Brain page
+ * and the disconnect dialog say so by it.
  */
-export const keepsReadsOf = (
-  connection: Pick<ConnectionOwner, "source" | "provider" | "ownerUserId">,
-  personId: string
-): boolean =>
-  connection.source === "native" &&
-  connection.ownerUserId === personId &&
+export const keepsReadsOf = (connection: Owned, personId: string): boolean =>
+  mayHoldCapturesOf(connection, personId) &&
   Object.hasOwn(nativeItemReads, connection.provider);
 
 const encoder = new TextEncoder();

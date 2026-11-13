@@ -30,10 +30,12 @@ export const brainModules = {
   // and a person's for their own export, whose probes hold what they
   // return, as they return it.
   "apps/core/src/brain-next-exports.ts": "core",
-  // Erases the sources of runs past their retention, a deleted chat's
-  // turns (its group) and a disconnected connection's captures (its
-  // group), with core's eraseSource, and answers nothing of it; names a
-  // chat's and its turns' sources, and a connection's captures' group.
+  // Erases the sources of runs past their retention and a deleted chat's
+  // turns (its group) with core's eraseSource, and a disconnected
+  // connection's captures (its group) with core's eraseOwnGroup, whose
+  // count of them it answers (`eraseCaptures`) for their erasure's audit
+  // event (capture-erasures.ts), and nothing else; names a chat's and its
+  // turns' sources, and a connection's captures' group.
   "apps/core/src/brain-next-origins.ts": "core",
   // Core's producers for the Brain's hand-overs and their relay: puts keys
   // on the queue with core's queueHandOvers, and reads the sources it

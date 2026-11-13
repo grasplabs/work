@@ -1,5 +1,6 @@
 import { personalBrainOf } from "@grasp-os/brain-next/contract";
 import { provenanceMetaKey } from "@grasp-os/connector-kit/manifest";
+import { auditOutboxTakeMax, createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import { runDurableObjectAlarm } from "cloudflare:test";
@@ -33,7 +34,7 @@ import { mockIdp } from "./idp.ts";
 import { mailConnection, mailWithSearch } from "./mail-connection.ts";
 import { acmeTenant, signInConfig } from "./sign-in-config.ts";
 import { openRpc, outcome, routed, signedInApi } from "./sign-in.ts";
-import { testBinding } from "./test-env.ts";
+import { connectDb, testBinding } from "./test-env.ts";
 
 // Capture (GRA-1730, src/connection-capture.ts): what a chat's agent reads
 // through its person's own connection, with a tool that reaches their own
@@ -1025,6 +1026,49 @@ const ownExported = async (person: Person): Promise<string> => {
   return id;
 };
 
+/** Which of the events `ids` are still in connect's audit outbox. */
+const inConnectOutbox = async (ids: readonly string[]): Promise<string[]> => {
+  const { results } = await connectDb()
+    .prepare(
+      "SELECT id FROM audit_outbox WHERE id IN (SELECT value FROM json_each(?)) ORDER BY rowid"
+    )
+    .bind(JSON.stringify(ids))
+    .all<{ id: string }>();
+  return results.map(({ id }) => id);
+};
+
+/**
+ * `count` disconnects of `connectionId` that stopped it, as connect
+ * records one, put in its audit outbox: their event IDs.
+ */
+const forgedDisconnects = async (
+  connectionId: string,
+  count: number
+): Promise<string[]> => {
+  const events = Array.from({ length: count }, () =>
+    createAuditEvent(
+      {
+        actor: { type: "system" },
+        action: "connection.disconnect",
+        target: { type: "connection", id: connectionId },
+        detail: { outcome: "ok" },
+      },
+      "connect"
+    )
+  );
+  const db = connectDb();
+  await db.batch(
+    events.map((event) =>
+      db
+        .prepare(
+          "INSERT INTO audit_outbox (id, event, created_at) VALUES (?, ?, ?)"
+        )
+        .bind(event.id, JSON.stringify(event), Date.now())
+    )
+  );
+  return events.map(({ id }) => id);
+};
+
 /** An erasure's event as the tests compare it: who, and how many. */
 const erasure = ({ actor, detail }: AuditEvent) => ({ actor, detail });
 
@@ -1173,7 +1217,7 @@ describe("a disconnected connection", setUpTime, () => {
     });
   });
 
-  it("erases nothing, and goes on, for a person whose own store was erased whole", async () => {
+  it("erases nothing, records nothing, and lets the disconnect go, for a person whose own store was erased whole", async () => {
     const person = await signedInApi(idp, "user");
     const marker = markerOf();
     const { connectionId, mailbox } = await ownGmail(person);
@@ -1190,21 +1234,205 @@ describe("a disconnected connection", setUpTime, () => {
     });
 
     await person.api.connections.disconnect(connectionId);
+    const stopped = await eventsOf("connection.disconnect", connectionId);
     const erased = await eventsOf("brain.capture.erased", connectionId);
     const found = await recalledKeys(person.userId, marker);
 
     expect({
       found: found.has(kept),
-      erased: erased.map(erasure),
+      erased: erased.length,
+      left: await inConnectOutbox(stopped.map(({ id }) => id)),
+    }).toStrictEqual({ found: false, erased: 0, left: [] });
+  });
+
+  it("holds only the disconnect whose person's store stays out of reach, while everyone else's events reach the log in order, and erases it once that store is back", async () => {
+    const [held, other, newcomer] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+    ]);
+    const marker = markerOf();
+    const heldConnection = await ownGmail(held);
+    const otherConnection = await ownGmail(other);
+    const heldKey = await capturedRead(
+      held.userId,
+      heldConnection.connectionId,
+      heldConnection.mailbox,
+      `quote-${marker}`,
+      `Quote ${marker}`
+    );
+    const otherKey = await capturedRead(
+      other.userId,
+      otherConnection.connectionId,
+      otherConnection.mailbox,
+      `order-${marker}`,
+      `Order ${marker}`
+    );
+    const failing = ownEraseFailing(held.userId);
+    const { core } = await openRpc(held.session, { coreEnv: failing });
+
+    await core
+      .authenticate()
+      .connections.disconnect(heldConnection.connectionId);
+    await drainAuditOutboxes(failing);
+    // Newer than the held disconnect: another disconnect, then a connect.
+    await other.api.connections.disconnect(otherConnection.connectionId);
+    const newConnection = await ownGmail(newcomer);
+    await drainAuditOutboxes(failing);
+    await drainAuditOutboxes(failing);
+    const logged = await loggedEvents();
+    const position = (action: string, connectionId: string): number =>
+      logged.findIndex(
+        (event) => event.action === action && event.target?.id === connectionId
+      );
+    const heldStop = about(
+      logged,
+      "connection.disconnect",
+      heldConnection.connectionId
+    );
+    const heldRecalled = await recalledKeys(held.userId, marker);
+    const whileHeld = {
+      heldErased: about(
+        logged,
+        "brain.capture.erased",
+        heldConnection.connectionId
+      ).length,
+      otherErased: about(
+        logged,
+        "brain.capture.erased",
+        otherConnection.connectionId
+      ).map(erasure),
+      inOrder:
+        position("connection.disconnect", otherConnection.connectionId) <
+        position("connection.connect", newConnection.connectionId),
+      left: await inConnectOutbox(heldStop.map(({ id }) => id)),
+      heldFound: heldRecalled.has(heldKey),
+    };
+    // The store back: the next drain erases it, and the one after changes
+    // nothing.
+    await allEvents();
+    const after = await eventsOf(
+      "brain.capture.erased",
+      heldConnection.connectionId
+    );
+
+    expect({
+      whileHeld,
+      heldStops: heldStop.length,
+      after: after.map(erasure),
+      left: await inConnectOutbox(heldStop.map(({ id }) => id)),
+      states: [
+        ...(await ownKeyStates(held.userId, [heldKey])),
+        ...(await ownKeyStates(other.userId, [otherKey])),
+      ],
     }).toStrictEqual({
-      found: false,
-      erased: [
+      whileHeld: {
+        heldErased: 0,
+        otherErased: [
+          {
+            actor: { type: "person", userId: other.userId },
+            detail: { sources: 1 },
+          },
+        ],
+        inOrder: true,
+        left: heldStop.map(({ id }) => id),
+        heldFound: true,
+      },
+      heldStops: 1,
+      after: [
         {
-          actor: { type: "person", userId: person.userId },
-          detail: { sources: 0 },
+          actor: { type: "person", userId: held.userId },
+          detail: { sources: 1 },
         },
       ],
+      left: [],
+      states: ["erased", "erased"],
     });
+  });
+
+  it("lets newer events through past more held disconnects than a drain takes at once", async () => {
+    const [held, other] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+    ]);
+    const marker = markerOf();
+    const heldConnection = await ownGmail(held);
+    const otherConnection = await ownGmail(other);
+    const heldKey = await capturedRead(
+      held.userId,
+      heldConnection.connectionId,
+      heldConnection.mailbox,
+      `quote-${marker}`,
+      `Quote ${marker}`
+    );
+    await allEvents();
+    // A full batch of disconnects and one more, all of one connection
+    // whose person's store is out of reach, ahead of a newer one.
+    const forged = await forgedDisconnects(
+      heldConnection.connectionId,
+      auditOutboxTakeMax + 1
+    );
+    const failing = ownEraseFailing(held.userId);
+
+    await other.api.connections.disconnect(otherConnection.connectionId);
+    await drainAuditOutboxes(failing);
+    const logged = await loggedEvents();
+    const stillHeld = await inConnectOutbox(forged);
+    const whileHeld = {
+      other: about(
+        logged,
+        "connection.disconnect",
+        otherConnection.connectionId
+      ).length,
+      left: stillHeld.length,
+    };
+    await allEvents();
+
+    expect({
+      whileHeld,
+      left: await inConnectOutbox(forged),
+      state: await ownKeyStates(held.userId, [heldKey]),
+    }).toStrictEqual({
+      whileHeld: { other: 1, left: forged.length },
+      left: [],
+      state: ["erased"],
+    });
+  });
+
+  it("passes a disconnect the Brain could never have kept a capture under, so it holds nothing up", async () => {
+    const owner = await signedInApi(idp, "user");
+    const now = Date.now();
+    // Forged: an id holding "/", and an owner the Brain refuses as a person.
+    const withSlash = `connection/${crypto.randomUUID()}`;
+    const longOwned = crypto.randomUUID();
+    await connectDb()
+      .prepare(
+        "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, created_at, updated_at) VALUES (?, 'google', 'personal', ?, 'disconnected', 'native', 'google-workspace', ?, ?), (?, 'google', 'personal', ?, 'disconnected', 'native', 'google-workspace', ?, ?)"
+      )
+      .bind(
+        withSlash,
+        owner.userId,
+        now,
+        now,
+        longOwned,
+        "x".repeat(1000),
+        now,
+        now
+      )
+      .run();
+    const forged = [
+      ...(await forgedDisconnects(withSlash, 1)),
+      ...(await forgedDisconnects(longOwned, 1)),
+    ];
+
+    const events = await allEvents();
+
+    expect({
+      left: await inConnectOutbox(forged),
+      erased: [withSlash, longOwned].flatMap((id) =>
+        about(events, "brain.capture.erased", id)
+      ),
+    }).toStrictEqual({ left: [], erased: [] });
   });
 
   it("keeps its captures erased after a restore of an older copy of its person's store, and an export taken before serves none", async () => {

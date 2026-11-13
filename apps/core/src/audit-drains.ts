@@ -21,9 +21,7 @@ import { eraseCapturesOfDisconnects } from "./capture-erasures.ts";
 const connectOf = (env: Env, besides?: Outbox["appended"]): Outbox =>
   connectOutbox(
     env,
-    async (events) => {
-      await eraseCapturesOfDisconnects(env, events);
-    },
+    async (events) => await eraseCapturesOfDisconnects(env, events),
     besides
   );
 

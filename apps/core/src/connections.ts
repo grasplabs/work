@@ -85,7 +85,7 @@ import { providerIds, signInConfig } from "./auth/config.ts";
 import { identify } from "./auth/identity.ts";
 import { eraseCaptures } from "./brain-next-origins.ts";
 import { listAppRequests, requestApp } from "./catalog-requests.ts";
-import { keepsReadsOf } from "./connection-capture-key.ts";
+import { keepsReadsOf, mayHoldCapturesOf } from "./connection-capture-key.ts";
 import {
   accounts,
   hiddenConnectors,
@@ -190,8 +190,8 @@ export const connectionOwnersOf = async (
 
 /**
  * Erases what the Brain kept through `connectionId` (connection-
- * capture.ts) once `person` disconnected it, straight away, when it is a
- * connection the Brain keeps their reads through (`keepsReadsOf`). The
+ * capture.ts) once `person` disconnected it, straight away, when it is
+ * their own native connection (`mayHoldCapturesOf`). The
  * disconnect never waits on it: should it fail, it is logged, and the
  * drain of connect's audit outbox erases them before the disconnect's
  * event leaves it (capture-erasures.ts), which also records the erasure.
@@ -203,7 +203,7 @@ const eraseCapturesSoon = async (
 ): Promise<void> => {
   try {
     const [owner] = await connectionOwnersOf(env, [connectionId]);
-    if (owner !== undefined && keepsReadsOf(owner, person.userId)) {
+    if (owner !== undefined && mayHoldCapturesOf(owner, person.userId)) {
       await eraseCaptures(env, person.userId, connectionId);
     }
   } catch (error) {

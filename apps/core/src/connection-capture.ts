@@ -11,7 +11,7 @@ import type { AgentScope } from "./agent-scope.ts";
 import { keepAuditEvent } from "./audit-outbox.ts";
 import { captureGroupOf } from "./brain-next-origins.ts";
 import { addSource } from "./brain-next.ts";
-import { captureIdOf } from "./connection-capture-key.ts";
+import { captureIdOf, keepsReadsOf } from "./connection-capture-key.ts";
 import { connectionOwnersOf } from "./connections.ts";
 import { nativeItemReads } from "./native-tool-classes.gen.ts";
 import { nativeClasses } from "./tool-classes.ts";
@@ -186,8 +186,11 @@ const captured = async (
   if (classOf(owner, action) !== "read-own") {
     return skippedAll("reach", named);
   }
-  const itemRead =
-    owner.source === "native" ? itemReadOf(owner.provider, action) : undefined;
+  // The one rule for a connection the Brain keeps reads through, which
+  // the Brain page and the disconnect dialog say by too.
+  const itemRead = keepsReadsOf(owner, scope.personId)
+    ? itemReadOf(owner.provider, action)
+    : undefined;
   const [itemId] = result.provenance;
   if (itemRead === undefined || named !== 1 || itemId === undefined) {
     return skippedAll("list", named);

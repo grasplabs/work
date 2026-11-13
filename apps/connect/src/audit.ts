@@ -349,21 +349,32 @@ const ackSchema = z
     { message: `At most ${auditOutboxTakeMax} events` }
   );
 
+/** How many of the oldest events a take steps over: none by default. */
+const pastSchema = z.int().nonnegative().default(0);
+
 /**
- * The oldest events in the outbox, in the order they were stored (SQLite's
- * rowid, which an insert sets past every row in the table, also for events
- * stored in one batch, which share their `created_at`), at most
- * {@link auditOutboxTakeMax}: core takes them, appends them to the audit
- * log, and only then acknowledges them (`ackAuditEvents`). Taking removes
- * nothing, so events core took but didn't acknowledge are taken again.
+ * The oldest events in the outbox past the first `past`, in the order they
+ * were stored (SQLite's rowid, which an insert sets past every row in the
+ * table, also for events stored in one batch, which share their
+ * `created_at`), at most {@link auditOutboxTakeMax}: core takes them,
+ * appends them to the audit log, and only then acknowledges them
+ * (`ackAuditEvents`). Taking removes nothing, so events core took but
+ * didn't acknowledge are taken again. Core steps over the oldest it holds
+ * (an erasure it could not finish yet), so those never keep the newer
+ * ones from the log.
  */
 export const takeAuditEvents = async (
-  env: Env
+  env: Env,
+  past: unknown = 0
 ): Promise<OutboxedAuditEvent[]> => {
+  const parsed = pastSchema.safeParse(past);
+  if (!parsed.success) {
+    throw connectErrors.create("connect.invalid");
+  }
   const { results } = await env.DB.prepare(
-    "SELECT id, event, created_at AS createdAt FROM audit_outbox ORDER BY rowid LIMIT ?"
+    "SELECT id, event, created_at AS createdAt FROM audit_outbox ORDER BY rowid LIMIT ? OFFSET ?"
   )
-    .bind(auditOutboxTakeMax)
+    .bind(auditOutboxTakeMax, parsed.data)
     .all<OutboxedAuditEvent>();
   return results;
 };
