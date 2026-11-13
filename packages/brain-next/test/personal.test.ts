@@ -581,6 +581,42 @@ describe("a person's own store", () => {
     await expect(tablesOf(own())).resolves.toStrictEqual([]);
   });
 
+  it("is the only store that keeps their instruction file: the shared one refuses it, and keeps nothing of it", async () => {
+    const file = `instructions:person:${person}`;
+    const adding = {
+      source: file,
+      change: "1",
+      text: "Call me by my first name",
+      access: theirs(),
+    };
+
+    const inShared = await Promise.allSettled([
+      called(shared().addInstructions(adding)),
+    ]);
+    await own().addInstructions(adding);
+    const ownReads = await called(
+      own().readCurrent({ sources: [file], reader: readerOf(person) })
+    );
+
+    expect({
+      refused: inShared.map(
+        (outcome) =>
+          outcome.status === "rejected" &&
+          /kept in that person's own store/u.test(String(outcome.reason))
+      ),
+      sharedKey: await called(shared().keyState(file)),
+      sharedReads: await called(
+        shared().readCurrent({ sources: [file], reader: readerOf(person) })
+      ),
+      ownReads: ownReads.map(({ text }) => text),
+    }).toStrictEqual({
+      refused: [true],
+      sharedKey: "free",
+      sharedReads: [],
+      ownReads: ["Call me by my first name"],
+    });
+  });
+
   // Threat 1: an id not made from a name says no one's store.
   it("refuses every call when its id has no name", async () => {
     const unnamed = env.BRAIN_STORE.get(env.BRAIN_STORE.newUniqueId());
@@ -1375,6 +1411,8 @@ const leavingNone = [
   "readEntityNames",
   "readMemories",
   "readVersion",
+  // One statement of which versions the reader may still read.
+  "readableVersions",
   "repackVectors",
   "restoreStatus",
   "retireMemory",
