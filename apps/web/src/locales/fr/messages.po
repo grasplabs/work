@@ -2377,6 +2377,14 @@ msgstr "Un administrateur a refusé ou retiré son droit de lancer : il ne lance
 msgid "An admin revoked this version, so it can't be shared again."
 msgstr "Un administrateur a révoqué cette version : elle ne peut donc plus être partagée."
 
+#: src/agents/new-agent.tsx
+msgid "An agent for the company, or one only you use."
+msgstr "Un agent pour l'entreprise, ou un que vous seul utilisez."
+
+#: src/agents/new-agent.tsx
+msgid "An agent of your own, for a job you do often. Only you see and ask it, in Grasp's chat."
+msgstr "Un agent à vous, pour une tâche que vous faites souvent. Vous seul le voyez et l'interrogez, dans le chat de Grasp."
+
 #: src/apps/field-kinds.tsx
 msgid "An amount in a currency"
 msgstr "Un montant dans une devise"
@@ -2830,6 +2838,10 @@ msgstr "Comme le code de l’App le définit"
 #: src/agents/agent-page.tsx
 msgid "As the company has it"
 msgstr "Comme dans l’entreprise"
+
+#: src/agents/agent-page.tsx
+msgid "As your company has set it, never more"
+msgstr "Tel que votre entreprise l'a défini, jamais plus"
 
 #: src/onboarding/ai-step.tsx
 #: src/settings/ai-providers.tsx
@@ -5905,6 +5917,10 @@ msgstr "Pour les demandes de Stephen, à propos de « {label} » ({why}), fais c
 msgid "For the {role}"
 msgstr "Pour : {role}"
 
+#: src/agents/new-agent.tsx
+msgid "For the company"
+msgstr "Pour l'entreprise"
+
 #: src/agents/agent-wakes.tsx
 msgid "For whom"
 msgstr "Pour qui"
@@ -6834,6 +6850,10 @@ msgid "In {name}, make a service user that may read people’s basic and work de
 msgstr "Dans {name}, créez un utilisateur de service qui peut lire les données de base et professionnelles des personnes, puis collez ici son ID et son jeton."
 
 #: src/agents/agent-page.tsx
+msgid "In Grasp's chat"
+msgstr "Dans le chat de Grasp"
+
+#: src/agents/agent-page.tsx
 msgid "In Grasp's chat. Chat apps are under Access."
 msgstr "Dans le chat de Grasp. Les applications de chat sont sous Accès."
 
@@ -7317,6 +7337,10 @@ msgstr "Ses messages sont supprimés définitivement, et chaque modification que
 msgid "Its name, job and picture show where people pick an agent. Its instructions are for the agent alone."
 msgstr "Son nom, sa tâche et son image s'affichent là où les personnes choisissent un agent. Ses instructions ne sont destinées qu'à l'agent."
 
+#: src/agents/new-agent.tsx
+msgid "Its name, job and picture show where you pick an agent. Its instructions are for the agent alone."
+msgstr "Son nom, sa tâche et son image apparaissent là où vous choisissez un agent. Ses instructions sont pour l'agent seul."
+
 #: src/workflows/files-and-apps.tsx
 msgid "Its next start is refused until an admin approves {alias} again, and runs already started fail at their next call through it."
 msgstr "Son prochain démarrage est refusé jusqu’à ce qu’un administrateur approuve de nouveau {alias}, et les exécutions déjà démarrées échouent à leur prochain appel par cette liaison."
@@ -7400,6 +7424,10 @@ msgstr "Jugement"
 #: src/chat/thread.tsx
 msgid "Jump to the newest message"
 msgstr "Aller au message le plus récent"
+
+#: src/agents/new-agent.tsx
+msgid "Just for me"
+msgstr "Rien que pour moi"
 
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx
@@ -9643,6 +9671,11 @@ msgstr "Seuls les concepteurs du workflow peuvent les modifier."
 msgid "Only when asked"
 msgstr "Seulement sur demande"
 
+#: src/agents/agent-page.tsx
+#: src/agents/agents-overview.tsx
+msgid "Only you"
+msgstr "Vous seul"
+
 #: src/brain/sources-page.tsx
 msgctxt "a source nobody else may read"
 msgid "Only you"
@@ -9656,6 +9689,14 @@ msgstr "Seuls vous et vos agents le lisez, jusqu’à ce que vous le partagiez."
 #: src/connections/connected-dialog.tsx
 msgid "Only you can use it."
 msgstr "Vous seul pouvez l’utiliser."
+
+#: src/agents/new-agent.tsx
+msgid "Only you see and ask it. It does at most what Grasp may do for you."
+msgstr "Vous seul le voyez et l'interrogez. Il fait au plus ce que Grasp peut faire pour vous."
+
+#: src/agents/agents-overview.tsx
+msgid "Only you see and ask these."
+msgstr "Vous seul les voyez et les interrogez."
 
 #: src/chat/plan-card.tsx
 msgid "Only you see it while you try it. You share it when it's right."
@@ -13436,8 +13477,8 @@ msgid "The agents you can ask. Each has its own job and knows its own part of th
 msgstr "Les agents que vous pouvez interroger. Chacun a sa propre tâche et connaît sa partie de l'entreprise."
 
 #: src/agents/agents-overview.tsx
-msgid "The agents your company sets up for you show here."
-msgstr "Les agents que votre entreprise configure pour vous s'affichent ici."
+msgid "The agents your company sets up for you show here. You can also make one of your own."
+msgstr "Les agents que votre entreprise configure pour vous s'affichent ici. Vous pouvez aussi en créer un à vous."
 
 #: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
@@ -15577,6 +15618,10 @@ msgstr "Ce que Grasp ne sait pas encore, et qui peut y répondre."
 msgid "What Grasp may do"
 msgstr "Ce que Grasp peut faire"
 
+#: src/agents/agent-page.tsx
+msgid "What Grasp may do for you"
+msgstr "Ce que Grasp peut faire pour vous"
+
 #: src/inbox/item-detail.tsx
 msgctxt "inbox item section"
 msgid "What happened"
@@ -16118,6 +16163,10 @@ msgstr "Qui le fait"
 msgid "Who gets it"
 msgstr "Qui le reçoit"
 
+#: src/agents/new-agent.tsx
+msgid "Who it is for"
+msgstr "À qui il est destiné"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Who leads it?"
 msgstr "Qui la dirige ?"
@@ -16569,6 +16618,10 @@ msgstr "Vous ne pouvez pas lire cette source."
 msgid "You can't read this version."
 msgstr "Vous ne pouvez pas lire cette version."
 
+#: src/agents/new-agent.tsx
+msgid "You choose who may ask it and what it may do."
+msgstr "Vous choisissez qui peut l'interroger et ce qu'il peut faire."
+
 #: src/connections/connect-dialog.tsx
 msgid "You come back to {app}’s page here."
 msgstr "Vous revenez ici sur la page de {app}."
@@ -16638,6 +16691,10 @@ msgstr "Vous êtes toujours connecté. Réessayez dans un instant."
 #: src/routes/_shell.settings.tsx
 msgid "Your account"
 msgstr "Votre compte"
+
+#: src/agents/agents-overview.tsx
+msgid "Your agents"
+msgstr "Vos agents"
 
 #: src/chat/failure.ts
 msgid "Your AI provider is limiting requests (a rate or spending limit at the provider). Try again in a while."
@@ -16713,6 +16770,10 @@ msgstr "Votre entreprise veut savoir comment le travail se passe vraiment. Je vo
 #: src/interview/before.tsx
 msgid "Your company wants to know how the work really goes. You lead your team, so I first ask how your team works with AI today. Then I ask what work the team does, and who does which. That takes about 20 minutes. Talking is the fastest. You can also type."
 msgstr "Votre entreprise veut savoir comment le travail se passe vraiment. Vous dirigez votre équipe, je vous demande donc d’abord comment votre équipe travaille avec l’IA aujourd’hui. Ensuite, je vous demande quel travail fait l’équipe, et qui fait quoi. Cela prend environ 20 minutes. Parler est le plus rapide. Vous pouvez aussi écrire."
+
+#: src/agents/agents-overview.tsx
+msgid "Your company's"
+msgstr "Ceux de votre entreprise"
 
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Your company’s name in Grasp."
@@ -16857,6 +16918,10 @@ msgstr "Vos mots"
 msgid "Your workspace, who may do what in it, and your own account."
 msgstr "Votre espace de travail, qui peut y faire quoi, et votre propre compte."
 
+#: src/agents/agents-overview.tsx
+msgid "Yours"
+msgstr "Les vôtres"
+
 #: src/brain/lessons-view.tsx
 msgctxt "lesson scope"
 msgid "Yours"
@@ -16871,6 +16936,10 @@ msgstr "Les vôtres"
 msgctxt "memory records: the person's own"
 msgid "Yours"
 msgstr "Les vôtres"
+
+#: src/agents/agent-page.tsx
+msgid "Yours alone: nobody else sees or asks it"
+msgstr "À vous seul : personne d'autre ne le voit ni ne l'interroge"
 
 #: src/brain/atlas-overlays.tsx
 #: src/workflows/workflow-flow.tsx

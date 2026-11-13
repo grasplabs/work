@@ -22,6 +22,7 @@ import { drizzle } from "drizzle-orm/d1";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
+import { dropOwnAgentsOf } from "./agent-builder.ts";
 import { dropAgentWakesFor } from "./agent-wakes.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import {
@@ -503,6 +504,9 @@ const workspaceArea: ErasureStep = {
     await dropHeldStarts(env, { personId: userId });
     // The wake-ups that worked for them: no agent wakes for someone gone.
     await dropAgentWakesFor(env, userId);
+    // Their own agents, with what each was given to answer from: nobody
+    // else ever saw or asked them.
+    await dropOwnAgentsOf(env, userId);
     const db = drizzle(env.DB);
     // Who was in their chats, kept for each chat's agent (knowledge/
     // access.ts), goes with the chats. Shared chats elsewhere keep them in
