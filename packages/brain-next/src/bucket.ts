@@ -11,6 +11,8 @@
 
 /** An object of the bucket, as the store reads it. */
 export interface BucketObject {
+  /** Its size in bytes, as R2 has it, known before its body is read. */
+  size: number;
   text: () => Promise<string>;
   arrayBuffer: () => Promise<ArrayBuffer>;
 }

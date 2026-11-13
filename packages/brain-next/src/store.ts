@@ -1,3 +1,4 @@
+import { log } from "@grasp-os/shared/log";
 import { DurableObject } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
@@ -18,7 +19,12 @@ import {
   newMemoriesSchema,
   retireRequestSchema,
   currentRequestSchema,
+  deploymentSchema,
   embedModelSchema,
+  exportFileRequestSchema,
+  exportIdSchema,
+  exportRequestSchema,
+  isWholeKey,
   handOverRequestSchema,
   handOverResultSchema,
   newInstructionsSchema,
@@ -57,6 +63,9 @@ import type {
   CurrentRequest,
   Embedders,
   ErasureReason,
+  ExportFileRequest,
+  ExportRequest,
+  ExportStatus,
   KeyState,
   Finding,
   HandOverRequest,
@@ -70,6 +79,7 @@ import type {
   PersonErasure,
   RecallRequest,
   Pack,
+  RestoreStatus,
   SourceErasure,
   SourceId,
   SourceList,
@@ -116,6 +126,14 @@ import {
 } from "./erasure.ts";
 import type { ErasureStore } from "./erasure.ts";
 import {
+  exportFile,
+  exportStatus,
+  exportsDue,
+  exportsPrefix,
+  exportsStep,
+  startExport,
+} from "./exports.ts";
+import {
   fileGraceMs,
   filesPrefix,
   hashOf,
@@ -141,6 +159,7 @@ import {
 } from "./recall-counts.ts";
 import { find, recall } from "./recall.ts";
 import { addMemories } from "./remember.ts";
+import { checkRestore, restoreStatus, startRestore } from "./restore.ts";
 import { addVersion, readCurrent, readVersion } from "./sources.ts";
 import type { SourcesStore } from "./sources.ts";
 import {
@@ -241,6 +260,19 @@ const sharedOnly = "The Brain refused it: only the shared store takes this";
 const notTheirsAlone =
   "The Brain refused it: this store keeps only what its person alone may read";
 
+/** What a person's own store answers a restore: restores go into the shared store. */
+const restoresShared =
+  "The Brain refused it: a restore goes only into the shared store";
+
+/**
+ * What an add answers under the wrong kind of key (contract.ts
+ * `wholeKeyPrefixes`): what is kept whole is never indexed, and nothing
+ * indexed is kept whole.
+ */
+const notInstructions =
+  "The Brain refused it: an instruction file or a skill is added with addInstructions";
+const onlyInstructions =
+  "The Brain refused it: addInstructions takes only an instruction file's or a skill's key";
 /** What the shared store answers memories only one person may read. */
 const sharedNotOwn =
   "The Brain refused it: memories only one person may read are kept in that person's own store";
@@ -701,6 +733,9 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    */
   async addSource(source: NewSource): Promise<SourceVersionRef> {
     const adding = checked(newSourceSchema, source);
+    if (isWholeKey(adding.source)) {
+      throw new Error(notInstructions);
+    }
     this.#mayKeep(adding.access);
     return await this.#changing(async () => {
       await this.#readyToWrite();
@@ -716,6 +751,9 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    */
   async addInstructions(source: NewInstructions): Promise<SourceVersionRef> {
     const adding = checked(newInstructionsSchema, source);
+    if (!isWholeKey(adding.source)) {
+      throw new Error(onlyInstructions);
+    }
     this.#mayKeep(adding.access);
     return await this.#changing(async () => {
       await this.#readyToWrite();
@@ -1009,6 +1047,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         filesPrefix,
         vectorsPrefix,
         ledgerPrefix,
+        exportsPrefix,
       ]);
       done = quiet && (settled || neverWritten) && emptied;
     } catch {
@@ -1083,6 +1122,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     this.#repack(tickAt);
     this.#reindex(tickAt);
     this.#embedding(tickAt, embedders.model);
+    this.#exports();
     await workTick(
       this.ctx.storage,
       this.#work,
@@ -1206,6 +1246,12 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * - words.ts `wordsRebuilding`: word indexes behind their rules;
    * - embedding.ts `embeddingDue`: a walk not over, or a replaced build
    *   still to remove;
+   * - exports.ts `exportsDue`: an erasure recorded since the step last
+   *   looked (exports it makes stale, and a sweep of export files the store
+   *   has no record of), or an export or a restore whose item of the queue
+   *   is parked for good or gone (writing an export, restoring one,
+   *   deleting files and the sweep are items of the queue, which
+   *   `queueDueAt` covers);
    * - work.ts `queueDueAt`: an item of the queue, due or coming back from
    *   parked, once the queue's pause is over.
    *
@@ -1219,7 +1265,8 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       erasureDue(sql) ||
       repackDue(sql) ||
       wordsRebuilding(sql) ||
-      embeddingDue(storage)
+      embeddingDue(storage) ||
+      exportsDue(sql)
     ) {
       return now;
     }
@@ -1332,6 +1379,25 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     } catch {
       // Nothing of the error is kept: the batch stays to do.
       this.#stepsFailed.erase = { at, reason: "failed" };
+    }
+  }
+
+  /**
+   * The tick's step for exports (exports.ts `exportsStep`), in one
+   * transaction: the stuck settled as failed, failed restores given up,
+   * the stale retired, and a pass of the sweep of export files the store
+   * has no record of started. A
+   * failure changes nothing and never reaches the queue: it is due again
+   * next tick (`#nextWorkAt`), and meanwhile a stale export is served to
+   * no one (`exportFile` asks itself).
+   */
+  #exports(): void {
+    try {
+      exportsStep(this.ctx.storage);
+    } catch {
+      // One fixed event, nothing of the error: it may be the database's
+      // own words.
+      log.error("brain.exports_step_failed", {});
     }
   }
 
@@ -1545,6 +1611,83 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     return (await this.#readable())
       ? searchVectors(this.ctx.storage.sql, asked)
       : { chunks: [] };
+  }
+
+  /**
+   * Starts an export of the company's Brain (exports.ts), or answers with
+   * the one being written. A person's own store refuses: a person's own
+   * export is for later.
+   */
+  async startExport(deployment: string): Promise<{ id: string }> {
+    const of = checked(deploymentSchema, deployment);
+    if (this.#kind.kind === "person") {
+      throw new Error(sharedOnly);
+    }
+    return await this.#changing(async () => {
+      await this.#ready();
+      return { id: startExport(this.ctx.storage, of) };
+    });
+  }
+
+  /** Where an export is: null when there is none. A person's own store refuses. */
+  async exportStatus(request: ExportRequest): Promise<ExportStatus | null> {
+    const asked = checked(exportRequestSchema, request);
+    if (this.#kind.kind === "person") {
+      throw new Error(sharedOnly);
+    }
+    await this.#ready();
+    return exportStatus(this.ctx.storage.sql, asked);
+  }
+
+  /** A file of a done export: null for any other, alike. A person's own store refuses. */
+  async exportFile(request: ExportFileRequest): Promise<string | null> {
+    const asked = checked(exportFileRequestSchema, request);
+    if (this.#kind.kind === "person") {
+      throw new Error(sharedOnly);
+    }
+    await this.#ready();
+    return await exportFile(this.ctx.storage.sql, this.#bucket, asked);
+  }
+
+  /**
+   * Starts restoring a company export into this shared store, which holds
+   * nothing (restore.ts); a person's own store refuses.
+   */
+  async startRestore(id: string, deployment: string): Promise<RestoreStatus> {
+    const asked = checked(exportIdSchema, id);
+    const of = checked(deploymentSchema, deployment);
+    if (this.#kind.kind === "person") {
+      throw new Error(restoresShared);
+    }
+    return await this.#changing(async () => {
+      await this.#ready();
+      return await startRestore(this.ctx.storage, this.#bucket, asked, of);
+    });
+  }
+
+  /**
+   * Whether a restore of the company export `id` of `deployment` may start
+   * now, starting nothing (restore.ts `checkRestore`): throws as
+   * `startRestore` refuses.
+   */
+  async checkRestore(id: string, deployment: string): Promise<void> {
+    const asked = checked(exportIdSchema, id);
+    const of = checked(deploymentSchema, deployment);
+    if (this.#kind.kind === "person") {
+      throw new Error(restoresShared);
+    }
+    await this.#ready();
+    await checkRestore(this.ctx.storage, this.#bucket, asked, of);
+  }
+
+  /** Where the restore of export `id` is: null when none was started. */
+  async restoreStatus(id: string): Promise<RestoreStatus | null> {
+    const asked = checked(exportIdSchema, id);
+    if (this.#kind.kind === "person") {
+      throw new Error(restoresShared);
+    }
+    await this.#ready();
+    return restoreStatus(this.ctx.storage.sql, asked);
   }
 
   /** Repacks one block holding removed codes: true when more are left. */
