@@ -19,6 +19,7 @@ import {
   newMemoriesSchema,
   retireRequestSchema,
   currentRequestSchema,
+  readableRequestSchema,
   deploymentSchema,
   embedModelSchema,
   exportFileRequestSchema,
@@ -61,6 +62,7 @@ import type {
   RetireRequest,
   AskModel,
   CurrentRequest,
+  ReadableRequest,
   Embedders,
   ErasureReason,
   ExportFileRequest,
@@ -160,7 +162,12 @@ import {
 import { find, recall } from "./recall.ts";
 import { addMemories } from "./remember.ts";
 import { checkRestore, restoreStatus, startRestore } from "./restore.ts";
-import { addVersion, readCurrent, readVersion } from "./sources.ts";
+import {
+  addVersion,
+  readCurrent,
+  readVersion,
+  readableVersions,
+} from "./sources.ts";
 import type { SourcesStore } from "./sources.ts";
 import {
   putVectors,
@@ -952,6 +959,17 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     return (await this.#readable())
       ? listVersions(this.ctx.storage.sql, asked)
       : { versions: [], more: false };
+  }
+
+  /** Of some versions, those the reader may read now: no text read. */
+  async readableVersions(
+    request: ReadableRequest
+  ): Promise<SourceVersionRef[]> {
+    const asked = checked(readableRequestSchema, request);
+    this.#mayRead(asked.reader);
+    return (await this.#readable())
+      ? readableVersions(this.#sources, asked)
+      : [];
   }
 
   /**

@@ -1375,6 +1375,8 @@ const leavingNone = [
   "readEntityNames",
   "readMemories",
   "readVersion",
+  // One statement of which versions the reader may still read.
+  "readableVersions",
   "repackVectors",
   "restoreStatus",
   "retireMemory",

@@ -42,6 +42,14 @@ export const brainModules = {
   // Writing and sharing skills (GRA-1754): its own surface, each export
   // probed as the signed-in person.
   "apps/core/src/skill-shares.ts": "shares",
+  // A chat's recall before its question: hands the model what core's
+  // recallAs gave the chat's own person, two of its packs merged at most
+  // (mergeRecalled, which only drops and orders what both hold), as data;
+  // what an analysis says only ever becomes that same person's question.
+  "apps/core/src/turn-recall.ts": "core",
+  // Checks what a chat once handed over with core's readableVersionsAs, and
+  // hands on only which of those it may still send, never what they say.
+  "apps/core/src/history-access.ts": "core",
   // Remembers, forgets and corrects for a person, and reads entities for
   // them: its own surface, each export probed as the person.
   "apps/core/src/brain-memories.ts": "memories",

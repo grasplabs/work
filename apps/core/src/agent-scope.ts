@@ -299,6 +299,26 @@ export interface AgentCall {
 /** How a call ended: done, refused (an expected error), or failed. */
 export type CallOutcome = "ok" | "refused" | "failed";
 
+/** The `agent.call` event for a call of the chat's code, as it ended. */
+export const agentCallEntry = (
+  scope: Omit<AgentScope, "runId">,
+  { method, target, detail = {} }: AgentCall,
+  ended?: { outcome: CallOutcome; reason: string | null }
+): AuditEntry => ({
+  actor: delegateActorOf(chatAuthority(scope), scope.via),
+  action: "agent.call",
+  target,
+  // The actor is the organization's agent, in everyone's chats: which chat
+  // called.
+  detail: {
+    ...detail,
+    method,
+    chat: scope.chatId,
+    outcome: ended?.outcome ?? "ok",
+    reason: ended?.reason ?? null,
+  },
+});
+
 /**
  * Records a call of the chat's code as `agent.call`, by the workspace's
  * agent acting for the chat's person, in the chat: for the calls nothing
@@ -309,23 +329,14 @@ export type CallOutcome = "ok" | "refused" | "failed";
 export const auditAgentCall = async (
   env: Env,
   scope: Omit<AgentScope, "runId">,
-  { method, target, detail = {} }: AgentCall,
+  call: AgentCall,
   ended?: { outcome: CallOutcome; reason: string | null }
 ): Promise<void> => {
-  await keepAuditEvent(env, drizzle(env.DB), {
-    actor: delegateActorOf(chatAuthority(scope), scope.via),
-    action: "agent.call",
-    target,
-    // The actor is the organization's agent, in everyone's chats: which chat
-    // called.
-    detail: {
-      ...detail,
-      method,
-      chat: scope.chatId,
-      outcome: ended?.outcome ?? "ok",
-      reason: ended?.reason ?? null,
-    },
-  });
+  await keepAuditEvent(
+    env,
+    drizzle(env.DB),
+    agentCallEntry(scope, call, ended)
+  );
 };
 
 /**
