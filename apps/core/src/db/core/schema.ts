@@ -3236,6 +3236,13 @@ export const agents = sqliteTable(
      * made, which takes one; its name's key is cleared, free for another.
      */
     state: text({ enum: ["on", "paused", "deleted"] }).notNull(),
+    /**
+     * The person whose own agent it is (agents.ts): only they see, ask
+     * and change it, and it goes when they are erased. Null: one of the
+     * company's. Its name's key is null, as two people may each call
+     * theirs the same.
+     */
+    ownerId: text("owner_id"),
     madeBy: text("made_by").notNull(),
     madeAt: timestamp("made_at").notNull(),
     changedBy: text("changed_by").notNull(),
@@ -3245,6 +3252,10 @@ export const agents = sqliteTable(
     // No two agents answer to one name, however it is capitalised: people
     // say which agent they mean by it.
     uniqueIndex("agents_name_key_idx").on(table.nameKey),
+    // A person's own agents, and dropping them when they are erased.
+    index("agents_owner_idx")
+      .on(table.ownerId)
+      .where(sql`${table.ownerId} IS NOT NULL`),
   ]
 );
 
