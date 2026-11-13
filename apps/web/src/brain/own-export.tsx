@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 import { useCoreRead } from "../apps/use-core-read.ts";
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { ErrorText } from "../error-text.tsx";
+import { notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import {
@@ -18,34 +19,19 @@ import type { OwnExport } from "./own-export-route.ts";
 
 // Brain › Sources: the person's own export of what only they may read
 // (GRA-1839). Their own store writes it on its own alarm, a part a minute
-// or so. While it is written the page reads it again a few seconds after
-// each read has landed, never over one still under way, and not while the
-// page is hidden: once when it is seen again. What is shown is always the
-// latest read: a start is followed by a read (`changeThenRefresh`), its
-// button off until that read is back, and a start's failure is said only
-// while the read on screen is the one that followed it. Each file is a
-// plain link the browser downloads on the person's session (core's route
-// checks it).
+// or so. While it may be being written (the last read said so, or core
+// took a start) the page reads it again a few seconds after each read has
+// landed, never over one still under way, through reads that failed to
+// reach core, until one says otherwise; never while the page is hidden,
+// and once when it is seen again. A refusal from core stops it. What is
+// shown is always the latest read: a start is followed by a read
+// (`changeThenRefresh`), its button off until that read is back, and a
+// start's failure is said only while the read on screen is the one that
+// followed it. Each file is a plain link the browser downloads on the
+// person's session (core's route checks it).
 
 /** How long after a read has landed the page reads again, while it is written. */
 export const followEveryMs = 5000;
-
-/** How often the page was seen again after it was hidden: each is one more read. */
-const useSeenAgain = (): number => {
-  const [seen, setSeen] = useState(0);
-  useEffect(() => {
-    const back = (): void => {
-      if (document.visibilityState === "visible") {
-        setSeen((before) => before + 1);
-      }
-    };
-    document.addEventListener("visibilitychange", back);
-    return () => {
-      document.removeEventListener("visibilitychange", back);
-    };
-  }, []);
-  return seen;
-};
 
 /** A done export's files, each a download. */
 const Files = ({ shown }: { shown: OwnExport }) => {
@@ -120,13 +106,12 @@ const Said = ({
 
 /** Where the person's own export is, and what they can do about it. */
 export const OwnExportSection = () => {
-  const { t } = useLingui();
+  const { i18n } = useLingui();
   const heading = useId();
-  const status = useRef<HTMLOutputElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const [reads, setReads] = useState(0);
-  const seenAgain = useSeenAgain();
   const read = useCoreRead(
-    `own-export/${reads}/${seenAgain}`,
+    `own-export/${reads}`,
     async (_session, signal) => await readOwnExport(signal),
     "own-export"
   );
@@ -135,33 +120,37 @@ export const OwnExportSection = () => {
 
   // Each read that lands (a new one: `useCoreRead` keeps the last while
   // the next is under way) lets a start's follow-up read go on, and, while
-  // the export is written and the page seen, sets the next read a few
-  // seconds on. One read at a time: none starts over one under way. A read
-  // that failed (core out of reach, or slower than a read's deadline, as
-  // every read of the app) is followed too, while the last that landed
-  // showed the export being written.
+  // the export may be being written, sets the next read a few seconds on,
+  // and one when the page is seen again. One read at a time: none starts
+  // over one under way. It may be being written while the last read that
+  // reached core said so, or since core took a start; a read that failed to
+  // reach core (out of reach, or slower than a read's deadline, as every
+  // read of the app) changes neither, and a refusal from core stops it.
   const landed = useRef<(() => void) | null>(null);
-  const lastWriting = useRef(false);
+  const mayBeWriting = useRef(false);
   useEffect(() => {
     if (read !== undefined) {
       landed.current?.();
       landed.current = null;
     }
     if (read?.state === "ready") {
-      lastWriting.current = writing;
+      mayBeWriting.current = writing;
     }
     const following =
       read !== undefined &&
-      (writing || (read.state !== "ready" && lastWriting.current));
-    const timer = following
-      ? setTimeout(() => {
-          if (document.visibilityState === "visible") {
-            setReads((before) => before + 1);
-          }
-        }, followEveryMs)
-      : undefined;
+      (writing || (read.state === "offline" && mayBeWriting.current));
+    const readNow = (): void => {
+      if (document.visibilityState === "visible") {
+        setReads((before) => before + 1);
+      }
+    };
+    const timer = following ? setTimeout(readNow, followEveryMs) : undefined;
+    if (following) {
+      document.addEventListener("visibilitychange", readNow);
+    }
     return () => {
       clearTimeout(timer);
+      document.removeEventListener("visibilitychange", readNow);
     };
   }, [read, writing]);
   // A follow-up read the page left before it landed holds up nothing.
@@ -201,18 +190,28 @@ export const OwnExportSection = () => {
     setFailed(undefined);
     await run(
       async () => {
-        await changeThenRefresh(startOwnExport, readAgain);
+        await changeThenRefresh(async () => {
+          await startOwnExport();
+          // Core took it: being written until a read that reaches core says
+          // otherwise.
+          mayBeWriting.current = true;
+        }, readAgain);
       },
       (reason) => {
         setFailed({ reason, after: onScreen.current });
       }
     );
     starting.current = false;
-    // The button the person pressed is gone or replaced: their focus goes
-    // to what the section now says, not to the top of the page.
-    const section = status.current?.closest("section");
-    if (section?.contains(document.activeElement) !== true) {
-      status.current?.focus();
+    // The button the person pressed went with what replaced it, and their
+    // focus with it: it goes to the section's heading, not to the top of
+    // the page. Only when it was lost: if they moved on meanwhile, it stays
+    // where they are. Not to the status, which, a live region, already
+    // says what changed: focused, it would say it twice.
+    const lost =
+      document.activeElement === document.body ||
+      document.activeElement === null;
+    if (lost) {
+      headingRef.current?.focus();
     }
   };
   // Said only while the read on screen is the one that followed it: a
@@ -227,11 +226,7 @@ export const OwnExportSection = () => {
   if (read !== undefined && read.state !== "ready") {
     controls = (
       <>
-        <ErrorText>
-          {read.state === "refused"
-            ? read.message
-            : t`Grasp can’t be reached just now.`}
-        </ErrorText>
+        <ErrorText>{notLoadedText(read, i18n)}</ErrorText>
         <div>
           <Button
             disabled={busy}
@@ -267,7 +262,12 @@ export const OwnExportSection = () => {
 
   return (
     <section aria-labelledby={heading} className="flex flex-col gap-3">
-      <h2 className="text-sm font-medium" id={heading}>
+      <h2
+        className="text-sm font-medium"
+        id={heading}
+        ref={headingRef}
+        tabIndex={-1}
+      >
         <Trans>Export what only you may read</Trans>
       </h2>
       <p className="text-muted-foreground text-sm">
@@ -277,7 +277,7 @@ export const OwnExportSection = () => {
           and it is deleted when your data is erased.
         </Trans>
       </p>
-      <output className="text-sm" ref={status} tabIndex={-1}>
+      <output className="text-sm">
         <Said read={read} shown={shown} />
       </output>
       {controls}

@@ -6170,10 +6170,6 @@ msgstr "Grasp a ajouté un widget à votre tableau de bord."
 msgid "Grasp asks"
 msgstr "Grasp demande"
 
-#: src/brain/own-export.tsx
-msgid "Grasp can’t be reached just now."
-msgstr "Grasp est injoignable pour le moment."
-
 #: src/chat/cited-note.tsx
 #: src/chat/global-chat.tsx
 #: src/core.ts

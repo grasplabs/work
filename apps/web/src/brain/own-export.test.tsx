@@ -40,6 +40,8 @@ const twoFiles = ["manifest.json", "part-0000.jsonl"];
 
 const ready = "Your export is ready. Download each of its files:";
 
+const unreachable = "Grasp can't be reached right now. Try again in a moment.";
+
 /** What the faked route holds and answers. */
 interface Route {
   /** The export it shows; null for none. */
@@ -56,6 +58,8 @@ interface Route {
   holdRead?: Promise<unknown>;
   /** Fails each read, as a body core never sends. */
   failRead?: boolean;
+  /** Refuses each read with this core error. */
+  refuseRead?: { status: number; code: string; message: string };
   /** Every call, in order. */
   calls: string[];
   /** Whether each read was sent with a signal to end it. */
@@ -93,6 +97,13 @@ const serve = (faked: Route) =>
       await faked.holdRead;
       if (faked.failRead === true) {
         return new Response("<html>proxy</html>", { status: 502 });
+      }
+      if (faked.refuseRead !== undefined) {
+        const { status, code, message } = faked.refuseRead;
+        return Response.json(
+          { code, message, details: { requestId: "req-2" } },
+          { status }
+        );
       }
       return Response.json({ export: faked.shown });
     }
@@ -228,7 +239,7 @@ describe("the person's own export", () => {
       again: buttonOf("Export again").disabled,
     }).toStrictEqual({
       writing: true,
-      focused: "OUTPUT",
+      focused: "H2",
       done: ready,
       links: [
         [
@@ -412,7 +423,7 @@ describe("the person's own export", () => {
       asked: faked.calls.length,
       done: said(),
     }).toStrictEqual({
-      failed: ["Grasp can’t be reached just now."],
+      failed: [unreachable],
       askedThen: 2,
       asked: 3,
       done: ready,
@@ -447,7 +458,7 @@ describe("the person's own export", () => {
       start: buttonOf("Export").disabled,
       calls: faked.calls,
     }).toStrictEqual({
-      failed: ["Grasp can’t be reached just now."],
+      failed: [unreachable],
       after: [],
       start: false,
       calls: ["read", "read"],
@@ -464,9 +475,7 @@ describe("the person's own export", () => {
       })
     );
     await press("Export");
-    expect(alerts()).toContain(
-      "Grasp can't be reached right now. Try again in a moment."
-    );
+    expect(alerts()).toContain(unreachable);
   });
 
   it("drops a start's reply that lands after the person left the section", async () => {
@@ -492,5 +501,86 @@ describe("the person's own export", () => {
       calls: ["read", "start"],
       shown: "",
     });
+  });
+
+  it("leaves the person's focus where they moved it while a start ran", async () => {
+    const held = Promise.withResolvers<boolean>();
+    await shown(route(null, { holdStart: held.promise }));
+    const elsewhere = document.createElement("input");
+    document.body.append(elsewhere);
+    await act(async () => {
+      buttonOf("Export").focus();
+      buttonOf("Export").click();
+      await Promise.resolve();
+    });
+    await settle();
+    act(() => {
+      elsewhere.focus();
+    });
+    await act(async () => {
+      held.resolve(true);
+      await Promise.resolve();
+    });
+    await settle();
+    expect({
+      focused: document.activeElement === elsewhere,
+      writing: said().includes("Grasp is writing your export."),
+    }).toStrictEqual({ focused: true, writing: true });
+  });
+
+  // Core took the start, and the read after it failed to reach core: the
+  // page follows on its own until a read lands.
+  it("follows a start core took though the read after it failed", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const faked = route(null);
+    await shown(faked);
+    faked.started = exported("writing");
+    faked.failRead = true;
+    await press("Export");
+    const failed = alerts();
+    faked.failRead = false;
+    faked.shown = exported("done", twoFiles);
+    await later(followEveryMs);
+    expect({
+      failed,
+      calls: faked.calls,
+      done: said(),
+      alerts: alerts(),
+    }).toStrictEqual({
+      failed: [unreachable],
+      calls: ["read", "start", "read", "read"],
+      done: ready,
+      alerts: [],
+    });
+  });
+
+  // A refusal from core (signed out in another tab, say) stops the
+  // following, and is said.
+  it("stops following once core refuses a read, and says why", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const faked = route(exported("writing"));
+    await shown(faked);
+    faked.refuseRead = {
+      status: 401,
+      code: "auth.unauthenticated",
+      message: "Sign in to continue.",
+    };
+    await later(followEveryMs);
+    const refused = alerts();
+    const asked = faked.calls.length;
+    await later(followEveryMs * 4);
+    expect({ refused, asked, after: faked.calls.length }).toStrictEqual({
+      refused: ["Sign in to continue. Reference: req-2"],
+      asked: 2,
+      after: 2,
+    });
+  });
+
+  it("doesn't read again when the page is seen again and nothing is being written", async () => {
+    const faked = route(exported("done", twoFiles));
+    await shown(faked);
+    await visibility("hidden");
+    await visibility("visible");
+    expect(faked.calls).toStrictEqual(["read"]);
   });
 });

@@ -3792,7 +3792,7 @@ msgstr "Bezig met controleren…"
 
 #: src/brain/own-export.tsx
 msgid "Checking on your export…"
-msgstr "Je export wordt nagekeken…"
+msgstr "Je export wordt opgehaald…"
 
 #. Grasp checks the App it changed (its types, lint and preview) before its turn ends.
 #: src/chat/thread.tsx
@@ -6169,10 +6169,6 @@ msgstr "Grasp heeft een widget aan je dashboard toegevoegd."
 #: src/chat/asked-questions.tsx
 msgid "Grasp asks"
 msgstr "Grasp vraagt"
-
-#: src/brain/own-export.tsx
-msgid "Grasp can’t be reached just now."
-msgstr "Grasp is nu niet bereikbaar."
 
 #: src/chat/cited-note.tsx
 #: src/chat/global-chat.tsx

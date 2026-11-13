@@ -1501,7 +1501,7 @@ msgstr "Eine Verbindung hat verweigert zu sagen, was sich geändert hat"
 
 #: src/brain/own-export.tsx
 msgid "A copy of everything the Brain keeps for you alone: your own sources and what it remembers from them. Only you can make it and download it, and it is deleted when your data is erased."
-msgstr "Eine Kopie von allem, was das Brain nur für Sie aufbewahrt: Ihre eigenen Quellen und was es daraus behält. Nur Sie können sie erstellen und herunterladen, und sie wird gelöscht, wenn Ihre Daten gelöscht werden."
+msgstr "Eine Kopie von allem, was das Brain nur für Sie aufbewahrt: Ihre eigenen Quellen und was es daraus behält. Nur Sie können sie erstellen und herunterladen, und sie wird mit Ihren Daten gelöscht."
 
 #: src/apps/publish-errors.ts
 msgid "A data migration moved this App's records on since this version, so it can't be shared again. Share a new version instead."
@@ -6169,10 +6169,6 @@ msgstr "Grasp hat Ihrem Dashboard ein Widget hinzugefügt."
 #: src/chat/asked-questions.tsx
 msgid "Grasp asks"
 msgstr "Grasp fragt"
-
-#: src/brain/own-export.tsx
-msgid "Grasp can’t be reached just now."
-msgstr "Grasp ist gerade nicht erreichbar."
 
 #: src/chat/cited-note.tsx
 #: src/chat/global-chat.tsx
