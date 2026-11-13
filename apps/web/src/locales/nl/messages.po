@@ -6228,10 +6228,6 @@ msgid "Grasp couldn't remove its own access at these apps. Until someone removes
 msgstr "Grasp kon zijn eigen toegang bij deze apps niet verwijderen. Tot iemand die daar verwijdert, werkt die misschien nog."
 
 #: src/brain/own-export.tsx
-msgid "Grasp couldn’t say where your export is just now."
-msgstr "Grasp kon nu niet zeggen hoe ver je export is."
-
-#: src/brain/own-export.tsx
 msgid "Grasp couldn’t start your export just now."
 msgstr "Grasp kon je export nu niet starten."
 

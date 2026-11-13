@@ -83,11 +83,10 @@ const Files = ({ shown }: { shown: OwnExport }) => {
 export const OwnExportSection = () => {
   const { t } = useLingui();
   const heading = useId();
-  const unexpected = t`Grasp couldn’t say where your export is just now.`;
   const [reads, setReads] = useState(0);
   const read = useCoreRead(
     `own-export/${reads}`,
-    async () => await readOwnExport(unexpected),
+    async () => await readOwnExport(),
     "own-export"
   );
   const shown = read?.state === "ready" ? read.data : undefined;

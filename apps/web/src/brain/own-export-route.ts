@@ -29,8 +29,10 @@ export type OwnExport = z.infer<typeof ownExportSchema>;
 const shownSchema = z.object({ export: ownExportSchema.nullable() });
 
 /**
- * Why core refused: its own error, with its reference, as RPC errors
- * carry them; or, for an answer that isn't one, `unexpected`.
+ * Why core refused: its own error, with its code and reference, as RPC
+ * errors carry them; or, for an answer that isn't one (a proxy's page),
+ * `unexpected`, with no code: core out of reach, as a read takes it
+ * (load-from-core.tsx).
  */
 const refusalOf = async (
   response: Response,
@@ -50,10 +52,12 @@ const refusalOf = async (
   return Object.assign(new Error(message), { code, details });
 };
 
-/** The export the person's own store shows them: null when there is none. */
-export const readOwnExport = async (
-  unexpected: string
-): Promise<OwnExport | null> => {
+/**
+ * The export the person's own store shows them: null when there is none.
+ * An answer that isn't core's throws with no code: out of reach.
+ */
+export const readOwnExport = async (): Promise<OwnExport | null> => {
+  const unexpected = "Core's answer about the export wasn't one it gives";
   const response = await fetch(ownExportPath, {
     headers: { accept: "application/json" },
   });
