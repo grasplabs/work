@@ -205,6 +205,8 @@ const activitySchema = z.object({
     id: z.string().min(1).max(1024),
     conversationType: z.enum(["personal", "groupChat", "channel"]),
   }),
+  // Only whether it names a meeting (`isMeeting`): any value counts.
+  channelData: z.looseObject({ meeting: z.unknown().optional() }).optional(),
   entities: z
     .array(
       z.looseObject({
@@ -431,12 +433,25 @@ const mentionsBot = (env: Env, activity: Activity): boolean =>
   );
 
 /**
+ * Whether `activity` came from a Teams meeting's chat: its channel data
+ * names the meeting, or its conversation id is a meeting's. Anonymous
+ * attendees, and those who dial in, can be in a meeting's chat without
+ * being on the roster Teams gives a bot, so a meeting's roster is never
+ * shown complete: read as having someone Grasp can't name (GRA-1820).
+ */
+const isMeeting = (activity: Activity): boolean =>
+  activity.channelData?.meeting !== undefined ||
+  // A meeting's chat's conversation id, as Teams names one.
+  activity.conversation.id.startsWith("19:meeting_");
+
+/**
  * Who is in the group chat or channel `activity` came from, read from the
  * conversation's roster (a channel's: its team's, or a private channel's
  * own): its members Grasp knows as the organization's active people, and
  * whether anyone else is in it, a guest, another tenant's, someone Grasp
  * hasn't seen, or anyone at all when the roster can't be read or is too
- * large. Whoever is not named narrows what the answer reads to nothing.
+ * large, or in a meeting's chat (`isMeeting`). Whoever is not named
+ * narrows what the answer reads to nothing.
  */
 const audienceIn = async (
   env: Env,
@@ -444,6 +459,9 @@ const audienceIn = async (
   activity: Activity
 ): Promise<Audience> => {
   const nobody = { members: [], outsiders: true };
+  if (isMeeting(activity)) {
+    return nobody;
+  }
   // A channel thread's conversation is the channel's, with `;messageid=`.
   const [conversationId = activity.conversation.id] =
     activity.conversation.id.split(";");

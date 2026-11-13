@@ -362,6 +362,25 @@ const readsAs = ({
 };
 
 /**
+ * What a recall read as, for its audit event: as its person (`person`,
+ * their own store too), as their teams and the company (`teams`), or as
+ * everyone in a conversation others share (`everyone`), with how many
+ * people that is, the asker counted. Never who.
+ */
+const readAsDetail = (
+  personId: string,
+  { personal, everyone }: Pick<Recall, "personal" | "everyone">
+): { reads: "person" | "teams" | "everyone"; members?: number } => {
+  if (everyone !== undefined) {
+    return {
+      reads: "everyone",
+      members: new Set([personId, ...everyone]).size,
+    };
+  }
+  return { reads: personal ? "person" : "teams" };
+};
+
+/**
  * Recalls evidence for `question` before the turn's first model request,
  * with the analysis alongside, as a run of the chat whose reads are
  * pinned with it before anything is handed over. What it found, or what
@@ -378,6 +397,7 @@ export const recallForTurn = async (
     return undefined;
   }
   const { env, turn } = recalling;
+  const readAs = readAsDetail(turn.scope.personId, reads);
   // Alongside the first pass from the start; let go of once the recall
   // ends, however it ends, so no request of it outlives the recall. None
   // for a chat's first message: nothing before it to resolve.
@@ -414,7 +434,7 @@ export const recallForTurn = async (
     ];
     const call = {
       method: turnRecallMethod,
-      detail: { versions: versions.length, run: runId },
+      detail: { versions: versions.length, run: runId, ...readAs },
     };
     // Pinned with the run, then in the log, before the model gets any of
     // it, within what is left of the recall's time: a run revoked or ended
@@ -441,7 +461,7 @@ export const recallForTurn = async (
     await auditToolCall(
       env,
       scope,
-      { method: turnRecallMethod, detail: { run: runId } },
+      { method: turnRecallMethod, detail: { run: runId, ...readAs } },
       // Too slow told apart from a crash.
       isTimeout(error)
         ? { outcome: "failed", reason: recallTimeoutReason }
@@ -462,7 +482,7 @@ export const recallForTurn = async (
     await auditToolCall(
       env,
       scope,
-      { method: turnRecallMethod, detail: { run: runId } },
+      { method: turnRecallMethod, detail: { run: runId, ...readAs } },
       { outcome: "failed", reason: "agent.run_revoked" }
     );
   }

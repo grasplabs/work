@@ -595,6 +595,10 @@ const everyoneReaderOf = async (
   if (!people.every((id) => idSchema.safeParse(id).success)) {
     return nobody;
   }
+  // The two reads of `memberOf` (auth/identity.ts), for many people in one
+  // snapshot: who is a member as `memberRole` counts them, and their teams
+  // as `teamsOf` reads them. Keep the three in step: a member either
+  // counts differently is read here as someone else.
   const db = drizzle(env.DB);
   const [current, memberships] = await db.batch([
     db

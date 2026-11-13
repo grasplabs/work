@@ -53,6 +53,7 @@ import { mockIdp } from "./idp.ts";
 import { answeringProvider } from "./model-provider.ts";
 import { noProducers } from "./no-producers.ts";
 import { carrying } from "./platform-providers.ts";
+import { acmeTenant } from "./sign-in-config.ts";
 import { routed, signedInApi, signedInWithRole, unique } from "./sign-in.ts";
 import {
   member as teamsMember,
@@ -1430,10 +1431,7 @@ describe(
       await chatAgentReadsBrain();
       const ann = await teamsMember(
         idp,
-        says("Noted."),
-        says("Noted."),
-        says("Noted."),
-        says("Noted.")
+        ...Array.from({ length: 8 }, () => says("Noted."))
       );
       const ben = await memberAnsweredBy(idp, ann.provider);
       const depot = `d${unique()}`;
@@ -1456,10 +1454,14 @@ describe(
       /** What reached the model for Ann's question in `conversation`. */
       const askedIn = async (
         conversation: string,
-        kind: "groupChat" | "channel" = "groupChat"
+        kind: "groupChat" | "channel" = "groupChat",
+        changes: Record<string, unknown> = {}
       ) => {
         const before = ann.provider.requests.length;
-        await post(mentionIn(ann.teams, conversation, question, kind));
+        await post({
+          ...mentionIn(ann.teams, conversation, question, kind),
+          ...changes,
+        });
         const sent = JSON.stringify(
           ann.provider.requests.slice(before).map(({ body }) => body)
         );
@@ -1495,6 +1497,39 @@ describe(
         { person: ben.teams },
       ]);
       const afterBenJoined = await askedIn(thread, "channel");
+      // A channel where both are, then a guest joins before Ann asks again
+      // in the same thread: what was recalled before is sent no more.
+      const guestJoins = `19:${unique()}@thread.tacv2`;
+      const guestThread = `${guestJoins};messageid=${unique()}`;
+      await onGroupRoster(guestJoins, [
+        { person: ann.teams },
+        { person: ben.teams },
+      ]);
+      const beforeGuest = await askedIn(guestThread, "channel");
+      await onGroupRoster(guestJoins, [
+        { person: ann.teams },
+        { person: ben.teams },
+        { person: teamsPerson(), userRole: "guest" },
+      ]);
+      const afterGuestJoined = await askedIn(guestThread, "channel");
+      // A meeting's chat, whose roster leaves out anonymous attendees: both
+      // on it, named a meeting by its channel data or by its id.
+      const meeting = newGroup();
+      const meetingById = `19:meeting_${unique()}@thread.v2`;
+      for (const conversation of [meeting, meetingById]) {
+        // oxlint-disable-next-line no-await-in-loop -- one roster at a time
+        await onGroupRoster(conversation, [
+          { person: ann.teams },
+          { person: ben.teams },
+        ]);
+      }
+      const inMeeting = await askedIn(meeting, "groupChat", {
+        channelData: {
+          tenant: { id: acmeTenant },
+          meeting: { id: `MCMx${unique()}` },
+        },
+      });
+      const inMeetingById = await askedIn(meetingById);
       // Her own recall finds all three: what the model got is no empty Brain.
       const found = await textsFor(ann.userId, `depot ${depot}`);
 
@@ -1504,6 +1539,10 @@ describe(
         inWithGuest,
         alone,
         afterBenJoined,
+        beforeGuest,
+        afterGuestJoined,
+        inMeeting,
+        inMeetingById,
       }).toStrictEqual({
         found: 3,
         // What both may read; never her team's alone, never her own.
@@ -1523,6 +1562,21 @@ describe(
           answered: true,
           annTeam: false,
           both: true,
+          own: false,
+        },
+        beforeGuest: { answered: true, annTeam: false, both: true, own: false },
+        // Nothing recalled, and the earlier recall withheld from history.
+        afterGuestJoined: {
+          answered: true,
+          annTeam: false,
+          both: false,
+          own: false,
+        },
+        inMeeting: { answered: true, annTeam: false, both: false, own: false },
+        inMeetingById: {
+          answered: true,
+          annTeam: false,
+          both: false,
           own: false,
         },
       });

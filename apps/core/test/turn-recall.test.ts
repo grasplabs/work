@@ -370,6 +370,8 @@ describe("the recall before a chat's question", setUpTime, () => {
       recalls: recalls.map(({ detail }) => ({
         versions: detail.versions,
         run: detail.run,
+        reads: detail.reads,
+        members: detail.members,
         outcome: detail.outcome,
       })),
       saysWhat: JSON.stringify(recalls).includes(depot),
@@ -378,6 +380,9 @@ describe("the recall before a chat's question", setUpTime, () => {
         {
           versions: 1,
           run: recallRunIn(provider.requests[0]?.body),
+          // Her own chat: as her, her own store too; no count of people.
+          reads: "person",
+          members: undefined,
           outcome: "ok",
         },
       ],
@@ -1040,8 +1045,24 @@ describe("what the recall before a question may reach", setUpTime, () => {
       removedAt: new Date(),
     });
     const benRemoved = await sentFor(inGroup);
+    // What the shared chat's recall was recorded as reading: everyone in
+    // it, and how many they are, never who.
+    const [recorded] = recallsIn(
+      await eventsOf(agentId, (events) => recallsIn(events, chatId).length > 0),
+      chatId
+    );
 
-    expect({ bothMembers, unattended, benRemoved }).toStrictEqual({
+    expect({
+      bothMembers,
+      unattended,
+      benRemoved,
+      recorded: {
+        reads: recorded?.detail.reads,
+        members: recorded?.detail.members,
+        names: JSON.stringify(recorded).includes(ben.userId),
+      },
+    }).toStrictEqual({
+      recorded: { reads: "everyone", members: 2, names: false },
       bothMembers: { recalls: 1, marker: true },
       // Only the first question's recall, as the chat's history holds it.
       unattended: { recalls: 1, marker: true },
