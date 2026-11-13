@@ -644,13 +644,14 @@ const readersAgent = (personId: string): Authority =>
  */
 const pairedOverSkills = async (
   hidden: readonly string[] | undefined,
-  call: (name: string) => Promise<unknown>
+  call: (name: string) => Promise<unknown>,
+  kind = "someone else's own skill"
 ): Promise<Answer[]> => {
   const ask = async (like: string, name: string, about: Answer["about"]) =>
     await answer(like, async () => await call(name), about, like);
   const answers: Answer[] = [];
   for (const [index, name] of (hidden ?? []).entries()) {
-    const like = `someone else's own skill ${index}`;
+    const like = `${kind} ${index}`;
     const pair = [
       [name, "hidden"],
       [twinOf(name), "nothing"],
@@ -684,6 +685,10 @@ const pairedOverTeamSkills = async (
     // One call site for both, so a stack differs in nothing but what was
     // asked.
     for (const [asked, about] of pair) {
+      // Each asked from a resumed call, the first too: a refusal thrown
+      // before any I/O then has the same stack for both.
+      // oxlint-disable-next-line no-await-in-loop -- one answer at a time
+      await Promise.resolve();
       const asking = async () => await call(team, asked);
       // oxlint-disable-next-line no-await-in-loop -- one answer at a time
       const got = await answer(like, asking, about, like);
@@ -6059,7 +6064,8 @@ export const shareProbes = {
           await plainOwnSkill(personId),
           1,
           { team }
-        )
+        ),
+      "a team the reader isn't in"
     )),
   ],
   // Deciding is an admin's: the reader is refused, for a share there is

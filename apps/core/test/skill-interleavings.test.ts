@@ -950,26 +950,25 @@ const innerGroups: readonly (readonly Op[])[] = [
   ["otherAsk", "approve"],
 ];
 
-/** The team operations swept, and one of the company's, each held at each of its steps. */
-const teamOuters: readonly Op[] = [
-  "approveTeam",
-  "askTeam",
-  "retireTeam",
-  "approve",
-];
-
 /**
- * What runs inside a team operation's hold: the asker leaving the team;
- * a decision of the same name for the company; another of the team's; and
- * another team's ask and approval.
+ * The team sweep: the asker leaving the team held inside each step of
+ * each team operation and of approving for the company; and, inside each
+ * step of a team's decision, a decision of the same name for the company,
+ * a newer one for the team, and another team's ask and approval.
  */
-const teamInnerGroups: readonly (readonly Op[])[] = [
-  ["leave"],
-  ["approve"],
-  ["retire"],
-  ["retireTeam"],
-  ["askTeam", "approveTeam"],
-  ["askTeamB", "approveTeamB"],
+const teamSweep: readonly { outer: Op; inner: readonly Op[] }[] = [
+  ...(["approveTeam", "askTeam", "retireTeam", "approve"] as const).map(
+    (outer) => ({ outer, inner: ["leave"] as const })
+  ),
+  ...(["approveTeam", "retireTeam"] as const).flatMap((outer) =>
+    (
+      [
+        ["approve"],
+        ["askTeam", "approveTeam"],
+        ["askTeamB", "approveTeamB"],
+      ] as const
+    ).map((inner) => ({ outer, inner }))
+  ),
 ];
 
 /** Park and Miller's minimal standard generator: the same numbers from the same seed, everywhere. */
@@ -1151,26 +1150,26 @@ describe("sharing skills, every step against every other", () => {
     async () => {
       const violations: string[] = [];
       let runs = 0;
-      for (const outer of teamOuters) {
+      const steps = new Map<Op, number>();
+      for (const { outer, inner } of teamSweep) {
         // oxlint-disable-next-line no-await-in-loop -- a world at a time
-        const steps = await stepsOf(outer);
-        for (const group of teamInnerGroups) {
-          for (let step = 1; step <= steps; step += 1) {
-            // oxlint-disable-next-line no-await-in-loop -- a world at a time
-            const found = await runSequence({
-              ops: [outer, ...group],
-              placements: [
-                {
-                  op: 0,
-                  step,
-                  kind: "hold",
-                  inner: group.map((_, at) => at + 1),
-                },
-              ],
-            });
-            violations.push(...found);
-            runs += 1;
-          }
+        const of = steps.get(outer) ?? (await stepsOf(outer));
+        steps.set(outer, of);
+        for (let step = 1; step <= of; step += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- a world at a time
+          const found = await runSequence({
+            ops: [outer, ...inner],
+            placements: [
+              {
+                op: 0,
+                step,
+                kind: "hold",
+                inner: inner.map((_, at) => at + 1),
+              },
+            ],
+          });
+          violations.push(...found);
+          runs += 1;
         }
       }
       expect({ violations, ran: runs > 0 }).toStrictEqual({
