@@ -1440,6 +1440,8 @@ const leavingNone = [
   // Memories and entities are written and read whole in their call, and
   // erased with what they rest on: none of their methods leaves work.
   "addMemories",
+  // One statement of which version a change made, if the reader may read it.
+  "changeVersion",
   "confirmMemory",
   "erasePerson",
   "exportFile",

@@ -41,6 +41,7 @@ import { sweepBuilds } from "./pages.ts";
 import { retryErasures } from "./person-erasure.ts";
 import { recordPlatformUpdate } from "./platform-updates.ts";
 import { sweepReleases } from "./release-retention.ts";
+import { reconcileSkills } from "./skill-shares.ts";
 import { sweepSpokenLines } from "./speech-cache.ts";
 import { sendStephenSummaries } from "./stephen-summary.ts";
 import { sweepCandidateRuns } from "./workflows/candidate-runs.ts";
@@ -93,6 +94,9 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   { name: "brain.hand_overs", period: "minute", run: relayHandOvers },
   { name: "members.disconnects", period: "minute", run: retryDisconnects },
   { name: "members.erasures", period: "minute", run: retryErasures },
+  // Decisions on the company's skills whose outcome the Brain hasn't given
+  // yet (src/skill-shares.ts `reconcileSkills`).
+  { name: "skills.reconcile", period: "minute", run: reconcileSkills },
   {
     name: "access.revocations",
     period: "minute",

@@ -4,8 +4,9 @@ import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 
 import type { BrainBucket } from "./bucket.ts";
 import { chunksOf } from "./chunks.ts";
-import { restoringNow, erasedSource } from "./contract.ts";
+import { erasedSource, restoringNow, staleVersion } from "./contract.ts";
 import type {
+  ChangeRequest,
   CurrentRequest,
   NewSource,
   ReadableRequest,
@@ -86,7 +87,8 @@ const encoder = new TextEncoder();
  * instruction file's never is (contract.ts `addInstructions`).
  */
 interface Adding {
-  readonly added: NewSource;
+  /** The add, and the current version it expects when it names one. */
+  readonly added: NewSource & { readonly after?: number | null };
   /** The source's key as the erasure ledger names it (erasure.ts). */
   readonly subject: string;
   /**
@@ -143,6 +145,12 @@ const versionFields = {
  * keeping a new change's key for the current version it matches; or
  * `undefined` when it is a new version. Throws when its change was added
  * before with other text or readers.
+ *
+ * An add over an expected version (`after`) never matches the current
+ * one: it always makes a new version, so landing moves the version, and a
+ * writer that read the version before it is refused as stale. Matching
+ * would let a decision "land" without moving it, and an older writer's
+ * `after` still pass over it.
  */
 const madeBefore = (
   db: DrizzleSqliteDODatabase,
@@ -178,8 +186,14 @@ const madeBefore = (
     .innerJoin(readerSets, eq(readerSets.id, sourceVersions.readerSet))
     .where(eq(currentVersions.source, added.source))
     .get();
+  // Expected to be over another version than the current one: refused,
+  // nothing written, before anything else is compared.
+  if (added.after !== undefined && (current?.version ?? null) !== added.after) {
+    throw new Error(staleVersion);
+  }
   if (
     current === undefined ||
+    added.after !== undefined ||
     current.file !== hash ||
     current.readers !== readers
   ) {
@@ -331,10 +345,12 @@ const addAgain = "The Brain lost the file while adding it: add it again";
  * can be repeated after a lost reply, or after a crash between the file
  * and the version, which it then finishes. Its text is cut into chunks
  * and indexed for recall when `indexed`; otherwise it is only kept whole.
+ * With `after`, only over that current version (`staleVersion` otherwise),
+ * asked again in the transaction that writes.
  */
 export const addVersion = async (
   { storage, db, bucket, groups }: SourcesStore,
-  added: NewSource,
+  added: Adding["added"],
   { indexed }: { indexed: boolean }
 ): Promise<SourceVersionRef> => {
   const soFar = erasuresSoFar(storage.sql);
@@ -432,6 +448,40 @@ WHERE source = ?1 AND version = ?4
     WHERE current_versions.source = ?1
       AND current.reader_set IN (SELECT reader_set FROM readable)
   )`;
+
+/** `?1` the source, `?4` the change: the version it made, by `versionSql`'s rule. */
+const changeVersionSql = `
+WITH ${readableSql}
+SELECT version.version AS version FROM source_changes AS change
+JOIN source_versions AS version ON version.row = change.version_row
+WHERE change.source = ?1 AND change.change = ?4
+  AND version.row NOT IN (SELECT version_row FROM erasing_versions)
+  AND version.reader_set IN (SELECT reader_set FROM readable)
+  AND EXISTS (
+    SELECT 1 FROM current_versions
+    JOIN source_versions AS current ON current.row = current_versions.version_row
+    WHERE current_versions.source = ?1
+      AND current.reader_set IN (SELECT reader_set FROM readable)
+  )`;
+
+/**
+ * The version the change `change` of `source` made: `null` when it made
+ * none or `reader` may not read it (as `readVersion`), alike.
+ */
+export const changeVersion = (
+  { storage }: Pick<SourcesStore, "storage">,
+  { source, change, reader }: ChangeRequest
+): number | null =>
+  storage.sql
+    .exec<{ version: number }>(
+      changeVersionSql,
+      source,
+      reader.person,
+      JSON.stringify(reader.groups),
+      change
+    )
+    .toArray()
+    .at(0)?.version ?? null;
 
 /**
  * A version of a source, current or history, whole from its file:
