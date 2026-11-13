@@ -7,7 +7,12 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { draftCheckpointsOf, restoreCheckpoint } from "../src/drafts.ts";
+import {
+  draftCheckpointsOf,
+  draftOf,
+  restoreCheckpoint,
+  saveDraft,
+} from "../src/drafts.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { publish, rollback } from "../src/publish.ts";
@@ -216,6 +221,50 @@ describe("publishing a workflow", { timeout: 60_000 }, () => {
       ],
       draft: greetingOf("1 hour", "Version 2"),
       audited: [1, 2],
+    });
+  });
+
+  it("empties a draft left over an older version that holds nothing the live one hasn't, answering the live version", async () => {
+    const ada = await person("builder");
+    const workflow = await publishedWorkflow(ada, greetingOf(undefined, "v1"));
+    await saved(ada, workflow.id, greetingOf(undefined, "v2"));
+    const live = await published(ada, workflow.id);
+    // Left over version 1 with what version 2 has, as a write that landed
+    // while version 2 went live, and stayed so, leaves it.
+    const stale = await saveDraft(
+      env,
+      workflowKind,
+      workflow.id,
+      await draftOf(env, workflowKind, workflow.id),
+      { changes: { "workflow.json": greetingOf(undefined, "v2") } },
+      { by: ada, detail: {} }
+    );
+    await env.DB.prepare(
+      "UPDATE drafts SET base = 1 WHERE subject_kind = 'workflow' AND subject_id = ?"
+    )
+      .bind(workflow.id)
+      .run();
+
+    const again = await publish(
+      env,
+      workflowKind,
+      ada,
+      workflow.id,
+      stale.revision
+    );
+    const after = await draftOf(env, workflowKind, workflow.id);
+    const versions = await workflowVersions(env, ada, workflow.id);
+
+    expect({
+      again: again.version,
+      changes: after.changes,
+      base: after.base,
+      versions: versions.length,
+    }).toStrictEqual({
+      again: live.version,
+      changes: {},
+      base: live.version,
+      versions: 2,
     });
   });
 

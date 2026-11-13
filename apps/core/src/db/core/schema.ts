@@ -1123,8 +1123,8 @@ export const appVersions = sqliteTable(
 );
 
 /**
- * Unused since every subject's draft moved to `drafts` (src/drafts.ts),
- * which migration 0245 copied each App's into: nothing reads or writes
+ * Unused since every subject's draft is in `drafts` (src/drafts.ts),
+ * which started empty (migration 0245): nothing reads or writes
  * it. Kept while a release that writes it may serve or be rolled back to
  * (expand, then contract); dropped in a later release, as are the four
  * tables after it.
