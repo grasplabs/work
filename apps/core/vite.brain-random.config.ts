@@ -15,7 +15,8 @@ const from = Number(process.env.BRAIN_RANDOM_FROM ?? "1");
 /** How many seeds, one after another from `from`: 500 unless asked. */
 const count = Number(process.env.BRAIN_RANDOM_SEEDS ?? "500");
 
-// Its arm without a vector recalls through core without the embedder (test/without-embedder.ts), so the test model never reaches it.
+// Its arm without a vector recalls through core without the embedder
+// (test/without-embedder.ts), so the test model never reaches it.
 export default coreProject(
   {
     name: "@grasp-os/core:brain-random",

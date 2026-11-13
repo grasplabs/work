@@ -590,9 +590,10 @@ describe(
       // before the first thing hidden from it exists. Each shape, as core
       // builds it (`readerOf`), what it may read, and what it may not:
       // - the company alone (an App's or a workflow's code, `recall
-      //   recallFor`, asked in the admin's pass) and an admin in no team
-      //   with nothing of their own: the passage for everyone; not the
-      //   team's handbook, nor the reader's note, nor anything after;
+      //   recallFor`, asked in the admin's pass and acting for the reader)
+      //   and an admin in no team with nothing of their own: the passage
+      //   for everyone; not the team's handbook, nor the reader's note,
+      //   nor anything after;
       // - the reader's teams with no person (a chat that doesn't answer
       //   its person alone, `personal: false`, and a chat's code) and a
       //   team-mate: the passage for everyone and the handbook; not the
@@ -674,9 +675,13 @@ describe(
           reason: "deleted",
         });
         await allEmbedded([]);
-      });
+      }, 120_000);
       await allEmbedded([admin]);
       const adminBefore = await answersOf(asAdmin, among);
+      // Code's recall as an App acting for the reader, who is in the team
+      // already: as the company alone, so before the team's handbook.
+      const appAmong = among.filter(([name]) => name === "recall recallFor");
+      const appBefore = await answersOf(probing, appAmong);
 
       // The reader's team's, current after drafts: the team-mate's, the
       // reader's teams alone's and their chat's code's before.
@@ -777,6 +782,12 @@ describe(
               teamsAmong,
             ],
             ["the reader's chat's code", asReader, chatCodeBefore, chatCode],
+            [
+              "code's recall as an App, for the reader",
+              asReader,
+              appBefore,
+              appAmong,
+            ],
           ];
         const found: Finding[] = [];
         for (const [who, as, was, surfacesOf] of passes) {
@@ -815,18 +826,23 @@ describe(
         // meaning, before; and every passage, the hidden ones among them,
         // was embedded when the answers were taken again.
         readable: readable.rebuilt && readable.embedded === readable.chunks,
-        meaningBefore: foundByMeaning(before.values()) > 0,
-        // The team-mate read the handbook, embedded, and found it by
-        // meaning.
-        mateMeaningBefore: foundByMeaning(mateBefore.values()) > 0,
-        // The admin, in no team, and code reading as the company alone,
-        // found the passage everyone may read by meaning; the reader's
-        // teams alone found their team's and the company's.
-        adminMeaningBefore: foundByMeaning(adminBefore.values()) > 0,
-        companyMeaningBefore:
-          foundByMeaning([adminBefore.get("recall recallFor") ?? []]) > 0,
-        teamsMeaningBefore: foundByMeaning(teamsBefore.values()) > 0,
-        chatCodeMeaningBefore: foundByMeaning(chatCodeBefore.values()) > 0,
+        // Each shape's every surface found something by meaning before:
+        // the passage for everyone, the handbook, the note, as it may.
+        withoutMeaningBefore: Object.fromEntries(
+          Object.entries({
+            reader: before,
+            teamMate: mateBefore,
+            admin: adminBefore,
+            teamsAlone: teamsBefore,
+            chatCode: chatCodeBefore,
+            appForReader: appBefore,
+          }).map(([shape, answers]) => [
+            shape,
+            [...answers]
+              .filter(([, each]) => foundByMeaning([each]) === 0)
+              .map(([name]) => name),
+          ])
+        ),
         hidden: hidden.rebuilt && hidden.embedded === hidden.chunks,
         hiddenChunks: hidden.chunks - readable.chunks,
         afterErasure: afterErasure.rebuilt,
@@ -837,12 +853,14 @@ describe(
       }).toStrictEqual({
         findings: [],
         readable: true,
-        meaningBefore: true,
-        mateMeaningBefore: true,
-        adminMeaningBefore: true,
-        companyMeaningBefore: true,
-        teamsMeaningBefore: true,
-        chatCodeMeaningBefore: true,
+        withoutMeaningBefore: {
+          reader: [],
+          teamMate: [],
+          admin: [],
+          teamsAlone: [],
+          chatCode: [],
+          appForReader: [],
+        },
         hidden: true,
         hiddenChunks: (recallLimit + 1) * hiddenTexts.length + 4,
         afterErasure: true,

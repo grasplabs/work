@@ -24,7 +24,9 @@ const repeats = Number(process.env.BRAIN_SCALE_REPEATS ?? "2");
 /** Hours the run may take before Vitest stops it. */
 const maxHours = 6;
 
-// No meaning hit of the test model reaches it: it measures the older Brain (test/brain-harness.ts), whose chats hold no `brain` grant, so none recalls core's Brain.
+// No meaning hit of the test model reaches it: it measures the older Brain
+// (test/brain-harness.ts), whose chats hold no `brain` grant, so none
+// recalls core's Brain.
 export default coreProject(
   {
     name: "@grasp-os/core:brain-scale",

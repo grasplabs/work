@@ -3,8 +3,9 @@
  * (`isolate: false` in vite.config.ts), so each starts from empty storage,
  * the env as configured, real timers, no spies, the databases at the
  * committed migrations, and the files of the model core ships in
- * `MODEL_FILES`, as a deployment's deploy put them there. Module state in core's isolate carries over, as it
- * does between requests in production: caches keyed by IDs a reset never
+ * `MODEL_FILES`, as a deployment's deploy put them there. Module state in
+ * core's isolate carries over, as it does between requests in
+ * production: caches keyed by IDs a reset never
  * reuses, and once-per-isolate state, such as the built-ins' install,
  * which the first file's setup runs and waits for (builtins-first.ts), and
  * the missing-table warning (platform-updates.test.ts), which only that
