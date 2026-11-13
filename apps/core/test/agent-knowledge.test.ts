@@ -14,6 +14,8 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { withheldResponse, withheldResult } from "../src/agent.ts";
+import { addSource } from "../src/brain-next.ts";
+import type { SourceReaders } from "../src/brain-next.ts";
 import { refreshDailySignals } from "../src/daily-signals.ts";
 import { chatSession, workspace } from "../src/durable-objects.ts";
 import {
@@ -91,6 +93,30 @@ const grantRead = async (
     admin,
     readCollection(agent, collectionId, `C${unique()}`.toUpperCase())
   );
+};
+
+/** Grants `agent` the Brain permission, as an admin would. */
+const grantBrain = async (
+  admin: Admin,
+  agent: { type: "agent"; agentId: string }
+) =>
+  await requestGranted(idp, admin, {
+    subject: agent,
+    object: { type: "platform" },
+    actions: ["brain"],
+    binding: "BRAIN",
+  });
+
+/** A source in the new Brain that `readers` may read. */
+const inBrain = async (text: string, readers: SourceReaders) => {
+  const source = { producer: "upload" as const, id: crypto.randomUUID() };
+  await addSource(env, {
+    source,
+    change: crypto.randomUUID(),
+    text,
+    readers,
+  });
+  return source;
 };
 
 /** The audit events of the chat's agent, once `done` holds for them. */
@@ -1170,49 +1196,21 @@ describe("a chat's Knowledge", setUpTime, () => {
     ).toStrictEqual([[]]);
   });
 
-  it("recalls for a chat only under the Brain permission, only from what its person may read, and labels the chat with every collection it read, found or not", async () => {
+  it("recalls for a chat only under the Brain permission, and only what its person may read", async () => {
     const admin = await newAdmin();
     const person = await newPerson();
     const word = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
-    // Granted and readable by the person, but without the word.
-    const { id: handbook } = await admin.knowledge.createCollection({
-      name: `Handbook ${unique()}`,
-      access: "everyone",
-    });
-    await admin.knowledge.saveDocument({
-      collectionId: handbook,
-      path: "other.md",
-      text: "# Other\nNothing of it here.",
-      ifVersion: 0,
-    });
-    // Granted, holding the word, but a team's the person isn't in.
+    // A team's, holding the word, and the person isn't in it.
     const team = await newTeam(admin, [admin]);
-    const { id: teamOnly } = await admin.knowledge.createCollection({
-      name: `Team ${unique()}`,
-      access: "teams",
-      teams: [team],
+    await inBrain(`The plan: ${word}.`, { kind: "team", teamId: team });
+    // One of a team of the person's, holding it too: the agent's code
+    // reads as their teams, never what only they may read (GRA-1762).
+    await inBrain(`Our plan: ${word}.`, {
+      kind: "team",
+      teamId: await newTeam(admin, [person]),
     });
-    await admin.knowledge.saveDocument({
-      collectionId: teamOnly,
-      path: "plan.md",
-      text: `# Plan\n${word}`,
-      ifVersion: 0,
-    });
-    // Readable by the person, holding the word, but never granted.
-    const { id: ungranted } = await admin.knowledge.createCollection({
-      name: `Ungranted ${unique()}`,
-      access: "everyone",
-    });
-    await admin.knowledge.saveDocument({
-      collectionId: ungranted,
-      path: "plan.md",
-      text: `# Plan\n${word}`,
-      ifVersion: 0,
-    });
-    const asked = (collectionIds?: string[]) =>
-      `outcome(env.brain.recall(${JSON.stringify({ query: word, ...(collectionIds === undefined ? {} : { filters: { collectionIds } }) })}))`;
     const recallStep = codeStep(
-      `export default async (self, env) => { const outcome = async (pending) => { try { const pack = await pending; return pack.items.length; } catch (error) { return error.code ?? String(error); } }; return [await ${asked()}, await ${asked([handbook])}, await ${asked([ungranted])}, await ${asked([teamOnly])}]; };`
+      `export default async (self, env) => { try { const pack = await env.brain.recall(${JSON.stringify({ question: word, budget: { tokens: 800 } })}); return pack.items.map(({ text }) => text); } catch (error) { return error.code ?? String(error); } };`
     );
     const { stub, chat, ask, agent } = await chatOf(
       person.userId,
@@ -1223,38 +1221,19 @@ describe("a chat's Knowledge", setUpTime, () => {
       recallStep,
       says("Refused.")
     );
-    await grantRead(admin, agent, handbook);
-    await grantRead(admin, agent, teamOnly);
     // Without the Brain permission: no `env.brain` to call at all.
-    const before = await ask("What is the plan?");
-    const brainGrant = await requestGranted(idp, admin, {
-      subject: agent,
-      object: { type: "platform" },
-      actions: ["brain"],
-      binding: "BRAIN",
-    });
-    const after = await ask("What is the plan, now?");
+    await ask("What is the plan?");
+    const brainGrant = await grantBrain(admin, agent);
+    await ask("What is the plan, now?");
     // Revoked: gone again, from the next turn.
     await admin.api.permissions.revoke(brainGrant);
     await ask("And now?");
     const results = await codeResults(stub, chat.id);
-    expect({
-      results: results.map(({ text }) => text),
-      before: before.provenance,
-      after: after.provenance,
-    }).toStrictEqual({
-      results: [
-        expect.stringContaining("This chat has no API named env.brain"),
-        // Once granted: never wider than its grants, nor than what its person may read:
-        // naming either is refused as not found.
-        'Returned:\n[0,0,"brain.not_found","brain.not_found"]',
-        expect.stringContaining("This chat has no API named env.brain"),
-      ],
-      before: { sources: [], restricted: false },
-      // The word is only in a collection the person can't read; the
-      // collection it was told to read is the chat's source even though
-      // nothing was found there.
-      after: { sources: [handbook], restricted: false },
-    });
+    expect(results.map(({ text }) => text)).toStrictEqual([
+      expect.stringContaining("This chat has no API named env.brain"),
+      // Once granted, the code's own: their own plan, never the team's.
+      `Returned:\n["Our plan: ${word}."]`,
+      expect.stringContaining("This chat has no API named env.brain"),
+    ]);
   });
 });

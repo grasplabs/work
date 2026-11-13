@@ -9,7 +9,7 @@ import type {
   Access,
   NewEntity,
   NewMemory,
-  Reader,
+  PersonReader,
 } from "@grasp-os/brain-next/contract";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -77,7 +77,7 @@ interface Series {
   pick: <T>(items: readonly T[]) => T;
   tag: string;
   people: string[];
-  readers: Reader[];
+  readers: PersonReader[];
   accesses: Access[];
   emails: string[];
   sources: { source: string; versions: number }[];

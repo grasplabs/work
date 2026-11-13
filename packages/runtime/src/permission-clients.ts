@@ -1,19 +1,12 @@
 import type {
-  MemoryPack,
-  SkillRead,
-  SkillSelection,
-  SkillsReadInput,
-  SkillsSelectInput,
-} from "@grasp-os/brain/contract";
-import type {
   GuestChat,
   GuestInvitation,
   GuestInvite,
   GuestTranscript,
 } from "@grasp-os/shared/guests";
 import type { HttpContract } from "@grasp-os/shared/http-contract";
-import type { ResourceRecallInput } from "@grasp-os/shared/knowledge";
 
+import type { BrainPack, BrainRecall } from "./brain-recall.ts";
 import type { ContractAction, HttpRequestInit } from "./connector-contracts.ts";
 import type { GraspFunctions } from "./grasp-functions.ts";
 import type { MemberName } from "./member-names.ts";
@@ -27,18 +20,6 @@ import type {
 import type { ValueSchema } from "./value-descriptor.ts";
 import type { AnySchema } from "./value-schema.ts";
 import type { Infer, ObjectInput } from "./value-types.ts";
-
-/** One search result from the Brain: a title and an excerpt of it. */
-export interface BrainHit {
-  title: string;
-  excerpt: string;
-}
-
-/** A document read from the Brain. */
-export interface BrainDocument {
-  title: string;
-  text: string;
-}
 
 /** What `ctx.ai` is. */
 export interface AiClient {
@@ -107,63 +88,16 @@ export interface HttpClient<Actions extends readonly string[]> {
 
 /** What `ctx.brain` is, by its operations. */
 export type BrainClient<Operations extends readonly BrainOperation[]> =
-  ("search" extends Operations[number]
+  "recall" extends Operations[number]
     ? {
         /**
-         * The best matches for `text` in the declared collections: 1 to
-         * `knowledgeSearchMaxLength` (500) code units, the Brain's own
-         * limit; a longer text is refused as `contract.invalid_args`.
+         * What the person the call acts for may read that answers
+         * `request.question`, within its budget: the same pack a
+         * workflow's step and a chat's code get.
          */
-        readonly search: (request: {
-          readonly text: string;
-          readonly limit?: number;
-        }) => Promise<BrainHit[]>;
+        readonly recall: (request: BrainRecall) => Promise<BrainPack>;
       }
-    : unknown) &
-    ("read" extends Operations[number]
-      ? {
-          /** One document of the declared collections, by its ID. */
-          readonly read: (request: {
-            readonly id: string;
-          }) => Promise<BrainDocument>;
-        }
-      : unknown) &
-    ("recall" extends Operations[number]
-      ? {
-          /**
-           * The Brain's evidence for `query` from the declared collections,
-           * or those `collections` names of them, as far as the person may
-           * read each: a bounded memory pack, each item cited at its exact
-           * version. Needs the Brain's permission too.
-           */
-          readonly recall: (
-            request: ResourceRecallInput
-          ) => Promise<MemoryPack>;
-        }
-      : unknown) &
-    ("skillsSelect" extends Operations[number]
-      ? {
-          /**
-           * The skill of the declared collections the person may read
-           * that applies to `request.task`, pinned at the version read,
-           * or an explicit no-skill result. Keep the pin for the task.
-           * Needs the Brain's permission too.
-           */
-          readonly skillsSelect: (
-            request: SkillsSelectInput
-          ) => Promise<SkillSelection>;
-        }
-      : unknown) &
-    ("skillsRead" extends Operations[number]
-      ? {
-          /**
-           * A skill of the declared collections at exactly the version a
-           * selection pinned, while the person may read it: its text is
-           * data. Needs the Brain's permission too.
-           */
-          readonly skillsRead: (request: SkillsReadInput) => Promise<SkillRead>;
-        }
-      : unknown);
+    : unknown;
 
 /** What `ctx.guests` is, by its operations. */
 export type GuestsClient<Operations extends readonly GuestsOperation[]> =

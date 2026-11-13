@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import type { BrainPack, BrainRecall } from "./brain-recall.ts";
+
 // What a workflow's `ctx` calls take and answer: their options and
 // results, as generated code and its types see them.
 
@@ -109,35 +111,16 @@ export interface FilesActions {
   ) => Promise<null>;
 }
 
-/** A document a Brain search found: its ID, its title, a snippet. */
-export interface BrainHit {
-  readonly id: string;
-  readonly title: string;
-  readonly excerpt: string;
-}
-
 /**
- * What each action on a Brain collection takes and answers: what the run's
- * person may read of it, as the Brain answers it. A recall answers the
- * Brain's memory pack: its `items` the evidence that applies, each with
- * what it cites.
+ * What a brain permission's steps do: recall what everyone in the
+ * company may read, whoever the run acts for, with the same request and
+ * pack as an App's action (`brain-recall.ts`).
  */
 export interface BrainActions {
-  readonly search: (
-    args: { readonly text: string; readonly limit?: number },
-    options: CallOptions
-  ) => Promise<readonly BrainHit[]>;
-  readonly read: (
-    args: { readonly id: string },
-    options: CallOptions
-  ) => Promise<{ readonly title: string; readonly text: string }>;
   readonly recall: (
-    args: { readonly query: string; readonly [field: string]: unknown },
+    request: BrainRecall,
     options: CallOptions
-  ) => Promise<{
-    readonly items: readonly Readonly<Record<string, Read>>[];
-    readonly [field: string]: Read;
-  }>;
+  ) => Promise<BrainPack>;
 }
 
 /**

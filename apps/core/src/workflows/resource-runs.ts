@@ -1,4 +1,3 @@
-import { brainErrors } from "@grasp-os/brain/contract";
 import { schemaFromDescriptor } from "@grasp-os/runtime/host";
 import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
@@ -81,7 +80,10 @@ import type { AiCalls, RunStep } from "./host.ts";
 import { admitAttempt, triggeredAccountOf } from "./quotas.ts";
 import { callingRunOf } from "./resource-authority.ts";
 import type { CallingRun } from "./resource-authority.ts";
-import { requireResourceRunEvidenceReadable } from "./resource-reads.ts";
+import {
+  requireEndedRunEvidenceReadable,
+  requireResourceRunEvidenceReadable,
+} from "./resource-reads.ts";
 import { detailsRemoved, removedText } from "./retention.ts";
 import { tellQueryFollowers } from "./run-changes.ts";
 import { compensationFailedError } from "./runs.ts";
@@ -981,7 +983,7 @@ const evidenceRefusal = async (
     await requireResourceRunEvidenceReadable(env, run);
     return undefined;
   } catch (error) {
-    if (brainErrors.codeOf(error) !== "brain.revoked") {
+    if (workflowResourceErrors.codeOf(error) !== "brain.revoked") {
       throw error;
     }
     return forIsolate(error);
@@ -1295,6 +1297,25 @@ export const resultOf = async (
   // asked.
   if (removed) {
     return { error: { code: row.failureCode, message: removedText } };
+  }
+  // What it returned or why it failed may hold what it recalled: withheld
+  // once the company may no longer read that, as before it ended.
+  try {
+    await requireEndedRunEvidenceReadable(env, {
+      runId: row.id,
+      workflowId: row.workflowResourceId,
+      principal: row.principalId,
+    });
+  } catch (error) {
+    if (workflowResourceErrors.codeOf(error) !== "brain.revoked") {
+      throw error;
+    }
+    return {
+      error: {
+        code: "brain.revoked",
+        message: workflowResourceErrors.create("brain.revoked").message,
+      },
+    };
   }
   let engine: Pick<WorkflowResourceRun, "result" | "error">;
   try {
