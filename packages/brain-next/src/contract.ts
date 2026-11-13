@@ -37,6 +37,15 @@ export const erasedSource = "The Brain refused it: what this adds was erased";
  */
 export const storeErased = "The Brain refused it: this store was erased";
 
+/**
+ * What an add with an expected current version (`NewInstructions.after`)
+ * says when the source's current version is another by the time it would
+ * write: nothing is written. The caller reads the source again and decides;
+ * the message alone, compared whole, tells it from any other failure.
+ */
+export const staleVersion =
+  "The Brain refused it: the current version is not the one expected";
+
 /** Most characters of a question (the host's page holds to it too). */
 export const questionMaxLength = brainQuestionMaxLength;
 
@@ -175,6 +184,15 @@ export const newSourceSchema = z.strictObject({
       message: `At most ${sourceTextMaxBytes} bytes as indexed`,
     }),
   access: accessSchema,
+  /**
+   * When the producer read this text from where it lives, in milliseconds
+   * since the epoch, if it read it: an add of a text read before the
+   * source's current version was read writes nothing (`AddedVersion`'s
+   * `newer`), so a late add of an older read never replaces a newer one,
+   * whatever order the adds arrive in. A `newer` answer records nothing,
+   * not even its change, so a retry of that change is judged afresh.
+   */
+  readAt: z.int().nonnegative().optional(),
 });
 export type NewSource = z.infer<typeof newSourceSchema>;
 
@@ -200,9 +218,25 @@ export const instructionsTextSchema = wellFormedString()
  * source, but never cut into chunks or indexed, so recall never finds it:
  * it is read whole (`readCurrent`).
  */
+// Neither a group nor when it was read: an instruction file is written by
+// a person over the version they saw (`after`), never a read that a later
+// one may hold off.
 export const newInstructionsSchema = newSourceSchema
-  .omit({ group: true })
-  .extend({ text: instructionsTextSchema });
+  .omit({ group: true, readAt: true })
+  .extend({
+    text: instructionsTextSchema,
+    /**
+     * The current version the caller saw, null for none yet: the add writes
+     * only while it still is, checked in the transaction that writes, and
+     * is refused with `staleVersion` otherwise. Given, the add always makes
+     * a new version, even of the current text and readers, so every add
+     * that lands moves the version. A change the store already has answers
+     * with the version it made first, so a retry still adds nothing twice.
+     * Left out, an add writes whatever is current, and current text and
+     * readers make no new version.
+     */
+    after: versionSchema.nullable().optional(),
+  });
 export type NewInstructions = z.infer<typeof newInstructionsSchema>;
 
 /**
@@ -343,6 +377,15 @@ export interface RecallOverview {
 export interface SourceVersionRef {
   source: SourceId;
   version: number;
+}
+
+/**
+ * What an add answers: the version it made or already is, or, `newer`, the
+ * source's current version, read later than the add's text (`readAt`):
+ * then the add wrote nothing.
+ */
+export interface AddedVersion extends SourceVersionRef {
+  newer?: true;
 }
 
 /**
@@ -514,6 +557,14 @@ export const versionRequestSchema = z.strictObject({
   reader: readerSchema,
 });
 export type VersionRequest = z.infer<typeof versionRequestSchema>;
+
+/** A change of a source to look up, and who asks. */
+export const changeRequestSchema = z.strictObject({
+  source: sourceIdSchema,
+  change: changeKeySchema,
+  reader: readerSchema,
+});
+export type ChangeRequest = z.infer<typeof changeRequestSchema>;
 
 /** Sources whose current versions to read whole, and who reads them. */
 export const currentRequestSchema = z.strictObject({
@@ -2058,13 +2109,16 @@ export interface Brain {
    * current version is that version. So an add is safe to repeat, late
    * or at once, after a lost reply or a crash.
    */
-  addSource: (source: NewSource) => Promise<SourceVersionRef>;
+  addSource: (source: NewSource) => Promise<AddedVersion>;
   /**
    * Adds a version of an instruction file as `addSource` adds a source,
    * with the same versions, change keys and safe repeats, but kept whole:
    * never cut into chunks or indexed, so recall never returns it. The
    * shared store refuses one only one person may read (`owner`): it is
-   * kept in that person's own store alone.
+   * kept in that person's own store alone. With `after`, only over that
+   * current version (null: none yet), checked in the writing transaction:
+   * otherwise refused with `staleVersion`, nothing written; a change it
+   * has answers with its version first.
    */
   addInstructions: (source: NewInstructions) => Promise<SourceVersionRef>;
   /**
@@ -2111,6 +2165,14 @@ export interface Brain {
    * hides its history from those taken off.
    */
   readVersion: (request: VersionRequest) => Promise<SourceVersion | null>;
+  /**
+   * The version the change `change` of `source` made, by the rule
+   * `readVersion` reads by: `null` when it made none, or the reader may
+   * not read it, alike. Answers a number alone, never text: for a caller
+   * whose reply to an add was lost, to learn whether the change landed
+   * without sending it again.
+   */
+  changeVersion: (request: ChangeRequest) => Promise<number | null>;
   /**
    * The current version of each source asked for, whole, in the order
    * asked, leaving out alike each that doesn't exist and each whose

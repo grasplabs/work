@@ -87,6 +87,10 @@ const ProducerBadge = ({ producer }: { producer: BrainSourceProducer }) => {
     upload: t({ message: "Upload", context: "a source of the Brain" }),
     chat: t({ message: "Chat", context: "a source of the Brain" }),
     run: t({ message: "Workflow run", context: "a source of the Brain" }),
+    capture: t({
+      message: "Fetched from a connection",
+      context: "a source of the Brain",
+    }),
   }[producer];
   return <Badge variant="outline">{label}</Badge>;
 };
@@ -249,10 +253,12 @@ const Search = ({
 };
 
 /**
- * How each of the person's connections feeds the Brain. Today only one
- * way exists: an agent searches the connection live, with its own tools,
- * and nothing it reads is kept. What agents fetch is kept once capture
- * is built (GRA-1730), and a full copy once native sync is.
+ * How the person's connections feed the Brain. What an agent reads as one
+ * item (a message, a page) through a connection of their own is kept in
+ * their own Brain, for them alone (core's connection-capture.ts,
+ * GRA-1730); everything else agents search live, and the Brain keeps
+ * nothing of it. A full copy comes with native sync. These connections
+ * don't say which are the person's own, so the rule is said once.
  */
 const ConnectionFeeds = ({ connections }: { connections: Connection[] }) => {
   const heading = useId();
@@ -266,16 +272,34 @@ const ConnectionFeeds = ({ connections }: { connections: Connection[] }) => {
           <Trans>You have no connections yet.</Trans>
         </p>
       ) : (
-        <ul className="flex flex-col gap-1.5 text-sm">
-          {connections.map(({ name }) => (
-            <li key={name}>
-              <Trans>
-                {name}: agents search it live when you ask. The Brain keeps
-                nothing from it.
-              </Trans>
-            </li>
-          ))}
-        </ul>
+        <>
+          <p className="text-muted-foreground text-sm">
+            <Trans>
+              The Brain keeps one Gmail message or attachment, or one OneNote
+              page, when an agent reads it for you through an account you
+              connected yourself, and keeps it for you alone. Everything else
+              agents search live when you ask, and the Brain keeps nothing of
+              it.
+            </Trans>
+          </p>
+          <ul className="flex flex-col gap-2 text-sm">
+            {connections.map(({ name, keepsReads }) => (
+              <li className="flex flex-col" key={name}>
+                <span>{name}</span>
+                <span className="text-muted-foreground">
+                  {keepsReads === true ? (
+                    <Trans>
+                      The Brain keeps the messages and pages an agent reads for
+                      you from this.
+                    </Trans>
+                  ) : (
+                    <Trans>Searched live, nothing kept.</Trans>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
     </section>
   );

@@ -35,8 +35,11 @@ import type {
   SourceReaders,
   SourceRef,
 } from "../src/brain-next.ts";
+import { selectSkillsFor } from "../src/brain-skills.ts";
 import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
+import { captureIdOf } from "../src/connection-capture-key.ts";
+import { captureRead } from "../src/connection-capture.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
 import { instructionFilesFor } from "../src/instruction-files.ts";
@@ -66,6 +69,7 @@ import {
   reached,
   watched as teamsWatched,
 } from "./teams-door.ts";
+import { connectDb } from "./test-env.ts";
 import {
   builder,
   definitionOf,
@@ -479,6 +483,8 @@ describe(
         "another agent's instruction file": markerWord(),
         "an App's instruction file the outsider doesn't build": markerWord(),
         "an App's instruction file the outsider uses": markerWord(),
+        "what the holder's agent fetched through a connection": markerWord(),
+        "the holder's own skill": markerWord(),
       };
       const {
         "the holder's own source": ownerMarker,
@@ -490,6 +496,8 @@ describe(
         "another agent's instruction file": agentFileMarker,
         "an App's instruction file the outsider doesn't build": appFileMarker,
         "an App's instruction file the outsider uses": usedAppFileMarker,
+        "what the holder's agent fetched through a connection": captureMarker,
+        "the holder's own skill": holderSkillMarker,
       } = markers;
       // Instruction files the outsider may not get: the holder's own,
       // another agent's than theirs, and an App's they don't build (one no
@@ -545,6 +553,26 @@ describe(
         appFileMarker,
         usedAppFileMarker,
       ];
+      // The holder's own skill, named by its marker, written and asked to
+      // be shared on the holder's own session: theirs alone, and the share
+      // waits on admins, which the outsider isn't.
+      const holderSkill = await holderApi.api.skills.save(
+        `---\nname: ${holderSkillMarker}\ndescription: How to ${sharedWord} ${holderSkillMarker}\n---\nSteps ${sharedWord} ${holderSkillMarker}`
+      );
+      await holderApi.api.skills.share(holderSkill.name, holderSkill.version);
+      // The holder's own chat lists it, and selects it for a task of it.
+      await expect(
+        selectSkillsFor(
+          env,
+          authoritySchema.parse({
+            subject: { type: "agent", agentId: `agent-${unique()}` },
+            onBehalfOf: holder,
+            mode: "interactive",
+          }),
+          { personal: true },
+          { task: holderSkillMarker }
+        )
+      ).resolves.toMatchObject([{ scope: "person", name: holderSkillMarker }]);
       // No recall ever finds an instruction file, a reader's own included.
       const inRecall = {
         "the holder's instruction file": holderFileMarker,
@@ -562,6 +590,54 @@ describe(
           personId: holder,
         }),
       ];
+      // Read in the holder's chat through their own Gmail and captured
+      // as capture keeps it (connection-capture.ts): theirs alone, its
+      // connection's ID holding a marker too, so a pack or a citation that
+      // named it for anyone else would show it.
+      const captureConnection = `connection-${captureMarker}`;
+      const readAtNow = Date.now();
+      await connectDb()
+        .prepare(
+          "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, created_at, updated_at) VALUES (?, 'google', 'personal', ?, 'active', 'native', 'google-workspace', ?, ?)"
+        )
+        .bind(captureConnection, holder, readAtNow, readAtNow)
+        .run();
+      const capturedItem = `quote-${captureMarker}`;
+      await captureRead(
+        env,
+        {
+          workspaceId: personalWorkspaceId(holder),
+          agentId: chatAgentId,
+          chatId: chatIdSchema.parse(crypto.randomUUID()),
+          personId: holder,
+          runId: crypto.randomUUID(),
+        },
+        captureConnection,
+        "mail.get",
+        { mailbox: `${holder}@acme.test`, message: capturedItem },
+        {
+          result: {
+            output: JSON.stringify({
+              message: {
+                id: capturedItem,
+                subject: `Supplier quote ${sharedWord} ${captureMarker}`,
+              },
+            }),
+            provenance: [capturedItem],
+            keep: true,
+          },
+          readAt: new Date(readAtNow),
+        }
+      );
+      const captureId: SourceRef = {
+        producer: "capture",
+        id: await captureIdOf(
+          captureConnection,
+          holder,
+          "mail.get",
+          capturedItem
+        ),
+      };
       const teamSource = `Board minutes ${sharedWord} ${teamMarker}`;
       const teamId = await add(teamSource, {
         kind: "team",
@@ -673,6 +749,11 @@ describe(
       // What the outsider finds by the shared word: their own source, past
       // the marked ones.
       const outsiderFinds = await textsFor(outsider, sharedWord);
+      // The holder's own recall finds what was captured for them.
+      const holderTexts = await textsFor(holder, `supplier ${captureMarker}`);
+      const holderFindsCapture = holderTexts.some((text) =>
+        text.includes(captureMarker)
+      );
       // And by the ID the hidden copies share: their own chunk, as exact.
       const { items: cappedItems } = await recallAs(env, outsider, {
         personal: true,
@@ -707,11 +788,20 @@ describe(
           teamMarker,
           noneMarker,
           narrowedMarker,
+          captureMarker,
           toHolderMarker,
           ...instructionMarkers,
+          holderSkillMarker,
         ],
-        hiddenVersions: everyVersionOf(...ownerIds, teamId, noneId, narrowedId),
+        hiddenVersions: everyVersionOf(
+          ...ownerIds,
+          teamId,
+          noneId,
+          narrowedId,
+          captureId
+        ),
         hiddenInstructionFiles: [holderFile, agentFile, appFile, usedAppFile],
+        hiddenSkills: [holderSkillMarker],
         usedApps,
         instructionGroups,
         moments: [whileDraft],
@@ -737,10 +827,16 @@ describe(
             ownerMarker,
             noneMarker,
             narrowedMarker,
+            captureMarker,
             toHolderMarker,
             ...instructionMarkers,
           ],
-          hiddenVersions: everyVersionOf(...ownerIds, noneId, narrowedId),
+          hiddenVersions: everyVersionOf(
+            ...ownerIds,
+            noneId,
+            narrowedId,
+            captureId
+          ),
         },
         notJoined,
         { inRecall }
@@ -956,6 +1052,7 @@ describe(
           addressed.includes(`person:${outsider}`),
         ],
         outsiderFinds,
+        holderFindsCapture,
         cappedFinds,
         joinedFinds,
         leftFinds,
@@ -967,6 +1064,7 @@ describe(
         holdersStoreAddressed: false,
         othersAddressed: [true, true],
         outsiderFinds: [handbook],
+        holderFindsCapture: true,
         cappedFinds: [{ text: capped, found: "exact" }],
         joinedFinds: [teamSource],
         leftFinds: [],
@@ -1140,6 +1238,20 @@ describe(
         hiddenInstructionFiles,
         instructionGroups: ["company"],
       });
+      // Their own store was erased whole, and takes nothing from then on:
+      // the surfaces that write a skill of theirs (and decide a share of
+      // one) can only be refused for them, and are probed as the
+      // team-mate.
+      const holderWritesOwn = new Set([
+        "instructions saveInstructionFile",
+        "core addOwnSkill",
+        "shares readSkill",
+        "shares saveOwnSkill",
+        "shares shareOwnSkill",
+        "shares approveShare",
+        "shares declineShare",
+        "shares retireSkill",
+      ]);
       const findings = [
         // Their own file is theirs to write again, and what they write
         // after an erasure is new: saving it is probed as the team-mate
@@ -1150,9 +1262,7 @@ describe(
           asReader(holder, []),
           markers,
           {
-            among: surfaces.filter(
-              ([name]) => name !== "instructions saveInstructionFile"
-            ),
+            among: surfaces.filter(([name]) => !holderWritesOwn.has(name)),
           }
         )),
         ...(await findingsOf(

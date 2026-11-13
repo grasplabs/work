@@ -119,7 +119,7 @@ import {
 } from "./brain-capture.ts";
 import type { CaptureStore, TurnFacts } from "./brain-capture.ts";
 import { chatTurnSource, eraseChat } from "./brain-next-origins.ts";
-import { skillsFor } from "./brain-skills.ts";
+import { skillsFor, skillsReachOf } from "./brain-skills.ts";
 import {
   channelText,
   heldWriteRefusal,
@@ -2057,7 +2057,10 @@ export class Workspace extends DurableObject<Env> {
       const files = this.#unsentFiles(chat.id, parsed.data.files ?? []);
       // A turn nobody was there for says so in its scope, which every API
       // of its code reads: it only reads (agent-scope.ts, `unattended`).
-      const scope = this.#scopeOf(chat, unattended);
+      // Its person's own skills steer only a turn they asked for in their
+      // own chat (`AgentScope.ownChat`): never a thread others share, nor
+      // a turn nobody was there for.
+      const scope = this.#scopeOf(chat, { unattended, turn: true });
       // The organization's agent, acting for the chat's person, in this chat:
       // the audit log's actor, and the rules' context (its restricted mode).
       const authority = chatAuthority(scope);
@@ -2212,8 +2215,18 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /** The agent's scope in `chat`: where it is, whose agent, for whom. */
-  #scopeOf(chat: Chat, unattended = false): Omit<AgentScope, "runId"> {
+  #scopeOf(
+    chat: Chat,
+    {
+      unattended = false,
+      turn = false,
+    }: { unattended?: boolean; turn?: boolean } = {}
+  ): Omit<AgentScope, "runId"> {
     const { personId, agentId, via } = chat;
+    // A turn whose answer reaches its person alone (`answersAlone`): the
+    // only scope their own skills steer (`AgentScope.ownChat`). A chat
+    // app's direct message is not one, until GRA-1821 decides it may be.
+    const ownChat = turn && answersAlone(chat, unattended);
     const workspaceId = workspaceIdSchema.parse(this.ctx.id.name);
     return {
       workspaceId,
@@ -2222,6 +2235,7 @@ export class Workspace extends DurableObject<Env> {
       personId,
       via,
       ...(unattended ? { unattended: true } : {}),
+      ...(ownChat ? { ownChat: true } : {}),
     };
   }
 
@@ -2420,13 +2434,14 @@ export class Workspace extends DurableObject<Env> {
     this.#keepSources(work.chatId, memory.provenance.collectionIds);
     // The skills the chat may use, from the Brain: guidance every member
     // may read, as the company's instruction file, never a grant
-    // (brain-skills.ts). Recorded as the code's calls are, by count. A
+    // (brain-skills.ts). Their own skills only where the scope says so
+    // (`skillsReachOf`): a turn they asked for in their own chat. Recorded as the code's calls are, by count. A
     // Brain that can't answer leaves the turn without them, not without
     // an answer: missing guidance is no question of access.
     let skills: Awaited<ReturnType<typeof skillsFor>> = [];
     let unavailable = false;
     try {
-      skills = await skillsFor(this.env, authority);
+      skills = await skillsFor(this.env, authority, skillsReachOf(scope));
     } catch (error) {
       unavailable = true;
       log.warn("skills.turn_unavailable", {

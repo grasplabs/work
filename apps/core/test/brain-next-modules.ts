@@ -41,6 +41,12 @@ export const brainModules = {
   // Erases what an erased person alone may read with core's erasePerson,
   // and answers nothing of it.
   "apps/core/src/person-erasure.ts": "core",
+  // Adds what a chat's agent read through a connection with core's
+  // addSource, for the chat's person alone, and hands nothing on.
+  "apps/core/src/connection-capture.ts": "core",
+  // Writing and sharing skills (GRA-1754): its own surface, each export
+  // probed as the signed-in person.
+  "apps/core/src/skill-shares.ts": "shares",
   // Code's recall: an App's action, a workflow's step and a chat's code.
   "apps/core/src/brain-recall.ts": "recall",
   // Checks with core's readableVersionsAs that a run may still read what

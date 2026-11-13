@@ -197,6 +197,24 @@ const hubspotAs = (status: string) => ({
   matches: ["HubSpot"],
 });
 
+/** The native connections `person`'s Brain page lists as connected, each with its mark. */
+const nativeConnected = async (
+  person: Awaited<ReturnType<typeof signedInApi>>
+) => {
+  const { connections } = await person.api.brain.read();
+  return (
+    connections
+      // Earlier tests' shared connections (mail, HubSpot) aside.
+      .filter(
+        ({ name, status }) =>
+          status === "connected" &&
+          (name === "Google Workspace" || name === "Microsoft 365")
+      )
+      .map(({ name, keepsReads }) => ({ name, keepsReads }))
+      .toSorted((a, b) => a.name.localeCompare(b.name))
+  );
+};
+
 /** `teams` with the id of each team the kickoff named as `kickoff`: a hash of its name. */
 const kickoffAs = <T extends { id: string }>(teams: T[]): T[] =>
   teams.map((team) =>
@@ -681,6 +699,43 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
       offered: [hubspotAs("available")],
       hidden: [],
       connected: [hubspotAs("connected")],
+    });
+  });
+
+  it("marks the connections the Brain keeps a person's reads from: their own, to a provider with a tool that answers one item", async () => {
+    const owner = await signedInApi(idp, "user");
+    const other = await signedInApi(idp, "user");
+    const now = Date.now();
+    /** A native connection, as connect keeps one: `ownerUserId`'s, or shared. */
+    const connected = async (provider: string, ownerUserId: string | null) => {
+      await connectDb()
+        .prepare(
+          "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', 'native', ?, ?, ?)"
+        )
+        .bind(
+          `connection-${crypto.randomUUID()}`,
+          provider,
+          ownerUserId === null ? "shared" : "personal",
+          ownerUserId,
+          `${provider}-server`,
+          now,
+          now
+        )
+        .run();
+    };
+    // The owner's own Google, and a shared Microsoft 365 they reach too.
+    await connected("google", owner.userId);
+    await connected("microsoft", null);
+    expect({
+      owner: await nativeConnected(owner),
+      other: await nativeConnected(other),
+    }).toStrictEqual({
+      owner: [
+        { name: "Google Workspace", keepsReads: true },
+        { name: "Microsoft 365", keepsReads: undefined },
+      ],
+      // Someone else: the shared one alone, and no mark on it.
+      other: [{ name: "Microsoft 365", keepsReads: undefined }],
     });
   });
 

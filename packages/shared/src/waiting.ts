@@ -20,6 +20,7 @@ import type {
 } from "./notifications.ts";
 import { grantReviewSchema } from "./permissions.ts";
 import type { Permission } from "./permissions.ts";
+import type { SkillShare } from "./skills.ts";
 import type { PendingWorkflowBindings } from "./workflow-resources.ts";
 
 // What waits on a person (core's waiting-rpc.ts): one feed of everything
@@ -177,6 +178,17 @@ export interface DecisionItem extends ItemBase {
   decision: DecisionView;
 }
 
+/**
+ * A person's ask to share one of their skills with the company: for the
+ * organization's own admins, who read its text and decide it on the
+ * skills page (`SkillsApi.approve`, `decline`).
+ */
+export interface SkillShareItem extends ItemBase {
+  kind: "skillShare";
+  verdicts: never[];
+  share: SkillShare;
+}
+
 export type WaitingItem =
   | HeldWriteItem
   | UnknownOutcomeItem
@@ -190,7 +202,8 @@ export type WaitingItem =
   | BindingApprovalItem
   | SignInAgainItem
   | DecisionItem
-  | HeldStartItem;
+  | HeldStartItem
+  | SkillShareItem;
 
 export type WaitingKind = WaitingItem["kind"];
 
@@ -208,6 +221,7 @@ export const waitingParts = [
   "decisions",
   "heldStarts",
   "bindings",
+  "skillShares",
 ] as const;
 export type WaitingPart = (typeof waitingParts)[number];
 

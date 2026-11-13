@@ -53,6 +53,9 @@ export const TargetLink = ({
   if (destination.kind === "brain") {
     return <Link to="/brain" {...props} />;
   }
+  if (destination.kind === "skills") {
+    return <Link to="/brain/skills" {...props} />;
+  }
   if (destination.kind === "decision") {
     return (
       <Link

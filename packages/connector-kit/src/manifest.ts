@@ -364,6 +364,11 @@ const actionManifestSchema = z.strictObject({
    */
   answersFile: z.literal(true).optional(),
   /**
+   * It reads one item and answers its content, naming exactly that item in
+   * its provenance: what core keeps as a source in the Brain (GRA-1730).
+   */
+  answersItem: z.literal(true).optional(),
+  /**
    * It attaches files (GRA-887): its input has an `attachments` property
    * naming each by digest, and its bytes come beside the input
    * (`attachmentsMetaKey`). In its generated contract the property names
@@ -464,6 +469,13 @@ export const connectorManifestSchema = z
         ({ answersFile, readOnly }) => answersFile !== true || readOnly
       ),
     "Only a read-only action answers a file"
+  )
+  .refine(
+    ({ actions }) =>
+      Object.values(actions).every(
+        ({ answersItem, readOnly }) => answersItem !== true || readOnly
+      ),
+    "Only a read-only action answers an item"
   )
   .refine(
     ({ actions }) =>
