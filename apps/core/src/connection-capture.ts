@@ -70,28 +70,25 @@ import { nativeClasses } from "./tool-classes.ts";
 // - A capture is the item's copy, not the chat's text: deleting the chat
 //   it was read in leaves it, and so does deleting the item at its source
 //   (nothing tells core). A person removes them by disconnecting the
-//   connection, which erases all of its captures (connections.ts
-//   `eraseOwnCaptures`), or
-//   by their own erasure, which removes all of theirs.
+//   connection, which erases all of its captures (below), or by their own
+//   erasure, which removes all of theirs.
 //
-// Disconnecting (GRA-1827; the threat model is on the issue): every
-// capture through a connection is added in its group
-// (brain-next-origins.ts `captureGroupOf`),
-// in its owner's own store, the only store that ever holds one. Core's
-// disconnect erases that group there first, in one call that closes it,
-// then asks connect: a capture landing after is refused by the store, one
-// under way goes with the group, and a restore of an older copy replays
-// the erasure. Should the erasure fail, connect is never asked: the
-// connection stays connected, its captures with it, and the person's
-// disconnect fails until a retry gets through (as a chat's delete does).
-// Should connect fail after it, the connection stays connected with its
-// group closed: nothing more of it is kept until a retry disconnects it.
-// A reconnect is a new connection (connect never revives a disconnected
-// one), so a new group: nothing erased comes back. Not on a disconnect:
-// a person's removal (connect stops their connections; their captures
-// stay in their own store, which nobody reads, until their erasure), and
-// a connection needing sign-in again (`needs_reauth`: not ended, the same
-// connection when its person reconnects it).
+// Disconnecting (GRA-1827; the threat model and the decisions are on the
+// issue): every capture through a connection is added in its group
+// (brain-next-origins.ts `captureGroupOf`), in its owner's own store, the
+// only store that ever holds one. A disconnect is never held up by the
+// Brain: connect stops the connection first, then core erases the group,
+// in one call that closes it (connections.ts `eraseCapturesSoon`). The
+// erasure is owed by connect's record of the stop, which stays in its
+// audit outbox until core's drain has erased the group and recorded it
+// (capture-erasures.ts): so the person's own disconnect, their removal
+// and their erasure all erase it, whatever failed on the way. A capture
+// landing after the erasure is refused by the store, one under way goes
+// with the group, and a restore of an older copy replays the erasure. A
+// reconnect is a new connection (connect never revives a disconnected
+// one), so a new group: nothing erased comes back. A connection needing
+// sign-in again (`needs_reauth`) is not ended: the same connection when
+// its person reconnects it.
 
 type CaptureEvent =
   | "brain.capture.kept"

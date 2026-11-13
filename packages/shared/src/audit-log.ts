@@ -130,9 +130,9 @@ const typeRules: readonly {
   { action: "brain.records", type: "action" },
   // A chat's agent's read through a connection kept as a source in the
   // new Brain, skipped, or failed (core's connection-capture.ts): IDs and
-  // counts, never what was read. And every such source of a connection
-  // erased as its person disconnected it (core's connections.ts).
-  { action: "brain.capture.erased", type: "action" },
+  // counts, never what was read; and every such source of a connection
+  // erased once it was disconnected (`brain.capture.erased`, core's
+  // capture-erasures.ts).
   { action: "brain.capture", type: "action" },
   // An App, a workflow's run or a chat's code recalling from the Brain
   // for a person (core's src/brain-recall.ts): for whom, how many

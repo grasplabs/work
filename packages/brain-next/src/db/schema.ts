@@ -445,6 +445,13 @@ export const erasures = sqliteTable(
     erasedAt: integer("erased_at", { mode: "timestamp_ms" }).notNull(),
     /** Whether its ledger entry is known to be in the bucket, every part. */
     confirmed: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * How many sources a source's erasure covered as it was applied: its
+     * key's and each added in it as a group (erasure.ts `apply`), so a
+     * repeat answers what it erased. Null for one recorded before it was
+     * kept.
+     */
+    sources: integer(),
   },
   (table) => [
     // An add looks up whether its source, or its one reader, was erased.

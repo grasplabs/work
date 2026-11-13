@@ -7,6 +7,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import { brainOwnExportPath } from "../src/brain-next-exports.ts";
 import {
   addSource,
@@ -21,7 +22,7 @@ import { inJurisdiction } from "../src/durable-objects.ts";
 import { personalWorkspaceId } from "../src/personal-workspace.ts";
 import { chatOf, codeStep, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
-import { allEvents } from "./audit-events.ts";
+import { allEvents, loggedEvents } from "./audit-events.ts";
 import { copyOfStore, restoreStore } from "./brain-next-store-copy.ts";
 import {
   consentCode,
@@ -827,14 +828,18 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
   });
 });
 
-// Disconnecting a connection (GRA-1827, src/connections.ts
-// `eraseOwnCaptures`): every capture through it is erased from its
-// person's own store first, in one call that closes the connection's
-// group. From the threat model on the issue, each way it can fail: a
-// capture stays, or lands after the disconnect; a restore of an older copy
+// Disconnecting a connection (GRA-1827; the threat model and decisions are
+// on the issue): connect stops it first, whatever the Brain does; core
+// then erases its captures from its person's own store at once, in one
+// call that closes the connection's group (connections.ts
+// `eraseCapturesSoon`), and the drain of connect's audit outbox erases them
+// before the disconnect's event leaves it and records the erasure
+// (capture-erasures.ts). Each way it can fail: a capture stays, or lands
+// after; the Brain holds the disconnect up; a failed erasure is never
+// tried again, or holds the drain up for good; a restore of an older copy
 // of the store brings one back; an export taken before still serves one;
-// a failed erasure lets the disconnect go ahead; someone else's disconnect
-// erases what is not theirs; a reconnect sees what was erased.
+// someone else's disconnect erases what is not theirs; a reconnect sees
+// what was erased; the erasure is recorded more than once, or not at all.
 
 /** A chat's agent of `personId`, as capture records whose read it kept. */
 const scopeOf = (personId: string) => ({
@@ -847,18 +852,19 @@ const scopeOf = (personId: string) => ({
 
 /**
  * Captures the message `id` (`subject`) read with `mail.get` through
- * `connectionId` for `personId`, as connect answered it: the source it is
- * kept as, if it is.
+ * `connectionId` for `personId`, as connect answered it, through `withEnv`:
+ * the key of the source it is kept as, if it is.
  */
 const capturedRead = async (
   personId: string,
   connectionId: string,
   mailbox: string,
   id: string,
-  subject: string
+  subject: string,
+  withEnv: Env = env
 ): Promise<string> => {
   await captureRead(
-    env,
+    withEnv,
     scopeOf(personId),
     connectionId,
     "mail.get",
@@ -897,23 +903,34 @@ const ownKeyStates = async (
   return await Promise.all(keys.map(async (key) => await store.keyState(key)));
 };
 
-/** The events of `action` about `connectionId`. */
+/** The events of `action` about `connectionId` in `events`. */
+const about = (
+  events: readonly AuditEvent[],
+  action: string,
+  connectionId: string
+): AuditEvent[] =>
+  events.filter(
+    (event) => event.action === action && event.target?.id === connectionId
+  );
+
+/** The events of `action` about `connectionId`, every outbox drained. */
 const eventsOf = async (
   action: string,
   connectionId: string
-): Promise<AuditEvent[]> => {
-  const events = await allEvents();
-  return events.filter(
-    (event) => event.action === action && event.target?.id === connectionId
-  );
-};
+): Promise<AuditEvent[]> => about(await allEvents(), action, connectionId);
 
 /**
- * Core's env with `personId`'s own Brain store failing `eraseSource` once,
- * as a store out of reach would; every other call reaches the store.
+ * Core's env with `personId`'s own Brain store's `method` replaced by
+ * `instead`, given the store's own; every other call reaches the store.
  */
-const ownEraseFailingOnce = (personId: string): Env => {
-  let failed = false;
+const ownStoreWith = (
+  personId: string,
+  method: string,
+  instead: (
+    real: (...args: unknown[]) => Promise<unknown>,
+    args: unknown[]
+  ) => Promise<unknown>
+): Env => {
   const binding = env.BRAIN_STORE;
   const getByName = (name: string) => {
     const stub = binding.getByName(name);
@@ -926,14 +943,13 @@ const ownEraseFailingOnce = (personId: string): Env => {
         if (typeof value !== "function") {
           return value;
         }
-        return async (...args: unknown[]) => {
-          if (property === "eraseSource" && !failed) {
-            failed = true;
-            throw new Error("Out of reach, for the test");
-          }
+        const real = async (...args: unknown[]): Promise<unknown> => {
           const answered: unknown = await Reflect.apply(value, target, args);
           return answered;
         };
+        return property === method
+          ? async (...args: unknown[]) => await instead(real, args)
+          : real;
       },
     });
   };
@@ -943,6 +959,34 @@ const ownEraseFailingOnce = (personId: string): Env => {
       get: (target, property): unknown =>
         property === "getByName" ? getByName : Reflect.get(target, property),
     }),
+  };
+};
+
+/** Core's env with `personId`'s own store failing every erasure. */
+const ownEraseFailing = (personId: string): Env =>
+  ownStoreWith(personId, "eraseSource", async () => {
+    await Promise.resolve();
+    throw new Error("Out of reach, for the test");
+  });
+
+/**
+ * Core's env with `personId`'s own store holding each add until
+ * `release`, and `reached` once one waits.
+ */
+const ownAddHeld = (personId: string) => {
+  const gate = Promise.withResolvers<true>();
+  const reached = Promise.withResolvers<true>();
+  const withEnv = ownStoreWith(personId, "addSource", async (real, args) => {
+    reached.resolve(true);
+    await gate.promise;
+    return await real(...args);
+  });
+  return {
+    withEnv,
+    reached: reached.promise,
+    release: () => {
+      gate.resolve(true);
+    },
   };
 };
 
@@ -981,8 +1025,11 @@ const ownExported = async (person: Person): Promise<string> => {
   return id;
 };
 
+/** An erasure's event as the tests compare it: who, and how many. */
+const erasure = ({ actor, detail }: AuditEvent) => ({ actor, detail });
+
 describe("a disconnected connection", setUpTime, () => {
-  it("takes every capture of it from its person's own store, refuses one landing after, and is recorded once, by ids", async () => {
+  it("takes every capture of it from its person's own store at once, refuses an add held past it, and is recorded once, with how many", async () => {
     const person = await signedInApi(idp, "user");
     const marker = markerOf();
     const { connectionId, mailbox } = await ownGmail(person);
@@ -1003,43 +1050,62 @@ describe("a disconnected connection", setUpTime, () => {
       ),
     ];
     const before = await recalledKeys(person.userId, marker);
-
-    await person.api.connections.disconnect(connectionId);
-    // A read connect answered before the disconnect, captured after it.
-    const late = await capturedRead(
+    // A read connect answered before the disconnect, its add held until
+    // after it.
+    const held = ownAddHeld(person.userId);
+    const late = capturedRead(
       person.userId,
       connectionId,
       mailbox,
       `late-${marker}`,
-      `Late ${marker}`
+      `Late ${marker}`,
+      held.withEnv
     );
-    const after = await recalledKeys(person.userId, marker);
-    const erased = await eventsOf("brain.capture.erased", connectionId);
-    const [lateEnded] = await eventsOf("brain.capture.skipped", connectionId);
+    await held.reached;
+
+    await person.api.connections.disconnect(connectionId);
+    // At once, before any drain of connect's outbox.
+    const atOnce = await recalledKeys(person.userId, marker);
+    held.release();
+    const lateKey = await late;
+    const events = await allEvents();
 
     expect({
       before: kept.map((key) => before.has(key)),
-      after: [...kept, late].map((key) => after.has(key)),
-      states: await ownKeyStates(person.userId, [...kept, late]),
-      late: lateEnded === undefined ? undefined : shown(lateEnded),
-      erased: erased.map(({ actor, detail }) => ({ actor, detail })),
+      atOnce: kept.map((key) => atOnce.has(key)),
+      states: await ownKeyStates(person.userId, [...kept, lateKey]),
+      late: about(events, "brain.capture.skipped", connectionId).map(shown),
+      erased: about(events, "brain.capture.erased", connectionId).map(erasure),
     }).toStrictEqual({
       before: [true, true],
-      after: [false, false, false],
+      atOnce: [false, false],
       states: ["erased", "erased", "erased"],
-      late: {
-        action: "brain.capture.skipped",
-        onBehalfOf: person.userId,
-        detail: { reason: "erased", items: 1, kept: 0, failed: 0, skipped: 1 },
-      },
+      late: [
+        {
+          action: "brain.capture.skipped",
+          onBehalfOf: person.userId,
+          detail: {
+            reason: "erased",
+            items: 1,
+            kept: 0,
+            failed: 0,
+            skipped: 1,
+          },
+        },
+      ],
       erased: [
-        { actor: { type: "person", userId: person.userId }, detail: {} },
+        {
+          actor: { type: "person", userId: person.userId },
+          detail: { sources: 2 },
+        },
       ],
     });
-    expect(JSON.stringify(erased)).not.toContain(marker);
+    expect(
+      JSON.stringify(about(events, "brain.capture.erased", connectionId))
+    ).not.toContain(marker);
   });
 
-  it("stays connected, its captures kept, when the Brain can't erase them, and takes them once disconnected again", async () => {
+  it("disconnects whatever the Brain does, and erases what was kept, also what landed meanwhile, once connect's outbox drains", async () => {
     const person = await signedInApi(idp, "user");
     const marker = markerOf();
     const { connectionId, mailbox } = await ownGmail(person);
@@ -1050,15 +1116,14 @@ describe("a disconnected connection", setUpTime, () => {
       `quote-${marker}`,
       `Quote ${marker}`
     );
-    const { core } = await openRpc(person.session, {
-      coreEnv: ownEraseFailingOnce(person.userId),
-    });
+    const failing = ownEraseFailing(person.userId);
+    const { core } = await openRpc(person.session, { coreEnv: failing });
 
-    const refused = await outcome(
+    const disconnected = await outcome(
       core.authenticate().connections.disconnect(connectionId)
     );
     const listed = await person.api.connections.list();
-    // Still connected, its reads still kept.
+    // Read before the disconnect, captured after it, before any erasure.
     const second = await capturedRead(
       person.userId,
       connectionId,
@@ -1067,30 +1132,78 @@ describe("a disconnected connection", setUpTime, () => {
       `Order ${marker}`
     );
     const meanwhile = await recalledKeys(person.userId, marker);
-    const erasedMeanwhile = await eventsOf(
-      "brain.capture.erased",
-      connectionId
-    );
-    await person.api.connections.disconnect(connectionId);
+    // The Brain still out of reach as connect's outbox drains: its batch,
+    // logged, stays in it.
+    await drainAuditOutboxes(failing);
+    const logged = await loggedEvents();
+    const kept = await recalledKeys(person.userId, marker);
+    // Once it can be reached, the next drain erases them.
+    const drained = await allEvents();
     const after = await recalledKeys(person.userId, marker);
-    const erased = await eventsOf("brain.capture.erased", connectionId);
+    const again = await allEvents();
 
     expect({
-      refused: refused === "ok" ? "disconnected" : "refused",
+      disconnected,
       connected: listed.some(({ id }) => id === connectionId),
       meanwhile: [first, second].map((key) => meanwhile.has(key)),
-      erasedMeanwhile: erasedMeanwhile.length,
+      logged: {
+        stopped: about(logged, "connection.disconnect", connectionId).length,
+        erased: about(logged, "brain.capture.erased", connectionId).length,
+      },
+      kept: [first, second].map((key) => kept.has(key)),
       after: [first, second].map((key) => after.has(key)),
       states: await ownKeyStates(person.userId, [first, second]),
-      erased: erased.length,
+      erased: about(drained, "brain.capture.erased", connectionId).map(erasure),
+      again: about(again, "brain.capture.erased", connectionId).length,
     }).toStrictEqual({
-      refused: "refused",
-      connected: true,
+      disconnected: "ok",
+      connected: false,
       meanwhile: [true, true],
-      erasedMeanwhile: 0,
+      logged: { stopped: 1, erased: 0 },
+      kept: [true, true],
       after: [false, false],
       states: ["erased", "erased"],
-      erased: 1,
+      erased: [
+        {
+          actor: { type: "person", userId: person.userId },
+          detail: { sources: 2 },
+        },
+      ],
+      again: 1,
+    });
+  });
+
+  it("erases nothing, and goes on, for a person whose own store was erased whole", async () => {
+    const person = await signedInApi(idp, "user");
+    const marker = markerOf();
+    const { connectionId, mailbox } = await ownGmail(person);
+    const kept = await capturedRead(
+      person.userId,
+      connectionId,
+      mailbox,
+      `quote-${marker}`,
+      `Quote ${marker}`
+    );
+    await erasePerson(env, {
+      personId: person.userId,
+      reason: "person_erased",
+    });
+
+    await person.api.connections.disconnect(connectionId);
+    const erased = await eventsOf("brain.capture.erased", connectionId);
+    const found = await recalledKeys(person.userId, marker);
+
+    expect({
+      found: found.has(kept),
+      erased: erased.map(erasure),
+    }).toStrictEqual({
+      found: false,
+      erased: [
+        {
+          actor: { type: "person", userId: person.userId },
+          detail: { sources: 0 },
+        },
+      ],
     });
   });
 
@@ -1133,7 +1246,7 @@ describe("a disconnected connection", setUpTime, () => {
     });
   });
 
-  it("is disconnected once and its captures erased when two disconnects run at once", async () => {
+  it("is stopped and its captures' erasure recorded once, however many disconnects ask, at once or after", async () => {
     const person = await signedInApi(idp, "user");
     const marker = markerOf();
     const { connectionId, mailbox } = await ownGmail(person);
@@ -1149,22 +1262,63 @@ describe("a disconnected connection", setUpTime, () => {
       outcome(person.api.connections.disconnect(connectionId)),
       outcome(person.api.connections.disconnect(connectionId)),
     ]);
-    const after = await recalledKeys(person.userId, marker);
-    const stopped = await eventsOf("connection.disconnect", connectionId);
-    const listed = await person.api.connections.list();
+    outcomes.push(
+      await outcome(person.api.connections.disconnect(connectionId))
+    );
+    const events = await allEvents();
+    const found = await recalledKeys(person.userId, marker);
 
     expect({
       outcomes,
-      after: after.has(kept),
+      found: found.has(kept),
       states: await ownKeyStates(person.userId, [kept]),
-      stopped: stopped.filter(({ detail }) => detail.outcome === "ok").length,
-      connected: listed.some(({ id }) => id === connectionId),
+      stopped: about(events, "connection.disconnect", connectionId).filter(
+        ({ detail }) => detail.outcome === "ok"
+      ).length,
+      erased: about(events, "brain.capture.erased", connectionId).map(erasure),
     }).toStrictEqual({
-      outcomes: ["ok", "ok"],
-      after: false,
+      outcomes: ["ok", "ok", "ok"],
+      found: false,
       states: ["erased"],
       stopped: 1,
-      connected: false,
+      erased: [
+        {
+          actor: { type: "person", userId: person.userId },
+          detail: { sources: 1 },
+        },
+      ],
+    });
+  });
+
+  it("takes a removed member's captures with the connections their removal disconnects", async () => {
+    const [person, admin] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+    ]);
+    const marker = markerOf();
+    const { connectionId, mailbox } = await ownGmail(person);
+    const kept = await capturedRead(
+      person.userId,
+      connectionId,
+      mailbox,
+      `quote-${marker}`,
+      `Quote ${marker}`
+    );
+
+    await admin.api.members.remove(person.userId);
+    const erased = await eventsOf("brain.capture.erased", connectionId);
+
+    expect({
+      states: await ownKeyStates(person.userId, [kept]),
+      erased: erased.map(erasure),
+    }).toStrictEqual({
+      states: ["erased"],
+      erased: [
+        {
+          actor: { type: "person", userId: admin.userId },
+          detail: { sources: 1 },
+        },
+      ],
     });
   });
 
@@ -1203,7 +1357,7 @@ describe("a disconnected connection", setUpTime, () => {
     });
   });
 
-  it("erases nothing of a person's when someone else disconnects their connection, or tries to", async () => {
+  it("erases nothing of a person's when someone else tries to disconnect their connection", async () => {
     const [person, stranger, admin] = await Promise.all([
       signedInApi(idp, "user"),
       signedInApi(idp, "user"),

@@ -488,6 +488,11 @@ export interface OrganizationConnection {
 export interface ListedConnection extends ConnectionSummary {
   /** `connectedBy`'s name, while core knows them. */
   connectedByName: string | null;
+  /**
+   * The Brain keeps what agents read for the person through it (core's
+   * connection-capture.ts), and erases it when it is disconnected.
+   */
+  keepsReads?: true;
 }
 
 /**

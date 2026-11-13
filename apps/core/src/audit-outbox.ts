@@ -50,10 +50,10 @@ import { isRemovedAppRefusal } from "./db/d1.ts";
 // can't note them keeps them for the next.
 
 /** Most batches one clock drain of an outbox appends: 5,000 events. */
-const drainMaxBatches = 50;
+export const drainMaxBatches = 50;
 
 /** One outbox, as a drain reads it: its oldest events, and settling them. */
-interface Outbox {
+export interface Outbox {
   /** Named in logs. */
   name: "core" | "knowledge" | "connect" | "workspace";
   /** Its oldest events, at most {@link auditOutboxTakeMax}, in order. */
@@ -86,7 +86,7 @@ interface Outbox {
  * SQLite's rowid, which an insert sets past every row in the table, also
  * for events stored in one batch, which share their `created_at`.
  */
-const databaseOutbox = (
+export const databaseOutbox = (
   name: Outbox["name"],
   database: D1Database
 ): Outbox => ({
@@ -124,7 +124,7 @@ const databaseOutbox = (
  * Core's own outbox, whose events note what core hands over to the new
  * Brain (`noteHandOvers`) before they leave it.
  */
-const coreOutbox = (env: OutboxEnv): Outbox => ({
+export const coreOutbox = (env: OutboxEnv): Outbox => ({
   ...databaseOutbox("core", env.DB),
   required: async (events) => {
     await noteHandOvers(env, events);
@@ -162,13 +162,19 @@ const objectOutbox = (env: Pick<Env, "DB">, storage: SqlStorage): Outbox => ({
   },
 });
 
-/** Connect's outbox, over RPC, and what is done with its events besides. */
-const connectOutbox = (
+/**
+ * Connect's outbox, over RPC: `required` is what must be done with its
+ * events before they leave it (audit-drains.ts gives it), and `besides`
+ * what is done with them besides.
+ */
+export const connectOutbox = (
   env: Pick<Env, "CONNECT">,
+  required: NonNullable<Outbox["required"]>,
   besides?: Outbox["appended"]
 ): Outbox => ({
   name: "connect",
   ...(besides === undefined ? {} : { appended: besides }),
+  required,
   take: async () => await env.CONNECT.takeAuditEvents(),
   settle: async (appended, rejected) => {
     await env.CONNECT.ackAuditEvents([...appended], [...rejected]);
@@ -382,7 +388,7 @@ const drain = async (
  * instead of throwing: it is drained again later. Returns how many events
  * it appended.
  */
-const drainLogged = async (
+export const drainLogged = async (
   env: AuditLogEnv,
   outbox: Outbox,
   maxBatches: number
@@ -414,28 +420,6 @@ export const drainObjectOutbox = async (
   return left?.count ?? 0;
 };
 
-/**
- * Drains every outbox: the core and Knowledge databases' and connect's,
- * each on its own, so one that fails (connect unreachable, say) is logged
- * and leaves the others to drain. Returns how many events it appended.
- * The clock calls it, with what connect's events are to tell people
- * (connector-source-notices.ts).
- */
-export const drainAuditOutboxes = async (
-  env: Env,
-  /** What is done with connect's events besides (`Outbox.appended`). */
-  connectAppended?: Outbox["appended"]
-): Promise<number> => {
-  const counts = await Promise.all(
-    [
-      coreOutbox(env),
-      databaseOutbox("knowledge", env.KNOWLEDGE),
-      connectOutbox(env, connectAppended),
-    ].map(async (outbox) => await drainLogged(env, outbox, drainMaxBatches))
-  );
-  return counts.reduce((total, count) => total + count, 0);
-};
-
 /** What draining core's own outboxes needs. */
 export type OutboxEnv = AuditLogEnv & Pick<Env, "DB" | "KNOWLEDGE">;
 
@@ -457,16 +441,6 @@ const drainSoon = (env: OutboxEnv, db: AuditedDatabase): void => {
       1
     )
   );
-};
-
-/**
- * Drains connect's outbox soon, one batch, in the background: after a
- * change connect recorded in its own outbox (an AI provider's key), so its
- * event reaches the log a moment later rather than at the clock's next
- * drain. A drain that fails is logged; the clock drains it later.
- */
-export const drainConnectOutboxSoon = (env: Env): void => {
-  waitUntil(drainLogged(env, connectOutbox(env), 1));
 };
 
 /** Drains Knowledge's outbox soon, as `drainSoon` does: its `audit` port. */

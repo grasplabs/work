@@ -1,4 +1,4 @@
-import { eraseSource } from "./brain-next.ts";
+import { eraseOwnGroup, eraseSource } from "./brain-next.ts";
 import type { SourceReaders, SourceRef } from "./brain-next.ts";
 
 // What core hands the Brain comes from an origin core keeps (an upload, a
@@ -124,24 +124,21 @@ export const captureGroupOf = (connectionId: string): SourceRef => {
  * Erases every capture through `personId`'s own connection `connectionId`
  * from their own store, the only store that holds any, and closes the
  * connection's group there, so a capture landing after is refused: one
- * call, however many captures it had, as `eraseChat`. Throws when it
- * failed, and the connection must stay connected until a repeat returns.
- * Safe to repeat.
+ * call, however many captures it had, as `eraseChat`. Answers how many
+ * it erased, the same each time it is repeated. Throws when it failed:
+ * the connect event that asked for it stays to be drained again
+ * (audit-outbox.ts). Safe to repeat.
  */
 export const eraseCaptures = async (
   env: Pick<Env, "BRAIN_STORE" | "DURABLE_OBJECT_JURISDICTION">,
   personId: string,
   connectionId: string
-): Promise<void> => {
-  await eraseSource(env, {
-    source: captureGroupOf(connectionId),
-    readers: { kind: "owner", personId },
+): Promise<number> =>
+  await eraseOwnGroup(env, {
+    personId,
+    group: captureGroupOf(connectionId),
     reason: "deleted",
-    // As a group though nothing may have been captured yet, so nothing is
-    // added in it after.
-    asGroup: true,
   });
-};
 
 /** Why sources are erased, as the Brain's ledger records it. */
 type ErasureReason = Parameters<typeof eraseSource>[1]["reason"];

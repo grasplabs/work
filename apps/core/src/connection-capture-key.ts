@@ -1,4 +1,7 @@
+import type { ConnectionOwner } from "@grasp-os/shared/connect";
+
 import { captureGroupOf } from "./brain-next-origins.ts";
+import { nativeItemReads } from "./native-tool-classes.gen.ts";
 
 // The key of a source captured from a connection (GRA-1730,
 // connection-capture.ts): its connection, then a hash that names one item
@@ -6,6 +9,21 @@ import { captureGroupOf } from "./brain-next-origins.ts";
 // `captureGroupOf`), so disconnecting it erases them all in one call
 // (GRA-1827). The Brain knows no connector: to it, this is one producer's
 // id like any other.
+
+/**
+ * Whether the Brain keeps what agents read through `connection` for
+ * `personId` (connection-capture.ts): their own native connection, to a
+ * provider with a tool that answers one item's content
+ * (`nativeItemReads`), the only reads capture keeps. The Brain page says
+ * so by it, and disconnecting such a connection erases its captures.
+ */
+export const keepsReadsOf = (
+  connection: Pick<ConnectionOwner, "source" | "provider" | "ownerUserId">,
+  personId: string
+): boolean =>
+  connection.source === "native" &&
+  connection.ownerUserId === personId &&
+  Object.hasOwn(nativeItemReads, connection.provider);
 
 const encoder = new TextEncoder();
 

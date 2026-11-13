@@ -164,12 +164,18 @@ test("a person comes back from connecting Microsoft 365, sees it on its page, an
   await expect(
     expiredCard.getByRole("button", { name: /^Sign in to/u })
   ).toBeVisible();
-  // It can be disconnected instead.
+  // It can be disconnected instead; what the Brain kept from their own
+  // Microsoft 365 goes with it, and the dialog says so.
   await expiredCard
     .getByRole("button", {
       name: `Disconnect Microsoft 365 (${expired.account})`,
     })
     .click();
+  await expect(
+    page
+      .getByRole("dialog")
+      .getByText("Everything the Brain kept from it is erased for good.")
+  ).toBeVisible();
   await page
     .getByRole("dialog")
     .getByRole("button", { name: "Disconnect" })

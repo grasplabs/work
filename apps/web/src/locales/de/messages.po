@@ -5534,6 +5534,10 @@ msgstr "Alles, was ich lese, und jedes Gespräch, das ich führe, läuft über e
 msgid "Everything I read and every conversation I have runs on an AI model. Yours is Grasp’s AI, and it is ready."
 msgstr "Alles, was ich lese, und jedes Gespräch, das ich führe, läuft über ein KI-Modell. Ihres ist die KI von Grasp, und sie ist bereit."
 
+#: src/connections/connection-list.tsx
+msgid "Everything the Brain kept from it is erased for good."
+msgstr "Alles, was das Brain daraus gespeichert hat, wird endgültig gelöscht."
+
 #: src/interview/closed.tsx
 msgid "Everything you told me is removed for good and cannot be brought back. Is only something wrong? Then put it right with “Add something” instead."
 msgstr "Alles, was Sie mir erzählt haben, wird endgültig entfernt und lässt sich nicht zurückholen. Stimmt nur etwas nicht? Dann korrigieren Sie es lieber mit „Etwas ergänzen“."
