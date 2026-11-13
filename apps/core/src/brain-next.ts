@@ -3,6 +3,9 @@ import {
   brainOf,
   currentReadMax,
   changeTaken,
+  entityAttributes,
+  entityIdSchema,
+  entityKinds,
   fitsSourceText,
   isSourceText,
   erasedSource,
@@ -11,13 +14,20 @@ import {
   exportFileNameSchema,
   exportIdSchema,
   handOversMax,
+  identifierSchema,
   instructionsMaxLength,
   instructionsTextSchema,
   isOverInstructionsLimit,
+  memoryIdSchema,
+  memoryTypes,
+  namesPerEntityMax,
   isStillDeleting,
   principalMaxLength,
+  quoteMaxLength,
   questionMaxLength,
   sourceIdMaxLength,
+  statementMaxLength,
+  valueMaxLength,
   storeErased,
   wellFormedString,
   modelWaitMaxSeconds,
@@ -30,9 +40,18 @@ import {
 import type {
   Access,
   AskModel,
+  AttributeRule,
   Brain,
   ErasureReason,
   Embedders,
+  EntityKind,
+  EntityNamesCursor,
+  Identifier,
+  EntityId,
+  Memory,
+  MemoriesCursor,
+  MemoryChangeOutcome,
+  MemoryId,
   ExportStatus,
   KeyState,
   HandOverPriority,
@@ -2157,5 +2176,265 @@ export const actOnBrainForStaff = async (
       const unhandled: never = action;
       throw new Error(`No such action (${typeof unhandled})`);
     }
+  }
+};
+
+// Memories, for a person core verified (GRA-1743): what a person's own
+// chat saves of what they said (agent-remember.ts, through
+// brain-memories.ts), and their undo. Everything written here is the
+// person's own word (writer and speaker both them), readable by them
+// alone, and kept in their own store (`person:<id>`), never in the shared
+// one: the plan's rule is that a memory an agent writes is readable only
+// by those who can read everything its chat read, and a person's own chat
+// read only what they may. An instruction is the Brain's to keep its
+// writer's own (`owner` of that writer), which this is.
+
+/**
+ * The attributes a memory a person says can hold, as the Brain lists them:
+ * those whose value is a text, never a relation to another entity (which
+ * a memory names by the related entity, not a value). No attribute is a
+ * relation for one kind and a value for another.
+ */
+const valueRules = Object.values(entityAttributes).flatMap((rules) =>
+  Object.entries(rules).flatMap(([name, rule]: [string, AttributeRule]) =>
+    rule.relation === undefined ? [{ name, many: rule.values === "many" }] : []
+  )
+);
+const attributeNames = [...new Set(valueRules.map(({ name }) => name))];
+
+/** Of those, the ones that hold many values side by side. */
+const manyValueAttributes = [
+  ...new Set(valueRules.flatMap(({ name, many }) => (many ? [name] : []))),
+];
+
+/**
+ * What a memory a person says may name, as the Brain lists them, and the
+ * Brain's own bounds on its texts: for the chat's tool to offer, so the
+ * model chooses from these and no other number is invented.
+ */
+export const memoryChoices = {
+  kinds: entityKinds,
+  types: memoryTypes,
+  attributes: attributeNames,
+  manyValueAttributes,
+  valueMaxLength,
+  statementMaxLength,
+  quoteMaxLength,
+} as const;
+
+/** A text of a memory: some text, at most `max` characters (the Brain's bounds). */
+const memoryText = (max: number) => wellFormedString().regex(/\S/u).max(max);
+
+/**
+ * What a memory is about: an entity by its id in the person's own store,
+ * or by its kind and the names and exact identifiers given, linked to one
+ * the store holds on an identifier alone.
+ */
+const memoryAboutSchema = z.strictObject({
+  id: entityIdSchema.optional(),
+  kind: z.enum(entityKinds),
+  names: z.array(memoryText(valueMaxLength)).max(namesPerEntityMax).default([]),
+  identifiers: z.array(identifierSchema).max(namesPerEntityMax).default([]),
+});
+
+const rememberedSchema = z.strictObject({
+  change: changeSchema,
+  about: memoryAboutSchema,
+  attribute: z.enum(attributeNames).optional(),
+  value: memoryText(valueMaxLength).optional(),
+  type: z.enum(memoryTypes),
+  statement: memoryText(statementMaxLength),
+  quote: memoryText(quoteMaxLength),
+});
+
+/** A memory a person said, to save for them (`rememberAs`), as its schema takes it. */
+export type Remembered = z.input<typeof rememberedSchema>;
+
+/**
+ * What `rememberAs` saved: the memory and the entity it is about, and the
+ * memory's own fields as the store holds them (`kept`), read back from
+ * it: what the person is shown, never what the caller asked for.
+ */
+export interface RememberedMemory {
+  memory: MemoryId;
+  entity: EntityId;
+  kept: Pick<Memory, "type" | "attribute" | "value" | "statement">;
+}
+
+/**
+ * `error`, an erased store's or key's refusal (the Brain's own words), as
+ * the code core gives it everywhere (`brain.source_erased`): final, never
+ * tried again. Any other error as it is.
+ */
+const erasedAs = (error: unknown): unknown =>
+  error instanceof Error &&
+  (error.message === erasedSource || error.message === storeErased)
+    ? brainSourceErrors.create("brain.source_erased")
+    : error;
+
+/**
+ * Memory `memory` about `entity` in `store`, as `reader` reads it, history
+ * included: every page, read at the first page's moment, until it is
+ * found. Undefined when none holds it.
+ */
+const keptMemory = async (
+  store: Brain,
+  reader: Reader,
+  entity: EntityId,
+  memory: MemoryId
+): Promise<Memory | undefined> => {
+  let after: MemoriesCursor | undefined;
+  do {
+    // oxlint-disable-next-line no-await-in-loop -- each page after the last
+    const page = await store.readMemories({
+      entity,
+      reader,
+      history: true,
+      ...(after === undefined ? {} : { after }),
+    });
+    const found = page.memories.find(({ id }) => id === memory);
+    if (found !== undefined) {
+      return found;
+    }
+    after = page.more ? page.next : undefined;
+  } while (after !== undefined);
+  return undefined;
+};
+
+/**
+ * Saves what the member `personId` said as their own memory, readable by
+ * them alone, in their own store: about an entity of theirs (by id, as
+ * they may see it), or one found by an exact identifier there, or a new
+ * one. Their new word on the same entity and one-value attribute ends
+ * their earlier memory, which stays as history. `change` names this one
+ * save, minted by core (a chat's tool call): the same change again
+ * answers what it saved. Refused once they are no longer a member, and by
+ * the Brain for what its rules refuse (an attribute their entity's kind
+ * doesn't have, say).
+ */
+export const rememberAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  remembered: Remembered | Readonly<Record<string, unknown>>
+): Promise<RememberedMemory> => {
+  const { change, about, quote, ...memory } = checked(
+    rememberedSchema,
+    remembered
+  );
+  const reader = await readerOf(env, personId);
+  const { person } = reader;
+  const store = ownBrain(env, person);
+  let added: Awaited<ReturnType<Brain["addMemories"]>>;
+  try {
+    added = await store.addMemories({
+      change,
+      access: { kind: "owner", person },
+      // An entity's id is taken only as they may see it.
+      reader,
+      entities: [{ key: "about", ...about }],
+      memories: [
+        {
+          about: "about",
+          ...memory,
+          speaker: { kind: "internal", person },
+          basis: { kind: "writer", writer: person, quote },
+        },
+      ],
+    });
+  } catch (error) {
+    throw erasedAs(error);
+  }
+  const [saved] = added.memories;
+  const entity = added.entities.about;
+  const kept =
+    saved === undefined || entity === undefined
+      ? undefined
+      : await keptMemory(store, reader, entity, saved);
+  if (saved === undefined || entity === undefined || kept === undefined) {
+    throw new Error("The Brain kept no memory");
+  }
+  const { type, attribute, value, statement } = kept;
+  return {
+    memory: saved,
+    entity,
+    kept: { type, attribute, value, statement },
+  };
+};
+
+/**
+ * An entity of a person's own store, as they may read it: its kind, the
+ * earliest name they may see (`name`), and every name and exact
+ * identifier they may see.
+ */
+export interface OwnEntity {
+  kind: EntityKind;
+  name: string | null;
+  names: string[];
+  identifiers: Identifier[];
+}
+
+/**
+ * The entity `entity` of the member `personId`'s own store, as they may
+ * read it: what a memory about it is about, named as the store holds it,
+ * every page of its names read at the first page's moment. Null alike
+ * when there is none or they may not. Refused once they are no longer a
+ * member.
+ */
+export const ownEntityAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  entity: string
+): Promise<OwnEntity | null> => {
+  const id = checked(entityIdSchema, entity);
+  const reader = await readerOf(env, personId);
+  const store = ownBrain(env, reader.person);
+  const read = await store.readEntity({ entity: id, reader });
+  if (read === null) {
+    return null;
+  }
+  const names: string[] = [];
+  const identifiers: Identifier[] = [];
+  let after: EntityNamesCursor | undefined;
+  do {
+    // oxlint-disable-next-line no-await-in-loop -- each page after the last
+    const page = await store.readEntityNames({
+      entity: id,
+      reader,
+      ...(after === undefined ? {} : { after }),
+    });
+    for (const { type, value } of page.names) {
+      if (type === "name") {
+        names.push(value);
+      } else {
+        identifiers.push({ type, value });
+      }
+    }
+    after = page.more ? page.next : undefined;
+  } while (after !== undefined);
+  return { kind: read.kind, name: read.name, names, identifiers };
+};
+
+/**
+ * Retires one of the member `personId`'s own memories (`rememberAs`),
+ * current or ended by a newer one of theirs: it never becomes current
+ * again, and stays as history; `done` again for one they retired before,
+ * so a retry never reads as not found. `nothing` alike when there is no
+ * such memory (an erased one included), when it isn't theirs, and when it
+ * has expired. Refused once they are no longer a member.
+ */
+export const forgetAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  memory: string
+): Promise<MemoryChangeOutcome> => {
+  const id = checked(memoryIdSchema, memory);
+  const reader = await readerOf(env, personId);
+  try {
+    return await ownBrain(env, reader.person).retireMemory({
+      memory: id,
+      reader,
+    });
+  } catch (error) {
+    throw erasedAs(error);
   }
 };

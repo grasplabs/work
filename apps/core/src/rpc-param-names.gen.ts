@@ -110,6 +110,9 @@ export const rpcParamNames: ParamNames = {
     "searchArchive": ["filter","before"],
     "verify": ["after"],
   },
+  "BrainMemoriesRpc": {
+    "forget": ["memory"],
+  },
   "BrainRpc": {
     "addRecords": ["records"],
     "answerGap": ["gapId","answer"],
