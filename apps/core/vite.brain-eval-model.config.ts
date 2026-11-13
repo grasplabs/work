@@ -43,6 +43,7 @@ const everythingTokens = everythingCapOf(
 /** Hours a run may take before Vitest stops it. */
 const maxHours = 4;
 
+// No meaning hit of the test model reaches it: its pack arm recalls through core without the embedder (test/without-embedder.ts), by words and exact parts as defined.
 export default coreProject(
   {
     name: "@grasp-os/core:brain-eval-model",

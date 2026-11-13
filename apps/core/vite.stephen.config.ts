@@ -9,6 +9,7 @@ import { coreProject } from "./vite.config.ts";
 // would crowd them and they it. Projects run in groups, lowest first: this
 // one after all the others, and in CI on a shard of its own
 // (scripts/test-shards.ts).
+// No meaning hit of the test model reaches it: its chats hold no `brain` grant, so none recalls core's Brain.
 export default coreProject({
   name: "@grasp-os/core:stephen",
   // Every one of them, as the root config's core project leaves out.

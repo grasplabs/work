@@ -11,6 +11,7 @@ import { coreProject } from "./vite.config.ts";
 // times each recall it asks, one at a time, so it runs here too. Projects run in groups, lowest first: this one
 // after all the others, and in CI on shards of its own
 // (scripts/test-shards.ts).
+// No meaning hit of the test model reaches them: they measure the older Brain (test/brain-harness.ts), whose chats hold no `brain` grant, so none recalls core's Brain.
 export default coreProject({
   name: "@grasp-os/core:brain",
   include: [
