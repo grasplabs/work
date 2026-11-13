@@ -2,16 +2,17 @@ import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { canBuild, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, eq, or, sql } from "drizzle-orm";
+import type { ShareCandidates } from "@grasp-os/shared/subject-members";
+import { and, asc, eq, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 
-import { activeMember, organizationId } from "./auth/auth.ts";
+import { activeMember, notRemoved, organizationId } from "./auth/auth.ts";
 import { memberRole } from "./auth/identity.ts";
-import { projects, teams } from "./db/core/schema.ts";
+import { members, projects, teams, users } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
-import { requireProjectRole } from "./project-access.ts";
+import { buildsProjectsOf, requireProjectRole } from "./project-access.ts";
 import type { Person } from "./project-access.ts";
 import { viaProjectSql } from "./project-sql.ts";
 
@@ -192,3 +193,57 @@ export const memberEntry = (
   target,
   detail: { memberType: member.type, member: member.id, role: member.role },
 });
+
+/**
+ * The organization's people, members now, and its teams, each by name and
+ * ID alone, by name: whom an App or a workflow is shared with, and whom a
+ * workflow's start names where its input takes a person
+ * (workflow-start-form.ts).
+ */
+export const organizationPeopleAndTeams = async (
+  env: Env
+): Promise<Pick<ShareCandidates, "people" | "teams">> => {
+  const db = drizzle(env.DB);
+  const [people, organizationTeams] = await Promise.all([
+    db
+      .select({ id: users.id, name: users.name })
+      .from(members)
+      .innerJoin(users, eq(users.id, members.userId))
+      .where(
+        and(
+          eq(members.organizationId, organizationId),
+          notRemoved(members.userId)
+        )
+      )
+      .orderBy(asc(users.name), asc(users.id)),
+    db
+      .select({ id: teams.id, name: teams.name })
+      .from(teams)
+      .where(eq(teams.organizationId, organizationId))
+      .orderBy(asc(teams.name), asc(teams.id)),
+  ]);
+  return { people, teams: organizationTeams };
+};
+
+/**
+ * Whom `by` may share an App or a workflow with (its Share dialog, for
+ * whoever may share it, which each kind checks first): the organization's
+ * people and teams (`organizationPeopleAndTeams`) and the projects `by`
+ * builds, as a project's name is its members' alone. A builder needn't be
+ * an admin, so this, not the organization's member list, is what they pick
+ * from; it says no more of a person than a share names: no address, no
+ * organization role, nor a team's members. A share core then refuses (a
+ * builder's role for someone who doesn't build, the owner) is offered
+ * all the same, and refused by the share, which decides.
+ */
+export const shareCandidates = async (
+  env: Env,
+  by: Identity
+): Promise<ShareCandidates> => {
+  const [{ people, teams: organizationTeams }, builtProjects] =
+    await Promise.all([
+      organizationPeopleAndTeams(env),
+      buildsProjectsOf(env, by),
+    ]);
+  return { people, teams: organizationTeams, projects: builtProjects };
+};

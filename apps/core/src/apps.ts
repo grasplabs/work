@@ -24,7 +24,6 @@ import type {
   AppContents,
   AppOverview,
   AppFiles,
-  AppRole,
   AppVersion,
   ViewedApp,
   CommittedVersion,
@@ -43,6 +42,7 @@ import { nextReleaseId, releaseMonthPrefix } from "@grasp-os/shared/release-id";
 import { requireBuilder } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { dataErrors } from "@grasp-os/shared/stores";
+import type { MemberRole } from "@grasp-os/shared/subject-members";
 import { waitUntil } from "cloudflare:workers";
 import { and, asc, desc, eq, isNull, like, lt, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
@@ -290,7 +290,7 @@ export const appFor = async (
   env: Env,
   by: Person,
   input: unknown,
-  needed: AppRole,
+  needed: MemberRole,
   /** For what manages the App without reading its data (`requireAppRole`). */
   options: { managing?: boolean } = {}
 ): Promise<App> => {
@@ -308,7 +308,7 @@ export const usableApp = async (
   env: Env,
   by: Person,
   input: unknown,
-  needed: AppRole = "user"
+  needed: MemberRole = "user"
 ): Promise<App> => {
   const app = await appFor(env, by, input, needed);
   requireNotArchived(app);

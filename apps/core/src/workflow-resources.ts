@@ -16,21 +16,25 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { isAdmin, requireBuilder, roleErrors } from "@grasp-os/shared/roles";
 import {
+  newSubjectMemberSchema,
+  subjectMemberRefSchema,
+} from "@grasp-os/shared/subject-members";
+import type {
+  MemberRole,
+  SubjectMember,
+} from "@grasp-os/shared/subject-members";
+import {
   catalogBindingKinds,
   catalogKeySchema,
   workflowNameSchema,
   workflowNamespace,
   workflowResourceErrors,
-  workflowShareSchema,
-  workflowMemberSchema,
 } from "@grasp-os/shared/workflow-resources";
 import type {
   CatalogBindingKind,
   WorkflowDefinitionProblem,
-  WorkflowMember,
   WorkflowResource,
   WorkflowResourceVersion,
-  WorkflowRole,
   WorkflowBinders,
   SteeredWrite,
   WorkflowVersionBinding,
@@ -295,8 +299,8 @@ const rolesIn = async (
   env: Env,
   by: Acting,
   workflows: readonly Pick<Live, "id" | "owner">[]
-): Promise<Map<string, WorkflowRole>> => {
-  const roles = new Map<string, WorkflowRole>();
+): Promise<Map<string, MemberRole>> => {
+  const roles = new Map<string, MemberRole>();
   if (isAdmin(by.role)) {
     for (const { id } of workflows) {
       roles.set(id, "builder");
@@ -322,7 +326,7 @@ const rolesIn = async (
             )
           );
   // Grouped once: each workflow then reads only its own rows.
-  const rowRoles = new Map<string, WorkflowRole[]>();
+  const rowRoles = new Map<string, MemberRole[]>();
   for (const row of rows) {
     const list = rowRoles.get(row.id) ?? [];
     list.push(row.role);
@@ -345,7 +349,7 @@ const roleIn = async (
   env: Env,
   by: Acting,
   workflow: Pick<Live, "id" | "owner">
-): Promise<WorkflowRole | undefined> => {
+): Promise<MemberRole | undefined> => {
   const roles = await rolesIn(env, by, [workflow]);
   return roles.get(workflow.id);
 };
@@ -379,8 +383,8 @@ export const requireWorkflowRole = async (
   env: Env,
   by: Acting,
   id: unknown,
-  needed: WorkflowRole
-): Promise<Live & { role: WorkflowRole }> => {
+  needed: MemberRole
+): Promise<Live & { role: MemberRole }> => {
   const workflow = await liveWorkflow(env, id);
   const role =
     workflow === undefined ? undefined : await roleIn(env, by, workflow);
@@ -395,7 +399,7 @@ export const requireWorkflowRole = async (
 
 const resourceOf = (
   workflow: Live,
-  role: WorkflowRole,
+  role: MemberRole,
   { process, paused }: { process: BusinessProcess | null; paused: boolean }
 ): WorkflowResource => ({
   id: workflow.id,
@@ -2197,7 +2201,7 @@ export const workflowMembers = async (
   env: Env,
   by: Acting,
   id: unknown
-): Promise<WorkflowMember[]> => {
+): Promise<SubjectMember[]> => {
   const workflow = await requireWorkflowRole(env, by, id, "user");
   const rows = await drizzle(env.DB)
     .select({
@@ -2262,12 +2266,12 @@ export const shareWorkflowResource = async (
   by: Acting,
   id: unknown,
   input: unknown
-): Promise<WorkflowMember> => {
+): Promise<SubjectMember> => {
   requireNotStaff(by);
   const workflow = await requireWorkflowRole(env, by, id, "builder");
   const { role, ...member } = workflowResourceErrors.parse(
     "workflow.resource_invalid",
-    workflowShareSchema,
+    newSubjectMemberSchema,
     input
   );
   await requireSharable(
@@ -2432,7 +2436,7 @@ export const unshareWorkflowResource = async (
   const workflow = await requireWorkflowRole(env, by, id, "builder");
   const member: MemberRef = workflowResourceErrors.parse(
     "workflow.resource_invalid",
-    workflowMemberSchema,
+    subjectMemberRefSchema,
     input
   );
   const db = drizzle(env.DB);

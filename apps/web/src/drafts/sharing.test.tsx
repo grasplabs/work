@@ -1,13 +1,13 @@
 // @vitest-environment happy-dom
-import type {
-  AppMember,
-  AppMemberRef,
-  NewAppMember,
-  ShareCandidates,
-  ViewedApp,
-} from "@grasp-os/shared/apps";
+import type { ViewedApp } from "@grasp-os/shared/apps";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
+import type {
+  NewSubjectMember,
+  ShareCandidates,
+  SubjectMember,
+  SubjectMemberRef,
+} from "@grasp-os/shared/subject-members";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -71,17 +71,17 @@ const candidates: ShareCandidates = {
 
 /** Core's App members, kept as builders change them, and each change asked. */
 const fakeMembers = (
-  initial: AppMember[] = [],
+  initial: SubjectMember[] = [],
   offering: ShareCandidates = candidates
 ) => {
   const asked: unknown[][] = [];
   let kept = initial;
-  const nameOf = ({ type, id }: AppMemberRef): string =>
+  const nameOf = ({ type, id }: SubjectMemberRef): string =>
     (type === "team" ? offering.teams : offering.people).find(
       (each) => each.id === id
     )?.name ?? id;
   const members = {
-    list: async (): Promise<AppMember[]> => {
+    list: async (): Promise<SubjectMember[]> => {
       await Promise.resolve();
       return kept;
     },
@@ -89,10 +89,13 @@ const fakeMembers = (
       await Promise.resolve();
       return offering;
     },
-    add: async (_app: string, member: NewAppMember): Promise<AppMember> => {
+    add: async (
+      _app: string,
+      member: NewSubjectMember
+    ): Promise<SubjectMember> => {
       await Promise.resolve();
       asked.push(["add", member.type, member.id, member.role]);
-      const added: AppMember = {
+      const added: SubjectMember = {
         type: member.type,
         id: member.id,
         name: nameOf(member),
@@ -108,7 +111,7 @@ const fakeMembers = (
       ];
       return added;
     },
-    remove: async (_app: string, member: AppMemberRef): Promise<void> => {
+    remove: async (_app: string, member: SubjectMemberRef): Promise<void> => {
       await Promise.resolve();
       asked.push(["remove", member.type, member.id]);
       kept = kept.filter(

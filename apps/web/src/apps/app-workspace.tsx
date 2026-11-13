@@ -1,6 +1,7 @@
-import type { App, AppMember, ViewedApp } from "@grasp-os/shared/apps";
+import type { App, ViewedApp } from "@grasp-os/shared/apps";
 import type { Draft } from "@grasp-os/shared/drafts";
 import type { Identity } from "@grasp-os/shared/rpc";
+import type { SubjectMember } from "@grasp-os/shared/subject-members";
 import {
   Alert,
   AlertAction,
@@ -48,7 +49,6 @@ import type { ReactNode } from "react";
 import { setActiveChat } from "../chat/active-chat.ts";
 import { slotOf, useChatSubject } from "../chat/chat-subject.ts";
 import { useChatAbout, useGlobalChat } from "../chat/global-chat.tsx";
-import type { Session } from "../core.ts";
 import { ConfirmChange, useDraftChange } from "../drafts/draft-history.tsx";
 import type { Asked } from "../drafts/draft-history.tsx";
 import {
@@ -56,7 +56,7 @@ import {
   showsUnpublishedChanges,
   UnpublishedChanges,
 } from "../drafts/share-with-team.tsx";
-import { memberNames, readMembers } from "../drafts/sharing.tsx";
+import { memberNames, useMembers } from "../drafts/sharing.tsx";
 import { hasChanges, useDraft } from "../drafts/use-draft.ts";
 import { ErrorText } from "../error-text.tsx";
 import {
@@ -291,7 +291,7 @@ const WorkspaceBar = ({
   /** The App's changes, as read last; none while they are read, or archived. */
   draft: Draft | undefined;
   /** Whom it is shared with; none while they are read. */
-  members: readonly AppMember[] | undefined;
+  members: readonly SubjectMember[] | undefined;
   /** Whether the chat's agent is at work on it, or checking it. */
   running?: boolean;
   /** Whether it is shared and has changes only its builders see. */
@@ -968,10 +968,6 @@ const useSetUp = ({
   return { setUp: failed ? "failed" : "ready", onFrame };
 };
 
-/** Whom App `app` is shared with. */
-const readAppMembers = async (session: Session, app: string) =>
-  await readMembers(session, { kind: "app", id: app });
-
 /**
  * Reads the page again once the chat's agent stops, or its drafts change
  * after (`worked`): during a turn they change at every write, and its end
@@ -1039,9 +1035,10 @@ const Building = ({
   const [resets, setResets] = useState(0);
   useReadAgainOnceBuilt(running, worked);
   useReadAgainOnNewBase(app, draft?.base);
-  // Whom it is shared with: who uses it, and whom Share adds to.
-  const membersRead = useAppRead(app.id, readAppMembers);
-  const members = membersRead?.state === "ready" ? membersRead.data : undefined;
+  // Whom it is shared with: who uses it, and whom Share adds to, read
+  // again each time it is shared from here.
+  const [shares, setShares] = useState(0);
+  const members = useMembers({ kind: "app", id: app.id }, shares);
   const { setUp, onFrame } = useSetUp({
     app,
     shown,
@@ -1066,7 +1063,10 @@ const Building = ({
           draft={draft}
           identity={identity}
           members={members}
-          onShared={reread}
+          onShared={() => {
+            reread();
+            setShares((before) => before + 1);
+          }}
           pending={changesLine}
           running={busy}
           settingUp={settingUp}

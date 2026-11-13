@@ -1,4 +1,3 @@
-import type { AppRole } from "@grasp-os/shared/apps";
 import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import {
@@ -35,6 +34,7 @@ import type {
 } from "@grasp-os/shared/projects";
 import { requireBuilder, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import type { MemberRole } from "@grasp-os/shared/subject-members";
 import type { WorkflowResource } from "@grasp-os/shared/workflow-resources";
 import { and, asc, desc, eq, isNotNull, ne, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
@@ -153,7 +153,7 @@ const iconOf = (icon: string): ProjectIcon =>
 
 /** What `by` may open now: their Apps and live workflows, by ID. */
 interface Visible {
-  apps: Map<string, { name: string; role: AppRole }>;
+  apps: Map<string, { name: string; role: MemberRole }>;
   workflows: Map<string, Pick<WorkflowResource, "name" | "role">>;
 }
 

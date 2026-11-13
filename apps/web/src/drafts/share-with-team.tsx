@@ -1,8 +1,12 @@
 import { isGeneratedServerFile } from "@grasp-os/runtime/host";
 import type { AppReview } from "@grasp-os/shared/app-review";
-import type { AppMemberRef, ShareCandidates } from "@grasp-os/shared/apps";
 import type { Draft, DraftProblem } from "@grasp-os/shared/drafts";
 import type { Subject } from "@grasp-os/shared/subject";
+import type {
+  ShareCandidates,
+  SubjectMember,
+  SubjectMemberRef,
+} from "@grasp-os/shared/subject-members";
 import { Button } from "@grasp-os/ui/components/button";
 import { Checkbox } from "@grasp-os/ui/components/checkbox";
 import {
@@ -59,7 +63,6 @@ import { ConfirmChange, useDraftChange } from "./draft-history.tsx";
 import type { Asked } from "./draft-history.tsx";
 import { isConflict, publishFailureText, settled } from "./publish-errors.ts";
 import { membersOf, readMembers } from "./sharing.tsx";
-import type { Member } from "./sharing.tsx";
 import { hasChanges } from "./use-draft.ts";
 
 // Share with your team, in the bar of an App's workspace and of a
@@ -366,7 +369,7 @@ const ChangesNotes = ({
  */
 interface Undoable {
   subject: Subject;
-  added: readonly AppMemberRef[];
+  added: readonly SubjectMemberRef[];
   back: { before: number; made: number; revision: number } | undefined;
 }
 
@@ -497,10 +500,10 @@ const versionToShare = (
     : undefined;
 
 /** A share's key: its kind and ID. */
-const keyOf = ({ type, id }: AppMemberRef): string => `${type}:${id}`;
+const keyOf = ({ type, id }: SubjectMemberRef): string => `${type}:${id}`;
 
 /** Someone to share with, by name. */
-interface Recipient extends AppMemberRef {
+interface Recipient extends SubjectMemberRef {
   name: string;
 }
 
@@ -695,7 +698,7 @@ const WhoGetsIt = ({
   onChosen,
 }: {
   offered: readonly Recipient[] | undefined;
-  members: readonly Member[];
+  members: readonly SubjectMember[];
   chosen: readonly string[];
   disabled: boolean;
   onChosen: (chosen: string[]) => void;
@@ -816,7 +819,7 @@ export const ShareWithTeam = ({
   /** Its draft, as read last; none while it is read. */
   draft: Draft | undefined;
   /** Whom it is shared with now. */
-  members: readonly Member[];
+  members: readonly SubjectMember[];
   /** Whether Grasp is working on it, or checking it. */
   running: boolean;
   /** Whether it is shared and has changes only its builders see. */
@@ -955,7 +958,7 @@ export const ShareWithTeam = ({
 export const showsUnpublishedChanges = (
   live: number | null,
   draft: Draft | undefined,
-  members: readonly Member[]
+  members: readonly SubjectMember[]
 ): boolean => live !== null && members.length > 0 && hasChanges(draft);
 
 /** How many changes only its builders see, as the line counts them. */

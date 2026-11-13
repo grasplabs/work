@@ -1,6 +1,5 @@
 import { collections } from "@grasp-os/brain/schema";
 import { appErrors } from "@grasp-os/shared/apps";
-import type { AppRole } from "@grasp-os/shared/apps";
 import type {
   AuditActor,
   AuditDetailValue,
@@ -41,6 +40,7 @@ import {
   roleErrors,
 } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import type { MemberRole } from "@grasp-os/shared/subject-members";
 import {
   triggerEventsRequest,
   triggerStartRequest,
@@ -567,7 +567,7 @@ const requireCollection = async (
  * doesn't exist.
  */
 export interface PermissionRoles {
-  app: (app: AppId, role: AppRole) => Promise<unknown>;
+  app: (app: AppId, role: MemberRole) => Promise<unknown>;
   resource: (
     ref: { type: "workflow" | "trigger"; id: string },
     needed: "user" | "builder"

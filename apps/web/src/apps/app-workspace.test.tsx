@@ -1,12 +1,6 @@
 // @vitest-environment happy-dom
 import type { AppReview } from "@grasp-os/shared/app-review";
-import type {
-  App,
-  AppMember,
-  AppMemberRef,
-  ShareCandidates,
-  ViewedApp,
-} from "@grasp-os/shared/apps";
+import type { App, ViewedApp } from "@grasp-os/shared/apps";
 import type {
   ChatQuestion,
   ChatUpdate,
@@ -26,6 +20,11 @@ import {
 import type { Permission } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { Subject } from "@grasp-os/shared/subject";
+import type {
+  ShareCandidates,
+  SubjectMember,
+  SubjectMemberRef,
+} from "@grasp-os/shared/subject-members";
 import { SidebarProvider } from "@grasp-os/ui/components/sidebar";
 import { Toaster } from "@grasp-os/ui/components/toast";
 import { typeInPrompt } from "@grasp-os/ui/testing";
@@ -85,7 +84,10 @@ const memberNames: Record<string, string> = {
 };
 
 /** Someone the App is shared with, as core lists them. */
-const memberOf = (type: AppMemberRef["type"], id: string): AppMember => ({
+const memberOf = (
+  type: SubjectMemberRef["type"],
+  id: string
+): SubjectMember => ({
   type,
   id,
   name: memberNames[id] ?? id,
@@ -106,7 +108,7 @@ const fakeApps = ({
   archived?: boolean;
   currentVersion?: number | null;
   /** Whom it is shared with now. */
-  sharedWith?: AppMember[];
+  sharedWith?: SubjectMember[];
   /** The draft's checkpoints, newest first. */
   points?: DraftCheckpoint[];
 } = {}) => {
@@ -131,7 +133,7 @@ const fakeApps = ({
   return {
     calls,
     /** Someone shares the App meanwhile, as `member`, the page unaware. */
-    sharedMeanwhile: (member: AppMember): void => {
+    sharedMeanwhile: (member: SubjectMember): void => {
       members = [...members, member];
     },
     /** The App's draft was published as version `version`: it is live. */
@@ -179,7 +181,8 @@ const fakeApps = ({
         return app;
       },
       members: {
-        list: async (): Promise<AppMember[]> => await Promise.resolve(members),
+        list: async (): Promise<SubjectMember[]> =>
+          await Promise.resolve(members),
         candidates: async (): Promise<ShareCandidates> =>
           await Promise.resolve({
             teams: [{ id: "t-fin", name: "Finance team" }],
@@ -191,13 +194,13 @@ const fakeApps = ({
           }),
         add: async (
           _app: string,
-          { type, id, role: as }: AppMemberRef & { role: string }
+          { type, id, role: as }: SubjectMemberRef & { role: string }
         ): Promise<void> => {
           calls.push(`share ${type}:${id} as ${as}`);
           await Promise.resolve();
           members = [...members, memberOf(type, id)];
         },
-        remove: async (_app: string, { type, id }: AppMemberRef) => {
+        remove: async (_app: string, { type, id }: SubjectMemberRef) => {
           calls.push(`unshare ${type}:${id}`);
           await Promise.resolve();
           members = members.filter(

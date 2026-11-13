@@ -8,6 +8,7 @@ import { chatIdSchema, identifierSchema, workspaceIdSchema } from "./ids.ts";
 import type { Json } from "./json.ts";
 import type { RunFileListing } from "./run-files.ts";
 import { isEventType, sealedBuildLimits } from "./sealed-builds.ts";
+import type { MemberRole, SubjectMembersApi } from "./subject-members.ts";
 import type {
   WorkflowCandidateTrace,
   WorkflowDiagram,
@@ -41,27 +42,6 @@ export const workflowNameSchema = z
     /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u,
     "Lowercase letters, digits and dashes, starting and ending with a letter or digit"
   );
-
-/**
- * Whom a workflow is shared with, and in which role: a person, a team, or
- * everyone in a project (@grasp-os/shared/projects).
- */
-export const workflowMemberSchema = z.strictObject({
-  type: z.enum(["person", "team", "project"]),
-  id: identifierSchema,
-});
-
-/**
- * A role in a workflow: `user` follows it and, once starts land, starts
- * it; `builder` also publishes versions, shares and deletes it. The
- * organization role caps it, as for Apps.
- */
-const workflowRoleSchema = z.enum(["user", "builder"]);
-export type WorkflowRole = z.infer<typeof workflowRoleSchema>;
-
-export const workflowShareSchema = workflowMemberSchema.extend({
-  role: workflowRoleSchema,
-});
 
 export const workflowResourceErrors = defineErrorFamily({
   "workflow.resource_invalid": "That isn't a valid request for a workflow.",
@@ -738,7 +718,7 @@ export interface WorkflowResource {
   /** The version published last; null before the first. */
   currentVersion: number | null;
   /** The caller's role in it. */
-  role: WorkflowRole;
+  role: MemberRole;
   /**
    * The business process it serves, if a builder set one: what the UI
    * shows its icon for and groups it by. It grants nothing.
@@ -862,49 +842,6 @@ export interface WorkflowResourceVersion {
  */
 export interface WorkflowVersionSource {
   files: Record<string, string>;
-}
-
-/**
- * The organization's people and teams, by name, to share a workflow with,
- * and the projects the person builds, whose everyone it may be shared with.
- */
-export interface WorkflowShareCandidates {
-  people: { id: string; name: string }[];
-  teams: { id: string; name: string }[];
-  projects: { id: string; name: string }[];
-}
-
-/** Someone a workflow is shared with, as an App's (`AppMember`). */
-export interface WorkflowMember {
-  type: "person" | "team" | "project";
-  id: string;
-  /**
-   * The person's, team's or project's name; null once they are gone, and
-   * for a project the person isn't in, whose name is its members' alone.
-   */
-  name: string | null;
-  role: WorkflowRole;
-  /** Who shared it with them, or last changed their role. */
-  addedBy: string;
-  addedAt: string;
-}
-
-/**
- * Whom a workflow is shared with (`workflowResources.members`), as an
- * App's members (`apps.members`): anyone with a role in it lists them;
- * its builders change them, never Grasp staff.
- */
-export interface WorkflowMembersApi {
-  list: (id: string) => Promise<WorkflowMember[]>;
-  /** Shares it (`workflowShareSchema`), or changes the role of someone it is shared with. */
-  add: (id: string, member: unknown) => Promise<WorkflowMember>;
-  /** Stops sharing it with them (`workflowMemberSchema`). */
-  remove: (id: string, member: unknown) => Promise<void>;
-  /**
-   * Whom its builders may share it with: the organization's people and
-   * teams, by name and ID alone (no address, no role, no team's members).
-   */
-  candidates: (id: string) => Promise<WorkflowShareCandidates>;
 }
 
 /**
@@ -1344,7 +1281,7 @@ export interface WorkflowResourcesApi {
   pause: (id: string) => Promise<WorkflowResource>;
   /** Resumes it, likewise. Resuming one that isn't paused changes nothing. */
   resume: (id: string) => Promise<WorkflowResource>;
-  readonly members: WorkflowMembersApi;
+  readonly members: SubjectMembersApi;
   /** Its triggers: list, create, enable and delete. */
   readonly triggers: WorkflowTriggersApi;
   /**

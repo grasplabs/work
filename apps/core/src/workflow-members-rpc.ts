@@ -1,23 +1,24 @@
 import type {
-  WorkflowMember,
-  WorkflowMembersApi,
-  WorkflowShareCandidates,
-} from "@grasp-os/shared/workflow-resources";
+  ShareCandidates,
+  SubjectMember,
+  SubjectMembersApi,
+} from "@grasp-os/shared/subject-members";
 
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
+import { requireNotStaff, shareCandidates } from "./sharing.ts";
 import {
+  requireWorkflowRole,
   shareWorkflowResource,
   unshareWorkflowResource,
   workflowMembers,
 } from "./workflow-resources.ts";
-import { workflowShareCandidates } from "./workflow-share-candidates.ts";
 
 /** A signed-in person's `workflowResources.members`. */
 export class WorkflowMembersRpc
   extends CoreRpcTarget
-  implements WorkflowMembersApi
+  implements SubjectMembersApi
 {
   readonly #env: Env;
   readonly #check: SessionCheck;
@@ -28,14 +29,14 @@ export class WorkflowMembersRpc
     this.#check = check;
   }
 
-  async list(id: string): Promise<WorkflowMember[]> {
+  async list(id: string): Promise<SubjectMember[]> {
     return await withPerson(
       this.#check,
       async (person) => await workflowMembers(this.#env, person, id)
     );
   }
 
-  async add(id: string, member: unknown): Promise<WorkflowMember> {
+  async add(id: string, member: unknown): Promise<SubjectMember> {
     return await withPerson(
       this.#check,
       async (person) =>
@@ -49,10 +50,12 @@ export class WorkflowMembersRpc
     });
   }
 
-  async candidates(id: string): Promise<WorkflowShareCandidates> {
-    return await withPerson(
-      this.#check,
-      async (person) => await workflowShareCandidates(this.#env, person, id)
-    );
+  /** For whoever may share it: a builder, never Grasp staff. */
+  async candidates(id: string): Promise<ShareCandidates> {
+    return await withPerson(this.#check, async (person) => {
+      requireNotStaff(person);
+      await requireWorkflowRole(this.#env, person, id, "builder");
+      return await shareCandidates(this.#env, person);
+    });
   }
 }

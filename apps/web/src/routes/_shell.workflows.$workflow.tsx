@@ -1,6 +1,7 @@
 import type { Draft } from "@grasp-os/shared/drafts";
 import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import type { SubjectMember } from "@grasp-os/shared/subject-members";
 import type {
   WorkflowActivity,
   WorkflowDraft,
@@ -20,7 +21,6 @@ import {
 import { HistoryIcon, SettingsIcon, WorkflowIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { useCoreRead } from "../apps/use-core-read.ts";
 import { setActiveChat } from "../chat/active-chat.ts";
 import { chatPresence } from "../chat/chat-presence.ts";
 import { slotOf, useChatSubject } from "../chat/chat-subject.ts";
@@ -31,8 +31,7 @@ import {
   showsUnpublishedChanges,
   UnpublishedChanges,
 } from "../drafts/share-with-team.tsx";
-import { memberNames, readMembers } from "../drafts/sharing.tsx";
-import type { Member } from "../drafts/sharing.tsx";
+import { memberNames, useMembers } from "../drafts/sharing.tsx";
 import { useDraft } from "../drafts/use-draft.ts";
 import {
   backCrumb,
@@ -370,7 +369,7 @@ const WorkflowBar = ({
   /** Its draft, for its builders, as read last. */
   draft: Draft | undefined;
   /** Whom it is shared with, for its builders, once read. */
-  members: readonly Member[] | undefined;
+  members: readonly SubjectMember[] | undefined;
   /** Whether Grasp works on it, or checks it. */
   running: boolean;
   /** Whether it is shared and has changes only its builders see. */
@@ -439,22 +438,6 @@ const WorkflowBar = ({
   );
 };
 
-/**
- * Whom it is shared with, for one who builds it (`builds`), read again
- * each time it is shared from here (`shares`); none for anyone else.
- */
-const useMembers = (workflow: string, builds: boolean, shares: number) => {
-  const read = useCoreRead(
-    builds ? `${workflow}/${shares}` : "none",
-    async (session) =>
-      builds
-        ? await readMembers(session, { kind: "workflow", id: workflow })
-        : [],
-    workflow
-  );
-  return read?.state === "ready" ? read.data : undefined;
-};
-
 const WorkflowResourceView = ({
   back,
   view: asked,
@@ -472,22 +455,23 @@ const WorkflowResourceView = ({
   const { resource, draft, runs, activity, names, admin } = read;
   const navigate = useNavigate();
   const builder = resource.role === "builder";
-  const subject = { kind: "workflow", id: resource.id } as const;
+  // What its builders build: none for anyone else.
+  const built = builder
+    ? ({ kind: "workflow", id: resource.id } as const)
+    : undefined;
   const view = shownView(asked, draft !== undefined);
   // Grasp's chat about it, docked beside it for its builders, draws it.
-  useChatSubject(builder ? subject : undefined, resource.name);
-  const chat = useChatAbout(builder ? subject : undefined);
-  const { draft: shared, reread } = useDraft(
-    builder ? subject : undefined,
-    chat.worked
-  );
+  useChatSubject(built, resource.name);
+  const chat = useChatAbout(built);
+  const { draft: shared, reread } = useDraft(built, chat.worked);
   const { draft: latest, onDraft } = useWorkflowDraft(
     resource.id,
     draft,
     shared?.revision
   );
   const [shares, setShares] = useState(0);
-  const members = useMembers(resource.id, builder, shares);
+  // Whom it is shared with, for one who builds it; none for anyone else.
+  const members = useMembers(built, shares);
   const { paused, pauses, onChange } = usePaused(resource, read.identity);
   useEffect(() => {
     if (handedOver === undefined) {

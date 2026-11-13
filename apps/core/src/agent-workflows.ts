@@ -1,8 +1,6 @@
 import type { Permission } from "@grasp-os/shared/permissions";
-import type {
-  WorkflowRole,
-  WorkflowRunStatus,
-} from "@grasp-os/shared/workflow-resources";
+import type { MemberRole } from "@grasp-os/shared/subject-members";
+import type { WorkflowRunStatus } from "@grasp-os/shared/workflow-resources";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
 
@@ -86,7 +84,7 @@ export interface AgentIndependentWorkflow {
   /** The version published last; null before the first. */
   currentVersion: number | null;
   /** The person's role in it. */
-  role: WorkflowRole;
+  role: MemberRole;
 }
 
 /**

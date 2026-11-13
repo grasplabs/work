@@ -15,6 +15,7 @@ import { defineErrorFamily } from "./errors.ts";
 import { identifierSchema } from "./ids.ts";
 import type { AppId, BlueprintId } from "./ids.ts";
 import type { DeclaredPermission, Permission } from "./permissions.ts";
+import type { MemberRole, SubjectMembersApi } from "./subject-members.ts";
 
 // An App's code is a tree of text files, versioned as a whole. Builders
 // and their chats' agents write into the App's one shared draft; a builder
@@ -475,38 +476,12 @@ export interface AppReleasesApi {
   ) => Promise<AppRelease>;
 }
 
-/**
- * A role in one App: a `user` works in its pages; a `builder` also
- * changes its code, its settings and whom it is shared with. The person's
- * role in the organization is a ceiling: someone whose role there is
- * `user` never builds, whatever an App's members say.
- */
-export const appRoleSchema = z.enum(["user", "builder"]);
-export type AppRole = z.infer<typeof appRoleSchema>;
-
-/**
- * Whom an App is shared with: a person or a team of the organization, or
- * everyone in a project (@grasp-os/shared/projects).
- */
-export const appMemberRefSchema = z.strictObject({
-  type: z.enum(["person", "team", "project"]),
-  id: identifierSchema,
-});
-export type AppMemberRef = z.infer<typeof appMemberRefSchema>;
-
 /** Whom an App is made for: a person or a team of the organization. */
 export const appAudienceSchema = z.strictObject({
   type: z.enum(["person", "team"]),
   id: identifierSchema,
 });
 export type AppAudience = z.infer<typeof appAudienceSchema>;
-
-/** Sharing an App with someone, or changing their role in it. */
-export const newAppMemberSchema = z.strictObject({
-  ...appMemberRefSchema.shape,
-  role: appRoleSchema,
-});
-export type NewAppMember = z.input<typeof newAppMemberSchema>;
 
 /**
  * What a builder changes of an App's settings (`AppsApi.update`): any of
@@ -527,63 +502,10 @@ export const appChangesSchema = z
   });
 export type AppChanges = z.input<typeof appChangesSchema>;
 
-/** Someone an App is shared with. Times are ISO 8601. */
-export interface AppMember extends AppMemberRef {
-  /**
-   * The person's, team's or project's name; null once they are gone, and
-   * for a project the person isn't in, whose name is its members' alone.
-   */
-  name: string | null;
-  role: AppRole;
-  /** Who shared it with them, or last changed their role. */
-  addedBy: string;
-  addedAt: string;
-}
-
 /** Someone who may answer for an App (`AppsApi.answerers`). */
 export interface AppAnswerer {
   id: string;
   name: string;
-}
-
-/**
- * Whom an App is shared with. Apps are private: open to their owner
- * (always a builder, and not listed here), to the organization's admins,
- * who manage every App, and to the people and teams they are shared
- * with. Anyone with a role in the App lists them; its builders change
- * them.
- */
-export interface AppMembersApi {
-  list: (app: string) => Promise<AppMember[]>;
-  /**
-   * Shares the App, or changes the role of someone it is shared with.
-   * Refused with `app.share_unreadable`, naming the `sources` and `people`
-   * in its details, when the App has read data (from someone's personal
-   * connection, or a collection they can't read) that anyone it would reach
-   * can't read where it comes from.
-   */
-  add: (app: string, member: NewAppMember) => Promise<AppMember>;
-  /**
-   * Stops sharing the App with them. Their open pages of it stop at
-   * once, or within a few seconds, as every push checks their role again.
-   */
-  remove: (app: string, member: AppMemberRef) => Promise<void>;
-  /**
-   * Whom its builders may share the App with: the organization's people
-   * and teams, by name and ID alone (no address, no role, no team's
-   * members). For whoever may share it (`add`).
-   */
-  candidates: (app: string) => Promise<ShareCandidates>;
-}
-
-/**
- * The organization's people and teams, by name, to share an App with, and
- * the projects the person builds, whose everyone it may be shared with.
- */
-export interface ShareCandidates {
-  people: { id: string; name: string }[];
-  teams: { id: string; name: string }[];
-  projects: { id: string; name: string }[];
 }
 
 /**
@@ -713,7 +635,7 @@ export interface AppBlueprintsApi {
  * App here, as admins are, yet their sessions change none.
  */
 export interface ViewedApp extends App {
-  role: AppRole;
+  role: MemberRole;
 }
 
 export interface AppsApi {
@@ -849,7 +771,7 @@ export interface AppsApi {
   ) => Promise<DataModelChange>;
   readonly files: AppFilesApi;
   readonly releases: AppReleasesApi;
-  readonly members: AppMembersApi;
+  readonly members: SubjectMembersApi;
   readonly blueprints: AppBlueprintsApi;
   readonly integrations: AppIntegrationsApi;
   readonly webhooks: AppWebhooksApi;

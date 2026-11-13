@@ -1,11 +1,12 @@
-import type {
-  AppMember,
-  AppMemberRef,
-  AppRole,
-  ShareCandidates,
-} from "@grasp-os/shared/apps";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { Subject, SubjectKind } from "@grasp-os/shared/subject";
+import type {
+  MemberRole,
+  ShareCandidates,
+  SubjectMember,
+  SubjectMemberRef,
+  SubjectMembersApi,
+} from "@grasp-os/shared/subject-members";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -50,35 +51,44 @@ import { useCoreAction } from "../use-core-action.ts";
 // a builder isn't an admin and can't list the organization's members.
 // Core checks every change and records it in the audit log.
 
-/** Someone it is shared with: a person, a team, or everyone in a project, by name. */
-export type Member = AppMember;
-
-/** Whom a subject is shared with, as both kinds give it. */
-interface MembersApi {
-  list: (id: string) => Promise<Member[]>;
-  add: (
-    id: string,
-    member: AppMemberRef & { role: AppRole }
-  ) => Promise<unknown>;
-  remove: (id: string, member: AppMemberRef) => Promise<unknown>;
-  candidates: (id: string) => Promise<ShareCandidates>;
-}
-
 /** The members of `kind`'s subjects, over `session`. */
-export const membersOf = (session: Session, kind: SubjectKind): MembersApi =>
+export const membersOf = (
+  session: Session,
+  kind: SubjectKind
+): SubjectMembersApi =>
   kind === "app" ? session.apps.members : session.workflowResources.members;
 
 /** Whom `subject` is shared with. */
 export const readMembers = async (
   session: Session,
   { kind, id }: Subject
-): Promise<Member[]> => await membersOf(session, kind).list(id);
+): Promise<SubjectMember[]> => await membersOf(session, kind).list(id);
+
+/**
+ * Whom `subject` is shared with, read again each time it is shared from
+ * the page (`shares`, one more each time); none to read without a
+ * subject (someone it isn't read for). Undefined while it is read.
+ */
+export const useMembers = (
+  subject: Subject | undefined,
+  shares = 0
+): readonly SubjectMember[] | undefined => {
+  const scope =
+    subject === undefined ? "none" : `${subject.kind}:${subject.id}`;
+  const read = useCoreRead(
+    `${scope}/${shares}`,
+    async (session) =>
+      subject === undefined ? [] : await readMembers(session, subject),
+    scope
+  );
+  return read?.state === "ready" ? read.data : undefined;
+};
 
 /**
  * Who uses it by name, as its status says it: the teams, people and
  * projects it is shared with, those with a name the person may read.
  */
-export const memberNames = (members: readonly Member[]): string[] =>
+export const memberNames = (members: readonly SubjectMember[]): string[] =>
   members.flatMap(({ name }) => (name === null ? [] : [name]));
 
 /** How a member is named: a team, and everyone in a project, say so. */
@@ -90,7 +100,11 @@ interface MemberWords {
 }
 
 /** Who `member` is, in words: a person told apart from a namesake. */
-const memberName = (member: Member, words: MemberWords, apart: PeopleApart) => {
+const memberName = (
+  member: SubjectMember,
+  words: MemberWords,
+  apart: PeopleApart
+) => {
   if (member.type === "project") {
     return member.name === null
       ? words.unnamedProject
@@ -115,7 +129,7 @@ const ShareMembers = ({
   subject: Subject;
   owner: string;
   /** Whom it is shared with now, left out of the list. */
-  members: readonly AppMemberRef[];
+  members: readonly SubjectMemberRef[];
   onChanged: () => Promise<void>;
 }) => {
   const { t } = useLingui();
@@ -125,7 +139,7 @@ const ShareMembers = ({
   // namesake it is shared with already, or its owner.
   const apart = usePeopleApart(candidates?.people ?? []);
   const shared = new Set(members.map(({ type, id }) => `${type}:${id}`));
-  const isOffered = (type: AppMemberRef["type"], id: string): boolean =>
+  const isOffered = (type: SubjectMemberRef["type"], id: string): boolean =>
     !shared.has(`${type}:${id}`) && !(type === "person" && id === owner);
   const read = async (): Promise<void> => {
     if (candidates !== undefined) {
@@ -139,7 +153,10 @@ const ShareMembers = ({
       setCandidates(listed);
     }
   };
-  const share = async (member: AppMemberRef, role: AppRole): Promise<void> => {
+  const share = async (
+    member: SubjectMemberRef,
+    role: MemberRole
+  ): Promise<void> => {
     await run(async (session) => {
       await changeThenRefresh(async () => {
         await membersOf(session, subject.kind).add(subject.id, {
@@ -197,7 +214,7 @@ const MemberRow = ({
   onChanged,
 }: {
   subject: Subject;
-  member: Member;
+  member: SubjectMember;
   editable: boolean;
   /** Telling apart the people it is shared with of the same name. */
   apart: PeopleApart;
@@ -214,9 +231,9 @@ const MemberRow = ({
     },
     apart
   );
-  const ref: AppMemberRef = { type: member.type, id: member.id };
+  const ref: SubjectMemberRef = { type: member.type, id: member.id };
   const change = async (
-    action: (members: MembersApi) => Promise<unknown>
+    action: (members: SubjectMembersApi) => Promise<unknown>
   ): Promise<void> => {
     await run(async (session) => {
       await changeThenRefresh(async () => {

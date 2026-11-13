@@ -7,8 +7,8 @@ import { drizzle } from "drizzle-orm/d1";
 
 import { keepAuditEvent } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
+import { organizationPeopleAndTeams } from "./sharing.ts";
 import { requireWorkflowRole, versionContract } from "./workflow-resources.ts";
-import { organizationPeopleAndTeams } from "./workflow-share-candidates.ts";
 
 // What a person needs to start an independent workflow by hand from its
 // page (GRA-1305): the version a start would run, and the JSON Schema its

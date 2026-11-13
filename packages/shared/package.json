@@ -65,6 +65,7 @@
     "./brain-sources": "./src/brain-sources.ts",
     "./skills": "./src/skills.ts",
     "./subject": "./src/subject.ts",
+    "./subject-members": "./src/subject-members.ts",
     "./thinking": "./src/thinking.ts",
     "./brain-records": "./src/brain-records.ts",
     "./brain-exports": "./src/brain-exports.ts",

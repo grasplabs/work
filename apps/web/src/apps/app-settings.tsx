@@ -3,13 +3,13 @@ import type {
   App,
   AppAnswerer,
   AppChanges,
-  AppMember,
   ViewedApp,
 } from "@grasp-os/shared/apps";
 import type { OfferedCatalog } from "@grasp-os/shared/connect";
 import type { SurfaceSummary } from "@grasp-os/shared/pages";
 import { canBuild, isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import type { SubjectMember } from "@grasp-os/shared/subject-members";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
 import { Input } from "@grasp-os/ui/components/input";
 import {
@@ -326,7 +326,7 @@ const PuttingAway = ({ app }: { app: App }) => {
 
 /** What General reads: whom it is shared with, names, and who may answer for it. */
 interface GeneralRead {
-  members: AppMember[];
+  members: SubjectMember[];
   people: ReadonlyMap<string, string>;
   /**
    * Who may answer for it, as core decides (`apps.answerers`); null when
@@ -479,7 +479,7 @@ const GeneralForm = ({
     names.set(id, name);
   }
   const personName = (userId: string): string => names.get(userId) ?? userId;
-  const nameOf = (member: AppMember): string =>
+  const nameOf = (member: SubjectMember): string =>
     member.name ??
     (member.type === "person" ? personName(member.id) : member.id);
   // Whom it may be made for: a person or team it is shared with, never a
