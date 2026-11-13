@@ -89,15 +89,16 @@ const credentials: readonly (readonly [
 // link is parsed, never matched by pattern: its HTML character references
 // are decoded as a browser reads an `href` (`entities`, so `&amp;`,
 // `&#38;`, `&#x26;`, `&#038;` and `&AMP;` all separate parameters), it is
-// checked as a URL, and its query is read pair by pair; a parameter whose
-// value is itself a URL (a redirect's target) is read the same way, once.
-// Only the values of those parameters change, found by their offsets in
-// one pass (never searched for, which a link of many pairs would make
-// quadratic): a link with none comes back byte for byte as it was, one
-// with some comes back as the URL standard serializes it (percent-encoded,
-// so no character a reference stood for breaks out of what held the
-// link), and a word outside a link (`R&D`, `code=42`) is never one. JSON escapes are not decoded: what is redacted (a tool's
-// output as JSON text, a chat's text) holds `&` as itself.
+// parsed by `URL`, and its query read by `URL`'s own `searchParams`; a
+// parameter whose value is itself a URL (a redirect's target) is read the
+// same way, once. Where a link ends is GitHub Flavored Markdown's rule as
+// written (`linkEndOf`). Only the values of those parameters change: a
+// link with none comes back byte for byte as it was, one with some comes
+// back as the URL standard serializes it (percent-encoded, so no character
+// a reference stood for breaks out of what held the link), and a word
+// outside a link (`R&D`, `code=42`) is never one. JSON escapes are not
+// decoded: what is redacted (a tool's output as JSON text, a chat's text)
+// holds `&` as itself.
 // Not caught: a credential in a URL's path, and an opaque download URL
 // that grants by its whole self. What is left is bounded: such text
 // reaches only the person who read it (the Brain keeps a connection's
@@ -115,65 +116,6 @@ const linkPattern = /\b[a-z][a-z\d+.-]{0,31}:\/\/[^\s"'<>\\^`{|}]+/giu;
 
 /** The query parameters that sign or grant a link, by name. */
 const grantingName = /^(?:[\w-]*signature|sig|code|tempauth|pwd)$/iu;
-
-/** `component` decoded as a URL's query writes it, or itself if it isn't. */
-const decoded = (component: string): string => {
-  try {
-    return decodeURIComponent(component.replaceAll("+", " "));
-  } catch {
-    return component;
-  }
-};
-
-/**
- * `link` (a URL as text, its character references already decoded) with
- * the values of its granting parameters replaced with `[redacted]`, and,
- * with `nested`, a parameter whose value is itself a URL read the same way
- * once; `undefined` when it isn't a URL or nothing in it changes. Its
- * query is walked once, pair by pair, by offset: each pair ends at `&` or
- * the query's end, its name at its first `=`; only a replaced value's
- * span is written anew, every other character as it was. Linear in the
- * link, whatever its pairs hold.
- */
-const redactedQuery = (link: string, nested: boolean): string | undefined => {
-  // The query is what lies between the first `?` and the first `#`: a `?`
-  // after the `#` is the fragment's.
-  const hash = link.indexOf("#");
-  const end = hash === -1 ? link.length : hash;
-  const query = link.indexOf("?");
-  if (query === -1 || query > end || !URL.canParse(link)) {
-    return undefined;
-  }
-  let out = "";
-  // Written up to here; the pair being read starts at `start`, its `=` at `equals`.
-  let written = 0;
-  let start = query + 1;
-  let equals = -1;
-  for (let at = start; at <= end; at += 1) {
-    const char = at < end ? link[at] : "&";
-    if (char === "=" && equals === -1) {
-      equals = at;
-    } else if (char === "&") {
-      if (equals !== -1) {
-        const value = link.slice(equals + 1, at);
-        let to: string | undefined;
-        if (grantingName.test(decoded(link.slice(start, equals)))) {
-          to = "[redacted]";
-        } else if (nested) {
-          const inner = redactedQuery(decoded(value), false);
-          to = inner === undefined ? undefined : encodeURIComponent(inner);
-        }
-        if (to !== undefined) {
-          out += link.slice(written, equals + 1) + to;
-          written = at;
-        }
-      }
-      start = at + 1;
-      equals = -1;
-    }
-  }
-  return written === 0 ? undefined : out + link.slice(written);
-};
 
 /** Characters that end no link when they end what was found (GFM §6.9). */
 const trailingPunctuation = new Set(["?", "!", ".", ",", ":", "*", "_", "~"]);
@@ -227,39 +169,12 @@ const linkEndOf = (found: string): number => {
   return end;
 };
 
-/**
- * Of what GFM cuts off a link's end, the characters that can be part of a
- * token's value: the marks among RFC 3986's unreserved characters
- * (letters, digits, `-`, `.`, `_`, `~`; §2.3) and `*`, which the
- * `application/x-www-form-urlencoded` serializer leaves raw too. A
- * base64url, hex or JWT signature can end in one.
- */
-const valueMarks = new Set(["_", "~", ".", "*"]);
-
-/**
- * Whether the last pair of `link`'s query (decoded, cut by `linkEndOf`)
- * has a granting name: then what GFM cut after it may be the end of its
- * value. Not when the link has a fragment, which holds what follows.
- */
-const endsInGrant = (link: string): boolean => {
-  const query = link.indexOf("?");
-  if (query === -1 || link.includes("#")) {
-    return false;
-  }
-  const last = link.lastIndexOf("&") + 1 || query + 1;
-  const equals = link.indexOf("=", Math.max(last, query + 1));
-  return (
-    equals !== -1 &&
-    grantingName.test(decoded(link.slice(Math.max(last, query + 1), equals)))
-  );
-};
-
 /** A character no link holds as written: what ends one (`linkPattern`). */
 const outsideLink = /[\s"'<>\\^`{|}]/gu;
 
 /**
- * `link` (decoded, its granting values replaced) as the URL standard
- * writes it: its query by the `application/x-www-form-urlencoded`
+ * `url` (its granting values replaced) as the URL standard writes it: its
+ * query by the `application/x-www-form-urlencoded`
  * serializer (every character but letters, digits and `*-._`
  * percent-encoded, so `[redacted]` reads `%5Bredacted%5D`), the whole by
  * `URL`'s `href` (its host lower-cased, an IDN as punycode, a path
@@ -270,13 +185,39 @@ const outsideLink = /[\s"'<>\\^`{|}]/gu;
  * outside the link (an HTML attribute, a JSON string, a Markdown link) is
  * broken out of.
  */
-const serialized = (link: string): string => {
-  const url = new URL(link);
-  url.search = url.searchParams.toString();
+const serialized = (url: URL): string =>
   // `encodeURIComponent` leaves `'` as it is, one of its unreserved marks.
-  return url.href.replace(outsideLink, (char) =>
+  url.href.replace(outsideLink, (char) =>
     char === "'" ? "%27" : encodeURIComponent(char)
   );
+
+/**
+ * Sets `url`'s granting parameters to `[redacted]`, and, with `nested`, a
+ * parameter whose value is itself a URL read the same way once: the
+ * query as `URL`'s `searchParams` reads it (each name and value decoded,
+ * every pair in order, a name given twice twice), written back by its
+ * serializer only when something changed. Whether anything did.
+ */
+const redactParams = (url: URL, nested: boolean): boolean => {
+  let changed = false;
+  const pairs = [...url.searchParams].map(([name, value]): [string, string] => {
+    if (grantingName.test(name)) {
+      changed = true;
+      return [name, "[redacted]"];
+    }
+    if (nested && URL.canParse(value)) {
+      const inner = new URL(value);
+      if (redactParams(inner, false)) {
+        changed = true;
+        return [name, inner.href];
+      }
+    }
+    return [name, value];
+  });
+  if (changed) {
+    url.search = new URLSearchParams(pairs).toString();
+  }
+  return changed;
 };
 
 /**
@@ -288,27 +229,14 @@ const serialized = (link: string): string => {
  */
 const redactLinks = (text: string): string =>
   text.replace(linkPattern, (found) => {
-    // What ends no link stays outside it, byte for byte (`linkEndOf`);
-    // but when the link ends in a granting value, the marks GFM cut that
-    // can end such a value (`valueMarks`) go with it, up to the first that
-    // can't: so `sig=S_).` redacts `S_` and leaves `).`, `sig=S).` leaves
-    // `).`, and `[t](…?sig=S)` keeps its `)`. A sentence's `.` straight
-    // after a secret is redacted with it: accepted, as a secret's last `.`
-    // or `_` must never be left behind.
-    let end = linkEndOf(found);
-    if (
-      end < found.length &&
-      endsInGrant(decodeHTMLAttribute(found.slice(0, end)))
-    ) {
-      while (end < found.length && valueMarks.has(found[end] ?? "")) {
-        end += 1;
-      }
+    // What ends no link stays outside it, byte for byte (`linkEndOf`).
+    const end = linkEndOf(found);
+    const link = decodeHTMLAttribute(found.slice(0, end));
+    if (!URL.canParse(link)) {
+      return found;
     }
-    const link = found.slice(0, end);
-    const redacted = redactedQuery(decodeHTMLAttribute(link), true);
-    return redacted === undefined
-      ? found
-      : serialized(redacted) + found.slice(end);
+    const url = new URL(link);
+    return redactParams(url, true) ? serialized(url) + found.slice(end) : found;
   });
 
 /** `text` with every credential in it ({@link credentials}) redacted. */

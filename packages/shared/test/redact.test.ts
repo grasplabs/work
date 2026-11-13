@@ -55,9 +55,10 @@ describe("redacting credentials", () => {
       "https://acme.blob.core.windows.net/c/q.pdf?sv=2024&sig=%5Bredacted%5D",
       "https://d111.cloudfront.net/q.pdf?Expires=1795000000&Signature=%5Bredacted%5D",
       "https://acme.blob.core.windows.net/c/q.pdf?sv=2024&sig=%5Bredacted%5D",
-      `https://app.acme.test/out?to=${encodeURIComponent(
-        "https://bucket.s3.amazonaws.com/q.pdf?x=1&X-Amz-Signature=[redacted]"
-      )}`,
+      // The target as a URL writes it, its own value encoded once more.
+      `https://app.acme.test/out?${new URLSearchParams({
+        to: "https://bucket.s3.amazonaws.com/q.pdf?x=1&X-Amz-Signature=%5Bredacted%5D",
+      }).toString()}`,
     ]);
   });
 
@@ -124,45 +125,13 @@ describe("redacting credentials", () => {
       "[Quote](https://h/q?sig=%5Bredacted%5D)",
       "[Quote](https://h/q?sig=%5Bredacted%5D&a=1)",
       "https://h/a_(b)?sig=%5Bredacted%5D",
-      // A sentence's `.` straight after a secret goes with it.
-      "See https://h/q?sig=%5Bredacted%5D",
+      "See https://h/q?sig=%5Bredacted%5D.",
       "See https://h/q?sig=%5Bredacted%5D, then",
       "(see https://h/q?sig=%5Bredacted%5D)",
       "(see https://h/q?sig=%5Bredacted%5D).",
       "<https://h/q?sig=%5Bredacted%5D> and 'https://h/q?sig=%5Bredacted%5D'",
       "https://h/q?sig=%5Bredacted%5D&amp;",
     ]);
-  });
-
-  it("redacts a granting value whole, its last `_`, `~`, `.` or `*` too, and leaves the punctuation after it", () => {
-    expect(
-      [
-        "https://h/q?a=1&sig=abc_",
-        "https://h/q?sig=___ next",
-        "https://h/q?sig=._~* next",
-        "https://app.example/cb?code=4/0Aabc_ next",
-        "https://h/q?sig=S_).",
-        "[t](https://h/q?sig=S)",
-        "See https://h/q?sig=S.",
-        // A last pair that grants nothing: its trailing `_` stays outside.
-        "https://h/q?sig=S&page=2_",
-      ].map(redact)
-    ).toStrictEqual([
-      "https://h/q?a=1&sig=%5Bredacted%5D",
-      "https://h/q?sig=%5Bredacted%5D next",
-      "https://h/q?sig=%5Bredacted%5D next",
-      "https://app.example/cb?code=%5Bredacted%5D next",
-      "https://h/q?sig=%5Bredacted%5D).",
-      "[t](https://h/q?sig=%5Bredacted%5D)",
-      "See https://h/q?sig=%5Bredacted%5D",
-      "https://h/q?sig=%5Bredacted%5D&page=2_",
-    ]);
-  });
-
-  it("swallows a megabyte of `_` after a granting value in one pass", () => {
-    expect(redact(`https://h/q?sig=S${"_".repeat(1_000_000)} end`)).toBe(
-      "https://h/q?sig=%5Bredacted%5D end"
-    );
   });
 
   it("leaves any text that names no granting parameter byte for byte, wherever its links end", () => {
