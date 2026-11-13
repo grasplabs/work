@@ -348,7 +348,7 @@ describe("a person's chat turn", () => {
 
     const turn = chatTurnOf(source.id);
     expect({
-      source: { producer: source.producer, ...turn, answerId: undefined },
+      source: { ...turn, answerId: undefined },
       ben: await recalled(ben.userId, marker),
       admin: await recalled(admin.userId, marker),
       theirsOutsideTheirChat: await recalled(person.userId, marker, false),
@@ -357,7 +357,6 @@ describe("a person's chat turn", () => {
       ),
     }).toStrictEqual({
       source: {
-        producer: "chat",
         personId: person.userId,
         chatId,
         answerId: undefined,

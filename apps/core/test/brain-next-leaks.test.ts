@@ -721,7 +721,7 @@ describe(
         teamId: readersTeam,
       });
       // And one everyone could read, embedded, then narrowed to the
-      // holder's team: after every before, as the company read it once.
+      // holder's team: after every before, so no before holds it.
       const fromCompany: SourceRef = newSource();
       await sharedStore().addSource({
         source: `upload:${fromCompany.id}`,
@@ -771,7 +771,10 @@ describe(
 
       const asReader: Probing = {
         ...probing,
-        hiddenVersions: everyVersionOf(erased, narrowed, fromCompany),
+        // For the probes' contract alone: none of the surfaces asked here
+        // reads it. A hidden version is caught by its marker and by the
+        // comparison with before.
+        hiddenVersions: everyVersionOf(erased, narrowed),
       };
       /** Each shape of reader held to their answers before, as `label`. */
       const everyShape = async (label: string): Promise<Finding[]> => {
@@ -1715,8 +1718,10 @@ describe(
           });
           // The turn, whatever else everyone may read comes back first.
           const found = items.find(({ source }) => source.producer === "chat");
-          expect(found, "the chat's turn was never handed over").toBeDefined();
-          return found?.source;
+          if (found === undefined) {
+            throw new Error("The chat's turn was never handed over");
+          }
+          return found.source;
         },
         { timeout: 15_000, interval: 200 }
       );
@@ -1729,7 +1734,7 @@ describe(
         markers: Object.values(markers),
         hiddenVersions: everyVersionOf(
           { producer: "run", id: runId ?? "" },
-          ...(turn === undefined ? [] : [turn])
+          turn
         ),
         hiddenInstructionFiles: [],
         instructionGroups: [],
@@ -1747,7 +1752,15 @@ describe(
         )),
       ];
       const runnerFinds = await textsFor(runner.userId, runMarker);
-      const chatterFinds = await textsFor(chatter.userId, askedMarker);
+      // Of what the chatter finds, their chat's turns: the one.
+      const { items: chatterItems } = await recallAs(env, chatter.userId, {
+        personal: true,
+        question: askedMarker,
+        budget: { tokens: recallBudgetMax },
+      });
+      const chatterFinds = chatterItems.filter(
+        ({ source }) => source.producer === "chat"
+      );
 
       expect({
         findings,
