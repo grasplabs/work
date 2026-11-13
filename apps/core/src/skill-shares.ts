@@ -3,6 +3,7 @@ import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { identifierSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { permissionErrors } from "@grasp-os/shared/permissions";
 import { isMemberAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { skillErrors } from "@grasp-os/shared/skills";
@@ -26,6 +27,7 @@ import {
   outboxedIfChanged,
   outboxedWhere,
 } from "./audit-outbox.ts";
+import { activeMember } from "./auth/membership-sql.ts";
 import {
   addCompanySkill,
   addOwnSkill,
@@ -39,7 +41,7 @@ import {
   retireCompanySkill,
 } from "./brain-next.ts";
 import type { SkillCardAt } from "./brain-next.ts";
-import { skillShares, users } from "./db/core/schema.ts";
+import { personErasures, skillShares, users } from "./db/core/schema.ts";
 import { shippedSkills } from "./shipped-skills.ts";
 
 // Writing skills, and sharing one with the company (GRA-1754). Threat
@@ -324,12 +326,18 @@ export type Closer = Actor | "system";
 /**
  * Which shares a close takes, and why:
  * - `replaced`: their person asked again for that skill, or deleted it
- *   for good. A waiting one goes; an approved one with no add landed keeps
- *   its record and drops its text.
- * - `declined`: an admin declined it, waiting or approved with no add
- *   landed; its text goes.
- * - `unasked`: an ask just written for a skill deleted meanwhile.
- * - `erased`: their person is erased; every share of theirs goes.
+ *   for good.
+ * - `declined`: an admin declined it.
+ * - `unasked`: an ask just written whose skill couldn't be read again
+ *   (deleted meanwhile, its person gone, or the read failed).
+ * - `erased`: their person is erased.
+ *
+ * One rule: what closes is every open share among them (`isOpen`:
+ * waiting, or approved with no add landed and its text kept), whatever the
+ * reason. Withdrawn by their person or by core (`replaced`, `unasked`), a
+ * waiting one goes and an approved one keeps its record and drops its
+ * text; declined, it says so and drops its text; erased, every row of
+ * theirs goes, closed ones too.
  */
 export type Closing =
   | { why: "replaced"; requestedBy: string; name: string }
@@ -393,11 +401,12 @@ export const closingShares = async (
     await recordLanded(env, by, share);
   }
   switch (closing.why) {
-    case "replaced": {
+    case "replaced":
+    case "unasked": {
       return [
         db
           .delete(skillShares)
-          .where(and(taken, eq(skillShares.status, "pending"))),
+          .where(and(taken, isOpen, eq(skillShares.status, "pending"))),
         db.update(skillShares).set({ text: null }).where(and(taken, isOpen)),
       ];
     }
@@ -412,13 +421,6 @@ export const closingShares = async (
             text: null,
           })
           .where(and(taken, isOpen)),
-      ];
-    }
-    case "unasked": {
-      return [
-        db
-          .delete(skillShares)
-          .where(and(taken, eq(skillShares.status, "pending"))),
       ];
     }
     case "erased": {
@@ -529,28 +531,43 @@ export const shareOwnSkill = async (
   });
   const id = crypto.randomUUID();
   const db = drizzle(env.DB);
+  // Written only while they are a member, not removed, and no erasure of
+  // them has begun, checked in the write itself: removed and erased since
+  // the read, nothing of theirs is written after their erasure took their
+  // shares (the check other writes for a person make, app-webhook-queue.ts).
+  const current = sql`${activeMember(by.userId)}
+    AND NOT EXISTS (SELECT 1 FROM ${personErasures}
+      WHERE ${personErasures.userId} = ${by.userId})`;
   await auditedBatch(env, db, [
     ...replacing,
-    db.insert(skillShares).values({
-      id,
-      name: read.name,
-      text: read.text,
-      requestedBy: by.userId,
-      requestedAt: new Date(),
-      status: "pending",
-    }),
+    db.insert(skillShares).select(
+      sql`SELECT ${id}, ${read.name}, ${read.text}, ${by.userId}, ${Date.now()}, 'pending', NULL, NULL, NULL
+          WHERE ${current}`
+    ),
     outboxedIfChanged(db, shareEntry(by, "requested", id)),
   ]);
+  const [written] = await db
+    .select({ id: skillShares.id })
+    .from(skillShares)
+    .where(eq(skillShares.id, id));
+  if (written === undefined) {
+    throw permissionErrors.create("permission.person_inactive");
+  }
   // Their skill could have been deleted for good meanwhile
-  // (`removeOwnSkill` erases it, then drops what waits of it): asked
-  // again after the share is written, so whichever lands last, no share
-  // of a deleted skill is left waiting.
-  const still = await readSkillAs(env, by.userId, {
-    scope: "person",
-    ...wanted,
-  });
+  // (`removeOwnSkill` erases it, then closes what is open of it), or they
+  // were removed: read again after the share is written, so whichever
+  // lands last, nothing open is left of a skill not read again. A read
+  // that fails closes it too. Closed by core (`system`), whoever is still
+  // a member, and first recording an add that landed meanwhile.
+  let still: Awaited<ReturnType<typeof readSkillAs>>;
+  try {
+    still = await readSkillAs(env, by.userId, { scope: "person", ...wanted });
+  } catch (error) {
+    await db.batch(await closingShares(env, "system", { why: "unasked", id }));
+    throw error;
+  }
   if (still === null) {
-    await db.batch(await closingShares(env, by, { why: "unasked", id }));
+    await db.batch(await closingShares(env, "system", { why: "unasked", id }));
     throw skillErrors.create("skills.not_found");
   }
   return shareOf(await shareById(env, id));

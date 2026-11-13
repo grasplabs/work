@@ -22,7 +22,11 @@ import {
   retryErasures,
 } from "../src/person-erasure.ts";
 import { personalWorkspaceId } from "../src/personal-workspace.ts";
-import { approveShare, retireSkill } from "../src/skill-shares.ts";
+import {
+  approveShare,
+  retireSkill,
+  shareOwnSkill,
+} from "../src/skill-shares.ts";
 import { chatOf, codeResults, codeStep, model, says } from "./agent-chat.ts";
 import { eventsAfterWithHead, logHead } from "./audit-events.ts";
 import { ageOwnErasure } from "./brain-next-own-store.ts";
@@ -205,15 +209,19 @@ type Hook = () => Promise<unknown>;
  * what lands while a call is on its way. An after hook answering `"lose"`
  * loses the reply, as a dropped connection would, after the store wrote.
  */
-const hooked = (hooks: {
-  before?: Record<string, Record<number, Hook>>;
-  after?: Record<string, Record<number, Hook>>;
-}): Env => {
+const hooked = (
+  hooks: {
+    before?: Record<string, Record<number, Hook>>;
+    after?: Record<string, Record<number, Hook>>;
+  },
+  /** The store hooked: the shared one, or `person:<id>`, someone's own. */
+  storeName = "brain"
+): Env => {
   const calls = new Map<string, number>();
   const binding = env.BRAIN_STORE;
   const getByName = (named: string) => {
     const stub = binding.getByName(named);
-    if (named !== "brain") {
+    if (named !== storeName) {
       return stub;
     }
     return new Proxy(stub, {
@@ -2373,6 +2381,234 @@ describe("writing and sharing skills", setUpTime, () => {
       live: [["Left", 1]],
       kept: [],
       added: [[{ type: "system" }, { version: 1 }]],
+    });
+  });
+
+  it("asks nothing for a person removed and erased while their ask was on its way, before or after its share was written", async () => {
+    /** An ask of a new skill of a new builder, erased at `moment`. */
+    const erasedWhileAsking = async (moment: "before" | "after") => {
+      const [asker, admin] = await Promise.all([
+        signedInApi(idp, "builder"),
+        signedInApi(idp, "admin"),
+      ]);
+      const name = nameOf(`erased-${moment}`);
+      const saved = await asker.api.skills.save(skillText(name, "Mine"));
+      const person = await asker.api.whoami();
+      const head = await logHead();
+      const erase: Hook = async () => {
+        await admin.api.members.remove(asker.userId);
+        await admin.api.members.erase(asker.userId, String(asker.person.name));
+      };
+      // The first read of their skill answered, or the share is written
+      // and its second read is on its way.
+      const hooks =
+        moment === "before"
+          ? { after: { readVersion: { 1: erase } } }
+          : { before: { readVersion: { 2: erase } } };
+      const asked = await outcome(
+        shareOwnSkill(
+          hooked(hooks, `person:${asker.userId}`),
+          person,
+          name,
+          saved.version
+        )
+      );
+      const { requests } = await admin.api.skills.overview();
+      return {
+        asked,
+        rows: await drizzle(env.DB)
+          .select({ id: skillShares.id })
+          .from(skillShares)
+          .where(eq(skillShares.requestedBy, asker.userId)),
+        waiting: requests?.filter(({ name: named }) => named === name),
+        events: await skillEventsAfter(head),
+      };
+    };
+
+    expect({
+      before: await erasedWhileAsking("before"),
+      after: await erasedWhileAsking("after"),
+    }).toStrictEqual({
+      before: {
+        asked: "permission.person_inactive",
+        rows: [],
+        waiting: [],
+        events: [],
+      },
+      after: {
+        // Their own store, erased whole, answers as one that never held
+        // anything: no such skill.
+        asked: "skills.not_found",
+        rows: [],
+        waiting: [],
+        // Asked while they were a member; nothing of it is left.
+        events: ["skill.share.requested"],
+      },
+    });
+  });
+
+  it("closes a share just written when its skill can't be read again, so nothing unread waits", async () => {
+    const asker = await signedInApi(idp, "user");
+    const name = nameOf("unread-again");
+    const saved = await asker.api.skills.save(skillText(name, "Mine"));
+    const person = await asker.api.whoami();
+    const asked = await outcome(
+      shareOwnSkill(
+        hooked(
+          {
+            before: {
+              readVersion: {
+                2: async () =>
+                  await Promise.reject(new Error("Brain down, for the test")),
+              },
+            },
+          },
+          `person:${asker.userId}`
+        ),
+        person,
+        name,
+        saved.version
+      )
+    );
+    const { shares } = await overviewOf(asker.api);
+
+    expect({
+      asked,
+      shares: shares.filter(({ name: named }) => named === name),
+    }).toStrictEqual({ asked: "Error: Brain down, for the test", shares: [] });
+  });
+
+  it("never publishes a skill deleted while its ask was on its way, approved meanwhile and its add failed", async () => {
+    const [asker, admin, member] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    const name = nameOf("deleted-while-asked");
+    const saved = await asker.api.skills.save(skillText(name, "Deleted"));
+    const person = await asker.api.whoami();
+    const deciding = await admin.api.whoami();
+    const head = await logHead();
+    let shareId = "";
+    const asked = await outcome(
+      shareOwnSkill(
+        hooked(
+          {
+            after: {
+              // Read: the person deletes it, before the share is written.
+              readVersion: {
+                1: async () => {
+                  await asker.api.skills.remove(name);
+                },
+              },
+            },
+            before: {
+              // Written: an admin approves it, and its add fails.
+              readVersion: {
+                2: async () => {
+                  const [row] = await drizzle(env.DB)
+                    .select({ id: skillShares.id })
+                    .from(skillShares)
+                    .where(eq(skillShares.name, name));
+                  shareId = row?.id ?? "";
+                  await outcome(
+                    approveShare(
+                      sharedStoreFailing("addInstructions"),
+                      deciding,
+                      shareId
+                    )
+                  );
+                },
+              },
+            },
+          },
+          `person:${asker.userId}`
+        ),
+        person,
+        name,
+        saved.version
+      )
+    );
+    const again = await outcome(admin.api.skills.approve(shareId));
+
+    expect({
+      asked,
+      again,
+      live: await liveOf(member.api, name),
+      kept: await keptText(shareId),
+      events: await skillEventsAfter(head),
+    }).toStrictEqual({
+      asked: "skills.not_found",
+      again: "skills.not_found",
+      live: [],
+      kept: [null],
+      events: [
+        "skill.share.requested",
+        "skill.share.approved",
+        "skill.share.approve_failed",
+      ],
+    });
+  });
+
+  it("shares the version asked for when the skill is edited while the ask is on its way, and says a newer one is saved", async () => {
+    const [asker, admin] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+    ]);
+    const name = nameOf("edited-while-asked");
+    const saved = await asker.api.skills.save(skillText(name, "Asked"));
+    const person = await asker.api.whoami();
+    await shareOwnSkill(
+      hooked(
+        {
+          after: {
+            readVersion: {
+              1: async () =>
+                await asker.api.skills.save(skillText(name, "Edited")),
+            },
+          },
+        },
+        `person:${asker.userId}`
+      ),
+      person,
+      name,
+      saved.version
+    );
+    const { requests } = await admin.api.skills.overview();
+    const { shares } = await overviewOf(asker.api);
+
+    expect({
+      card: requests
+        ?.filter(({ name: named }) => named === name)
+        .map(({ text }) => text.includes("Asked")),
+      outdated: shares
+        .filter(({ name: named }) => named === name)
+        .map(({ outdated }) => outdated),
+    }).toStrictEqual({ card: [true], outdated: [true] });
+  });
+
+  it("leaves one waiting share when its person asks twice at once", async () => {
+    const [asker, admin] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+    ]);
+    const name = nameOf("asked-twice");
+    const first = await asker.api.skills.save(skillText(name, "First"));
+    const second = await asker.api.skills.save(skillText(name, "Second"));
+    const head = await logHead();
+    await Promise.allSettled([
+      asker.api.skills.share(name, first.version),
+      asker.api.skills.share(name, second.version),
+    ]);
+    const { requests } = await admin.api.skills.overview();
+    const cards = requests?.filter(({ name: named }) => named === name);
+
+    expect({
+      cards: cards?.length,
+      events: await skillEventsAfter(head),
+    }).toStrictEqual({
+      cards: 1,
+      events: ["skill.share.requested", "skill.share.requested"],
     });
   });
 
