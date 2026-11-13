@@ -83,16 +83,7 @@ const CheckRow = ({ check }: { check: ReadinessCheck }) => (
       </Badge>
     </div>
     <div className="flex flex-wrap items-start justify-between gap-2">
-      <p
-        className={cn(
-          "min-w-0 flex-1",
-          check.required &&
-            check.status === "blocked" &&
-            "text-status-attention"
-        )}
-      >
-        {check.words}
-      </p>
+      <p className="min-w-0 flex-1">{check.words}</p>
       {check.link === undefined ? null : <CheckLinkTo link={check.link} />}
     </div>
   </li>
