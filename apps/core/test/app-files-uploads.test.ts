@@ -7,7 +7,6 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { revokeRelease } from "../src/release-retention.ts";
-import { commitApp } from "./app-definitions.ts";
 import {
   appsOf,
   answerOf,
@@ -30,7 +29,7 @@ import {
   uploadKey,
   utf8,
 } from "./app-files.ts";
-import { published as publishedApp } from "./apps.ts";
+import { commitApp, published as publishedApp } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { person as actingPerson } from "./sealed-apps.ts";
 import { clientOrigin } from "./sign-in-config.ts";
@@ -248,12 +247,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
     const builder = await personApi("builder");
     const { id: app } = await builder.api.apps.create({ name: "Notes" });
     await publishedApp(app);
-    const { version } = await commitApp(
-      builder.api.apps.files,
-      app,
-      files,
-      "First"
-    );
+    const { version } = await commitApp(builder.api, app, files);
     await builder.api.versions.rollback({ kind: "app", id: app }, version);
     // Made current, its App's data sensitive, and no admin looked at it.
     const page = await pageOf(builder, app);

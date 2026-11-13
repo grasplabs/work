@@ -212,8 +212,7 @@ export const migrated = async (
     withFiles(
       migratedFiles(fromSchema, placeholder, handler, fixtures, next),
       extra
-    ),
-    "Migrate"
+    )
   );
   const refused = await refusalOf(async () => await seal(fixture, 2));
   const toSchema = namedSchema(refused.details);
@@ -224,8 +223,7 @@ export const migrated = async (
     withFiles(
       migratedFiles(fromSchema, toSchema, handler, fixtures, next),
       extra
-    ),
-    "Migrate to the sealed schema"
+    )
   );
   const release = await seal(fixture, 3);
   return {

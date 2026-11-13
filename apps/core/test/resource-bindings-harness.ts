@@ -158,7 +158,7 @@ export const nextVersion = async (
   files: TestSource,
   version: number
 ): Promise<Sealed> => {
-  await commitDefined(env, sealed.owner, sealed.app, files, "Next version");
+  await commitDefined(env, sealed.owner, sealed.app, files);
   const release = await seal(sealed, version);
   await rollback(env, appKind, sealed.owner, sealed.app, version);
   return { ...sealed, release };

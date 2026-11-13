@@ -19,9 +19,9 @@ import { appHost } from "../src/durable-objects.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { leasedBuild, leaseFor } from "../src/page-delivery.ts";
 import { revokeRelease } from "../src/release-retention.ts";
-import { commitApp, testApp, withFiles } from "./app-definitions.ts";
+import { testApp, withFiles } from "./app-definitions.ts";
 import type { TestApp, TestSource } from "./app-definitions.ts";
-import { published } from "./apps.ts";
+import { commitApp, published } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { captureMail } from "./mail-capture.ts";
 import type { CapturedMail } from "./mail-capture.ts";
@@ -211,12 +211,7 @@ const released = async (
   app: string,
   files: TestSource
 ): Promise<number> => {
-  const { version } = await commitApp(
-    builder.api.apps.files,
-    app,
-    files,
-    "Next"
-  );
+  const { version } = await commitApp(builder.api, app, files);
   await builder.api.versions.rollback({ kind: "app", id: app }, version);
   return version;
 };

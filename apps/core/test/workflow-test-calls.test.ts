@@ -11,14 +11,13 @@ import { z } from "zod";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { fixtureHostFor } from "../src/app-tests.ts";
-import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { appKind, releaseIdsOf } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { rollback } from "../src/publish.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { runObjectOf } from "../src/workflows/engine.ts";
-import { testApp } from "./app-definitions.ts";
+import { boundIn, testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { resumed, sleeping, stopped } from "./runs.ts";
@@ -148,7 +147,6 @@ const requestsApp = async (
   const model = await modelContract(admin);
   const builder = await person("builder");
   const files = filesWith(tests);
-  const fixture = await appWith(files, "Requests", builder);
   const resource = await createWorkflowResource(
     env,
     builder,
@@ -160,10 +158,11 @@ const requestsApp = async (
     resource.id,
     definitionOf(flow, { ai: { contract: model } })
   );
-  await bindWorkflowToApp(env, builder, resource.id, {
-    app: fixture.app,
-    alias: "followUp",
-  });
+  const fixture = await appWith(
+    boundIn(files, { followUp: resource.id }),
+    "Requests",
+    builder
+  );
   await seal(fixture);
   const release = await loadRelease(env, fixture.app, 1);
   return { builder, app: fixture.app, release, options };
@@ -332,9 +331,11 @@ describe("a workflow test's model calls", { timeout: 180_000 }, () => {
       asked: provider.requests.length,
       traces: events
         .map(({ action }) => action)
+        // Never the binding the version makes as it goes live.
         .filter(
           (action) =>
-            action.startsWith("model.") || action.startsWith("workflow.")
+            (action.startsWith("model.") || action.startsWith("workflow.")) &&
+            !action.startsWith("workflow.app_binding.")
         ),
       left: await leftOf(app.app),
     }).toStrictEqual({

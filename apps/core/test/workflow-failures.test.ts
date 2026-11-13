@@ -91,7 +91,7 @@ const startFor = async (by: Acting, id: string, who = "Ada") => {
     env,
     { type: "person", person: by },
     id,
-    { version: 1, args: { who }, key: unique() }
+    { expected: 1, args: { who }, key: unique() }
   );
   return runId;
 };

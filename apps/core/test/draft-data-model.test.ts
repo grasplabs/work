@@ -6,6 +6,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { loadRelease } from "../src/app-releases.ts";
+import { boundIn } from "./app-definitions.ts";
 import { release } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -45,7 +46,10 @@ const outcome = async (promise: Promise<unknown>): Promise<string> => {
   }
 };
 
-/** A builder's Notes App, released and published, with one of their notes. */
+/**
+ * A builder's Notes App, published, with one of their notes, and the
+ * revision its draft is at: each change counts on from it.
+ */
 const notesWithANote = async () => {
   const builder = await signedInApi(idp, "builder");
   const { id: app } = await builder.api.apps.create({ name: "Notes" });
@@ -56,7 +60,11 @@ const notesWithANote = async () => {
     { name: "notes.create", kind: "mutation" },
     { title: "Plan" }
   );
-  return { builder, app };
+  const { revision: start } = await builder.api.drafts.get({
+    kind: "app",
+    id: app,
+  });
+  return { builder, app, start };
 };
 
 describe(
@@ -89,8 +97,13 @@ describe(
       const model = await apps.dataModel(app);
       const files = await drafts.files({ kind: "app", id: app });
       const events = await allEvents();
+      // The definition's changes, by their op: never the files the App
+      // was published with.
       const audited = events.filter(
-        ({ action, target }) => action === "draft.saved" && target?.id === app
+        ({ action, target, detail }) =>
+          action === "draft.saved" &&
+          target?.id === app &&
+          detail.op !== undefined
       );
 
       const tasks = model.model.tables.find(({ name }) => name === "tasks");
@@ -202,7 +215,7 @@ describe(
     });
 
     it("previews a change without saving it, and asks what the records it would check get", async () => {
-      const { builder, app } = await notesWithANote();
+      const { builder, app, start } = await notesWithANote();
       const { apps, drafts } = builder.api;
       const operation = {
         op: "addField",
@@ -236,12 +249,12 @@ describe(
         unchangedFields: ["title", "body"],
         answered: [{ table: "notes", field: "category", answer: "general" }],
         // Only the change made was saved.
-        revisions: [1],
+        revisions: [start + 1],
       });
     });
 
     it("removes a field and a table, keeping their records, and says what it can't take without saving anything", async () => {
-      const { builder, app } = await notesWithANote();
+      const { builder, app, start } = await notesWithANote();
       const { apps, drafts } = builder.api;
 
       const fieldless = await apps.define(app, {
@@ -274,12 +287,12 @@ describe(
         },
         keptTables: ["notes"],
         invalid: "app.invalid",
-        revisions: [2],
+        revisions: [start + 2],
       });
     });
 
     it("makes a few operations as one change, all or none, and says what that change alone does", async () => {
-      const { builder, app } = await notesWithANote();
+      const { builder, app, start } = await notesWithANote();
       const { apps, drafts } = builder.api;
       await apps.define(app, {
         op: "removeField",
@@ -339,12 +352,12 @@ describe(
           { name: "rank", kind: "number" },
         ],
         // The removal, the field added, and the rename and retype as one.
-        revisions: [3],
+        revisions: [start + 3],
       });
     });
 
     it("is refused to anyone who doesn't build the App, and for an archived App, and shared by every builder of it", async () => {
-      const { builder, app } = await notesWithANote();
+      const { builder, app, start } = await notesWithANote();
       const [user, otherBuilder] = await Promise.all([
         signedInApi(idp, "user"),
         signedInApi(idp, "builder"),
@@ -391,7 +404,7 @@ describe(
         othersRead: "ok",
         archived: appErrors.create("app.archived").code,
         // The other builder's change, the one written.
-        revision: 1,
+        revision: start + 1,
       });
     });
   }
@@ -420,25 +433,23 @@ describe("a workflow bound from a draft", { timeout: 120_000 }, () => {
       jobWaitingOf(contract, { more: ["laterEvents"] })
     );
     const { id: app } = await builder.api.apps.create({ name: "Requests" });
-    const api = builder.api.workflowResources;
-    await api.bindToApp(flow.id, { app, alias: "review" });
-    await release(builder, app, requestsApp("review", jobEventsDeclared));
+    await release(
+      builder,
+      app,
+      boundIn(requestsApp("review", jobEventsDeclared), { review: flow.id })
+    );
     // Another builder of the App, with no role in the workflow.
     await builder.api.apps.members.add(app, {
       type: "person",
       id: otherBuilder.userId,
       role: "builder",
     });
-    const bindSecond = async () =>
-      await outcome(api.bindToApp(later.id, { app, alias: "review" }));
     const bindInDraft = (alias: string) => ({
       op: "bindWorkflow",
       alias,
       workflow: later.id,
     });
 
-    // The App's current version declares the first workflow's events.
-    const beforeDraft = await bindSecond();
     const undeclared = await builder.api.apps.define(app, bindInDraft("ghost"));
     const noRole = await outcome(
       otherBuilder.api.apps.define(app, bindInDraft("review"))
@@ -452,8 +463,12 @@ describe("a workflow bound from a draft", { timeout: 120_000 }, () => {
       })
     );
     const declared = await builder.api.apps.define(app, bindInDraft("review"));
-    // Still the live version's declaration, until the draft is published.
-    const draftOnly = await bindSecond();
+    // Still the first workflow's binding, until the draft is published.
+    const boundOf = async () => {
+      const listed = await builder.api.workflowResources.appBindings(app);
+      return listed.map(({ alias, workflowId }) => [alias, workflowId]);
+    };
+    const draftOnly = await boundOf();
     const { revision } = await builder.api.drafts.get({ kind: "app", id: app });
     const { version } = await builder.api.drafts.publish(
       { kind: "app", id: app },
@@ -476,7 +491,6 @@ describe("a workflow bound from a draft", { timeout: 120_000 }, () => {
       }));
 
     expect({
-      beforeDraft,
       undeclared,
       noRole,
       forged,
@@ -484,9 +498,8 @@ describe("a workflow bound from a draft", { timeout: 120_000 }, () => {
       sealed: { events: sealed?.events, listens: sealed?.listens },
       audited,
       draftOnly,
-      afterCurrent: await bindSecond(),
+      afterCurrent: await boundOf(),
     }).toStrictEqual({
-      beforeDraft: "workflow.app_binding_contract_changed",
       undeclared: {
         ok: false,
         problem:
@@ -505,8 +518,8 @@ describe("a workflow bound from a draft", { timeout: 120_000 }, () => {
       },
       // The workflow and version the declaration was read from.
       audited: [{ alias: "review", workflow: later.id }],
-      draftOnly: "workflow.app_binding_contract_changed",
-      afterCurrent: "ok",
+      draftOnly: [["review", flow.id]],
+      afterCurrent: [["review", later.id]],
     });
   });
 });

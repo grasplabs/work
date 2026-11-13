@@ -26,8 +26,9 @@ import {
 } from "../src/app-webhook-queue.ts";
 import { drainWebhookDeliveries } from "../src/app-webhooks.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
-import { commitApp, testApp, withFiles } from "./app-definitions.ts";
+import { testApp, withFiles } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
+import { commitApp } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import {
   webhookReceivedUrl,
@@ -162,12 +163,7 @@ const personApi = async (role: Role): Promise<Person> =>
 /** A builder's Notes App, its first version current, left a draft. */
 const notesApp = async (builder: Person) => {
   const { id } = await builder.api.apps.create({ name: "Notes" });
-  const { version } = await commitApp(
-    builder.api.apps.files,
-    id,
-    files,
-    "First"
-  );
+  const { version } = await commitApp(builder.api, id, files);
   return { app: id, version };
 };
 
@@ -686,12 +682,11 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
 
     await builder.api.versions.rollback({ kind: "app", id: app }, first);
     const { version } = await commitApp(
-      builder.api.apps.files,
+      builder.api,
       app,
       withFiles(files, {
         "notes.md": "Second\n",
-      }),
-      "Second"
+      })
     );
     await builder.api.versions.rollback({ kind: "app", id: app }, version);
     await drainWebhookDeliveries(env);

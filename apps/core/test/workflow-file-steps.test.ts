@@ -135,7 +135,7 @@ const started = async (
     env,
     { type: "person", person: by },
     id,
-    { version: 1, args: { text: "", file: "", ...input }, key: unique() }
+    { expected: 1, args: { text: "", file: "", ...input }, key: unique() }
   );
   if (runId === null) {
     throw new Error("The start admitted no run");

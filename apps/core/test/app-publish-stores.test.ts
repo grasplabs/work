@@ -107,7 +107,7 @@ type Caller = Awaited<ReturnType<typeof person>>;
 const appWith = async (files: TestSource) => {
   const owner = await person("builder");
   const { id } = await createApp(env, owner, { name: "Notes" });
-  await commitDefined(env, owner, id, files, "First version");
+  await commitDefined(env, owner, id, files);
   return { owner, app: id };
 };
 
@@ -307,7 +307,7 @@ const nextVersion = async (
   app: AppId,
   files: TestSource
 ): Promise<number> => {
-  const committed = await commitDefined(env, owner, app, files, "Next version");
+  const committed = await commitDefined(env, owner, app, files);
   return committed.version;
 };
 
@@ -341,7 +341,7 @@ describe(
       const first = await loadRelease(env, app, 1);
       await call(owner, first, "notes.create", { title: "Kept" });
 
-      await commitDefined(env, owner, app, notesFiles("Notes 2"), "Second");
+      await commitDefined(env, owner, app, notesFiles("Notes 2"));
       await rollback(env, appKind, owner, app, 2);
       const second = await loadRelease(env, app, 2);
       expect(second.store?.storeId).toBe(first.store?.storeId);
@@ -366,7 +366,7 @@ describe(
         id: other.userId,
         role: "builder",
       });
-      await commitDefined(env, other, app, notesFiles("Notes 2"), "Second");
+      await commitDefined(env, other, app, notesFiles("Notes 2"));
       const activated = await rollback(env, appKind, other, app, 2);
       const second = await loadRelease(env, app, 2);
       expect([
@@ -378,7 +378,7 @@ describe(
 
     it("is refused to someone who doesn't build the App, sealing it directly", async () => {
       const { owner, app } = await appWith(notesFiles());
-      await commitDefined(env, owner, app, notesFiles("Notes 2"), "Second");
+      await commitDefined(env, owner, app, notesFiles("Notes 2"));
       const stranger = await person("builder");
       await expect(
         failure(
@@ -440,9 +440,9 @@ describe(
     it("refuses a revoked version, even one revoked as it is made current", async () => {
       const { owner, app } = await appWith(notesFiles());
       await rollback(env, appKind, owner, app, 1);
-      await commitDefined(env, owner, app, notesFiles("Notes 2"), "Second");
+      await commitDefined(env, owner, app, notesFiles("Notes 2"));
       await rollback(env, appKind, owner, app, 2);
-      await commitDefined(env, owner, app, notesFiles("Notes 3"), "Third");
+      await commitDefined(env, owner, app, notesFiles("Notes 3"));
       await rollback(env, appKind, owner, app, 3);
       const admin = await person("admin");
 
@@ -469,7 +469,7 @@ describe(
       const { owner, app } = await appWith(notesFiles());
       await rollback(env, appKind, owner, app, 1);
       const [own] = await defaultStores(app);
-      await commitDefined(env, owner, app, notesFiles("Notes 2"), "Second");
+      await commitDefined(env, owner, app, notesFiles("Notes 2"));
       await rollback(env, appKind, owner, app, 2);
       // A rollback to a release still kept seals nothing.
       await rollback(env, appKind, owner, app, 1);
@@ -497,7 +497,7 @@ describe(
       const { owner, app } = await appWith(notesFiles());
       await rollback(env, appKind, owner, app, 1);
       const [deleted] = await defaultStores(app);
-      await commitDefined(env, owner, app, withoutNotes, "No tables");
+      await commitDefined(env, owner, app, withoutNotes);
       await rollback(env, appKind, owner, app, 2);
       // Version 1 kept binds its store; once retention lets it go, the
       // store can be deleted.
@@ -509,13 +509,7 @@ describe(
       const back = await rollback(env, appKind, owner, app, 1);
       expect(back.version).toBe(1);
 
-      await commitDefined(
-        env,
-        owner,
-        app,
-        notesFiles("Notes 3"),
-        "Tables again"
-      );
+      await commitDefined(env, owner, app, notesFiles("Notes 3"));
       await rollback(env, appKind, owner, app, 3);
       const [fresh] = await defaultStores(app);
       expect(fresh?.storeId).not.toBe(deleted?.storeId);
@@ -530,7 +524,7 @@ describe(
       const { owner, app } = await appWith(notesFiles());
       await rollback(env, appKind, owner, app, 1);
       const [store] = await defaultStores(app);
-      await commitDefined(env, owner, app, withoutNotes, "No tables");
+      await commitDefined(env, owner, app, withoutNotes);
       await rollback(env, appKind, owner, app, 2);
       // Its store gone as the statement runs (deletion itself is refused
       // while version 1 is kept: this is the guard behind that).
@@ -559,8 +553,7 @@ describe(
         app,
         withFiles(notesFiles(), {
           "server/broken.ts": 'throw new Error("Broken");\n',
-        }),
-        "Broken"
+        })
       );
       await expect(
         failure(async () => await rollback(env, appKind, owner, app, 2))
@@ -667,14 +660,14 @@ describe("a store's definitions", { timeout: 120_000 }, () => {
     const { owner, app } = await appWith(notesFiles());
     await rollback(env, appKind, owner, app, 1);
     // The same schema and functions under another name: one definition.
-    await commitDefined(env, owner, app, notesFiles("Notes 2"), "Renamed");
+    await commitDefined(env, owner, app, notesFiles("Notes 2"));
     await rollback(env, appKind, owner, app, 2);
     // Another table: a second definition.
     const widened = testApp(
       notesSpec("Notes 3", { tags: { fields: { name: "v.string()" } } }),
       notesFiles("Notes 3").files
     );
-    await commitDefined(env, owner, app, widened, "Tags");
+    await commitDefined(env, owner, app, widened);
     await rollback(env, appKind, owner, app, 3);
     const [recorded] = await defaultStores(app);
     const store = recorded?.storeId ?? "";

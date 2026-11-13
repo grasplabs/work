@@ -6,13 +6,12 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { callAppFunction, callPageFunction } from "../src/app-functions.ts";
-import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { appKind } from "../src/apps.ts";
 import { rollback } from "../src/publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
-import { withFiles } from "./app-definitions.ts";
+import { boundIn, withFiles } from "./app-definitions.ts";
 import { commitDefined } from "./apps.ts";
 import { person, queryReference, seal } from "./sealed-apps.ts";
 import {
@@ -25,8 +24,8 @@ import {
   longDefinitionOf,
   objectSchema,
   passing,
-  pinnedApp,
   refusalOf,
+  requestsApp,
   startedRuns,
 } from "./sealed-workflow-starts-harness.ts";
 import { unique } from "./sign-in.ts";
@@ -45,7 +44,7 @@ describe("a workflow reference's run list", { timeout: 120_000 }, () => {
     const bob = await person("user");
     const owner = await person("builder");
     const workflow = await greetingOf(owner);
-    const { fixture, release } = await pinnedApp(
+    const { release, ...fixture } = await requestsApp(
       admin,
       [bob],
       workflow.id,
@@ -175,7 +174,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
     const [bob, carol] = await Promise.all([person("user"), person("user")]);
     const owner = await person("builder");
     const workflow = await greetingOf(owner);
-    const { fixture, release } = await pinnedApp(
+    const { release, ...fixture } = await requestsApp(
       admin,
       [bob, carol],
       workflow.id,
@@ -214,9 +213,9 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
     const bobs = await kickOff(bob, "Bob");
     const carols = await kickOff(carol, "Carol");
     // Bob's run of the same version, through another App pinning it too.
-    const otherApp = await pinnedApp(admin, [bob], workflow.id, owner);
+    const otherApp = await requestsApp(admin, [bob], workflow.id, owner);
     const throughOther = await kickOff(bob, "Bob", {
-      app: otherApp.fixture.app,
+      app: otherApp.app,
       release: otherApp.release,
     });
     await Promise.all([settled(bobs), settled(carols), settled(throughOther)]);
@@ -225,7 +224,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       env,
       { type: "person", person: owner },
       workflow.id,
-      { version: 1, args: { who: "Owner" }, key: `key-${unique()}` }
+      { expected: 1, args: { who: "Owner" }, key: `key-${unique()}` }
     );
 
     const history = queryReference(release, "followUp", "history");
@@ -382,7 +381,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       .bind(workflow.id)
       .first<{ manifest: string }>();
     const immutable =
-      // As migration 0245 left it: only a version's label changes.
+      // As migration 0246 left it: only a version's label changes.
       "CREATE TRIGGER workflow_resource_versions_immutable_update BEFORE UPDATE OF workflow_resource_id, version, definition_version, definition, definition_json_hash, profile_version, evaluator_hash, contract, contract_hash, manifest, manifest_hash, author_id, created_at, seal_id, status ON workflow_resource_versions BEGIN SELECT RAISE(ABORT, 'workflow_resource_versions are immutable'); END";
     await env.DB.batch([
       env.DB.prepare(
@@ -400,34 +399,17 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       env.DB.prepare(immutable),
     ]);
 
-    // Bound to another workflow without a new seal: the binding's runs are
-    // what `runs` lists, so the pinned workflow's history is read no more.
-    const other = await greetingOf(owner);
-    await bindWorkflowToApp(env, owner, other.id, {
-      app,
-      alias: "followUp",
-    });
-    expect({
-      unverified: pageOf(unverified),
-      reboundPage: refusalOf(await ask(bob, { runId: bobs, pagination: {} })),
-      reboundEnded: refusalOf(
-        await ask(bob, { runId: bobs, pagination: { endCursor: "1" } })
-      ),
-    }).toStrictEqual({
-      unverified: { items: [], nextCursor: null, hasMore: false },
-      reboundPage: unknown,
-      reboundEnded: unknown,
+    expect(pageOf(unverified)).toStrictEqual({
+      items: [],
+      nextCursor: null,
+      hasMore: false,
     });
 
-    // Bound back to the workflow, live at version 2 now, which fails on
-    // what it reads: the alias follows the workflow's live version, so
-    // each release that binds it tells the runs of every version of it.
-    // A failure's own words never leave.
+    // The workflow live at version 2 now, which fails on what it reads:
+    // the alias follows the workflow's live version, so each release that
+    // binds it tells the runs of every version of it. A failure's own
+    // words never leave.
     await publishDefinition(env, owner, workflow.id, failingDefinition);
-    await bindWorkflowToApp(env, owner, workflow.id, {
-      app,
-      alias: "followUp",
-    });
     const secret = `Secret-${unique()}`;
     const failed = await kickOff(bob, secret);
     await settled(failed);
@@ -438,10 +420,12 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       env,
       owner,
       app,
-      withFiles(files(), {
-        "server/requests.ts": `${files().files["server/requests.ts"] ?? ""}// Sealed again.\n`,
-      }),
-      "Seal again"
+      boundIn(
+        withFiles(files(), {
+          "server/requests.ts": `${files().files["server/requests.ts"] ?? ""}// Sealed again.\n`,
+        }),
+        { followUp: workflow.id }
+      )
     );
     const next = await seal(fixture, 2);
     await rollback(env, appKind, owner, app, 2);
@@ -515,7 +499,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
         ],
       })
     );
-    const { fixture, release } = await pinnedApp(
+    const { release, ...fixture } = await requestsApp(
       admin,
       [bob],
       workflow.id,
@@ -569,7 +553,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       `long-${unique()}`
     );
     await publishDefinition(env, owner, workflow.id, longDefinitionOf(60));
-    const { fixture, release } = await pinnedApp(
+    const { release, ...fixture } = await requestsApp(
       admin,
       [bob],
       workflow.id,

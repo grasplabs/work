@@ -4,14 +4,14 @@ import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
 
-import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
-import { appKind, appFor } from "../src/apps.ts";
+import { appFor, appKind } from "../src/apps.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { rollback } from "../src/publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
-import { testApp } from "./app-definitions.ts";
+import { boundIn, testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
+import { activeBinding } from "./apps.ts";
 import { appWith, seal } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
 import { publishDefinition } from "./workflow-publishing.ts";
@@ -147,7 +147,11 @@ export const requestsApp = async (
   workflowId: string,
   owner?: Identity
 ) => {
-  const fixture = await appWith(files(), "Requests", owner);
+  const fixture = await appWith(
+    boundIn(files(), { followUp: workflowId }),
+    "Requests",
+    owner
+  );
   const release = await seal(fixture);
   await rollback(env, appKind, fixture.owner, fixture.app, 1);
   for (const member of members) {
@@ -158,10 +162,7 @@ export const requestsApp = async (
       .bind(fixture.app, member.userId, fixture.owner.userId, Date.now())
       .run();
   }
-  const binding = await bindWorkflowToApp(env, fixture.owner, workflowId, {
-    app: fixture.app,
-    alias: "followUp",
-  });
+  const binding = await activeBinding(fixture.app, "followUp");
   const asked = await requestPermission(
     env,
     fixture.owner,
@@ -174,7 +175,7 @@ export const requestsApp = async (
     rolesOf(fixture.owner)
   );
   await grantPermission(env, admin, asked.id, { version: 1 });
-  return { ...fixture, release, binding: binding.id };
+  return { ...fixture, release, binding };
 };
 
 /** `count` runs of `workflowId` App `app` started for `principal`, as their rows. */
@@ -197,47 +198,6 @@ export const startedRuns = async (
     ];
   });
   await env.DB.batch(statements.flat());
-};
-
-/**
- * The Requests App with `workflowId` bound as `followUp` before its seal,
- * so its release pins version 1, current, `members` given the user role,
- * with the App's `start` grant.
- */
-export const pinnedApp = async (
-  admin: Identity,
-  members: readonly Identity[],
-  workflowId: string,
-  owner: Identity
-) => {
-  const fixture = await appWith(files(), "Requests", owner);
-  await bindWorkflowToApp(env, owner, workflowId, {
-    app: fixture.app,
-    alias: "followUp",
-  });
-  const release = await seal(fixture);
-  await rollback(env, appKind, owner, fixture.app, 1);
-  for (const member of members) {
-    // oxlint-disable-next-line no-await-in-loop -- a row each
-    await env.DB.prepare(
-      "INSERT INTO app_members (app_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'user', ?, ?)"
-    )
-      .bind(fixture.app, member.userId, owner.userId, Date.now())
-      .run();
-  }
-  const asked = await requestPermission(
-    env,
-    owner,
-    {
-      subject: { type: "app", appId: fixture.app },
-      object: { type: "workflow", workflowId },
-      actions: ["start"],
-      binding: "FOLLOW_UP",
-    },
-    rolesOf(owner)
-  );
-  await grantPermission(env, admin, asked.id, { version: 1 });
-  return { fixture, release };
 };
 
 /** A workflow of `name` running `tasks` steps, one after another. */

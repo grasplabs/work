@@ -15,9 +15,9 @@ import { z } from "zod";
 
 import { loadRelease } from "../src/app-releases.ts";
 import { revokeRelease } from "../src/release-retention.ts";
-import { commitApp, withFiles } from "./app-definitions.ts";
+import { withFiles } from "./app-definitions.ts";
 import type { TestSource } from "./app-definitions.ts";
-import { pastAccessRecheck } from "./apps.ts";
+import { commitApp, pastAccessRecheck } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { apiOf, notesFiles } from "./notes-client-app.ts";
 import { person as actingPerson } from "./sealed-apps.ts";
@@ -54,12 +54,7 @@ type Person = Awaited<ReturnType<typeof personApi>>;
 /** A new App with `files` as its current version: nobody approves its pages. */
 const currentApp = async (builder: Person, files: TestSource) => {
   const { id } = await builder.api.apps.create({ name: "Notes" });
-  const { version } = await commitApp(
-    builder.api.apps.files,
-    id,
-    files,
-    "First"
-  );
+  const { version } = await commitApp(builder.api, id, files);
   await builder.api.versions.rollback({ kind: "app", id }, version);
   return { app: id, version };
 };
@@ -84,12 +79,9 @@ const twoPageApp = async (builder: Person) => {
  */
 const nextVersion = async (builder: Person, app: string) => {
   const notesPage = notesFiles.files["src/routes/index.tsx"] ?? "";
-  const { version } = await commitApp(
-    builder.api.apps.files,
-    app,
-    { "src/routes/index.tsx": notesPage.replace(">Add<", ">Add a note<") },
-    "Second"
-  );
+  const { version } = await commitApp(builder.api, app, {
+    "src/routes/index.tsx": notesPage.replace(">Add<", ">Add a note<"),
+  });
   await builder.api.versions.rollback({ kind: "app", id: app }, version);
   return {
     version,

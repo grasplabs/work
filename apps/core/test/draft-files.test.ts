@@ -5,8 +5,8 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { appKind } from "../src/apps.ts";
 import { readDraft, saveDraft } from "../src/drafts.ts";
-import { commitApp, redefined, testApp } from "./app-definitions.ts";
-import { release } from "./apps.ts";
+import { redefined, testApp } from "./app-definitions.ts";
+import { commitApp, release } from "./apps.ts";
 import { agentWriting } from "./draft-writers.ts";
 import { mockIdp } from "./idp.ts";
 import { deskFiles } from "./preview-drafts.ts";
@@ -62,7 +62,7 @@ describe("an App's draft files, for the App's code view", () => {
     await drafts.discard({ kind: "app", id: app }, written);
     const discarded = await drafts.files({ kind: "app", id: app });
     // A version committed, not live: the draft stays over the live one.
-    await commitApp(builder.api.apps.files, app, renamed, "Rename");
+    await commitApp(builder.api, app, renamed);
     const committed = await drafts.files({ kind: "app", id: app });
 
     expect({ before, first, second, discarded, committed }).toStrictEqual({

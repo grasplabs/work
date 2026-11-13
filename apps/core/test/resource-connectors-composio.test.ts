@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { commitApp } from "./app-definitions.ts";
+import { commitApp } from "./apps.ts";
 import { mockIdpWith } from "./idp.ts";
 import {
   call,
@@ -171,7 +171,7 @@ describe("Composio connector resource bindings", { timeout: 120_000 }, () => {
     const admin = await signedInApi(idp, "admin");
     const builder = await signedInApi(idp, "builder");
     const created = await builder.api.apps.create({ name: "Two CRMs" });
-    await commitApp(builder.api.apps.files, created.id, twoCrmFiles(), "First");
+    await commitApp(builder.api, created.id, twoCrmFiles());
     await builder.api.versions.rollback({ kind: "app", id: created.id }, 1);
     const down = await crmConnection();
     const up = await crmConnection();

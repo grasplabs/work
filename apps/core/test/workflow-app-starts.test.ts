@@ -41,10 +41,6 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { invocationFor } from "../src/app-functions.ts";
 import type { Release } from "../src/app-releases.ts";
 import { cancelArchivedRuns, setArchived } from "../src/app-status.ts";
-import {
-  bindWorkflowToApp,
-  unbindWorkflowFromApp,
-} from "../src/app-workflow-bindings.ts";
 import { appFor } from "../src/apps.ts";
 import { personOf } from "../src/connections.ts";
 import { openStore } from "../src/data-stores.ts";
@@ -77,7 +73,7 @@ import {
   stopRetryMs,
 } from "../src/workflows/resource-runs.ts";
 import { storeOfNewApp } from "./app-stores.ts";
-import { racingDb, standInLive } from "./apps.ts";
+import { racingDb, standInBinding, standInLive } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
 import { sleeping, woken } from "./runs.ts";
@@ -461,10 +457,7 @@ const fixture = async (
   const store = await openStore(env, storeId);
   await store.applySchema(applied(manifestText(manifest.schema)));
   const workflow = await workflowOf(ada, waits);
-  const binding = await bindWorkflowToApp(env, ada, workflow.id, {
-    app,
-    alias: "followUp",
-  });
+  const binding = await standInBinding(app, "followUp", workflow.id, ada);
   const asked = await requestPermission(
     env,
     ada,
@@ -486,7 +479,7 @@ const fixture = async (
     app,
     workflowId: workflow.id,
     permissionId: asked.id,
-    bindingId: binding.id,
+    bindingId: binding,
     store,
     release: {
       manifest: sealed.parsed,
@@ -782,7 +775,7 @@ describe("an action starting a workflow", () => {
         .first<{ id: string }>();
       const id = bound?.id ?? "";
       earlier = await startWorkflow(env, { type: "person", person: ada }, id, {
-        version: 1,
+        expected: 1,
         args: { who: "Ada" },
         key: `key-${unique()}`,
       });
@@ -979,7 +972,12 @@ describe("an action starting a workflow", () => {
     );
     // Granted on the version live, as the admin reviewed it.
     await grantPermission(env, fx.admin, regranted.id, { version: 1 });
-    await unbindWorkflowFromApp(env, fx.ada, fx.bindingId);
+    // Ended, as a version that binds nothing there ends it.
+    await env.DB.prepare(
+      "UPDATE app_workflow_bindings SET status = 'removed' WHERE id = ?"
+    )
+      .bind(fx.bindingId)
+      .run();
     const unbound = await call(fx, fx.bob, "requests.kickOff", { who: "Bob" });
     expect({
       outsider: answerOf(outsider),
@@ -1010,10 +1008,7 @@ describe("App code starting a workflow it didn't declare", () => {
     // Another workflow Ada binds to the App, which the App never declared.
     const fx = await fixture(false, async ({ admin, ada, app }) => {
       const other = await workflowOf(ada);
-      await bindWorkflowToApp(env, ada, other.id, {
-        app,
-        alias: "other",
-      });
+      await standInBinding(app, "other", other.id, ada);
       const asked = await requestPermission(
         env,
         ada,
@@ -2254,7 +2249,7 @@ describe("what a start rechecks, and records", () => {
     const fx = await fixture();
     const taken = await outcome(
       startWorkflow(env, { type: "person", person: fx.ada }, fx.workflowId, {
-        version: 1,
+        expected: 1,
         args: { who: "Ada" },
         key: `grasp:after-commit:${unique()}`,
       })

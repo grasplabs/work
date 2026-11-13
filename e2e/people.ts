@@ -13,7 +13,7 @@ import { RpcSession, WebSocketTransport } from "capnweb";
 import type { RpcTransport } from "capnweb";
 import { z } from "zod";
 
-import { commitApp } from "../apps/core/test/app-definitions.ts";
+import { publishApp } from "../apps/core/test/app-definitions.ts";
 import type { TestSource } from "../apps/core/test/app-definitions.ts";
 /**
  * Signed-in people for end-to-end tests. They sign in through the product,
@@ -860,17 +860,14 @@ export const ordinaryData = async (app: string): Promise<void> => {
 };
 
 /**
- * Writes `files` to the App (null deletes one), commits them and publishes
- * that version.
+ * Writes `files` into the App's draft (null deletes one) and publishes it:
+ * live, for the people it is shared with (until then, its builders'
+ * alone).
  */
 export const release = async (
   api: ReturnType<typeof apiOf>["api"],
   app: string,
-  files: TestSource,
-  message: string
+  files: TestSource
 ): Promise<void> => {
-  const { version } = await commitApp(api.apps.files, app, files, message);
-  // Live, for the people it is shared with (until then, its
-  // builders' alone).
-  await api.versions.rollback({ kind: "app", id: app }, version);
+  await publishApp(api, app, files);
 };

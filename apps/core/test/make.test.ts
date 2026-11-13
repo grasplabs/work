@@ -554,6 +554,40 @@ describe("Make something", { timeout: 120_000 }, () => {
     expect(made.workflow).toBeUndefined();
   });
 
+  it("builds all it lists, its turn going on, when keeping what it made as the chat's work fails", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const { chat, callId, stub } = await plannedChat(builder, closePlan);
+
+    // The database refuses the chat's checkpoints of what it makes.
+    const refusing = `refuse_kept_${unique().replaceAll("-", "_")}`;
+    await env.DB.prepare(
+      `CREATE TRIGGER ${refusing} BEFORE INSERT ON draft_checkpoints WHEN NEW.chat_id = '${chat.id}' BEGIN SELECT RAISE(ABORT, 'refused'); END`
+    ).run();
+    let made: Awaited<ReturnType<typeof builder.api.chats.build>>;
+    try {
+      made = await builder.api.chats.build(chat.id, {
+        plan: callId,
+        text: "Build it",
+        model,
+      });
+    } finally {
+      await env.DB.prepare(`DROP TRIGGER ${refusing}`).run();
+    }
+    const updates = await watched(stub, chat.id, builder.userId);
+
+    expect({
+      made: { app: made.app?.name, workflow: made.workflow?.name },
+      said: updates
+        .flatMap(({ messages }) => messages)
+        .findLast(({ role }) => role === "user"),
+      stopped: updates.at(-1)?.stopped,
+    }).toMatchObject({
+      made: { app: "Month-end close", workflow: "Late reminder" },
+      said: { text: "Build it", built: { plan: callId, ...made } },
+      stopped: null,
+    });
+  });
+
   it("keeps a workflow it made whose filing in the project fails, the chat the App's and the workflow's, and never makes either twice", async () => {
     const owner = await signedInApi(idp, "builder");
     const { id: project } = await owner.api.projects.create({

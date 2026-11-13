@@ -17,7 +17,6 @@ import { z } from "zod";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { applyVersionSchema } from "../src/app-schema.ts";
-import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { appKind, appFor } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { appHost } from "../src/durable-objects.ts";
@@ -32,8 +31,9 @@ import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
-import { testApp } from "./app-definitions.ts";
+import { boundIn, testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
+import { standInBinding } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -279,11 +279,11 @@ const invoicesApp = async (
     target: { kind: "event" },
     reviewed: { version: 1 },
   });
-  const fixture = await appWith(files(declares), "Invoices", builder.acting);
-  await bindWorkflowToApp(env, builder.acting, workflow.id, {
-    app: fixture.app,
-    alias: "review",
-  });
+  const fixture = await appWith(
+    boundIn(files(declares), { review: workflow.id }),
+    "Invoices",
+    builder.acting
+  );
   await seal(fixture);
   const switched = await outcome(
     rollback(env, appKind, builder.acting, fixture.app, 1)
@@ -303,6 +303,8 @@ const invoicesApp = async (
     await env.DB.prepare("UPDATE apps SET current_version = 1 WHERE id = ?")
       .bind(fixture.app)
       .run();
+    // And bound, as the refused switch would have bound it.
+    await standInBinding(fixture.app, "review", workflow.id, builder.acting);
   }
   const grants: string[] = [];
   for (const each of actions) {

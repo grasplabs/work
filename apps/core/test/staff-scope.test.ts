@@ -113,7 +113,7 @@ const reportWorkflow = async () => {
 
 /** A start of version 1, under a key of its own, as a session starts one. */
 const startOf = () => ({
-  version: 1,
+  expected: 1,
   args: { who: "Ada" },
   key: unique(),
 });

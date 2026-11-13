@@ -9,8 +9,7 @@ import {
   fingerprintOf,
   loadBuiltinRelease,
 } from "../src/builtins.ts";
-import { commitApp } from "./app-definitions.ts";
-import { release } from "./apps.ts";
+import { commitApp, release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { refusal, signedInApi } from "./sign-in.ts";
 
@@ -55,14 +54,12 @@ describe("an App's own workflows", () => {
     await release(builder, app, { "AGENTS.md": "# Ledger\n" });
 
     const refused = await Promise.all([
-      refusal(commitApp(builder.api.apps.files, app, stealing, "Steal")),
+      refusal(commitApp(builder.api, app, stealing)),
       refusal(
-        commitApp(
-          builder.api.apps.files,
-          app,
-          { "notes.md": "# Notes\n", "workflows/lib/send.ts": "export {};\n" },
-          "Helper"
-        )
+        commitApp(builder.api, app, {
+          "notes.md": "# Notes\n",
+          "workflows/lib/send.ts": "export {};\n",
+        })
       ),
     ]);
     const versions = await builder.api.versions.list({ kind: "app", id: app });

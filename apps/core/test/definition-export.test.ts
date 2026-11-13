@@ -9,16 +9,13 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { appKind } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { exportAppDefinition } from "../src/definition-export.ts";
 import { rollback } from "../src/publish.ts";
-import {
-  createWorkflowResource,
-  shareWorkflowResource,
-} from "../src/workflow-resources.ts";
-import { testApp, withFiles } from "./app-definitions.ts";
+import { shareWorkflowResource } from "../src/workflow-members.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
+import { boundIn, testApp, withFiles } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
 import { published as publishedApp } from "./apps.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
@@ -112,8 +109,7 @@ const keys = (value: object): string[] => Object.keys(value).toSorted();
 
 describe("exporting an App's definition", { timeout: 120_000 }, () => {
   it("packages the sealed release and each version it binds once, as generated code with only what its allow-list names", async () => {
-    const fixture = await appWith(files(), "Requests");
-    const { owner, app, store } = fixture;
+    const owner = await person("builder");
     const workflow = await published(owner, {
       apiKey: { label: "API key", type: { kind: "string" } },
       pageSize: {
@@ -122,13 +118,12 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
         sensitive: false,
       },
     });
-    for (const alias of ["followUp", "remind"]) {
-      // oxlint-disable-next-line no-await-in-loop -- one alias at a time
-      await bindWorkflowToApp(env, owner, workflow.id, {
-        app,
-        alias,
-      });
-    }
+    const fixture = await appWith(
+      boundIn(files(), { followUp: workflow.id, remind: workflow.id }),
+      "Requests",
+      owner
+    );
+    const { app, store } = fixture;
     const release = await seal(fixture);
     await rollback(env, appKind, owner, app, 1);
 
@@ -235,7 +230,12 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       workflowBindings: {},
     });
 
-    const text = JSON.stringify(exported);
+    // The definition names the workflows its bindings bind by ID, kept so
+    // it hashes as sealed: an ID grants nothing. Nothing else names a row.
+    const text = JSON.stringify({
+      ...exported,
+      app: { ...exported.app, definition: null },
+    });
     const asPublished = await env.DB.prepare(
       "SELECT definition_json_hash, manifest_hash FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
     )
@@ -272,8 +272,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
   });
 
   it("lists a workflow its exporter doesn't build, without its code", async () => {
-    const fixture = await appWith(files(), "Requests");
-    const { owner, app } = fixture;
+    const owner = await person("builder");
     const bob = await person("builder");
     const theirs = await published(bob, {});
     await shareWorkflowResource(env, bob, theirs.id, {
@@ -281,10 +280,12 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       id: owner.userId,
       role: "user",
     });
-    await bindWorkflowToApp(env, owner, theirs.id, {
-      app,
-      alias: "followUp",
-    });
+    const fixture = await appWith(
+      boundIn(files(), { followUp: theirs.id }),
+      "Requests",
+      owner
+    );
+    const { app } = fixture;
     await seal(fixture);
     await rollback(env, appKind, owner, app, 1);
 

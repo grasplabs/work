@@ -34,8 +34,7 @@ const sealedTwice = async () => {
     fixture.app,
     withFiles(notesFiles, {
       "server/notes.ts": `${notesFiles.files["server/notes.ts"] ?? ""}// Again.\n`,
-    }),
-    "Again"
+    })
   );
   const second = await seal(fixture, 2);
   return { ...fixture, first, second };

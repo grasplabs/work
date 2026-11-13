@@ -37,7 +37,6 @@ import { z } from "zod";
 
 import { invocationFor } from "../src/app-functions.ts";
 import type { Release } from "../src/app-releases.ts";
-import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { appFor } from "../src/apps.ts";
 import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
@@ -62,7 +61,7 @@ import {
   terminateResourceRun,
 } from "../src/workflows/resource-runs.ts";
 import { storeOfNewApp } from "./app-stores.ts";
-import { standInLive } from "./apps.ts";
+import { standInBinding, standInLive } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
 import { liveStatus } from "./runs.ts";
@@ -403,10 +402,7 @@ const fixture = async (
     target: { kind: "event" },
     reviewed: { version: 1 },
   });
-  await bindWorkflowToApp(env, ada, workflow.id, {
-    app,
-    alias: "review",
-  });
+  await standInBinding(app, "review", workflow.id, ada);
   await granted(admin, ada, app, workflow.id, ["start"]);
   const send = await granted(admin, ada, app, workflow.id, ["send"]);
   await before?.({ admin, ada, app, workflowId: workflow.id });
@@ -428,7 +424,7 @@ const fixture = async (
     workflows: [
       {
         alias: "review",
-        pinned: { workflowId: workflow.id },
+        workflowId: workflow.id,
       },
     ],
   };
@@ -668,7 +664,7 @@ describe(
         env,
         { type: "person", person: fx.ada },
         fx.workflowId,
-        { version: 1, args: { jobId: "job-9" }, key: unique() }
+        { expected: 1, args: { jobId: "job-9" }, key: unique() }
       );
       const raw = async (
         path: "jobs.rawSendEvent" | "jobs.undeclared",
@@ -758,8 +754,8 @@ describe(
       let runId = "";
       const fx = await fixture(async ({ admin, ada, app, workflowId }) => {
         runId = await startedRun({ app }, ada);
-        // A later version of the workflow with an event of its own, bound
-        // to the App in place of the one its version was sealed with.
+        // A later version of the workflow live, with an event of its own:
+        // the App's binding follows it.
         const contract = `later-events-${unique()}`;
         await publishCatalogContract(env, admin, {
           key: contract,
@@ -787,10 +783,6 @@ describe(
             reviewed: { version: 2 },
           });
         }
-        await bindWorkflowToApp(env, ada, workflowId, {
-          app,
-          alias: "review",
-        });
       });
       const raw = async (event: string) =>
         answerOf(

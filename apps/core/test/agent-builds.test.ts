@@ -25,7 +25,8 @@ import {
   transcript,
   turnChecks,
 } from "./agent-chat.ts";
-import { commitApp, withFiles } from "./app-definitions.ts";
+import { withFiles } from "./app-definitions.ts";
+import { commitApp } from "./apps.ts";
 import { agentWriting } from "./draft-writers.ts";
 import { mockIdpWith } from "./idp.ts";
 import { defineNotes, notesCode, notesFiles } from "./notes-client-app.ts";
@@ -70,12 +71,10 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
 
     await chat.ask("Add notes to the Ledger");
     // A builder commits meanwhile, the same file too.
-    await commitApp(
-      builder.api.apps.files,
-      existing,
-      { "notes.md": "the builder's", "builder.md": "mine" },
-      "Mine"
-    );
+    const { version } = await commitApp(builder.api, existing, {
+      "notes.md": "the builder's",
+      "builder.md": "mine",
+    });
     await chat.ask("Are your notes still there?");
 
     const [draft, after] = await codeResults(chat.stub, chat.chat.id);
@@ -92,7 +91,9 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       notes: "the agent's",
       builder: null,
     });
-    await expect(builder.api.apps.files.read(existing)).resolves.toStrictEqual(
+    await expect(
+      builder.api.versions.files({ kind: "app", id: existing }, version)
+    ).resolves.toStrictEqual(
       withFiles(ledgerDefinition, {
         "AGENTS.md": "# Ledger\n",
         "notes.md": "the builder's",

@@ -102,7 +102,7 @@ const twoVersions = async (
   await rollback(env, appKind, fixture.owner, fixture.app, 1);
   // The sweep sees version 1 current.
   await sweepReleases(env, start);
-  await commitDefined(env, fixture.owner, fixture.app, files("two"), "Two");
+  await commitDefined(env, fixture.owner, fixture.app, files("two"));
   const second = await seal(fixture, 2);
   await rollback(env, appKind, fixture.owner, fixture.app, 2);
   await sweepReleases(env, start);

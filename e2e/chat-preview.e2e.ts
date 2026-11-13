@@ -1,7 +1,7 @@
 import { expect } from "@playwright/test";
 import type { FrameLocator, Locator, Page } from "@playwright/test";
 
-import { commitApp } from "../apps/core/test/app-definitions.ts";
+import { publishApp } from "../apps/core/test/app-definitions.ts";
 import { test } from "./csp.ts";
 import { writeDraft } from "./draft-writes.ts";
 import { modelScripts } from "./model-scripts.ts";
@@ -64,15 +64,7 @@ test("a chat building an App offers its workspace, whose preview changes none of
   const name = `Tally ${tag}`;
   try {
     const app = await api.apps.create({ name });
-    const { version } = await commitApp(
-      api.apps.files,
-      app.id,
-      tallyFiles("in the App"),
-      "A tally"
-    );
-    // Live, for the people it is shared with (until then, its
-    // builders' alone).
-    await api.versions.rollback({ kind: "app", id: app.id }, version);
+    const { version } = await publishApp(api, app.id, tallyFiles("in the App"));
     const chat = await api.chats.create(`Build ${tag}`);
     const page = await pageOf(builder);
 
@@ -188,13 +180,7 @@ test("an App's own chat writes its page and server code, and its workspace previ
 
     // A version published elsewhere, from another tab: the App shows, as
     // the team sees it while nothing is changed over it.
-    const { version } = await commitApp(
-      api.apps.files,
-      app.id,
-      tallyFiles("in the App"),
-      "A tally"
-    );
-    await api.versions.rollback({ kind: "app", id: app.id }, version);
+    await publishApp(api, app.id, tallyFiles("in the App"));
     const published = page
       .getByRole("region", { name: `${name}, as your team sees it` })
       .frameLocator("iframe");
@@ -339,13 +325,7 @@ test("an App's workspace previews the App before its chat changes anything, then
   const name = `Tally ${crypto.randomUUID().slice(0, 8)}`;
   try {
     const app = await api.apps.create({ name });
-    const { version } = await commitApp(
-      api.apps.files,
-      app.id,
-      tallyFiles("in the App"),
-      "A tally"
-    );
-    await api.versions.rollback({ kind: "app", id: app.id }, version);
+    await publishApp(api, app.id, tallyFiles("in the App"));
     const page = await pageOf(builder);
     await page.goto(`/apps/${app.id}`);
 
@@ -363,13 +343,7 @@ test("an App's workspace previews the App before its chat changes anything, then
     ).toBeEnabled();
 
     // A version published elsewhere comes into the open preview.
-    const second = await commitApp(
-      api.apps.files,
-      app.id,
-      tallyFiles("in version 2"),
-      "Elsewhere"
-    );
-    await api.versions.rollback({ kind: "app", id: app.id }, second.version);
+    await publishApp(api, app.id, tallyFiles("in version 2"));
     await expect(live.getByRole("status")).toHaveText("0 in version 2", {
       timeout: 30_000,
     });
@@ -406,13 +380,7 @@ test("a preview opened on a draft that doesn't build shows the App's latest vers
   const name = `Tally ${crypto.randomUUID().slice(0, 8)}`;
   try {
     const app = await api.apps.create({ name });
-    const { version } = await commitApp(
-      api.apps.files,
-      app.id,
-      tallyFiles("in the App"),
-      "A tally"
-    );
-    await api.versions.rollback({ kind: "app", id: app.id }, version);
+    await publishApp(api, app.id, tallyFiles("in the App"));
     const page = await pageOf(builder);
     await page.goto(`/apps/${app.id}`);
     await expect(

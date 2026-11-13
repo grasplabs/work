@@ -17,10 +17,8 @@ import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
-import {
-  createWorkflowResource,
-  shareWorkflowResource,
-} from "../src/workflow-resources.ts";
+import { shareWorkflowResource } from "../src/workflow-members.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { runObjectOf } from "../src/workflows/engine.ts";
 import { resourceRunTrace } from "../src/workflows/resource-run-trace.ts";
@@ -118,7 +116,7 @@ const routing = [
 ];
 
 /**
- * Starts version `version` of workflow `id` for `who` on `startEnv`, and
+ * Starts workflow `id`, live at `version`, for `who` on `startEnv`, and
  * waits for its end.
  */
 const ranFor = async (
@@ -132,7 +130,7 @@ const ranFor = async (
     startEnv,
     { type: "person", person: by },
     id,
-    { version, args: { who }, key: unique() }
+    { expected: version, args: { who }, key: unique() }
   );
   if (runId === null) {
     throw new Error("The start made a run");
@@ -543,7 +541,7 @@ describe("a run's trace, read over the session API", () => {
       env,
       { type: "person", person: builder.acting },
       workflow.id,
-      { version: 1, args: { who: "Ada" }, key: unique() }
+      { expected: 1, args: { who: "Ada" }, key: unique() }
     );
     if (runId === null) {
       throw new Error("The start made a run");
@@ -671,7 +669,7 @@ describe("a run's trace, read over the session API", () => {
           env,
           { type: "person", person: builder.acting },
           long.id,
-          { version: 1, args: { who: "Ada" }, key: unique() }
+          { expected: 1, args: { who: "Ada" }, key: unique() }
         );
         if (longRun === null) {
           throw new Error("The start made a run");

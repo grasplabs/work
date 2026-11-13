@@ -1,9 +1,5 @@
 import { v } from "@grasp-os/runtime/app";
-import {
-  declaredPermission,
-  declaredWorkflows,
-  generatedPaths,
-} from "@grasp-os/runtime/host";
+import { declaredWorkflows, generatedPaths } from "@grasp-os/runtime/host";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { FunctionResult } from "@grasp-os/shared/functions";
 import { appIdSchema } from "@grasp-os/shared/ids";
@@ -15,12 +11,7 @@ import { z } from "zod";
 
 import { callAppFunction, callPageFunction } from "../src/app-functions.ts";
 import type { Release } from "../src/app-releases.ts";
-import {
-  bindWorkflowToApp,
-  unbindWorkflowFromApp,
-} from "../src/app-workflow-bindings.ts";
 import { appKind, appFor, versionFiles } from "../src/apps.ts";
-import { sealedWorkflowPins } from "../src/bound-workflows.ts";
 import { decisionOutcome } from "../src/decisions/decisions.ts";
 import { withDraftReferences } from "../src/draft-references.ts";
 import { appHost } from "../src/durable-objects.ts";
@@ -43,8 +34,9 @@ import {
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { withRespond } from "../src/workflows/run-waits.ts";
 import { repairWakes } from "../src/workflows/wakes.ts";
-import { testApp } from "./app-definitions.ts";
+import { boundIn, testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
+import { commitDefined } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import {
   contractOf,
@@ -194,11 +186,10 @@ const boundApp = async (
   looped = false
 ): Promise<{
   fixture: Fixture;
-  binding: string;
   workflowId: string;
 }> => {
   const admin = await person("admin");
-  const fixture = await appWith(files(), "Invoices");
+  const owner = await person("builder");
   const key = `approval-${unique()}`;
   await publishCatalogContract(env, admin, {
     key,
@@ -208,20 +199,16 @@ const boundApp = async (
   });
   const workflow = await createWorkflowResource(
     env,
-    fixture.owner,
+    owner,
     `approve-${unique()}`
   );
-  await publishDefinition(
-    env,
-    fixture.owner,
-    workflow.id,
-    definitionOf(key, looped)
+  await publishDefinition(env, owner, workflow.id, definitionOf(key, looped));
+  const fixture = await appWith(
+    boundIn(files(), { review: workflow.id }),
+    "Invoices",
+    owner
   );
-  const { id } = await bindWorkflowToApp(env, fixture.owner, workflow.id, {
-    app: fixture.app,
-    alias: "review",
-  });
-  return { fixture, binding: id, workflowId: workflow.id };
+  return { fixture, workflowId: workflow.id };
 };
 
 /** A page naming the `review` workflow's `jobEvents`, its name literal. */
@@ -269,32 +256,37 @@ const eventDefinitionOf = (contract: string): string =>
     ],
   });
 
+/**
+ * Publishes `fixture`'s App again without its binding: it binds nothing as
+ * `review` from then on, its new version declaring it all the same.
+ */
+const publishedUnbound = async (fixture: Fixture): Promise<void> => {
+  const { version } = await commitDefined(
+    env,
+    fixture.owner,
+    fixture.app,
+    files()
+  );
+  await rollback(env, appKind, fixture.owner, fixture.app, version);
+};
+
 /** An App bound, as `review`, to a workflow version waiting for a page's event. */
 const eventApp = async (): Promise<Fixture> => {
   const admin = await person("admin");
-  const fixture = await appWith(files(eventPage, declaresEvent), "Invoices");
+  const owner = await person("builder");
   const key = `job-events-${unique()}`;
   await publishCatalogContract(env, admin, {
     key,
     kind: "event",
     events: jobEvents,
   });
-  const workflow = await createWorkflowResource(
-    env,
-    fixture.owner,
-    `wait-${unique()}`
+  const workflow = await createWorkflowResource(env, owner, `wait-${unique()}`);
+  await publishDefinition(env, owner, workflow.id, eventDefinitionOf(key));
+  return await appWith(
+    boundIn(files(eventPage, declaresEvent), { review: workflow.id }),
+    "Invoices",
+    owner
   );
-  await publishDefinition(
-    env,
-    fixture.owner,
-    workflow.id,
-    eventDefinitionOf(key)
-  );
-  await bindWorkflowToApp(env, fixture.owner, workflow.id, {
-    app: fixture.app,
-    alias: "review",
-  });
-  return fixture;
 };
 
 /** The text of `path` among `release`'s artifacts, as it was sealed. */
@@ -470,7 +462,7 @@ const answerOf = (result: FunctionResult): unknown =>
  * of its decision queries, as whoever calls.
  */
 const decisionInbox = async (looped = false) => {
-  const { fixture, workflowId, binding } = await boundApp(looped);
+  const { fixture, workflowId } = await boundApp(looped);
   const release = await seal(fixture);
   await rollback(env, appKind, fixture.owner, fixture.app, 1);
   const [reviewer, starter, outsider] = await Promise.all([
@@ -566,7 +558,6 @@ const decisionInbox = async (looped = false) => {
   return {
     fixture,
     release,
-    binding,
     workflowId,
     manifestHash,
     opened,
@@ -583,7 +574,7 @@ describe(
   { timeout: 180_000 },
   () => {
     it("are the release's declared ones in its references, typed for its pages, and stay so when the binding goes", async () => {
-      const { fixture, binding } = await boundApp();
+      const { fixture } = await boundApp();
       const release = await seal(fixture);
       const references = await sealedText(release, generatedPaths.api);
       const sealedFiles = await versionFiles(env, fixture.app, 1);
@@ -594,7 +585,7 @@ describe(
         );
       const typedBefore = await sealedBuild();
 
-      await unbindWorkflowFromApp(env, fixture.owner, binding);
+      await publishedUnbound(fixture);
 
       expect({
         sealed: declaredWorkflows(release.app, release.workflows).find(
@@ -883,7 +874,7 @@ describe(
     });
 
     it("answer an independent run's decision from the App's page once, after the page's confirmation, and refuse every decision the App may not answer alike", async () => {
-      const { fixture, binding, opened, reviewer, outsider, runAsking, ask } =
+      const { fixture, opened, reviewer, outsider, runAsking, ask } =
         await decisionInbox();
       const { app } = fixture;
       // The page's App, at the release its frame runs.
@@ -1013,7 +1004,7 @@ describe(
         restricted: true,
       });
       const beforeUnbinding = await review(reviewer, matching);
-      await unbindWorkflowFromApp(env, fixture.owner, binding);
+      await publishedUnbound(fixture);
 
       expect({
         ...refusals,
@@ -1055,7 +1046,7 @@ describe(
     });
 
     it("keep one answer of a decision answered from pages at once, or against its deadline, and take none against a changed context or a binding gone", async () => {
-      const { fixture, binding, workflowId, opened, reviewer, runAsking } =
+      const { fixture, workflowId, opened, reviewer, runAsking } =
         await decisionInbox();
       const { app } = fixture;
       const page = { app, version: 1 };
@@ -1177,7 +1168,7 @@ describe(
         unbound,
         approve,
         async () => {
-          await unbindWorkflowFromApp(env, fixture.owner, binding);
+          await publishedUnbound(fixture);
         }
       );
 
@@ -1639,7 +1630,7 @@ describe(
     });
 
     it("type a draft's pages from the App's own declaration, bound or not, and fail a page's type check on a decision it doesn't declare", async () => {
-      const { fixture, binding } = await boundApp();
+      const { fixture } = await boundApp();
       const draftErrors = async (key: string) => {
         const drafted = await withDraftReferences(
           env,
@@ -1650,7 +1641,7 @@ describe(
       };
       const bound = await draftErrors("approval");
       const missing = await draftErrors("missing");
-      await unbindWorkflowFromApp(env, fixture.owner, binding);
+      await publishedUnbound(fixture);
       const unbound = await draftErrors("approval");
 
       expect({
@@ -1658,57 +1649,6 @@ describe(
         missing: missing.some((message) => message.includes("missing")),
         unbound,
       }).toStrictEqual({ bound: [], missing: true, unbound: [] });
-    });
-
-    it("resolve every workflow an App declares and binds, more of them than one statement binds values", async () => {
-      const { fixture, workflowId } = await boundApp();
-      const release = await seal(fixture);
-      // 60 more aliases, each declared and bound to the same version: past
-      // the 100 values D1 binds to one statement, two per pinned version.
-      const declared = declaredPermission(release.app, "review", "workflows");
-      if (declared === undefined) {
-        throw new Error("The App declares no review");
-      }
-      const aliases = Array.from(
-        { length: 60 },
-        (_, index) => `review${index}`
-      );
-      await env.DB.batch(
-        aliases.map((alias) =>
-          env.DB.prepare(
-            "INSERT INTO app_workflow_bindings (id, app_id, alias, workflow_resource_id, workflow_resource_version, status, bound_by, bound_at) VALUES (?, ?, ?, ?, 1, 'active', ?, ?)"
-          ).bind(
-            crypto.randomUUID(),
-            fixture.app,
-            alias,
-            workflowId,
-            fixture.owner.userId,
-            Date.now()
-          )
-        )
-      );
-      const bound = await sealedWorkflowPins(
-        env,
-        fixture.app,
-        {
-          ...release.app,
-          permissions: {
-            ...release.app.permissions,
-            ...Object.fromEntries(
-              aliases.map((alias) => [alias, { ...declared, alias }])
-            ),
-          },
-        },
-        // Recording none of its own: each is bound as the App binds it.
-        { name: "Invoices", permissions: [], tables: [], answers: [] }
-      );
-
-      expect({
-        count: bound.length,
-        eachPinned: bound.every(
-          ({ pinned }) => pinned?.workflowId === workflowId
-        ),
-      }).toStrictEqual({ count: 61, eachPinned: true });
     });
 
     it("seal the events a page sends, and the event waits on them as typed waits", async () => {

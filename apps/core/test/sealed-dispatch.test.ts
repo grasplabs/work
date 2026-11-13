@@ -9,7 +9,6 @@ import { z } from "zod";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { fixtureHostFor } from "../src/app-tests.ts";
-import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { releaseIdsOf } from "../src/apps.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { editWorkflowDraft, workflowDraft } from "../src/workflow-editor.ts";
@@ -30,7 +29,7 @@ import type { HostedActivation } from "../src/workflows/resource-runs.ts";
 import type { StepError } from "../src/workflows/sealed-isolate.ts";
 import { sealedRunModules } from "../src/workflows/sealed-run.ts";
 import type { SealedRunMemory } from "../src/workflows/sealed-run.ts";
-import { testApp } from "./app-definitions.ts";
+import { boundIn, testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
 import { fakeProvider } from "./model-provider.ts";
@@ -410,7 +409,6 @@ const requestsApp = async (
   const keys = await contracts(admin);
   const builder = await person("builder");
   const files = requestsFiles();
-  const app = await appWith(files, "Requests", builder);
   const resource = await createWorkflowResource(
     env,
     builder,
@@ -430,10 +428,11 @@ const requestsApp = async (
       status
     )
   );
-  await bindWorkflowToApp(env, builder, resource.id, {
-    app: app.app,
-    alias: "followUp",
-  });
+  const app = await appWith(
+    boundIn(files, { followUp: resource.id }),
+    "Requests",
+    builder
+  );
   await seal(app);
   const release = await loadRelease(env, app.app, 1);
   return { app: app.app, resource: resource.id, release, files, fixture };

@@ -149,7 +149,7 @@ export const startedApproval = async (
   workflow: string
 ): Promise<ApprovalRun> => {
   const { runId } = await by.api.workflowResources.start(workflow, {
-    version: 1,
+    expected: 1,
     args: { invoice: "INV-7" },
     key: unique(),
   });

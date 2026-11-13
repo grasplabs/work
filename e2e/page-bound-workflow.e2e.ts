@@ -2,7 +2,11 @@ import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { expect } from "@playwright/test";
 import type { FrameLocator, Page, Route } from "@playwright/test";
 
-import { commitApp, testApp } from "../apps/core/test/app-definitions.ts";
+import {
+  boundIn,
+  publishApp,
+  testApp,
+} from "../apps/core/test/app-definitions.ts";
 import type { TestApp } from "../apps/core/test/app-definitions.ts";
 import { test } from "./csp.ts";
 import { apiOf, peopleIn } from "./people.ts";
@@ -74,7 +78,7 @@ import { workflows } from "@server/_generated/api";
 
 const yesNo = (value: boolean): string => (value ? "yes" : "no");
 
-function Desk() {
+const Desk = () => {
   const followUp = useWorkflow(workflows.followUp);
   const [refused, setRefused] = useState("");
   const tried = async (command: () => Promise<unknown>): Promise<void> => {
@@ -103,7 +107,7 @@ function Desk() {
       {refused === "" ? null : <p role="alert">{refused}</p>}
     </main>
   );
-}
+};
 export const Route = createFileRoute("/")({ component: Desk });
 `,
     }
@@ -135,17 +139,12 @@ const boundApp = async (
       source: definition,
     });
     await builds.api.drafts.publish({ kind: "workflow", id: workflow.id }, 1);
-    await builds.api.workflowResources.bindToApp(workflow.id, {
+    // Published from its draft, binding the workflow as it goes live.
+    await publishApp(
+      builds.api,
       app,
-      alias: "followUp",
-    });
-    const { version } = await commitApp(
-      builds.api.apps.files,
-      app,
-      appFiles(),
-      "Requests"
+      boundIn(appFiles(), { followUp: workflow.id })
     );
-    await builds.api.versions.rollback({ kind: "app", id: app }, version);
     const { id } = await builds.api.permissions.request({
       subject: { type: "app", appId: app },
       object: { type: "workflow", workflowId: workflow.id },

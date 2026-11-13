@@ -177,7 +177,7 @@ test("an admin sees a grant asked for again after a new version, and approves on
       name: appName,
       description: "Invites guests to the minutes",
     }));
-    await release(builds.api, appId, { "README.md": "One" }, "First");
+    await release(builds.api, appId, { "README.md": "One" });
     const { id } = await builds.api.permissions.request({
       subject: { type: "app", appId },
       object: { type: "platform" },
@@ -186,7 +186,7 @@ test("an admin sees a grant asked for again after a new version, and approves on
     });
     await decides.api.permissions.grant(id, { version: 1 });
     // The builder can't grant it, so a new version asks for it again.
-    await release(builds.api, appId, { "README.md": "Two" }, "Second");
+    await release(builds.api, appId, { "README.md": "Two" });
   } finally {
     decides.core[Symbol.dispose]();
   }
@@ -205,7 +205,7 @@ test("an admin sees a grant asked for again after a new version, and approves on
     await expect(card).toContainText(/Version to review: \d{2}\.\d{2}\.2/u);
 
     // Another version is published while the admin looks at version 2.
-    await release(builds.api, appId, { "README.md": "Three" }, "Third");
+    await release(builds.api, appId, { "README.md": "Three" });
     await card.getByRole("button", { name: /^Approve /u }).click();
     await expect(card.getByRole("alert")).toHaveText(
       "Another version of this App was published since this list was read. The list now shows it: review that version, then approve again."

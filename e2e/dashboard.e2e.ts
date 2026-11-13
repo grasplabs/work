@@ -63,7 +63,6 @@ test("a builder sees their workflows on the board, and opens them in full", asyn
       throw new Error("No workflow was made");
     }
     const { runId } = await api.workflowResources.start(counted.id, {
-      version: 1,
       args: { who: "Ada" },
       key: `count-${tag}`,
     });

@@ -20,9 +20,9 @@ import {
 import { rollback } from "../src/publish.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
-import { commitApp, testApp } from "./app-definitions.ts";
+import { testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
-import { requestGranted } from "./apps.ts";
+import { commitApp, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
@@ -625,12 +625,7 @@ describe("a chat's agent and who calls an App", { timeout: 180_000 }, () => {
   it("is its person to the App, and is recorded as the agent when it reads the directory itself", async () => {
     const builder = await signedInApi(idp, "builder");
     const { id } = await builder.api.apps.create({ name: "Directory" });
-    const { version } = await commitApp(
-      builder.api.apps.files,
-      id,
-      peopleFiles(),
-      "First"
-    );
+    const { version } = await commitApp(builder.api, id, peopleFiles());
     await builder.api.versions.rollback({ kind: "app", id }, version);
     const release = await loadRelease(env, appIdSchema.parse(id), version);
     const chat = await chatOf(

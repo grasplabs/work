@@ -767,7 +767,7 @@ describe("independent workflows' email triggers", { timeout: 120_000 }, () => {
     }).toStrictEqual({ full: true, runsWhileFull: 0, freed: 202, runs: 1 });
   });
 
-  it("try a message again, never refuse it for good, when a version is published as it starts, then start it on that version", async () => {
+  it("start a message on the version published as it starts, once, however often it comes", async () => {
     const { builder, workflow, trigger, address } = await emailTrigger();
     const message = invoiceMail({
       to: address,
@@ -782,12 +782,9 @@ describe("independent workflows' email triggers", { timeout: 120_000 }, () => {
         definitionOf("args.subject.trim()")
       );
     });
-    const failed = vi.spyOn(console, "error").mockReturnValue();
-
     const raced = await outcome(
       deliver(address, message, { changes: { DB: moving } })
     );
-    failed.mockRestore();
     const again = await deliver(address, message);
     const versions = await env.DB.prepare(
       "SELECT workflow_resource_version AS version FROM workflow_start_receipts WHERE invoker_type = 'trigger' AND invoker_id = ?"
@@ -801,7 +798,8 @@ describe("independent workflows' email triggers", { timeout: 120_000 }, () => {
       versions: versions.results.map(({ version }) => version),
       refused: await refusalsOf(trigger.id),
     }).toStrictEqual({
-      raced: false,
+      // The live version as the start is admitted: the one published.
+      raced: true,
       again: undefined,
       versions: [2],
       refused: [],
@@ -1245,7 +1243,7 @@ describe(
 
       const refused = await outcome(
         builder.api.workflowResources.start(workflow, {
-          version: 1,
+          expected: 1,
           args: {
             subject: "Invoice",
             from: "ben@acme.test",

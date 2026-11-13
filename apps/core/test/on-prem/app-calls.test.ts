@@ -5,9 +5,9 @@ import { z } from "zod";
 import { loadRelease } from "../../src/app-releases.ts";
 import type { Release } from "../../src/app-releases.ts";
 import { chatOf, codeResults, codeStep, says } from "../agent-chat.ts";
-import { commitApp, testApp } from "../app-definitions.ts";
+import { testApp } from "../app-definitions.ts";
 import type { TestApp } from "../app-definitions.ts";
-import { requestGranted } from "../apps.ts";
+import { commitApp, requestGranted } from "../apps.ts";
 import { mockIdp } from "../idp.ts";
 import { signedInApi } from "../sign-in.ts";
 
@@ -78,12 +78,7 @@ const callOf = (release: Release, path: string, input: unknown): string =>
 const notesApp = async () => {
   const builder = await signedInApi(idp, "builder");
   const { id } = await builder.api.apps.create({ name: "Notes" });
-  const { version } = await commitApp(
-    builder.api.apps.files,
-    id,
-    files,
-    "First"
-  );
+  const { version } = await commitApp(builder.api, id, files);
   await builder.api.versions.rollback({ kind: "app", id }, version);
   return { builder, app: id, release: await loadRelease(env, id, version) };
 };

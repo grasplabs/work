@@ -95,7 +95,7 @@ const started = async (
     { type: "person", person: by },
     id,
     {
-      version: 1,
+      expected: 1,
       args: input ?? { who: "Ada" },
       key: unique(),
     }

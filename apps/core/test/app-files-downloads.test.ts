@@ -13,7 +13,7 @@ import {
 } from "../src/file-host.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { StoreHost } from "../src/store-host.ts";
-import { commitApp, withFiles } from "./app-definitions.ts";
+import { withFiles } from "./app-definitions.ts";
 import {
   appsOf,
   answerOf,
@@ -37,6 +37,7 @@ import {
   upload,
   utf8,
 } from "./app-files.ts";
+import { commitApp } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { person as actingPerson } from "./sealed-apps.ts";
@@ -114,12 +115,11 @@ describe("an App's files", { timeout: 120_000 }, () => {
     await reader?.read();
     // The same files under a second version.
     const { version } = await commitApp(
-      builder.api.apps.files,
+      builder.api,
       app,
       withFiles(files, {
         "server/notes.ts": `${files.files["server/notes.ts"] ?? ""}\n// The second.\n`,
-      }),
-      "Second"
+      })
     );
     await builder.api.versions.rollback({ kind: "app", id: app }, version);
     await expect(reader?.read()).rejects.toThrow(

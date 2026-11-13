@@ -13,9 +13,9 @@ import {
   candidateRunFor,
   startCandidateRun,
 } from "../src/workflows/candidate-runs.ts";
-import { appOf, commitApp, testApp, withFiles } from "./app-definitions.ts";
+import { appOf, testApp, withFiles } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
-import { requestGranted } from "./apps.ts";
+import { commitApp, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -109,16 +109,13 @@ const redefined = async (
 
 type Builder = Awaited<ReturnType<typeof signedInApi>>;
 
-/**
- * Commits `app` over App `id` and makes it current, as an admin (made
- * current by its builder, the App's grants would be asked for again).
- */
+/** Commits `app` over App `id` and makes it current, as an admin. */
 const published = async (
   builder: Builder,
   id: string,
   app: TestApp
 ): Promise<unknown> => {
-  const { version } = await commitApp(builder.api.apps.files, id, app, "Next");
+  const { version } = await commitApp(builder.api, id, app);
   const admin = await signedInApi(idp, "admin");
   return await refusal(
     admin.api.versions.rollback({ kind: "app", id }, version)
@@ -227,7 +224,7 @@ const ended = async (
 /** A run of version 1 of workflow `id` writing `title`, once it ended. */
 const ranWith = async (builder: Builder, id: string, title: string) => {
   const { runId } = await builder.api.workflowResources.start(id, {
-    version: 1,
+    expected: 1,
     args: { title },
     key: unique(),
   });
@@ -297,7 +294,7 @@ const waitingRun = async () => {
   );
   const { runId } = await set.builder.api.workflowResources.start(
     set.workflow.id,
-    { version: 1, args: { title: "Later" }, key: unique() }
+    { expected: 1, args: { title: "Later" }, key: unique() }
   );
   return { ...set, grant, runId };
 };
@@ -620,7 +617,7 @@ export const create = mutation({
     await requestGranted(idp, builder, callRequest(workflow.id, app, create));
     await requestGranted(idp, builder, callRequest(workflow.id, app, titles));
     const { runId } = await builder.api.workflowResources.start(workflow.id, {
-      version: 1,
+      expected: 1,
       args: { title: "Once" },
       key: unique(),
     });
@@ -679,7 +676,7 @@ return { note: made.output, titles: listed.output };`);
     await requestGranted(idp, builder, callRequest(workflow.id, app, titles));
     const tampered = async (fn: string) => {
       const { runId } = await builder.api.workflowResources.start(workflow.id, {
-        version: 1,
+        expected: 1,
         args: { title: "Forged" },
         key: unique(),
       });

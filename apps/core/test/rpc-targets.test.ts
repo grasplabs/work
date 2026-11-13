@@ -468,7 +468,6 @@ describe("what a browser reaches over core's connection", () => {
         "authenticate: SessionRpc",
         "authenticate.drafts: DraftsRpc",
         "authenticate.drafts.watch: Subscription",
-        "authenticate.apps.files: AppFilesRpc",
         "authenticate.chats.watch: Subscription",
         "authenticate.pages.frame: PageFrameRpc",
         "authenticate.pages.frame.watchQuery: Subscription",

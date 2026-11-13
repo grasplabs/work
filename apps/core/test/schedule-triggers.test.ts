@@ -21,10 +21,8 @@ import {
   listWorkflowTriggers,
   setTriggerEnabled,
 } from "../src/trigger-resources.ts";
-import {
-  createWorkflowResource,
-  shareWorkflowResource,
-} from "../src/workflow-resources.ts";
+import { shareWorkflowResource } from "../src/workflow-members.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import {
   resourceRunFor,
@@ -1001,7 +999,7 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
           env,
           { type: "trigger", triggerId: trigger.id },
           workflow.id,
-          { version: 1, args: nightly, key: keyOf(trigger.id, occurrence) },
+          { expected: 1, args: nightly, key: keyOf(trigger.id, occurrence) },
           undefined,
           { scheduledAt: occurrence.toISOString() }
         );
@@ -1077,7 +1075,7 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
           env,
           { type: "trigger", triggerId: trigger.id },
           workflow.id,
-          { version: 2, args: nightly, key: keyOf(trigger.id, occurrence) },
+          { expected: 2, args: nightly, key: keyOf(trigger.id, occurrence) },
           undefined,
           { scheduledAt: occurrence.toISOString() }
         );

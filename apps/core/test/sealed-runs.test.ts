@@ -154,7 +154,7 @@ const startOfFirst = async (old: Sealed): Promise<unknown> =>
         serving,
         { type: "person", person: old.by },
         old.workflow.id,
-        { version: 1, args: { who: "Ada" }, key: unique() }
+        { expected: 1, args: { who: "Ada" }, key: unique() }
       )
   );
 
@@ -828,7 +828,7 @@ return { before, after: await late };
       serving,
       { type: "person", person: tampered.by },
       tampered.workflow.id,
-      { version: 1, args: { who: "Ada" }, key: unique() }
+      { expected: 1, args: { who: "Ada" }, key: unique() }
     );
     await expect(sealedRunOf(runId ?? "")).rejects.toMatchObject({
       code: "workflow.version_corrupt",
@@ -872,6 +872,7 @@ return { before, after: await late };
     // As a version published before format 2, its contract as it stored it.
     const format1 = await publishedBefore(ofFormat1, contractOfFormat1);
     const { workflow, by } = format1;
+    const start = await startOfFirst(format1);
     // A new version beside it, published as any is.
     const first = await env.DB.prepare(
       "SELECT definition FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
@@ -892,7 +893,7 @@ return { before, after: await late };
     );
     const listed = await workflowVersions(env, by, workflow.id);
     expect({
-      start: await startOfFirst(format1),
+      start,
       exported: await codeOf(
         async () => await exportedWorkflowVersion(env, by, workflow.id, 1)
       ),

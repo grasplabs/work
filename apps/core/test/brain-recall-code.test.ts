@@ -53,10 +53,8 @@ import { approveResourceBinding } from "../src/resource-bindings.ts";
 import { createTriggerResource } from "../src/trigger-resources.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
-import {
-  createWorkflowResource,
-  shareWorkflowResource,
-} from "../src/workflow-resources.ts";
+import { shareWorkflowResource } from "../src/workflow-members.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
@@ -420,7 +418,7 @@ const startedRun = async (
     env,
     { type: "person", person: by },
     id,
-    { version: 1, args, key: unique() }
+    { expected: 1, args, key: unique() }
   );
   if (runId === null) {
     throw new Error("The start admitted no run");
@@ -694,7 +692,7 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
       env,
       { type: "trigger", triggerId: trigger.id },
       workflow.id,
-      { version: 1, args: { question: word, tokens: 800 }, key: unique() }
+      { expected: 1, args: { question: word, tokens: 800 }, key: unique() }
     );
     if (runId === null) {
       throw new Error("The start admitted no run");

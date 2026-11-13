@@ -182,7 +182,7 @@ const waitingRun = async (
     env,
     { type: "person", person: admin },
     workflow.id,
-    { version: 1, args: { invoice }, key: unique() }
+    { expected: 1, args: { invoice }, key: unique() }
   );
   if (runId === null) {
     throw new Error("The start admitted no run");

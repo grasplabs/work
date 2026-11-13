@@ -363,7 +363,7 @@ export const waitingRun = async ({
     serving,
     { type: "person", person: by },
     workflow.id,
-    { version: 1, args: { who: "Ada" }, key: unique() }
+    { expected: 1, args: { who: "Ada" }, key: unique() }
   );
   if (runId === null) {
     throw new Error("The start admitted no run");
@@ -949,7 +949,7 @@ export const reviewRun = async (
     env,
     { type: "person", person: by },
     workflow.id,
-    { version: 1, args: { reviewer, invoice: "INV-7" }, key: unique() }
+    { expected: 1, args: { reviewer, invoice: "INV-7" }, key: unique() }
   );
   if (runId === null) {
     throw new Error("The start admitted no run");

@@ -51,7 +51,7 @@ describe("a JSON workflow's run on-prem", () => {
       env,
       { type: "person", person: by },
       workflow.id,
-      { version: 1, args: { who: "Ada" }, key: unique() }
+      { expected: 1, args: { who: "Ada" }, key: unique() }
     );
     const run = await vi.waitFor(
       async () => {
@@ -130,7 +130,7 @@ describe("a JSON workflow's run on-prem", () => {
       env,
       { type: "person", person: by },
       workflow.id,
-      { version: 1, args: { who: "Ada" }, key: unique() }
+      { expected: 1, args: { who: "Ada" }, key: unique() }
     );
     if (runId === null) {
       throw new Error("The start admitted no run");

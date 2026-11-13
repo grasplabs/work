@@ -11,10 +11,8 @@ import { z } from "zod";
 import { appFor } from "../src/apps.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
-import {
-  createWorkflowResource,
-  shareWorkflowResource,
-} from "../src/workflow-resources.ts";
+import { shareWorkflowResource } from "../src/workflow-members.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import type { StartInvoker } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
@@ -112,7 +110,7 @@ const ranOnce = async (
     env,
     invoker ?? { type: "person", person: by.identity },
     id,
-    { version: 1, args: { doc: { id: handed.id } }, key: unique() },
+    { expected: 1, args: { doc: { id: handed.id } }, key: unique() },
     undefined,
     undefined,
     undefined,

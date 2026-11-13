@@ -7,9 +7,9 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { appKind } from "../src/apps.ts";
 import { readDraft, saveDraft } from "../src/drafts.ts";
-import { commitApp, sourceParts, testApp } from "./app-definitions.ts";
+import { sourceParts, testApp } from "./app-definitions.ts";
 import type { TestApp, TestSource } from "./app-definitions.ts";
-import { appVersionOf, appVersionsOf } from "./apps.ts";
+import { appVersionOf, appVersionsOf, commitApp } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { agentWriting } from "./draft-writers.ts";
 import { mockIdp } from "./idp.ts";
@@ -224,7 +224,6 @@ describe("publishing an App's draft", { timeout: 180_000 }, () => {
         version: version?.version,
         label: version?.label,
         author: version?.author,
-        message: version?.message,
       },
       draft: await builder.api.drafts.get({ kind: "app", id: app }),
       point: {
@@ -245,7 +244,6 @@ describe("publishing an App's draft", { timeout: 180_000 }, () => {
         version: 1,
         label: `${month}1`,
         author: builder.userId,
-        message: "Published from the draft.",
       },
       draft: {
         subject: { kind: "app", id: app },
@@ -439,7 +437,7 @@ describe("publishing an App's draft", { timeout: 180_000 }, () => {
 
     const live = await publishing(builder, app, { "notes.md": "Notes\n" });
 
-    const files = await builder.api.apps.files.read(app, 3);
+    const files = await builder.api.versions.files({ kind: "app", id: app }, 3);
     const version = appVersionOf(
       await builder.api.versions.get({ kind: "app", id: app }, 3)
     );
@@ -474,7 +472,7 @@ describe("publishing an App's draft", { timeout: 180_000 }, () => {
 
     const live = await publishing(builder, app, { "notes.md": "New\n" });
 
-    const files = await builder.api.apps.files.read(app, 3);
+    const files = await builder.api.versions.files({ kind: "app", id: app }, 3);
     const version = appVersionOf(
       await builder.api.versions.get({ kind: "app", id: app }, 3)
     );
@@ -601,7 +599,7 @@ describe("publishing an App's draft", { timeout: 180_000 }, () => {
       left.revision
     );
 
-    const files = await builder.api.apps.files.read(app, 3);
+    const files = await builder.api.versions.files({ kind: "app", id: app }, 3);
     const version = appVersionOf(
       await builder.api.versions.get({ kind: "app", id: app }, 3)
     );
@@ -633,7 +631,7 @@ describe("publishing an App's draft", { timeout: 180_000 }, () => {
     // back to it seals and tests it first, which takes a second, then
     // gives the store its schema.
     await commitApp(
-      builder.api.apps.files,
+      builder.api,
       app,
       testApp(
         {
@@ -650,13 +648,14 @@ describe("publishing an App's draft", { timeout: 180_000 }, () => {
           },
         },
         notes.files
-      ),
-      "Tags"
+      )
     );
     await publishing(builder, app, { "notes.md": "Three\n" });
     const { revision } = await builder.api.drafts.get({ kind: "app", id: app });
     const { id: chatId } = await builder.api.chats.create("App changes");
     const writer = await agentWriting(builder, chatId);
+    const before = await allEvents();
+    const earlier = new Set(before.map(({ id }) => id));
 
     const rolling = builder.api.versions.rollback(
       { kind: "app", id: app },
@@ -682,8 +681,8 @@ describe("publishing an App's draft", { timeout: 180_000 }, () => {
     const events = await allEvents();
     const discarded = events
       .filter(
-        ({ action, target }) =>
-          action === "draft.discarded" && target?.id === app
+        ({ id, action, target }) =>
+          !earlier.has(id) && action === "draft.discarded" && target?.id === app
       )
       .map(({ detail }) => detail);
     // The write is still there to step back to, over the version live.
@@ -745,7 +744,7 @@ describe("publishing an App's draft", { timeout: 180_000 }, () => {
       restored.revision
     );
 
-    const files = await builder.api.apps.files.read(app, 3);
+    const files = await builder.api.versions.files({ kind: "app", id: app }, 3);
     const version = appVersionOf(
       await builder.api.versions.get({ kind: "app", id: app }, 3)
     );
@@ -853,7 +852,7 @@ describe(
       });
     });
 
-    it("names the access the App waits for, and what a builder's publish asks an admin for again, which an admin's doesn't", async () => {
+    it("names the access the App waits for, the same for a builder and an admin, and nothing it holds already", async () => {
       const [builder, admin] = await Promise.all([
         signedInApi(idp, "builder"),
         signedInApi(idp, "admin"),
@@ -864,7 +863,7 @@ describe(
         id: admin.userId,
         role: "builder",
       });
-      const mail = await storedGrant(
+      await storedGrant(
         { type: "app", id: app },
         { type: "connection", id: crypto.randomUUID() },
         ["send"],
@@ -879,24 +878,15 @@ describe(
       );
       await writeDraft(builder, app, deskSaying("Approve"));
 
-      const reviewed = async (by: Person) => {
-        const { permissions, grants } = await by.api.apps.review(app);
-        return {
-          waiting: permissions.map(({ id }) => id),
-          askedAgain: grants.map(({ permission, askedAgain }) => [
-            permission.id,
-            askedAgain,
-          ]),
-        };
+      const waiting = async (by: Person) => {
+        const { permissions } = await by.api.apps.review(app);
+        return permissions.map(({ id }) => id);
       };
 
       expect({
-        builder: await reviewed(builder),
-        admin: await reviewed(admin),
-      }).toStrictEqual({
-        builder: { waiting: [calendar], askedAgain: [[mail, true]] },
-        admin: { waiting: [calendar], askedAgain: [[mail, false]] },
-      });
+        builder: await waiting(builder),
+        admin: await waiting(admin),
+      }).toStrictEqual({ builder: [calendar], admin: [calendar] });
     });
 
     it("is for the App's builders, never someone who only uses it", async () => {

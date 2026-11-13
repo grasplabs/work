@@ -1,5 +1,4 @@
 import { checkExpression } from "@grasp-os/runtime/check";
-import { appErrors } from "@grasp-os/shared/apps";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
@@ -131,9 +130,9 @@ const unavailable = workflowResourceErrors.create(
 ).message;
 
 describe("the agent building an independent workflow", () => {
-  it("drafts, test-runs and binds a workflow as its person, recorded as the agent acting for them and as its chat's work, and never publishes it", async () => {
+  it("drafts and test-runs a workflow as its person, recorded as the agent acting for them and as its chat's work, and never publishes it", async () => {
     const name = `summary-${unique()}`;
-    const { app, person, chat, grant } = await setUp([]);
+    const { person, chat, grant } = await setUp([]);
     // Made as Build it makes one, and published once by the person: the
     // agent creates and publishes none.
     const made = await person.api.workflowResources.create(name);
@@ -157,16 +156,11 @@ describe("the agent building an independent workflow", () => {
         await new Promise((resolve) => setTimeout(resolve, 200));
         run = await env.workflowBuild.testRun(created.id, runId);
       }
-      const bound = await env.workflowBuild.bind(created.id, {
-        app: ${JSON.stringify(app)},
-        alias: "summary",
-      });
       return {
         id: created.id,
         notes: [started.note, run.note],
         problems: saved.problems,
         test: { status: run.status, result: run.result },
-        bound: { app: bound.app, alias: bound.alias, version: bound.version },
       };
     };`;
     await fakeProvider(codeStep(build), says("Built."));
@@ -188,7 +182,6 @@ describe("the agent building an independent workflow", () => {
       ],
       problems: [],
       test: { status: "completed", result: { status: "done" } },
-      bound: { app, alias: "summary" },
     });
     // Its edit is the chat's work, waiting in the draft for the person to
     // publish: the workflow's live version is still the person's.
@@ -221,7 +214,7 @@ describe("the agent building an independent workflow", () => {
           action !== "workflow.created" &&
           // A run's own events are the system's, a test run's too.
           !action.startsWith("workflow.run.") &&
-          (target?.id === built.id || action === "workflow.app_binding.bound")
+          target?.id === built.id
       );
       expect(changes.length).toBeGreaterThan(0);
       return changes;
@@ -361,153 +354,6 @@ describe("the agent building an independent workflow", () => {
     });
   });
 
-  it("binds nothing once its permission is revoked while the binding is being read", async () => {
-    const { admin, builder, app, chat, grant } = await setUp([]);
-    const flow = await builder.api.workflowResources.create(
-      `unbound-${unique()}`
-    );
-    await publishOverRpc(builder.api, flow.id, definitionOf());
-    const calls = tryEach({
-      bind: `await env.workflowBuild.bind(${JSON.stringify(flow.id)}, { app: ${JSON.stringify(app)}, alias: "summary" })`,
-    });
-    await fakeProvider(codeStep(calls), says("It was stopped."));
-    const granted = await grant();
-    // The last read before the binding is saved (the binding it would
-    // replace) is held until the grant is revoked, so the save comes after
-    // the revocation. Flags, polled, not promises: each side runs in a
-    // request of its own.
-    const { DB: database } = env;
-    const held = { reading: false, revoked: false };
-    const replacingRead = /from "app_workflow_bindings"/u;
-    const holding = (statement: D1PreparedStatement): D1PreparedStatement =>
-      new Proxy(statement, {
-        get: (target, property) => {
-          if (property === "bind") {
-            return (...values: unknown[]): D1PreparedStatement =>
-              holding(target.bind(...values));
-          }
-          const value: unknown = Reflect.get(target, property);
-          if (typeof value !== "function") {
-            return value;
-          }
-          return async (...args: unknown[]): Promise<unknown> => {
-            held.reading = true;
-            while (!held.revoked) {
-              // oxlint-disable-next-line no-await-in-loop -- polled
-              await scheduler.wait(20);
-            }
-            const answered: unknown = await Reflect.apply(value, target, args);
-            return answered;
-          };
-        },
-      });
-    env.DB = new Proxy(database, {
-      get: (target, property) => {
-        if (property === "prepare") {
-          return (query: string): D1PreparedStatement => {
-            const statement = target.prepare(query);
-            return query.startsWith("select") &&
-              replacingRead.test(query) &&
-              !held.revoked
-              ? holding(statement)
-              : statement;
-          };
-        }
-        const value: unknown = Reflect.get(target, property);
-        if (typeof value !== "function") {
-          return value;
-        }
-        return (...args: unknown[]): unknown => {
-          const answered: unknown = Reflect.apply(value, target, args);
-          return answered;
-        };
-      },
-    });
-    try {
-      const asked = chat.ask("Bind it");
-      // Waits on the gate itself, for as long as the chat takes to reach
-      // the read under load: the held read sets the flag, nothing goes on
-      // until it does, and only a chat that never reads it times out.
-      await vi.waitFor(
-        () => {
-          expect(held.reading).toBeTruthy();
-        },
-        { timeout: 15_000, interval: 20 }
-      );
-      await admin.api.permissions.revoke(granted);
-      held.revoked = true;
-      await asked;
-    } finally {
-      held.revoked = true;
-      env.DB = database;
-    }
-
-    // The revocation closed the run: its save was refused, and nothing
-    // was bound.
-    const [result] = await codeResults(chat.stub, chat.chat.id);
-    const bound = await env.DB.prepare(
-      "SELECT COUNT(*) AS n FROM app_workflow_bindings WHERE workflow_resource_id = ?"
-    )
-      .bind(flow.id)
-      .first<{ n: number }>();
-    expect({
-      isError: result?.isError,
-      revoked: result?.text.startsWith("Error (revoked):"),
-      bound: bound?.n,
-    }).toStrictEqual({ isError: true, revoked: true, bound: 0 });
-  });
-
-  it("names what a rebind replaced in its record", async () => {
-    const { builder, app } = await setUp([]);
-    const flow = await builder.api.workflowResources.create(
-      `rebound-${unique()}`
-    );
-    await publishOverRpc(builder.api, flow.id, definitionOf());
-    await publishOverRpc(builder.api, flow.id, definitionOf("later"));
-    const first = await builder.api.workflowResources.bindToApp(flow.id, {
-      app,
-      alias: "summary",
-    });
-    const second = await builder.api.workflowResources.bindToApp(flow.id, {
-      app,
-      alias: "summary",
-    });
-
-    const bound = await vi.waitFor(async () => {
-      const events = await allEvents();
-      const found = events
-        .filter(
-          ({ action, detail }) =>
-            action === "workflow.app_binding.bound" &&
-            detail.workflowId === flow.id
-        )
-        .map(({ detail }) => detail);
-      expect(found).toHaveLength(2);
-      return found;
-    });
-    expect(bound).toStrictEqual([
-      {
-        binding: first.id,
-        alias: "summary",
-        workflowId: flow.id,
-        // The live version, which its starts run.
-        version: 2,
-        replacedBinding: null,
-        replacedWorkflowId: null,
-        replacedVersion: null,
-      },
-      {
-        binding: second.id,
-        alias: "summary",
-        workflowId: flow.id,
-        version: 2,
-        replacedBinding: first.id,
-        replacedWorkflowId: flow.id,
-        replacedVersion: 2,
-      },
-    ]);
-  });
-
   it("builds for a builder with no permission of the agent's own, and nothing for a person who doesn't build", async () => {
     const calls = (workflow: string) =>
       tryEach({
@@ -541,13 +387,12 @@ describe("the agent building an independent workflow", () => {
     });
   });
 
-  it("does nothing to a workflow its person has no role in, nor binds to an App they don't build", async () => {
+  it("does nothing to a workflow its person has no role in", async () => {
     const { builder, chat, grant } = await setUp([]);
     const other = await signedInApi(idp, "builder");
     const theirs = await other.api.workflowResources.create(
       `theirs-${unique()}`
     );
-    const { id: theirApp } = await other.api.apps.create({ name: "Theirs" });
     const mine = await builder.api.workflowResources.create(`mine-${unique()}`);
     await publishOverRpc(builder.api, mine.id, definitionOf());
     const id = JSON.stringify(theirs.id);
@@ -556,8 +401,6 @@ describe("the agent building an independent workflow", () => {
       edit: `await env.workflowBuild.edit(${id}, { revision: 0, source: "{}" })`,
       startTest: `await env.workflowBuild.startTest(${id}, { revision: 1, args: {}, fixtures: {} })`,
       testRun: `await env.workflowBuild.testRun(${id}, "run-1")`,
-      bindTheirs: `await env.workflowBuild.bind(${id}, { app: ${JSON.stringify(theirApp)}, alias: "x" })`,
-      bindToTheirApp: `await env.workflowBuild.bind(${JSON.stringify(mine.id)}, { app: ${JSON.stringify(theirApp)}, alias: "x" })`,
       requestTheirs: `await env.workflowBuild.requestPermission(${id}, { object: { type: "workflow", workflowId: ${JSON.stringify(mine.id)} }, actions: ["start"], binding: "CHILD" })`,
     });
     await fakeProvider(codeStep(calls), says("No."));
@@ -571,17 +414,8 @@ describe("the agent building an independent workflow", () => {
       edit: unavailable,
       startTest: unavailable,
       testRun: unavailable,
-      bindTheirs: appErrors.create("app.not_found").message,
-      bindToTheirApp: appErrors.create("app.not_found").message,
       requestTheirs: unavailable,
     });
-    // Nothing was bound, and nothing asked for.
-    const bindings = await env.DB.prepare(
-      "SELECT COUNT(*) AS n FROM app_workflow_bindings WHERE workflow_resource_id IN (?, ?)"
-    )
-      .bind(theirs.id, mine.id)
-      .first<{ n: number }>();
-    expect(bindings?.n).toBe(0);
   });
 
   it("asks for a permission for the workflow alone, whatever subject the code names, and it grants nothing", async () => {
@@ -657,7 +491,7 @@ describe("the agent following independent workflows", () => {
     );
     await publishOverRpc(builder.api, flow.id, definitionOf());
     const { id: run } = await builder.api.workflowResources.start(flow.id, {
-      version: 1,
+      expected: 1,
       args: { who: "Ada" },
       key: `key-${unique()}`,
     });

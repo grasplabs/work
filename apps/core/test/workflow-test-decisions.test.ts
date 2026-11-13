@@ -10,14 +10,13 @@ import { z } from "zod";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { fixtureHostFor } from "../src/app-tests.ts";
-import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { appKind, findApp, releaseIdsOf } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { rollback } from "../src/publish.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { runEngine } from "../src/workflows/engine.ts";
-import { testApp } from "./app-definitions.ts";
+import { boundIn, testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
 import { resumed, stopped, whileEngineRefuses } from "./runs.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
@@ -188,7 +187,6 @@ const invoicesApp = async (
     response: JSON.stringify(response.descriptor),
   });
   const files = filesWith(tests);
-  const fixture = await appWith(files, "Invoices", builder);
   const workflow = await createWorkflowResource(
     env,
     builder,
@@ -200,10 +198,11 @@ const invoicesApp = async (
     workflow.id,
     definitionOf(contract, steps, status)
   );
-  await bindWorkflowToApp(env, builder, workflow.id, {
-    app: fixture.app,
-    alias: "approval",
-  });
+  const fixture = await appWith(
+    boundIn(files, { approval: workflow.id }),
+    "Invoices",
+    builder
+  );
   await seal(fixture);
   const release = await loadRelease(env, fixture.app, 1);
   return { builder, app: fixture.app, release, options: optionsOf(given) };

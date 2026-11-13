@@ -743,7 +743,7 @@ describe("a page's call, by a function's name", { timeout: 120_000 }, () => {
 });`
       ),
     });
-    await commitDefined(env, notes.owner, notes.app, files, "Tag");
+    await commitDefined(env, notes.owner, notes.app, files);
     await seal(notes, 2);
     await rollback(env, appKind, notes.owner, notes.app, 2);
     const again = await save();
@@ -784,7 +784,7 @@ describe("a page's call, by a function's name", { timeout: 120_000 }, () => {
           "export const bump = internalQuery("
         ),
     });
-    await commitDefined(env, notes.owner, notes.app, files, "Rename");
+    await commitDefined(env, notes.owner, notes.app, files);
     await seal(notes, 2);
     await rollback(env, appKind, notes.owner, notes.app, 2);
     const fromPage = async (

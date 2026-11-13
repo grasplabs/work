@@ -16,8 +16,9 @@ import { z } from "zod";
 
 import { loadRelease } from "../src/app-releases.ts";
 import { revokeRelease } from "../src/release-retention.ts";
-import { commitApp, testApp } from "./app-definitions.ts";
+import { testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
+import { commitApp } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { chatWithDraft, previewLease } from "./previews.ts";
 import { person } from "./sealed-apps.ts";
@@ -106,12 +107,7 @@ const personApi = async (role: Role): Promise<Person> =>
 const servedApp = async () => {
   const builder = await personApi("builder");
   const { id } = await builder.api.apps.create({ name: "Notes" });
-  const { version } = await commitApp(
-    builder.api.apps.files,
-    id,
-    files,
-    "First"
-  );
+  const { version } = await commitApp(builder.api, id, files);
   await builder.api.versions.rollback({ kind: "app", id }, version);
   const { lease } = await builder.api.pages.open(id);
   const release = await loadRelease(env, id, version);

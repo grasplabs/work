@@ -20,8 +20,7 @@ import { callAppFunction } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import { reviewDraft } from "../src/app-review.ts";
 import { appStartFiles } from "../src/app-start-files.ts";
-import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
-import { appKind, appFor, findApp } from "../src/apps.ts";
+import { appFor, appKind, findApp } from "../src/apps.ts";
 import type { Acting, Member } from "../src/auth/identity.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
@@ -33,8 +32,9 @@ import { resultOf, runOf } from "../src/workflows/resource-runs.ts";
 import { copyIntoRun, sweepRunFiles } from "../src/workflows/run-files.ts";
 import { handFiles } from "../src/workflows/start-files.ts";
 import type { StartFile } from "../src/workflows/start-files.ts";
-import { commitApp, testApp } from "./app-definitions.ts";
+import { testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
+import { commitApp } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { appWith, seal } from "./sealed-apps.ts";
@@ -63,8 +63,8 @@ const files = ({
   operations?: string;
   doc?: string;
   workflows?: readonly string[];
-  /** The workflow version it records binding as `review` (`bindWorkflow`). */
-  bound?: { readonly workflowId: string; readonly version: number };
+  /** The workflow it records binding as `review` (`bindWorkflow`). */
+  bound?: { readonly workflowId: string };
 } = {}): TestApp =>
   testApp(
     {
@@ -164,11 +164,11 @@ const reviewsApp = async () => {
     `review-${unique()}`
   );
   await publishDefinition(env, builder.acting, workflow.id, definition);
-  const fixture = await appWith(files(), "Reviews", builder.acting);
-  await bindWorkflowToApp(env, builder.acting, workflow.id, {
-    app: fixture.app,
-    alias: "review",
-  });
+  const fixture = await appWith(
+    files({ bound: { workflowId: workflow.id } }),
+    "Reviews",
+    builder.acting
+  );
   await seal(fixture);
   await rollback(env, appKind, builder.acting, fixture.app, 1);
   const asked = await requestPermission(
@@ -873,12 +873,14 @@ describe("a page's start handing its run a file", { timeout: 120_000 }, () => {
   it("tells whoever publishes a draft it may hand files people can read to its bound workflows, and no longer once it can't read files", async () => {
     const fixture = await reviewsApp();
     const handing = await reviewOf(fixture, 1);
-    const withoutRead = files({ operations: '["upload", "delete"]' });
+    const withoutRead = files({
+      operations: '["upload", "delete"]',
+      bound: { workflowId: fixture.workflow },
+    });
     const { version } = await commitApp(
-      fixture.builder.api.apps.files,
+      fixture.builder.api,
       fixture.app,
-      withoutRead,
-      "Uploads only"
+      withoutRead
     );
     const notHanding = await reviewOf(fixture, version);
 
@@ -892,19 +894,21 @@ describe("a page's start handing its run a file", { timeout: 120_000 }, () => {
     const fixture = await reviewsApp();
     // The same `{ id }` reaches the bound workflow, which takes it as a
     // file: copied all the same (`handFiles`).
-    const aliased = files({ doc: "v.object({ id: v.string() })" });
+    const aliased = files({
+      doc: "v.object({ id: v.string() })",
+      bound: { workflowId: fixture.workflow },
+    });
     const { version } = await commitApp(
-      fixture.builder.api.apps.files,
+      fixture.builder.api,
       fixture.app,
-      aliased,
-      "Doc as an object"
+      aliased
     );
     const review = await reviewOf(fixture, version);
 
     expect(review.handsFilesToWorkflows).toBeTruthy();
   });
 
-  it("tells whoever publishes it may hand files when the version binds, once current, a workflow version taking a file that the App doesn't bind yet", async () => {
+  it("tells whoever publishes it may hand files when the version binds, once current, a workflow taking a file that the App doesn't bind now", async () => {
     const fixture = await reviewsApp();
     // `review` bound directly to a workflow taking no file instead.
     const plain = await createWorkflowResource(
@@ -929,19 +933,22 @@ describe("a page's start handing its run a file", { timeout: 120_000 }, () => {
         },
       })
     );
-    await fixture.builder.api.workflowResources.bindToApp(plain.id, {
-      app: fixture.app,
-      alias: "review",
-    });
-    // A version recording the workflow taking a file again.
-    const { version } = await commitApp(
-      fixture.builder.api.apps.files,
+    await commitApp(
+      fixture.builder.api,
       fixture.app,
       files({
         doc: "v.object({ id: v.string() })",
-        bound: { workflowId: fixture.workflow, version: 1 },
-      }),
-      "Bind the file-taking workflow again"
+        bound: { workflowId: plain.id },
+      })
+    );
+    // A version recording the workflow taking a file again.
+    const { version } = await commitApp(
+      fixture.builder.api,
+      fixture.app,
+      files({
+        doc: "v.object({ id: v.string() })",
+        bound: { workflowId: fixture.workflow },
+      })
     );
     const review = await reviewOf(fixture, version);
 
@@ -955,17 +962,13 @@ describe("a page's start handing its run a file", { timeout: 120_000 }, () => {
     const extras = Array.from({ length: 120 }, (_, at) => `extra${at}`);
     const many = files({
       doc: "v.object({ id: v.string() })",
+      bound: { workflowId: fixture.workflow },
       workflows: extras.map(
         (name) =>
           `permission.workflow("${name}", { args: v.object({ note: v.string() }), returns: v.null() })`
       ),
     });
-    const { version } = await commitApp(
-      fixture.builder.api.apps.files,
-      fixture.app,
-      many,
-      "Many workflows"
-    );
+    const { version } = await commitApp(fixture.builder.api, fixture.app, many);
     const review = await reviewOf(fixture, version);
     // Made current, each alias it declares held to what it binds.
     const current = await outcome(

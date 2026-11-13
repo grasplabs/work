@@ -9,9 +9,9 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { appHost } from "../src/durable-objects.ts";
 import { revokeRelease } from "../src/release-retention.ts";
-import { commitApp, testApp } from "./app-definitions.ts";
+import { testApp } from "./app-definitions.ts";
 import type { TestSource } from "./app-definitions.ts";
-import { ordinaryData } from "./apps.ts";
+import { commitApp, ordinaryData } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { notesFiles, notesSpec } from "./notes-client-app.ts";
@@ -61,12 +61,7 @@ const released = async (
   app: string,
   files: TestSource
 ): Promise<number> => {
-  const { version } = await commitApp(
-    builder.api.apps.files,
-    app,
-    files,
-    "Next"
-  );
+  const { version } = await commitApp(builder.api, app, files);
   await builder.api.versions.rollback({ kind: "app", id: app }, version);
   return version;
 };

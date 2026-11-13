@@ -197,7 +197,7 @@ JSON.stringify = (value, ...rest) => {
   it("is refused to someone who doesn't build the App, before a store is made or its code is built", async () => {
     const owner = await person("builder");
     const { id } = await createApp(env, owner, { name: "Beta" });
-    await commitDefined(env, owner, id, withTable("beta"), "First version");
+    await commitDefined(env, owner, id, withTable("beta"));
     const outsider = await person("builder");
     const before = await builds();
     const refused = await failure(
@@ -233,8 +233,7 @@ JSON.stringify = (value, ...rest) => {
       fixture.app,
       changesOf(tablelessFiles(), {
         "server/notes.ts": null,
-      }),
-      "Two"
+      })
     );
     await seal(fixture, 2);
     await rollback(env, appKind, fixture.owner, fixture.app, 2);
@@ -321,9 +320,9 @@ export const reach = action({
   it("makes its App's one store when it first declares tables, keyed by the App and audited", async () => {
     const owner = await person("builder");
     const { id } = await createApp(env, owner, { name: "Notes" });
-    await commitDefined(env, owner, id, notesFiles(), "First version");
+    await commitDefined(env, owner, id, notesFiles());
     const first = await sealRelease(env, { app: id, version: 1, by: owner });
-    await commitDefined(env, owner, id, withTable("beta"), "Second version");
+    await commitDefined(env, owner, id, withTable("beta"));
     const second = await sealRelease(env, { app: id, version: 2, by: owner });
     const keyed = await env.DB.prepare(
       "SELECT store_id AS store FROM app_default_stores WHERE app_id = ?"
@@ -463,13 +462,9 @@ export const reach = action({
     await expect(
       failure(
         async () =>
-          await commitDefined(
-            env,
-            owner,
-            id,
-            { "server/_generated/api.ts": "export const api = {};\n" },
-            "Forged references"
-          )
+          await commitDefined(env, owner, id, {
+            "server/_generated/api.ts": "export const api = {};\n",
+          })
       )
     ).resolves.toBe("app.invalid");
   });

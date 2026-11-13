@@ -195,7 +195,7 @@ const waitingRun = async ({ admin, workflow }: InboxWorkflow) => {
     env,
     { type: "person", person: admin },
     workflow.id,
-    { version: 1, args: {}, key: unique() }
+    { expected: 1, args: {}, key: unique() }
   );
   if (runId === null) {
     throw new Error("The start admitted no run");

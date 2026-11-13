@@ -300,16 +300,14 @@ const sealedMigrating = async (
     env,
     fixture.owner,
     fixture.app,
-    files(fromSchema, placeholder),
-    "Migrate"
+    files(fromSchema, placeholder)
   );
   const refused = await refusalOf(async () => await seal(fixture, 2));
   await commitDefined(
     env,
     fixture.owner,
     fixture.app,
-    files(fromSchema, namedSchema(refused.details)),
-    "Fix"
+    files(fromSchema, namedSchema(refused.details))
   );
   return { fixture, release: await seal(fixture, 3), refused };
 };
@@ -368,8 +366,7 @@ const sealedSource = async (
       env,
       fixture.owner,
       fixture.app,
-      notesFiles({ [name]: source(fromSchema, toSchema) }),
-      "Migrate"
+      notesFiles({ [name]: source(fromSchema, toSchema) })
     );
   await commit(placeholder);
   const named = await refusalOf(async () => await seal(fixture, 2));

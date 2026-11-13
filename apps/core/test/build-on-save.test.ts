@@ -4,23 +4,19 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { sealRelease } from "../src/app-releases.ts";
-import { appKind, versionFiles } from "../src/apps.ts";
-import { versionPageCodes } from "../src/page-references.ts";
+import { appKind } from "../src/apps.ts";
 import { buildPages, versionPages } from "../src/pages.ts";
 import { rollback } from "../src/publish.ts";
 import { buildOnSave, draftLintBuild } from "../src/save-builds.ts";
-import { commitApp, withFiles } from "./app-definitions.ts";
-import { commitDefined } from "./apps.ts";
+import { commitApp } from "./apps.ts";
 import { holdingBuilds } from "./build-holds.ts";
 import { mockIdp } from "./idp.ts";
-import { notesFiles } from "./notes-client-app.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 
-// Saving an App's files builds them at once, so the version opens without
+// Saving an App's files builds them at once, so its pages open without
 // building, and whoever saved (an agent, most of all) hears what doesn't
 // build in the same call. A build never fails the save, and one that
-// can't finish is reported as such within a bound. Gone with App
-// workflows: a save building an App's own workflows.
+// can't finish is reported as such within a bound.
 
 const idp = mockIdp();
 
@@ -59,103 +55,49 @@ const newApp = async (
   return id;
 };
 
-describe("building on save", { timeout: 60_000 }, () => {
-  it("builds a saved version's pages, so it opens without building", async () => {
-    const builder = await signedInApi(idp, "builder");
-    // Files no other test builds, so nothing is in the cache before.
-    const unique = crypto.randomUUID();
-    const app = await newApp(builder);
+/** `files` built as a save builds them, for a new App's draft. */
+const saved = async (files: Readonly<Record<string, string>>, on: Env = env) =>
+  await buildOnSave(
+    on,
+    { app: appIdSchema.parse(crypto.randomUUID()), version: 0, files },
+    { profile: "production" }
+  );
 
-    const { version, builds } = await commitApp(
-      builder.api.apps.files,
-      app,
-      page(unique),
-      "Save"
-    );
-    const files = await versionFiles(env, appIdSchema.parse(app), version);
+describe("building on save", { timeout: 60_000 }, () => {
+  it("builds what a save holds, so its pages open without building", async () => {
+    // Files no other test builds, so nothing is in the cache before.
+    const files = page(crypto.randomUUID());
     const unbuilt = { ...env, LOADER: noBuilds };
+
+    const builds = await saved(files);
 
     expect(builds).toStrictEqual({
       pages: { status: "ok", diagnostics: [] },
     });
     // Opening it loads what the save built.
     await expect(buildPages(unbuilt, files, "app-test")).resolves.toMatchObject(
-      {
-        ok: true,
-      }
+      { ok: true }
     );
-  });
-
-  it("builds a saved version's pages that call its functions, so it opens without building them", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const app = await newApp(builder);
-    // Files no other test builds, so nothing is in the cache before.
-    const unique = crypto.randomUUID();
-    const notesPage = notesFiles.files["src/routes/index.tsx"] ?? "";
-    const { version, builds } = await commitApp(
-      builder.api.apps.files,
-      app,
-      withFiles(notesFiles, {
-        "src/routes/index.tsx": `${notesPage}\n// ${unique}\n`,
-      }),
-      "Notes"
-    );
-    const appId = appIdSchema.parse(app);
-    const files = await versionFiles(env, appId, version);
-    const unbuilt = { ...env, LOADER: noBuilds };
-
-    expect({
-      pages: builds.pages,
-      references: notesPage.includes("@server/_generated/api"),
-    }).toStrictEqual({
-      pages: { status: "ok", diagnostics: [] },
-      references: true,
-    });
-    // Opening it loads what the save built.
-    await expect(
-      versionPageCodes(unbuilt, appId, version, files, { unsealed: "build" })
-    ).resolves.toHaveProperty("artifact");
   });
 
   it("builds a page with an unused import: an unused name is the lint's, never the build's", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const app = await newApp(builder);
-    const unused = {
+    const builds = await saved({
       "src/routes/index.tsx": `import { Badge } from "@grasp-os/ui/components/badge";
 ${page(crypto.randomUUID())["src/routes/index.tsx"] ?? ""}`,
-    };
-
-    const { builds } = await commitApp(
-      builder.api.apps.files,
-      app,
-      unused,
-      "Unused"
-    );
+    });
 
     expect(builds.pages).toStrictEqual({ status: "ok", diagnostics: [] });
   });
 
-  it("tells whoever saved what doesn't build and where, and commits all the same", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const app = await newApp(builder);
-    const broken = {
+  it("tells whoever saved what doesn't build and where", async () => {
+    const { pages } = await saved({
       "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router"; function Desk() {
   const count: number = "three";
   return <p>{count}</p>;
 }
 export const Route = createFileRoute("/")({ component: Desk });
 `,
-    };
-
-    const committed = await commitApp(
-      builder.api.apps.files,
-      app,
-      broken,
-      "Broken"
-    );
-
-    const { pages } = committed.builds;
-
+    });
     const [typeError] = pages.diagnostics;
 
     expect({
@@ -168,41 +110,9 @@ export const Route = createFileRoute("/")({ component: Desk });
       column: 9,
       message: true,
     });
-    await expect(
-      builder.api.versions.get({ kind: "app", id: app }, committed.version)
-    ).resolves.toMatchObject({ version: committed.version });
   });
 
-  it("never says pages are ok that were checked without their server code's references, as it doesn't register", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const app = await newApp(builder);
-    // Registration throws (never inspected before: no kept manifest).
-    const throwing = `${notesFiles.files["server/notes.ts"] ?? ""}\nif (globalThis.Object === Object) throw new Error("No notes today ${crypto.randomUUID()}");\n`;
-
-    const { builds } = await commitApp(
-      builder.api.apps.files,
-      app,
-      withFiles(notesFiles, {
-        "server/notes.ts": throwing,
-      }),
-      "Notes"
-    );
-
-    // Checked for everything else, and nothing else failed, but not ok:
-    // whoever reads the status alone isn't told the pages passed.
-    expect(builds.pages).toStrictEqual({
-      status: "error",
-      diagnostics: [],
-      error:
-        "Checked without the references the server code generates, as it doesn't register yet: fix the server code and save again.",
-      standIn: true,
-    });
-  });
-
-  it("says a build couldn't run when the compiler can't be reached, commits, and leaves it to its first use", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const app = await newApp(builder);
-    const by = await builder.api.whoami();
+  it("says a build couldn't run when the compiler can't be reached, and leaves it to its first use", async () => {
     const unreachable: WorkerLoader = {
       get: () => {
         throw new Error("The compiler is unreachable");
@@ -212,24 +122,16 @@ export const Route = createFileRoute("/")({ component: Desk });
       },
     };
     const warned = vi.spyOn(console, "warn");
+    const files = page(crypto.randomUUID());
 
-    const committed = await commitDefined(
-      { ...env, LOADER: unreachable },
-      by,
-      app,
-      page(crypto.randomUUID()),
-      "Save"
-    );
+    const builds = await saved(files, { ...env, LOADER: unreachable });
 
-    expect(committed).toMatchObject({
-      version: 1,
-      builds: {
-        pages: {
-          status: "error",
-          diagnostics: [],
-          error:
-            "The build couldn't run now. It runs again when this is first used.",
-        },
+    expect(builds).toStrictEqual({
+      pages: {
+        status: "error",
+        diagnostics: [],
+        error:
+          "The build couldn't run now. It runs again when this is first used.",
       },
     });
     // The warning says why, not only what kind of error.
@@ -241,7 +143,6 @@ export const Route = createFileRoute("/")({ component: Desk });
         errorMessage: "The compiler is unreachable",
       }),
     ]);
-    const files = await versionFiles(env, appIdSchema.parse(app), 1);
     await expect(buildPages(env, files, "app-test")).resolves.toMatchObject({
       ok: true,
     });
@@ -301,38 +202,14 @@ export const Route = createFileRoute("/")({ component: Desk });
     );
   });
 
-  it("commits within a build's wait, saying the build didn't finish", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const app = await newApp(builder);
-    const by = await builder.api.whoami();
-    const held = Promise.withResolvers<boolean>();
-    // The build cache answers only once the test lets it: every build
-    // waits on its entry, a second one too.
-    const holding = holdingBuilds(env.FILES, held.promise);
-
-    // Answers while the cache is still held: a second build would wait on
-    // it, and the commit with it, until the test timed out.
-    const committed = await commitDefined(
-      { ...env, FILES: holding, BUILD_WAIT_MS: "50" },
-      by,
-      app,
-      page(crypto.randomUUID()),
-      "Save"
-    );
-    held.resolve(true);
-
-    expect(committed.builds.pages.status).toBe("error");
-  });
-
   it("makes a version current without waiting on a page build, however long that takes", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await newApp(builder);
     const by = await builder.api.whoami();
     const { version } = await commitApp(
-      builder.api.apps.files,
+      builder.api,
       app,
-      page(crypto.randomUUID()),
-      "Save"
+      page(crypto.randomUUID())
     );
     // Its server code, the config and schema of the definition its first
     // version got, sealed first, as a review would.

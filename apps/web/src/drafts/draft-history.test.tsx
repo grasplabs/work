@@ -509,13 +509,11 @@ describe("An App's History", () => {
     expect({
       afterCancel,
       titled: said.includes("Go back to 26.10.1?"),
-      warned: said.includes("wait for an admin to grant them again"),
       asked,
       listed: titles("draft-published"),
     }).toStrictEqual({
       afterCancel: [],
       titled: true,
-      warned: true,
       asked: [["rollback", appId, 1, 7, 2]],
       listed: ["26.10.3", "26.10.2", "26.10.1Your team has this one"],
     });

@@ -203,7 +203,7 @@ describe("publishing a workflow", { timeout: 60_000 }, () => {
       env,
       { type: "person", person: admin },
       workflow.id,
-      { version: 1, args: { who: "Ada" }, key: `key-${unique()}` }
+      { expected: 1, args: { who: "Ada" }, key: `key-${unique()}` }
     );
     await saved(admin, workflow.id, greetingOf("1 hour", "Version 2"));
     const live = await published(admin, workflow.id);

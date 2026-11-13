@@ -11,10 +11,8 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { editWorkflowDraft, workflowDraft } from "../src/workflow-editor.ts";
-import {
-  createWorkflowResource,
-  shareWorkflowResource,
-} from "../src/workflow-resources.ts";
+import { shareWorkflowResource } from "../src/workflow-members.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import {
   candidateRunFor,
@@ -162,7 +160,7 @@ const ranFor = async (
     env,
     { type: "person", person: by },
     id,
-    { version: 1, args: { who }, key: unique() }
+    { expected: 1, args: { who }, key: unique() }
   );
   if (runId === null) {
     throw new Error("The start made a run");

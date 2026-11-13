@@ -11,7 +11,6 @@ import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
-import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { appKind, appFor } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { decisionOutcome, openDecision } from "../src/decisions/decisions.ts";
@@ -22,7 +21,7 @@ import { rollback } from "../src/publish.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { terminateResourceRun } from "../src/workflows/resource-runs.ts";
-import { testApp } from "./app-definitions.ts";
+import { boundIn, testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
 import { mockIdp } from "./idp.ts";
 import { approvalDeclared } from "./json-workflow-apps.ts";
@@ -201,13 +200,13 @@ const followingRuns = async (
     `greet-${unique()}`
   );
   await publishDefinition(env, builder.acting, workflow.id, definitionOf());
-  const fixture = await appWith(files(), "Requests", builder.acting);
+  const fixture = await appWith(
+    boundIn(files(), { followUp: workflow.id }),
+    "Requests",
+    builder.acting
+  );
   await seal(fixture);
   await rollback(env, appKind, builder.acting, fixture.app, 1);
-  await bindWorkflowToApp(env, builder.acting, workflow.id, {
-    app: fixture.app,
-    alias: "followUp",
-  });
   const asked = await requestPermission(
     env,
     builder.acting,
@@ -433,14 +432,10 @@ describe("a page's live workflow queries", { timeout: 120_000 }, () => {
       decidingDefinitionOf(key)
     );
     const fixture = await appWith(
-      files(approvalDeclared),
+      boundIn(files(approvalDeclared), { followUp: workflow.id }),
       "Requests",
       builder.acting
     );
-    await bindWorkflowToApp(env, builder.acting, workflow.id, {
-      app: fixture.app,
-      alias: "followUp",
-    });
     await seal(fixture);
     await rollback(env, appKind, builder.acting, fixture.app, 1);
     await env.DB.prepare(
@@ -544,14 +539,10 @@ describe("a page's live workflow queries", { timeout: 120_000 }, () => {
       decidingDefinitionOf(key)
     );
     const fixture = await appWith(
-      files(approvalDeclared),
+      boundIn(files(approvalDeclared), { followUp: workflow.id }),
       "Requests",
       builder.acting
     );
-    await bindWorkflowToApp(env, builder.acting, workflow.id, {
-      app: fixture.app,
-      alias: "followUp",
-    });
     await seal(fixture);
     await rollback(env, appKind, builder.acting, fixture.app, 1);
     await env.DB.prepare(

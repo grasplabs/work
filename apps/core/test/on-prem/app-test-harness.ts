@@ -72,8 +72,7 @@ export const appWith = async (suite: string): Promise<Built> => {
     id,
     withFiles(appFiles, {
       "tests/notes.test.ts": suite,
-    }),
-    "First version"
+    })
   );
   return { owner, app: id };
 };

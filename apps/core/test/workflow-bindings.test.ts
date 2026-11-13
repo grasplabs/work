@@ -14,11 +14,7 @@ import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
 
-import {
-  bindWorkflowToApp,
-  startAppBinding,
-  unbindWorkflowFromApp,
-} from "../src/app-workflow-bindings.ts";
+import { startAppBinding } from "../src/app-workflow-bindings.ts";
 import { appFor } from "../src/apps.ts";
 import { boundEventsOf } from "../src/bound-workflow-events.ts";
 import { policyOf } from "../src/data-policy.ts";
@@ -38,12 +34,12 @@ import {
   publishCatalogContract,
   resolveCatalogKeys,
 } from "../src/workflow-catalog.ts";
+import { shareWorkflowResource } from "../src/workflow-members.ts";
 import { setWorkflowParams, workflowParams } from "../src/workflow-params.ts";
 import {
   workflowKind,
   createWorkflowResource,
   deleteWorkflowResource,
-  shareWorkflowResource,
   versionContract,
   workflowVersions,
 } from "../src/workflow-resources.ts";
@@ -59,7 +55,7 @@ import type {
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { sweepRunDetails } from "../src/workflows/retention.ts";
 import { storeOfNewApp } from "./app-stores.ts";
-import { racingDb } from "./apps.ts";
+import { racingDb, standInBinding } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
 import { connectModels } from "./model-provider.ts";
@@ -284,7 +280,7 @@ const modelContract = async (admin: Person): Promise<string> => {
 
 const start = async (who: Person, id: string, version = 1) =>
   await startWorkflow(env, { type: "person", person: who }, id, {
-    version,
+    expected: version,
     args: { who: "Ada" },
     key: `key-${unique()}`,
   });
@@ -351,7 +347,7 @@ const decide = async (
   version: number
 ): Promise<StartAuthorization> => {
   const decision = await decideWorkflowStart(env, invoker, id, {
-    version,
+    expected: version,
     args: { who: "Ada" },
     key: `key-${unique()}`,
   });
@@ -793,7 +789,7 @@ describe("approving a workflow's binding", () => {
     const approved = await outcome(approve(workflowsOwn.id));
     const startsNow = await outcome(
       startWorkflow(connecting, { type: "person", person: ada }, workflow.id, {
-        version: 1,
+        expected: 1,
         args: { who: "Ada" },
         key: `key-${unique()}`,
       })
@@ -805,7 +801,7 @@ describe("approving a workflow's binding", () => {
     };
     const afterDrift = await outcome(
       startWorkflow(connecting, { type: "person", person: ada }, workflow.id, {
-        version: 1,
+        expected: 1,
         args: { who: "Ada" },
         key: `key-${unique()}`,
       })
@@ -986,7 +982,7 @@ describe("bindings waiting on an admin", () => {
           connecting,
           { type: "person", person: ada },
           workflow.id,
-          { version: 1, args: { who: "Ada" }, key: `key-${unique()}` }
+          { expected: 1, args: { who: "Ada" }, key: `key-${unique()}` }
         )
       );
 
@@ -1281,7 +1277,7 @@ describe("what a start freezes", () => {
       reviewed: { version: 1 },
     });
     const request = {
-      version: 1,
+      expected: 1,
       args: { who: "Ada" },
       key: `key-${unique()}`,
     };
@@ -1774,38 +1770,15 @@ describe("an App binding a workflow", () => {
   it("binds the live version, grants nothing, and while its App may start it keeps the workflow from being deleted", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
-    const bob = await person("builder");
-    const cy = await person("builder");
-    const eve = await person("builder");
-    const staff = await person("admin", true);
     const workflow = await workflowOf(ada);
     const app = await appOf(ada);
-    await env.DB.prepare(
-      "INSERT INTO app_members (app_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'builder', ?, ?)"
-    )
-      .bind(app, bob.userId, ada.userId, Date.now())
-      .run();
-    // Cy builds the workflow, not the App.
-    await shareWorkflowResource(env, ada, workflow.id, {
-      type: "person",
-      id: cy.userId,
-      role: "builder",
-    });
     const authority: Authority = {
       subject: { type: "app", appId: appIdSchema.parse(app) },
       onBehalfOf: ada.userId,
       mode: "interactive",
       appVersion: 1,
     };
-    const bind = async (by: Person) =>
-      await bindWorkflowToApp(env, by, workflow.id, {
-        app,
-        alias: "greet",
-      });
-    // Bob builds the App but has no role in the workflow.
-    const byBob = await outcome(bind(bob));
-    const byStaff = await outcome(bind(staff));
-    const binding = await bind(ada);
+    const binding = await standInBinding(app, "greet", workflow.id, ada);
     const ungranted = await outcome(
       startAppBinding(env, authority, "greet", {
         args: { who: "Ada" },
@@ -1828,15 +1801,15 @@ describe("an App binding a workflow", () => {
       ({ action, target }) =>
         action === "workflow.delete_refused" && target?.id === workflow.id
     );
-    const unbinds = {
-      staff: await outcome(unbindWorkflowFromApp(env, staff, binding.id)),
-      eve: await outcome(unbindWorkflowFromApp(env, eve, binding.id)),
-      // A builder of the workflow removes what holds it up.
-      cy: await outcome(unbindWorkflowFromApp(env, cy, binding.id)),
-    };
+    // Ended, as the App's next version binding nothing there ends it.
+    await env.DB.prepare(
+      "UPDATE app_workflow_bindings SET status = 'removed' WHERE id = ?"
+    )
+      .bind(binding)
+      .run();
     // The run the start admitted holds the workflow too, until it ends:
-    // the delete after the unbind waits for it, so only the binding is
-    // what the unbind removed.
+    // the delete after the binding ended waits for it, so only the
+    // binding is what held it up.
     await vi.waitFor(
       async () => {
         const run = await resourceRunFor(env, ada, workflow.id, started.runId);
@@ -1845,29 +1818,19 @@ describe("an App binding a workflow", () => {
       { timeout: 30_000, interval: 100 }
     );
     expect({
-      byBob,
-      byStaff,
       ungranted,
       started: started.version,
       bound,
       audited: refused?.detail,
-      unbinds,
       afterUnbind: await outcome(deleteWorkflowResource(env, ada, workflow.id)),
     }).toMatchObject({
-      byBob: "workflow.resource_unavailable",
-      byStaff: "role.forbidden",
       ungranted: "workflow.start_denied",
       started: 1,
       bound: {
         code: "workflow.resource_bound",
-        details: { appBindings: [{ id: binding.id, app }] },
+        details: { appBindings: [{ id: binding, app }] },
       },
-      audited: { appBindings: 1, appBinding1: binding.id, app1: app },
-      unbinds: {
-        staff: "role.forbidden",
-        eve: "workflow.app_binding_unavailable",
-        cy: "ok",
-      },
+      audited: { appBindings: 1, appBinding1: binding, app1: app },
       afterUnbind: "ok",
     });
   });
@@ -1883,10 +1846,7 @@ describe("an App binding a workflow", () => {
       role: "user",
     });
     const app = await appOf(bob);
-    await bindWorkflowToApp(env, bob, workflow.id, {
-      app,
-      alias: "greet",
-    });
+    await standInBinding(app, "greet", workflow.id, bob);
     await expect(
       outcome(deleteWorkflowResource(env, ada, workflow.id))
     ).resolves.toBe("ok");
@@ -1977,7 +1937,7 @@ describe("retention", () => {
       values: { limit: 4 },
     });
     const key = `key-${unique()}`;
-    const request = { version: 1, args: { who: "Ada" }, key };
+    const request = { expected: 1, args: { who: "Ada" }, key };
     const first = await startWorkflow(
       env,
       { type: "person", person: ada },

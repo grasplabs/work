@@ -231,8 +231,7 @@ describe("sealing a release", { timeout: 120_000 }, () => {
       env,
       fixture.owner,
       fixture.app,
-      notesFiles("Notes, renamed"),
-      "Rename"
+      notesFiles("Notes, renamed")
     );
     const second = await seal(fixture, 2);
     const firstAgain = await loadRelease(env, fixture.app, 1);

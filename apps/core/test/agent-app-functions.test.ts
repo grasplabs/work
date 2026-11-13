@@ -11,9 +11,9 @@ import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { appHost } from "../src/durable-objects.ts";
 import { chatOf, codeResults, codeStep, model, says } from "./agent-chat.ts";
-import { commitApp, testApp } from "./app-definitions.ts";
+import { testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
-import { requestGranted } from "./apps.ts";
+import { commitApp, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInApi } from "./sign-in.ts";
@@ -112,12 +112,7 @@ const tryEach = (calls: Record<string, string>): string =>
 const notesApp = async (existing?: Awaited<ReturnType<typeof signedInApi>>) => {
   const builder = existing ?? (await signedInApi(idp, "builder"));
   const { id } = await builder.api.apps.create({ name: "Notes" });
-  const { version } = await commitApp(
-    builder.api.apps.files,
-    id,
-    files,
-    "First"
-  );
+  const { version } = await commitApp(builder.api, id, files);
   await builder.api.versions.rollback({ kind: "app", id }, version);
   return { builder, app: id, release: await loadRelease(env, id, version) };
 };

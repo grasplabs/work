@@ -12,11 +12,11 @@ import { describe, expect, it } from "vite-plus/test";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { createTriggerResource } from "../src/trigger-resources.ts";
+import { shareWorkflowResource } from "../src/workflow-members.ts";
 import { pauseWorkflow, resumeWorkflow } from "../src/workflow-pause.ts";
 import {
   createWorkflowResource,
   getWorkflowResource,
-  shareWorkflowResource,
 } from "../src/workflow-resources.ts";
 import {
   admitWorkflowStart,
@@ -96,7 +96,7 @@ const workflowOf = async (owner: Identity, versions = 1) => {
 /** A start of version 1 by `who`, with a fresh key. */
 const startBy = async (who: Identity, id: string) =>
   await startWorkflow(env, { type: "person", person: who }, id, {
-    version: 1,
+    expected: 1,
     args: { who: "Ada" },
     key: `key-${unique()}`,
   });
@@ -145,7 +145,7 @@ describe("a paused workflow", { timeout: 120_000 }, () => {
       env,
       { type: "person", person: workflow.user },
       workflow.id,
-      { version: 1, args: { who: "Ada" }, key: `key-${unique()}` }
+      { expected: 1, args: { who: "Ada" }, key: `key-${unique()}` }
     );
     if ("start" in decided) {
       throw new Error("A new start was answered as one already admitted");
@@ -280,7 +280,6 @@ describe("a paused workflow", { timeout: 120_000 }, () => {
         {
           action: "trigger.schedule.refused",
           detail: {
-            version: 1,
             scheduledAt: occurrence.toISOString(),
             code: "workflow.paused",
           },

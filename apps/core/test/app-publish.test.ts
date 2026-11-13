@@ -58,7 +58,7 @@ const committed = async (
   app: AppId,
   files: TestSource
 ): Promise<number> => {
-  const { version } = await commitDefined(env, by, app, files, "Next");
+  const { version } = await commitDefined(env, by, app, files);
   return version;
 };
 

@@ -15,9 +15,9 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { loadRelease } from "../src/app-releases.ts";
-import { commitApp, withFiles } from "./app-definitions.ts";
+import { withFiles } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
-import { pastAccessRecheck } from "./apps.ts";
+import { commitApp, pastAccessRecheck } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { apiOf, notesFiles, referenceTo } from "./notes-client-app.ts";
 import { clientOrigin } from "./sign-in-config.ts";
@@ -95,12 +95,7 @@ export const touchOldest = mutation({
 const openedApp = async () => {
   const builder = await personApi("builder");
   const { id } = await builder.api.apps.create({ name: "Notes" });
-  const { version } = await commitApp(
-    builder.api.apps.files,
-    id,
-    files,
-    "First"
-  );
+  const { version } = await commitApp(builder.api, id, files);
   await builder.api.versions.rollback({ kind: "app", id }, version);
   const { lease } = await builder.api.pages.open(id);
   const release = await loadRelease(env, id, version);
@@ -502,12 +497,11 @@ describe("live paginated lists", { timeout: 180_000 }, () => {
     await list.pager.loadMore();
     // A new version: every cursor read under the one before expires.
     const { version } = await commitApp(
-      opened.builder.api.apps.files,
+      opened.builder.api,
       opened.app,
       withFiles(files, {
         "server/notes.ts": `${files.files["server/notes.ts"] ?? ""}\n// Second.\n`,
-      }),
-      "Second"
+      })
     );
     await opened.builder.api.versions.rollback(
       { kind: "app", id: opened.app },

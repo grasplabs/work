@@ -18,8 +18,8 @@ import {
   findApp,
 } from "./agent-builds-harness.ts";
 import { codeResults, codeStep, says } from "./agent-chat.ts";
-import { commitApp, definedWith, redefined } from "./app-definitions.ts";
-import { published, release } from "./apps.ts";
+import { definedWith, redefined } from "./app-definitions.ts";
+import { commitApp, published, release } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdpWith } from "./idp.ts";
 import { notesFiles } from "./notes-client-app.ts";
@@ -265,7 +265,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     // and isn't current yet.
     await release(builder, app, notesFiles);
     await commitApp(
-      builder.api.apps.files,
+      builder.api,
       app,
       definedWith(notesFiles, {
         op: "addField",
@@ -273,8 +273,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         name: "category",
         type: "v.string()",
         answer: "general",
-      }),
-      "Categories"
+      })
     );
     // A builder's draft over version 2: the agent changes what they
     // began.
@@ -399,9 +398,9 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       })),
     }));
 
-    await expect(
-      commitApp(builder.api.apps.files, app, renamed, "Rename")
-    ).resolves.toMatchObject({ version: 2 });
+    await expect(commitApp(builder.api, app, renamed)).resolves.toMatchObject({
+      version: 2,
+    });
   });
 
   it("keeps no change that leaves a file as the base has it", async () => {

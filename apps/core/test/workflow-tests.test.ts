@@ -11,7 +11,6 @@ import { z } from "zod";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { fixtureHostFor, sweepTestFixtures } from "../src/app-tests.ts";
-import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { appKind, findApp, releaseIdsOf } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { rollback } from "../src/publish.ts";
@@ -20,7 +19,7 @@ import { setWorkflowParams } from "../src/workflow-params.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { runEngine, runObjectOf } from "../src/workflows/engine.ts";
-import { testApp } from "./app-definitions.ts";
+import { boundIn, testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
 import { passing } from "./json-workflow-apps.ts";
 import { fakeProvider } from "./model-provider.ts";
@@ -148,12 +147,12 @@ const requestsApp = async (
   tests: Record<string, string> = {}
 ) => {
   const builder = await person("builder");
-  const fixture = await appWith(filesWith(tests), "Requests", builder);
   const workflowId = await workflow(builder);
-  await bindWorkflowToApp(env, builder, workflowId, {
-    app: fixture.app,
-    alias: "followUp",
-  });
+  const fixture = await appWith(
+    boundIn(filesWith(tests), { followUp: workflowId }),
+    "Requests",
+    builder
+  );
   await seal(fixture);
   const release = await loadRelease(env, fixture.app, 1);
   return { builder, app: fixture.app, workflowId, release };
@@ -333,7 +332,12 @@ describe("an App's workflow tests", { timeout: 180_000 }, () => {
       outcome,
       organization: await organizationRunsOf(workflowId),
       recorded: await recordedRuns(app),
-      runEvents: events.filter(({ action }) => action.startsWith("workflow.")),
+      // The run's own: never the binding the version makes as it goes live.
+      runEvents: events.filter(
+        ({ action }) =>
+          action.startsWith("workflow.") &&
+          !action.startsWith("workflow.app_binding.")
+      ),
     }).toStrictEqual({
       outcome: "current",
       organization: { receipts: 0, runs: 0 },
@@ -1218,7 +1222,7 @@ export default appTest(schema, {
       env,
       { type: "person", person: builder },
       workflowId,
-      { version: 1, args: { who: "Ada" }, key: unique() }
+      { expected: 1, args: { who: "Ada" }, key: unique() }
     );
     if (runId === null) {
       throw new Error("The start admitted no run");

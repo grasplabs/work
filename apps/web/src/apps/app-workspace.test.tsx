@@ -12,12 +12,7 @@ import type {
   DraftCheckpoint,
   LiveVersion,
 } from "@grasp-os/shared/drafts";
-import {
-  appIdSchema,
-  permissionIdSchema,
-  workflowResourceIdSchema,
-} from "@grasp-os/shared/ids";
-import type { Permission } from "@grasp-os/shared/permissions";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { Subject } from "@grasp-os/shared/subject";
 import type {
@@ -528,40 +523,8 @@ const changesOf = (overrides: Partial<Reviewed> = {}): Reviewed => ({
   readsPeople: false,
   rowRules: [],
   permissions: [],
-  grants: [],
-  callers: [],
   ...overrides,
 });
-
-/**
- * A workflow's grant to call the App's function `path`, as core lists it
- * among the draft's callers.
- */
-const callerGrant = (workflow: string, path: string): Permission => {
-  const workflowId = workflowResourceIdSchema.parse(crypto.randomUUID());
-  return {
-    id: permissionIdSchema.parse(crypto.randomUUID()),
-    subject: { type: "workflow", workflowId },
-    object: {
-      type: "app",
-      appId: appIdSchema.parse("invoice-desk"),
-      function: "f1",
-    },
-    actions: ["call"],
-    binding: "INVOICES",
-    status: "active",
-    requestedBy: "user-1",
-    requestedAt: "2026-10-20T08:00:00.000Z",
-    grantedBy: "admin-1",
-    grantedAt: "2026-10-20T09:00:00.000Z",
-    revokedBy: null,
-    revokedAt: null,
-    requestedVia: null,
-    chat: null,
-    workflowNames: { [workflowId]: workflow },
-    functionName: path,
-  };
-};
 
 /** The sheet Share with your team opens, once open. */
 const sheet = (): HTMLElement | null =>
@@ -1887,35 +1850,6 @@ describe(AppWorkspace, () => {
     );
     return access?.textContent ?? "";
   };
-
-  it("names in the sheet only the workflows that call the App again once an admin grants it again", async () => {
-    const access = await accessShown({
-      callers: [
-        {
-          permission: callerGrant("Approve", "invoices.approve"),
-          askedAgain: true,
-        },
-        {
-          permission: callerGrant("Remind", "invoices.remind"),
-          askedAgain: false,
-        },
-      ],
-    });
-
-    expect({
-      heading: access.includes(
-        "Workflows that call it again once an admin grants it again for the new version"
-      ),
-      askedAgain: access.includes("Approve calls invoices.approve"),
-      notAskedAgain: access.includes("Remind"),
-      nothingNew: access.includes("Nothing new"),
-    }).toStrictEqual({
-      heading: true,
-      askedAgain: true,
-      notAskedAgain: false,
-      nothingNew: false,
-    });
-  });
 
   it("says in the sheet who sees and changes which rows of the App's tables", async () => {
     const access = await accessShown({

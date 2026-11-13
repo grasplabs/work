@@ -327,8 +327,7 @@ export const Route = createFileRoute("/")({ component: () => <p>{String(renderTo
       fixture.app,
       withFiles(files, {
         "src/routes/index.tsx": `${files.files["src/routes/index.tsx"]}// Again.\n`,
-      }),
-      "Again"
+      })
     );
     await seal(fixture, 2);
     // Release 1, the one bundling the replaced graph, held past retention.

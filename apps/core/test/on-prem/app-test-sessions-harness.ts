@@ -50,7 +50,7 @@ export const slowToAdmit = (
 export const notesRelease = async (): Promise<Release> => {
   const owner = await person("builder");
   const { id } = await createApp(env, owner, { name: "Notes" });
-  await commitDefined(env, owner, id, appFiles, "First version");
+  await commitDefined(env, owner, id, appFiles);
   await rollback(env, appKind, owner, id, 1);
   return await loadRelease(env, id, 1);
 };

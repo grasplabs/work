@@ -15,9 +15,9 @@ import { z } from "zod";
 
 import { appVisitorResponse, sweepAppVisitors } from "../src/app-visitors.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
-import { commitApp, testApp } from "./app-definitions.ts";
+import { testApp } from "./app-definitions.ts";
 import type { TestApp, TestSource } from "./app-definitions.ts";
-import { published } from "./apps.ts";
+import { commitApp, published } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { captureMail } from "./mail-capture.ts";
 import type { CapturedMail } from "./mail-capture.ts";
@@ -103,12 +103,7 @@ const releasedNotes = async (
   app: string,
   files: TestSource = notesFiles
 ): Promise<void> => {
-  const { version } = await commitApp(
-    builder.api.apps.files,
-    app,
-    files,
-    "First"
-  );
+  const { version } = await commitApp(builder.api, app, files);
   await builder.api.versions.rollback({ kind: "app", id: app }, version);
 };
 

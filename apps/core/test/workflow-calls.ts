@@ -22,7 +22,6 @@ import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { expect, vi } from "vite-plus/test";
 
-import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { appFor } from "../src/apps.ts";
 import { personOf } from "../src/connections.ts";
 import { appHost } from "../src/durable-objects.ts";
@@ -39,6 +38,7 @@ import { appWorkflowStarts } from "../src/workflow-start-intents.ts";
 import type { CallingAgent } from "../src/workflow-start-intents.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
+import { standInBinding } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
 import { mailConnection } from "./mail-connection.ts";
@@ -158,7 +158,7 @@ export const started = async (
     startEnv,
     { type: "person", person: by },
     id,
-    { version: 1, args: { who: "Ada" }, key: unique() }
+    { expected: 1, args: { who: "Ada" }, key: unique() }
   );
   if (runId === null) {
     const [version] = await workflowVersions(env, by, id);
@@ -409,7 +409,7 @@ export const mailingWorkflow = async (
 
 /** A start request of Ada's, with a key of its own. */
 export const adaStart = (version = 1) => ({
-  version,
+  expected: version,
   args: { who: "Ada" },
   key: unique(),
 });
@@ -460,8 +460,8 @@ export const answer = (text: string) => ({
 });
 
 /**
- * An App of `by`'s, version 1 approved, binding version 1 of workflow
- * `workflowId` as `flow`, with a `start` grant of its own from `admin`; in
+ * An App of `by`'s, a stand-in version 1, binding workflow `workflowId`
+ * as `flow`, with a `start` grant of its own from `admin`; in
  * restricted mode when `restricted`. `start` starts it as App code does
  * (an action's `ctx.workflows.<alias>.start`), for `by`, made by `agent`'s call
  * when given: its run's ID.
@@ -481,10 +481,7 @@ export const startingApp = async (
       "INSERT INTO app_versions (app_id, version, tree, files, author_id, message, created_at, approved) VALUES (?, 1, 'tree', 0, ?, 'Version', ?, 1)"
     ).bind(app, by.userId, Date.now()),
   ]);
-  await bindWorkflowToApp(env, by, workflowId, {
-    app,
-    alias: "flow",
-  });
+  await standInBinding(app, "flow", workflowId, by);
   await granted(by, admin, {
     subject: { type: "app", appId: app },
     object: {

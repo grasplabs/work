@@ -4,10 +4,6 @@ import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  bindWorkflowToApp,
-  unbindWorkflowFromApp,
-} from "../src/app-workflow-bindings.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import {
   createTriggerResource,
@@ -15,18 +11,21 @@ import {
 } from "../src/trigger-resources.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import {
+  shareWorkflowResource,
+  unshareWorkflowResource,
+  workflowMembers,
+} from "../src/workflow-members.ts";
+import {
   createWorkflowResource,
   deleteWorkflowResource,
   getWorkflowResource,
   listWorkflowResources,
   releaseWorkflowName,
   setWorkflowProcess,
-  shareWorkflowResource,
-  unshareWorkflowResource,
   workflowDefinition,
-  workflowMembers,
   workflowVersions,
 } from "../src/workflow-resources.ts";
+import { standInBinding } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
 import { configuredLimits } from "./quota-limits.ts";
@@ -926,10 +925,7 @@ describe("releasing a deleted workflow's name", () => {
     )
       .bind(app, ada.userId, Date.now())
       .run();
-    const binding = await bindWorkflowToApp(env, ada, workflow.id, {
-      app,
-      alias: "greet",
-    });
+    const binding = await standInBinding(app, "greet", workflow.id, ada);
     const trigger = await createTriggerResource(env, ada, {
       kind: "webhook",
       workflowId: workflow.id,
@@ -945,7 +941,12 @@ describe("releasing a deleted workflow's name", () => {
     const app_ = await detailsOf(
       releaseWorkflowName(env, admin, workflow.name)
     );
-    await unbindWorkflowFromApp(env, ada, binding.id);
+    // Ended, as a version that binds nothing there ends it.
+    await env.DB.prepare(
+      "UPDATE app_workflow_bindings SET status = 'removed' WHERE id = ?"
+    )
+      .bind(binding)
+      .run();
     await releaseWorkflowName(env, admin, workflow.name);
     expect({ both, app: app_ }).toStrictEqual({
       both: { triggers: 1, appBindings: 1, liveRuns: 0 },
@@ -1043,10 +1044,7 @@ describe("releasing a deleted workflow's name", () => {
       )
         .bind(app, ada.userId, Date.now())
         .run();
-      await bindWorkflowToApp(env, ada, workflow.id, {
-        app,
-        alias: "greet",
-      });
+      await standInBinding(app, "greet", workflow.id, ada);
       await deleteWorkflowResource(env, ada, workflow.id);
       return workflow;
     };

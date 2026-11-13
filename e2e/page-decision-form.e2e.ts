@@ -3,7 +3,11 @@ import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { expect } from "@playwright/test";
 import type { FrameLocator, Page } from "@playwright/test";
 
-import { commitApp, testApp } from "../apps/core/test/app-definitions.ts";
+import {
+  boundIn,
+  publishApp,
+  testApp,
+} from "../apps/core/test/app-definitions.ts";
 import type { TestApp } from "../apps/core/test/app-definitions.ts";
 import { test } from "./csp.ts";
 import { apiOf, peopleIn } from "./people.ts";
@@ -112,11 +116,11 @@ import { Form, FormError, SubmitButton, TextField } from "@grasp-os/ui/form";
 import { workflows } from "@server/_generated/api";
 
 /** One waiting decision, answered through its own form, mounted per item. */
-export function Review({
+export const Review = ({
   item,
 }: {
   item: WorkflowDecisionInboxItem<"approval", { comment: string }>;
-}) {
+}) => {
   const workflow = useWorkflow(workflows.followUp, { runId: item.run.runId });
   const form = useForm(workflows.followUp.decisions.approval, {
     defaultValues: { approved: false, value: { comment: "" } },
@@ -154,16 +158,16 @@ export function Review({
       <SubmitButton form={form}>Send answer</SubmitButton>
     </Form>
   );
-}
+};
 `,
       "src/components/watched.tsx": `import { useWorkflow } from "@grasp-os/sdk/react";
 import { workflows } from "@server/_generated/api";
 
 /** Run \`runId\`'s status, as the person may see it: \`unavailable\` otherwise. */
-export function Watched({ runId }: { runId: string }) {
+export const Watched = ({ runId }: { runId: string }) => {
   const run = useWorkflow(workflows.followUp, { runId });
   return <output aria-label="Watched status">{run.status}</output>;
-}
+};
 `,
       "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useWorkflow } from "@grasp-os/sdk/react";
@@ -173,7 +177,7 @@ import { workflows } from "@server/_generated/api";
 import { Review } from "../components/review.tsx";
 import { Watched } from "../components/watched.tsx";
 
-function Desk() {
+const Desk = () => {
   const followUp = useWorkflow(workflows.followUp);
   const inbox = useQuery(workflows.followUp.queries.decisions, {
     pagination: {},
@@ -215,7 +219,7 @@ function Desk() {
       </ul>
     </main>
   );
-}
+};
 export const Route = createFileRoute("/")({ component: Desk });
 `,
     }
@@ -269,17 +273,14 @@ const boundApp = async (
       },
       reviewed: { version: 1 },
     });
-    await builds.api.workflowResources.bindToApp(workflow.id, {
+    // Published from its draft, binding the workflow as it goes live.
+    await publishApp(
+      builds.api,
       app,
-      alias: "followUp",
-    });
-    const { version } = await commitApp(
-      builds.api.apps.files,
-      app,
-      appFiles(admin.userId, colleague.userId),
-      "Requests"
+      boundIn(appFiles(admin.userId, colleague.userId), {
+        followUp: workflow.id,
+      })
     );
-    await builds.api.versions.rollback({ kind: "app", id: app }, version);
     const { id } = await builds.api.permissions.request({
       subject: { type: "app", appId: app },
       object: { type: "workflow", workflowId: workflow.id },

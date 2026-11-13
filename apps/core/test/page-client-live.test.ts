@@ -7,9 +7,9 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { commitApp, definedWith, withFiles } from "./app-definitions.ts";
+import { definedWith, withFiles } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
-import { pastAccessRecheck } from "./apps.ts";
+import { commitApp, pastAccessRecheck } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { apiOf, referenceTo } from "./notes-client-app.ts";
 import type { Opened, Push } from "./page-client.ts";
@@ -781,12 +781,11 @@ export const glance = query({
     const refusedOutbox = await keptVersions();
     // A second version made current while the query is followed.
     const { version } = await commitApp(
-      opened.builder.api.apps.files,
+      opened.builder.api,
       opened.app,
       withFiles(glanceFiles, {
         "server/notes.ts": `${glanceFiles.files["server/notes.ts"] ?? ""}\n// The second version.\n`,
-      }),
-      "Second"
+      })
     );
     await opened.builder.api.versions.rollback(
       { kind: "app", id: opened.app },

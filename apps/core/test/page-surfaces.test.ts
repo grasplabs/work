@@ -5,8 +5,9 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { revokeRelease } from "../src/release-retention.ts";
-import { commitApp, withFiles } from "./app-definitions.ts";
+import { withFiles } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
+import { commitApp } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { notesFiles } from "./notes-client-app.ts";
 import {
@@ -60,12 +61,7 @@ const surfacedApp = async (name = "Notes") => {
   const builder = await personApi("builder");
   const admin = await personApi("admin");
   const { id } = await builder.api.apps.create({ name });
-  const { version } = await commitApp(
-    builder.api.apps.files,
-    id,
-    surfacedFiles(),
-    "First"
-  );
+  const { version } = await commitApp(builder.api, id, surfacedFiles());
   await builder.api.versions.rollback({ kind: "app", id }, version);
   return { app: id, builder, admin, version };
 };
@@ -75,22 +71,12 @@ describe("an App's surfaces", () => {
     const { app, builder } = await surfacedApp();
     // An App of theirs that declares no surfaces: no sidebar entry.
     const { id: plain } = await builder.api.apps.create({ name: "Plain" });
-    const { version } = await commitApp(
-      builder.api.apps.files,
-      plain,
-      notesFiles,
-      "First"
-    );
+    const { version } = await commitApp(builder.api, plain, notesFiles);
     await builder.api.versions.rollback({ kind: "app", id: plain }, version);
     // Another of theirs whose sealed release no longer passes its checks:
     // it drops out of the sidebar, the others' entries stay.
     const { id: broken } = await builder.api.apps.create({ name: "Broken" });
-    const second = await commitApp(
-      builder.api.apps.files,
-      broken,
-      surfacedFiles(),
-      "First"
-    );
+    const second = await commitApp(builder.api, broken, surfacedFiles());
     await builder.api.versions.rollback(
       { kind: "app", id: broken },
       second.version
@@ -133,7 +119,7 @@ describe("an App's surfaces", () => {
     const builder = await personApi("builder");
     const { id: app } = await builder.api.apps.create({ name: "Routed" });
     const { version } = await commitApp(
-      builder.api.apps.files,
+      builder.api,
       app,
       withFiles(notesFiles, {
         // A route group: a folder that adds nothing to the address.
@@ -159,15 +145,14 @@ export const Route = createFileRoute("/_layout")({ component: Outlet });
           "New task",
           '{ kind: "sidebar", title: "New task" }'
         ),
-      }),
-      "First"
+      })
     );
     await builder.api.versions.rollback({ kind: "app", id: app }, version);
 
     expect({
-      files: Object.keys(await builder.api.apps.files.read(app)).filter(
-        (path) => path.startsWith("src/routes/")
-      ),
+      files: Object.keys(
+        await builder.api.drafts.files({ kind: "app", id: app })
+      ).filter((path) => path.startsWith("src/routes/")),
       surfaces: await builder.api.pages.surfaces(app),
       // Built and sealed: the App's pages open.
       opens: await outcome(builder.api.pages.open(app)),
@@ -241,14 +226,13 @@ export const Route = createFileRoute("/_layout")({ component: Outlet });
     // same ones would be the readable App's too.
     const files = surfacedFiles();
     const { version } = await commitApp(
-      builder.api.apps.files,
+      builder.api,
       unreadable,
       withFiles(files, {
         "src/routes/index.tsx": (
           files.files["src/routes/index.tsx"] ?? ""
         ).replace("All notes", "Every note"),
-      }),
-      "First"
+      })
     );
     await builder.api.versions.rollback(
       { kind: "app", id: unreadable },

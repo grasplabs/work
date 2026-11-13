@@ -109,7 +109,7 @@ export interface Built {
 export const appWith = async (files: TestSource): Promise<Built> => {
   const owner = await person("builder");
   const { id } = await createApp(env, owner, { name: "Notes" });
-  await commitDefined(env, owner, id, files, "First version");
+  await commitDefined(env, owner, id, files);
   return { owner, app: id };
 };
 

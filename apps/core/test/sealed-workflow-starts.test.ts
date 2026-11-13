@@ -8,16 +8,14 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { callAppFunction, evaluateAppQuery } from "../src/app-functions.ts";
-import {
-  bindWorkflowToApp,
-  unbindWorkflowFromApp,
-} from "../src/app-workflow-bindings.ts";
 import { appKind } from "../src/apps.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { rollback } from "../src/publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
+import { boundIn } from "./app-definitions.ts";
+import { commitDefined } from "./apps.ts";
 import { appWith, person, queryReference, seal } from "./sealed-apps.ts";
 import {
   codeOf,
@@ -43,8 +41,19 @@ import { publishDefinition } from "./workflow-publishing.ts";
 describe("a sealed App's functions", { timeout: 120_000 }, () => {
   it("start the workflow the App binds, now from an action and after the commit from a mutation, for the person calling", async () => {
     const admin = await person("admin");
-    const fixture = await appWith(files(), "Requests");
-    const { owner, app } = fixture;
+    const owner = await person("builder");
+    const workflow = await createWorkflowResource(
+      env,
+      owner,
+      `greet-${unique()}`
+    );
+    await publishDefinition(env, owner, workflow.id, definitionOf());
+    const fixture = await appWith(
+      boundIn(files(), { followUp: workflow.id }),
+      "Requests",
+      owner
+    );
+    const { app } = fixture;
     const release = await seal(fixture);
     await rollback(env, appKind, owner, app, 1);
     const bob = await person("user");
@@ -53,16 +62,6 @@ describe("a sealed App's functions", { timeout: 120_000 }, () => {
     )
       .bind(app, bob.userId, owner.userId, Date.now())
       .run();
-    const workflow = await createWorkflowResource(
-      env,
-      owner,
-      `greet-${unique()}`
-    );
-    await publishDefinition(env, owner, workflow.id, definitionOf());
-    await bindWorkflowToApp(env, owner, workflow.id, {
-      app,
-      alias: "followUp",
-    });
     const asked = await requestPermission(
       env,
       owner,
@@ -136,8 +135,19 @@ describe("a sealed App's functions", { timeout: 120_000 }, () => {
 describe("a workflow reference's queries", { timeout: 120_000 }, () => {
   it("list only the runs this App started for the person, of the workflow it binds, newest first, page by page", async () => {
     const admin = await person("admin");
-    const fixture = await appWith(files(), "Requests");
-    const { owner, app } = fixture;
+    const owner = await person("builder");
+    const workflow = await createWorkflowResource(
+      env,
+      owner,
+      `greet-${unique()}`
+    );
+    await publishDefinition(env, owner, workflow.id, definitionOf());
+    const fixture = await appWith(
+      boundIn(files(), { followUp: workflow.id }),
+      "Requests",
+      owner
+    );
+    const { app } = fixture;
     const release = await seal(fixture);
     await rollback(env, appKind, owner, app, 1);
     const [bob, carol] = await Promise.all([person("user"), person("user")]);
@@ -149,16 +159,6 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
         .bind(app, member.userId, owner.userId, Date.now())
         .run();
     }
-    const workflow = await createWorkflowResource(
-      env,
-      owner,
-      `greet-${unique()}`
-    );
-    await publishDefinition(env, owner, workflow.id, definitionOf());
-    const binding = await bindWorkflowToApp(env, owner, workflow.id, {
-      app,
-      alias: "followUp",
-    });
     const asked = await requestPermission(
       env,
       owner,
@@ -194,7 +194,7 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
       env,
       { type: "person", person: owner },
       workflow.id,
-      { version: 1, args: { who: "Owner" }, key: `key-${unique()}` }
+      { expected: 1, args: { who: "Owner" }, key: `key-${unique()}` }
     );
 
     const references = {
@@ -250,9 +250,9 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
       none: [],
       carol: [carols],
       owner: [],
-      // Sealed before the App bound anything, the release pins no
-      // workflow version: it reads no run's history, its own included.
-      ownHistory: "workflow.run_unavailable",
+      // The history of the person's own run of the workflow the release
+      // binds; never another's.
+      ownHistory: "ok",
       othersHistory: "workflow.run_unavailable",
     });
     const bobs = runIds(await ask(bob, references.runs, { pagination: {} }));
@@ -297,18 +297,11 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
           pagination: { cursor: "not a cursor" },
         })
       ),
-      historyEnded: codeOf(
-        await ask(bob, references.history, {
-          runId: first,
-          pagination: { endCursor: "1" },
-        })
-      ),
     }).toStrictEqual({
       forged: "contract.invalid_request",
       unknown: "function.not_found",
       status: "contract.invalid_args",
       cursor: "data.invalid_cursor",
-      historyEnded: "workflow.run_unavailable",
     });
 
     // A caller no longer allowed to call (an agent whose permission was
@@ -325,8 +318,14 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
     );
     expect(codeOf(withdrawn.result)).toBe("role.forbidden");
 
-    // Without the binding, nothing is read.
-    await unbindWorkflowFromApp(env, owner, binding.id);
+    // A version that binds nothing there made live: nothing is read.
+    const { version: unbinding } = await commitDefined(
+      env,
+      owner,
+      app,
+      files()
+    );
+    await rollback(env, appKind, owner, app, unbinding);
     expect(codeOf(await ask(bob, references.runs, { pagination: {} }))).toBe(
       "permission.unavailable"
     );
@@ -463,13 +462,16 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
       indexed: true,
     });
 
-    // The alias bound to another workflow: none of the old one's runs,
-    // whatever place in their list a cursor names.
+    // A version binding the alias to another workflow published: none of
+    // the old one's runs, whatever place in their list a cursor names.
     const other = await greetingOf(owner);
-    await bindWorkflowToApp(env, owner, other.id, {
-      app: first.app,
-      alias: "followUp",
-    });
+    const { version: rebinding } = await commitDefined(
+      env,
+      owner,
+      first.app,
+      boundIn(files(), { followUp: other.id })
+    );
+    await rollback(env, appKind, owner, first.app, rebinding);
     const rebound = {
       fresh: runIds(await ask({ pagination: {} })),
       oldCursor: runIds(await ask({ pagination: { cursor } })),
@@ -518,7 +520,7 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
       first.app,
       async () =>
         await env.DB.prepare(
-          "UPDATE sdk_release_manifests SET revoked_at = ? WHERE app_id = ? AND version = 1"
+          "UPDATE sdk_release_manifests SET revoked_at = ? WHERE app_id = ? AND version = 2"
         )
           .bind(Date.now(), first.app)
           .run()
@@ -530,7 +532,7 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
 
     // A release revoked while current answers nothing.
     await env.DB.prepare(
-      "UPDATE sdk_release_manifests SET revoked_at = ? WHERE app_id = ? AND version = 1"
+      "UPDATE sdk_release_manifests SET revoked_at = ? WHERE app_id = ? AND version = 2"
     )
       .bind(Date.now(), first.app)
       .run();
