@@ -33,10 +33,6 @@ export const rpcParamNames: ParamNames = {
     "records": ["app","table","version","cursor"],
     "tables": ["app"],
   },
-  "AppFilesRpc": {
-    "commit": ["app","changes","message","definition"],
-    "read": ["app","version"],
-  },
   "AppIntegrationsRpc": {
     "add": ["app","entry"],
     "list": ["app"],
@@ -76,6 +72,7 @@ export const rpcParamNames: ParamNames = {
     "dataModel": ["app"],
     "define": ["app","operation","preview"],
     "definition": ["app"],
+    "editDraft": ["app","edit"],
     "get": ["app"],
     "list": [],
     "openLink": ["link"],
@@ -496,7 +493,6 @@ export const rpcParamNames: ParamNames = {
     "approveBinding": ["id","input"],
     "askable": ["id"],
     "askableWorkflows": [],
-    "bindToApp": ["id","input"],
     "bindings": ["id"],
     "candidateRun": ["id","runId"],
     "candidateRunTrace": ["id","runId"],
@@ -534,7 +530,6 @@ export const rpcParamNames: ParamNames = {
     "state": ["id"],
     "terminateCandidateRun": ["id","runId"],
     "terminateRun": ["id","runId"],
-    "unbindFromApp": ["binding"],
   },
   "WorkflowTriggersRpc": {
     "create": ["input"],

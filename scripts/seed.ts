@@ -22,6 +22,7 @@
  * start it again.
  */
 import { definitionText as appDefinitionText } from "@grasp-os/runtime/definition";
+import type { AppDefinition } from "@grasp-os/runtime/definition";
 import { appErrors } from "@grasp-os/shared/apps";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { onboardingErrors, planDays } from "@grasp-os/shared/onboarding";
@@ -247,22 +248,40 @@ const seedCollection = async (
 };
 
 /**
+ * Writes `changes` and `definition` into App `app`'s draft over
+ * `revision`, the one read, and publishes it as its owner: live, the
+ * people it is shared with use it.
+ */
+const publishSeeded = async (
+  owner: Session,
+  app: string,
+  revision: number,
+  changes: Record<string, string>,
+  definition: AppDefinition
+): Promise<void> => {
+  const drafted = await owner.api.apps.editDraft(app, {
+    revision,
+    changes,
+    definition: JSON.parse(appDefinitionText(definition)),
+  });
+  await owner.api.drafts.publish({ kind: "app", id: app }, drafted.revision);
+};
+
+/**
  * Brings an App seeded before it had its board, or with an older one, to
- * the seed's, as its next version published with the definition that
- * holds its table. Only the seed's own change is published: a later
- * version that holds exactly the live one plus the seed's files (a seed
- * stopped before publishing it) is published; one with anyone else's
- * changes is left alone, and so is the App, as committing over it would
- * release them.
+ * the seed's, published from its draft with the definition that holds
+ * its table. Only the seed's own change is published: a draft with
+ * anyone's changes is left alone, and so is the App, as publishing it
+ * would release them.
  */
 const upgradeBoard = async (
   owner: Session,
-  adminSession: Session,
-  app: { id: string; name: string; currentVersion: number | null },
-  seed: AppSeed
+  app: { id: string; name: string; currentVersion: number },
+  seed: AppSeed,
+  workflows: ReadonlyMap<string, string>
 ): Promise<void> => {
-  const current = app.currentVersion ?? undefined;
-  const files = await owner.api.apps.files.read(app.id, current);
+  const subject = { kind: "app", id: app.id } as const;
+  const files = await owner.api.versions.files(subject, app.currentVersion);
   const wanted = appFiles(seed);
   const changed = Object.fromEntries(
     Object.entries(wanted).filter(([path, code]) => files[path] !== code)
@@ -270,30 +289,19 @@ const upgradeBoard = async (
   if (Object.keys(changed).length === 0) {
     return;
   }
-  const [latest] = await owner.api.versions.list({ kind: "app", id: app.id });
-  if (latest !== undefined && latest.version !== current) {
-    const later = await owner.api.apps.files.read(app.id, latest.version);
-    if (Object.entries(changed).some(([path, code]) => later[path] !== code)) {
-      console.warn(
-        `${app.name} has a version that isn't live, with changes of its own: its board is left as it is.`
-      );
-      return;
-    }
-    await adminSession.api.versions.rollback(
-      { kind: "app", id: app.id },
-      latest.version
+  const draft = await owner.api.drafts.get(subject);
+  if (draft.changed.length > 0 || draft.definitionChanged) {
+    console.warn(
+      `${app.name} has unpublished changes in its draft: its board is left as it is.`
     );
     return;
   }
-  const { version } = await owner.api.apps.files.commit(
+  await publishSeeded(
+    owner,
     app.id,
+    draft.revision,
     changed,
-    "Add the App's board",
-    JSON.parse(appDefinitionText(appDefinition(seed)))
-  );
-  await adminSession.api.versions.rollback(
-    { kind: "app", id: app.id },
-    version
+    appDefinition(seed, workflows)
   );
 };
 
@@ -518,35 +526,34 @@ const seedApp = async (
     );
   }
   if (app.currentVersion === null) {
-    for (const { alias } of seed.workflows) {
-      const id = workflowIds.get(alias);
-      if (id !== undefined) {
-        // oxlint-disable-next-line no-await-in-loop -- one binding at a time
-        await owner.api.workflowResources.bindToApp(id, {
-          app: app.id,
-          alias,
-        });
-      }
-    }
-    const { version } = await owner.api.apps.files.commit(
+    // Its workflows bound with it, its board's table and page, published
+    // from its draft once its checks and workflow tests pass.
+    const { revision } = await owner.api.drafts.get({
+      kind: "app",
+      id: app.id,
+    });
+    await publishSeeded(
+      owner,
       app.id,
+      revision,
       appFiles(seed),
-      "Release the App's workflows and board",
-      JSON.parse(appDefinitionText(appDefinition(seed)))
-    );
-    // An admin publishes it, which approves its code, once its workflow
-    // tests pass: live, the people it is shared with use it.
-    await adminSession.api.versions.rollback(
-      { kind: "app", id: app.id },
-      version
+      appDefinition(seed, workflowIds)
     );
   } else {
     // Its board needs the App's own files and workflow bindings: one
     // seeded before them keeps what it has (nothing has shipped, so no
     // seed migrates it; reset local data to seed it anew).
-    const files = await owner.api.apps.files.read(app.id, app.currentVersion);
+    const files = await owner.api.versions.files(
+      { kind: "app", id: app.id },
+      app.currentVersion
+    );
     if (files["grasp.config.ts"] === appFiles(seed)["grasp.config.ts"]) {
-      await upgradeBoard(owner, adminSession, app, seed);
+      await upgradeBoard(
+        owner,
+        { ...app, currentVersion: app.currentVersion },
+        seed,
+        workflowIds
+      );
     } else {
       console.warn(
         `${app.name} was seeded before its independent workflows: its board is left as it is. Reset local data to seed it again.`

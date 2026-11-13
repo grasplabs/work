@@ -33,7 +33,7 @@ import { useCoreRead } from "./use-core-read.ts";
 // changes it, that is the draft's files as they are now, read again at
 // each of its writes; otherwise the live version's. The App changes
 // through its chat, which the note says. Everything is read with core's
-// own reads for builders (`drafts.files`, `apps.files.read`), which
+// own reads for builders (`drafts.files`, `versions.files`), which
 // refuse anyone else.
 //
 // What Grasp generates among an App's files (`server/_generated/`), which

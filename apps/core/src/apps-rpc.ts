@@ -18,18 +18,23 @@ import type {
   DraftDataModel,
 } from "@grasp-os/shared/data-model";
 import type { DefinitionPackage } from "@grasp-os/shared/definition-packages";
+import type { Draft } from "@grasp-os/shared/drafts";
 import type { AppId } from "@grasp-os/shared/ids";
 
 import { AppBlueprintsRpc } from "./app-blueprints.ts";
 import { AppDataRpc } from "./app-data.ts";
-import { AppFilesRpc } from "./app-files-rpc.ts";
 import { AppIntegrationsRpc } from "./app-integrations.ts";
 import { AppMembersRpc } from "./app-members.ts";
 import { openAppLink, setAppLink } from "./app-own-links.ts";
 import { AppPreviewRpc } from "./app-preview-rpc.ts";
 import { AppReleasesRpc } from "./app-releases-rpc.ts";
 import { removeApp } from "./app-removal.ts";
-import { defineDraft, draftDataModel, reviewChanges } from "./app-review.ts";
+import {
+  defineDraft,
+  draftDataModel,
+  editAppDraft,
+  reviewChanges,
+} from "./app-review.ts";
 import { resetAppData } from "./app-schema.ts";
 import { appAnswerers, updateApp } from "./app-settings.ts";
 import { setArchived } from "./app-status.ts";
@@ -52,7 +57,7 @@ import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 
 /**
- * A signed-in person's `apps`, with `apps.files`, `apps.releases`,
+ * A signed-in person's `apps`, with `apps.releases`,
  * `apps.members`, `apps.blueprints`, `apps.integrations`, `apps.webhooks`,
  * `apps.data` and `apps.preview`, in SessionRpc's form. An App's draft and
  * versions are every subject's (`drafts`, `versions`). The App
@@ -62,7 +67,6 @@ import type { SessionCheck } from "./session-check.ts";
 export class AppsRpc extends CoreRpcTarget implements AppsApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
-  readonly #files: AppFilesRpc;
   readonly #releases: AppReleasesRpc;
   readonly #members: AppMembersRpc;
   readonly #blueprints: AppBlueprintsRpc;
@@ -75,7 +79,6 @@ export class AppsRpc extends CoreRpcTarget implements AppsApi {
     super();
     this.#env = env;
     this.#check = check;
-    this.#files = new AppFilesRpc(env, check);
     this.#releases = new AppReleasesRpc(env, check);
     this.#members = new AppMembersRpc(env, check);
     this.#blueprints = new AppBlueprintsRpc(env, check);
@@ -83,10 +86,6 @@ export class AppsRpc extends CoreRpcTarget implements AppsApi {
     this.#webhooks = new AppWebhooksRpc(env, check);
     this.#data = new AppDataRpc(env, check);
     this.#preview = new AppPreviewRpc(env, check);
-  }
-
-  get files(): AppFilesRpc {
-    return this.#files;
   }
 
   get releases(): AppReleasesRpc {
@@ -128,6 +127,13 @@ export class AppsRpc extends CoreRpcTarget implements AppsApi {
     return await withPerson(
       this.#check,
       async (by) => await draftDataModel(this.#env, by, app)
+    );
+  }
+
+  async editDraft(app: string, edit: unknown): Promise<Draft> {
+    return await withPerson(
+      this.#check,
+      async (by) => await editAppDraft(this.#env, by, app, edit)
     );
   }
 

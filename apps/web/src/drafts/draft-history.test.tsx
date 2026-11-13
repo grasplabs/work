@@ -42,7 +42,6 @@ const versionOf = (number: number): AppVersion => ({
   tree: `tree-${number}`,
   files: 3,
   author: "user-owner",
-  message: `Change ${number}`,
   createdAt: `2026-10-0${number}T09:00:00.000Z`,
 });
 
@@ -601,7 +600,6 @@ describe("An App's History", () => {
       label: `26.10.${number}`,
       parent: number === 1 ? null : number - 1,
       tree: `tree-${number}`,
-      message: `Change ${number}`,
       createdAt: new Date(Date.UTC(2026, 9, 1) + number * 60_000).toISOString(),
     });
     const { session } = fakeApps({ role: "builder", current: total });

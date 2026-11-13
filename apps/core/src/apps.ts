@@ -15,7 +15,6 @@ import { versionErrors } from "@grasp-os/shared/app-releases";
 import {
   appErrors,
   appVersionSchema,
-  commitMessageSchema,
   fileChangesSchema,
   newAppSchema,
 } from "@grasp-os/shared/apps";
@@ -26,7 +25,6 @@ import type {
   AppFiles,
   AppVersion,
   ViewedApp,
-  CommittedVersion,
   FileDiff,
 } from "@grasp-os/shared/apps";
 import type { AuditDetailValue, AuditEntry } from "@grasp-os/shared/audit";
@@ -38,13 +36,12 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, BlueprintId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { nextReleaseId, releaseMonthPrefix } from "@grasp-os/shared/release-id";
 import { requireBuilder } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { dataErrors } from "@grasp-os/shared/stores";
 import type { MemberRole } from "@grasp-os/shared/subject-members";
 import { waitUntil } from "cloudflare:workers";
-import { and, asc, desc, eq, isNull, like, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, lt, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
@@ -84,11 +81,9 @@ import {
   sdkResourceBindings,
 } from "./db/core/schema.ts";
 import { isUniqueViolation, retriedBatch } from "./db/d1.ts";
-import { subjectEntry } from "./drafts.ts";
+import { nextLabel, subjectEntry } from "./drafts.ts";
 import type { DraftKind, DraftState } from "./drafts.ts";
 import { appMemoryPath, requireWithinLimit } from "./knowledge/memory-files.ts";
-import { madeCurrent } from "./permissions.ts";
-import { buildOnSave } from "./save-builds.ts";
 import type { SchemaIds } from "./schema-changes.ts";
 import { liveStoreSql } from "./store-deletion.ts";
 
@@ -144,7 +139,7 @@ export type AppRow = typeof apps.$inferSelect;
 /** A version as this release writes it: never the previous release's `screens`. */
 export type VersionRow = Omit<typeof appVersions.$inferSelect, "screens">;
 
-/** A tree as `commitFiles` stores it. */
+/** A tree as a version stores it. */
 const storedTreeSchema = z.record(z.string(), z.string());
 
 /** Most versions one `listVersions` call returns. */
@@ -222,7 +217,6 @@ export const toVersion = (row: VersionRow): AppVersion => ({
   tree: row.tree,
   files: row.files,
   author: row.authorId,
-  message: row.message,
   createdAt: row.createdAt.toISOString(),
 });
 
@@ -587,7 +581,7 @@ export const readStored = async (stored: {
 };
 
 /**
- * The definition a caller gives (`commitFiles`), checked whole:
+ * The definition a caller gives (`AppsApi.editDraft`), checked whole:
  * `app.definition_invalid` naming the problem otherwise.
  */
 export const givenDefinition = (input: unknown): AppDefinition => {
@@ -1091,121 +1085,6 @@ export const applyChanges = (
 };
 
 /**
- * Commits changes (new content by path, or null to delete a file) over an
- * App's latest version as its next version, by `by` with `message`, with
- * `definition` if given, else the latest version's (an empty one for an
- * App's first). Refused as a whole when the version would be over the
- * App's limits. A version committed meanwhile takes the number:
- * `app.conflict`, and nothing of this commit is kept.
- */
-export const commitFiles = async (
-  env: Env,
-  by: Identity,
-  app: unknown,
-  input: unknown,
-  message: unknown,
-  definitionInput?: unknown
-): Promise<CommittedVersion> => {
-  const { id: appId, name } = await editableApp(env, by, app);
-  const text = appErrors.parse("app.invalid", commitMessageSchema, message);
-  const { latest, files } = await latestFiles(env, appId);
-  const previous = await carriedDefinitions(env, appId, latest);
-  const definition =
-    definitionInput === undefined
-      ? (previous[0] ?? emptyDefinition(name))
-      : givenDefinition(definitionInput);
-  // Imported here, not at the top: bindings reach back into this module.
-  const { requireRecordableBindings } =
-    await import("./app-workflow-bindings.ts");
-  await requireRecordableBindings(env, by, definition, previous[0] ?? null);
-  applyChanges(files, input, definition);
-  const stored = await storedVersion(env, appId, files, definition, previous);
-  if (sameVersion(stored, latest)) {
-    throw appErrors.create("app.nothing_to_commit");
-  }
-  const { tree, json } = stored;
-  refuseAppWorkflows(files.keys());
-  await storeTree(env, appId, { tree, json });
-
-  const row: VersionRow = {
-    appId,
-    version: (latest?.version ?? 0) + 1,
-    parent: latest?.version ?? null,
-    tree,
-    code: stored.code,
-    definition: stored.definition.text,
-    definitionHash: stored.definition.hash,
-    files: files.size,
-    authorId: by.userId,
-    message: text,
-    createdAt: new Date(),
-    approved: null,
-    pages: hasPages(files),
-    proposedBy: null,
-    label: null,
-    status: null,
-    publishedManifestHash: null,
-  };
-  const db = drizzle(env.DB);
-  let undone: unknown[];
-  try {
-    // Taken back in the same batch should the App have been archived
-    // since `editableApp` let the commit in: nothing of it stays, and
-    // nothing is audited.
-    [, undone] = await auditedBatch(env, db, [
-      db.insert(appVersions).values(row),
-      db
-        .delete(appVersions)
-        .where(
-          and(
-            eq(appVersions.appId, appId),
-            eq(appVersions.version, row.version),
-            archivedNow(appId)
-          )
-        )
-        .returning({ version: appVersions.version }),
-      outboxedWhere(
-        db,
-        changeEntry(by, "app.committed", appId, {
-          version: row.version,
-          parent: row.parent,
-          tree,
-          definition: row.definitionHash,
-          files: row.files,
-        }),
-        sql`NOT ${archivedNow(appId)}`
-      ),
-    ]);
-  } catch (error) {
-    if (isUniqueViolation(error)) {
-      throw appErrors.create("app.conflict");
-    }
-    throw error;
-  }
-  if (undone.length > 0) {
-    throw appErrors.create("app.archived");
-  }
-  // Committed: now built, so the version opens without building, and
-  // whoever saved hears what doesn't build (save-builds.ts). Built from
-  // the files as the version reads back, paths in order, so a build says
-  // the same here as at its first use.
-  const saved = storedTreeSchema.parse(JSON.parse(json));
-  const builds = await buildOnSave(
-    env,
-    {
-      app: appId,
-      version: row.version,
-      files: saved,
-    },
-    { profile: "production" }
-  );
-  // The pages open on the App hear of it (spec 11.5): their pages show
-  // a new version ready, and switch to it (pages-rpc.ts, `watchVersion`).
-  waitUntil(versionMadeCurrent(env, appId));
-  return { ...toVersion(row), builds };
-};
-
-/**
  * A draft's definition (`readStored`): its own, else its base version's;
  * null for a draft of an App with no version that hasn't written yet.
  */
@@ -1234,9 +1113,6 @@ export interface DraftCommit {
   /** Null for a draft of an App with no version that holds none. */
   definition: AppDefinition | null;
 }
-
-/** The message of every version a publish commits from a draft. */
-const publishedMessage = "Published from the draft.";
 
 /**
  * Commits the App's draft (`DraftCommit`) as its next version, by
@@ -1277,7 +1153,8 @@ export const commitDraft = async (
     definitionHash: stored.definition.hash,
     files: files.size,
     authorId: by.userId,
-    message: publishedMessage,
+    // Unused (schema.ts).
+    message: "",
     createdAt: new Date(),
     approved: null,
     pages: hasPages(files),
@@ -1290,8 +1167,7 @@ export const commitDraft = async (
   let undone: unknown;
   try {
     // Taken back in the same batch should the App have been archived since
-    // `editableApp` let the draft in, as in `commitFiles`: no version,
-    // nothing audited.
+    // `editableApp` let the draft in: no version, nothing audited.
     const write = [
       db.insert(appVersions).values(row),
       db
@@ -1475,33 +1351,6 @@ export const isPublished = async (
 };
 
 /**
- * The label the next version of App `app` to go live takes at `at`
- * (`YY.MM.N`, @grasp-os/shared/release-id): N one past the highest the
- * App's versions hold in that month. Taken only by the batch that makes
- * the version live (`activateVersion`), so a publish that fails takes none;
- * of two at once, only the one whose compare and set of the live version
- * lands takes it, and the label's unique index refuses any other, thrown
- * as it came.
- */
-export const nextLabel = async (
-  env: Env,
-  app: AppId,
-  at: Date
-): Promise<string> => {
-  const prefix = releaseMonthPrefix(at);
-  const rows = await drizzle(env.DB)
-    .select({ label: appVersions.label })
-    .from(appVersions)
-    .where(
-      and(eq(appVersions.appId, app), like(appVersions.label, `${prefix}%`))
-    );
-  return nextReleaseId(
-    rows.flatMap(({ label }) => (label === null ? [] : [label])),
-    at
-  );
-};
-
-/**
  * The label a version of App `app` goes live under: the one it went live
  * under before (`held`, a roll back), or the next (`nextLabel`).
  */
@@ -1509,7 +1358,8 @@ const labelFor = async (
   env: Env,
   app: AppId,
   held: string | null
-): Promise<string> => held ?? (await nextLabel(env, app, new Date()));
+): Promise<string> =>
+  held ?? (await nextLabel(env, { kind: "app", id: app }, new Date()));
 
 /**
  * What making `version` of `app` live over `previous` tells besides,
@@ -1539,6 +1389,15 @@ const firstLive = (
       )
     : [];
 
+/** Whether a switch binds or unbinds anything (app-workflow-bindings.ts). */
+const rebound = ({
+  changes,
+  removals,
+}: {
+  readonly changes: readonly unknown[];
+  readonly removals: readonly unknown[];
+}): boolean => changes.length > 0 || removals.length > 0;
+
 /**
  * Makes a published version the one that runs, live (app-publish.ts):
  * the App's draft just published, or any other, such as an earlier one to
@@ -1552,12 +1411,9 @@ const firstLive = (
  * the batch that makes it live, and keeps it after; its first live
  * version opens the App to everyone it is shared with. `alsoWhenLive`
  * adds to that batch what goes only with it: the draft emptied over the
- * version (drafts.ts, `emptyDraftStatements`), audited as `action`. Made current
- * by someone who couldn't grant them, the version is unapproved and the
- * App's permissions that change things for the person using it are asked
- * for again (`madeCurrent`), but for an App's first version copied from a
- * blueprint, the first time: version 1 existed and was immutable when the
- * admin granted its requests.
+ * version (drafts.ts, `emptyDraftStatements`), audited as `action`. What
+ * an admin granted the App stays granted, whichever version runs: only
+ * new access waits for an admin, asked for as the version declares it.
  */
 export const activateVersion = async (
   env: Env,
@@ -1572,7 +1428,7 @@ export const activateVersion = async (
   const found = await appFor(env, by, app, "builder");
   const appId = found.id;
   const row = await findVersion(env, appId, version);
-  const { version: number, approved, label: held } = row;
+  const { version: number, label: held } = row;
   if (found.currentVersion === number) {
     return found;
   }
@@ -1597,7 +1453,6 @@ export const activateVersion = async (
   const {
     bindableSql,
     bindingChangeStatements,
-    ownWorkflowBindings,
     tellBindingChanged,
     versionBindingChanges,
   } = await import("./app-workflow-bindings.ts");
@@ -1614,43 +1469,8 @@ export const activateVersion = async (
   );
   // What the version binds of its workflows, as its release sealed it,
   // checked now and bound in the same batch (app-workflow-bindings.ts).
-  // The bindings the version records of its own, which its author
-  // answers for: never those it carries over from its parent.
-  const { definition: defined } = await readStored(row);
-  const parentDefinition =
-    row.parent === null
-      ? null
-      : await readStored(await findVersion(env, appId, row.parent));
-  const recorded = ownWorkflowBindings(
-    defined,
-    parentDefinition?.definition ?? null
-  );
-  // What it binds unlike the version current now, as its seal took them
-  // (bound-workflows.ts, `sealedWorkflowPins`): bound, never kept over.
-  const currentDefinition =
-    previous === null
-      ? null
-      : await readStored(await findVersion(env, appId, previous));
-  const chosen = ownWorkflowBindings(
-    defined,
-    currentDefinition?.definition ?? null
-  );
   const bindingsOf = async () =>
-    await versionBindingChanges(
-      env,
-      by,
-      appId,
-      {
-        author: row.authorId,
-        recorded,
-        chosen,
-        // Approved or not only once it was made current (`madeCurrent`):
-        // a rollback. A blueprint copy's first version comes approved, but
-        // records no binding (app-blueprints.ts).
-        currentBefore: row.approved !== null,
-      },
-      release
-    );
+    await versionBindingChanges(env, by, found, release);
   // Refused here before the store changes; checked again once it has
   // (below), as roles may have changed while its schema applied.
   await bindingsOf();
@@ -1732,8 +1552,8 @@ export const activateVersion = async (
                 publishedSql(appId, number),
                 // A workflow granted a function since it was checked.
                 boundFunctionsServedSql(appId, served),
-                // A workflow it binds deleted, or an alias rebound, since
-                // it was checked.
+                // A workflow it binds deleted, or made live at another
+                // version, since it was checked.
                 bindableSql(appId, rebinding)
               )
             )
@@ -1756,18 +1576,9 @@ export const activateVersion = async (
             env,
             by,
             { app: appId, appVersion: number, switchId: event.id },
-            rebinding.changes,
+            rebinding,
             storedEvent(event.id)
           ),
-          ...madeCurrent(env, by, {
-            app: appId,
-            version: number,
-            previous,
-            changed: storedEvent(event.id),
-            // A copy's first version, approved as it was created from the
-            // blueprint (app-blueprints.ts), made current for the first time.
-            keep: previous === null && approved === 1,
-          }),
           // Its webhooks told of the version, with the change or not at all.
           ...queuedWebhookDeliveries(
             db,
@@ -1802,7 +1613,7 @@ export const activateVersion = async (
       .get();
     if (ours !== undefined) {
       // The try whose answer was lost may have told no page either.
-      if (rebinding.changes.length > 0) {
+      if (rebound(rebinding)) {
         waitUntil(tellBindingChanged(env, appId));
       }
       waitUntil(versionMadeCurrent(env, appId));
@@ -1825,7 +1636,7 @@ export const activateVersion = async (
     // What is left is a conflict: the base moved.
     throw draftErrors.create("draft.conflict");
   }
-  if (rebinding.changes.length > 0) {
+  if (rebound(rebinding)) {
     waitUntil(tellBindingChanged(env, appId));
   }
   // The pages open on the App hear of it (spec 11.5): their pages show

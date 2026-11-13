@@ -11,6 +11,7 @@ import type { CatalogEntryRef } from "./connect.ts";
 import type { DataModelChange, DraftDataModel } from "./data-model.ts";
 import type { DefinitionPackage } from "./definition-packages.ts";
 import type { DiagnosticCategory } from "./diagnostics.ts";
+import type { Draft } from "./drafts.ts";
 import { defineErrorFamily } from "./errors.ts";
 import { identifierSchema } from "./ids.ts";
 import type { AppId, BlueprintId } from "./ids.ts";
@@ -81,13 +82,6 @@ export const fileChangesSchema = z
     message: `At most ${appLimits.files} files at once`,
   });
 export type FileChanges = z.input<typeof fileChangesSchema>;
-
-/** A commit message: what changed and why, for people. */
-export const commitMessageSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .max(appLimits.messageLength);
 
 /** An App in the registry. Times are ISO 8601. */
 export interface App {
@@ -249,10 +243,8 @@ export interface AppVersion {
   /** SHA-256 of the version's files, which identifies them exactly. */
   tree: string;
   files: number;
-  /** The user who published it, or committed it. */
+  /** The user who published it. */
   author: string;
-  /** What changed and why, in its author's words. */
-  message: string;
   createdAt: string;
 }
 
@@ -362,42 +354,6 @@ export interface SavedBuild {
    * `error`. Check again once the server code registers.
    */
   standIn?: true;
-}
-
-/** A committed version, with how its builds went (`AppFilesApi.commit`). */
-export interface CommittedVersion extends AppVersion {
-  builds: {
-    pages: SavedBuild;
-  };
-}
-
-/** An App's files. */
-export interface AppFilesApi {
-  /**
-   * The App's files at `version`; without one, at its latest version
-   * (none while it has no version).
-   */
-  read: (app: string, version?: number) => Promise<AppFiles>;
-  /**
-   * Commits `changes` over the App's latest version as its next version,
-   * with `definition` (@grasp-os/runtime's `AppDefinition`, checked whole:
-   * `app.definition_invalid` otherwise) if given, else the latest
-   * version's, and builds its pages, so the version opens without
-   * building. Its `grasp.config.ts` and `server/schema.ts` are always
-   * what its definition generates, whatever `changes` hold of them.
-   * Answers once they are done with how they went (`builds`).
-   * A build never fails the commit.
-   * Changes that leave the files and the definition as they are:
-   * `app.nothing_to_commit`.
-   * Of two commits at once, one is refused with `app.conflict`: read the
-   * latest version and commit over it again.
-   */
-  commit: (
-    app: string,
-    changes: FileChanges,
-    message: string,
-    definition?: unknown
-  ) => Promise<CommittedVersion>;
 }
 
 /** Why an admin revokes a release or holds it: kept in the audit log. */
@@ -746,6 +702,21 @@ export interface AppsApi {
    */
   answerers: (app: string) => Promise<AppAnswerer[]>;
   /**
+   * Writes the App's draft, for its builders, over `revision`, the one the
+   * person read (`draft.conflict` once anyone wrote since), as their own
+   * checkpoint, as a chat's agent writes it: `changes` (new content by
+   * path, or null to delete a file), its TypeScript fixed and formatted
+   * as the lint does safely, and, if given, `definition`
+   * (@grasp-os/runtime's `AppDefinition`, whole: `app.definition_invalid`
+   * otherwise). Its `grasp.config.ts` and `server/schema.ts` are always
+   * what its definition generates. Publish it with `drafts.publish`. Not
+   * for an archived App.
+   */
+  editDraft: (
+    app: string,
+    edit: { revision: number; changes: FileChanges; definition?: unknown }
+  ) => Promise<Draft>;
+  /**
    * What publishing the App's draft would change against its live
    * version, and whether its checks pass (`AppReview`), to review
    * before publishing it at the revision this names (`DraftsApi.publish`).
@@ -769,7 +740,6 @@ export interface AppsApi {
     operation: unknown,
     preview?: boolean
   ) => Promise<DataModelChange>;
-  readonly files: AppFilesApi;
   readonly releases: AppReleasesApi;
   readonly members: SubjectMembersApi;
   readonly blueprints: AppBlueprintsApi;
@@ -796,7 +766,6 @@ export const appErrors = defineErrorFamily({
   "app.blueprint_not_found": "There's no such blueprint.",
   "app.version_not_found": "The App has no such version.",
   "app.too_large": "The App's files would be over its limits.",
-  "app.nothing_to_commit": "The changes leave the latest version as it is.",
   "app.conflict": "Someone else changed this App at the same time. Try again.",
   "app.not_running": "The App has no current version to run yet.",
   "app.link_taken": "Another App has that link. Choose another.",
@@ -816,7 +785,7 @@ export const appErrors = defineErrorFamily({
   "app.answer_invalid":
     "The App's server code answered with something other than plain data.",
   "app.no_workflows":
-    "An App holds no workflows of its own, nor code under workflows/. Build an independent workflow with env.workflowBuild, add it to the App's permissions with addPermission (permission.workflow) and bind it to the App under that alias.",
+    "An App holds no workflows of its own, nor code under workflows/. Build an independent workflow with env.workflowBuild, add it to the App's permissions with addPermission (permission.workflow) and bind it under that alias with bindWorkflow.",
   "app.generated_file":
     "grasp.config.ts and server/schema.ts are the code Grasp generates from the App's definition, which is no file: change it with the definition tools (addTable, addField, changeField, renameField, renameTable, setAccess, addIndex, addPermission, renameFunction and their remove counterparts), never by writing them.",
   "app.definition_invalid":

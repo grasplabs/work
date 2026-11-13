@@ -18,13 +18,17 @@ import { boardFiles, boardOperations, boards } from "./pages.ts";
 
 /**
  * An App's definition: its board's table, a permission to start each of its
- * workflows, which it binds under its alias. A workflow that asks a
- * decision declares it as the version bound has it, as binding it in a
- * draft writes it (`bindWorkflow`): what a decision is about, and what a
- * person may answer. Core refuses to bind a version whose contract
- * differs from what the App's current version declares.
+ * workflows, and the workflow it binds under each alias (`workflows`, by
+ * alias, once seeded). A workflow that asks a decision declares it as its
+ * live version has it, as binding it in a draft writes it
+ * (`bindWorkflow`): what a decision is about, and what a person may
+ * answer. Core refuses to publish an App that declares what a workflow it
+ * binds doesn't have.
  */
-export const appDefinition = (seed: AppSeed): AppDefinition => {
+export const appDefinition = (
+  seed: AppSeed,
+  workflows: ReadonlyMap<string, string> = new Map()
+): AppDefinition => {
   const board = boards[seed.name];
   let definition = emptyDefinition(seed.name);
   for (const operation of board === undefined ? [] : boardOperations(board)) {
@@ -35,22 +39,28 @@ export const appDefinition = (seed: AppSeed): AppDefinition => {
       op: "addPermission",
       permission: `permission.workflow(${JSON.stringify(alias)}, { args: ${declared.args}, returns: ${declared.returns} })`,
     });
-    if (decision !== undefined) {
-      definition = applyOperation(definition, {
-        op: "setWorkflowContract",
-        alias,
-        contract: {
-          events: {},
-          listens: {},
-          decisions: {
-            [decision.binding]: {
-              value: descriptorFromText(decisionResponse),
-              context: descriptorFromText(decision.input),
-            },
-          },
-        },
-      });
+    const workflowId = workflows.get(alias);
+    if (decision === undefined && workflowId === undefined) {
+      continue;
     }
+    definition = applyOperation(definition, {
+      op: "setWorkflowContract",
+      alias,
+      contract: {
+        events: {},
+        listens: {},
+        decisions:
+          decision === undefined
+            ? {}
+            : {
+                [decision.binding]: {
+                  value: descriptorFromText(decisionResponse),
+                  context: descriptorFromText(decision.input),
+                },
+              },
+      },
+      ...(workflowId === undefined ? {} : { bound: { workflowId } }),
+    });
   }
   return definition;
 };

@@ -37,7 +37,6 @@ const version = (number: number): AppVersion => ({
   tree: `tree-${number}`,
   files: 3,
   author: "user-owner",
-  message: `Change ${number}`,
   createdAt: `2026-10-0${number}T09:00:00.000Z`,
 });
 
