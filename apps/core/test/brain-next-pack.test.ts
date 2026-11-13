@@ -681,10 +681,11 @@ describe("contested facts in a pack across stores", () => {
     ).toStrictEqual([3, 3]);
     expect({
       broken,
-      reached: [...counts].toSorted((x, y) => x.localeCompare(y)),
+      reached: counts,
     }).toStrictEqual({
       broken: [],
-      reached: ["[3,3]", "[3]", "[]"],
+      // Both facts packed, one, and none: every case is reached.
+      reached: new Set(["[3,3]", "[3]", "[]"]),
     });
   });
 });
