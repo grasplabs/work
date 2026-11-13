@@ -153,6 +153,51 @@ export const messageFrom = (
   ...changes,
 });
 
+/** A new group chat's conversation id, as Teams names one. */
+export const newGroup = (): string => `19:${unique()}@thread.v2`;
+
+/** A message `person` sent in `conversation`, @mentioning Stephen. */
+export const mentionIn = (
+  person: TeamsPerson,
+  conversation: string,
+  text: string,
+  conversationType: "groupChat" | "channel" = "groupChat"
+) =>
+  messageFrom(person, {
+    text: `<at>Stephen</at> ${text}`,
+    conversation: { id: conversation, conversationType, tenantId: acmeTenant },
+    entities: [
+      {
+        type: "mention",
+        text: "<at>Stephen</at>",
+        mentioned: { id: `28:${teamsBot.id}`, name: "Stephen" },
+      },
+    ],
+  });
+
+/** Puts each of `people` on `conversation`'s roster, as Teams has them. */
+export const onGroupRoster = async (
+  conversation: string,
+  people: { person: TeamsPerson; userRole?: string; tenantId?: string }[]
+): Promise<void> => {
+  await providers().fetch(botConnectorMembersUrl, {
+    method: "POST",
+    body: JSON.stringify({
+      members: Object.fromEntries(
+        people.map(({ person, userRole = "user", tenantId = acmeTenant }) => [
+          `${conversation} ${person.userId}`,
+          {
+            id: person.userId,
+            aadObjectId: person.aadObjectId,
+            userRole,
+            tenantId,
+          },
+        ])
+      ),
+    }),
+  });
+};
+
 /**
  * Posts `activity` to core as Teams would, through the router, and waits
  * for what it does in the background.

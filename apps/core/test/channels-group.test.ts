@@ -6,7 +6,7 @@ import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
 import { codeStep, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
-import { botConnectorMembersUrl, teamsBot } from "./connect-providers.ts";
+import { botConnectorMembersUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam, readCollection } from "./knowledge.ts";
 import { acmeTenant } from "./sign-in-config.ts";
@@ -15,14 +15,16 @@ import {
   kept,
   member,
   memberAnsweredBy,
+  mentionIn,
   messageFrom,
+  newGroup,
+  onGroupRoster,
   post,
   providers,
   reached,
   teamsPerson,
   watched,
 } from "./teams-door.ts";
-import type { TeamsPerson } from "./teams-door.ts";
 
 // Stephen asked in a Teams group chat or channel (src/channels/door.ts):
 // only a message that @mentions him is taken, and its answer reads only
@@ -38,54 +40,9 @@ watched();
 /** Signing people in and granting permissions can be slow on CI. */
 const setUpTime = { timeout: 90_000 };
 
-/** A new group chat's conversation id, as Teams names one. */
 /** A request that offers any of the agent's tools besides code (agent-tools.ts). */
 const dedicated =
   /"name":"(?<tool>createApp|readFile|writeFile|editFile|searchFiles|searchBrain|requestConnection|editWorkflow)"/u;
-
-const newGroup = (): string => `19:${unique()}@thread.v2`;
-
-/** A message `person` sent in `conversation`, @mentioning Stephen. */
-const mentionIn = (
-  person: TeamsPerson,
-  conversation: string,
-  text: string,
-  conversationType: "groupChat" | "channel" = "groupChat"
-) =>
-  messageFrom(person, {
-    text: `<at>Stephen</at> ${text}`,
-    conversation: { id: conversation, conversationType, tenantId: acmeTenant },
-    entities: [
-      {
-        type: "mention",
-        text: "<at>Stephen</at>",
-        mentioned: { id: `28:${teamsBot.id}`, name: "Stephen" },
-      },
-    ],
-  });
-
-/** Puts each of `people` on `conversation`'s roster, as Teams has them. */
-const onGroupRoster = async (
-  conversation: string,
-  people: { person: TeamsPerson; userRole?: string; tenantId?: string }[]
-): Promise<void> => {
-  await providers().fetch(botConnectorMembersUrl, {
-    method: "POST",
-    body: JSON.stringify({
-      members: Object.fromEntries(
-        people.map(({ person, userRole = "user", tenantId = acmeTenant }) => [
-          `${conversation} ${person.userId}`,
-          {
-            id: person.userId,
-            aadObjectId: person.aadObjectId,
-            userRole,
-            tenantId,
-          },
-        ])
-      ),
-    }),
-  });
-};
 
 /** The person's chats, as their Workspace keeps them. */
 const chatsOf = async (userId: string) =>

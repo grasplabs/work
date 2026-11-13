@@ -480,13 +480,16 @@ export const heldWritesCard = ({
 export const signInCard = ({
   locale,
   url,
+  line = "signIn",
 }: {
   locale: ChannelLocale;
   url: string;
+  /** What it says above the button: `signInAskAgain` where nothing was kept. */
+  line?: "signIn" | "signInAskAgain";
 }): PostableCard => ({
   card: cardOf(
     <Card>
-      <CardText>{say("signIn", locale)}</CardText>
+      <CardText>{say(line, locale)}</CardText>
       <Actions>
         <LinkButton style="primary" url={ownLink(url)}>
           {say("signInButton", locale)}
