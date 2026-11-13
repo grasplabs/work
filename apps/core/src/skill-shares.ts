@@ -29,6 +29,7 @@ import {
 import {
   addCompanySkill,
   addOwnSkill,
+  companyChangeVersionAsCore,
   companyChangeVersionOf,
   companySkillVersionOf,
   eraseOwnSkill,
@@ -190,12 +191,12 @@ const shareById = async (env: Env, id: unknown): Promise<ShareRow> => {
 
 /** The audit entry of something that happened to a share: its ID only. */
 const shareEntry = (
-  by: Actor,
+  by: Closer,
   action: string,
   id: string,
   detail: Record<string, number> = {}
 ): AuditEntry => ({
-  actor: actorOf(by),
+  actor: by === "system" ? { type: "system" } : actorOf(by),
   action: `skill.share.${action}`,
   target: { type: "skill_share", id },
   detail,
@@ -284,16 +285,17 @@ export const skillsOverview = async (
  */
 const recordLanded = async (
   env: Env,
-  by: Actor,
+  by: Closer,
   share: Pick<ShareRow, "id" | "name" | "version">
 ): Promise<number | null> => {
   if (share.version !== null) {
     return share.version;
   }
-  const version = await companyChangeVersionOf(env, by.userId, {
-    name: share.name,
-    change: `share:${share.id}`,
-  });
+  const asked = { name: share.name, change: `share:${share.id}` };
+  const version =
+    by === "system"
+      ? await companyChangeVersionAsCore(env, asked)
+      : await companyChangeVersionOf(env, by.userId, asked);
   if (version === null) {
     return null;
   }
@@ -308,8 +310,16 @@ const recordLanded = async (
   return version;
 };
 
-/** Who closes shares: a person, by their ID, as the audit log names them. */
+/** A person acting, by their ID, as the audit log names them. */
 type Actor = Pick<Identity, "userId" | "staff">;
+
+/**
+ * Who closes shares, and asks the store what landed: the person acting,
+ * present by definition (the admin declining, the person asking again or
+ * deleting their skill); or core itself (`system`) for a step no person
+ * runs, a person's erasure, which nobody's membership may hold up.
+ */
+export type Closer = Actor | "system";
 
 /**
  * Which shares a close takes, and why:
@@ -323,7 +333,7 @@ type Actor = Pick<Identity, "userId" | "staff">;
  */
 export type Closing =
   | { why: "replaced"; requestedBy: string; name: string }
-  | { why: "declined"; id: string }
+  | { why: "declined"; id: string; decidedBy: string }
   | { why: "unasked"; id: string }
   | { why: "erased"; requestedBy: string };
 
@@ -359,7 +369,7 @@ const takenBy = (closing: Closing): SQL | undefined => {
  */
 export const closingShares = async (
   env: Env,
-  by: Actor,
+  by: Closer,
   closing: Closing
 ): Promise<[BatchItem<"sqlite">, ...BatchItem<"sqlite">[]]> => {
   const db = drizzle(env.DB);
@@ -397,7 +407,7 @@ export const closingShares = async (
           .update(skillShares)
           .set({
             status: "declined",
-            decidedBy: by.userId,
+            decidedBy: closing.decidedBy,
             decidedAt: new Date(),
             text: null,
           })
@@ -687,6 +697,7 @@ export const declineShare = async (
   const declining = await closingShares(env, by, {
     why: "declined",
     id: row.id,
+    decidedBy: by.userId,
   });
   const db = drizzle(env.DB);
   await auditedBatch(env, db, [

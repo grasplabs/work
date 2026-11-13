@@ -273,13 +273,14 @@ const brain: ErasureStep = {
     // Their asks to share a skill, with the text a waiting one holds; a
     // company skill an approval made stays the company's, and an add of
     // theirs that landed unrecorded is recorded first, by the share's ID,
-    // as the admin who asked (`closingShares`). Who decided another's ask
-    // goes too, if it was them: the decision stays, unnamed.
-    const closing = await closingShares(
-      env,
-      { userId: erasure.requestedBy, staff: false },
-      { why: "erased", requestedBy: userId }
-    );
+    // by core itself (`closingShares` as `system`): the admin who asked may
+    // have left since, and nobody's membership holds an erasure up. Who
+    // decided another's ask goes too, if it was them: the decision stays,
+    // unnamed.
+    const closing = await closingShares(env, "system", {
+      why: "erased",
+      requestedBy: userId,
+    });
     await db.batch([
       ...closing,
       db

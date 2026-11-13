@@ -704,7 +704,7 @@ const refusedWith = async (call: () => Promise<unknown>): Promise<unknown> => {
  * them for a batch, never run here.
  */
 const closes = async (
-  by: Identity,
+  by: skillShares.Closer,
   closing: skillShares.Closing
 ): Promise<number> => {
   const statements = await skillShares.closingShares(env, by, closing);
@@ -1990,6 +1990,34 @@ export const coreProbes = {
       hiddenSkills,
       async (name) =>
         await coreBrain.companyChangeVersionOf(env, personId, {
+          name,
+          change: "share:unmade",
+        })
+    )),
+  ],
+  // Core's own read, for an erasure: a version number alone, of what the
+  // company may read, whatever change or skill is named.
+  companyChangeVersionAsCore: async ({ markers, hiddenSkills }) => [
+    await answer(
+      "a change never made",
+      async () =>
+        await coreBrain.companyChangeVersionAsCore(env, {
+          name: "unwritten",
+          change: "share:unmade",
+        })
+    ),
+    await answer(
+      "a change of the markers",
+      async () =>
+        await coreBrain.companyChangeVersionAsCore(env, {
+          name: "unwritten",
+          change: markers.join(""),
+        })
+    ),
+    ...(await pairedOverSkills(
+      hiddenSkills,
+      async (name) =>
+        await coreBrain.companyChangeVersionAsCore(env, {
           name,
           change: "share:unmade",
         })
@@ -5450,12 +5478,13 @@ export const shareProbes = {
         await closes(adminSessionOf(personId), {
           why: "declined",
           id: await plainShare(personId),
+          decidedBy: personId,
         })
     ),
     await answer(
       "every share of the reader, erased",
       async () =>
-        await closes(adminSessionOf(personId), {
+        await closes("system", {
           why: "erased",
           requestedBy: personId,
         })

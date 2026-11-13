@@ -3,7 +3,7 @@ import type { Authority } from "@grasp-os/shared/permissions";
 import type { SessionApi } from "@grasp-os/shared/rpc";
 import type { SkillsOverview } from "@grasp-os/shared/skills";
 import { env } from "cloudflare:workers";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -15,8 +15,12 @@ import {
   skillsReachOf,
 } from "../src/brain-skills.ts";
 import type { SkillAt } from "../src/brain-skills.ts";
-import { skillShares } from "../src/db/core/schema.ts";
+import { personErasureAreas, skillShares } from "../src/db/core/schema.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
+import {
+  erasePerson as requestErasure,
+  retryErasures,
+} from "../src/person-erasure.ts";
 import { personalWorkspaceId } from "../src/personal-workspace.ts";
 import { approveShare, retireSkill } from "../src/skill-shares.ts";
 import { chatOf, codeResults, codeStep, model, says } from "./agent-chat.ts";
@@ -2284,6 +2288,78 @@ describe("writing and sharing skills", setUpTime, () => {
         ["skill.share.added", { version: 1 }],
       ],
       namesThem: false,
+    });
+  });
+
+  it("finishes an erasure whose admin left before its Brain step ran, recording a landed add as the system", async () => {
+    const [asker, erasing, other, member] = await Promise.all([
+      signedInApi(idp, "builder"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    const name = nameOf("eraser-left");
+    const eraser = await erasing.api.whoami();
+    const saved = await asker.api.skills.save(skillText(name, "Left"));
+    const share = await asker.api.skills.share(name, saved.version);
+    const head = await logHead();
+    await outcome(
+      approveShare(
+        hooked({
+          after: {
+            addInstructions: { 1: async () => await Promise.resolve("lose") },
+          },
+        }),
+        eraser,
+        share.id
+      )
+    );
+    await other.api.members.remove(asker.userId);
+    // The Brain is out of reach on the first run: the step waits for the
+    // clock, and meanwhile the admin who asked leaves.
+    const first = await outcome(
+      requestErasure(
+        hooked({
+          before: {
+            changeVersion: {
+              1: async () =>
+                await Promise.reject(new Error("Brain down, for the test")),
+            },
+          },
+        }),
+        eraser,
+        asker.userId,
+        String(asker.person.name)
+      )
+    );
+    await other.api.members.remove(erasing.userId);
+    await retryErasures(env);
+    const areas = await drizzle(env.DB)
+      .select({ state: personErasureAreas.state })
+      .from(personErasureAreas)
+      .where(
+        and(
+          eq(personErasureAreas.userId, asker.userId),
+          eq(personErasureAreas.area, "brain")
+        )
+      );
+    const { events } = await eventsAfterWithHead(head);
+    const added = events
+      .filter(({ action }) => action === "skill.share.added")
+      .map(({ actor, detail }) => [actor, detail]);
+
+    expect({
+      first,
+      brain: areas.map(({ state }) => state),
+      live: await liveOf(member.api, name),
+      kept: await keptText(share.id),
+      added,
+    }).toStrictEqual({
+      first: "ok",
+      brain: ["complete"],
+      live: [["Left", 1]],
+      kept: [],
+      added: [[{ type: "system" }, { version: 1 }]],
     });
   });
 

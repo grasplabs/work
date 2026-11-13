@@ -1451,7 +1451,8 @@ const ownSkillPrefix = `${skillsKind}:person:`;
  * The release's own reader of skills, to compare what is stored with what
  * it ships: the company's group, which every skill is readable by, and a
  * person no member is (core's person principals are user IDs, which never
- * hold ":"), so it reads nothing but what the company may.
+ * hold ":"), so it reads nothing but what the company may. Core's own
+ * reader for a step no person runs, too (`companyChangeVersionAsCore`).
  */
 const releaseReader: Reader = {
   person: "grasp:release",
@@ -1879,6 +1880,28 @@ export const addCompanySkill = async (
   return { ...skill, version };
 };
 
+/** As `companyChangeVersionOf`, read as `person`, whoever checked them. */
+const changeVersionAs = async (
+  env: BrainEnv,
+  person: string,
+  asked: { name: string; change: string }
+): Promise<number | null> => {
+  const skill = skillErrors.parse("skills.invalid", skillSchema, {
+    scope: "company",
+    name: asked.name,
+  });
+  const change = skillErrors.parse(
+    "skills.invalid",
+    changeSchema,
+    asked.change
+  );
+  return await brain(env).changeVersion({
+    source: skillKeyOf(skill),
+    change,
+    reader: { person, groups: [companyGroup, retiredGroup] },
+  });
+};
+
 /**
  * The version of the company's skill `name` its change `change` made, if
  * it made one, as the member `personId` asks: a number alone, never text,
@@ -1899,21 +1922,21 @@ export const companyChangeVersionOf = async (
   asked: { name: string; change: string }
 ): Promise<number | null> => {
   const { person } = await skillReaderOf(env, personId);
-  const skill = skillErrors.parse("skills.invalid", skillSchema, {
-    scope: "company",
-    name: asked.name,
-  });
-  const change = skillErrors.parse(
-    "skills.invalid",
-    changeSchema,
-    asked.change
-  );
-  return await brain(env).changeVersion({
-    source: skillKeyOf(skill),
-    change,
-    reader: { person, groups: [companyGroup, retiredGroup] },
-  });
+  return await changeVersionAs(env, person, asked);
 };
+
+/**
+ * As `companyChangeVersionOf`, asked by core itself for a step no person
+ * runs: a person's erasure, which the clock retries, and which nobody's
+ * membership may hold up (the admin who asked for it may have left). Read
+ * as the release's own reader (`releaseReader`), a person no member is,
+ * answering a version number alone.
+ */
+export const companyChangeVersionAsCore = async (
+  env: BrainEnv,
+  asked: { name: string; change: string }
+): Promise<number | null> =>
+  await changeVersionAs(env, releaseReader.person, asked);
 
 /**
  * The current version of the company's skill `name`, live or retired, as
