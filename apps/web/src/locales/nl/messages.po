@@ -6929,6 +6929,11 @@ msgstr "Integratie"
 msgid "Integrations"
 msgstr "Integraties"
 
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "Interview"
+msgstr "Interview"
+
 #. Something that has not happened yet, on a timeline
 #: src/brain/brain.ts
 msgid "Interviewed"
@@ -15885,6 +15890,11 @@ msgstr "Wat jij en je agents onthouden, en wat anderen met je delen, staat hier.
 #: src/connections/connected-dialog.tsx
 msgid "What you chose"
 msgstr "Wat je hebt gekozen"
+
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "What your team said"
+msgstr "Wat je team zei"
 
 #: src/apps/app-workspace.tsx
 msgid "What your team sees"

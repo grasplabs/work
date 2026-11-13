@@ -47,6 +47,7 @@ import {
   subjectsOf,
 } from "../erased-people.ts";
 import { mayComeIn, staffMayStay } from "../onboarding/gate.ts";
+import { onboardingStore } from "../onboarding/store.ts";
 import { checkClaims } from "./claims.ts";
 import {
   devIdpOrigin,
@@ -357,6 +358,30 @@ const gateLetsIn = async (
     .from(users)
     .where(eq(users.id, userId));
   return await mayComeIn(env, config, user?.email);
+};
+
+/**
+ * Links `userId` to the person on the onboarding's list whose interview
+ * link went to their address (GRA-1790, the store's `linkAccount`): only
+ * here, once their session is made, so their address is the one the
+ * company's sign-in vouched for (`checkClaims`: the tenant, a member, the
+ * domain, and Google's verified address). A failure never fails the
+ * sign-in: the next one tries again.
+ */
+const linkInterview = async (env: Env, userId: string): Promise<void> => {
+  try {
+    const [user] = await drizzle(env.DB)
+      .select({ email: users.email })
+      .from(users)
+      .where(eq(users.id, userId));
+    if (user !== undefined) {
+      await onboardingStore(env).linkAccount(userId, user.email);
+    }
+  } catch (error) {
+    log.error("auth.interview_link_failed", {
+      error: error instanceof Error ? error.name : "unknown",
+    });
+  }
 };
 
 /**
@@ -807,7 +832,9 @@ const createAuth = (
               await drizzle(env.DB)
                 .delete(sessions)
                 .where(eq(sessions.id, session.id));
+              return;
             }
+            await linkInterview(env, session.userId);
           },
         },
       },

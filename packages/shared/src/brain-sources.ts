@@ -7,8 +7,16 @@
 
 import { defineErrorFamily } from "./errors.ts";
 
-/** Who added a source: an upload, a chat, a workflow run. */
-export type BrainSourceProducer = "upload" | "chat" | "run";
+/**
+ * Who added a source: an upload, a chat, a workflow run, the person's own
+ * interview, or a claim five or more of their team made in theirs.
+ */
+export type BrainSourceProducer =
+  | "upload"
+  | "chat"
+  | "run"
+  | "interview"
+  | "claim";
 
 /** A source, as its producer names it. */
 export interface BrainSourceRef {

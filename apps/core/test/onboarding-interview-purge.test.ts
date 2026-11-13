@@ -217,7 +217,7 @@ describe("a content purge of the interviews", () => {
         },
       });
     const erasure = interviewErasure({
-      DURABLE_OBJECT_JURISDICTION: env.DURABLE_OBJECT_JURISDICTION,
+      ...env,
       ONBOARDING: namespace(env.ONBOARDING),
     });
     await erasure.rewrite(

@@ -145,6 +145,19 @@ export const links = sqliteTable("links", {
    * matches again. A save from a copy of another version is refused.
    */
   version: integer().notNull().default(0),
+  /**
+   * The account a sign-in with the one address the link ever went to
+   * (`link_addresses`) linked to this person,
+   * once: the only reader of their interview in the Brain, and how core
+   * finds their team's claims for them (GRA-1790). None before.
+   */
+  account: text().unique(),
+  /**
+   * What the Brain's copy of their interview was last settled from
+   * (`interviewMarkSql`, store.ts): their interview is owed again while
+   * it differs. None before it ever was.
+   */
+  brainMark: text("brain_mark"),
 });
 
 /**
@@ -616,4 +629,84 @@ export const mailOutbox = sqliteTable(
     messageId: text("message_id"),
   },
   (table) => [index("mail_outbox_due").on(table.state, table.nextAt)]
+);
+
+/**
+ * Each interview the Brain is to take as a source (GRA-1790), under an id
+ * minted here for one decision of it: the facts the person approved,
+ * readable by their linked account alone, handed over by core's hand-over
+ * (brain-sources.ts), which reads them as they are then. A decision that
+ * moves is a new source, and the old one is owed an erasure; a row stays
+ * until the Brain's erasure of it returned (`erase`), so no source is ever
+ * there without a row naming it.
+ */
+export const brainInterviews = sqliteTable(
+  "brain_interviews",
+  {
+    /** The source's id in the Brain (`interview:<source>`), minted here. */
+    source: text().primaryKey(),
+    person: text().notNull(),
+    /** The account that reads it. */
+    account: text().notNull(),
+    /**
+     * What it was decided from (`interviewMarkSql`, store.ts): a source
+     * stands for one text, so a mark that moved makes a new one.
+     */
+    mark: text().notNull(),
+    /** Whether it is to be erased: set once, never cleared. */
+    erase: integer({ mode: "boolean" }).notNull().default(false),
+  },
+  (table) => [index("brain_interviews_person").on(table.person)]
+);
+
+/**
+ * Each team claim given to the Brain (GRA-1741): a claim five or more of
+ * the team's people back, as the intake counts them here (`brain_sent`,
+ * record `record`), given to the Brain as a source of its own
+ * (`claim:<source>`) under an id minted here each time it stands. Who
+ * backs it is counted here alone, never in the Brain. Once the recount
+ * drops it below five it is erased (`erase`), and the row goes once the
+ * Brain's erasure returned; a claim backed again later is a new source.
+ */
+export const brainClaims = sqliteTable(
+  "brain_claims",
+  {
+    /** The source's id in the Brain (`claim:<source>`), minted here. */
+    source: text().primaryKey(),
+    /** The intake's statement record it stands for. */
+    record: text().notNull(),
+    team: text().notNull(),
+    text: text().notNull(),
+    /** Whether it is to be erased: set once, never cleared. */
+    erase: integer({ mode: "boolean" }).notNull().default(false),
+  },
+  (table) => [index("brain_claims_record").on(table.record)]
+);
+
+/**
+ * Every address someone's link, or a reminder carrying it, was ever queued
+ * to (GRA-1790), folded to lower case, from the link's first sending on:
+ * whoever holds the mail holds the link. A sign-in links an account to the
+ * person only while exactly one address was ever recorded for their link,
+ * it is the one of its first sending, and it is the account's (store.ts,
+ * `linkAccount`); otherwise nobody. A second address ends a link made.
+ * Goes with the link.
+ */
+export const linkAddresses = sqliteTable(
+  "link_addresses",
+  {
+    person: text().notNull(),
+    /** Empty for a first sending to no address (a link handed over by hand). */
+    address: text().notNull(),
+    /**
+     * Whether this is the link's first sending, recorded in the statement
+     * that made the link: a link whose history holds no first sending
+     * (made before addresses were recorded) is never linked to anyone.
+     */
+    first: integer({ mode: "boolean" }).notNull().default(false),
+  },
+  (table) => [
+    primaryKey({ columns: [table.person, table.address] }),
+    index("link_addresses_address").on(table.address),
+  ]
 );

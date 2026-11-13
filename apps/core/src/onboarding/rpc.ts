@@ -86,6 +86,7 @@ import {
 import { shareDocument } from "./documents.ts";
 import { gateView, openAsFlowSays } from "./gate.ts";
 import { connectHr, onboardingHr, readOnboardingHr } from "./hr.ts";
+import { eraseOwedClaimsQuietly } from "./new-brain.ts";
 import { mondayOf } from "./rules.ts";
 import { onboardingStore } from "./store.ts";
 import { summaryOf } from "./summary.ts";
@@ -179,11 +180,15 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
         rosterSchema,
         roster
       );
-      return await onboardingStore(this.#env).saveRoster(
+      const view = await onboardingStore(this.#env).saveRoster(
         parsed,
         actorOf(person),
         { confirmed }
       );
+      // A team the save took under seven loses its claims in the Brain now,
+      // not only by core's clock (onboarding/new-brain.ts).
+      await eraseOwedClaimsQuietly(this.#env);
+      return view;
     });
   }
 

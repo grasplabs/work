@@ -108,6 +108,7 @@ import { inJurisdiction } from "./durable-objects.ts";
 import { embedInBulk, embedderModel, questionVectorOf } from "./embedder.ts";
 import { brainSpendByPurpose, spendMonth } from "./model-spend.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
+import { onboardingStoreName } from "./onboarding/store-name.ts";
 import { shippedSkills } from "./shipped-skills.ts";
 import { skillCards, skillCardsKept } from "./skill-cards.ts";
 import type { SkillCardText } from "./skill-cards.ts";
@@ -159,9 +160,23 @@ const idSchema = wellFormedString()
   .min(1)
   .max(principalMaxLength - teamPrefix.length);
 
+/**
+ * A team of the onboarding's staff list, as the Brain's group: its people
+ * who signed in read what five or more of them said in their interviews
+ * (GRA-1741). A staff-list team is not one of core's teams, so it is a
+ * group of its own kind.
+ */
+const interviewsPrefix = "interviews:";
+
+/** A staff-list team's ID, as core passes it: never empty. */
+const rosterTeamIdSchema = wellFormedString()
+  .min(1)
+  .max(principalMaxLength - interviewsPrefix.length);
+
 const sourceReadersSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("owner"), personId: idSchema }),
   z.strictObject({ kind: z.literal("team"), teamId: idSchema }),
+  z.strictObject({ kind: z.literal("interviews"), teamId: rosterTeamIdSchema }),
   z.strictObject({ kind: z.literal("none") }),
 ]);
 
@@ -217,7 +232,16 @@ const kindsWithoutColon = <const K extends string>(
 // `chat` stays although nothing produces it now: stores filled between
 // #2157 and its revert hold chat sources, and a recall that meets one must
 // still read it.
-const producerKinds = kindsWithoutColon(["upload", "chat", "run"]);
+// `interview` is a person's interview, theirs alone; `claim` is what five
+// or more people of a staff-list team said in theirs, readable by that
+// team (onboarding/new-brain.ts).
+const producerKinds = kindsWithoutColon([
+  "upload",
+  "chat",
+  "run",
+  "interview",
+  "claim",
+]);
 
 /** Who adds a source: one of `producerKinds`. */
 export type ProducerKind = (typeof producerKinds)[number];
@@ -447,6 +471,10 @@ const keptIn = async <T>(
 const teamGroup = (teamId: string): string =>
   `${teamPrefix}${checked(idSchema, teamId)}`;
 
+/** A staff-list team, as the Brain's group (`interviewsPrefix`). */
+const interviewsGroup = (teamId: string): string =>
+  `${interviewsPrefix}${checked(rosterTeamIdSchema, teamId)}`;
+
 const accessOf = (readers: SourceReaders): Access => {
   switch (readers.kind) {
     case "owner": {
@@ -454,6 +482,9 @@ const accessOf = (readers: SourceReaders): Access => {
     }
     case "team": {
       return { kind: "audience", group: teamGroup(readers.teamId) };
+    }
+    case "interviews": {
+      return { kind: "audience", group: interviewsGroup(readers.teamId) };
     }
     case "none": {
       return { kind: "none" };
@@ -464,21 +495,55 @@ const accessOf = (readers: SourceReaders): Access => {
   }
 };
 
+/** What reading as a member needs: core's records and the onboarding's. */
+type ReaderEnv = Pick<Env, "DB" | "ONBOARDING" | "DURABLE_OBJECT_JURISDICTION">;
+
 /**
- * `personId` as the Brain's reader: the person, and the teams core counts
- * them in now. Refused once they have no current membership.
+ * The staff-list team whose claims `personId` reads (GRA-1741): that of
+ * the interview their sign-in was linked to, while they are on the list in
+ * it. Asked of the onboarding's object at every read, beside core's own
+ * records, so a move or a removal holds from the next question on. A
+ * failure there drops only that group, so the onboarding can't take the
+ * Brain down with it: the reader then reads less, never more. It has no
+ * timeout of its own: a slow onboarding object holds the read up to the
+ * platform's own RPC limits, and a throw fails closed as above.
  */
-const readerOf = async (
-  env: Pick<Env, "DB">,
+const interviewTeamOf = async (
+  env: ReaderEnv,
   personId: string
-): Promise<Reader> => {
-  const member = await memberOf(env.DB, checked(idSchema, personId));
+): Promise<string | null> => {
+  try {
+    return await inJurisdiction(env, env.ONBOARDING)
+      .getByName(onboardingStoreName)
+      .interviewTeamOf(personId);
+  } catch (error) {
+    log.error("brain.interview_team_failed", {
+      error: error instanceof Error ? error.name : "unknown",
+    });
+    return null;
+  }
+};
+
+/**
+ * `personId` as the Brain's reader: the person, the teams core counts
+ * them in now, and the staff-list team whose claims they read
+ * (`interviewTeamOf`). Refused once they have no current membership.
+ */
+const readerOf = async (env: ReaderEnv, personId: string): Promise<Reader> => {
+  const id = checked(idSchema, personId);
+  const [member, interviewTeam] = await Promise.all([
+    memberOf(env.DB, id),
+    interviewTeamOf(env, id),
+  ]);
   if (member === undefined) {
     throw permissionErrors.create("permission.person_inactive");
   }
   return {
     person: member.userId,
-    groups: member.teams.map(({ id }) => teamGroup(id)),
+    groups: [
+      ...member.teams.map(({ id: teamId }) => teamGroup(teamId)),
+      ...(interviewTeam === null ? [] : [interviewsGroup(interviewTeam)]),
+    ],
   };
 };
 
@@ -595,7 +660,7 @@ const meaningOf = async (
  * when `personId` isn't an ID.
  */
 export const recallAs = async (
-  env: BrainEnv & Pick<Env, "DB" | "EMBEDDER">,
+  env: BrainEnv & ReaderEnv & Pick<Env, "EMBEDDER">,
   personId: string,
   { question: asked, budget, asOf, personal }: Recall
 ): Promise<RecalledPack> => {
@@ -694,7 +759,7 @@ export const mergeRecalled = (
  * only, as `addSource`.
  */
 export const readSourceVersionAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   wanted: { source: SourceRef; version: number }
 ): Promise<SourceVersion | null> => {
@@ -752,7 +817,7 @@ export interface SourcePage {
  * are no longer a member.
  */
 export const listSourcesAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   { after }: { after?: SourcesAfter } = {}
 ): Promise<SourcePage> => {
@@ -832,7 +897,7 @@ const versionsWantedSchema = z.strictObject({
  * Refused once they are no longer a member.
  */
 export const listVersionsAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   wanted: { source: SourceRef; before?: number }
 ): Promise<VersionPage> => {
@@ -897,7 +962,7 @@ const readableIn = async (
  * longer a member. For the server only, as `addSource`.
  */
 export const readableVersionsAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   versions: readonly SourceVersionRef[]
 ): Promise<SourceVersionRef[]> => {
@@ -2404,7 +2469,7 @@ const keptMemory = async (
  * doesn't have, say).
  */
 export const rememberAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   remembered: Remembered | Readonly<Record<string, unknown>>
 ): Promise<RememberedMemory> => {
@@ -2472,7 +2537,7 @@ export interface OwnEntity {
  * member.
  */
 export const ownEntityAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   entity: string
 ): Promise<OwnEntity | null> => {
@@ -2514,7 +2579,7 @@ export const ownEntityAs = async (
  * has expired. Refused once they are no longer a member.
  */
 export const forgetAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   memory: string
 ): Promise<MemoryChangeOutcome> => {

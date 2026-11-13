@@ -39,6 +39,11 @@ export const brainModules = {
   // Erases what an erased person alone may read with core's erasePerson,
   // and answers nothing of it.
   "apps/core/src/person-erasure.ts": "core",
+  // Gives the new Brain each interview (readable by its person) and each
+  // team claim enough people back (readable by that staff-list team), as
+  // sources, with core's addSource and eraseSource, and answers nothing of
+  // them.
+  "apps/core/src/onboarding/new-brain.ts": "core",
   // A chat's recall before its question: hands the model what core's
   // recallAs gave the chat's own person, two of its packs merged at most
   // (mergeRecalled, which only drops and orders what both hold), as data;

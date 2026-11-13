@@ -205,6 +205,7 @@
   "@grasp-os/core test/brain-next-embedding.test.ts": 0.3,
   "@grasp-os/core test/brain-next-erasure.test.ts": 38.2,
   "@grasp-os/core test/brain-next-exports.test.ts": 1.2,
+  "@grasp-os/core test/brain-next-interviews.test.ts": 5,
   "@grasp-os/core test/brain-next-leaks.test.ts": 70.3,
   "@grasp-os/core test/brain-next-origins.test.ts": 3.6,
   "@grasp-os/core test/brain-next-own-work.test.ts": 0.8,

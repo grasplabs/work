@@ -26,7 +26,16 @@ const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 const sessionKey = z.object({ key: z.string().optional() });
 
 /** The people of a team, by key. */
-export type Key = "lea" | "max" | "mia" | "mo" | "noor" | "pim" | "rik";
+export type Key =
+  | "lea"
+  | "max"
+  | "mia"
+  | "mo"
+  | "noor"
+  | "pim"
+  | "rik"
+  | "sam"
+  | "ada";
 
 const names: Record<Key, [string, string]> = {
   lea: ["Lea Lind", "Team lead"],
@@ -36,6 +45,8 @@ const names: Record<Key, [string, string]> = {
   noor: ["Noor Nijs", "Agent"],
   pim: ["Pim Peeters", "Agent"],
   rik: ["Rik Rooms", "Agent"],
+  sam: ["Sam Smit", "Agent"],
+  ada: ["Ada Aerts", "Agent"],
 };
 
 /** Each person's and the team's id, by key. */
@@ -48,19 +59,22 @@ const idsOf = (id: string) => ({
   noor: `noor-${id}`,
   pim: `pim-${id}`,
   rik: `rik-${id}`,
+  sam: `sam-${id}`,
+  ada: `ada-${id}`,
 });
 
 /** The staff list of Ops, led by Lea, with the people `keys`. */
 export const rosterOf = (
   ids: ReturnType<typeof idsOf>,
-  keys: readonly Key[]
+  keys: readonly Key[],
+  emails: Partial<Record<Key, string>> = {}
 ): Roster => ({
   teams: [{ id: ids.team, name: "Ops", lead: ids.lea, does: "", off: false }],
   people: keys.map((key) => ({
     id: ids[key],
     name: names[key][0],
     team: ids.team,
-    email: "",
+    email: emails[key] ?? "",
     title: names[key][1],
     away: false,
   })),
@@ -71,13 +85,18 @@ export const rosterOf = (
  * a fresh onboarding that started yesterday.
  */
 export const team = async (
-  keys: readonly Key[] = ["lea", "max", "mia", "mo", "noor", "pim", "rik"]
+  keys: readonly Key[] = ["lea", "max", "mia", "mo", "noor", "pim", "rik"],
+  /** Each person's address on the list, from their id; none by default. */
+  emailOf?: (person: string) => string
 ) => {
   const store = onboardingStore(env);
   const ids = idsOf(unique());
   const by = { type: "system" } as const;
+  const emails = Object.fromEntries(
+    emailOf === undefined ? [] : keys.map((key) => [key, emailOf(ids[key])])
+  );
   await store.setPaused(false, by);
-  await store.saveRoster(rosterOf(ids, keys), by);
+  await store.saveRoster(rosterOf(ids, keys, emails), by);
   await store.savePlan({ start: isoDay(Date.now() - dayMs), days: 14 }, by);
   await store.setAgreements(
     { processing: true, assessment: true, council: "none" },

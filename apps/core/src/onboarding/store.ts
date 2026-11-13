@@ -113,6 +113,7 @@ import { z } from "zod";
 
 import { drainObjectOutbox } from "../audit-outbox.ts";
 import { signInConfig } from "../auth/config.ts";
+import { handOverProducers } from "../brain-hand-overs.ts";
 import {
   keepOnboardingRecords,
   purgeOnboardingDrawings,
@@ -129,6 +130,8 @@ import {
   askedAbout,
   moreVoices,
   auditOutbox,
+  brainClaims,
+  brainInterviews,
   brainSent,
   brainTeams,
   countedPeople,
@@ -141,6 +144,7 @@ import {
   interviewSettings,
   interviews,
   linesToForget,
+  linkAddresses,
   linkCodes,
   documents,
   kickoff,
@@ -209,10 +213,12 @@ import type { InterviewState, TeamCount } from "./rules.ts";
 import { anyLanguage, spokenKeysOf } from "./spoken-lines.ts";
 import type { SaidIn } from "./spoken-lines.ts";
 import { interviewBrief, setupView } from "./stephen-setup.ts";
+import { onboardingStoreName } from "./store-name.ts";
 import {
   checksFor,
   claimChecksMax,
   teamClaims,
+  teamMayClaim,
   TooManyClaimChecksError,
 } from "./team-claims.ts";
 import { assignWork, companyName, drawTeamMap } from "./team-map.ts";
@@ -263,7 +269,7 @@ import type { WorkBrief, WorkKnown } from "./work-drawing.ts";
 //   away as it ends, and drawn again.
 
 /** The one store of a deployment, by the name it is reached under. */
-const storeName = "onboarding";
+const storeName = onboardingStoreName;
 
 /** The deployment's onboarding store. */
 /**
@@ -602,6 +608,36 @@ const agreedOf = (stored: string): Record<string, string> =>
  */
 const admissionSql = (person: string): SQL =>
   sql`(SELECT CASE WHEN agreed_at IS NULL THEN NULL ELSE coalesce(started_at, '') || '|' || revocations END FROM interview_states WHERE person = ${person})`;
+
+/** An address as `link_addresses` keeps it, and a sign-in's is compared. */
+const foldedAddress = (email: string): string => email.trim().toLowerCase();
+
+/**
+ * An erasure the onboarding still owes the new Brain (`owedErasures`), for
+ * core to do with `eraseSource` (onboarding/new-brain.ts): a source it
+ * gave that no longer stands.
+ */
+export type OwedErasure =
+  | {
+      kind: "interview";
+      source: string;
+      account: string;
+      reason: "deleted" | "withdrawn";
+    }
+  | { kind: "claim"; source: string; team: string };
+
+/**
+ * What someone's interview in the new Brain is settled from, as SQL over
+ * their link `l` (`links.brain_mark`): the account linked to them, their
+ * link's version (every save, delete, new start and purge rewrite moves
+ * it), their withdrawal, and their approvals. NULL, for nothing to hold,
+ * without an account or once core erased them.
+ */
+const interviewMarkSql = `CASE WHEN l.account IS NULL OR l.erased_at IS NOT NULL THEN NULL ELSE
+  l.account || '|' || l.version
+  || '|' || coalesce((SELECT p.withdrawn_at FROM participations p WHERE p.person = l.person), '-')
+  || '|' || (SELECT count(*) || ':' || coalesce(max(a.at), '') FROM approvals a WHERE a.person = l.person)
+  END`;
 
 /** A drawing as the store keeps it; null when there is none. */
 const drawingOf = (stored: string | null): DrawnWork | null =>
@@ -1209,10 +1245,20 @@ export class Onboarding extends DurableObject<Env> {
         .run();
       this.#db.delete(linkCodes).where(eq(linkCodes.person, person)).run();
       this.#db.delete(links).where(eq(links.person, person)).run();
+      this.#db
+        .delete(linkAddresses)
+        .where(eq(linkAddresses.person, person))
+        .run();
       dropMailAbout(this.ctx.storage.sql, person);
     }
     this.#lateTeams(late ? before : roster, roster, now);
     this.#askNewcomers(before, roster);
+    // Someone moved out, made a lead or taken off may leave a team too
+    // small to have claims shown (`teamMayClaim`), or a claim under five of
+    // its team's people now (`#toPurge`, the one recount): those claims are
+    // owed an erasure at once, which core's clock does within a minute.
+    this.#eraseClaimsOfSmallTeams();
+    this.#eraseClaims(this.#toPurge().records);
     return { removed: gone.length, erased };
   }
 
@@ -1618,6 +1664,7 @@ export class Onboarding extends DurableObject<Env> {
           .where(eq(links.person, person))
           .run();
         this.#purged();
+        this.#eraseClaims(this.#backedRecords(person));
         // Unlike `rewriteInterview`, no line of the voice's is queued to go
         // from the speech cache: it can't be read out of what doesn't parse.
         // Those lines expire from the cache within a month, the residual
@@ -1629,6 +1676,7 @@ export class Onboarding extends DurableObject<Env> {
     if (rewritten) {
       this.#deliverAudit();
       await this.#armDrawing();
+      this.#decideInterviews();
     }
     return rewritten;
   }
@@ -1686,6 +1734,7 @@ export class Onboarding extends DurableObject<Env> {
       // Whatever the cache doesn't take now waits for the alarm.
       await this.forgetLinesNow();
       await this.#armDrawing();
+      this.#decideInterviews();
     }
     return rewritten;
   }
@@ -1765,6 +1814,11 @@ export class Onboarding extends DurableObject<Env> {
       this.#queueLines(after.lines);
       // A drawing read what they said before: it keeps nothing.
       this.#purged();
+      // Nor does a claim put together from it: every claim they back is
+      // owed an erasure, hidden from its team until it lands (rule (i),
+      // `interviewTeamOf`), and comes back only from the team's next
+      // intake, from what the purge left, under a new key.
+      this.#eraseClaims(this.#backedRecords(person));
       this.#changed(by, "onboarding.interview.purged", {
         lines: after.lines.length,
       });
@@ -2207,6 +2261,7 @@ export class Onboarding extends DurableObject<Env> {
     });
     if (changed) {
       await this.#alarmBy(Date.parse(now) + drawAfterMs);
+      this.#decideInterviews();
     }
     return answered({ approved: true, receipt, at: now });
   }
@@ -3238,6 +3293,9 @@ export class Onboarding extends DurableObject<Env> {
     this.ctx.storage.transactionSync(() => {
       for (const { key } of again) {
         const [kind = "mail"] = key.split("/");
+        if (kind === "link" || kind === "reminder") {
+          this.#linkWentTo(person, to);
+        }
         // All due at once, so they go in the order they were first queued.
         queueAgain(this.ctx.storage.sql, key, to, Date.parse(now));
         this.#noted(person, `mail.${kind}.again`, now, whoIs(by));
@@ -3246,6 +3304,8 @@ export class Onboarding extends DurableObject<Env> {
     });
     this.#deliverAudit();
     this.#deliverMailSoon();
+    // A send-again to a second address ended a link: owed at once.
+    this.#decideInterviews();
     return "sent";
   }
 
@@ -4611,11 +4671,20 @@ export class Onboarding extends DurableObject<Env> {
         .update(links)
         .set({
           keyMark: null,
+          // Their account no longer reads anything of the onboarding's:
+          // their interview leaves the new Brain (`owedErasures`).
+          account: null,
           erasedAt: sql`coalesce(${links.erasedAt}, ${now})`,
         })
         .where(eq(links.person, person))
         .run();
+      // Every address their link went to goes with them.
+      this.#db
+        .delete(linkAddresses)
+        .where(eq(linkAddresses.person, person))
+        .run();
     });
+    this.#decideInterviews();
   }
 
   /**
@@ -4705,7 +4774,13 @@ export class Onboarding extends DurableObject<Env> {
     mapped: string[];
     links: Omit<
       typeof links.$inferSelect,
-      "keyMark" | "version" | "ledTeam" | "takenAt" | "erasedAt"
+      | "keyMark"
+      | "version"
+      | "ledTeam"
+      | "takenAt"
+      | "erasedAt"
+      | "account"
+      | "brainMark"
     >[];
     interviews: AdminInterviewFacts[];
   } {
@@ -4793,6 +4868,7 @@ export class Onboarding extends DurableObject<Env> {
   override async alarm(): Promise<void> {
     try {
       // Erasure first (GRA-329): nothing else that fails holds it up.
+      this.#decideInterviews();
       try {
         await this.purgeBrain();
       } catch (error) {
@@ -4931,6 +5007,8 @@ export class Onboarding extends DurableObject<Env> {
       }
     });
     this.#deliverMailSoon();
+    // A reminder to a second address ended a link: owed at once.
+    this.#decideInterviews();
     return due.map(({ person }) => person);
   }
 
@@ -5079,6 +5157,9 @@ export class Onboarding extends DurableObject<Env> {
       name: firstName(person.name),
       closes: closesOn(plan),
     };
+    // A link and a reminder both carry the link: whoever reads this
+    // address holds it (`linkAccount`).
+    this.#linkWentTo(person.id, person.email);
     queueMail(
       this.ctx.storage.sql,
       {
@@ -5167,6 +5248,13 @@ export class Onboarding extends DurableObject<Env> {
     const ledTeam =
       roster.teams.find(({ lead: led }) => led === person)?.id ?? null;
     this.#db.insert(links).values({ person, sentAt: now, ledTeam }).run();
+    // The link's first sending, recorded with the link itself: a link with
+    // none (made before addresses were recorded) is never linked to anyone.
+    this.#linkWentTo(
+      person,
+      roster.people.find(({ id }) => id === person)?.email ?? "",
+      true
+    );
     this.#queuePersonMail({ roster, plan, said, person, sentAt: now }, "link");
     const team = roster.people.find(({ id }) => id === person)?.team;
     if (team !== undefined && ledTeam === null) {
@@ -6069,9 +6157,33 @@ export class Onboarding extends DurableObject<Env> {
             .run();
         }
       }
+      // The team's claims, for the new Brain (GRA-1741): only from an
+      // intake nobody it rests on moved under, as five or more back each
+      // as read. Otherwise the team stays due, and the next intake notes
+      // them.
+      if (since.length === 0 && !changed) {
+        this.#noteClaims(
+          teamId,
+          records.flatMap((record) =>
+            record.type === "statement"
+              ? [
+                  {
+                    record: record.id,
+                    text: record.text,
+                    people: rests.flatMap(({ record: of, person }) =>
+                      of === record.id ? [person] : []
+                    ),
+                  },
+                ]
+              : []
+          )
+        );
+      }
       this.#brainSettled(teamId, dueAt);
       return changed || since.length > 0 || stale.length > 0;
     });
+    // The claims it noted reach the hand-over with their events.
+    this.#deliverAudit();
     // Someone it rests on deleted their interview while it was given, or a
     // claim it gave before isn't the team's now: taken out again at once,
     // or by the alarm.
@@ -6085,6 +6197,650 @@ export class Onboarding extends DurableObject<Env> {
         await this.#armDrawing();
       }
     }
+  }
+
+  /** Notes, in the caller's transaction, that `person`'s link was queued to `email`. */
+  #linkWentTo(person: string, email: string, first = false): void {
+    const address = foldedAddress(email);
+    if (address === "" && !first) {
+      return;
+    }
+    this.#db
+      .insert(linkAddresses)
+      .values({ person, address, first })
+      .onConflictDoNothing()
+      .run();
+    // A second address: whoever read either may hold the link, so an
+    // account linked to it is linked no more, at once, and the interview's
+    // copy in the Brain is owed an erasure (`#decideInterviews`). It is never
+    // linked again (`linkAccount`).
+    const recorded = this.#db
+      .select({ address: linkAddresses.address })
+      .from(linkAddresses)
+      .where(eq(linkAddresses.person, person))
+      .all();
+    if (recorded.length > 1) {
+      this.#db
+        .update(links)
+        .set({ account: null })
+        .where(eq(links.person, person))
+        .run();
+    }
+  }
+
+  /**
+   * Links `account` to the person on the list whose link went to `email`,
+   * once: from a sign-in only (auth.ts, after the identity provider's
+   * claims were checked), never from anything a person or an admin sends.
+   * Only while that address is the one address their link, or a reminder
+   * carrying it, was ever queued to (`link_addresses`): whoever held any
+   * other address could hold the link too (GRA-1790, review of #2206). So
+   * nobody is linked when no link went to that address, when it went to
+   * more than one person's, when theirs also went to another address,
+   * when that person is linked already, when the account is linked to
+   * someone else, or when core erased them. Editing the list afterwards
+   * changes nothing. Their interview reaches the new Brain, readable by
+   * that account alone, from core's next hand-over (onboarding/new-brain.ts).
+   */
+  linkAccount(account: string, email: string): boolean {
+    const address = foldedAddress(email);
+    if (account === "" || address === "") {
+      return false;
+    }
+    const linked = this.ctx.storage.transactionSync(() => {
+      const taken = this.#db
+        .select({ person: links.person })
+        .from(links)
+        .where(eq(links.account, account))
+        .all();
+      const to = this.#db
+        .select({ person: linkAddresses.person })
+        .from(linkAddresses)
+        .where(eq(linkAddresses.address, address))
+        .all();
+      const [only] = to;
+      if (taken.length > 0 || to.length !== 1 || only === undefined) {
+        return false;
+      }
+      const addresses = this.#db
+        .select({ address: linkAddresses.address, first: linkAddresses.first })
+        .from(linkAddresses)
+        .where(eq(linkAddresses.person, only.person))
+        .all();
+      const [link] = this.#db
+        .select({ account: links.account, erasedAt: links.erasedAt })
+        .from(links)
+        .where(eq(links.person, only.person))
+        .all();
+      // Only one address ever, and it is the link's first sending: a
+      // history that starts later (a link made before addresses were
+      // recorded) can't say who else read it.
+      if (
+        addresses.length !== 1 ||
+        addresses[0]?.first !== true ||
+        link === undefined ||
+        link.account !== null ||
+        link.erasedAt !== null
+      ) {
+        return false;
+      }
+      this.#db
+        .update(links)
+        .set({ account })
+        .where(and(eq(links.person, only.person), isNull(links.account)))
+        .run();
+      // One event: the account itself, in the client's audit log; whose
+      // entry it is only in the onboarding's own.
+      this.#changed(
+        { type: "person", userId: account },
+        "onboarding.interview.account_linked",
+        {},
+        only.person
+      );
+      return true;
+    });
+    if (linked) {
+      this.#deliverAudit();
+      this.#decideInterviews();
+    }
+    return linked;
+  }
+
+  /**
+   * The staff-list team of the person `account` is linked to
+   * (`linkAccount`), while they are on the list, core didn't erase them,
+   * the team may have claims shown (`teamMayClaim`), and none of its
+   * claims is owed an erasure: whose claims they read in the new Brain
+   * (brain-next.ts, `readerOf`). Null otherwise.
+   */
+  interviewTeamOf(account: string): string | null {
+    const [link] = this.#db
+      .select({ person: links.person })
+      .from(links)
+      .where(and(eq(links.account, account), isNull(links.erasedAt)))
+      .all();
+    if (link === undefined) {
+      return null;
+    }
+    // A team too small to have claims shown gives its group to nobody,
+    // from the moment its count changes (`teamMayClaim`); and so does a
+    // team with any claim owed an erasure the Brain hasn't confirmed, so
+    // that what may be read never rests on a Brain call having succeeded:
+    // readers read less, never more, until it has.
+    const team = this.#teamOfPerson(link.person);
+    if (team === null || !teamMayClaim(this.#tellers(team).length)) {
+      return null;
+    }
+    const [owed] = this.#db
+      .select({ source: brainClaims.source })
+      .from(brainClaims)
+      .where(and(eq(brainClaims.team, team), eq(brainClaims.erase, true)))
+      .limit(1)
+      .all();
+    return owed === undefined ? team : null;
+  }
+
+  /**
+   * People whose interview the new Brain may hold otherwise than the
+   * store last decided: what it was decided from changed
+   * (`interviewMarkSql`), or they left the list with a source of theirs
+   * still standing.
+   */
+  #interviewsDue(): string[] {
+    return this.ctx.storage.sql
+      .exec<{ person: string }>(
+        `SELECT l.person AS person FROM links l
+          WHERE (${interviewMarkSql}) IS NOT l.brain_mark
+        UNION
+        SELECT b.person AS person FROM brain_interviews b
+          WHERE b.erase = 0
+            AND NOT EXISTS (SELECT 1 FROM links l WHERE l.person = b.person)`
+      )
+      .toArray()
+      .map(({ person }) => person);
+  }
+
+  /** What `person`'s interview is settled from now (`interviewMarkSql`); null for nothing. */
+  #interviewMark(person: string): string | null {
+    const [row] = this.ctx.storage.sql
+      .exec<{ mark: string | null }>(
+        `SELECT (${interviewMarkSql}) AS mark FROM links l WHERE l.person = ?`,
+        person
+      )
+      .toArray();
+    return row?.mark ?? null;
+  }
+
+  /**
+   * What the new Brain should hold of `person`'s interview now: the facts
+   * they approved, readable by the account linked to them; null for
+   * nothing (no account, erased, withdrawn, or nothing approved).
+   */
+  #interviewWanted(person: string): { account: string; text: string } | null {
+    const [link] = this.#db
+      .select({ account: links.account, erasedAt: links.erasedAt })
+      .from(links)
+      .where(eq(links.person, person))
+      .all();
+    if (link === undefined || link.account === null || link.erasedAt !== null) {
+      return null;
+    }
+    const text = this.#admitted(person)
+      .map(({ record }) => record.trim())
+      .filter((record) => record !== "")
+      .join("\n");
+    return text === "" ? null : { account: link.account, text };
+  }
+
+  /**
+   * Decides, in the caller's transaction, what the new Brain is to hold
+   * of `person`'s interview, from one read of the store: a source stands
+   * for one mark of it (`interviewMarkSql`), so one made for another mark
+   * is marked to be erased, and a new one is noted (`brain_interviews`,
+   * under an id minted here) before anything adds it. Its row stays until
+   * the Brain's erasure of it returned, so the Brain never holds an
+   * interview the store doesn't know of. Answers the text wanted, if any.
+   */
+  #decideInterview(person: string): string | null {
+    const mark = this.#interviewMark(person);
+    const wanted = mark === null ? null : this.#interviewWanted(person);
+    const rows = this.#db
+      .select()
+      .from(brainInterviews)
+      .where(eq(brainInterviews.person, person))
+      .all();
+    const standing = rows.find(
+      (row) => !row.erase && wanted !== null && row.mark === mark
+    );
+    for (const row of rows) {
+      if (row !== standing && !row.erase) {
+        this.#db
+          .update(brainInterviews)
+          .set({ erase: true })
+          .where(eq(brainInterviews.source, row.source))
+          .run();
+      }
+    }
+    if (wanted !== null && mark !== null && standing === undefined) {
+      const source = crypto.randomUUID();
+      this.#db
+        .insert(brainInterviews)
+        .values({ source, person, account: wanted.account, mark })
+        .run();
+      this.#noteBrainSource("interview", source, person);
+    }
+    this.#db
+      .update(links)
+      .set({ brainMark: mark })
+      .where(eq(links.person, person))
+      .run();
+    return wanted?.text ?? null;
+  }
+
+  /**
+   * Notes, in the caller's transaction, that the new Brain is to take the
+   * source `source` of `kind`: an audit event naming it, which the outbox's
+   * drain notes as a hand-over (brain-hand-overs.ts), in the same
+   * transaction as the row that says it stands. What it holds is read when
+   * the hand-over runs (`interviewToHand`, `claimToHand`), never here.
+   */
+  #noteBrainSource(
+    kind: "interview" | "claim",
+    source: string,
+    about: string | null
+  ): void {
+    const at = new Date().toISOString();
+    const {
+      actions: [action],
+      target: targetType,
+    } = handOverProducers[kind];
+    this.#db
+      .insert(events)
+      .values({ at, by: whoIs({ type: "system" }), what: action, about })
+      .run();
+    const event = createAuditEvent(
+      {
+        actor: { type: "system" },
+        action,
+        target: { type: targetType, id: source },
+        detail: {},
+      },
+      "core"
+    );
+    this.#db
+      .insert(auditOutbox)
+      .values({
+        id: event.id,
+        event: JSON.stringify(event),
+        createdAt: new Date(),
+      })
+      .run();
+  }
+
+  /**
+   * Decides, in one transaction, what the new Brain is to hold of every
+   * interview whose decision is due (`#decideInterview`): at most everyone
+   * on the list, which `onboardingPeopleMax` bounds. Each new source is
+   * noted for the hand-over (`#noteBrainSource`); each that no longer
+   * stands is owed an erasure (`owedErasures`). Run after every change
+   * that may move one, and by the alarm.
+   */
+  #decideInterviews(): void {
+    const decided = this.ctx.storage.transactionSync(() => {
+      const due = this.#interviewsDue();
+      for (const person of due) {
+        this.#decideInterview(person);
+      }
+      return due.length > 0;
+    });
+    if (decided) {
+      this.#deliverAudit();
+    }
+  }
+
+  /**
+   * The interview `source` as the hand-over adds it now: its account and
+   * the text it stands for, only while it is the one the store decided
+   * for that person's interview as it is now. Null otherwise: withdrawn,
+   * deleted, begun anew, edited, unlinked, erased or gone.
+   */
+  interviewToHand(source: string): { account: string; text: string } | null {
+    this.#decideInterviews();
+    const [row] = this.#db
+      .select()
+      .from(brainInterviews)
+      .where(eq(brainInterviews.source, source))
+      .all();
+    if (row === undefined || row.erase) {
+      return null;
+    }
+    const wanted = this.#interviewWanted(row.person);
+    return wanted === null ||
+      wanted.account !== row.account ||
+      this.#interviewMark(row.person) !== row.mark
+      ? null
+      : wanted;
+  }
+
+  /**
+   * The claim `source` as the hand-over adds it now: its sentence and its
+   * team, only while it stands (five or more back it, and its team may
+   * have claims shown, `teamMayClaim`). Null otherwise.
+   */
+  claimToHand(source: string): { text: string; team: string } | null {
+    const [row] = this.#db
+      .select()
+      .from(brainClaims)
+      .where(eq(brainClaims.source, source))
+      .all();
+    if (
+      row === undefined ||
+      row.erase ||
+      !teamMayClaim(this.#tellers(row.team).length)
+    ) {
+      return null;
+    }
+    return { text: row.text, team: row.team };
+  }
+
+  /**
+   * Every erasure the onboarding still owes the new Brain: each source it
+   * noted that no longer stands, until core says it is erased
+   * (`erasedFromBrain`). Interviews are decided first. Scoped to what a
+   * request erases at once, the rest left to core's clock:
+   *
+   * - `person`: that person's interviews, and the claims now owed of
+   *   their team and of `teams` (the teams whose claims they backed before
+   *   their request, `claimTeamsOf`): what their withdrawal or delete
+   *   takes out (a claim they backed that fell under five, or every claim
+   *   of a team their leaving took under seven), never another team's;
+   * - `claims`: every claim owed, after a roster save, which may take any
+   *   team under seven.
+   */
+  owedErasures(
+    scope?: { person: string; teams?: readonly string[] } | { claims: true }
+  ): OwedErasure[] {
+    this.#decideInterviews();
+    if (scope !== undefined) {
+      const ofTeams = new Set<string>();
+      if ("person" in scope) {
+        for (const team of scope.teams ?? []) {
+          ofTeams.add(team);
+        }
+        const now = this.#teamOfPerson(scope.person);
+        if (now !== null) {
+          ofTeams.add(now);
+        }
+      }
+      return this.owedErasures().filter((owed) =>
+        "claims" in scope
+          ? owed.kind === "claim"
+          : (owed.kind === "interview" &&
+              this.#interviewPersonOf(owed.source) === scope.person) ||
+            (owed.kind === "claim" && ofTeams.has(owed.team))
+      );
+    }
+    const owedInterviews: OwedErasure[] = this.#db
+      .select()
+      .from(brainInterviews)
+      .where(eq(brainInterviews.erase, true))
+      .all()
+      .map(({ source, person, account }) => ({
+        kind: "interview",
+        source,
+        account,
+        reason: this.#withdrawnAt(person) === null ? "deleted" : "withdrawn",
+      }));
+    const claims: OwedErasure[] = this.#db
+      .select()
+      .from(brainClaims)
+      .where(eq(brainClaims.erase, true))
+      .all()
+      .map(({ source, team }) => ({ kind: "claim", source, team }));
+    return [...owedInterviews, ...claims];
+  }
+
+  /**
+   * The teams whose standing claims `person` backs now, from the rows the
+   * intake keeps of who each claim rests on (`brain_sent`): asked before a
+   * request of theirs that may drop them (onboarding/links.ts), whose
+   * recount forgets those rows. At most the claims they back.
+   */
+  claimTeamsOf(person: string): string[] {
+    const backed = this.#backedRecords(person);
+    return [
+      ...new Set(
+        this.#db
+          .select({ team: brainClaims.team })
+          .from(brainClaims)
+          .where(inList(brainClaims.record, backed))
+          .all()
+          .map(({ team }) => team)
+      ),
+    ];
+  }
+
+  /**
+   * Those of `candidates` who back a claim of `team` now: they agree to what
+   * they said, and are in that team on the list now, so someone moved
+   * away no longer backs it. The one rule, for the recount (`#toPurge`)
+   * and for noting a claim (`#noteClaims`).
+   */
+  #currentBackers(
+    team: string,
+    candidates: readonly string[],
+    agreed: ReadonlySet<string> = new Set(
+      this.#db
+        .select({ person: interviewStates.person })
+        .from(interviewStates)
+        .where(isNotNull(interviewStates.agreedAt))
+        .all()
+        .map(({ person }) => person)
+    )
+  ): string[] {
+    const inTeam = new Set(
+      this.#db
+        .select({ id: people.id })
+        .from(people)
+        .where(eq(people.team, team))
+        .all()
+        .map(({ id }) => id)
+    );
+    return candidates.filter(
+      (person) => agreed.has(person) && inTeam.has(person)
+    );
+  }
+
+  /** The intake's statement records `person` is among the backers of (`brain_sent`). */
+  #backedRecords(person: string): string[] {
+    return this.#db
+      .select({ record: brainSent.record })
+      .from(brainSent)
+      .where(and(eq(brainSent.person, person), eq(brainSent.type, "statement")))
+      .all()
+      .map(({ record }) => record);
+  }
+
+  /** The staff-list team `person` is in now; null when they aren't on the list. */
+  #teamOfPerson(person: string): string | null {
+    const [row] = this.#db
+      .select({ team: people.team })
+      .from(people)
+      .where(eq(people.id, person))
+      .all();
+    return row?.team ?? null;
+  }
+
+  /**
+   * The sentence of every team claim standing (not owed an erasure), by
+   * its source: what a content purge reads to find claims holding a
+   * purged word (interview-erasure.ts).
+   */
+  standingClaims(): { source: string; text: string }[] {
+    return this.#db
+      .select({ source: brainClaims.source, text: brainClaims.text })
+      .from(brainClaims)
+      .where(eq(brainClaims.erase, false))
+      .all();
+  }
+
+  /**
+   * Marks the claims `sources` owed an erasure: a content purge found a
+   * purged word in their sentence. Hidden from their teams at once
+   * (`interviewTeamOf`); a claim comes back only from its team's next
+   * intake, from the purged text, under a new key.
+   */
+  purgeClaims(sources: readonly string[]): void {
+    this.ctx.storage.transactionSync(() => {
+      this.#db
+        .update(brainClaims)
+        .set({ erase: true })
+        .where(inList(brainClaims.source, sources))
+        .run();
+    });
+  }
+
+  /** Whose interview the source `source` is; null for none. */
+  #interviewPersonOf(source: string): string | null {
+    const [row] = this.#db
+      .select({ person: brainInterviews.person })
+      .from(brainInterviews)
+      .where(eq(brainInterviews.source, source))
+      .all();
+    return row?.person ?? null;
+  }
+
+  /**
+   * The person a link's secret (`secretMark`) is theirs, for core's own
+   * use after a request on that link (onboarding/links.ts): never answered
+   * to the link's holder. Null for an unknown link.
+   */
+  personOfLink(secretMark: string): string | null {
+    const [code] = this.#db
+      .select({ person: linkCodes.person })
+      .from(linkCodes)
+      .where(eq(linkCodes.mark, secretMark))
+      .all();
+    return code?.person ?? null;
+  }
+
+  /** Forgets the owed erasure of `source` of `kind`: core's `eraseSource` of it returned. */
+  erasedFromBrain(kind: OwedErasure["kind"], source: string): void {
+    this.ctx.storage.transactionSync(() => {
+      if (kind === "interview") {
+        this.#db
+          .delete(brainInterviews)
+          .where(
+            and(
+              eq(brainInterviews.source, source),
+              eq(brainInterviews.erase, true)
+            )
+          )
+          .run();
+      } else {
+        this.#db
+          .delete(brainClaims)
+          .where(
+            and(eq(brainClaims.source, source), eq(brainClaims.erase, true))
+          )
+          .run();
+      }
+    });
+  }
+
+  /**
+   * Whether the new Brain may still hold `person`'s interview otherwise
+   * than the store does now: for core's erasures and purges, which let go
+   * only once it doesn't.
+   */
+  interviewOwed(person: string): boolean {
+    this.#decideInterviews();
+    const [row] = this.ctx.storage.sql
+      .exec<{ owed: number }>(
+        "SELECT EXISTS (SELECT 1 FROM brain_interviews WHERE person = ? AND erase = 1) AS owed",
+        person
+      )
+      .toArray();
+    return row?.owed === 1;
+  }
+
+  /**
+   * Notes, in the caller's transaction, that the statements `claims` of
+   * `team` are the team's claims now: each new one is to be written to
+   * the new Brain under a change key minted here, and each written before
+   * that isn't one of them any more is to be erased.
+   */
+  #noteClaims(
+    team: string,
+    claims: readonly {
+      record: string;
+      text: string;
+      people: readonly string[];
+    }[]
+  ): void {
+    // A team too small to have claims shown has none (`teamMayClaim`); a
+    // claim is noted only while five or more of its team's people now
+    // back it (`#currentBackers`, the recount's own rule): one moved away
+    // while the claims were put together doesn't count.
+    const shown = teamMayClaim(this.#tellers(team).length)
+      ? claims.filter(
+          ({ people: backing }) =>
+            this.#currentBackers(team, backing).length >= minTeamShown
+        )
+      : [];
+    const current = new Set(shown.map(({ record }) => record));
+    const held = this.#db
+      .select({ record: brainClaims.record })
+      .from(brainClaims)
+      .where(and(eq(brainClaims.team, team), eq(brainClaims.erase, false)))
+      .all();
+    this.#eraseClaims(
+      held.flatMap(({ record }) => (current.has(record) ? [] : [record]))
+    );
+    const kept = new Set(held.map(({ record }) => record));
+    for (const { record, text } of shown) {
+      if (!kept.has(record)) {
+        const source = crypto.randomUUID();
+        this.#db
+          .insert(brainClaims)
+          .values({ source, record, team, text })
+          .run();
+        this.#noteBrainSource("claim", source, null);
+      }
+    }
+  }
+
+  /**
+   * Marks, in the caller's transaction, every claim of a team that may no
+   * longer have claims shown (`teamMayClaim`) to be erased.
+   */
+  #eraseClaimsOfSmallTeams(): void {
+    const teamsHeld = new Set(
+      this.#db
+        .select({ team: brainClaims.team })
+        .from(brainClaims)
+        .where(eq(brainClaims.erase, false))
+        .all()
+        .map(({ team }) => team)
+    );
+    for (const team of teamsHeld) {
+      if (!teamMayClaim(this.#tellers(team).length)) {
+        this.#db
+          .update(brainClaims)
+          .set({ erase: true })
+          .where(eq(brainClaims.team, team))
+          .run();
+      }
+    }
+  }
+
+  /** Marks the claims standing for `records` to be erased, in the caller's transaction. */
+  #eraseClaims(records: readonly string[]): void {
+    this.#db
+      .update(brainClaims)
+      .set({ erase: true })
+      .where(inList(brainClaims.record, records))
+      .run();
   }
 
   /** Runs `work` with the brain once what it is doing with it now is done. */
@@ -6152,11 +6908,13 @@ export class Onboarding extends DurableObject<Env> {
     const purged = new Set<string>();
     for (const [record, { type, team, people: on }] of records) {
       const left = on.filter((person) => agreed.has(person));
+      const backers = this.#currentBackers(team, on, agreed);
       if (
         emptied.has(team) ||
         left.length === 0 ||
-        // A claim rests on five or more people, or isn't the team's.
-        (type === "statement" && left.length < minTeamShown) ||
+        // A claim rests on five or more of its team's people now, or isn't
+        // the team's.
+        (type === "statement" && backers.length < minTeamShown) ||
         (type === "workflowVersion" && left.length < on.length) ||
         (unmapped.has(team) &&
           (type === "workflow" || type === "workflowVersion"))
@@ -6200,10 +6958,20 @@ export class Onboarding extends DurableObject<Env> {
    * `#withBrain`, so no intake lands between.
    */
   async #purgeNow(): Promise<number> {
+    // A team's claims go with the team dropping below what may have them
+    // shown, whoever left it and whatever else is purged.
+    this.ctx.storage.transactionSync(() => {
+      this.#eraseClaimsOfSmallTeams();
+    });
     const { records, gone, emptied } = this.#toPurge();
     if (records.length === 0 && gone.length === 0) {
       return 0;
     }
+    // The new Brain's claims among them are to be erased, noted before
+    // anything is awaited (core erases them, onboarding/new-brain.ts).
+    this.ctx.storage.transactionSync(() => {
+      this.#eraseClaims(records);
+    });
     const purged = await purgeOnboardingRecords(this.env, records);
     this.ctx.storage.transactionSync(() => {
       this.#db.delete(brainSent).where(inList(brainSent.record, records)).run();
@@ -7265,6 +8033,9 @@ export class Onboarding extends DurableObject<Env> {
       this.#queueLines(keys);
     });
     await this.#armDrawing();
+    // What the new Brain holds of their interview is decided again: an
+    // erasure owed, before anything else (`owedErasures`).
+    this.#decideInterviews();
     try {
       await this.purgeBrain();
     } catch (error) {

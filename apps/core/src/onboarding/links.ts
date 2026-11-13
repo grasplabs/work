@@ -13,6 +13,7 @@ import { log } from "@grasp-os/shared/log";
 
 import { errorResponse } from "../errors.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
+import { eraseOwedOfPersonQuietly } from "./new-brain.ts";
 import { onboardingStore } from "./store.ts";
 import type { LinkAnswer, LinkRefusal } from "./store.ts";
 
@@ -153,6 +154,16 @@ export const interviewResponse = async (
   const store = onboardingStore(env);
   const secretMark = await sha256Hex(body.secret);
   const keyMark = body.key === undefined ? null : await sha256Hex(body.key);
+  // Whose link it is, and the teams whose claims they back, read before
+  // a request that may drop them: what it takes out leaves the new Brain
+  // in the same request (onboarding/new-brain.ts).
+  const ownBrainWork = async () => {
+    const person = await store.personOfLink(secretMark);
+    return {
+      person,
+      backed: person === null ? [] : await store.claimTeamsOf(person),
+    };
+  };
   const done = (result: LinkAnswer<unknown>) => {
     if (!result.ok && result.code === "interview.link_invalid") {
       // Never the secret: only that one opened nothing.
@@ -171,6 +182,7 @@ export const interviewResponse = async (
       return answer(result, requestId, (value) => json(sessionOf(value, key)));
     }
     case "save": {
+      const { person, backed } = await ownBrainWork();
       const result = await store.saveInterview(
         secretMark,
         keyMark ?? "",
@@ -178,13 +190,20 @@ export const interviewResponse = async (
         body.progress
       );
       done(result);
+      // What it took out of their interview leaves the new Brain now
+      // (onboarding/new-brain.ts); what it added is handed over.
+      await eraseOwedOfPersonQuietly(env, person, backed);
       return answer(result, requestId, (value) =>
         json(value, value.saved ? 200 : 409)
       );
     }
     case "delete": {
+      const { person, backed } = await ownBrainWork();
       const result = await store.deleteInterview(secretMark, keyMark ?? "");
       done(result);
+      // What it took out of their interview leaves the new Brain now
+      // (onboarding/new-brain.ts); what it added is handed over.
+      await eraseOwedOfPersonQuietly(env, person, backed);
       return answer(result, requestId, (value) => json(value));
     }
     case "participate": {
@@ -197,15 +216,23 @@ export const interviewResponse = async (
       return answer(result, requestId, (value) => json(value));
     }
     case "approve": {
+      const { person, backed } = await ownBrainWork();
       const result = await store.approve(secretMark, keyMark ?? "", body.facts);
       done(result);
+      // What it took out of their interview leaves the new Brain now
+      // (onboarding/new-brain.ts); what it added is handed over.
+      await eraseOwedOfPersonQuietly(env, person, backed);
       return answer(result, requestId, (value) =>
         json(value, value.approved ? 200 : 409)
       );
     }
     case "withdraw": {
+      const { person, backed } = await ownBrainWork();
       const result = await store.withdraw(secretMark, keyMark ?? "");
       done(result);
+      // What it took out of their interview leaves the new Brain now
+      // (onboarding/new-brain.ts); what it added is handed over.
+      await eraseOwedOfPersonQuietly(env, person, backed);
       return answer(result, requestId, (value) => json(value));
     }
     default: {

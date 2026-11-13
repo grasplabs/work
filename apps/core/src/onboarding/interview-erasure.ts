@@ -4,6 +4,10 @@ import type { AuditActor } from "@grasp-os/shared/audit";
 import { interviewLimits } from "@grasp-os/shared/interview-links";
 import type { InterviewProgress } from "@grasp-os/shared/interview-links";
 
+import {
+  eraseOnboardingInterview,
+  eraseOwedOnboardingSources,
+} from "./new-brain.ts";
 import { onboardingStore } from "./store.ts";
 
 // The interviews as a Knowledge purge reaches them (GRA-528): what people
@@ -204,17 +208,40 @@ const rewriteOne = async (
  * to forget here.
  */
 export const interviewErasure = (
-  env: Pick<Env, "ONBOARDING" | "DURABLE_OBJECT_JURISDICTION">
+  env: Env
 ): Pick<OnErase, "rewrite" | "forgetActor"> => {
   const store = onboardingStore(env);
   return {
     rewrite: async (by, rewrite) => {
       const actor = auditActorSchema.parse(by.actor);
-      for (const person of await store.interviewPeople()) {
+      const people = await store.interviewPeople();
+      for (const person of people) {
         // oxlint-disable-next-line no-await-in-loop -- one interview after another
         const stored = await store.interviewStored(person);
         // oxlint-disable-next-line no-await-in-loop -- one interview after another
         await rewriteOne(store, person, stored, rewrite, actor);
+      }
+      // A team claim's sentence was put together from the whole team's
+      // interviews, so it may hold a purged word whoever backs it: every
+      // standing claim the purge's own rewrite changes is owed an erasure,
+      // hidden from its team at once.
+      const claims = await store.standingClaims();
+      await store.purgeClaims(
+        claims.flatMap(({ source, text }) =>
+          rewrite(text) === text ? [] : [source]
+        )
+      );
+      // The new Brain's copies hold the purged words too: each is replaced
+      // by the rewritten text, and each claim holding one erased, before the
+      // purge reports done, or it fails and is run again.
+      for (const person of people) {
+        // oxlint-disable-next-line no-await-in-loop -- one interview after another
+        await eraseOnboardingInterview(env, person);
+      }
+      await eraseOwedOnboardingSources(env, { claims: true });
+      const owedClaims = await store.owedErasures({ claims: true });
+      if (owedClaims.length > 0) {
+        throw new Error("The Brain still holds a purged team claim.");
       }
     },
     forgetActor: async () => {

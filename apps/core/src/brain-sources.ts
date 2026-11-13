@@ -15,6 +15,12 @@ import { runSource } from "./brain-next-origins.ts";
 import { queueHandOvers } from "./brain-next.ts";
 import type { Handed, Producers, SourceRef } from "./brain-next.ts";
 import { workflowStartReceipts } from "./db/core/schema.ts";
+import {
+  claimOf,
+  claimSource,
+  interviewOf,
+  interviewSource,
+} from "./onboarding/new-brain.ts";
 import { resultOf, runOf } from "./workflows/resource-runs.ts";
 import { detailsRemoved } from "./workflows/retention.ts";
 
@@ -115,6 +121,8 @@ const producers: Record<
   }
 > = {
   run: { source: runSource, read: runOfId },
+  interview: { source: interviewSource, read: interviewOf },
+  claim: { source: claimSource, read: claimOf },
 };
 
 /** Whether `kind` is a producer's: a source of any other has nothing to hand over. */
