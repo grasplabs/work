@@ -1055,4 +1055,59 @@ describe("uploading a file straight into the Brain", () => {
       });
     }
   );
+
+  it(
+    "refuses an upload while the Brain restores an export, keeps its row, and takes the same id once the restore is done",
+    slow,
+    async () => {
+      const uploader = await signedInApi(idp, "user");
+      const uploadId = crypto.randomUUID();
+      const file = fileOf(`While it restores ${word()}`);
+      // A restore under way in the shared store, as an admin starts one.
+      const restore = crypto.randomUUID();
+      await runInDurableObject(sharedStore(), (_instance, state) => {
+        state.storage.sql.exec(
+          "INSERT INTO restores (export, checked, part, restored, state, started_at) VALUES (?, 0, 0, 0, 'running', ?)",
+          restore,
+          Date.now()
+        );
+      });
+
+      let refused: unknown;
+      try {
+        refused = await outcome(
+          async () =>
+            await uploader.api.brainSources.upload(file, everyone, uploadId)
+        );
+      } finally {
+        await runInDurableObject(sharedStore(), (_instance, state) => {
+          state.storage.sql.exec(
+            "DELETE FROM restores WHERE export = ?",
+            restore
+          );
+        });
+      }
+      const kept = await rowsWith(uploadId);
+      const events = await eventsOf(uploadId);
+      const retried = await uploader.api.brainSources.upload(
+        file,
+        everyone,
+        uploadId
+      );
+
+      expect({
+        refused,
+        kept: kept.length,
+        refusedAs: events[0]?.detail?.reason,
+        retried,
+        actions: await actionsOf(uploadId),
+      }).toStrictEqual({
+        refused: { refused: "brain.restoring" },
+        kept: 1,
+        refusedAs: "restoring",
+        retried: { source: { producer: "upload", id: uploadId }, version: 1 },
+        actions: ["brain.upload.refused", "brain.upload.added"],
+      });
+    }
+  );
 });

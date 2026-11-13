@@ -1,4 +1,5 @@
 import { actorOf } from "@grasp-os/shared/audit";
+import { brainExportErrors } from "@grasp-os/shared/brain-exports";
 import {
   brainSourceErrors,
   brainUploadErrors,
@@ -280,7 +281,12 @@ const detailOf = (
  * `invalid`, `too_large`), or, for a retried first upload, that its id
  * was already added with another file (`other_file`).
  */
-type RefusalReason = "erased" | "invalid" | "too_large" | "other_file";
+type RefusalReason =
+  | "erased"
+  | "invalid"
+  | "too_large"
+  | "other_file"
+  | "restoring";
 
 /**
  * Each of the Brain's refusals of an add, which certainly didn't land:
@@ -312,7 +318,10 @@ const refusals: Readonly<
         ? brainUploadErrors.create("brain.upload_retry_refused")
         : brainUploadErrors.create("brain.upload_deleted"),
   },
-  // An argument core's own check refused, before the Brain was asked.
+  // An argument core's own check refused, before the Brain was asked. Not
+  // reached through an upload: everything `addSource` checks is core's own
+  // (its ids, readers and change key) or checked before the add (its text,
+  // `textOf`). Kept so every refusal of the family has its answer.
   "brain.request_invalid": {
     reason: "invalid",
     frees: false,
@@ -337,6 +346,15 @@ const refusals: Readonly<
 
 /** How the Brain refused `error`'s add, or undefined when it isn't sure. */
 const refusalOf = (error: unknown) => {
+  // The Brain restores an export and adds nothing meanwhile: refused, the
+  // row kept, and the same id taken again once the restore is done.
+  if (brainExportErrors.codeOf(error) === "brain.restoring") {
+    return {
+      reason: "restoring",
+      frees: false,
+      error: () => brainExportErrors.create("brain.restoring"),
+    } as const;
+  }
   const code = brainSourceErrors.codeOf(error);
   return code === undefined ? undefined : refusals[code];
 };

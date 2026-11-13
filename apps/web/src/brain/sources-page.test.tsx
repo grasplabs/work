@@ -610,11 +610,14 @@ describe(SourcesPage, () => {
     expect({
       chosen,
       accepts: picker.accept,
+      // The types and the limit, as core's own lists hold them.
+      says: uploadText.includes(".xlsx, and .vtt files of up to 10 MB."),
       uploadSaysWhy: uploadText.includes(refused),
       panelSaysWhy: panel().includes(refused),
     }).toStrictEqual({
       chosen: "Only me",
       accepts: ".pdf,.docx,.xlsx,.vtt",
+      says: true,
       uploadSaysWhy: true,
       panelSaysWhy: true,
     });

@@ -17,7 +17,7 @@ import {
   firstLineOf,
 } from "@grasp-os/shared/brain-sources";
 import { failureText } from "@grasp-os/shared/errors";
-import { uploadTypes } from "@grasp-os/shared/uploads";
+import { uploadMaxBytes, uploadTypes } from "@grasp-os/shared/uploads";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import { Card, CardContent } from "@grasp-os/ui/components/card";
@@ -52,7 +52,7 @@ import { Confirmed } from "../confirmed.tsx";
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
-import { formatDateTime, formatList } from "../format.ts";
+import { formatBytes, formatDateTime, formatList } from "../format.ts";
 import { useCore } from "../use-core.ts";
 
 // The Brain's sources, from the new Brain (GRA-1734): what the person may
@@ -274,6 +274,9 @@ const UploadForm = ({
   const [choice, setChoice] = useState("me");
   const [sent, setSent] = useState<Read<{ source: BrainSourceRef }>>();
   const busy = sent?.state === "loading";
+  // What an upload takes, from core's own limits.
+  const types = formatList(Object.keys(uploadTypes).map((type) => `.${type}`));
+  const size = formatBytes(uploadMaxBytes);
   return (
     <form
       className="flex flex-col gap-3"
@@ -362,9 +365,8 @@ const UploadForm = ({
       </FieldGroup>
       <FieldDescription>
         <Trans>
-          A PDF, Word, Excel or WebVTT file of up to 10 MB. Who may read it
-          stays as you choose: to share it with others, upload it again for
-          them.
+          It takes {types} files of up to {size}. Who may read it stays as you
+          choose: to share it with others, upload it again for them.
         </Trans>
       </FieldDescription>
       {sent?.state === "refused" ? <UploadRefusal refused={sent} /> : null}

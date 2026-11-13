@@ -1645,10 +1645,6 @@ msgstr "Se negaron los datos de la aplicación a una página"
 msgid "A page your team opens"
 msgstr "Una página que abre tu equipo"
 
-#: src/brain/sources-page.tsx
-msgid "A PDF, Word, Excel or WebVTT file of up to 10 MB. Who may read it stays as you choose: to share it with others, upload it again for them."
-msgstr "Un archivo PDF, Word, Excel o WebVTT de hasta 10 MB. Quién puede leerlo queda como elijas: para compartirlo con otras personas, súbelo de nuevo para ellas."
-
 #: src/brain/memory-parts.tsx
 msgctxt "memory record kind"
 msgid "A preference"
@@ -7294,6 +7290,10 @@ msgstr "Deja de ejecutarse al instante, también las llamadas en curso, y no pod
 #: src/workflows/stop-run.tsx
 msgid "It stops where it is and never goes on. What it already did stays done. This can't be undone."
 msgstr "Se detiene donde está y no continúa nunca. Lo que ya hizo sigue hecho. Esto no se puede deshacer."
+
+#: src/brain/sources-page.tsx
+msgid "It takes {types} files of up to {size}. Who may read it stays as you choose: to share it with others, upload it again for them."
+msgstr "Admite archivos {types} de hasta {size}. Quién puede leerlo queda como elijas: para compartirlo con otras personas, súbelo de nuevo para ellas."
 
 #: src/settings/event-sources.tsx
 msgid "It takes no event until you make it a new secret."
