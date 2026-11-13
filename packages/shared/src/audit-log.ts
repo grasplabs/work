@@ -134,10 +134,12 @@ const typeRules: readonly {
   // never the question or what was found.
   { action: "brain.recall", type: "read" },
   // An App or a workflow's run selecting or reading the Brain's skills for
-  // a person (core's src/brain-recall.ts, `brain.skills.select` and
-  // `brain.skills.read`): for whom, how many skills or which version, or
-  // why it was refused; never the task, a name or a text.
-  { action: "brain.skills", type: "read" },
+  // a person (core's src/brain-recall.ts): for whom, how many skills or
+  // which version, or why it was refused; never the task, a name or a
+  // text. Each named exactly: a release installing skills
+  // (`brain.skills.installed`) is no read.
+  { action: "brain.skills.select", type: "read" },
+  { action: "brain.skills.read", type: "read" },
   // A Grasp staff member reaching a namespace, method or route of the
   // client's deployment (core's staff-audit.ts): what they looked at or
   // did there, by its surface and identifiers, never its content.
