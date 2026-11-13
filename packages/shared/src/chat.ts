@@ -134,6 +134,8 @@ export interface ChatAgent {
    * answers with the model its asker picks.
    */
   model: string | null;
+  /** Whether it is the person's own, which nobody else sees or asks. */
+  own: boolean;
 }
 
 /** A chat in the person's list. */

@@ -1,5 +1,5 @@
 import { agentErrors } from "@grasp-os/shared/agent";
-import { agentInputSchema } from "@grasp-os/shared/agents";
+import { agentInputSchema, ownAgentsMax } from "@grasp-os/shared/agents";
 import type { Agent, AgentSaid, AgentSettings } from "@grasp-os/shared/agents";
 import { actorOf } from "@grasp-os/shared/audit";
 import {
@@ -7,14 +7,22 @@ import {
   companyToolClassSchema,
   toolClassAudienceSchema,
 } from "@grasp-os/shared/connect";
+import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { appClassAudienceSchema } from "@grasp-os/shared/stephen-reach";
-import { and, asc, eq, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import type { SQLWrapper } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { agentOfRow, firstAgentId, readAgent } from "./agents.ts";
+import {
+  agentOfRow,
+  changeableAgent,
+  companyAgent,
+  firstAgentId,
+  readAgent,
+} from "./agents.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
+import { activeMember } from "./auth/membership-sql.ts";
 import {
   agentDocuments,
   agentPlaces,
@@ -60,16 +68,6 @@ const inputOf = (input: unknown): AgentSaid => {
     throw agentErrors.create("agent.record_invalid");
   }
   return parsed.data;
-};
-
-/** The agent `agentId`, or `agent.unknown`. */
-const requireAgent = async (env: Env, agentId: unknown): Promise<Agent> => {
-  const agent =
-    typeof agentId === "string" ? await readAgent(env, agentId) : undefined;
-  if (agent === undefined) {
-    throw agentErrors.create("agent.unknown");
-  }
-  return agent;
 };
 
 /**
@@ -130,6 +128,10 @@ const namedOnce = async (write: () => Promise<unknown>): Promise<void> => {
  */
 const notDeleted = sql`${agents.state} IS NOT 'deleted'`;
 
+/** The agent's row is still `ownerId`'s own, or still the company's for null. */
+const ownedBy = (ownerId: string | null) =>
+  sql`${agents.ownerId} IS ${ownerId}`;
+
 /** The same for a write of another table's row of the agent `agentId`. */
 const keptAgent = (agentId: SQLWrapper) =>
   sql`NOT EXISTS (SELECT 1 FROM ${agents} WHERE ${agents.id} = ${agentId} AND ${agents.state} = 'deleted')`;
@@ -162,6 +164,16 @@ const requireModelChosen = async (
   }
 };
 
+/**
+ * What an audit event says of a person's own agent: that it is one, and
+ * how much it was told. Never its name or job, which are its owner's and
+ * the company's admins read the log.
+ */
+const ownDetailOf = ({ instructions }: AgentSaid): Record<string, string> => ({
+  own: "true",
+  instructionsLength: String(instructions.length),
+});
+
 /** What an audit event says of an agent: never its instructions. */
 const detailOf = ({
   name,
@@ -179,14 +191,14 @@ const detailOf = ({
   model: model ?? "none",
 });
 
-/** Every agent of the company, the first one first, then by name. */
+/** Every agent of the company, the first one first, then by name: never a person's own. */
 export const listAgents = async (env: Env): Promise<Agent[]> => {
   const [first, rows] = await Promise.all([
     readAgent(env, firstAgentId),
     drizzle(env.DB)
       .select()
       .from(agents)
-      .where(ne(agents.id, firstAgentId))
+      .where(and(ne(agents.id, firstAgentId), isNull(agents.ownerId)))
       .orderBy(asc(sql`lower(${agents.name})`), asc(agents.id)),
   ]);
   return [
@@ -253,9 +265,107 @@ export const makeAgent = async (
     id,
     ...made,
     state: "on",
+    ownerId: null,
     changedBy: identity.userId,
     changedAt: now.toISOString(),
   };
+};
+
+/** The agents that are `userId`'s own, by name: never one they deleted. */
+export const listOwnAgents = async (
+  env: Pick<Env, "DB">,
+  userId: string
+): Promise<Agent[]> => {
+  const rows = await drizzle(env.DB)
+    .select()
+    .from(agents)
+    .where(eq(agents.ownerId, userId))
+    .orderBy(asc(sql`lower(${agents.name})`), asc(agents.id));
+  return rows.flatMap((row) => agentOfRow(row) ?? []);
+};
+
+/**
+ * Refuses `name` when another of `ownerId`'s own agents has it: people
+ * pick their agents by name. Not held by an index, as the company's
+ * names are: two of one person's adds at once can both land, and the
+ * person then renames one.
+ */
+const requireOwnNameFree = async (
+  env: Env,
+  ownerId: string,
+  name: string,
+  agentId: string
+): Promise<void> => {
+  const key = agentNameKey(name);
+  const own = await listOwnAgents(env, ownerId);
+  if (
+    own.some((each) => each.id !== agentId && agentNameKey(each.name) === key)
+  ) {
+    throw agentErrors.create("agent.name_taken");
+  }
+};
+
+/**
+ * Makes an agent of `identity`'s own: on, theirs alone. It has no row of
+ * reach, place or class: who reaches it is its owner, in Grasp's own chat
+ * (agent-reach.ts), and each class is for it as the company has the class
+ * for that person, so it does at most what the company's first agent may
+ * do for them. Anyone of the company makes one, never Grasp's staff.
+ * Throws `agent.record_invalid`, `agent.name_taken` for a name another of
+ * their own has, `agent.model_unknown`, `agent.too_many_own` past
+ * {@link ownAgentsMax}, and `role.forbidden` for someone no longer one of
+ * the company; the insert itself holds the last two.
+ */
+export const makeOwnAgent = async (
+  env: Env,
+  identity: Identity,
+  input: unknown
+): Promise<Agent> => {
+  if (identity.staff) {
+    throw roleErrors.create("role.forbidden");
+  }
+  const made = inputOf(input);
+  const id = `agent-${crypto.randomUUID()}`;
+  const ownerId = identity.userId;
+  const [own] = await Promise.all([
+    listOwnAgents(env, ownerId),
+    requireOwnNameFree(env, ownerId, made.name, id),
+    requireModelChosen(env, made.model, null),
+  ]);
+  if (own.length >= ownAgentsMax) {
+    throw agentErrors.create("agent.too_many_own");
+  }
+  const now = new Date();
+  const db = drizzle(env.DB);
+  const room = sql`(SELECT count(*) FROM ${agents} WHERE ${agents.ownerId} = ${ownerId} AND ${agents.state} IS NOT 'deleted') < ${ownAgentsMax}`;
+  // Still one of the company as the row lands: a person is removed before
+  // they are erased, so a making that was under way when they were is
+  // never kept past the erasure that dropped their agents.
+  const member = activeMember(ownerId);
+  await auditedBatch(env, db, [
+    db.insert(agents).select(
+      sql`SELECT ${id}, ${made.name}, NULL, ${made.face}, ${made.job},
+          ${made.instructions}, ${made.modelRole}, ${made.model}, 'on',
+          ${ownerId}, ${ownerId}, ${now.getTime()}, ${ownerId},
+          ${now.getTime()} WHERE ${room} AND ${member}`
+    ),
+    outboxedIfChanged(db, {
+      actor: actorOf(identity),
+      action: "agent.made",
+      target: { type: "agent", id },
+      detail: ownDetailOf(made),
+    }),
+  ]);
+  const kept = await readAgent(env, id);
+  if (kept === undefined) {
+    // The insert's condition failed: full since the check, or its owner
+    // is no longer one of the company.
+    const still = await listOwnAgents(env, ownerId);
+    throw still.length >= ownAgentsMax
+      ? agentErrors.create("agent.too_many_own")
+      : roleErrors.create("role.forbidden");
+  }
+  return kept;
 };
 
 /**
@@ -269,58 +379,76 @@ export const changeAgent = async (
   agentId: unknown,
   input: unknown
 ): Promise<void> => {
-  requireCompanyAdmin(identity);
+  const agent = await changeableAgent(env, identity, agentId);
   const changed = inputOf(input);
-  const agent = await requireAgent(env, agentId);
   if (unchanged(agent, changed)) {
     // A change to nothing: nothing is written and nothing recorded, the
     // first agent's first row included.
     return;
   }
+  const { ownerId } = agent;
   await Promise.all([
-    requireNameFree(env, changed.name, agent.id),
+    ownerId === null
+      ? requireNameFree(env, changed.name, agent.id)
+      : requireOwnNameFree(env, ownerId, changed.name, agent.id),
     requireModelChosen(env, changed.model, agent.model),
   ]);
   const now = new Date();
   const by = { changedBy: identity.userId, changedAt: now };
-  const named = { ...changed, nameKey: agentNameKey(changed.name) };
+  // A person's own agent keeps no key: two people may each name theirs alike.
+  const named = {
+    ...changed,
+    nameKey: ownerId === null ? agentNameKey(changed.name) : null,
+  };
   const db = drizzle(env.DB);
+  const differs = or(
+    sql`${agents.name} IS NOT ${changed.name}`,
+    sql`${agents.face} IS NOT ${changed.face}`,
+    sql`${agents.job} IS NOT ${changed.job}`,
+    sql`${agents.instructions} IS NOT ${changed.instructions}`,
+    sql`${agents.modelRole} IS NOT ${changed.modelRole}`,
+    sql`${agents.model} IS NOT ${changed.model}`
+  );
   await namedOnce(
     async () =>
       await auditedBatch(env, db, [
-        db
-          .insert(agents)
-          // The first agent's row, the first time it is changed.
-          .values({
-            id: agent.id,
-            ...named,
-            state: agent.state,
-            madeBy: identity.userId,
-            madeAt: now,
-            ...by,
-          })
-          .onConflictDoUpdate({
-            target: agents.id,
-            set: { ...named, ...by },
-            // Never one deleted since it was read: it stays deleted, and
-            // its name stays free.
-            setWhere: and(
-              notDeleted,
-              or(
-                sql`${agents.name} IS NOT ${changed.name}`,
-                sql`${agents.face} IS NOT ${changed.face}`,
-                sql`${agents.job} IS NOT ${changed.job}`,
-                sql`${agents.instructions} IS NOT ${changed.instructions}`,
-                sql`${agents.modelRole} IS NOT ${changed.modelRole}`,
-                sql`${agents.model} IS NOT ${changed.model}`
-              )
-            ),
-          }),
+        // The first agent's row is made the first time it is changed. Any
+        // other agent has its row, and only that row is changed: one
+        // deleted since it was read stays deleted, with its name free,
+        // and one erased with its owner is never made again, least of
+        // all as the company's.
+        agent.id === firstAgentId
+          ? db
+              .insert(agents)
+              .values({
+                id: agent.id,
+                ...named,
+                state: agent.state,
+                madeBy: identity.userId,
+                madeAt: now,
+                ...by,
+              })
+              .onConflictDoUpdate({
+                target: agents.id,
+                set: { ...named, ...by },
+                setWhere: and(notDeleted, differs),
+              })
+          : db
+              .update(agents)
+              .set({ ...named, ...by })
+              .where(
+                and(
+                  eq(agents.id, agent.id),
+                  notDeleted,
+                  ownedBy(ownerId),
+                  differs
+                )
+              ),
         outboxedIfChanged(db, {
           actor: actorOf(identity),
           action: "agent.changed",
           target: { type: "agent", id: agent.id },
-          detail: detailOf(changed),
+          detail: ownerId === null ? detailOf(changed) : ownDetailOf(changed),
         }),
       ])
   );
@@ -337,11 +465,10 @@ export const setAgentPaused = async (
   agentId: unknown,
   paused: unknown
 ): Promise<void> => {
-  requireCompanyAdmin(identity);
+  const agent = await changeableAgent(env, identity, agentId);
   if (typeof paused !== "boolean") {
     throw agentErrors.create("agent.record_invalid");
   }
-  const agent = await requireAgent(env, agentId);
   const state = paused ? "paused" : "on";
   if (agent.state === state) {
     // As it is already: nothing is written and nothing recorded.
@@ -351,28 +478,42 @@ export const setAgentPaused = async (
   const by = { changedBy: identity.userId, changedAt: now };
   const db = drizzle(env.DB);
   await auditedBatch(env, db, [
-    db
-      .insert(agents)
-      .values({
-        id: agent.id,
-        name: agent.name,
-        nameKey: agentNameKey(agent.name),
-        face: agent.face,
-        job: agent.job,
-        instructions: agent.instructions,
-        modelRole: agent.modelRole,
-        model: agent.model,
-        state,
-        madeBy: identity.userId,
-        madeAt: now,
-        ...by,
-      })
-      .onConflictDoUpdate({
-        target: agents.id,
-        set: { state, ...by },
-        // Never one deleted since it was read: it stays deleted.
-        setWhere: and(notDeleted, sql`${agents.state} IS NOT ${state}`),
-      }),
+    // As `changeAgent` writes: the first agent's row made at its first
+    // change, any other's own row changed, never one deleted or erased
+    // with its owner since it was read.
+    agent.id === firstAgentId
+      ? db
+          .insert(agents)
+          .values({
+            id: agent.id,
+            name: agent.name,
+            nameKey: agentNameKey(agent.name),
+            face: agent.face,
+            job: agent.job,
+            instructions: agent.instructions,
+            modelRole: agent.modelRole,
+            model: agent.model,
+            state,
+            madeBy: identity.userId,
+            madeAt: now,
+            ...by,
+          })
+          .onConflictDoUpdate({
+            target: agents.id,
+            set: { state, ...by },
+            setWhere: and(notDeleted, sql`${agents.state} IS NOT ${state}`),
+          })
+      : db
+          .update(agents)
+          .set({ state, ...by })
+          .where(
+            and(
+              eq(agents.id, agent.id),
+              notDeleted,
+              ownedBy(agent.ownerId),
+              sql`${agents.state} IS NOT ${state}`
+            )
+          ),
     outboxedIfChanged(db, {
       actor: actorOf(identity),
       action: "agent.paused",
@@ -396,8 +537,7 @@ export const deleteAgent = async (
   identity: Identity,
   agentId: unknown
 ): Promise<void> => {
-  requireCompanyAdmin(identity);
-  const agent = await requireAgent(env, agentId);
+  const agent = await changeableAgent(env, identity, agentId);
   if (agent.id === firstAgentId) {
     throw agentErrors.create("agent.first_stays");
   }
@@ -426,7 +566,7 @@ export const deleteAgent = async (
       actor: actorOf(identity),
       action: "agent.deleted",
       target: { type: "agent", id: agent.id },
-      detail: { name: agent.name },
+      detail: agent.ownerId === null ? { name: agent.name } : { own: "true" },
     }),
   ]);
 };
@@ -436,7 +576,8 @@ const requireOwnSettings = async (
   env: Env,
   agentId: unknown
 ): Promise<string> => {
-  const agent = await requireAgent(env, agentId);
+  // Never a person's own agent, which has neither: it is its owner's.
+  const agent = await companyAgent(env, agentId);
   if (agent.id === firstAgentId) {
     throw agentErrors.create("agent.settings_elsewhere");
   }
@@ -582,5 +723,25 @@ export const setAgentToolClass = async (
         ...teamsDetail(stored.teams),
       },
     }),
+  ]);
+};
+
+/**
+ * Drops the agents that are `personId`'s own, with their documents: they
+ * are erased. Their rows go whole, the ones they deleted included, which
+ * name them too.
+ */
+export const dropOwnAgentsOf = async (
+  env: Pick<Env, "DB">,
+  personId: string
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  const own = db
+    .select({ id: agents.id })
+    .from(agents)
+    .where(eq(agents.ownerId, personId));
+  await db.batch([
+    db.delete(agentDocuments).where(inArray(agentDocuments.agentId, own)),
+    db.delete(agents).where(eq(agents.ownerId, personId)),
   ]);
 };
