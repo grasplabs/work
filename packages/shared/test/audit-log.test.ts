@@ -242,4 +242,28 @@ describe("audit event types", () => {
       ].map((action) => typeOf(action))
     ).toStrictEqual(["permission", "permission", "action"]);
   });
+
+  it("files a skill share's decisions as decisions and each outcome so a search finds it, and a retirement with its outcome", () => {
+    expect(
+      [
+        "skill.share.requested",
+        "skill.share.approved",
+        "skill.share.declined",
+        "skill.share.added",
+        "skill.share.superseded",
+        "skill.retired",
+        "skill.retire_done",
+        "skill.retire_superseded",
+      ].map((action) => typeOf(action))
+    ).toStrictEqual([
+      "action",
+      "decision",
+      "decision",
+      "action",
+      "action",
+      "config",
+      "config",
+      "action",
+    ]);
+  });
 });
