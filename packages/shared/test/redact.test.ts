@@ -39,6 +39,50 @@ describe("redacting credentials", () => {
     );
   });
 
+  it("redacts a link's granting parameter however its separator is written: a numeric reference, an upper-case name, or inside a redirect's target", () => {
+    const target =
+      "https://bucket.s3.amazonaws.com/q.pdf?x=1&X-Amz-Signature=SECRET4";
+    expect(
+      [
+        "https://acme.blob.core.windows.net/c/q.pdf?sv=2024&#x26;sig=SECRET1",
+        "https://d111.cloudfront.net/q.pdf?Expires=1795000000&#038;Signature=SECRET2",
+        "https://acme.blob.core.windows.net/c/q.pdf?sv=2024&AMP;sig=SECRET3",
+        `https://app.acme.test/out?to=${encodeURIComponent(target)}`,
+      ].map(redact)
+    ).toStrictEqual([
+      "https://acme.blob.core.windows.net/c/q.pdf?sv=2024&#x26;sig=[redacted]",
+      "https://d111.cloudfront.net/q.pdf?Expires=1795000000&#038;Signature=[redacted]",
+      "https://acme.blob.core.windows.net/c/q.pdf?sv=2024&AMP;sig=[redacted]",
+      `https://app.acme.test/out?to=${encodeURIComponent(
+        "https://bucket.s3.amazonaws.com/q.pdf?x=1&X-Amz-Signature=[redacted]"
+      )}`,
+    ]);
+  });
+
+  it("leaves a link with nothing to redact, and prose, exactly as they were", () => {
+    const texts = [
+      '<a href="https://acme.test/report?x=1&amp;y=2&#38;z=3">Report</a>',
+      "Our R&amp;D budget, and Tom &amp; Jerry.",
+      "Use code=42 in R&D, then sig=abc for the form.",
+    ];
+    expect(texts.map(redact)).toStrictEqual(texts);
+  });
+
+  it("redacts a megabyte of text, links and references in it, in one pass", () => {
+    const large = [
+      "&amp;".repeat(200_000),
+      `&amp;${"a".repeat(1_000_000)}`,
+      `https://acme.test/q?sig=${"b".repeat(1_000_000)}`,
+      "https://acme.test/q?x=1&amp;Signature=v ".repeat(30_000),
+    ];
+    expect(large.map((text) => redact(text).length)).toStrictEqual([
+      large[0]?.length,
+      large[1]?.length,
+      "https://acme.test/q?sig=[redacted]".length,
+      "https://acme.test/q?x=1&amp;Signature=[redacted] ".length * 30_000,
+    ]);
+  });
+
   it("redacts an OAuth code in a redirect, but not a field merely named for a code", () => {
     expect(
       [

@@ -172,7 +172,8 @@ export const newSourceSchema = z.strictObject({
    * since the epoch, if it read it: an add of a text read before the
    * source's current version was read writes nothing (`AddedVersion`'s
    * `newer`), so a late add of an older read never replaces a newer one,
-   * whatever order the adds arrive in.
+   * whatever order the adds arrive in. A `newer` answer records nothing,
+   * not even its change, so a retry of that change is judged afresh.
    */
   readAt: z.int().nonnegative().optional(),
 });

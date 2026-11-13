@@ -196,6 +196,7 @@
     "@grasp-os/brain": "workspace:*",
     "capnweb": "catalog:",
     "croner": "catalog:",
+    "entities": "catalog:",
     "zod": "catalog:"
   }
 }
