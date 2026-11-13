@@ -6,19 +6,34 @@ import type { Draft, DraftCheckpoint, Version } from "@grasp-os/shared/drafts";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { nextReleaseId, releaseMonthPrefix } from "@grasp-os/shared/release-id";
 import type { Subject, SubjectKind } from "@grasp-os/shared/subject";
-import { and, asc, desc, eq, gte, isNull, lt, lte, sql } from "drizzle-orm";
+import { waitUntil } from "cloudflare:workers";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gte,
+  isNull,
+  like,
+  lt,
+  lte,
+  sql,
+} from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { auditedBatch, outboxed, outboxedWhere } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import {
+  appVersions,
   draftBlobs,
   draftCheckpointFiles,
   draftCheckpoints,
   draftFiles,
   drafts,
+  workflowResourceVersions,
 } from "./db/core/schema.ts";
 import { notNullFailed } from "./db/d1.ts";
 import { draftWatch } from "./durable-objects.ts";
@@ -174,6 +189,42 @@ const ofSubject = (table: SubjectTable, { kind, id }: Subject) =>
 const targetTypes: Readonly<Record<SubjectKind, string>> = {
   app: "app",
   workflow: "workflow_resource",
+};
+
+/**
+ * The label the next version of `subject` to go live takes at `at`
+ * (`YY.MM.N`, @grasp-os/shared/release-id): N one past the highest its
+ * versions hold in that month. Taken only by the batch that makes the
+ * version live (its kind's `activate`, publish.ts), so a publish that
+ * fails takes none; of two at once, only the one whose compare and set of
+ * the live version lands takes it.
+ */
+export const nextLabel = async (
+  env: Env,
+  { kind, id }: Subject,
+  at: Date
+): Promise<string> => {
+  const month = `${releaseMonthPrefix(at)}%`;
+  const db = drizzle(env.DB);
+  const rows =
+    kind === "app"
+      ? await db
+          .select({ label: appVersions.label })
+          .from(appVersions)
+          .where(and(eq(appVersions.appId, id), like(appVersions.label, month)))
+      : await db
+          .select({ label: workflowResourceVersions.label })
+          .from(workflowResourceVersions)
+          .where(
+            and(
+              eq(workflowResourceVersions.workflowResourceId, id),
+              like(workflowResourceVersions.label, month)
+            )
+          );
+  return nextReleaseId(
+    rows.flatMap(({ label }) => (label === null ? [] : [label])),
+    at
+  );
 };
 
 /** The audit entry of a change to `subject`'s draft or versions by `by`. */
@@ -366,14 +417,8 @@ const nextRevision = (
 ) =>
   sql`(SELECT ${revision + 1} WHERE COALESCE((SELECT revision FROM drafts WHERE subject_kind = ${kind.kind} AND subject_id = ${id}), 0) = ${revision} AND ${kind.stillEditable(id, by)})`;
 
-/**
- * Tells everyone who follows `subject`'s draft that it moved to
- * `revision` (draft-watch.ts), whoever moved it; read now when the
- * caller can't know it (a publish or roll back, whose batch may have
- * landed over a write since). Never thrown for: the write landed, and a
- * follower reads the draft afresh at its next call anyway.
- */
-export const draftRevised = async (
+/** What `draftRevised` does, after the request answered. */
+const tellRevised = async (
   env: Env,
   subject: Subject,
   revision?: number
@@ -392,6 +437,21 @@ export const draftRevised = async (
   } catch (error) {
     log.warn("draft.watch_untold", { ...subject, ...errorFields(error) });
   }
+};
+
+/**
+ * Tells everyone who follows `subject`'s draft that it moved to
+ * `revision` (draft-watch.ts), whoever moved it; read first when the
+ * caller can't know it (a publish or roll back, whose batch may have
+ * landed over a write since). Never waited for nor thrown for: the write
+ * landed, and a follower reads the draft afresh at its next call anyway.
+ */
+export const draftRevised = (
+  env: Env,
+  subject: Subject,
+  revision?: number
+): void => {
+  waitUntil(tellRevised(env, subject, revision));
 };
 
 /**
@@ -419,7 +479,7 @@ const writeOver = async (
     }
     throw error;
   }
-  await draftRevised(env, { kind: kind.kind, id }, revision);
+  draftRevised(env, { kind: kind.kind, id }, revision);
 };
 
 /**

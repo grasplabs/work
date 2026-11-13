@@ -173,6 +173,28 @@ const summaryOfMade = (chat: Chat): ChatSummary => ({
   make: makeOf(chat),
 });
 
+/**
+ * Keeps what Build it made as the chat's work (drafts.ts,
+ * `keepMadeInChat`): where it was made, so the chat lists it at once. A
+ * failure is logged for Grasp and never fails the build, which made it
+ * all the same; the chat's agent's first write keeps it as the chat's
+ * work then.
+ */
+const keptInChat = async (
+  ...kept: Parameters<typeof keepMadeInChat>
+): Promise<void> => {
+  try {
+    await keepMadeInChat(...kept);
+  } catch (error) {
+    const [, kind, subject] = kept;
+    log.error("chat.made_unkept", {
+      kind: kind.kind,
+      id: subject,
+      ...errorFields(error),
+    });
+  }
+};
+
 export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
@@ -476,7 +498,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
               const { app } = started;
               // Known as made at once: a filing that fails leaves it made.
               made.app = { id: app.id, name: app.name };
-              await keepMadeInChat(this.#env, appKind, app.id, person.userId, {
+              await keptInChat(this.#env, appKind, app.id, person.userId, {
                 chatId: id,
                 turnId: null,
                 callId,
@@ -499,7 +521,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
                 workflowNameOf(workflowPart.name)
               );
               made.workflow = { id: workflow.id, name: workflowPart.name };
-              await keepMadeInChat(
+              await keptInChat(
                 this.#env,
                 workflowKind,
                 workflow.id,

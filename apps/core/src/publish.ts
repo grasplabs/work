@@ -39,7 +39,7 @@ import { workflowKind } from "./workflow-resources.ts";
 // the same way: what drafts and versions read of it (its `DraftKind`, in
 // apps.ts and workflow-resources.ts) and how a draft of it is built and
 // made live (its `PublishSteps`, in app-publish.ts and
-// workflow-publish.ts), both registered here (`kinds`, `steps`). A version takes its label
+// workflow-publish.ts), both registered here (`kinds`). A version takes its label
 // (`YY.MM.N`) only in the batch that first makes it live, so a publish
 // that fails takes none.
 //
@@ -116,16 +116,13 @@ export interface PublishSteps {
   ) => Promise<string>;
 }
 
-/** Each kind of subject, as drafts and versions see it. */
-export const kinds: Readonly<Record<SubjectKind, DraftKind>> = {
-  app: appKind,
-  workflow: workflowKind,
-};
-
-/** How each kind publishes a draft and makes a version live. */
-const steps: Readonly<Record<SubjectKind, PublishSteps>> = {
-  app: appSteps,
-  workflow: workflowSteps,
+/**
+ * Each kind of subject: what drafts and versions read of it, and how a
+ * draft of it is published and a version made live.
+ */
+export const kinds: Readonly<Record<SubjectKind, DraftKind & PublishSteps>> = {
+  app: { ...appKind, ...appSteps },
+  workflow: { ...workflowKind, ...workflowSteps },
 };
 
 /** The subject a caller names, as they sent it. */
@@ -154,7 +151,7 @@ export const check = async (
   const id = await kind.readable(env, by, input);
   const draft = await draftOf(env, kind, id);
   const files = await filesOf(env, kind, id, draft);
-  const { passed, problems } = await steps[kind.kind].check(env, by, id, {
+  const { passed, problems } = await kinds[kind.kind].check(env, by, id, {
     draft,
     files,
   });
@@ -209,7 +206,7 @@ export const publish = async (
     if (basedOn === null) {
       throw draftErrors.create("draft.empty");
     }
-    const label = await steps[kind.kind].activate(env, by, id, {
+    const label = await kinds[kind.kind].activate(env, by, id, {
       version: basedOn,
       basedOn,
       action: "version.published",
@@ -218,9 +215,9 @@ export const publish = async (
     return { subject, version: basedOn, label };
   }
   const files = await filesOf(env, kind, id, draft);
-  const version = await steps[kind.kind].build(env, by, id, { draft, files });
+  const version = await kinds[kind.kind].build(env, by, id, { draft, files });
   const at = new Date();
-  const label = await steps[kind.kind].activate(env, by, id, {
+  const label = await kinds[kind.kind].activate(env, by, id, {
     version,
     basedOn,
     action: "version.published",
@@ -232,7 +229,7 @@ export const publish = async (
         live
       ),
   });
-  await draftRevised(env, subject);
+  draftRevised(env, subject);
   // A write that landed meanwhile left the draft over the version before.
   // Only tidying once the version is live: whatever stops it (the subject
   // archived, the role taken away, D1 failing) never says the publish
@@ -297,7 +294,7 @@ export const rollback = async (
         live: true,
       });
     }
-    const label = await steps[kind.kind].activate(env, by, id, {
+    const label = await kinds[kind.kind].activate(env, by, id, {
       version,
       basedOn: current,
       action: "version.rolled_back",
@@ -313,7 +310,7 @@ export const rollback = async (
     throw draftErrors.create("draft.conflict");
   }
   const at = new Date();
-  const label = await steps[kind.kind].activate(env, by, id, {
+  const label = await kinds[kind.kind].activate(env, by, id, {
     version,
     basedOn,
     action: "version.rolled_back",
@@ -336,6 +333,6 @@ export const rollback = async (
   // Told even when no row of the draft changed: a draft with no changes
   // reads as over the version live, so its builders' open pages follow
   // the version that went live.
-  await draftRevised(env, subject);
+  draftRevised(env, subject);
   return { subject, version, label };
 };

@@ -216,7 +216,7 @@ export class DraftsRpc extends CoreRpcTarget implements DraftsApi {
       const watched = draftWatch(this.#env, found);
       let watchId: string;
       try {
-        watchId = await watched.watch(listener);
+        watchId = await watched.watch(by.userId, listener);
       } catch (error) {
         listener[Symbol.dispose]();
         throw error;
