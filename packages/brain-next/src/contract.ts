@@ -2027,10 +2027,12 @@ export interface Brain {
   /**
    * Adds a version of an instruction file as `addSource` adds a source,
    * with the same versions, change keys and safe repeats, but kept whole:
-   * never cut into chunks or indexed, so recall never returns it. With
-   * `after`, only over that current version (null: none yet), checked in
-   * the writing transaction: otherwise refused with `staleVersion`,
-   * nothing written; a change it has answers with its version first.
+   * never cut into chunks or indexed, so recall never returns it. The
+   * shared store refuses one only one person may read (`owner`): it is
+   * kept in that person's own store alone. With `after`, only over that
+   * current version (null: none yet), checked in the writing transaction:
+   * otherwise refused with `staleVersion`, nothing written; a change it
+   * has answers with its version first.
    */
   addInstructions: (source: NewInstructions) => Promise<SourceVersionRef>;
   /**
