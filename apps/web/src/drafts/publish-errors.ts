@@ -8,11 +8,12 @@ import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { formatList } from "../format.ts";
 
-// What the page says when core refuses to publish an App's draft
-// (publish.tsx) or to go back to an earlier version
-// (app-history.tsx, Undo in publish.tsx). Core's own messages are English and written for the
-// API; these are the page's, in every locale, and say what to do next.
-// A refusal the page doesn't know keeps core's words.
+// What the page says when core refuses to publish the draft of an App or
+// a workflow (share-with-team.tsx) or to go back to an earlier version
+// (draft-history.tsx, Undo in share-with-team.tsx). Core's own messages
+// are English and written for the API; these are the page's, in every
+// locale, and say what to do next. A refusal the page doesn't know keeps
+// core's words.
 
 /** The code of a refusal from core, if it has one. */
 const codeOf = (error: unknown): string | undefined => {
@@ -36,9 +37,10 @@ const detailOf = (error: unknown, key: string): unknown => {
 
 /** What the page says for each refusal of a publish it knows. */
 const refusals: Readonly<Record<string, MessageDescriptor>> = {
-  "app.conflict": msg`Someone changed the App since you opened this. Look at the changes again, then share.`,
-  "app.draft_empty": msg`There are no changes to share.`,
+  "draft.conflict": msg`Someone changed it since you opened this. Look at the changes again, then share.`,
+  "draft.empty": msg`There are no changes to share.`,
   "app.draft_failed": msg`It doesn't pass its checks. Fix the problems, then share.`,
+  "workflow.definition_invalid": msg`It doesn't pass its checks. Fix the problems, then share.`,
   "app.publish_busy": msg`Someone else is sharing this App right now. Try again in a moment.`,
   "app.archived": msg`This App is archived. Restore it to share it.`,
   "page.build_failed": msg`The App's pages don't build. Fix the problems, then share.`,
@@ -102,7 +104,7 @@ export const publishFailureText = (error: unknown): string => {
 
 /** Whether core refused because the draft moved since it was read. */
 export const isConflict = (error: unknown): boolean =>
-  codeOf(error) === "app.conflict";
+  codeOf(error) === "draft.conflict";
 
 /** How a change against core went: its answer, or why it didn't go through. */
 export type Settled<T> = { ok: true; value: T } | { ok: false; error: unknown };

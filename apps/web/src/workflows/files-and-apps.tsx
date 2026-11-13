@@ -1,4 +1,3 @@
-import type { WorkflowLifecycle } from "@grasp-os/shared/workflow-lifecycle";
 import type {
   PendingWorkflowBindings,
   ListedWorkflowBindingApproval,
@@ -172,8 +171,8 @@ const Files = ({ files }: { files: WorkflowFile[] }) => {
 };
 
 /**
- * The versions of workflow `workflow` whose bindings wait, each binding
- * approved for its version; `onApproved` with the binding once one is.
+ * The live version of workflow `workflow`, while its bindings wait, each
+ * binding approved for it; `onApproved` with the binding once one is.
  * What was approved is said by the tab, not here: approving the last one
  * leaves nothing waiting, and this part goes with it.
  */
@@ -213,15 +212,8 @@ const Waiting = ({
           the version it runs.
         </Trans>
       </p>
-      {pending.map(({ version, live, bindings }) => (
+      {pending.map(({ version, bindings }) => (
         <div className="flex flex-col gap-2" key={version}>
-          <h3 className="font-medium">
-            {live ? (
-              <Trans>Version {version}, which runs now</Trans>
-            ) : (
-              <Trans>Version {version}, not live yet</Trans>
-            )}
-          </h3>
           <PendingBindingList
             bindings={bindings}
             busy={busy}
@@ -419,26 +411,21 @@ interface RunningBindings {
 
 /**
  * What `RunningBindings` the reads give, once all are read: of the version
- * a start runs now, as core picks it for what waits (`pendingBindingsOf`),
- * the live one, or before any went live `currentVersion`, the one published
- * last; null before any was published.
+ * a start runs now, the live one (`currentVersion`); null before any was
+ * published.
  */
 const runningBindingsOf = (
   versions: Loaded<WorkflowResourceVersion[]>,
-  lifecycle: Loaded<WorkflowLifecycle>,
   currentVersion: number | null,
   approvals: Loaded<ListedWorkflowBindingApproval[]> | undefined
 ): Loaded<RunningBindings | null> | undefined => {
   if (versions.state !== "ready") {
     return versions;
   }
-  if (lifecycle.state !== "ready") {
-    return lifecycle;
-  }
   if (approvals?.state !== "ready") {
     return approvals;
   }
-  const version = lifecycle.data.live?.version ?? currentVersion;
+  const version = currentVersion;
   const running = versions.data.find((each) => each.version === version);
   return {
     state: "ready",
@@ -451,7 +438,7 @@ const runningBindingsOf = (
 
 /**
  * Files and apps of workflow `workflow`, read each time it is shown;
- * `versions`, `currentVersion` and `lifecycle` as the page read them, and
+ * `versions` and `currentVersion` as the page read them, and
  * `names` who approved its bindings. `approves` for one of the
  * organization's admins, who approve and revoke its bindings here.
  */
@@ -459,14 +446,12 @@ export const FilesAndApps = ({
   workflow,
   currentVersion,
   versions,
-  lifecycle,
   names,
   approves,
 }: {
   workflow: string;
   currentVersion: number | null;
   versions: Loaded<WorkflowResourceVersion[]>;
-  lifecycle: Loaded<WorkflowLifecycle>;
   names: Names;
   approves: boolean;
 }) => {
@@ -491,7 +476,6 @@ export const FilesAndApps = ({
     : versions;
   const runningBindings = runningBindingsOf(
     versions,
-    lifecycle,
     currentVersion,
     approvals
   );

@@ -154,6 +154,7 @@ export const rpcParamNames: ParamNames = {
     "denyConnection": ["chatId","id"],
     "efforts": [],
     "forApp": ["app"],
+    "forWorkflow": ["workflow"],
     "grantConnection": ["chatId","id"],
     "list": [],
     "models": [],

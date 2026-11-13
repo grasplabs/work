@@ -5,15 +5,6 @@ import type {
   WorkflowShareCandidates,
 } from "@grasp-os/shared/workflow-resources";
 import { Button } from "@grasp-os/ui/components/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@grasp-os/ui/components/dialog";
 import { Label } from "@grasp-os/ui/components/label";
 import {
   NativeSelect,
@@ -22,19 +13,20 @@ import {
 } from "@grasp-os/ui/components/native-select";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
-import { UserPlusIcon } from "lucide-react";
-import { useEffect, useId, useState } from "react";
+import { useId, useState } from "react";
 
+import { useCoreRead } from "../apps/use-core-read.ts";
 import { ErrorText } from "../error-text.tsx";
 import { roleLabel } from "../labels.ts";
+import { NotLoaded } from "../load-from-core.tsx";
 import { usePeopleApart } from "../people/people-apart.ts";
 import { useCoreAction } from "../use-core-action.ts";
-import { useCore } from "../use-core.ts";
 
 // Sharing an independent workflow (GRA-1304): whom it is open to besides
 // its owner and the admins, as a user (it follows and starts it) or a
 // builder (it also publishes, shares and deletes it). Its builders share
-// it from Share on its page, change a role and unshare it. Whom to share
+// it in its Settings' Sharing, change a role and unshare it, as an App's
+// do; Share with your team, in its bar, adds users alone. Whom to share
 // with comes from `workflowResources.shareCandidates`: the organization's
 // people and teams by name, for whoever may share the workflow, as a
 // builder isn't an admin and can't list the organization's members. Core
@@ -102,53 +94,150 @@ interface Read {
   members: WorkflowMember[];
 }
 
-/** Share on workflow `resource`'s page, for its builders. */
+/**
+ * Whom to offer: the people (not its owner), teams and projects it isn't
+ * shared with yet; none while they are read.
+ */
+const offeredOf = (
+  read: Read | undefined,
+  owner: string
+): WorkflowShareCandidates => {
+  if (read === undefined) {
+    return { people: [], teams: [], projects: [] };
+  }
+  const shared = new Set(read.members.map(({ type, id }) => `${type}:${id}`));
+  return {
+    people: read.candidates.people.filter(
+      ({ id }) => id !== owner && !shared.has(`person:${id}`)
+    ),
+    teams: read.candidates.teams.filter(({ id }) => !shared.has(`team:${id}`)),
+    // Only the projects the person builds: sharing with one reaches
+    // everyone in it, which its builders decide.
+    projects: read.candidates.projects.filter(
+      ({ id }) => !shared.has(`project:${id}`)
+    ),
+  };
+};
+
+/** Whom it is shared with, each with their role, and unsharing them. */
+const SharedWith = ({
+  read,
+  busy,
+  onChange,
+}: {
+  read: Read;
+  busy: boolean;
+  /** Changes a member's role, or unshares them (null). */
+  onChange: (
+    member: Pick<WorkflowMember, "type" | "id">,
+    as: WorkflowRole | null
+  ) => Promise<void>;
+}) => {
+  const { t } = useLingui();
+  const everyone = (project: string): string => t`Everyone in ${project}`;
+  // Told apart among themselves, as an App's list is.
+  const sharedApart = usePeopleApart(
+    read.members.flatMap((member) =>
+      member.type === "person"
+        ? [{ id: member.id, name: nameOf(member, read.candidates) }]
+        : []
+    )
+  );
+  return (
+    <section className="flex flex-col gap-2">
+      <h3 className="text-muted-foreground">
+        <Trans>Shared with</Trans>
+      </h3>
+      {read.members.length === 0 ? (
+        <p className="text-muted-foreground">
+          <Trans context="a workflow">It isn&apos;t shared with anyone.</Trans>
+        </p>
+      ) : (
+        <ul className="flex flex-col divide-y rounded-md border">
+          {read.members.map((member) => {
+            const memberName = nameOf(member, read.candidates);
+            const projectName = member.projectName ?? null;
+            let shown = memberName;
+            if (member.type === "person") {
+              shown = sharedApart.named({
+                id: member.id,
+                name: memberName,
+              });
+            } else if (member.type === "team") {
+              shown = t`${memberName} (team)`;
+            } else if (member.type === "project") {
+              shown =
+                projectName === null
+                  ? t`Everyone in a project you aren’t in`
+                  : everyone(projectName);
+            }
+            return (
+              <li
+                className="flex flex-wrap items-center justify-between gap-2 px-3 py-2"
+                key={`${member.type}:${member.id}`}
+              >
+                <span className="min-w-0 truncate">{shown}</span>
+                <span className="flex items-center gap-2">
+                  <RoleSelect
+                    disabled={busy}
+                    label={t`Role of ${shown}`}
+                    onChange={(next) => {
+                      void onChange(member, next);
+                    }}
+                    role={member.role}
+                  />
+                  <Button
+                    aria-label={t`Stop sharing with ${shown}`}
+                    disabled={busy}
+                    onClick={() => {
+                      void onChange(member, null);
+                    }}
+                    size="sm"
+                    variant="ghost"
+                  >
+                    <Trans>Unshare</Trans>
+                  </Button>
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
+  );
+};
+
+/** Sharing, in workflow `resource`'s settings, for its builders. */
 export const ShareWorkflow = ({
   resource,
 }: {
-  resource: Pick<WorkflowResource, "id" | "name" | "owner" | "role">;
+  resource: Pick<WorkflowResource, "id" | "owner">;
 }) => {
   const { t } = useLingui();
   const ids = useId();
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
-  const [open, setOpen] = useState(false);
-  const [read, setRead] = useState<Read>();
+  // Each change made here, which reads whom it is shared with again.
+  const [changes, setChanges] = useState(0);
+  const loaded = useCoreRead(
+    `${resource.id}/${changes}`,
+    async (session): Promise<Read> => {
+      const [candidates, members] = await Promise.all([
+        session.workflowResources.shareCandidates(resource.id),
+        session.workflowResources.members(resource.id),
+      ]);
+      return { candidates, members };
+    },
+    resource.id
+  );
+  const read = loaded?.state === "ready" ? loaded.data : undefined;
   const [chosen, setChosen] = useState("");
   const [role, setRole] = useState<WorkflowRole>("user");
   const everyone = (project: string): string => t`Everyone in ${project}`;
   const workflow = resource.id;
-  const { name } = resource;
   // Whom to share with: told apart among everyone in the organization,
-  // so from a namesake it is shared with already too. Whom it is shared
-  // with: among themselves, as an App's list is.
+  // so from a namesake it is shared with already too.
   const apart = usePeopleApart(read?.candidates.people ?? []);
-  const sharedApart = usePeopleApart(
-    read === undefined
-      ? []
-      : read.members.flatMap((member) =>
-          member.type === "person"
-            ? [{ id: member.id, name: nameOf(member, read.candidates) }]
-            : []
-        )
-  );
-
-  if (resource.role !== "builder") {
-    return null;
-  }
-
-  const reload = async (): Promise<void> => {
-    const both = await run(async (session) => {
-      const [candidates, members] = await Promise.all([
-        session.workflowResources.shareCandidates(workflow),
-        session.workflowResources.members(workflow),
-      ]);
-      return { candidates, members };
-    });
-    if (both !== undefined) {
-      setRead(both);
-    }
-  };
 
   /** Shares with `member` in `as`, or unshares them, then reads again. */
   const change = async (
@@ -164,245 +253,98 @@ export const ShareWorkflow = ({
     });
     if (done === true) {
       setChosen("");
-      await reload();
+      setChanges((before) => before + 1);
       // Whoever sees it now, as the page reads it.
       void router.invalidate();
     }
   };
 
-  const shared = new Set(
-    (read?.members ?? []).map(({ type, id }) => `${type}:${id}`)
-  );
-  const people = (read?.candidates.people ?? []).filter(
-    ({ id }) => id !== resource.owner && !shared.has(`person:${id}`)
-  );
-  const teams = (read?.candidates.teams ?? []).filter(
-    ({ id }) => !shared.has(`team:${id}`)
-  );
-  // Only the projects the person builds: sharing with one reaches everyone
-  // in it, which its builders decide.
-  const projects = (read?.candidates.projects ?? []).filter(
-    ({ id }) => !shared.has(`project:${id}`)
-  );
+  const { people, teams, projects } = offeredOf(read, resource.owner);
   const [chosenPrefix, chosenId] = chosen.split(":", 2);
   const chosenType = memberTypes.find((type) => type === chosenPrefix);
 
   return (
-    <Dialog
-      onOpenChange={(next) => {
-        setOpen(next);
-        if (next) {
-          void reload();
-        }
-      }}
-      open={open}
-    >
-      <DialogTrigger render={<Button size="sm" variant="outline" />}>
-        <UserPlusIcon aria-hidden="true" />
-        {/* Its icon alone where its bar is narrow (frame/item-shell.tsx). */}
-        <span className="@max-5xl/bar:sr-only">
-          <Trans>Share</Trans>
-        </span>
-      </DialogTrigger>
-      <DialogContent closeLabel={t`Close`}>
-        <DialogHeader>
-          <DialogTitle>
-            <Trans>Share {name}</Trans>
-          </DialogTitle>
-          <DialogDescription>
-            <Trans>
-              Its owner and the admins always have it. A user follows and starts
-              it; a builder also changes, shares and deletes it.
-            </Trans>
-          </DialogDescription>
-        </DialogHeader>
-        {read === undefined ? null : (
-          <form
-            className="flex flex-col gap-2"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (chosenType !== undefined && chosenId !== undefined) {
-                void change({ type: chosenType, id: chosenId }, role);
-              }
-            }}
-          >
-            <Label htmlFor={`${ids}-who`}>
-              <Trans>Share with</Trans>
-            </Label>
-            <div className="flex flex-wrap items-center gap-2">
-              <NativeSelect
-                id={`${ids}-who`}
-                onChange={(event) => {
-                  setChosen(event.target.value);
-                }}
-                value={chosen}
-              >
-                <NativeSelectOption value="">{t`Choose…`}</NativeSelectOption>
-                {people.length === 0 ? null : (
-                  <NativeSelectOptGroup label={t`People`}>
-                    {people.map((person) => (
-                      <NativeSelectOption
-                        key={person.id}
-                        value={`person:${person.id}`}
-                      >
-                        {apart.named(person)}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelectOptGroup>
-                )}
-                {teams.length === 0 ? null : (
-                  <NativeSelectOptGroup label={t`Teams`}>
-                    {teams.map((team) => (
-                      <NativeSelectOption
-                        key={team.id}
-                        value={`team:${team.id}`}
-                      >
-                        {team.name}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelectOptGroup>
-                )}
-                {projects.length === 0 ? null : (
-                  <NativeSelectOptGroup label={t`Projects`}>
-                    {projects.map((project) => (
-                      <NativeSelectOption
-                        key={project.id}
-                        value={`project:${project.id}`}
-                      >
-                        {everyone(project.name)}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelectOptGroup>
-                )}
-              </NativeSelect>
-              <RoleSelect
-                label={t`Role to share with`}
-                onChange={setRole}
-                role={role}
-              />
-              <Button disabled={busy || chosen === ""} size="sm" type="submit">
-                <Trans context="share a workflow with someone">Share</Trans>
-              </Button>
-            </div>
-          </form>
-        )}
-        <ErrorText>{failure}</ErrorText>
-        {read === undefined ? null : (
-          <section className="flex flex-col gap-2">
-            <h3 className="text-muted-foreground">
-              <Trans>Shared with</Trans>
-            </h3>
-            {read.members.length === 0 ? (
-              <p className="text-muted-foreground">
-                <Trans context="a workflow">
-                  It isn&apos;t shared with anyone.
-                </Trans>
-              </p>
-            ) : (
-              <ul className="flex flex-col divide-y rounded-md border">
-                {read.members.map((member) => {
-                  const memberName = nameOf(member, read.candidates);
-                  const projectName = member.projectName ?? null;
-                  let shown = memberName;
-                  if (member.type === "person") {
-                    shown = sharedApart.named({
-                      id: member.id,
-                      name: memberName,
-                    });
-                  } else if (member.type === "team") {
-                    shown = t`${memberName} (team)`;
-                  } else if (member.type === "project") {
-                    shown =
-                      projectName === null
-                        ? t`Everyone in a project you aren’t in`
-                        : everyone(projectName);
-                  }
-                  return (
-                    <li
-                      className="flex flex-wrap items-center justify-between gap-2 px-3 py-2"
-                      key={`${member.type}:${member.id}`}
-                    >
-                      <span className="min-w-0 truncate">{shown}</span>
-                      <span className="flex items-center gap-2">
-                        <RoleSelect
-                          disabled={busy}
-                          label={t`Role of ${shown}`}
-                          onChange={(next) => {
-                            void change(member, next);
-                          }}
-                          role={member.role}
-                        />
-                        <Button
-                          aria-label={t`Stop sharing with ${shown}`}
-                          disabled={busy}
-                          onClick={() => {
-                            void change(member, null);
-                          }}
-                          size="sm"
-                          variant="ghost"
-                        >
-                          <Trans>Unshare</Trans>
-                        </Button>
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </section>
-        )}
-        <DialogFooter closeLabel={t`Close`} showCloseButton />
-      </DialogContent>
-    </Dialog>
-  );
-};
-
-/**
- * Whom workflow `workflow` is shared with, by name, for one who builds
- * it (`builds`), who may read whom to share with: what its status says
- * it runs for. None while read, refused, or for anyone else.
- */
-export const useWorkflowUsers = (
-  workflow: string,
-  builds: boolean
-): string[] | undefined => {
-  const core = useCore();
-  const [read, setRead] = useState<{ workflow: string; names: string[] }>();
-  useEffect(() => {
-    if (!builds) {
-      return () => {
-        // Nothing was read.
-      };
-    }
-    let current = true;
-    const load = async (): Promise<void> => {
-      try {
-        const names = await core.withSession(async (session) => {
-          const [candidates, members] = await Promise.all([
-            session.workflowResources.shareCandidates(workflow),
-            session.workflowResources.members(workflow),
-          ]);
-          return members.flatMap((member) => {
-            if (member.type !== "project") {
-              return [nameOf(member, candidates)];
+    <div className="flex flex-col gap-4">
+      <p className="text-muted-foreground">
+        <Trans>
+          Its owner and the admins always have it. A user follows and starts it;
+          a builder also changes, shares and deletes it.
+        </Trans>
+      </p>
+      {read === undefined ? null : (
+        <form
+          className="flex flex-col gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (chosenType !== undefined && chosenId !== undefined) {
+              void change({ type: chosenType, id: chosenId }, role);
             }
-            return member.projectName === null ||
-              member.projectName === undefined
-              ? []
-              : [member.projectName];
-          });
-        });
-        if (current) {
-          setRead({ workflow, names });
-        }
-      } catch {
-        // Its status says it runs for the team, without names.
-      }
-    };
-    void load();
-    return () => {
-      current = false;
-    };
-  }, [core, workflow, builds]);
-  return read?.workflow === workflow ? read.names : undefined;
+          }}
+        >
+          <Label htmlFor={`${ids}-who`}>
+            <Trans>Share with</Trans>
+          </Label>
+          <div className="flex flex-wrap items-center gap-2">
+            <NativeSelect
+              id={`${ids}-who`}
+              onChange={(event) => {
+                setChosen(event.target.value);
+              }}
+              value={chosen}
+            >
+              <NativeSelectOption value="">{t`Choose…`}</NativeSelectOption>
+              {people.length === 0 ? null : (
+                <NativeSelectOptGroup label={t`People`}>
+                  {people.map((person) => (
+                    <NativeSelectOption
+                      key={person.id}
+                      value={`person:${person.id}`}
+                    >
+                      {apart.named(person)}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelectOptGroup>
+              )}
+              {teams.length === 0 ? null : (
+                <NativeSelectOptGroup label={t`Teams`}>
+                  {teams.map((team) => (
+                    <NativeSelectOption key={team.id} value={`team:${team.id}`}>
+                      {team.name}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelectOptGroup>
+              )}
+              {projects.length === 0 ? null : (
+                <NativeSelectOptGroup label={t`Projects`}>
+                  {projects.map((project) => (
+                    <NativeSelectOption
+                      key={project.id}
+                      value={`project:${project.id}`}
+                    >
+                      {everyone(project.name)}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelectOptGroup>
+              )}
+            </NativeSelect>
+            <RoleSelect
+              label={t`Role to share with`}
+              onChange={setRole}
+              role={role}
+            />
+            <Button disabled={busy || chosen === ""} size="sm" type="submit">
+              <Trans context="share a workflow with someone">Share</Trans>
+            </Button>
+          </div>
+        </form>
+      )}
+      <ErrorText>{failure}</ErrorText>
+      {loaded === undefined || loaded.state === "ready" ? null : (
+        <NotLoaded page={loaded} />
+      )}
+      {read === undefined ? null : (
+        <SharedWith busy={busy} onChange={change} read={read} />
+      )}
+    </div>
+  );
 };

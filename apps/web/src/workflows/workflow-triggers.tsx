@@ -46,6 +46,7 @@ import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
+import { workflowVersions } from "./reads.ts";
 import {
   eventLabels,
   eventTypeOf,
@@ -962,7 +963,7 @@ const TriggersRead = ({
             await Promise.all([
               session.workflowResources.triggers.list(workflow),
               builder
-                ? session.workflowResources.versions(workflow)
+                ? workflowVersions(session, workflow)
                 : Promise.resolve([]),
               builder
                 ? session.workflowResources.sources.list()

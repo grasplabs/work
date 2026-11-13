@@ -306,7 +306,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     return await withPerson(this.#check, async (person) => {
       // A builder's, of an App that isn't archived: the chat changes it.
       const { id, name } = await editableApp(this.#env, person, app);
-      const kept = await this.#chatsOf(person.userId).appChat(
+      const kept = await this.#chatsOf(person.userId).subjectChat(
         person.userId,
         id,
         await chatsWorkedOn(this.#env, { kind: "app", id }, person.userId)
@@ -317,6 +317,24 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       // No new chat with a paused agent: it couldn't answer in it.
       await turnAgent(this.#env, chatAgentId);
       return await this.#appChat(person, id, name);
+    });
+  }
+
+  async forWorkflow(workflow: string): Promise<ChatSummary | null> {
+    return await withPerson(this.#check, async (person) => {
+      // A builder's, not Grasp staff's: the chat changes its draft.
+      requireNotStaff(person);
+      const { id } = await requireWorkflowRole(
+        this.#env,
+        person,
+        workflow,
+        "builder"
+      );
+      return await this.#chatsOf(person.userId).subjectChat(
+        person.userId,
+        null,
+        await chatsWorkedOn(this.#env, { kind: "workflow", id }, person.userId)
+      );
     });
   }
 

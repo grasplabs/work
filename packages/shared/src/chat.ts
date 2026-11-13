@@ -1201,6 +1201,12 @@ export interface ChatsApi {
    */
   forApp: (app: string) => Promise<ChatSummary>;
   /**
+   * The person's chat for workflow `workflow`: the one whose agent last
+   * wrote its draft with them, or null while none did, when the next
+   * question starts one. Only for someone who builds the workflow.
+   */
+  forWorkflow: (workflow: string) => Promise<ChatSummary | null>;
+  /**
    * The organization's members, by name, that a question can mention
    * (`ChatQuestion.mentions`): whoever asks needn't be an admin.
    */

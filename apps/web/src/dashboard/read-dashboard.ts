@@ -151,9 +151,6 @@ export const readWaiting = async (
     decisions: partOf(feed, "decisions", (read) =>
       ofKind(read, "decision").map(({ decision }) => decision)
     ),
-    workflowGoLives: partOf(feed, "workflowGoLives", (read) =>
-      ofKind(read, "workflowGoLive")
-    ),
     ...(decidesRequests(identity)
       ? {
           bindings: partOf(feed, "bindings", (read) =>

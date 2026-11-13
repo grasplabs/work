@@ -3682,16 +3682,17 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * `personId`'s chat for App `appId`: the one that last worked on it, as
-   * their list shows it, whether made for the App or one among `drafted`,
-   * whose agent wrote its draft (a chat started on Chat that built it), so
-   * the App's page carries on where they left it, with all it knows;
-   * `null` while they have none. A chat others share on a chat platform is
-   * never one.
+   * `personId`'s chat for an App or a workflow: the one that last worked on
+   * it, as their list shows it, whether made for App `appId` or one among
+   * `drafted`, whose agent wrote its draft (a chat started on Chat that
+   * built it), so its page carries on where they left it, with all it
+   * knows; `null` while they have none. A workflow has no chat made for
+   * it (`appId` null): only one that drafted it. A chat others share on a
+   * chat platform is never one.
    */
-  appChat(
+  subjectChat(
     personId: string,
-    appId: AppId,
+    appId: AppId | null,
     drafted: readonly string[]
   ): ChatSummary | null {
     const chat = this.#db
@@ -3701,7 +3702,7 @@ export class Workspace extends DurableObject<Env> {
         and(
           eq(chats.personId, personId),
           or(
-            eq(chats.appId, appId),
+            appId === null ? undefined : eq(chats.appId, appId),
             sql`${chats.id} IN (SELECT value FROM json_each(${JSON.stringify(drafted)}))`
           ),
           isNull(chats.thread)

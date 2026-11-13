@@ -1,6 +1,9 @@
+import { draftErrors } from "@grasp-os/shared/drafts";
 import { failureText } from "@grasp-os/shared/errors";
-import type { DiagramTask } from "@grasp-os/shared/workflow-diagrams";
-import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
+import type {
+  DiagramTask,
+  WorkflowDiagram,
+} from "@grasp-os/shared/workflow-diagrams";
 import type { WorkflowDraft } from "@grasp-os/shared/workflow-resources";
 import { Button } from "@grasp-os/ui/components/button";
 import { Label } from "@grasp-os/ui/components/label";
@@ -27,7 +30,6 @@ import { useEffect, useId, useRef, useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { useCore } from "../use-core.ts";
-import { withHeldCheckpoint } from "./definition-editor.tsx";
 import { stepFieldsAt } from "./step-body.ts";
 import { WorkflowDiagramView } from "./workflow-diagram.tsx";
 import type { Layout } from "./workflow-diagram.tsx";
@@ -35,8 +37,8 @@ import type { Layout } from "./workflow-diagram.tsx";
 // A workflow's Flow (GRA-1402): the page opens on its definition drawn,
 // as the prototype's workflow canvas has it. On a dotted ground, with
 // fit, zoom and layout at its top left, it reads from where it starts,
-// through its steps (the diagram core drew from the draft's checkpoint,
-// `workflow-diagram.tsx`), to where it ends. Its builders open a step to
+// through its steps (the diagram core drew from the draft, while it has
+// no problems, `workflow-diagram.tsx`), to where it ends. Its builders open a step to
 // change it (core's `editStep`, GRA-514), saved as the draft's next
 // revision and checked like any edit; the JSON behind it stays one click
 // away, in its Settings' Definition.
@@ -114,7 +116,7 @@ const Done = () => (
 /** What the last change of a step came to, when it didn't simply pass. */
 type Outcome =
   | { kind: "conflict" }
-  | { kind: "failing"; revision: number }
+  | { kind: "failing" }
   | { kind: "failed"; reason: string };
 
 /** A step's fields as JSON, changed and saved as the draft's next revision. */
@@ -162,13 +164,13 @@ const StepForm = ({
       saved = await core.withSession(
         async (session) =>
           await session.workflowResources.editStep(workflow, {
-            expectedRevision: draft.revision,
+            revision: draft.revision,
             edit: { kind: "change", pointer: task.pointer, step: changed },
           })
       );
     } catch (error) {
       setOutcome(
-        workflowResourceErrors.codeOf(error) === "workflow.draft_conflict"
+        draftErrors.codeOf(error) === "draft.conflict"
           ? { kind: "conflict" }
           : { kind: "failed", reason: failureText(error) }
       );
@@ -176,11 +178,11 @@ const StepForm = ({
       return;
     }
     setBusy(false);
-    onDraft(withHeldCheckpoint(draft, saved));
-    if (saved.checkpoint?.revision === saved.revision) {
-      onDone();
+    onDraft(saved);
+    if (saved.diagram === null) {
+      setOutcome({ kind: "failing" });
     } else {
-      setOutcome({ kind: "failing", revision: saved.revision });
+      onDone();
     }
   };
 
@@ -200,8 +202,6 @@ const StepForm = ({
     setBusy(false);
   };
 
-  // Saved, and the revision it saved doesn't pass: the sheet stays open.
-  const savedRevision = outcome?.kind === "failing" ? outcome.revision : null;
   return (
     <form
       className="flex flex-col gap-4 px-6 py-5"
@@ -228,11 +228,12 @@ const StepForm = ({
       <Button className="self-start" disabled={busy} type="submit">
         {busy ? t`Checking…` : t`Check and save`}
       </Button>
-      {savedRevision === null ? null : (
+      {/* Saved, and it doesn't pass: the sheet stays open. */}
+      {outcome?.kind === "failing" ? (
         <p className="text-status-attention">
-          {t`Saved as revision ${savedRevision}, but it doesn't pass yet: Definition says what to fix.`}
+          {t`Saved, but it doesn't pass yet: Definition says what to fix.`}
         </p>
-      )}
+      ) : null}
       {outcome?.kind === "conflict" ? (
         <div className="flex flex-col items-start gap-2">
           <ErrorText>
@@ -272,9 +273,7 @@ const StepSheet = ({
   onClose: () => void;
 }) => {
   const fields =
-    task === null || draft.checkpoint === null
-      ? undefined
-      : stepFieldsAt(draft.checkpoint.source, task.pointer);
+    task === null ? undefined : stepFieldsAt(draft.source, task.pointer);
   return (
     <Sheet
       onOpenChange={(open) => {
@@ -380,28 +379,34 @@ const Controls = ({
   );
 };
 
-/** What the drawing shows, in words, and why a step can't be changed. */
-const Caption = ({
-  draft,
-  checkpointRevision,
-}: {
-  draft: WorkflowDraft;
-  checkpointRevision: number;
-}) => {
-  const { t } = useLingui();
-  const { revision } = draft;
-  // Said only while the draft's newest revision doesn't pass: the Flow
-  // then still draws the last one that did.
-  return checkpointRevision === revision ? null : (
-    <p className="text-status-attention px-4 pb-3">
-      {t`Revision ${revision} doesn't pass yet: fix it under Definition to change steps here. The Flow shows revision ${checkpointRevision}.`}
-    </p>
-  );
+/**
+ * Why a step can't be changed, while the draft doesn't pass: the Flow
+ * then still draws it as it last passed here.
+ */
+const Caption = () => (
+  <p className="text-status-attention px-4 pb-3">
+    <Trans>
+      The draft doesn&apos;t pass yet: fix it under Definition to change steps
+      here. The Flow shows it as it last passed.
+    </Trans>
+  </p>
+);
+
+/**
+ * The diagram to draw: the draft's, or, while it has problems and none,
+ * the one drawn last on this page.
+ */
+const useDrawn = (draft: WorkflowDraft): WorkflowDiagram | null => {
+  const [drawn, setDrawn] = useState(draft.diagram);
+  if (draft.diagram !== null && draft.diagram !== drawn) {
+    setDrawn(draft.diagram);
+  }
+  return draft.diagram ?? drawn;
 };
 
 /**
- * The Flow of a workflow, drawn from its draft's checkpoint, for its
- * builders: `onDraft` takes each draft a change here saves.
+ * The Flow of a workflow, drawn from its draft, for its builders:
+ * `onDraft` takes each draft a change here saves.
  */
 export const WorkflowFlow = ({
   workflow,
@@ -424,11 +429,10 @@ export const WorkflowFlow = ({
   const [step, setStep] = useState<DiagramTask | null>(null);
   const room = useRef<HTMLDivElement>(null);
   const drawing = useRef<HTMLDivElement>(null);
-  const { checkpoint } = draft;
-  // A step is changed on the revision it was drawn from: while the latest
+  const diagram = useDrawn(draft);
+  // A step is changed on the draft it was drawn from: while the draft
   // doesn't pass, the drawing is of an earlier one, and stays as it is.
-  const changeable =
-    checkpoint !== null && checkpoint.revision === draft.revision;
+  const changeable = draft.diagram !== null;
 
   const fit = (): void => {
     setZoom(fitting(drawing.current, room.current));
@@ -466,7 +470,7 @@ export const WorkflowFlow = ({
           data-ground=""
           ref={room}
         >
-          {checkpoint === null ? (
+          {diagram === null ? (
             // Nothing passed yet, as a new workflow starts: its builders
             // tell Grasp how the work runs, in its chat beside the Flow.
             <p className="bg-card text-muted-foreground m-auto max-w-sm rounded-xl border px-5 py-4 text-center">
@@ -486,16 +490,14 @@ export const WorkflowFlow = ({
                   end: <Done />,
                   onStep: changeable ? setStep : undefined,
                 }}
-                diagram={checkpoint.diagram}
+                diagram={diagram}
                 label={t`Diagram`}
               />
             </div>
           )}
         </div>
       </div>
-      {checkpoint === null ? null : (
-        <Caption checkpointRevision={checkpoint.revision} draft={draft} />
-      )}
+      {changeable ? null : <Caption />}
       <StepSheet
         draft={draft}
         onClose={() => {

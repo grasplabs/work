@@ -1025,7 +1025,7 @@ export const previewTarget = (
         follow?.problem();
       }
       await on(link, async ({ apps }) => {
-        await apps.drafts.previewReport(app, at, location.current(), problem);
+        await apps.preview.report(app, at, location.current(), problem);
       });
     },
     ...(follow === undefined ? {} : { followUpdates: follow.followUpdates }),
@@ -1556,7 +1556,7 @@ export const runPreview = (
     frame,
     {
       open: async (session) =>
-        await session.apps.drafts.preview(app, point, version),
+        await session.apps.preview.open(app, point, version),
       openMs: pageLimits.previewOpenMs,
       // A connection of its own: core keeps a preview's callbacks (its
       // server calls') per connection, with no way of the frame's own to
@@ -1585,7 +1585,7 @@ export const runPreview = (
               await on(
                 link,
                 async ({ apps }) =>
-                  await apps.drafts.previewUpdate(
+                  await apps.preview.update(
                     bundle.app,
                     revision,
                     appVersion === undefined ? {} : { appVersion }

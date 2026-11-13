@@ -14,7 +14,8 @@ import { outcome, signedInApi, unique } from "./sign-in.ts";
 
 // A chat bound to an App (`chats.forApp`), through `/rpc` as the App's
 // page reaches it and from the chat's code: the person's chat where Grasp
-// changes the App with them. What could go wrong: someone who doesn't
+// changes the App with them; and a workflow's (`chats.forWorkflow`), the
+// chat whose agent last drafted it with them. What could go wrong: someone who doesn't
 // build the App gets a chat for it, or one for an App that is archived or
 // isn't there; two asks make two chats; one person gets another's chat;
 // the binding goes unrecorded; the chat's agent isn't told the App, and a
@@ -323,6 +324,42 @@ describe("a chat for an App", () => {
 
     expect({ told, refused }).toStrictEqual({
       told: [workflow.name, workflow.id],
+      refused: "workflow.resource_unavailable",
+    });
+  });
+});
+
+describe("a chat for a workflow", () => {
+  it("is the person's chat whose agent last drafted it, none before, and refused to someone who doesn't build it", async () => {
+    const [builder, user] = await Promise.all([
+      signedInApi(idp, "builder"),
+      signedInApi(idp, "user"),
+    ]);
+    const made = await builder.api.workflowResources.create(
+      `quotes-${unique()}`
+    );
+    const id = JSON.stringify(made.id);
+    const draft = `export default async (self, env) => {
+  const draft = await env.workflowBuild.draft(${id});
+  await env.workflowBuild.edit(${id}, { revision: draft.revision, source: draft.source + "\\n" });
+};`;
+    const { stub, newChat } = await personalChatsOf(
+      builder.userId,
+      codeStep(draft),
+      says("Drafted.")
+    );
+    const before = await builder.api.chats.forWorkflow(made.id);
+    const { chat } = await newChat();
+    await stub.ask(chat.id, { text: "Draft it.", model });
+
+    const after = await builder.api.chats.forWorkflow(made.id);
+    expect({
+      before,
+      after: after?.id,
+      refused: await outcome(user.api.chats.forWorkflow(made.id)),
+    }).toStrictEqual({
+      before: null,
+      after: chat.id,
       refused: "workflow.resource_unavailable",
     });
   });

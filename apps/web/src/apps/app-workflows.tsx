@@ -58,6 +58,7 @@ import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
+import { workflowVersions } from "../workflows/reads.ts";
 import { buildsApp } from "./app-role.ts";
 
 // The workflows an App's App starts, on the App's Resources tab, for
@@ -118,7 +119,7 @@ const BindDialog = ({
       }
       const loaded = await loadFromCore(
         core,
-        async (session) => await session.workflowResources.versions(workflow),
+        async (session) => await workflowVersions(session, workflow),
         left.signal
       );
       if (!left.signal.aborted) {

@@ -1,9 +1,5 @@
-import type {
-  AppDraft,
-  AppDraftChanges,
-  AppDraftHistoryPoint,
-} from "@grasp-os/shared/app-drafts";
 // @vitest-environment happy-dom
+import type { AppDraftChanges } from "@grasp-os/shared/app-drafts";
 import type {
   App,
   AppMember,
@@ -16,6 +12,11 @@ import type {
   ChatUpdate,
   PreviewBundle,
 } from "@grasp-os/shared/chat";
+import type {
+  Draft,
+  DraftCheckpoint,
+  LiveVersion,
+} from "@grasp-os/shared/drafts";
 import {
   appIdSchema,
   permissionIdSchema,
@@ -23,6 +24,7 @@ import {
 } from "@grasp-os/shared/ids";
 import type { Permission } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
+import type { Subject } from "@grasp-os/shared/subject";
 import { SidebarProvider } from "@grasp-os/ui/components/sidebar";
 import { Toaster } from "@grasp-os/ui/components/toast";
 import { typeInPrompt } from "@grasp-os/ui/testing";
@@ -104,8 +106,8 @@ const fakeApps = ({
   currentVersion?: number | null;
   /** Whom it is shared with now. */
   sharedWith?: AppMember[];
-  /** The draft's undo points, newest first. */
-  points?: AppDraftHistoryPoint[];
+  /** The draft's checkpoints, newest first. */
+  points?: DraftCheckpoint[];
 } = {}) => {
   const calls: string[] = [];
   let members = sharedWith;
@@ -148,16 +150,16 @@ const fakeApps = ({
             label:
               version <= (app.currentVersion ?? 0) ? `26.11.${version}` : null,
           }),
-        // Publishing a version again: `version` live, over the draft at
+        // Rolling back to a version: `version` live, over the draft at
         // `revision`, only over `expected`, the version the person saw live.
-        publish: async (
+        rollback: async (
           id: string,
           version: number,
           revision?: number,
           expected?: number | null
         ): Promise<App> => {
           calls.push(
-            `publish ${id} ${version} over ${revision} from ${expected}`
+            `rollback ${id} ${version} over ${revision} from ${expected}`
           );
           await Promise.resolve();
           app = {
@@ -202,10 +204,10 @@ const fakeApps = ({
           );
         },
       },
-      /** The draft's undo points, newest first. */
-      draftPoints: async (): Promise<AppDraftHistoryPoint[]> =>
+      /** The draft's checkpoints, newest first. */
+      draftPoints: async (): Promise<DraftCheckpoint[]> =>
         await Promise.resolve(points),
-      /** Makes undo point `point` the draft again, over `revision`. */
+      /** Makes checkpoint `point` the draft again, over `revision`. */
       restoreDraftPoint: async (
         _app: string,
         point: number,
@@ -255,8 +257,8 @@ const isApp = (data: unknown): data is ViewedApp =>
 const draftOf = (
   app: string,
   changed: string[] = ["src/routes/index.tsx"]
-): AppDraft => ({
-  app: appIdSchema.parse(app),
+): Draft => ({
+  subject: { kind: "app", id: appIdSchema.parse(app) },
   base: 1,
   changed,
   deleted: [],
@@ -282,6 +284,13 @@ const watching = () => ({
   [Symbol.dispose]: () => {},
 });
 
+/** What a publish or roll back made live, as core answers it. */
+const liveOf = (made: App): LiveVersion => ({
+  subject: { kind: "app", id: made.id },
+  version: made.currentVersion ?? 0,
+  label: made.liveLabel ?? "",
+});
+
 const opened = async (
   apps: ReturnType<typeof fakeApps>["apps"],
   identity: Identity = identityOf(false),
@@ -295,7 +304,7 @@ const opened = async (
    * The App's draft, as core reads it; by default one with a change only
    * its builders see, so the workspace shows their working version.
    */
-  draft: () => Promise<AppDraft> = async () =>
+  draft: () => Promise<Draft> = async () =>
     await Promise.resolve(draftOf("invoice-desk")),
   /** How core answers the person publishing the App's draft; by default not yet. */
   publish: (
@@ -332,25 +341,46 @@ const opened = async (
     summary: async () => await Promise.withResolvers<never>().promise,
   };
   const pendingActions = { list: async () => await Promise.resolve([]) };
-  const withDrafts = {
-    ...apps,
-    drafts: {
-      get: draft,
-      publish,
-      changes,
-      points: apps.draftPoints,
-      restorePoint: apps.restoreDraftPoint,
-      discard: apps.discardDraft,
+  const withReview = { ...apps, review: changes };
+  const drafts = {
+    get: draft,
+    publish: async ({ id }: Subject, revision: number, message?: string) =>
+      liveOf(await publish(id, revision, message)),
+    checkpoints: apps.draftPoints,
+    restore: async ({ id }: Subject, point: number, revision: number) => {
+      await apps.restoreDraftPoint(id, point, revision);
     },
+    discard: async ({ id }: Subject, revision: number) => {
+      await apps.discardDraft(id, revision);
+    },
+  };
+  const versions = {
+    get: async ({ id }: Subject, version: number) =>
+      await apps.versions.get(id, version),
+    rollback: async (
+      { id }: Subject,
+      version: number,
+      revision?: number,
+      expected?: number | null
+    ) => liveOf(await apps.versions.rollback(id, version, revision, expected)),
   };
   const core = {
     withSession: async <T,>(
       action: (session: {
-        apps: typeof withDrafts;
+        apps: typeof withReview;
+        drafts: typeof drafts;
+        versions: typeof versions;
         chats: typeof chats;
         pendingActions: typeof pendingActions;
       }) => Promise<T>
-    ): Promise<T> => await action({ apps: withDrafts, chats, pendingActions }),
+    ): Promise<T> =>
+      await action({
+        apps: withReview,
+        drafts,
+        versions,
+        chats,
+        pendingActions,
+      }),
     // The live App's page joins the tab's connection, which never
     // answers here: it stays on its way.
     onEnded: () => () => {},
@@ -663,11 +693,11 @@ class PreviewingCore extends RpcTarget {
     return this;
   }
 
-  get drafts(): this {
+  get preview(): this {
     return this;
   }
 
-  async preview(...args: unknown[]): Promise<PreviewBundle> {
+  async open(...args: unknown[]): Promise<PreviewBundle> {
     this.asked.push(args);
     this.#reached.resolve(true);
     if (this.#refusal !== undefined) {
@@ -1509,7 +1539,7 @@ describe(AppWorkspace, () => {
 
     expect({ calls: fake.calls, status: status() }).toStrictEqual({
       calls: [
-        "publish invoice-desk 1 over 0 from null",
+        "rollback invoice-desk 1 over 0 from null",
         "share person:p-bo as user",
       ],
       status: "Bo uses it",
@@ -1572,7 +1602,7 @@ describe(AppWorkspace, () => {
       calls: [
         "share team:t-fin as user",
         "unshare team:t-fin",
-        "publish invoice-desk 1 over 0 from 2",
+        "rollback invoice-desk 1 over 0 from 2",
       ],
       status: "Bo uses it",
     });
@@ -1580,7 +1610,7 @@ describe(AppWorkspace, () => {
 
   it("shares only with whom it has no share yet, and Undo puts the shared changes back as the draft over the version before", async () => {
     // The draft as shared, at revision 1, over version 1.
-    const sharedPoint: AppDraftHistoryPoint = {
+    const sharedPoint: DraftCheckpoint = {
       number: 3,
       revision: 1,
       base: 1,
@@ -1629,7 +1659,7 @@ describe(AppWorkspace, () => {
       // Bo stays a builder: only the team, which had no share, is added.
       "share team:t-fin as user",
       "unshare team:t-fin",
-      "publish invoice-desk 1 over 0 from 2",
+      "rollback invoice-desk 1 over 0 from 2",
       // The changes shared are the draft again, as before the share.
       "restore point 3 over 0",
     ]);
@@ -1685,7 +1715,7 @@ describe(AppWorkspace, () => {
       calls: [
         "share team:t-fin as user",
         "unshare team:t-fin",
-        "publish invoice-desk 1 over 1 from 2",
+        "rollback invoice-desk 1 over 1 from 2",
       ],
     });
   });
@@ -1949,8 +1979,10 @@ describe(AppWorkspace, () => {
       async () => {
         await Promise.resolve();
         throw Object.assign(
-          new Error("Someone else changed this App at the same time."),
-          { code: "app.conflict" }
+          new Error(
+            "Someone else changed the draft at the same time. Read it again and retry."
+          ),
+          { code: "draft.conflict" }
         );
       },
       async () => {
@@ -1966,7 +1998,7 @@ describe(AppWorkspace, () => {
 
     expect({
       said: says(
-        "Someone changed the App since you opened this. Look at the changes again, then share."
+        "Someone changed it since you opened this. Look at the changes again, then share."
       ),
       reads,
       calls: fake.calls,

@@ -1,5 +1,5 @@
-import type { ChatSubject, ChatSubjectKind } from "@grasp-os/shared/chat";
-import { chatSubjectKinds } from "@grasp-os/shared/chat";
+import { subjectKinds } from "@grasp-os/shared/subject";
+import type { Subject, SubjectKind } from "@grasp-os/shared/subject";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useEffect, useState } from "react";
@@ -16,8 +16,8 @@ import type { ChatSlot } from "./active-chat.ts";
 // thing, that thing's own chat, as an App's workspace has the chat that
 // builds the App and a workflow's page the chat that draws it. A page
 // says so (`useChatSubject`); each kind of subject says, here, how core
-// finds the person's chat for one, if it keeps one, and what the chat
-// says there. The chat is an ordinary one, in the person's list, held in
+// finds the person's chat for one, if it has one; what the chat says
+// there is the same for both. The chat is an ordinary one, in the person's list, held in
 // a slot of the tab's own (active-chat.ts), so their other chats stay as
 // they were. There it stays docked open beside the page: the page is
 // where its subject is made, so the chat is part of it, and never closes.
@@ -27,50 +27,39 @@ import type { ChatSlot } from "./active-chat.ts";
 //
 //   useChatSubject({ kind: "app", id: app.id }, app.name);
 
-/** What the chat is called and says, on a subject's page. */
-export interface ChatSubjectWords {
-  title: MessageDescriptor;
-  placeholder: MessageDescriptor;
-  empty: MessageDescriptor;
-}
+/**
+ * What the chat is called and says on a subject's page: the same for an
+ * App and a workflow, whose draft its builders share until they share
+ * it with their team.
+ */
+const words = {
+  title: msg`Ask for a change`,
+  placeholder: msg`Say what should change`,
+  empty: msg`Say what to change. Your team sees the changes once you share them.`,
+} satisfies Record<string, MessageDescriptor>;
 
-/** How a kind of subject has its chat. */
-interface ChatSubjectKindOf {
-  /**
-   * The person's chat for subject `id`, as core keeps it, made the first
-   * time; none for a kind core keeps no chat for, whose next question in
-   * a slot holding none starts one.
-   */
-  chatOf?: (session: Session, id: string) => Promise<{ id: string }>;
-  words: ChatSubjectWords;
-}
-
-const kinds: Record<ChatSubjectKind, ChatSubjectKindOf> = {
-  app: {
-    chatOf: async (session, id) => await session.chats.forApp(id),
-    words: {
-      title: msg`Ask for a change`,
-      placeholder: msg`Say what should change`,
-      empty: msg`Say what to change. Only you see the changes until you share them with your team.`,
-    },
-  },
-  workflow: {
-    words: {
-      title: msg`Ask for a change`,
-      placeholder: msg`Say what should change`,
-      empty: msg`Say what to change. Only you see the changes, in the Flow: its runs go on as they are until a new version runs for your team.`,
-    },
-  },
+/**
+ * The person's chat for a subject of each kind, as core keeps it: an
+ * App's made the first time; a workflow's only once its agent drafted it
+ * with them (null before), as the next question in a slot holding none
+ * starts one.
+ */
+const chatOf: Record<
+  SubjectKind,
+  (session: Session, id: string) => Promise<{ id: string } | null>
+> = {
+  app: async (session, id) => await session.chats.forApp(id),
+  workflow: async (session, id) => await session.chats.forWorkflow(id),
 };
 
 /** The tab's slot for `subject`'s chat. */
-export const slotOf = ({ kind, id }: ChatSubject): ChatSlot => `${kind}:${id}`;
+export const slotOf = ({ kind, id }: Subject): ChatSlot => `${kind}:${id}`;
 
-const isKind = (kind: string): kind is ChatSubjectKind =>
-  chatSubjectKinds.some((each) => each === kind);
+const isKind = (kind: string): kind is SubjectKind =>
+  subjectKinds.some((each) => each === kind);
 
 /** The subject whose chat `slot` holds; none for the person's own. */
-export const subjectOf = (slot: ChatSlot): ChatSubject | undefined => {
+export const subjectOf = (slot: ChatSlot): Subject | undefined => {
   if (slot === "chat") {
     return undefined;
   }
@@ -79,18 +68,25 @@ export const subjectOf = (slot: ChatSlot): ChatSubject | undefined => {
   return isKind(kind) ? { kind, id: slot.slice(at + 1) } : undefined;
 };
 
-/** What the chat says about a subject of `kind`. */
-export const subjectWords = (kind: ChatSubjectKind): ChatSubjectWords =>
-  kinds[kind].words;
+/** What the chat says about a subject, of either kind. */
+export const subjectWords = words;
 
 /**
  * Has Grasp's chat be about `subject`, called `name`, while the calling
  * page is open: that subject's chat, in its slot; the person's own again
- * after.
+ * after. None for a page about it that the person doesn't build.
  */
-export const useChatSubject = (subject: ChatSubject, name: string): void => {
-  const slot = slotOf(subject);
+export const useChatSubject = (
+  subject: Subject | undefined,
+  name: string
+): void => {
+  const slot = subject === undefined ? undefined : slotOf(subject);
   useEffect(() => {
+    if (slot === undefined) {
+      return () => {
+        // Not about the page's subject: the person's own chat stays.
+      };
+    }
     showSlot(slot, name);
     return () => {
       showSlot("chat");
@@ -101,9 +97,10 @@ export const useChatSubject = (subject: ChatSubject, name: string): void => {
 /**
  * Asks core for the subject's chat while its slot (`slot`) holds none
  * (`chatId`), and keeps it there: whether it is looking, why not when core
- * gave none, and a way to ask again. Nothing for the person's own slot,
- * one left to start afresh, or a kind core keeps no chat for: its next
- * question starts one.
+ * couldn't say, and a way to ask again. Nothing for the person's own
+ * slot, one left to start afresh, or a subject core has no chat for yet
+ * (a workflow nobody's agent drafted with them): its next question starts
+ * one.
  */
 export const useSubjectChat = (
   slot: ChatSlot,
@@ -120,18 +117,13 @@ export const useSubjectChat = (
   }>();
   // Asked again (Try again) after core gave no chat.
   const [attempt, setAttempt] = useState(0);
+  // The slot whose subject core has no chat for yet.
+  const [none, setNone] = useState<ChatSlot>();
   // Left to start afresh: the next question starts its chat.
   const afresh = useAfresh(slot);
   useEffect(() => {
     const subject = subjectOf(slot);
-    const chatOf =
-      subject === undefined ? undefined : kinds[subject.kind].chatOf;
-    if (
-      subject === undefined ||
-      chatOf === undefined ||
-      chatId !== undefined ||
-      afresh
-    ) {
+    if (subject === undefined || chatId !== undefined || afresh) {
       return () => {
         // Nothing asked.
       };
@@ -140,15 +132,17 @@ export const useSubjectChat = (
     const find = async (): Promise<void> => {
       const found = await loadFromCore(
         core,
-        async (session) => await chatOf(session, subject.id)
+        async (session) => await chatOf[subject.kind](session, subject.id)
       );
       if (!live) {
         return;
       }
-      if (found.state === "ready") {
-        setActiveChat(found.data.id, slot);
-      } else {
+      if (found.state !== "ready") {
         setFailure({ slot, read: found });
+      } else if (found.data === null) {
+        setNone(slot);
+      } else {
+        setActiveChat(found.data.id, slot);
       }
     };
     void find();
@@ -165,9 +159,9 @@ export const useSubjectChat = (
   return {
     searching:
       subject !== undefined &&
-      kinds[subject.kind].chatOf !== undefined &&
       chatId === undefined &&
       !afresh &&
+      none !== slot &&
       shownFailure === undefined,
     failure: shownFailure,
     retry: () => {

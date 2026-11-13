@@ -1,15 +1,11 @@
 import { isGeneratedServerFile } from "@grasp-os/runtime/host";
 import type {
-  AppDraft,
   AppDraftChanges,
   AppDraftProblem,
 } from "@grasp-os/shared/app-drafts";
-import type {
-  App,
-  AppMember,
-  AppMemberRef,
-  ShareCandidates,
-} from "@grasp-os/shared/apps";
+import type { AppMemberRef, ShareCandidates } from "@grasp-os/shared/apps";
+import type { Draft } from "@grasp-os/shared/drafts";
+import type { Subject } from "@grasp-os/shared/subject";
 import { Button } from "@grasp-os/ui/components/button";
 import { Checkbox } from "@grasp-os/ui/components/checkbox";
 import {
@@ -43,16 +39,9 @@ import {
   UsersIcon,
 } from "lucide-react";
 import { useEffect, useId, useState } from "react";
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 
-import { useGlobalChat } from "../chat/global-chat.tsx";
-import { ErrorText } from "../error-text.tsx";
-import { formatList } from "../format.ts";
-import { usePeopleApart } from "../people/people-apart.ts";
-import { useCore } from "../use-core.ts";
-import { ConfirmChange, useDraftChange } from "./app-history.tsx";
-import type { Asked } from "./app-history.tsx";
-import { planLines } from "./data-model-changes.tsx";
+import { planLines } from "../apps/data-model-changes.tsx";
 import {
   AccessChanges,
   ChangesSection,
@@ -60,82 +49,138 @@ import {
   FileChanges,
   groupOf,
   groupOrder,
-} from "./draft-changes.tsx";
-import type { FileGroup } from "./draft-changes.tsx";
-import { fixQuestion } from "./fix-with-grasp.ts";
+} from "../apps/draft-changes.tsx";
+import type { FileGroup } from "../apps/draft-changes.tsx";
+import { fixQuestion } from "../apps/fix-with-grasp.ts";
+import { useGlobalChat } from "../chat/global-chat.tsx";
+import type { Session } from "../core.ts";
+import { ErrorText } from "../error-text.tsx";
+import { formatList } from "../format.ts";
+import { usePeopleApart } from "../people/people-apart.ts";
+import { useCore } from "../use-core.ts";
+import { ConfirmChange, useDraftChange } from "./draft-history.tsx";
+import type { Asked } from "./draft-history.tsx";
+import {
+  addMember,
+  readCandidates,
+  readMembers,
+  removeMember,
+} from "./members.ts";
+import type { Member } from "./members.ts";
 import { isConflict, publishFailureText, settled } from "./publish-errors.ts";
-import { hasChanges } from "./use-app-draft.ts";
+import { hasChanges } from "./use-draft.ts";
 
-// Share with your team, in the App's workspace bar (app-workspace.tsx):
-// the page's one lime action, in place of a separate Publish and Share.
-// It opens a sheet that asks who gets the App (its teams and people, by
-// name, those it is shared with already ticked), says what they'll see,
-// names any access an admin approves first, and what in the App's
-// changes stops it from being shared, with Fix with Grasp. Share does
-// both in one step, with core's own calls: it publishes the changes only
-// the builders see (`apps.drafts.publish`, over the revision the sheet
-// read, so a draft someone changed meanwhile is refused with
-// `app.conflict` and read again rather than shared unseen), then shares
-// the App with whoever was ticked and has no share of it yet
-// (`apps.members.add`), so nobody's role changes. A toast says "Shared
-// with …", with Undo: whoever the share added is taken off again, the
-// version the team had before is theirs again (`apps.versions.publish`
-// over the one just made, so a colleague's since stays), and the changes
-// shared are the builders' draft again (`apps.drafts.restorePoint`), as
-// before the share; confirmed first when the App changed since. The
-// toasts outlive the workspace, so Undo works after leaving it.
+// Share with your team, in the bar of an App's workspace and of a
+// workflow's page alike: the page's one lime action (`PublishButton`), in
+// place of a separate Publish and Share. It opens a sheet that asks who
+// gets it (its teams and people, by name, those it is shared with already
+// ticked), says what they'll see, names any access an admin approves
+// first, and what in its changes stops it from being shared, with Fix with
+// Grasp. Share does both in one step, with core's own calls: it publishes
+// the changes only the builders see (`drafts.publish`, over the revision
+// the sheet read, so a draft someone changed meanwhile is refused with
+// `draft.conflict` and read again rather than shared unseen), then shares
+// it with whoever was ticked and has no share of it yet (members.ts), so
+// nobody's role changes. A toast says "Shared with …", with Undo: whoever
+// the share added is taken off again, the version the team had before is
+// theirs again (`versions.rollback` over the one just made, so a
+// colleague's since stays), and the changes shared are the builders'
+// draft again (`drafts.restore`), as before the share; confirmed first
+// when it changed since. The toasts outlive the page, so Undo works after
+// leaving it.
 //
-// Once the App is shared, changes stay its builders' until they share
-// them: one slim line under the bar says how many and of what, with
-// Share changes, which publishes them as Share does, and Undo, which
-// discards them once the person confirms (app-history.tsx).
+// Once it is shared, changes stay its builders' until they share them:
+// one slim line under the bar (`UnpublishedChanges`) says so, with Undo,
+// which discards them once the person confirms (draft-history.tsx).
 
-/** What the panel read of the draft's changes, or why it couldn't. */
-type ChangesRead =
-  | { state: "ready"; changes: AppDraftChanges }
+/** A problem that stops the draft from being shared: where, and what. */
+type Problem = AppDraftProblem;
+
+/**
+ * What the sheet read of the draft's changes, at the draft's `revision`:
+ * whether they pass their checks, what stops them, and, for an App, all
+ * they change (`AppsApi.review`).
+ */
+interface Review {
+  revision: number;
+  passed: boolean;
+  problems: readonly Problem[];
+  /** An App's changes, for its notes; none for a workflow. */
+  app: AppDraftChanges | null;
+}
+
+/**
+ * Reads the review of `subject`'s draft: an App's from core's review of
+ * it, without what Grasp generates (`server/_generated/`), which every
+ * save writes again and no one edits; a workflow's from its draft's
+ * problems, as the profile found them.
+ */
+const readReview = async (
+  session: Session,
+  { kind, id }: Subject
+): Promise<Review> => {
+  if (kind === "app") {
+    const changes = await session.apps.review(id);
+    return {
+      revision: changes.revision,
+      passed: changes.check.passed,
+      problems: changes.check.problems,
+      app: {
+        ...changes,
+        files: changes.files.filter(({ path }) => !isGeneratedServerFile(path)),
+      },
+    };
+  }
+  const draft = await session.workflowResources.draft(id);
+  return {
+    revision: draft.revision,
+    passed: draft.problems.length === 0,
+    problems: draft.problems.map(({ pointer, message }) => ({
+      at: pointer,
+      line: null,
+      message,
+    })),
+    app: null,
+  };
+};
+
+/** What the sheet read of the draft's changes, or why it couldn't. */
+type ReviewRead =
+  | { state: "ready"; review: Review }
   | { state: "failed"; text: string };
 
 /**
  * The draft's changes, read at each write of the draft (`revision`) and
- * each time the panel asks (`again`), while `reading` (the draft has
- * changes, and Grasp isn't writing it); otherwise the last read of the
- * App's stays, so the button can say how many problems Grasp is fixing.
+ * each time the sheet asks (`again`), while `reading` (the draft has
+ * changes, and Grasp isn't writing it); otherwise the last read stays.
  * Publish never takes it for a later revision than it was read at.
  */
-const useDraftChanges = (
-  app: string,
+const useReview = (
+  subject: Subject,
   revision: number,
   reading: boolean
-): { read: ChangesRead | undefined; again: () => void } => {
+): { read: ReviewRead | undefined; again: () => void } => {
   const core = useCore();
+  const { kind, id } = subject;
+  const key = `${kind}:${id}`;
   const [reads, setReads] = useState(0);
-  const [read, setRead] = useState<{ app: string; read: ChangesRead }>();
+  const [read, setRead] = useState<{ key: string; read: ReviewRead }>();
   useEffect(() => {
     let current = true;
     const load = async (): Promise<void> => {
       if (!reading) {
         return;
       }
-      // Not within a page read's few seconds: the draft's check builds it.
+      // Not within a page read's few seconds: an App's check builds it.
       const found = await settled(
         core,
-        async (session) => await session.apps.drafts.changes(app)
+        async (session) => await readReview(session, { kind, id })
       );
       if (current) {
         setRead({
-          app,
-          // What Grasp generates (`server/_generated/`) every save writes
-          // again; no one edits it, so it isn't a change to review.
+          key: `${kind}:${id}`,
           read: found.ok
-            ? {
-                state: "ready",
-                changes: {
-                  ...found.value,
-                  files: found.value.files.filter(
-                    ({ path }) => !isGeneratedServerFile(path)
-                  ),
-                },
-              }
+            ? { state: "ready", review: found.value }
             : { state: "failed", text: publishFailureText(found.error) },
         });
       }
@@ -145,16 +190,16 @@ const useDraftChanges = (
       current = false;
     };
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `revision` and `reads` say when to read again
-  }, [core, app, revision, reads, reading]);
+  }, [core, kind, id, revision, reads, reading]);
   return {
-    read: read?.app === app ? read.read : undefined,
+    read: read?.key === key ? read.read : undefined,
     again: () => {
       setReads((before) => before + 1);
     },
   };
 };
 
-/** Whether publishing changes the App's records, as the panel says once. */
+/** Whether publishing changes the App's records, as the sheet says once. */
 const changesData = (changes: AppDraftChanges, i18n: I18n): boolean =>
   (changes.plan === null ? 0 : planLines(changes.plan, i18n).length) > 0 ||
   (changes.migrations?.length ?? 0) > 0;
@@ -182,7 +227,7 @@ const groupCount = (group: FileGroup, count: number): string => {
   return plural(count, { one: "# other file", other: "# other files" });
 };
 
-/** What the changes are, in a few words each: how many of what. */
+/** What an App's changes are, in a few words each: how many of what. */
 export const changeSummaries = (changes: AppDraftChanges): string[] =>
   groupOrder.flatMap((group) => {
     const count = changes.files.filter(
@@ -196,7 +241,7 @@ const Problems = ({
   problems,
   onFix,
 }: {
-  problems: readonly AppDraftProblem[];
+  problems: readonly Problem[];
   onFix: () => void;
 }) => {
   const { t } = useLingui();
@@ -250,7 +295,7 @@ const Line = ({ icon, children }: { icon: ReactNode; children: ReactNode }) => (
   </p>
 );
 
-/** Everything the changes hold, folded away. */
+/** Everything an App's changes hold, folded away. */
 const Summary = ({ changes }: { changes: AppDraftChanges }) => (
   <Collapsible>
     <CollapsibleTrigger render={<Button size="sm" variant="ghost" />}>
@@ -271,21 +316,15 @@ const Summary = ({ changes }: { changes: AppDraftChanges }) => (
   </Collapsible>
 );
 
-/** What applies to the changes being shared: their data, an admin's approval, problems. */
-const ChangesNotes = ({
-  changes,
-  onFix,
-}: {
-  changes: AppDraftChanges;
-  onFix: (problems: readonly AppDraftProblem[]) => void;
-}) => {
+/** What applies to an App's changes being shared: their data, an admin's approval. */
+const AppNotes = ({ changes }: { changes: AppDraftChanges }) => {
   const { i18n } = useLingui();
   const asksAgain = [...changes.grants, ...changes.callers].some(
     ({ askedAgain }) => askedAgain
   );
   const waiting = changes.permissions.length;
   return (
-    <div className="flex flex-col gap-3">
+    <>
       {changes.files.length === 0 ? null : <Summary changes={changes} />}
       {changesData(changes, i18n) ? (
         <Line icon={<DatabaseIcon className="size-4" />}>
@@ -308,26 +347,39 @@ const ChangesNotes = ({
           </Trans>
         </Line>
       ) : null}
-      {changes.check.passed ? null : (
-        <Problems
-          onFix={() => {
-            onFix(changes.check.problems);
-          }}
-          problems={changes.check.problems}
-        />
-      )}
-    </div>
+    </>
   );
 };
 
+/** What applies to the changes being shared: an App's notes, and problems. */
+const ChangesNotes = ({
+  review,
+  onFix,
+}: {
+  review: Review;
+  onFix: (problems: readonly Problem[]) => void;
+}) => (
+  <div className="flex flex-col gap-3">
+    {review.app === null ? null : <AppNotes changes={review.app} />}
+    {review.passed ? null : (
+      <Problems
+        onFix={() => {
+          onFix(review.problems);
+        }}
+        problems={review.problems}
+      />
+    )}
+  </div>
+);
+
 /**
  * What Undo puts back: whom a share added, and, when it made a new
- * version current over one the team had (`before`) from the draft at
+ * version live over one the team had (`before`) from the draft at
  * `revision`, that version again over the new one (`made`), with the
  * draft as it was shared.
  */
 interface Undoable {
-  app: string;
+  subject: Subject;
   added: readonly AppMemberRef[];
   back: { before: number; made: number; revision: number } | undefined;
 }
@@ -339,7 +391,7 @@ interface Undoable {
 interface UndoTools {
   core: ReturnType<typeof useCore>;
   router: ReturnType<typeof useRouter>;
-  /** Told once it was undone, while the workspace still listens. */
+  /** Told once it was undone, while the page still listens. */
   onDone: () => void;
 }
 
@@ -349,27 +401,29 @@ const undoFailed = (error: unknown): void => {
 };
 
 /**
- * The version the team had before, current again over the App's changes
- * at `revision`, while the one the share made still is: a colleague's
- * share since stays. Then the draft as it was shared is the draft again,
- * over that version (its undo point at the revision shared), so nothing
- * of the builders' work is left only in History.
+ * The version the team had before, live again over the draft at
+ * `revision`, while the one the share made still is: a colleague's share
+ * since stays. Then the draft as it was shared is the draft again, over
+ * that version (its checkpoint at the revision shared), so nothing of the
+ * builders' work is left only in History.
  */
 const takeBack = async (
   { core, router, onDone }: UndoTools,
-  app: string,
+  subject: Subject,
   back: NonNullable<Undoable["back"]>,
   revision: number
 ): Promise<void> => {
   const done = await settled(core, async (session) => {
-    await session.apps.versions.publish(app, back.before, revision, back.made);
-    const [points, now] = await Promise.all([
-      session.apps.drafts.points(app),
-      session.apps.drafts.get(app),
+    await session.versions.rollback(subject, back.before, revision, back.made);
+    const [checkpoints, now] = await Promise.all([
+      session.drafts.checkpoints(subject),
+      session.drafts.get(subject),
     ]);
-    const shared = points.find((point) => point.revision === back.revision);
+    const shared = checkpoints.find(
+      (checkpoint) => checkpoint.revision === back.revision
+    );
     if (shared !== undefined) {
-      await session.apps.drafts.restorePoint(app, shared.number, now.revision);
+      await session.drafts.restore(subject, shared.number, now.revision);
     }
   });
   onDone();
@@ -384,18 +438,18 @@ const takeBack = async (
 /**
  * Undo, from the toast that says it was shared: takes off whoever was
  * added, then puts back the version the team had before, once the person
- * confirms in a toast of its own when the App changed since. Works from
- * the toast alone, after the workspace was left.
+ * confirms in a toast of its own when it changed since. Works from the
+ * toast alone, after the page was left.
  */
 const undoShare = async (
   tools: UndoTools,
-  { app, added, back }: Undoable
+  { subject, added, back }: Undoable
 ): Promise<void> => {
   const { core, router, onDone } = tools;
   const removed = await settled(core, async (session) => {
     for (const member of added) {
       // oxlint-disable-next-line no-await-in-loop -- one at a time, in order
-      await session.apps.members.remove(app, member);
+      await removeMember(session, subject, member);
     }
   });
   if (!removed.ok) {
@@ -410,7 +464,7 @@ const undoShare = async (
   }
   const draft = await settled(
     core,
-    async (session) => await session.apps.drafts.get(app)
+    async (session) => await session.drafts.get(subject)
   );
   if (!draft.ok) {
     undoFailed(draft.error);
@@ -418,37 +472,37 @@ const undoShare = async (
   }
   const { revision } = draft.value;
   if (!hasChanges(draft.value)) {
-    await takeBack(tools, app, back, revision);
+    await takeBack(tools, subject, back, revision);
     return;
   }
   toast.add({
     type: "warning",
     title: pageI18n._(msg`Give your team the version they had before?`),
     description: pageI18n._(
-      msg`The App changed since you shared it. Going back drops those changes, for everyone who builds this App.`
+      msg`It changed since you shared it. Going back drops those changes, for everyone who builds it.`
     ),
     timeout: 0,
     actionProps: {
       children: pageI18n._(msg`Drop them and go back`),
       onClick: () => {
-        void takeBack(tools, app, back, revision);
+        void takeBack(tools, subject, back, revision);
       },
     },
   });
 };
 
 /**
- * The version sharing makes current as it is, with nothing shared yet and
+ * The version sharing makes live as it is, with nothing live yet and
  * changes over it that change nothing (the first of an App made from a
  * blueprint); none otherwise, when the changes are what is shared.
  */
 const versionToShare = (
-  app: App,
-  draft: AppDraft | undefined
+  live: number | null,
+  draft: Draft | undefined
 ): number | undefined =>
   draft !== undefined &&
   !hasChanges(draft) &&
-  app.currentVersion === null &&
+  live === null &&
   draft.base !== null
     ? draft.base
     : undefined;
@@ -457,19 +511,29 @@ const versionToShare = (
 const keyOf = ({ type, id }: AppMemberRef): string => `${type}:${id}`;
 
 /** Someone to share with, by name. */
-export interface Recipient extends AppMemberRef {
+interface Recipient extends AppMemberRef {
   name: string;
 }
 
+/** What is shared: the subject, its name, owner and live version. */
+export interface Shared {
+  subject: Subject;
+  name: string;
+  /** Its owner, who has it always: never offered. */
+  owner: string;
+  /** The version live now; null before the first. */
+  live: number | null;
+}
+
 /**
- * Shares `app`: publishes its changes (`changes`, as read, when there are
+ * Shares it: publishes its changes (as `review` read them, when there are
  * any to share), then shares it with `recipients`; `onShared` and a toast
- * with Undo once done; why not otherwise, and `again` when the App moved,
- * so its changes are read again.
+ * with Undo once done; why not otherwise, and `again` when it moved, so
+ * its changes are read again.
  */
 const useSharing = (
-  app: App,
-  draft: AppDraft | undefined,
+  { subject, live }: Shared,
+  draft: Draft | undefined,
   {
     onShared,
     again,
@@ -483,52 +547,56 @@ const useSharing = (
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string>();
-  const version = versionToShare(app, draft);
+  const version = versionToShare(live, draft);
   const share = async (
-    changes: AppDraftChanges | undefined,
+    review: Review | undefined,
     recipients: readonly Recipient[]
   ): Promise<boolean> => {
     setBusy(true);
     setFailure(undefined);
-    const message = t({
-      message: "Shared from the App's workspace",
-      context: "a version's message",
-    });
-    const before = app.currentVersion;
+    // An App's version keeps a note of where it was shared from.
+    const message =
+      subject.kind === "app"
+        ? t({
+            message: "Shared from the App's workspace",
+            context: "a version's message",
+          })
+        : undefined;
+    const before = live;
     const shared = await settled(core, async (session) => {
       let made = before;
       // Only who has no share yet: a builder ticked stays one.
-      const sharedWith = await session.apps.members.list(app.id);
+      const sharedWith = await readMembers(session, subject);
       const had = new Set(sharedWith.map((member) => keyOf(member)));
       const added = recipients.filter(
         (recipient) => !had.has(keyOf(recipient))
       );
       if (version !== undefined) {
-        const published = await session.apps.versions.publish(
-          app.id,
+        const rolled = await session.versions.rollback(
+          subject,
           version,
           draft?.revision ?? 0,
           null
         );
-        made = published.currentVersion;
-      } else if (changes !== undefined) {
-        const published = await session.apps.drafts.publish(
-          app.id,
-          changes.revision,
+        made = rolled.version;
+      } else if (review !== undefined) {
+        const published = await session.drafts.publish(
+          subject,
+          review.revision,
           message
         );
-        made = published.currentVersion;
+        made = published.version;
       }
-      for (const { type, id } of added) {
+      for (const recipient of added) {
         // oxlint-disable-next-line no-await-in-loop -- one at a time, in order
-        await session.apps.members.add(app.id, { type, id, role: "user" });
+        await addMember(session, subject, recipient);
       }
       return { made, added };
     });
     setBusy(false);
     if (!shared.ok) {
       setFailure(publishFailureText(shared.error));
-      // The App moved: what changes is read again, to look at.
+      // It moved: what changes is read again, to look at.
       if (isConflict(shared.error)) {
         again();
       }
@@ -539,15 +607,15 @@ const useSharing = (
     const { made, added } = shared.value;
     const tools = { core, router, onDone: onShared };
     const undoable: Undoable = {
-      app: app.id,
+      subject,
       added: added.map(({ type, id }) => ({ type, id })),
       back:
         before === null ||
         made === null ||
         made === before ||
-        changes === undefined
+        review === undefined
           ? undefined
-          : { before, made, revision: changes.revision },
+          : { before, made, revision: review.revision },
     };
     const who = formatList(recipients.map(({ name }) => name));
     toast.add({
@@ -577,29 +645,29 @@ const useSharing = (
 };
 
 /**
- * The changes to share, read while the App has some and Grasp isn't
- * working on it, with whether they may be shared now (`ready`) and Fix
- * with Grasp for what stops them.
+ * The changes to share, read while it has some and Grasp isn't working on
+ * it, with whether they may be shared now (`ready`) and Fix with Grasp
+ * for what stops them.
  */
 const useShareable = (
-  app: App,
-  draft: AppDraft | undefined,
+  subject: Subject,
+  draft: Draft | undefined,
   running: boolean
 ) => {
   const { t } = useLingui();
   const chat = useGlobalChat();
   const changing = hasChanges(draft);
-  const { read, again } = useDraftChanges(
-    app.id,
+  const { read, again } = useReview(
+    subject,
     draft?.revision ?? 0,
     changing && !running
   );
-  const changes = read?.state === "ready" ? read.changes : undefined;
-  const current = changes !== undefined && changes.revision === draft?.revision;
-  const fix = (problems: readonly AppDraftProblem[]): void => {
+  const review = read?.state === "ready" ? read.review : undefined;
+  const current = review !== undefined && review.revision === draft?.revision;
+  const fix = (problems: readonly Problem[]): void => {
     void chat.ask(
       fixQuestion(
-        t`Fix these problems the check found, so the App can be shared:`,
+        t`Fix these problems the check found, so it can be shared:`,
         problems
       )
     );
@@ -609,9 +677,9 @@ const useShareable = (
     read,
     again,
     /** The changes as read at the draft's revision; none while they're read. */
-    changes: current ? changes : undefined,
+    review: current ? review : undefined,
     /** Whether the changes may be shared now: read, passing, Grasp done. */
-    ready: !changing || (current && changes.check.passed && !running),
+    ready: !changing || (current && review.passed && !running),
     fix,
   };
 };
@@ -634,7 +702,7 @@ const recipientsOf = (
           .map(({ id, name }) => ({ type: "person" as const, id, name })),
       ];
 
-/** Ticks who gets the App: whom it is shared with already stays ticked. */
+/** Ticks who gets it: whom it is shared with already stays ticked. */
 const WhoGetsIt = ({
   offered,
   members,
@@ -643,7 +711,7 @@ const WhoGetsIt = ({
   onChosen,
 }: {
   offered: readonly Recipient[] | undefined;
-  members: readonly AppMember[];
+  members: readonly Member[];
   chosen: readonly string[];
   disabled: boolean;
   onChosen: (chosen: string[]) => void;
@@ -707,45 +775,85 @@ const WhoGetsIt = ({
 };
 
 /**
+ * The page's one lime action, always labelled: "Share with your team",
+ * or "Share changes" once it is shared and has changes only its builders
+ * see (`pending`), with a dot while there are changes to share. Given as
+ * the trigger of Share with your team's sheet, whose props it takes.
+ */
+export const PublishButton = ({
+  pending,
+  changes,
+  ...props
+}: Omit<ComponentProps<typeof Button>, "size" | "variant"> & {
+  pending: boolean;
+  /** Whether the draft has changes to share: the dot. */
+  changes: boolean;
+}) => (
+  <Button {...props} size="sm" variant="highlight">
+    <UsersIcon data-icon="inline-start" />
+    {pending ? (
+      <Trans>Share changes</Trans>
+    ) : (
+      <Trans>Share with your team</Trans>
+    )}
+    {changes ? (
+      <span
+        aria-hidden="true"
+        className="bg-status-attention size-1.5 rounded-full"
+      />
+    ) : null}
+  </Button>
+);
+
+/** What the sheet says they'll find, for its kind. */
+const FoundUnder = ({ kind }: { kind: Subject["kind"] }) =>
+  kind === "app" ? (
+    <Trans>They&apos;ll find it under Apps, and see it as it is now.</Trans>
+  ) : (
+    <Trans>
+      They&apos;ll find it under Workflows, and run it as it is now.
+    </Trans>
+  );
+
+/**
  * Share with your team, and its sheet: who gets it, what they'll see,
- * what an admin approves first and what stops it; Share does it all.
- * The page's one lime action, always labelled: "Share changes" once it
- * is shared and has changes only its builders see (`pending`, which the
- * line under the bar counts).
+ * what an admin approves first and what stops it; Share does it all. The
+ * page's one lime action, for an App and a workflow alike.
  */
 export const ShareWithTeam = ({
-  app,
+  shared,
   draft,
   members,
   running,
   pending = false,
   onShared,
 }: {
-  app: App;
-  /** The App's changes, as read last; none while they are read. */
-  draft: AppDraft | undefined;
+  shared: Shared;
+  /** Its draft, as read last; none while it is read. */
+  draft: Draft | undefined;
   /** Whom it is shared with now. */
-  members: readonly AppMember[];
+  members: readonly Member[];
   /** Whether Grasp is working on it, or checking it. */
   running: boolean;
+  /** Whether it is shared and has changes only its builders see. */
   pending?: boolean;
   onShared?: () => void;
 }) => {
   const { t } = useLingui();
   const core = useCore();
-  const { name } = app;
+  const { subject, name, owner, live } = shared;
   const [open, setOpen] = useState(false);
   const [candidates, setCandidates] = useState<ShareCandidates>();
   const [chosen, setChosen] = useState<string[]>([]);
-  const shareable = useShareable(app, draft, running);
-  const { busy, failure, share, clear } = useSharing(app, draft, {
+  const shareable = useShareable(subject, draft, running);
+  const { busy, failure, share, clear } = useSharing(shared, draft, {
     onShared: () => {
       onShared?.();
     },
     again: shareable.again,
   });
   const offered =
-    candidates === undefined ? undefined : recipientsOf(candidates, app.owner);
+    candidates === undefined ? undefined : recipientsOf(candidates, owner);
   const recipients = (offered ?? []).filter((each) =>
     chosen.includes(keyOf(each))
   );
@@ -753,15 +861,15 @@ export const ShareWithTeam = ({
   const something =
     recipients.length > 0 ||
     (members.length > 0 &&
-      (shareable.changing || versionToShare(app, draft) !== undefined));
+      (shareable.changing || versionToShare(live, draft) !== undefined));
   const canShare = something && shareable.ready && !busy && !running;
-  const readCandidates = async (): Promise<void> => {
+  const readOffered = async (): Promise<void> => {
     if (candidates !== undefined) {
       return;
     }
     const listed = await settled(
       core,
-      async (session) => await session.apps.members.candidates(app.id)
+      async (session) => await readCandidates(session, subject)
     );
     setCandidates(
       listed.ok ? listed.value : { people: [], teams: [], projects: [] }
@@ -773,36 +881,27 @@ export const ShareWithTeam = ({
         setOpen(opening);
         if (opening) {
           clear();
-          void readCandidates();
+          void readOffered();
         }
       }}
       open={open}
     >
       <SheetTrigger
         render={
-          <Button
+          <PublishButton
+            changes={shareable.changing}
             disabled={draft === undefined}
-            size="sm"
-            variant="highlight"
+            pending={pending}
           />
         }
-      >
-        <UsersIcon data-icon="inline-start" />
-        {pending ? (
-          <Trans>Share changes</Trans>
-        ) : (
-          <Trans>Share with your team</Trans>
-        )}
-      </SheetTrigger>
+      />
       <SheetContent closeLabel={t`Close`} side="right">
         <SheetHeader>
           <SheetTitle>
             <Trans>Share {name}</Trans>
           </SheetTitle>
           <SheetDescription>
-            <Trans>
-              They&apos;ll find it under Apps, and see it as it is now.
-            </Trans>
+            <FoundUnder kind={subject.kind} />
           </SheetDescription>
         </SheetHeader>
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4">
@@ -813,8 +912,7 @@ export const ShareWithTeam = ({
             offered={offered}
             onChosen={setChosen}
           />
-          {running ||
-          (shareable.changing && shareable.changes === undefined) ? (
+          {running || (shareable.changing && shareable.review === undefined) ? (
             <p className="text-muted-foreground flex items-center gap-2">
               <Spinner aria-hidden />
               {running ? (
@@ -827,13 +925,13 @@ export const ShareWithTeam = ({
           {shareable.read?.state === "failed" ? (
             <ErrorText>{shareable.read.text}</ErrorText>
           ) : null}
-          {shareable.changes === undefined ? null : (
+          {shareable.review === undefined ? null : (
             <ChangesNotes
-              changes={shareable.changes}
               onFix={(problems) => {
                 setOpen(false);
                 shareable.fix(problems);
               }}
+              review={shareable.review}
             />
           )}
           <ErrorText>{failure}</ErrorText>
@@ -843,7 +941,7 @@ export const ShareWithTeam = ({
             disabled={!canShare}
             onClick={() => {
               void (async () => {
-                if (await share(shareable.changes, recipients)) {
+                if (await share(shareable.review, recipients)) {
                   setOpen(false);
                   setChosen([]);
                 }
@@ -862,57 +960,75 @@ export const ShareWithTeam = ({
   );
 };
 
-/** Whether the changes line shows: shared, with changes only its builders see. */
-export const showsChangesLine = (
-  app: App,
-  draft: AppDraft | undefined,
-  members: readonly AppMember[]
-): boolean =>
-  app.currentVersion !== null && members.length > 0 && hasChanges(draft);
+/**
+ * Whether the line of unpublished changes shows: live and shared, with
+ * changes only its builders see.
+ */
+export const showsUnpublishedChanges = (
+  live: number | null,
+  draft: Draft | undefined,
+  members: readonly Member[]
+): boolean => live !== null && members.length > 0 && hasChanges(draft);
+
+/** How many changes only its builders see, as the line counts them. */
+const ChangesCount = ({
+  draft,
+  review,
+}: {
+  draft: Draft;
+  review: Review | undefined;
+}) => {
+  // A workflow's draft is one file: the line says it has changes.
+  if (draft.subject.kind === "workflow") {
+    return <Trans>Changes only you see</Trans>;
+  }
+  const count =
+    review?.app?.files.length ??
+    draft.changed.filter((path) => !isGeneratedServerFile(path)).length;
+  const changed = Math.max(count, 1);
+  return (
+    <Plural
+      one="# change only you see"
+      other="# changes only you see"
+      value={changed}
+    />
+  );
+};
 
 /**
- * Under the bar, once the App is shared and has changes only its builders
- * see: how many and of what, that the workspace shows them, and Undo,
- * which discards them once the person confirms. Share changes is the
- * bar's (`ShareWithTeam`).
+ * Under the bar, once it is shared and has changes only its builders
+ * see: how many and of what, that the page shows them, and Undo, which
+ * discards them once the person confirms. Share changes is the bar's
+ * (`ShareWithTeam`).
  */
-export const ChangesLine = ({
-  app,
+export const UnpublishedChanges = ({
   draft,
   running,
   onChanged,
 }: {
-  app: App;
-  draft: AppDraft;
+  draft: Draft;
   running: boolean;
   /** Told once the changes were shared or undone. */
   onChanged: () => void;
 }) => {
   const { t } = useLingui();
-  const shareable = useShareable(app, draft, running);
+  const { subject } = draft;
+  const shareable = useShareable(subject, draft, running);
   const [asked, setAsked] = useState<Asked>();
-  const undo = useDraftChange(app.id, draft.revision, onChanged);
-  const { changes } = shareable;
-  const count =
-    changes?.files.length ??
-    draft.changed.filter((path) => !isGeneratedServerFile(path)).length;
-  const summaries = changes === undefined ? [] : changeSummaries(changes);
-  const changed = Math.max(count, 1);
-  const problems =
-    changes?.check.passed === false ? changes.check.problems : [];
+  const undo = useDraftChange(subject, draft.revision, onChanged);
+  const { review } = shareable;
+  const appChanges = review?.app ?? null;
+  const summaries = appChanges === null ? [] : changeSummaries(appChanges);
+  const problems = review?.passed === false ? review.problems : [];
   return (
     <section
       aria-label={t`Changes only you see`}
       className="bg-muted flex flex-none flex-wrap items-center gap-x-3 gap-y-1 border-b px-3 py-1.5"
     >
       <p className="font-medium">
-        <Plural
-          one="# change only you see"
-          other="# changes only you see"
-          value={changed}
-        />
+        <ChangesCount draft={draft} review={review} />
       </p>
-      {/* The workspace shows them while there are some (app-workspace.tsx). */}
+      {/* The page shows them while there are some. */}
       <p className="text-muted-foreground">
         <Trans>You’re seeing your version.</Trans>
       </p>

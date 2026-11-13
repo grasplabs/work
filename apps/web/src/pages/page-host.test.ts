@@ -668,8 +668,8 @@ const previewOver = (answer: unknown, lease: string | null = "lease") => {
   };
   const session = {
     apps: {
-      drafts: {
-        previewReport: async (
+      preview: {
+        report: async (
           _app: string,
           revision: number,
           _page: string,
@@ -691,7 +691,7 @@ const previewOver = (answer: unknown, lease: string | null = "lease") => {
   // The revision the frame's reports are of, as its updates say.
   const reporting = { at: 1 };
   // SAFETY: a preview's calls, reports and live queries reach only these
-  // of `apps.drafts` and `pages`, which the stand-in has.
+  // of `apps.preview` and `pages`, which the stand-in has.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion, anti-slop/no-chained-type-assertions -- see SAFETY
   const asLink = link as unknown as FrameLink;
   const { lease: _bundleLease, ...unleased } = bundle;

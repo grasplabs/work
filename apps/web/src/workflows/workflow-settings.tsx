@@ -1,4 +1,4 @@
-import type { WorkflowLifecycle } from "@grasp-os/shared/workflow-lifecycle";
+import type { Identity } from "@grasp-os/shared/rpc";
 import type {
   SteeredWrite,
   WorkflowDraft,
@@ -9,22 +9,14 @@ import type {
 } from "@grasp-os/shared/workflow-resources";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { buttonVariants } from "@grasp-os/ui/components/button";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/ui/components/table";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link, useRouter } from "@tanstack/react-router";
-import { useId } from "react";
 import type { ReactNode } from "react";
 
-import { formatDateTime, formatList } from "../format.ts";
+import { DraftHistory } from "../drafts/draft-history.tsx";
+import { formatList } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import {
@@ -41,27 +33,29 @@ import { FilesAndApps } from "./files-and-apps.tsx";
 import { KeptState } from "./kept-state.tsx";
 import { ResourceParams } from "./resource-params.tsx";
 import { SavedAgo } from "./saved-ago.tsx";
+import { ShareWorkflow } from "./share-workflow.tsx";
 import { VersionSource } from "./version-source.tsx";
-import { LiveFacts } from "./workflow-status.tsx";
 import { WorkflowTriggers } from "./workflow-triggers.tsx";
 
 // Everything about a workflow besides its Flow and its runs, in one place,
 // a section at a time, as an App's settings are (apps/app-settings.tsx):
-// what it serves, whose it is and where it stands (General), what starts
-// it on its own (Triggers), the files its runs wrote and the apps and
-// Brain it works in (Files and apps), its parameters and what it keeps
-// between runs (Parameters), the JSON behind its Flow, for its builders,
-// who save and publish it there (Definition), and its published versions
-// (Versions). Each section is an address of its own (`?section=`).
+// what it serves and whose it is (General), whom it is shared with and as
+// what (Sharing), what starts it on its own (Triggers), the files its runs
+// wrote and the apps and Brain it works in (Files and apps), its
+// parameters and what it keeps between runs (Parameters), the JSON behind
+// its Flow, for its builders (Definition), and its changes and published
+// versions, as an App's History has them (drafts/draft-history.tsx). Each
+// section is an address of its own (`?section=`).
 
 /** The sections, in the order the list shows them. */
 const workflowSettingsSections = [
   "general",
+  "sharing",
   "triggers",
   "files",
   "parameters",
   "definition",
-  "versions",
+  "history",
 ] as const;
 
 export type WorkflowSettingsSection = (typeof workflowSettingsSections)[number];
@@ -75,6 +69,10 @@ export const workflowSettingsSectionOf = (
 const sectionLabels: Record<WorkflowSettingsSection, MessageDescriptor> = {
   general: msg({
     message: "General",
+    context: "a workflow's settings section",
+  }),
+  sharing: msg({
+    message: "Sharing",
     context: "a workflow's settings section",
   }),
   triggers: msg({
@@ -93,8 +91,8 @@ const sectionLabels: Record<WorkflowSettingsSection, MessageDescriptor> = {
     message: "Definition",
     context: "a workflow's settings section",
   }),
-  versions: msg({
-    message: "Versions",
+  history: msg({
+    message: "History",
     context: "a workflow's settings section",
   }),
 };
@@ -104,88 +102,37 @@ const sectionLabels: Record<WorkflowSettingsSection, MessageDescriptor> = {
  * reviewer should have to piece together: each connector's alias and the
  * operations that may write.
  */
-const SteeredWrites = ({ writes }: { writes: readonly SteeredWrite[] }) => {
-  if (writes.length === 0) {
+const SteeredWrites = ({ writes }: { writes: readonly SteeredWrite[] }) => (
+  <span className="flex flex-wrap items-center gap-1">
+    {writes.map((write) => (
+      <Badge key={write.alias} variant="attention">
+        {`${write.alias}: ${formatList(write.operations)}`}
+      </Badge>
+    ))}
+  </span>
+);
+
+/**
+ * What a version's model tasks may steer, under it in History (GRA-718,
+ * GRA-727). A version an earlier platform release published, in a format
+ * this one doesn't read (`refused`), never runs: it says so, and to
+ * publish it again, in place of a review of a build it doesn't have.
+ */
+const VersionDetails = ({ version }: { version: WorkflowResourceVersion }) => {
+  if (version.refused !== undefined) {
     return (
-      <span className="text-muted-foreground">
-        <Trans>None</Trans>
+      <span>
+        <Badge variant="attention">
+          <Trans>Made by an earlier platform release: publish it again</Trans>
+        </Badge>
       </span>
     );
   }
-  return (
-    <div className="flex flex-wrap items-center gap-1">
-      {writes.map((write) => (
-        <Badge key={write.alias} variant="attention">
-          {`${write.alias}: ${formatList(write.operations)}`}
-        </Badge>
-      ))}
-    </div>
-  );
-};
-
-/**
- * The published versions, each with the writes its model tasks may steer.
- * A version an earlier platform release published, in a format this one
- * doesn't read (`refused`), never runs: it says so, and to publish it
- * again, in place of a review of a build it doesn't have.
- */
-const Versions = ({ versions }: { versions: WorkflowResourceVersion[] }) => {
-  const { t } = useLingui();
-  const captionId = useId();
-  if (versions.length === 0) {
-    return (
-      <p className="bg-card text-muted-foreground rounded-xl border px-4 py-6 text-center">
-        <Trans>Nothing is published yet.</Trans>
-      </p>
-    );
-  }
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="bg-card overflow-hidden rounded-xl border">
-        <Table aria-describedby={captionId}>
-          <TableHeader>
-            <TableRow>
-              <TableHead variant="card">{t`Version`}</TableHead>
-              <TableHead variant="card">{t`Definition version`}</TableHead>
-              <TableHead variant="card">{t`Published`}</TableHead>
-              <TableHead variant="card">
-                {t`Writes a model may steer`}
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {versions.map((version) => (
-              <TableRow key={version.version}>
-                <TableCell variant="roomy">{version.version}</TableCell>
-                <TableCell variant="roomy">
-                  {version.definitionVersion}
-                </TableCell>
-                <TableCell variant="roomy">
-                  {formatDateTime(version.createdAt)}
-                </TableCell>
-                <TableCell variant="roomy">
-                  {version.refused === undefined ? (
-                    <SteeredWrites writes={version.modelSteeredWrites} />
-                  ) : (
-                    <Badge variant="attention">
-                      <Trans>
-                        Made by an earlier platform release: publish it again
-                      </Trans>
-                    </Badge>
-                  )}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-      <p className="text-muted-foreground" id={captionId}>
-        <Trans>
-          Each of the workflow&apos;s model tasks is taken to reach every call
-          the workflow makes.
-        </Trans>
-      </p>
-    </div>
+  return version.modelSteeredWrites.length === 0 ? null : (
+    <span className="text-muted-foreground flex flex-wrap items-center gap-1 text-xs">
+      <Trans>Writes a model may steer:</Trans>
+      <SteeredWrites writes={version.modelSteeredWrites} />
+    </span>
   );
 };
 
@@ -218,21 +165,20 @@ export interface WorkflowRead {
   /** What it keeps between runs, for its builders and admins only. */
   state: Loaded<WorkflowState> | undefined;
   askable: Loaded<boolean>;
-  /** Where it stands, as the bar has it: a change made there before a read. */
-  lifecycle: Loaded<WorkflowLifecycle>;
   names: Names;
+  /** Who reads it: what History offers them. */
+  identity: Pick<Identity, "userId" | "role" | "staff">;
   /** Whether the reader is one of the organization's admins. */
   admin: boolean;
   /** Whether they approve its bindings: an admin of its own, not Grasp staff. */
   approves: boolean;
 }
 
-/** General: what it serves, whose it is, where it stands, and deleting it. */
+/** General: what it serves, whose it is, and deleting it. */
 const General = ({
   resource,
   savedAt,
   askable,
-  lifecycle,
   names,
   admin,
 }: WorkflowRead) => {
@@ -240,7 +186,6 @@ const General = ({
   const router = useRouter();
   const builder = resource.role === "builder";
   const owner = resource.owner === names.me;
-  const status = lifecycle.state === "ready" ? lifecycle.data : undefined;
   return (
     <>
       <SettingsSection title={t`About`}>
@@ -270,18 +215,6 @@ const General = ({
               <OwnedBy names={names} owner={resource.owner} />
             </span>
           </SettingsRow>
-          {status === undefined ? null : (
-            <SettingsRow label={t`Live`}>
-              <span className="flex flex-col items-end gap-1">
-                <LiveFacts lifecycle={status} />
-                {status.live?.selfApproved === true ? (
-                  <Badge variant="outline">
-                    <Trans>Self-approved: nobody else could approve it</Trans>
-                  </Badge>
-                ) : null}
-              </span>
-            </SettingsRow>
-          )}
           {savedAt === null ? null : (
             <SettingsRow label={t`Draft`}>
               <span>
@@ -311,10 +244,12 @@ const SectionBody = ({
   section: WorkflowSettingsSection;
   read: WorkflowRead;
 }) => {
-  const router = useRouter();
-  const { resource, names, approves, versions } = read;
+  const { resource, names, approves, versions, identity } = read;
   const builder = resource.role === "builder";
   const { currentVersion } = resource;
+  if (section === "sharing") {
+    return <ShareWorkflow resource={resource} />;
+  }
   if (section === "triggers") {
     return (
       <WorkflowTriggers
@@ -329,7 +264,6 @@ const SectionBody = ({
       <FilesAndApps
         approves={approves}
         currentVersion={currentVersion}
-        lifecycle={read.lifecycle}
         names={names}
         versions={versions}
         workflow={resource.id}
@@ -359,18 +293,9 @@ const SectionBody = ({
   if (section === "definition" && read.draft !== undefined) {
     return read.draft.state === "ready" ? (
       <DefinitionEditor
-        currentVersion={currentVersion}
         loaded={read.latest ?? read.draft.data}
         onDraft={(next) => {
           read.onDraft(next);
-        }}
-        onPublished={() => {
-          // The new current version, and its place among the versions,
-          // as core has them now.
-          void router.invalidate();
-        }}
-        onVersionMoved={() => {
-          void router.invalidate();
         }}
         workflow={resource.id}
       />
@@ -378,14 +303,20 @@ const SectionBody = ({
       <NotLoadedState page={read.draft} />
     );
   }
-  if (section === "versions") {
+  if (section === "history") {
     return (
       <>
-        {versions.state === "ready" ? (
-          <Versions versions={versions.data} />
-        ) : (
-          <NotLoadedState page={versions} />
-        )}
+        <DraftHistory
+          builds={builder && !identity.staff}
+          renderDetails={(version) =>
+            "resourceId" in version ? (
+              <VersionDetails version={version} />
+            ) : null
+          }
+          identity={identity}
+          live={currentVersion}
+          subject={{ kind: "workflow", id: resource.id }}
+        />
         <VersionSource
           builder={builder}
           versions={versions}
@@ -430,8 +361,8 @@ const SectionLink = ({
 
 /**
  * A workflow's settings: the sections the reader sees as a list, and the
- * one open (`section`, or General) beside it. Definition is its builders'
- * alone, who read its draft.
+ * one open (`section`, or General) beside it. Sharing and Definition are
+ * its builders' alone, who read its draft.
  */
 export const WorkflowSettings = ({
   section: asked,
@@ -442,7 +373,8 @@ export const WorkflowSettings = ({
 }) => {
   const { t, i18n } = useLingui();
   const sections = workflowSettingsSections.filter(
-    (each) => each !== "definition" || read.draft !== undefined
+    (each) =>
+      (each !== "definition" && each !== "sharing") || read.draft !== undefined
   );
   const section =
     asked === undefined || !sections.includes(asked) ? "general" : asked;

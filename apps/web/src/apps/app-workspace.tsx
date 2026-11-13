@@ -1,5 +1,5 @@
-import type { AppDraft } from "@grasp-os/shared/app-drafts";
 import type { App, AppMember, ViewedApp } from "@grasp-os/shared/apps";
+import type { Draft } from "@grasp-os/shared/drafts";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
   Alert,
@@ -49,6 +49,15 @@ import { setActiveChat } from "../chat/active-chat.ts";
 import { answeredAfterBuild } from "../chat/build-answered.ts";
 import { slotOf, useChatSubject } from "../chat/chat-subject.ts";
 import { useGlobalChat } from "../chat/global-chat.tsx";
+import { ConfirmChange, useDraftChange } from "../drafts/draft-history.tsx";
+import type { Asked } from "../drafts/draft-history.tsx";
+import { memberNames } from "../drafts/members.ts";
+import {
+  ShareWithTeam,
+  showsUnpublishedChanges,
+  UnpublishedChanges,
+} from "../drafts/share-with-team.tsx";
+import { hasChanges, useDraft } from "../drafts/use-draft.ts";
 import { ErrorText } from "../error-text.tsx";
 import {
   ItemBar,
@@ -65,19 +74,15 @@ import type { FrameFix } from "../pages/page-frame.tsx";
 import { useVersionPushes } from "../pages/use-version-pushes.ts";
 import { AppDataModel } from "./app-data-model.tsx";
 import { AppData } from "./app-data.tsx";
-import { ConfirmChange, useDraftChange } from "./app-history.tsx";
-import type { Asked } from "./app-history.tsx";
 import { AppLinkDialog } from "./app-own-link.tsx";
 import { AppSettings, Read } from "./app-settings.tsx";
 import type { AppSettingsSection } from "./app-settings.tsx";
 import { readMembers, sharesApp } from "./app-sharing.tsx";
 import { AppStart } from "./app-start.tsx";
-import { StatusBadge, useStatusMove, userNames } from "./app-status.tsx";
+import { StatusBadge, useStatusMove } from "./app-status.tsx";
 import { DraftPreview } from "./draft-preview.tsx";
 import { fixQuestion } from "./fix-with-grasp.ts";
 import { dismissMadeTip, showsMadeTip } from "./made-tip.ts";
-import { ChangesLine, ShareWithTeam, showsChangesLine } from "./publish.tsx";
-import { hasChanges, useAppDraft } from "./use-app-draft.ts";
 import { readTables, useAppRead } from "./use-app-read.ts";
 import { useCoreRead } from "./use-core-read.ts";
 
@@ -92,7 +97,7 @@ const AppCode = lazy(async () => {
 // App's (frame/item-shell.tsx): back to the Apps, its name and where it
 // stands in plain words ("Only you see this", or who uses it), then what
 // the main area shows (Preview, Code, Data, Settings), "…" and Share with
-// your team, the page's one lime action (publish.tsx). The main area
+// your team, the page's one lime action (drafts/share-with-team.tsx). The main area
 // always shows the App: an App with no page yet asks what it should do
 // (app-start.tsx), and one just made says what to do next, once
 // (made-tip.ts).
@@ -114,9 +119,9 @@ const AppCode = lazy(async () => {
 // Sharing is what gives the team the changes: Share with your team asks
 // who gets it and shares the changes with them in one step; once shared,
 // a line under the bar says how many changes only its builders see, with
-// Share changes and Undo (publish.tsx). The chat's agent never shares.
+// Share changes and Undo (drafts/share-with-team.tsx). The chat's agent never shares.
 // History, in Settings, steps the changes back and goes back to an
-// earlier version (app-history.tsx); its Preview opens an undo point or a
+// earlier version (drafts/draft-history.tsx); its Preview opens an undo point or a
 // version here, read-only (`?point=`, `?version=`).
 
 /** What the main area shows. */
@@ -284,7 +289,7 @@ const WorkspaceBar = ({
   view: WorkspaceView;
   identity: Pick<Identity, "staff">;
   /** The App's changes, as read last; none while they are read, or archived. */
-  draft: AppDraft | undefined;
+  draft: Draft | undefined;
   /** Whom it is shared with; none while they are read. */
   members: readonly AppMember[] | undefined;
   /** Whether the chat's agent is at work on it, or checking it. */
@@ -310,11 +315,16 @@ const WorkspaceBar = ({
           <MoreMenu app={app} changing={hasChanges(draft)} chatId={chatId} />
           {sharesApp(app, identity) ? (
             <ShareWithTeam
-              app={app}
               draft={draft}
               members={members ?? []}
               pending={pending}
               running={running}
+              shared={{
+                subject: { kind: "app", id: app.id },
+                name: app.name,
+                owner: app.owner,
+                live: app.currentVersion,
+              }}
               {...(onShared === undefined ? {} : { onShared })}
             />
           ) : null}
@@ -324,7 +334,7 @@ const WorkspaceBar = ({
       name={app.name}
       state={
         members === undefined && !archived ? undefined : (
-          <StatusBadge app={app} who={userNames(members ?? [])} />
+          <StatusBadge app={app} who={memberNames(members ?? [])} />
         )
       }
     />
@@ -390,7 +400,7 @@ const StaleTestData = ({ app }: { app: string }) => (
 );
 
 /** Whether the App has no page to preview yet: nothing written to it and no version. */
-const hasNoPage = (app: App, draft: AppDraft): boolean =>
+const hasNoPage = (app: App, draft: Draft): boolean =>
   draft.revision === 0 && app.currentVersion === null;
 
 /**
@@ -417,7 +427,9 @@ const useVersionLabel = (
   version: number | undefined
 ): string | undefined => {
   const read = useCoreRead(`${app}/${version ?? ""}`, async (session) =>
-    version === undefined ? null : await session.apps.versions.get(app, version)
+    version === undefined
+      ? null
+      : await session.versions.get({ kind: "app", id: app }, version)
   );
   return read?.state === "ready" ? (read.data?.label ?? undefined) : undefined;
 };
@@ -450,14 +462,14 @@ const ReadOnlyBar = ({
   shown,
   onChanged,
 }: {
-  draft: AppDraft;
+  draft: Draft;
   shown: ReadOnlyShown;
   onChanged: () => void;
 }) => {
   const navigate = useNavigate();
   const [asked, setAsked] = useState<Asked>();
   const label = useVersionLabel(
-    draft.app,
+    draft.subject.id,
     "version" in shown ? shown.version : undefined
   );
   const back = (): void => {
@@ -472,7 +484,7 @@ const ReadOnlyBar = ({
     });
   };
   const { busy, failure, change } = useDraftChange(
-    draft.app,
+    draft.subject,
     draft.revision,
     () => {
       onChanged();
@@ -605,7 +617,7 @@ const PreviewArea = ({
 }: {
   app: App;
   /** The App's draft; none until it is read. */
-  draft: AppDraft | undefined;
+  draft: Draft | undefined;
   shown: ReadOnlyShown | undefined;
   running: boolean;
   /** Where a new App's first version stands: the preview shows once ready. */
@@ -833,7 +845,7 @@ const MainArea = ({
   identity: Identity;
   preview: ReactNode;
   /** The App's draft the preview shows, which the code shows too. */
-  building?: AppDraft | undefined;
+  building?: Draft | undefined;
   /** The draft the Data view changes; none without one. */
   modelDraft?: ModelDraft;
 }) => (
@@ -886,7 +898,7 @@ const showsTeams = ({
   shown,
 }: {
   app: App;
-  draft: AppDraft | undefined;
+  draft: Draft | undefined;
   env: WorkspaceEnv;
   shown: ReadOnlyShown | undefined;
 }): boolean => {
@@ -1033,7 +1045,7 @@ const Building = ({
   identity: Identity;
 }) => {
   const { chatId, running, busy, built, draftChanges } = useAppChat(app.id);
-  const { draft, reread } = useAppDraft(app.id, draftChanges);
+  const { draft, reread } = useDraft({ kind: "app", id: app.id }, draftChanges);
   const changing = hasChanges(draft);
   // Each reset of the test data in Data starts the preview afresh on it,
   // without the alert that it didn't fit.
@@ -1056,7 +1068,7 @@ const Building = ({
   const changesLine =
     !theirs &&
     sharesApp(app, identity) &&
-    showsChangesLine(app, draft, members ?? []);
+    showsUnpublishedChanges(app.currentVersion, draft, members ?? []);
   return (
     <ItemShell
       bar={
@@ -1077,12 +1089,7 @@ const Building = ({
     >
       {env === "live" && changing ? <TeamViewBar app={app.id} /> : null}
       {changesLine && draft !== undefined ? (
-        <ChangesLine
-          app={app}
-          draft={draft}
-          onChanged={reread}
-          running={busy}
-        />
+        <UnpublishedChanges draft={draft} onChanged={reread} running={busy} />
       ) : null}
       <MainArea
         app={app}

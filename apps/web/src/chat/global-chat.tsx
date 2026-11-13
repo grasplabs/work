@@ -1,5 +1,6 @@
-import type { ChatAgent, ChatSubject } from "@grasp-os/shared/chat";
+import type { ChatAgent } from "@grasp-os/shared/chat";
 import type { ModelEfforts } from "@grasp-os/shared/models";
+import type { Subject } from "@grasp-os/shared/subject";
 import { useIsMobile } from "@grasp-os/ui/hooks/use-mobile";
 import { useLingui } from "@lingui/react/macro";
 import { useLocation, useRouteContext } from "@tanstack/react-router";
@@ -154,7 +155,7 @@ const useChatWords = (): ChatWords => {
   const { t, i18n } = useLingui();
   const subject = subjectOf(useShownSlot());
   if (subject !== undefined) {
-    const { title, placeholder, empty } = subjectWords(subject.kind);
+    const { title, placeholder, empty } = subjectWords;
     return {
       title: i18n._(title),
       placeholder: i18n._(placeholder),
@@ -175,7 +176,7 @@ const useChatWords = (): ChatWords => {
  */
 const useQuestionSubject = (
   slot: ChatSlot
-): { about: ChatSubject | undefined; name: string | undefined } => {
+): { about: Subject | undefined; name: string | undefined } => {
   const name = useShownName();
   const about = subjectOf(slot);
   return { about, name: about === undefined ? undefined : name };

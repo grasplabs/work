@@ -14,7 +14,6 @@ import {
   MailWarningIcon,
   PencilLineIcon,
   PlayIcon,
-  RocketIcon,
   ScaleIcon,
   BookOpenIcon,
   ShieldAlertIcon,
@@ -42,7 +41,6 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
     message: "Check a proposal",
     context: "inbox item kind",
   }),
-  goLive: msg({ message: "Go live", context: "inbox item kind" }),
   approveChange: msg({ message: "Change", context: "inbox item kind" }),
   confirmResult: msg({ message: "Result", context: "inbox item kind" }),
   conflict: msg({
@@ -91,7 +89,6 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
 export const kindIcon: Record<InboxKind, LucideIcon> = {
   checkDrawing: WorkflowIcon,
   checkProposal: GitCompareArrowsIcon,
-  goLive: RocketIcon,
   approveChange: PencilLineIcon,
   confirmResult: CircleCheckIcon,
   conflict: SplitIcon,

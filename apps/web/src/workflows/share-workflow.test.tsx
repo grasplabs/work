@@ -17,12 +17,12 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { ShareWorkflow } from "./share-workflow.tsx";
 
-// The Share dialog of an independent workflow, against core's
+// The Sharing settings of an independent workflow, against core's
 // workflowResources as the page reaches them over RPC, faked with the
 // members core keeps: a builder shares with exactly whom and in exactly
 // the role picked, from the people and teams core offers but its owner
 // and whoever has it already; changes a role and unshares; and is told
-// what core refuses. Anyone but a builder is offered no Share.
+// what core refuses.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -46,9 +46,8 @@ const candidates = {
   projects: [],
 };
 
-/** The dialog for a reader in `role`, core refusing shares with `refuses`: what core was asked. */
+/** The section for a builder, core refusing shares with `refuses`: what core was asked. */
 const shown = async (
-  role: "user" | "builder",
   refuses?: string,
   offering = candidates
 ): Promise<unknown[]> => {
@@ -108,14 +107,7 @@ const shown = async (
     getParentRoute: () => rootRoute,
     path: "/",
     component: () => (
-      <ShareWorkflow
-        resource={{
-          id: "workflow-1",
-          name: "Invoices",
-          owner: "owner",
-          role,
-        }}
-      />
+      <ShareWorkflow resource={{ id: "workflow-1", owner: "owner" }} />
     ),
   });
   const router = createRouter({
@@ -187,7 +179,7 @@ const offered = (name: string): string[] =>
     .map(({ value }) => value)
     .filter((value) => value !== "");
 
-describe("sharing an independent workflow from its page", () => {
+describe("sharing an independent workflow in its settings", () => {
   afterEach(() => {
     act(() => {
       root?.unmount();
@@ -197,8 +189,7 @@ describe("sharing an independent workflow from its page", () => {
   });
 
   it("shares with exactly whom and as what the builder picks, from those it isn't shared with but its owner, then changes a role and unshares", async () => {
-    const asked = await shown("builder");
-    await press("Share");
+    const asked = await shown();
     const choices = offered("Share with");
     await pick("Share with", "person:ada");
     await pick("Role to share with", "builder");
@@ -227,11 +218,10 @@ describe("sharing an independent workflow from its page", () => {
   });
 
   it("tells apart someone offered from a namesake it is shared with by the end of their ID", async () => {
-    await shown("builder", undefined, {
+    await shown(undefined, {
       ...candidates,
       people: [...candidates.people, { id: "user-bo-222333", name: "Bo" }],
     });
-    await press("Share");
     const labels = [...(select("Share with")?.options ?? [])]
       .filter(({ value }) => value.startsWith("person:"))
       .map(({ textContent }) => textContent);
@@ -264,21 +254,11 @@ describe("sharing an independent workflow from its page", () => {
   });
 
   it("says what core refuses", async () => {
-    await shown(
-      "builder",
-      "Only the organization's admins and builders build workflows."
-    );
-    await press("Share");
+    await shown("Only the organization's admins and builders build workflows.");
     await pick("Role of Bo", "builder");
 
     expect(document.body.textContent).toContain(
       "Only the organization's admins and builders build workflows."
     );
-  });
-
-  it("offers no Share to someone who doesn't build the workflow", async () => {
-    await shown("user");
-
-    expect(button("Share")).toBeUndefined();
   });
 });

@@ -364,7 +364,7 @@ describe("starting a workflow by hand", () => {
     await type("times", "2");
     await press("Start the run");
     const refused = said().includes(
-      "Ask for it to go live, or ask an admin to approve it on the workflow's Files and apps tab."
+      "Ask an admin to approve it on the workflow's Files and apps tab."
     );
     await press("Open Files and apps");
 

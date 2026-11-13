@@ -40,6 +40,7 @@ import { timeoutMs, withTimeout } from "../core.ts";
 import type { Session } from "../core.ts";
 import { decidesRequests } from "../dashboard/waiting.ts";
 import { readPeople } from "../directory.ts";
+import { DraftHistory } from "../drafts/draft-history.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
@@ -54,7 +55,6 @@ import {
 import { useCoreAction } from "../use-core-action.ts";
 import { AppAccessRequests } from "./app-access-requests.tsx";
 import { ExportDefinition } from "./app-definition.tsx";
-import { AppHistory } from "./app-history.tsx";
 import { AppIntegrations } from "./app-integrations.tsx";
 import { AppLinkDialog, linkAddress } from "./app-own-link.tsx";
 import { AppOwner } from "./app-owner.tsx";
@@ -964,7 +964,14 @@ const SectionBody = ({
     return <Sharing app={app} identity={identity} />;
   }
   if (section === "history") {
-    return <AppHistory app={app} identity={identity} />;
+    return (
+      <DraftHistory
+        builds={builds && !app.archived}
+        identity={identity}
+        live={app.currentVersion}
+        subject={{ kind: "app", id: app.id }}
+      />
+    );
   }
   if (section === "connections") {
     return <Connections app={app} builds={builds} identity={identity} />;

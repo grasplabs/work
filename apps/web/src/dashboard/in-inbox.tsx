@@ -8,8 +8,8 @@ import type { InboxItem, InboxSource } from "../inbox/items.ts";
 import { DashboardGroup } from "./dashboard-card.tsx";
 import type { Viewer, Waiting } from "./waiting.ts";
 
-// What waits on the person that only the inbox settles: versions of
-// workflows asked to go live, decisions runs wait on, starts of
+// What waits on the person that only the inbox settles: decisions runs
+// wait on, starts of
 // workflows their chats' agents asked for, questions of the brain asked of
 // them, schedules that stopped, mailboxes or drives connect stopped hearing
 // for their triggers, workflows' bindings that wait on an admin, and
@@ -18,7 +18,6 @@ import type { Viewer, Waiting } from "./waiting.ts";
 
 /** What the inbox settles and the dashboard has no card of its own for. */
 const settledInInbox = new Set<InboxSource["type"]>([
-  "workflowGoLive",
   "decision",
   "heldStart",
   "asked",

@@ -1,4 +1,4 @@
-import type { AppDraft } from "@grasp-os/shared/app-drafts";
+import type { Draft } from "@grasp-os/shared/drafts";
 import { useLingui } from "@lingui/react/macro";
 
 import { PreviewFrame } from "../pages/page-frame.tsx";
@@ -32,7 +32,7 @@ export const DraftPreview = ({
 }: {
   app: string;
   /** The App's draft; none until it is read. */
-  draft: AppDraft | undefined;
+  draft: Draft | undefined;
   name: string;
   shown: ReadOnlyShown | undefined;
   /** Told once the frame failed (`PreviewFrame`). */

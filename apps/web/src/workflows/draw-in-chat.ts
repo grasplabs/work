@@ -1,41 +1,74 @@
 import type { WorkflowDraft } from "@grasp-os/shared/workflow-resources";
-import { useEffect } from "react";
+import { useEffect, useEffectEvent } from "react";
 
-import { useActiveChat } from "../chat/active-chat.ts";
-import { useChatSubject } from "../chat/chat-subject.ts";
-import { useFollowedChat } from "../chat/chat-watch.ts";
+import { answeredAfterBuild } from "../chat/build-answered.ts";
+import { slotOf, useChatSubject } from "../chat/chat-subject.ts";
+import { useGlobalChat } from "../chat/global-chat.tsx";
 import { useCore } from "../use-core.ts";
 
 // A workflow drawn with Grasp: its builders' chat about it
 // (chat/chat-subject.ts) is docked beside its Flow, and every question
 // asked there names the workflow to the chat's agent, which edits its
-// draft (`env.workflowBuild`). The Flow follows the draft as it does.
-
-/** How often the page reads the draft again while the chat's agent works, in milliseconds. */
-const whileWorking = 2000;
+// draft (`env.workflowBuild`). The Flow follows the draft as anyone
+// writes it, as an App's preview does: the shared draft's revision
+// (drafts/use-draft.ts, which core tells of each write) says when to read
+// the editor's draft again.
 
 /**
- * Follows `workflow`'s draft as the chat docked beside it may
- * change it: while the chat's agent works, the draft is read again every
- * {@link whileWorking} milliseconds, and again as each of its steps lands
- * and as it stops; `onDraft` takes each read, so the Flow draws the latest
- * revision that passes. Core tells the page nothing of a draft's edits,
- * and the chat says only that its agent works, so the page reads.
+ * Has Grasp's chat be its builders' chat about `workflow` while its page
+ * is open, docked beside it, for one who builds it (`builds`): its ID once
+ * found, whether its agent works
+ * on it (`running`), or checks it too (`busy`), whether Grasp answered
+ * after the Build it that made it (`built`), and how often it wrote
+ * drafts (`worked`), which reads the draft again.
  */
-export const useDraftFromChat = (
+export const useWorkflowChat = (
+  workflow: { id: string; name: string },
+  builds: boolean
+) => {
+  useChatSubject(
+    builds ? { kind: "workflow", id: workflow.id } : undefined,
+    workflow.name
+  );
+  const chat = useGlobalChat();
+  const ours =
+    builds && chat.slot === slotOf({ kind: "workflow", id: workflow.id });
+  const running = ours && chat.view.running;
+  return {
+    chatId: ours ? chat.chatId : undefined,
+    running,
+    busy: running || (ours && chat.view.checking),
+    built:
+      ours &&
+      answeredAfterBuild(chat.view.messages, {
+        kind: "workflow",
+        id: workflow.id,
+      }),
+    worked: chat.view.worked,
+    /** What the person calls it: its chat's title, which the plan named. */
+    title: ours ? chat.summary?.title : undefined,
+  };
+};
+
+/**
+ * Reads `workflow`'s draft for its editor again each time the shared
+ * draft moves past the one the page holds (`held`): `onDraft` takes it,
+ * so the Flow draws the latest revision.
+ */
+export const useFollowedDraft = (
   workflow: string,
+  revision: number | undefined,
+  held: number | undefined,
   onDraft: (draft: WorkflowDraft) => void
 ): void => {
   const core = useCore();
-  const chatId = useActiveChat();
-  const { view } = useFollowedChat(chatId);
-  const { running } = view;
-  const steps = view.messages.length;
-  const followed = chatId !== undefined;
+  const took = useEffectEvent(onDraft);
   useEffect(() => {
-    // Nothing said in it yet: nothing changed the draft. Each step that
-    // lands (`steps`) is read after.
-    const said = followed && steps > 0;
+    if (revision === undefined || (held !== undefined && revision <= held)) {
+      return () => {
+        // Nothing to read: the page holds this revision already.
+      };
+    }
     let left = false;
     const read = async (): Promise<void> => {
       try {
@@ -43,38 +76,16 @@ export const useDraftFromChat = (
           async (session) => await session.workflowResources.draft(workflow)
         );
         if (!left) {
-          onDraft(draft);
+          took(draft);
         }
       } catch {
-        // Out of reach for a moment: the next read, or the page's own,
-        // brings it.
+        // Out of reach for a moment: the next write, or the page's own
+        // read, brings it.
       }
     };
-    if (said) {
-      void read();
-    }
-    const timer =
-      said && running
-        ? setInterval(() => {
-            void read();
-          }, whileWorking)
-        : undefined;
+    void read();
     return () => {
       left = true;
-      clearInterval(timer);
     };
-  }, [core, followed, onDraft, running, steps, workflow]);
-};
-
-/**
- * Has Grasp's chat be its builders' chat about `workflow` while its page
- * is open, docked beside it, and its Flow follow the draft as that chat
- * changes it (`onDraft`).
- */
-export const useWorkflowChat = (
-  workflow: { id: string; name: string },
-  onDraft: (draft: WorkflowDraft) => void
-): void => {
-  useChatSubject({ kind: "workflow", id: workflow.id }, workflow.name);
-  useDraftFromChat(workflow.id, onDraft);
+  }, [core, workflow, revision, held]);
 };

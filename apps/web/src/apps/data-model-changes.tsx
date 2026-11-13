@@ -519,7 +519,7 @@ export const useModelChanges = ({
     preview: boolean
   ): Promise<DataModelChange | undefined> =>
     await action.run(
-      async (session) => await session.apps.drafts.define(app, change, preview)
+      async (session) => await session.apps.define(app, change, preview)
     );
   /** Makes `change` now, saying core's problem if it can't be made. */
   const apply = async (change: ModelChange): Promise<boolean> => {

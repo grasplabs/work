@@ -186,9 +186,14 @@ const shown = async (
   };
   const workflowResources = {
     triggers,
-    versions: async () =>
-      await Promise.resolve([{ version: 1 }, { version: 2 }]),
     sources: { list: async () => await Promise.resolve(sources) },
+  };
+  // Its versions, as `versions` lists a workflow's: newest first.
+  const versions = {
+    list: async () =>
+      await Promise.resolve(
+        [2, 1].map((version) => ({ resourceId: "workflow-1", version }))
+      ),
   };
   const connections = {
     list: async (): Promise<ListedConnection[]> => {
@@ -213,11 +218,12 @@ const shown = async (
     withSession: async <T,>(
       action: (session: {
         workflowResources: typeof workflowResources;
+        versions: typeof versions;
         connections: typeof connections;
         permissions: typeof permissions;
       }) => Promise<T>
     ): Promise<T> =>
-      await action({ workflowResources, connections, permissions }),
+      await action({ workflowResources, versions, connections, permissions }),
   };
   const rootRoute = createRootRoute({ component: Outlet });
   const page = createRoute({

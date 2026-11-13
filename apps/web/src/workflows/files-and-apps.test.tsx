@@ -1,5 +1,4 @@
 // @vitest-environment happy-dom
-import type { WorkflowLifecycle } from "@grasp-os/shared/workflow-lifecycle";
 import type {
   PendingWorkflowBindings,
   ListedWorkflowBindingApproval,
@@ -63,7 +62,8 @@ const waiting: PendingWorkflowBindings["bindings"] = [
 const versionTwo: WorkflowResourceVersion = {
   resourceId: workflow,
   version: 2,
-  definitionVersion: "1.0.0",
+  contractVersion: "1.0.0",
+  label: "26.11.2",
   profile: "grasp-workflow/2",
   definitionHash: "definition",
   contractHash: "contract",
@@ -86,26 +86,6 @@ const versionTwo: WorkflowResourceVersion = {
   build: { hash: "build" },
   author: "user-ada",
   createdAt: "2026-11-04T09:00:00.000Z",
-};
-
-/** Version 2 live, as core's lifecycle answers it. */
-const lifecycle: WorkflowLifecycle = {
-  workflowId: workflow,
-  revision: 2,
-  stage: "live",
-  stageSet: false,
-  draft: null,
-  publishedVersion: 2,
-  live: {
-    version: 2,
-    approvedBy: "user-admin",
-    approvedAt: "2026-11-03T09:00:00.000Z",
-    selfApproved: false,
-  },
-  paused: null,
-  goLive: null,
-  canChange: false,
-  canDecide: false,
 };
 
 /** An admin's active approval of `crm` for version 2, as core lists it. */
@@ -181,7 +161,6 @@ const fakeCore = (
             {
               workflow: { id, name: "Quotes" },
               version: 2,
-              live: true,
               bindings: left,
             },
           ];
@@ -268,7 +247,6 @@ const shown = async (
       <FilesAndApps
         approves={approves}
         currentVersion={2}
-        lifecycle={{ state: "ready", data: lifecycle }}
         names={{ people, me: "user-ada" }}
         versions={{ state: "ready", data: [versionTwo] }}
         workflow={workflow}

@@ -1,4 +1,4 @@
-import type { App, AppMember } from "@grasp-os/shared/apps";
+import type { App } from "@grasp-os/shared/apps";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -37,13 +37,6 @@ export const statusOf = (
   }
   return app.currentVersion === null ? "draft" : "live";
 };
-
-/**
- * Who uses the App by name, as its state says it: the teams, people and
- * projects it is shared with, those with a name the person may read.
- */
-export const userNames = (members: readonly AppMember[]): string[] =>
-  members.flatMap(({ name }) => (name === null ? [] : [name]));
 
 /** Who uses it, as a whole sentence: one name, several, or the team. */
 const UsedBy = ({ who }: { who: readonly string[] | undefined }) => {

@@ -39,7 +39,8 @@ const settled = async (): Promise<void> => {
 const published = (version: number): WorkflowResourceVersion => ({
   resourceId: "workflow-1",
   version,
-  definitionVersion: `1.${version}.0`,
+  contractVersion: `1.${version}.0`,
+  label: `26.11.${version}`,
   profile: "grasp-workflow/2",
   definitionHash: "definition",
   contractHash: "contract",
