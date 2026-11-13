@@ -122,6 +122,11 @@ describe("recall by meaning, through core", () => {
   let readers: SourceReaders = { kind: "none" };
   /** The person's sources, by the Brain's key for each (core's brain-next.ts). */
   const sources = new Map<string, SourceRef>();
+  /**
+   * Sources the person may not read, holding the words `withWords` finds
+   * by: another person's team's, and that person's own.
+   */
+  const hidden = new Set<string>();
 
   /**
    * The pack the store gives the person by words and exact parts alone,
@@ -177,6 +182,23 @@ describe("recall by meaning, through core", () => {
         change: crypto.randomUUID(),
         text,
         readers,
+      });
+    }
+    // What the person may not read, holding the words they recall by, so a
+    // recall that goes without meaning shows whether it keeps to them.
+    const { userId: other } = await signedInWithRole(idp, "user");
+    for (const othersReaders of [
+      await soleReadersOf(other),
+      { kind: "owner", personId: other } as const,
+    ]) {
+      const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
+      hidden.add(source.id);
+      // oxlint-disable-next-line no-await-in-loop -- one source at a time
+      await addSource(env, {
+        source,
+        change: crypto.randomUUID(),
+        text: "De pallets voor de andere klant staan in hal vier.",
+        readers: othersReaders,
       });
     }
     await embedEverything();
@@ -237,6 +259,7 @@ describe("recall by meaning, through core", () => {
       expect({
         pack: value,
         byWords: byWords.items.map(({ text, found }) => ({ text, found })),
+        hiddenCited: value.items.filter(({ source }) => hidden.has(source.id)),
         warned,
         tellsQuestion: said.includes("leverancier"),
         tellsPerson: said.includes(personId),
@@ -253,6 +276,7 @@ describe("recall by meaning, through core", () => {
       }).toStrictEqual({
         pack: byWords,
         byWords: [{ text: dutch, found: "words" }],
+        hiddenCited: [],
         warned: [{ event: "brain.recall.without_meaning", reason }],
         tellsQuestion: false,
         tellsPerson: false,
