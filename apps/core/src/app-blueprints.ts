@@ -84,7 +84,7 @@ import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { ensureReleaseContract } from "./workflow-catalog.ts";
-import { workflowKind } from "./workflow-publish.ts";
+import { workflowSteps } from "./workflow-publish.ts";
 import {
   createWorkflowResource,
   definitionProblems,
@@ -303,12 +303,12 @@ const createShippedWorkflows = async (
       // Its first version, built and made live as a publish of its draft
       // would (workflow-publish.ts), with no draft to empty.
       // oxlint-disable-next-line no-await-in-loop -- after its creation
-      const version = await workflowKind.steps.build(env, by, workflow.id, {
+      const version = await workflowSteps.build(env, by, workflow.id, {
         draft: { base: null, changes: {}, definition: null, revision: 0 },
         files: new Map([[workflowFile, definition]]),
       });
       // oxlint-disable-next-line no-await-in-loop -- after it is built
-      await workflowKind.steps.activate(env, by, workflow.id, {
+      await workflowSteps.activate(env, by, workflow.id, {
         version,
         basedOn: null,
         action: "version.published",

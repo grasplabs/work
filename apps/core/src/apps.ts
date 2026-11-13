@@ -1860,8 +1860,8 @@ const liveBase = async (env: Env, app: string): Promise<number | null> => {
 
 /**
  * An App as drafts and versions see it (drafts.ts, publish.ts): its draft
- * written by its builders while it isn't archived, over its live version,
- * and published as app-publish.ts' `appSteps` publish it.
+ * written by its builders while it isn't archived, over its live version
+ * (`liveBase`). How it is published is app-publish.ts' `appSteps`.
  */
 export const appKind: DraftKind = {
   kind: "app",
@@ -1893,17 +1893,5 @@ export const appKind: DraftKind = {
       await listVersions(env, by, app, before),
     get: async (env, by, app, version) =>
       await getVersion(env, by, app, version),
-  },
-  // Imported when used, not at the top: publishing reaches back into this
-  // module.
-  steps: {
-    build: async (env, by, id, built) => {
-      const { appSteps } = await import("./app-publish.ts");
-      return await appSteps.build(env, by, id, built);
-    },
-    activate: async (env, by, id, activated) => {
-      const { appSteps } = await import("./app-publish.ts");
-      return await appSteps.activate(env, by, id, activated);
-    },
   },
 };

@@ -13,8 +13,8 @@ import {
   editWorkflowStep,
   workflowDraft,
 } from "../src/workflow-editor.ts";
-import { workflowKind } from "../src/workflow-publish.ts";
 import {
+  workflowKind,
   createWorkflowResource,
   deleteWorkflowResource,
   shareWorkflowResource,

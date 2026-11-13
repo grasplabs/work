@@ -57,8 +57,8 @@ import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { requireNotStaff } from "./sharing.ts";
 import { Subscription } from "./subscription.ts";
-import { workflowKind } from "./workflow-publish.ts";
 import {
+  workflowKind,
   createWorkflowResource,
   requireWorkflowRole,
 } from "./workflow-resources.ts";

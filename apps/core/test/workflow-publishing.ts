@@ -6,8 +6,7 @@ import type { Acting } from "../src/auth/identity.ts";
 import { draftOf } from "../src/drafts.ts";
 import { publish } from "../src/publish.ts";
 import { editWorkflowDraft } from "../src/workflow-editor.ts";
-import { workflowKind } from "../src/workflow-publish.ts";
-import { workflowVersion } from "../src/workflow-resources.ts";
+import { workflowKind, workflowVersion } from "../src/workflow-resources.ts";
 
 /**
  * Publishes `definition` as workflow `id`'s next version over `/rpc`, as

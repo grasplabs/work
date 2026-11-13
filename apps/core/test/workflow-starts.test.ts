@@ -33,8 +33,8 @@ import {
   createTriggerResource,
   setTriggerEnabled,
 } from "../src/trigger-resources.ts";
-import { workflowKind } from "../src/workflow-publish.ts";
 import {
+  workflowKind,
   createWorkflowResource,
   deleteWorkflowResource,
   shareWorkflowResource,

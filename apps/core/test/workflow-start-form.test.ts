@@ -5,8 +5,8 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { rollback } from "../src/publish.ts";
-import { workflowKind } from "../src/workflow-publish.ts";
 import {
+  workflowKind,
   createWorkflowResource,
   shareWorkflowResource,
 } from "../src/workflow-resources.ts";

@@ -2,11 +2,15 @@ import { draftErrors } from "@grasp-os/shared/drafts";
 import type { LiveVersion } from "@grasp-os/shared/drafts";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { subjectSchema } from "@grasp-os/shared/subject";
+import type { Subject, SubjectKind } from "@grasp-os/shared/subject";
 import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { appSteps } from "./app-publish.ts";
+import { appKind } from "./apps.ts";
 import {
   changesAnything,
   draftOf,
@@ -18,6 +22,8 @@ import {
   rebasedOnto,
 } from "./drafts.ts";
 import type { DraftKind, DraftState } from "./drafts.ts";
+import { workflowSteps } from "./workflow-publish.ts";
+import { workflowKind } from "./workflow-resources.ts";
 
 // Publishing an App's or a workflow's draft, and rolling back to one of
 // its versions (GRA-1665): one step each, run by one of its builders as
@@ -25,9 +31,11 @@ import type { DraftKind, DraftState } from "./drafts.ts";
 // here: the draft is published only at the revision the builder read,
 // only when it changes something, checked and built as the next version,
 // and made live over the version live when the publish began, the draft
-// emptied over it in the batch that makes it live. What differs by kind
-// (how a draft is built and made live) is its `DraftKind.steps`
-// (app-publish.ts, workflow-publish.ts). A version takes its label
+// emptied over it in the batch that makes it live. Each kind is defined
+// the same way: what drafts and versions read of it (its `DraftKind`, in
+// apps.ts and workflow-resources.ts) and how a draft of it is built and
+// made live (its `PublishSteps`, in app-publish.ts and
+// workflow-publish.ts), both registered here (`kinds`, `steps`). A version takes its label
 // (`YY.MM.N`) only in the batch that first makes it live, so a publish
 // that fails takes none.
 //
@@ -60,7 +68,7 @@ import type { DraftKind, DraftState } from "./drafts.ts";
 //   `emptyDraftStatements`), and the draft's followers are told
 //   (`draftRevised`).
 
-/** How a kind publishes a draft (its `DraftKind.steps`). */
+/** How a kind publishes a draft (`steps`). */
 export interface PublishSteps {
   /**
    * Makes `draft` the subject's next version, its files `files`, checked
@@ -92,6 +100,22 @@ export interface PublishSteps {
     }
   ) => Promise<string>;
 }
+
+/** Each kind of subject, as drafts and versions see it. */
+export const kinds: Readonly<Record<SubjectKind, DraftKind>> = {
+  app: appKind,
+  workflow: workflowKind,
+};
+
+/** How each kind publishes a draft and makes a version live. */
+const steps: Readonly<Record<SubjectKind, PublishSteps>> = {
+  app: appSteps,
+  workflow: workflowSteps,
+};
+
+/** The subject a caller names, as they sent it. */
+export const subjectOf = (subject: unknown): Subject =>
+  draftErrors.parse("draft.invalid", subjectSchema, subject);
 
 /** A version number as a caller sends it. */
 const versionSchema = z.int().min(1);
@@ -143,7 +167,7 @@ export const publish = async (
     if (basedOn === null) {
       throw draftErrors.create("draft.empty");
     }
-    const label = await kind.steps.activate(env, by, id, {
+    const label = await steps[kind.kind].activate(env, by, id, {
       version: basedOn,
       basedOn,
       action: "version.published",
@@ -152,9 +176,9 @@ export const publish = async (
     return { subject, version: basedOn, label };
   }
   const files = await filesOf(env, kind, id, draft);
-  const version = await kind.steps.build(env, by, id, { draft, files });
+  const version = await steps[kind.kind].build(env, by, id, { draft, files });
   const at = new Date();
-  const label = await kind.steps.activate(env, by, id, {
+  const label = await steps[kind.kind].activate(env, by, id, {
     version,
     basedOn,
     action: "version.published",
@@ -231,7 +255,7 @@ export const rollback = async (
         live: true,
       });
     }
-    const label = await kind.steps.activate(env, by, id, {
+    const label = await steps[kind.kind].activate(env, by, id, {
       version,
       basedOn: current,
       action: "version.rolled_back",
@@ -247,7 +271,7 @@ export const rollback = async (
     throw draftErrors.create("draft.conflict");
   }
   const at = new Date();
-  const label = await kind.steps.activate(env, by, id, {
+  const label = await steps[kind.kind].activate(env, by, id, {
     version,
     basedOn,
     action: "version.rolled_back",

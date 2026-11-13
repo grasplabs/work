@@ -21,23 +21,18 @@ import {
 } from "./db/core/schema.ts";
 import { retriedBatch } from "./db/d1.ts";
 import { subjectEntry } from "./drafts.ts";
-import type { DraftKind } from "./drafts.ts";
+import type { PublishSteps } from "./publish.ts";
 import { triggersFollowing } from "./trigger-resources.ts";
 import {
   buildWorkflowVersion,
   liveWorkflow,
-  publishedDefinition,
   requireWorkflowRole,
-  stillBuiltBy,
   workflowFile,
-  workflowVersion,
-  workflowVersions,
 } from "./workflow-resources.ts";
 
-// Publishing an independent workflow (GRA-1665): how drafts and versions
-// see a workflow (`workflowKind`), its steps of publish.ts's publish and
-// roll back among them. Its draft is one file,
-// `workflow.json`; building it checks it as the profile and the catalog
+// Publishing an independent workflow (GRA-1665): its steps of
+// publish.ts's publish and roll back (`workflowSteps`). Its draft is one
+// file, `workflow.json`; building it checks it as the profile and the catalog
 // do and compiles it once into the version's sealed build
 // (workflow-resources.ts, `buildWorkflowVersion`); activating a version
 // makes it the one the workflow runs: what a start by hand, an agent's,
@@ -228,51 +223,20 @@ const activate = async (
 };
 
 /**
- * A workflow as drafts and versions see it (drafts.ts, publish.ts): its
- * draft is one file, `workflow.json`, written by its builders while it
- * isn't deleted, over its live version; publishing it checks and builds
- * it as its next version (`buildWorkflowVersion`) and makes that live
- * (`activate`).
+ * How a workflow's draft is published (publish.ts): its one file,
+ * `workflow.json`, checked and built as its next version
+ * (`buildWorkflowVersion`), made live by `activate`.
  */
-export const workflowKind: DraftKind = {
-  kind: "workflow",
-  readable: async (env, by, input) => {
-    const { id } = await requireWorkflowRole(env, by, input, "builder");
-    return id;
+export const workflowSteps: PublishSteps = {
+  build: async (env, by, id, { files }) => {
+    const workflow = await requireWorkflowRole(env, by, id, "builder");
+    const built = await buildWorkflowVersion(
+      env,
+      by,
+      workflow,
+      files.get(workflowFile) ?? ""
+    );
+    return built.version;
   },
-  editable: async (env, by, input) => {
-    const { id } = await requireWorkflowRole(env, by, input, "builder");
-    return id;
-  },
-  stillEditable: (id, by) => stillBuiltBy(by, id),
-  currentVersion: async (env, id) => {
-    const workflow = await liveWorkflow(env, id);
-    return workflow?.currentVersion ?? null;
-  },
-  liveBase: async (env, id) => {
-    const workflow = await liveWorkflow(env, id);
-    return workflow?.currentVersion ?? null;
-  },
-  versionFiles: async (env, id, version) =>
-    new Map([[workflowFile, await publishedDefinition(env, id, version)]]),
-  versionDefinition: async () => await Promise.resolve(null),
-  versions: {
-    list: async (env, by, id, before) =>
-      await workflowVersions(env, by, id, before),
-    get: async (env, by, id, version) =>
-      await workflowVersion(env, by, id, version),
-  },
-  steps: {
-    build: async (env, by, id, { files }) => {
-      const workflow = await requireWorkflowRole(env, by, id, "builder");
-      const built = await buildWorkflowVersion(
-        env,
-        by,
-        workflow,
-        files.get(workflowFile) ?? ""
-      );
-      return built.version;
-    },
-    activate,
-  },
+  activate,
 };

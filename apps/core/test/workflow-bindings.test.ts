@@ -39,8 +39,8 @@ import {
   resolveCatalogKeys,
 } from "../src/workflow-catalog.ts";
 import { setWorkflowParams, workflowParams } from "../src/workflow-params.ts";
-import { workflowKind } from "../src/workflow-publish.ts";
 import {
+  workflowKind,
   createWorkflowResource,
   deleteWorkflowResource,
   shareWorkflowResource,

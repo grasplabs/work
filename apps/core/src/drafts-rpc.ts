@@ -11,11 +11,9 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import { pageErrors } from "@grasp-os/shared/pages";
 import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { subjectSchema } from "@grasp-os/shared/subject";
-import type { Subject, SubjectKind } from "@grasp-os/shared/subject";
+import type { Subject } from "@grasp-os/shared/subject";
 import { z } from "zod";
 
-import { appKind } from "./apps.ts";
 import {
   draftCheckpointsOf,
   draftOf,
@@ -24,16 +22,14 @@ import {
   filesOf,
   restoreCheckpoint,
 } from "./drafts.ts";
-import type { DraftKind } from "./drafts.ts";
 import { draftWatch } from "./durable-objects.ts";
 import { callbackFor, isStub } from "./page-callbacks.ts";
 import type { StillOpen } from "./page-callbacks.ts";
-import { publish } from "./publish.ts";
+import { kinds, publish, subjectOf } from "./publish.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { Subscription } from "./subscription.ts";
-import { workflowKind } from "./workflow-publish.ts";
 
 // A signed-in person's `drafts` (GRA-1665): each App's and workflow's one
 // draft (drafts.ts), which every builder of it and their chats' agents
@@ -43,16 +39,6 @@ import { workflowKind } from "./workflow-publish.ts";
 // audited as theirs. Every write tells the draft's object
 // (draft-watch.ts), which tells every page that follows it (`watch`).
 // Publishing it is publish.ts's.
-
-/** Each kind of subject, as drafts and versions see it. */
-export const kinds: Readonly<Record<SubjectKind, DraftKind>> = {
-  app: appKind,
-  workflow: workflowKind,
-};
-
-/** The subject a caller names, as they sent it. */
-export const subjectOf = (subject: unknown): Subject =>
-  draftErrors.parse("draft.invalid", subjectSchema, subject);
 
 /**
  * Most drafts one connection follows at once, as a connection follows at

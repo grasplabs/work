@@ -21,8 +21,8 @@ import {
   setTriggerEnabled,
 } from "../src/trigger-resources.ts";
 import { editWorkflowDraft, workflowDraft } from "../src/workflow-editor.ts";
-import { workflowKind } from "../src/workflow-publish.ts";
 import {
+  workflowKind,
   createWorkflowResource,
   workflowVersions,
 } from "../src/workflow-resources.ts";

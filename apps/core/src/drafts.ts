@@ -22,7 +22,6 @@ import {
 } from "./db/core/schema.ts";
 import { notNullFailed } from "./db/d1.ts";
 import { draftWatch } from "./durable-objects.ts";
-import type { PublishSteps } from "./publish.ts";
 
 // The draft of an App or a workflow (GRA-1665): one per subject, in core's
 // database, shared by everyone who builds it and by their chats' agents
@@ -84,9 +83,9 @@ export type Builder = Pick<Acting, "userId" | "role" | "teams">;
 
 /**
  * One kind of subject, an App or a workflow, as drafts and versions see
- * it: who reads and writes its draft, the versions a draft is over, and
- * how a draft is published (app-publish.ts' `appKind`,
- * workflow-publish.ts' `workflowKind`).
+ * it: who reads and writes its draft and the versions a draft is over
+ * (apps.ts' `appKind`, workflow-resources.ts' `workflowKind`). How a
+ * draft of it is published is its `PublishSteps` (publish.ts).
  */
 export interface DraftKind {
   kind: SubjectKind;
@@ -136,8 +135,6 @@ export interface DraftKind {
       version: unknown
     ) => Promise<Version>;
   };
-  /** How its draft is published (publish.ts). */
-  steps: PublishSteps;
 }
 
 /** The chat whose agent writes a draft: in which turn and code step. */

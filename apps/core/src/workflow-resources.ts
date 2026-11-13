@@ -90,7 +90,7 @@ import {
   workflowStateWrites,
 } from "./db/core/schema.ts";
 import { isUniqueViolation, notNullFailed } from "./db/d1.ts";
-import type { Builder } from "./drafts.ts";
+import type { Builder, DraftKind } from "./drafts.ts";
 import { checkWorkflowExpressions, withinBuildWait } from "./pages.ts";
 import { namedProjectsFor, requireStillBuilt } from "./project-access.ts";
 import { projectStillBuiltSql } from "./project-sql.ts";
@@ -2914,4 +2914,40 @@ export const releaseWorkflowName = async (
       );
     }
   }
+};
+
+/**
+ * A workflow as drafts and versions see it (drafts.ts, publish.ts): its
+ * draft is one file, `workflow.json`, written by its builders while it
+ * isn't deleted, over its live version. How it is published is
+ * workflow-publish.ts' `workflowSteps`.
+ */
+export const workflowKind: DraftKind = {
+  kind: "workflow",
+  readable: async (env, by, input) => {
+    const { id } = await requireWorkflowRole(env, by, input, "builder");
+    return id;
+  },
+  editable: async (env, by, input) => {
+    const { id } = await requireWorkflowRole(env, by, input, "builder");
+    return id;
+  },
+  stillEditable: (id, by) => stillBuiltBy(by, id),
+  currentVersion: async (env, id) => {
+    const workflow = await liveWorkflow(env, id);
+    return workflow?.currentVersion ?? null;
+  },
+  liveBase: async (env, id) => {
+    const workflow = await liveWorkflow(env, id);
+    return workflow?.currentVersion ?? null;
+  },
+  versionFiles: async (env, id, version) =>
+    new Map([[workflowFile, await publishedDefinition(env, id, version)]]),
+  versionDefinition: async () => await Promise.resolve(null),
+  versions: {
+    list: async (env, by, id, before) =>
+      await workflowVersions(env, by, id, before),
+    get: async (env, by, id, version) =>
+      await workflowVersion(env, by, id, version),
+  },
 };

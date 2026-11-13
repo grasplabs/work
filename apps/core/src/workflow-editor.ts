@@ -15,8 +15,11 @@ import { draftOf, filesOf, saveDraft } from "./drafts.ts";
 import type { ChatWriter, DraftState, DraftWriter } from "./drafts.ts";
 import { withCurrentFunctionNames } from "./workflow-app-functions.ts";
 import { workflowDiagram } from "./workflow-diagram.ts";
-import { workflowKind } from "./workflow-publish.ts";
-import { definitionProblems, workflowFile } from "./workflow-resources.ts";
+import {
+  workflowKind,
+  definitionProblems,
+  workflowFile,
+} from "./workflow-resources.ts";
 import { applyStepEdit } from "./workflow-steps.ts";
 
 // A workflow's draft as its editor and its builders' agents write it
