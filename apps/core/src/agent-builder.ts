@@ -127,6 +127,10 @@ const namedOnce = async (write: () => Promise<unknown>): Promise<void> => {
  */
 const notDeleted = sql`${agents.state} IS NOT 'deleted'`;
 
+/** The agent's row is still `ownerId`'s own, or still the company's for null. */
+const ownedBy = (ownerId: string | null) =>
+  sql`${agents.ownerId} IS ${ownerId}`;
+
 /** The same for a write of another table's row of the agent `agentId`. */
 const keptAgent = (agentId: SQLWrapper) =>
   sql`NOT EXISTS (SELECT 1 FROM ${agents} WHERE ${agents.id} = ${agentId} AND ${agents.state} = 'deleted')`;
@@ -387,37 +391,49 @@ export const changeAgent = async (
     nameKey: ownerId === null ? agentNameKey(changed.name) : null,
   };
   const db = drizzle(env.DB);
+  const differs = or(
+    sql`${agents.name} IS NOT ${changed.name}`,
+    sql`${agents.face} IS NOT ${changed.face}`,
+    sql`${agents.job} IS NOT ${changed.job}`,
+    sql`${agents.instructions} IS NOT ${changed.instructions}`,
+    sql`${agents.modelRole} IS NOT ${changed.modelRole}`,
+    sql`${agents.model} IS NOT ${changed.model}`
+  );
   await namedOnce(
     async () =>
       await auditedBatch(env, db, [
-        db
-          .insert(agents)
-          // The first agent's row, the first time it is changed.
-          .values({
-            id: agent.id,
-            ...named,
-            state: agent.state,
-            madeBy: identity.userId,
-            madeAt: now,
-            ...by,
-          })
-          .onConflictDoUpdate({
-            target: agents.id,
-            set: { ...named, ...by },
-            // Never one deleted since it was read: it stays deleted, and
-            // its name stays free.
-            setWhere: and(
-              notDeleted,
-              or(
-                sql`${agents.name} IS NOT ${changed.name}`,
-                sql`${agents.face} IS NOT ${changed.face}`,
-                sql`${agents.job} IS NOT ${changed.job}`,
-                sql`${agents.instructions} IS NOT ${changed.instructions}`,
-                sql`${agents.modelRole} IS NOT ${changed.modelRole}`,
-                sql`${agents.model} IS NOT ${changed.model}`
-              )
-            ),
-          }),
+        // The first agent's row is made the first time it is changed. Any
+        // other agent has its row, and only that row is changed: one
+        // deleted since it was read stays deleted, with its name free,
+        // and one erased with its owner is never made again, least of
+        // all as the company's.
+        agent.id === firstAgentId
+          ? db
+              .insert(agents)
+              .values({
+                id: agent.id,
+                ...named,
+                state: agent.state,
+                madeBy: identity.userId,
+                madeAt: now,
+                ...by,
+              })
+              .onConflictDoUpdate({
+                target: agents.id,
+                set: { ...named, ...by },
+                setWhere: and(notDeleted, differs),
+              })
+          : db
+              .update(agents)
+              .set({ ...named, ...by })
+              .where(
+                and(
+                  eq(agents.id, agent.id),
+                  notDeleted,
+                  ownedBy(ownerId),
+                  differs
+                )
+              ),
         outboxedIfChanged(db, {
           actor: actorOf(identity),
           action: "agent.changed",
@@ -452,28 +468,42 @@ export const setAgentPaused = async (
   const by = { changedBy: identity.userId, changedAt: now };
   const db = drizzle(env.DB);
   await auditedBatch(env, db, [
-    db
-      .insert(agents)
-      .values({
-        id: agent.id,
-        name: agent.name,
-        nameKey: agentNameKey(agent.name),
-        face: agent.face,
-        job: agent.job,
-        instructions: agent.instructions,
-        modelRole: agent.modelRole,
-        model: agent.model,
-        state,
-        madeBy: identity.userId,
-        madeAt: now,
-        ...by,
-      })
-      .onConflictDoUpdate({
-        target: agents.id,
-        set: { state, ...by },
-        // Never one deleted since it was read: it stays deleted.
-        setWhere: and(notDeleted, sql`${agents.state} IS NOT ${state}`),
-      }),
+    // As `changeAgent` writes: the first agent's row made at its first
+    // change, any other's own row changed, never one deleted or erased
+    // with its owner since it was read.
+    agent.id === firstAgentId
+      ? db
+          .insert(agents)
+          .values({
+            id: agent.id,
+            name: agent.name,
+            nameKey: agentNameKey(agent.name),
+            face: agent.face,
+            job: agent.job,
+            instructions: agent.instructions,
+            modelRole: agent.modelRole,
+            model: agent.model,
+            state,
+            madeBy: identity.userId,
+            madeAt: now,
+            ...by,
+          })
+          .onConflictDoUpdate({
+            target: agents.id,
+            set: { state, ...by },
+            setWhere: and(notDeleted, sql`${agents.state} IS NOT ${state}`),
+          })
+      : db
+          .update(agents)
+          .set({ state, ...by })
+          .where(
+            and(
+              eq(agents.id, agent.id),
+              notDeleted,
+              ownedBy(agent.ownerId),
+              sql`${agents.state} IS NOT ${state}`
+            )
+          ),
     outboxedIfChanged(db, {
       actor: actorOf(identity),
       action: "agent.paused",

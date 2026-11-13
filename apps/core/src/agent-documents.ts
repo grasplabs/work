@@ -7,7 +7,12 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { changeableAgent, readAgent, readableAgent } from "./agents.ts";
+import {
+  changeableAgent,
+  firstAgentId,
+  readAgent,
+  readableAgent,
+} from "./agents.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { readChatFile } from "./chat-files.ts";
 import { agentDocuments, agents } from "./db/core/schema.ts";
@@ -179,7 +184,8 @@ const sameOrNamed = async (
  * file added again is answered with the document it already is.
  *
  * The insert itself holds what was checked before the file was read: the
- * agent wasn't deleted and has room. Reading a file takes a while, and
+ * agent wasn't deleted, is still whose it was (never one erased with its
+ * owner meanwhile, whose row is gone), and has room. Reading a file takes a while, and
  * either may have changed since.
  */
 export const addAgentDocument = async (
@@ -188,7 +194,7 @@ export const addAgentDocument = async (
   agentId: unknown,
   file: unknown
 ): Promise<AgentDocument> => {
-  const { id } = await changeableAgent(env, identity, agentId);
+  const { id, ownerId } = await changeableAgent(env, identity, agentId);
   const read = await readAsDocument(env, file);
   const before = await documentsOf(env, id);
   const named = before.find(({ name }) => name === read.name);
@@ -207,7 +213,8 @@ export const addAgentDocument = async (
   };
   const db = drizzle(env.DB);
   const holds = sql`(SELECT count(*) FROM ${agentDocuments} WHERE ${agentDocuments.agentId} = ${id}) < ${agentDocumentsMax}
-    AND NOT EXISTS (SELECT 1 FROM ${agents} WHERE ${agents.id} = ${id} AND ${agents.state} = 'deleted')`;
+    AND NOT EXISTS (SELECT 1 FROM ${agents} WHERE ${agents.id} = ${id} AND ${agents.state} = 'deleted')
+    AND (${id} = ${firstAgentId} OR EXISTS (SELECT 1 FROM ${agents} WHERE ${agents.id} = ${id} AND ${agents.ownerId} IS ${ownerId}))`;
   try {
     await auditedBatch(env, db, [
       db.insert(agentDocuments).select(
