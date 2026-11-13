@@ -184,6 +184,10 @@ msgstr "{asker} hat es am {askedOn} schon angefragt."
 msgid "{asker} asked to share their skill {name} with the company. Approved, every member's agents use it. Read it on the skills page before you decide."
 msgstr "{asker} möchte den Skill {name} mit dem Unternehmen teilen. Nach der Freigabe nutzen ihn die Agenten aller Mitglieder. Lies ihn auf der Skills-Seite, bevor du entscheidest."
 
+#: src/inbox/items.ts
+msgid "{asker} asked to share their skill {name} with the team {team}. Approved, its members' agents use it. Read it on the skills page before you decide."
+msgstr "{asker} möchte den Skill {name} mit dem Team {team} teilen. Nach der Freigabe nutzen ihn die Agenten seiner Mitglieder. Lies ihn auf der Skills-Seite, bevor du entscheidest."
+
 #: src/workflows/traces.tsx
 #: src/workflows/workflow-diagram.tsx
 msgid "{attempts, plural, one {# attempt} other {# attempts}}"
@@ -1237,6 +1241,10 @@ msgstr "{team} interviewt"
 msgid "{team} says the same"
 msgstr "{team} sagt dasselbe"
 
+#: src/brain/skills-page.tsx
+msgid "{team}, version {version}"
+msgstr "{team}, Version {version}"
+
 #: src/brain/thinking/use-thinking.ts
 msgid "{team}: “{words}”"
 msgstr "{team}: „{words}“"
@@ -2134,6 +2142,14 @@ msgstr "Zu den Skills des Unternehmens hinzugefügt und seitdem außer Gebrauch 
 msgid "Added to the company's skills."
 msgstr "Zu den Skills des Unternehmens hinzugefügt."
 
+#: src/brain/skills-page.tsx
+msgid "Added to the team's skills, and since taken out of use."
+msgstr "Zu den Skills des Teams hinzugefügt und seitdem außer Gebrauch genommen."
+
+#: src/brain/skills-page.tsx
+msgid "Added to the team's skills."
+msgstr "Zu den Skills des Teams hinzugefügt."
+
 #: src/projects/file-item-dialog.tsx
 msgid "Adding an app or workflow shares it with nobody. Only those it is shared with see it here."
 msgstr "Eine App oder einen Workflow hinzuzufügen teilt sie mit niemandem. Hier sehen sie nur die, mit denen sie geteilt sind."
@@ -2757,6 +2773,10 @@ msgstr "Freigegeben, aber eine spätere Entscheidung zu diesem Skill kam, bevor 
 msgid "Approved, but not added to the company's skills yet."
 msgstr "Freigegeben, aber noch nicht zu den Skills des Unternehmens hinzugefügt."
 
+#: src/brain/skills-page.tsx
+msgid "Approved, but not added to the team's skills yet."
+msgstr "Freigegeben, aber noch nicht zu den Skills des Teams hinzugefügt."
+
 #: src/inbox/item-detail.tsx
 msgid "Approved: {alias} of {name}."
 msgstr "Freigegeben: {alias} von {name}."
@@ -2783,8 +2803,20 @@ msgid "Approving it replaces Grasp's own skill {name} for everyone."
 msgstr "Mit der Freigabe ersetzt er Grasps eigenen Skill {name} für alle."
 
 #: src/brain/skills-page.tsx
+msgid "Approving it replaces Grasp's own skill {name} for the members of {team}."
+msgstr "Mit der Freigabe ersetzt er Grasps eigenen Skill {name} für die Mitglieder von {team}."
+
+#: src/brain/skills-page.tsx
 msgid "Approving it replaces the company's own skill {name} for everyone."
 msgstr "Mit der Freigabe ersetzt er den eigenen Skill {name} des Unternehmens für alle."
+
+#: src/brain/skills-page.tsx
+msgid "Approving it replaces the company's own skill {name} for the members of {team}."
+msgstr "Mit der Freigabe ersetzt er den eigenen Skill {name} des Unternehmens für die Mitglieder von {team}."
+
+#: src/brain/skills-page.tsx
+msgid "Approving it replaces the team {team}'s own skill {name} for its members."
+msgstr "Mit der Freigabe ersetzt er den eigenen Skill {name} des Teams {team} für seine Mitglieder."
 
 #: src/apps/apps-overview.tsx
 #: src/chat/mentions.tsx
@@ -5945,6 +5977,10 @@ msgstr "für alle Modellaufrufe diesen Monat"
 msgid "For everyone"
 msgstr "Für alle"
 
+#: src/brain/skills-page.tsx
+msgid "For everyone in the company"
+msgstr "Für alle im Unternehmen"
+
 #: src/connections/request-app-dialog.tsx
 msgid "For example Personio or Twinfield"
 msgstr "Zum Beispiel Personio oder Twinfield"
@@ -5976,6 +6012,10 @@ msgstr "Für: {role}"
 #: src/agents/new-agent.tsx
 msgid "For the company"
 msgstr "Für das Unternehmen"
+
+#: src/brain/skills-page.tsx
+msgid "For the team {team}"
+msgstr "Für das Team {team}"
 
 #: src/agents/agent-wakes.tsx
 msgid "For whom"
@@ -6705,8 +6745,8 @@ msgid "How they would notice: not said yet."
 msgstr "Woran sie es merken würden: noch nicht genannt."
 
 #: src/brain/skills-page.tsx
-msgid "How things are done here. Your own skills are used in your own chats alone. Sharing one with the company waits for an admin, and from then on everyone's agents use it. A skill is guidance: it never grants access."
-msgstr "Wie hier gearbeitet wird. Deine eigenen Skills werden nur in deinen eigenen Chats genutzt. Teilst du einen mit dem Unternehmen, wartet das auf einen Admin, danach nutzen ihn die Agenten aller. Ein Skill ist eine Anleitung: Er gewährt nie Zugriff."
+msgid "How things are done here. Your own skills are used in your own chats alone. Sharing one with the company or one of your teams waits for an admin, and from then on the agents of everyone in it use it. A skill is guidance: it never grants access."
+msgstr "Wie hier gearbeitet wird. Deine eigenen Skills werden nur in deinen eigenen Chats genutzt. Teilst du einen mit dem Unternehmen oder einem deiner Teams, wartet das auf einen Admin, danach nutzen ihn die Agenten aller darin. Ein Skill ist eine Anleitung: Er gewährt nie Zugriff."
 
 #: src/interview/closed.tsx
 msgid "How was talking to {who}?"
@@ -11370,6 +11410,10 @@ msgid "Retire"
 msgstr "Außer Dienst stellen"
 
 #: src/brain/skills-page.tsx
+msgid "Retire {name} for {team}?"
+msgstr "{name} für {team} außer Dienst stellen?"
+
+#: src/brain/skills-page.tsx
 msgid "Retire {name}?"
 msgstr "{name} außer Dienst stellen?"
 
@@ -12370,6 +12414,10 @@ msgid "Share {name}"
 msgstr "{name} teilen"
 
 #: src/inbox/items.ts
+msgid "Share {name} with {team}?"
+msgstr "{name} mit {team} teilen?"
+
+#: src/inbox/items.ts
 msgid "Share {name} with the company?"
 msgstr "{name} mit dem Unternehmen teilen?"
 
@@ -12405,6 +12453,10 @@ msgstr "Stattdessen diese Version teilen"
 #: src/workflows/share-workflow.tsx
 msgid "Share with"
 msgstr "Teilen mit"
+
+#: src/brain/skills-page.tsx
+msgid "Share with a team"
+msgstr "Mit einem Team teilen"
 
 #: src/brain/skills-page.tsx
 msgid "Share with the company"
@@ -13592,6 +13644,10 @@ msgstr "Der Agent bittet um npm-Pakete für {subject}"
 #: src/activity/audit-words.ts
 msgid "The agent looked something up"
 msgstr "Der Agent hat etwas nachgeschlagen"
+
+#: src/brain/skills-page.tsx
+msgid "The agents of {team}'s members no longer use {name}. Its versions stay as history, and a new approved share of its name with the team brings it back."
+msgstr "Die Agenten der Mitglieder von {team} nutzen {name} nicht mehr. Seine Versionen bleiben als Verlauf erhalten, und eine neue freigegebene Anfrage mit diesem Namen für das Team bringt ihn zurück."
 
 #: src/agents/agents-overview.tsx
 msgid "The agents you can ask. Each has its own job and knows its own part of the company."
@@ -17044,6 +17100,14 @@ msgstr "Ihr Team hat diese"
 #: src/apps/app-status.tsx
 msgid "Your team uses it"
 msgstr "Ihr Team nutzt es"
+
+#: src/brain/skills-page.tsx
+msgid "Your teams have no skills of their own yet."
+msgstr "Deine Teams haben noch keine eigenen Skills."
+
+#: src/brain/skills-page.tsx
+msgid "Your teams' skills"
+msgstr "Skills deiner Teams"
 
 #: src/inbox/items.ts
 msgid "Your triggers stopped hearing new files"

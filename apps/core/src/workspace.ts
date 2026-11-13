@@ -105,6 +105,7 @@ import type {
   CodeRunAdmission,
   CodeRunCall,
 } from "./agent-scope.ts";
+import { heldIn } from "./agent-skills.ts";
 import { builtNoteText, inOwnWords } from "./agent.ts";
 import type { QuestionBuilt, TurnContext, TurnResult } from "./agent.ts";
 import { turnAgent } from "./agents.ts";
@@ -2432,16 +2433,24 @@ export class Workspace extends DurableObject<Env> {
       shared ? { type: "channel" } : { type: "own" }
     );
     this.#keepSources(work.chatId, memory.provenance.collectionIds);
-    // The skills the chat may use, from the Brain: guidance every member
-    // may read, as the company's instruction file, never a grant
-    // (brain-skills.ts). Their own skills only where the scope says so
-    // (`skillsReachOf`): a turn they asked for in their own chat. Recorded as the code's calls are, by count. A
-    // Brain that can't answer leaves the turn without them, not without
-    // an answer: missing guidance is no question of access.
+    // The skills the chat may use, from the Brain: guidance, never a grant
+    // (brain-skills.ts). Their own skills only where the scope says so, a
+    // turn they asked for in their own chat, and their teams' only where
+    // nobody else reads the answer (`skillsReachOf`); only those whose
+    // needs the chat's agent meets now (`heldIn`). Recorded as the code's
+    // calls are, by count. A Brain that can't answer leaves the turn
+    // without them, not without an answer: missing guidance is no
+    // question of access.
     let skills: Awaited<ReturnType<typeof skillsFor>> = [];
     let unavailable = false;
     try {
-      skills = await skillsFor(this.env, authority, skillsReachOf(scope));
+      const reach = skillsReachOf(scope, shared);
+      skills = await skillsFor(
+        this.env,
+        authority,
+        reach,
+        heldIn(this.env, scope, reach)
+      );
     } catch (error) {
       unavailable = true;
       log.warn("skills.turn_unavailable", {

@@ -14,7 +14,7 @@ import {
   skillsFor,
   skillsReachOf,
 } from "../src/brain-skills.ts";
-import type { SkillAt } from "../src/brain-skills.ts";
+import type { SkillAt, SkillsReach } from "../src/brain-skills.ts";
 import { skillShares } from "../src/db/core/schema.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
 import { personalWorkspaceId } from "../src/personal-workspace.ts";
@@ -30,6 +30,7 @@ import { actingFor } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
+import { holdsNothing } from "./stored-skills.ts";
 
 // Writing skills and sharing one with the company (GRA-1754), from the
 // threat model on the issue: someone else reads, lists or is given a
@@ -51,6 +52,10 @@ const setUpTime = { timeout: 60_000 };
 const skillText = (name: string, description: string, steps = "The steps.") =>
   `---\nname: ${name}\ndescription: ${description}\n---\n\n${steps}\n`;
 
+/** How far a chat's skills go: their own too, or their teams' and the company's. */
+const reachOf = (personal: boolean): SkillsReach =>
+  personal ? "person" : "teams";
+
 /** A chat's agent acting for `userId`. */
 const agentOf = (userId: string): Authority =>
   actingFor({ type: "agent", agentId: `agent-${unique()}` }, userId);
@@ -61,7 +66,12 @@ const usable = async (
   personal: boolean,
   names: readonly string[]
 ): Promise<string[][]> => {
-  const listed = await skillsFor(env, agentOf(userId), { personal });
+  const listed = await skillsFor(
+    env,
+    agentOf(userId),
+    reachOf(personal),
+    holdsNothing
+  );
   return listed
     .filter(({ name }) => names.includes(name))
     .map(({ scope, name }) => [scope, name]);
@@ -76,7 +86,8 @@ const selected = async (
   const skills = await selectSkillsFor(
     env,
     agentOf(userId),
-    { personal },
+    reachOf(personal),
+    holdsNothing,
     { task }
   );
   return skills.map(({ scope, name }) => [scope, name]);
@@ -93,7 +104,8 @@ const readIn = async (
     ({ text } = await readSkillFor(
       env,
       agentOf(userId),
-      { personal },
+      reachOf(personal),
+      holdsNothing,
       { skill }
     ));
   };
@@ -281,7 +293,7 @@ describe("writing and sharing skills", setUpTime, () => {
       otherSelects: await selected(other.userId, true, "quote a tender"),
       otherReads: await readIn(other.userId, true, current),
       otherReadsOnPage: await outcome(other.api.skills.read("own", name)),
-      otherShares: await outcome(other.api.skills.share(name, 1)),
+      otherShares: await outcome(other.api.skills.share(name, 1, "company")),
     }).toStrictEqual({
       versions: [1, 2],
       ownPage: [{ name, version: 2, description }],
@@ -309,7 +321,7 @@ describe("writing and sharing skills", setUpTime, () => {
     const name = nameOf("close-the-month");
     const asked = skillText(name, "Close the month", "The steps as asked.");
     const saved = await author.api.skills.save(asked);
-    const share = await author.api.skills.share(name, saved.version);
+    const share = await author.api.skills.share(name, saved.version, "company");
     // Edited after asking: the edit isn't what the admin approves.
     await author.api.skills.save(
       skillText(name, "Close the month", "Steps nobody reviewed.")
@@ -389,11 +401,15 @@ describe("writing and sharing skills", setUpTime, () => {
     ]);
     const name = nameOf("book-travel");
     const first = await author.api.skills.save(skillText(name, "Book travel"));
-    const shown = await author.api.skills.share(name, first.version);
+    const shown = await author.api.skills.share(name, first.version, "company");
     const second = await author.api.skills.save(
       skillText(name, "Book travel", "Other steps.")
     );
-    const again = await author.api.skills.share(name, second.version);
+    const again = await author.api.skills.share(
+      name,
+      second.version,
+      "company"
+    );
 
     const approvingShown = await outcome(admin.api.skills.approve(shown.id));
     const declined = await admin.api.skills.decline(again.id);
@@ -426,11 +442,13 @@ describe("writing and sharing skills", setUpTime, () => {
     const saved = await author.api.skills.save(
       skillText(name, "File expenses")
     );
-    const first = await author.api.skills.share(name, saved.version);
+    const first = await author.api.skills.share(name, saved.version, "company");
     await admin.api.skills.approve(first.id);
 
-    const memberRetires = await outcome(member.api.skills.retire(name));
-    await admin.api.skills.retire(name);
+    const memberRetires = await outcome(
+      member.api.skills.retire(name, "company")
+    );
+    await admin.api.skills.retire(name, "company");
     const retired = {
       memberRetires,
       memberUses: await usable(member.userId, true, [name]),
@@ -439,9 +457,9 @@ describe("writing and sharing skills", setUpTime, () => {
         name,
         version: 1,
       }),
-      retiredAgain: await outcome(admin.api.skills.retire(name)),
+      retiredAgain: await outcome(admin.api.skills.retire(name, "company")),
     };
-    const again = await author.api.skills.share(name, saved.version);
+    const again = await author.api.skills.share(name, saved.version, "company");
     const page = await overviewOf(admin.api);
     const back = await admin.api.skills.approve(again.id);
 
@@ -472,7 +490,7 @@ describe("writing and sharing skills", setUpTime, () => {
     const saved = await author.api.skills.save(
       skillText(name, "Onboard a hire")
     );
-    const share = await author.api.skills.share(name, saved.version);
+    const share = await author.api.skills.share(name, saved.version, "company");
 
     await author.api.skills.remove(name);
     await author.api.skills.remove(name);
@@ -506,7 +524,7 @@ describe("writing and sharing skills", setUpTime, () => {
     ]);
     const name = nameOf("plan-a-route");
     const saved = await author.api.skills.save(skillText(name, "Plan a route"));
-    const share = await author.api.skills.share(name, saved.version);
+    const share = await author.api.skills.share(name, saved.version, "company");
     const kindsFor = async (api: SessionApi) => {
       const { items } = await api.waiting.list();
       return items
@@ -548,7 +566,7 @@ describe("writing and sharing skills", setUpTime, () => {
     const name = nameOf("count-the-till");
     const saved = await author.api.skills.save(skillText(name, "Count it"));
     const own = await keptWhere(author.userId, `skill:person:${name}`);
-    const share = await author.api.skills.share(name, saved.version);
+    const share = await author.api.skills.share(name, saved.version, "company");
     const asked = await keptWhere(author.userId, `skill:company:${name}`);
     await admin.api.skills.approve(share.id);
 
@@ -683,7 +701,11 @@ describe("writing and sharing skills", setUpTime, () => {
     const kept = nameOf("my-own-way");
     const first = await author.api.skills.save(skillText(shared, "Close it"));
     await author.api.skills.save(skillText(kept, "Mine"));
-    const share = await author.api.skills.share(shared, first.version);
+    const share = await author.api.skills.share(
+      shared,
+      first.version,
+      "company"
+    );
     await admin.api.skills.approve(share.id);
     const before = await usable(author.userId, true, [shared, kept]);
 
@@ -717,20 +739,36 @@ describe("writing and sharing skills", setUpTime, () => {
     ]);
     const companys = nameOf("pay-suppliers");
     const first = await author.api.skills.save(skillText(companys, "Pay"));
-    const firstShare = await author.api.skills.share(companys, first.version);
+    const firstShare = await author.api.skills.share(
+      companys,
+      first.version,
+      "company"
+    );
     await admin.api.skills.approve(firstShare.id);
     const again = await author.api.skills.save(
       skillText(companys, "Pay", "Newer steps.")
     );
-    const replacing = await author.api.skills.share(companys, again.version);
+    const replacing = await author.api.skills.share(
+      companys,
+      again.version,
+      "company"
+    );
     // Grasp ships a skill of this name: a company skill of it takes its
     // place for everyone, so the admin is told.
     const grasps = "draw-a-workflow";
     const planted = await author.api.skills.save(skillText(grasps, "Mine"));
-    const overGrasp = await author.api.skills.share(grasps, planted.version);
+    const overGrasp = await author.api.skills.share(
+      grasps,
+      planted.version,
+      "company"
+    );
     const fresh = nameOf("count-pallets");
     const freshSaved = await author.api.skills.save(skillText(fresh, "Count"));
-    const nothing = await author.api.skills.share(fresh, freshSaved.version);
+    const nothing = await author.api.skills.share(
+      fresh,
+      freshSaved.version,
+      "company"
+    );
     const page = await overviewOf(admin.api);
     const replaces = (id: string) =>
       page.requests?.find((request) => request.id === id)?.replaces;
@@ -750,7 +788,7 @@ describe("writing and sharing skills", setUpTime, () => {
     ]);
     const name = nameOf("race");
     const saved = await author.api.skills.save(skillText(name, "Race"));
-    const share = await author.api.skills.share(name, saved.version);
+    const share = await author.api.skills.share(name, saved.version, "company");
     const head = await logHead();
     const [x, y] = await Promise.all([
       outcome(first.api.skills.approve(share.id)),
@@ -780,11 +818,19 @@ describe("writing and sharing skills", setUpTime, () => {
     const name = nameOf("audit");
     const head = await logHead();
     const saved = await author.api.skills.save(skillText(name, "Audit"));
-    const declined = await author.api.skills.share(name, saved.version);
+    const declined = await author.api.skills.share(
+      name,
+      saved.version,
+      "company"
+    );
     await admin.api.skills.decline(declined.id);
-    const approved = await author.api.skills.share(name, saved.version);
+    const approved = await author.api.skills.share(
+      name,
+      saved.version,
+      "company"
+    );
     await admin.api.skills.approve(approved.id);
-    await admin.api.skills.retire(name);
+    await admin.api.skills.retire(name, "company");
     const { events } = await eventsAfterWithHead(head);
 
     expect(
@@ -802,15 +848,17 @@ describe("writing and sharing skills", setUpTime, () => {
     ]);
   });
 
-  it("gives a person's own skills only to a scope that says it is their own attended turn", () => {
+  it("gives a person's own skills only to a scope that says it is their own attended turn, and no team's where others share the chat", () => {
     expect({
-      saysNothing: skillsReachOf({}),
-      saysNo: skillsReachOf({ ownChat: false }),
-      ownTurn: skillsReachOf({ ownChat: true }),
+      saysNothing: skillsReachOf({}, false),
+      saysNo: skillsReachOf({ ownChat: false }, false),
+      ownTurn: skillsReachOf({ ownChat: true }, false),
+      shared: skillsReachOf({ ownChat: true }, true),
     }).toStrictEqual({
-      saysNothing: { personal: false },
-      saysNo: { personal: false },
-      ownTurn: { personal: true },
+      saysNothing: "teams",
+      saysNo: "teams",
+      ownTurn: "person",
+      shared: "company",
     });
   });
 
@@ -844,7 +892,8 @@ describe("writing and sharing skills", setUpTime, () => {
         ),
         person,
         name,
-        saved.version
+        saved.version,
+        "company"
       )
     );
     const { requests } = await admin.api.skills.overview();
@@ -872,7 +921,7 @@ describe("writing and sharing skills", setUpTime, () => {
     ]);
     const name = nameOf("removed-asking");
     const saved = await asker.api.skills.save(skillText(name, "Mine"));
-    const share = await asker.api.skills.share(name, saved.version);
+    const share = await asker.api.skills.share(name, saved.version, "company");
     await admin.api.members.remove(asker.userId);
     const { requests } = await admin.api.skills.overview();
 
@@ -895,7 +944,7 @@ describe("writing and sharing skills", setUpTime, () => {
     ]);
     const name = nameOf("count-stock");
     const saved = await author.api.skills.save(skillText(name, "Count it"));
-    const share = await author.api.skills.share(name, saved.version);
+    const share = await author.api.skills.share(name, saved.version, "company");
     const head = await logHead();
     const decided = await approveShare(
       sharedStoreFailing("addInstructions"),
@@ -950,7 +999,8 @@ describe("writing and sharing skills", setUpTime, () => {
       ),
       person,
       name,
-      saved.version
+      saved.version,
+      "company"
     );
     const { requests } = await admin.api.skills.overview();
     const { shares } = await overviewOf(asker.api);
@@ -975,8 +1025,8 @@ describe("writing and sharing skills", setUpTime, () => {
     const second = await asker.api.skills.save(skillText(name, "Second"));
     const head = await logHead();
     await Promise.allSettled([
-      asker.api.skills.share(name, first.version),
-      asker.api.skills.share(name, second.version),
+      asker.api.skills.share(name, first.version, "company"),
+      asker.api.skills.share(name, second.version, "company"),
     ]);
     const { requests } = await admin.api.skills.overview();
     const cards = requests?.filter(({ name: named }) => named === name);
@@ -994,7 +1044,7 @@ describe("writing and sharing skills", setUpTime, () => {
     const asker = await signedInApi(idp, "user");
     const name = nameOf("saved-since");
     const first = await asker.api.skills.save(skillText(name, "Old"));
-    const old = await asker.api.skills.share(name, first.version);
+    const old = await asker.api.skills.share(name, first.version, "company");
     /** Each of the person's shares of `name`: old or new, status, outdated. */
     const rows = async () => {
       const { shares } = await overviewOf(asker.api);
@@ -1009,7 +1059,7 @@ describe("writing and sharing skills", setUpTime, () => {
     const asked = await rows();
     const second = await asker.api.skills.save(skillText(name, "New"));
     const saved = await rows();
-    await asker.api.skills.share(name, second.version);
+    await asker.api.skills.share(name, second.version, "company");
 
     expect({ asked, saved, again: await rows() }).toStrictEqual({
       asked: [["old", "pending", false]],

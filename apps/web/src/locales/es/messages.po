@@ -184,6 +184,10 @@ msgstr "{asker} ya la pidió el {askedOn}."
 msgid "{asker} asked to share their skill {name} with the company. Approved, every member's agents use it. Read it on the skills page before you decide."
 msgstr "{asker} ha pedido compartir su skill {name} con la empresa. Si se aprueba, los agentes de todos los miembros la usan. Léela en la página de skills antes de decidir."
 
+#: src/inbox/items.ts
+msgid "{asker} asked to share their skill {name} with the team {team}. Approved, its members' agents use it. Read it on the skills page before you decide."
+msgstr "{asker} ha pedido compartir su skill {name} con el equipo {team}. Si se aprueba, los agentes de sus miembros la usan. Léela en la página de skills antes de decidir."
+
 #: src/workflows/traces.tsx
 #: src/workflows/workflow-diagram.tsx
 msgid "{attempts, plural, one {# attempt} other {# attempts}}"
@@ -1237,6 +1241,10 @@ msgstr "Equipo entrevistado: {team}"
 msgid "{team} says the same"
 msgstr "{team} dice lo mismo"
 
+#: src/brain/skills-page.tsx
+msgid "{team}, version {version}"
+msgstr "{team}, versión {version}"
+
 #: src/brain/thinking/use-thinking.ts
 msgid "{team}: “{words}”"
 msgstr "{team}: «{words}»"
@@ -2134,6 +2142,14 @@ msgstr "Añadida a las skills de la empresa, y retirada desde entonces."
 msgid "Added to the company's skills."
 msgstr "Añadida a las skills de la empresa."
 
+#: src/brain/skills-page.tsx
+msgid "Added to the team's skills, and since taken out of use."
+msgstr "Añadida a las skills del equipo, y retirada desde entonces."
+
+#: src/brain/skills-page.tsx
+msgid "Added to the team's skills."
+msgstr "Añadida a las skills del equipo."
+
 #: src/projects/file-item-dialog.tsx
 msgid "Adding an app or workflow shares it with nobody. Only those it is shared with see it here."
 msgstr "Añadir una app o un flujo de trabajo no lo comparte con nadie. Aquí solo lo ven aquellos con quienes está compartido."
@@ -2757,6 +2773,10 @@ msgstr "Aprobada, pero una decisión posterior sobre esta skill llegó antes de 
 msgid "Approved, but not added to the company's skills yet."
 msgstr "Aprobada, pero aún no añadida a las skills de la empresa."
 
+#: src/brain/skills-page.tsx
+msgid "Approved, but not added to the team's skills yet."
+msgstr "Aprobada, pero aún no añadida a las skills del equipo."
+
 #: src/inbox/item-detail.tsx
 msgid "Approved: {alias} of {name}."
 msgstr "Aprobado: {alias} de {name}."
@@ -2783,8 +2803,20 @@ msgid "Approving it replaces Grasp's own skill {name} for everyone."
 msgstr "Al aprobarla, sustituye la skill propia de Grasp {name} para todos."
 
 #: src/brain/skills-page.tsx
+msgid "Approving it replaces Grasp's own skill {name} for the members of {team}."
+msgstr "Al aprobarla, sustituye la skill propia de Grasp {name} para los miembros de {team}."
+
+#: src/brain/skills-page.tsx
 msgid "Approving it replaces the company's own skill {name} for everyone."
 msgstr "Al aprobarla, sustituye la skill propia de la empresa {name} para todos."
+
+#: src/brain/skills-page.tsx
+msgid "Approving it replaces the company's own skill {name} for the members of {team}."
+msgstr "Al aprobarla, sustituye la skill propia de la empresa {name} para los miembros de {team}."
+
+#: src/brain/skills-page.tsx
+msgid "Approving it replaces the team {team}'s own skill {name} for its members."
+msgstr "Al aprobarla, sustituye la skill propia del equipo {team} {name} para sus miembros."
 
 #: src/apps/apps-overview.tsx
 #: src/chat/mentions.tsx
@@ -5945,6 +5977,10 @@ msgstr "por todas las llamadas a modelos este mes"
 msgid "For everyone"
 msgstr "Para todos"
 
+#: src/brain/skills-page.tsx
+msgid "For everyone in the company"
+msgstr "Para todos en la empresa"
+
 #: src/connections/request-app-dialog.tsx
 msgid "For example Personio or Twinfield"
 msgstr "Por ejemplo Personio o Twinfield"
@@ -5976,6 +6012,10 @@ msgstr "Para: {role}"
 #: src/agents/new-agent.tsx
 msgid "For the company"
 msgstr "Para la empresa"
+
+#: src/brain/skills-page.tsx
+msgid "For the team {team}"
+msgstr "Para el equipo {team}"
 
 #: src/agents/agent-wakes.tsx
 msgid "For whom"
@@ -6705,8 +6745,8 @@ msgid "How they would notice: not said yet."
 msgstr "Cómo lo notarían: aún no se ha dicho."
 
 #: src/brain/skills-page.tsx
-msgid "How things are done here. Your own skills are used in your own chats alone. Sharing one with the company waits for an admin, and from then on everyone's agents use it. A skill is guidance: it never grants access."
-msgstr "Cómo se hacen las cosas aquí. Tus propias skills solo se usan en tus propios chats. Compartir una con la empresa espera a un administrador, y desde entonces los agentes de todos la usan. Una skill es una guía: nunca da acceso."
+msgid "How things are done here. Your own skills are used in your own chats alone. Sharing one with the company or one of your teams waits for an admin, and from then on the agents of everyone in it use it. A skill is guidance: it never grants access."
+msgstr "Cómo se hacen las cosas aquí. Tus propias skills solo se usan en tus propios chats. Compartir una con la empresa o con uno de tus equipos espera a un administrador, y desde entonces la usan los agentes de todos los que forman parte. Una skill es una guía: nunca da acceso."
 
 #: src/interview/closed.tsx
 msgid "How was talking to {who}?"
@@ -11370,6 +11410,10 @@ msgid "Retire"
 msgstr "Retirar"
 
 #: src/brain/skills-page.tsx
+msgid "Retire {name} for {team}?"
+msgstr "¿Retirar {name} para {team}?"
+
+#: src/brain/skills-page.tsx
 msgid "Retire {name}?"
 msgstr "¿Retirar {name}?"
 
@@ -12370,6 +12414,10 @@ msgid "Share {name}"
 msgstr "Compartir {name}"
 
 #: src/inbox/items.ts
+msgid "Share {name} with {team}?"
+msgstr "¿Compartir {name} con {team}?"
+
+#: src/inbox/items.ts
 msgid "Share {name} with the company?"
 msgstr "¿Compartir {name} con la empresa?"
 
@@ -12405,6 +12453,10 @@ msgstr "Compartir esta versión en su lugar"
 #: src/workflows/share-workflow.tsx
 msgid "Share with"
 msgstr "Compartir con"
+
+#: src/brain/skills-page.tsx
+msgid "Share with a team"
+msgstr "Compartir con un equipo"
 
 #: src/brain/skills-page.tsx
 msgid "Share with the company"
@@ -13592,6 +13644,10 @@ msgstr "El agente pide paquetes de npm para {subject}"
 #: src/activity/audit-words.ts
 msgid "The agent looked something up"
 msgstr "El agente consultó algo"
+
+#: src/brain/skills-page.tsx
+msgid "The agents of {team}'s members no longer use {name}. Its versions stay as history, and a new approved share of its name with the team brings it back."
+msgstr "Los agentes de los miembros de {team} dejan de usar {name}. Sus versiones quedan como historial, y una nueva solicitud aprobada con su nombre para el equipo la recupera."
 
 #: src/agents/agents-overview.tsx
 msgid "The agents you can ask. Each has its own job and knows its own part of the company."
@@ -17044,6 +17100,14 @@ msgstr "Tu equipo tiene esta"
 #: src/apps/app-status.tsx
 msgid "Your team uses it"
 msgstr "Tu equipo lo usa"
+
+#: src/brain/skills-page.tsx
+msgid "Your teams have no skills of their own yet."
+msgstr "Tus equipos aún no tienen skills propias."
+
+#: src/brain/skills-page.tsx
+msgid "Your teams' skills"
+msgstr "Skills de tus equipos"
 
 #: src/inbox/items.ts
 msgid "Your triggers stopped hearing new files"

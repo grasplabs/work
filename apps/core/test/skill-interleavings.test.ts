@@ -5,7 +5,7 @@ import { and, asc, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { companyChangeVersion, readCurrentSkillAs } from "../src/brain-next.ts";
+import { readCurrentSkillAs, sharedChangeVersion } from "../src/brain-next.ts";
 import { skillsFor } from "../src/brain-skills.ts";
 import {
   skillDecisions,
@@ -26,6 +26,7 @@ import { eventsAfterWithHead, logHead } from "./audit-events.ts";
 import { actingFor } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
+import { holdsNothing } from "./stored-skills.ts";
 
 // Sharing skills, every step of every operation held while another runs,
 // failed, or its reply lost (GRA-1754, from review round 9's probe): the
@@ -285,13 +286,19 @@ const operation = async (w: World, op: Op, e: Env): Promise<void> => {
     }
     case "askAgain": {
       const version = await saveNew(w);
-      const asked = await shareOwnSkill(e, w.asker.ident, w.name, version);
+      const asked = await shareOwnSkill(
+        e,
+        w.asker.ident,
+        w.name,
+        version,
+        "company"
+      );
       w.lastShare = asked.id;
       return;
     }
     case "askOld": {
       // Its first version: the text that is live.
-      const asked = await shareOwnSkill(e, w.asker.ident, w.name, 1);
+      const asked = await shareOwnSkill(e, w.asker.ident, w.name, 1, "company");
       w.lastShare = asked.id;
       return;
     }
@@ -302,13 +309,14 @@ const operation = async (w: World, op: Op, e: Env): Promise<void> => {
         e,
         w.other.ident,
         w.name,
-        saved.version
+        saved.version,
+        "company"
       );
       w.lastShare = asked.id;
       return;
     }
     case "retire": {
-      await retireSkill(e, w.second.ident, w.name);
+      await retireSkill(e, w.second.ident, w.name, "company");
       return;
     }
     case "delete": {
@@ -392,14 +400,16 @@ const worldOf = async (): Promise<World> => {
     env,
     w.asker.ident,
     w.name,
-    await saveNew(w)
+    await saveNew(w),
+    "company"
   );
   await approveShare(env, first.ident, added.id);
   const waiting = await shareOwnSkill(
     env,
     w.asker.ident,
     w.name,
-    await saveNew(w)
+    await saveNew(w),
+    "company"
   );
   w.lastShare = waiting.id;
   await saveNew(w);
@@ -458,7 +468,8 @@ const decisionViolations = async (
   events: readonly AuditEvent[]
 ): Promise<string[]> => {
   const found: string[] = [];
-  const made = await companyChangeVersion(env, {
+  const made = await sharedChangeVersion(env, {
+    audience: { kind: "company" },
     name: w.name,
     change: `decision:${decision.id}`,
   });
@@ -545,7 +556,8 @@ const personalViolations = async (
   const memberSees = await skillsFor(
     env,
     actingFor({ type: "agent", agentId: `agent-${unique()}` }, w.member.userId),
-    { personal: true }
+    "person",
+    holdsNothing
   );
   if (
     memberSees.some(({ name, scope }) => name === w.name && scope === "person")

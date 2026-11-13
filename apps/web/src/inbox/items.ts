@@ -396,22 +396,40 @@ const bindingItems = (
     };
   });
 
+/** Whom a share is for, as the inbox says it: its title and its body. */
+const skillShareWords = (
+  share: SkillShareItem["share"]
+): { title: string; body: string } => {
+  const { name, requestedBy, audience } = share;
+  const asker = requestedBy.name ?? requestedBy.userId;
+  if (audience.kind === "company") {
+    return {
+      title: t`Share ${name} with the company?`,
+      body: t`${asker} asked to share their skill ${name} with the company. Approved, every member's agents use it. Read it on the skills page before you decide.`,
+    };
+  }
+  const team = audience.team.name ?? audience.team.id;
+  return {
+    title: t`Share ${name} with ${team}?`,
+    body: t`${asker} asked to share their skill ${name} with the team ${team}. Approved, its members' agents use it. Read it on the skills page before you decide.`,
+  };
+};
+
 /**
- * A person's ask to share one of their skills with the company: read and
- * decided by an admin on the skills page, where its text is.
+ * A person's ask to share one of their skills with the company or one of
+ * their teams: read and decided by an admin on the skills page, where its
+ * text is.
  */
 const skillShareItems = (shares: readonly SkillShareItem[]): InboxItem[] =>
   shares.map((item) => {
-    const { name, requestedBy, requestedAt } = item.share;
-    const asker = requestedBy.name ?? requestedBy.userId;
+    const { name, requestedAt } = item.share;
+    const { title, body } = skillShareWords(item.share);
     return {
       id: item.id,
       kind: "skillShare",
-      title: t`Share ${name} with the company?`,
+      title,
       context: name,
-      body: [
-        t`${asker} asked to share their skill ${name} with the company. Approved, every member's agents use it. Read it on the skills page before you decide.`,
-      ],
+      body: [body],
       facts: [{ label: t`Asked`, value: formatDateTime(requestedAt) }],
       about: { kind: "skills" },
       date: requestedAt,

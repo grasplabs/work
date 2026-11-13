@@ -3461,12 +3461,17 @@ export const appRequests = sqliteTable(
 );
 
 /**
- * A person's ask to share one of their own skills with the company
- * (skill-shares.ts, GRA-1754). `text` is the exact `SKILL.md` they asked
- * to share, kept only while it waits: an admin decides that text and no
- * other (`skillDecisions` takes it on). At most one waits per person and
- * name; asking again, deleting the skill or being removed takes the waiting
- * one away, so a decision on it is refused.
+ * A person's ask to share one of their own skills with the company or one
+ * of their teams (skill-shares.ts, GRA-1754, GRA-1844). `text` is the exact
+ * `SKILL.md` they asked to share, kept only while it waits: an admin
+ * decides that text and no other (`skillDecisions` takes it on).
+ * `audience` is whom for: `company`, or `team:<teamId>` (brain-next.ts
+ * `audienceKeyOf`); nullable only as schemas expand, and a row without
+ * one is never decided or listed, never read as the company's. At most
+ * one waits per person, name and audience; asking again, deleting the
+ * skill or being removed takes the waiting one away, so a decision on it
+ * is refused, and one for a team is decided only while its person is in
+ * that team.
  */
 export const skillShares = sqliteTable(
   "skill_shares",
@@ -3479,20 +3484,22 @@ export const skillShares = sqliteTable(
     status: text({ enum: ["pending", "approved", "declined"] }).notNull(),
     decidedBy: text("decided_by"),
     decidedAt: timestamp("decided_at"),
+    audience: text(),
   },
   (table) => [
-    uniqueIndex("skill_shares_pending_idx")
-      .on(table.requestedBy, table.name)
+    uniqueIndex("skill_shares_waiting_idx")
+      .on(table.requestedBy, table.name, table.audience)
       .where(sql`status = 'pending'`),
     index("skill_shares_status_idx").on(table.status, table.requestedAt),
   ]
 );
 
 /**
- * The admins' decisions on the company's skills, the one record of what
- * should be live (skill-shares.ts): numbered per name (`seq`), the latest
- * is what the Brain follows, an approved share's text (`share_id`) or a
- * retirement (none). `text` is what the decision writes, kept with it so
+ * The admins' decisions on the shared skills, the one record of what
+ * should be live (skill-shares.ts): numbered per audience and name
+ * (`seq`), the latest is what the Brain follows, an approved share's text
+ * (`share_id`) or a retirement (none). `audience` as `skillShares`'s: a
+ * row without one is never reconciled, never read as the company's. `text` is what the decision writes, kept with it so
  * an erasure of the asker never takes a decision's text away. `outcome` is
  * what became of it in the Brain, recorded once by the reconciler:
  * `landed` at `version`, or `superseded` by a later decision before it
@@ -3510,12 +3517,17 @@ export const skillDecisions = sqliteTable(
     decidedAt: timestamp("decided_at").notNull(),
     outcome: text({ enum: ["landed", "superseded"] }),
     version: integer(),
+    audience: text(),
   },
   (table) => [
-    uniqueIndex("skill_decisions_seq_idx").on(table.name, table.seq),
+    uniqueIndex("skill_decisions_sequence_idx").on(
+      table.audience,
+      table.name,
+      table.seq
+    ),
     index("skill_decisions_share_idx").on(table.shareId),
     index("skill_decisions_open_idx")
-      .on(table.name)
+      .on(table.audience, table.name)
       .where(sql`outcome IS NULL`),
   ]
 );

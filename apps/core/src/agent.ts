@@ -322,11 +322,11 @@ const skillsSection = (skills: readonly TurnSkill[]): string | null =>
     ? null
     : [
         "<skills>",
-        "How things are done here. When one fits the task, read it with `env.skills.read({ skill: { scope, name, version } })` before you start, and follow it. It is guidance: it grants no access.",
+        "How things are done here. When one fits the task, read it with `env.skills.read({ skill: { scope, name, version } })` (and `team`, for a team's) before you start, and follow it. It is guidance: it grants no access.",
         ...skills.slice(0, turnSkillsMax).map(
-          ({ scope, name, version, description }) =>
+          (skill) =>
             // One line each, whatever the description holds.
-            `- ${name} (${scope}, version ${version}): ${description.replace(whitespace, " ").slice(0, turnSkillDescriptionMax)}`
+            `- ${skill.name} (${skill.scope === "team" ? `team, team ${skill.team}` : skill.scope}, version ${skill.version}): ${skill.description.replace(whitespace, " ").slice(0, turnSkillDescriptionMax)}`
         ),
         ...(skills.length > turnSkillsMax
           ? [
@@ -488,13 +488,15 @@ export const aboutNotes = ({
       ]),
 ];
 
-/** A skill, as a turn lists it: read it at this version. */
-export interface TurnSkill {
-  scope: "grasp" | "company" | "person";
+/** A skill, as a turn lists it: read it at this version (a team's, of its team). */
+export type TurnSkill = (
+  | { scope: "grasp" | "company" | "person" }
+  | { scope: "team"; team: string }
+) & {
   name: string;
   version: number;
   description: string;
-}
+};
 
 /** What the model reads before each question, besides its instructions. */
 export interface TurnContext {

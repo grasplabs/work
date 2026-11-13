@@ -1,10 +1,13 @@
 // @vitest-environment happy-dom
 import type {
   ListedSkill,
+  ListedTeamSkill,
   OwnSkillShare,
+  SkillAudienceAsked,
   SkillShare,
   SkillShareRequest,
   SkillsOverview,
+  SkillTeam,
 } from "@grasp-os/shared/skills";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
@@ -59,6 +62,7 @@ const asked = "---\nname: close-the-month\ndescription: Close it\n---\nSteps.";
 const request: SkillShareRequest = {
   id: "share-1",
   name: "close-the-month",
+  audience: { kind: "company" },
   status: "pending",
   requestedAt: "2026-11-12T09:00:00.000Z",
   requestedBy: { userId: "u-2", name: "Anna" },
@@ -69,9 +73,16 @@ const request: SkillShareRequest = {
   replaces: "grasp",
 };
 
-const shareOf = (name: string): OwnSkillShare => ({
+/** The company, as a share is for it. */
+const forCompany: OwnSkillShare["audience"] = { kind: "company" };
+
+const shareOf = (
+  name: string,
+  audience: OwnSkillShare["audience"] = forCompany
+): OwnSkillShare => ({
   id: `share-of-${name}`,
   name,
+  audience,
   status: "pending",
   requestedAt: "2026-11-12T09:00:00.000Z",
   requestedBy: { userId: "u-1", name: "Me" },
@@ -91,6 +102,8 @@ const shown = async ({
   approveRefusal,
   company = ["file-expenses"],
   overviewRefusals = [],
+  teams = [],
+  team = [],
 }: {
   admin: boolean;
   refusal?: string;
@@ -106,6 +119,10 @@ const shown = async ({
   company?: string[];
   /** Which reads of the page core refuses, counting from 1. */
   overviewRefusals?: number[];
+  /** The teams the person is in. */
+  teams?: SkillTeam[];
+  /** Their teams' skills. */
+  team?: ListedTeamSkill[];
 }) => {
   const calls: string[] = [];
   const owned = [own, other];
@@ -129,6 +146,8 @@ const shown = async ({
           version: 1,
           description: "File",
         })),
+        team,
+        teams,
         shares: [...shares],
         requests: admin ? requests : null,
       };
@@ -142,12 +161,36 @@ const shown = async ({
       }
       return own;
     },
-    share: async (name: string, version: number) => {
+    share: async (
+      name: string,
+      version: number,
+      audience: SkillAudienceAsked
+    ) => {
       await Promise.resolve();
-      calls.push(`share ${name}@${version}`);
-      const share = shareOf(name);
+      if (audience === "company") {
+        calls.push(`share ${name}@${version}`);
+        const share = shareOf(name);
+        shares.push(share);
+        return share;
+      }
+      calls.push(`share ${name}@${version} with ${audience.team}`);
+      const share = shareOf(name, {
+        kind: "team",
+        team: {
+          id: audience.team,
+          name: teams.find(({ id }) => id === audience.team)?.name ?? null,
+        },
+      });
       shares.push(share);
       return share;
+    },
+    retire: async (name: string, audience: SkillAudienceAsked) => {
+      await Promise.resolve();
+      calls.push(
+        audience === "company"
+          ? `retire ${name}`
+          : `retire ${name} for ${audience.team}`
+      );
     },
     approve: async (id: string) => {
       await Promise.resolve();
@@ -549,6 +592,95 @@ describe("the skills page", () => {
       refused: true,
       calls: ["overview", "overview"],
       own: true,
+    });
+  });
+
+  it("shares a skill with one of the person's teams from its menu, and says whom each share is for", async () => {
+    const { calls } = await shown({
+      admin: false,
+      teams: [{ id: "t-1", name: "Sales" }],
+    });
+    await press(buttons("Share with a team")[0]);
+    const offered = [...document.querySelectorAll('[role="menuitem"]')].map(
+      (item) => item.textContent
+    );
+    await press(
+      [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+        (item) => item.textContent === "Sales"
+      )
+    );
+    const text = document.body.textContent ?? "";
+    expect({
+      offered,
+      calls,
+      forTeam: text.includes("For the team Sales"),
+      state: stateOf("quote-a-tender"),
+    }).toStrictEqual({
+      offered: ["Sales"],
+      calls: ["overview", "share quote-a-tender@2 with t-1", "overview"],
+      forTeam: true,
+      state: "Waiting for an admin",
+    });
+  });
+
+  it("offers no team to share with to someone in none", async () => {
+    await shown({ admin: false });
+    expect(buttons("Share with a team")).toStrictEqual([]);
+  });
+
+  it("shows an admin a team share's exact text, its team, and what approving replaces for the team's members", async () => {
+    await shown({
+      admin: true,
+      waiting: {
+        ...request,
+        audience: { kind: "team", team: { id: "t-1", name: "Sales" } },
+        replaces: "company",
+      },
+    });
+    const text = document.body.textContent ?? "";
+    expect({
+      text: text.includes("Steps."),
+      team: text.includes("For the team Sales"),
+      replaces: text.includes(
+        "Approving it replaces the company's own skill close-the-month for the members of Sales."
+      ),
+      forEveryone: text.includes("for everyone"),
+    }).toStrictEqual({
+      text: true,
+      team: true,
+      replaces: true,
+      forEveryone: false,
+    });
+  });
+
+  it("lists the person's teams' skills with their team, and lets an admin retire one for its team alone", async () => {
+    const teamSkill: ListedTeamSkill = {
+      name: "pitch-a-client",
+      version: 3,
+      description: "Pitch",
+      team: { id: "t-1", name: "Sales" },
+    };
+    const { calls } = await shown({
+      admin: true,
+      company: [],
+      teams: [{ id: "t-1", name: "Sales" }],
+      team: [teamSkill],
+    });
+    const text = document.body.textContent ?? "";
+    await click("Retire");
+    await press(
+      [...document.querySelectorAll<HTMLElement>("button")].findLast(
+        (each) => each.textContent === "Retire"
+      )
+    );
+    expect({
+      listed: text.includes("pitch-a-client"),
+      withTeam: text.includes("Sales, version 3"),
+      calls,
+    }).toStrictEqual({
+      listed: true,
+      withTeam: true,
+      calls: ["overview", "retire pitch-a-client for t-1", "overview"],
     });
   });
 });
