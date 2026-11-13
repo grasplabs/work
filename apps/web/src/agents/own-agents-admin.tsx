@@ -23,8 +23,8 @@ export interface OwnAgentsAdmin {
   on: boolean;
   /** Per person with any, the most spent first; none where core didn't say. */
   usage: readonly OwnAgentsUsage[] | undefined;
-  /** The company's people, by whom each row is named. */
-  people: readonly Member[];
+  /** The company's people, by whom each row is named; undefined where core didn't say them. */
+  people: readonly Member[] | undefined;
 }
 
 /** One row per person with agents of their own, or why there are none to show. */
@@ -80,6 +80,10 @@ export const OwnAgentsCard = ({
   const switchId = useId();
   const { busy, failure, run } = useCoreAction();
   const nameOf = (personId: string): string => {
+    // Without the company's people, nobody is said to have left.
+    if (admin.people === undefined) {
+      return t`Name not shown`;
+    }
     const found = admin.people.find(({ userId }) => userId === personId);
     if (found === undefined) {
       return t`Someone no longer in the company`;

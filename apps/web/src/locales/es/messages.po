@@ -8355,6 +8355,10 @@ msgstr "Indica abajo un modelo que ofrezca este endpoint, elígelo y pruébalo."
 msgid "Name in the App's code"
 msgstr "Nombre en el código de la aplicación"
 
+#: src/agents/own-agents-admin.tsx
+msgid "Name not shown"
+msgstr "Nombre no mostrado"
+
 #: src/apps/release-controls.tsx
 msgid "Name of the hold, such as a case reference"
 msgstr "Nombre de la retención, como una referencia del caso"

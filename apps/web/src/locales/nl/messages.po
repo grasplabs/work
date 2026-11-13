@@ -8355,6 +8355,10 @@ msgstr "Geef hieronder een model op dat dit endpoint aanbiedt, kies het en test 
 msgid "Name in the App's code"
 msgstr "Naam in de code van de app"
 
+#: src/agents/own-agents-admin.tsx
+msgid "Name not shown"
+msgstr "Naam niet getoond"
+
 #: src/apps/release-controls.tsx
 msgid "Name of the hold, such as a case reference"
 msgstr "Naam van de bewaarplicht, zoals een zaaknummer"

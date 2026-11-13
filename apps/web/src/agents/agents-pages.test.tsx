@@ -333,6 +333,7 @@ describe("the company's agents, on pages of their own", () => {
             to: "/agents/agent-scribe",
             chat: ["/?agent=agent-scribe"],
           },
+          // Not listed as theirs to ask: paused, or turned off.
           { name: "Idle", to: "/agents/agent-idle", chat: [] },
           // Then the company's, once: never their own again.
           {
@@ -403,6 +404,55 @@ describe("the company's agents, on pages of their own", () => {
         spent: true,
         gone: true,
         asked: [["own agents", { on: false }]],
+      });
+    });
+
+    it("names nobody as gone where the company's people couldn't be read", async () => {
+      await mounted(
+        <AgentsOverview
+          makes
+          makesOwn
+          managed={managed}
+          own={[]}
+          ownAdmin={{
+            on: true,
+            people: undefined,
+            usage: [
+              {
+                personId: "user-anna",
+                agents: 1,
+                month: "2026-11",
+                spent: 0,
+                spentBefore: 0,
+                requests: 0,
+              },
+            ],
+          }}
+          usable={[]}
+        />
+      );
+      const text = document.body.textContent ?? "";
+      expect({
+        unnamed: text.includes("Name not shown"),
+        gone: text.includes("Someone no longer in the company"),
+      }).toStrictEqual({ unnamed: true, gone: false });
+    });
+
+    it("offers no chat with one of a person's own the company turned off, and still opens its page", async () => {
+      const scribe = agentOf("agent-scribe", "Scribe", { ownerId: "user-me" });
+      await mounted(
+        <AgentsOverview
+          makes={false}
+          makesOwn={false}
+          managed={undefined}
+          own={[scribe]}
+          // Off: core lists none of their own as theirs to ask.
+          usable={[chatAgent(stephen)]}
+        />
+      );
+      expect(cards().find(({ name }) => name === "Scribe")).toMatchObject({
+        to: "/agents/agent-scribe",
+        chat: [],
       });
     });
 

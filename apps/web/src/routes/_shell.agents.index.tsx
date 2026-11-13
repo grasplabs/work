@@ -79,7 +79,7 @@ const readOwnAdmin = async (
   ]);
   return {
     usage: usage.status === "fulfilled" ? usage.value : undefined,
-    people: people.status === "fulfilled" ? people.value : [],
+    people: people.status === "fulfilled" ? people.value : undefined,
   };
 };
 

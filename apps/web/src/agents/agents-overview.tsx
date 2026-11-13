@@ -264,14 +264,21 @@ const AgentCard = ({
 const filters = ["all", "on", "paused"] as const;
 type Filter = (typeof filters)[number];
 
-/** The cards of the person's own agents, each opening its page. */
-const ownShownOf = (own: readonly Agent[]): Shown[] =>
+/**
+ * The cards of the person's own agents, each opening its page, with a way
+ * into a chat only for one core lists them as asking (`usable`): none
+ * while the company has them off.
+ */
+const ownShownOf = (
+  own: readonly Agent[],
+  usable: readonly ChatAgent[]
+): Shown[] =>
   own.map(({ id, name, job, face, state }) => ({
     id,
     name,
     job,
     face,
-    usable: true,
+    usable: usable.some((each) => each.id === id),
     own: state,
     managed: undefined,
   }));
@@ -370,7 +377,7 @@ export const AgentsOverview = ({
     (agent) =>
       matches(agent) && (filter === "all" || agent.managed?.state === filter)
   );
-  const mine = ownShownOf(own).filter(
+  const mine = ownShownOf(own, usable).filter(
     (agent) => matches(agent) && (filter === "all" || agent.own === filter)
   );
   const paused = agents.filter(

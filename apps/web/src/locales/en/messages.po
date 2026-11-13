@@ -8355,6 +8355,10 @@ msgstr "Name a model this endpoint serves below and choose it, then test it."
 msgid "Name in the App's code"
 msgstr "Name in the App's code"
 
+#: src/agents/own-agents-admin.tsx
+msgid "Name not shown"
+msgstr "Name not shown"
+
 #: src/apps/release-controls.tsx
 msgid "Name of the hold, such as a case reference"
 msgstr "Name of the hold, such as a case reference"

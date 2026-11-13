@@ -8355,6 +8355,10 @@ msgstr "Nennen Sie unten ein Modell, das dieser Endpunkt bereitstellt, wählen S
 msgid "Name in the App's code"
 msgstr "Name im Code der App"
 
+#: src/agents/own-agents-admin.tsx
+msgid "Name not shown"
+msgstr "Name nicht angezeigt"
+
 #: src/apps/release-controls.tsx
 msgid "Name of the hold, such as a case reference"
 msgstr "Name der Aufbewahrung, etwa ein Aktenzeichen"
