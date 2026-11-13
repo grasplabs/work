@@ -1,6 +1,5 @@
 import type { OrgView } from "@grasp-os/shared/admin/onboarding-admin";
 import { stephenOf } from "@grasp-os/shared/admin/onboarding-admin-record";
-import type { StephenStats } from "@grasp-os/shared/admin/onboarding-admin-record";
 import { RATINGS } from "@grasp-os/shared/admin/org-record";
 import { Badge } from "@grasp-os/ui/components/badge";
 /**
@@ -15,11 +14,10 @@ import { Badge } from "@grasp-os/ui/components/badge";
  * each interview found (core runs no such review, so the model says none
  * is `reviewed`).
  */
-import { Stat } from "@grasp-os/ui/components/stat";
-import { cn } from "@grasp-os/ui/lib/utils";
 
-import { BarList, Figure } from "./interview-parts.tsx";
+import { BarList } from "./interview-parts.tsx";
 import { noInterviewsYet } from "./interviews.tsx";
+import { Attention, Figure } from "./parts.tsx";
 import { EmptySection, Section } from "./section.tsx";
 import { SetupActions } from "./stephen-setup.tsx";
 import type { SetupRead } from "./stephen-setup.tsx";
@@ -31,36 +29,42 @@ const oneDecimal = new Intl.NumberFormat("en", {
 /** An average, to one place. */
 const decimal = (value: number): string => oneDecimal.format(value);
 
-/** What the people who talked to them thought of it: the average as a number and five dots, and how many gave each. */
-const Rating = ({ stats }: { stats: StephenStats }) => {
+/**
+ * How Stephen and Claire did in this company's interviews, in short: what
+ * people thought of it and how many who started also finished, as two
+ * figures, then how many gave each rating. The rest (who people chose, how
+ * long it takes, where they stop) is in Stephen Lab, organization by
+ * organization.
+ */
+export const InterviewersDoing = ({ view }: { view: OrgView }) => {
+  const stats = stephenOf(view);
+  if (stats.started === 0) {
+    return <EmptySection>{noInterviewsYet(view)}</EmptySection>;
+  }
   const { count, average, by } = stats.rating;
-  const full = Math.round(average);
   return (
-    <div className="bg-card flex flex-col gap-4 px-5 py-4">
-      <div className="flex min-w-0 flex-col gap-0.5">
-        <h2 className="font-medium">What people thought of it</h2>
-        <p className="text-muted-foreground">
-          {count === 0
-            ? "Nobody has said yet. At the end of their interview, people can say how it was: from 1 to 5."
-            : `${count} of ${stats.held} said how it was, at the end of their interview.`}
-        </p>
+    <Section
+      description="At the end of their interview, people can say how it was: from 1 to 5."
+      title="What people thought of it"
+    >
+      <div className="bg-border grid grid-cols-2 gap-px border-t">
+        <Figure
+          label="Rating"
+          sub={
+            count === 0
+              ? "Nobody has said yet"
+              : `${count} of ${stats.held} said how it was`
+          }
+          value={count === 0 ? "–" : `${decimal(average)} of 5`}
+        />
+        <Figure
+          label="Finished"
+          sub="who started also agreed"
+          value={`${stats.held} of ${stats.started}`}
+        />
       </div>
       {count > 0 ? (
-        <div className="grid items-center gap-x-8 gap-y-4 sm:grid-cols-[auto_minmax(0,1fr)]">
-          <div className="flex flex-col gap-1.5">
-            <Stat>{`${decimal(average)} of 5`}</Stat>
-            <span aria-hidden className="flex gap-1">
-              {RATINGS.map((rating) => (
-                <span
-                  className={cn(
-                    "size-2.5 rounded-full",
-                    rating <= full ? "bg-foreground" : "bg-border"
-                  )}
-                  key={rating}
-                />
-              ))}
-            </span>
-          </div>
+        <div className="border-t px-5 py-4">
           <BarList
             label="How many gave each"
             rows={RATINGS.toReversed().map((rating) => {
@@ -75,31 +79,7 @@ const Rating = ({ stats }: { stats: StephenStats }) => {
           />
         </div>
       ) : null}
-    </div>
-  );
-};
-
-/**
- * How Stephen and Claire did in this company's interviews, in short: what
- * people thought of it, and how many who started also finished. The rest
- * (who people chose, how long it takes, where they stop) is in Stephen
- * Lab, organization by organization.
- */
-export const InterviewersDoing = ({ view }: { view: OrgView }) => {
-  const stats = stephenOf(view);
-  if (stats.started === 0) {
-    return <EmptySection>{noInterviewsYet(view)}</EmptySection>;
-  }
-  return (
-    <section className="bg-border grid gap-px overflow-hidden rounded-xl border lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-      <Rating stats={stats} />
-      <Figure
-        label="Finished"
-        ring={{ value: stats.held, of: stats.started }}
-        sub="who started also agreed"
-        value={`${stats.held} of ${stats.started}`}
-      />
-    </section>
+    </Section>
   );
 };
 
@@ -182,9 +162,11 @@ export const InterviewersSetup = ({
           short
         />
         {wanted === "" ? null : (
-          <p className="text-status-attention border-t px-5 py-4">
-            People there also need {wanted}, which Stephen and Claire don’t
-            speak yet.
+          <p className="border-t px-5 py-4">
+            <Attention>
+              People there also need {wanted}, which Stephen and Claire don’t
+              speak yet.
+            </Attention>
           </p>
         )}
         <SetupPart

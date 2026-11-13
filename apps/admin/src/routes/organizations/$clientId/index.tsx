@@ -54,7 +54,7 @@ const NeedsHere = () => {
                   />
                 }
                 size="sm"
-                variant="ghost"
+                variant="outline"
               >
                 {sectionWords[section].title}
                 <ArrowRightIcon data-icon="inline-end" />
@@ -70,7 +70,7 @@ const NeedsHere = () => {
 const Overview = () => {
   const { admin, view } = useOrganization();
   return (
-    <div className="grid items-start gap-6 xl:grid-cols-3">
+    <div className="grid gap-6 xl:grid-cols-3">
       <div className="flex min-w-0 flex-col gap-6 xl:col-span-2">
         <NeedsHere />
       </div>

@@ -250,12 +250,10 @@ describe("the admin's frame", () => {
       ),
       // Fees core doesn't hold yet are not known, not nothing; the hours
       // freed are counted from the work core sends.
-      unknownSums: ["a month under contract", "hours a week freed"].map(
-        (label) => {
-          const tile = main.slice(0, main.indexOf(label));
-          return tile.slice(tile.lastIndexOf("<div")).includes("—");
-        }
-      ),
+      unknownSums: ["Under contract", "Hours a week freed"].map((label) => {
+        const tile = main.slice(main.indexOf(`>${label}</span>`));
+        return tile.slice(0, tile.indexOf("</div>")).includes("—");
+      }),
       // In the sidebar, how many things need Grasp at Acme.
       acmeCount: acmeEntry
         .slice(0, acmeEntry.indexOf("</li>"))
