@@ -37,6 +37,15 @@ export const erasedSource = "The Brain refused it: what this adds was erased";
  */
 export const storeErased = "The Brain refused it: this store was erased";
 
+/**
+ * What an add with an expected current version (`NewInstructions.after`)
+ * says when the source's current version is another by the time it would
+ * write: nothing is written. The caller reads the source again and decides;
+ * the message alone, compared whole, tells it from any other failure.
+ */
+export const staleVersion =
+  "The Brain refused it: the current version is not the one expected";
+
 /** Most characters of a question (the host's page holds to it too). */
 export const questionMaxLength = brainQuestionMaxLength;
 
@@ -202,7 +211,20 @@ export const instructionsTextSchema = wellFormedString()
  */
 export const newInstructionsSchema = newSourceSchema
   .omit({ group: true })
-  .extend({ text: instructionsTextSchema });
+  .extend({
+    text: instructionsTextSchema,
+    /**
+     * The current version the caller saw, null for none yet: the add writes
+     * only while it still is, checked in the transaction that writes, and
+     * is refused with `staleVersion` otherwise. Given, the add always makes
+     * a new version, even of the current text and readers, so every add
+     * that lands moves the version. A change the store already has answers
+     * with the version it made first, so a retry still adds nothing twice.
+     * Left out, an add writes whatever is current, and current text and
+     * readers make no new version.
+     */
+    after: versionSchema.nullable().optional(),
+  });
 export type NewInstructions = z.infer<typeof newInstructionsSchema>;
 
 /**
@@ -514,6 +536,14 @@ export const versionRequestSchema = z.strictObject({
   reader: readerSchema,
 });
 export type VersionRequest = z.infer<typeof versionRequestSchema>;
+
+/** A change of a source to look up, and who asks. */
+export const changeRequestSchema = z.strictObject({
+  source: sourceIdSchema,
+  change: changeKeySchema,
+  reader: readerSchema,
+});
+export type ChangeRequest = z.infer<typeof changeRequestSchema>;
 
 /** Sources whose current versions to read whole, and who reads them. */
 export const currentRequestSchema = z.strictObject({
@@ -2064,7 +2094,10 @@ export interface Brain {
    * with the same versions, change keys and safe repeats, but kept whole:
    * never cut into chunks or indexed, so recall never returns it. The
    * shared store refuses one only one person may read (`owner`): it is
-   * kept in that person's own store alone.
+   * kept in that person's own store alone. With `after`, only over that
+   * current version (null: none yet), checked in the writing transaction:
+   * otherwise refused with `staleVersion`, nothing written; a change it
+   * has answers with its version first.
    */
   addInstructions: (source: NewInstructions) => Promise<SourceVersionRef>;
   /**
@@ -2111,6 +2144,14 @@ export interface Brain {
    * hides its history from those taken off.
    */
   readVersion: (request: VersionRequest) => Promise<SourceVersion | null>;
+  /**
+   * The version the change `change` of `source` made, by the rule
+   * `readVersion` reads by: `null` when it made none, or the reader may
+   * not read it, alike. Answers a number alone, never text: for a caller
+   * whose reply to an add was lost, to learn whether the change landed
+   * without sending it again.
+   */
+  changeVersion: (request: ChangeRequest) => Promise<number | null>;
   /**
    * The current version of each source asked for, whole, in the order
    * asked, leaving out alike each that doesn't exist and each whose
