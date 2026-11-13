@@ -50,8 +50,8 @@ import type { WorkflowResourcesRpc } from "./workflow-resources-rpc.ts";
 // and apps to approve wait on the organization's own admins, never Grasp
 // staff; a connection on whoever may sign in to it again; a version up
 // for review on the member who answers for its App; a share of a skill on
-// the organization's admins. Not audited: reading
-// it shows a person what they may already see, as the parts do.
+// the organization's admins. Not audited: reading it shows a person what
+// they may already see, as the parts do.
 
 /** The namespaces the feed is read from and acts through: the session's own. */
 export interface WaitingSources {
