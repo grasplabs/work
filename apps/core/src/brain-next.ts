@@ -1151,9 +1151,9 @@ export const startOwnBrainExport = async (
   });
 
 /**
- * The export `person`'s own store shows them: the one being written, else
- * the one done, else the latest; null when there is none. Only for the
- * person core verified.
+ * The export `person`'s own store shows them: their most recent one,
+ * whatever came of it; null when there is none. Only for the person core
+ * verified.
  */
 export const ownBrainExport = async (
   env: ExportEnv,

@@ -2248,9 +2248,9 @@ export interface Brain {
    */
   startOwnExport: (request: OwnExportStart) => Promise<{ id: string }>;
   /**
-   * The export `person`'s own store shows them: the one being written,
-   * else the one done, else the latest; null when there is none or the
-   * store was erased. Only their own store answers, and only them.
+   * The export `person`'s own store shows them: their most recent one,
+   * whatever came of it; null when there is none or the store was erased.
+   * Only their own store answers, and only them.
    */
   ownExport: (request: OwnExportRequest) => Promise<ExportStatus | null>;
   /**
