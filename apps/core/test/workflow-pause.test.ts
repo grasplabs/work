@@ -12,13 +12,10 @@ import { describe, expect, it } from "vite-plus/test";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { createTriggerResource } from "../src/trigger-resources.ts";
-import {
-  pauseWorkflow,
-  resumeWorkflow,
-  workflowPause,
-} from "../src/workflow-pause.ts";
+import { pauseWorkflow, resumeWorkflow } from "../src/workflow-pause.ts";
 import {
   createWorkflowResource,
+  getWorkflowResource,
   shareWorkflowResource,
 } from "../src/workflow-resources.ts";
 import {
@@ -117,21 +114,21 @@ const pauseEventsOf = async (id: string) => {
 };
 
 describe("a workflow's pause", { timeout: 60_000 }, () => {
-  it("lets only its builders change it, never Grasp staff, while anyone with a role reads it", async () => {
+  it("lets only its builders change it, never Grasp staff, while anyone with a role reads it on the workflow", async () => {
     const owner = await person("builder");
     const workflow = await workflowOf(owner);
     const staff = await person("admin", true);
     const stranger = await person("builder");
-    const read = await workflowPause(env, workflow.user, workflow.id);
+    const read = await getWorkflowResource(env, workflow.user, workflow.id);
 
     expect({
-      read: { paused: read.paused, canChange: read.canChange },
+      read: { paused: read.paused, role: read.role },
       user: await outcome(pauseWorkflow(env, workflow.user, workflow.id)),
       staff: await outcome(pauseWorkflow(env, staff, workflow.id)),
-      stranger: await outcome(workflowPause(env, stranger, workflow.id)),
+      stranger: await outcome(pauseWorkflow(env, stranger, workflow.id)),
       audited: await pauseEventsOf(workflow.id),
     }).toStrictEqual({
-      read: { paused: null, canChange: false },
+      read: { paused: false, role: "user" },
       user: "role.forbidden",
       staff: "role.forbidden",
       stranger: "workflow.resource_unavailable",
@@ -172,8 +169,8 @@ describe("a paused workflow", { timeout: 120_000 }, () => {
     const pauseEvents = await pauseEventsOf(workflow.id);
 
     expect({
-      paused: paused.paused?.by,
-      pausedAgain: pausedAgain.paused?.by,
+      paused: paused.paused,
+      pausedAgain: pausedAgain.paused,
       decidedBefore,
       whilePaused,
       resumed: resumed.paused,
@@ -181,12 +178,12 @@ describe("a paused workflow", { timeout: 120_000 }, () => {
       refusals,
       audited: pauseEvents.map(({ action, actor }) => ({ action, actor })),
     }).toStrictEqual({
-      paused: workflow.builder.userId,
-      // Pausing a paused workflow changes nothing: still the first pause.
-      pausedAgain: workflow.builder.userId,
+      paused: true,
+      // Pausing a paused workflow changes nothing (audited once, below).
+      pausedAgain: true,
       decidedBefore: "workflow.start_denied",
       whilePaused: "workflow.paused",
-      resumed: null,
+      resumed: false,
       afterResume: "ok",
       refusals: ["workflow.start_denied", "workflow.paused"],
       audited: [

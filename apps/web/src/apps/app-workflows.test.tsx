@@ -58,6 +58,7 @@ const workflow = (
   currentVersion,
   role: "builder",
   process: null,
+  paused: false,
   createdAt: "2026-10-01T09:00:00.000Z",
 });
 

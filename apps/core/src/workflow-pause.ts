@@ -1,5 +1,5 @@
 import { actorOf } from "@grasp-os/shared/audit";
-import type { WorkflowPause } from "@grasp-os/shared/workflow-pause";
+import type { WorkflowResource } from "@grasp-os/shared/workflow-resources";
 import { and, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -8,12 +8,14 @@ import type { Acting } from "./auth/identity.ts";
 import { workflowResourceLifecycles } from "./db/core/schema.ts";
 import { requireNotStaff } from "./sharing.ts";
 import {
+  getWorkflowResource,
   nextGeneration,
   previousChanged,
   requireWorkflowRole,
 } from "./workflow-resources.ts";
 
-// Whether an independent workflow is paused (GRA-512). Which version runs
+// Whether an independent workflow is paused (GRA-512), as its
+// `WorkflowResource.paused` says: as an App is archived. Which version runs
 // is the workflow's live one, made live by a publish or a roll back
 // (workflow-publish.ts); a pause stops new runs of whichever it is.
 //
@@ -35,46 +37,13 @@ import {
 //
 // Every change is audited in its own batch, only if it landed.
 
-type Lifecycle = typeof workflowResourceLifecycles.$inferSelect;
-
-type Workflow = Awaited<ReturnType<typeof requireWorkflowRole>>;
-
-/** Workflow `id`'s row, if anything was ever set on it. */
-const rowOf = async (env: Env, id: string): Promise<Lifecycle | undefined> =>
-  await drizzle(env.DB)
-    .select()
+/** Whether workflow `id` is paused now. */
+export const isPaused = async (env: Env, id: string): Promise<boolean> => {
+  const row = await drizzle(env.DB)
+    .select({ pausedAt: workflowResourceLifecycles.pausedAt })
     .from(workflowResourceLifecycles)
     .where(eq(workflowResourceLifecycles.workflowResourceId, id))
     .get();
-
-const pauseOf = (
-  by: Acting,
-  workflow: Workflow,
-  row: Lifecycle | undefined
-): WorkflowPause => ({
-  workflowId: workflow.id,
-  paused:
-    row?.pausedAt === null ||
-    row?.pausedAt === undefined ||
-    row.pausedBy === null
-      ? null
-      : { by: row.pausedBy, at: row.pausedAt.toISOString() },
-  canChange: workflow.role === "builder" && !by.staff,
-});
-
-/** Workflow `id`'s pause, for anyone with a role in it. */
-export const workflowPause = async (
-  env: Env,
-  by: Acting,
-  id: unknown
-): Promise<WorkflowPause> => {
-  const workflow = await requireWorkflowRole(env, by, id, "user");
-  return pauseOf(by, workflow, await rowOf(env, workflow.id));
-};
-
-/** Whether workflow `id` is paused now. */
-export const isPaused = async (env: Env, id: string): Promise<boolean> => {
-  const row = await rowOf(env, id);
   return row?.pausedAt !== null && row?.pausedAt !== undefined;
 };
 
@@ -82,14 +51,15 @@ export const isPaused = async (env: Env, id: string): Promise<boolean> => {
  * Pauses (`paused`) or resumes workflow `id`, for its builders, never
  * Grasp staff: only while it is still the other, so a pause of a paused
  * workflow changes nothing. A pause moves its policy generation on with
- * it. Audited as `workflow.paused` or `workflow.resumed`.
+ * it. Audited as `workflow.paused` or `workflow.resumed`. Answers the
+ * workflow as it is then.
  */
 const setPaused = async (
   env: Env,
   by: Acting,
   id: unknown,
   paused: boolean
-): Promise<WorkflowPause> => {
+): Promise<WorkflowResource> => {
   requireNotStaff(by);
   const workflow = await requireWorkflowRole(env, by, id, "builder");
   const db = drizzle(env.DB);
@@ -132,7 +102,7 @@ const setPaused = async (
       detail: {},
     }),
   ]);
-  return pauseOf(by, workflow, await rowOf(env, workflow.id));
+  return await getWorkflowResource(env, by, workflow.id);
 };
 
 /** Pauses workflow `id`: it starts no runs until resumed (`setPaused`). */
@@ -140,11 +110,11 @@ export const pauseWorkflow = async (
   env: Env,
   by: Acting,
   id: unknown
-): Promise<WorkflowPause> => await setPaused(env, by, id, true);
+): Promise<WorkflowResource> => await setPaused(env, by, id, true);
 
 /** Resumes workflow `id`: it starts runs again (`setPaused`). */
 export const resumeWorkflow = async (
   env: Env,
   by: Acting,
   id: unknown
-): Promise<WorkflowPause> => await setPaused(env, by, id, false);
+): Promise<WorkflowResource> => await setPaused(env, by, id, false);

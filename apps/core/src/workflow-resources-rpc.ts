@@ -56,7 +56,7 @@ import {
 import { WorkflowMembersRpc } from "./workflow-members-rpc.ts";
 import { workflowActivity, workflowFiles } from "./workflow-own.ts";
 import { setWorkflowParams, workflowParams } from "./workflow-params.ts";
-import { WorkflowPauseRpc } from "./workflow-pause-rpc.ts";
+import { pauseWorkflow, resumeWorkflow } from "./workflow-pause.ts";
 import {
   createWorkflowResource,
   deleteWorkflowResource,
@@ -97,7 +97,6 @@ export class WorkflowResourcesRpc
 {
   readonly #env: Env;
   readonly #check: SessionCheck;
-  readonly #pause: WorkflowPauseRpc;
   readonly #members: WorkflowMembersRpc;
   readonly #triggers: WorkflowTriggersRpc;
   readonly #sources: EventSourcesRpc;
@@ -106,14 +105,9 @@ export class WorkflowResourcesRpc
     super();
     this.#env = env;
     this.#check = check;
-    this.#pause = new WorkflowPauseRpc(env, check);
     this.#members = new WorkflowMembersRpc(env, check);
     this.#triggers = new WorkflowTriggersRpc(env, check);
     this.#sources = new EventSourcesRpc(env, check);
-  }
-
-  get pause(): WorkflowPauseRpc {
-    return this.#pause;
   }
 
   get members(): WorkflowMembersRpc {
@@ -154,6 +148,20 @@ export class WorkflowResourcesRpc
     return await withPerson(
       this.#check,
       async (person) => await getWorkflowResource(this.#env, person, id)
+    );
+  }
+
+  async pause(id: string): Promise<WorkflowResource> {
+    return await withPerson(
+      this.#check,
+      async (person) => await pauseWorkflow(this.#env, person, id)
+    );
+  }
+
+  async resume(id: string): Promise<WorkflowResource> {
+    return await withPerson(
+      this.#check,
+      async (person) => await resumeWorkflow(this.#env, person, id)
     );
   }
 

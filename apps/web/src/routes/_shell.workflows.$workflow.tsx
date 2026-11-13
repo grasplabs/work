@@ -1,7 +1,6 @@
 import type { Draft } from "@grasp-os/shared/drafts";
 import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import type { WorkflowPause } from "@grasp-os/shared/workflow-pause";
 import type {
   WorkflowActivity,
   WorkflowDraft,
@@ -106,23 +105,31 @@ const viewOf = (value: unknown): WorkflowView | undefined =>
 
 /**
  * Whether it is paused, as core answered the last change made on the
- * page until the page reads it again; `onChange` takes a change.
+ * page until the page reads it again, and whether `identity` may pause
+ * and resume it (a builder of it, never Grasp staff); `onChange` takes a
+ * change.
  */
-const usePaused = (pause: Loaded<WorkflowPause>) => {
+const usePaused = (
+  resource: WorkflowResource,
+  identity: Pick<Identity, "staff">
+) => {
   const router = useRouter();
-  const loaded = pause.state === "ready" ? pause.data : undefined;
   // As core answered the last change made here, until the next read.
-  const [changed, setChanged] = useState<WorkflowPause>();
-  const [seen, setSeen] = useState(loaded);
-  if (loaded !== seen) {
-    setSeen(loaded);
+  const [changed, setChanged] = useState<WorkflowResource>();
+  const [seen, setSeen] = useState(resource);
+  if (resource !== seen) {
+    setSeen(resource);
     setChanged(undefined);
   }
-  const onChange = (next: WorkflowPause): void => {
+  const onChange = (next: WorkflowResource): void => {
     setChanged(next);
     void router.invalidate();
   };
-  return { status: changed ?? loaded, onChange };
+  return {
+    paused: (changed ?? resource).paused,
+    pauses: resource.role === "builder" && !identity.staff,
+    onChange,
+  };
 };
 
 /**
@@ -318,7 +325,6 @@ interface WorkflowPageRead {
   state: Loaded<WorkflowState> | undefined;
   runs: Loaded<WorkflowResourceRun[]>;
   askable: Loaded<boolean>;
-  pause: Loaded<WorkflowPause>;
   activity: Loaded<WorkflowActivity[]>;
   names: Names;
   /** Who reads it: what its History offers them. */
@@ -339,7 +345,8 @@ const WorkflowBar = ({
   view,
   flow,
   runs,
-  status,
+  paused,
+  pauses,
   builder,
   draft,
   members,
@@ -356,8 +363,9 @@ const WorkflowBar = ({
   flow: boolean;
   /** How many runs it has, once read. */
   runs: number | undefined;
-  /** Whether it is paused, once read. */
-  status: WorkflowPause | undefined;
+  paused: boolean;
+  /** Whether the reader may pause and resume it: a builder, not Grasp staff. */
+  pauses: boolean;
   builder: boolean;
   /** Its draft, for its builders, as read last. */
   draft: Draft | undefined;
@@ -367,7 +375,7 @@ const WorkflowBar = ({
   running: boolean;
   /** Whether it is shared and has changes only its builders see. */
   pending: boolean;
-  onChange: (pause: WorkflowPause) => void;
+  onChange: (changed: WorkflowResource) => void;
   /** Shows what it may reach, in its Settings' Files and apps. */
   onFiles: () => void;
   onShared: () => void;
@@ -390,15 +398,15 @@ const WorkflowBar = ({
             onFiles={onFiles}
             workflow={resource.id}
           />
-          {status === undefined ? null : (
+          {pauses ? (
             <PauseControl
-              pause={status}
               live={live}
               name={resource.name}
               onChange={onChange}
+              paused={paused}
               workflow={resource.id}
             />
-          )}
+          ) : null}
           {builder ? (
             <ShareWithTeam
               draft={draft}
@@ -421,8 +429,8 @@ const WorkflowBar = ({
       state={
         builder && members === undefined ? undefined : (
           <WorkflowStatus
-            pause={status}
             live={live}
+            paused={paused}
             who={members === undefined ? undefined : memberNames(members)}
           />
         )
@@ -480,7 +488,7 @@ const WorkflowResourceView = ({
   );
   const [shares, setShares] = useState(0);
   const members = useMembers(resource.id, builder, shares);
-  const { status, onChange } = usePaused(read.pause);
+  const { paused, pauses, onChange } = usePaused(resource, read.identity);
   useEffect(() => {
     if (handedOver === undefined) {
       return;
@@ -540,8 +548,9 @@ const WorkflowResourceView = ({
           pending={unpublished}
           resource={resource}
           running={chat.busy}
+          paused={paused}
+          pauses={pauses}
           runs={runs.state === "ready" ? runs.data.length : undefined}
-          status={status}
           view={view}
         />
       }
@@ -754,7 +763,6 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
       state,
       runs,
       askable,
-      pause,
       activity,
       inProject,
     ] = await Promise.all([
@@ -779,10 +787,6 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
       ),
       loadFromCore(
         core,
-        async (session) => await session.workflowResources.pause.get(workflow)
-      ),
-      loadFromCore(
-        core,
         async (session) => await session.workflowResources.activity(workflow)
       ),
       // The project it was started or opened from, for the way back.
@@ -799,7 +803,6 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
       state,
       runs,
       askable,
-      pause,
       activity,
       people,
       project: inProject.state === "ready" ? inProject.data : undefined,

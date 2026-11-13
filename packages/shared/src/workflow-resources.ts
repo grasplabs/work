@@ -13,7 +13,6 @@ import type {
   WorkflowDiagram,
   WorkflowRunTrace,
 } from "./workflow-diagrams.ts";
-import type { WorkflowPauseApi } from "./workflow-pause.ts";
 import type { WorkflowTriggersApi } from "./workflow-triggers.ts";
 import type { RunAiProviderWait } from "./workflows.ts";
 
@@ -745,6 +744,11 @@ export interface WorkflowResource {
    * shows its icon for and groups it by. It grants nothing.
    */
   process: BusinessProcess | null;
+  /**
+   * Whether a builder paused it: it starts no runs until resumed, and
+   * runs already going go on.
+   */
+  paused: boolean;
   createdAt: string;
 }
 
@@ -1332,10 +1336,16 @@ export interface WorkflowResourcesApi {
   catalog: () => Promise<CatalogContractEntry[]>;
   /** Publishes a catalog contract; for the organization's admins. */
   publishContract: (input: unknown) => Promise<CatalogContractEntry>;
-  /** Whether it is paused, and pausing and resuming it. */
-  readonly pause: WorkflowPauseApi;
+  /**
+   * Pauses it, for its builders, never Grasp staff: it starts no runs
+   * until resumed; runs already going go on. Pausing a paused workflow
+   * changes nothing.
+   */
+  pause: (id: string) => Promise<WorkflowResource>;
+  /** Resumes it, likewise. Resuming one that isn't paused changes nothing. */
+  resume: (id: string) => Promise<WorkflowResource>;
   readonly members: WorkflowMembersApi;
-  /** Its triggers: list, create, move to a version, enable and delete. */
+  /** Its triggers: list, create, enable and delete. */
   readonly triggers: WorkflowTriggersApi;
   /**
    * The deployment's event sources, which webhook triggers start on:

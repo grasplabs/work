@@ -82,6 +82,7 @@ import {
   projectItems,
   teams,
   users,
+  workflowResourceLifecycles,
   workflowResourceMembers,
   workflowResourceProcesses,
   workflowResources,
@@ -395,7 +396,7 @@ export const requireWorkflowRole = async (
 const resourceOf = (
   workflow: Live,
   role: WorkflowRole,
-  process: BusinessProcess | null
+  { process, paused }: { process: BusinessProcess | null; paused: boolean }
 ): WorkflowResource => ({
   id: workflow.id,
   namespace: workflowNamespace,
@@ -404,8 +405,29 @@ const resourceOf = (
   currentVersion: workflow.currentVersion,
   role,
   process,
+  paused,
   createdAt: workflow.createdAt.toISOString(),
 });
+
+/** Which of `workflows` are paused (workflow-pause.ts), in one read. */
+const pausedAmong = async (
+  env: Env,
+  workflows: readonly string[]
+): Promise<Set<string>> => {
+  if (workflows.length === 0) {
+    return new Set();
+  }
+  const rows = await drizzle(env.DB)
+    .select({ id: workflowResourceLifecycles.workflowResourceId })
+    .from(workflowResourceLifecycles)
+    .where(
+      and(
+        sql`${workflowResourceLifecycles.workflowResourceId} IN ${jsonList(workflows)}`,
+        isNotNull(workflowResourceLifecycles.pausedAt)
+      )
+    );
+  return new Set(rows.map(({ id }) => id));
+};
 
 /**
  * The business process each of `workflows` serves, by ID, in one read: a
@@ -518,7 +540,7 @@ export const createWorkflowResource = async (
   return resourceOf(
     { id, name: parsed, owner: by.userId, currentVersion: null, createdAt },
     ceilingOf(by),
-    null
+    { process: null, paused: false }
   );
 };
 
@@ -529,7 +551,14 @@ export const getWorkflowResource = async (
   id: unknown
 ): Promise<WorkflowResource> => {
   const workflow = await requireWorkflowRole(env, by, id, "user");
-  return resourceOf(workflow, workflow.role, await processOf(env, workflow.id));
+  const [process, paused] = await Promise.all([
+    processOf(env, workflow.id),
+    pausedAmong(env, [workflow.id]),
+  ]);
+  return resourceOf(workflow, workflow.role, {
+    process,
+    paused: paused.has(workflow.id),
+  });
 };
 
 /**
@@ -581,7 +610,11 @@ export const setWorkflowProcess = async (
       ),
     ]);
   }
-  return resourceOf(workflow, workflow.role, process);
+  const paused = await pausedAmong(env, [workflow.id]);
+  return resourceOf(workflow, workflow.role, {
+    process,
+    paused: paused.has(workflow.id),
+  });
 };
 
 /** The live workflows `by` has a role in, by name. */
@@ -611,16 +644,22 @@ export const listWorkflowResources = async (
       )
     )
     .orderBy(asc(workflowResources.name));
-  const roles = await rolesIn(env, by, rows);
-  const processes = await processesOf(
-    env,
-    rows.map(({ id }) => id)
-  );
+  const ids = rows.map(({ id }) => id);
+  const [roles, processes, paused] = await Promise.all([
+    rolesIn(env, by, rows),
+    processesOf(env, ids),
+    pausedAmong(env, ids),
+  ]);
   return rows.flatMap((row) => {
     const role = roles.get(row.id);
     return role === undefined
       ? []
-      : [resourceOf(row, role, processes.get(row.id) ?? null)];
+      : [
+          resourceOf(row, role, {
+            process: processes.get(row.id) ?? null,
+            paused: paused.has(row.id),
+          }),
+        ];
   });
 };
 

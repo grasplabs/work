@@ -1,4 +1,4 @@
-import type { WorkflowPause } from "@grasp-os/shared/workflow-pause";
+import type { WorkflowResource } from "@grasp-os/shared/workflow-resources";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,8 +24,8 @@ import { useGrace } from "../use-grace.ts";
 // Where an independent workflow stands, in its bar, in the words an App's
 // bar has (apps/app-status.tsx): "Only you see this" until a version is
 // live and shared, then who uses it; "Paused" while it is paused. Beside
-// Run, for whoever core lets change it (`canChange`), Pause while a
-// version is live, or Resume while paused (`workflowResources.pause`).
+// Run, for its builders, Pause while a version is live, or Resume while
+// paused (`workflowResources.pause`, `resume`).
 //
 // Pausing stops real work, so it asks first and says what it stops: core
 // refuses new starts while it is paused, and runs already going carry on.
@@ -39,21 +39,21 @@ const graceSeconds = 5;
 /** Where the workflow stands, as its bar says it. */
 export const WorkflowStatus = ({
   live,
-  pause,
+  paused,
   who,
 }: {
   /** Its live version; null before the first. */
   live: number | null;
-  pause: WorkflowPause | undefined;
+  paused: boolean;
   /** Whom it is shared with, by name; none while they are read. */
   who: readonly string[] | undefined;
 }) =>
-  pause?.paused === null || pause === undefined ? (
-    <StatusBadge app={{ archived: false, currentVersion: live }} who={who} />
-  ) : (
+  paused ? (
     <Badge variant="attention">
       <Trans context="a workflow someone paused">Paused</Trans>
     </Badge>
+  ) : (
+    <StatusBadge app={{ archived: false, currentVersion: live }} who={who} />
   );
 
 /** "Pauses in 4 s", with Undo beside it, while a pause may be taken back. */
@@ -117,22 +117,22 @@ const PauseQuestion = ({
 };
 
 /**
- * Pause, or Resume while paused, beside Run, for whoever core lets change
- * it: nothing before a version is live, as nothing runs to pause.
+ * Pause, or Resume while paused, beside Run, for its builders: nothing
+ * before a version is live, as nothing runs to pause.
  */
 export const PauseControl = ({
   workflow,
   name,
   live,
-  pause,
+  paused,
   onChange,
 }: {
   workflow: string;
   name: string;
   /** Its live version; null before the first. */
   live: number | null;
-  pause: WorkflowPause;
-  onChange: (pause: WorkflowPause) => void;
+  paused: boolean;
+  onChange: (changed: WorkflowResource) => void;
 }) => {
   const core = useCore();
   const { busy, failure, run } = useCoreAction();
@@ -140,7 +140,7 @@ export const PauseControl = ({
 
   const change = async (write: "pause" | "resume"): Promise<void> => {
     const changed = await run(
-      async (session) => await session.workflowResources.pause[write](workflow)
+      async (session) => await session.workflowResources[write](workflow)
     );
     if (changed !== undefined) {
       onChange(changed);
@@ -159,8 +159,7 @@ export const PauseControl = ({
       void (async () => {
         try {
           await core.withSession(
-            async (session) =>
-              await session.workflowResources.pause.pause(workflow)
+            async (session) => await session.workflowResources.pause(workflow)
           );
         } catch {
           // Nobody is left on the page to tell.
@@ -172,8 +171,7 @@ export const PauseControl = ({
   if (held !== null) {
     return <PauseCountdown left={held.left} onUndo={undo} />;
   }
-  const paused = pause.paused !== null;
-  if (!pause.canChange || (live === null && !paused)) {
+  if (live === null && !paused) {
     return null;
   }
   return (
