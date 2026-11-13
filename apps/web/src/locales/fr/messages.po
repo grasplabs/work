@@ -2189,6 +2189,7 @@ msgid "Agent not found"
 msgstr "Agent introuvable"
 
 #: src/agents/agents-overview.tsx
+#: src/chat/mentions.tsx
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.agents.$agent.tsx
 #: src/routes/_shell.agents.index.tsx
@@ -2385,6 +2386,10 @@ msgstr "Un agent pour l'entreprise, ou un que vous seul utilisez."
 #: src/agents/new-agent.tsx
 msgid "An agent of your own, for a job you do often. Only you see and ask it, in Grasp's chat."
 msgstr "Un agent à vous, pour une tâche que vous faites souvent. Vous seul le voyez et l'interrogez, dans le chat de Grasp."
+
+#: src/chat/thread.tsx
+msgid "An agent you can no longer ask"
+msgstr "Un agent que vous ne pouvez plus interroger"
 
 #: src/apps/field-kinds.tsx
 msgid "An amount in a currency"
