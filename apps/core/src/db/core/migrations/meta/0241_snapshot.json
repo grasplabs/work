@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "e41e88a8-ff96-4f6e-b179-d9cdb2e140fd",
+  "id": "bf3238c4-677c-4a72-9d78-c421568847fd",
   "prevId": "907b2009-ca9e-41e5-8b25-ed279461bfd5",
   "tables": {
     "access_revocations": {
@@ -4202,6 +4202,72 @@
           "name": "brain_hand_overs_producer_source_id_pk"
         }
       },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "brain_own_stores": {
+      "name": "brain_own_stores",
+      "columns": {
+        "store": {
+          "name": "store",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reported_at": {
+          "name": "reported_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "waiting": {
+          "name": "waiting",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "oldest_waiting_at": {
+          "name": "oldest_waiting_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "parked": {
+          "name": "parked",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "failing": {
+          "name": "failing",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "not_rebuilt": {
+          "name": "not_rebuilt",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "near_limit": {
+          "name": "near_limit",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
@@ -8845,69 +8911,6 @@
             "permission_id"
           ],
           "name": "run_brain_evidence_run_id_document_id_version_permission_id_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "run_brain_versions": {
-      "name": "run_brain_versions",
-      "columns": {
-        "run_id": {
-          "name": "run_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "producer": {
-          "name": "producer",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "source_id": {
-          "name": "source_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "version": {
-          "name": "version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "permission_id": {
-          "name": "permission_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "recorded_at": {
-          "name": "recorded_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "run_brain_versions_run_id_producer_source_id_version_permission_id_pk": {
-          "columns": [
-            "run_id",
-            "producer",
-            "source_id",
-            "version",
-            "permission_id"
-          ],
-          "name": "run_brain_versions_run_id_producer_source_id_version_permission_id_pk"
         }
       },
       "uniqueConstraints": {},

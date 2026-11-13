@@ -44,4 +44,8 @@ export const brainModules = {
   // Checks with core's readableVersionsAs that a run may still read what
   // it recalled, and hands on only a refusal.
   "apps/core/src/workflows/resource-reads.ts": "core",
+  // Core's subclass of the store: its alarm's host, from core's
+  // alarmHostOf, given to the store inside its own object; it adds no
+  // method, so the store's probes are its own.
+  "apps/core/src/brain-store.ts": "store",
 } as const satisfies Readonly<Record<string, string>>;

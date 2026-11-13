@@ -54,8 +54,8 @@ const unboundedTargetPaths = [
 
 /**
  * The Brain's store and its files: reached only through its contract
- * (`@grasp-os/brain-next/contract`). Core's entry point alone imports the
- * store, to register its class. Its work queue (`/work`) is the store's
+ * (`@grasp-os/brain-next/contract`). Core's src/brain-store.ts alone
+ * imports the store, to subclass it for its alarm. Its work queue (`/work`) is the store's
  * own too: its handlers run inside the store.
  */
 const brainStoreImports = {
@@ -245,6 +245,7 @@ export default defineConfig({
           "apps/core/test/brain-next-vectors.test.ts",
           "apps/core/test/brain-next-erasure.test.ts",
           "apps/core/test/brain-report.test.ts",
+          "apps/core/test/brain-next-own-work.test.ts",
         ],
         rules: {
           "no-restricted-imports": [
@@ -345,14 +346,15 @@ export default defineConfig({
         },
       },
       {
-        // Core's entry point registers the Brain's store: its one import.
-        files: ["apps/core/src/index.ts"],
+        // Core's subclass of the Brain's store (its alarm's host): the one
+        // import of the store, and a module the harness probes.
+        files: ["apps/core/src/brain-store.ts"],
         rules: {
           "no-restricted-imports": [
             "error",
             {
               paths: unboundedTargetPaths,
-              patterns: [brainContractImports, brainModuleImports],
+              patterns: [brainContractImports],
             },
           ],
         },

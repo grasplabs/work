@@ -25,6 +25,9 @@ export class BrainStore extends Store {
           throw new Error("No model in these tests");
         },
       },
+      report: async () => {
+        await Promise.resolve();
+      },
     };
   };
 }
