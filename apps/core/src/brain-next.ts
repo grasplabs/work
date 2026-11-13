@@ -230,7 +230,9 @@ const kindsWithoutColon = <const K extends string>(
  */
 // `chat`: a turn of a person's own chat, in their own store alone, in its
 // chat's group (brain-next-origins.ts `chatTurnSource`, GRA-1805).
-const producerKinds = kindsWithoutColon(["upload", "chat", "run"]);
+// `capture`: what a chat's agent read through its person's own connection
+// (connection-capture.ts, GRA-1730), in their own store alone.
+const producerKinds = kindsWithoutColon(["upload", "chat", "run", "capture"]);
 
 /**
  * The kinds the Sources page lists (`listSourcesAs`): not a chat's turns,
@@ -353,6 +355,7 @@ const newSourceSchema = z.strictObject({
   readers: sourceReadersSchema,
   said: saidSchema.optional(),
   group: sourceRefSchema.optional(),
+  readAt: z.date().optional(),
 });
 
 /** The most characters of a question `recallAs` takes, as the Brain's contract says. */
@@ -692,9 +695,15 @@ export const addSource = async (
     readers: SourceReaders;
     said?: Said;
     group?: SourceRef;
+    /**
+     * When the producer read `text` where it lives: a text read before the
+     * source's current version was is not added (`newer`), whatever order
+     * the adds arrive in.
+     */
+    readAt?: Date;
   }
-): Promise<SourceVersionRef> => {
-  const { source, change, text, readers, said, group } = checked(
+): Promise<SourceVersionRef & { newer?: true }> => {
+  const { source, change, text, readers, said, group, readAt } = checked(
     newSourceSchema,
     added
   );
@@ -705,6 +714,12 @@ export const addSource = async (
     throw new Error(
       "Refused: only a source for one person alone is in a group, of its own producer"
     );
+  }
+  // What an agent read through a person's own connection is theirs alone
+  // (connection-capture.ts): never in the shared store, so never in a
+  // recall that doesn't read their own store, such as code's.
+  if (source.producer === "capture" && readers.kind !== "owner") {
+    throw new Error("Refused: a capture is for one person alone");
   }
   const access = accessOf(readers);
   const key = sourceKeyOf(source);
@@ -720,8 +735,9 @@ export const addSource = async (
           },
         };
   let version: number;
+  let newer: true | undefined;
   try {
-    ({ version } = await whileNotRestoring(
+    ({ version, newer } = await whileNotRestoring(
       async () =>
         await keptIn(
           env,
@@ -735,6 +751,7 @@ export const addSource = async (
               access,
               ...extract,
               ...(group === undefined ? {} : { group: sourceKeyOf(group) }),
+              ...(readAt === undefined ? {} : { readAt: readAt.getTime() }),
             })
         )
     ));
@@ -750,7 +767,7 @@ export const addSource = async (
     }
     throw error;
   }
-  return { source, version };
+  return { source, version, ...(newer === true ? { newer } : {}) };
 };
 
 /** Whether `vector` is one the Brain takes: finite numbers, not all zero. */

@@ -249,6 +249,15 @@ export const newSourceSchema = z.strictObject({
     }),
   access: accessSchema,
   extract: extractSchema.optional(),
+  /**
+   * When the producer read this text from where it lives, in milliseconds
+   * since the epoch, if it read it: an add of a text read before the
+   * source's current version was read writes nothing (`AddedVersion`'s
+   * `newer`), so a late add of an older read never replaces a newer one,
+   * whatever order the adds arrive in. A `newer` answer records nothing,
+   * not even its change, so a retry of that change is judged afresh.
+   */
+  readAt: z.int().nonnegative().optional(),
 });
 export type NewSource = z.infer<typeof newSourceSchema>;
 
@@ -274,8 +283,11 @@ export const instructionsTextSchema = wellFormedString()
  * source, but never cut into chunks or indexed, so recall never finds it:
  * it is read whole (`readCurrent`).
  */
+// Neither a group nor when it was read: an instruction file is written by
+// a person over the version they saw (`after`), never a read that a later
+// one may hold off.
 export const newInstructionsSchema = newSourceSchema
-  .omit({ extract: true, group: true })
+  .omit({ extract: true, group: true, readAt: true })
   .extend({
     text: instructionsTextSchema,
     /**
@@ -430,6 +442,15 @@ export interface RecallOverview {
 export interface SourceVersionRef {
   source: SourceId;
   version: number;
+}
+
+/**
+ * What an add answers: the version it made or already is, or, `newer`, the
+ * source's current version, read later than the add's text (`readAt`):
+ * then the add wrote nothing.
+ */
+export interface AddedVersion extends SourceVersionRef {
+  newer?: true;
 }
 
 /**
@@ -2167,7 +2188,7 @@ export interface Brain {
    * current version is that version. So an add is safe to repeat, late
    * or at once, after a lost reply or a crash.
    */
-  addSource: (source: NewSource) => Promise<SourceVersionRef>;
+  addSource: (source: NewSource) => Promise<AddedVersion>;
   /**
    * Adds a version of an instruction file as `addSource` adds a source,
    * with the same versions, change keys and safe repeats, but kept whole:

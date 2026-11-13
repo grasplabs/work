@@ -272,6 +272,7 @@
   "@grasp-os/core test/chats.test.ts": 20,
   "@grasp-os/core test/clock.test.ts": 1.9,
   "@grasp-os/core test/code-quality.test.ts": 2.6,
+  "@grasp-os/core test/connection-capture.test.ts": 1.8,
   "@grasp-os/core test/connections.test.ts": 3,
   "@grasp-os/core test/connector-contracts.test.ts": 0.2,
   "@grasp-os/core test/connector-triggers.test.ts": 13.5,

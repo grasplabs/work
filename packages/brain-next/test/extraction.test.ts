@@ -2356,4 +2356,82 @@ describe("extracting memories", () => {
       identifiers: names.filter(({ type }) => type !== "name"),
     }).toStrictEqual({ kept: true, identifiers: [] });
   });
+
+  it("takes the memories drawn from a grouped source with the group when the group is erased", async () => {
+    const token = unique("t");
+    const name = unique("Grouped");
+    const person = unique("person");
+    const store = env.BRAIN_STORE.getByName(`person:${person}`);
+    answers.set(
+      token,
+      answering({
+        entities: [{ key: "c", kind: "customer", names: [name] }],
+        memories: [
+          customerFact(
+            `${name} is active.`,
+            `${name} is active`,
+            "status",
+            "active"
+          ),
+        ],
+      })
+    );
+    // A turn of a chat: its source in the chat's group, as core names them.
+    const group = `chat:${unique("c")}`;
+    await store.addSource({
+      source: `${group}/${unique("turn")}`,
+      group,
+      change: crypto.randomUUID(),
+      text: `${token}: ${name} is active.`,
+      access: { kind: "owner", person },
+      extract: fromOutside({ speaker: { kind: "internal", person } }),
+    });
+    const tickOwn = async () => {
+      clock += 60_000;
+      await store.work({
+        ask,
+        at: new Date(clock),
+        embedders: noModel,
+        handOvers: noHandOvers,
+        contextTokens: null,
+      });
+    };
+    await tickOwn();
+    const reader = { person, groups: [] };
+    const memoriesOf = async () => {
+      const {
+        entities: [entity],
+      } = await store.findEntities({ reader, name });
+      if (entity === undefined) {
+        return [];
+      }
+      const { memories } = await store.readMemories({
+        entity: entity.id,
+        reader,
+        history: true,
+      });
+      return memories.map(({ value }) => value);
+    };
+    const drawn = await memoriesOf();
+    await store.eraseSource({ source: group, reason: "deleted" });
+    // The erasure is carried through on the store's ticks.
+    for (let round = 0; round < 3; round += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one tick after another
+      await tickOwn();
+    }
+    const after = await memoriesOf();
+    const left = await runInDurableObject(
+      store,
+      (_instance, state) =>
+        state.storage.sql
+          .exec("SELECT 1 FROM memories WHERE instr(statement, ?) > 0", name)
+          .toArray().length
+    );
+
+    expect({ drawn, after, left }).toStrictEqual({
+      drawn: ["active"],
+      after: [],
+      left: 0,
+    });
+  });
 });

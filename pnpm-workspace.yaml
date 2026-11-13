@@ -25,6 +25,7 @@ catalog:
   # vite.browser.config.ts): Vitest's browser mode drives it through
   # Playwright, the same version as @playwright/test's.
   "@vitest/browser-playwright": 4.1.11
+  entities: 9.0.0
   playwright: 1.63.0
   "@shadcn/lint": 0.1.5
   "@secretlint/secretlint-rule-preset-recommend": 13.0.5
