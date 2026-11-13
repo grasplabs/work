@@ -912,10 +912,6 @@ msgstr "{name} : {hours, plural, one {# heure par semaine} other {# heures par s
 msgid "{name}: {started} started, {completed} completed, {failed} failed"
 msgstr "{name} : {started} lancées, {completed} terminées, {failed} en échec"
 
-#: src/brain/sources-page.tsx
-msgid "{name}: agents search it live when you ask. The Brain keeps nothing from it."
-msgstr "{name} : les agents y cherchent en direct quand vous demandez. Le cerveau n'en garde rien."
-
 #: src/apps/app-status.tsx
 msgid "{names} use it"
 msgstr "{names} l’utilisent"
@@ -16096,6 +16092,10 @@ msgstr "Quand {account} signale un événement"
 #: src/brain/lessons-view.tsx
 msgid "When a task keeps failing the same way, the Brain notes it here as a lesson you can check."
 msgstr "Quand une tâche échoue sans cesse de la même manière, le Brain le note ici comme une leçon que vous pouvez vérifier."
+
+#: src/brain/sources-page.tsx
+msgid "When an agent reads one message or page for you through a connection of your own, the Brain keeps what it read, in your own Brain, for you alone. Everything else agents search live when you ask, and the Brain keeps nothing of it."
+msgstr "Quand un agent lit pour vous un message ou une page via une de vos propres connexions, le Brain garde ce qu'il a lu, dans votre propre Brain, pour vous seul. Tout le reste, les agents le cherchent en direct quand vous le demandez, et le Brain n'en garde rien."
 
 #: src/workflows/trigger-description.ts
 msgid "When an email arrives at its own address"
