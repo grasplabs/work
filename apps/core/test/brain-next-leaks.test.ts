@@ -424,6 +424,32 @@ const meaningSourcesIn = (answers: Iterable<readonly Answer[]>): string[] =>
       )
     );
 
+/**
+ * How many passages the current versions of `sources` hold in the shared
+ * store, and how many of them have a vector: read from its storage, as
+ * the store's overview counts only the whole store.
+ */
+const embeddedOf = async (
+  sources: readonly SourceRef[]
+): Promise<{ chunks: number; embedded: number }> =>
+  await runInDurableObject(
+    inJurisdiction(env, env.BRAIN_STORE).getByName("brain"),
+    (_instance, state) =>
+      state.storage.sql
+        .exec<{ chunks: number; embedded: number }>(
+          `SELECT count(*) AS chunks,
+          count(DISTINCT vector_codes.chunk) AS embedded
+        FROM source_versions
+        JOIN current_versions
+          ON current_versions.version_row = source_versions.row
+        JOIN chunks ON chunks.version_row = source_versions.row
+        LEFT JOIN vector_codes ON vector_codes.chunk = chunks.row
+        WHERE source_versions.source IN (SELECT value FROM json_each(?))`,
+          JSON.stringify(sources.map(({ producer, id }) => `${producer}:${id}`))
+        )
+        .one()
+  );
+
 /** The queue's clock for ticks of this file: only forward. */
 const clock = { at: Date.now() };
 
@@ -798,25 +824,36 @@ describe(
       const hiddenTexts = [words.join(" "), sharedWord];
       /** The holder's own copies, in their own store. */
       const holdersOwn = new Set<string>();
+      /**
+       * The shared store's hidden sources this test plants, by their refs:
+       * what must be embedded when the answers are taken again, however
+       * many sources a probe adds of its own. No probe of the surfaces
+       * asked here adds a source any probed reader may read: one that did
+       * would change their answers between before and after, rightly.
+       */
+      const planted: SourceRef[] = [erased, narrowed, fromCompany];
       for (const text of hiddenTexts) {
         for (let copy = 0; copy <= recallLimit; copy += 1) {
           // oxlint-disable-next-line no-await-in-loop -- one source at a time
-          await add(text, { kind: "team", teamId: secretTeam });
+          planted.push(await add(text, { kind: "team", teamId: secretTeam }));
           // oxlint-disable-next-line no-await-in-loop -- one source at a time
           const own = await add(text, { kind: "owner", personId: holder });
           holdersOwn.add(own.id);
         }
       }
-      await add(`Board minutes ${sharedWord} ${teamMarker}`, {
-        kind: "team",
-        teamId: secretTeam,
-      });
-      await add(`Unfiled note ${sharedWord} ${noneMarker}`, { kind: "none" });
+      planted.push(
+        await add(`Board minutes ${sharedWord} ${teamMarker}`, {
+          kind: "team",
+          teamId: secretTeam,
+        }),
+        await add(`Unfiled note ${sharedWord} ${noneMarker}`, { kind: "none" })
+      );
       await add(`Salary review ${sharedWord} ${ownerMarker}`, {
         kind: "owner",
         personId: holder,
       });
       const hidden = await allEmbedded([reader, holder]);
+      const plantedEmbedded = await embeddedOf(planted);
       // The hidden passages are near: the holder, who may read them, gets
       // them by meaning for the markers' question.
       const holders = await recallAs(env, holder, {
@@ -931,7 +968,7 @@ describe(
           readersNote.id
         ),
         hidden: hidden.rebuilt && hidden.embedded === hidden.chunks,
-        hiddenChunks: hidden.chunks - readable.chunks,
+        planted: plantedEmbedded,
         afterErasure: afterErasure.rebuilt,
         // By meaning, from their own store, apart from the team's copies.
         holdersByMeaning: holders.items.some(
@@ -972,7 +1009,11 @@ describe(
           appForReader: { surfaces: ["recall recallFor"], withoutMeaning: [] },
         },
         hidden: true,
-        hiddenChunks: (recallLimit + 1) * hiddenTexts.length + 5,
+        // One passage each, every one embedded.
+        planted: {
+          chunks: (recallLimit + 1) * hiddenTexts.length + 5,
+          embedded: (recallLimit + 1) * hiddenTexts.length + 5,
+        },
         afterErasure: true,
         readersNoteByMeaning: true,
         holdersByMeaning: true,
