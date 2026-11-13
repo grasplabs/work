@@ -162,6 +162,37 @@ describe("an entity's card", () => {
       before
     );
   });
+
+  // Hidden or not yet there is absent: as of a moment before the first
+  // memory the reader may read mentions it, there is no card.
+  it("is no card as of a moment before the first memory the reader may read", async () => {
+    const [group, hiddenGroup] = [unique("team"), unique("hidden")];
+    const reader = readerOf(unique("ann"), group);
+    const name = word();
+    const { entities } = await remember(
+      audience(hiddenGroup),
+      [{ key: "c", kind: "customer", names: [name] }],
+      [fact("c", `${name} note nobody may see`)]
+    );
+    const entity = entities.c ?? "";
+    await scheduler.wait(5);
+    const between = new Date();
+    await scheduler.wait(5);
+    await remember(
+      audience(group),
+      [{ key: "c", id: entity, kind: "customer", names: [name] }],
+      [fact("c", `${name} is a customer`)],
+      readerOf(unique("maker"), group, hiddenGroup)
+    );
+
+    const before = await shared().readCard({ entity, reader, asOf: between });
+    const now = await shared().readCard({ entity, reader });
+
+    expect({
+      before,
+      now: now?.notes.map(({ statement }) => statement),
+    }).toStrictEqual({ before: null, now: [`${name} is a customer`] });
+  });
 });
 
 describe("linking entities", () => {
@@ -225,6 +256,42 @@ describe("linking entities", () => {
   });
 
   // A name of one word is no exact evidence: a proposal, never a link.
+  // The order of adds decides: an entity given an identifier links only
+  // by its identifiers, one given none by its exact name. So a name and
+  // an email, then the name alone, are one entity; the name alone first,
+  // then the name and the email, are two.
+  it("links by the name after an add with an identifier, never the other way round", async () => {
+    const name = `${word()} ${word()}`;
+    const email = `${word()}@example.test`;
+    const named = { key: "e", kind: "person" as const, names: [name] };
+    const withEmail = {
+      ...named,
+      identifiers: [{ type: "email" as const, value: email }],
+    };
+    const entityOf = async (group: string, entity: typeof named) => {
+      const { entities } = await remember(
+        audience(group),
+        [entity],
+        [fact("e", `${name} works here`)]
+      );
+      return entities.e;
+    };
+    const [first, second] = [unique("team"), unique("team")];
+    const emailFirst = [
+      await entityOf(first, withEmail),
+      await entityOf(first, named),
+    ];
+    const nameFirst = [
+      await entityOf(second, named),
+      await entityOf(second, withEmail),
+    ];
+
+    expect({
+      emailFirst: emailFirst[0] === emailFirst[1],
+      nameFirst: nameFirst[0] === nameFirst[1],
+    }).toStrictEqual({ emailFirst: true, nameFirst: false });
+  });
+
   it("never links two entities by a name of one word, and proposes them", async () => {
     const group = unique("team");
     const reader = readerOf(unique("ann"), group);

@@ -1063,10 +1063,50 @@ const memoryFixture = async ({
 };
 
 /**
+ * A marked memory in someone else's own store (`person:<id>`), readable by
+ * them alone: its entity's id and its own. Every probe of a person's
+ * memories asks for these and must answer as for ids no one holds.
+ */
+const othersOwnMemory = async (
+  markers: readonly string[]
+): Promise<{ entity: string; memory: string }> => {
+  const person = stranger();
+  const text = markedText(markers);
+  const added = await personalBrainOf(
+    inJurisdiction(env, env.BRAIN_STORE),
+    person
+  ).addMemories({
+    change: crypto.randomUUID(),
+    access: { kind: "owner", person },
+    entities: [
+      {
+        key: "c",
+        kind: "customer",
+        names: [text],
+        identifiers: [{ type: "ref", value: `ref:${first(markers)}` }],
+      },
+    ],
+    memories: [
+      {
+        about: "c",
+        attribute: "status",
+        value: text,
+        type: "fact",
+        statement: text,
+        speaker: { kind: "internal", person },
+        basis: { kind: "writer", writer: person },
+      },
+    ],
+  });
+  return { entity: added.entities.c ?? "", memory: added.memories[0] ?? "" };
+};
+
+/**
  * The memory fixture (above) for a recall: and a relation, hidden from
  * the reader, from their own entity ("Plain") to a person only hidden
  * memories name, so a recall stepping along it, or naming the person,
  * would show a marker. Asking "Plain" must find the reader's own alone.
+ * And a marked memory in someone else's own store.
  */
 const recallFixture = async (probing: Probing): Promise<MemoryFixture> => {
   const fixture = await memoryFixture(probing);
@@ -1124,6 +1164,9 @@ const recallFixture = async (probing: Probing): Promise<MemoryFixture> => {
         }
       : { entities: [person], memories: [role] }),
   });
+  // Someone else's own store, every marker in it: a recall that reads
+  // the reader's own store (their own source is there) reads theirs alone.
+  await othersOwnMemory(probing.markers);
   return fixture;
 };
 
@@ -3351,45 +3394,6 @@ const memoryProbes = {
 } satisfies Record<string, Probe>;
 
 /**
- * A marked memory in someone else's own store (`person:<id>`), readable by
- * them alone: its entity's id and its own. Every probe of a person's
- * memories asks for these and must answer as for ids no one holds.
- */
-const othersOwnMemory = async (
-  markers: readonly string[]
-): Promise<{ entity: string; memory: string }> => {
-  const person = stranger();
-  const text = markedText(markers);
-  const added = await personalBrainOf(
-    inJurisdiction(env, env.BRAIN_STORE),
-    person
-  ).addMemories({
-    change: crypto.randomUUID(),
-    access: { kind: "owner", person },
-    entities: [
-      {
-        key: "c",
-        kind: "customer",
-        names: [text],
-        identifiers: [{ type: "ref", value: `ref:${first(markers)}` }],
-      },
-    ],
-    memories: [
-      {
-        about: "c",
-        attribute: "status",
-        value: text,
-        type: "fact",
-        statement: text,
-        speaker: { kind: "internal", person },
-        basis: { kind: "writer", writer: person },
-      },
-    ],
-  });
-  return { entity: added.entities.c ?? "", memory: added.memories[0] ?? "" };
-};
-
-/**
  * A person's memories, as a surface reaches them for `personId`: core's
  * functions (brain-next.ts) or the callers' (brain-memories.ts). Each
  * saves in the person's own word, in their own store.
@@ -3659,7 +3663,56 @@ const linkingProbes = {
           }),
         about
       );
+    // An add of the reader's names an entity as one of theirs and a hidden
+    // one are named: it links to theirs, never the hidden one, so its card
+    // holds no marker.
+    const linkedBeside = async (): Promise<Answer[]> => {
+      const [group] = reader.groups;
+      if (group === undefined) {
+        return [];
+      }
+      const name = `Twin ${crypto.randomUUID().slice(0, 8)}`;
+      const named = (
+        access: Access,
+        statement: string,
+        extra: { attribute?: string; value?: string } = {}
+      ) => ({
+        change: crypto.randomUUID(),
+        access,
+        entities: [{ key: "c", kind: "customer" as const, names: [name] }],
+        memories: [
+          {
+            about: "c",
+            type: "fact" as const,
+            statement,
+            speaker: { kind: "system" as const },
+            basis: { kind: "writer" as const, writer: stranger() },
+            ...extra,
+          },
+        ],
+      });
+      const text = markedText(probing.markers);
+      await store().addMemories(
+        named({ kind: "audience", group }, `${name} is a customer`)
+      );
+      await store().addMemories(
+        named({ kind: "audience", group: stranger() }, text, {
+          attribute: "status",
+          value: text,
+        })
+      );
+      const linked = await store().addMemories(
+        named({ kind: "audience", group }, `${name} renews in March`)
+      );
+      return [
+        await read(
+          "the reader's own, linked by a name a hidden entity holds too",
+          linked.entities.c ?? ""
+        ),
+      ];
+    };
     return [
+      ...(await linkedBeside()),
       await read("an entity no one added", crypto.randomUUID(), "nothing"),
       await read(
         "an entity only hidden memories name",
@@ -3924,11 +3977,78 @@ export const storeProbes = {
   // What recall finds before it is packed: the same questions, answered
   // as lists with their order keys, must hold no marker either.
   find: async (probing) => {
-    await recallFixture(probing);
+    const fixture = await recallFixture(probing);
     const find = async (asking: PackAsk) =>
       await store().find({ ...asking, reader: probing.reader });
     const whole = { tokens: recallBudgetMax };
+    // A readable entity reached from the reader's "Plain" only through a
+    // hidden relation: finding "Plain" must be what it was before the
+    // relation was added.
+    const reachedThroughHidden = async (): Promise<Answer[]> => {
+      const [group] = probing.reader.groups;
+      if (group === undefined) {
+        return [];
+      }
+      const like = "a readable entity behind a hidden relation";
+      const keeper = `Keeper ${crypto.randomUUID().slice(0, 8)}`;
+      const readable = await store().addMemories({
+        change: crypto.randomUUID(),
+        access: { kind: "audience", group },
+        entities: [{ key: "q", kind: "person", names: [keeper] }],
+        memories: [
+          {
+            about: "q",
+            type: "fact",
+            statement: `${keeper} keeps the keys`,
+            speaker: { kind: "system" },
+            basis: { kind: "writer", writer: stranger() },
+          },
+        ],
+      });
+      const before = await answer(
+        `${like}, before the relation`,
+        async () => await find({ question: "Plain", budget: whole }),
+        "nothing"
+      );
+      const hidden = stranger();
+      await store().addMemories({
+        change: crypto.randomUUID(),
+        access: { kind: "audience", group: hidden },
+        // Made for someone who sees both entities and is in the group.
+        reader: {
+          person: probing.reader.person,
+          groups: [hidden, ...probing.reader.groups],
+        },
+        entities: [
+          { key: "c", id: fixture.seen, kind: "customer", names: [] },
+          {
+            key: "q",
+            id: readable.entities.q ?? "",
+            kind: "person",
+            names: [],
+          },
+        ],
+        memories: [
+          {
+            about: "c",
+            attribute: "contact",
+            object: "q",
+            type: "fact",
+            statement: markedText(probing.markers),
+            speaker: { kind: "system" },
+            basis: { kind: "writer", writer: stranger() },
+          },
+        ],
+      });
+      const after = await answer(
+        `${like}, after it`,
+        async () => await find({ question: "Plain", budget: whole }),
+        "hidden"
+      );
+      return [before, after].map((answered) => ({ ...answered, like }));
+    };
     return [
+      ...(await reachedThroughHidden()),
       await answer(
         "the reader's own entity, which hidden relations name",
         async () => await find({ question: "Plain", budget: whole })

@@ -694,15 +694,16 @@ const placeOf = ({ source, version, position }: RecalledItem): string =>
   JSON.stringify([sourceKeyOf(source), version, position]);
 
 /**
- * Two recalls for one reader as one pack within `budget.tokens`: the
- * first's items in their order, then the second's that the first doesn't
- * hold (the same passage of the same version), best first, each while it
- * fits as the Brain counts it (`packItemTokens`); then the same of their
- * memories (`packMemoryTokens`, the same memory by its id), from what the
- * budget leaves; cut short when either was or one of the second's didn't
- * fit. A fact is contested when the merged pack holds more than one of its
- * contested sides, whichever pass found each. What was not found is the second's: it was asked for what the
- * first meant. Both must be packs of the same reader's, as `recallAs`
+ * Two recalls for one reader as one pack within `budget.tokens`, as one
+ * pass over both would fit them: the first's items and memories in their
+ * order, then the second's items that the first doesn't hold (the same
+ * passage of the same version), best first, then its memories (the same
+ * memory by its id), each while it fits in what is left, as the Brain
+ * counts it (`packItemTokens`, `packMemoryTokens`). Cut short when either
+ * was or anything was left out for room. A fact is contested when the
+ * merged pack holds more than one of its contested sides, whichever pass
+ * found each. What was not found is the second's: it was asked for what
+ * the first meant. Both must be packs of the same reader's, as `recallAs`
  * gave them.
  */
 export const mergeRecalled = (
@@ -710,26 +711,8 @@ export const mergeRecalled = (
   second: RecalledPack,
   budget: { tokens: number }
 ): RecalledPack => {
-  const tokensOf = (item: RecalledItem): number =>
+  const itemTokensOf = (item: RecalledItem): number =>
     packItemTokens({ ...item, source: sourceKeyOf(item.source) });
-  const held = new Set(first.items.map((item) => placeOf(item)));
-  const items = [...first.items];
-  let used = items.reduce((sum, item) => sum + tokensOf(item), 0);
-  let truncated = first.truncated || second.truncated;
-  for (const item of second.items) {
-    const place = placeOf(item);
-    if (held.has(place)) {
-      continue;
-    }
-    const tokens = tokensOf(item);
-    if (used + tokens > budget.tokens) {
-      truncated = true;
-      continue;
-    }
-    held.add(place);
-    items.push(item);
-    used += tokens;
-  }
   const memoryTokensOf = (memory: RecalledMemory): number =>
     packMemoryTokens({
       ...memory,
@@ -741,21 +724,47 @@ export const mergeRecalled = (
               version: memory.source.version,
             },
     });
-  const heldMemories = new Set(first.memories.map(({ memory }) => memory));
-  const memories = [...first.memories];
-  used += memories.reduce((sum, memory) => sum + memoryTokensOf(memory), 0);
-  for (const memory of second.memories) {
-    if (heldMemories.has(memory.memory)) {
-      continue;
-    }
-    const tokens = memoryTokensOf(memory);
+  let used = 0;
+  let truncated = first.truncated || second.truncated;
+  /** Whether `tokens` more fit, counted in when they do. */
+  const fits = (tokens: number): boolean => {
     if (used + tokens > budget.tokens) {
       truncated = true;
-      continue;
+      return false;
     }
-    heldMemories.add(memory.memory);
-    memories.push(memory);
     used += tokens;
+    return true;
+  };
+  const heldItems = new Set<string>();
+  const items: RecalledItem[] = [];
+  const heldMemories = new Set<MemoryId>();
+  const memories: RecalledMemory[] = [];
+  const keepItem = (item: RecalledItem): void => {
+    const place = placeOf(item);
+    if (!heldItems.has(place) && fits(itemTokensOf(item))) {
+      heldItems.add(place);
+      items.push(item);
+    }
+  };
+  const keepMemory = (memory: RecalledMemory): void => {
+    if (!heldMemories.has(memory.memory) && fits(memoryTokensOf(memory))) {
+      heldMemories.add(memory.memory);
+      memories.push(memory);
+    }
+  };
+  // The first pass whole before anything of the second: its memories
+  // hold their room before the second's items are counted.
+  for (const item of first.items) {
+    keepItem(item);
+  }
+  for (const memory of first.memories) {
+    keepMemory(memory);
+  }
+  for (const item of second.items) {
+    keepItem(item);
+  }
+  for (const memory of second.memories) {
+    keepMemory(memory);
   }
   // As the Brain's pack finds them: each entity's one-value attribute
   // whose contested sides the merged pack holds more than one of, in the

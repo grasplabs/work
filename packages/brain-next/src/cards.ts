@@ -22,31 +22,36 @@ import { readableSql } from "./reader-sets.ts";
 // different cards, and a reader sees the card a store without what is
 // hidden from them would show.
 
-/** `?1` the entities' rows (JSON): those a memory the reader may read mentions. */
+/**
+ * `?1` the entities' rows (JSON), `?4` the moment read at: those a memory
+ * the reader may read, learned by then, mentions.
+ */
 const seenSql = `
 WITH ${readableSql}
 SELECT entities.row AS row, entities.id AS id, entities.kind AS kind
 FROM json_each(?1) AS asked
 JOIN entities ON entities.row = asked.value
-WHERE ${mentionedSql("entities.row")}
+WHERE ${mentionedSql("entities.row", "?4")}
 ORDER BY asked.key`;
 
 /** The attributes of `kind`, in the order its list gives them. */
 const attributeOrder = (kind: EntityKind): Map<string, number> =>
   new Map(Object.keys(entityAttributes[kind]).map((name, at) => [name, at]));
 
-/** The entities at `rows` the reader may see, by row. */
+/** The entities at `rows` the reader may see as of `at`, by row. */
 const seenOf = (
   sql: SqlStorage,
   reader: Reader,
-  rows: readonly number[]
+  rows: readonly number[],
+  at: number
 ): { row: number; id: string; kind: string }[] =>
   sql
     .exec<{ row: number; id: string; kind: string }>(
       seenSql,
       JSON.stringify(rows),
       reader.person,
-      JSON.stringify(reader.groups)
+      JSON.stringify(reader.groups),
+      at
     )
     .toArray();
 
@@ -54,7 +59,7 @@ const seenOf = (
  * A page of the card of the entity `entity` as `reader` sees it as of
  * `at` (milliseconds, the store's read moment or the cursor's: store.ts
  * `#pageMoments`, as `readMemories` is read), after `after`, from at most
- * `limit` memories; or null when they may see no such entity.
+ * `limit` memories; or null when they may see no such entity then.
  */
 export const readCard = (
   sql: SqlStorage,
@@ -80,7 +85,7 @@ export const readCard = (
   if (found === undefined) {
     return null;
   }
-  const [card] = asSeen(sql, seenOf(sql, reader, [found.row]), reader, at);
+  const [card] = asSeen(sql, seenOf(sql, reader, [found.row], at), reader, at);
   if (card === undefined) {
     return null;
   }

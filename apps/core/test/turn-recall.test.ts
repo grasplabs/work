@@ -1,4 +1,8 @@
-import { brainOf, packMemoryTokens } from "@grasp-os/brain-next/contract";
+import {
+  brainOf,
+  packItemTokens,
+  packMemoryTokens,
+} from "@grasp-os/brain-next/contract";
 import type {
   NewEntity,
   NewMemory,
@@ -19,6 +23,8 @@ import {
   recallAs,
 } from "../src/brain-next.ts";
 import type {
+  RecalledItem,
+  RecalledMemory,
   RecalledPack,
   SourceReaders,
   SourceRef,
@@ -1196,6 +1202,112 @@ const recalledBy =
       personal: false,
     });
 
+/** The tokens of `item`, as the Brain counts them. */
+const itemTokensOf = (item: RecalledItem): number =>
+  packItemTokens({
+    ...item,
+    source: `${item.source.producer}:${item.source.id}`,
+  });
+
+/** The tokens of all of `pack`, items and memories. */
+const tokensOf = (pack: RecalledPack): number =>
+  pack.items.reduce((sum, item) => sum + itemTokensOf(item), 0) +
+  memoryTokensOf(pack);
+
+/** A passage of an upload `id`, as recall gives it. */
+const randomItem = (id: string, text: string): RecalledItem => ({
+  source: { producer: "upload", id },
+  version: 1,
+  position: 0,
+  text,
+  whole: true,
+  found: "words",
+});
+
+/** A memory citing no source, as recall gives it. */
+const randomMemory = (statement: string): RecalledMemory => ({
+  memory: crypto.randomUUID(),
+  about: crypto.randomUUID(),
+  attribute: null,
+  object: null,
+  type: "fact",
+  statement,
+  quote: null,
+  context: null,
+  source: null,
+  writer: "crm",
+  speaker: { kind: "system" },
+  validFrom: null,
+  validUntil: null,
+  learnedAt: new Date(0),
+  contested: false,
+  confirmed: false,
+  found: "words",
+});
+
+/** Where an item of a pack is: its source, version and place. */
+const placeOf = (item: RecalledItem): string =>
+  JSON.stringify([item.source, item.version, item.position]);
+
+/** The tokens of a memory citing no source, as the Brain counts them. */
+const sourcelessTokens = (memory: RecalledMemory): number =>
+  packMemoryTokens({ ...memory, source: null });
+
+/**
+ * One pass over `first`, then `second`'s items and memories that `first`
+ * doesn't hold, keeping each while it fits in `tokens`: what a merge of
+ * the two packs gives, written out plainly.
+ */
+const onePass = (
+  first: RecalledPack,
+  second: RecalledPack,
+  tokens: number
+): RecalledPack => {
+  let used = 0;
+  let truncated = first.truncated || second.truncated;
+  const fitted = <T>(
+    list: readonly T[],
+    keyOf: (one: T) => string,
+    size: (one: T) => number,
+    held: Set<string>
+  ): T[] =>
+    list.filter((one) => {
+      if (held.has(keyOf(one))) {
+        return false;
+      }
+      if (used + size(one) > tokens) {
+        truncated = true;
+        return false;
+      }
+      used += size(one);
+      held.add(keyOf(one));
+      return true;
+    });
+  const places = new Set<string>();
+  const ids = new Set<string>();
+  const firstItems = fitted(first.items, placeOf, itemTokensOf, places);
+  const firstMemories = fitted(
+    first.memories,
+    ({ memory }) => memory,
+    sourcelessTokens,
+    ids
+  );
+  const secondItems = fitted(second.items, placeOf, itemTokensOf, places);
+  const secondMemories = fitted(
+    second.memories,
+    ({ memory }) => memory,
+    sourcelessTokens,
+    ids
+  );
+  return {
+    items: [...firstItems, ...secondItems],
+    memories: [...firstMemories, ...secondMemories],
+    contested: [],
+    notFound: second.notFound,
+    truncated,
+  };
+};
+
 /** The budget both passes of the merge tests recall within. */
 const mergeBudget = { tokens: 3000 };
 
@@ -1233,33 +1345,114 @@ describe("two recalls merged into one pack", setUpTime, () => {
   it("keeps both passes within one budget, and says the second's was cut", async () => {
     const person = await signedInWithRole(idp, "user");
     const group = await teamOf(person.userId);
+    const team: SourceReaders = {
+      kind: "team",
+      teamId: group.slice("team:".length),
+    };
     const [first, second] = [word(), word()];
+    await added(`Depot ${first} opens on Monday at the north gate`, team);
     await remembered(
       group,
       [customer(`Depot ${word()}`)],
       [fact("c", `Depot ${first} opens on Monday`)]
     );
+    await added(
+      `Depot ${second} opens on Tuesday at noon, at the south gate, by the long road past the harbour and the old mill`,
+      team
+    );
     const later = await remembered(
       group,
       [customer(`Depot ${word()}`)],
-      [fact("c", `Depot ${second} opens on Tuesday at noon`)]
+      [fact("c", `Depot ${second} opens on Tuesday`)]
     );
     const recall = recalledBy(person.userId, mergeBudget.tokens);
     const firstPack = await recall(first);
     const secondPack = await recall(second);
-    const held = memoryTokensOf(firstPack);
-    const laterTokens = memoryTokensOf(secondPack);
-    const tight = { tokens: held + laterTokens - 1 };
+    const held = tokensOf(firstPack);
+    const [laterItem] = secondPack.items;
+    const itemTokens = laterItem === undefined ? 0 : itemTokensOf(laterItem);
+    const memoryTokens = memoryTokensOf(secondPack);
+    // Room for the second's memory, not its passage: the passage is left
+    // out, the memory joins, and the pack says it was cut.
+    const tight = { tokens: held + memoryTokens };
     const merged = mergeRecalled(firstPack, secondPack, tight);
+    const roomy = mergeRecalled(firstPack, secondPack, {
+      tokens: held + itemTokens + memoryTokens,
+    });
 
-    expect(idsOf(merged)).toStrictEqual(idsOf(firstPack));
-    expect(memoryTokensOf(merged)).toBeLessThanOrEqual(tight.tokens);
-    expect(merged.truncated).toBeTruthy();
-    expect(
-      idsOf(
-        mergeRecalled(firstPack, secondPack, { tokens: held + laterTokens })
-      )
-    ).toStrictEqual([...idsOf(firstPack), later.memories[0]]);
+    expect({
+      shape: [
+        firstPack.items.length,
+        firstPack.memories.length,
+        secondPack.items.length,
+        itemTokens > memoryTokens,
+      ],
+      tight: {
+        items: merged.items,
+        memories: idsOf(merged),
+        truncated: merged.truncated,
+        within: tokensOf(merged) <= tight.tokens,
+      },
+      roomy: {
+        items: roomy.items,
+        memories: idsOf(roomy),
+        truncated: roomy.truncated,
+      },
+    }).toStrictEqual({
+      shape: [1, 1, 1, true],
+      tight: {
+        items: firstPack.items,
+        memories: [...idsOf(firstPack), later.memories[0]],
+        truncated: true,
+        within: true,
+      },
+      roomy: {
+        items: [...firstPack.items, ...secondPack.items],
+        memories: [...idsOf(firstPack), later.memories[0]],
+        truncated: false,
+      },
+    });
+  });
+
+  // Packs of every shape, the second sharing items and memories with the
+  // first: the merged pack never goes over the budget, and it is what one
+  // pass over the first pass, then the second's new items, then its new
+  // memories, keeping each while it fits, would give.
+  it("never goes over the budget, and fits as one pass over both would", () => {
+    let seed = 7;
+    const random = (): number => {
+      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return seed / 2_147_483_648;
+    };
+    const count = (most: number): number => Math.floor(random() * (most + 1));
+    const text = (): string => "word ".repeat(1 + count(120));
+    const items = Array.from({ length: 8 }, (_, index) =>
+      randomItem(`s${index}`, text())
+    );
+    const memories = Array.from({ length: 8 }, () => randomMemory(text()));
+    const some = <T>(list: readonly T[]): T[] =>
+      list.filter(() => random() < 0.4);
+    for (let round = 0; round < 300; round += 1) {
+      const first: RecalledPack = {
+        items: some(items),
+        memories: some(memories),
+        contested: [],
+        notFound: [],
+        truncated: random() < 0.2,
+      };
+      const second: RecalledPack = {
+        items: some(items),
+        memories: some(memories),
+        contested: [],
+        notFound: [],
+        truncated: random() < 0.2,
+      };
+      const tokens = tokensOf(first) + count(400);
+      const merged = mergeRecalled(first, second, { tokens });
+
+      expect(tokensOf(merged)).toBeLessThanOrEqual(tokens);
+      expect(merged).toStrictEqual(onePass(first, second, tokens));
+    }
   });
 
   it("shows a fact as contested when each pass held one side of it", async () => {

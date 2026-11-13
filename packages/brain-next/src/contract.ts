@@ -1563,10 +1563,12 @@ const nameSchema = someText(valueMaxLength).refine(
  * An entity an add names, by a key of its own within the add (`key`,
  * which its memories use): the known entity `id`, or else one found by
  * its exact identifiers, the first entity of its kind holding any of
- * them (never by a name alone: linking on names and proposals are the
- * linker's), or else a new one. Its names and identifiers are kept as
- * given by each memory of the add that mentions it, so each is visible
- * only to those who can read such a memory.
+ * them; or else, given no identifier, the one entity of its kind holding
+ * one of its names of two words or more through memories read by exactly
+ * the add's readers ("Cards and proposals" below); or else a new one.
+ * Its names and identifiers are kept as given by each memory of the add
+ * that mentions it, so each is visible only to those who can read such a
+ * memory.
  */
 export const newEntitySchema = z.strictObject({
   key: wellFormedString().min(1).max(64),
@@ -2028,6 +2030,22 @@ export type MemoryChangeOutcome = "done" | "nothing";
 // the other's, whole) is a proposal, never a link: worked out when a
 // reader asks, from the names they may read alone, never stored.
 // Accepting one is not built here (GRA-1835).
+//
+// The order of adds decides a link. An entity given an identifier links
+// by its identifiers alone; one given none links by its exact name. So
+// "Jan de Vries" with an email, then "Jan de Vries" alone, are one
+// entity; "Jan de Vries" alone first, then with the email, are two. Two
+// entities of one add with the same name are not linked to each other by
+// it, and a later add of that name, finding two holders, links to
+// neither.
+//
+// A link, once made, stays; erasing the evidence does not undo it. Jan
+// holds email x; a source says "Anna Smit" has email x, so her entity is
+// Jan's (by the identifier); "Anna Smit" added without one then links to
+// it by her name. Erasing the source leaves Anna's memories on Jan's
+// card, and later adds of "Anna Smit" go on linking there. No reader sees
+// more than they may read (the readers are the same), but the evidence
+// for the join is gone, and nothing splits an entity.
 
 /**
  * An entity's card to read, for a reader: as now, or as of a moment; a
@@ -2530,7 +2548,8 @@ export interface Brain {
   /**
    * An entity's card as the reader sees it (`Card`), built now from the
    * memories they may read: null when they may see no such entity, alike
-   * for one nobody holds.
+   * for one nobody holds; with `asOf`, null too when no memory they may
+   * read mentioned it by then.
    */
   readCard: (request: CardRequest) => Promise<Card | null>;
   /**

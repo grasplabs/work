@@ -49,14 +49,19 @@ export const foldIdentifier = ({ type, value }: Identifier): string =>
   type === "email" ? value.toLowerCase() : value;
 
 /**
- * An entity the reader may see: a memory they may read mentions it.
+ * An entity the reader may see: a memory they may read mentions it; with
+ * `learnedBy` (an expression, milliseconds), one learned by then.
  */
-export const mentionedSql = (entity: string): string => `(
+export const mentionedSql = (entity: string, learnedBy?: string): string => {
+  const learned =
+    learnedBy === undefined ? "" : `AND m.learned_at <= ${learnedBy}`;
+  return `(
   EXISTS (SELECT 1 FROM memories AS m
-    WHERE m.entity = ${entity} AND ${visibleSql("m")})
+    WHERE m.entity = ${entity} ${learned} AND ${visibleSql("m")})
   OR EXISTS (SELECT 1 FROM memories AS m
-    WHERE m.object = ${entity} AND ${visibleSql("m")})
+    WHERE m.object = ${entity} ${learned} AND ${visibleSql("m")})
 )`;
+};
 
 /**
  * Whether the memory `alias` is read by exactly the set of readers whose
