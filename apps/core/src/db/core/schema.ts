@@ -5931,6 +5931,13 @@ export const modelUsage = sqliteTable(
     bindingAlias: text("binding_alias"),
     /** `<provider>/<model>`. */
     model: text().notNull(),
+    /**
+     * What the call was for, as its `model.call` audit event says
+     * (`brain.recall_analysis`, say): the Brain's spend by purpose is read
+     * from it (model-spend.ts `brainSpendByPurpose`). Nullable as a schema
+     * expands: every row the gateway writes names it.
+     */
+    purpose: text(),
     /** Whose key: `organization`, or `platform` for Grasp's own features. */
     credential: text().notNull(),
     /** Which of Grasp's own features, on Grasp's key. */

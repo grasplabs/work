@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "c181deda-61cf-4270-8f11-f5049d4dd9a5",
+  "id": "af760113-881b-4dfe-b525-4ffaf1c5be7f",
   "prevId": "bf3238c4-677c-4a72-9d78-c421568847fd",
   "tables": {
     "access_revocations": {
@@ -952,13 +952,6 @@
           "notNull": true,
           "autoincrement": false
         },
-        "owner_id": {
-          "name": "owner_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "made_by": {
           "name": "made_by",
           "type": "text",
@@ -995,14 +988,6 @@
             "name_key"
           ],
           "isUnique": true
-        },
-        "agents_owner_idx": {
-          "name": "agents_owner_idx",
-          "columns": [
-            "owner_id"
-          ],
-          "isUnique": false,
-          "where": "\"agents\".\"owner_id\" IS NOT NULL"
         }
       },
       "foreignKeys": {},
@@ -7463,6 +7448,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "purpose": {
+          "name": "purpose",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         },
         "credential": {
