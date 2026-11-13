@@ -125,15 +125,23 @@ export const recallFor = async (
     // Passages alone (GRA-1742): the pack code gets is the SDK's
     // `BrainPack`, which holds no memory, so none takes its budget or a
     // word from `notFound`, and no entity reaches code.
-    const pack: BrainPack = await recallPassagesAs(
-      env,
-      caller.authority.onBehalfOf,
-      {
-        ...recall,
-        personal: false,
-        company: caller.authority.subject.type !== "agent",
-      }
-    );
+    const recalled = await recallPassagesAs(env, caller.authority.onBehalfOf, {
+      ...recall,
+      personal: false,
+      company: caller.authority.subject.type !== "agent",
+    });
+    // A capture is one person's own, kept only in their own store (core's
+    // addSource refuses it anywhere else), which this recall never reads:
+    // none can be here. Narrowed for the SDK's type, never thrown over.
+    const pack: BrainPack = {
+      ...recalled,
+      items: recalled.items.flatMap((item) => {
+        const { producer, id } = item.source;
+        return producer === "capture"
+          ? []
+          : [{ ...item, source: { producer, id } }];
+      }),
+    };
     await caller.keep?.(pack);
     await audit({ items: pack.items.length, truncated: pack.truncated });
     return pack;

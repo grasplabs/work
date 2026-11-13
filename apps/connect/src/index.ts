@@ -976,7 +976,9 @@ export default class Connect
       });
     }
     if (done.pending === undefined) {
-      return done.result;
+      return done.keep === undefined
+        ? done.result
+        : { ...done.result, keep: done.keep };
     }
     // A run's step can't carry on with an answer that says "held": it ends
     // as held, and core waits for the person's decision before running it

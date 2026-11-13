@@ -138,8 +138,23 @@ export const sourceChanges = sqliteTable(
     versionRow: integer("version_row")
       .notNull()
       .references(() => sourceVersions.row),
+    /**
+     * When its producer read the text it added, if it said
+     * (`NewSource.readAt`). A version's latest is when its text was last
+     * read: no add of an earlier read replaces it (sources.ts
+     * `newerThan`). Each change keeps its own, so a later read of the same
+     * text, kept as a change of the version it matches, moves it on
+     * without anything being overwritten.
+     */
+    readAt: integer("read_at", { mode: "timestamp_ms" }),
   },
-  (table) => [primaryKey({ columns: [table.source, table.change] })]
+  (table) => [
+    primaryKey({ columns: [table.source, table.change] }),
+    // A version's changes, and the latest read of them, without a scan:
+    // `newerThan` inside the store's write, and the export's latest read
+    // and change keys of each version.
+    index("source_changes_version_idx").on(table.versionRow, table.readAt),
+  ]
 );
 
 /**
