@@ -47,7 +47,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { setActiveChat } from "../chat/active-chat.ts";
-import { slotOf, useChatSubject } from "../chat/chat-subject.ts";
+import { slotOf } from "../chat/chat-subject.ts";
 import { useChatAbout, useGlobalChat } from "../chat/global-chat.tsx";
 import { ConfirmChange, useDraftChange } from "../drafts/draft-history.tsx";
 import type { Asked } from "../drafts/draft-history.tsx";
@@ -57,6 +57,7 @@ import {
   UnpublishedChanges,
 } from "../drafts/share-with-team.tsx";
 import { memberNames, useMembers } from "../drafts/sharing.tsx";
+import { StatusBadge } from "../drafts/status-badge.tsx";
 import { hasChanges, useDraft } from "../drafts/use-draft.ts";
 import { ErrorText } from "../error-text.tsx";
 import {
@@ -79,7 +80,7 @@ import { sharesApp } from "./app-role.ts";
 import { AppSettings, Read } from "./app-settings.tsx";
 import type { AppSettingsSection } from "./app-settings.tsx";
 import { AppStart } from "./app-start.tsx";
-import { StatusBadge, useStatusMove } from "./app-status.tsx";
+import { useStatusMove } from "./app-status.tsx";
 import { DraftPreview } from "./draft-preview.tsx";
 import { fixQuestion } from "./fix-with-grasp.ts";
 import { dismissMadeTip, showsMadeTip } from "./made-tip.ts";
@@ -334,7 +335,11 @@ const WorkspaceBar = ({
       name={app.name}
       state={
         members === undefined && !archived ? undefined : (
-          <StatusBadge app={app} who={memberNames(members ?? [])} />
+          <StatusBadge
+            archived={app.archived}
+            live={app.currentVersion}
+            who={memberNames(members ?? [])}
+          />
         )
       }
     />
@@ -1024,10 +1029,10 @@ const Building = ({
   section: AppSettingsSection | undefined;
   identity: Identity;
 }) => {
-  const { chatId, running, busy, built, worked } = useChatAbout({
-    kind: "app",
-    id: app.id,
-  });
+  const { chatId, running, busy, built, worked } = useChatAbout(
+    { kind: "app", id: app.id },
+    app.name
+  );
   const { draft, reread } = useDraft({ kind: "app", id: app.id }, worked);
   const changing = hasChanges(draft);
   // Each reset of the test data in Data starts the preview afresh on it,
@@ -1206,7 +1211,6 @@ const Workspace = ({
   handedOver: string | undefined;
 }) => {
   const { app } = at;
-  useChatSubject({ kind: "app", id: app.id }, app.name);
   const navigate = useNavigate();
   useEffect(() => {
     if (handedOver === undefined) {

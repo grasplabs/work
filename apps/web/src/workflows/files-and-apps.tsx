@@ -411,12 +411,12 @@ interface RunningBindings {
 
 /**
  * What `RunningBindings` the reads give, once all are read: of the version
- * a start runs now, the live one (`currentVersion`); null before any was
+ * a start runs now, the live one (`version`); null before any was
  * published.
  */
 const runningBindingsOf = (
   versions: Loaded<WorkflowResourceVersion[]>,
-  currentVersion: number | null,
+  version: number | null,
   approvals: Loaded<ListedWorkflowBindingApproval[]> | undefined
 ): Loaded<RunningBindings | null> | undefined => {
   if (versions.state !== "ready") {
@@ -425,7 +425,6 @@ const runningBindingsOf = (
   if (approvals?.state !== "ready") {
     return approvals;
   }
-  const version = currentVersion;
   const running = versions.data.find((each) => each.version === version);
   return {
     state: "ready",

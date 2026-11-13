@@ -767,7 +767,7 @@ const WhoGetsIt = ({
  * see (`pending`), with a dot while there are changes to share. Given as
  * the trigger of Share with your team's sheet, whose props it takes.
  */
-export const PublishButton = ({
+const PublishButton = ({
   pending,
   changes,
   ...props

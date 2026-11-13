@@ -23,7 +23,7 @@ import { useEffect, useState } from "react";
 
 import { setActiveChat } from "../chat/active-chat.ts";
 import { chatPresence } from "../chat/chat-presence.ts";
-import { slotOf, useChatSubject } from "../chat/chat-subject.ts";
+import { slotOf } from "../chat/chat-subject.ts";
 import { useChatAbout } from "../chat/global-chat.tsx";
 import { readPeople } from "../directory.ts";
 import {
@@ -461,8 +461,7 @@ const WorkflowResourceView = ({
     : undefined;
   const view = shownView(asked, draft !== undefined);
   // Grasp's chat about it, docked beside it for its builders, draws it.
-  useChatSubject(built, resource.name);
-  const chat = useChatAbout(built);
+  const chat = useChatAbout(built, resource.name);
   const { draft: shared, reread } = useDraft(built, chat.worked);
   const { draft: latest, onDraft } = useWorkflowDraft(
     resource.id,

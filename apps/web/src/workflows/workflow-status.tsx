@@ -15,14 +15,14 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { PauseIcon, PlayIcon } from "lucide-react";
 import { useState } from "react";
 
-import { StatusBadge } from "../apps/app-status.tsx";
+import { StatusBadge } from "../drafts/status-badge.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { useGrace } from "../use-grace.ts";
 
 // Where an independent workflow stands, in its bar, in the words an App's
-// bar has (apps/app-status.tsx): "Only you see this" until a version is
+// bar has (drafts/status-badge.tsx): "Only you see this" until a version is
 // live and shared, then who uses it; "Paused" while it is paused. Beside
 // Run, for its builders, Pause while a version is live, or Resume while
 // paused (`workflowResources.pause`, `resume`).
@@ -53,7 +53,7 @@ export const WorkflowStatus = ({
       <Trans context="a workflow someone paused">Paused</Trans>
     </Badge>
   ) : (
-    <StatusBadge app={{ archived: false, currentVersion: live }} who={who} />
+    <StatusBadge live={live} who={who} />
   );
 
 /** "Pauses in 4 s", with Undo beside it, while a pause may be taken back. */

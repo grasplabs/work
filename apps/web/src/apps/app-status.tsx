@@ -9,19 +9,16 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@grasp-os/ui/components/alert-dialog";
-import { Badge } from "@grasp-os/ui/components/badge";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
-import { formatList } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
 // Where an App (core's App) is in its life, and its builders moving it,
-// in plain words: "Only you see this" until it is shared with the team
-// (its first version live, and someone to use it), then who uses it; and
-// Archive or Restore to put it away or take it back. A new App opens only
+// in plain words (its badge is every subject's: drafts/status-badge.tsx);
+// and Archive or Restore to put it away or take it back. A new App opens only
 // for its builders, and its triggers don't fire, until it is shared. Core decides who may move
 // it (app-status.ts); a refusal shows under the buttons.
 
@@ -36,55 +33,6 @@ export const statusOf = (
     return "archived";
   }
   return app.currentVersion === null ? "draft" : "live";
-};
-
-/** Who uses it, as a whole sentence: one name, several, or the team. */
-const UsedBy = ({ who }: { who: readonly string[] | undefined }) => {
-  const [only] = who ?? [];
-  if (who === undefined || only === undefined) {
-    return <Trans>Your team uses it</Trans>;
-  }
-  if (who.length === 1) {
-    return <Trans>{only} uses it</Trans>;
-  }
-  const names = formatList(who);
-  return <Trans>{names} use it</Trans>;
-};
-
-/**
- * Where an App stands, in words anyone reads: "Only you see this" until a
- * version is live and shared with someone; then who uses it, by name
- * (`who`), or "Your team" where the page doesn't read whom it is shared
- * with (a card on the Apps page).
- */
-export const StatusBadge = ({
-  app,
-  who,
-}: {
-  app: Pick<App, "archived" | "currentVersion">;
-  /** Whom it is shared with, by name; none where the page doesn't read it. */
-  who?: readonly string[];
-}) => {
-  const status = statusOf(app);
-  if (status === "archived") {
-    return (
-      <Badge variant="outline">
-        <Trans context="an App put away">Archived</Trans>
-      </Badge>
-    );
-  }
-  if (status === "draft" || who?.length === 0) {
-    return (
-      <Badge variant="attention">
-        <Trans>Only you see this</Trans>
-      </Badge>
-    );
-  }
-  return (
-    <Badge variant="passed">
-      <UsedBy who={who} />
-    </Badge>
-  );
 };
 
 /** What a builder can move an App along, as core's `apps` names it. */

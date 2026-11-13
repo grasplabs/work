@@ -42,6 +42,7 @@ import { decidesRequests } from "../dashboard/waiting.ts";
 import { readPeople } from "../directory.ts";
 import { DraftHistory } from "../drafts/draft-history.tsx";
 import { Sharing } from "../drafts/sharing.tsx";
+import { StatusBadge } from "../drafts/status-badge.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
@@ -62,12 +63,7 @@ import { AppOwner } from "./app-owner.tsx";
 import { RemoveApp } from "./app-remove.tsx";
 import { ResetAppData } from "./app-reset.tsx";
 import { buildsApp, sharesApp } from "./app-role.ts";
-import {
-  ArchiveDialog,
-  StatusBadge,
-  StatusNote,
-  useStatusMove,
-} from "./app-status.tsx";
+import { ArchiveDialog, StatusNote, useStatusMove } from "./app-status.tsx";
 import { AppWebhooks, WebhookList } from "./app-webhooks.tsx";
 import { AppWorkflows } from "./app-workflows.tsx";
 import { SaveAsBlueprint } from "./blueprints.tsx";
@@ -559,7 +555,7 @@ const GeneralForm = ({
         </SettingsRow>
         <SettingsRow label={t`Status`}>
           <div className="flex flex-col items-start gap-1">
-            <StatusBadge app={app} />
+            <StatusBadge archived={app.archived} live={app.currentVersion} />
             <StatusNote app={app} />
           </div>
         </SettingsRow>

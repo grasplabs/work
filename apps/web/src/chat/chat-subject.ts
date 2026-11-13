@@ -7,14 +7,14 @@ import { useEffect, useState } from "react";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
-import { setActiveChat, showSlot, useAfresh } from "./active-chat.ts";
+import { setActiveChat, useAfresh } from "./active-chat.ts";
 import type { ChatSlot } from "./active-chat.ts";
 
 // What Grasp's one chat is about on a page (global-chat.tsx): by default
 // the person's open chat, carried from page to page; on a page about one
 // thing, that thing's own chat, as an App's workspace has the chat that
 // builds the App and a workflow's page the chat that draws it. A page
-// says so (`useChatSubject`); each kind of subject says, here, how core
+// says so (global-chat.tsx, `useChatAbout`); each kind of subject says, here, how core
 // finds the person's chat for one, if it has one; what the chat says
 // there is the same for both. The chat is an ordinary one, in the person's list, held in
 // a slot of the tab's own (active-chat.ts), so their other chats stay as
@@ -24,7 +24,7 @@ import type { ChatSlot } from "./active-chat.ts";
 // Each question asked there carries the subject to core (`ChatQuestion`),
 // which tells the agent, by name, what "this" and "it" mean.
 //
-//   useChatSubject({ kind: "app", id: app.id }, app.name);
+//   useChatAbout({ kind: "app", id: app.id }, app.name);
 
 /**
  * What the chat is called and says on a subject's page: the same for an
@@ -51,29 +51,6 @@ export const subjectOf = (slot: ChatSlot): Subject | undefined => {
   const at = slot.indexOf(":");
   const kind = slot.slice(0, at);
   return isKind(kind) ? { kind, id: slot.slice(at + 1) } : undefined;
-};
-
-/**
- * Has Grasp's chat be about `subject`, called `name`, while the calling
- * page is open: that subject's chat, in its slot; the person's own again
- * after. None for a page about it that the person doesn't build.
- */
-export const useChatSubject = (
-  subject: Subject | undefined,
-  name: string
-): void => {
-  const slot = subject === undefined ? undefined : slotOf(subject);
-  useEffect(() => {
-    if (slot === undefined) {
-      return () => {
-        // Not about the page's subject: the person's own chat stays.
-      };
-    }
-    showSlot(slot, name);
-    return () => {
-      showSlot("chat");
-    };
-  }, [slot, name]);
 };
 
 /**

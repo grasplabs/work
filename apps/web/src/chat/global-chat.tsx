@@ -15,6 +15,7 @@ import type { Loaded } from "../load-from-core.tsx";
 import { isShortcut } from "../shortcuts.ts";
 import {
   setActiveChat,
+  showSlot,
   useActiveChat,
   useShownName,
   useShownSlot,
@@ -313,23 +314,40 @@ export const useGlobalChat = (): GlobalChat => {
 };
 
 /**
- * Grasp's chat about `subject` on its page, once its slot holds it
- * (chat-subject.ts), and nothing of the chat it showed before (none for no
- * subject: a page about something the person doesn't build): its ID,
+ * Has Grasp's chat be about `subject`, called `name`, while the calling
+ * page is open: that subject's chat, in its slot (chat-subject.ts); the
+ * person's own again after. None for a page about something the person
+ * doesn't build (no subject). Answers that chat, once its slot holds it,
+ * and nothing of the chat it showed before: its ID,
  * whether its agent works on it (`running`), or checks it too (`busy`),
  * whether Grasp answered after the Build it that made it (`built`), how
  * often its agent wrote drafts (`worked`), which reads the page again,
  * and what the person calls it, its chat's title, which the plan named.
  */
-export const useChatAbout = (subject: Subject | undefined) => {
+export const useChatAbout = (subject: Subject | undefined, name: string) => {
   const chat = useGlobalChat();
-  const ours = subject !== undefined && chat.slot === slotOf(subject);
+  const slot = subject === undefined ? undefined : slotOf(subject);
+  useEffect(() => {
+    if (slot === undefined) {
+      return () => {
+        // Not about the page's subject: the person's own chat stays.
+      };
+    }
+    showSlot(slot, name);
+    return () => {
+      showSlot("chat");
+    };
+  }, [slot, name]);
+  const ours = slot !== undefined && chat.slot === slot;
   const running = ours && chat.view.running;
   return {
     chatId: ours ? chat.chatId : undefined,
     running,
     busy: running || (ours && chat.view.checking),
-    built: ours && answeredAfterBuild(chat.view.messages, subject),
+    built:
+      ours &&
+      subject !== undefined &&
+      answeredAfterBuild(chat.view.messages, subject),
     worked: chat.view.worked,
     title: ours ? chat.summary?.title : undefined,
   };
