@@ -1,7 +1,7 @@
 import { Button } from "@grasp-os/ui/components/button";
 import { Spinner } from "@grasp-os/ui/components/spinner";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { useCoreRead } from "../apps/use-core-read.ts";
@@ -118,22 +118,57 @@ export const OwnExportSection = () => {
   const shown = read?.state === "ready" ? read.data : undefined;
   const writing = shown?.state === "writing";
 
-  // Each read that lands (a new one: `useCoreRead` keeps the last while
-  // the next is under way) lets a start's follow-up read go on, and, while
-  // the export may be being written, makes the next read due a few seconds
-  // on: read then if the page is seen, else once it is seen again. One read
-  // at a time: none starts over one under way, as a read is only made due
-  // once the last landed, and made once. It may be being written while the
-  // last read that reached core said so, or since a start was sent (core
-  // may have taken it though its answer was lost); a read that failed to
-  // reach core (out of reach, or slower than a read's deadline, as every
-  // read of the app) changes neither, and a refusal from core stops it.
-  const landed = useRef<(() => void) | null>(null);
+  // One read at a time, owned here: every read (the first, the follow-up
+  // coming due, the page seen again, Try again, the read after a start)
+  // is asked for through `requestRead`. None starts while one is under way
+  // (a new key would end it, `useCoreRead`); one asked for meanwhile is
+  // remembered as due, once, and made when the read under way lands. A
+  // read has landed when `read` changes: `useCoreRead` keeps the last one
+  // while the next is under way.
+  const underWay = useRef(true);
+  const dueAfter = useRef(false);
+  /** Who waits for a read that started after they asked: this one, the next. */
+  const waitingNow = useRef<(() => void)[]>([]);
+  const waitingNext = useRef<(() => void)[]>([]);
+  const requestRead = async (): Promise<void> => {
+    const { promise, resolve } = Promise.withResolvers<true>();
+    const landed = (): void => {
+      resolve(true);
+    };
+    if (underWay.current) {
+      dueAfter.current = true;
+      waitingNext.current.push(landed);
+    } else {
+      underWay.current = true;
+      waitingNow.current.push(landed);
+      setReads((before) => before + 1);
+    }
+    await promise;
+  };
+
+  // While the export may be being written, a read becomes due a few
+  // seconds after each read lands, and is asked for when the page is seen,
+  // else once it is seen again. It may be being written while the last
+  // read that reached core said so, or since a start was sent (core may
+  // have taken it though its answer was lost); a read that failed to reach
+  // core (out of reach, or slower than a read's deadline, as every read of
+  // the app) changes neither, and a refusal from core stops it.
   const mayBeWriting = useRef(false);
+  const askForRead = useEffectEvent((): void => {
+    void requestRead();
+  });
   useEffect(() => {
-    if (read !== undefined) {
-      landed.current?.();
-      landed.current = null;
+    if (read !== undefined && underWay.current) {
+      underWay.current = false;
+      for (const landed of waitingNow.current.splice(0)) {
+        landed();
+      }
+      if (dueAfter.current) {
+        dueAfter.current = false;
+        underWay.current = true;
+        waitingNow.current.push(...waitingNext.current.splice(0));
+        setReads((before) => before + 1);
+      }
     }
     if (read?.state === "ready") {
       mayBeWriting.current = writing;
@@ -145,7 +180,7 @@ export const OwnExportSection = () => {
     const readIfDue = (): void => {
       if (due && document.visibilityState === "visible") {
         due = false;
-        setReads((before) => before + 1);
+        askForRead();
       }
     };
     const timer = following
@@ -162,21 +197,19 @@ export const OwnExportSection = () => {
       document.removeEventListener("visibilitychange", readIfDue);
     };
   }, [read, writing]);
-  // A follow-up read the page left before it landed holds up nothing.
+  // Whoever waits for a read the page left before it landed holds up
+  // nothing.
   useEffect(
     () => () => {
-      landed.current?.();
+      for (const landed of [
+        ...waitingNow.current.splice(0),
+        ...waitingNext.current.splice(0),
+      ]) {
+        landed();
+      }
     },
     []
   );
-  const readAgain = async (): Promise<void> => {
-    const { promise, resolve } = Promise.withResolvers<true>();
-    landed.current = () => {
-      resolve(true);
-    };
-    setReads((before) => before + 1);
-    await promise;
-  };
 
   const { busy, run } = useCoreAction();
   /** Two clicks in one tick, before `busy` turns the button off: one start. */
@@ -202,7 +235,7 @@ export const OwnExportSection = () => {
         // Sent: core may take it though its answer is lost, so it may be
         // being written until a read that reaches core says otherwise.
         mayBeWriting.current = true;
-        await changeThenRefresh(startOwnExport, readAgain);
+        await changeThenRefresh(startOwnExport, requestRead);
       },
       (reason) => {
         setFailed({ reason, after: onScreen.current });
@@ -243,7 +276,7 @@ export const OwnExportSection = () => {
           <Button
             disabled={busy}
             onClick={() => {
-              setReads((before) => before + 1);
+              void requestRead();
             }}
             variant="outline"
           >

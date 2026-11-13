@@ -71,12 +71,15 @@ interface Route {
   calls: string[];
   /** Whether each read was sent with a signal to end it. */
   signals: boolean[];
+  /** Each read's signal, in order: whether it was ended. */
+  seen: AbortSignal[];
 }
 
 const route = (shown: OwnExport | null, more: Partial<Route> = {}): Route => ({
   shown,
   calls: [],
   signals: [],
+  seen: [],
   ...more,
 });
 
@@ -106,6 +109,9 @@ const serve = (faked: Route) =>
       }
       faked.calls.push("read");
       faked.signals.push(init?.signal instanceof AbortSignal);
+      if (init?.signal instanceof AbortSignal) {
+        faked.seen.push(init.signal);
+      }
       await faked.holdRead;
       if (faked.failRead === true) {
         return new Response("<html>proxy</html>", { status: 502 });
@@ -239,6 +245,19 @@ const visibility = async (state: "hidden" | "visible"): Promise<void> => {
     document.dispatchEvent(new Event("visibilitychange"));
     await Promise.resolve();
   });
+};
+
+/** Moves the faked timers on by `ms`. */
+const advance = async (ms: number): Promise<void> => {
+  await act(async () => {
+    vi.advanceTimersByTime(ms);
+    await Promise.resolve();
+  });
+};
+
+/** Presses Try again, as a person does. */
+const clickTryAgain = (): void => {
+  buttonOf("Try again").click();
 };
 
 /** The section gone, as the person leaving it. */
@@ -691,4 +710,103 @@ describe("the person's own export", () => {
     await until(() => true, "a flush");
     expect(faked.calls).toStrictEqual(["read"]);
   });
+
+  // One read at a time, whatever asks for it. While the export may be
+  // being written and the last read failed (so Try again shows and the
+  // follow-up runs), read A is held in flight and B arrives: A is never
+  // ended, no other read starts while it is, at most one follows it, and
+  // what is shown is the latest read's answer. (The read after a start
+  // can't overlap these: its button shows only when nothing is followed.)
+  it.each([
+    {
+      a: "Try again, just before the follow-up comes due",
+      b: "the follow-up coming due",
+      first: async () => {
+        await advance(followEveryMs - 100);
+        clickTryAgain();
+      },
+      arrives: async () => {
+        await advance(100);
+      },
+    },
+    {
+      a: "the follow-up coming due",
+      b: "Try again",
+      first: async () => {
+        await advance(followEveryMs);
+      },
+      arrives: async () => {
+        await Promise.resolve();
+        clickTryAgain();
+      },
+    },
+    {
+      a: "Try again",
+      b: "the page seen again, a read due meanwhile",
+      first: async () => {
+        await visibility("hidden");
+        clickTryAgain();
+        await advance(followEveryMs);
+      },
+      arrives: async () => {
+        await visibility("visible");
+      },
+    },
+    {
+      a: "the follow-up coming due",
+      b: "the page seen again",
+      first: async () => {
+        await advance(followEveryMs);
+      },
+      arrives: async () => {
+        await visibility("hidden");
+        await visibility("visible");
+      },
+    },
+  ])(
+    "ends no read in flight, $a, when $b arrives, and reads once after it at most",
+    async ({ first, arrives }) => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const faked = route(exported("writing"));
+      await shown(faked, () => said().includes(writingSaid), "writing");
+      faked.failRead = true;
+      await later(
+        followEveryMs,
+        () => buttonNamed("Try again") !== undefined,
+        "a failed read"
+      );
+      faked.failRead = false;
+      const base = faked.calls.length;
+      const held = Promise.withResolvers<boolean>();
+      faked.holdRead = held.promise;
+      await act(first);
+      await until(() => faked.calls.length === base + 1, "read A");
+      await act(arrives);
+      await until(() => true, "B served or kept");
+      const whileA = faked.calls.length;
+      // While A is in flight: once it landed, the next read's start ends
+      // its signal, which then ends nothing.
+      const endedA = faked.seen[base]?.aborted;
+      faked.shown = exported("done", twoFiles);
+      faked.holdRead = undefined;
+      await act(async () => {
+        held.resolve(true);
+        await Promise.resolve();
+      });
+      await until(() => said() === readySaid, "the latest answer");
+      await until(() => true, "a read after A, if any");
+      const after = faked.calls.length - base;
+      expect({
+        whileA: whileA - base,
+        endedA,
+        atMostOneAfter: after === 1 || after === 2,
+        shown: said(),
+      }).toStrictEqual({
+        whileA: 1,
+        endedA: false,
+        atMostOneAfter: true,
+        shown: readySaid,
+      });
+    }
+  );
 });
