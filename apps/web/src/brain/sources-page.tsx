@@ -38,13 +38,15 @@ import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime, formatList } from "../format.ts";
 import { useCore } from "../use-core.ts";
+import { OwnExportSection } from "./own-export.tsx";
 
 // The Brain's sources, from the new Brain (GRA-1734): what the person may
 // read, a page at a time, newest first; one source's versions and text;
 // search, which is recall as that person, shown as recall packs it (no
 // ranking of the page's own); and how each of their connections feeds the
 // Brain today. Core answers each from what they may read alone. Texts are
-// shown as text, never markup.
+// shown as text, never markup. At its foot, the person's own export of
+// what only they may read (own-export.tsx).
 
 type Sources = Session["brainSources"];
 
@@ -677,6 +679,7 @@ export const SourcesPage = ({
             )}
           </div>
         </section>
+        <OwnExportSection />
       </div>
     </div>
   );

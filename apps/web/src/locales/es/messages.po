@@ -1499,6 +1499,10 @@ msgstr "Una conexión necesita volver a iniciar sesión"
 msgid "A connection refused to say what changed"
 msgstr "Una conexión se negó a decir qué cambió"
 
+#: src/brain/own-export.tsx
+msgid "A copy of everything the Brain keeps for you alone: your own sources and what it remembers from them. Only you can make it and download it, and it is deleted when you are erased."
+msgstr "Una copia de todo lo que el Brain guarda solo para ti: tus propias fuentes y lo que recuerda de ellas. Solo tú puedes crearla y descargarla, y se elimina cuando se te borra."
+
 #: src/apps/publish-errors.ts
 msgid "A data migration moved this App's records on since this version, so it can't be shared again. Share a new version instead."
 msgstr "Una migración de datos ha hecho avanzar los registros de esta App desde esta versión, así que no se puede volver a compartir. Comparte una versión nueva en su lugar."
@@ -5513,9 +5517,14 @@ msgstr "previsto además, por diseños y pruebas"
 msgid "Expected return"
 msgstr "Rendimiento esperado"
 
+#: src/brain/own-export.tsx
 #: src/export/export-menu.tsx
 msgid "Export"
 msgstr "Exportar"
+
+#: src/brain/own-export.tsx
+msgid "Export again"
+msgstr "Exportar de nuevo"
 
 #: src/apps/app-data.tsx
 msgid "Export as CSV"
@@ -5542,6 +5551,10 @@ msgstr "Exportar informe"
 #: src/activity/audit-log.tsx
 msgid "Export the audit trail"
 msgstr "Exportar el registro de auditoría"
+
+#: src/brain/own-export.tsx
+msgid "Export what only you may read"
+msgstr "Exportar lo que solo tú puedes leer"
 
 #: src/settings/audit-archive.tsx
 msgid "Export with archive"
@@ -6153,6 +6166,10 @@ msgstr "Grasp ha añadido un widget a tu panel."
 msgid "Grasp asks"
 msgstr "Grasp pregunta"
 
+#: src/brain/own-export.tsx
+msgid "Grasp can’t be reached just now."
+msgstr "No se puede conectar con Grasp en este momento."
+
 #: src/chat/cited-note.tsx
 #: src/chat/global-chat.tsx
 #: src/core.ts
@@ -6210,6 +6227,14 @@ msgstr "Grasp no pudo hacerle esta pregunta al modelo. Vuelve a intentarlo."
 msgid "Grasp couldn't remove its own access at these apps. Until someone removes it there, it may still work."
 msgstr "Grasp no pudo quitar su propio acceso en estas aplicaciones. Hasta que alguien lo quite allí, puede que siga funcionando."
 
+#: src/brain/own-export.tsx
+msgid "Grasp couldn’t say where your export is just now."
+msgstr "Grasp no ha podido decir ahora cómo va tu exportación."
+
+#: src/brain/own-export.tsx
+msgid "Grasp couldn’t start your export just now."
+msgstr "Grasp no ha podido iniciar tu exportación en este momento."
+
 #: src/dashboard/outcome-card.tsx
 msgid "Grasp doesn't know where this came from, so it can't be resolved here."
 msgstr "Grasp no sabe de dónde vino esto, así que no se puede resolver aquí."
@@ -6253,6 +6278,10 @@ msgstr "Grasp sigue trabajando en ello…"
 #: src/workflows/requests/request-needs.tsx
 msgid "Grasp is still working out a proposal."
 msgstr "Grasp todavía está preparando una propuesta."
+
+#: src/brain/own-export.tsx
+msgid "Grasp is writing your export. It takes a minute or two; it shows here as soon as it is ready, and you can leave this page meanwhile."
+msgstr "Grasp está escribiendo tu exportación. Tarda uno o dos minutos; aparecerá aquí en cuanto esté lista, y mientras tanto puedes salir de esta página."
 
 #: src/apps/draft-changes.tsx
 msgid "Grasp itself"
@@ -10777,6 +10806,10 @@ msgstr "Falló la lectura de lo que cambió en una conexión"
 msgid "Reading what you wrote"
 msgstr "Leyendo lo que has escrito"
 
+#: src/brain/own-export.tsx
+msgid "Reading where your export is"
+msgstr "Leyendo cómo va tu exportación"
+
 #: src/people/person-picker.tsx
 msgid "Reading who can own it…"
 msgstr "Leyendo quién puede ser responsable…"
@@ -12710,6 +12743,10 @@ msgstr "Algo salió mal al abrirla."
 msgid "Something went wrong."
 msgstr "Algo ha salido mal."
 
+#: src/brain/own-export.tsx
+msgid "Something your export held was erased since, so the export was deleted with it. Make a new one."
+msgstr "Algo que contenía tu exportación se ha borrado desde entonces, así que la exportación se eliminó con ello. Crea una nueva."
+
 #: src/chat/composer-menu.tsx
 msgctxt "a feature still to come"
 msgid "Soon"
@@ -13634,6 +13671,10 @@ msgstr "El Brain"
 #: src/routes/_shell.settings.brain.tsx
 msgid "The brain has no teams to group yet."
 msgstr "El Brain aún no tiene equipos que agrupar."
+
+#: src/brain/own-export.tsx
+msgid "The Brain keeps nothing that only you may read yet, so your export holds nothing."
+msgstr "El Brain todavía no guarda nada que solo tú puedas leer, así que tu exportación no contiene nada."
 
 #: src/routes/_shell.settings.brain.tsx
 msgid "The brain's regions: your teams, grouped the way your company is. Grasp can propose groups; they count once you confirm them."
@@ -14779,6 +14820,7 @@ msgstr "Intentar"
 #: src/apps/app-data.tsx
 #: src/apps/app-owner.tsx
 #: src/apps/app-settings.tsx
+#: src/brain/own-export.tsx
 #: src/chat/builds.tsx
 #: src/chat/chat-panel.tsx
 #: src/chat/thread.tsx
@@ -16790,6 +16832,18 @@ msgstr "El número de IVA de tu empresa, tal como aparece en las facturas."
 #: src/settings/ai-providers.tsx
 msgid "Your endpoint's public HTTPS address, such as https://models.example.com/v1."
 msgstr "La dirección HTTPS pública de tu endpoint, por ejemplo https://models.example.com/v1."
+
+#: src/brain/own-export.tsx
+msgid "Your export couldn’t be finished. Try making it again."
+msgstr "No se ha podido terminar tu exportación. Intenta crearla de nuevo."
+
+#: src/brain/own-export.tsx
+msgid "Your export is ready. Download each of its files:"
+msgstr "Tu exportación está lista. Descarga cada uno de sus archivos:"
+
+#: src/brain/own-export.tsx
+msgid "Your export's files"
+msgstr "Los archivos de tu exportación"
 
 #: src/routes/guest.tsx
 msgid "Your message"
