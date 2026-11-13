@@ -4,7 +4,10 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { erasePerson, eraseSource, recallAs } from "../src/brain-next.ts";
-import { captureIdOf } from "../src/connection-capture-key.ts";
+import {
+  captureIdOf,
+  connectionOfCapture,
+} from "../src/connection-capture-key.ts";
 import { captureRead } from "../src/connection-capture.ts";
 import { chatOf, codeStep, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
@@ -211,9 +214,12 @@ const messagesRead = (messages: { id: string; subject: string }[]) => ({
 });
 
 /**
- * What `personId` recalls for `question`, each item's text and version:
+ * What `personId` recalls for `question` by its words and exact parts,
+ * each item's text and version, and where else to look by those items:
  * with their own store, as their own web chat does, unless `personal` is
- * false, as an App, a workflow or the SDK asks.
+ * false, as an App, a workflow or the SDK asks. A passage found by meaning
+ * alone is left out, so what a test asserts never depends on which
+ * readable passages lie nearest the question.
  */
 const recalled = async (
   personId: string,
@@ -225,13 +231,19 @@ const recalled = async (
     question,
     budget,
   });
+  const byWords = items.filter(({ found }) => found !== "meaning");
+  const named = new Set(
+    byWords.map(({ source }) =>
+      source.producer === "capture" ? connectionOfCapture(source.id) : undefined
+    )
+  );
   return {
-    texts: items.map(({ source, version, text }) => ({
+    texts: byWords.map(({ source, version, text }) => ({
       producer: source.producer,
       version,
       text,
     })),
-    elsewhere,
+    elsewhere: elsewhere.filter((connection) => named.has(connection)),
   };
 };
 
