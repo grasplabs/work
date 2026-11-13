@@ -614,12 +614,14 @@ describe("the skills page", () => {
       offered,
       calls,
       forTeam: text.includes("For the team Sales"),
-      state: stateOf("quote-a-tender"),
+      states: [...document.querySelectorAll('[data-slot="badge"]')].map(
+        (badge) => badge.textContent
+      ),
     }).toStrictEqual({
       offered: ["Sales"],
       calls: ["overview", "share quote-a-tender@2 with t-1", "overview"],
       forTeam: true,
-      state: "Waiting for an admin",
+      states: ["Waiting for an admin"],
     });
   });
 
