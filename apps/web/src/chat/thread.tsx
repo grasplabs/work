@@ -74,6 +74,7 @@ import {
 import { failureMessage } from "./failure.ts";
 import { GraspSign } from "./grasp-sign.tsx";
 import { recoveredSteps } from "./recovered.ts";
+import { SavedMemoryLine } from "./saved-memory.tsx";
 import { readingFileOf, signOf } from "./sign.ts";
 import type { WorkState } from "./sign.ts";
 import { AnswerCited, AnswerSources, useCitedDocuments } from "./sources.tsx";
@@ -260,6 +261,9 @@ const useToolSummary = (): ((call: ChatToolCall, done: boolean) => string) => {
       case "editWorkflow": {
         return done ? t`Edited a workflow` : t`Editing a workflow`;
       }
+      case "remember": {
+        return done ? t`Saved to your memory` : t`Saving to your memory`;
+      }
       default: {
         return done ? t`Used ${tool}` : t`Using ${tool}`;
       }
@@ -326,34 +330,39 @@ const ToolStep = ({
   const summary = useToolSummary()(call, status === "done");
   const label = useStatusLabel()(status);
   return (
-    <TraceCollapsible>
-      <TraceCollapsibleTrigger>
-        <TraceLine status={lineStatus[status]}>
-          <TraceIcon>{statusIcon[status]}</TraceIcon>
-          <TraceTitle>{summary}</TraceTitle>
-          {status === "done" ? null : (
-            <TraceDescription>{label}</TraceDescription>
-          )}
-        </TraceLine>
-      </TraceCollapsibleTrigger>
-      <TraceCollapsibleContent>
-        <div className="flex flex-col gap-4 py-1">
-          <StepPart
-            heading={<Trans>Input</Trans>}
-            text={JSON.stringify(call.input, null, 2)}
-          />
-          {result === undefined ? null : (
+    <>
+      <TraceCollapsible>
+        <TraceCollapsibleTrigger>
+          <TraceLine status={lineStatus[status]}>
+            <TraceIcon>{statusIcon[status]}</TraceIcon>
+            <TraceTitle>{summary}</TraceTitle>
+            {status === "done" ? null : (
+              <TraceDescription>{label}</TraceDescription>
+            )}
+          </TraceLine>
+        </TraceCollapsibleTrigger>
+        <TraceCollapsibleContent>
+          <div className="flex flex-col gap-4 py-1">
             <StepPart
-              failed={status === "failed"}
-              heading={
-                result.failed ? <Trans>Error</Trans> : <Trans>Result</Trans>
-              }
-              text={result.text}
+              heading={<Trans>Input</Trans>}
+              text={JSON.stringify(call.input, null, 2)}
             />
-          )}
-        </div>
-      </TraceCollapsibleContent>
-    </TraceCollapsible>
+            {result === undefined ? null : (
+              <StepPart
+                failed={status === "failed"}
+                heading={
+                  result.failed ? <Trans>Error</Trans> : <Trans>Result</Trans>
+                }
+                text={result.text}
+              />
+            )}
+          </div>
+        </TraceCollapsibleContent>
+      </TraceCollapsible>
+      {result?.saved === undefined ? null : (
+        <SavedMemoryLine saved={result.saved} />
+      )}
+    </>
   );
 };
 

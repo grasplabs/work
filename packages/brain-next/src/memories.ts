@@ -775,12 +775,11 @@ export const confirmMemory = (
 
 /**
  * Retires the memory `id` if its lineage is the reader's person's own (as
- * writer), the reader may
- * read it, and it is current as they see it: not retired, in its world
- * time now, and no newer memory of its lineage that they may read ended
- * it by now, so one hidden from them neither blocks the retire nor shows.
- * One they already retired answers `done` again (contract.ts
- * `retireMemory`).
+ * writer), the reader may read it, it is not retired, and it is in its
+ * world time now: current, or ended by a newer memory of its lineage,
+ * which a person forgets as well, so it never becomes current again when
+ * the newer one is retired too. One they already retired answers `done`
+ * again (contract.ts `retireMemory`).
  */
 export const retireMemory = (
   sql: SqlStorage,
@@ -800,8 +799,7 @@ export const retireMemory = (
     WHERE m.id = ?1 AND m.lineage = ?4 AND m.retired_at IS NULL
       AND (m.valid_from IS NULL OR m.valid_from <= ?5)
       AND (m.valid_until IS NULL OR m.valid_until > ?5)
-      AND ${visibleSql("m")}
-      AND NOT EXISTS (${newerSql("m", "?5", "?5", true)})`,
+      AND ${visibleSql("m")}`,
     ...asked,
     stamp
   );

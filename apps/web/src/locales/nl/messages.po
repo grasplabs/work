@@ -6276,6 +6276,10 @@ msgstr "Grasp mag {app} alleen gebruiken via de tools die je hebt toegestaan."
 msgid "Grasp never sends it again. Nothing is changed or undone on {connection}."
 msgstr "Grasp verstuurt het nooit meer. Op {connection} wordt niets gewijzigd of ongedaan gemaakt."
 
+#: src/chat/saved-memory.tsx
+msgid "Grasp no longer remembers this."
+msgstr "Grasp onthoudt dit niet meer."
+
 #: src/brain/brain-log.tsx
 msgid "Grasp noticed it did not know"
 msgstr "Grasp merkte dat het dit niet wist"
@@ -6342,6 +6346,22 @@ msgstr "Grasp schrijft interviews uit met {whereItRuns}, met de eigen sleutel va
 #: src/route-error.tsx
 msgid "Grasp was updated while this page was open. Try again to load the new version."
 msgstr "Grasp is bijgewerkt terwijl deze pagina open stond. Probeer het opnieuw om de nieuwe versie te laden."
+
+#: src/chat/saved-memory.tsx
+msgid "Grasp will remember about {about}: {statement}"
+msgstr "Grasp onthoudt over {about}: {statement}"
+
+#: src/chat/saved-memory.tsx
+msgid "Grasp will remember about {about}: {statement} (value: {value})"
+msgstr "Grasp onthoudt over {about}: {statement} (waarde: {value})"
+
+#: src/chat/saved-memory.tsx
+msgid "Grasp will remember: {statement}"
+msgstr "Grasp onthoudt: {statement}"
+
+#: src/chat/saved-memory.tsx
+msgid "Grasp will remember: {statement} (value: {value})"
+msgstr "Grasp onthoudt: {statement} (waarde: {value})"
 
 #: src/apps/app-history.tsx
 msgid "Grasp, in {name}'s chat"
@@ -6892,6 +6912,10 @@ msgstr "Invoer"
 #: src/workflows/start-run.tsx
 msgid "Input, as JSON"
 msgstr "Invoer, als JSON"
+
+#: src/chat/saved-memory.tsx
+msgid "Instruction"
+msgstr "Instructie"
 
 #: src/agents/agent-form.tsx
 #: src/agents/agent-page.tsx
@@ -10341,6 +10365,10 @@ msgstr "Positie"
 msgid "Prague"
 msgstr "Praag"
 
+#: src/chat/saved-memory.tsx
+msgid "Preference"
+msgstr "Voorkeur"
+
 #: src/interview/read-back.tsx
 msgid "Press a line to change it, take out what is wrong, or type what is missing. What you leave in is what counts."
 msgstr "Druk op een regel om hem aan te passen, haal weg wat niet klopt, of typ wat er ontbreekt. Wat je laat staan, telt."
@@ -11774,9 +11802,17 @@ msgstr "Zojuist opgeslagen"
 msgid "Saved on {date}"
 msgstr "Opgeslagen op {date}"
 
+#: src/chat/thread.tsx
+msgid "Saved to your memory"
+msgstr "Opgeslagen in je geheugen"
+
 #: src/workflows/resource-params.tsx
 msgid "Saved."
 msgstr "Opgeslagen."
+
+#: src/chat/thread.tsx
+msgid "Saving to your memory"
+msgstr "Opslaan in je geheugen"
 
 #: src/interview/composer.tsx
 msgid "Saving…"
@@ -14106,6 +14142,10 @@ msgstr "Er is al een team met deze naam."
 msgid "There is nobody in this list."
 msgstr "Er staat niemand in deze lijst."
 
+#: src/chat/saved-memory.tsx
+msgid "There was nothing to undo: Grasp no longer uses this."
+msgstr "Er was niets om ongedaan te maken: Grasp gebruikt dit niet meer."
+
 #: src/brain/share-record.tsx
 msgid "There's nowhere to share it yet: you're in no team, and in no chat others share."
 msgstr "Je kunt het nog nergens delen: je zit in geen team en in geen chat die anderen delen."
@@ -14819,6 +14859,7 @@ msgid "Under way"
 msgstr "In volle gang"
 
 #: src/apps/publish.tsx
+#: src/chat/saved-memory.tsx
 msgid "Undo"
 msgstr "Ongedaan maken"
 

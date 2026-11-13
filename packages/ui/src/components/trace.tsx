@@ -30,7 +30,7 @@ function Trace({ className, ...props }: React.ComponentProps<"div">) {
  * One step on its own line. `running` turns while it is at work; `error`
  * failed; `pending` waits its turn; `attention` waits on someone. `wrap`
  * lets a step that is a sentence run onto more lines instead of being cut
- * short.
+ * short, breaking a long unbroken word (a URL) where it must.
  */
 function TraceLine({
   className,
@@ -47,7 +47,7 @@ function TraceLine({
       data-status={status}
       data-wrap={wrap || undefined}
       className={cn(
-        "text-muted-foreground data-[status=error]:text-destructive data-[status=attention]:text-status-attention in-[a:hover,button:hover]:text-foreground data-[status=error]:in-[a:hover,button:hover]:text-destructive flex w-fit max-w-full min-w-0 items-center gap-2 text-sm transition-colors in-[a,button]:cursor-pointer data-wrap:items-start data-wrap:*:data-[slot=trace-icon]:h-5 data-wrap:*:data-[slot=trace-title]:whitespace-normal data-[status=pending]:opacity-60 data-[status=running]:*:data-[slot=trace-title]:animate-pulse",
+        "text-muted-foreground data-[status=error]:text-destructive data-[status=attention]:text-status-attention in-[a:hover,button:hover]:text-foreground data-[status=error]:in-[a:hover,button:hover]:text-destructive flex w-fit max-w-full min-w-0 items-center gap-2 text-sm transition-colors in-[a,button]:cursor-pointer data-wrap:items-start data-wrap:*:data-[slot=trace-icon]:h-5 data-wrap:*:data-[slot=trace-title]:wrap-anywhere data-wrap:*:data-[slot=trace-title]:whitespace-normal data-[status=pending]:opacity-60 data-[status=running]:*:data-[slot=trace-title]:animate-pulse",
         className
       )}
       {...props}
