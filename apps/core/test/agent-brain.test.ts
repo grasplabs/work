@@ -1,8 +1,12 @@
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import type { BrainRecordInput } from "@grasp-os/shared/brain-records";
+import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { addSource } from "../src/brain-next.ts";
+import { turnRecallMethod, turnRecallTool } from "../src/turn-recall.ts";
 import {
+  chatOf,
   codeResults,
   codeStep,
   model,
@@ -79,11 +83,15 @@ describe("a chat's brain", setUpTime, () => {
     const calls = await gapCalls(agent.agentId, 1);
     const beforeSteps = await codeResults(stub, before.chat.id);
     // Once granted, the turn recalls for the question before the model's
-    // first request (agent.ts): its own code step, then the model's.
-    const [recalled, read] = await codeResults(stub, after.chat.id);
+    // first request (turn-recall.ts): its own search step, then the
+    // model's code step.
+    const [read] = await codeResults(stub, after.chat.id);
+    const [recalled] = await toolResults(stub, after.chat.id);
     expect({
       before: beforeSteps.map(({ text }) => text),
-      recalled: recalled?.text.startsWith('Returned:\n{"note":'),
+      recalled:
+        recalled?.tool === "searchBrain" &&
+        recalled.text.startsWith('Returned:\n{"note":'),
       after: read?.text,
       calls: calls.map(({ actor, detail }) => ({
         onBehalfOf: actor.type === "agent" ? actor.onBehalfOf : null,
@@ -146,7 +154,8 @@ describe("a chat's brain", setUpTime, () => {
     await ask("What's still unknown?");
 
     // The recall before the first request, then the model's own read.
-    const [recalled, read] = await codeResults(stub, chat.id);
+    const [recalled] = await toolResults(stub, chat.id);
+    const [read] = await codeResults(stub, chat.id);
     const text = read?.text ?? "";
     expect(recalled?.text).not.toContain(secret);
     expect(text).not.toContain(secret);
@@ -221,7 +230,73 @@ describe("a chat's brain", setUpTime, () => {
       })),
       built: [["writeFile", false]],
       with: { tool: true, api: true },
-      searched: [[false, true]],
+      // The recall before the question, of the Brain, which holds none of
+      // Knowledge's documents; then the model's own search, which finds it.
+      searched: [
+        [false, false],
+        [false, true],
+      ],
+    });
+  });
+
+  it("recalls nothing before a question while the agent lacks the brain permission, and recalls once it holds it", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = await signedInWithRole(idp, "user");
+    const depot = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
+    const fact = `Depot ${depot} opens at seven`;
+    await addSource(env, {
+      source: { producer: "upload", id: crypto.randomUUID() },
+      change: crypto.randomUUID(),
+      text: fact,
+      readers: { kind: "owner", personId: person.userId },
+    });
+    const { stub, chat, provider, ask, agent } = await chatOf(
+      person.userId,
+      says("I can't look."),
+      says("Seven.")
+    );
+    const question = `When does depot ${depot} open?`;
+
+    await ask(question);
+    await requestGranted(idp, admin, {
+      subject: agent,
+      object: { type: "platform" },
+      actions: ["brain"],
+      binding: "BRAIN",
+    });
+    await ask(question);
+
+    /** Each request's own recall part, if it carries one. */
+    const recalled = provider.requests.map(({ body }) =>
+      JSON.stringify(body).includes("[Recall ")
+    );
+    // Once the granted turn's recall is in the log: the first turn's
+    // would be before it.
+    const recalls = await vi.waitFor(
+      async () => {
+        const logged = await allEvents();
+        const events = logged.filter(
+          ({ action, detail }) =>
+            action === "agent.call" &&
+            detail.method === turnRecallMethod &&
+            detail.chat === chat.id
+        );
+        expect(events.length).toBeGreaterThan(0);
+        return events;
+      },
+      { timeout: 10_000, interval: 50 }
+    );
+    const results = await toolResults(stub, chat.id);
+    const steps = results.filter(({ tool }) => tool === turnRecallTool);
+    expect({
+      recalled,
+      steps: steps.map(({ text }) => text.includes(fact)),
+      recalls: recalls.length,
+    }).toStrictEqual({
+      // The first request, before the grant, carried none.
+      recalled: [false, true],
+      steps: [true],
+      recalls: 1,
     });
   });
 });
