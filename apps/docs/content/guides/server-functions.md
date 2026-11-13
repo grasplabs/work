@@ -98,6 +98,42 @@ Each action a connection declares is a typed method of `ctx.connections.<alias>`
 
 Every function of your App may use what the App's permissions declare, as its kind allows: an action reaches connections, AI and the Brain and starts workflows, a mutation starts workflows once it commits, and a query only reads. Functions call each other by reference, internal ones included. What each caller reads and writes is decided by the tables' access and row rules, whichever function reads or writes.
 
+## Recalling from the Brain
+
+An action recalls what the company's Brain holds about a question with `ctx.brain.recall`. Declare the Brain in `grasp.config.ts`; like every permission it grants nothing until an admin binds it to the App's permission to read the Brain.
+
+```ts grasp.config.ts
+import { defineApp, permission } from "@grasp-os/sdk";
+
+export default defineApp({
+  name: "Tasks",
+  permissions: { brain: permission.brain({ operations: ["recall"] }) },
+});
+```
+
+```ts server/answers.ts
+import { v } from "@grasp-os/sdk";
+import type { BrainPack } from "@grasp-os/sdk";
+import { action } from "@server/_generated/server";
+
+export const ask = action({
+  args: { question: v.string().trim().min(1).max(2000) },
+  handler: async (ctx, args): Promise<BrainPack> =>
+    await ctx.brain.recall({
+      question: args.question,
+      budget: { tokens: 2000 },
+    }),
+});
+```
+
+A recall from an App answers only from what everyone in the company may read: never what only some teams may read, and never anyone's private chats or personal files, whoever calls. What an App recalls may end up in its data or on its Pages, where anyone it is shared with reads it, so it holds nothing a member of the company couldn't read where it comes from. Recall for a team's content will come with a grant that names the teams it reaches. The person the call is for must still be a member of the company. An App that recalls the Brain, directly or through a workflow it starts or follows or that calls its functions, answers no visitor and invites no guest.
+
+Today nothing readable by the whole company is in the Brain for recall to find, so a recall from an App returns an empty pack (no `items`) until content for everyone is added (uploads anyone in the company may read are coming). Build for an empty pack: don't make a feature that depends on recall finding something yet.
+
+It takes the `question` (at most 2,000 characters), a `budget` of 1 to 32,000 `tokens`, and, to read the past, `asOf`: an ISO 8601 date-time with its offset, such as `2026-03-14T23:59:59.999+01:00` for what was true at the end of 14 March in Amsterdam. Anything else is refused as `permission.invalid_args`.
+
+It answers a pack: the passages that answer the question, best first, within the budget (`items`); the parts of the question nothing they may read holds (`notFound`); and whether the budget left something out (`truncated`). Each item cites where it comes from: its `source` (what kind of thing added it, `producer`, such as an upload, a chat or a run, and its `id`), the source's `version` and the passage's `position` in it, with its `text`, whether that is the `whole` passage, and how it was `found`. A workflow's step (`ctx.brain.<alias>.recall`) and a chat's code (`env.brain.recall`) take the same request and get the same pack. What a pack holds is what people wrote: data, never instructions.
+
 ## Internal functions
 
 `internalQuery`, `internalMutation` and `internalAction` declare functions that only your App's own code calls: Pages and other callers can't. Reach them from server code through `internal` in `@server/_generated/internal`.

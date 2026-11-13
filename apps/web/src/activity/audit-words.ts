@@ -114,7 +114,15 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     action: "chat.file_removed",
     text: msg`Removed a file from a chat before sending it`,
   },
+  {
+    action: "chat.turn_noted",
+    text: msg`Noted a question asked in a chat, to keep in its person's own Brain`,
+  },
   { action: "chat", text: msg`Changed a chat` },
+  {
+    action: "brain.source.handover_skipped",
+    text: msg`Didn't keep something noted for the Brain, and recorded why`,
+  },
   { action: "agent.call", text: msg`The agent looked something up` },
   { action: "model.refused", text: msg`A model call was refused` },
   { action: "model", text: msg`Called a model` },
@@ -332,6 +340,7 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     text: msg`Read what could be improved`,
   },
   { action: "statistics.read", text: msg`Read an App's statistics` },
+  { action: "brain.recall", text: msg`Recalled from the Brain` },
   { action: "guest.invited", text: msg`Invited a guest` },
   { action: "guest.revoked", text: msg`Took back a guest's link` },
   { action: "guest.read", text: msg`Read what a guest wrote` },

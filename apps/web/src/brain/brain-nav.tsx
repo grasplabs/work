@@ -17,6 +17,7 @@ import {
   LibraryIcon,
   LightbulbIcon,
   NotebookPenIcon,
+  BookOpenIcon,
   TargetIcon,
   UsersIcon,
 } from "lucide-react";
@@ -351,6 +352,11 @@ export const BrainNav = ({
     message: "Sources",
     context: "the Brain's sources page",
   });
+  const onSkills = Boolean(matchRoute({ to: "/brain/skills" }));
+  const skillsLabel = t({
+    message: "Skills",
+    context: "the Brain's skills page",
+  });
   const onBrain = Boolean(matchRoute({ to: "/brain" }));
   let here = new Set<string>();
   if (note) {
@@ -446,6 +452,13 @@ export const BrainNav = ({
         >
           <LightbulbIcon />
         </PageSidebarRailButton>
+        <PageSidebarRailButton
+          active={onSkills}
+          label={skillsLabel}
+          render={<Link to="/brain/skills" />}
+        >
+          <BookOpenIcon />
+        </PageSidebarRailButton>
         {regions.map(({ region, Icon }) => (
           <PageSidebarRailButton
             active={here.has(regionKey(region.id))}
@@ -491,6 +504,9 @@ export const BrainNav = ({
         </Link>
         <Link className={topLinkClass} to="/brain/memories">
           <TopLinkContent icon={LightbulbIcon} label={memoriesLabel} />
+        </Link>
+        <Link className={topLinkClass} to="/brain/skills">
+          <TopLinkContent icon={BookOpenIcon} label={skillsLabel} />
         </Link>
         <span aria-hidden="true" className="bg-border my-2 h-px" />
 

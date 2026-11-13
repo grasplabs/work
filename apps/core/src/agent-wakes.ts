@@ -11,7 +11,7 @@ import { and, asc, eq, isNull, lte, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { requireAgentReaches } from "./agent-reach.ts";
-import { readAgent, turnAgent } from "./agents.ts";
+import { companyAgent, turnAgent } from "./agents.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { memberOf } from "./auth/identity.ts";
 import { agentWakes } from "./db/core/schema.ts";
@@ -161,11 +161,8 @@ export const makeAgentWake = async (
   now = new Date()
 ): Promise<AgentWake> => {
   requireCompanyAdmin(identity);
-  const agent =
-    typeof agentId === "string" ? await readAgent(env, agentId) : undefined;
-  if (agent === undefined) {
-    throw agentErrors.create("agent.unknown");
-  }
+  // Never a person's own agent: it works only when its owner asks.
+  const agent = await companyAgent(env, agentId);
   const parsed = agentWakeInputSchema.safeParse(input);
   if (!parsed.success) {
     throw agentErrors.create("agent.wake_invalid");

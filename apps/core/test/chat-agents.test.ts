@@ -81,6 +81,7 @@ describe("picking an agent for a chat", setUpTime, () => {
       face: "stephen",
       job: "Answers from what the company told Grasp, and helps people in their own apps.",
       model: null,
+      own: false,
     };
     const theirs = await inTeam.api.chats.agents();
     expect(theirs).toStrictEqual([
@@ -91,6 +92,7 @@ describe("picking an agent for a chat", setUpTime, () => {
         face: "claire",
         job: "Chases unpaid invoices.",
         model: null,
+        own: false,
       },
     ]);
     await expect(outside.api.chats.agents()).resolves.toStrictEqual([first]);

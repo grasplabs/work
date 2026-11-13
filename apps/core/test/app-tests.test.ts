@@ -49,9 +49,7 @@ const appFiles: TestApp = testApp(
         access: { read: "appMembers", write: "appBuilders" },
       },
     },
-    permissions: [
-      'permission.brain({\n  operations: ["search"],\n  collections: ["handbook"],\n})',
-    ],
+    permissions: ['permission.brain({ operations: ["recall"] })'],
   },
   {
     "server/notes.ts": `import { AppError, v } from "@grasp-os/sdk";
@@ -94,8 +92,11 @@ export const help = permissions.brain;
 
 export const searchHelp = action({
   args: { text: v.string().min(1) },
-  returns: v.array(v.object({ title: v.string(), excerpt: v.string() })).max(20),
-  handler: async (ctx, args) => await ctx.brain.search({ text: args.text, limit: 5 }),
+  returns: v.array(v.string()),
+  handler: async (ctx, args) => {
+    const pack = await ctx.brain.recall({ question: args.text, budget: { tokens: 500 } });
+    return pack.items.map((item) => item.text);
+  },
 });
 
 export const count = internalQuery({

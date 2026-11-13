@@ -2,18 +2,21 @@ import { agentErrors } from "@grasp-os/shared/agent";
 import { agentDocumentsMax } from "@grasp-os/shared/agents";
 import type { AgentDocument } from "@grasp-os/shared/agents";
 import { actorOf } from "@grasp-os/shared/audit";
-import { requireAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { readAgent } from "./agents.ts";
+import {
+  changeableAgent,
+  firstAgentId,
+  readAgent,
+  readableAgent,
+} from "./agents.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { readChatFile } from "./chat-files.ts";
 import { agentDocuments, agents } from "./db/core/schema.ts";
 import type { LocalExtractorEnv } from "./files/extract.ts";
-import { requireCompanyAdmin } from "./stephen-reach.ts";
 
 // An agent's documents: files the company's admins give an agent to
 // answer from, such as a checklist or a policy too long for its
@@ -31,8 +34,10 @@ import { requireCompanyAdmin } from "./stephen-reach.ts";
 // admin as its instructions are, and like them it adds to Grasp's rules
 // and lifts none (agent.ts says so to the model).
 //
-// The company's own admins add and remove documents, never Grasp staff,
-// who read their names only. Each change is audited with the document's
+// The company's own admins add and remove a company agent's documents,
+// never Grasp staff, who read their names only. A person's own agent's
+// documents are that person's alone, to read, add and remove
+// (agents.ts). Each change is audited with the document's
 // ID, type and size, never its name or text.
 //
 // The ways it can fail, which the tests start from: someone who isn't
@@ -69,16 +74,6 @@ const documentOf = (row: {
   addedAt: row.addedAt.toISOString(),
 });
 
-/** The ID of the agent `agentId`, or `agent.unknown`. */
-const requireAgentId = async (env: Env, agentId: unknown): Promise<string> => {
-  const agent =
-    typeof agentId === "string" ? await readAgent(env, agentId) : undefined;
-  if (agent === undefined) {
-    throw agentErrors.create("agent.unknown");
-  }
-  return agent.id;
-};
-
 /**
  * The documents core keeps for the agent with this ID, the oldest first,
  * without their text but with its length in characters: what a turn
@@ -106,8 +101,7 @@ export const listAgentDocuments = async (
   identity: Identity,
   agentId: unknown
 ): Promise<AgentDocument[]> => {
-  requireAdmin(identity);
-  const id = await requireAgentId(env, agentId);
+  const { id } = await readableAgent(env, identity, agentId);
   const documents = await documentsOf(env, id);
   return documents.map(({ chars: _chars, ...document }) => document);
 };
@@ -190,7 +184,8 @@ const sameOrNamed = async (
  * file added again is answered with the document it already is.
  *
  * The insert itself holds what was checked before the file was read: the
- * agent wasn't deleted and has room. Reading a file takes a while, and
+ * agent wasn't deleted, is still whose it was (never one erased with its
+ * owner meanwhile, whose row is gone), and has room. Reading a file takes a while, and
  * either may have changed since.
  */
 export const addAgentDocument = async (
@@ -199,8 +194,7 @@ export const addAgentDocument = async (
   agentId: unknown,
   file: unknown
 ): Promise<AgentDocument> => {
-  requireCompanyAdmin(identity);
-  const id = await requireAgentId(env, agentId);
+  const { id, ownerId } = await changeableAgent(env, identity, agentId);
   const read = await readAsDocument(env, file);
   const before = await documentsOf(env, id);
   const named = before.find(({ name }) => name === read.name);
@@ -219,7 +213,8 @@ export const addAgentDocument = async (
   };
   const db = drizzle(env.DB);
   const holds = sql`(SELECT count(*) FROM ${agentDocuments} WHERE ${agentDocuments.agentId} = ${id}) < ${agentDocumentsMax}
-    AND NOT EXISTS (SELECT 1 FROM ${agents} WHERE ${agents.id} = ${id} AND ${agents.state} = 'deleted')`;
+    AND NOT EXISTS (SELECT 1 FROM ${agents} WHERE ${agents.id} = ${id} AND ${agents.state} = 'deleted')
+    AND (${id} = ${firstAgentId} OR EXISTS (SELECT 1 FROM ${agents} WHERE ${agents.id} = ${id} AND ${agents.ownerId} IS ${ownerId}))`;
   try {
     await auditedBatch(env, db, [
       db.insert(agentDocuments).select(
@@ -253,7 +248,9 @@ export const addAgentDocument = async (
   const kept = await readAgentDocument(env, id, document.id);
   if (kept === undefined) {
     // The insert's condition failed: deleted, or full, since the checks.
-    await requireAgentId(env, id);
+    if ((await readAgent(env, id)) === undefined) {
+      throw agentErrors.create("agent.unknown");
+    }
     // Full with this very file, added at once by another call: the same
     // answer as that call got.
     const after = await documentsOf(env, id);
@@ -277,8 +274,7 @@ export const removeAgentDocument = async (
   agentId: unknown,
   documentId: unknown
 ): Promise<void> => {
-  requireCompanyAdmin(identity);
-  const id = await requireAgentId(env, agentId);
+  const { id } = await changeableAgent(env, identity, agentId);
   const document = await readAgentDocument(env, id, documentId);
   if (document === undefined) {
     throw agentErrors.create("agent.document_unknown");

@@ -58,6 +58,7 @@ import {
   notifications,
   personErasures,
   sessions,
+  skillShares,
   teamMembers,
   users,
 } from "./db/core/schema.ts";
@@ -294,6 +295,16 @@ const recordRemoval = async (
     db
       .delete(notifications)
       .where(and(eq(notifications.personId, userId), removed)),
+    // The asks of theirs that wait: nobody decides a removed person's ask.
+    db
+      .delete(skillShares)
+      .where(
+        and(
+          eq(skillShares.requestedBy, userId),
+          eq(skillShares.status, "pending"),
+          removed
+        )
+      ),
   ]);
   return {
     removed: inserted.length > 0,

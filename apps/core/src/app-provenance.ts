@@ -4,7 +4,7 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Role } from "@grasp-os/shared/roles";
-import { and, eq, inArray, isNotNull, ne, or } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, ne, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -26,10 +26,13 @@ import type { CollectionAccess, PersonAccess } from "./knowledge/access.ts";
 // every collection it was ever granted to read; and, through grants on
 // independent workflows, what those workflows may have read, and what
 // another App holding a grant on one sent it, whatever the depth
-// (`reachedThroughCalls`, `workflow:<id>` in the graph): following a
-// workflow's runs (`read`) brings its output into the App, and starting it
-// (`start`) sends the App's input into the workflow too, from where another
-// App following it carries it on. An App's store is its own and no grant
+// (`reachedThroughCalls`, `workflow:<id>` in the graph), each grant an
+// edge each way its data can flow (`edgesOf`): following a workflow's runs
+// (`read`) brings their output in; starting it (`start`) sends input in
+// and brings its result back; sending its runs an event (`send`) sends
+// data in; and a workflow granted to call an App's function (`call`)
+// sends what it holds into the App's data and gets the function's answer
+// back. An App's store is its own and no grant
 // reaches another's (data-stores.ts), so stores add no edge. Once granted
 // counts for good, revoked or not: the App may still hold what it read. An
 // App the graph reaches that has no row fails closed, as an unresolved
@@ -199,23 +202,49 @@ const edgesOf = async (
   frontier: { apps: AppId[]; workflows: string[] }
 ): Promise<Map<string, Edges>> => {
   const { apps: frontierApps, workflows } = frontier;
-  // Grants ever given to an App on an independent workflow, either end in
-  // the frontier.
+  // Grants ever given on an independent workflow, to an App or to another
+  // workflow, either end in the frontier.
   const run = await drizzle(env.DB)
     .select({
-      app: permissions.subjectId,
+      type: permissions.subjectType,
+      subject: permissions.subjectId,
       workflow: permissions.objectId,
       actions: permissions.actions,
     })
     .from(permissions)
     .where(
       and(
-        eq(permissions.subjectType, "app"),
         eq(permissions.objectType, "workflow"),
         isNotNull(permissions.grantedAt),
         or(
-          inList(permissions.subjectId, frontierApps),
-          inList(permissions.objectId, workflows)
+          and(
+            eq(permissions.subjectType, "app"),
+            inList(permissions.subjectId, frontierApps)
+          ),
+          and(
+            eq(permissions.subjectType, "workflow"),
+            inList(permissions.subjectId, workflows)
+          ),
+          and(
+            inArray(permissions.subjectType, ["app", "workflow"]),
+            inList(permissions.objectId, workflows)
+          )
+        )
+      )
+    );
+  // Grants ever given to a workflow to call an App's functions, either
+  // end in the frontier.
+  const calls = await drizzle(env.DB)
+    .select({ workflow: permissions.subjectId, app: permissions.objectId })
+    .from(permissions)
+    .where(
+      and(
+        eq(permissions.subjectType, "workflow"),
+        eq(permissions.objectType, "app"),
+        isNotNull(permissions.grantedAt),
+        or(
+          inList(permissions.objectId, frontierApps),
+          inList(permissions.subjectId, workflows)
         )
       )
     );
@@ -230,14 +259,39 @@ const edgesOf = async (
       found.get(key)?.push(...edges);
     }
   };
-  for (const { app, workflow, actions } of run) {
-    const [from, to] = [appNode(app), workflowNode(workflow)];
-    const of = [app, workflowNode(workflow)];
-    // Following its runs brings its output in; starting it sends input out.
-    link(of, { from, to });
-    if (actionsSchema.parse(JSON.parse(actions)).includes("start")) {
-      link(of, { from: to, to: from });
+  for (const { type, subject, workflow, actions } of run) {
+    const isApp = type === "app";
+    const holder = isApp ? appNode(subject) : workflowNode(subject);
+    const to = workflowNode(workflow);
+    const of = [isApp ? subject : workflowNode(subject), to];
+    const granted = actionsSchema.parse(JSON.parse(actions));
+    // Which way each action carries data, holder `from` holding `to`'s:
+    // - any grant at all: the holder holds the workflow's data, as main
+    //   always counted it (a grant of `send` alone brings nothing back,
+    //   but loosening an existing sharing protection is not this rule's
+    //   to do);
+    // - `start`: the arguments go into the run (the workflow holds the
+    //   starter's data), and what the run returns comes back;
+    // - `read`: following its runs brings their output in;
+    // - `send`: an event goes into its runs (the workflow holds the
+    //   sender's).
+    if (granted.length > 0) {
+      link(of, { from: holder, to });
     }
+    if (granted.includes("start") || granted.includes("send")) {
+      link(of, { from: to, to: holder });
+    }
+  }
+  for (const { workflow, app } of calls) {
+    // `call`: what the workflow sends lands in the App's data (the App
+    // holds the workflow's), and the function's answer comes back (the
+    // workflow holds the App's).
+    const [appAt, workflowAt] = [appNode(app), workflowNode(workflow)];
+    link(
+      [app, workflowAt],
+      { from: appAt, to: workflowAt },
+      { from: workflowAt, to: appAt }
+    );
   }
   return found;
 };
@@ -560,6 +614,78 @@ export const sourcesOf = async (env: Env, app: AppId): Promise<AppSources> => {
       unresolved: [],
     }
   );
+};
+
+/**
+ * Whether App `app` may hold what the Brain recalled: it, or a workflow
+ * or App it reaches through grants (`reachedThroughCalls`: on workflows,
+ * and a workflow's on an App's functions), whatever the depth, was ever
+ * granted the platform's `brain`. What code recalls is what everyone in the company may read
+ * (brain-recall.ts), so this matters only for someone outside it: a
+ * visitor (app-visitors.ts). One query past the walk.
+ */
+export const recallsTheBrain = async (
+  env: Env,
+  app: AppId
+): Promise<boolean> => {
+  // Every node whose data the App may hold, one level of `edgesOf` at a
+  // time until a level adds none: each node is queried once, so it ends,
+  // on cycles too, after as many levels as the grants make, with no cap
+  // (the sharing walk's caps are for its many Apps at once).
+  const reached = new Set<string>([appNode(app)]);
+  let frontier: string[] = [appNode(app)];
+  while (frontier.length > 0) {
+    // oxlint-disable-next-line no-await-in-loop -- one level at a time
+    const edges = await edgesOf(env, {
+      apps: frontier.flatMap((id) =>
+        id.startsWith(workflowPrefix) ? [] : [appIdSchema.parse(id)]
+      ),
+      workflows: frontier.flatMap((id) =>
+        id.startsWith(workflowPrefix) ? [id.slice(workflowPrefix.length)] : []
+      ),
+    });
+    const next = new Set<string>();
+    for (const { from, to } of [...edges.values()].flat()) {
+      if (reached.has(from) && !reached.has(to)) {
+        next.add(to);
+      }
+    }
+    for (const node of next) {
+      reached.add(node);
+    }
+    frontier = [...next];
+  }
+  const nodes = [...reached];
+  const reachedApps = nodes.filter((id) => !id.startsWith(workflowPrefix));
+  const reachedWorkflows = nodes.flatMap((id) =>
+    id.startsWith(workflowPrefix) ? [id.slice(workflowPrefix.length)] : []
+  );
+  const brainGrant = and(
+    eq(permissions.objectType, "platform"),
+    isNotNull(permissions.grantedAt),
+    sql`EXISTS (SELECT 1 FROM json_each(${permissions.actions}) WHERE value = 'brain')`
+  );
+  const found = await drizzle(env.DB)
+    .select({ id: permissions.id })
+    .from(permissions)
+    .where(
+      and(
+        brainGrant,
+        or(
+          and(
+            eq(permissions.subjectType, "app"),
+            inList(permissions.subjectId, reachedApps)
+          ),
+          and(
+            eq(permissions.subjectType, "workflow"),
+            inList(permissions.subjectId, reachedWorkflows)
+          )
+        )
+      )
+    )
+    .limit(1)
+    .get();
+  return found !== undefined;
 };
 
 /** Whether an App has read from anything at all. */
