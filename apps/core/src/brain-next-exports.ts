@@ -12,8 +12,11 @@ import {
   brainExportFile,
   brainExportStatus,
   brainRestoreStatus,
+  ownBrainExport,
+  ownBrainExportFile,
   startBrainExport,
   startBrainRestore,
+  startOwnBrainExport,
 } from "./brain-next.ts";
 import { installShippedSkills } from "./brain-skills.ts";
 import { errorResponse } from "./errors.ts";
@@ -24,11 +27,17 @@ import { errorResponse } from "./errors.ts";
 // and every file an attachment never cached.
 //
 // - `POST /api/brain/exports`: starts an export of the company's Brain,
-//   for an admin, never staff. A person's own export is for later.
+//   for an admin, never staff.
 // - `GET /api/brain/exports?id=`: where it is, with its files once done;
 //   `&file=` downloads one. For an admin, never staff.
 // - `POST /api/brain/restore` `{ exportId }` and `GET ?id=`: an admin's
 //   restore of the company's export into a shared store that holds nothing.
+// - `POST /api/brain/own-export`, `GET` and `GET ?id=&file=` (GRA-1839): a
+//   signed-in person's own export, of what only they may read: started,
+//   followed and downloaded by that person alone, whoever they are in the
+//   company. No request names a person: it is the session's, so nobody
+//   else, an admin or staff among them, reaches it (staff sessions don't
+//   reach the workspace at all). Audited on the person, as their own.
 //
 // Each start is in the audit log before it applies, with its outcome after;
 // each download before its file is answered. Events name the export's
@@ -36,6 +45,9 @@ import { errorResponse } from "./errors.ts";
 
 /** Where exports are started, followed and downloaded. */
 export const brainExportsPath = "/api/brain/exports";
+
+/** Where a person starts, follows and downloads their own export. */
+export const brainOwnExportPath = "/api/brain/own-export";
 
 /** Where an admin restores the company's export. */
 export const brainRestorePath = "/api/brain/restore";
@@ -52,6 +64,9 @@ const readSchema = z.strictObject({
   // (brain-next.ts `brainExportFile`): a name it doesn't take is not found.
   file: z.string().min(1).max(64).optional(),
 });
+
+/** A file of a person's own export: a download. Without a query, where it is. */
+const ownReadSchema = readSchema.required({ file: true });
 
 const restoreSchema = z.strictObject({ exportId: z.uuid() });
 
@@ -118,16 +133,20 @@ const queryOf = <T>(request: Request, schema: z.ZodType<T>): T | undefined => {
   return parsed.success ? parsed.data : undefined;
 };
 
-/** An audit entry of `person`'s, on the organization. */
+/**
+ * An audit entry of `person`'s, on the organization, or on themselves for
+ * what is theirs alone (their own export).
+ */
 const entryOf = (
   person: Identity,
   action: string,
   requestId: string,
-  detail: Record<string, AuditDetailValue>
+  detail: Record<string, AuditDetailValue>,
+  target: { type: string; id: string } = organization
 ) => ({
   actor: { type: "person", userId: person.userId } as const,
   action,
-  target: organization,
+  target,
   requestId,
   detail,
 });
@@ -157,6 +176,14 @@ const audited = async <T>(
   await appendAuditEvent(env, entry("answered", "started", value));
   return value;
 };
+
+/** The headers of export file `file`, saved as `name` and it: an attachment never cached. */
+const fileHeaders = (name: string, file: string): HeadersInit => ({
+  "content-type":
+    file === "manifest.json" ? "application/json" : "application/x-ndjson",
+  "content-disposition": `attachment; filename="${name}-${file}"`,
+  "cache-control": "no-store",
+});
 
 /** Starts an export of the company's Brain, for an admin. */
 const startExport = async (
@@ -220,12 +247,7 @@ const readExport = async (
     })
   );
   return new Response(body, {
-    headers: {
-      "content-type":
-        file === "manifest.json" ? "application/json" : "application/x-ndjson",
-      "content-disposition": `attachment; filename="brain-${asked.id}-${file}"`,
-      "cache-control": "no-store",
-    },
+    headers: fileHeaders(`brain-${asked.id}`, file),
   });
 };
 
@@ -251,6 +273,75 @@ export const brainExportsResponse = async (
   return request.method === "POST"
     ? await startExport(env, person, requestId)
     : await readExport(request, env, person, requestId);
+};
+
+/**
+ * A person's own export (above): started with `POST`, where it is with
+ * `GET`, a file with `GET ?id=&file=`. Only ever the signed-in person's
+ * own: what isn't theirs, or isn't done, answers as not found.
+ */
+export const brainOwnExportResponse = async (
+  request: Request,
+  env: Env,
+  requestId: string
+): Promise<Response> => {
+  if (request.method !== "GET" && request.method !== "POST") {
+    return notFound(requestId);
+  }
+  const person = await personOf(request, env, requestId);
+  if (person instanceof Response) {
+    return person;
+  }
+  const { userId } = person;
+  const self = { type: "person", id: userId };
+  if (request.method === "POST") {
+    const started = await audited(
+      env,
+      (step, outcome, answered) =>
+        entryOf(
+          person,
+          `brain.export.${step}`,
+          requestId,
+          {
+            scope: "own",
+            ...(outcome === undefined ? {} : { outcome }),
+            ...(answered === undefined ? {} : { exportId: answered.id }),
+          },
+          self
+        ),
+      async () => await startOwnBrainExport(env, userId)
+    );
+    return answer(started);
+  }
+  if (new URL(request.url).search === "") {
+    return answer({ export: await ownBrainExport(env, userId) });
+  }
+  const asked = queryOf(request, ownReadSchema);
+  if (asked === undefined) {
+    return notFound(requestId);
+  }
+  const { id, file } = asked;
+  const body = await ownBrainExportFile(env, userId, { id, file });
+  if (body === null) {
+    return notFound(requestId);
+  }
+  // On record before the file is answered; a log that can't take it
+  // answers nothing.
+  await appendAuditEvent(
+    env,
+    entryOf(
+      person,
+      "brain.export.downloaded",
+      requestId,
+      {
+        scope: "own",
+        exportId: id,
+        file: file === "manifest.json" ? "manifest" : "part",
+      },
+      self
+    )
+  );
+  return new Response(body, { headers: fileHeaders(`brain-own-${id}`, file) });
 };
 
 /**

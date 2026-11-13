@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "133461e7-1e91-4692-b154-3087ffe2a4c0",
+  "id": "870ddfb8-9fb5-4fb6-927f-a54ed4ada5f2",
   "prevId": "17459488-a159-4e64-982c-55d05693a0a9",
   "tables": {
     "chunks": {
@@ -268,15 +268,6 @@
             "type",
             "folded",
             "entity"
-          ],
-          "isUnique": false
-        },
-        "entity_names_entity_idx": {
-          "name": "entity_names_entity_idx",
-          "columns": [
-            "entity",
-            "type",
-            "folded"
           ],
           "isUnique": false
         },
@@ -886,6 +877,23 @@
         }
       }
     },
+    "known_groups": {
+      "name": "known_groups",
+      "columns": {
+        "subject": {
+          "name": "subject",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "memories": {
       "name": "memories",
       "columns": {
@@ -1072,24 +1080,6 @@
           "name": "memories_object_idx",
           "columns": [
             "object"
-          ],
-          "isUnique": false
-        },
-        "memories_entity_object_idx": {
-          "name": "memories_entity_object_idx",
-          "columns": [
-            "entity",
-            "object"
-          ],
-          "isUnique": false
-        },
-        "memories_lineage_value_idx": {
-          "name": "memories_lineage_value_idx",
-          "columns": [
-            "entity",
-            "attribute",
-            "lineage",
-            "value_key"
           ],
           "isUnique": false
         },
@@ -1701,6 +1691,13 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "group_subject": {
+          "name": "group_subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -1708,6 +1705,13 @@
           "name": "source_subjects_subject_idx",
           "columns": [
             "subject"
+          ],
+          "isUnique": false
+        },
+        "source_subjects_group_idx": {
+          "name": "source_subjects_group_idx",
+          "columns": [
+            "group_subject"
           ],
           "isUnique": false
         }

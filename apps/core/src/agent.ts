@@ -490,7 +490,7 @@ export const aboutNotes = ({
 
 /** A skill, as a turn lists it: read it at this version. */
 export interface TurnSkill {
-  scope: "grasp" | "company";
+  scope: "grasp" | "company" | "person";
   name: string;
   version: number;
   description: string;

@@ -6,6 +6,7 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import type {
   BindingApprovalItem,
   SignInAgainItem,
+  SkillShareItem,
   WorkflowGoLiveItem,
 } from "@grasp-os/shared/waiting";
 
@@ -39,6 +40,8 @@ export interface Waiting {
   heldStarts: Loaded<HeldStart[]>;
   /** Versions of workflows whose bindings no admin approved, so their starts are refused. Admins only. */
   bindings?: Loaded<BindingApprovalItem[]>;
+  /** Asks to share a skill with the company, which an admin decides. Admins only. */
+  skillShares?: Loaded<SkillShareItem[]>;
 }
 
 /** Who counts what waits: what they may act on follows from their role. */

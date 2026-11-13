@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
+import { memberRole } from "./auth/identity.ts";
 import {
   erasureBegun,
   handOverProducers,
@@ -11,10 +12,12 @@ import {
   removeHandOvers,
 } from "./brain-hand-overs.ts";
 import type { HandOverProducer } from "./brain-hand-overs.ts";
-import { runSource } from "./brain-next-origins.ts";
+import { chatSource, chatTurnOf, runSource } from "./brain-next-origins.ts";
 import { queueHandOvers } from "./brain-next.ts";
 import type { Handed, Producers, SourceRef } from "./brain-next.ts";
 import { workflowStartReceipts } from "./db/core/schema.ts";
+import { workspace } from "./durable-objects.ts";
+import { personalWorkspaceId } from "./personal-workspace.ts";
 import { resultOf, runOf } from "./workflows/resource-runs.ts";
 import { detailsRemoved } from "./workflows/retention.ts";
 import { evidenceOf } from "./workflows/run-evidence.ts";
@@ -40,6 +43,19 @@ import { evidenceOf } from "./workflows/run-evidence.ts";
 //   a second copy of what it recalled, which would outlive that source
 //   being narrowed or erased (GRA-1731).
 //
+// - A turn of a person's own chat (`chat:<person>/<chat>/<answer>`), in
+//   their own store alone, in its chat's group (brain-next-origins.ts):
+//   once, change `answer`: what they asked, their words alone. Never what
+//   was answered: an answer can quote anything its prompt held (a step's
+//   result, an earlier turn's, the recall, instruction files, memories,
+//   skills), and its copy here would outlive that being erased or the
+//   person losing it, until GRA-1855 gives an answer a record of what it
+//   used. Only while the chat is still theirs, in Grasp's
+//   own app, shared with no one, not restricted and not being deleted, as
+//   their Workspace holds it now (workspace.ts `turnForBrain`); a turn
+//   nobody asked for there and then is never noted. Deleting the chat
+//   erases them all in one call before its rows go (`eraseChat`).
+//
 // Nothing for a person whose erasure has begun (core's `personErasures`):
 // a reader answers `erased`, with the readers it would have named, and the
 // Brain closes the source's key. What is gone answers `gone`, and nothing
@@ -49,7 +65,14 @@ import { evidenceOf } from "./workflows/run-evidence.ts";
 // before its text leaves core, then `brain.source.handed_over` with the
 // Brain's version, or `brain.source.handover_refused` when it was refused
 // for good (what it adds was erased, or its one reader's erasure began:
-// brain-next.ts `handOver`). Each attempt records its own. Each is added
+// brain-next.ts `handOver`). A chat's turn its producer finds it may no
+// longer hand over ends in `brain.source.handover_skipped` with why
+// (`HandOverSkip`), so its `chat.turn_noted` never stands alone. Like the
+// other hand-over events, a skip is recorded once per attempt: an attempt
+// whose skip was recorded but whose item failed to settle records it again
+// on the next. A run
+// that is gone records nothing (its noting events say only that it
+// ended). Each attempt records its own. Each is added
 // through core's `addSource`, which picks the store its readers belong in;
 // nothing here assumes which.
 
@@ -111,6 +134,44 @@ const runOfId = async (env: Env, id: string): Promise<Handed> => {
   };
 };
 
+/** Turn `id` of a person's own chat, as their Workspace holds it now. */
+const chatTurnOfId = async (env: Env, id: string): Promise<Handed> => {
+  const turn = chatTurnOf(id);
+  if (turn === undefined) {
+    return { kind: "gone", skipped: "deleted" };
+  }
+  const { personId, chatId, answerId } = turn;
+  const readers = { kind: "owner", personId } as const;
+  if (await erasureBegun(env, personId)) {
+    return { kind: "erased", readers };
+  }
+  if ((await memberRole(env.DB, personId)) === undefined) {
+    return { kind: "gone", skipped: "not_a_member" };
+  }
+  const said = await workspace(env, personalWorkspaceId(personId)).turnForBrain(
+    chatId,
+    personId,
+    answerId
+  );
+  if (said.kind === "deleting") {
+    // Neither kept nor gone yet: a throw, so the queue tries it again by
+    // its own rules (later, and parked after too many), and it ends as
+    // the deletion did: skipped as `deleted`, or handed over.
+    throw new Error("The chat is being deleted: handed over later");
+  }
+  if (said.kind === "skipped") {
+    return { kind: "gone", skipped: said.reason };
+  }
+  return {
+    kind: "source",
+    change: "answer",
+    text: said.question,
+    whenTooLarge: "A question asked in a chat, too large to keep.",
+    readers,
+    group: chatSource(personId, chatId),
+  };
+};
+
 /**
  * Every producer (brain-hand-overs.ts `handOverProducers`): its source
  * for an id it noted (brain-next-origins.ts), and how that source is read
@@ -124,6 +185,11 @@ const producers: Record<
   }
 > = {
   run: { source: runSource, read: runOfId },
+  chat: {
+    // The id as noted: its parts are read back when it is handed over.
+    source: (id) => ({ producer: "chat", id }),
+    read: chatTurnOfId,
+  },
 };
 
 /** Whether `kind` is a producer's: a source of any other has nothing to hand over. */
@@ -159,6 +225,16 @@ const record = async (env: Env, entry: AuditEntry): Promise<void> => {
 export const producersOf = (env: Env): Producers => ({
   read: async (source) => {
     const handed = await handedOf(env, source);
+    // A noted source that is not handed over after all ends in why, so a
+    // note never stands alone in the log (the chat's: GRA-1805).
+    if (handed.kind === "gone" && handed.skipped !== undefined) {
+      await record(env, {
+        actor: { type: "system" },
+        action: "brain.source.handover_skipped",
+        target: targetOf(source),
+        detail: { producer: source.producer, reason: handed.skipped },
+      });
+    }
     if (handed.kind === "source") {
       await record(env, {
         actor: { type: "system" },

@@ -1177,6 +1177,10 @@ const recalledBy =
       personal: false,
     });
 
+/** How many of `pack`'s passages its question's words found. */
+const byWords = (pack: RecalledPassages): number =>
+  pack.items.filter(({ found }) => found === "words").length;
+
 /** Where an item of a pack is: its source, version and place. */
 const placeOf = (item: RecalledItem): string =>
   JSON.stringify([item.source, item.version, item.position]);
@@ -1306,9 +1310,11 @@ describe("two recalls merged into one pack", setUpTime, () => {
     const secondPack = await recall(second);
     const merged = mergeRecalled(firstPack, secondPack, mergeBudget);
 
+    // Counted by how each was found: recall by meaning may find either
+    // passage for either word too.
     expect({
-      first: firstPack.items.length,
-      second: secondPack.items.length,
+      first: byWords(firstPack),
+      second: byWords(secondPack),
       merged: placesOf(merged),
       truncated: merged.truncated,
     }).toStrictEqual({
@@ -1333,21 +1339,32 @@ describe("two recalls merged into one pack", setUpTime, () => {
     const recall = recalledBy(person.userId, mergeBudget.tokens);
     const firstPack = await recall(first);
     const secondPack = await recall(second);
-    const room = tokensOf(firstPack) + tokensOf(secondPack);
+    // The second's passages the first doesn't hold (recall by meaning may
+    // find a passage for both words): what the merge adds.
+    const newOnes = secondPack.items.filter(
+      (item) => !placesOf(firstPack).includes(placeOf(item))
+    );
+    const room =
+      tokensOf(firstPack) + tokensOf({ ...secondPack, items: newOnes });
     const tight = mergeRecalled(firstPack, secondPack, { tokens: room - 1 });
     const roomy = mergeRecalled(firstPack, secondPack, { tokens: room });
 
     expect({
-      tight: placesOf(tight),
+      adds: newOnes.length > 0,
+      tightHoldsFirst: placesOf(tight).slice(0, firstPack.items.length),
+      tightLeftSome:
+        placesOf(tight).length < firstPack.items.length + newOnes.length,
       tightCut: tight.truncated,
       within: tokensOf(tight) <= room - 1,
       roomy: placesOf(roomy),
       roomyCut: roomy.truncated,
     }).toStrictEqual({
-      tight: placesOf(firstPack),
+      adds: true,
+      tightHoldsFirst: placesOf(firstPack),
+      tightLeftSome: true,
       tightCut: true,
       within: true,
-      roomy: [...placesOf(firstPack), ...placesOf(secondPack)],
+      roomy: [...placesOf(firstPack), ...newOnes.map((item) => placeOf(item))],
       roomyCut: false,
     });
   });
