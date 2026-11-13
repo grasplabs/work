@@ -34,6 +34,7 @@ import {
   personErasureSchema,
   storeKindOf,
   recallRequestSchema,
+  restoringNow,
   sourceErasureSchema,
   sourceIdSchema,
   stillDeleting,
@@ -164,6 +165,7 @@ import {
 import { find, recall } from "./recall.ts";
 import { addMemories } from "./remember.ts";
 import { checkRestore, restoreStatus, startRestore } from "./restore.ts";
+import { isRestoring } from "./restoring.ts";
 import {
   addVersion,
   changeVersion,
@@ -1837,9 +1839,13 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       if (!(await this.#readable())) {
         return "nothing";
       }
-      return this.ctx.storage.transactionSync(() =>
-        retireMemory(this.ctx.storage.sql, { id: memory, reader })
-      );
+      return this.ctx.storage.transactionSync(() => {
+        // Refused while a restore runs, as an add is (restoring.ts).
+        if (isRestoring(this.ctx.storage.sql)) {
+          throw new Error(restoringNow);
+        }
+        return retireMemory(this.ctx.storage.sql, { id: memory, reader });
+      });
     });
   }
 
@@ -1851,9 +1857,13 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       if (!(await this.#readable())) {
         return "nothing";
       }
-      return this.ctx.storage.transactionSync(() =>
-        confirmMemory(this.ctx.storage.sql, { id: memory, reader })
-      );
+      return this.ctx.storage.transactionSync(() => {
+        // Refused while a restore runs, as an add is (restoring.ts).
+        if (isRestoring(this.ctx.storage.sql)) {
+          throw new Error(restoringNow);
+        }
+        return confirmMemory(this.ctx.storage.sql, { id: memory, reader });
+      });
     });
   }
 
