@@ -34,6 +34,7 @@ import {
   refusalPrefix,
   restoringNow,
   personalBrainOf,
+  stillDeletingAtMostMs,
   storeBytesMax,
   storeKindOf,
 } from "@grasp-os/brain-next/contract";
@@ -1031,6 +1032,17 @@ export const erasePerson = async (
   await forgetOwnStoreHealth(env, personId);
   return "erased";
 };
+
+/**
+ * Whether a person's erasure asked for at `askedAt` has had their own store
+ * answer that it is still deleting for longer than the Brain allows
+ * (`stillDeletingAtMostMs`: two graces and an item's time): then it is
+ * stuck, and person-erasure.ts counts and logs it.
+ */
+export const stillDeletingTooLong = (
+  askedAt: Date,
+  now: Date = new Date()
+): boolean => now.getTime() - askedAt.getTime() > stillDeletingAtMostMs;
 
 // Exports and restores (@grasp-os/brain-next exports.ts, restore.ts): the
 // company's Brain, for an admin; core's route checks who asks

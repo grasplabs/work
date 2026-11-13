@@ -32,7 +32,10 @@ import {
   organizationId,
 } from "./auth/auth.ts";
 import { directoryProviderId } from "./auth/config.ts";
-import { erasePerson as eraseFromBrain } from "./brain-next.ts";
+import {
+  erasePerson as eraseFromBrain,
+  stillDeletingTooLong,
+} from "./brain-next.ts";
 import { personalWorkspaceId } from "./chats-rpc.ts";
 import {
   accounts,
@@ -596,11 +599,39 @@ const brainSources: ErasureStep = {
       personId: userId,
       reason: "person_erased",
     });
+    const db = drizzle(env.DB);
+    if (outcome === "erased") {
+      await completed(db, userId, "brain_sources");
+      return;
+    }
     // Their own store still deleting is the expected way for its first
     // minutes: pending, for the clock, with nothing logged or counted as
-    // failed, so a stuck erasure stands out from a normal one.
-    if (outcome === "erased") {
-      await completed(drizzle(env.DB), userId, "brain_sources");
+    // failed. Past the Brain's bound for it (`stillDeletingTooLong`,
+    // counted from when the erasure was asked for) it is stuck: counted as a
+    // failed attempt and logged (`runErasure`), once, so it stands out from
+    // a normal one.
+    const [state] = await db
+      .select({
+        requestedAt: personErasures.requestedAt,
+        attempts: personErasureAreas.attempts,
+      })
+      .from(personErasures)
+      .innerJoin(
+        personErasureAreas,
+        and(
+          eq(personErasureAreas.userId, personErasures.userId),
+          eq(personErasureAreas.area, "brain_sources")
+        )
+      )
+      .where(eq(personErasures.userId, userId));
+    const stuck =
+      state !== undefined &&
+      state.attempts === 0 &&
+      stillDeletingTooLong(state.requestedAt);
+    if (stuck) {
+      throw new Error(
+        "Their own store has been still deleting for longer than its graces allow"
+      );
     }
   },
 };

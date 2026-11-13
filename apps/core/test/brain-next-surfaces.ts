@@ -1558,6 +1558,13 @@ export const coreProbes = {
       }),
     ];
   },
+  // A rule of time alone: it reads nothing of the Brain.
+  stillDeletingTooLong: async () => [
+    await answer("an erasure asked for now", async () => {
+      await Promise.resolve();
+      return coreBrain.stillDeletingTooLong(new Date());
+    }),
+  ],
   erasePerson: async ({ markers }) => {
     const erase = async (
       name: string,

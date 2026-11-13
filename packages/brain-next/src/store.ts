@@ -5,48 +5,49 @@ import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import { z } from "zod";
 
 import { packAcross } from "./across.ts";
-import { bucketUnder } from "./bucket.ts";
+import { bucketUnder, countingWrites, keptUntilSettled } from "./bucket.ts";
 import type { BrainBucket } from "./bucket.ts";
 import {
   attributeRuleOf,
-  entityKinds,
   confirmRequestSchema,
   contestedRequestSchema,
-  entitiesRequestSchema,
-  entityNamesRequestSchema,
-  entityRequestSchema,
-  memoriesRequestSchema,
-  newMemoriesSchema,
-  retireRequestSchema,
   currentRequestSchema,
-  readableRequestSchema,
   deploymentSchema,
   embedModelSchema,
+  entitiesRequestSchema,
+  entityKinds,
+  entityNamesRequestSchema,
+  entityRequestSchema,
   exportFileRequestSchema,
   exportIdSchema,
   exportRequestSchema,
+  fileGraceMs,
+  handOverRequestSchema,
+  handOverResultSchema,
+  isWholeKey,
+  memoriesRequestSchema,
+  newInstructionsSchema,
+  newMemoriesSchema,
+  newSourceSchema,
   ownExportFileRequestSchema,
   ownExportRequestSchema,
   ownExportStartSchema,
-  isWholeKey,
-  handOverRequestSchema,
-  handOverResultSchema,
-  newInstructionsSchema,
-  newSourceSchema,
   personErasureSchema,
-  storeKindOf,
+  readableRequestSchema,
   recallRequestSchema,
   restoringNow,
+  retireRequestSchema,
   sourceErasureSchema,
   sourceIdSchema,
+  sourceListRequestSchema,
   stillDeleting,
   storeErased as erasedWhole,
-  sourceListRequestSchema,
+  storeKindOf,
+  vectorModelNameOf,
   vectorSearchSchema,
   vectorsToPutSchema,
   versionListRequestSchema,
   versionRequestSchema,
-  vectorModelNameOf,
 } from "./contract.ts";
 import type {
   AddedMemories,
@@ -144,7 +145,6 @@ import {
   startExport,
 } from "./exports.ts";
 import {
-  fileGraceMs,
   filesPrefix,
   hashOf,
   sweepDueAt,
@@ -198,7 +198,6 @@ import {
   requeueWork,
   restartStore,
   stopWorkOn,
-  workItemTimeMs,
   workOverview,
   workTick,
 } from "./work.ts";
@@ -253,7 +252,7 @@ const ledgerCatchingUp =
   "The Brain is applying its erasure ledger after a restore, so it answers nothing yet: try again shortly";
 
 /** How long after a failed read of the ledger a call reads it again. */
-const ledgerRetryMs = 30_000;
+export const ledgerRetryMs = 30_000;
 
 /**
  * The soonest a person's own store wakes itself again (`alarm`): a
@@ -411,21 +410,12 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   /** Whether this person's own store was erased whole: then it refuses every call. */
   #erased = false;
 
-  /** When this instance started: how long it has been up (`#eraseWhole`). */
-  readonly #startedAt = Date.now();
-
   /**
-   * Whether this instance wrote the record of its store's erasure: then
-   * every earlier instance had ended before, and whatever it sent the
-   * bucket, before the record (`#eraseWhole`).
+   * Every write this instance sent that hasn't been answered yet, whoever
+   * sent it and whether or not it still waits: to its part of the bucket
+   * (bucket.ts `countingWrites`), and its report to its host (`#report`).
    */
-  #recordedHere = false;
-
-  /**
-   * The calls under way that may write to the store's part of the bucket:
-   * every call that can change it (`#changing`).
-   */
-  readonly #writes = new Set<Promise<unknown>>();
+  readonly #inFlight = new Set<Promise<unknown>>();
 
   /** Whether this instance made its schema current (`#start`). */
   #opened = false;
@@ -569,7 +559,10 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     if (this.#prefix === undefined) {
       throw new Error(noOnes);
     }
-    return bucketUnder(this.env.BRAIN_OBJECTS, this.#prefix);
+    return countingWrites(
+      bucketUnder(this.env.BRAIN_OBJECTS, this.#prefix),
+      this.#inFlight
+    );
   }
 
   /**
@@ -836,24 +829,18 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   }
 
   /**
-   * `change` run as a call that may change the store: counted among the
-   * calls under way, which may write to its part of the bucket
-   * (`#eraseWhole` waits for them), and, once it ends, done or failed, a
-   * person's own store's alarm set from what it then has to do
+   * `change` run as a call that may change the store: once it ends, done
+   * or failed, a person's own store's alarm set from what it then has to do
    * (`#armAlarm`). Every method that can leave work for a tick runs
    * through here, so none can leave it without the store waking for it:
    * a person's store has no clock but its own alarm.
    */
   async #changing<T>(change: () => Promise<T>): Promise<T> {
-    const running = change();
-    this.#writes.add(running);
     let outcome: { done: true; value: T } | { done: false; error: unknown };
     try {
-      outcome = { done: true, value: await running };
+      outcome = { done: true, value: await change() };
     } catch (error) {
       outcome = { done: false, error };
-    } finally {
-      this.#writes.delete(running);
     }
     // The call's own answer stands: a failure to arm never replaces it,
     // and never reaches the caller in its own words.
@@ -1071,23 +1058,24 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * couldn't be written.
    */
   async #eraseWhole(reason: ErasureReason): Promise<void> {
-    // Whether the store was never written when this call erased it: an
-    // add makes the schema before it writes a file, so no add of an
-    // earlier instance can still land under its prefix.
+    // Whether the store was never written when this call erased it: no
+    // schema, and no record of an earlier erasure (which deleted the schema
+    // with all else, and may have left a write on its way). An add makes
+    // the schema before it writes a file, so then nothing of it can land.
     let neverWritten = false;
     if (!this.#erased) {
       const recorded = await this.ctx.blockConcurrencyWhile(async () => {
         if (this.#erased) {
           return true;
         }
-        neverWritten = !hasSchema(this.ctx.storage.sql);
         try {
+          const before = await storeErasedAt(this.#bucket);
+          neverWritten = before === null && !hasSchema(this.ctx.storage.sql);
           await recordStoreErased(this.#bucket, reason, Date.now());
         } catch {
           // Nothing of the error is kept: nothing is deleted.
           return false;
         }
-        this.#recordedHere = true;
         await this.#forget();
         return true;
       });
@@ -1095,46 +1083,55 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         throw new Error(erasureUnrecorded);
       }
     }
-    // An add, a source's erasure or a tick that started before this may
-    // still write a file, a vector or a ledger entry under the store's
-    // prefix after this deletes what it lists. While one is under way in
-    // this instance, the erasure isn't finished: a call (`#writes`), or a
-    // handler of the queue, also one the queue stopped waiting for past its
-    // time, which may still be writing (work.ts `WorkState.handlers`): R2
-    // orders nothing between a put in flight and a listing, so none may be
-    // in flight. Nor is it while one that an earlier instance started
-    // (reset meanwhile, so no longer seen here) may still land: until the
-    // grace an add has to write its file (files.ts `fileGraceMs`) has
-    // passed since the record, unless the store was never written; and,
-    // in an instance that didn't write the record (it started after one
-    // that was ended, its puts perhaps still on their way), until this
-    // instance has been up for an item's time (work.ts `workItemTimeMs`).
-    // All are read before the listing, so what lands after it is deleted
-    // by a later call: the caller calls again until one is done.
-    const quiet = this.#writes.size === 0 && this.#work.handlers.size === 0;
-    const upLongEnough =
-      this.#recordedHere || Date.now() - this.#startedAt >= workItemTimeMs;
+    // Whether it was erased is read again where it couldn't be as the
+    // store started: until it can, the erasure is never done.
+    await this.#ledgerStep();
+    // The one rule. Done only when no write of this instance is on its way
+    // (bucket.ts `countingWrites`: every put and delete, from the moment it
+    // is sent until R2 answers, whoever sent it and whether or not it still
+    // waits), the grace (files.ts `fileGraceMs`) has passed since the
+    // record's moment, and the listing is empty, read in that order, so
+    // what lands after the listing is deleted by a later call: the caller
+    // calls again until one is done.
+    //
+    // The premise, for writes of an instance that has ended (restarted,
+    // evicted, crashed): the runtime ends what it had still to send with
+    // it, and a write R2 had already taken completes within R2's own
+    // bounds, far inside the grace. So every write of an earlier instance
+    // lands before the grace from a moment after that instance ended. The
+    // record's moment is such a moment for every instance that ended
+    // before it was written; a write of this instance that never answers
+    // moves it (below), and ends this instance after, so it is one for
+    // that write too. It lives in the bucket, with the record, under the
+    // store's prefix: `#forget` deletes the object's storage, never it,
+    // and a restart or an eviction leaves it as it is.
     let done = false;
     try {
       const at = await storeErasedAt(this.#bucket);
       const settled = at !== null && Date.now() - at >= fileGraceMs;
-      // Past the grace, a handler the queue stopped waiting for (any still
-      // running by then is one: the grace is longer than an item's time
-      // and its own grace) ends with nothing else while the caller's
-      // retries keep the store awake: the store restarts, which ends it,
-      // and the next instance finishes the erasure (`upLongEnough`). The
-      // call that restarts it may answer with the restart's error rather
-      // than `stillDeleting`: either way the caller calls again.
-      if (settled && this.#work.zombies.size > 0) {
+      if (settled && this.#inFlight.size > 0) {
+        // A write still on its way a grace after the record: one that may
+        // never answer. The grace starts again from now, durably, then the
+        // store restarts, which ends it: a later instance, however often
+        // evicted, is done a grace on with nothing on its way and nothing
+        // listed. Two graces at most, never for ever. Moved first: a
+        // restart without it could be done before the write lands.
+        await recordStoreErased(this.#bucket, reason, Date.now());
         restartStore(this.#work);
+        throw new Error(stillDeleting);
       }
+      const quiet = this.#inFlight.size === 0;
       const emptied = await deleteStoreObjects(this.#bucket, [
         filesPrefix,
         vectorsPrefix,
         ledgerPrefix,
         exportsPrefix,
       ]);
-      done = quiet && ((settled && upLongEnough) || neverWritten) && emptied;
+      done =
+        quiet &&
+        (settled || neverWritten) &&
+        this.#ledger === "through" &&
+        emptied;
     } catch {
       // Nothing of the error is kept: it may name a key.
     }
@@ -1267,8 +1264,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         const host = await this.alarmHost();
         // No side of hand-overs: a person's own store never queues one
         // (`handOver` refuses), so none is ever due here.
-        // Its report inside the same change, so a whole-store erasure
-        // waits for it as for any write (`#eraseWhole`).
+        // Its report is counted as a write (`#report`).
         await this.#changing(async () => {
           try {
             await this.#workNow(host.ask, new Date(), host.embedders);
@@ -1297,7 +1293,10 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       return;
     }
     try {
-      await host.report(this.workOverview());
+      // A write to core's row of the store, counted as the bucket's are:
+      // a whole-store erasure isn't done while it is on its way, so it
+      // can't land after core removed the row (`#eraseWhole`).
+      await keptUntilSettled(host.report(this.workOverview()), this.#inFlight);
     } catch {
       // Nothing of the error is kept.
     }

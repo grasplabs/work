@@ -2383,6 +2383,21 @@ export type StoreKind =
   | { kind: "unknown" };
 
 /**
+ * How long an add may take between noting a file and recording its
+ * version (files.ts), and the grace a whole-store erasure waits from its
+ * record's moment before it is done (store.ts `#eraseWhole`).
+ */
+export const fileGraceMs = 15 * 60 * 1000;
+
+/**
+ * How long a person's own store may answer that it is still deleting
+ * before its host counts the erasure as stuck: two graces (the second after
+ * it moved its moment for a write that never answered) and an item's time
+ * of the queue (`modelTimeoutMaxMs`, work.ts `workItemTimeMs`) more.
+ */
+export const stillDeletingAtMostMs = 2 * fileGraceMs + modelTimeoutMaxMs;
+
+/**
  * What erasing a person's own store whole answers while it is still
  * deleting: its record written and its storage gone, its files waiting
  * out the time an add under way has to write one. The expected answer
