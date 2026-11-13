@@ -23,12 +23,12 @@ import { chunkTarget } from "../src/chunks.ts";
 import {
   brainOf,
   erasedSource,
+  fileGraceMs,
   personalBrainOf,
   recallBudgetMax,
   vectorModelNameOf,
 } from "../src/contract.ts";
 import { eraseChunksPerBatch } from "../src/erasure.ts";
-import { fileGraceMs } from "../src/files.ts";
 import { BrainStore } from "../src/store.ts";
 
 /** A store, as its namespace gives it. */
@@ -1356,6 +1356,10 @@ const leavingWork: Record<string, (who: string) => Promise<void>> = {
   addSource: async (who) => {
     await add(own(who), "A source to embed", theirs(who));
   },
+  // Their own export: written by the queue, a part a run.
+  startOwnExport: async (who) => {
+    await own(who).startOwnExport({ person: who, deployment: "test" });
+  },
   // Failed: its file is noted before it is written, and nothing holds it.
   addInstructions: async (who) => {
     const { heal } = await breakBucket(own(who), ["put"]);
@@ -1446,6 +1450,8 @@ const leavingNone = [
   "listContested",
   "listSources",
   "listVersions",
+  "ownExport",
+  "ownExportFile",
   "readCurrent",
   "readEntity",
   "readEntityNames",
@@ -1458,7 +1464,7 @@ const leavingNone = [
   "retireMemory",
   "searchVectors",
   "startExport",
-  // A person's own store refuses every export and restore.
+  // A person's own store refuses the company's export and every restore.
   "checkRestore",
   "startRestore",
   "workOverview",

@@ -910,7 +910,12 @@ type CorePersonMember =
 // markers among them, by design: it is for an admin, and core's route
 // lets no one else ask for it (brain-next-exports.ts), so no probe reads
 // its files. Probes ask of it only what answers no content, and a
-// person's own store refuses every export and restore call.
+// person's own store refuses the company's export and every restore call.
+//
+// A person's own export (GRA-1839) is theirs alone to read: the reader's
+// own is written and read whole (it must hold no marker), and someone
+// else's, holding every marker, answers the reader exactly as an export
+// no one started.
 
 /** A store, as a probe ticks it: the shared one, or a person's own. */
 const personalStore = (person: string): Brain =>
@@ -953,6 +958,58 @@ const companyExport = async ({ markers }: Probing): Promise<string> => {
   const { id } = await coreBrain.startBrainExport(env);
   await exportSettled(id);
   return id;
+};
+
+/**
+ * Ticks `person`'s own store until its export `id` is no longer being
+ * written: at most 5 ticks, then fails.
+ */
+const ownExportSettled = async (person: string, id: string): Promise<void> => {
+  for (let ticks = 0; ticks < 5; ticks += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+    await personalStore(person).work({
+      ask: quietModel,
+      at: new Date(),
+      embedders: noEmbedders,
+      handOvers: noHandOvers,
+    });
+    // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+    const status = await personalStore(person).ownExport({ person });
+    if (status?.id === id && status.state !== "writing") {
+      return;
+    }
+  }
+  throw new Error("An own export was still being written after 5 ticks");
+};
+
+/** Someone else's own export, written, holding every marker: its id. */
+const strangersExport = async ({ markers }: Probing): Promise<string> => {
+  const person = stranger();
+  await personalStore(person).addSource({
+    source: `upload:${crypto.randomUUID()}`,
+    change: crypto.randomUUID(),
+    text: markedText(markers),
+    access: { kind: "owner", person },
+  });
+  const { id } = await personalStore(person).startOwnExport({
+    person,
+    deployment: "test",
+  });
+  await ownExportSettled(person, id);
+  return id;
+};
+
+/** The reader's own export, written, and every file of it as they download it. */
+const readersExport = async (personId: string): Promise<string[]> => {
+  const { id } = await coreBrain.startOwnBrainExport(env, personId);
+  await ownExportSettled(personId, id);
+  const status = await coreBrain.ownBrainExport(env, personId);
+  return await Promise.all(
+    (status?.files ?? []).map(
+      async (file) =>
+        (await coreBrain.ownBrainExportFile(env, personId, { id, file })) ?? ""
+    )
+  );
 };
 
 /**
@@ -1631,6 +1688,13 @@ export const coreProbes = {
       }),
     ];
   },
+  // A rule of time alone: it reads nothing of the Brain.
+  stillDeletingTooLong: async () => [
+    await answer("an erasure asked for now", async () => {
+      await Promise.resolve();
+      return coreBrain.stillDeletingTooLong(new Date());
+    }),
+  ],
   erasePerson: async ({ markers }) => {
     const erase = async (
       name: string,
@@ -1821,6 +1885,64 @@ export const coreProbes = {
           await coreBrain.brainExportFile(
             env,
             unchecked({ id, file: probing.markers.join(" ") })
+          )
+      ),
+    ];
+  },
+  // The reader's own export: theirs alone, read whole. (A reader erased
+  // whole is refused; someone who never kept anything always answers.)
+  startOwnBrainExport: async ({ personId }) => [
+    await answer(
+      "the reader's own export, written and read whole",
+      async () => await readersExport(personId)
+    ),
+    await answer(
+      "the export of someone who never kept anything",
+      async () => await readersExport(stranger())
+    ),
+  ],
+  ownBrainExport: async (probing) => {
+    await strangersExport(probing);
+    return [
+      await answer("the reader's own export, as it shows them", async () => {
+        await readersExport(probing.personId);
+        const status = await coreBrain.ownBrainExport(env, probing.personId);
+        return [status?.state, status?.files];
+      }),
+      await answer(
+        "the export of someone who never started one",
+        async () => await coreBrain.ownBrainExport(env, stranger())
+      ),
+    ];
+  },
+  ownBrainExportFile: async (probing) => {
+    const others = await strangersExport(probing);
+    return [
+      await answer(
+        "a file of someone else's marked export",
+        async () =>
+          await coreBrain.ownBrainExportFile(env, probing.personId, {
+            id: others,
+            file: "manifest.json",
+          }),
+        "hidden"
+      ),
+      await answer(
+        "a file of an export no one started",
+        async () =>
+          await coreBrain.ownBrainExportFile(env, probing.personId, {
+            id: crypto.randomUUID(),
+            file: "manifest.json",
+          }),
+        "nothing"
+      ),
+      await answer(
+        "a file named by the markers",
+        async () =>
+          await coreBrain.ownBrainExportFile(
+            env,
+            probing.personId,
+            unchecked({ id: others, file: probing.markers.join(" ") })
           )
       ),
     ];
@@ -4984,6 +5106,103 @@ export const storeProbes = {
         async () =>
           await store().exportFile(
             unchecked({ id, file: probing.markers.join(" ") })
+          )
+      ),
+    ];
+  },
+  // A person's own export, through the contract: only their own store,
+  // only for them.
+  startOwnExport: async ({ reader, markers }) => [
+    await answer("the reader's own export, started", async () => {
+      const { id } = await personalStore(reader.person).startOwnExport({
+        person: reader.person,
+        deployment: "test",
+      });
+      return typeof id;
+    }),
+    await answer("someone who never kept anything", async () => {
+      const person = stranger();
+      const { id } = await personalStore(person).startOwnExport({
+        person,
+        deployment: "test",
+      });
+      return typeof id;
+    }),
+    await answer("the shared store", async () => {
+      await store().startOwnExport({
+        person: reader.person,
+        deployment: "test",
+      });
+    }),
+    await answer("someone else's own store, as the reader", async () => {
+      await personalStore(stranger()).startOwnExport({
+        person: reader.person,
+        deployment: "test",
+      });
+    }),
+    await answer("a deployment named by the markers, too long", async () => {
+      await personalStore(reader.person).startOwnExport({
+        person: reader.person,
+        deployment: markers.join("").repeat(300),
+      });
+    }),
+  ],
+  ownExport: async (probing) => {
+    await strangersExport(probing);
+    const { person } = probing.reader;
+    return [
+      await answer("the reader's own export", async () => {
+        const status = await personalStore(person).ownExport({ person });
+        return status?.state ?? null;
+      }),
+      await answer(
+        "the shared store",
+        async () => await store().ownExport({ person })
+      ),
+      await answer(
+        "someone else's own store, as the reader",
+        async () => await personalStore(stranger()).ownExport({ person })
+      ),
+    ];
+  },
+  ownExportFile: async (probing) => {
+    const others = await strangersExport(probing);
+    const { person } = probing.reader;
+    return [
+      await answer(
+        "a file of someone else's marked export",
+        async () =>
+          await personalStore(person).ownExportFile({
+            person,
+            id: others,
+            file: "manifest.json",
+          }),
+        "hidden"
+      ),
+      await answer(
+        "a file of an export no one started",
+        async () =>
+          await personalStore(person).ownExportFile({
+            person,
+            id: crypto.randomUUID(),
+            file: "manifest.json",
+          }),
+        "nothing"
+      ),
+      await answer(
+        "the shared store",
+        async () =>
+          await store().ownExportFile({
+            person,
+            id: others,
+            file: "manifest.json",
+          })
+      ),
+      await answer(
+        "a file named by the markers",
+        async () =>
+          await personalStore(person).ownExportFile(
+            unchecked({ person, id: others, file: probing.markers.join(" ") })
           )
       ),
     ];
