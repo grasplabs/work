@@ -1706,8 +1706,7 @@ describe(
       expect({
         count: bound.length,
         eachPinned: bound.every(
-          ({ pinned }) =>
-            pinned?.workflowId === workflowId && pinned.version === 1
+          ({ pinned }) => pinned?.workflowId === workflowId
         ),
       }).toStrictEqual({ count: 61, eachPinned: true });
     });

@@ -324,7 +324,7 @@ export class WorkflowBuildApi extends WorkerEntrypoint<Env, AgentScope> {
   async bind(
     workflow: unknown,
     binding: unknown
-  ): Promise<{ id: string; app: string; alias: string; version: number }> {
+  ): Promise<{ id: string; app: string; alias: string }> {
     return await this.#build(
       "bind",
       async (by) => {
@@ -336,18 +336,12 @@ export class WorkflowBuildApi extends WorkerEntrypoint<Env, AgentScope> {
           binding,
           this.#admit
         );
-        return {
-          id: bound.id,
-          app: bound.app,
-          alias: bound.alias,
-          version: bound.version,
-        };
+        return { id: bound.id, app: bound.app, alias: bound.alias };
       },
       (bound) => ({
         workflow: named(workflow),
         app: bound.app,
         binding: bound.id,
-        version: bound.version,
       })
     );
   }
@@ -577,7 +571,7 @@ workflowBuild: {
    * passes and its test runs do what they asked.
    */
   /** Binds the workflow to an App the person builds under \`alias\`, replacing that alias's binding: the App must declare the events, decisions and listen tasks of the workflow's live version, which its starts run. */
-  bind(workflow: string, binding: { app: string; alias: string }): Promise<{ id: string; app: string; alias: string; version: number }>;
+  bind(workflow: string, binding: { app: string; alias: string }): Promise<{ id: string; app: string; alias: string }>;
   /** Asks for a permission for the workflow itself (a connection for its connection permissions, or \`{ type: "platform" }\` with actions \`["brain"]\` for its brain permission), \`binding\` its alias; nothing holds until an admin grants it. */
   requestPermission(workflow: string, request: {
     object:

@@ -96,15 +96,15 @@ export interface DefinedFunction {
 }
 
 /**
- * The workflow version a draft bound under a workflow permission's alias
+ * The workflow a draft bound under a workflow permission's alias
  * (`bindWorkflow`): what making the version current binds (core's
- * app-workflow-bindings.ts). A claim until then: a definition committed
- * by hand may name any, so core checks each again as it binds it.
+ * app-workflow-bindings.ts), at the workflow's live version, whichever
+ * that is. A claim until then: a definition committed by hand may name
+ * any, so core checks each again as it binds it.
  */
 export interface DefinedWorkflowBinding {
   readonly alias: string;
   readonly workflowId: string;
-  readonly version: number;
 }
 
 /** An App's definition (see the header). */

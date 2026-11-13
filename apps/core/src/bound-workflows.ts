@@ -33,9 +33,10 @@ import { resolveCatalogKeys } from "./workflow-catalog.ts";
 import type { ResolvedCatalogContract } from "./workflow-catalog.ts";
 
 // What the host resolves of the workflows an App declares. A release
-// seals the exact workflow version each declared alias is bound to once
-// its version is current (`sealedWorkflowPins`, app-workflow-bindings.ts):
-// what its pages' reads of a run's history and decisions are held to. The events, listen
+// seals the workflow each declared alias is bound to once its version is
+// current (`sealedWorkflowPins`, app-workflow-bindings.ts): what its
+// pages start, at the workflow's live version, and whose runs they read,
+// each at the version it is of. The events, listen
 // tasks and decisions the App's references name are the App's own
 // declaration (`permission.workflow`), never resolved from the binding.
 //
@@ -271,17 +272,15 @@ const ownBindings = async (
   return recorded.filter(
     (bound) =>
       !current.some(
-        ({ alias, workflowId, version }) =>
-          alias === bound.alias &&
-          workflowId === bound.workflowId &&
-          version === bound.version
+        ({ alias, workflowId }) =>
+          alias === bound.alias && workflowId === bound.workflowId
       )
   );
 };
 
 /**
- * The exact workflow version each workflow `manifest` declares is bound
- * to once the version of `app` whose definition is `definition` is
+ * The workflow each workflow `manifest` declares is bound to once the
+ * version of `app` whose definition is `definition` is
  * current, by alias, for its seal: what it binds of its own
  * (`ownBindings`), otherwise what the App binds now. A declared alias
  * with neither, and a binding the App's code doesn't declare, resolve to
@@ -301,7 +300,6 @@ export const sealedWorkflowPins = async (
     .select({
       alias: appWorkflowBindings.alias,
       workflowId: appWorkflowBindings.workflowResourceId,
-      version: appWorkflowBindings.workflowResourceVersion,
     })
     .from(appWorkflowBindings)
     .where(
@@ -311,17 +309,10 @@ export const sealedWorkflowPins = async (
       )
     );
   const pins = new Map(
-    active.map(({ alias, workflowId, version }) => [
-      alias,
-      { workflowId, version },
-    ])
+    active.map(({ alias, workflowId }) => [alias, { workflowId }])
   );
-  for (const { alias, workflowId, version } of await ownBindings(
-    env,
-    app,
-    definition
-  )) {
-    pins.set(alias, { workflowId, version });
+  for (const { alias, workflowId } of await ownBindings(env, app, definition)) {
+    pins.set(alias, { workflowId });
   }
   return [...pins]
     .filter(

@@ -428,7 +428,7 @@ const fixture = async (
     workflows: [
       {
         alias: "review",
-        pinned: { workflowId: workflow.id, version: 1 },
+        pinned: { workflowId: workflow.id },
       },
     ],
   };
@@ -540,6 +540,17 @@ const outboxOf = async (store: OpenStore) =>
         settled: settled_at !== null,
         undeliverable,
       }))
+  );
+
+/** The workflow version each sent event staged in `store`'s outbox names. */
+const stagedVersions = async (store: OpenStore) =>
+  await runInDurableObject(objectOf(store), (_instance, state) =>
+    state.storage.sql
+      .exec<{ version: number }>(
+        "SELECT json_extract(intent, '$.data.version') AS version FROM sdk_change_outbox ORDER BY rowid"
+      )
+      .toArray()
+      .map(({ version }) => version)
   );
 
 /** Drains the store's outbox with `consumer` taking its sent events, at `at`. */
@@ -811,6 +822,8 @@ describe(
         sealed: await raw("jobEvents"),
         refusals: await refusals(),
         outbox: await outboxOf(fx.store),
+        // The run's own version, audited as it is sent: not the one live.
+        version: await stagedVersions(fx.store),
       }).toStrictEqual({
         later: "permission.not_allowed",
         sealed: "staged",
@@ -826,6 +839,7 @@ describe(
         outbox: [
           { kind: "workflow.send_event", settled: false, undeliverable: null },
         ],
+        version: [1],
       });
     });
 

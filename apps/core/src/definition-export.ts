@@ -33,7 +33,7 @@ import {
 import { appendAuditEvent } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import { requireNotStaff } from "./sharing.ts";
-import { exportedWorkflowVersion } from "./workflow-resources.ts";
+import { exportedWorkflowVersion, liveWorkflow } from "./workflow-resources.ts";
 
 // Exporting an App's definition (GRA-363): its current sealed release and
 // the exact workflow versions it binds, as a package of portable source
@@ -125,7 +125,7 @@ const textBudget = (max: number): TextBudget => {
 };
 
 /**
- * The workflow versions the App's pins name, each read once by `by`,
+ * The live versions of the workflows the App's pins name, each read once by `by`,
  * packaged under its key with the catalog kinds it binds, and every pin
  * that doesn't resolve. A workflow binds no other: what it binds is the
  * catalog's.
@@ -136,7 +136,7 @@ class PackagedVersions {
   readonly #env: Env;
   readonly #by: Acting;
   readonly #budget: TextBudget;
-  /** What each pin read came to, by `<workflow id>@<version>`. */
+  /** What each pin read came to, by workflow ID. */
   readonly #read = new Map<string, Packed>();
 
   constructor(env: Env, by: Acting, budget: TextBudget) {
@@ -146,12 +146,12 @@ class PackagedVersions {
   }
 
   /**
-   * The key of the version `pin` names, packaged the first time it is
-   * named and only named after; null, with an unresolved entry for
-   * `alias`, for one that can't be packaged.
+   * The key of the live version of the workflow `pin` names, packaged the
+   * first time it is named and only named after; null, with an
+   * unresolved entry for `alias`, for one that can't be packaged.
    */
   async pack(alias: string, pin: WorkflowPin): Promise<string | null> {
-    const id = `${pin.workflowId}@${pin.version}`;
+    const id = pin.workflowId;
     let packed = this.#read.get(id);
     if (packed === undefined) {
       if (this.#read.size >= definitionPackageMaxWorkflows) {
@@ -168,11 +168,16 @@ class PackagedVersions {
   }
 
   async #packed(pin: WorkflowPin): Promise<Packed> {
+    // What a binding starts: the workflow's live version.
+    const live = await liveWorkflow(this.#env, pin.workflowId);
+    if (live?.currentVersion === undefined || live.currentVersion === null) {
+      return { reason: "missing" };
+    }
     const found = await exportedWorkflowVersion(
       this.#env,
       this.#by,
       pin.workflowId,
-      pin.version
+      live.currentVersion
     );
     if (found.status !== "found") {
       return { reason: found.status };

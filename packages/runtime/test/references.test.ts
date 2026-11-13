@@ -260,7 +260,7 @@ describe("generated modules", () => {
       generateModules(changedContracts, notesFunctions, [
         {
           alias: "summarizeNote",
-          pinned: { workflowId: "workflow-7", version: 7 },
+          pinned: { workflowId: "workflow-7" },
         },
       ]),
     ]);
@@ -368,7 +368,7 @@ const unsealed = (generated: Readonly<Record<string, string>>) =>
   );
 
 describe("workflow references", () => {
-  const pinned = { workflowId: "workflow-1", version: 3 };
+  const pinned = { workflowId: "workflow-1" };
 
   /**
    * The fixture's generated modules, with the versions the host resolved
@@ -418,10 +418,8 @@ describe("workflow references", () => {
 
   test.each([
     ["no pin at all", undefined],
-    ["no workflow", { version: 1 }],
-    ["an empty workflow", { workflowId: "", version: 1 }],
-    ["a version that isn't one", { workflowId: "workflow-1", version: 0 }],
-    ["a fractional version", { workflowId: "workflow-1", version: 1.5 }],
+    ["no workflow", {}],
+    ["an empty workflow", { workflowId: "" }],
   ])("refuse a sealed pin with %s", (_case, sealed) => {
     expect(() =>
       readSealedWorkflows({
@@ -721,7 +719,7 @@ describe("workflow references", () => {
     });
   });
 
-  test("are covered by the release's contracts with all the App declares of them, and the version each binding pinned", async () => {
+  test("are covered by the release's contracts with all the App declares of them, and the workflow each binding names", async () => {
     const text = v.string().descriptor;
     const edited = summarizeNote.events.noteEdited;
     const approve = summarizeNote.decisions.approveSummary;
@@ -765,7 +763,7 @@ describe("workflow references", () => {
       generatedWith([]),
       generatedWith([{ alias: "summarizeNote", pinned }]),
       generatedWith([
-        { alias: "summarizeNote", pinned: { ...pinned, version: 4 } },
+        { alias: "summarizeNote", pinned: { workflowId: "workflow-4" } },
       ]),
       ...declarationChanges.map(
         async (change) => await generatedWith([], { summarizeNote: change })
@@ -788,7 +786,7 @@ describe("workflow references", () => {
     const pins: WorkflowBindingExtras[] = [
       {
         alias: "archiveNotes",
-        pinned: { workflowId: "workflow-2", version: 1 },
+        pinned: { workflowId: "workflow-2" },
       },
       { alias: "summarizeNote", pinned },
     ];
@@ -869,7 +867,7 @@ describe("workflow references", () => {
       "the same alias twice",
       [
         { alias: "summarizeNote", pinned },
-        { alias: "summarizeNote", pinned: { ...pinned, version: 4 } },
+        { alias: "summarizeNote", pinned: { workflowId: "workflow-4" } },
       ],
     ],
     [

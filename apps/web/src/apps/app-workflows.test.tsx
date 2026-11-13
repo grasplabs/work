@@ -70,7 +70,6 @@ const fakeWorkflows = () => {
       app: appId,
       alias: "summary",
       workflowId: "flow-summary",
-      version: 1,
       boundBy: "user-owner",
       boundAt: "2026-10-20T09:00:00.000Z",
     },

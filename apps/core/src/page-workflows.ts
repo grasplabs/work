@@ -1513,7 +1513,8 @@ const sent = async (
   /** What a send names of the run, the workflow and the event, audited. */
   const detail = {
     workflow: pin.workflowId,
-    version: pin.version,
+    // The run's own: a binding follows the live version, a run keeps its.
+    version: row.version,
     binding: alias,
     type,
     app: asking.app,

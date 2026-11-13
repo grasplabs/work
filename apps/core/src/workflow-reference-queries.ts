@@ -723,10 +723,16 @@ const historyRowOf = (entry: RunHistoryEntry): Json | undefined => {
   }
 };
 
+/** A version of a workflow: a run's, whose build it runs. */
+interface RunVersion {
+  readonly workflowId: string;
+  readonly version: number;
+}
+
 /** The task IDs version `pinned`'s sealed build declares; none if unreadable. */
 const declaredTasks = async (
   env: Env,
-  pinned: WorkflowPin,
+  pinned: RunVersion,
   manifestHash: string
 ): Promise<SealedSteps | undefined> => {
   try {
@@ -864,7 +870,7 @@ interface DecisionTasks {
 
 const decisionTasksOf = async (
   env: Env,
-  pinned: WorkflowPin,
+  pinned: RunVersion,
   manifestHash: string
 ): Promise<DecisionTasks | undefined> => {
   try {

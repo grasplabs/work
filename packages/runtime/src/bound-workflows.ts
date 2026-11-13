@@ -38,26 +38,25 @@ export interface BoundWorkflow {
   readonly listens: Readonly<Record<string, readonly string[]>>;
   readonly decisions: Readonly<Record<string, BoundWorkflowDecision>>;
   /**
-   * The workflow version the host resolved the App's binding to, as a
-   * seal records it. The host reads a run's history or decisions through
-   * the reference only for a run of exactly this version, so a rebind
-   * never reads one version's journal against another's contract. None
-   * for an alias nothing was bound to. Never part of a generated
-   * reference.
+   * The workflow the host resolved the App's binding to, as a seal
+   * records it: its pages start and read runs of it, at whichever version
+   * each run is of, while the App's binding still names it, so a rebind
+   * to another workflow never reads one's journal against another's
+   * contract. None for an alias nothing was bound to. Never part of a
+   * generated reference.
    */
   readonly pinned?: WorkflowPin;
 }
 
-/** A workflow permission's version, as the host resolved a binding to it. */
+/** The workflow the host resolved a workflow permission's binding to. */
 export interface WorkflowPin {
   readonly workflowId: string;
-  readonly version: number;
 }
 
 /**
  * What the host resolved of a workflow the App declares, beside the
- * contract the declaration gives (`BoundWorkflow`): the version its
- * binding pins. Never from App code.
+ * contract the declaration gives (`BoundWorkflow`): the workflow its
+ * binding names. Never from App code.
  */
 export interface WorkflowBindingExtras {
   readonly alias: string;
@@ -96,7 +95,7 @@ export const sameEventContract = (
 
 /**
  * The workflows the App declares, in alias order, each with the contract
- * its declaration gives and the version the host resolved its binding to
+ * its declaration gives and the workflow the host resolved its binding to
  * in `bound`, if any. A resolution for a workflow the App doesn't declare
  * throws: a reference is made only for a declaration.
  */

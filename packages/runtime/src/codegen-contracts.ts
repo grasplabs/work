@@ -55,7 +55,7 @@ export const ownFiles = <Content>(
 /**
  * The format of `contracts.json`: 6 since its manifest names the App's
  * functions `functions`, and it names no release and seals only the
- * version each workflow binding pinned, the App's declaration being the
+ * workflow each workflow binding names, the App's declaration being the
  * workflow's contract. A release whose contracts are of another format
  * doesn't load: a new version replaces it.
  */

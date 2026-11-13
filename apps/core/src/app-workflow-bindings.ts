@@ -73,8 +73,8 @@ import type { StartFiles } from "./workflows/start-files.ts";
 //   requires what it checked still so: a binding or an App's publish
 //   requires the workflow's live version it checked, a workflow's publish
 //   or roll back each bound App's current version, so of an App's and a
-//   workflow's change at once, the one landing second is refused. The
-//   version a binding names is the live one it was made at.
+//   workflow's change at once, the one landing second is refused. A
+//   binding names a workflow, never a version.
 // - A binding removed under a start: the start's admitting statement
 //   requires the binding still active, as it requires the grant.
 // - Deleting a workflow an App relies on: an active binding whose App
@@ -99,8 +99,8 @@ import type { StartFiles } from "./workflows/start-files.ts";
 // definition) is bound as that version is made current, in the batch that
 // makes it current (apps.ts, `makeCurrent`), never before: so the App's
 // declaration and what its alias binds change together. Its release
-// seals the version too (bound-workflows.ts, `sealedWorkflowPins`), so
-// its pages read the runs of the version its starts run. How each way it
+// seals the workflow too (bound-workflows.ts, `sealedWorkflowPins`), so
+// its pages read the runs of the workflow its starts run. How each way it
 // can fail is closed (`versionBindingChanges`):
 //
 // - A recorded binding written by hand: a definition committed through
@@ -109,8 +109,8 @@ import type { StartFiles } from "./workflows/start-files.ts";
 //   `bindWorkflow` asks (`requireRecordableBindings`); no one launders one
 //   into another builder's next version, which carries it over. Even so,
 //   nothing it names is bound unless it holds as the version is made
-//   current: the workflow is live and published that version, its
-//   contract is the one the App version declares, the person making the
+//   current: the workflow is live, its live version's contract is the
+//   one the App version declares, the person making the
 //   version current has a role in it, and so has the version's author for
 //   a binding the version recorded of its own, the first time it is made
 //   current. Grasp staff never make a version current that binds one.
@@ -130,30 +130,32 @@ import type { StartFiles } from "./workflows/start-files.ts";
 //   as for any switch.
 // - The workflow deleted, the App version unpublished, or the alias
 //   rebound directly, as the switch lands: the switch's own statement
-//   requires each workflow version it binds live, each alias still binding
+//   requires each workflow it binds live at the version checked, each
+//   alias still binding
 //   what it was checked against, and the App version published, and binds
 //   only if the switch landed, so both land or neither. A batch tried
 //   again after one that landed binds nothing twice.
 // - The contract changed between the draft and the switch (a declaration
 //   committed by hand, a catalog contract the version no longer resolves):
-//   each workflow version the release seals, and the binding an alias it
-//   declares keeps where it seals none, is compared with what it declares
-//   as the switch is checked (`workflow.app_binding_contract_changed`).
+//   the live version of each workflow the release seals, and of the
+//   binding an alias it declares keeps where it seals none, is compared
+//   with what it declares as the switch is checked
+//   (`workflow.app_binding_contract_changed`).
 //   The roles are checked again once its schema applied, right before
 //   the batch.
 // - A rollback: making an older version current binds what its release
 //   sealed, checked as above, so its pages and its starts name the same
-//   versions again.
+//   workflows again.
 // - A later version undoing a rebind it never made: a version binds as
 //   its own only what it records differently from the version people use
 //   as it is sealed; for every other alias its release seals what the App
 //   binds then, so a direct rebind made before it is sealed stays. One
 //   made after it is sealed stays too, while its contract is the one the
 //   version declares, and so does an unbinding (a workflow deleted
-//   since, say): the switch binds such a pin again only over a version
-//   of another contract (a rollback across a contract change), so pages
-//   and starts agree on the contract, if not on the very version, as
-//   after any direct rebind. What the version records unlike the version
+//   since, say): the switch binds such a pin again only over a workflow
+//   whose live version has another contract (a rollback across a
+//   contract change), so pages and starts agree on the contract, as after
+//   any direct rebind. What the version records unlike the version
 //   current as it is made current is always bound.
 //
 // What an alias binds is otherwise the App's configuration, set by its
@@ -168,7 +170,6 @@ const bindingOf = (
   app: row.appId,
   alias: row.alias,
   workflowId: row.workflowResourceId,
-  version: row.workflowResourceVersion,
   boundBy: row.boundBy,
   boundAt: row.boundAt.toISOString(),
 });
@@ -195,8 +196,8 @@ const bindableWorkflow = async (
 
 /**
  * The events, listen tasks and decisions the live version of workflow
- * `id` has, for `by`, who may bind it (`bindableWorkflow`), and that
- * version: what a draft declares and records when they bind it there
+ * `id` has, for `by`, who may bind it (`bindableWorkflow`), and the
+ * workflow: what a draft declares and records when they bind it there
  * (`bindWorkflow`, agent-builds.ts).
  */
 export const bindableContract = async (
@@ -205,7 +206,7 @@ export const bindableContract = async (
   id: unknown
 ): Promise<{
   contract: WorkflowEventContract;
-  bound: { workflowId: string; version: number };
+  bound: { workflowId: string };
 }> => {
   requireNotStaff(by);
   const workflow = await bindableWorkflow(env, by, id);
@@ -218,10 +219,7 @@ export const bindableContract = async (
   if (!complete) {
     throw invalid();
   }
-  return {
-    contract,
-    bound: { workflowId: workflow.id, version: workflow.version },
-  };
+  return { contract, bound: { workflowId: workflow.id } };
 };
 
 /**
@@ -239,13 +237,10 @@ export const carriedOverBinding = async (
   app: AppId,
   before: AppDefinition | null,
   alias: string,
-  bound: { readonly workflowId: string; readonly version: number }
+  bound: { readonly workflowId: string }
 ): Promise<string | undefined> => {
   const recorded = (before?.workflowBindings ?? []).some(
-    (held) =>
-      held.alias === alias &&
-      held.workflowId === bound.workflowId &&
-      held.version === bound.version
+    (held) => held.alias === alias && held.workflowId === bound.workflowId
   );
   if (!recorded) {
     return undefined;
@@ -349,15 +344,6 @@ export const requireBoundAppsDeclare = async (
 };
 
 /**
- * Workflow `id`'s live version, which its App bindings start and whose
- * contract an App's declaration is checked against; null for none.
- */
-const liveVersionOf = async (env: Env, id: string): Promise<number | null> => {
-  const workflow = await liveWorkflow(env, id);
-  return workflow?.currentVersion ?? null;
-};
-
-/**
  * Tells App `app`'s pages following its workflows to read them again
  * (app.ts, `workflowPolicyChanged`): a binding changed what each watch may
  * show and what its person may start (page-workflows.ts). Best effort:
@@ -380,8 +366,8 @@ export const tellBindingChanged = async (
 
 /**
  * A binding making an App version current makes: the workflow its
- * release sealed under `alias`, where the App binds another now, at its
- * live version as checked.
+ * release sealed under `alias`, where the App binds another now, and its
+ * live version as checked, which the binding records it was made at.
  */
 export interface BindingChange {
   readonly alias: string;
@@ -435,16 +421,14 @@ export const ownWorkflowBindings = (
   (definition.workflowBindings ?? []).filter(
     (bound) =>
       !(parent?.workflowBindings ?? []).some(
-        ({ alias, workflowId, version }) =>
-          alias === bound.alias &&
-          workflowId === bound.workflowId &&
-          version === bound.version
+        ({ alias, workflowId }) =>
+          alias === bound.alias && workflowId === bound.workflowId
       )
   );
 
 /**
  * That `by`, committing `definition` over `parent`, may bind each
- * workflow version it records of its own (`ownWorkflowBindings`), as a
+ * workflow it records of its own (`ownWorkflowBindings`), as a
  * draft's `bindWorkflow` asks: so no one records, by committing a
  * definition by hand, a binding another builder would carry into a
  * version of theirs (`workflow.app_version_binding_unavailable`).
@@ -567,7 +551,8 @@ export const versionBindingChanges = async (
     if (known !== undefined) {
       return known;
     }
-    const version = await liveVersionOf(env, workflowId);
+    const found = await liveWorkflow(env, workflowId);
+    const version = found?.currentVersion ?? null;
     live.set(workflowId, version);
     return version;
   };
@@ -596,9 +581,7 @@ export const versionBindingChanges = async (
       continue;
     }
     const names = (bound: DefinedWorkflowBinding) =>
-      bound.alias === alias &&
-      bound.workflowId === pinned.workflowId &&
-      bound.version === pinned.version;
+      bound.alias === alias && bound.workflowId === pinned.workflowId;
     const recordedBy = recorded.some(names) ? author : undefined;
     // A pin the version only took from the App's binding as it was
     // sealed: a direct rebind of the same contract since stays, and so

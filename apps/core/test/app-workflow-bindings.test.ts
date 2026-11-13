@@ -26,7 +26,7 @@ import {
 } from "./sign-in.ts";
 import { publishDefinition, publishOverRpc } from "./workflow-publishing.ts";
 
-// Reading which workflow versions an App binds (`workflowResources.
+// Reading which workflows an App binds (`workflowResources.
 // appBindings`), over the session's RPC as the domain page reads it, next
 // to binding and removing one. A binding is the App's configuration, set by
 // its builders, so it is read as it is set: by the App's builders, never
@@ -77,11 +77,10 @@ describe("an App's workflow bindings, as its builders read them", () => {
     const listed = await api.appBindings(app);
 
     expect(
-      listed.map(({ id, alias, workflowId, version, boundBy }) => ({
+      listed.map(({ id, alias, workflowId, boundBy }) => ({
         id,
         alias,
         workflowId,
-        version,
         boundBy,
       }))
     ).toStrictEqual([
@@ -89,14 +88,12 @@ describe("an App's workflow bindings, as its builders read them", () => {
         id: archive.id,
         alias: "archive",
         workflowId: flow.id,
-        version: 2,
         boundBy: builder.userId,
       },
       {
         id: summary.id,
         alias: "summary",
         workflowId: flow.id,
-        version: 2,
         boundBy: builder.userId,
       },
     ]);
@@ -179,7 +176,7 @@ describe("binding a workflow its App's current version declares", () => {
       await outcome(api.bindToApp(flow.id, { app: to, alias }));
     const bound = async () => {
       const listed = await api.appBindings(app);
-      return listed.map(({ alias, version }) => ({ alias, version }));
+      return listed.map(({ alias }) => alias);
     };
     const publish = async (definition: string) =>
       await outcome(publishOverRpc(builder.api, flow.id, definition));
@@ -232,10 +229,7 @@ describe("binding a workflow its App's current version declares", () => {
       sameContract: "ok",
       undeclaredAlias: "ok",
       noCurrentVersion: "ok",
-      after: [
-        { alias: "other", version: 4 },
-        { alias: "review", version: 4 },
-      ],
+      after: ["other", "review"],
     });
   });
 
@@ -256,7 +250,7 @@ describe("binding a workflow its App's current version declares", () => {
     }).toStrictEqual({
       whileLive: "workflow.app_binding_contract_changed",
       rolledBack: "ok",
-      bound: [{ alias: "review", version: 1 }],
+      bound: ["review"],
     });
   });
 
@@ -405,12 +399,12 @@ describe("binding a workflow its App's current version declares", () => {
 
     expect({
       raced,
-      kept: listed.map(({ alias, version }) => ({ alias, version })),
+      kept: listed.map(({ alias }) => alias),
       // Checked against the version current now, it binds.
       again: await outcome(api.bindToApp(flow.id, { app, alias: "review" })),
     }).toStrictEqual({
       raced: "workflow.binding_conflict",
-      kept: [{ alias: "review", version: 2 }],
+      kept: ["review"],
       again: "ok",
     });
   });

@@ -148,7 +148,7 @@ const maySendSql = (
   appVersion: number,
   principal: string,
   alias: string,
-  pin: { workflowId: string; version: number },
+  pin: { workflowId: string },
   runId: string
 ): SQL => {
   const workflow = workflowResourceIdSchema.safeParse(pin.workflowId);
@@ -174,19 +174,24 @@ const holds = async (env: Env, condition: SQL): Promise<boolean> => {
   return row.holds === 1;
 };
 
-/** Whether App `app`, restricted, would carry what it read into run `runId`. */
-const restrictsRun = async (
+/** Run `runId`'s own version and whether it is restricted, if it exists. */
+const runOf = async (
   env: Env,
-  app: AppId,
   runId: string
-): Promise<boolean> => {
-  const row = await env.DB.prepare(
-    "SELECT restricted FROM workflow_resource_runs WHERE id = ?"
+): Promise<{ version: number; restricted: number } | null> =>
+  await env.DB.prepare(
+    "SELECT version, restricted FROM workflow_resource_runs WHERE id = ?"
   )
     .bind(runId)
-    .first<{ restricted: number }>();
-  return row?.restricted !== 1 && (await appHost(env, app).isRestricted());
-};
+    .first<{ version: number; restricted: number }>();
+
+/** Whether App `app`, restricted, would carry what it read into `run`. */
+const restricts = async (
+  env: Env,
+  app: AppId,
+  run: { restricted: number } | null
+): Promise<boolean> =>
+  run?.restricted !== 1 && (await appHost(env, app).isRestricted());
 
 /** A sent event the App may not make now: never saying why. */
 const unavailable = () => functionErrors.create("permission.unavailable");
@@ -252,12 +257,14 @@ export const appWorkflowEventSends = (
       throw unavailable();
     }
     const app = subject.appId;
+    const run = await runOf(env, runId);
     if (
+      run === null ||
       !(await holds(
         env,
         maySendSql(app, appVersion, onBehalfOf, workflow, pin, runId)
       )) ||
-      (await restrictsRun(env, app, runId))
+      (await restricts(env, app, run))
     ) {
       throw unavailable();
     }
@@ -267,7 +274,8 @@ export const appWorkflowEventSends = (
       principal: onBehalfOf,
       workflow,
       workflowId: workflowResourceIdSchema.parse(pin.workflowId),
-      version: pin.version,
+      // The run's own: a binding follows the live version, a run keeps its.
+      version: run.version,
       event,
       type: resolved.type,
       runId,
@@ -385,7 +393,7 @@ export const dispatchSendEventIntent = async (
       ) {
         throw workflowResourceErrors.create("workflow.event_denied");
       }
-      if (await restrictsRun(env, intent.app, intent.runId)) {
+      if (await restricts(env, intent.app, await runOf(env, intent.runId))) {
         throw permissionErrors.create("permission.restricted");
       }
     } catch (error) {

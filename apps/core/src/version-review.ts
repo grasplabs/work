@@ -15,7 +15,7 @@ import type { App, ReviewChange, TableRowRules } from "@grasp-os/shared/apps";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalText } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -32,8 +32,10 @@ import {
 import type { Member } from "./auth/identity.ts";
 import {
   appWorkflowBindings,
+  workflowResources,
   workflowResourceVersions,
 } from "./db/core/schema.ts";
+import { inList } from "./db/d1.ts";
 import { draftRelease } from "./draft-runs.ts";
 import { filesOf } from "./drafts.ts";
 import type { DraftState } from "./drafts.ts";
@@ -56,10 +58,10 @@ import { takesFile } from "./workflows/start-files.ts";
 const boundContractSchema = z.object({ args: z.json() });
 
 /**
- * Whether any workflow version the draft of App `app` may bind once live
- * takes a file in its args, as that version's contract says: what its
- * release seals (`pins`, bound-workflows.ts), so a binding the draft
- * records counts as it will bind, and what the App binds now.
+ * Whether the live version of any workflow the draft of App `app` may
+ * bind once live takes a file in its args, as that version's contract
+ * says: what its release seals (`pins`, bound-workflows.ts), so a binding
+ * the draft records counts as it will bind, and what the App binds now.
  */
 const boundTakesFile = async (
   env: Env,
@@ -77,7 +79,6 @@ const boundTakesFile = async (
     .select({
       alias: appWorkflowBindings.alias,
       workflowId: appWorkflowBindings.workflowResourceId,
-      version: appWorkflowBindings.workflowResourceVersion,
     })
     .from(appWorkflowBindings)
     .where(
@@ -86,31 +87,31 @@ const boundTakesFile = async (
         eq(appWorkflowBindings.status, "active")
       )
     );
-  const bound = [
-    ...pins.map(({ pinned }) => pinned),
-    ...active.filter(({ alias }) => declared.has(alias)),
+  // One read for every distinct workflow, however many bindings name it:
+  // the pins and the active bindings often name the same ones.
+  const workflows = [
+    ...new Set([
+      ...pins.map(({ pinned }) => pinned.workflowId),
+      ...active
+        .filter(({ alias }) => declared.has(alias))
+        .map(({ workflowId }) => workflowId),
+    ]),
   ];
-  // One read for every distinct workflow version, however many bindings
-  // name it: the pins and the active bindings often name the same ones.
-  const pairs = [
-    ...new Map(
-      bound.map(({ workflowId, version }) => [
-        `${workflowId}@${version}`,
-        [workflowId, version] as const,
-      ])
-    ).values(),
-  ];
-  if (pairs.length === 0) {
+  if (workflows.length === 0) {
     return false;
   }
+  // Each at its live version, which a binding starts.
   const rows = await drizzle(env.DB)
     .select({ contract: workflowResourceVersions.contract })
     .from(workflowResourceVersions)
-    .where(
-      sql`EXISTS (SELECT 1 FROM json_each(${JSON.stringify(pairs)}) AS pair
-        WHERE ${workflowResourceVersions.workflowResourceId} = json_extract(pair.value, '$[0]')
-        AND ${workflowResourceVersions.version} = json_extract(pair.value, '$[1]'))`
-    );
+    .innerJoin(
+      workflowResources,
+      and(
+        eq(workflowResources.id, workflowResourceVersions.workflowResourceId),
+        eq(workflowResources.currentVersion, workflowResourceVersions.version)
+      )
+    )
+    .where(inList(workflowResourceVersions.workflowResourceId, workflows));
   for (const row of rows) {
     const parsed =
       row.contract === null
@@ -182,7 +183,8 @@ const handsFilesOf = async (
   }
   // What a start hands is copied by the bound workflow's own input
   // (`handFiles`), whatever the App declares for its alias: read from the
-  // version each alias is bound to once the draft is live.
+  // live version of the workflow each alias is bound to once the draft is
+  // live.
   return await boundTakesFile(env, app, workflows, manifest);
 };
 

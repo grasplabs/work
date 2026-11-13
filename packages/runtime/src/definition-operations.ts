@@ -144,17 +144,15 @@ export type DefinitionOperation =
   | {
       /**
        * Sets the events, listen tasks and decisions workflow permission
-       * `alias` declares: what a version the builder binds has, as the
-       * host resolved it (app-workflow-bindings.ts in core); and records
-       * that version, `bound`, as the one the definition binds there.
+       * `alias` declares: what the live version of the workflow the
+       * builder binds has, as the host resolved it
+       * (app-workflow-bindings.ts in core); and records that workflow,
+       * `bound`, as the one the definition binds there.
        */
       readonly op: "setWorkflowContract";
       readonly alias: string;
       readonly contract: WorkflowEventContract;
-      readonly bound?: {
-        readonly workflowId: string;
-        readonly version: number;
-      };
+      readonly bound?: { readonly workflowId: string };
     }
   | {
       /** Renames function `function` (by its path now), keeping its ID. */
@@ -518,17 +516,16 @@ const withoutIndex = (
 const withWorkflowBinding = (
   definition: AppDefinition,
   alias: string,
-  bound?: { readonly workflowId: string; readonly version: number }
+  bound?: { readonly workflowId: string }
 ): AppDefinition => {
   const { workflowBindings = [], ...rest } = definition;
   const kept = workflowBindings.filter((held) => held.alias !== alias);
   const next =
     bound === undefined
       ? kept
-      : [
-          ...kept,
-          { alias, workflowId: bound.workflowId, version: bound.version },
-        ].toSorted((a, b) => (a.alias < b.alias ? -1 : 1));
+      : [...kept, { alias, workflowId: bound.workflowId }].toSorted((a, b) =>
+          a.alias < b.alias ? -1 : 1
+        );
   return next.length === 0 ? rest : { ...rest, workflowBindings: next };
 };
 

@@ -188,7 +188,7 @@ describe("the agent building an independent workflow", () => {
       ],
       problems: [],
       test: { status: "completed", result: { status: "done" } },
-      bound: { app, alias: "summary", version: 1 },
+      bound: { app, alias: "summary" },
     });
     // Its edit is the chat's work, waiting in the draft for the person to
     // publish: the workflow's live version is still the person's.

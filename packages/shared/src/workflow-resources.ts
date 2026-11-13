@@ -587,9 +587,8 @@ export interface AppWorkflowBinding {
   id: string;
   app: string;
   alias: string;
+  /** The workflow it binds: its starts run its live version. */
   workflowId: string;
-  /** The workflow's live version when it was bound, whose contract was checked. */
-  version: number;
   boundBy: string;
   boundAt: string;
 }
@@ -1323,8 +1322,8 @@ export interface WorkflowResourcesApi {
   /** Removes an App's binding; for the App's builders. */
   unbindFromApp: (binding: string) => Promise<void>;
   /**
-   * The workflow versions App `app` binds, by alias: for the App's
-   * builders, archived or not, never Grasp staff.
+   * The workflows App `app` binds, by alias: for the App's builders,
+   * archived or not, never Grasp staff.
    */
   appBindings: (app: string) => Promise<AppWorkflowBinding[]>;
   /** The host catalog's contracts, for builders. */
