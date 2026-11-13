@@ -42,6 +42,13 @@ export const brainModules = {
   // Writing and sharing skills (GRA-1754): its own surface, each export
   // probed as the signed-in person.
   "apps/core/src/skill-shares.ts": "shares",
+  // Remembers, forgets and corrects for a person, and reads entities for
+  // them: its own surface, each export probed as the person.
+  "apps/core/src/brain-memories.ts": "memories",
+  // The chat's tool that saves what a person says: reads core's
+  // memoryChoices, and hands on nothing it returns beyond what
+  // brain-memories.ts's probes hold.
+  "apps/core/src/agent-remember.ts": "core",
   // Core's subclass of the store: its alarm's host, from core's
   // alarmHostOf, given to the store inside its own object; it adds no
   // method, so the store's probes are its own.

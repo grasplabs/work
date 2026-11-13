@@ -2276,11 +2276,13 @@ export interface Brain {
   listContested: (request: ContestedRequest) => Promise<ContestedPage>;
   /**
    * Retires one of the reader's own memories (its lineage is the reader's
-   * person, as writer) that they may read and that is current for them: it
-   * stops being current from now on, and stays as history. It no longer
-   * ends older memories, which may become current again. One already retired
-   * answers `done` again, so a retry never reads as not found; one ended
-   * otherwise, expired included, answers `nothing`, as one not theirs.
+   * person, as writer) that they may read and that is not retired: current,
+   * or ended by a newer one of theirs. It stops being current from now on,
+   * or can never become current again, and stays as history. It no longer
+   * ends older memories, which may become current again unless retired
+   * too. One already retired answers `done` again, so a retry never reads
+   * as not found; one outside its time (expired) answers `nothing`, as one
+   * not theirs.
    */
   retireMemory: (request: RetireRequest) => Promise<MemoryChangeOutcome>;
   /**

@@ -6318,6 +6318,10 @@ msgstr "Grasp ne peut utiliser {app} qu’avec les outils que vous avez autoris�
 msgid "Grasp never sends it again. Nothing is changed or undone on {connection}."
 msgstr "Grasp ne l'envoie plus jamais. Rien n'est modifié ni annulé sur {connection}."
 
+#: src/chat/saved-memory.tsx
+msgid "Grasp no longer remembers this."
+msgstr "Grasp ne retient plus ceci."
+
 #: src/brain/brain-log.tsx
 msgid "Grasp noticed it did not know"
 msgstr "Grasp a remarqué qu’il ne le savait pas"
@@ -6384,6 +6388,22 @@ msgstr "Grasp transcrit les entretiens avec {whereItRuns}, avec la propre clé d
 #: src/route-error.tsx
 msgid "Grasp was updated while this page was open. Try again to load the new version."
 msgstr "Grasp a été mis à jour pendant que cette page était ouverte. Réessayez pour charger la nouvelle version."
+
+#: src/chat/saved-memory.tsx
+msgid "Grasp will remember about {about}: {statement}"
+msgstr "Grasp retiendra à propos de {about} : {statement}"
+
+#: src/chat/saved-memory.tsx
+msgid "Grasp will remember about {about}: {statement} (value: {value})"
+msgstr "Grasp retiendra à propos de {about} : {statement} (valeur : {value})"
+
+#: src/chat/saved-memory.tsx
+msgid "Grasp will remember: {statement}"
+msgstr "Grasp retiendra : {statement}"
+
+#: src/chat/saved-memory.tsx
+msgid "Grasp will remember: {statement} (value: {value})"
+msgstr "Grasp retiendra : {statement} (valeur : {value})"
 
 #: src/apps/app-history.tsx
 msgid "Grasp, in {name}'s chat"
@@ -6938,6 +6958,10 @@ msgstr "Entrée"
 #: src/workflows/start-run.tsx
 msgid "Input, as JSON"
 msgstr "Entrée, en JSON"
+
+#: src/chat/saved-memory.tsx
+msgid "Instruction"
+msgstr "Instruction"
 
 #: src/agents/agent-form.tsx
 #: src/agents/agent-page.tsx
@@ -10399,6 +10423,10 @@ msgstr "Position"
 msgid "Prague"
 msgstr "Prague"
 
+#: src/chat/saved-memory.tsx
+msgid "Preference"
+msgstr "Préférence"
+
 #: src/interview/read-back.tsx
 msgid "Press a line to change it, take out what is wrong, or type what is missing. What you leave in is what counts."
 msgstr "Appuyez sur une ligne pour la modifier, retirez ce qui est faux, ou tapez ce qui manque. Ce que vous laissez, c’est ce qui compte."
@@ -11841,9 +11869,17 @@ msgstr "Enregistré à l’instant"
 msgid "Saved on {date}"
 msgstr "Enregistré le {date}"
 
+#: src/chat/thread.tsx
+msgid "Saved to your memory"
+msgstr "Enregistré dans votre mémoire"
+
 #: src/workflows/resource-params.tsx
 msgid "Saved."
 msgstr "Enregistré."
+
+#: src/chat/thread.tsx
+msgid "Saving to your memory"
+msgstr "Enregistrement dans votre mémoire"
 
 #: src/interview/composer.tsx
 msgid "Saving…"
@@ -14204,6 +14240,10 @@ msgstr "Une équipe porte déjà ce nom."
 msgid "There is nobody in this list."
 msgstr "Il n’y a personne dans cette liste."
 
+#: src/chat/saved-memory.tsx
+msgid "There was nothing to undo: Grasp no longer uses this."
+msgstr "Il n’y avait rien à annuler : Grasp n’utilise plus ceci."
+
 #: src/brain/share-record.tsx
 msgid "There's nowhere to share it yet: you're in no team, and in no chat others share."
 msgstr "Il n’y a encore nulle part où le partager : vous n’êtes dans aucune équipe ni dans aucune discussion que d’autres partagent."
@@ -14917,6 +14957,7 @@ msgid "Under way"
 msgstr "En cours"
 
 #: src/apps/publish.tsx
+#: src/chat/saved-memory.tsx
 msgid "Undo"
 msgstr "Annuler"
 

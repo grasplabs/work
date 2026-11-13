@@ -1,6 +1,7 @@
 import type { AiProvidersApi } from "./ai-providers.ts";
 import type { AppsApi } from "./apps.ts";
 import type { AuditApi } from "./audit-log.ts";
+import type { BrainMemoriesApi } from "./brain-memories.ts";
 import type { BrainSourcesApi } from "./brain-sources.ts";
 import type { BrainApi } from "./brain.ts";
 import type { ChannelAccountsApi } from "./channel-accounts.ts";
@@ -117,6 +118,11 @@ export interface SessionApi {
    * company's skills.
    */
   readonly skills: SkillsApi;
+  /**
+   * The memories the agent saved for the person in their own chats:
+   * undoing one there.
+   */
+  readonly brainMemories: BrainMemoriesApi;
   /**
    * Knowledge usage signals, computed daily: what's missing or stale in the
    * collections the person owns.
