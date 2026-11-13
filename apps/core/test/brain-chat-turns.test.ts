@@ -1,4 +1,5 @@
 import { brainOf, recallBudgetMax } from "@grasp-os/brain-next/contract";
+import type { Brain, SourceErasure } from "@grasp-os/brain-next/contract";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import type { ChatId } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
@@ -61,10 +62,13 @@ const word = (): string => `w${crypto.randomUUID().replaceAll("-", "")}`;
 const clock = { at: Date.now() };
 
 /** A tick's time, past the last one's (and never before now). */
-const later = (): Date => {
-  clock.at = Math.max(clock.at + 1, Date.now());
+const later = (aheadMs = 0): Date => {
+  clock.at = Math.max(clock.at + 1, Date.now()) + aheadMs;
   return new Date(clock.at);
 };
+
+/** Past any backoff a failed hand-over waits out (the queue's, a few hours at most). */
+const pastBackoffMs = 6 * 60 * 60 * 1000;
 
 /** Hands over what changed, as core's clock does, with `producers`. */
 const handOverNow = async (
@@ -212,6 +216,94 @@ const knowledgeOutOfReach = async (
     await runInDurableObject(stub, (instance) => {
       Reflect.set(envOf(instance), "KNOWLEDGE", real);
     });
+  };
+};
+
+/** Whether `value` is the Brain stores' namespace, as an object's env binds it. */
+const isNamespace = (value: unknown): value is Env["BRAIN_STORE"] =>
+  typeof value === "object" && value !== null && "getByName" in value;
+
+/** Where a held erase keeps its gate, on the Workspace object. */
+const gateKey = Symbol("brain erase gate");
+
+/** A held erase's gate, made inside the object it holds. */
+interface Gate {
+  reached: boolean;
+  end: PromiseWithResolvers<"fail" | "go">;
+}
+
+/** The gate `holdBrainErase` put on `instance`. */
+const gateOf = (instance: object): Gate => {
+  const gate: unknown = Reflect.get(instance, gateKey);
+  if (typeof gate !== "object" || gate === null || !("end" in gate)) {
+    throw new TypeError("No erase is held");
+  }
+  // SAFETY: only `holdBrainErase` sets it, as a `Gate`.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return gate as Gate;
+};
+
+/**
+ * The Workspace object's Brain stores with their `eraseSource` held until
+ * `end` says whether it fails or goes ahead. The gate is made and opened
+ * inside the object: what an object awaits must be its own.
+ */
+const holdBrainErase = async (stub: ReturnType<typeof workspace>) => {
+  // The object's own env replaced, not changed: the test Worker's env,
+  // which the clock's relay in the test uses, stays as it was.
+  const before = await runInDurableObject(stub, (instance) => {
+    const objectEnv = envOf(instance);
+    const real: unknown = Reflect.get(objectEnv, "BRAIN_STORE");
+    if (!isNamespace(real)) {
+      throw new TypeError("The Workspace object has no Brain store");
+    }
+    const gate: Gate = {
+      reached: false,
+      end: Promise.withResolvers<"fail" | "go">(),
+    };
+    Reflect.set(instance, gateKey, gate);
+    const held = (store: Brain) => ({
+      eraseSource: async (request: SourceErasure) => {
+        gate.reached = true;
+        if ((await gate.end.promise) === "fail") {
+          throw new Error("The Brain is out of reach");
+        }
+        await store.eraseSource(request);
+      },
+    });
+    Reflect.set(instance, "env", {
+      ...objectEnv,
+      BRAIN_STORE: {
+        getByName: (name: string) => held(real.getByName(name)),
+        jurisdiction: (where: DurableObjectJurisdiction) => ({
+          getByName: (name: string) =>
+            held(real.jurisdiction(where).getByName(name)),
+        }),
+      },
+    });
+    return objectEnv;
+  });
+  return {
+    reached: async () => {
+      await vi.waitFor(
+        async () => {
+          await expect(
+            runInDurableObject(stub, (instance) => gateOf(instance).reached)
+          ).resolves.toBeTruthy();
+        },
+        { timeout: 10_000, interval: 20 }
+      );
+    },
+    end: async (how: "fail" | "go") => {
+      await runInDurableObject(stub, (instance) => {
+        gateOf(instance).end.resolve(how);
+      });
+    },
+    putBack: async () => {
+      await runInDurableObject(stub, (instance) => {
+        Reflect.set(instance, "env", before);
+      });
+    },
   };
 };
 
@@ -599,6 +691,61 @@ describe("a deleted chat", () => {
       after: [],
     });
   });
+
+  // Greptile, first paid review: a hand-over that meets the chat while its
+  // deletion is under way is tried again, never recorded as deleted: it
+  // ends as the deletion does, either way exactly once.
+  it.each([
+    {
+      ending: "fail" as const,
+      expected: {
+        deleted: "internal.unexpected",
+        ended: ["brain.source.handed_over"],
+        found: 1,
+      },
+    },
+    {
+      ending: "go" as const,
+      expected: {
+        deleted: "ok",
+        ended: ["brain.source.handover_skipped:deleted"],
+        found: 0,
+      },
+    },
+  ])(
+    "hands a question over that met its chat being deleted as the deletion ends ($ending)",
+    async ({ ending, expected }) => {
+      const marker = word();
+      const { person, stub, chatId, ask } = await chatter(says("Noted."));
+      await ask(`Hold ${marker}?`);
+      await vi.waitFor(
+        async () => {
+          await expect(
+            notedEvents(person.userId, chatId)
+          ).resolves.toHaveLength(1);
+        },
+        { timeout: 15_000, interval: 200 }
+      );
+      const held = await holdBrainErase(stub);
+      const deleting = outcome(person.api.chats.remove(chatId));
+      await held.reached();
+
+      await handOverNow();
+      await held.end(ending);
+      const deleted = await deleting;
+      await held.putBack();
+      await drainAuditOutboxes(env);
+      await workBrain(env, later(pastBackoffMs), producersOf(env));
+
+      const [noted] = await notedEvents(person.userId, chatId);
+      const found = await recalled(person.userId, marker);
+      expect({
+        deleted,
+        ended: await endingsFor(noted?.target?.id ?? ""),
+        found: found.length,
+      }).toStrictEqual(expected);
+    }
+  );
 
   // The mirror (review round 3): the Brain's part done, a later step
   // failing. The chat stays and answers; its questions are no longer kept,

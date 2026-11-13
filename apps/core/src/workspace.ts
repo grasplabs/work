@@ -1574,8 +1574,9 @@ export class Workspace extends DurableObject<Env> {
    * what it used). Read back from the answer, this turn's rows alone,
    * never the chat's history before it.
    *
-   * Skipped, with why, otherwise: `deleted` once the chat is gone, being
-   * deleted, or someone else's, or the message isn't one of its answers;
+   * `deleting` while a deletion of the chat is under way: the hand-over
+   * is tried again later, as that deletion may yet fail. Skipped, with
+   * why, otherwise: `deleted` once the chat is gone or someone else's, or the message isn't one of its answers;
    * `restricted` once it is no longer one whose turns go to the Brain
    * (`handsTurnsOver`: restricted since, say); `no_text` for a turn with
    * no words of theirs before its answer (files alone).
@@ -1586,11 +1587,16 @@ export class Workspace extends DurableObject<Env> {
     answerId: number
   ):
     | { kind: "question"; question: string }
+    | { kind: "deleting" }
     | { kind: "skipped"; reason: "restricted" | "deleted" | "no_text" } {
     const deleted = { kind: "skipped", reason: "deleted" } as const;
     const id = chatIdSchema.safeParse(chatId);
-    if (!id.success || this.#deleting.has(id.data)) {
+    if (!id.success) {
       return deleted;
+    }
+    // Being deleted, which may yet fail: not gone, so not `deleted`.
+    if (this.#deleting.has(id.data)) {
+      return { kind: "deleting" };
     }
     const chat = this.#db
       .select()

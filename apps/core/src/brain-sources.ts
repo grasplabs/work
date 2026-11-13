@@ -62,7 +62,10 @@ import { detailsRemoved } from "./workflows/retention.ts";
 // for good (what it adds was erased, or its one reader's erasure began:
 // brain-next.ts `handOver`). A chat's turn its producer finds it may no
 // longer hand over ends in `brain.source.handover_skipped` with why
-// (`HandOverSkip`), so its `chat.turn_noted` never stands alone; a run
+// (`HandOverSkip`), so its `chat.turn_noted` never stands alone. Like the
+// other hand-over events, a skip is recorded once per attempt: an attempt
+// whose skip was recorded but whose item failed to settle records it again
+// on the next. A run
 // that is gone records nothing (its noting events say only that it
 // ended). Each attempt records its own. Each is added
 // through core's `addSource`, which picks the store its readers belong in;
@@ -141,6 +144,12 @@ const chatTurnOfId = async (env: Env, id: string): Promise<Handed> => {
     personId,
     answerId
   );
+  if (said.kind === "deleting") {
+    // Neither kept nor gone yet: a throw, so the queue tries it again by
+    // its own rules (later, and parked after too many), and it ends as
+    // the deletion did: skipped as `deleted`, or handed over.
+    throw new Error("The chat is being deleted: handed over later");
+  }
   if (said.kind === "skipped") {
     return { kind: "gone", skipped: said.reason };
   }
