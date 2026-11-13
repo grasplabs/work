@@ -622,6 +622,7 @@ describe(
         "a source nobody is known to read": markerWord(),
         "a source narrowed away from the reader": markerWord(),
         "a source erased": markerWord(),
+        "a source narrowed away from the company": markerWord(),
       };
       const {
         "the holder's own source": ownerMarker,
@@ -629,6 +630,7 @@ describe(
         "a source nobody is known to read": noneMarker,
         "a source narrowed away from the reader": narrowedMarker,
         "a source erased": erasedMarker,
+        "a source narrowed away from the company": fromCompanyMarker,
       } = markers;
       const words = Object.values(markers);
       const probingAs = (personId: string, groups: string[]): Probing => ({
@@ -718,11 +720,25 @@ describe(
         kind: "team",
         teamId: readersTeam,
       });
+      // And one everyone could read, embedded, then narrowed to the
+      // holder's team: after every before, as the company read it once.
+      const fromCompany: SourceRef = newSource();
+      await sharedStore().addSource({
+        source: `upload:${fromCompany.id}`,
+        change: crypto.randomUUID(),
+        text: `Policy for everyone ${sharedWord} ${fromCompanyMarker}`,
+        access: { kind: "audience", group: "company" },
+      });
       await allEmbedded([reader]);
       await add(
         `Final plan ${sharedWord} ${narrowedMarker}`,
         { kind: "team", teamId: secretTeam },
         narrowed
+      );
+      await add(
+        `Policy for the board ${sharedWord} ${fromCompanyMarker}`,
+        { kind: "team", teamId: secretTeam },
+        fromCompany
       );
       // More hidden passages than recall takes by meaning, each exactly a
       // question the surfaces ask: the markers, and the shared word.
@@ -755,7 +771,7 @@ describe(
 
       const asReader: Probing = {
         ...probing,
-        hiddenVersions: everyVersionOf(erased, narrowed),
+        hiddenVersions: everyVersionOf(erased, narrowed, fromCompany),
       };
       /** Each shape of reader held to their answers before, as `label`. */
       const everyShape = async (label: string): Promise<Finding[]> => {
@@ -828,7 +844,12 @@ describe(
         readable: readable.rebuilt && readable.embedded === readable.chunks,
         // Each shape's every surface found something by meaning before:
         // the passage for everyone, the handbook, the note, as it may.
-        withoutMeaningBefore: Object.fromEntries(
+        // Every surface named here is one the harness probes: a renamed
+        // one fails here, never drops out of the passes.
+        unprobed: [...meaningSurfaces].filter(
+          (name) => !surfaces.some(([probed]) => probed === name)
+        ),
+        answeredBefore: Object.fromEntries(
           Object.entries({
             reader: before,
             teamMate: mateBefore,
@@ -838,9 +859,12 @@ describe(
             appForReader: appBefore,
           }).map(([shape, answers]) => [
             shape,
-            [...answers]
-              .filter(([, each]) => foundByMeaning([each]) === 0)
-              .map(([name]) => name),
+            {
+              surfaces: [...answers.keys()].toSorted(),
+              withoutMeaning: [...answers]
+                .filter(([, each]) => foundByMeaning([each]) === 0)
+                .map(([name]) => name),
+            },
           ])
         ),
         hidden: hidden.rebuilt && hidden.embedded === hidden.chunks,
@@ -853,16 +877,37 @@ describe(
       }).toStrictEqual({
         findings: [],
         readable: true,
-        withoutMeaningBefore: {
-          reader: [],
-          teamMate: [],
-          admin: [],
-          teamsAlone: [],
-          chatCode: [],
-          appForReader: [],
+        unprobed: [],
+        answeredBefore: {
+          reader: {
+            surfaces: ["core mergeRecalled", "core recallAs", "sources search"],
+            withoutMeaning: [],
+          },
+          teamMate: {
+            surfaces: ["core mergeRecalled", "core recallAs", "sources search"],
+            withoutMeaning: [],
+          },
+          admin: {
+            surfaces: [
+              "core mergeRecalled",
+              "core recallAs",
+              "recall recallFor",
+              "sources search",
+            ],
+            withoutMeaning: [],
+          },
+          teamsAlone: {
+            surfaces: ["core mergeRecalled", "core recallAs"],
+            withoutMeaning: [],
+          },
+          chatCode: {
+            surfaces: ["recall recallFor, as a chat's code"],
+            withoutMeaning: [],
+          },
+          appForReader: { surfaces: ["recall recallFor"], withoutMeaning: [] },
         },
         hidden: true,
-        hiddenChunks: (recallLimit + 1) * hiddenTexts.length + 4,
+        hiddenChunks: (recallLimit + 1) * hiddenTexts.length + 5,
         afterErasure: true,
         holdersByMeaning: true,
         joined: true,
@@ -1668,7 +1713,8 @@ describe(
             question: askedMarker,
             budget: { tokens: recallBudgetMax },
           });
-          const [found] = items;
+          // The turn, whatever else everyone may read comes back first.
+          const found = items.find(({ source }) => source.producer === "chat");
           expect(found, "the chat's turn was never handed over").toBeDefined();
           return found?.source;
         },
