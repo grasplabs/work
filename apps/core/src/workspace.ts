@@ -79,6 +79,7 @@ import {
   desc,
   eq,
   gt,
+  lt,
   inArray,
   isNull,
   ne,
@@ -117,6 +118,7 @@ import {
   turnSource,
 } from "./brain-capture.ts";
 import type { CaptureStore, TurnFacts } from "./brain-capture.ts";
+import { chatTurnSource, eraseChat } from "./brain-next-origins.ts";
 import { skillsFor, skillsReachOf } from "./brain-skills.ts";
 import {
   channelText,
@@ -125,6 +127,7 @@ import {
   withoutLinks,
 } from "./channels/stephen-rules.ts";
 import type { HeldWriteRefusal, TurnCheck } from "./channels/stephen-rules.ts";
+import { questionText } from "./chat-agent.ts";
 import { revokeChatPermissions } from "./chat-connections.ts";
 import type {
   TurnCapture,
@@ -846,6 +849,22 @@ const answersAlone = (
   unattended: boolean
 ): boolean => via === "web" && thread === null && !unattended;
 
+/** A turn's rows `turnForBrain` reads at a time, back from its answer. */
+const turnRowsPerRead = 20;
+
+/**
+ * Whether `chat`'s turns go to its person's own Brain (GRA-1805): a chat
+ * whose turns answer them alone (`answersAlone`), not restricted. Whether
+ * its person asked the turn there and then is the turn's own (its
+ * capture's `attended`).
+ */
+const handsTurnsOver = ({
+  via,
+  thread,
+  restricted,
+}: Pick<Chat, "via" | "thread" | "restricted">): boolean =>
+  answersAlone({ via, thread }, false) && !restricted;
+
 /** A person's or team's workspace: chats and the Code Mode agent on Pi. */
 export class Workspace extends DurableObject<Env> {
   readonly #db = drizzle(this.ctx.storage);
@@ -1545,7 +1564,13 @@ export class Workspace extends DurableObject<Env> {
    */
   captureTurn(chatId: ChatId, capture: TurnCapture): void {
     const chat = this.#db
-      .select({ personId: chats.personId, agentId: chats.agentId })
+      .select({
+        personId: chats.personId,
+        agentId: chats.agentId,
+        via: chats.via,
+        thread: chats.thread,
+        restricted: chats.restricted,
+      })
       .from(chats)
       .where(eq(chats.id, chatId))
       .get();
@@ -1567,17 +1592,137 @@ export class Workspace extends DurableObject<Env> {
       model: capture.model,
       occurredAt: new Date().toISOString(),
     };
-    this.#db
-      .insert(brainCaptureIntents)
-      .values({
-        eventId: turnEventId(facts),
-        evidenceId: chatId,
-        facts: JSON.stringify(facts),
-        createdAt: new Date(),
-      })
-      .onConflictDoNothing({ target: brainCaptureIntents.eventId })
-      .run();
+    const { answerId } = capture;
+    const kept = this.ctx.storage.transactionSync(() => {
+      const noted = this.#db
+        .insert(brainCaptureIntents)
+        .values({
+          eventId: turnEventId(facts),
+          evidenceId: chatId,
+          facts: JSON.stringify(facts),
+          createdAt: new Date(),
+        })
+        .onConflictDoNothing({ target: brainCaptureIntents.eventId })
+        .returning({ seq: brainCaptureIntents.seq })
+        .all();
+      // The turn for its person's own Brain (GRA-1805), noted by this
+      // event (a note: whether it is kept is the hand-over's to record,
+      // `brain.source.*`), in the same transaction, once a turn as
+      // delivered: an
+      // answered turn they asked there and then, in a chat whose turns go
+      // there. The hand-over reads the chat again as it runs.
+      if (
+        noted.length === 0 ||
+        !capture.attended ||
+        capture.outcome !== "answered" ||
+        answerId === null ||
+        !handsTurnsOver(chat)
+      ) {
+        return false;
+      }
+      this.#outboxEntry({
+        actor: { type: "system" },
+        action: "chat.turn_noted",
+        target: {
+          type: "chat_turn",
+          id: chatTurnSource(chat.personId, chatId, answerId).id,
+        },
+        detail: { workspace: this.ctx.id.name ?? null },
+      });
+      return true;
+    });
+    if (kept) {
+      this.#deliverAudit();
+    }
     this.ctx.waitUntil(this.#captureSoon());
+  }
+
+  /**
+   * What `personId` asked in the turn of their chat `chatId` that ended
+   * with message `answerId`, for their own Brain (brain-sources.ts): the
+   * last question of theirs before that answer, their words alone (as
+   * `questionText` reads them: no note of files, no recall). Never the
+   * answer: it can quote anything the turn's prompt held (a step's result,
+   * this turn's or an earlier one's; the recall; instruction files,
+   * memories, skills), and a copy of it in their store would outlive that
+   * being erased or their losing it (GRA-1855 gives an answer a record of
+   * what it used). Read back from the answer, this turn's rows alone,
+   * never the chat's history before it.
+   *
+   * `deleting` while a deletion of the chat is under way: the hand-over
+   * is tried again later, as that deletion may yet fail. Skipped, with
+   * why, otherwise: `deleted` once the chat is gone or someone else's, or the message isn't one of its answers;
+   * `restricted` once it is no longer one whose turns go to the Brain
+   * (`handsTurnsOver`: restricted since, say); `no_text` for a turn with
+   * no words of theirs before its answer (files alone).
+   */
+  turnForBrain(
+    chatId: string,
+    personId: string,
+    answerId: number
+  ):
+    | { kind: "question"; question: string }
+    | { kind: "deleting" }
+    | { kind: "skipped"; reason: "restricted" | "deleted" | "no_text" } {
+    const deleted = { kind: "skipped", reason: "deleted" } as const;
+    const id = chatIdSchema.safeParse(chatId);
+    if (!id.success) {
+      return deleted;
+    }
+    // Being deleted, which may yet fail: not gone, so not `deleted`.
+    if (this.#deleting.has(id.data)) {
+      return { kind: "deleting" };
+    }
+    const chat = this.#db
+      .select()
+      .from(chats)
+      .where(eq(chats.id, id.data))
+      .get();
+    if (chat === undefined || chat.personId !== personId) {
+      return deleted;
+    }
+    if (!handsTurnsOver(chat)) {
+      return { kind: "skipped", reason: "restricted" };
+    }
+    const parsed = (row: { message: string }) =>
+      storedMessageSchema.parse(JSON.parse(row.message));
+    const answer = this.#db
+      .select()
+      .from(chatMessages)
+      .where(
+        and(eq(chatMessages.chatId, id.data), eq(chatMessages.id, answerId))
+      )
+      .get();
+    if (answer === undefined || parsed(answer).role !== "assistant") {
+      return deleted;
+    }
+    // Back from the answer, a page at a time, to the person's question.
+    let before = answerId;
+    for (;;) {
+      const page = this.#db
+        .select()
+        .from(chatMessages)
+        .where(
+          and(eq(chatMessages.chatId, id.data), lt(chatMessages.id, before))
+        )
+        .orderBy(desc(chatMessages.id))
+        .limit(turnRowsPerRead)
+        .all();
+      const asked = page
+        .map((row) => parsed(row))
+        .find((message) => message.role === "user");
+      if (asked?.role === "user") {
+        const question = questionText(asked).trim();
+        return question === ""
+          ? { kind: "skipped", reason: "no_text" }
+          : { kind: "question", question };
+      }
+      const last = page.at(-1);
+      if (last === undefined || page.length < turnRowsPerRead) {
+        return { kind: "skipped", reason: "no_text" };
+      }
+      before = last.id;
+    }
   }
 
   async #captureSoon(): Promise<void> {
@@ -1980,6 +2125,7 @@ export class Workspace extends DurableObject<Env> {
         capture: {
           model: model.id,
           audience: audience === undefined ? null : [...audience.members],
+          attended: !unattended,
         },
       });
       if (end.stopped !== undefined) {
@@ -3957,8 +4103,9 @@ export class Workspace extends DurableObject<Env> {
    * Deletes `personId`'s own chat once its agent isn't working on it:
    * rejects every write its agent holds for `person` (connect's
    * `declineChatActions`, each recorded there) and revokes every
-   * connection granted or asked for in it, each audited, then deletes it with its
-   * messages and sources, audited as `by`'s. While it does, the chat is
+   * connection granted or asked for in it, each audited, erases its turns
+   * from its person's own Brain (`eraseChat`), then deletes it with its
+   * messages and sources, audited as `by`'s. The Brain's part runs first. While it does, the chat is
    * marked deleting and takes no question, so no write can be held after
    * the rejecting; if rejecting or revoking fails, the mark goes and the
    * chat stays.
@@ -3979,6 +4126,13 @@ export class Workspace extends DurableObject<Env> {
     }
     this.#deleting.add(id);
     try {
+      // Its turns in its person's own Brain (GRA-1805), first: one call,
+      // which closes the chat there too, so a turn handed over after is
+      // refused. Should it fail, nothing of the chat was touched: it stays
+      // and works. Should a step after it fail, the chat stays and still
+      // answers, but its questions are no longer kept (each later one
+      // ends refused as erased), and deleting it again completes.
+      await eraseChat(this.env, personId, id);
       const workspaceId = workspaceIdSchema.parse(this.ctx.id.name);
       const declined = await this.env.CONNECT.declineChatActions({
         person,

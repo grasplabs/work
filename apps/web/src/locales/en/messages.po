@@ -4867,6 +4867,10 @@ msgstr "Didn't hand a webhook event to the run waiting for it"
 msgid "Didn't keep a webhook event: its source keeps as many as it may"
 msgstr "Didn't keep a webhook event: its source keeps as many as it may"
 
+#: src/activity/audit-words.ts
+msgid "Didn't keep something noted for the Brain, and recorded why"
+msgstr "Didn't keep something noted for the Brain, and recorded why"
+
 #: src/agents/agent-wakes.tsx
 msgid "Didn't run {when}: no AI provider is connected"
 msgstr "Didn't run {when}: no AI provider is connected"
@@ -9244,6 +9248,10 @@ msgstr "Note not found"
 #: src/onboarding/connect-steps.tsx
 msgid "Noted"
 msgstr "Noted"
+
+#: src/activity/audit-words.ts
+msgid "Noted a question asked in a chat, to keep in its person's own Brain"
+msgstr "Noted a question asked in a chat, to keep in its person's own Brain"
 
 #: src/onboarding/connect-steps.tsx
 msgid "Noted: {name}. Sign in to connect it now, or we’ll connect it with you. I’ll only read what you share with me."

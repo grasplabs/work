@@ -165,11 +165,14 @@ export const fitsSourceText = (text: string): boolean =>
 
 /**
  * A version of a source to add: which source, the change it is, its text,
- * and who may read this version.
+ * who may read this version, and, in a person's own store alone, the
+ * group it is erased with (`Brain.eraseSource` of the group's key): a key its own key starts
+ * with, then "/". A source keeps the group of its first version.
  */
 export const newSourceSchema = z.strictObject({
   source: sourceIdSchema,
   change: changeKeySchema,
+  group: sourceIdSchema.optional(),
   text: wellFormedString()
     // A text of whitespace alone has no passage to keep or find.
     .regex(/\S/u, { message: "Holds no text" })
@@ -206,20 +209,22 @@ export const instructionsTextSchema = wellFormedString()
  * source, but never cut into chunks or indexed, so recall never finds it:
  * it is read whole (`readCurrent`).
  */
-export const newInstructionsSchema = newSourceSchema.extend({
-  text: instructionsTextSchema,
-  /**
-   * The current version the caller saw, null for none yet: the add writes
-   * only while it still is, checked in the transaction that writes, and is
-   * refused with `staleVersion` otherwise. Given, the add always makes a
-   * new version, even of the current text and readers, so every add that
-   * lands moves the version. A change the store already has answers with
-   * the version it made first, so a retry still adds nothing twice. Left
-   * out, an add writes whatever is current, and current text and readers
-   * make no new version.
-   */
-  after: versionSchema.nullable().optional(),
-});
+export const newInstructionsSchema = newSourceSchema
+  .omit({ group: true })
+  .extend({
+    text: instructionsTextSchema,
+    /**
+     * The current version the caller saw, null for none yet: the add writes
+     * only while it still is, checked in the transaction that writes, and
+     * is refused with `staleVersion` otherwise. Given, the add always makes
+     * a new version, even of the current text and readers, so every add
+     * that lands moves the version. A change the store already has answers
+     * with the version it made first, so a retry still adds nothing twice.
+     * Left out, an add writes whatever is current, and current text and
+     * readers make no new version.
+     */
+    after: versionSchema.nullable().optional(),
+  });
 export type NewInstructions = z.infer<typeof newInstructionsSchema>;
 
 /**
@@ -1082,8 +1087,23 @@ export type ErasureReason = (typeof erasureReasons)[number];
 export const sourceErasureSchema = z.strictObject({
   source: sourceIdSchema,
   reason: z.enum(erasureReasons),
+  /**
+   * That the key is a group's (`NewSource.group`), though no add may have
+   * named it yet: so it is erased as one, and keys under it are refused
+   * from then on, named in the group or not. A key an add named as a
+   * group is erased as one whether this is given or not. A person's own
+   * store's alone: the shared store, which holds no group, ignores it.
+   */
+  asGroup: z.literal(true).optional(),
 });
 export type SourceErasure = z.infer<typeof sourceErasureSchema>;
+
+/**
+ * Whether `source` may be in `group`: its key is the group's, "/" and
+ * more, so no source joins a group its key isn't under.
+ */
+export const isInGroup = (source: string, group: string): boolean =>
+  source.length > group.length + 1 && source.startsWith(`${group}/`);
 
 /** A person whose own content to erase, and why. */
 export const personErasureSchema = z.strictObject({
@@ -2238,8 +2258,15 @@ export interface Brain {
    * sweep). Returns once the erasure is in the
    * ledger and nothing of the source is found or read any more; what is
    * left to delete, the store's tick finishes. The source's key is closed:
-   * an add to it is refused from then on. It answers alike whether the
-   * source held anything, and is safe to repeat.
+   * an add to it is refused from then on. Every source added in the key
+   * as its group (`NewSource.group`) is erased with it, in the same one
+   * entry. Once a key an add named as a group is erased, every key under
+   * it (`<group>/…`) is refused and answers `erased` (`keyState`), named
+   * in the group or not; a key no add named as a group closes alone, so
+   * `upload:1` erased leaves `upload:1/x` free. Never an erasure by
+   * prefix: what is erased is the key and its group's members. It
+   * answers alike whether the source held anything, and is safe to
+   * repeat.
    */
   eraseSource: (request: SourceErasure) => Promise<void>;
   /**

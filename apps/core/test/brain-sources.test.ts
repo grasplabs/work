@@ -282,6 +282,37 @@ describe("the Brain's sources, as a person reads them", () => {
     ]);
   });
 
+  // GRA-1805: a chat's turns are seen in their chat, not as a row each.
+  it("lists no turn of a person's chat, and still finds one when they search", async () => {
+    const reader = await signedInApi(idp, "user");
+    const asked = word();
+    const upload = newSource();
+    await add(upload, `${asked} in a file`, owner(reader.userId));
+    const chat = {
+      producer: "chat" as const,
+      id: `${reader.userId}/${crypto.randomUUID()}`,
+    };
+    const turn = { producer: "chat" as const, id: `${chat.id}/1` };
+    await addSource(env, {
+      source: turn,
+      change: "answer",
+      text: `${asked} in a chat?`,
+      readers: owner(reader.userId),
+      group: chat,
+    });
+
+    const { sources } = await reader.api.brainSources.list();
+    const { items } = await reader.api.brainSources.search(asked);
+
+    expect({
+      listed: idsOf(sources).filter((id) => id === upload.id || id === turn.id),
+      found: items.map(({ source }) => source.id).toSorted(byCodeUnits),
+    }).toStrictEqual({
+      listed: [upload.id],
+      found: [upload.id, turn.id].toSorted(byCodeUnits),
+    });
+  });
+
   it("refuses a question longer than the Brain takes, as recall does for every caller", async () => {
     const { api, userId } = await signedInApi(idp, "user");
     const tooLong = "a".repeat(questionMaxLength + 1);

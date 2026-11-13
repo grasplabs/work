@@ -1004,6 +1004,63 @@ const erasedBefore = async (personId: string): Promise<string> => {
   return personId;
 };
 
+/**
+ * Adds in a group that core refuses, each answered with the markers in
+ * its text: for a team, for nobody, of another producer, not over its
+ * source, and named by the markers.
+ */
+const groupedAdds = async (
+  markers: readonly string[],
+  text: string
+): Promise<Answer[]> => {
+  const chat = (): SourceRef => ({
+    producer: "chat",
+    id: `${stranger()}/${crypto.randomUUID()}`,
+  });
+  const add = async (
+    name: string,
+    readers: SourceReaders,
+    group: SourceRef,
+    source?: SourceRef
+  ) =>
+    await answer(
+      name,
+      async () =>
+        await coreBrain.addSource(env, {
+          source: source ?? { ...group, id: `${group.id}/1` },
+          change: crypto.randomUUID(),
+          text,
+          readers,
+          group,
+        })
+    );
+  const someoneElse: SourceReaders = { kind: "owner", personId: stranger() };
+  return [
+    await add(
+      "in a group, for a team",
+      { kind: "team", teamId: stranger() },
+      chat()
+    ),
+    await add("in a group, for nobody", { kind: "none" }, chat()),
+    await add(
+      "in a group of another producer",
+      someoneElse,
+      {
+        producer: "upload",
+        id: crypto.randomUUID(),
+      },
+      { producer: "chat", id: `${crypto.randomUUID()}/1` }
+    ),
+    await add("in a group not over its source", someoneElse, chat(), chat()),
+    await add(
+      "in a group named by the markers, not over its source",
+      someoneElse,
+      { producer: "chat", id: markers.join("") },
+      chat()
+    ),
+  ];
+};
+
 /** One probe per export of core's brain-next.ts. */
 export const coreProbes = {
   addSource: async ({ markers, hiddenVersions }) => {
@@ -1062,6 +1119,8 @@ export const coreProbes = {
       ),
       ...(await refusedChange(markers)),
       ...(await otherKindOf(hiddenVersions)),
+      // Groups (GRA-1805): a person's own store's alone, over their source.
+      ...(await groupedAdds(markers, text)),
     ];
   },
   listSourcesAs: async ({ personId, hiddenVersions, markers }) => {
@@ -1558,6 +1617,18 @@ export const coreProbes = {
       text: markedText(markers),
       readers,
     });
+    // A chat's turn of theirs, in its chat's group (GRA-1805).
+    const markedGroup: SourceRef = {
+      producer: "chat",
+      id: `${readers.personId}/${crypto.randomUUID()}`,
+    };
+    await coreBrain.addSource(env, {
+      source: { producer: "chat", id: `${markedGroup.id}/1` },
+      change: crypto.randomUUID(),
+      text: markedText(markers),
+      readers,
+      group: markedGroup,
+    });
     return [
       await erase(
         "a source no one added",
@@ -1567,6 +1638,12 @@ export const coreProbes = {
       ),
       await erase("someone else's marked source", marked, "deleted", "hidden"),
       await erase("the same erasure again", marked, "deleted", "hidden"),
+      await erase(
+        "the group of someone else's marked source",
+        markedGroup,
+        "deleted",
+        "hidden"
+      ),
       await erase(
         "an unknown producer named by the markers",
         unchecked({ producer: markers.join(""), id: crypto.randomUUID() })
