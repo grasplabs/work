@@ -11,6 +11,7 @@ import {
   staleVersion,
 } from "./contract.ts";
 import type {
+  AddedVersion,
   ChangeRequest,
   CurrentRequest,
   NewSource,
@@ -145,6 +146,10 @@ const versionFields = {
   readers: readerSets.key,
 };
 
+/** When `added`'s text was read, as a change row keeps it, if it said. */
+const readAtOf = (added: NewSource): { readAt?: Date } =>
+  added.readAt === undefined ? {} : { readAt: new Date(added.readAt) };
+
 /**
  * The version `adding` already made or matches, by the order above,
  * keeping a new change's key for the current version it matches; or
@@ -207,9 +212,49 @@ const madeBefore = (
       source: added.source,
       change: added.change,
       versionRow: current.row,
+      ...readAtOf(added),
     })
     .run();
   return { source: added.source, version: current.version };
+};
+
+/**
+ * The source's current version when its text was last read later than
+ * `added`'s (each says when it was read: the latest `read_at` among the
+ * current version's changes, `readAtOf`), marked `newer`: then `added` is
+ * written nowhere. A later read of the current text is a change of the
+ * current version (`madeBefore`), so it counts too.
+ */
+const newerThan = (
+  db: DrizzleSqliteDODatabase,
+  added: NewSource
+): AddedVersion | undefined => {
+  if (added.readAt === undefined) {
+    return undefined;
+  }
+  const current = db
+    .select({
+      version: sourceVersions.version,
+      readAt: max(sourceChanges.readAt),
+    })
+    .from(currentVersions)
+    .innerJoin(
+      sourceVersions,
+      eq(sourceVersions.row, currentVersions.versionRow)
+    )
+    .innerJoin(
+      sourceChanges,
+      eq(sourceChanges.versionRow, currentVersions.versionRow)
+    )
+    .where(eq(currentVersions.source, added.source))
+    .groupBy(sourceVersions.version)
+    .get();
+  const lastRead = current?.readAt ?? undefined;
+  return current !== undefined &&
+    lastRead !== undefined &&
+    lastRead.getTime() > added.readAt
+    ? { source: added.source, version: current.version, newer: true }
+    : undefined;
 };
 
 /**
@@ -227,7 +272,7 @@ const record = (
   db: DrizzleSqliteDODatabase,
   storage: DurableObjectStorage,
   adding: Adding
-): SourceVersionRef | undefined => {
+): AddedVersion | undefined => {
   // Erased while this add wrote its file: closed for good. Or for one
   // person alone, whose erasure came after it began and before this: it
   // may have missed it, so it is refused, writing nothing (its file is
@@ -251,6 +296,13 @@ const record = (
     return before;
   }
   const { added, hash } = adding;
+  // Read before the current version was: a late add of an older read
+  // never replaces a newer one. Checked here, in the transaction that
+  // would make it current, so no other add slips in between.
+  const newer = newerThan(db, added);
+  if (newer !== undefined) {
+    return newer;
+  }
   if (isInDoubt(db, hash)) {
     return undefined;
   }
@@ -298,7 +350,12 @@ const record = (
     enqueueEmbedding(storage, added.source, version);
   }
   db.insert(sourceChanges)
-    .values({ source: added.source, change: added.change, versionRow: row })
+    .values({
+      source: added.source,
+      change: added.change,
+      versionRow: row,
+      ...readAtOf(added),
+    })
     .run();
   keepSubject(storage.sql, added.source, adding.subject, adding.group);
   if (adding.group !== null) {
@@ -355,7 +412,7 @@ export const addVersion = async (
   { storage, db, bucket, groups }: SourcesStore,
   added: Adding["added"],
   { indexed }: { indexed: boolean }
-): Promise<SourceVersionRef> => {
+): Promise<AddedVersion> => {
   const soFar = erasuresSoFar(storage.sql);
   const body = encoder.encode(added.text);
   const adding: Adding = {

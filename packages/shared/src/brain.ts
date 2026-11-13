@@ -366,6 +366,13 @@ export interface Connection {
   via: "direct" | "composio";
   /** Tool names in workflow steps that this connection covers. */
   matches: string[];
+  /**
+   * Whether the Brain keeps what an agent reads for this person through it
+   * (GRA-1730): a native provider with a tool that answers one item
+   * (core's `nativeItemReads`, the table capture keeps by), connected by
+   * the person themselves. Absent for every other.
+   */
+  keepsReads?: true;
 }
 
 /** Everything the brain is built from. */

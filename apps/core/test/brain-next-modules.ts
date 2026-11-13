@@ -44,6 +44,9 @@ export const brainModules = {
   // Uploads straight into the Brain, reached only through the Sources
   // page's methods (brain-sources-rpc.ts), whose probes call each of them.
   "apps/core/src/brain-uploads.ts": "sources",
+  // Adds what a chat's agent read through a connection with core's
+  // addSource, for the chat's person alone, and hands nothing on.
+  "apps/core/src/connection-capture.ts": "core",
   // Writing and sharing skills (GRA-1754): its own surface, each export
   // probed as the signed-in person.
   "apps/core/src/skill-shares.ts": "shares",
