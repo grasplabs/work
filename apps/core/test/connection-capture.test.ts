@@ -3,7 +3,12 @@ import type { AuditEvent } from "@grasp-os/shared/audit";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { erasePerson, eraseSource, recallAs } from "../src/brain-next.ts";
+import {
+  addSource,
+  erasePerson,
+  eraseSource,
+  recallAs,
+} from "../src/brain-next.ts";
 import { captureIdOf } from "../src/connection-capture-key.ts";
 import { captureRead } from "../src/connection-capture.ts";
 import { chatOf, codeStep, says } from "./agent-chat.ts";
@@ -789,5 +794,26 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
         },
       ],
     });
+  });
+
+  it("is refused unless one person alone reads it, so it never reaches the shared store or code's recall", async () => {
+    const marker = markerOf();
+    const added = async (readers: Parameters<typeof addSource>[1]["readers"]) =>
+      await addSource(env, {
+        source: { producer: "capture", id: `connection-x/${marker}` },
+        change: crypto.randomUUID(),
+        text: `Captured ${marker}`,
+        readers,
+      }).then(() => "added", String);
+
+    await expect(
+      Promise.all([
+        added({ kind: "team", teamId: crypto.randomUUID() }),
+        added({ kind: "none" }),
+      ])
+    ).resolves.toStrictEqual([
+      "Error: Refused: a capture is for one person alone",
+      "Error: Refused: a capture is for one person alone",
+    ]);
   });
 });
