@@ -1,3 +1,4 @@
+import { modelFileKey, shippedModel } from "@grasp-os/embed/model-files";
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
 import { toHex } from "@grasp-os/shared/encoding";
 import { requestIdHeader } from "@grasp-os/shared/http";
@@ -37,8 +38,9 @@ import { coreOrigin } from "./sign-in.ts";
 // - The answer leaking a secret, a resource's id or an error's words.
 // - A binding or clock that doesn't answer passing as one that does.
 // - A deployment whose model files bucket lacks a file of the model core
-//   runs passing, to fail at its first question instead (what the probe
-//   asks of the bucket, `holdsModelFiles`, is tried in embedder.test.ts).
+//   runs passing, to fail at its first question instead (each way the
+//   bucket can fail to hold one, `holdsModelFiles`, is tried in
+//   embedder.test.ts).
 
 /** The client the admin deployed this core as. */
 const clientId = "acme";
@@ -177,8 +179,7 @@ describe("the console's provisioning probe", () => {
           FILES: true,
           AUDIT_ARCHIVE: true,
           BRAIN_OBJECTS: true,
-          // It answers; no model ships yet, so there are no files to hold
-          // (test/embedder.test.ts holds a model to the files).
+          // It answers and holds every file of the model core runs.
           MODEL_FILES: true,
           // The sandbox App code runs in, with a fresh isolate's answer.
           LOADER: true,
@@ -318,6 +319,18 @@ describe("the console's provisioning probe", () => {
     expect(text).not.toContain("9b3e7d10aa");
     expect(text).not.toContain("51c2e9");
     expect(text).not.toContain("deployed");
+  });
+
+  it("says the model files bucket failed while it lacks a file of the model core runs", async () => {
+    const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await env.MODEL_FILES.delete(modelFileKey(shippedModel.tokens));
+
+    const response = await probe();
+    warnings.mockRestore();
+
+    expect(
+      provisionProbeSchema.parse(await response.json()).bindings
+    ).toMatchObject({ MODEL_FILES: false, FILES: true });
   });
 
   it("says when it runs as no client the console deployed", async () => {

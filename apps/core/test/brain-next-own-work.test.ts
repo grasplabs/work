@@ -131,7 +131,10 @@ const answer = { text: "An answer.", inputTokens: 10, outputTokens: 5 };
 describe("a person's own store at work on its own alarm", () => {
   it("works its own queue on its alarm, asking the model through core's gateway, and staff see it only in totals", async () => {
     const provider = await answeringProvider(() => answer);
+    const before = await totals();
     const person = await personWithSource();
+    // Its source embedded first, so this item is all its queue holds.
+    await workedOut(person);
     const key = `asks-${crypto.randomUUID()}`;
     const answers: string[] = [];
     behaviours.set(key, async ({ ask }) => {
@@ -139,7 +142,6 @@ describe("a person's own store at work on its own alarm", () => {
     });
     await enqueueOwn(person, key);
     const armed = (await alarmOf(person)) !== null;
-    const before = await totals();
 
     const ran = await runDurableObjectAlarm(ownStore(person));
     const after = await totals();

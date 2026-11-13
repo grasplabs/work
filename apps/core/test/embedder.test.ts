@@ -6,6 +6,11 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  embedInProcess,
+  putTestModel,
+} from "../../../packages/embed/test/test-models.ts";
+import { inJurisdiction } from "../src/durable-objects.ts";
+import {
   Embedder,
   holdsModelFiles,
   questionEmbedderOf,
@@ -16,18 +21,25 @@ import {
 // reading the model's files from MODEL_FILES, and what the probe asks of
 // that bucket. The model itself is the embed package's to test
 // (packages/embed); the files' way in is the admin's deploy's and the
-// on-prem profile's (scripts/workerd-model-files.test.ts). No model ships
-// yet (GRA-1767), so core runs none: that path is tried here end to end.
+// on-prem profile's (scripts/workerd-model-files.test.ts). Core's tests
+// ship the embed package's test model, its files in MODEL_FILES as each
+// file starts (start-each-file.ts), as a deploy puts the real one's.
 
-/** What core's question embedder says to `text`: its vector's length, or why it refused. */
-const embedded = async (text: string): Promise<number | string> =>
-  await runInDurableObject(questionEmbedderOf(env), async (instance) => {
+/**
+ * What `embedder` says to `text`: its vector, as numbers, and the model's
+ * name, or why it refused.
+ */
+const embeddedBy = async (
+  embedder: DurableObjectStub<Embedder>,
+  text: string
+): Promise<{ vector: number[]; model: string } | string> =>
+  await runInDurableObject(embedder, async (instance) => {
     if (!(instance instanceof Embedder)) {
       throw new TypeError("EMBEDDER isn't the embedder");
     }
     try {
-      const { vector } = await instance.embed(text);
-      return vector.length;
+      const { vector, model } = await instance.embed(text);
+      return { vector: [...vector], model: model.name };
     } catch (error) {
       return error instanceof Error ? error.message : String(error);
     }
@@ -71,16 +83,35 @@ const putModel = async ({
 };
 
 describe("core's embedder", () => {
-  it("runs no model while none ships, and refuses every text, saying why", async () => {
-    expect(shippedModel).toBeNull();
+  it("has the clock warm the question embedder, failing no task, and answers a question by the model core ships, from MODEL_FILES", async () => {
+    const question = "Wat staat er op de factuur?";
+    await expect(warmQuestionEmbedder(env)).resolves.toBeUndefined();
 
-    await expect(embedded("Wat staat er op de factuur?")).resolves.toBe(
-      "No embedding model ships with this release, so nothing is embedded."
-    );
+    const {
+      vectors: [expected],
+    } = await embedInProcess([question]);
+
+    await expect(
+      embeddedBy(questionEmbedderOf(env), question)
+    ).resolves.toStrictEqual({ vector: expected, model: shippedModel.name });
   });
 
-  it("has the clock warm nothing, and fail no task, while no model ships", async () => {
-    await expect(warmQuestionEmbedder(env)).resolves.toBeUndefined();
+  it("refuses every text while a file of the model is missing from MODEL_FILES, saying which, and embeds once it is back", async () => {
+    // An embedder that hasn't loaded the model yet, as after a deploy.
+    const embedder = inJurisdiction(env, env.EMBEDDER).getByName(
+      crypto.randomUUID()
+    );
+    await env.MODEL_FILES.delete(modelFileKey(shippedModel.tokens));
+
+    await expect(embeddedBy(embedder, "Een vraag")).resolves.toBe(
+      `${shippedModel.name}'s tokens file is missing: no ${modelFileKey(shippedModel.tokens)} in the model files bucket.`
+    );
+
+    await putTestModel(env.MODEL_FILES, shippedModel);
+
+    await expect(embeddedBy(embedder, "Een vraag")).resolves.toMatchObject({
+      model: shippedModel.name,
+    });
   });
 
   it("finds a model's files held only when each is there at its size and with its SHA-256", async () => {
@@ -108,7 +139,11 @@ describe("core's embedder", () => {
     expect(answers).toStrictEqual([true, false, false]);
   });
 
-  it("holds no model to anything while none ships", async () => {
-    await expect(holdsModelFiles(env.MODEL_FILES)).resolves.toBeTruthy();
+  it("finds the model core ships held while MODEL_FILES has its files, and not once one is gone", async () => {
+    const before = await holdsModelFiles(env.MODEL_FILES);
+    await env.MODEL_FILES.delete(modelFileKey(shippedModel.encoder));
+
+    await expect(holdsModelFiles(env.MODEL_FILES)).resolves.toBeFalsy();
+    expect(before).toBeTruthy();
   });
 });

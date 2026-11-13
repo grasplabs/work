@@ -2,21 +2,9 @@ import { brainOf, recallBudgetMax } from "@grasp-os/brain-next/contract";
 import type { Pack } from "@grasp-os/brain-next/contract";
 import { brainWithoutMeaningReasons } from "@grasp-os/shared/brain-report";
 import { env } from "cloudflare:workers";
-import {
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import {
-  calls,
-  int8Model,
-  poisonWord,
-  putTestModel,
-} from "../../../packages/embed/test/test-models.ts";
+import { calls, poisonWord } from "../../../packages/embed/test/test-models.ts";
 import type {
   BreakableEmbedder,
   Breakage,
@@ -167,10 +155,6 @@ describe("recall by meaning, through core", () => {
           budget: { tokens: recallBudgetMax },
         })
     );
-
-  beforeAll(async () => {
-    await putTestModel(env.MODEL_FILES, int8Model);
-  });
 
   /**
    * The person and their passage, embedded, once for the file: inside the
