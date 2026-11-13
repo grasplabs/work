@@ -76,9 +76,10 @@ export type ChatSubject = z.infer<typeof chatSubjectSchema>;
 
 /**
  * The kinds of thing a question may mention: what the person picks with
- * `@` in the composer, an App, a workflow or a member of the organization.
+ * `@` in the composer, an App, a workflow, a member of the organization,
+ * or an agent they may ask (`ChatsApi.agents`), which then answers it.
  */
-export const chatMentionKinds = ["app", "workflow", "person"] as const;
+export const chatMentionKinds = ["app", "workflow", "person", "agent"] as const;
 export type ChatMentionKind = (typeof chatMentionKinds)[number];
 
 /** One thing a question mentions: of a kind, by its ID (a person's user ID). */
@@ -815,6 +816,11 @@ export type ChatMessage =
   | {
       id: number;
       role: "assistant";
+      /**
+       * The agent that gave it (`ChatsApi.agents`); none for an answer
+       * kept before a chat could have several.
+       */
+      agentId?: string;
       /**
        * Its answer, in Markdown. A link to a note it was given stays a
        * `grasp:note/<documentId>` link, one of `citations`; one to any

@@ -1,5 +1,6 @@
 import { definitionToolNames } from "@grasp-os/shared/chat";
 import type {
+  ChatAgent,
   ChatCitation,
   ChatCode,
   ChatMessage,
@@ -51,6 +52,7 @@ import {
 import { createContext, Fragment, lazy, Suspense, use, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 
+import { AgentAvatar } from "../agents/agent-avatar.tsx";
 import type { ThinkingOf } from "../brain/thinking/play.ts";
 import { useCopy } from "../copy.ts";
 import { ConnectAiProvider } from "../frame/connect-ai-provider.tsx";
@@ -1082,8 +1084,49 @@ const lastAnswerOf = (
 /** Where the page passes no calls of the chat's code. */
 const noTools: readonly ChatToolEvent[] = [];
 
+/** Where the page passes no agents. */
+const noAgents: readonly ChatAgent[] = [];
+
+/**
+ * The answers that name their agent, by ID: in a chat more than one agent
+ * answered in, each answer whose agent isn't the one before it. A chat one
+ * agent answers in names none, as it always did.
+ */
+export const answerAgentsOf = (
+  messages: readonly ChatMessage[]
+): ReadonlyMap<number, string> => {
+  const answers = messages.filter(
+    (message): message is Answer => message.role === "assistant"
+  );
+  const named = new Map<number, string>();
+  if (new Set(answers.flatMap(({ agentId }) => agentId ?? [])).size < 2) {
+    return named;
+  }
+  let before: string | undefined;
+  for (const { id, agentId } of answers) {
+    if (agentId !== undefined && agentId !== before) {
+      named.set(id, agentId);
+    }
+    before = agentId ?? before;
+  }
+  return named;
+};
+
+/** The agent that gave the answers under it: its picture and name. */
+const AnswerBy = ({ agent }: { agent: ChatAgent | undefined }) => {
+  const { t } = useLingui();
+  const name = agent?.name ?? t`An agent you can no longer ask`;
+  return (
+    <p className="text-muted-foreground flex items-center gap-2 text-sm font-medium">
+      <AgentAvatar face={agent?.face ?? "stephen"} size="default" />
+      {name}
+    </p>
+  );
+};
+
 /** The chat's messages, and the response being written, oldest first. */
 export const ChatThread = ({
+  agents = noAgents,
   chatId,
   loaded,
   messages,
@@ -1097,6 +1140,12 @@ export const ChatThread = ({
   build,
   children,
 }: {
+  /**
+   * The agents the person may ask, which name each answer that another
+   * agent gave than the one before it; none, and no names, where the page
+   * hasn't them.
+   */
+  agents?: readonly ChatAgent[] | undefined;
   /** The chat, whose answers' sources core is asked for. */
   chatId: string;
   /** Whether core has sent the chat yet: until then, it is loading. */
@@ -1218,9 +1267,15 @@ export const ChatThread = ({
         <Reading />
       </div>
     ) : null;
+  const answerAgents = answerAgentsOf(messages);
   const renderReplies = (answers: readonly Answer[]): ReactNode =>
     answers.map((message) => (
       <Fragment key={message.id}>
+        {answerAgents.has(message.id) ? (
+          <AnswerBy
+            agent={agents.find(({ id }) => id === answerAgents.get(message.id))}
+          />
+        ) : null}
         <Reply
           compact={compact}
           onRetry={
