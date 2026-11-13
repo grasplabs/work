@@ -32,7 +32,8 @@ const idp = mockIdp();
 const word = () => `w${unique()}`;
 
 /** What core or the store says when it refuses an input. */
-const refused = /^(?:The Brain refused it|Refused)/u;
+const refused =
+  /^(?:The Brain refused it|Refused|That isn't a valid request to the Brain)/u;
 
 /** A member of the organization, signed in. */
 const person = async (): Promise<string> => {

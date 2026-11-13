@@ -272,7 +272,8 @@ const later = (ms: number): void => {
 const crashed = /Crashed by the test/u;
 
 /** What the Brain or core says when it refuses an input. */
-const refused = /^(?:The Brain refused it|Refused)/u;
+const refused =
+  /^(?:The Brain refused it|Refused|That isn't a valid request to the Brain)/u;
 
 describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
   afterEach(() => {

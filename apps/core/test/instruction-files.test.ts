@@ -330,8 +330,8 @@ describe("instruction files", setUpTime, () => {
     await expect(saveOutcome(person, file, `${atMost}${astral}`)).resolves.toBe(
       "instructions.too_large"
     );
-    await expect(saveOutcome(person, file, " \n ")).resolves.toMatch(
-      /^Error: Refused/u
+    await expect(saveOutcome(person, file, " \n ")).resolves.toBe(
+      "brain.invalid"
     );
     await expect(
       textsFor(agentFor(newAgentId(), person.userId), { conversation: "own" })
