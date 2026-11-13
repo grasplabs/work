@@ -140,8 +140,6 @@ export interface ChatSummary {
   lastAt: string;
   /** Whether its agent is working on a question now. */
   running: boolean;
-  /** The App it was made for, or null for none. */
-  appId: string | null;
   /**
    * Which channel it came through: Grasp's own app (`web`), or a chat
    * platform by its adapter's name (`teams`, `slack`), for good.
@@ -234,10 +232,11 @@ export interface ChatFileInput {
 }
 
 /**
- * What a chat's agent worked on (`ChatsApi.worked`): an App or workflow
- * whose draft it wrote, when it last did, and in which code step or tool
- * call (`ChatCode.callId`, `ChatToolCall.callId`), where the chat's thread
- * shows it.
+ * What a chat worked on (`ChatsApi.worked`): an App or workflow whose
+ * draft its agent wrote, or which its Build it made, when it last did,
+ * and in which code step or tool call (`ChatCode.callId`,
+ * `ChatToolCall.callId`), or by which plan (`ChatPlanned.callId`), where
+ * the chat's thread shows it.
  */
 export interface ChatWork {
   kind: SubjectKind;

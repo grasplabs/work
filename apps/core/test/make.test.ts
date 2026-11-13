@@ -5,6 +5,7 @@ import type {
   ChatPlan,
   ChatUpdate,
 } from "@grasp-os/shared/chat";
+import type { Subject } from "@grasp-os/shared/subject";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -312,7 +313,7 @@ describe("Make something", { timeout: 120_000 }, () => {
     });
   });
 
-  it("builds exactly what the plan lists, once, says it in the person's words and tells the agent what was made", async () => {
+  it("builds exactly what the plan lists, once, says it in the person's words, tells the agent what was made, and is the chat of each", async () => {
     const builder = await signedInApi(idp, "builder");
     const before = await madeBy(builder);
     const { chat, callId, stub, provider } = await plannedChat(
@@ -336,6 +337,10 @@ describe("Make something", { timeout: 120_000 }, () => {
     const after = await madeBy(builder);
     const messages = await messagesOf(stub, chat.id, builder.userId);
     const told = JSON.stringify(provider.requests.at(-1)?.body);
+    const chatOf = async (subject: Subject) => {
+      const found = await builder.api.chats.forSubject(subject);
+      return found?.id;
+    };
 
     expect({
       made: {
@@ -353,6 +358,11 @@ describe("Make something", { timeout: 120_000 }, () => {
         (id) => id !== undefined && told.includes(id)
       ),
       again,
+      // Its agent wrote neither yet: Build it made them in this chat.
+      chats: [
+        await chatOf({ kind: "app", id: made.app?.id ?? "" }),
+        await chatOf({ kind: "workflow", id: made.workflow?.id ?? "" }),
+      ],
     }).toStrictEqual({
       made: { app: "Month-end close", workflow: "Late reminder" },
       apps: [made.app?.id],
@@ -363,6 +373,7 @@ describe("Make something", { timeout: 120_000 }, () => {
       ],
       told: true,
       again: "agent.plan_not_found",
+      chats: [chat.id, chat.id],
     });
   });
 
@@ -543,7 +554,7 @@ describe("Make something", { timeout: 120_000 }, () => {
     expect(made.workflow).toBeUndefined();
   });
 
-  it("keeps an App it made whose filing in the project fails, and never makes it twice", async () => {
+  it("keeps a workflow it made whose filing in the project fails, the chat the App's and the workflow's, and never makes either twice", async () => {
     const owner = await signedInApi(idp, "builder");
     const { id: project } = await owner.api.projects.create({
       name: `Close ${unique()}`,
@@ -551,7 +562,7 @@ describe("Make something", { timeout: 120_000 }, () => {
       icon: "coins",
     });
     const started = { kind: "app", project } as const;
-    const { chat, callId, stub } = await plannedChat(owner, pagePlan, started);
+    const { chat, callId, stub } = await plannedChat(owner, closePlan, started);
     const before = await madeBy(owner);
     const build = async () =>
       await owner.api.chats.build(chat.id, {
@@ -560,11 +571,11 @@ describe("Make something", { timeout: 120_000 }, () => {
         model,
       });
 
-    // The database refuses filing anything in the project, as one removed
-    // or no longer theirs midway would.
+    // The database refuses filing the workflow in the project, as a
+    // project removed or no longer theirs midway would, after the App.
     const refusing = `refuse_filing_${unique().replaceAll("-", "_")}`;
     await env.DB.prepare(
-      `CREATE TRIGGER ${refusing} BEFORE INSERT ON project_items WHEN NEW.project_id = '${project}' BEGIN SELECT RAISE(ABORT, 'refused'); END`
+      `CREATE TRIGGER ${refusing} BEFORE INSERT ON project_items WHEN NEW.project_id = '${project}' AND NEW.item_type = 'workflow' BEGIN SELECT RAISE(ABORT, 'refused'); END`
     ).run();
     let made: Awaited<ReturnType<typeof build>>;
     try {
@@ -575,14 +586,28 @@ describe("Make something", { timeout: 120_000 }, () => {
     const again = await outcome(build());
     const after = await madeBy(owner);
     const messages = await messagesOf(stub, chat.id, owner.userId);
+    const chatOf = async (subject: Subject) => {
+      const found = await owner.api.chats.forSubject(subject);
+      return found?.id;
+    };
 
     expect({
       apps: after.apps.filter((id) => !before.apps.includes(id)),
+      workflows: after.workflows.filter((id) => !before.workflows.includes(id)),
       said: messages.findLast(({ role }) => role === "user"),
+      chats: [
+        await chatOf({ kind: "app", id: made.app?.id ?? "" }),
+        await chatOf({ kind: "workflow", id: made.workflow?.id ?? "" }),
+      ],
       again,
     }).toMatchObject({
       apps: [made.app?.id],
-      said: { text: "Build it", built: { plan: callId, app: made.app } },
+      workflows: [made.workflow?.id],
+      said: {
+        text: "Build it",
+        built: { plan: callId, app: made.app, workflow: made.workflow },
+      },
+      chats: [chat.id, chat.id],
       again: "agent.plan_not_found",
     });
   });

@@ -37,13 +37,13 @@ import { z } from "zod";
 
 import { turnAgent } from "./agents.ts";
 import { createFromBlueprint } from "./app-blueprints.ts";
-import { createApp, editableApp } from "./apps.ts";
+import { appKind, createApp, editableApp } from "./apps.ts";
 import { chatAgentOf, chatAgentsFor } from "./chat-agents.ts";
 import { chatRequests, decideInChat } from "./chat-connections.ts";
 import { readChatFile } from "./chat-files.ts";
 import { mentionablePeople, mentionsOf } from "./chat-mentions.ts";
 import { personOf } from "./connections.ts";
-import { chatWork, chatsWorkedOn } from "./drafts.ts";
+import { chatWork, chatsWorkedOn, keepMadeInChat } from "./drafts.ts";
 import { workspace } from "./durable-objects.ts";
 import { modelSettings, modelEffortsOf } from "./models.ts";
 import { chatPackageRequests } from "./packages/requests.ts";
@@ -57,6 +57,7 @@ import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { requireNotStaff } from "./sharing.ts";
 import { Subscription } from "./subscription.ts";
+import { workflowKind } from "./workflow-publish.ts";
 import {
   createWorkflowResource,
   requireWorkflowRole,
@@ -168,7 +169,6 @@ const summaryOfMade = (chat: Chat): ChatSummary => ({
   createdAt: chat.createdAt.toISOString(),
   lastAt: chat.lastAt.toISOString(),
   running: false,
-  appId: chat.appId,
   via: chat.via,
   make: makeOf(chat),
 });
@@ -402,9 +402,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       }
       const { subject: named, mentions: picked, ...asked } = parsed.data;
       const [subject, mentions] = await Promise.all([
-        named === undefined
-          ? this.#chatSubjectOf(person, id)
-          : this.#subjectOf(person, named),
+        named === undefined ? undefined : this.#subjectOf(person, named),
         picked === undefined || picked.length === 0
           ? undefined
           : mentionsOf(this.#env, person, picked),
@@ -423,7 +421,9 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
    * `createFromBlueprint` for an App part that names one,
    * `createWorkflowResource`, in the project the chat was started with),
    * then asks the chat's agent to build them, in the person's words, about
-   * the App (or the workflow, without one), told what was made. A plan
+   * the App (or the workflow, without one), told what was made. Each is
+   * kept as the chat's work the moment it is made (`keepMadeInChat`), so
+   * its page finds this chat (`forSubject`) whatever happens next. A plan
    * whose connections aren't all there yet makes nothing and stays to
    * build once they are: nothing is promised and then left out. What the
    * first make refuses (the person's role, the project's) leaves the plan
@@ -476,6 +476,11 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
               const { app } = started;
               // Known as made at once: a filing that fails leaves it made.
               made.app = { id: app.id, name: app.name };
+              await keepMadeInChat(this.#env, appKind, app.id, person.userId, {
+                chatId: id,
+                turnId: null,
+                callId,
+              });
               return app;
             },
             ({ id: appId }) => appId
@@ -494,6 +499,13 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
                 workflowNameOf(workflowPart.name)
               );
               made.workflow = { id: workflow.id, name: workflowPart.name };
+              await keepMadeInChat(
+                this.#env,
+                workflowKind,
+                workflow.id,
+                person.userId,
+                { chatId: id, turnId: null, callId }
+              );
               return workflow;
             },
             ({ id: workflowId }) => workflowId
@@ -550,26 +562,6 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     );
     if (unmetNeeds(plan, usable).length > 0) {
       throw agentErrors.create("agent.plan_needs_connection");
-    }
-  }
-
-  /**
-   * What a question names nothing else for is about, in a chat made for an
-   * App: that App, while the person still builds it; nothing otherwise.
-   */
-  async #chatSubjectOf(
-    person: Identity,
-    chatId: ChatId
-  ): Promise<{ kind: SubjectKind; id: string; name: string } | undefined> {
-    const app = await this.#chatsOf(person.userId).chatApp(chatId);
-    if (app === null) {
-      return undefined;
-    }
-    try {
-      return await this.#subjectOf(person, { kind: "app", id: app });
-    } catch {
-      // No longer theirs to build, or archived: asked about nothing.
-      return undefined;
     }
   }
 

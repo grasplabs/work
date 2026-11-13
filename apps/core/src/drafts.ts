@@ -1270,8 +1270,9 @@ export const turnSubjects = async (
 };
 
 /**
- * What chat `chatId`'s agent worked on, the most recently written first:
- * each subject with a checkpoint naming the chat, at its latest one.
+ * What chat `chatId` worked on, the most recently first: each subject
+ * with a checkpoint naming the chat (its agent's writes, and what its
+ * Build it made, `keepMadeInChat`), at its latest one.
  */
 export const chatWork = async (
   env: Env,
@@ -1302,7 +1303,8 @@ export const chatWork = async (
 };
 
 /**
- * The chats of `personId`'s whose agent wrote `subject`'s draft: those a
+ * The chats of `personId`'s that worked on `subject`, whose agent wrote
+ * its draft or whose Build it made it (`keepMadeInChat`): those a
  * checkpoint names, for the subject's page to carry on in
  * (`ChatsApi.forSubject`).
  */
@@ -1322,4 +1324,37 @@ export const chatsWorkedOn = async (
     )
     .all();
   return rows.flatMap(({ chatId }) => (chatId === null ? [] : [chatId]));
+};
+
+/**
+ * Keeps subject `id`, which Build it just made in a chat of `personId`'s
+ * (`ChatsApi.build`), as worked on by that chat: its draft as it starts,
+ * empty, kept as a checkpoint naming the chat and the plan's call
+ * (`chat`), before the chat's agent writes a thing. So the chat is the
+ * subject's (`chatsWorkedOn`) and lists it (`chatWork`) the moment it is
+ * made, whether its turn then starts or not. The draft itself doesn't
+ * move: nothing was written to it.
+ */
+export const keepMadeInChat = async (
+  env: Env,
+  kind: DraftKind,
+  id: string,
+  personId: string,
+  chat: ChatWriter
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  const draft = await draftOf(env, kind, id);
+  const { statements } = await keepCheckpoint(
+    db,
+    { kind: kind.kind, id },
+    draft,
+    draft.revision,
+    { personId, ...chat },
+    new Date()
+  );
+  // Never empty: the checkpoint's own row is among them.
+  const [first, ...rest] = statements;
+  if (first !== undefined) {
+    await auditedBatch(env, db, [first, ...rest]);
+  }
 };

@@ -84,7 +84,6 @@ import {
   inArray,
   isNull,
   ne,
-  or,
   max,
   sql,
 } from "drizzle-orm";
@@ -1120,7 +1119,6 @@ export class Workspace extends DurableObject<Env> {
         title: chats.title,
         createdAt: chats.createdAt,
         lastAt: chats.lastAt,
-        appId: chats.appId,
         via: chats.via,
         makeKind: chats.makeKind,
         makeProject: chats.makeProject,
@@ -3633,7 +3631,6 @@ export class Workspace extends DurableObject<Env> {
         agentId: chats.agentId,
         createdAt: chats.createdAt,
         lastAt: chats.lastAt,
-        appId: chats.appId,
         via: chats.via,
         makeKind: chats.makeKind,
         makeProject: chats.makeProject,
@@ -3655,7 +3652,6 @@ export class Workspace extends DurableObject<Env> {
       | "agentId"
       | "createdAt"
       | "lastAt"
-      | "appId"
       | "via"
       | "makeKind"
       | "makeProject"
@@ -3668,20 +3664,18 @@ export class Workspace extends DurableObject<Env> {
       createdAt: chat.createdAt.toISOString(),
       lastAt: chat.lastAt.toISOString(),
       running: this.#isRunning(chat.id),
-      appId: chat.appId,
       via: chat.via,
       make: makeOf(chat),
     };
   }
 
   /**
-   * `personId`'s chat for `subject`, an App or a workflow: the one that
-   * last worked on it, as their list shows it, whether made for the App
-   * or one among `drafted`, whose agent wrote its draft (a chat started on
-   * Chat that built it), so its page carries on where they left it, with
-   * all it knows; `null` while they have none, when the next question
-   * there starts one. A chat others share on a chat platform is never
-   * one.
+   * `personId`'s chat for `subject`, an App or a workflow: of `drafted`,
+   * the chats that worked on it (`chatsWorkedOn`: whose agent wrote its
+   * draft, or whose Build it made it), the one active last, as their list
+   * shows it, so its page carries on where they left it, with all it
+   * knows; `null` while they have none, when the next question there
+   * starts one. A chat others share on a chat platform is never one.
    */
   subjectChat(
     personId: string,
@@ -3694,10 +3688,7 @@ export class Workspace extends DurableObject<Env> {
       .where(
         and(
           eq(chats.personId, personId),
-          or(
-            subject.kind === "app" ? eq(chats.appId, subject.id) : undefined,
-            sql`${chats.id} IN (SELECT value FROM json_each(${JSON.stringify(drafted)}))`
-          ),
+          sql`${chats.id} IN (SELECT value FROM json_each(${JSON.stringify(drafted)}))`,
           isNull(chats.thread)
         )
       )
@@ -3783,9 +3774,9 @@ export class Workspace extends DurableObject<Env> {
    * Keeps Build it on `personId`'s chat `chatId` when what it made can't
    * go on in a turn (`ChatsApi.build`): their `text` with what was made
    * (`built`), shown as a turn shows it, so the plan waits no more; the
-   * chat made the App's when it is for none, so the App's page carries on
-   * in it and what is asked there is about the App; the agent told what
-   * was made (`#note`), and the chat stopped for `stopped`, to try again.
+   * agent told what was made (`#note`), and the chat stopped for
+   * `stopped`, to try again. What was made is the chat's work already
+   * (`keepMadeInChat`), so its page carries on in this chat.
    */
   async keepBuilt(
     chatId: unknown,
@@ -3809,35 +3800,17 @@ export class Workspace extends DurableObject<Env> {
         },
       }
     );
-    if (app !== undefined && chat.appId === null) {
-      this.#db
-        .update(chats)
-        .set({ appId: app.id })
-        .where(eq(chats.id, chat.id))
-        .run();
-    }
     this.#stopped.set(chat.id, stopped);
     this.#changed(chat.id);
     try {
       await this.#note(chat.id, builtNoteText(built));
     } catch (error) {
-      // Kept and shown all the same: the next question is about the App.
+      // Kept and shown all the same.
       log.warn("agent.built_untold", {
         chatId: chat.id,
         ...errorFields(error),
       });
     }
-  }
-
-  /** The App chat `chatId` is for, or null: what its agent is told (`env.chat.info`). */
-  chatApp(chatId: ChatId): string | null {
-    return (
-      this.#db
-        .select({ appId: chats.appId })
-        .from(chats)
-        .where(eq(chats.id, chatId))
-        .get()?.appId ?? null
-    );
   }
 
   /**
