@@ -8,7 +8,7 @@ import { brainSearchBudget } from "@grasp-os/shared/brain-sources";
 import { roleErrors } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { organizationId } from "../src/auth/auth.ts";
 import { addSource, eraseSource, recallAs } from "../src/brain-next.ts";
@@ -17,7 +17,14 @@ import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { soleReadersOf } from "./brain-next-sole-readers.ts";
 import { mockIdp } from "./idp.ts";
-import { openRpc, signedIn, signedInApi, staffPerson } from "./sign-in.ts";
+import { eventsOf } from "./model-rules.ts";
+import {
+  openRpc,
+  outcome,
+  signedIn,
+  signedInApi,
+  staffPerson,
+} from "./sign-in.ts";
 
 type Api = Awaited<ReturnType<typeof signedInApi>>["api"];
 
@@ -309,18 +316,21 @@ describe("the Brain's sources, as a person reads them", () => {
   it("refuses a question longer than the Brain takes, as recall does for every caller", async () => {
     const { api, userId } = await signedInApi(idp, "user");
     const tooLong = "a".repeat(questionMaxLength + 1);
-    await expect(api.brainSources.search(tooLong)).rejects.toThrow(
-      "Something went wrong."
-    );
     // Core's own refusal, not the store's ("The Brain refused it"): the
     // question is checked before anything of it reaches the embedder.
-    await expect(
-      recallAs(env, userId, {
-        question: tooLong,
-        budget: { tokens: brainSearchBudget },
-        personal: true,
-      })
-    ).rejects.toThrow(/^Refused: /u);
+    expect({
+      searched: await outcome(api.brainSources.search(tooLong)),
+      recalled: await outcome(
+        recallAs(env, userId, {
+          question: tooLong,
+          budget: { tokens: brainSearchBudget },
+          personal: true,
+        })
+      ),
+    }).toStrictEqual({
+      searched: "brain.request_invalid",
+      recalled: "brain.request_invalid",
+    });
   });
 
   it("reads a null page start as none, and refuses one that names no page", async () => {
@@ -332,11 +342,13 @@ describe("the Brain's sources, as a person reads them", () => {
       first
     );
     await expect(
-      reader.api.brainSources.list({
-        addedAt: "not a time",
-        source: { producer: "upload", id: crypto.randomUUID() },
-      })
-    ).rejects.toThrow("Something went wrong.");
+      outcome(
+        reader.api.brainSources.list({
+          addedAt: "not a time",
+          source: { producer: "upload", id: crypto.randomUUID() },
+        })
+      )
+    ).resolves.toBe("brain.request_invalid");
   });
 
   it("refuses a Grasp staff session", async () => {
@@ -462,5 +474,96 @@ describe("the Brain's sources, as a person reads them", () => {
         .flatMap(({ sources }) => sources.map(({ source }) => source))
         .toSorted(byCodeUnits)
     ).toStrictEqual(keys);
+  });
+});
+
+/** `value` as any argument: a call from outside TypeScript can send any shape. */
+const anything = (value: unknown): never =>
+  // SAFETY: what the test sends is what a page could, whatever its type.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  value as never;
+
+describe("the Brain's methods over RPC, given arguments of the wrong kind", () => {
+  it("refuses each as an invalid request, audits an audited one as refused for it, and logs nothing of it", async () => {
+    const { api, userId } = await signedInApi(idp, "user");
+    const marker = `Marker${word()}`;
+    const long = `${marker}${"a".repeat(1024 * 1024)}`;
+    const logged = (["log", "info", "warn", "error", "debug"] as const).map(
+      (method) => vi.spyOn(console, method)
+    );
+    const answers = {
+      forgetNumber: await outcome(api.brainMemories.forget(anything(42))),
+      forgetLong: await outcome(api.brainMemories.forget(long)),
+      listExtraField: await outcome(
+        api.brainSources.list({
+          addedAt: new Date().toISOString(),
+          source: anything({
+            producer: "upload",
+            id: crypto.randomUUID(),
+            [marker]: marker,
+          }),
+        })
+      ),
+      versionsWrongType: await outcome(
+        api.brainSources.versions(anything(marker))
+      ),
+      searchLong: await outcome(api.brainSources.search(long)),
+    };
+    const lines = logged.flatMap((spy) =>
+      spy.mock.calls
+        .flat()
+        .map((arg) => (typeof arg === "string" ? arg : JSON.stringify(arg)))
+    );
+    for (const spy of logged) {
+      spy.mockRestore();
+    }
+    // The refusals come through core's outbox, after their attempts.
+    const events = await vi.waitFor(
+      async () => {
+        const kept = await eventsOf({ type: "person", userId });
+        expect(kept).toHaveLength(4);
+        return kept;
+      },
+      { timeout: 10_000 }
+    );
+    expect({
+      answers,
+      events: events
+        .map(({ action, detail }) => ({ action, detail }))
+        .toSorted(
+          (a, b) =>
+            Number(a.detail?.outcome === "refused") -
+            Number(b.detail?.outcome === "refused")
+        ),
+      failuresLogged: lines.filter((line) => line.includes("rpc.failed")),
+      markerAnywhere: [JSON.stringify(events), ...lines].some((text) =>
+        text.includes(marker)
+      ),
+    }).toStrictEqual({
+      answers: {
+        forgetNumber: "brain.request_invalid",
+        forgetLong: "brain.request_invalid",
+        listExtraField: "brain.request_invalid",
+        versionsWrongType: "brain.request_invalid",
+        searchLong: "brain.request_invalid",
+      },
+      events: [
+        ...Array.from({ length: 2 }, () => ({
+          action: "brain.memory.forgotten",
+          detail: { onBehalfOf: userId, memory: null, outcome: "attempted" },
+        })),
+        ...Array.from({ length: 2 }, () => ({
+          action: "brain.memory.forgotten",
+          detail: {
+            onBehalfOf: userId,
+            memory: null,
+            outcome: "refused",
+            reason: "brain.request_invalid",
+          },
+        })),
+      ],
+      failuresLogged: [],
+      markerAnywhere: false,
+    });
   });
 });
