@@ -739,7 +739,7 @@ export const recallsTheBrain = async (
  * every team a grant to read the Brain ever named, of it or of the Apps
  * and workflows whose data it may hold through grants
  * (`reachedThroughCalls`), revoked or not; an App past the walk's caps
- * counts `unreadableTeam`. For deciding its owner and admins, whom the
+ * counts `unreadableTeam` while any grant names teams. For deciding its owner and admins, whom the
  * other sources don't bind (`sourcesOfApps` holds the same for everyone
  * else): no call to connect.
  */
@@ -793,14 +793,31 @@ export const brainTeamsOfApps = async (
     const node = type === "workflow" ? workflowNode(subject) : appNode(subject);
     own.set(node, [...(own.get(node) ?? []), ...teamsIn(teams)]);
   }
+  // Past the walk's caps, what it holds can't be placed: closed, but only
+  // while any grant names teams at all, so a deployment without team
+  // grants keeps its owners and admins in their deepest Apps.
+  const cappedApps = apps.filter(
+    (app) => reach.get(app)?.unresolved.has(sourceId("app", "*")) === true
+  );
+  const anyTeamGrant =
+    cappedApps.length > 0 &&
+    (await drizzle(env.DB)
+      .select({ id: permissions.id })
+      .from(permissions)
+      .where(
+        and(
+          isNotNull(permissions.grantedAt),
+          eq(permissions.objectType, "platform"),
+          isNotNull(permissions.teams)
+        )
+      )
+      .limit(1)
+      .get()) !== undefined;
   return new Map(
     apps.map((app) => {
-      const of = reach.get(app);
       const capped =
-        of?.unresolved.has(sourceId("app", "*")) === true
-          ? [unreadableTeam]
-          : [];
-      const teams = [...(of?.nodes ?? [app])].flatMap(
+        anyTeamGrant && cappedApps.includes(app) ? [unreadableTeam] : [];
+      const teams = [...(reach.get(app)?.nodes ?? [app])].flatMap(
         (node) => own.get(node) ?? []
       );
       return [app, [...new Set([...teams, ...capped])]];
