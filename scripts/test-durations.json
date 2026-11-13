@@ -20,6 +20,7 @@
   "@grasp-os/brain test/transcripts.test.ts": 1.4,
   "@grasp-os/brain-next test/chunks.test.ts": 0.1,
   "@grasp-os/brain-next test/embedding.test.ts": 3.1,
+  "@grasp-os/brain-next test/erase-whole.test.ts": 0.6,
   "@grasp-os/brain-next test/exact.test.ts": 0,
   "@grasp-os/brain-next test/exports-interleave.test.ts": 0.3,
   "@grasp-os/brain-next test/exports-own.test.ts": 0.8,
