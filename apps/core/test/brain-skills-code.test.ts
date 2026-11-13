@@ -1,4 +1,5 @@
 import { brainOf } from "@grasp-os/brain-next/contract";
+import { v } from "@grasp-os/runtime/app";
 import type { FunctionResult } from "@grasp-os/shared/functions";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -14,6 +15,11 @@ import { publishVersion } from "../src/app-publish.ts";
 import type { Release } from "../src/app-releases.ts";
 import { appFor } from "../src/apps.ts";
 import { installShippedSkills } from "../src/brain-skills.ts";
+import {
+  answerDecision,
+  confirmDecision,
+  reviewDecision,
+} from "../src/decisions/decisions.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import {
@@ -220,22 +226,29 @@ const skillDescriptor = {
   },
 };
 
-/** A step that waits a moment, for a test to act in. */
-const holdStep = { id: "hold", type: "wait", for: "3 seconds" };
-
 /**
  * A workflow of `by`'s that selects the skills for its args' task and
  * returns the first, read, its `brain` permission bound by `admin` to a
- * grant of its own; `hold` waits a moment after the read, and
- * `bind: false` approves no binding.
+ * grant of its own. With `holdFor`, the run then asks that person to go
+ * on, and waits for their answer (a test acts meanwhile); `bind: false`
+ * approves no binding.
  */
 const skillsWorkflow = async (
   by: Member,
   admin: Member,
-  { hold = false, bind = true }: { hold?: boolean; bind?: boolean } = {}
+  { holdFor, bind = true }: { holdFor?: Member; bind?: boolean } = {}
 ) => {
   const key = `brain-${unique()}`;
   await publishCatalogContract(env, admin, { key, kind: "brain" });
+  const decision = `go-on-${unique()}`;
+  if (holdFor !== undefined) {
+    await publishCatalogContract(env, admin, {
+      key: decision,
+      kind: "decision",
+      input: JSON.stringify(v.object({ amount: v.number() }).descriptor),
+      response: JSON.stringify(v.null().descriptor),
+    });
+  }
   const workflow = await createWorkflowResource(env, by, `skills-${unique()}`);
   await publishWorkflowVersion(env, by, workflow.id, {
     definition: JSON.stringify({
@@ -243,7 +256,12 @@ const skillsWorkflow = async (
       args: { kind: "object", fields: { task: { kind: "string" } } },
       returns: skillDescriptor,
       result: { $expr: "howTo" },
-      permissions: { brain: { docs: { contract: key } } },
+      permissions: {
+        brain: { docs: { contract: key } },
+        ...(holdFor === undefined
+          ? {}
+          : { decisions: { go: { contract: decision } } }),
+      },
       steps: [
         {
           id: "chosen",
@@ -259,7 +277,18 @@ const skillsWorkflow = async (
           action: "skills.read",
           args: { skill: { $expr: "chosen.skills[0]" } },
         },
-        ...(hold ? [holdStep] : []),
+        ...(holdFor === undefined
+          ? []
+          : [
+              {
+                id: "goOn",
+                type: "decide",
+                decision: "go",
+                recipients: [`person:${holdFor.userId}`],
+                prompt: "Go on?",
+                input: { amount: 1 },
+              },
+            ]),
       ],
     }),
     basedOn: null,
@@ -273,6 +302,13 @@ const skillsWorkflow = async (
     await approveWorkflowBinding(env, admin, workflow.id, {
       alias: "docs",
       target: { kind: "brain", permissionId },
+      reviewed: { version: 1 },
+    });
+  }
+  if (holdFor !== undefined) {
+    await approveWorkflowBinding(env, admin, workflow.id, {
+      alias: "go",
+      target: { kind: "decision", deciders: [`person:${holdFor.userId}`] },
       reviewed: { version: 1 },
     });
   }
@@ -330,20 +366,41 @@ const ranOf = async (
   return await endOf(by, id, runId);
 };
 
-/** Once run `runId` has read its skill, as its audit event says. */
-const readIn = async (runId: string): Promise<void> => {
+/**
+ * The decision run `runId` opened once it had read its skill: opening it
+ * checks what the run read, so each run waits there with its read kept.
+ */
+const openedIn = async (runId: string): Promise<string> =>
   await vi.waitFor(
     async () => {
-      const all = await allEvents();
-      expect(
-        all.some(
-          ({ action, target }) =>
-            action === "brain.skills.read" && target?.id === runId
-        )
-      ).toBeTruthy();
+      const row = await env.DB.prepare(
+        "SELECT id FROM workflow_decisions WHERE resource_run_id = ?"
+      )
+        .bind(runId)
+        .first<{ id: string }>();
+      if (row === null) {
+        throw new Error("No decision yet");
+      }
+      return row.id;
     },
-    { timeout: 30_000, interval: 50 }
+    { timeout: 30_000, interval: 100 }
   );
+
+/** `by`'s answer to `decision`: go on, reviewed and confirmed. */
+const goOn = async (by: Member, decision: string): Promise<void> => {
+  const answer = { approved: true };
+  const review = await reviewDecision(env, by, decision, answer);
+  if (review.state === "recorded") {
+    return;
+  }
+  const { confirmation } = await confirmDecision(
+    env,
+    by,
+    decision,
+    review.decision.revision,
+    review.response
+  );
+  await answerDecision(env, by, decision, review.response, confirmation);
 };
 
 /**
@@ -568,20 +625,27 @@ describe("skills, as an App and a workflow reach them", setUpTime, () => {
     const erasedName = await companySkill(word);
     // One workflow for the run left alone and the run whose skill is
     // erased; another whose grant is revoked.
-    const kept = await skillsWorkflow(ada, admin, { hold: true });
-    const revoked = await skillsWorkflow(ada, admin, { hold: true });
+    const reviewer = await person("user");
+    const kept = await skillsWorkflow(ada, admin, { holdFor: reviewer });
+    const revoked = await skillsWorkflow(ada, admin, { holdFor: reviewer });
     const [unchanged, erased, withdrawn] = await Promise.all([
       startedRun(ada, kept.workflow.id, { task }),
       startedRun(ada, kept.workflow.id, { task: `${word} settlements` }),
       startedRun(ada, revoked.workflow.id, { task }),
     ]);
-    // Each has read its skill, and waits before its output.
-    await Promise.all([unchanged, erased, withdrawn].map(readIn));
+    // Each has read its skill, and waits for its person before its output.
+    const asked = await Promise.all(
+      [unchanged, erased, withdrawn].map(openedIn)
+    );
     await brainOf(inJurisdiction(env, env.BRAIN_STORE)).eraseSource({
       source: `skill:company:${erasedName}`,
       reason: "deleted",
     });
     await revokePermission(env, admin, revoked.permissionId);
+    for (const decision of asked) {
+      // oxlint-disable-next-line no-await-in-loop -- one answer at a time
+      await goOn(reviewer, decision);
+    }
     const [left, afterErasure, afterRevoke] = await Promise.all([
       endOf(ada, kept.workflow.id, unchanged),
       endOf(ada, kept.workflow.id, erased),
