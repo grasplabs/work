@@ -196,7 +196,9 @@ import {
   releaseInterrupted,
   repackPerTick,
   requeueWork,
+  restartStore,
   stopWorkOn,
+  workItemTimeMs,
   workOverview,
   workTick,
 } from "./work.ts";
@@ -409,6 +411,16 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   /** Whether this person's own store was erased whole: then it refuses every call. */
   #erased = false;
 
+  /** When this instance started: how long it has been up (`#eraseWhole`). */
+  readonly #startedAt = Date.now();
+
+  /**
+   * Whether this instance wrote the record of its store's erasure: then
+   * every earlier instance had ended before, and whatever it sent the
+   * bucket, before the record (`#eraseWhole`).
+   */
+  #recordedHere = false;
+
   /**
    * The calls under way that may write to the store's part of the bucket:
    * every call that can change it (`#changing`).
@@ -566,6 +578,8 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * else.
    */
   async #forget(): Promise<void> {
+    // First: a handler of the queue that ends from now on settles nothing.
+    this.#work.forgotten = true;
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
     this.#erased = true;
@@ -1073,6 +1087,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
           // Nothing of the error is kept: nothing is deleted.
           return false;
         }
+        this.#recordedHere = true;
         await this.#forget();
         return true;
       });
@@ -1085,29 +1100,41 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     // prefix after this deletes what it lists. While one is under way in
     // this instance, the erasure isn't finished: a call (`#writes`), or a
     // handler of the queue, also one the queue stopped waiting for past its
-    // time, which may still be writing (work.ts `WorkState.handlers`). R2
+    // time, which may still be writing (work.ts `WorkState.handlers`): R2
     // orders nothing between a put in flight and a listing, so none may be
-    // in flight; and none starts once the store was erased (`#forget`
-    // deleted every row a writer asks before it puts: exports.ts
-    // `stillWriting`). Nor is it while one that
-    // an earlier instance started (reset meanwhile, so no longer seen
-    // here) may still land: until the grace an add has to write its file
-    // (files.ts `fileGraceMs`) has passed since the record, unless the
-    // store was never written. Both are read before the listing, so what
-    // lands after it is deleted by a later call: the caller calls again
-    // until one is done.
+    // in flight. Nor is it while one that an earlier instance started
+    // (reset meanwhile, so no longer seen here) may still land: until the
+    // grace an add has to write its file (files.ts `fileGraceMs`) has
+    // passed since the record, unless the store was never written; and,
+    // in an instance that didn't write the record (it started after one
+    // that was ended, its puts perhaps still on their way), until this
+    // instance has been up for an item's time (work.ts `workItemTimeMs`).
+    // All are read before the listing, so what lands after it is deleted
+    // by a later call: the caller calls again until one is done.
     const quiet = this.#writes.size === 0 && this.#work.handlers.size === 0;
+    const upLongEnough =
+      this.#recordedHere || Date.now() - this.#startedAt >= workItemTimeMs;
     let done = false;
     try {
       const at = await storeErasedAt(this.#bucket);
       const settled = at !== null && Date.now() - at >= fileGraceMs;
+      // Past the grace, a handler the queue stopped waiting for (any still
+      // running by then is one: the grace is longer than an item's time
+      // and its own grace) ends with nothing else while the caller's
+      // retries keep the store awake: the store restarts, which ends it,
+      // and the next instance finishes the erasure (`upLongEnough`). The
+      // call that restarts it may answer with the restart's error rather
+      // than `stillDeleting`: either way the caller calls again.
+      if (settled && this.#work.zombies.size > 0) {
+        restartStore(this.#work);
+      }
       const emptied = await deleteStoreObjects(this.#bucket, [
         filesPrefix,
         vectorsPrefix,
         ledgerPrefix,
         exportsPrefix,
       ]);
-      done = quiet && (settled || neverWritten) && emptied;
+      done = quiet && ((settled && upLongEnough) || neverWritten) && emptied;
     } catch {
       // Nothing of the error is kept: it may name a key.
     }

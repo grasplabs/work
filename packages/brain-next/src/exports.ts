@@ -448,8 +448,10 @@ export const isStale = (sql: SqlStorage, id: string): boolean =>
  * asked right before each of its puts, with no await between, so none
  * starts once the ledger names what it holds, nor once its store was
  * erased whole (its rows gone with it, so asking throws, which says no).
- * The erasure, in turn, isn't done while a put already started is in
- * flight (store.ts `#eraseWhole`).
+ * Not what keeps an erased store's files from outliving its erasure: the
+ * erasure isn't done while a handler still runs (store.ts `#eraseWhole`).
+ * This only stops a run from writing a private file more once an erasure
+ * began, while that erasure is still pending.
  */
 const stillWriting = (sql: SqlStorage, id: string): boolean => {
   try {
