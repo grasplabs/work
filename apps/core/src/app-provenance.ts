@@ -735,6 +735,26 @@ export const recallsTheBrain = async (
 };
 
 /**
+ * Whether any grant to read the Brain naming teams was ever granted: one
+ * statement, through `permissions_object_idx` (object type first), so it
+ * reads only the platform's grants, a few per App. Until one is, no App
+ * holds a team's content and nobody's access depends on teams.
+ */
+export const anyTeamGrant = async (env: Env): Promise<boolean> =>
+  (await drizzle(env.DB)
+    .select({ id: permissions.id })
+    .from(permissions)
+    .where(
+      and(
+        eq(permissions.objectType, "platform"),
+        isNotNull(permissions.teams),
+        isNotNull(permissions.grantedAt)
+      )
+    )
+    .limit(1)
+    .get()) !== undefined;
+
+/**
  * The teams whose Brain content each of `apps` may hold (`brainTeams`):
  * every team a grant to read the Brain ever named, of it or of the Apps
  * and workflows whose data it may hold through grants
@@ -747,7 +767,9 @@ export const brainTeamsOfApps = async (
   env: Env,
   apps: readonly AppId[]
 ): Promise<Map<AppId, string[]>> => {
-  if (apps.length === 0) {
+  // Most deployments have no team grant: then no App holds a team's
+  // content, and nothing is walked.
+  if (apps.length === 0 || !(await anyTeamGrant(env))) {
     return new Map();
   }
   const reach = await reachedThroughCalls(env, apps);
@@ -793,30 +815,17 @@ export const brainTeamsOfApps = async (
     const node = type === "workflow" ? workflowNode(subject) : appNode(subject);
     own.set(node, [...(own.get(node) ?? []), ...teamsIn(teams)]);
   }
-  // Past the walk's caps, what it holds can't be placed: closed, but only
-  // while any grant names teams at all, so a deployment without team
-  // grants keeps its owners and admins in their deepest Apps.
-  const cappedApps = apps.filter(
-    (app) => reach.get(app)?.unresolved.has(sourceId("app", "*")) === true
+  // Past the walk's caps, what it holds can't be placed: closed (only
+  // ever reached while some grant names teams, above).
+  const cappedApps = new Set(
+    apps.filter(
+      (app) => reach.get(app)?.unresolved.has(sourceId("app", "*")) === true
+    )
   );
-  const anyTeamGrant =
-    cappedApps.length > 0 &&
-    (await drizzle(env.DB)
-      .select({ id: permissions.id })
-      .from(permissions)
-      .where(
-        and(
-          isNotNull(permissions.grantedAt),
-          eq(permissions.objectType, "platform"),
-          isNotNull(permissions.teams)
-        )
-      )
-      .limit(1)
-      .get()) !== undefined;
+
   return new Map(
     apps.map((app) => {
-      const capped =
-        anyTeamGrant && cappedApps.includes(app) ? [unreadableTeam] : [];
+      const capped = cappedApps.has(app) ? [unreadableTeam] : [];
       const teams = [...(reach.get(app)?.nodes ?? [app])].flatMap(
         (node) => own.get(node) ?? []
       );

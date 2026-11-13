@@ -480,7 +480,7 @@ describe("who finds an App", setUpTime, () => {
     ).resolves.toStrictEqual(["app.unreadable", [], [entryPath(app.id)]]);
   });
 
-  it("finds an App shared with a team for its people, and every App for admins", async () => {
+  it("finds an App shared with a team for its people, and every App for admins but one holding a team's Brain content they aren't in", async () => {
     const admin = await personOf("admin");
     const owner = await personOf("builder");
     const member = await personOf("user");
@@ -503,6 +503,29 @@ describe("who finds an App", setUpTime, () => {
     await expect(entriesFound(member.knowledge, word)).resolves.toStrictEqual([
       entryPath(app.id),
     ]);
+
+    // Then the App is granted the Brain of the owner's team (GRA-1842),
+    // which the admin isn't in: they find it no more, as they can't open
+    // it; an admin in the team still does.
+    const owners = await newTeam(admin, [owner]);
+    const inTeam = await personOf("admin");
+    await env.DB.prepare(
+      "INSERT INTO team_members (id, team_id, user_id, created_at) VALUES (?, ?, ?, ?)"
+    )
+      .bind(crypto.randomUUID(), owners, inTeam.userId, Date.now())
+      .run();
+    await env.DB.prepare(
+      "INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id, actions, binding, status, requested_by, requested_at, granted_by, granted_at, teams) VALUES (?, 'app', ?, 'platform', 'platform', '[\"brain\"]', 'TEAM_BRAIN', 'active', 'test', 0, 'test', 0, ?)"
+    )
+      .bind(crypto.randomUUID(), app.id, JSON.stringify([owners]))
+      .run();
+    await expect(
+      Promise.all([
+        outcome(admin.api.apps.get(app.id)),
+        entriesFound(admin.knowledge, word),
+        entriesFound(inTeam.knowledge, word),
+      ])
+    ).resolves.toStrictEqual(["app.unreadable", [], [entryPath(app.id)]]);
   });
 
   it("doesn't name an App through a link to its entry", async () => {

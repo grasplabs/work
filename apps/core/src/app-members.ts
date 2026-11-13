@@ -313,7 +313,9 @@ export const listMembers = async (
   by: Identity,
   app: unknown
 ): Promise<AppMember[]> => {
-  const { id } = await appFor(env, by, app, "user");
+  // Whom it is shared with is none of its data: its owner and admins see
+  // it outside a team its Brain grants name (GRA-1842).
+  const { id } = await appFor(env, by, app, "user", { managing: true });
   return await namedMembers(env, by, eq(appMembers.appId, id));
 };
 
@@ -458,8 +460,10 @@ export const removeMember = async (
   app: unknown,
   input: unknown
 ): Promise<void> => {
-  // Taking access away is never blocked by an archive (app-status.ts).
-  const found = await appFor(env, by, app, "builder");
+  // Taking access away is never blocked by an archive (app-status.ts),
+  // nor by a team its Brain grants name that its owner or an admin isn't
+  // in: it reads none of its data (GRA-1842).
+  const found = await appFor(env, by, app, "builder", { managing: true });
   requireNotStaff(by);
   const member = appErrors.parse("app.invalid", appMemberRefSchema, input);
   const db = drizzle(env.DB);

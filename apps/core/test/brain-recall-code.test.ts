@@ -19,11 +19,12 @@ import { z } from "zod";
 
 import { appsReadableBy } from "../src/app-access.ts";
 import { callAppFunction } from "../src/app-functions.ts";
-import { addMember } from "../src/app-members.ts";
+import { addMember, listMembers, removeMember } from "../src/app-members.ts";
 import { publishVersion } from "../src/app-publish.ts";
 import type { Release } from "../src/app-releases.ts";
 import { removeApp } from "../src/app-removal.ts";
 import { resetAppData } from "../src/app-schema.ts";
+import { updateApp } from "../src/app-settings.ts";
 import { setArchived } from "../src/app-status.ts";
 import { appFor } from "../src/apps.ts";
 import { drainAuditOutboxes } from "../src/audit-outbox.ts";
@@ -1595,6 +1596,31 @@ describe("an App whose grant names teams", setUpTime, () => {
     const name = await env.DB.prepare("SELECT name FROM apps WHERE id = ?")
       .bind(app.app)
       .first<{ name: string }>();
+    // Whom it is shared with is theirs to see and take back; renaming it
+    // stays closed, as every change of the App does.
+    const sharedWith = await listMembers(env, await now(ada), app.app);
+    const adminSees = await listMembers(env, await now(outsideAdmin), app.app);
+    expect({
+      sharedWith: sharedWith.map(({ id }) => id),
+      adminSees: adminSees.map(({ id }) => id),
+      renamed: await outcomeOf(
+        async () =>
+          await updateApp(env, await now(ada), app.app, { name: "Renamed" })
+      ),
+      unshared: await outcomeOf(async () => {
+        await removeMember(env, await now(ada), app.app, {
+          type: "person",
+          id: carl.userId,
+        });
+      }),
+      carlAfter: await calledOf(app, await now(carl), "keep.titles", {}),
+    }).toStrictEqual({
+      sharedWith: [carl.userId],
+      adminSees: [carl.userId],
+      renamed: { code: "app.unreadable", details: undefined },
+      unshared: "done",
+      carlAfter: { failed: "app.not_found" },
+    });
     const listed = await permissionsOpenTo(env, await now(outsideAdmin), {
       type: "app",
       appId: app.app,
