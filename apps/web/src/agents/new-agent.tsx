@@ -36,9 +36,12 @@ type Whose = "company" | "own";
 export const NewAgent = ({
   models,
   company,
+  own = true,
 }: {
   models: readonly string[];
   company: boolean;
+  /** Whether the company lets people have agents of their own. */
+  own?: boolean;
 }) => {
   const { t } = useLingui();
   const navigate = useNavigate();
@@ -75,7 +78,7 @@ export const NewAgent = ({
         }
         title={<Trans>New agent</Trans>}
       />
-      {company ? (
+      {company && own ? (
         <SettingsSection
           description={t`An agent for the company, or one only you use.`}
           title={t`Who it is for`}

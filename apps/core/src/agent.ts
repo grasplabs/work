@@ -374,7 +374,7 @@ const subjectNoteText = ({ kind, id, name }: QuestionSubject): string =>
  * in the member list.
  */
 export type QuestionMention =
-  | { kind: "app" | "workflow"; id: string; name: string }
+  | { kind: "app" | "workflow" | "agent"; id: string; name: string }
   | {
       kind: "person";
       id: string;
@@ -445,6 +445,9 @@ export const builtNoteText = ({
 /** One mention as the note lists it; its names quoted, as the person's data. */
 const mentionLine = (mention: QuestionMention): string => {
   const name = JSON.stringify(mention.name);
+  if (mention.kind === "agent") {
+    return `- the agent ${name} (${mention.id}): the person addressed it, and each agent they address answers this question in turn, as itself`;
+  }
   if (mention.kind !== "person") {
     return `- the ${mention.kind === "app" ? "App" : "workflow"} ${name} (${mention.id})`;
   }
