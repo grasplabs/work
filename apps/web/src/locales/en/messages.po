@@ -2130,6 +2130,10 @@ msgid "Added someone to a team"
 msgstr "Added someone to a team"
 
 #: src/brain/skills-page.tsx
+msgid "Added to the company's skills, and since taken out of use."
+msgstr "Added to the company's skills, and since taken out of use."
+
+#: src/brain/skills-page.tsx
 msgid "Added to the company's skills."
 msgstr "Added to the company's skills."
 

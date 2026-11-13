@@ -76,6 +76,7 @@ import { dropHeldStarts } from "./held-starts.ts";
 import { brainOf } from "./knowledge/ports.ts";
 import { coreErasure } from "./knowledge/rpc.ts";
 import { onboardingStore } from "./onboarding/store.ts";
+import { closingShares } from "./skill-shares.ts";
 import { stopRunsFor } from "./workflows/resource-runs.ts";
 
 // Erasing a person (GRA-903), from its threat model (person-erasure.test.ts):
@@ -270,10 +271,17 @@ const brain: ErasureStep = {
       reason: "erasure_request" as const,
     };
     // Their asks to share a skill, with the text a waiting one holds; a
-    // company skill an approval made stays the company's. Who decided
-    // another's ask goes too, if it was them: the decision stays, unnamed.
+    // company skill an approval made stays the company's, and an add of
+    // theirs that landed unrecorded is recorded first, by the share's ID,
+    // as the admin who asked (`closingShares`). Who decided another's ask
+    // goes too, if it was them: the decision stays, unnamed.
+    const closing = await closingShares(
+      env,
+      { userId: erasure.requestedBy, staff: false },
+      { why: "erased", requestedBy: userId }
+    );
     await db.batch([
-      db.delete(skillShares).where(eq(skillShares.requestedBy, userId)),
+      ...closing,
       db
         .update(skillShares)
         .set({ decidedBy: null })

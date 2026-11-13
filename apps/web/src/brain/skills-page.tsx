@@ -92,15 +92,30 @@ The steps.
 /**
  * Where the person's share stands, as its row says: added, whenever an
  * add landed (one on its way when the share was closed included; a later
- * add may replace it since: the last to land is live); otherwise waiting;
+ * add may replace it since: the last to land is live), or added and since
+ * taken out of use when the company has no such skill now (retired);
+ * otherwise waiting;
  * approved but not added yet; closed before it was added (the person asked
  * again or deleted the skill); or declined.
  */
-const ShareStatus = ({ share }: { share: SkillShare }) => {
+const ShareStatus = ({
+  share,
+  live,
+}: {
+  share: SkillShare;
+  /** Whether the company has a skill of its name now. */
+  live: boolean;
+}) => {
   if (share.version !== null) {
-    return (
+    return live ? (
       <Badge variant="passed">
         <Trans>Added to the company&apos;s skills.</Trans>
+      </Badge>
+    ) : (
+      <Badge variant="outline">
+        <Trans>
+          Added to the company&apos;s skills, and since taken out of use.
+        </Trans>
       </Badge>
     );
   }
@@ -174,11 +189,12 @@ const Confirmed = ({
 
 /**
  * The person's share button for a skill: share it; or, while a share of
- * it waits, nothing to do unless they saved a newer version since, which
- * asking again shares instead (the waiting one is closed).
+ * it is open, nothing to do unless asking again replaces something: a
+ * waiting share of an older text, or one approved and not added yet
+ * (asking again closes it, and the admin's approval with it).
  */
 const ShareLabel = ({ waiting }: { waiting: Waiting | undefined }) => {
-  if (waiting === "outdated") {
+  if (waiting === "replaceable") {
     return <Trans>Share this version instead</Trans>;
   }
   return waiting === "current" ? (
@@ -188,33 +204,43 @@ const ShareLabel = ({ waiting }: { waiting: Waiting | undefined }) => {
   );
 };
 
-/** A share of a skill that waits: of its current text or an older one. */
-type Waiting = "current" | "outdated";
+/**
+ * An open share of a skill: one waiting with its current text, or one a
+ * new ask replaces (waiting with an older text, or approved and not added).
+ */
+type Waiting = "current" | "replaceable";
 
-/** Of each of the person's skills a share of which waits: of which text. */
+/** Of each of the person's skills with an open share: which kind. */
 const waitingOf = (shares: OwnSkillShare[] = []): Map<string, Waiting> =>
   new Map(
     shares
-      .filter(({ status }) => status === "pending")
-      .map(({ name, outdated }): [string, Waiting] => [
+      .filter(({ open }) => open)
+      .map(({ name, status, outdated }): [string, Waiting] => [
         name,
-        outdated ? "outdated" : "current",
+        status === "pending" && !outdated ? "current" : "replaceable",
       ])
   );
+
+/** Whether `page` still lists the person's own skill `name`. */
+const listsOwn = (page: Read<SkillsOverview>, name: string): boolean =>
+  page.state !== "ready" || page.data.own.some((skill) => skill.name === name);
 
 /** One of the person's own skills, with what they can do with it. */
 const OwnSkill = ({
   skill,
   waiting,
   busy,
+  reading,
   onEdit,
   onShare,
   onRemove,
 }: {
   skill: ListedSkill;
-  /** Undefined while no share of it waits. */
+  /** Undefined while no share of it is open. */
   waiting: Waiting | undefined;
   busy: boolean;
+  /** A skill is being read into the editor: nothing is deleted meanwhile. */
+  reading: boolean;
   onEdit: () => void;
   onShare: () => void;
   onRemove: () => void;
@@ -254,7 +280,7 @@ const OwnSkill = ({
         <Confirmed
           confirm={t`Delete for good`}
           description={t`${name} and every version of it are deleted for good, with a share of it that waits. You can't use its name again.`}
-          disabled={busy}
+          disabled={busy || reading}
           label={t`Delete`}
           onConfirm={onRemove}
           title={t`Delete ${name}?`}
@@ -351,6 +377,19 @@ export const SkillsPage = () => {
   const [reading, setReading] = useState<string | null>(null);
   /** The read asked for last: only its reply fills the editor. */
   const lastRead = useRef<string | null>(null);
+  /** Where focus goes once the page is read again after an action. */
+  const focusNext = useRef<HTMLElement | null>(null);
+  const editorRef = useRef<HTMLTextAreaElement>(null);
+  const ownHeadingRef = useRef<HTMLHeadingElement>(null);
+
+  // Focus returns where the action left the person, once the page holds
+  // still again (a disabled control takes no focus).
+  useEffect(() => {
+    if (!busy) {
+      focusNext.current?.focus();
+      focusNext.current = null;
+    }
+  }, [busy]);
 
   useEffect(() => {
     let left = false;
@@ -391,9 +430,16 @@ export const SkillsPage = () => {
       } else {
         after?.();
       }
-      setOverview(
-        await callCore(core, async (skills) => await skills.overview())
+      const page = await callCore(
+        core,
+        async (skills) => await skills.overview()
       );
+      // A read of a skill the page no longer lists fills nothing.
+      if (lastRead.current !== null && !listsOwn(page, lastRead.current)) {
+        lastRead.current = null;
+        setReading(null);
+      }
+      setOverview(page);
       setBusy(false);
     })();
   };
@@ -455,6 +501,7 @@ export const SkillsPage = () => {
               async (skills) => await skills.save(text),
               () => {
                 setText(newSkillText);
+                focusNext.current = editorRef.current;
               }
             );
           }}
@@ -466,6 +513,7 @@ export const SkillsPage = () => {
             <Textarea
               disabled={editorBusy}
               id={editorId}
+              ref={editorRef}
               onChange={(event) => {
                 setText(event.target.value);
               }}
@@ -491,7 +539,12 @@ export const SkillsPage = () => {
         </form>
 
         <section aria-labelledby={ownHeading} className="flex flex-col gap-3">
-          <h2 className="text-sm font-medium" id={ownHeading}>
+          <h2
+            className="text-sm font-medium"
+            id={ownHeading}
+            ref={ownHeadingRef}
+            tabIndex={-1}
+          >
             <Trans>Your skills</Trans>
           </h2>
           {data !== undefined && data.own.length === 0 ? (
@@ -504,13 +557,19 @@ export const SkillsPage = () => {
               <li key={skill.name}>
                 <OwnSkill
                   busy={busy}
+                  reading={reading !== null}
                   onEdit={() => {
                     edit(skill.name);
                   }}
                   onRemove={() => {
-                    act(async (skills) => {
-                      await skills.remove(skill.name);
-                    });
+                    act(
+                      async (skills) => {
+                        await skills.remove(skill.name);
+                      },
+                      () => {
+                        focusNext.current = ownHeadingRef.current;
+                      }
+                    );
                   }}
                   onShare={() => {
                     act(
@@ -545,7 +604,12 @@ export const SkillsPage = () => {
                       </span>
                     </ItemContent>
                     <ItemActions>
-                      <ShareStatus share={share} />
+                      <ShareStatus
+                        live={data.company.some(
+                          ({ name }) => name === share.name
+                        )}
+                        share={share}
+                      />
                     </ItemActions>
                   </Item>
                 </li>

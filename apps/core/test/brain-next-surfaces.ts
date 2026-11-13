@@ -699,6 +699,18 @@ const refusedWith = async (call: () => Promise<unknown>): Promise<unknown> => {
   }
 };
 
+/**
+ * How many statements closing `closing` answers: `closingShares` answers
+ * them for a batch, never run here.
+ */
+const closes = async (
+  by: Identity,
+  closing: skillShares.Closing
+): Promise<number> => {
+  const statements = await skillShares.closingShares(env, by, closing);
+  return statements.length;
+};
+
 /** `personId`'s session, as the RPC layer builds an `Identity`. */
 const sessionOf = (personId: string): Identity => ({
   userId: personId,
@@ -5419,6 +5431,35 @@ export const shareProbes = {
     ...(await pairedOverSkills(hiddenSkills, async (name) => {
       await skillShares.retireSkill(env, adminSessionOf(personId), name);
     })),
+  ],
+  // It answers statements for a batch, never run here: what it answers
+  // is how many, and what it records first is the store's version alone.
+  closingShares: async ({ personId, markers }) => [
+    await answer(
+      "the reader's shares of a name of the markers",
+      async () =>
+        await closes(sessionOf(personId), {
+          why: "replaced",
+          requestedBy: personId,
+          name: markers.join("-"),
+        })
+    ),
+    await answer(
+      "the reader's share, declined",
+      async () =>
+        await closes(adminSessionOf(personId), {
+          why: "declined",
+          id: await plainShare(personId),
+        })
+    ),
+    await answer(
+      "every share of the reader, erased",
+      async () =>
+        await closes(adminSessionOf(personId), {
+          why: "erased",
+          requestedBy: personId,
+        })
+    ),
   ],
   waitingShares: async ({ personId }) => [
     await answer(

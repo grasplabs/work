@@ -2130,6 +2130,10 @@ msgid "Added someone to a team"
 msgstr "Iemand aan een team toegevoegd"
 
 #: src/brain/skills-page.tsx
+msgid "Added to the company's skills, and since taken out of use."
+msgstr "Toegevoegd aan de skills van het bedrijf, en sindsdien niet meer in gebruik."
+
+#: src/brain/skills-page.tsx
 msgid "Added to the company's skills."
 msgstr "Toegevoegd aan de skills van het bedrijf."
 
@@ -12337,7 +12341,7 @@ msgstr "Deze herinnering delen"
 
 #: src/brain/skills-page.tsx
 msgid "Share this version instead"
-msgstr "Deze versie in plaats daarvan delen"
+msgstr "Deel in plaats daarvan deze versie"
 
 #: src/brain/share-record.tsx
 #: src/workflows/share-workflow.tsx

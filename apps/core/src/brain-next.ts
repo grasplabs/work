@@ -1886,6 +1886,12 @@ export const addCompanySkill = async (
  * or its record didn't (skill-shares.ts): the store's answer is the truth,
  * learned without sending the text again. Refused once `personId` is no
  * longer a member.
+ *
+ * Any member may ask, on purpose, unlike the add's admin check: a person
+ * asking again or deleting their skill records what their own share's add
+ * made, as themselves. What it can tell is a version number, of a change
+ * key made of a share's random ID, which only that share's person and the
+ * admins are ever shown: nothing a member couldn't list already.
  */
 export const companyChangeVersionOf = async (
   env: BrainEnv & Pick<Env, "DB">,

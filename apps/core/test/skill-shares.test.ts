@@ -2236,6 +2236,57 @@ describe("writing and sharing skills", setUpTime, () => {
     });
   });
 
+  it("records a landed add whose reply was lost before its person's erasure takes the share, without naming them", async () => {
+    const [asker, admin, member] = await Promise.all([
+      signedInApi(idp, "builder"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    const name = nameOf("lost-then-erased");
+    const deciding = await admin.api.whoami();
+    const saved = await asker.api.skills.save(skillText(name, "Lost"));
+    const share = await asker.api.skills.share(name, saved.version);
+    const head = await logHead();
+    const lost = await outcome(
+      approveShare(
+        hooked({
+          after: {
+            addInstructions: { 1: async () => await Promise.resolve("lose") },
+          },
+        }),
+        deciding,
+        share.id
+      )
+    );
+    await admin.api.members.remove(asker.userId);
+    await admin.api.members.erase(asker.userId, String(asker.person.name));
+    const { events } = await eventsAfterWithHead(head);
+    const skillEvents = events.filter(({ action }) =>
+      action.startsWith("skill.")
+    );
+
+    expect({
+      lost,
+      live: await liveOf(member.api, name),
+      kept: await keptText(share.id),
+      events: skillEvents.map(({ action, detail }) => [action, detail]),
+      namesThem: skillEvents.some((event) =>
+        JSON.stringify(event).includes(asker.userId)
+      ),
+    }).toStrictEqual({
+      lost: "Error: Reply lost, for the test",
+      live: [["Lost", 1]],
+      kept: [],
+      events: [
+        ["skill.share.approved", {}],
+        ["skill.share.approve_failed", {}],
+        // Recorded as the erasure took the share: what is live is said.
+        ["skill.share.added", { version: 1 }],
+      ],
+      namesThem: false,
+    });
+  });
+
   it("tells its person a waiting share is of an older text once they saved a newer one, and asking again shares that", async () => {
     const asker = await signedInApi(idp, "user");
     const name = nameOf("saved-since");

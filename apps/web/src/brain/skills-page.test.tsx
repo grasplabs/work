@@ -89,6 +89,7 @@ const shown = async ({
   waiting = request,
   held = {},
   approveRefusal,
+  company = ["file-expenses"],
 }: {
   admin: boolean;
   refusal?: string;
@@ -100,8 +101,11 @@ const shown = async ({
   held?: Record<string, Promise<unknown>>;
   /** Refuses approving with this, after core moved the share on. */
   approveRefusal?: string;
+  /** The names of the company's live skills. */
+  company?: string[];
 }) => {
   const calls: string[] = [];
+  const owned = [own, other];
   const shares: OwnSkillShare[] = [...existing];
   let requests = [waiting];
   const skills = {
@@ -109,8 +113,12 @@ const shown = async ({
       await Promise.resolve();
       calls.push("overview");
       return {
-        own: [own, other],
-        company: [{ name: "file-expenses", version: 1, description: "File" }],
+        own: [...owned],
+        company: company.map((name) => ({
+          name,
+          version: 1,
+          description: "File",
+        })),
         shares: [...shares],
         requests: admin ? requests : null,
       };
@@ -141,6 +149,14 @@ const shown = async ({
       }
       requests = [];
       return { ...request, status: "approved" as const, version: 1 };
+    },
+    remove: async (name: string) => {
+      await Promise.resolve();
+      calls.push(`remove ${name}`);
+      owned.splice(
+        owned.findIndex((skill) => skill.name === name),
+        1
+      );
     },
     read: async (scope: string, name: string) => {
       await Promise.resolve();
@@ -187,7 +203,7 @@ const shown = async ({
     await router.load();
   });
   await settle();
-  return { calls };
+  return { calls, owned };
 };
 
 /** The button whose text is `label`. */
@@ -214,6 +230,24 @@ const stateOf = (name: string): string | null | undefined =>
   [...document.querySelectorAll("li")]
     .find((item) => item.textContent?.startsWith(name))
     ?.querySelector('[data-slot="badge"]')?.textContent;
+
+/** The buttons whose text is `label`, in page order. */
+const buttons = (label: string): HTMLButtonElement[] =>
+  [...document.querySelectorAll("button")].filter(
+    (each) => each.textContent === label
+  );
+
+/** Clicks `target`, then lets the page settle. */
+const press = async (target: HTMLElement | undefined): Promise<void> => {
+  if (target === undefined) {
+    throw new Error("Nothing to press");
+  }
+  await act(async () => {
+    target.click();
+    await Promise.resolve();
+  });
+  await settle();
+};
 
 /** The page's skill editor. */
 const editor = (): HTMLTextAreaElement => {
@@ -309,6 +343,7 @@ describe("the skills page", () => {
     });
     await shown({
       admin: false,
+      company: ["added", "landed"],
       existing: [
         at("waiting", "pending", null, true),
         at("added", "approved", 3, false),
@@ -432,5 +467,68 @@ describe("the skills page", () => {
       whileSaving,
       shown: editor().value.includes("name: plan-a-trip"),
     }).toStrictEqual({ whileSaving: true, shown: true });
+  });
+
+  it("holds Delete while a skill is read into the editor, and drops a read of a skill gone from the page", async () => {
+    const reading = Promise.withResolvers<boolean>();
+    const { owned } = await shown({
+      admin: true,
+      held: { "read quote-a-tender": reading.promise },
+    });
+    await press(buttons("Edit")[0]);
+    const deleteHeld = buttons("Delete").map((each) => each.disabled);
+    // Deleted meanwhile from somewhere else; the page reads it gone.
+    owned.splice(0, 1);
+    await click("Approve");
+    await act(async () => {
+      reading.resolve(true);
+      await Promise.resolve();
+    });
+    await settle();
+
+    expect({
+      deleteHeld,
+      filled: editor().value.includes("quote-a-tender"),
+    }).toStrictEqual({ deleteHeld: [true, true], filled: false });
+  });
+
+  it("says a share added since taken out of use is no longer the company's", async () => {
+    await shown({
+      admin: false,
+      existing: [
+        { ...shareOf("gone-now"), status: "approved", version: 2, open: false },
+      ],
+    });
+
+    expect(stateOf("gone-now")).toBe(
+      "Added to the company's skills, and since taken out of use."
+    );
+  });
+
+  it("offers to share a newer version in place of one approved and not added yet", async () => {
+    const { calls } = await shown({
+      admin: false,
+      existing: [{ ...shareOf("quote-a-tender"), status: "approved" }],
+    });
+    await click("Share this version instead");
+
+    expect(calls).toStrictEqual([
+      "overview",
+      "share quote-a-tender@2",
+      "overview",
+    ]);
+  });
+
+  it("returns focus to the editor after saving, and to the list after deleting", async () => {
+    await shown({ admin: false });
+    await click("Save");
+    const afterSave = document.activeElement === editor();
+    await press(buttons("Delete")[0]);
+    await press(buttons("Delete for good").at(-1));
+
+    expect({
+      afterSave,
+      afterDelete: document.activeElement?.textContent,
+    }).toStrictEqual({ afterSave: true, afterDelete: "Your skills" });
   });
 });
