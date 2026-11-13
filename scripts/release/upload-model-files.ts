@@ -35,11 +35,6 @@ if (args.dir === undefined) {
 }
 const dir = path.resolve(args.dir);
 const model = shippedModel;
-if (model === null) {
-  throw new Error(
-    "No model ships yet: name it in `shippedModel` (@grasp-os/embed's model-files.ts) in the change this upload goes with"
-  );
-}
 
 const named = new Map(modelFilesOf(model).map((file) => [file.sha256, file]));
 const found = new Map<string, Buffer>();

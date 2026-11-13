@@ -212,7 +212,7 @@ export const brainReportSchema = z.object({
   words: z.enum(["current", "rebuilding"]),
   /** How far the embedding model has come over the current passages: counts only. */
   embedding: z.object({
-    /** The model and its build the store embeds for; null while none ships. */
+    /** The model and its build the store embeds for; null until it has one. */
     model: z.string().min(1).max(256).nullable(),
     /** Passages of current versions. */
     chunks: count,

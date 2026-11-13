@@ -383,9 +383,7 @@ const checkBudget = (build: WorkerBuild): void => {
 
 /**
  * Throws when the release names model files but no Worker binds the
- * bucket they're copied into: files nothing reads. A Worker that binds it
- * while the release names none runs no model (`shippedModel` is unset),
- * and its embedder says so.
+ * bucket they're copied into: files nothing reads.
  */
 const checkModelFiles = (
   modelFiles: readonly ModelFileInfo[],
