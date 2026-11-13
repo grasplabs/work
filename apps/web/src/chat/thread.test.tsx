@@ -788,6 +788,23 @@ describe("answers given by the agents a question addressed", () => {
     });
   });
 
+  it("names the next agent over the answer it is writing, before it is kept", async () => {
+    await thread(
+      [questionOf(1, "@Claire @Pat hi"), answerBy(2, "Claire here", "claire")],
+      { agentId: "pat", text: "Pat wri", code: [], tools: [], reasoning: "" },
+      [],
+      undefined,
+      undefined,
+      [agentOf("claire", "Claire"), agentOf("pat", "Pat")]
+    );
+    // The names over answers: Claire's kept answer names none until
+    // another is kept, and Pat's being written is named.
+    const named = [...document.querySelectorAll("p")]
+      .map((each) => each.textContent?.trim())
+      .filter((each) => each === "Claire" || each === "Pat");
+    expect(named).toStrictEqual(["Pat"]);
+  });
+
   it("shows the agent's name over its first answer, and says so of one the person can no longer ask", async () => {
     await thread(
       [

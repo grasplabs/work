@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { model, says } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
-import { fakeProvider } from "./model-provider.ts";
+import { answeringProvider, fakeProvider } from "./model-provider.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 
 // Agents mentioned in a question (`ChatQuestion.mentions`, kind `agent`):
@@ -140,6 +140,54 @@ describe("agents mentioned in a question", slow, () => {
         ["assistant", pat.id, "Pat again."],
       ],
       chatAgent: pat.id,
+    });
+  });
+
+  it("stop at a next agent that can't answer, saying why on the chat, with nothing left waiting", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const ann = await signedInApi(idp, "user");
+    const claire = await agentFor(admin, "Claire", "Speak of invoices.");
+    const pat = await agentFor(admin, "Pat", "Speak of leave.");
+    let paused = false;
+    // An admin pauses Pat while Claire answers.
+    const provider = await answeringProvider(async () => {
+      if (!paused) {
+        paused = true;
+        await admin.api.connections.setAgentPaused(pat.id, true);
+        return says("Claire: two invoices are late.");
+      }
+      return says("Pat should not answer.");
+    });
+    const chat = await ann.api.chats.create("Monday");
+    const updates: ChatUpdate[] = [];
+    await ann.api.chats.watch(chat.id, null, (update) => {
+      updates.push(update);
+    });
+
+    await ann.api.chats.send(chat.id, {
+      text: "@Claire @Pat what should I know?",
+      model,
+      mentions: [
+        { kind: "agent", id: claire.id },
+        { kind: "agent", id: pat.id },
+      ],
+    });
+    await settled(ann, chat.id);
+    await vi.waitFor(() => {
+      expect(updates.at(-1)?.stopped).toBeTruthy();
+    });
+    const listed = await ann.api.chats.list();
+
+    expect({
+      asked: provider.requests.length,
+      stopped: updates.at(-1)?.stopped,
+      // The chat stays with the agent that answered.
+      chatAgent: listed.find(({ id }) => id === chat.id)?.agentId,
+    }).toStrictEqual({
+      asked: 1,
+      stopped:
+        "This agent is paused, so it doesn't answer now. An admin can turn it back on.",
+      chatAgent: claire.id,
     });
   });
 

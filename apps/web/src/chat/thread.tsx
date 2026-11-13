@@ -1124,6 +1124,25 @@ const AnswerBy = ({ agent }: { agent: ChatAgent | undefined }) => {
   );
 };
 
+/**
+ * The agent writing an answer now, named where it isn't the one that
+ * answered last: the next one a question addressed. Nothing otherwise.
+ */
+const WrittenBy = ({
+  agents,
+  writer,
+  last,
+}: {
+  agents: readonly ChatAgent[];
+  writer: string | undefined;
+  last: Answer | undefined;
+}) =>
+  writer === undefined ||
+  last?.agentId === undefined ||
+  writer === last.agentId ? null : (
+    <AnswerBy agent={agents.find(({ id }) => id === writer)} />
+  );
+
 /** The chat's messages, and the response being written, oldest first. */
 export const ChatThread = ({
   agents = noAgents,
@@ -1238,26 +1257,29 @@ export const ChatThread = ({
   // replies its question already has, or stands as an answer of its own.
   const written =
     shown === null ? null : (
-      <Reply
-        compact={compact}
-        output={output}
-        reply={{
-          ...shown,
-          reasoning:
-            shown.reasoning === ""
-              ? undefined
-              : { text: shown.reasoning, ms: null },
-        }}
-        results={results}
-        running={running}
-        sign={doing}
-        top={
-          doing !== undefined && replies.length === 0 ? (
-            <Working doing={doing} file={file} />
-          ) : undefined
-        }
-        writing
-      />
+      <>
+        <WrittenBy agents={agents} last={lastAnswer} writer={shown.agentId} />
+        <Reply
+          compact={compact}
+          output={output}
+          reply={{
+            ...shown,
+            reasoning:
+              shown.reasoning === ""
+                ? undefined
+                : { text: shown.reasoning, ms: null },
+          }}
+          results={results}
+          running={running}
+          sign={doing}
+          top={
+            doing !== undefined && replies.length === 0 ? (
+              <Working doing={doing} file={file} />
+            ) : undefined
+          }
+          writing
+        />
+      </>
     );
   const writtenGoesOn = written !== null && items.at(-1)?.kind === "answer";
   const waiting = pendingPlan(messages, running);

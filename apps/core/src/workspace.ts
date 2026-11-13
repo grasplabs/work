@@ -2131,6 +2131,9 @@ export class Workspace extends DurableObject<Env> {
       if (!answered) {
         return;
       }
+      // Nobody waits on a next turn's start: one refused before it
+      // starts (an agent paused meanwhile) says why on the chat, as one
+      // stopped short does (`#sentTurn`, with no `started`).
       // oxlint-disable-next-line no-await-in-loop -- each agent answers after the one before it
       answered = await this.#sentTurn(
         { ...chat, agentId: next.id },
@@ -2140,7 +2143,7 @@ export class Workspace extends DurableObject<Env> {
           ...(question.effort === undefined ? {} : { effort: question.effort }),
           followUp: true,
         },
-        Promise.withResolvers<boolean>(),
+        undefined,
         false
       );
     }
@@ -2169,7 +2172,11 @@ export class Workspace extends DurableObject<Env> {
   async #sentTurn(
     chat: Chat,
     question: Question,
-    started: PromiseWithResolvers<boolean>,
+    /**
+     * Told once the turn is under way, or why it couldn't start; none for
+     * a turn nobody waits on, whose reason goes on the chat instead.
+     */
+    started: PromiseWithResolvers<boolean> | undefined,
     unattended: boolean
   ): Promise<boolean> {
     let underWay = false;
@@ -2177,12 +2184,12 @@ export class Workspace extends DurableObject<Env> {
       const answer = await this.#turn(chat, question, unattended, {
         started: () => {
           underWay = true;
-          started.resolve(true);
+          started?.resolve(true);
         },
       });
       return answer.outcome === "answered";
     } catch (error) {
-      if (!underWay) {
+      if (!underWay && started !== undefined) {
         started.reject(error);
         return false;
       }
@@ -4364,7 +4371,15 @@ export class Workspace extends DurableObject<Env> {
     const partial = this.#partials.get(chatId);
     const stopped = this.#stopped.get(chatId);
     return {
-      partial: partial === undefined ? null : partialOf(partial),
+      partial:
+        partial === undefined
+          ? null
+          : {
+              // Whose it is, so the page names the agent writing it.
+              agentId:
+                this.#turns.get(chatId)?.agentId ?? this.#chat(chatId).agentId,
+              ...partialOf(partial),
+            },
       output: outputOf(this.#outputs.get(chatId)),
       running: this.#isRunning(chatId),
       provenanceVersion: this.#provenanceVersions.get(chatId) ?? 0,

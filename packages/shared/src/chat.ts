@@ -892,6 +892,8 @@ export type ChatMessage =
  * when `<id>` is among that stored message's `citations`, never in this.
  */
 export interface ChatPartial {
+  /** The agent writing it: the chat's agent of the turn under way. */
+  agentId?: string;
   text: string;
   code: ChatCode[];
   /** Its calls of other tools so far, their texts cut short. */
