@@ -1084,6 +1084,44 @@ describe("the Brain's memories, as a person reads them", () => {
     });
   });
 
+  it("audits a confirmation or correction sent without its argument, refused once the attempt is in the log", async () => {
+    const anna = await signedInApi(idp, "user");
+    const memories = anna.api.brainMemories;
+    // As a client outside TypeScript could call them: with null, or nothing.
+    const asks: [
+      typeof memories.confirm | typeof memories.correct,
+      unknown[],
+    ][] = [
+      [memories.confirm, [null]],
+      [memories.confirm, []],
+      [memories.correct, [null]],
+      [memories.correct, []],
+    ];
+    const refusals = await Promise.all(
+      asks.map(async ([method, args]) => {
+        try {
+          const answered: unknown = await Reflect.apply(method, memories, args);
+          return answered === null ? "answered null" : "answered";
+        } catch (error) {
+          return error instanceof Error ? "refused" : "thrown";
+        }
+      })
+    );
+    const steps = async (action: string) => {
+      const kept = await auditedOf(anna.userId, action);
+      return kept.map(({ outcome }) => String(outcome)).toSorted(byCodeUnits);
+    };
+    expect({
+      refusals,
+      confirmed: await steps("brain.memory.confirmed"),
+      corrected: await steps("brain.memory.corrected"),
+    }).toStrictEqual({
+      refusals: ["refused", "refused", "refused", "refused"],
+      confirmed: ["attempted", "attempted", "refused", "refused"],
+      corrected: ["attempted", "attempted", "refused", "refused"],
+    });
+  });
+
   it("refuses a Grasp staff session", async () => {
     const staff = await openRpc(
       await signedIn(idp, "grasp-staff", staffPerson())

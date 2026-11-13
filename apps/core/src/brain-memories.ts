@@ -10,7 +10,6 @@ import type {
   Remembered,
   RememberedMemory,
   StoredMemoryPlace,
-  StoredMemoryRef,
 } from "./brain-next.ts";
 
 // A person's memories for a caller acting for them (GRA-1743, threat model
@@ -37,6 +36,21 @@ export interface MemoryCaller {
 }
 
 type Detail = Record<string, string | number | boolean | null>;
+
+/**
+ * The field `name` of `value`, as a caller outside TypeScript sent it:
+ * undefined for anything that isn't an object, null included. The audit
+ * log's details are built from it before anything is checked, so a value
+ * that holds no such field is refused afterwards, with its attempt kept.
+ */
+const fieldOf = (value: unknown, name: string): unknown =>
+  typeof value === "object" && value !== null
+    ? Reflect.get(value, name)
+    : undefined;
+
+/** `value` if it is a string, else null. */
+const stringOf = (value: unknown): string | null =>
+  typeof value === "string" ? value : null;
 
 /** A memory's id as the audit log may name it: a well-formed id, never what a caller sent instead. */
 const idOf = (value: unknown): string | null => {
@@ -102,7 +116,7 @@ export const rememberFor = async (
     caller,
     "brain.memory.remembered",
     {
-      change: typeof remembered.change === "string" ? remembered.change : null,
+      change: stringOf(fieldOf(remembered, "change")),
     },
     async () => await rememberAs(env, caller.person, remembered),
     ({ memory, entity }) => ({ memory, entity })
@@ -129,11 +143,13 @@ export const forgetFor = async (
   );
 
 /** A memory's place as the audit log may name it: its store and well-formed ids, never what a caller sent instead. */
-const placeOf = (memory: Partial<Record<keyof StoredMemoryRef, unknown>>) => ({
-  store:
-    memory.store === "own" || memory.store === "shared" ? memory.store : null,
-  memory: idOf(memory.memory),
-});
+const placeOf = (memory: unknown) => {
+  const store = fieldOf(memory, "store");
+  return {
+    store: store === "own" || store === "shared" ? store : null,
+    memory: idOf(fieldOf(memory, "memory")),
+  };
+};
 
 /**
  * `caller`'s person confirms a memory they may read (`confirmAs`): `done`,
@@ -171,12 +187,8 @@ export const correctFor = async (
     caller,
     "brain.memory.corrected",
     {
-      ...placeOf(
-        typeof correction.wrong === "object" && correction.wrong !== null
-          ? correction.wrong
-          : {}
-      ),
-      change: idOf(correction.change),
+      ...placeOf(fieldOf(correction, "wrong")),
+      change: idOf(fieldOf(correction, "change")),
     },
     async () => await correctAs(env, caller.person, correction),
     (saved): Detail =>
