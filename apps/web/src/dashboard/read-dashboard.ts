@@ -159,6 +159,9 @@ export const readWaiting = async (
           bindings: partOf(feed, "bindings", (read) =>
             ofKind(read, "bindingApproval")
           ),
+          skillShares: partOf(feed, "skillShares", (read) =>
+            ofKind(read, "skillShare")
+          ),
         }
       : {}),
   };

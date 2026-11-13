@@ -33,6 +33,7 @@ import type { ResourceBindingsApi } from "./resource-bindings.ts";
 import type { Role } from "./roles.ts";
 import type { SessionsApi } from "./sign-in.ts";
 import type { SignalsApi } from "./signals.ts";
+import type { SkillsApi } from "./skills.ts";
 import type { StephenRequestsApi } from "./stephen-requests.ts";
 import type { UploadsApi } from "./uploads.ts";
 import type { WaitingApi } from "./waiting.ts";
@@ -111,6 +112,12 @@ export interface SessionApi {
    * search, which is recall as that person.
    */
   readonly brainSources: BrainSourcesApi;
+  /**
+   * Skills: the person's own, which they write; asking to share one with
+   * the company; and, for admins, deciding those asks and retiring the
+   * company's skills.
+   */
+  readonly skills: SkillsApi;
   /**
    * The memories the agent saved for the person in their own chats:
    * undoing one there.

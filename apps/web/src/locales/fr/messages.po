@@ -180,6 +180,10 @@ msgstr "{asked} sur {reach} lui ont posé une question cette semaine"
 msgid "{asker} already asked for it on {askedOn}."
 msgstr "{asker} l’a déjà demandée le {askedOn}."
 
+#: src/inbox/items.ts
+msgid "{asker} asked to share their skill {name} with the company. Approved, every member's agents use it. Read it on the skills page before you decide."
+msgstr "{asker} a demandé à partager son skill {name} avec l'entreprise. Une fois approuvé, les agents de tous les membres l'utilisent. Lisez-le sur la page des skills avant de décider."
+
 #: src/workflows/traces.tsx
 #: src/workflows/workflow-diagram.tsx
 msgid "{attempts, plural, one {# attempt} other {# attempts}}"
@@ -263,6 +267,10 @@ msgstr "{count, plural, one {{label} : # élément} other {{label} : # élément
 #: src/brain/brain-atlas.ts
 msgid "{count, plural, one {{names} work here, on # piece of work that came up in what people said.} other {{names} work here, on # pieces of work that came up in what people said.}}"
 msgstr "{count, plural, one {{names} travaillent ici, sur # travail apparu dans ce que les gens ont dit.} other {{names} travaillent ici, sur # travaux apparus dans ce que les gens ont dit.}}"
+
+#: src/agents/own-agents-admin.tsx
+msgid "{count, plural, one {# agent} other {# agents}}"
+msgstr "{count, plural, one {# agent} other {# agents}}"
 
 #: src/inbox/items.ts
 msgid "{count, plural, one {# binding} other {# bindings}}"
@@ -768,6 +776,10 @@ msgstr "{name} (facultatif)"
 msgid "{name} (team)"
 msgstr "{name} (équipe)"
 
+#: src/brain/skills-page.tsx
+msgid "{name} and every version of it are deleted for good, with a share of it that waits. You can't use its name again."
+msgstr "{name} et toutes ses versions sont supprimés définitivement, ainsi qu'une demande de partage en attente. Vous ne pourrez plus utiliser ce nom."
+
 #: src/agents/agent-page.tsx
 msgid "{name} answers"
 msgstr "{name} répond à"
@@ -1128,6 +1140,7 @@ msgid "{sources, plural, one {Time-consuming work that could be automated, raise
 msgstr "{sources, plural, one {Un travail chronophage qui pourrait être automatisé, soulevé dans # source, encore par aucune équipe.} other {Un travail chronophage qui pourrait être automatisé, soulevé dans # sources, encore par aucune équipe.}}"
 
 #: src/agents/agents-overview.tsx
+#: src/agents/own-agents-admin.tsx
 msgid "{spent} this month"
 msgstr "{spent} ce mois-ci"
 
@@ -1723,6 +1736,10 @@ msgstr "Une discussion partagée avec {people}"
 msgid "A shared chat with only you in it"
 msgstr "Une discussion partagée où vous êtes seul"
 
+#: src/brain/skills-page.tsx
+msgid "A SKILL.md: a name of lowercase letters, digits and hyphens, and a description of when to use it, then the steps. Saving a skill of a name you have already makes its next version."
+msgstr "Un SKILL.md : un nom en minuscules, chiffres et tirets, et une description de quand l'utiliser, puis les étapes. Enregistrer un skill sous un nom que vous avez déjà en crée la version suivante."
+
 #: src/onboarding/setup-steps.tsx
 msgid "A staff list is the quickest way in: names, email addresses, teams and jobs, as a CSV or Excel file. I only use it to know who to talk to."
 msgstr "Une liste du personnel est le moyen le plus rapide : noms, adresses e-mail, équipes et postes, en fichier CSV ou Excel. Je ne l’utilise que pour savoir à qui parler."
@@ -2109,6 +2126,14 @@ msgstr "Ajoutée le"
 msgid "Added someone to a team"
 msgstr "A ajouté quelqu’un à une équipe"
 
+#: src/brain/skills-page.tsx
+msgid "Added to the company's skills, and since taken out of use."
+msgstr "Ajouté aux skills de l'entreprise, puis retiré depuis."
+
+#: src/brain/skills-page.tsx
+msgid "Added to the company's skills."
+msgstr "Ajouté aux skills de l'entreprise."
+
 #: src/projects/file-item-dialog.tsx
 msgid "Adding an app or workflow shares it with nobody. Only those it is shared with see it here."
 msgstr "Ajouter une app ou un workflow ne le partage avec personne. Seules les personnes avec qui il est partagé le voient ici."
@@ -2184,12 +2209,17 @@ msgid "Agent not found"
 msgstr "Agent introuvable"
 
 #: src/agents/agents-overview.tsx
+#: src/chat/mentions.tsx
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.agents.$agent.tsx
 #: src/routes/_shell.agents.index.tsx
 #: src/routes/_shell.agents.new.tsx
 msgid "Agents"
 msgstr "Agents"
+
+#: src/agents/own-agents-admin.tsx
+msgid "Agents people make for themselves. Only their owner sees and asks them, and they do at most what Grasp may do for that person. You see how many each person has and what they cost, never what they are told."
+msgstr "Des agents que les personnes créent pour elles-mêmes. Seul leur propriétaire les voit et les interroge, et ils font au plus ce que Grasp peut faire pour cette personne. Vous voyez combien chacun en a et ce qu'ils coûtent, jamais ce qu'on leur dit."
 
 #: src/knowledge/new-collection.tsx
 msgid "Agents read this before they look inside."
@@ -2376,6 +2406,10 @@ msgstr "Un agent pour l'entreprise, ou un que vous seul utilisez."
 #: src/agents/new-agent.tsx
 msgid "An agent of your own, for a job you do often. Only you see and ask it, in Grasp's chat."
 msgstr "Un agent à vous, pour une tâche que vous faites souvent. Vous seul le voyez et l'interrogez, dans le chat de Grasp."
+
+#: src/chat/thread.tsx
+msgid "An agent you can no longer ask"
+msgstr "Un agent que vous ne pouvez plus interroger"
 
 #: src/apps/field-kinds.tsx
 msgid "An amount in a currency"
@@ -2564,6 +2598,10 @@ msgstr "Tout événement qu’envoie sa source de webhook, des types que son con
 msgid "Any type"
 msgstr "Tout type"
 
+#: src/agents/own-agents-admin.tsx
+msgid "Anyone in the company can make agents of their own."
+msgstr "Toute personne de l'entreprise peut créer ses propres agents."
+
 #: src/apps/blueprints.tsx
 msgid "Anyone who builds and has a role in {name} can now start a new app from it. {name} itself stays as it is."
 msgstr "Quiconque construit et a un rôle dans {name} peut maintenant en partir pour une nouvelle application. {name} reste tel quel."
@@ -2630,6 +2668,7 @@ msgid "Approval"
 msgstr "Approbation"
 
 #: src/apps/app-webhooks.tsx
+#: src/brain/skills-page.tsx
 #: src/chat/package-requests.tsx
 #: src/dashboard/pile-cards.tsx
 #: src/decision-confirmation.tsx
@@ -2710,6 +2749,14 @@ msgstr "Approuvé dans {left} s"
 msgid "Approved packages"
 msgstr "A approuvé des paquets"
 
+#: src/brain/skills-page.tsx
+msgid "Approved, but a later decision on this skill came before it was added."
+msgstr "Approuvé, mais une décision ultérieure sur ce skill est arrivée avant qu'il soit ajouté."
+
+#: src/brain/skills-page.tsx
+msgid "Approved, but not added to the company's skills yet."
+msgstr "Approuvé, mais pas encore ajouté aux skills de l'entreprise."
+
 #: src/inbox/item-detail.tsx
 msgid "Approved: {alias} of {name}."
 msgstr "Approuvé : {alias} de {name}."
@@ -2730,6 +2777,14 @@ msgstr "Approuvé : {who}."
 #: src/brain/brain.ts
 msgid "Approver for new tools named"
 msgstr "Responsable des nouveaux outils désigné"
+
+#: src/brain/skills-page.tsx
+msgid "Approving it replaces Grasp's own skill {name} for everyone."
+msgstr "L'approuver remplace le skill {name} de Grasp pour tout le monde."
+
+#: src/brain/skills-page.tsx
+msgid "Approving it replaces the company's own skill {name} for everyone."
+msgstr "L'approuver remplace le skill {name} de l'entreprise pour tout le monde."
 
 #: src/apps/apps-overview.tsx
 #: src/chat/mentions.tsx
@@ -2946,6 +3001,10 @@ msgstr "Demandé par"
 #: src/connections/requested-apps.tsx
 msgid "Asked by {asker}"
 msgstr "Demandée par {asker}"
+
+#: src/brain/skills-page.tsx
+msgid "Asked by {asker} on {asked}"
+msgstr "Demandé par {asker} le {asked}"
 
 #: src/dashboard/pile-cards.tsx
 msgid "Asked by {requester} on {date}"
@@ -3395,6 +3454,7 @@ msgstr "Impossible de proposer Exécuter : {unread}"
 #: src/brain/goals-editor.tsx
 #: src/brain/remember-dialog.tsx
 #: src/brain/share-record.tsx
+#: src/brain/skills-page.tsx
 #: src/chat/answer-markdown.tsx
 #: src/chat/brain-questions.tsx
 #: src/confirmed.tsx
@@ -4592,6 +4652,7 @@ msgstr "Décision introuvable"
 msgid "Decisions"
 msgstr "Décisions"
 
+#: src/brain/skills-page.tsx
 #: src/inbox/item-detail.tsx
 msgid "Decline"
 msgstr "Refuser"
@@ -4599,6 +4660,10 @@ msgstr "Refuser"
 #: src/inbox/item-detail.tsx
 msgid "Decline starting {name}"
 msgstr "Refuser de lancer {name}"
+
+#: src/brain/skills-page.tsx
+msgid "Declined"
+msgstr "Refusé"
 
 #: src/inbox/item-detail.tsx
 msgid "Declined: {name}."
@@ -4623,6 +4688,7 @@ msgstr "Version de la définition"
 
 #: src/agents/agent-page.tsx
 #: src/apps/app-remove.tsx
+#: src/brain/skills-page.tsx
 #: src/chat/chat-menus.tsx
 #: src/chat/chat-more.tsx
 #: src/chat/delete-chat-dialog.tsx
@@ -4648,6 +4714,7 @@ msgstr "Supprimer {name}"
 
 #: src/agents/agent-page.tsx
 #: src/apps/app-remove.tsx
+#: src/brain/skills-page.tsx
 #: src/settings/teams.tsx
 #: src/workflows/delete-workflow.tsx
 msgid "Delete {name}?"
@@ -4659,6 +4726,7 @@ msgstr "Supprimer {projectName} ?"
 
 #: src/agents/agent-page.tsx
 #: src/apps/app-remove.tsx
+#: src/brain/skills-page.tsx
 msgid "Delete for good"
 msgstr "Supprimer définitivement"
 
@@ -4798,6 +4866,10 @@ msgstr "N’a pas remis un événement de webhook à l’exécution qui l’atte
 #: src/activity/audit-words.ts
 msgid "Didn't keep a webhook event: its source keeps as many as it may"
 msgstr "N’a pas conservé un événement de webhook : sa source en conserve déjà autant qu’elle le peut"
+
+#: src/activity/audit-words.ts
+msgid "Didn't keep something noted for the Brain, and recorded why"
+msgstr "N’a pas conservé quelque chose noté pour le Brain, et a enregistré pourquoi"
 
 #: src/agents/agent-wakes.tsx
 msgid "Didn't run {when}: no AI provider is connected"
@@ -5127,6 +5199,7 @@ msgctxt "older chats"
 msgid "Earlier"
 msgstr "Plus anciennes"
 
+#: src/brain/skills-page.tsx
 #: src/knowledge/document.tsx
 #: src/onboarding/setup-steps.tsx
 msgid "Edit"
@@ -6631,6 +6704,10 @@ msgstr "Comment ils le remarqueraient : {notice}."
 msgid "How they would notice: not said yet."
 msgstr "Comment ils le remarqueraient : pas encore précisé."
 
+#: src/brain/skills-page.tsx
+msgid "How things are done here. Your own skills are used in your own chats alone. Sharing one with the company waits for an admin, and from then on everyone's agents use it. A skill is guidance: it never grants access."
+msgstr "Comment on fait les choses ici. Vos propres skills ne servent que dans vos propres chats. Partager un skill avec l'entreprise attend un administrateur, puis les agents de tous l'utilisent. Un skill est un guide : il ne donne jamais d'accès."
+
 #: src/interview/closed.tsx
 msgid "How was talking to {who}?"
 msgstr "Comment s’est passé l’échange avec {who} ?"
@@ -7678,6 +7755,10 @@ msgstr "Je rassemble tout pour vous."
 msgid "Let people ask Stephen to start it"
 msgstr "Permettre de demander à Stephen de le lancer"
 
+#: src/agents/own-agents-admin.tsx
+msgid "Let people make agents of their own"
+msgstr "Permettre aux personnes de créer leurs propres agents"
+
 #: src/activity/audit-words.ts
 msgid "Let someone visit an App"
 msgstr "A autorisé quelqu’un à visiter une application"
@@ -8309,6 +8390,10 @@ msgstr "Indiquez ci-dessous un modèle que cet endpoint propose, choisissez-le, 
 msgid "Name in the App's code"
 msgstr "Nom dans le code de l’application"
 
+#: src/agents/own-agents-admin.tsx
+msgid "Name not shown"
+msgstr "Nom non affiché"
+
 #: src/apps/release-controls.tsx
 msgid "Name of the hold, such as a case reference"
 msgstr "Nom de la conservation, par exemple une référence de dossier"
@@ -8849,6 +8934,10 @@ msgstr "Personne ne lui a encore rien demandé."
 msgid "Nobody by that name"
 msgstr "Personne de ce nom"
 
+#: src/agents/own-agents-admin.tsx
+msgid "Nobody can make one, and those people have don't answer until you turn this back on."
+msgstr "Personne ne peut en créer, et ceux qui existent ne répondent plus jusqu'à ce que vous réactiviez ceci."
+
 #: src/workflows/delete-workflow.tsx
 msgid "Nobody can open or start it again. Its versions are kept but never served. This can't be undone."
 msgstr "Personne ne pourra plus l’ouvrir ni le démarrer. Ses versions sont conservées mais jamais servies. C’est irréversible."
@@ -8871,6 +8960,10 @@ msgstr "Personne d’autre avec qui partager."
 msgid "Nobody from Grasp can sign in to this workspace now."
 msgstr "Personne de Grasp ne peut se connecter à cet espace de travail pour le moment."
 
+#: src/agents/own-agents-admin.tsx
+msgid "Nobody has an agent of their own yet."
+msgstr "Personne n'a encore d'agent à soi."
+
 #: src/workflows/definition-editor.tsx
 msgid "Nobody has edited it since its current version."
 msgstr "Personne ne l'a modifié depuis sa version actuelle."
@@ -8890,6 +8983,10 @@ msgstr "Il n’y a encore personne dans cette équipe."
 #: src/brain/brain-atlas.ts
 msgid "Nobody is named yet to approve a new tool."
 msgstr "Personne n’est encore désigné pour approuver un nouvel outil."
+
+#: src/brain/skills-page.tsx
+msgid "Nobody is waiting for you to decide a share."
+msgstr "Personne n'attend que vous décidiez d'un partage."
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Nobody matches."
@@ -8923,6 +9020,10 @@ msgstr "Personne pour l’instant"
 #: src/agents/agent-page.tsx
 msgid "Nobody yet, until you choose."
 msgstr "À personne pour l'instant, jusqu'à ce que vous choisissiez."
+
+#: src/brain/skills-page.tsx
+msgid "Nobody's agents use {name} from then on. Its versions stay as history, and a new approved share of its name brings it back."
+msgstr "Plus aucun agent n'utilise {name} ensuite. Ses versions restent dans l'historique, et un nouveau partage approuvé sous ce nom le rétablit."
 
 #: src/settings/ai-providers.tsx
 #: src/workflows/workflow-settings.tsx
@@ -9147,6 +9248,10 @@ msgstr "Note introuvable"
 #: src/onboarding/connect-steps.tsx
 msgid "Noted"
 msgstr "Noté"
+
+#: src/activity/audit-words.ts
+msgid "Noted a question asked in a chat, to keep in its person's own Brain"
+msgstr "A noté une question posée dans un chat, pour la conserver dans le Brain propre à la personne"
 
 #: src/onboarding/connect-steps.tsx
 msgid "Noted: {name}. Sign in to connect it now, or we’ll connect it with you. I’ll only read what you share with me."
@@ -10248,6 +10353,10 @@ msgstr "Personnes qui ont demandé"
 msgid "People you removed can’t sign in. Erasing someone also takes their personal data, for good, keeping their name on what they did."
 msgstr "Les personnes que vous avez supprimées ne peuvent pas se connecter. Effacer quelqu’un retire aussi ses données personnelles, définitivement, en gardant son nom sur ce qu’il a fait."
 
+#: src/agents/own-agents-admin.tsx
+msgid "People's own agents"
+msgstr "Agents personnels"
+
 #: src/activity/type-labels.ts
 msgid "Permission"
 msgstr "Autorisation"
@@ -11256,6 +11365,14 @@ msgstr "Reprendre"
 msgid "Retention"
 msgstr "Conservation"
 
+#: src/brain/skills-page.tsx
+msgid "Retire"
+msgstr "Retirer"
+
+#: src/brain/skills-page.tsx
+msgid "Retire {name}?"
+msgstr "Retirer {name} ?"
+
 #: src/brain/memory-page.tsx
 msgid "Retire it"
 msgstr "Retirer"
@@ -11745,6 +11862,7 @@ msgstr "Sam, comme tous ceux qui utilisent l’App, voit tous les enregistrement
 #: src/agents/agent-page.tsx
 #: src/apps/field-editor.tsx
 #: src/brain/goals-editor.tsx
+#: src/brain/skills-page.tsx
 #: src/knowledge/document.tsx
 #: src/projects/project-dialog.tsx
 #: src/workflows/resource-params.tsx
@@ -12251,6 +12369,10 @@ msgstr "Partager"
 msgid "Share {name}"
 msgstr "Partager {name}"
 
+#: src/inbox/items.ts
+msgid "Share {name} with the company?"
+msgstr "Partager {name} avec l'entreprise ?"
+
 #: src/apps/app-sharing.tsx
 msgid "Share as"
 msgstr "Partager en tant que"
@@ -12275,10 +12397,18 @@ msgstr "Partagez-le dès qu’il est prêt"
 msgid "Share this record"
 msgstr "Partager cet enregistrement"
 
+#: src/brain/skills-page.tsx
+msgid "Share this version instead"
+msgstr "Partager plutôt cette version"
+
 #: src/brain/share-record.tsx
 #: src/workflows/share-workflow.tsx
 msgid "Share with"
 msgstr "Partager avec"
+
+#: src/brain/skills-page.tsx
+msgid "Share with the company"
+msgstr "Partager avec l'entreprise"
 
 #: src/apps/publish.tsx
 #: src/frame/setting-up.tsx
@@ -12315,6 +12445,10 @@ msgstr "Partagé avec {who}"
 msgctxt "memory records: others' that you read"
 msgid "Shared with you"
 msgstr "Partagés avec vous"
+
+#: src/brain/skills-page.tsx
+msgid "Shares waiting for you"
+msgstr "Partages qui vous attendent"
 
 #: src/apps/app-settings.tsx
 msgctxt "an app's settings section"
@@ -12583,6 +12717,17 @@ msgstr "Effectif modifié : inconnu"
 msgid "Skill"
 msgstr "Skill"
 
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind: a skill someone asked to share with the company"
+msgid "Skill"
+msgstr "Skill"
+
+#: src/brain/brain-nav.tsx
+#: src/brain/skills-page.tsx
+msgctxt "the Brain's skills page"
+msgid "Skills"
+msgstr "Skills"
+
 #: src/dashboard/todo-pile.tsx
 msgctxt "put a to-do card at the back of the pile"
 msgid "Skip"
@@ -12662,6 +12807,7 @@ msgid "Someone no longer here"
 msgstr "Quelqu’un qui n’est plus là"
 
 #: src/agents/agent-wakes.tsx
+#: src/agents/own-agents-admin.tsx
 msgid "Someone no longer in the company"
 msgstr "Une personne qui ne fait plus partie de l’entreprise"
 
@@ -13662,9 +13808,17 @@ msgstr "Les contrôles, revues et registres que le régulateur attend de vous."
 msgid "The company brain: {percent}% known. Dark dots are what I know, grey dots what I still need to learn."
 msgstr "Le Brain de l’entreprise : {percent} % connu. Les points foncés sont ce que je sais, les gris ce que je dois encore apprendre."
 
+#: src/brain/skills-page.tsx
+msgid "The company has no skills of its own yet."
+msgstr "L'entreprise n'a pas encore de skills à elle."
+
 #: src/agents/agent-page.tsx
 msgid "The company's first agent"
 msgstr "Le premier agent de l'entreprise"
+
+#: src/brain/skills-page.tsx
+msgid "The company's skills"
+msgstr "Skills de l'entreprise"
 
 #: src/inbox/items.ts
 msgid "The connection stopped working. Workflows that use it wait until someone signs in again."
@@ -14758,6 +14912,7 @@ msgstr "Essayer"
 #: src/apps/app-data.tsx
 #: src/apps/app-owner.tsx
 #: src/apps/app-settings.tsx
+#: src/brain/skills-page.tsx
 #: src/chat/builds.tsx
 #: src/chat/chat-panel.tsx
 #: src/chat/thread.tsx
@@ -15171,6 +15326,7 @@ msgstr "Version {number}, actuelle"
 
 #: src/apps/app-workflows.tsx
 #: src/brain/brain.ts
+#: src/brain/skills-page.tsx
 #: src/brain/sources-page.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/workflows/version-source.tsx
@@ -15327,6 +15483,7 @@ msgid "Waiting for a person"
 msgstr "Attend une personne"
 
 #: src/apps/app-webhooks.tsx
+#: src/brain/skills-page.tsx
 #: src/workflows/workflow-triggers.tsx
 msgid "Waiting for an admin"
 msgstr "En attente d'un administrateur"
@@ -15829,6 +15986,10 @@ msgstr "Ce que l’espace de travail paie pour Grasp."
 msgid "What they ask"
 msgstr "Ce qu’ils demandent"
 
+#: src/agents/own-agents-admin.tsx
+msgid "What they cost couldn't be loaded."
+msgstr "Leur coût n'a pas pu être chargé."
+
 #: src/settings/erasures.tsx
 msgid "What they sent through App forms, and usage signals of their collections"
 msgstr "Ce qu’ils ont envoyé via les formulaires des applications, et signaux d’utilisation de leurs collections"
@@ -15905,6 +16066,10 @@ msgstr "Ce que vous avez validé est conservé. Vous avez oublié quelque chose 
 #: src/brain/memory-page.tsx
 msgid "What you and your agents remember, and what others share with you, shows here."
 msgstr "Ce dont vous et vos agents vous souvenez, et ce que d'autres partagent avec vous, apparaissent ici."
+
+#: src/brain/skills-page.tsx
+msgid "What you asked to share"
+msgstr "Ce que vous avez demandé à partager"
 
 #: src/connections/connected-dialog.tsx
 msgid "What you chose"
@@ -16467,6 +16632,10 @@ msgctxt "what a tool may do"
 msgid "Write"
 msgstr "Écriture"
 
+#: src/brain/skills-page.tsx
+msgid "Write a skill"
+msgstr "Écrire un skill"
+
 #: src/routes/guest.tsx
 msgid "Write your answer"
 msgstr "Écrivez votre réponse"
@@ -16624,6 +16793,10 @@ msgstr "Vous n'avez encore aucune connexion."
 #: src/workflows/item-test.tsx
 msgid "You have no recent runs whose input is still kept, so there was nothing to test on."
 msgstr "Vous n’avez aucune exécution récente dont l’entrée est encore conservée : il n’y avait rien à tester."
+
+#: src/brain/skills-page.tsx
+msgid "You have no skills of your own yet."
+msgstr "Vous n'avez pas encore de skills à vous."
 
 #: src/onboarding/about-story.tsx
 msgid "You show me who’s who, where the documents are, and which tools people use."
@@ -16847,6 +17020,10 @@ msgstr "Votre exécution de la version {version} est terminée : {status}"
 #: src/pages/frame-failure.tsx
 msgid "Your session has ended"
 msgstr "Votre session est terminée"
+
+#: src/brain/skills-page.tsx
+msgid "Your skills"
+msgstr "Vos skills"
 
 #: src/interview/words.ts
 msgid "Your story"
