@@ -1688,6 +1688,13 @@
       "when": 1794495248877,
       "tag": "0240_brain_hand_overs",
       "breakpoints": true
+    },
+    {
+      "idx": 241,
+      "version": "6",
+      "when": 1794521687886,
+      "tag": "0241_brain_own_stores",
+      "breakpoints": true
     }
   ]
 }

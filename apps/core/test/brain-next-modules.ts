@@ -44,4 +44,8 @@ export const brainModules = {
   // Checks what a chat once handed over with core's readableVersionsAs, and
   // hands on only which of those it may still send, never what they say.
   "apps/core/src/history-access.ts": "core",
+  // Core's subclass of the store: its alarm's host, from core's
+  // alarmHostOf, given to the store inside its own object; it adds no
+  // method, so the store's probes are its own.
+  "apps/core/src/brain-store.ts": "store",
 } as const satisfies Readonly<Record<string, string>>;

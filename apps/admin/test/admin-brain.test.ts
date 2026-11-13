@@ -154,6 +154,17 @@ describe("an organization's brain", () => {
 });
 
 /** The Brain as a core reports it: a parked item, a store of `bytes`, a ledger through. */
+/** Totals of people's own stores while none holds anything. */
+const noOwnStores = {
+  stores: 0,
+  waiting: 0,
+  oldestWaitingAt: null,
+  parked: 0,
+  failing: 0,
+  notRebuilt: 0,
+  nearLimit: 0,
+};
+
 const brainReport = (bytes: number): BrainReport => ({
   now: "2026-11-12T10:00:00.000Z",
   queue: {
@@ -215,6 +226,7 @@ const brainReport = (bytes: number): BrainReport => ({
     },
     withoutMeaning: { timed_out: 0, failed: 0, refused: 0, unusable: 0 },
   },
+  ownStores: noOwnStores,
 });
 
 /** A read of a client's Brain from its core, as the section's server function makes it. */
@@ -231,6 +243,13 @@ const textOf = (html: string): string =>
 /** The Recall section of a page's HTML: from its title to the next section's. */
 const recallPartOf = (html: string): string =>
   html.slice(html.indexOf(">Recall<"), html.indexOf(">Erasures<"));
+
+/** The part of `html` that shows people's own stores. */
+const ownStoresPartOf = (html: string): string =>
+  html.slice(
+    html.indexOf(">People&#x27;s own stores<"),
+    html.indexOf(">Engine<")
+  );
 
 describe("how an organization's Brain is doing", () => {
   useStoreSecrets({ deployer: token });
@@ -625,5 +644,80 @@ describe("how an organization's Brain is doing", () => {
       notYet: true,
       calm: false,
     });
+  });
+
+  it("shows people's own stores as totals across them, a failing one in amber", async () => {
+    const acme = await liveClient();
+    acme.core.admin = heardSnapshot("Acme");
+    const report = brainReport(1_000_000);
+    const calm = await liveClient();
+    calm.core.admin = heardSnapshot("Calm");
+    calm.core.brain = {
+      ...report,
+      ownStores: { ...noOwnStores, stores: 1 },
+    };
+    acme.core.brain = {
+      ...report,
+      ownStores: {
+        stores: 12,
+        waiting: 30,
+        oldestWaitingAt: "2026-11-12T09:00:00.000Z",
+        parked: 2,
+        failing: 1,
+        notRebuilt: 3,
+        nearLimit: 0,
+      },
+    };
+
+    const { html: acmeHtml } = await page(
+      `/organizations/${acme.clientId}/brain`
+    );
+    const { html: calmHtml } = await page(
+      `/organizations/${calm.clientId}/brain`
+    );
+    const failing = ownStoresPartOf(acmeHtml);
+    const fine = ownStoresPartOf(calmHtml);
+    const text = textOf(failing);
+
+    expect({
+      stores: text.includes(
+        "Stores Stores holding anything, as their own upkeep last found them. 12 people"
+      ),
+      waiting: text.includes("Oldest added 1 hour ago. 30"),
+      parked: text.includes("Parked"),
+      notRebuilt: text.includes("Embedding not done"),
+      amber: failing.includes("text-status-attention"),
+      one: textOf(fine).includes("1 person"),
+      calm: fine.includes("text-status-attention"),
+    }).toStrictEqual({
+      stores: true,
+      waiting: true,
+      parked: true,
+      notRebuilt: true,
+      amber: true,
+      one: true,
+      calm: false,
+    });
+  });
+
+  it("shows the rest of the report of a core on an older release, which sends no totals of people's own stores, and says they aren't available yet", async () => {
+    const older = await liveClient();
+    older.core.admin = heardSnapshot("Older");
+    const { ownStores: _left, ...report } = brainReport(1_000_000);
+    older.core.brain = report;
+
+    const { status, html } = await page(
+      `/organizations/${older.clientId}/brain`
+    );
+    const own = textOf(ownStoresPartOf(html));
+
+    expect({
+      status,
+      rest: textOf(recallPartOf(html)).includes("Words 40 0"),
+      notYet: own.includes(
+        "This client’s release doesn’t report people’s own stores yet."
+      ),
+      totals: own.includes("Waiting"),
+    }).toStrictEqual({ status: 200, rest: true, notYet: true, totals: false });
   });
 });
