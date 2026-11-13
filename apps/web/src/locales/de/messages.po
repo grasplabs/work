@@ -7468,6 +7468,10 @@ msgid "Kept"
 msgstr "Übernommen"
 
 #: src/activity/audit-words.ts
+msgid "Kept a chat's question and answer for its person's own Brain"
+msgstr "Frage und Antwort eines Chats im eigenen Brain der Person gespeichert"
+
+#: src/activity/audit-words.ts
 msgid "Kept access at the provider for an account connected again"
 msgstr "Den Zugriff beim Anbieter für ein erneut verbundenes Konto behalten"
 

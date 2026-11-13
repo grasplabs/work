@@ -15,7 +15,9 @@ import { removeVectorsOf, repackBlocks } from "./vectors.ts";
 // Erasure: what goes for good, apart from ordinary removal. A new version
 // of a source ends the one before as history, readable as it was; an
 // erasure leaves nothing. It covers one source (`eraseSource`: every
-// version) or what one person alone may read (`erasePerson`), and reaches
+// version, and every version of each source added in its key as a group,
+// as a chat's turns are in a person's own store) or what one person alone
+// may read (`erasePerson`), and reaches
 // every place content is: versions, chunks, their words and stems, vector
 // codes and the packed blocks they were in, change keys, queued work, and
 // the files in R2, which the sweep deletes once no version holds them
@@ -69,7 +71,8 @@ import { removeVectorsOf, repackBlocks } from "./vectors.ts";
 // nothing but its overview (store.ts).
 //
 // An erased source's key stays closed: an add to it is refused, checked
-// again in the transaction that would record it (sources.ts). So is an
+// again in the transaction that would record it (sources.ts), and so is
+// an add naming it as its group, whatever the add's own key. So is an
 // add for a person alone that began before that person's erasure and
 // lands after it. What is added for them after the erasure is new and
 // kept.
@@ -306,6 +309,22 @@ export const isErased = (sql: SqlStorage, subject: string): boolean =>
     .toArray().length > 0;
 
 /**
+ * The subject of the group the source `source` was first added in: null
+ * for one in none, undefined for a source the store holds no version of.
+ */
+export const groupOfSource = (
+  sql: SqlStorage,
+  source: string
+): string | null | undefined =>
+  sql
+    .exec<{ group: string | null }>(
+      'SELECT group_subject AS "group" FROM source_subjects WHERE source = ?',
+      source
+    )
+    .toArray()
+    .at(0)?.group;
+
+/**
  * Where the store's record of erasures is now: an add notes it as it
  * begins, so an erasure recorded after that is known by its place, not by
  * a clock (`isPersonErasedSince`).
@@ -351,18 +370,21 @@ export const lastErasedVersion = (sql: SqlStorage, subject: string): number =>
     .one().version ?? 0;
 
 /**
- * Keeps `source`'s subject, as its first version is recorded, in the
- * caller's transaction.
+ * Keeps `source`'s subject, and its group's (`group`, null for none), as
+ * its first version is recorded, in the caller's transaction.
  */
 export const keepSubject = (
   sql: SqlStorage,
   source: string,
-  subject: string
+  subject: string,
+  group: string | null = null
 ): void => {
   sql.exec(
-    "INSERT OR IGNORE INTO source_subjects (source, subject) VALUES (?, ?)",
+    `INSERT OR IGNORE INTO source_subjects (source, subject, group_subject)
+    VALUES (?, ?, ?)`,
     source,
-    subject
+    subject,
+    group
   );
 };
 
@@ -470,11 +492,14 @@ const rowsOf = (
     .toArray()
     .map(({ row }) => row);
 
-/** The sources whose key's subject is `subject`. */
+/**
+ * The sources an erasure of the key whose subject is `subject` covers:
+ * the source of that key, and each added in it as a group.
+ */
 const sourcesOf = (sql: SqlStorage, subject: string): string[] =>
   sql
     .exec<{ source: string }>(
-      "SELECT source FROM source_subjects WHERE subject = ?",
+      "SELECT source FROM source_subjects WHERE subject = ?1 OR group_subject = ?1",
       subject
     )
     .toArray()
@@ -1248,7 +1273,16 @@ export const replayMemoryErasures = (sql: SqlStorage): number => {
     if (kind === "person") {
       sets.push(...eraseMemoriesHiddenBy(sql, key));
     } else {
-      sets.push(...eraseMemoriesOfSource(sql, subject));
+      // The source's, and those of each source added in it as a group.
+      for (const { source } of sql
+        .exec<{ source: string }>(
+          `SELECT ?1 AS source UNION
+          SELECT subject AS source FROM source_subjects WHERE group_subject = ?1`,
+          subject
+        )
+        .toArray()) {
+        sets.push(...eraseMemoriesOfSource(sql, source));
+      }
     }
   }
   for (const readerSet of new Set(sets)) {

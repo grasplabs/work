@@ -23,6 +23,7 @@ import {
 import { enqueueEmbedding } from "./embedding.ts";
 import {
   erasuresSoFar,
+  groupOfSource,
   isErased,
   lastErasedVersion,
   isPersonErasedSince,
@@ -90,11 +91,33 @@ interface Adding {
    * it (`record`).
    */
   readonly onlyFor?: { subject: string; soFar: number };
+  /** Its group's key as the erasure ledger names it: null for none. */
+  readonly group: string | null;
   readonly hash: string;
   readonly readers: string;
   /** Its chunks when it is indexed, each with its text's SHA-256: none when not. */
   readonly chunks: readonly { text: string; hash: string }[];
 }
+
+/** What an add answers that names another group than its source's first. */
+const otherGroup =
+  "The Brain refused it: a source keeps the group it was first added in";
+
+/**
+ * Refuses `adding` when its group's key was erased (as an erased key's
+ * add, `erasedSource`), or when its source was first added in another group,
+ * or in none: a source keeps its group for good, so a group's erasure
+ * finds every version of it.
+ */
+const refuseByGroup = (sql: SqlStorage, adding: Adding): void => {
+  if (adding.group !== null && isErased(sql, adding.group)) {
+    throw new Error(erasedSource);
+  }
+  const held = groupOfSource(sql, adding.added.source);
+  if (held !== undefined && held !== adding.group) {
+    throw new Error(otherGroup);
+  }
+};
 
 /** A version, as an add finds it: its row, number, file and readers' key. */
 const versionFields = {
@@ -193,6 +216,7 @@ const record = (
   ) {
     throw new Error(erasedSource);
   }
+  refuseByGroup(storage.sql, adding);
   // The same change, or the same text and readers, added meanwhile.
   const before = madeBefore(db, adding);
   if (before !== undefined) {
@@ -248,7 +272,7 @@ const record = (
   db.insert(sourceChanges)
     .values({ source: added.source, change: added.change, versionRow: row })
     .run();
-  keepSubject(storage.sql, added.source, adding.subject);
+  keepSubject(storage.sql, added.source, adding.subject, adding.group);
   // The version before stops being found by meaning as it stops being
   // current: its chunks' vector codes go with the pointer.
   const replaced = db
@@ -307,6 +331,7 @@ export const addVersion = async (
     ...(added.access.kind === "owner"
       ? { onlyFor: { subject: await subjectOf(added.access.person), soFar } }
       : {}),
+    group: added.group === undefined ? null : await subjectOf(added.group),
     hash: await hashOf(body),
     readers: readerSetKeyOf(added.access),
     chunks: await Promise.all(
@@ -319,6 +344,7 @@ export const addVersion = async (
   if (isErased(storage.sql, adding.subject)) {
     throw new Error(erasedSource);
   }
+  refuseByGroup(storage.sql, adding);
   if (isRestoring(storage.sql)) {
     throw new Error(restoringNow);
   }

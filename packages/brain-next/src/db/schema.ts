@@ -524,14 +524,21 @@ export const erasingVersions = sqliteTable(
  * A source's key as the erasure ledger names it: its SHA-256, written
  * with the source's first version, so a replay finds the source the
  * ledger names in SQL, and a person's erasure names the sources it hid.
+ * With it, the SHA-256 of the group it was added in (`NewSource.group`),
+ * for good: null for a source in none. A group's erasure finds its
+ * sources by it.
  */
 export const sourceSubjects = sqliteTable(
   "source_subjects",
   {
     source: text().primaryKey(),
     subject: text().notNull(),
+    group: text("group_subject"),
   },
-  (table) => [index("source_subjects_subject_idx").on(table.subject)]
+  (table) => [
+    index("source_subjects_subject_idx").on(table.subject),
+    index("source_subjects_group_idx").on(table.group),
+  ]
 );
 
 /**

@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
+import { memberRole } from "./auth/identity.ts";
 import {
   erasureBegun,
   handOverProducers,
@@ -11,10 +12,12 @@ import {
   removeHandOvers,
 } from "./brain-hand-overs.ts";
 import type { HandOverProducer } from "./brain-hand-overs.ts";
-import { runSource } from "./brain-next-origins.ts";
+import { chatSource, chatTurnOf, runSource } from "./brain-next-origins.ts";
 import { queueHandOvers } from "./brain-next.ts";
 import type { Handed, Producers, SourceRef } from "./brain-next.ts";
 import { workflowStartReceipts } from "./db/core/schema.ts";
+import { workspace } from "./durable-objects.ts";
+import { personalWorkspaceId } from "./personal-workspace.ts";
 import { resultOf, runOf } from "./workflows/resource-runs.ts";
 import { detailsRemoved } from "./workflows/retention.ts";
 
@@ -34,6 +37,15 @@ import { detailsRemoved } from "./workflows/retention.ts";
 //   result only while that person still holds the workflow's user role;
 //   the Brain's copy has no such check, so they keep recalling it after
 //   they lose the workflow (accepted for now: GRA-1829).
+//
+// - A turn of a person's own chat (`chat:<person>/<chat>/<answer>`), in
+//   their own store alone, in its chat's group (brain-next-origins.ts):
+//   once, change `answer`, what they asked and what was answered, nothing
+//   the agent read or ran. Only while the chat is still theirs, in Grasp's
+//   own app, shared with no one, not restricted and not being deleted, as
+//   their Workspace holds it now (workspace.ts `turnForBrain`); a turn
+//   nobody asked for there and then is never noted. Deleting the chat
+//   erases them all in one call before its rows go (`eraseChat`).
 //
 // Nothing for a person whose erasure has begun (core's `personErasures`):
 // a reader answers `erased`, with the readers it would have named, and the
@@ -102,6 +114,45 @@ const runOfId = async (env: Env, id: string): Promise<Handed> => {
   };
 };
 
+/** How a turn says who said what: the person's words, then the answer. */
+const turnText = (question: string | null, answer: string): string =>
+  [
+    ...(question === null ? [] : [`Asked:\n${question}`]),
+    `Answered:\n${answer}`,
+  ].join("\n\n");
+
+/** Turn `id` of a person's own chat, as their Workspace holds it now. */
+const chatTurnOfId = async (env: Env, id: string): Promise<Handed> => {
+  const turn = chatTurnOf(id);
+  if (turn === undefined) {
+    return gone;
+  }
+  const { personId, chatId, answerId } = turn;
+  const readers = { kind: "owner", personId } as const;
+  if (await erasureBegun(env, personId)) {
+    return { kind: "erased", readers };
+  }
+  if ((await memberRole(env.DB, personId)) === undefined) {
+    return gone;
+  }
+  const said = await workspace(env, personalWorkspaceId(personId)).turnForBrain(
+    chatId,
+    personId,
+    answerId
+  );
+  if (said === null) {
+    return gone;
+  }
+  return {
+    kind: "source",
+    change: "answer",
+    text: turnText(said.question, said.answer),
+    whenTooLarge: "A turn of a chat, too large to keep.",
+    readers,
+    group: chatSource(personId, chatId),
+  };
+};
+
 /**
  * Every producer (brain-hand-overs.ts `handOverProducers`): its source
  * for an id it noted (brain-next-origins.ts), and how that source is read
@@ -115,6 +166,11 @@ const producers: Record<
   }
 > = {
   run: { source: runSource, read: runOfId },
+  chat: {
+    // The id as noted: its parts are read back when it is handed over.
+    source: (id) => ({ producer: "chat", id }),
+    read: chatTurnOfId,
+  },
 };
 
 /** Whether `kind` is a producer's: a source of any other has nothing to hand over. */

@@ -38,6 +38,12 @@ export const handOverProducers = {
     ],
     target: "workflow_run",
   },
+  // A turn of a person's own chat, answered and kept (workspace.ts
+  // `captureTurn`): noted only for a turn that may be handed over.
+  chat: {
+    actions: ["chat.turn_kept"],
+    target: "chat_turn",
+  },
 } as const satisfies Record<
   string,
   { actions: readonly string[]; target: string }

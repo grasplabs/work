@@ -25,6 +25,7 @@ import {
   exportFileRequestSchema,
   exportIdSchema,
   exportRequestSchema,
+  isInGroup,
   isWholeKey,
   handOverRequestSchema,
   handOverResultSchema,
@@ -266,6 +267,18 @@ const sharedOnly = "The Brain refused it: only the shared store takes this";
 /** What a person's own store answers an add anyone else may read. */
 const notTheirsAlone =
   "The Brain refused it: this store keeps only what its person alone may read";
+
+/**
+ * What the shared store answers an add naming a group: groups are a
+ * person's own store's alone, as no export or restore of the shared store
+ * carries them.
+ */
+const groupsOwnOnly =
+  "The Brain refused it: only a person's own store keeps groups";
+
+/** What an add answers whose key isn't under the group it names. */
+const notInGroup =
+  "The Brain refused it: a source's key must start with its group's, then /";
 
 /** What a person's own store answers a restore: restores go into the shared store. */
 const restoresShared =
@@ -747,6 +760,14 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       throw new Error(notInstructions);
     }
     this.#mayKeep(adding.access);
+    if (adding.group !== undefined) {
+      if (this.#kind.kind !== "person") {
+        throw new Error(groupsOwnOnly);
+      }
+      if (!isInGroup(adding.source, adding.group)) {
+        throw new Error(notInGroup);
+      }
+    }
     return await this.#changing(async () => {
       await this.#readyToWrite();
       return await this.#unlessErasedMeanwhile(

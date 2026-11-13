@@ -213,9 +213,8 @@ const kindsWithoutColon = <const K extends string>(
  * (`sourceRefOf`), so a kind gone from this list would fail every recall
  * whose results hold one of its sources.
  */
-// `chat` stays although nothing produces it now: stores filled between
-// #2157 and its revert hold chat sources, and a recall that meets one must
-// still read it.
+// `chat`: a turn of a person's own chat, in their own store alone, in its
+// chat's group (brain-next-origins.ts `chatTurnSource`, GRA-1805).
 const producerKinds = kindsWithoutColon(["upload", "chat", "run"]);
 
 /** Who adds a source: one of `producerKinds`. */
@@ -273,6 +272,7 @@ const newSourceSchema = z.strictObject({
   change: changeSchema,
   text: wellFormedString(),
   readers: sourceReadersSchema,
+  group: sourceRefSchema.optional(),
 });
 
 /** The most characters of a question `recallAs` takes, as the Brain's contract says. */
@@ -489,6 +489,12 @@ const readerOf = async (
  * and its person, for its whole life (`keptIn`): `owner` readers for a
  * source the shared store holds are refused.
  *
+ * `group`, for a source of one person alone, names the source it is
+ * erased with: erasing the group (`eraseSource` of it) erases every
+ * source added in it, in one call to their own store, and refuses every
+ * add in it from then on. Of the same producer, its id the start of the
+ * source's, then "/"; a source keeps the group of its first add.
+ *
  * `change` names this one change, unique per source: an upstream
  * revision, a message id, or an id minted before the first try. Repeat an
  * add with the same `change` (after a lost reply, at once or much later)
@@ -512,9 +518,21 @@ export const addSource = async (
     change: string;
     text: string;
     readers: SourceReaders;
+    group?: SourceRef;
   }
 ): Promise<SourceVersionRef> => {
-  const { source, change, text, readers } = checked(newSourceSchema, added);
+  const { source, change, text, readers, group } = checked(
+    newSourceSchema,
+    added
+  );
+  if (
+    group !== undefined &&
+    (readers.kind !== "owner" || group.producer !== source.producer)
+  ) {
+    throw new Error(
+      "Refused: only a source for one person alone is in a group, of its own producer"
+    );
+  }
   const access = accessOf(readers);
   const key = sourceKeyOf(source);
   let version: number;
@@ -526,7 +544,13 @@ export const addSource = async (
           key,
           access,
           async (store) =>
-            await store.addSource({ source: key, change, text, access })
+            await store.addSource({
+              source: key,
+              change,
+              text,
+              access,
+              ...(group === undefined ? {} : { group: sourceKeyOf(group) }),
+            })
         )
     ));
   } catch (error) {
@@ -956,9 +980,10 @@ const personErasureSchema = z.strictObject({
 });
 
 /**
- * Erases `source` for good: every version, with everything kept of it.
- * Its key is closed: a later add of it is refused, so a producer's late
- * retry never brings it back. Safe to repeat. For a producer's deletion
+ * Erases `source` for good: every version, with everything kept of it,
+ * and every source added in it as their group (`addSource`), all in one
+ * call to the store. Its key is closed: a later add of it, or in it as a
+ * group, is refused, so a producer's late retry never brings it back. Safe to repeat. For a producer's deletion
  * for good, or the end of its retention. `readers` are the source's, as
  * its producer adds it: its key is closed in the person's own store when
  * they name one, then in the shared store (`keptIn`).
@@ -1825,6 +1850,8 @@ export type Handed =
       text: string;
       whenTooLarge: string;
       readers: SourceReaders;
+      /** The group it is added in (`addSource`): none for most. */
+      group?: SourceRef;
     };
 
 /** How a hand-over that did something ended: added, or refused for good. */
@@ -1943,6 +1970,7 @@ const handOver = async (
       change: handed.change,
       text,
       readers: readers.data,
+      ...(handed.group === undefined ? {} : { group: handed.group }),
     }));
   } catch (error) {
     if (!isErasedRefusal(error)) {
