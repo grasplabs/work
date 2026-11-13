@@ -11,7 +11,8 @@ import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 
 // The Agents page (agents/agents-overview.tsx): the agents the person may
-// talk to (`chats.agents`), and for the company's own admins every agent
+// talk to (`chats.agents`), their own (`connections.ownAgents`), and for
+// the company's own admins every agent of the company
 // with what core keeps of it. Only admins read the rest, as core checks
 // on every call; the first agent's reach is Settings › Stephen's, so only
 // the others' is read here.
@@ -75,7 +76,9 @@ const AgentsPage = () => {
       <SiteHeader crumbs={[{ label: t`Agents` }]} />
       <AgentsOverview
         makes={isMemberAdmin(identity)}
+        makesOwn={!identity.staff}
         managed={page.data.managed}
+        own={page.data.own}
         usable={page.data.usable}
       />
     </>
@@ -87,11 +90,13 @@ export const Route = createFileRoute("/_shell/agents/")({
   component: AgentsPage,
   loader: async ({ context: { core, identity } }) =>
     await loadFromCore(core, async (session) => {
-      const [usable, managed] = await Promise.all([
+      const [usable, own, managed] = await Promise.all([
         session.chats.agents(),
+        // The person's own, which nobody else is ever listed.
+        session.connections.ownAgents(),
         // Admins, Grasp's staff among them, who read and change nothing.
         isAdmin(identity.role) ? readManaged(session) : undefined,
       ]);
-      return { usable, managed };
+      return { usable, own, managed };
     }),
 });

@@ -115,6 +115,8 @@ interface Shown {
   face: string;
   /** Whether the person may talk to it. */
   usable: boolean;
+  /** Whether it answers, for one of the person's own; undefined for any other. */
+  own?: Agent["state"];
   /** As an admin reads it; undefined for anyone else. */
   managed:
     | {
@@ -208,16 +210,17 @@ const AgentCard = ({
   shown: Shown;
   teams: StephenReach["teams"];
 }) => {
-  const { managed } = shown;
+  const { managed, own } = shown;
   const nameClass =
     "truncate font-medium outline-none after:absolute after:inset-0 after:rounded-xl focus-visible:underline";
-  const answers = managed === undefined || managed.state === "on";
+  const state = managed?.state ?? own;
+  const answers = state === undefined || state === "on";
   return (
     <li className="bg-card hover:border-ring/40 relative flex min-w-0 flex-col gap-4 rounded-xl border p-4 transition-colors">
       <div className="flex items-start gap-3">
         <AgentAvatar face={shown.face} />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          {managed === undefined ? (
+          {state === undefined ? (
             <Link className={nameClass} search={{ agent: shown.id }} to="/">
               {shown.name}
             </Link>
@@ -238,12 +241,15 @@ const AgentCard = ({
       {managed === undefined ? null : (
         <ManagedFacts managed={managed} teams={teams} />
       )}
+      {own === undefined ? null : (
+        <div className="text-muted-foreground flex flex-col gap-1.5 text-sm">
+          <Fact icon={<UsersRoundIcon />}>
+            <Trans>Only you</Trans>
+          </Fact>
+        </div>
+      )}
       <div className="mt-auto flex min-h-8 items-center justify-between gap-2">
-        {managed === undefined ? (
-          <span />
-        ) : (
-          <AgentStateBadge state={managed.state} />
-        )}
+        {state === undefined ? <span /> : <AgentStateBadge state={state} />}
         {shown.usable && answers ? (
           <ChatLink agentId={shown.id} name={shown.name} />
         ) : null}
@@ -256,11 +262,28 @@ const AgentCard = ({
 const filters = ["all", "on", "paused"] as const;
 type Filter = (typeof filters)[number];
 
-/** The cards: every agent for an admin, else the ones the person may talk to. */
+/** The cards of the person's own agents, each opening its page. */
+const ownShownOf = (own: readonly Agent[]): Shown[] =>
+  own.map(({ id, name, job, face, state }) => ({
+    id,
+    name,
+    job,
+    face,
+    usable: true,
+    own: state,
+    managed: undefined,
+  }));
+
+/**
+ * The cards of the company's agents: every one for an admin, else the
+ * ones the person may talk to. Never one of the person's own, which have
+ * their own cards.
+ */
 const shownOf = (
-  usable: readonly ChatAgent[],
+  all: readonly ChatAgent[],
   managed: ManagedAgents | undefined
 ): Shown[] => {
+  const usable = all.filter(({ own }) => !own);
   if (managed === undefined) {
     return usable.map(({ id, name, job, face }) => ({
       id,
@@ -288,16 +311,45 @@ const shownOf = (
   }));
 };
 
-/** The Agents page's body: the agents the person may `usable`, and what an admin `managed`. */
+/** A group of agents' cards. */
+const Cards = ({
+  agents,
+  teams,
+  label,
+}: {
+  agents: readonly Shown[];
+  teams: StephenReach["teams"];
+  label: string;
+}) => (
+  <ul
+    aria-label={label}
+    className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+  >
+    {agents.map((agent) => (
+      <AgentCard key={agent.id} shown={agent} teams={teams} />
+    ))}
+  </ul>
+);
+
+/**
+ * The Agents page's body: the person's `own` agents, the company's they
+ * may `usable`, and what an admin `managed`.
+ */
 export const AgentsOverview = ({
   usable,
   managed,
+  own,
   makes,
+  makesOwn,
 }: {
   usable: readonly ChatAgent[];
   managed: ManagedAgents | undefined;
-  /** Whether the person may make an agent: the company's own admins. */
+  /** The person's own agents, which nobody else sees. */
+  own: readonly Agent[];
+  /** Whether the person may make an agent for the company: its own admins. */
   makes: boolean;
+  /** Whether the person may make one of their own: anyone of the company. */
+  makesOwn: boolean;
 }) => {
   const { t } = useLingui();
   const [query, setQuery] = useState("");
@@ -305,20 +357,25 @@ export const AgentsOverview = ({
   const agents = shownOf(usable, managed);
   const asked = query.trim();
   const needle = asked.toLocaleLowerCase();
+  const matches = (agent: Shown): boolean =>
+    needle === "" ||
+    agent.name.toLocaleLowerCase().includes(needle) ||
+    agent.job.toLocaleLowerCase().includes(needle);
   const shown = agents.filter(
     (agent) =>
-      (needle === "" ||
-        agent.name.toLocaleLowerCase().includes(needle) ||
-        agent.job.toLocaleLowerCase().includes(needle)) &&
-      (filter === "all" || agent.managed?.state === filter)
+      matches(agent) && (filter === "all" || agent.managed?.state === filter)
+  );
+  const mine = ownShownOf(own).filter(
+    (agent) => matches(agent) && (filter === "all" || agent.own === filter)
   );
   const paused = agents.filter(
     (agent) => agent.managed?.state === "paused"
   ).length;
+  const canMake = makes || makesOwn;
   return (
     <Page wide>
       <PageHeading
-        action={makes ? <NewAgentLink /> : undefined}
+        action={canMake ? <NewAgentLink /> : undefined}
         description={
           managed === undefined ? (
             <Trans>
@@ -334,7 +391,7 @@ export const AgentsOverview = ({
         }
         title={<Trans>Agents</Trans>}
       />
-      {agents.length === 0 ? (
+      {agents.length === 0 && own.length === 0 ? (
         <Empty>
           <EmptyHeader>
             <EmptyMedia variant="icon">
@@ -346,7 +403,8 @@ export const AgentsOverview = ({
             <EmptyDescription>
               {managed === undefined ? (
                 <Trans>
-                  The agents your company sets up for you show here.
+                  The agents your company sets up for you show here. You can
+                  also make one of your own.
                 </Trans>
               ) : (
                 <Trans>
@@ -356,7 +414,7 @@ export const AgentsOverview = ({
               )}
             </EmptyDescription>
           </EmptyHeader>
-          {makes ? (
+          {canMake ? (
             <EmptyContent>
               <NewAgentLink />
             </EmptyContent>
@@ -404,7 +462,7 @@ export const AgentsOverview = ({
               </ToggleGroup>
             )}
           </div>
-          {shown.length === 0 ? (
+          {shown.length === 0 && mine.length === 0 ? (
             <Empty>
               <EmptyHeader>
                 <EmptyTitle>
@@ -416,19 +474,35 @@ export const AgentsOverview = ({
                 </EmptyTitle>
               </EmptyHeader>
             </Empty>
-          ) : (
-            <ul
-              aria-label={t`Agents`}
-              className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-            >
-              {shown.map((agent) => (
-                <AgentCard
-                  key={agent.id}
-                  shown={agent}
-                  teams={managed?.teams ?? []}
-                />
-              ))}
-            </ul>
+          ) : null}
+          {/* The person's own first, told apart from the company's only
+              where they have some. */}
+          {mine.length === 0 ? null : (
+            <section className="flex flex-col gap-3">
+              <div className="flex flex-col gap-0.5">
+                <h2 className="font-medium">
+                  <Trans>Yours</Trans>
+                </h2>
+                <p className="text-muted-foreground text-sm">
+                  <Trans>Only you see and ask these.</Trans>
+                </p>
+              </div>
+              <Cards agents={mine} label={t`Your agents`} teams={[]} />
+            </section>
+          )}
+          {shown.length === 0 ? null : (
+            <section className="flex flex-col gap-3">
+              {own.length === 0 ? null : (
+                <h2 className="font-medium">
+                  <Trans>Your company&apos;s</Trans>
+                </h2>
+              )}
+              <Cards
+                agents={shown}
+                label={t`Agents`}
+                teams={managed?.teams ?? []}
+              />
+            </section>
           )}
         </>
       )}

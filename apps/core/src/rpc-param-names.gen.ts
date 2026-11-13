@@ -190,6 +190,8 @@ export const rpcParamNames: ParamNames = {
     "list": [],
     "makeAgent": ["input"],
     "makeAgentWake": ["agentId","input"],
+    "makeOwnAgent": ["input"],
+    "ownAgents": [],
     "pointApp": ["request"],
     "pointSharedMailbox": ["mailbox","audience"],
     "removeAgentDocument": ["agentId","documentId"],

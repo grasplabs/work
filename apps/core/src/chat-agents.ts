@@ -1,14 +1,15 @@
 import { agentErrors } from "@grasp-os/shared/agent";
 import type { ChatAgent } from "@grasp-os/shared/chat";
 
-import { listAgents } from "./agent-builder.ts";
+import { listAgents, listOwnAgents } from "./agent-builder.ts";
 import { agentFor } from "./agent-reach.ts";
 import { workspaceAgentIdSchema } from "./agent-scope.ts";
 import { firstAgentId, turnAgent } from "./agents.ts";
 import { modelSettings } from "./models.ts";
 
-// The company's agents a person may talk to in Grasp's own chat: the ones
-// that are on and whose audience takes them in (agent-reach.ts). A person
+// The agents a person may talk to in Grasp's own chat: the company's that
+// are on and whose audience takes them in (agent-reach.ts), and their
+// own (agents.ts), which nobody else is ever listed. A person
 // picks one of these for a new chat; a chat then stays with its agent.
 //
 // A person never learns of an agent outside their audience: it isn't
@@ -26,8 +27,9 @@ export const chatAgentsFor = async (
   env: Env,
   userId: string
 ): Promise<ChatAgent[]> => {
-  const [all, { models: chosen }] = await Promise.all([
+  const [all, own, { models: chosen }] = await Promise.all([
     listAgents(env),
+    listOwnAgents(env, userId),
     modelSettings(env),
   ]);
   const on = all.filter(({ state }) => state === "on");
@@ -37,16 +39,19 @@ export const chatAgentsFor = async (
       return reaches;
     })
   );
-  return on
-    .filter((_, index) => reached[index] === true)
-    .map(({ id, name, face, job, model }) => ({
-      id,
-      name,
-      face,
-      job,
-      // Only one its turns will use (workspace.ts, `#turnModel`).
-      model: model !== null && chosen.includes(model) ? model : null,
-    }));
+  return [
+    ...on.filter((_, index) => reached[index] === true),
+    // Their own, after the company's: on, and theirs by their record.
+    ...own.filter(({ state }) => state === "on"),
+  ].map(({ id, name, face, job, model, ownerId }) => ({
+    id,
+    name,
+    face,
+    job,
+    // Only one its turns will use (workspace.ts, `#turnModel`).
+    model: model !== null && chosen.includes(model) ? model : null,
+    own: ownerId !== null,
+  }));
 };
 
 /**

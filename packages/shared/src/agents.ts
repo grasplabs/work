@@ -41,6 +41,11 @@ export interface Agent {
   model: string | null;
   /** Whether it answers. */
   state: "on" | "paused";
+  /**
+   * The person whose own agent it is: only they see, ask and change it.
+   * Null for one of the company's, which its admins make.
+   */
+  ownerId: string | null;
   /** Who last changed it, and when; null: as Grasp ships it. */
   changedBy: string | null;
   changedAt: string | null;
@@ -92,6 +97,9 @@ export interface AgentSettings {
   /** Every class the company turns on or off, as this agent has it. */
   classes: { toolClass: CompanyToolClass; audience: AppClassAudience }[];
 }
+
+/** Most agents of their own one person keeps. */
+export const ownAgentsMax = 10;
 
 /** Most documents one agent keeps. */
 export const agentDocumentsMax = 10;
@@ -177,6 +185,17 @@ export interface AgentsApi {
    * off: an admin then says whom it answers and what it may do.
    */
   makeAgent: (input: AgentInput) => Promise<Agent>;
+  /**
+   * The person's own agents, by name: the ones they made for themselves,
+   * which nobody else sees, asks or changes. For anyone.
+   */
+  ownAgents: () => Promise<Agent[]>;
+  /**
+   * Makes an agent of the person's own, for anyone: on, theirs alone, in
+   * Grasp's own chat only, doing at most what the company lets its first
+   * agent do for them. Up to {@link ownAgentsMax} a person.
+   */
+  makeOwnAgent: (input: AgentInput) => Promise<Agent>;
   /** Changes an agent's name, face, job, instructions or model role. */
   changeAgent: (agentId: string, input: AgentInput) => Promise<void>;
   /** Pauses an agent, which then takes no turn, or turns it back on. */

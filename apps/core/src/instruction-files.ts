@@ -8,6 +8,7 @@ import { requireAdmin, roleErrors, roleSchema } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { z } from "zod";
 
+import { readAgent } from "./agents.ts";
 import { appFor, editableApp } from "./apps.ts";
 import { memberOf } from "./auth/identity.ts";
 import type { Member } from "./auth/identity.ts";
@@ -187,9 +188,19 @@ const requireWriter = async (
       }
       return;
     }
-    case "company":
+    case "company": {
+      requireAdmin(member);
+      return;
+    }
     case "agent": {
       requireAdmin(member);
+      // Never a person's own agent's (agents.ts): what it is told is its
+      // owner's to say, in its instructions, and an admin who learnt its
+      // ID from the audit log tells it nothing.
+      const agent = await readAgent(env, file.agentId);
+      if (agent !== undefined && agent.ownerId !== null) {
+        throw roleErrors.create("role.forbidden");
+      }
       return;
     }
     case "app": {

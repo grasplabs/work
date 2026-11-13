@@ -53,8 +53,10 @@ import { z } from "zod";
 import {
   changeAgent,
   listAgents,
+  listOwnAgents,
   deleteAgent,
   makeAgent,
+  makeOwnAgent,
   readAgentSettings,
   setAgentPaused,
   setAgentReach,
@@ -761,6 +763,20 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
       requireAdmin(identity);
       return await agentsUsage(this.#env, spendMonth(this.#env));
     });
+  }
+
+  async ownAgents(): Promise<Agent[]> {
+    return await withPerson(this.#check, async (identity) =>
+      // Grasp's staff are no one of the company: they have none.
+      identity.staff ? [] : await listOwnAgents(this.#env, identity.userId)
+    );
+  }
+
+  async makeOwnAgent(input: unknown): Promise<Agent> {
+    return await withPerson(
+      this.#check,
+      async (identity) => await makeOwnAgent(this.#env, identity, input)
+    );
   }
 
   async makeAgent(input: unknown): Promise<Agent> {
