@@ -1,3 +1,4 @@
+import { brainSourceErrors } from "@grasp-os/shared/brain-sources";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import {
   chatIdSchema,
@@ -23,10 +24,13 @@ import { evidenceOf } from "./run-evidence.ts";
 
 /**
  * `brain.revoked` for a refusal (any expected error: a grant, a member or
- * a read refused), or `error` as it is.
+ * a read refused), or `error` as it is. A stored row the Brain refuses as
+ * no request it takes (`brain.request_invalid`) stops the run as itself:
+ * nothing was revoked.
  */
 const revokedOr = (error: unknown): unknown =>
-  isExpectedError(error)
+  isExpectedError(error) &&
+  brainSourceErrors.codeOf(error) !== "brain.request_invalid"
     ? workflowResourceErrors.create("brain.revoked")
     : error;
 

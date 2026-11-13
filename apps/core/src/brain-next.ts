@@ -172,11 +172,16 @@ const sourceReadersSchema = z.discriminatedUnion("kind", [
 /** Who may read a source, as core names them. */
 export type SourceReaders = z.infer<typeof sourceReadersSchema>;
 
-/** `input` as `schema` reads it, or an error naming what was wrong. */
+/**
+ * `input` as `schema` reads it, or refused as `brain.request_invalid`: an expected
+ * error, so a caller over RPC gets that code, the audit log that reason,
+ * and the log no stack. It names nothing of the input, not even its paths:
+ * a key a caller sent is theirs.
+ */
 const checked = <T>(schema: z.ZodType<T>, input: unknown): T => {
   const result = schema.safeParse(input);
   if (!result.success) {
-    throw new Error(`Refused: ${z.prettifyError(result.error)}`);
+    throw brainSourceErrors.create("brain.request_invalid");
   }
   return result.data;
 };
