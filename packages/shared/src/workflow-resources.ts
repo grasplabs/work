@@ -168,6 +168,12 @@ export const workflowResourceErrors = defineErrorFamily({
     "Someone changed the parameters since you read them. Read them again, then retry.",
   "workflow.state_invalid":
     "That isn't state a step may keep: name each value with letters, digits and underscores, starting with a letter, and keep each value JSON.",
+  // A run's recall evidence (core's workflows/run-evidence.ts): the codes
+  // and words the old Brain's contract has for them, which runs keep
+  // until the cutover (GRA-1735) drops that contract.
+  "brain.revoked":
+    "Evidence this run recalled can no longer be read. Recall again before using it.",
+  "brain.budget_exceeded": "This request is over the Brain's limits for it.",
   "workflow.state_restricted":
     "A run in restricted mode keeps no state for later runs: what it read stays with it, so the step that set it failed.",
   "workflow.state_too_large":

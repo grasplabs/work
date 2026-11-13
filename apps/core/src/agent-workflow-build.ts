@@ -492,7 +492,8 @@ const workflowBuildDeclaration = `/**
  * it only once an admin has granted the workflow \`call\` on that function, and it acts as the run's person,
  * within the App's roles and row rules. Each alias is used once across every kind. A files permission is
  * the run's own files, and a brain permission the Brain, read as only what everyone in the company may
- * read (never a team's content, nor anyone's own), whoever the run acts for, served by the workflow's own grant of the platform's \`brain\`
+ * read (never a team's content, nor anyone's own), whoever the run acts for: today nothing readable by the whole company is
+ * in the Brain, so a recall returns an empty pack (say so, and build nothing that depends on it finding something); served by the workflow's own grant of the platform's \`brain\`
  * (\`requestPermission\` below): a \`call\` step reaches each (below). A file is handed on by its reference \`{ file, name, type, size,
  * sha256 }\`, never its content, and found by its \`file\` ID in its own run alone.
  * \`state\` declares what the workflow keeps between its runs: \`{ [key]: <descriptor> }\`, at

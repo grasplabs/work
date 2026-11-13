@@ -1,12 +1,10 @@
-// The old Brain package's errors, until the cutover (GRA-1735) moves
-// `brain.revoked` to the new one.
-import { brainErrors } from "@grasp-os/brain/contract";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import {
   chatIdSchema,
   permissionIdSchema,
   workspaceIdSchema,
 } from "@grasp-os/shared/ids";
+import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -17,16 +15,19 @@ import { readableSources } from "../history-access.ts";
 import { authorize } from "../permissions.ts";
 import { runAuthority, runContext } from "./resource-authority.ts";
 import type { CallingRun } from "./resource-authority.ts";
-import { evidenceOf, isAccessRefusal } from "./run-evidence.ts";
+import { evidenceOf } from "./run-evidence.ts";
 
 // What a run read, checked before anything of the run leaves it: the
 // Brain's versions its recalls pinned (run-evidence.ts) and what the chat
 // that started it had read (GRA-1093).
 
-/** `brain.revoked` for a refusal of access, or `error` as it is. */
+/**
+ * `brain.revoked` for a refusal (any expected error: a grant, a member or
+ * a read refused), or `error` as it is.
+ */
 const revokedOr = (error: unknown): unknown =>
-  isAccessRefusal(error) || isExpectedError(error)
-    ? brainErrors.create("brain.revoked")
+  isExpectedError(error)
+    ? workflowResourceErrors.create("brain.revoked")
     : error;
 
 /**
@@ -61,14 +62,14 @@ const requireChatPinsReadable = async (
     throw revokedOr(error);
   });
   if (rows.some(({ sourceId }) => !readable.has(sourceId))) {
-    throw brainErrors.create("brain.revoked");
+    throw workflowResourceErrors.create("brain.revoked");
   }
 };
 
 /** `requireResourceRunEvidenceReadable` for `run`'s own evidence alone. */
 const requireOwnEvidenceReadable = async (
   env: Env,
-  run: CallingRun
+  run: Pick<CallingRun, "runId" | "workflowId" | "principal">
 ): Promise<void> => {
   await requireChatPinsReadable(env, run.runId);
   const rows = await evidenceOf(env, run.runId);
@@ -110,7 +111,7 @@ const requireOwnEvidenceReadable = async (
           !kept.has(JSON.stringify([source.producer, source.id, version]))
       )
     ) {
-      throw brainErrors.create("brain.revoked");
+      throw workflowResourceErrors.create("brain.revoked");
     }
   } catch (error) {
     throw revokedOr(error);
@@ -137,6 +138,19 @@ const requireOwnEvidenceReadable = async (
 export const requireResourceRunEvidenceReadable = async (
   env: Env,
   run: CallingRun
+): Promise<void> => {
+  await requireOwnEvidenceReadable(env, run);
+};
+
+/**
+ * The same check for a run that ended, before what it returned or why it
+ * failed is shown to anyone (resource-runs.ts `resultOf`): its record
+ * holds what it recalled, so once the company may no longer read that,
+ * the record is withheld as `brain.revoked`, its status and times shown.
+ */
+export const requireEndedRunEvidenceReadable = async (
+  env: Env,
+  run: Pick<CallingRun, "runId" | "workflowId" | "principal">
 ): Promise<void> => {
   await requireOwnEvidenceReadable(env, run);
 };

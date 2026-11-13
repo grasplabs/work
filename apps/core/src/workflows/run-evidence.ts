@@ -1,7 +1,4 @@
-import { brainErrors } from "@grasp-os/brain/contract";
-import { knowledgeErrors } from "@grasp-os/brain/knowledge";
 import type { PermissionId } from "@grasp-os/shared/ids";
-import { permissionErrors } from "@grasp-os/shared/permissions";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -82,7 +79,7 @@ export const recordRunVersions = async (
       )
     );
   if ((kept?.count ?? 0) < unique.length) {
-    throw brainErrors.create("brain.budget_exceeded");
+    throw workflowResourceErrors.create("brain.budget_exceeded");
   }
 };
 
@@ -97,16 +94,3 @@ export const evidenceOf = async (env: Env, runId: string) =>
     })
     .from(runBrainVersions)
     .where(eq(runBrainVersions.runId, runId));
-
-/** Whether `error` is a refusal of access, rather than a passing failure. */
-export const isAccessRefusal = (error: unknown): boolean => {
-  const brain = brainErrors.codeOf(error);
-  const knowledge = knowledgeErrors.codeOf(error);
-  return (
-    workflowResourceErrors.codeOf(error) === "workflow.call_denied" ||
-    brain === "brain.denied" ||
-    brain === "brain.not_found" ||
-    knowledge === "knowledge.not_found" ||
-    permissionErrors.codeOf(error) === "permission.denied"
-  );
-};

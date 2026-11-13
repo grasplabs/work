@@ -1787,7 +1787,9 @@ build: {
    * ["recall"] })\`), it asks for \`{ type: "platform" }\` with actions
    * \`["brain"]\`. A recall answers only what everyone in the company may
    * read, whoever calls, never a team's content; and an App that recalls
-   * answers no visitor.
+   * answers no visitor and invites no guest. Today nothing readable by the
+   * whole company is in the Brain, so a recall returns an empty pack: say
+   * so, and never build a feature that depends on it finding something.
    */
   requestPermission(app: string, request: {
     object:

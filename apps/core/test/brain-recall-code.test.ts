@@ -22,7 +22,7 @@ import { addMember } from "../src/app-members.ts";
 import { publishVersion } from "../src/app-publish.ts";
 import type { Release } from "../src/app-releases.ts";
 import { appFor } from "../src/apps.ts";
-import { addSource, eraseSource } from "../src/brain-next.ts";
+import { addSource, eraseSource, recallAs } from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { recallFor } from "../src/brain-recall.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
@@ -486,17 +486,33 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
       question: request.question,
       tokens: request.budget.tokens,
     });
+    // Her own search of the Brain, as the person.
+    const own = await recallAs(env, ada.userId, {
+      question: request.question,
+      budget: request.budget,
+      personal: true,
+    });
+    const forEveryoneNote = `For everyone: ${word} is in the handbook.`;
+    const teamNote = `Ada's team: ${word} is planned in March.`;
     expect({
       app: textsOf(fromApp),
       sameInRun: fromRun,
-      chat: textsOf(returnedOf(fromCode?.text)),
+      chat: textsOf(returnedOf(fromCode?.text)).toSorted(),
+      own: own.items.map(({ text }) => text).toSorted(),
     }).toStrictEqual({
       // The note for everyone alone: never her team's, though she is in
       // it, nor her own note (GRA-1762), nor anyone else's.
-      app: [`For everyone: ${word} is in the handbook.`],
+      app: [forEveryoneNote],
       sameInRun: fromApp,
-      // Her chat's code: her team's note, never her own.
-      chat: [`Ada's team: ${word} is planned in March.`],
+      // Her chat's code: her team's note and the note for everyone, never
+      // her own.
+      chat: [teamNote, forEveryoneNote].toSorted(),
+      // Her own search: hers too, and never a team's she isn't in.
+      own: [
+        `Ada's own note: ask your lead about ${word}.`,
+        teamNote,
+        forEveryoneNote,
+      ].toSorted(),
     });
     // Each audited for her, with what it found counted, never said.
     const events = await recallEvents(ada.userId, 3);
@@ -738,6 +754,73 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
       afterErasure: { failed: "brain.revoked" },
       afterNarrowing: { failed: "brain.revoked" },
       unchanged: [keptText],
+    });
+  });
+
+  it("withholds a finished run's result once the company may no longer read what it recalled, its status and times still shown", async () => {
+    const { admin, ada } = await company();
+    const elsewhere = await teamOf(admin);
+    const words = [1, 2, 3].map(
+      (at) => `band${at}${unique().replaceAll(/\W/gu, "")}`
+    );
+    const [narrowedWord = "", erasedWord = "", keptWord = ""] = words;
+    const narrowed = await forEveryone(`Salary band: ${narrowedWord} is 90k.`);
+    const erased = await forEveryone(`Salary band: ${erasedWord} is 70k.`);
+    const keptText = `Salary band: ${keptWord} is 80k.`;
+    await forEveryone(keptText);
+    const { workflow } = await recallingWorkflow(ada, admin);
+    const runs: string[] = [];
+    for (const question of words) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      const runId = await startedRun(ada, workflow.id, {
+        question,
+        tokens: 800,
+      });
+      // oxlint-disable-next-line no-await-in-loop -- each ends first
+      await endOf(ada, workflow.id, runId);
+      runs.push(runId);
+    }
+    // Once they ended: the first plan narrowed to a team, the second erased.
+    await addSource(env, {
+      source: narrowed,
+      change: crypto.randomUUID(),
+      text: `Salary band: ${narrowedWord} is 95k.`,
+      readers: { kind: "team", teamId: elsewhere },
+    });
+    await eraseSource(env, {
+      source: erased,
+      readers: { kind: "none" },
+      reason: "deleted",
+    });
+    /** What its person and an admin see of a run's record. */
+    const recordOf = async (by: Member, runId: string) => {
+      const run = await resourceRunFor(env, by, workflow.id, runId);
+      return {
+        status: run.status,
+        ended: run.endedAt !== null,
+        result: run.result === undefined ? null : textsOf(run.result),
+        error: run.error?.code ?? null,
+      };
+    };
+    const withheld = {
+      status: "completed",
+      ended: true,
+      result: null,
+      error: "brain.revoked",
+    };
+    expect({
+      narrowed: await recordOf(ada, runs[0] ?? ""),
+      erased: await recordOf(admin, runs[1] ?? ""),
+      unchanged: await recordOf(ada, runs[2] ?? ""),
+    }).toStrictEqual({
+      narrowed: withheld,
+      erased: withheld,
+      unchanged: {
+        status: "completed",
+        ended: true,
+        result: [keptText],
+        error: null,
+      },
     });
   });
 

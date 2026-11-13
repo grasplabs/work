@@ -411,7 +411,7 @@ const refusal = (answer: unknown): string =>
 const grantedRow = (
   subjectType: "app" | "workflow",
   subject: string,
-  objectType: "platform" | "app",
+  objectType: "platform" | "app" | "workflow",
   object: string,
   actions: string[]
 ) =>
@@ -428,6 +428,9 @@ const grantedRow = (
     JSON.stringify(actions),
     `GRANT_${unique().toUpperCase().replaceAll(/\W/gu, "_")}`
   );
+
+/** A workflow's ID no other test has. */
+const workflowId = (): string => `workflow_${unique().replaceAll("-", "")}`;
 
 /** A domain no other test has. */
 const newDomain = (): string => `visitors-${unique()}.test`;
@@ -1197,5 +1200,44 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
       listNone: "ok",
       grantNone: "ok",
     });
+  });
+
+  it("are refused once the Brain reaches the App however many grants away, and the walk ends on a cycle", async () => {
+    const domain = newDomain();
+    const [twoHops, threeHops] = [await portal(domain), await portal(domain)];
+    const mail = await mailbox();
+    for (const { builder, app } of [twoHops, threeHops]) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      await builder.api.apps.setVisitorGrants(app, ["portal.mine"]);
+    }
+    const ana = await visitor(mail, twoHops.link, `ana@${domain}`);
+    const bo = await visitor(mail, threeHops.link, `bo@${domain}`);
+    // Two grants away: App A holds the Brain and starts workflow W, which
+    // holds no Brain and calls the visited App.
+    const [a, w] = [crypto.randomUUID(), workflowId()];
+    // Three away: A2 holds the Brain and starts W1, W1 calls App C, C
+    // starts W2, and W2 calls the visited App, which starts W1 back: a
+    // cycle the walk must end on.
+    const [a2, c, w1, w2] = [
+      crypto.randomUUID(),
+      crypto.randomUUID(),
+      workflowId(),
+      workflowId(),
+    ];
+    await env.DB.batch([
+      grantedRow("app", a, "platform", "platform", ["brain"]),
+      grantedRow("app", a, "workflow", w, ["start"]),
+      grantedRow("workflow", w, "app", twoHops.app, ["call"]),
+      grantedRow("app", a2, "platform", "platform", ["brain"]),
+      grantedRow("app", a2, "workflow", w1, ["start"]),
+      grantedRow("workflow", w1, "app", c, ["call"]),
+      grantedRow("app", c, "workflow", w2, ["start"]),
+      grantedRow("workflow", w2, "app", threeHops.app, ["call"]),
+      grantedRow("app", threeHops.app, "workflow", w1, ["start"]),
+    ]);
+    expect([
+      await call(twoHops.app, twoHops.version, ana, "portal.mine"),
+      await call(threeHops.app, threeHops.version, bo, "portal.mine"),
+    ]).toStrictEqual(["visitor.not_granted", "visitor.not_granted"]);
   });
 });
