@@ -26,6 +26,9 @@ export const brainModules = {
   // The Brain's Sources page, for people: its own surface, each method
   // probed as the signed-in person.
   "apps/core/src/brain-sources-rpc.ts": "sources",
+  // Answers an admin's request with core's export and restore functions,
+  // whose probes hold what they return, as they return it.
+  "apps/core/src/brain-next-exports.ts": "core",
   // Erases the sources of runs past their retention with core's
   // eraseSource, and answers nothing of it.
   "apps/core/src/brain-next-origins.ts": "core",
@@ -44,6 +47,13 @@ export const brainModules = {
   // Checks with core's readableVersionsAs that a run may still read what
   // it recalled, and hands on only a refusal.
   "apps/core/src/workflows/resource-reads.ts": "core",
+  // Remembers, forgets and corrects for a person, and reads entities for
+  // them: its own surface, each export probed as the person.
+  "apps/core/src/brain-memories.ts": "memories",
+  // The chat's tool that saves what a person says: reads core's
+  // memoryChoices, and hands on nothing it returns beyond what
+  // brain-memories.ts's probes hold.
+  "apps/core/src/agent-remember.ts": "core",
   // Core's subclass of the store: its alarm's host, from core's
   // alarmHostOf, given to the store inside its own object; it adds no
   // method, so the store's probes are its own.

@@ -146,6 +146,10 @@ const typeRules: readonly {
   // Two entities of different collections decided to be one, or not
   // (GRA-1080): their IDs and evidence, never a name.
   { action: "brain.entity_match", type: "decision" },
+  // The new Brain's memories (core's src/brain-memories.ts): one saved
+  // for a person, or retired by them, its attempt and then its outcome.
+  // Ids and codes only, never what a memory says.
+  { action: "brain.memory", type: "action" },
   // Core handing a source over to the new Brain (GRA-1727): started, handed
   // over or refused, by ids alone.
   { action: "brain.source", type: "action" },
