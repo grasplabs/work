@@ -716,9 +716,9 @@ describe(
       await expect(textsFor(holder, teamMarker)).resolves.toStrictEqual([
         teamSource,
       ]);
-      await expect(textsFor(holder, teamUploadMarker)).resolves.toStrictEqual([
-        expect.stringContaining(teamUploadMarker),
-      ]);
+      await expect(textsFor(holder, teamUploadMarker)).resolves.toContainEqual(
+        expect.stringContaining(teamUploadMarker)
+      );
       await expect(
         textsFor(holder, `salary ${ownerMarker}`)
       ).resolves.toContain(`Salary review ${sharedWord} ${ownerMarker}`);

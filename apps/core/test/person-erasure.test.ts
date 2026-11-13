@@ -1193,7 +1193,10 @@ describe("erasing a person", () => {
     expect({
       before,
       after: { own: await uploads("me"), team: await uploads("team") },
-      teamFinds: items.map(({ source }) => source.id),
+      // By its words: recall also adds passages by meaning alone.
+      teamFinds: items.flatMap(({ source, found }) =>
+        found === "meaning" ? [] : [source.id]
+      ),
     }).toStrictEqual({
       before: { own: 1, team: 1 },
       after: { own: 0, team: 1 },

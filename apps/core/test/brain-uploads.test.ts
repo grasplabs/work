@@ -92,10 +92,16 @@ const leave = async (teamId: string, { userId }: Person): Promise<void> => {
     .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)));
 };
 
-/** What `person` finds searching for `asked`: each passage's source id. */
+/**
+ * What `person` finds searching for `asked` by its words or exactly: each
+ * passage's source id. Hits by meaning alone are left out: recall adds
+ * the nearest readable passages by meaning, whatever they hold.
+ */
 const found = async (person: Person, asked: string): Promise<string[]> => {
   const { items } = await person.api.brainSources.search(asked);
-  return items.map(({ source }) => source.id);
+  return items.flatMap(({ source, found: how }) =>
+    how === "meaning" ? [] : [source.id]
+  );
 };
 
 /** The text of `version` of `source` as `person` reads it: null if not. */
