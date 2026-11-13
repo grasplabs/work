@@ -4821,6 +4821,10 @@ msgstr "Heeft een webhookgebeurtenis niet doorgegeven aan de run die erop wachtt
 msgid "Didn't keep a webhook event: its source keeps as many as it may"
 msgstr "Heeft een webhookgebeurtenis niet bewaard: de bron bewaart er al zoveel als mag"
 
+#: src/activity/audit-words.ts
+msgid "Didn't keep something noted for the Brain, and recorded why"
+msgstr "Iets dat voor het Brain was genoteerd niet bewaard, en vastgelegd waarom"
+
 #: src/agents/agent-wakes.tsx
 msgid "Didn't run {when}: no AI provider is connected"
 msgstr "Niet uitgevoerd op {when}: er is geen AI-provider verbonden"
@@ -9185,6 +9189,10 @@ msgstr "Notitie niet gevonden"
 #: src/onboarding/connect-steps.tsx
 msgid "Noted"
 msgstr "Genoteerd"
+
+#: src/activity/audit-words.ts
+msgid "Noted a question asked in a chat, to keep in its person's own Brain"
+msgstr "Een vraag uit een chat genoteerd, om te bewaren in het eigen Brain van de persoon"
 
 #: src/onboarding/connect-steps.tsx
 msgid "Noted: {name}. Sign in to connect it now, or we’ll connect it with you. I’ll only read what you share with me."

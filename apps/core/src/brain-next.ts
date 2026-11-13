@@ -221,10 +221,16 @@ const kindsWithoutColon = <const K extends string>(
  * (`sourceRefOf`), so a kind gone from this list would fail every recall
  * whose results hold one of its sources.
  */
-// `chat` stays although nothing produces it now: stores filled between
-// #2157 and its revert hold chat sources, and a recall that meets one must
-// still read it.
+// `chat`: a turn of a person's own chat, in their own store alone, in its
+// chat's group (brain-next-origins.ts `chatTurnSource`, GRA-1805).
 const producerKinds = kindsWithoutColon(["upload", "chat", "run"]);
+
+/**
+ * The kinds the Sources page lists (`listSourcesAs`): not a chat's turns,
+ * which its chat shows, and which would list as a row each. Recall still
+ * finds them, each naming its chat.
+ */
+const listedKinds = producerKinds.filter((kind) => kind !== "chat");
 
 /** Who adds a source: one of `producerKinds`. */
 export type ProducerKind = (typeof producerKinds)[number];
@@ -281,6 +287,7 @@ const newSourceSchema = z.strictObject({
   change: changeSchema,
   text: wellFormedString(),
   readers: sourceReadersSchema,
+  group: sourceRefSchema.optional(),
 });
 
 /** The most characters of a question `recallAs` takes, as the Brain's contract says. */
@@ -595,6 +602,12 @@ const readerOf = async (
  * and its person, for its whole life (`keptIn`): `owner` readers for a
  * source the shared store holds are refused.
  *
+ * `group`, for a source of one person alone, names the source it is
+ * erased with: erasing the group (`eraseSource` of it) erases every
+ * source added in it, in one call to their own store, and refuses every
+ * add in it from then on. Of the same producer, its id the start of the
+ * source's, then "/"; a source keeps the group of its first add.
+ *
  * `change` names this one change, unique per source: an upstream
  * revision, a message id, or an id minted before the first try. Repeat an
  * add with the same `change` (after a lost reply, at once or much later)
@@ -618,9 +631,21 @@ export const addSource = async (
     change: string;
     text: string;
     readers: SourceReaders;
+    group?: SourceRef;
   }
 ): Promise<SourceVersionRef> => {
-  const { source, change, text, readers } = checked(newSourceSchema, added);
+  const { source, change, text, readers, group } = checked(
+    newSourceSchema,
+    added
+  );
+  if (
+    group !== undefined &&
+    (readers.kind !== "owner" || group.producer !== source.producer)
+  ) {
+    throw new Error(
+      "Refused: only a source for one person alone is in a group, of its own producer"
+    );
+  }
   const access = accessOf(readers);
   const key = sourceKeyOf(source);
   let version: number;
@@ -632,7 +657,13 @@ export const addSource = async (
           key,
           access,
           async (store) =>
-            await store.addSource({ source: key, change, text, access })
+            await store.addSource({
+              source: key,
+              change,
+              text,
+              access,
+              ...(group === undefined ? {} : { group: sourceKeyOf(group) }),
+            })
         )
     ));
   } catch (error) {
@@ -872,7 +903,7 @@ export const listSourcesAs = async (
   const reader = await personReaderOf(env, personId);
   const request = {
     reader,
-    prefixes: producerKinds.map((kind) => `${kind}:`),
+    prefixes: listedKinds.map((kind) => `${kind}:`),
     ...(from === undefined
       ? {}
       : { after: { addedAt: from.addedAt, source: sourceKeyOf(from.source) } }),
@@ -1064,6 +1095,7 @@ const sourceErasureSchema = z.strictObject({
   source: sourceRefSchema,
   readers: sourceReadersSchema,
   reason: z.enum(erasureReasons),
+  asGroup: z.literal(true).optional(),
 });
 
 const personErasureSchema = z.strictObject({
@@ -1072,9 +1104,10 @@ const personErasureSchema = z.strictObject({
 });
 
 /**
- * Erases `source` for good: every version, with everything kept of it.
- * Its key is closed: a later add of it is refused, so a producer's late
- * retry never brings it back. Safe to repeat. For a producer's deletion
+ * Erases `source` for good: every version, with everything kept of it,
+ * and every source added in it as their group (`addSource`), all in one
+ * call to the store. Its key is closed: a later add of it, or in it as a
+ * group, is refused, so a producer's late retry never brings it back. Safe to repeat. For a producer's deletion
  * for good, or the end of its retention. `readers` are the source's, as
  * its producer adds it: its key is closed in the person's own store when
  * they name one, then in the shared store (`keptIn`).
@@ -1085,9 +1118,23 @@ const personErasureSchema = z.strictObject({
  */
 export const eraseSource = async (
   env: BrainEnv,
-  erased: { source: SourceRef; readers: SourceReaders; reason: ErasureReason }
+  erased: {
+    source: SourceRef;
+    readers: SourceReaders;
+    reason: ErasureReason;
+    /**
+     * That `source` is a group's (`addSource`'s `group`), though no add
+     * may have named it yet: its person's own store erases it as one, so
+     * every key under it stays refused, even after a restore of that
+     * store. For one person's own alone; the shared store holds no group.
+     */
+    asGroup?: true;
+  }
 ): Promise<void> => {
-  const { source, readers, reason } = checked(sourceErasureSchema, erased);
+  const { source, readers, reason, asGroup } = checked(
+    sourceErasureSchema,
+    erased
+  );
   const request = { source: sourceKeyOf(source), reason };
   // In its person's own store first, when it is theirs, and only once
   // that returned closed in the shared store, whatever its readers: the
@@ -1095,7 +1142,10 @@ export const eraseSource = async (
   // left. A failure of the first leaves the shared store as it was, and
   // the retry does both, in order.
   if (readers.kind === "owner") {
-    await ownBrain(env, readers.personId).eraseSource(request);
+    await ownBrain(env, readers.personId).eraseSource({
+      ...request,
+      ...(asGroup === undefined ? {} : { asGroup }),
+    });
   }
   await brain(env).eraseSource(request);
 };
@@ -1930,7 +1980,14 @@ const embeddersOf = async (env: Env): Promise<Embedders> => ({
  * may have landed after that erasure.
  */
 export type Handed =
-  | { kind: "gone" }
+  | {
+      kind: "gone";
+      /**
+       * Why a source its producer noted is not handed over, for those that
+       * record it (brain-sources.ts): what a note promised ends in this.
+       */
+      skipped?: HandOverSkip;
+    }
   | { kind: "erased"; readers: SourceReaders }
   | {
       kind: "source";
@@ -1938,7 +1995,20 @@ export type Handed =
       text: string;
       whenTooLarge: string;
       readers: SourceReaders;
+      /** The group it is added in (`addSource`): none for most. */
+      group?: SourceRef;
     };
+
+/**
+ * Why a noted source is not handed over after all: its record restricted
+ * since, deleted or gone, its reader no longer a member, or nothing of it
+ * to keep (a question of no words).
+ */
+export type HandOverSkip =
+  | "restricted"
+  | "deleted"
+  | "not_a_member"
+  | "no_text";
 
 /** How a hand-over that did something ended: added, or refused for good. */
 export type HandOverEnd = Exclude<HandOverResult, { kind: "nothing" }>;
@@ -2056,6 +2126,7 @@ const handOver = async (
       change: handed.change,
       text,
       readers: readers.data,
+      ...(handed.group === undefined ? {} : { group: handed.group }),
     }));
   } catch (error) {
     if (!isErasedRefusal(error)) {
