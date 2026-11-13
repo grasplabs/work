@@ -24,6 +24,18 @@ describe("audit event types", () => {
     expect(typeOf("audit.purged")).toBe("action");
   });
 
+  it("files a chat's question noted for the Brain, and how its hand-over ended, as actions", () => {
+    expect(
+      [
+        "chat.turn_noted",
+        "brain.source.handover_started",
+        "brain.source.handed_over",
+        "brain.source.handover_refused",
+        "brain.source.handover_skipped",
+      ].map((action) => typeOf(action))
+    ).toStrictEqual(["action", "action", "action", "action", "action"]);
+  });
+
   it("gives an audit action no rule names no type, rather than filing it as a read", () => {
     expect(typeOf("audit.something_new")).toBeNull();
   });

@@ -29,8 +29,9 @@ export const brainModules = {
   // Answers an admin's request with core's export and restore functions,
   // whose probes hold what they return, as they return it.
   "apps/core/src/brain-next-exports.ts": "core",
-  // Erases the sources of runs past their retention with core's
-  // eraseSource, and answers nothing of it.
+  // Erases the sources of runs past their retention, and a deleted chat's
+  // turns (its group), with core's eraseSource, and answers nothing of
+  // it; names a chat's and its turns' sources.
   "apps/core/src/brain-next-origins.ts": "core",
   // Core's producers for the Brain's hand-overs and their relay: puts keys
   // on the queue with core's queueHandOvers, and reads the sources it
