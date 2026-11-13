@@ -344,6 +344,7 @@ const meaningSurfaces = new Set([
   "core recallAs",
   "core mergeRecalled",
   "sources search",
+  "recall recallFor",
 ]);
 
 /** Each of `among`'s answers as `probing`'s reader, by surface: a `before` for `findingsOf`. */

@@ -3368,13 +3368,17 @@ export const recallProbes = {
       ...(await askedOfMarkers(
         probing,
         momentsOf(probing),
-        async (asking) => await recall(codeAsk(asking))
+        async (asking) => await recall(codeAsk(asking)),
+        true
       )),
-      await answer(
-        "the shared word",
-        async () =>
-          await recall({ question: probing.sharedWord, budget: whole })
-      ),
+      {
+        ...(await answer(
+          "the shared word",
+          async () =>
+            await recall({ question: probing.sharedWord, budget: whole })
+        )),
+        byMeaning: true,
+      },
       await answer(
         "too long a question",
         async () =>
