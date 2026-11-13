@@ -36,6 +36,30 @@ export interface Draft {
 }
 
 /**
+ * One problem a draft's check found (`DraftCheck`): where it is (an App's
+ * file and line or a route of its preview, a workflow definition's JSON
+ * Pointer) and what it says, as the build or the draft's own code wrote it.
+ */
+export interface DraftProblem {
+  /** The file, route, server method or JSON Pointer; null for the draft as a whole. */
+  at: string | null;
+  /** 1-based, in `at`'s file; null when it is about the whole file or not a file. */
+  line: number | null;
+  message: string;
+}
+
+/**
+ * A draft checked as publishing checks it (`DraftsApi.check`), at its
+ * `revision`: whether it passes, and the errors it found (warnings never
+ * fail it), at most 50.
+ */
+export interface DraftCheck {
+  revision: number;
+  passed: boolean;
+  problems: DraftProblem[];
+}
+
+/**
  * One checkpoint of a draft (`DraftsApi.checkpoints`): the draft as one
  * agent turn left it, as one person's edit left it, or as a restore,
  * discard, publish or roll back made it. The newest follows its turn's
@@ -127,6 +151,12 @@ export interface DraftsApi {
     subject: Subject,
     onRevision: (revision: number) => void
   ) => Promise<SubscriptionApi>;
+  /**
+   * Checks the draft as publishing checks it: an App's builds, types,
+   * lint and what its preview ran into; a workflow's definition, as the
+   * profile and the catalog take it.
+   */
+  check: (subject: Subject) => Promise<DraftCheck>;
   /**
    * Publishes the draft at `revision`, the one the person read, as the
    * subject's next version, built, checked and made live in one step, as

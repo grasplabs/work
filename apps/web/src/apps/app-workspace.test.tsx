@@ -14,6 +14,7 @@ import type {
 } from "@grasp-os/shared/chat";
 import type {
   Draft,
+  DraftCheck,
   DraftCheckpoint,
   LiveVersion,
 } from "@grasp-os/shared/drafts";
@@ -309,8 +310,8 @@ const opened = async (
   /** How core answers the person publishing the App's draft; by default not yet. */
   publish: (app: string, revision: number) => Promise<App> = async () =>
     await Promise.withResolvers<never>().promise,
-  /** What publishing the draft changes, as core reads it; by default not yet. */
-  changes: () => Promise<AppReview> = async () =>
+  /** What publishing the draft changes and its check, as core reads them; by default not yet. */
+  changes: () => Promise<Reviewed> = async () =>
     await Promise.withResolvers<never>().promise,
   /** Draft or Live, as the address says. */
   env: WorkspaceEnv = "draft",
@@ -341,6 +342,10 @@ const opened = async (
   const withReview = { ...apps, review: changes };
   const drafts = {
     get: draft,
+    check: async (): Promise<DraftCheck> => {
+      const { revision, check } = await changes();
+      return { revision, ...check };
+    },
     publish: async ({ id }: Subject, revision: number) =>
       liveOf(await publish(id, revision)),
     checkpoints: apps.draftPoints,
@@ -490,12 +495,15 @@ const press = async (element: HTMLElement): Promise<void> => {
   await settled();
 };
 
+/** An App's review, and its draft's check (`drafts.check`) at its revision. */
+type Reviewed = AppReview & { check: Omit<DraftCheck, "revision"> };
+
 /**
  * What publishing the draft of `draftOf` changes, as core reads it at
  * revision 1: its page changed, checks passing, unless `overrides` says
  * otherwise.
  */
-const changesOf = (overrides: Partial<AppReview> = {}): AppReview => ({
+const changesOf = (overrides: Partial<Reviewed> = {}): Reviewed => ({
   revision: 1,
   live: null,
   liveLabel: null,
@@ -1777,7 +1785,7 @@ describe(AppWorkspace, () => {
    * What the open sheet says of the draft's access, once its changes are
    * shown, as core reads the draft's changes as `changes` says.
    */
-  const accessShown = async (changes: Partial<AppReview>): Promise<string> => {
+  const accessShown = async (changes: Partial<Reviewed>): Promise<string> => {
     await opened(
       fakeApps().apps,
       identityOf(false),
@@ -1998,8 +2006,9 @@ describe(AppWorkspace, () => {
       status: status(),
     }).toStrictEqual({
       said: true,
-      // Once as the sheet opened, and again after the refusal.
-      reads: 2,
+      // Its review and its check, as the sheet opened and again after the
+      // refusal.
+      reads: 4,
       calls: [],
       status: "Only you see this",
     });

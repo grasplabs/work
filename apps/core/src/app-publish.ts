@@ -1,5 +1,6 @@
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { appErrors } from "@grasp-os/shared/apps";
+import type { DraftProblem } from "@grasp-os/shared/drafts";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
@@ -9,6 +10,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { checkFiles } from "./agent-builds.ts";
+import type { DraftCheck } from "./agent-builds.ts";
 import { sealedEvidence, sealRelease } from "./app-releases.ts";
 import { requireAppTestsPass } from "./app-tests.ts";
 import {
@@ -187,7 +189,23 @@ const buildRelease = async (
 };
 
 /**
- * How an App's draft is published (`appKind.steps`, apps.ts): checked as
+ * The errors `check` found, as a builder reads them before publishing:
+ * its builds' errors by file, then what its preview ran into. Warnings
+ * never fail a check, so they aren't listed.
+ */
+const problemsOf = (check: DraftCheck): DraftProblem[] => [
+  ...[check.pages, check.server, check.lint].flatMap((build) =>
+    build.diagnostics
+      .filter(({ severity }) => severity === "error")
+      .map(({ file, line, message }) => ({ at: file, line, message }))
+  ),
+  ...check.preview.problems
+    .filter(({ kind }) => kind !== "warning")
+    .map(({ at, message }) => ({ at, line: null, message })),
+];
+
+/**
+ * How an App's draft is published (publish.ts): checked as
  * a chat's agent's turn checks it (`checkFiles`, with what the App's
  * preview of it ran into), committed as it was checked as the App's next
  * version (`commitDraft`), built, sealed and tested (`buildRelease`), and
@@ -199,6 +217,15 @@ const buildRelease = async (
  * changes over its base.
  */
 export const appSteps: PublishSteps = {
+  check: async (env, _by, id, { draft, files }) => {
+    const checked = await checkFiles(
+      env,
+      appIdSchema.parse(id),
+      draft,
+      Object.fromEntries(files)
+    );
+    return { passed: checked.passed, problems: problemsOf(checked) };
+  },
   // Checked as it is built, once the number its version takes is read:
   // of two publishes of one draft at once, the second finds it taken as
   // it commits (`draft.conflict`), never committing a version that

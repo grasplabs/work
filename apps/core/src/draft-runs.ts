@@ -231,7 +231,7 @@ const sealedDraft = async (env: Env, app: AppId, draft: DraftState) => {
 /**
  * The release `draft`, a draft of `app`, seals to (`sealed`), the very one
  * its calls run on: what a review of the draft reads its manifest from
- * (version-review.ts). Null for a draft that holds nothing; throws as the
+ * (app-review.ts). Null for a draft that holds nothing; throws as the
  * seal does.
  */
 export const draftRelease = async (

@@ -16,24 +16,12 @@ import type { Permission } from "./permissions.ts";
 // (@grasp-os/shared/drafts).
 
 /**
- * One problem the draft's check found (`AppReview.check`): where it
- * is, a file and line or a route of the preview, and what it says, as
- * the build or the draft's own code wrote it.
- */
-export interface DraftProblem {
-  /** The App file, or the preview's route or server method; null for the App as a whole. */
-  at: string | null;
-  /** 1-based, in `at`'s file; null when it is about the whole file or not a file. */
-  line: number | null;
-  message: string;
-}
-
-/**
  * What publishing the draft would change against the live version
  * (`AppsApi.review`), worked out by core from the draft as it is
  * now, never taken from whoever wrote it, so code can't describe itself
- * as less than it is: its files, its server code, its data model, the
- * access the App holds and asks for, and whether its checks pass.
+ * as less than it is: its files, its server code, its data model and the
+ * access the App holds and asks for. Whether it passes its checks is
+ * every kind's (`DraftsApi.check`).
  */
 export interface AppReview {
   /** The draft's revision this was read at: what a publish of it names. */
@@ -121,11 +109,6 @@ export interface AppReview {
    * when the definition can't be read.
    */
   plan: DefinitionPlan | null;
-  /**
-   * The draft's check, as publishing checks it: whether it passes, and
-   * the errors it found (warnings never fail it), at most 50.
-   */
-  check: { passed: boolean; problems: DraftProblem[] };
 }
 
 /**

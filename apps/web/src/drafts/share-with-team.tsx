@@ -1,7 +1,7 @@
 import { isGeneratedServerFile } from "@grasp-os/runtime/host";
-import type { AppReview, DraftProblem } from "@grasp-os/shared/app-review";
+import type { AppReview } from "@grasp-os/shared/app-review";
 import type { AppMemberRef, ShareCandidates } from "@grasp-os/shared/apps";
-import type { Draft } from "@grasp-os/shared/drafts";
+import type { Draft, DraftProblem } from "@grasp-os/shared/drafts";
 import type { Subject } from "@grasp-os/shared/subject";
 import { Button } from "@grasp-os/ui/components/button";
 import { Checkbox } from "@grasp-os/ui/components/checkbox";
@@ -85,9 +85,6 @@ import { hasChanges } from "./use-draft.ts";
 // one slim line under the bar (`UnpublishedChanges`) says so, with Undo,
 // which discards them once the person confirms (draft-history.tsx).
 
-/** A problem that stops the draft from being shared: where, and what. */
-type Problem = DraftProblem;
-
 /**
  * What the sheet read of the draft's changes, at the draft's `revision`:
  * whether they pass their checks, what stops them, and, for an App, all
@@ -96,43 +93,40 @@ type Problem = DraftProblem;
 interface Review {
   revision: number;
   passed: boolean;
-  problems: readonly Problem[];
+  problems: readonly DraftProblem[];
   /** An App's changes, for its notes; none for a workflow. */
   app: AppReview | null;
 }
 
 /**
- * Reads the review of `subject`'s draft: an App's from core's review of
- * it, without what Grasp generates (`server/_generated/`), which every
- * save writes again and no one edits; a workflow's from its draft's
- * problems, as the profile found them.
+ * Reads the review of `subject`'s draft: its check, as core checks every
+ * kind's (`drafts.check`), and an App's changes from core's review of
+ * them, without what Grasp generates (`server/_generated/`), which every
+ * save writes again and no one edits.
  */
 const readReview = async (
   session: Session,
-  { kind, id }: Subject
+  subject: Subject
 ): Promise<Review> => {
-  if (kind === "app") {
-    const changes = await session.apps.review(id);
-    return {
-      revision: changes.revision,
-      passed: changes.check.passed,
-      problems: changes.check.problems,
-      app: {
-        ...changes,
-        files: changes.files.filter(({ path }) => !isGeneratedServerFile(path)),
-      },
-    };
-  }
-  const draft = await session.workflowResources.draft(id);
+  const [check, changes] = await Promise.all([
+    session.drafts.check(subject),
+    subject.kind === "app" ? session.apps.review(subject.id) : null,
+  ]);
   return {
-    revision: draft.revision,
-    passed: draft.problems.length === 0,
-    problems: draft.problems.map(({ pointer, message }) => ({
-      at: pointer,
-      line: null,
-      message,
-    })),
-    app: null,
+    // The older of the two reads: a write between them refuses the
+    // publish (`draft.conflict`), and the sheet reads both again.
+    revision: Math.min(check.revision, changes?.revision ?? check.revision),
+    passed: check.passed,
+    problems: check.problems,
+    app:
+      changes === null
+        ? null
+        : {
+            ...changes,
+            files: changes.files.filter(
+              ({ path }) => !isGeneratedServerFile(path)
+            ),
+          },
   };
 };
 
@@ -233,7 +227,7 @@ const Problems = ({
   problems,
   onFix,
 }: {
-  problems: readonly Problem[];
+  problems: readonly DraftProblem[];
   onFix: () => void;
 }) => {
   const { t } = useLingui();
@@ -349,7 +343,7 @@ const ChangesNotes = ({
   onFix,
 }: {
   review: Review;
-  onFix: (problems: readonly Problem[]) => void;
+  onFix: (problems: readonly DraftProblem[]) => void;
 }) => (
   <div className="flex flex-col gap-3">
     {review.app === null ? null : <AppNotes changes={review.app} />}
@@ -654,7 +648,7 @@ const useShareable = (
   );
   const review = read?.state === "ready" ? read.review : undefined;
   const current = review !== undefined && review.revision === draft?.revision;
-  const fix = (problems: readonly Problem[]): void => {
+  const fix = (problems: readonly DraftProblem[]): void => {
     void chat.ask(
       fixQuestion(
         t`Fix these problems the check found, so it can be shared:`,

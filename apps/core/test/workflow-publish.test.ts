@@ -15,7 +15,7 @@ import {
 } from "../src/drafts.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
-import { publish, rollback } from "../src/publish.ts";
+import { check, publish, rollback } from "../src/publish.ts";
 import {
   createTriggerResource,
   setTriggerEnabled,
@@ -106,6 +106,32 @@ const scheduled = async (admin: Identity, id: string): Promise<string> => {
 };
 
 describe("a workflow's draft", () => {
+  it("is checked as publishing checks it, at the revision read, saying where it fails", async () => {
+    const ada = await person("builder");
+    const workflow = await publishedWorkflow(ada, greetingOf(undefined, "v1"));
+    const { revision } = await saved(ada, workflow.id, "{ not json");
+    const failing = await check(env, workflowKind, ada, workflow.id);
+    await saved(ada, workflow.id, greetingOf(undefined, "v2"));
+    const passing = await check(env, workflowKind, ada, workflow.id);
+
+    expect({
+      failing: {
+        revision: failing.revision,
+        passed: failing.passed,
+        some: failing.problems.length > 0,
+      },
+      passing,
+      refused: await outcome(
+        publish(env, workflowKind, ada, workflow.id, revision)
+      ),
+    }).toStrictEqual({
+      failing: { revision, passed: false, some: true },
+      passing: { revision: revision + 1, passed: true, problems: [] },
+      // Moved on since: what was checked is what a publish names.
+      refused: "draft.conflict",
+    });
+  });
+
   it("keeps each edit as a checkpoint, restores one as a new checkpoint, and refuses a write over a stale revision", async () => {
     const ada = await person("builder");
     const workflow = await createWorkflowResource(env, ada, `flow-${unique()}`);

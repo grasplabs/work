@@ -18,6 +18,7 @@ import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
+import { reviewDraft } from "../src/app-review.ts";
 import { appStartFiles } from "../src/app-start-files.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { appKind, appFor, findApp } from "../src/apps.ts";
@@ -27,7 +28,6 @@ import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { rollback } from "../src/publish.ts";
 import { StoreHost } from "../src/store-host.ts";
 import { storeOutboxConsumers } from "../src/store-outbox-consumers.ts";
-import { reviewDraft } from "../src/version-review.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { resultOf, runOf } from "../src/workflows/resource-runs.ts";
 import { copyIntoRun, sweepRunFiles } from "../src/workflows/run-files.ts";

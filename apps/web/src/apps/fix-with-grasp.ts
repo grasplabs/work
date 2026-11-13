@@ -1,4 +1,4 @@
-import type { DraftProblem } from "@grasp-os/shared/app-review";
+import type { DraftProblem } from "@grasp-os/shared/drafts";
 
 // Fix with Grasp, wherever the App's workspace offers it (the Publish
 // panel, a preview that didn't start): what was found goes to the App's

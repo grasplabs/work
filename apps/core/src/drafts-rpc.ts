@@ -2,6 +2,7 @@ import { agentErrors } from "@grasp-os/shared/agent";
 import { draftErrors } from "@grasp-os/shared/drafts";
 import type {
   Draft,
+  DraftCheck,
   DraftCheckpoint,
   DraftsApi,
   LiveVersion,
@@ -25,7 +26,7 @@ import {
 import { draftWatch } from "./durable-objects.ts";
 import { callbackFor, isStub } from "./page-callbacks.ts";
 import type { StillOpen } from "./page-callbacks.ts";
-import { kinds, publish, subjectOf } from "./publish.ts";
+import { check as checkDraft, kinds, publish, subjectOf } from "./publish.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -228,6 +229,14 @@ export class DraftsRpc extends CoreRpcTarget implements DraftsApi {
           log.warn("draft.unwatch_failed", { ...found, ...errorFields(error) });
         }
       });
+    });
+  }
+
+  /** The draft checked as publishing checks it (publish.ts, `check`). */
+  async check(subject: Subject): Promise<DraftCheck> {
+    return await withPerson(this.#check, async (by) => {
+      const { kind, id } = subjectOf(subject);
+      return await checkDraft(this.#env, kinds[kind], by, id);
     });
   }
 

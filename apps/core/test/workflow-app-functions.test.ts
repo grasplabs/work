@@ -7,10 +7,10 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import { reviewDraft } from "../src/app-review.ts";
 import { appKind, findApp } from "../src/apps.ts";
 import { appHost } from "../src/durable-objects.ts";
 import { rollback } from "../src/publish.ts";
-import { reviewDraft } from "../src/version-review.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { appCallKey } from "../src/workflows/app-calls.ts";
 import type { CallingRun } from "../src/workflows/resource-authority.ts";

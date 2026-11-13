@@ -14,9 +14,9 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { definitionRefusal } from "../src/app-definition.ts";
+import { reviewDraft } from "../src/app-review.ts";
 import { findApp } from "../src/apps.ts";
 import { memberOf } from "../src/auth/identity.ts";
-import { reviewDraft } from "../src/version-review.ts";
 import {
   commitApp,
   definitionInput,

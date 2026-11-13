@@ -242,6 +242,7 @@ export const rpcParamNames: ParamNames = {
     "status": ["subject"],
   },
   "DraftsRpc": {
+    "check": ["subject"],
     "checkpoints": ["subject","before"],
     "discard": ["subject","revision"],
     "files": ["subject"],
@@ -543,7 +544,6 @@ export const rpcParamNames: ParamNames = {
     "delete": ["id"],
     "list": ["workflowId"],
     "setEnabled": ["id","enabled"],
-    "setVersion": ["id","version"],
   },
   "WorkflowsRpc": {
     "activity": ["query"],

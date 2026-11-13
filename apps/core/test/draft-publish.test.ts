@@ -790,6 +790,7 @@ describe(
       });
 
       const changes = await builder.api.apps.review(app);
+      const checked = await builder.api.drafts.check({ kind: "app", id: app });
       const published = await builder.api.drafts.publish(
         { kind: "app", id: app },
         changes.revision
@@ -804,7 +805,7 @@ describe(
         signs: changes.files.some(
           (file) => file.change === "modified" && file.after.includes("Sign")
         ),
-        check: changes.check,
+        check: checked,
         published: published.version,
       }).toStrictEqual({
         revision,
@@ -817,7 +818,7 @@ describe(
           { path: "src/routes/old.tsx", change: "deleted" },
         ],
         signs: true,
-        check: { passed: true, problems: [] },
+        check: { revision, passed: true, problems: [] },
         published: 2,
       });
     });
@@ -829,7 +830,8 @@ describe(
         "src/routes/index.tsx": restyled,
       });
 
-      const { check, live, next } = await builder.api.apps.review(app);
+      const { live, next } = await builder.api.apps.review(app);
+      const check = await builder.api.drafts.check({ kind: "app", id: app });
       const refused = await outcome(
         builder.api.drafts.publish({ kind: "app", id: app }, revision)
       );

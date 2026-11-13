@@ -25,6 +25,7 @@ import type { PublishSteps } from "./publish.ts";
 import { triggersFollowing } from "./trigger-resources.ts";
 import {
   buildWorkflowVersion,
+  definitionProblems,
   liveWorkflow,
   requireWorkflowRole,
   workflowFile,
@@ -224,10 +225,27 @@ const activate = async (
 
 /**
  * How a workflow's draft is published (publish.ts): its one file,
- * `workflow.json`, checked and built as its next version
+ * `workflow.json`, checked as the profile and the catalog take it
+ * (`definitionProblems`), built as its next version
  * (`buildWorkflowVersion`), made live by `activate`.
  */
 export const workflowSteps: PublishSteps = {
+  check: async (env, by, id, { files }) => {
+    const problems = await definitionProblems(
+      env,
+      by,
+      files.get(workflowFile) ?? "",
+      id
+    );
+    return {
+      passed: problems.length === 0,
+      problems: problems.map(({ pointer, message }) => ({
+        at: pointer,
+        line: null,
+        message,
+      })),
+    };
+  },
   build: async (env, by, id, { files }) => {
     const workflow = await requireWorkflowRole(env, by, id, "builder");
     const built = await buildWorkflowVersion(

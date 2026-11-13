@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { Release } from "../src/app-releases.ts";
+import { reviewDraft } from "../src/app-review.ts";
 import {
   transformBatch,
   failedOutside,
@@ -12,7 +13,6 @@ import {
 } from "../src/migration-run.ts";
 import type { TransformRow } from "../src/migration-run.ts";
 import { SandboxUnavailableError } from "../src/sandboxed.ts";
-import { reviewDraft } from "../src/version-review.ts";
 import { testApp, withFiles } from "./app-definitions.ts";
 import type { TableSpec, TestApp } from "./app-definitions.ts";
 import { commitDefined } from "./apps.ts";

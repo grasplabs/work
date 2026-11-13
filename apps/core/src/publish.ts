@@ -1,5 +1,9 @@
 import { draftErrors } from "@grasp-os/shared/drafts";
-import type { LiveVersion } from "@grasp-os/shared/drafts";
+import type {
+  DraftCheck,
+  DraftProblem,
+  LiveVersion,
+} from "@grasp-os/shared/drafts";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { subjectSchema } from "@grasp-os/shared/subject";
@@ -71,6 +75,17 @@ import { workflowKind } from "./workflow-resources.ts";
 /** How a kind publishes a draft (`steps`). */
 export interface PublishSteps {
   /**
+   * Checks `draft` of subject `id`, its files `files`, for `by`, as
+   * building it checks it, building nothing: whether it passes, and the
+   * errors it found.
+   */
+  check: (
+    env: Env,
+    by: Identity,
+    id: string,
+    checked: { draft: DraftState; files: Map<string, string> }
+  ) => Promise<{ passed: boolean; problems: DraftProblem[] }>;
+  /**
    * Makes `draft` the subject's next version, its files `files`, checked
    * and built as its kind builds one: its number. A version whose check
    * or build fails is never made live, and the failure is thrown.
@@ -122,6 +137,33 @@ const versionSchema = z.int().min(1);
 
 /** What a caller may expect is live: a version, or null for none. */
 const expectedSchema = versionSchema.nullable();
+
+/** Most problems a draft's check lists. */
+const maxProblems = 50;
+
+/**
+ * The draft of the subject `input` names, checked for `by`, who builds it,
+ * as publishing checks it (its kind's `check`), at the revision read.
+ */
+export const check = async (
+  env: Env,
+  kind: DraftKind,
+  by: Identity,
+  input: unknown
+): Promise<DraftCheck> => {
+  const id = await kind.readable(env, by, input);
+  const draft = await draftOf(env, kind, id);
+  const files = await filesOf(env, kind, id, draft);
+  const { passed, problems } = await steps[kind.kind].check(env, by, id, {
+    draft,
+    files,
+  });
+  return {
+    revision: draft.revision,
+    passed,
+    problems: problems.slice(0, maxProblems),
+  };
+};
 
 /** Nothing besides, in the batch that makes a version live. */
 const nothing = async (): Promise<BatchItem<"sqlite">[]> =>
