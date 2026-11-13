@@ -179,6 +179,7 @@ type DoorLine =
   | "guest"
   | "removed"
   | "signIn"
+  | "signInAskAgain"
   | "notTurnedOn";
 
 /**
@@ -338,8 +339,8 @@ const sendLine = async (
   try {
     await adapter.postMessage(
       threadId,
-      line === "signIn" && origin !== undefined
-        ? signInCard({ locale, url: `${origin}${signInPath}` })
+      (line === "signIn" || line === "signInAskAgain") && origin !== undefined
+        ? signInCard({ locale, url: `${origin}${signInPath}`, line })
         : say(line, locale)
     );
   } catch (error) {
@@ -383,16 +384,20 @@ const unknownLine = async (
 };
 
 /**
- * One of the client's own people Grasp hasn't seen: their first question
- * kept for the hour, and the sign-in link once a day, nothing in between.
+ * One of the client's own people Grasp hasn't seen: the sign-in link once
+ * a day, nothing in between. Their first question is kept for the hour
+ * only when it was asked in their direct message, and is answered there
+ * alone (`keptIn`); asked where others read it, it isn't kept, and the
+ * link asks them to ask again.
  */
 const newcomer = async (
   state: StateAdapter,
   activity: Activity,
   oid: string
 ): Promise<{ line?: DoorLine }> => {
+  const inDirect = activity.conversation.conversationType === "personal";
   const text = activity.text?.trim().slice(0, maxKeptChars) ?? "";
-  if (text !== "") {
+  if (inDirect && text !== "") {
     await state.setIfNotExists(keptKey(oid), text, keptMs);
   }
   const offered = await state.setIfNotExists(
@@ -400,7 +405,10 @@ const newcomer = async (
     true,
     signInEveryMs
   );
-  return offered ? { line: "signIn" } : {};
+  if (!offered) {
+    return {};
+  }
+  return { line: inDirect ? "signIn" : "signInAskAgain" };
 };
 
 /**
@@ -487,11 +495,19 @@ const placeOf = async (
   };
 };
 
-/** What a member asked before Grasp knew them, if it is still kept: taken once. */
-const keptQuestion = async (
+/**
+ * What a member asked before Grasp knew them, if it is still kept: taken
+ * once, and only in their direct message, where it was asked. Written
+ * anywhere else, it waits there for their next direct message.
+ */
+const keptIn = async (
   state: StateAdapter,
-  oid: string
+  oid: string,
+  place: ChannelPlace | undefined
 ): Promise<string | undefined> => {
+  if (place?.kind !== "direct") {
+    return undefined;
+  }
   const kept = await state.get<string>(keptKey(oid));
   if (kept === null) {
     return undefined;
@@ -605,12 +621,12 @@ const gate = async (
       if (!reach.reaches) {
         return { line: "notTurnedOn" };
       }
-      const kept = await keptQuestion(state, oid);
+      const place = await placeOf(env, adapter, activity);
       return {
         userId: writer.userId,
         acts: reach.acts,
-        kept,
-        place: await placeOf(env, adapter, activity),
+        kept: await keptIn(state, oid, place),
+        place,
       };
     }
     case "removed": {
@@ -634,11 +650,14 @@ const gate = async (
       }
       // As before the place was said: their first message is taken in
       // their direct message alone, and left unanswered anywhere else.
+      if (conversationType !== "personal") {
+        return { userId, acts: reach.acts };
+      }
       return {
         userId,
         acts: reach.acts,
-        kept: await keptQuestion(state, oid),
-        ...(conversationType === "personal" ? { place: direct } : {}),
+        kept: await keptIn(state, oid, direct),
+        place: direct,
       };
     }
     default: {

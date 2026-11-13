@@ -34,13 +34,15 @@ import { chatAgentId } from "../src/chats-rpc.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { instructionFilesFor } from "../src/instruction-files.ts";
-import { says } from "./agent-chat.ts";
+import { saveUserMemory } from "../src/knowledge/memory.ts";
+import { codeStep, says } from "./agent-chat.ts";
 import { published, requestGranted } from "./apps.ts";
 import { brainModules } from "./brain-next-modules.ts";
 import { ageOwnErasure } from "./brain-next-own-store.ts";
 import { copyOfStore, restoreStore } from "./brain-next-store-copy.ts";
 import { brainSurfaces, membersOf, textOf } from "./brain-next-surfaces.ts";
 import type { Answer, Probe, Probing } from "./brain-next-surfaces.ts";
+import { actingFor, newChat } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import { answeringProvider } from "./model-provider.ts";
 import { noProducers } from "./no-producers.ts";
@@ -1185,7 +1187,9 @@ describe(
       // reached it. A person's own source reaches a model only in their
       // own chat in Grasp: not in a thread others read, nor, while
       // GRA-1821's decision is open, in their direct message, which the
-      // chat app keeps too (workspace.ts, `answersAlone`).
+      // chat app keeps too (workspace.ts, `answersAlone`). A thread others
+      // read is never their own chat either: no USER.md of theirs, and
+      // none of their own chat's tools, their connections first.
       const admin = await signedInApi(idp, "admin");
       await requestGranted(idp, admin, {
         subject: { type: "agent", agentId: chatAgentId },
@@ -1195,15 +1199,26 @@ describe(
       });
       const depot = `d${unique()}`;
       const marker = markerWord();
+      const userMarker = markerWord();
       const answered = `Your note says ${marker}.`;
-      // The threads are asked first, then her direct message, whose
-      // (scripted) answer alone carries the marker: found in a thread or
-      // another's chat, it went astray.
+      // Each turn runs code that says whether it holds connections, then
+      // answers. The threads are asked first, then her direct message,
+      // whose (scripted) answer alone carries the marker: found in a
+      // thread or another's chat, it went astray.
+      // What it returns ("held:" or "none:" then the marker) is put
+      // together as it runs: the code's own text never holds it.
+      const holdsConnections = codeStep(
+        `export default async (self, env) => { let held = false; try { held = env.connections !== undefined; } catch {} return [held ? "held" : "none", "${marker}"].join(":"); };`
+      );
       const ann = await teamsMember(
         idp,
+        holdsConnections,
         says("Noted."),
+        holdsConnections,
         says("Noted."),
+        holdsConnections,
         says("Noted."),
+        holdsConnections,
         says(answered)
       );
       const ben = await memberAnsweredBy(idp, ann.provider);
@@ -1213,14 +1228,28 @@ describe(
         text: `Depot ${depot} keeps Ann's own note ${marker}`,
         readers: { kind: "owner", personId: ann.userId },
       });
+      const agent = { type: "agent" as const, agentId: chatAgentId };
+      await saveUserMemory(
+        env,
+        actingFor(agent, ann.userId),
+        await newChat(agent),
+        { type: "own" },
+        { text: `Call me ${userMarker}.`, ifVersion: 0 }
+      );
       const question = `What about depot ${depot}?`;
-      /** Whether the marker reached the model in what `ask` posted. */
-      const reachedModel = async (ask: () => Promise<unknown>) => {
+      /** What reached the model for what `ask` posted. */
+      const sentFor = async (ask: () => Promise<unknown>) => {
         const before = ann.provider.requests.length;
         await ask();
-        return JSON.stringify(
+        const sent = JSON.stringify(
           ann.provider.requests.slice(before).map(({ body }) => body)
-        ).includes(marker);
+        );
+        return {
+          own: sent.includes(`Depot ${depot} keeps`),
+          userMd: sent.includes(userMarker),
+          connections: sent.includes(`held:${marker}`),
+          ran: sent.includes(`:${marker}`),
+        };
       };
       // A group chat whose roster holds Ann alone is still one others can
       // join: shared, as Teams names it.
@@ -1236,13 +1265,13 @@ describe(
       const threads = [alone, withBen, channel];
 
       const inThreads = [
-        await reachedModel(
+        await sentFor(
           async () => await post(mentionIn(ann.teams, alone, question))
         ),
-        await reachedModel(
+        await sentFor(
           async () => await post(mentionIn(ann.teams, withBen, question))
         ),
-        await reachedModel(
+        await sentFor(
           async () =>
             await post(
               mentionIn(
@@ -1256,7 +1285,7 @@ describe(
       ];
       // Her direct message, after the threads: each message is judged as
       // it comes, so asking there first or after changes nothing.
-      const inDirect = await reachedModel(
+      const inDirect = await sentFor(
         async () => await post(messageFrom(ann.teams, { text: question }))
       );
       const found = await textsFor(ann.userId, `depot ${depot}`);
@@ -1275,8 +1304,15 @@ describe(
         postedToBen: await postedIn(ben.teams.conversation),
       }).toStrictEqual({
         found: 1,
-        inThreads: [false, false, false],
-        inDirect: false,
+        inThreads: threads.map(() => ({
+          own: false,
+          userMd: false,
+          connections: false,
+          ran: true,
+        })),
+        // Her own chat on Teams: its tools and her USER.md, as on main
+        // (knowledge/memory.ts); her own store, not while GRA-1821 is open.
+        inDirect: { own: false, userMd: true, connections: true, ran: true },
         postedInThreads: [false, false, false],
         postedInDirect: true,
         postedToBen: false,

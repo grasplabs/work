@@ -579,7 +579,7 @@ export const carryOnAfterConnecting = async (
         userId,
         thread: conversation,
         // Only ever kept from their direct message (`offerConnectOwn`).
-        place: { kind: kept.place },
+        place: { kind: "direct" },
         afterward: (send) => {
           later.push(send);
         },
