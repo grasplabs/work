@@ -175,6 +175,58 @@ const redactedQuery = (link: string, nested: boolean): string | undefined => {
   return written === 0 ? undefined : out + link.slice(written);
 };
 
+/** Characters that end no link when they end what was found (GFM §6.9). */
+const trailingPunctuation = new Set(["?", "!", ".", ",", ":", "*", "_", "~"]);
+
+/** A letter or a digit: an entity reference's name (GFM §6.9). */
+const entityNameChar = /^[a-z\d]$/iu;
+
+/**
+ * Where `found` (a link as `linkPattern` found it) ends, by GitHub
+ * Flavored Markdown's extended autolink path validation (GFM spec §6.9),
+ * from its end, until none applies: a trailing `?`, `!`, `.`, `,`, `:`,
+ * `*`, `_` or `~` is not part of the link; a trailing `)` is not when the
+ * link holds more `)` than `(`; and a trailing `;` is not, nor, when it
+ * ends an entity reference (`&amp;`), is that whole reference. So the `)`
+ * of `[t](https://…)` and the `.` ending a sentence stay outside the
+ * link, while an `&amp;` inside its query is part of it. Quotes and `<`
+ * `>` already end a link (`linkPattern`). Linear: the parentheses are
+ * counted once, and each step moves the end back.
+ */
+const linkEndOf = (found: string): number => {
+  let open = 0;
+  let close = 0;
+  for (const char of found) {
+    if (char === "(") {
+      open += 1;
+    } else if (char === ")") {
+      close += 1;
+    }
+  }
+  let end = found.length;
+  while (end > 0) {
+    const last = found[end - 1] ?? "";
+    if (trailingPunctuation.has(last)) {
+      end -= 1;
+    } else if (last === ")" && close > open) {
+      end -= 1;
+      close -= 1;
+    } else if (last === ";") {
+      let name = end - 1;
+      while (name > 0 && entityNameChar.test(found[name - 1] ?? "")) {
+        name -= 1;
+      }
+      end =
+        name > 0 && name < end - 1 && found[name - 1] === "&"
+          ? name - 1
+          : end - 1;
+    } else {
+      break;
+    }
+  }
+  return end;
+};
+
 /** A character no link holds as written: what ends one (`linkPattern`). */
 const outsideLink = /[\s"'<>\\^`{|}]/gu;
 
@@ -208,9 +260,14 @@ const serialized = (link: string): string => {
  * is left exactly as it was written.
  */
 const redactLinks = (text: string): string =>
-  text.replace(linkPattern, (link) => {
+  text.replace(linkPattern, (found) => {
+    // What ends no link stays outside it, byte for byte (`linkEndOf`).
+    const end = linkEndOf(found);
+    const link = found.slice(0, end);
     const redacted = redactedQuery(decodeHTMLAttribute(link), true);
-    return redacted === undefined ? link : serialized(redacted);
+    return redacted === undefined
+      ? found
+      : serialized(redacted) + found.slice(end);
   });
 
 /** `text` with every credential in it ({@link credentials}) redacted. */

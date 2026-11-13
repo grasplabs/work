@@ -99,10 +99,95 @@ describe("redacting credentials", () => {
       }),
     }).toStrictEqual({
       attribute: true,
-      href: "https://h/?sig=%5Bredacted%5D&q=%22+onmouseover%3Dalert%281%29+x%3D%22",
+      // The link ends before its trailing `;` and the `&quot;` after it
+      // (GFM §6.9): they stay as they were written, outside it.
+      href: "https://h/?sig=%5Bredacted%5D&q=%22+onmouseover%3Dalert%281%29+x%3D;&quot;",
       rawInLink: false,
       json: [["u", "n"], ["u"]],
     });
+  });
+
+  it("ends a link where GitHub Flavored Markdown does, so what follows it stays as it was", () => {
+    expect(
+      [
+        "[Quote](https://h/q?sig=S)",
+        "[Quote](https://h/q?sig=S&a=1)",
+        "https://h/a_(b)?sig=S",
+        "See https://h/q?sig=S.",
+        "See https://h/q?sig=S, then",
+        "(see https://h/q?sig=S)",
+        "(see https://h/q?sig=S).",
+        "<https://h/q?sig=S> and 'https://h/q?sig=S'",
+        "https://h/q?sig=S&amp;",
+      ].map(redact)
+    ).toStrictEqual([
+      "[Quote](https://h/q?sig=%5Bredacted%5D)",
+      "[Quote](https://h/q?sig=%5Bredacted%5D&a=1)",
+      "https://h/a_(b)?sig=%5Bredacted%5D",
+      "See https://h/q?sig=%5Bredacted%5D.",
+      "See https://h/q?sig=%5Bredacted%5D, then",
+      "(see https://h/q?sig=%5Bredacted%5D)",
+      "(see https://h/q?sig=%5Bredacted%5D).",
+      "<https://h/q?sig=%5Bredacted%5D> and 'https://h/q?sig=%5Bredacted%5D'",
+      "https://h/q?sig=%5Bredacted%5D&amp;",
+    ]);
+  });
+
+  it("leaves any text that names no granting parameter byte for byte, wherever its links end", () => {
+    // Pieces of links and of what surrounds them, none a granting name.
+    const pieces = [
+      "https://h.example/",
+      "a",
+      "?",
+      "&",
+      "&amp;",
+      "&#38;",
+      "&lt;",
+      "=",
+      "(",
+      ")",
+      ".",
+      ",",
+      ";",
+      ":",
+      "_",
+      "~",
+      "!",
+      " ",
+      "x=1",
+      "%26",
+      "#",
+      "[t](",
+      "<",
+      ">",
+      "'",
+      '"',
+    ];
+    // A fixed seed: the same texts each run.
+    let seed = 1730;
+    const next = (): number => {
+      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return seed;
+    };
+    const texts = Array.from({ length: 5000 }, () =>
+      Array.from(
+        { length: 1 + (next() % 24) },
+        () => pieces[next() % pieces.length]
+      ).join("")
+    );
+    expect(texts.filter((text) => redact(text) !== text)).toStrictEqual([]);
+  });
+
+  it("ends a megabyte link of closing or of opening parentheses in one pass", () => {
+    const closing = ")".repeat(1_000_000);
+    const opening = "(".repeat(1_000_000);
+    expect([
+      redact(`https://h/q?sig=S${closing}`),
+      redact(`https://h/q?sig=S${opening}`),
+    ]).toStrictEqual([
+      `https://h/q?sig=%5Bredacted%5D${closing}`,
+      "https://h/q?sig=%5Bredacted%5D",
+    ]);
   });
 
   it("leaves a link with nothing to redact, and prose, exactly as they were", () => {
