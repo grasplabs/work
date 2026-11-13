@@ -114,6 +114,10 @@ interface Faked {
   uploading?: Promise<boolean>;
   /** Refuses the first upload with this coded error, as core refuses one. */
   firstUploadRefused?: { code: string; message: string };
+  /** Holds each new version until it settles. */
+  versioning?: Promise<boolean>;
+  /** Holds each delete until it settles. */
+  deleting?: Promise<boolean>;
 }
 
 /** A question nothing the person may read holds: its pack is empty. */
@@ -130,6 +134,8 @@ const shown = async (
     uploadRefusal,
     uploading,
     firstUploadRefused,
+    versioning,
+    deleting,
   }: Faked = {}
 ) => {
   const calls: string[] = [];
@@ -214,7 +220,7 @@ const shown = async (
       uploadId: string,
       file: { name: string; bytes: Uint8Array }
     ) => {
-      await Promise.resolve();
+      await (versioning ?? Promise.resolve());
       calls.push(`uploadVersion ${uploadId} ${file.name}`);
       return { source: handbook, version: 3 };
     },
@@ -234,7 +240,7 @@ const shown = async (
         : null;
     },
     deleteUpload: async (uploadId: string) => {
-      await Promise.resolve();
+      await (deleting ?? Promise.resolve());
       calls.push(`deleteUpload ${uploadId}`);
     },
   };
@@ -672,6 +678,100 @@ describe(SourcesPage, () => {
       sameOnRetry: true,
       newForAnotherFile: true,
       ids: 3,
+    });
+  });
+
+  it("keeps the file picker out of reach while a file uploads, so the next file chosen isn't lost", async () => {
+    const held = Promise.withResolvers<boolean>();
+    await shown([], { uploading: held.promise });
+    const [, picker] = document.querySelectorAll("input");
+    const form = picker?.closest("form");
+    if (!(picker && form)) {
+      throw new TypeError("No upload form");
+    }
+    await act(async () => {
+      Object.defineProperty(picker, "files", {
+        configurable: true,
+        value: [new File(["WEBVTT"], "first.vtt", { type: "text/vtt" })],
+      });
+      picker.dispatchEvent(new Event("change", { bubbles: true }));
+      await Promise.resolve();
+    });
+    const before = picker.disabled;
+    await act(async () => {
+      form.requestSubmit();
+      await Promise.resolve();
+    });
+    await settle();
+    const whileUploading = picker.disabled;
+    held.resolve(true);
+    await settle();
+
+    expect({ before, whileUploading, after: picker.disabled }).toStrictEqual({
+      before: false,
+      whileUploading: true,
+      after: false,
+    });
+  });
+
+  it("leaves the source opened meanwhile open when a new version or a delete of another one finishes", async () => {
+    const versioned = Promise.withResolvers<boolean>();
+    const deleted = Promise.withResolvers<boolean>();
+    await shown([], {
+      versioning: versioned.promise,
+      deleting: deleted.promise,
+    });
+    // A new version of the handbook, still under way as the minutes open.
+    await press("Handbook");
+    await settle();
+    const versionPicker = [...document.querySelectorAll("input")].find(
+      (input) =>
+        input.type === "file" && input.closest("[data-slot=card]") !== null
+    );
+    const versionForm = versionPicker?.closest("form");
+    if (!(versionPicker && versionForm)) {
+      throw new TypeError("No new version form");
+    }
+    await act(async () => {
+      Object.defineProperty(versionPicker, "files", {
+        configurable: true,
+        value: [new File(["WEBVTT"], "handbook.vtt", { type: "text/vtt" })],
+      });
+      versionPicker.dispatchEvent(new Event("change", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      versionForm.requestSubmit();
+      await Promise.resolve();
+    });
+    await press("Board minutes");
+    await settle();
+    versioned.resolve(true);
+    await settle();
+    const afterVersion = panel();
+    // A delete of the handbook, still under way as the minutes open.
+    await press("Handbook");
+    await settle();
+    await press("Delete");
+    await press("Delete for good");
+    await press("Board minutes");
+    await settle();
+    deleted.resolve(true);
+    await settle();
+    const afterDelete = panel();
+
+    expect({
+      afterVersion: [
+        afterVersion.includes("Board minutes"),
+        afterVersion.includes("Invoices"),
+      ],
+      afterDelete: [
+        afterDelete.includes("Board minutes"),
+        afterDelete.includes("Invoices"),
+      ],
+    }).toStrictEqual({
+      afterVersion: [true, false],
+      afterDelete: [true, false],
     });
   });
 });

@@ -310,6 +310,9 @@ const UploadForm = ({
           </FieldLabel>
           <Input
             accept={uploadAccept}
+            // Out of reach while a file uploads: the form is reset when it
+            // is done, which would drop a file chosen meanwhile.
+            disabled={busy}
             id={fileId}
             onChange={(event) => {
               const chosen = event.target.files?.[0];
@@ -403,8 +406,8 @@ const UploadActions = ({
 }: {
   source: BrainSourceRef;
   teams: Team[];
-  onChanged: () => void;
-  onDeleted: () => void;
+  onChanged: (source: BrainSourceRef) => void;
+  onDeleted: (source: BrainSourceRef) => void;
 }) => {
   const { t } = useLingui();
   const core = useCore();
@@ -464,7 +467,7 @@ const UploadActions = ({
               setUploading(false);
               setActing(answer);
               if (answer.state === "ready") {
-                onChanged();
+                onChanged(source);
               }
             })();
           }}
@@ -513,7 +516,7 @@ const UploadActions = ({
               });
               setActing(answer);
               if (answer.state === "ready") {
-                onDeleted();
+                onDeleted(source);
               }
             })();
           }}
@@ -860,9 +863,9 @@ const SourcePanel = ({
   version: number | undefined;
   teams: Team[];
   /** A new version of it was added. */
-  onChanged: () => void;
+  onChanged: (source: BrainSourceRef) => void;
   /** It was deleted. */
-  onDeleted: () => void;
+  onDeleted: (source: BrainSourceRef) => void;
 }) => {
   const core = useCore();
   const [versions, setVersions] = useState<Read<BrainSourceVersionPage>>({
@@ -1003,6 +1006,25 @@ export const SourcesPage = ({
       version === undefined ? { source, opening } : { source, version, opening }
     );
   };
+  // What an action on `source` changed, once it finished: read from the
+  // state as it is then, as the person may have opened another source
+  // meanwhile, which stays open.
+  const changed = (source: BrainSourceRef) => {
+    setListing((before) => before + 1);
+    setOpened((current) =>
+      current !== undefined && sameSource(current.source, source)
+        ? { source, opening: current.opening + 1 }
+        : current
+    );
+  };
+  const deleted = (source: BrainSourceRef) => {
+    setListing((before) => before + 1);
+    setOpened((current) =>
+      current !== undefined && sameSource(current.source, source)
+        ? undefined
+        : current
+    );
+  };
   return (
     // A page of the brain as its memory is (memory-page.tsx): the title in
     // the serif, in the brain's column, with room at the foot for the chat.
@@ -1029,7 +1051,7 @@ export const SourcesPage = ({
           </h2>
           <UploadForm
             onUploaded={(source) => {
-              setListing(listing + 1);
+              setListing((before) => before + 1);
               open(source);
             }}
             teams={teams}
@@ -1051,14 +1073,8 @@ export const SourcesPage = ({
             {opened === undefined ? null : (
               <SourcePanel
                 key={`panel-${opened.opening}`}
-                onChanged={() => {
-                  setListing(listing + 1);
-                  open(opened.source);
-                }}
-                onDeleted={() => {
-                  setListing(listing + 1);
-                  setOpened(undefined);
-                }}
+                onChanged={changed}
+                onDeleted={deleted}
                 source={opened.source}
                 teams={teams}
                 version={opened.version}
