@@ -19,6 +19,7 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { packAcross } from "../src/across.ts";
+import { chunkTarget } from "../src/chunks.ts";
 import {
   brainOf,
   erasedSource,
@@ -26,6 +27,7 @@ import {
   recallBudgetMax,
   vectorModelNameOf,
 } from "../src/contract.ts";
+import { eraseChunksPerBatch } from "../src/erasure.ts";
 import { fileGraceMs } from "../src/files.ts";
 import { BrainStore } from "../src/store.ts";
 
@@ -1784,6 +1786,17 @@ describe("recall by meaning across stores", () => {
   });
 });
 
+/**
+ * The text of turn `index`, cut into `chunks` chunks: paragraphs each
+ * near a chunk's target size (chunks.ts).
+ */
+const turnOfChunks = (index: number, chunks: number): string =>
+  Array.from(
+    { length: chunks },
+    (_, part) =>
+      `Echidna turn ${index} part ${part} ${"burrow ".repeat(Math.floor(chunkTarget / 8))}`
+  ).join("\n\n");
+
 /** A group of this test's own, named as a host names a chat's. */
 const newGroup = (): string => `chat:${crypto.randomUUID()}`;
 
@@ -1976,14 +1989,17 @@ describe("a group in a person's own store", () => {
     );
   });
 
-  // Threat 8: a chat of thousands of turns, deleted in bounded batches
-  // that go on where they stopped, through a restart.
+  // Threat 8: a long chat, deleted in bounded batches that go on where
+  // they stopped, through a restart. A batch is `eraseChunksPerBatch`
+  // chunks: turns of `chunksPerTurn` chunks each, so the call's own batch,
+  // a tick's and a tick after a restart each take part of them.
   it(
-    "erases thousands of sources in one call, and deletes them a bounded batch a tick, going on after a restart",
-    { timeout: 120_000 },
+    "erases a group of many sources in one call, and deletes them a bounded batch a tick, going on after a restart",
+    { timeout: 60_000 },
     async () => {
       const group = newGroup();
-      const turns = 2500;
+      const chunksPerTurn = 10;
+      const turns = (2 * eraseChunksPerBatch) / chunksPerTurn + 1;
       const atOnce = 50;
       for (let at = 0; at < turns; at += atOnce) {
         // oxlint-disable-next-line no-await-in-loop -- a few at a time
@@ -1994,7 +2010,7 @@ describe("a group in a person's own store", () => {
               await addIn(
                 group,
                 String(at + index),
-                `Echidna turn ${at + index}`
+                turnOfChunks(at + index, chunksPerTurn)
               )
           )
         );

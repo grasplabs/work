@@ -3,13 +3,21 @@ import { chatIdSchema } from "@grasp-os/shared/ids";
 import type { ChatId } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
+import { and, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { drainAuditOutboxes } from "../src/audit-outbox.ts";
+import { organizationId } from "../src/auth/auth.ts";
 import { noteHandOvers } from "../src/brain-hand-overs.ts";
-import { chatSource, chatTurnOf } from "../src/brain-next-origins.ts";
+import {
+  chatSource,
+  chatTurnOf,
+  uploadSource,
+} from "../src/brain-next-origins.ts";
 import {
   addSource,
+  eraseSource,
   readSourceVersionAs,
   recallAs,
   workBrain,
@@ -17,8 +25,10 @@ import {
 import type { Producers, SourceRef } from "../src/brain-next.ts";
 import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
+import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
 import { codeStep, model, says } from "./agent-chat.ts";
+import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
@@ -32,7 +42,9 @@ import { outcome, signedInApi } from "./sign-in.ts";
 // From the threat model on the issue, each way it can fail:
 //
 // - A turn lands where anyone but its person reads it (threats 1, 2).
-// - What the agent ran or read is kept as the turn (threat 2).
+// - What the agent ran or read is kept as the turn (threat 2), or an
+//   answer quoting it outlives that being erased or the person losing it
+//   (review round 1: a turn that read anything keeps its question alone).
 // - A chat platform's chat, a woken turn or a restricted chat is handed
 //   over (threats 3, 4, 5).
 // - A deleted chat's turns stay, or come back with a hand-over that lands
@@ -90,6 +102,19 @@ const handedTo = async (
     },
     { timeout: 15_000, interval: 200 }
   );
+
+/** The text kept of the one turn `personId` recalls for `question`, once handed over. */
+const keptTextOf = async (
+  personId: string,
+  question: string
+): Promise<string | undefined> => {
+  const [source] = await handedTo(personId, question);
+  if (source === undefined) {
+    throw new Error("Nothing was handed over");
+  }
+  const kept = await readSourceVersionAs(env, personId, { source, version: 1 });
+  return kept?.text;
+};
 
 /** The hand-over events recorded for source `id`, in order. */
 const outcomesFor = async (id: string): Promise<string[]> => {
@@ -195,33 +220,118 @@ describe("a person's chat turn", () => {
     });
   });
 
-  it("holds what was asked and what was answered, nothing the agent ran, and its event holds neither", async () => {
+  it("holds what was asked and what was answered when the turn read nothing, and its event holds neither", async () => {
+    const marker = word();
+    const { person, chatId, ask } = await chatter(says(`Plainly ${marker}.`));
+
+    await ask(`Say it for ${marker}?`);
+
+    await expect(keptTextOf(person.userId, marker)).resolves.toBe(
+      `Asked:\nSay it for ${marker}?\n\nAnswered:\nPlainly ${marker}.`
+    );
+    expect(JSON.stringify(await keptEvents(person.userId, chatId))).not.toMatch(
+      new RegExp(marker, "u")
+    );
+  });
+
+  // An answer can quote what a step read: kept, it would outlive that.
+  it("holds the question alone when a step's result came before the answer", async () => {
     const marker = word();
     const ran = word();
-    const { person, chatId, ask } = await chatter(
+    const { person, ask } = await chatter(
       codeStep(
         `console.log(${JSON.stringify(ran)}); return ${JSON.stringify(ran)};`
       ),
-      says(`Done: ${marker}.`)
+      says(`Done: ${ran}.`)
     );
 
     await ask(`Run it for ${marker}?`);
-    const [source] = await handedTo(person.userId, marker);
-    if (source === undefined) {
-      throw new Error("Nothing was handed over");
-    }
-    const kept = await readSourceVersionAs(env, person.userId, {
-      source,
-      version: 1,
-    });
 
-    expect(kept?.text).toBe(
-      `Asked:\nRun it for ${marker}?\n\nAnswered:\nDone: ${marker}.`
+    await expect(keptTextOf(person.userId, marker)).resolves.toBe(
+      `Asked:\nRun it for ${marker}?`
     );
     await expect(recalled(person.userId, ran)).resolves.toStrictEqual([]);
-    expect(JSON.stringify(await keptEvents(person.userId, chatId))).not.toMatch(
-      new RegExp(`${marker}|${ran}`, "u")
+  });
+
+  // The reviewer's probe (round 1): what the recall before the question
+  // found, quoted in the answer, never outlives its source's erasure or
+  // the person leaving the team that could read it.
+  it("keeps nothing of a team's source the recall found, once it is erased and the person left the team", async () => {
+    const topic = word();
+    const marker = word();
+    const person = await signedInApi(idp, "user");
+    const admin = await signedInApi(idp, "admin");
+    const stub = workspace(env, personalWorkspaceId(person.userId));
+    const agentId = crypto.randomUUID();
+    const made = await stub.createChat("Questions", person.userId, agentId);
+    await requestGranted(idp, admin, {
+      subject: { type: "agent", agentId },
+      object: { type: "platform" },
+      actions: ["brain"],
+      binding: "BRAIN",
+    });
+    const teamId = crypto.randomUUID();
+    const db = drizzle(env.DB);
+    await db.insert(teams).values({
+      id: teamId,
+      name: `Team ${teamId}`,
+      organizationId,
+      createdAt: new Date(),
+    });
+    await db.insert(teamMembers).values({
+      id: crypto.randomUUID(),
+      teamId,
+      userId: person.userId,
+      createdAt: new Date(),
+    });
+    const upload = uploadSource(crypto.randomUUID());
+    const readers = { kind: "team", teamId } as const;
+    await addSource(env, {
+      source: upload,
+      change: "1",
+      text: `Board minutes on ${topic}: the board decided ${marker}.`,
+      readers,
+    });
+    await fakeProvider(says(`On ${topic} the board decided ${marker}.`));
+
+    await stub.ask(made.id, { text: `What about ${topic}?`, model });
+    await expect(keptTextOf(person.userId, topic)).resolves.toBe(
+      `Asked:\nWhat about ${topic}?`
     );
+    await eraseSource(env, { source: upload, readers, reason: "deleted" });
+    await db
+      .delete(teamMembers)
+      .where(
+        and(
+          eq(teamMembers.teamId, teamId),
+          eq(teamMembers.userId, person.userId)
+        )
+      );
+
+    await expect(recalled(person.userId, marker)).resolves.toStrictEqual([]);
+  });
+
+  // The re-check as it is handed over (threat 5): the reviewer's probe.
+  it("is not handed over once its chat was restricted after it was noted", async () => {
+    const marker = word();
+    const { person, stub, chatId, ask } = await chatter(
+      says(`Before ${marker}.`)
+    );
+    await ask(`Before ${marker}?`);
+    await vi.waitFor(
+      async () => {
+        await expect(keptEvents(person.userId, chatId)).resolves.toHaveLength(
+          1
+        );
+      },
+      { timeout: 15_000, interval: 200 }
+    );
+
+    await stub.restrictChat(chatId);
+    await handOverNow();
+    await handOverNow();
+
+    await expect(recalled(person.userId, marker)).resolves.toStrictEqual([]);
   });
 
   it("is never handed over from a chat app's chat, a turn nothing but a wake asked for, or a restricted chat", async () => {
@@ -233,14 +343,14 @@ describe("a person's chat turn", () => {
       says(`Asked ${marker}.`)
     );
     await stub.askUnattended(chatId, { text: `Wake ${marker}`, model });
-    const teams = await stub.createChat(
+    const onTeams = await stub.createChat(
       "On Teams",
       person.userId,
       chatAgentId,
       undefined,
       "teams"
     );
-    await stub.ask(teams.id, { text: `Teams ${marker}?`, model });
+    await stub.ask(onTeams.id, { text: `Teams ${marker}?`, model });
     const restricted = await person.api.chats.create("Restricted");
     await stub.restrictChat(chatIdSchema.parse(restricted.id));
     await stub.ask(chatIdSchema.parse(restricted.id), {

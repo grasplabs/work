@@ -786,6 +786,9 @@ const answersAlone = (
   unattended: boolean
 ): boolean => via === "web" && thread === null && !unattended;
 
+/** A turn's rows `turnForBrain` reads at a time, back from its answer. */
+const turnRowsPerRead = 20;
+
 /**
  * Whether `chat`'s turns go to its person's own Brain (GRA-1805): a chat
  * whose turns answer them alone (`answersAlone`), not restricted. Whether
@@ -1558,17 +1561,24 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * What the turn of `personId`'s chat `chatId` that ended with message
-   * `answerId` said, for their own Brain (brain-sources.ts): the question
-   * before that answer, if any, and the answer, as the person reads them.
+   * `answerId` said, for their own Brain (brain-sources.ts), as the person
+   * reads it: their question, the last of theirs before that answer, if
+   * any; and the answer only when the turn read nothing, no step's result
+   * between the two (the recall before the question is one too). An
+   * answer can quote what a step read, and a copy of it in their store
+   * would outlive that being erased or their losing it: so a turn that
+   * read anything keeps the question alone. Read back from the answer,
+   * this turn's rows alone, never the chat's history before it.
+   *
    * Null once the chat is gone, being deleted, someone else's, or no
-   * longer one whose turns go to the Brain (`handsTurnsOver`), and for
-   * any message that isn't one of its answers. Nothing it read or ran.
+   * longer one whose turns go to the Brain (`handsTurnsOver`), and for any
+   * message that isn't one of its answers. Nothing a step read or ran.
    */
   turnForBrain(
     chatId: string,
     personId: string,
     answerId: number
-  ): { question: string | null; answer: string } | null {
+  ): { question: string | null; answer: string | null } | null {
     const id = chatIdSchema.safeParse(chatId);
     if (!id.success || this.#deleting.has(id.data)) {
       return null;
@@ -1585,39 +1595,52 @@ export class Workspace extends DurableObject<Env> {
     ) {
       return null;
     }
-    const said = (row: { id: number; message: string; createdAt: Date }) =>
-      chatMessageOf(
-        row.id,
-        storedMessageSchema.parse(JSON.parse(row.message)),
-        row.createdAt
-      );
-    const answer = this.#db
+    const parsed = (row: { message: string }) =>
+      storedMessageSchema.parse(JSON.parse(row.message));
+    const answerRow = this.#db
       .select()
       .from(chatMessages)
       .where(
         and(eq(chatMessages.chatId, id.data), eq(chatMessages.id, answerId))
       )
       .get();
-    const answered = answer === undefined ? undefined : said(answer);
+    const answered =
+      answerRow === undefined
+        ? undefined
+        : chatMessageOf(answerRow.id, parsed(answerRow), answerRow.createdAt);
     if (answered?.role !== "assistant" || answered.text.trim() === "") {
       return null;
     }
-    // The person's question the answer ends: the last of theirs before it.
-    const asked = this.#db
-      .select()
-      .from(chatMessages)
-      .where(
-        and(eq(chatMessages.chatId, id.data), lt(chatMessages.id, answerId))
-      )
-      .orderBy(desc(chatMessages.id))
-      .all()
-      .map(said)
-      .find((shown) => shown?.role === "user");
-    return {
-      question:
-        asked === undefined || asked.text.trim() === "" ? null : asked.text,
-      answer: answered.text,
-    };
+    // Back from the answer, a page at a time, to the person's question:
+    // whether any step's result came between.
+    let question: string | null = null;
+    let read = false;
+    let before = answerId;
+    let more = true;
+    while (more) {
+      const page = this.#db
+        .select()
+        .from(chatMessages)
+        .where(
+          and(eq(chatMessages.chatId, id.data), lt(chatMessages.id, before))
+        )
+        .orderBy(desc(chatMessages.id))
+        .limit(turnRowsPerRead)
+        .all();
+      more = page.length === turnRowsPerRead;
+      for (const row of page) {
+        const message = parsed(row);
+        read ||= message.role === "toolResult";
+        const shown = chatMessageOf(row.id, message, row.createdAt);
+        if (shown?.role === "user") {
+          question = shown.text.trim() === "" ? null : shown.text;
+          more = false;
+          break;
+        }
+        before = row.id;
+      }
+    }
+    return { question, answer: read ? null : answered.text };
   }
 
   async #captureSoon(): Promise<void> {

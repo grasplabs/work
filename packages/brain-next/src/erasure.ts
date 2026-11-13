@@ -494,7 +494,10 @@ const rowsOf = (
 
 /**
  * The sources an erasure of the key whose subject is `subject` covers:
- * the source of that key, and each added in it as a group.
+ * the source of that key, and each added in it as a group. `apply` hides
+ * each in turn, in its one transaction: a group's erasure costs time
+ * linear in its sources (about 370 ms per 1,000 one-version sources in
+ * workerd), and its deleting is the tick's, a bounded batch at a time.
  */
 const sourcesOf = (sql: SqlStorage, subject: string): string[] =>
   sql

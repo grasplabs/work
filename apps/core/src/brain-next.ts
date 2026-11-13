@@ -217,6 +217,13 @@ const kindsWithoutColon = <const K extends string>(
 // chat's group (brain-next-origins.ts `chatTurnSource`, GRA-1805).
 const producerKinds = kindsWithoutColon(["upload", "chat", "run"]);
 
+/**
+ * The kinds the Sources page lists (`listSourcesAs`): not a chat's turns,
+ * which its chat shows, and which would list as a row each. Recall still
+ * finds them, each naming its chat.
+ */
+const listedKinds = producerKinds.filter((kind) => kind !== "chat");
+
 /** Who adds a source: one of `producerKinds`. */
 export type ProducerKind = (typeof producerKinds)[number];
 
@@ -784,7 +791,7 @@ export const listSourcesAs = async (
   const reader = await readerOf(env, personId);
   const request = {
     reader,
-    prefixes: producerKinds.map((kind) => `${kind}:`),
+    prefixes: listedKinds.map((kind) => `${kind}:`),
     ...(from === undefined
       ? {}
       : { after: { addedAt: from.addedAt, source: sourceKeyOf(from.source) } }),
