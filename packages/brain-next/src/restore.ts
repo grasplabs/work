@@ -26,6 +26,7 @@ import {
   confirmationLineSchema,
   dropPartsBeyond,
   exportKeyOf,
+  exportFormat,
   exportLineSchema,
   extractionLineSchema,
   isStale,
@@ -40,6 +41,7 @@ import {
   retireIfStale,
 } from "./exports.ts";
 import type {
+  ChangeLine,
   ConfirmationLine,
   ExportLine,
   ExtractionLine,
@@ -127,6 +129,9 @@ const refusals = {
   notEmpty: `${refusalPrefix} a restore goes only into a store that holds nothing`,
   running: `${refusalPrefix} a restore is under way`,
   notFound: `${refusalPrefix} no whole company export of this deployment has that id`,
+  // An export an older release made holds no memories: restored, it would
+  // read as whole without them (exports.ts `exportFormat`).
+  olderFormat: `${refusalPrefix} that export was made by an older release and holds no memories, so it can't be restored: make a new export`,
   // An abandoned restore's export id is refused for good: the store it
   // half-filled has been used since, or its export holds what the ledger
   // erased (its files are then deleted), so restoring it again would mix
@@ -255,6 +260,17 @@ const manifestOf = async (
     parsed = JSON.parse(await object.text());
   } catch {
     return undefined;
+  }
+  // An older release's export of this deployment: refused for what it is.
+  const older = z
+    .looseObject({
+      format: z.int().lt(exportFormat),
+      id: z.literal(id),
+      deployment: z.literal(deployment),
+    })
+    .safeParse(parsed);
+  if (older.success) {
+    throw new Error(refusals.olderFormat);
   }
   const manifest = manifestSchema.safeParse(parsed);
   return manifest.success &&
@@ -400,10 +416,7 @@ const partLinesOf = async (
   }
   const lines = new TextDecoder().decode(body).split("\n");
   // Written with a newline after each line.
-  if (
-    lines.pop() !== "" ||
-    lines.length !== part.versions + (part.memories ?? 0)
-  ) {
+  if (lines.pop() !== "" || lines.length !== part.versions + part.memories) {
     return undefined;
   }
   const parsed: PartLine[] = [];
@@ -594,31 +607,37 @@ const entityRowsOf = (
   sql: SqlStorage,
   line: MemoryLine
 ): Map<string, number> | undefined => {
-  const rows = new Map<string, number>();
-  for (const { id, kind } of line.entities) {
-    const known = sql
+  const known = line.entities.map(({ id }) =>
+    sql
       .exec<{ row: number; kind: string }>(
         "SELECT row, kind FROM entities WHERE id = ?",
         id
       )
       .toArray()
-      .at(0);
-    if (known !== undefined && known.kind !== kind) {
-      return undefined;
-    }
-    rows.set(
+      .at(0)
+  );
+  // Every one checked before any is made, so none is left without its memory.
+  if (
+    line.entities.some(
+      ({ kind }, index) =>
+        known[index] !== undefined && known[index]?.kind !== kind
+    )
+  ) {
+    return undefined;
+  }
+  return new Map(
+    line.entities.map(({ id, kind }, index) => [
       id,
-      known?.row ??
+      known[index]?.row ??
         sql
           .exec<{ row: number }>(
             "INSERT INTO entities (id, kind) VALUES (?, ?) RETURNING row",
             id,
             kind
           )
-          .one().row
-    );
-  }
-  return rows;
+          .one().row,
+    ])
+  );
 };
 
 /**
@@ -803,6 +822,38 @@ const restoreExtraction = async (
 };
 
 /**
+ * Writes the change key `line` back, once, only when it answered memories
+ * and this restore wrote every one of them (the store held none before
+ * it): so a change key in a bundle never answers for what it didn't bring
+ * back, and never hides a later add of anything else. In one transaction.
+ */
+const restoreChange = (
+  storage: DurableObjectStorage,
+  line: ChangeLine
+): void => {
+  storage.transactionSync(() => {
+    const { sql } = storage;
+    const { memories } = line.answer;
+    const restored = sql
+      .exec<{ count: number }>(
+        `SELECT count(*) AS count FROM memories
+        WHERE id IN (SELECT value FROM json_each(?))`,
+        JSON.stringify(memories)
+      )
+      .one().count;
+    if (memories.length === 0 || restored !== new Set(memories).size) {
+      return;
+    }
+    sql.exec(
+      "INSERT OR IGNORE INTO memory_changes (key, hash, answer) VALUES (?, ?, ?)",
+      line.key,
+      line.hash,
+      JSON.stringify(line.answer)
+    );
+  });
+};
+
+/**
  * Writes `line`, one of the memories' steps (exports.ts), back as it was,
  * unless it is passed over (above). A change key goes in as kept, once.
  */
@@ -818,12 +869,7 @@ const restoreMemoriesLine = async (
   } else if (line.kind === "extraction") {
     await restoreExtraction(storage, db, line);
   } else {
-    storage.sql.exec(
-      "INSERT OR IGNORE INTO memory_changes (key, hash, answer) VALUES (?, ?, ?)",
-      line.key,
-      line.hash,
-      JSON.stringify(line.answer)
-    );
+    restoreChange(storage, line);
   }
 };
 
@@ -950,7 +996,7 @@ const partsOf = (sql: SqlStorage, id: string): Manifest["parts"] =>
     file: exportPartNameOf(part, "jsonl"),
     sha256: hash,
     versions,
-    ...(memories === null ? {} : { memories }),
+    memories: memories ?? 0,
     bytes,
   }));
 

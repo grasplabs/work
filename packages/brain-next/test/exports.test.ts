@@ -1474,16 +1474,19 @@ describe("exports and restores", () => {
         file: "part-10000.jsonl",
         sha256: "0".repeat(64),
         versions: 1,
+        memories: 0,
         bytes: 1,
       };
       const manifest = storeManifestSchema.safeParse({
-        format: 1,
+        format: 2,
         id: crypto.randomUUID(),
         deployment: "test",
         scope: "company",
         startedAt: new Date().toISOString(),
         finishedAt: new Date().toISOString(),
         versions: 1,
+        memories: 0,
+        stamp: 0,
         parts: [part],
       });
       expect({
@@ -2128,6 +2131,13 @@ describe("exports and restores", () => {
             "SELECT count(*) AS count FROM memory_extractions"
           )
           .one().count,
+        // The erased add's change key went with its memory: only the
+        // kept one answers.
+        changes: sql
+          .exec<{ count: number }>(
+            "SELECT count(*) AS count FROM memory_changes"
+          )
+          .one().count,
       }));
       const inBucket: string[] = [];
       for (const key of await keysUnder("")) {
@@ -2143,7 +2153,11 @@ describe("exports and restores", () => {
         inBucket,
         files: await keysUnder(`exports/${id}/`),
       }).toStrictEqual({
-        stored: { memories: ["Acme said something else"], marks: 0 },
+        stored: {
+          memories: ["Acme said something else"],
+          marks: 0,
+          changes: 1,
+        },
         inBucket: [],
         files: [],
       });
@@ -2240,14 +2254,13 @@ describe("exports and restores", () => {
       }).toStrictEqual({ failed: "failed", givenUp: "abandoned" });
     });
 
-    it("restores an export made before memories were exported, which has no lines or stamp of them (threat 10)", async () => {
+    it("refuses an export an older release made, which holds no memories, saying so, and writes nothing (threat 10)", async () => {
       await putBack(shared(), emptyShared);
       const group = `team:${unique()}`;
-      const source = `test:${unique()}`;
-      await add(shared(), source, "older words", team(group));
+      await add(shared(), `test:${unique()}`, "older words", team(group));
       const { id } = await shared().startExport("test");
       await settled(shared(), id);
-      // Its manifest as an export made before them was written.
+      // Its manifest as an older release wrote it: format 1, versions only.
       const key = `exports/${id}/manifest.json`;
       const manifest = z
         .looseObject({ parts: z.array(z.looseObject({})) })
@@ -2257,19 +2270,27 @@ describe("exports and restores", () => {
         key,
         JSON.stringify({
           ...older,
+          format: 1,
           parts: manifest.parts.map(({ memories: _none, ...part }) => part),
         })
       );
       await putBack(shared(), emptyShared);
-      await shared().startRestore(id, "test");
-      await restoreSettled(id);
 
-      await expect(
-        shared().readCurrent({
-          sources: [source],
-          reader: readerOf(unique(), [group]),
-        })
-      ).resolves.toMatchObject([{ text: "older words" }]);
+      await expect(called(shared().startRestore(id, "test"))).rejects.toThrow(
+        "made by an older release and holds no memories"
+      );
+      expect({
+        restore: await shared().restoreStatus(id),
+        held: await inStore(
+          (sql) =>
+            sql
+              .exec<{ count: number }>(
+                `SELECT (SELECT count(*) FROM source_versions)
+                  + (SELECT count(*) FROM exports) AS count`
+              )
+              .one().count
+        ),
+      }).toStrictEqual({ restore: null, held: 0 });
     });
 
     it("fails a restore whose memory an add would refuse, and writes nothing of it (threat 6)", async () => {

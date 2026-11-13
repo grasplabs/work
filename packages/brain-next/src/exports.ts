@@ -298,9 +298,17 @@ export type MemoriesLine =
   | ExtractionLine
   | ChangeLine;
 
+/**
+ * The format of the exports this release writes, and the only one it
+ * restores: format 2 holds memories, and an export of format 1 (versions
+ * only) would come back as a Brain without them while reading as whole,
+ * so a restore refuses it (restore.ts) and the admin makes a new export.
+ */
+export const exportFormat = 2;
+
 /** An export's manifest, as written last. */
 export const manifestSchema = z.strictObject({
-  format: z.literal(1),
+  format: z.literal(exportFormat),
   id: z.uuid(),
   /**
    * The deployment it is of, as its host names it. On-prem every install
@@ -311,14 +319,13 @@ export const manifestSchema = z.strictObject({
   startedAt: z.iso.datetime(),
   finishedAt: z.iso.datetime(),
   versions: z.int().nonnegative(),
-  /** Lines of memories, in all its parts: none in an export made before they were exported. */
-  memories: z.int().nonnegative().optional(),
+  /** Lines of memories, in all its parts. */
+  memories: z.int().nonnegative(),
   /**
    * The store's latest write stamp of memories as it started: a restore
-   * raises the store's to it, never lowers it. None in an export made
-   * before memories were exported.
+   * raises the store's to it, never lowers it.
    */
-  stamp: z.int().nonnegative().optional(),
+  stamp: z.int().nonnegative(),
   parts: z.array(
     z
       .strictObject({
@@ -327,11 +334,11 @@ export const manifestSchema = z.strictObject({
         }),
         sha256: sha256Schema,
         versions: z.int().nonnegative(),
-        /** Its lines of memories: none in an export made before they were exported. */
-        memories: z.int().nonnegative().optional(),
+        /** Its lines of memories. */
+        memories: z.int().nonnegative(),
         bytes: z.int().positive(),
       })
-      .refine(({ versions, memories = 0 }) => versions + memories > 0, {
+      .refine(({ versions, memories }) => versions + memories > 0, {
         message: "A part holds no line",
       })
   ),
@@ -589,9 +596,21 @@ WHERE marked.rowid > ?1 AND marked.at <= ?4
   AND ${exportedVersionSql("marked.source", "marked.version")}
 ORDER BY marked.rowid
 LIMIT ?3`,
-  changes: `SELECT rowid AS row, key, hash, answer FROM memory_changes
-WHERE rowid > ?1 AND rowid <= ?5
-ORDER BY rowid
+  // A change goes with its memories: only one that answered some, each
+  // held by the export (a restore writes it only when it restored them
+  // all, restore.ts).
+  changes: `WITH ${unreadableSql}
+SELECT changed.rowid AS row, changed.key AS key, changed.hash AS hash,
+  changed.answer AS answer
+FROM memory_changes AS changed
+WHERE changed.rowid > ?1 AND changed.rowid <= ?5
+  AND json_array_length(changed.answer, '$.memories') > 0
+  AND NOT EXISTS (
+    SELECT 1 FROM json_each(changed.answer, '$.memories') AS answered
+    LEFT JOIN memories AS m ON m.id = answered.value
+    WHERE m.row IS NULL OR NOT ${exportedMemorySql("m")}
+  )
+ORDER BY changed.rowid
 LIMIT ?3`,
 };
 
@@ -1419,7 +1438,7 @@ const finish = async (
 ): Promise<void> => {
   const parts = partRowsOf(storage.sql, row.id);
   const manifest: Manifest = {
-    format: 1,
+    format: exportFormat,
     id: row.id,
     deployment: row.deployment,
     scope: "company",
@@ -1432,7 +1451,7 @@ const finish = async (
       file: partFileOf(part),
       sha256: hash,
       versions,
-      ...(memories === null ? {} : { memories }),
+      memories: memories ?? 0,
       bytes,
     })),
   };
@@ -1697,7 +1716,7 @@ const writePart = async (
       row.parts,
       hash,
       next.versions,
-      next.memories === 0 ? null : next.memories,
+      next.memories,
       body.byteLength
     );
     sql.exec(
@@ -1836,7 +1855,7 @@ export const recordRestoredExport = (
       part,
       sha256,
       versions,
-      memories ?? null,
+      memories,
       bytes
     );
   }
