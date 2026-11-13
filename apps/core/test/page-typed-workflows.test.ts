@@ -5,7 +5,6 @@ import { z } from "zod";
 
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { repairResourceTerminations } from "../src/workflows/resource-runs.ts";
 import { tellQueryFollowers } from "../src/workflows/run-changes.ts";
@@ -36,6 +35,7 @@ import {
   waitsListed,
 } from "./page-typed-workflows-harness.ts";
 import { auditedDuring, unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // A page's typed `useWorkflow` through the real host (spec 10.4,
 // page-workflows.ts; the threat model is on GRA-626): its starts and
@@ -185,10 +185,12 @@ describe(
         builder.acting,
         `ask-${unique()}`
       );
-      await publishWorkflowVersion(env, builder.acting, workflow.id, {
-        definition: askingOf(key, "role:admin"),
-        basedOn: null,
-      });
+      await publishDefinition(
+        env,
+        builder.acting,
+        workflow.id,
+        askingOf(key, "role:admin")
+      );
       await approveWorkflowBinding(env, admin.acting, workflow.id, {
         alias: "approval",
         target: { kind: "decision", deciders: ["role:admin"] },
@@ -263,10 +265,12 @@ describe(
         builder.acting,
         `ask-${unique()}`
       );
-      await publishWorkflowVersion(env, builder.acting, workflow.id, {
-        definition: askingOf(key, "role:admin"),
-        basedOn: null,
-      });
+      await publishDefinition(
+        env,
+        builder.acting,
+        workflow.id,
+        askingOf(key, "role:admin")
+      );
       await approveWorkflowBinding(env, admin.acting, workflow.id, {
         alias: "approval",
         target: { kind: "decision", deciders: ["role:admin"] },

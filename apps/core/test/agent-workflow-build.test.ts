@@ -160,7 +160,6 @@ describe("the agent building an independent workflow", () => {
       const bound = await env.workflowBuild.bind(created.id, {
         app: ${JSON.stringify(app)},
         alias: "summary",
-        version: 1,
       });
       return {
         id: created.id,
@@ -369,7 +368,7 @@ describe("the agent building an independent workflow", () => {
     );
     await publishOverRpc(builder.api, flow.id, definitionOf());
     const calls = tryEach({
-      bind: `await env.workflowBuild.bind(${JSON.stringify(flow.id)}, { app: ${JSON.stringify(app)}, alias: "summary", version: 1 })`,
+      bind: `await env.workflowBuild.bind(${JSON.stringify(flow.id)}, { app: ${JSON.stringify(app)}, alias: "summary" })`,
     });
     await fakeProvider(codeStep(calls), says("It was stopped."));
     const granted = await grant();
@@ -468,12 +467,10 @@ describe("the agent building an independent workflow", () => {
     const first = await builder.api.workflowResources.bindToApp(flow.id, {
       app,
       alias: "summary",
-      version: 1,
     });
     const second = await builder.api.workflowResources.bindToApp(flow.id, {
       app,
       alias: "summary",
-      version: 2,
     });
 
     const bound = await vi.waitFor(async () => {
@@ -493,7 +490,8 @@ describe("the agent building an independent workflow", () => {
         binding: first.id,
         alias: "summary",
         workflowId: flow.id,
-        version: 1,
+        // The live version, which its starts run.
+        version: 2,
         replacedBinding: null,
         replacedWorkflowId: null,
         replacedVersion: null,
@@ -505,7 +503,7 @@ describe("the agent building an independent workflow", () => {
         version: 2,
         replacedBinding: first.id,
         replacedWorkflowId: flow.id,
-        replacedVersion: 1,
+        replacedVersion: 2,
       },
     ]);
   });
@@ -558,8 +556,8 @@ describe("the agent building an independent workflow", () => {
       edit: `await env.workflowBuild.edit(${id}, { revision: 0, source: "{}" })`,
       startTest: `await env.workflowBuild.startTest(${id}, { revision: 1, args: {}, fixtures: {} })`,
       testRun: `await env.workflowBuild.testRun(${id}, "run-1")`,
-      bindTheirs: `await env.workflowBuild.bind(${id}, { app: ${JSON.stringify(theirApp)}, alias: "x", version: 1 })`,
-      bindToTheirApp: `await env.workflowBuild.bind(${JSON.stringify(mine.id)}, { app: ${JSON.stringify(theirApp)}, alias: "x", version: 1 })`,
+      bindTheirs: `await env.workflowBuild.bind(${id}, { app: ${JSON.stringify(theirApp)}, alias: "x" })`,
+      bindToTheirApp: `await env.workflowBuild.bind(${JSON.stringify(mine.id)}, { app: ${JSON.stringify(theirApp)}, alias: "x" })`,
       requestTheirs: `await env.workflowBuild.requestPermission(${id}, { object: { type: "workflow", workflowId: ${JSON.stringify(mine.id)} }, actions: ["start"], binding: "CHILD" })`,
     });
     await fakeProvider(codeStep(calls), says("No."));

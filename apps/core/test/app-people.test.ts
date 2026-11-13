@@ -8,9 +8,9 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
-import { appPublishing } from "../src/app-publish.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
+import { appKind } from "../src/apps.ts";
 import {
   appMembers,
   memberRemovals,
@@ -149,7 +149,7 @@ type Caller = Fixture["owner"];
 const directoryApp = async (people = true): Promise<Sealed> => {
   const fixture = await appWith(peopleFiles(people), "Directory");
   const release = await seal(fixture);
-  await rollback(env, appPublishing, fixture.owner, fixture.app, 1);
+  await rollback(env, appKind, fixture.owner, fixture.app, 1);
   return { ...fixture, release };
 };
 

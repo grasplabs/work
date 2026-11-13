@@ -203,7 +203,7 @@ describe("an App's chat building its App", { timeout: 180_000 }, () => {
       codeStep(calling(app.id)),
       says("The board is drafted.")
     );
-    const chat = await builder.api.chats.forApp(app.id);
+    const chat = await builder.api.chats.create("App changes");
 
     await stub.ask(chat.id, {
       text: "Build a kanban with four columns.",

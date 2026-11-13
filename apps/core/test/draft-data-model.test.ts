@@ -397,8 +397,8 @@ describe(
   }
 );
 
-describe("a workflow version bound from a draft", { timeout: 120_000 }, () => {
-  it("declares the version's events and listen tasks in the draft, for an alias the App declares and a person with a role in the workflow, so the version binds once that draft is published", async () => {
+describe("a workflow bound from a draft", { timeout: 120_000 }, () => {
+  it("declares its live version's events and listen tasks in the draft, for an alias the App declares and a person with a role in the workflow, so it binds once that draft is published", async () => {
     const [admin, builder, otherBuilder] = await Promise.all([
       signedInApi(idp, "admin"),
       signedInApi(idp, "builder"),
@@ -409,15 +409,19 @@ describe("a workflow version bound from a draft", { timeout: 120_000 }, () => {
       `bound-${unique()}`
     );
     await publishOverRpc(builder.api, flow.id, jobWaitingOf(contract));
-    // Version 2 waits for another event too, in a task of its own.
+    // Another workflow, live at a version that waits for another event
+    // too, in a task of its own.
+    const later = await builder.api.workflowResources.create(
+      `later-${unique()}`
+    );
     await publishOverRpc(
       builder.api,
-      flow.id,
+      later.id,
       jobWaitingOf(contract, { more: ["laterEvents"] })
     );
     const { id: app } = await builder.api.apps.create({ name: "Requests" });
     const api = builder.api.workflowResources;
-    await api.bindToApp(flow.id, { app, alias: "review", version: 1 });
+    await api.bindToApp(flow.id, { app, alias: "review" });
     await release(builder, app, requestsApp("review", jobEventsDeclared));
     // Another builder of the App, with no role in the workflow.
     await builder.api.apps.members.add(app, {
@@ -426,17 +430,14 @@ describe("a workflow version bound from a draft", { timeout: 120_000 }, () => {
       role: "builder",
     });
     const bindSecond = async () =>
-      await outcome(
-        api.bindToApp(flow.id, { app, alias: "review", version: 2 })
-      );
+      await outcome(api.bindToApp(later.id, { app, alias: "review" }));
     const bindInDraft = (alias: string) => ({
       op: "bindWorkflow",
       alias,
-      workflow: flow.id,
-      version: 2,
+      workflow: later.id,
     });
 
-    // The App's current version declares version 1's events.
+    // The App's current version declares the first workflow's events.
     const beforeDraft = await bindSecond();
     const undeclared = await builder.api.apps.define(app, bindInDraft("ghost"));
     const noRole = await outcome(
@@ -456,8 +457,7 @@ describe("a workflow version bound from a draft", { timeout: 120_000 }, () => {
     const { revision } = await builder.api.drafts.get({ kind: "app", id: app });
     const { version } = await builder.api.drafts.publish(
       { kind: "app", id: app },
-      revision,
-      "Declare version 2's events"
+      revision
     );
     // What the release of the draft's version declares, as its host reads it.
     const proposed = await loadRelease(env, appIdSchema.parse(app), version);
@@ -473,7 +473,6 @@ describe("a workflow version bound from a draft", { timeout: 120_000 }, () => {
       .map(({ detail }) => ({
         alias: detail.alias,
         workflow: detail.workflow,
-        version: detail.version,
       }));
 
     expect({
@@ -496,7 +495,7 @@ describe("a workflow version bound from a draft", { timeout: 120_000 }, () => {
       noRole: "workflow.resource_unavailable",
       forged: "app.invalid",
       declared: true,
-      // Version 2's events and listen tasks, as it has them.
+      // The live version's events and listen tasks, as it has them.
       sealed: {
         events: {
           jobEvents: jobEventsDeclared.events.jobEvents,
@@ -505,7 +504,7 @@ describe("a workflow version bound from a draft", { timeout: 120_000 }, () => {
         listens: { job: ["jobEvents"], laterEvents: ["laterEvents"] },
       },
       // The workflow and version the declaration was read from.
-      audited: [{ alias: "review", workflow: flow.id, version: "2" }],
+      audited: [{ alias: "review", workflow: later.id }],
       draftOnly: "workflow.app_binding_contract_changed",
       afterCurrent: "ok",
     });

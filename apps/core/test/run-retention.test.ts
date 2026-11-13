@@ -15,7 +15,6 @@ import {
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { setWorkflowParams } from "../src/workflow-params.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { workflowStateOf, writeWorkflowState } from "../src/workflow-state.ts";
 import {
@@ -42,6 +41,7 @@ import { runQuarterHourTasks } from "./maintenance.ts";
 import { racingDb } from "./racing-db.ts";
 import { runObject, sleeping, stopped, woken } from "./runs.ts";
 import { unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // Retention of independent (JSON) workflow runs, from its threat model
 // (src/workflows/retention.ts, `sweepWorkflowStartDetails`): a run reads
@@ -398,10 +398,12 @@ describe("JSON run retention", { timeout: 60_000 }, () => {
       owner.acting,
       `approve-${unique()}`
     );
-    await publishWorkflowVersion(env, owner.acting, workflow.id, {
-      definition: approvalDefinition(contract),
-      basedOn: null,
-    });
+    await publishDefinition(
+      env,
+      owner.acting,
+      workflow.id,
+      approvalDefinition(contract)
+    );
     await approveWorkflowBinding(env, admin.acting, workflow.id, {
       alias: "approval",
       target: { kind: "decision", deciders: [`person:${reviewer.userId}`] },

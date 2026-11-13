@@ -300,7 +300,7 @@ const unapprovedOf = async (
   const unapproved: PendingWorkflowBindings["bindings"] = [];
   for (const binding of versions.get(version) ?? []) {
     // oxlint-disable-next-line no-await-in-loop -- one point lookup per binding
-    if ((await approvalServing(env, id, version, binding)) !== undefined) {
+    if ((await approvalServing(env, id, binding)) !== undefined) {
       continue;
     }
     unapproved.push({

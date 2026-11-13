@@ -15,9 +15,8 @@ import { createTriggerResource } from "../src/trigger-resources.ts";
 import {
   pauseWorkflow,
   resumeWorkflow,
-  workflowLifecycle,
-} from "../src/workflow-lifecycle.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
+  workflowPause,
+} from "../src/workflow-pause.ts";
 import {
   createWorkflowResource,
   shareWorkflowResource,
@@ -31,8 +30,9 @@ import { startDueScheduleTriggers } from "../src/workflows/schedule-triggers.ts"
 import { allEvents } from "./audit-events.ts";
 import { greetingOf } from "./json-workflow-apps.ts";
 import { outcome, unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
-// An independent workflow's pause (workflow-lifecycle.ts), from its
+// An independent workflow's pause (workflow-pause.ts), from its
 // threat model: a paused workflow starts nothing, from people or
 // triggers, a start decided before the pause included, and its schedules
 // skip without stopping; Grasp staff and users change nothing. Each test
@@ -74,10 +74,12 @@ const workflowOf = async (owner: Identity, versions = 1) => {
   );
   for (let version = 1; version <= versions; version += 1) {
     // oxlint-disable-next-line no-await-in-loop -- each builds on the one before
-    await publishWorkflowVersion(env, owner, workflow.id, {
-      definition: greetingOf(undefined, `Version ${version}`),
-      basedOn: version === 1 ? null : version - 1,
-    });
+    await publishDefinition(
+      env,
+      owner,
+      workflow.id,
+      greetingOf(undefined, `Version ${version}`)
+    );
   }
   const builder = await person("builder");
   const user = await person("user");
@@ -102,8 +104,8 @@ const startBy = async (who: Identity, id: string) =>
     key: `key-${unique()}`,
   });
 
-/** The lifecycle events audited on workflow `id`, oldest first. */
-const lifecycleEvents = async (id: string) => {
+/** The pause events audited on workflow `id`, oldest first. */
+const pauseEventsOf = async (id: string) => {
   const events = await allEvents();
   return events
     .filter(
@@ -120,14 +122,14 @@ describe("a workflow's pause", { timeout: 60_000 }, () => {
     const workflow = await workflowOf(owner);
     const staff = await person("admin", true);
     const stranger = await person("builder");
-    const read = await workflowLifecycle(env, workflow.user, workflow.id);
+    const read = await workflowPause(env, workflow.user, workflow.id);
 
     expect({
       read: { paused: read.paused, canChange: read.canChange },
       user: await outcome(pauseWorkflow(env, workflow.user, workflow.id)),
       staff: await outcome(pauseWorkflow(env, staff, workflow.id)),
-      stranger: await outcome(workflowLifecycle(env, stranger, workflow.id)),
-      audited: await lifecycleEvents(workflow.id),
+      stranger: await outcome(workflowPause(env, stranger, workflow.id)),
+      audited: await pauseEventsOf(workflow.id),
     }).toStrictEqual({
       read: { paused: null, canChange: false },
       user: "role.forbidden",
@@ -167,7 +169,7 @@ describe("a paused workflow", { timeout: 120_000 }, () => {
       )
       .map(({ detail }) => detail.reason);
 
-    const pauseEvents = await lifecycleEvents(workflow.id);
+    const pauseEvents = await pauseEventsOf(workflow.id);
 
     expect({
       paused: paused.paused?.by,
@@ -207,10 +209,7 @@ describe("a paused workflow", { timeout: 120_000 }, () => {
       admin,
       `greet-${unique()}`
     );
-    await publishWorkflowVersion(env, admin, workflow.id, {
-      definition: greetingOf(),
-      basedOn: null,
-    });
+    await publishDefinition(env, admin, workflow.id, greetingOf());
     const trigger = await createTriggerResource(env, admin, {
       kind: "schedule",
       workflowId: workflow.id,

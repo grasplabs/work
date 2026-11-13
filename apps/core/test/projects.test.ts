@@ -233,7 +233,7 @@ describe("projects", { timeout: 120_000 }, () => {
       share: true,
     });
     // Shared with the outsider directly, who isn't in the project.
-    await owner.api.workflowResources.share(workflow, {
+    await owner.api.workflowResources.members.add(workflow, {
       type: "person",
       id: outsider.userId,
       role: "user",
@@ -242,10 +242,10 @@ describe("projects", { timeout: 120_000 }, () => {
     // Who is in it already, its owner included, isn't offered to add.
     const offered = await owner.api.projects.shareCandidates(project);
     const projectRow = async (who: Person) => {
-      const members = await who.api.workflowResources.members(workflow);
+      const members = await who.api.workflowResources.members.list(workflow);
       return members
         .filter(({ type }) => type === "project")
-        .map(({ id, projectName, role }) => ({ id, projectName, role }));
+        .map((row) => ({ id: row.id, projectName: row.name, role: row.role }));
     };
     const appRow = async (who: Person) => {
       const members = await who.api.apps.members.list(app);
@@ -339,7 +339,7 @@ describe("projects", { timeout: 120_000 }, () => {
     };
 
     await owner.api.projects.unfile(project, { type: "workflow", id: first });
-    const firstShares = await owner.api.workflowResources.members(first);
+    const firstShares = await owner.api.workflowResources.members.list(first);
     const firstTakenOut = {
       ben: await seesWorkflow(ben, first),
       benSecond: await seesWorkflow(ben, second),
@@ -399,9 +399,10 @@ describe("projects", { timeout: 120_000 }, () => {
     );
     const staff = staffCore.authenticate();
     const strangersList = await stranger.api.projects.list();
-    const strangersOffer = await stranger.api.workflowResources.shareCandidates(
-      await workflowOf(stranger)
-    );
+    const strangersOffer =
+      await stranger.api.workflowResources.members.candidates(
+        await workflowOf(stranger)
+      );
 
     expect({
       strangerList: strangersList.some(({ id }) => id === project),
@@ -427,7 +428,7 @@ describe("projects", { timeout: 120_000 }, () => {
       ),
       // Sharing an item of their own with someone else's project.
       strangerShares: await outcome(
-        stranger.api.workflowResources.share(await workflowOf(stranger), {
+        stranger.api.workflowResources.members.add(await workflowOf(stranger), {
           type: "project",
           id: project,
           role: "user",
@@ -444,7 +445,7 @@ describe("projects", { timeout: 120_000 }, () => {
         })
       ),
       memberShares: await outcome(
-        member.api.workflowResources.share(theirs, {
+        member.api.workflowResources.members.add(theirs, {
           type: "project",
           id: project,
           role: "user",
@@ -566,7 +567,7 @@ describe("projects", { timeout: 120_000 }, () => {
     });
     const workflow = await workflowOf(owner);
     // Shared from the workflow's own Share dialog, never filed.
-    await owner.api.workflowResources.share(workflow, {
+    await owner.api.workflowResources.members.add(workflow, {
       type: "project",
       id: project,
       role: "user",
@@ -662,7 +663,7 @@ describe("projects", { timeout: 120_000 }, () => {
         })
       ),
       sharesFromItsDialog: await outcome(
-        owner.api.workflowResources.share(sharedOne, {
+        owner.api.workflowResources.members.add(sharedOne, {
           type: "project",
           id: project,
           role: "user",
@@ -827,7 +828,7 @@ describe("projects", { timeout: 120_000 }, () => {
     const page = await owner.api.projects.get(project);
     const [appShares, workflowShares] = await Promise.all([
       bob.api.apps.members.list(bobsApp.id),
-      bob.api.workflowResources.members(bobsWorkflow),
+      bob.api.workflowResources.members.list(bobsWorkflow),
     ]);
 
     expect({
@@ -921,7 +922,7 @@ describe("projects", { timeout: 120_000 }, () => {
     const events = await auditedDuring(async () => {
       await owner.api.projects.remove(project);
     });
-    const sharesLeft = await owner.api.workflowResources.members(shared);
+    const sharesLeft = await owner.api.workflowResources.members.list(shared);
 
     expect({
       recorded: events.map(({ action, actor, target, detail }) => ({

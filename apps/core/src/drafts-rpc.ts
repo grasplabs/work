@@ -13,8 +13,9 @@ import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { subjectSchema } from "@grasp-os/shared/subject";
 import type { Subject, SubjectKind } from "@grasp-os/shared/subject";
+import { z } from "zod";
 
-import { appPublishing } from "./app-publish.ts";
+import { appKind } from "./apps.ts";
 import {
   draftCheckpointsOf,
   draftOf,
@@ -23,16 +24,16 @@ import {
   filesOf,
   restoreCheckpoint,
 } from "./drafts.ts";
+import type { DraftKind } from "./drafts.ts";
 import { draftWatch } from "./durable-objects.ts";
 import { callbackFor, isStub } from "./page-callbacks.ts";
 import type { StillOpen } from "./page-callbacks.ts";
 import { publish } from "./publish.ts";
-import type { Publishable } from "./publish.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { Subscription } from "./subscription.ts";
-import { workflowPublishing } from "./workflow-publish.ts";
+import { workflowKind } from "./workflow-publish.ts";
 
 // A signed-in person's `drafts` (GRA-1665): each App's and workflow's one
 // draft (drafts.ts), which every builder of it and their chats' agents
@@ -43,10 +44,10 @@ import { workflowPublishing } from "./workflow-publish.ts";
 // (draft-watch.ts), which tells every page that follows it (`watch`).
 // Publishing it is publish.ts's.
 
-/** Each kind of subject, as its draft and publish do it. */
-export const publishables: Readonly<Record<SubjectKind, Publishable>> = {
-  app: appPublishing,
-  workflow: workflowPublishing,
+/** Each kind of subject, as drafts and versions see it. */
+export const kinds: Readonly<Record<SubjectKind, DraftKind>> = {
+  app: appKind,
+  workflow: workflowKind,
 };
 
 /** The subject a caller names, as they sent it. */
@@ -66,32 +67,10 @@ const refusals = {
 };
 
 /** A draft revision as the page sends it: a count of writes. */
-const revisionOf = (revision: unknown): number => {
-  if (
-    typeof revision !== "number" ||
-    !Number.isSafeInteger(revision) ||
-    revision < 0
-  ) {
-    throw draftErrors.create("draft.invalid", {
-      issues: ["A draft revision, as the draft was read."],
-    });
-  }
-  return revision;
-};
+const revisionSchema = z.int().min(0);
 
 /** A checkpoint's number as the page sends it, to list those before it. */
-const checkpointOf = (checkpoint: unknown): number => {
-  if (
-    typeof checkpoint !== "number" ||
-    !Number.isSafeInteger(checkpoint) ||
-    checkpoint < 1
-  ) {
-    throw draftErrors.create("draft.invalid", {
-      issues: ["A checkpoint's number, as the draft's history listed it."],
-    });
-  }
-  return checkpoint;
-};
+const checkpointSchema = z.int().min(1);
 
 export class DraftsRpc extends CoreRpcTarget implements DraftsApi {
   readonly #env: Env;
@@ -121,7 +100,7 @@ export class DraftsRpc extends CoreRpcTarget implements DraftsApi {
   /** Whether `by` builds `subject` now. */
   async #buildsNow(by: Identity, { kind, id }: Subject): Promise<boolean> {
     try {
-      await publishables[kind].draft.readable(this.#env, by, id);
+      await kinds[kind].readable(this.#env, by, id);
       return true;
     } catch (error) {
       if (isExpectedError(error)) {
@@ -134,7 +113,7 @@ export class DraftsRpc extends CoreRpcTarget implements DraftsApi {
   async get(subject: Subject): Promise<Draft> {
     return await withPerson(this.#check, async (by) => {
       const { kind, id } = subjectOf(subject);
-      const { draft } = publishables[kind];
+      const draft = kinds[kind];
       return await draftSummary(
         this.#env,
         draft,
@@ -150,7 +129,7 @@ export class DraftsRpc extends CoreRpcTarget implements DraftsApi {
   async files(subject: Subject): Promise<Record<string, string>> {
     return await withPerson(this.#check, async (by) => {
       const { kind, id } = subjectOf(subject);
-      const { draft: draftKind } = publishables[kind];
+      const draftKind = kinds[kind];
       const found = await draftKind.readable(this.#env, by, id);
       const draft = await draftOf(this.#env, draftKind, found);
       return Object.fromEntries(
@@ -165,11 +144,13 @@ export class DraftsRpc extends CoreRpcTarget implements DraftsApi {
   ): Promise<DraftCheckpoint[]> {
     return await withPerson(this.#check, async (by) => {
       const { kind, id } = subjectOf(subject);
-      const found = await publishables[kind].draft.readable(this.#env, by, id);
+      const found = await kinds[kind].readable(this.#env, by, id);
       return await draftCheckpointsOf(
         this.#env,
         { kind, id: found },
-        before === undefined ? undefined : checkpointOf(before)
+        before === undefined
+          ? undefined
+          : draftErrors.parse("draft.invalid", checkpointSchema, before)
       );
     });
   }
@@ -186,7 +167,7 @@ export class DraftsRpc extends CoreRpcTarget implements DraftsApi {
   ): Promise<DraftCheckpoint> {
     return await withPerson(this.#check, async (by) => {
       const { kind, id } = subjectOf(subject);
-      const { draft } = publishables[kind];
+      const draft = kinds[kind];
       const found = await draft.editable(this.#env, by, id);
       return await restoreCheckpoint(
         this.#env,
@@ -194,7 +175,7 @@ export class DraftsRpc extends CoreRpcTarget implements DraftsApi {
         found,
         by,
         checkpoint,
-        revisionOf(revision)
+        draftErrors.parse("draft.invalid", revisionSchema, revision)
       );
     });
   }
@@ -207,10 +188,10 @@ export class DraftsRpc extends CoreRpcTarget implements DraftsApi {
   async discard(subject: Subject, revision: number): Promise<void> {
     await withPerson(this.#check, async (by) => {
       const { kind, id } = subjectOf(subject);
-      const { draft } = publishables[kind];
+      const draft = kinds[kind];
       const found = await draft.editable(this.#env, by, id);
       await emptyDraft(this.#env, draft, found, {
-        revision: revisionOf(revision),
+        revision: draftErrors.parse("draft.invalid", revisionSchema, revision),
         base: await draft.liveBase(this.#env, found),
         by,
       });
@@ -231,7 +212,7 @@ export class DraftsRpc extends CoreRpcTarget implements DraftsApi {
       const { kind, id } = subjectOf(subject);
       const found = {
         kind,
-        id: await publishables[kind].draft.readable(this.#env, by, id),
+        id: await kinds[kind].readable(this.#env, by, id),
       };
       if (!isStub(onRevision)) {
         throw pageErrors.create("page.invalid");
@@ -248,7 +229,7 @@ export class DraftsRpc extends CoreRpcTarget implements DraftsApi {
       const watched = draftWatch(this.#env, found);
       let watchId: string;
       try {
-        watchId = await watched.watch(by.userId, listener);
+        watchId = await watched.watch(listener);
       } catch (error) {
         listener[Symbol.dispose]();
         throw error;
@@ -268,20 +249,15 @@ export class DraftsRpc extends CoreRpcTarget implements DraftsApi {
    * Publishes the draft at `revision` (publish.ts), by the person
    * themselves: only while they may write it.
    */
-  async publish(
-    subject: Subject,
-    revision: number,
-    message?: string
-  ): Promise<LiveVersion> {
+  async publish(subject: Subject, revision: number): Promise<LiveVersion> {
     return await withPerson(this.#check, async (by) => {
       const { kind, id } = subjectOf(subject);
       return await publish(
         this.#env,
-        publishables[kind],
+        kinds[kind],
         by,
         id,
-        revisionOf(revision),
-        message ?? "Published from the draft."
+        draftErrors.parse("draft.invalid", revisionSchema, revision)
       );
     });
   }

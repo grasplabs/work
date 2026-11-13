@@ -536,14 +536,13 @@ export type DraftOperation =
   | {
       /**
        * Declares, for workflow permission `alias`, the events, listen
-       * tasks and decisions version `version` of workflow `workflow` has,
-       * and records that version as the one the App binds there once the
+       * tasks and decisions the live version of workflow `workflow` has,
+       * and records the workflow as the one the App binds there once the
        * App version is current.
        */
       readonly op: "bindWorkflow";
       readonly alias: string;
       readonly workflow: string;
-      readonly version: number;
     };
 
 /** The operations the definition tools make, as `define` takes them. */
@@ -607,7 +606,6 @@ export const definitionOperationSchema: z.ZodType<DraftOperation> =
       op: z.literal("bindWorkflow"),
       alias: text,
       workflow: text,
-      version: z.int().min(1),
     }),
     z.strictObject({
       op: z.literal("moveField"),
@@ -630,7 +628,7 @@ export const definitionOperationsSchema = z.union([
 
 /**
  * An audit's detail of one operation: its op, table and alias, and for a
- * workflow bound from the draft, the workflow and version it named.
+ * workflow bound from the draft, the workflow it named.
  */
 const singleDetail = (operation: unknown): Record<string, string | null> => {
   const parsed = definitionOperationSchema.safeParse(operation);
@@ -652,11 +650,8 @@ const singleDetail = (operation: unknown): Record<string, string | null> => {
   } else if (data.op === "removePermission" || data.op === "bindWorkflow") {
     alias = data.alias.slice(0, 64);
   }
-  // Which version a workflow's declared contract was read from.
   const bound: Record<string, string> =
-    data.op === "bindWorkflow"
-      ? { workflow: data.workflow.slice(0, 256), version: String(data.version) }
-      : {};
+    data.op === "bindWorkflow" ? { workflow: data.workflow.slice(0, 256) } : {};
   return { op: data.op, table, alias, ...bound };
 };
 

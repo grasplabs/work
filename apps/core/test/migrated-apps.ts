@@ -4,7 +4,7 @@ import type { StoreFields } from "@grasp-os/shared/stores";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 
-import { appPublishing } from "../src/app-publish.ts";
+import { appKind } from "../src/apps.ts";
 import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { rollback } from "../src/publish.ts";
@@ -182,7 +182,7 @@ export const migrated = async (
   const fixture: Fixture = await appWith(start, "Notes", owner);
   const first = await seal(fixture);
   if (firstCurrent) {
-    await rollback(env, appPublishing, fixture.owner, fixture.app, 1);
+    await rollback(env, appKind, fixture.owner, fixture.app, 1);
   }
   const store = await openStore(env, fixture.store);
   const fromSchema = first.manifest.schemaHash;

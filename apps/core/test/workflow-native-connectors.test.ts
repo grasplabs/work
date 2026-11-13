@@ -17,7 +17,6 @@ import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { editWorkflowDraft, workflowDraft } from "../src/workflow-editor.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import {
@@ -31,6 +30,7 @@ import { objectSchema } from "./json-workflow-apps.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { routed, signedInApi, unique } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // A workflow binding a native connector's operation (GRA-982): a host
 // catalog contract describes it by the connector's own JSON Schemas, which
@@ -248,10 +248,7 @@ const readingWorkflow = async () => {
     builder,
     `native-${unique()}`
   );
-  await publishWorkflowVersion(env, builder, workflow.id, {
-    definition: definitionOf(key),
-    basedOn: null,
-  });
+  await publishDefinition(env, builder, workflow.id, definitionOf(key));
   const permissionId = await granted(builder, admin, {
     subject: { type: "workflow", workflowId: workflow.id },
     object: { type: "connection", connectionId },

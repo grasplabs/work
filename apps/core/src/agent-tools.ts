@@ -850,15 +850,14 @@ const definitions = (known: Map<string, string>) => {
     }),
     tool({
       name: "bindWorkflow",
-      label: "Bind a workflow version",
+      label: "Bind a workflow",
       api: "build",
-      description: `Binds published version \`version\` of workflow \`workflow\` under the App's workflow permission \`alias\` (added first with \`addPermission\`), with this draft: declares the events its pages and mutations send, the listen tasks waiting on them and the decisions people answer, exactly as that version has them, so \`workflows.<alias>\` in \`@server/_generated/api\` names them, and binds the version once the App version this draft becomes is published, in the same step. Use it for a version whose events, decisions or listen tasks differ from what the App's live version declares, which can't be bound directly. ${definitionAnswer}`,
+      description: `Binds workflow \`workflow\` under the App's workflow permission \`alias\` (added first with \`addPermission\`), with this draft: declares the events its pages and mutations send, the listen tasks waiting on them and the decisions people answer, exactly as the workflow's live version has them, so \`workflows.<alias>\` in \`@server/_generated/api\` names them, and binds the workflow once the App version this draft becomes is published, in the same step. Its starts run the workflow's live version. Use it for a workflow whose events, decisions or listen tasks differ from what the App's live version declares, which can't be bound directly. ${definitionAnswer}`,
       parameters: Type.Object(
         {
           app: appParameter,
           alias: Type.String({ minLength: 1, maxLength: 64 }),
           workflow: Type.String({ minLength: 1, maxLength: 256 }),
-          version: Type.Integer({ minimum: 1 }),
         },
         { additionalProperties: false }
       ),

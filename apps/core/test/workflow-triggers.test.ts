@@ -157,12 +157,12 @@ describe("an independent workflow's triggers over /rpc", () => {
       personApi("builder"),
       personApi("user"),
     ]);
-    await owner.api.workflowResources.share(workflow, {
+    await owner.api.workflowResources.members.add(workflow, {
       type: "person",
       id: member.userId,
       role: "user",
     });
-    await owner.api.workflowResources.share(workflow, {
+    await owner.api.workflowResources.members.add(workflow, {
       type: "person",
       id: user.userId,
       role: "user",
@@ -193,7 +193,7 @@ describe("an independent workflow's triggers over /rpc", () => {
       personApi("user"),
       personApi("builder"),
     ]);
-    await owner.api.workflowResources.share(workflow, {
+    await owner.api.workflowResources.members.add(workflow, {
       type: "person",
       id: member.userId,
       role: "user",
@@ -232,7 +232,7 @@ describe("an independent workflow's triggers over /rpc", () => {
       personApi("builder"),
       personApi("admin"),
     ]);
-    await owner.api.workflowResources.share(workflow, {
+    await owner.api.workflowResources.members.add(workflow, {
       type: "person",
       id: coBuilder.userId,
       role: "builder",
@@ -359,14 +359,14 @@ describe("an independent workflow's triggers over /rpc", () => {
     const owner = await personApi("builder");
     const workflow = await reporting(owner);
     const coBuilder = await personApi("builder");
-    await owner.api.workflowResources.share(workflow, {
+    await owner.api.workflowResources.members.add(workflow, {
       type: "person",
       id: coBuilder.userId,
       role: "builder",
     });
     const ownersTrigger = await nightlyTrigger(owner, workflow);
     const theirs = await nightlyTrigger(coBuilder, workflow);
-    await owner.api.workflowResources.unshare(workflow, {
+    await owner.api.workflowResources.members.remove(workflow, {
       type: "person",
       id: coBuilder.userId,
     });

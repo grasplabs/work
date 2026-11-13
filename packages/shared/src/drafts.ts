@@ -135,15 +135,11 @@ export interface DraftsApi {
    * version went live meanwhile, `draft.empty` when it changes nothing,
    * and with the refusal of its check or build (an App's
    * `app.draft_failed`, a workflow's `workflow.definition_invalid`). A
-   * workflow's runs keep the version they started on; its enabled
-   * triggers start the new one. Not for an archived App or a deleted
+   * workflow's runs keep the version they started on; its triggers start
+   * the new one. Not for an archived App or a deleted
    * workflow.
    */
-  publish: (
-    subject: Subject,
-    revision: number,
-    message?: string
-  ) => Promise<LiveVersion>;
+  publish: (subject: Subject, revision: number) => Promise<LiveVersion>;
 }
 
 /**
@@ -161,6 +157,8 @@ export interface VersionsApi {
   /** The subject's versions, newest first, a page at a time. */
   list: (subject: Subject, before?: number) => Promise<Version[]>;
   get: (subject: Subject, version: number) => Promise<Version>;
+  /** Every file of `version`, exactly as published. */
+  files: (subject: Subject, version: number) => Promise<Record<string, string>>;
   /** How the files of version `to` differ from those of `from`, by path. */
   diff: (subject: Subject, from: number, to: number) => Promise<FileDiff[]>;
   /**
@@ -168,8 +166,8 @@ export interface VersionsApi {
    * it, its unpublished changes discarded, only over `revision`, the
    * draft's revision the person read (`draft.conflict` once it moved, or
    * when it has changes and none was given); and only over `expected`,
-   * when given, the version they saw live. A workflow's enabled triggers
-   * start it from then on.
+   * when given, the version they saw live. A workflow's triggers start it
+   * from then on.
    */
   rollback: (
     subject: Subject,

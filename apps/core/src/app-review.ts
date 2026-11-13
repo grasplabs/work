@@ -1,8 +1,5 @@
 import { ownFiles } from "@grasp-os/runtime/host";
-import type {
-  AppDraftChanges,
-  AppDraftProblem,
-} from "@grasp-os/shared/app-drafts";
+import type { AppReview, DraftProblem } from "@grasp-os/shared/app-review";
 import { appErrors } from "@grasp-os/shared/apps";
 import type {
   DataModelChange,
@@ -26,15 +23,14 @@ import {
   usesOf,
 } from "./app-definition.ts";
 import {
-  appDraftKind,
   appFor,
+  appKind,
   diffFiles,
-  draftFiles,
   editableApp,
   nextLabel,
   versionFiles,
 } from "./apps.ts";
-import { draftOf } from "./drafts.ts";
+import { draftOf, filesOf } from "./drafts.ts";
 import { buildAppCode, buildPages } from "./pages.ts";
 import { reviewDraft } from "./version-review.ts";
 
@@ -45,7 +41,7 @@ import { reviewDraft } from "./version-review.ts";
 // by the person themselves, as a chat's agent's definition tools make
 // one. Each checks the person builds the App.
 
-/** Most problems a draft's review lists (`AppDraftChanges.check`). */
+/** Most problems a draft's review lists (`AppReview.check`). */
 const maxProblems = 50;
 
 /**
@@ -53,7 +49,7 @@ const maxProblems = 50;
  * its builds' errors by file, then what its preview ran into. Warnings
  * never fail a check, so they aren't listed.
  */
-const problemsOf = (check: DraftCheck): AppDraftProblem[] =>
+const problemsOf = (check: DraftCheck): DraftProblem[] =>
   [
     ...[check.pages, check.server, check.lint].flatMap((build) =>
       build.diagnostics
@@ -76,11 +72,11 @@ export const reviewChanges = async (
   env: Env,
   by: Identity,
   app: unknown
-): Promise<AppDraftChanges> => {
+): Promise<AppReview> => {
   const found = await appFor(env, by, app, "builder");
   const { id, currentVersion } = found;
-  const draft = await draftOf(env, appDraftKind, id);
-  const files = await draftFiles(env, id, draft);
+  const draft = await draftOf(env, appKind, id);
+  const files = await filesOf(env, appKind, id, draft);
   const live = new Map(
     currentVersion === null
       ? []

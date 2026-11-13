@@ -8,16 +8,14 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { appPublishing } from "../src/app-publish.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { fixtureHostFor } from "../src/app-tests.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
-import { releaseIdsOf } from "../src/apps.ts";
+import { appKind, releaseIdsOf } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { rollback } from "../src/publish.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { runObjectOf } from "../src/workflows/engine.ts";
 import { testApp } from "./app-definitions.ts";
@@ -26,6 +24,7 @@ import { fakeProvider } from "./model-provider.ts";
 import { resumed, sleeping, stopped } from "./runs.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import { auditedDuring, unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // The model calls of a run an App's test started (`identity.start`,
 // workflows/fixture-calls.ts), from its threat model first: a test's run
@@ -155,14 +154,15 @@ const requestsApp = async (
     builder,
     `greet-${unique()}`
   );
-  await publishWorkflowVersion(env, builder, resource.id, {
-    definition: definitionOf(flow, { ai: { contract: model } }),
-    basedOn: null,
-  });
+  await publishDefinition(
+    env,
+    builder,
+    resource.id,
+    definitionOf(flow, { ai: { contract: model } })
+  );
   await bindWorkflowToApp(env, builder, resource.id, {
     app: fixture.app,
     alias: "followUp",
-    version: 1,
   });
   await seal(fixture);
   const release = await loadRelease(env, fixture.app, 1);
@@ -248,7 +248,7 @@ const activated = async (
   app: string
 ): Promise<unknown> => {
   try {
-    await rollback(env, appPublishing, by, app, 1);
+    await rollback(env, appKind, by, app, 1);
     return "current";
   } catch (error) {
     if (!isExpectedError(error)) {
@@ -384,8 +384,11 @@ describe("a workflow test's model calls", { timeout: 180_000 }, () => {
         });
       }),
       binding: await outcomeOf(async () => {
-        await publishWorkflowVersion(env, builder, resource.id, {
-          definition: definitionOf(
+        await publishDefinition(
+          env,
+          builder,
+          resource.id,
+          definitionOf(
             {
               steps: [
                 {
@@ -399,9 +402,8 @@ describe("a workflow test's model calls", { timeout: 180_000 }, () => {
               status: "saved",
             },
             { save: { kind: "operation", contract: "requests.add@1" } }
-          ),
-          basedOn: null,
-        });
+          )
+        );
       }),
     }).toStrictEqual({
       contract: "workflow.contract_invalid",

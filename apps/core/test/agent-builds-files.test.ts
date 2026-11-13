@@ -7,7 +7,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { appDraftKind } from "../src/apps.ts";
+import { appKind } from "../src/apps.ts";
 import { readDraft, saveDraft } from "../src/drafts.ts";
 import {
   editing,
@@ -168,7 +168,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     const draft = await readDraft(env, { kind: "app", id: existing });
     await saveDraft(
       env,
-      appDraftKind,
+      appKind,
       appIdSchema.parse(existing),
       { ...draft, base: 1 },
       { changes: { "AGENTS.md": "# Theirs\n" }, unchanged: [] },
@@ -213,7 +213,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     const draft = await readDraft(env, { kind: "app", id: existing });
     await saveDraft(
       env,
-      appDraftKind,
+      appKind,
       appIdSchema.parse(existing),
       { ...draft, base: 1 },
       { changes: { "AGENTS.md": "# Theirs\n" }, unchanged: [] },

@@ -11,12 +11,12 @@ import {
   revokeWorkflowBinding,
 } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { allEvents } from "./audit-events.ts";
 import { unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // A workflow's own steps on its run's files (`ctx.files.<alias>`), from
 // their threat model (sealed-run.ts, run-files.ts): a step writes, lists,
@@ -90,8 +90,11 @@ const filesWorkflow = async (
   const key = `files-${unique()}`;
   await publishCatalogContract(env, admin, { key, kind: "files" });
   const workflow = await createWorkflowResource(env, by, `files-${unique()}`);
-  await publishWorkflowVersion(env, by, workflow.id, {
-    definition: JSON.stringify({
+  await publishDefinition(
+    env,
+    by,
+    workflow.id,
+    JSON.stringify({
       $schema: workflowSchemaUrl,
       args: {
         kind: "object",
@@ -112,9 +115,8 @@ const filesWorkflow = async (
           }),
       permissions: { files: { runFiles: { contract: key } } },
       steps,
-    }),
-    basedOn: null,
-  });
+    })
+  );
   const approval = await approveWorkflowBinding(env, admin, workflow.id, {
     alias: "runFiles",
     target: { kind: "files" },

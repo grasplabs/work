@@ -7,9 +7,8 @@ import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { callAppFunction } from "../src/app-functions.ts";
-import { appPublishing } from "../src/app-publish.ts";
 import type { Release } from "../src/app-releases.ts";
-import { appFor } from "../src/apps.ts";
+import { appKind, appFor } from "../src/apps.ts";
 import {
   appResourceBindings,
   permissions as permissionRows,
@@ -149,7 +148,7 @@ export const sealedApp = async (
 ): Promise<Sealed> => {
   const fixture = await appWith(files, name);
   const release = await seal(fixture);
-  await rollback(env, appPublishing, fixture.owner, fixture.app, 1);
+  await rollback(env, appKind, fixture.owner, fixture.app, 1);
   return { ...fixture, release };
 };
 
@@ -161,7 +160,7 @@ export const nextVersion = async (
 ): Promise<Sealed> => {
   await commitDefined(env, sealed.owner, sealed.app, files, "Next version");
   const release = await seal(sealed, version);
-  await rollback(env, appPublishing, sealed.owner, sealed.app, version);
+  await rollback(env, appKind, sealed.owner, sealed.app, version);
   return { ...sealed, release };
 };
 

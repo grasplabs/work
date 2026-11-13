@@ -18,9 +18,9 @@ import { env } from "cloudflare:workers";
 import { z } from "zod";
 
 import { sealDraftRelease } from "../src/app-releases.ts";
-import { appDraftKind, draftDefinition, draftFiles } from "../src/apps.ts";
+import { appKind, draftDefinition } from "../src/apps.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
-import { readDraft, saveDraft } from "../src/drafts.ts";
+import { filesOf, readDraft, saveDraft } from "../src/drafts.ts";
 import type { DraftState } from "../src/drafts.ts";
 import {
   appPreview,
@@ -69,7 +69,7 @@ export const chatWithDraft = async (
     const now = await readDraft(env, { kind: "app", id: app });
     await saveDraft(
       env,
-      appDraftKind,
+      appKind,
 
       app,
       { ...now, base: 1, revision },
@@ -122,7 +122,7 @@ const draftContracts = async (
   const sealed = await sealDraftRelease(
     env,
     { app, version: (draft.base ?? 0) + 1 },
-    await draftFiles(env, app, draft),
+    await filesOf(env, appKind, app, draft),
     definition.definition
   );
   const manifest = keptManifestSchema.parse(JSON.parse(sealed.manifest));

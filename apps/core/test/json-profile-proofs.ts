@@ -12,7 +12,6 @@ import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
@@ -30,6 +29,7 @@ import { person } from "./sealed-apps.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { routed, signedInApi, unique } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // grasp-workflow/2 proved end to end (GRA-1132, spec 13.10): each step
 // kind that needs no outside system, and the calls of a model and a
@@ -80,10 +80,7 @@ const published = async (
   shape: Shape
 ): Promise<{ id: string; name: string }> => {
   const workflow = await createWorkflowResource(env, by, `proof-${unique()}`);
-  await publishWorkflowVersion(env, by, workflow.id, {
-    definition: definitionOf(shape),
-    basedOn: null,
-  });
+  await publishDefinition(env, by, workflow.id, definitionOf(shape));
   return workflow;
 };
 

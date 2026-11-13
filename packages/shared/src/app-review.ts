@@ -16,11 +16,11 @@ import type { Permission } from "./permissions.ts";
 // (@grasp-os/shared/drafts).
 
 /**
- * One problem the draft's check found (`AppDraftChanges.check`): where it
+ * One problem the draft's check found (`AppReview.check`): where it
  * is, a file and line or a route of the preview, and what it says, as
  * the build or the draft's own code wrote it.
  */
-export interface AppDraftProblem {
+export interface DraftProblem {
   /** The App file, or the preview's route or server method; null for the App as a whole. */
   at: string | null;
   /** 1-based, in `at`'s file; null when it is about the whole file or not a file. */
@@ -35,7 +35,7 @@ export interface AppDraftProblem {
  * as less than it is: its files, its server code, its data model, the
  * access the App holds and asks for, and whether its checks pass.
  */
-export interface AppDraftChanges {
+export interface AppReview {
   /** The draft's revision this was read at: what a publish of it names. */
   revision: number;
   /** The live version it is compared with; null while none is. */
@@ -125,7 +125,7 @@ export interface AppDraftChanges {
    * The draft's check, as publishing checks it: whether it passes, and
    * the errors it found (warnings never fail it), at most 50.
    */
-  check: { passed: boolean; problems: AppDraftProblem[] };
+  check: { passed: boolean; problems: DraftProblem[] };
 }
 
 /**

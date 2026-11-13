@@ -5,7 +5,7 @@ import { releaseMonthPrefix } from "@grasp-os/shared/release-id";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { appDraftKind } from "../src/apps.ts";
+import { appKind } from "../src/apps.ts";
 import { readDraft, saveDraft } from "../src/drafts.ts";
 import { commitApp, sourceParts, testApp } from "./app-definitions.ts";
 import type { TestApp, TestSource } from "./app-definitions.ts";
@@ -73,11 +73,11 @@ const writeDraft = async (
   app: AppId,
   changes: TestSource
 ): Promise<number> => {
-  const { id: chatId } = await person.api.chats.forApp(app);
+  const { id: chatId } = await person.api.chats.create("App changes");
   const { files, definition } = sourceParts(changes);
   const written = await saveDraft(
     env,
-    appDraftKind,
+    appKind,
 
     app,
     await readDraft(env, { kind: "app", id: app }),
@@ -96,11 +96,7 @@ const writeDraft = async (
 /** Writes `changes` into `app`'s draft and publishes it, as `builder`. */
 const publishing = async (builder: Person, app: AppId, changes: TestSource) => {
   const revision = await writeDraft(builder, app, changes);
-  return await builder.api.drafts.publish(
-    { kind: "app", id: app },
-    revision,
-    "Published"
-  );
+  return await builder.api.drafts.publish({ kind: "app", id: app }, revision);
 };
 
 /** The version of `app` live now. */
@@ -210,8 +206,7 @@ describe("publishing an App's draft", { timeout: 180_000 }, () => {
 
     const live = await builder.api.drafts.publish(
       { kind: "app", id: app },
-      revision,
-      "A desk"
+      revision
     );
     const [version] = appVersionsOf(
       await builder.api.versions.list({ kind: "app", id: app })
@@ -250,7 +245,7 @@ describe("publishing an App's draft", { timeout: 180_000 }, () => {
         version: 1,
         label: `${month}1`,
         author: builder.userId,
-        message: "A desk",
+        message: "Published from the draft.",
       },
       draft: {
         subject: { kind: "app", id: app },
@@ -502,7 +497,7 @@ describe("publishing an App's draft", { timeout: 180_000 }, () => {
       parent: 1,
       desk: deskSaying("Approve")["src/routes/index.tsx"],
       notes: "New\n",
-      discarded: [{ revision: unpublished + 1 }],
+      discarded: [{ version: 1 }],
     });
   });
 
@@ -571,13 +566,12 @@ describe("publishing an App's draft", { timeout: 180_000 }, () => {
     // and making it live.
     await publishing(builder, app, notesWithTests(aSecondsSuite));
     const revision = await writeDraft(builder, app, { "notes.md": "One\n" });
-    const { id: chatId } = await builder.api.chats.forApp(app);
+    const { id: chatId } = await builder.api.chats.create("App changes");
     const writer = await agentWriting(builder, chatId);
 
     const going = builder.api.drafts.publish(
       { kind: "app", id: app },
-      revision,
-      "One"
+      revision
     );
     // Once version 2 is committed, before it goes live, an agent writes.
     await until(
@@ -586,7 +580,7 @@ describe("publishing an App's draft", { timeout: 180_000 }, () => {
     );
     await saveDraft(
       env,
-      appDraftKind,
+      appKind,
 
       app,
       await readDraft(env, { kind: "app", id: app }),
@@ -604,8 +598,7 @@ describe("publishing an App's draft", { timeout: 180_000 }, () => {
     );
     const live = await builder.api.drafts.publish(
       { kind: "app", id: app },
-      left.revision,
-      "Two"
+      left.revision
     );
 
     const files = await builder.api.apps.files.read(app, 3);
@@ -631,65 +624,101 @@ describe("publishing an App's draft", { timeout: 180_000 }, () => {
     });
   });
 
-  it("refuses a roll back a write lands during, bringing nothing back, and rolls back once read again", async () => {
+  it("rolls back over a write that lands during it, a change of the store's schema and all, discarding the write, audited, its checkpoint kept to restore", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await appOf(builder);
-    await publishing(builder, app, notesWithTests(aSecondsSuite));
-    // Version 2, committed and never published: rolling back to it seals
-    // and tests it first, which takes a second.
+    const notes = notesWithTests(aSecondsSuite);
+    await publishing(builder, app, notes);
+    // Version 2, committed and never published, with a table more: rolling
+    // back to it seals and tests it first, which takes a second, then
+    // gives the store its schema.
     await commitApp(
       builder.api.apps.files,
       app,
-      { "notes.md": "Old\n" },
-      "Old"
+      testApp(
+        {
+          name: "Notes",
+          tables: {
+            notes: {
+              fields: { title: "v.string().min(1).max(200)" },
+              access: { read: "appMembers", write: "appMembers" },
+            },
+            tags: {
+              fields: { name: "v.string().min(1).max(50)" },
+              access: { read: "appMembers", write: "appMembers" },
+            },
+          },
+        },
+        notes.files
+      ),
+      "Tags"
     );
     await publishing(builder, app, { "notes.md": "Three\n" });
     const { revision } = await builder.api.drafts.get({ kind: "app", id: app });
-    const { id: chatId } = await builder.api.chats.forApp(app);
+    const { id: chatId } = await builder.api.chats.create("App changes");
     const writer = await agentWriting(builder, chatId);
 
-    const rolling = outcome(
-      builder.api.versions.rollback({ kind: "app", id: app }, 2, revision, 3)
+    const rolling = builder.api.versions.rollback(
+      { kind: "app", id: app },
+      2,
+      revision,
+      3
     );
     // Once version 2 is sealed, before it goes live, an agent writes.
     await until(
       "SELECT 1 FROM sdk_release_manifests WHERE app_id = ? AND version = 2",
       app
     );
-    await saveDraft(
+    const written = await saveDraft(
       env,
-      appDraftKind,
-
+      appKind,
       app,
       await readDraft(env, { kind: "app", id: app }),
       { changes: { "later.md": "Later\n" }, unchanged: [] },
       writer
     );
-    const refused = await rolling;
-    const kept = await builder.api.drafts.get({ kind: "app", id: app });
-    const liveAfterRefusal = await liveOf(builder, app);
-    // Read again, the builder rolls back over the draft as it is now.
-    const retried = await builder.api.versions.rollback(
-      { kind: "app", id: app },
-      2,
-      kept.revision,
-      3
-    );
+    const rolled = await rolling;
     const after = await builder.api.drafts.get({ kind: "app", id: app });
+    const events = await allEvents();
+    const discarded = events
+      .filter(
+        ({ action, target }) =>
+          action === "draft.discarded" && target?.id === app
+      )
+      .map(({ detail }) => detail);
+    // The write is still there to step back to, over the version live.
+    const [kept] = await builder.api.drafts.checkpoints({
+      kind: "app",
+      id: app,
+    });
+    const writes = await builder.api.drafts.checkpoints({
+      kind: "app",
+      id: app,
+    });
+    const own = writes.find((each) => each.revision === written.revision);
+    await builder.api.drafts.restore(
+      { kind: "app", id: app },
+      own?.number ?? 0,
+      after.revision
+    );
+    const restored = await builder.api.drafts.get({ kind: "app", id: app });
 
     expect({
-      refused,
-      liveAfterRefusal,
-      kept: { base: kept.base, changed: kept.changed },
-      retried: retried.version,
+      live: rolled.version,
       after: { base: after.base, changed: after.changed },
+      discarded,
+      kept: kept?.changes,
+      restored: {
+        base: restored.base,
+        later: restored.changed.includes("later.md"),
+      },
     }).toStrictEqual({
-      refused: "draft.conflict",
-      liveAfterRefusal: 3,
-      kept: { base: 3, changed: ["later.md"] },
-      retried: 2,
-      // Over version 2, with nothing of version 3 as its own changes.
+      live: 2,
+      // Over version 2, with nothing of version 3 or the write as its own.
       after: { base: 2, changed: [] },
+      discarded: [{ version: 2 }],
+      kept: 0,
+      restored: { base: 2, later: true },
     });
   });
 
@@ -713,8 +742,7 @@ describe("publishing an App's draft", { timeout: 180_000 }, () => {
     const restored = await builder.api.drafts.get({ kind: "app", id: app });
     const live = await builder.api.drafts.publish(
       { kind: "app", id: app },
-      restored.revision,
-      "Old again"
+      restored.revision
     );
 
     const files = await builder.api.apps.files.read(app, 3);

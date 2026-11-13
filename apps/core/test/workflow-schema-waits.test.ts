@@ -14,7 +14,6 @@ import {
   ensureReleaseContract,
   publishCatalogContract,
 } from "../src/workflow-catalog.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { runEngine } from "../src/workflows/engine.ts";
 import { eventTypeKey } from "../src/workflows/event-envelopes.ts";
@@ -45,6 +44,7 @@ import {
 } from "./sealed-run-harness.ts";
 import type { Engine, Journaled } from "./sealed-run-harness.ts";
 import { refusal, unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 import {
   declared,
   generated,
@@ -79,8 +79,11 @@ const eventWorkflow = async () => {
     },
   });
   const workflow = await createWorkflowResource(env, by, `replies-${unique()}`);
-  await publishWorkflowVersion(env, by, workflow.id, {
-    definition: JSON.stringify({
+  await publishDefinition(
+    env,
+    by,
+    workflow.id,
+    JSON.stringify({
       $schema: workflowSchemaUrl,
       args: objectOf({ who: { kind: "string" } }),
       permissions: { events: { replies: { contract } } },
@@ -94,9 +97,8 @@ const eventWorkflow = async () => {
           timeout: "3 days",
         },
       ],
-    }),
-    basedOn: null,
-  });
+    })
+  );
   const approved = await approveWorkflowBinding(env, admin, workflow.id, {
     alias: "replies",
     target: { kind: "event" },
@@ -294,8 +296,11 @@ const replyingWorkflow = async () => {
     },
   });
   const workflow = await createWorkflowResource(env, by, `asks-${unique()}`);
-  await publishWorkflowVersion(env, by, workflow.id, {
-    definition: JSON.stringify({
+  await publishDefinition(
+    env,
+    by,
+    workflow.id,
+    JSON.stringify({
       $schema: workflowSchemaUrl,
       args: objectOf({ who: { kind: "string" } }),
       permissions: {
@@ -319,9 +324,8 @@ const replyingWorkflow = async () => {
           timeout: "7 days",
         },
       ],
-    }),
-    basedOn: null,
-  });
+    })
+  );
   const mail = await mailConnection();
   const permissionId = await granted(by, admin, {
     subject: { type: "workflow", workflowId: workflow.id },
@@ -428,8 +432,11 @@ describe("a grasp-workflow/2 event wait's generated code on the run host", () =>
     });
     const workflow = await createWorkflowResource(env, by, `waits-${unique()}`);
     const publishing = async (types: string | string[]) =>
-      await publishWorkflowVersion(env, by, workflow.id, {
-        definition: JSON.stringify({
+      await publishDefinition(
+        env,
+        by,
+        workflow.id,
+        JSON.stringify({
           $schema: workflowSchemaUrl,
           permissions: { events: { replies: { contract } } },
           steps: [
@@ -441,9 +448,8 @@ describe("a grasp-workflow/2 event wait's generated code on the run host", () =>
               timeout: "3 days",
             },
           ],
-        }),
-        basedOn: null,
-      });
+        })
+      );
     const refused = await refusal(publishing([received, bounced]));
     const single = await refusal(publishing(bounced));
     await publishing(received);

@@ -14,7 +14,6 @@ import {
   deleteTriggerResource,
 } from "../src/trigger-resources.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import {
   createWorkflowResource,
   deleteWorkflowResource,
@@ -33,6 +32,7 @@ import { objectSchema } from "./json-workflow-apps.ts";
 import { configuredLimits } from "./quota-limits.ts";
 import { outcome, refusal, unique } from "./sign-in.ts";
 import { webhookConfig } from "./source-config.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // Independent workflows (workflow-resources.ts), from its threat model:
 // a definition's text names no workflow, so it carries no authority; a
@@ -131,13 +131,9 @@ const modelContract = async (): Promise<string> => {
 const workflowOf = async (by: Acting, prefix = "greet") =>
   await createWorkflowResource(env, by, `${prefix}-${unique()}`);
 
-/** Publishes `definition` to `id` for `by`, on its current version. */
-const publish = async (
-  by: Acting,
-  id: string,
-  definition: string,
-  basedOn: number | null = null
-) => await publishWorkflowVersion(env, by, id, { definition, basedOn });
+/** Publishes `definition` to `id` for `by`, through its draft. */
+const publish = async (by: Acting, id: string, definition: string) =>
+  await publishDefinition(env, by, id, definition);
 
 /** The codes of a refused publication's problems. */
 const problemCodes = async (promise: Promise<unknown>): Promise<unknown> => {
@@ -205,8 +201,7 @@ describe("publishing a version", () => {
     const second = await publish(
       ada,
       workflow.id,
-      definitionOf({ status: "ok" }),
-      1
+      definitionOf({ status: "ok" })
     );
     // Same input, output and parameter schemas: the same contract, in
     // another manifest.
@@ -235,72 +230,20 @@ describe("publishing a version", () => {
     ]);
   });
 
-  it("answers a retried publication with the version it made, and numbers other content as the next", async () => {
+  it("numbers each version's contract as it is published", async () => {
     const ada = await person("builder");
     const workflow = await workflowOf(ada);
-    const definition = definitionOf();
-    const first = await publish(ada, workflow.id, definition);
-    // The retry still says it built on nothing: it is the same publication.
-    await expect(publish(ada, workflow.id, definition)).resolves.toStrictEqual(
-      first
-    );
+    const first = await publish(ada, workflow.id, definitionOf());
     // The document names no version: the publication numbers it.
     const other = await publish(
       ada,
       workflow.id,
-      definitionOf({ status: "other" }),
-      1
+      definitionOf({ status: "other" })
     );
     expect([first, other].map((each) => each.contractVersion)).toStrictEqual([
       "1.0.0",
       "2.0.0",
     ]);
-  });
-
-  it("answers two identical publications racing each other with the one version", async () => {
-    const ada = await person("builder");
-    const workflow = await workflowOf(ada);
-    const definition = definitionOf();
-    const [first, second] = await Promise.all([
-      publish(ada, workflow.id, definition),
-      publish(ada, workflow.id, definition),
-    ]);
-    const versions = await workflowVersions(env, ada, workflow.id);
-    expect({ same: first, versions: versions.length }).toStrictEqual({
-      same: second,
-      versions: 1,
-    });
-  });
-
-  it("refuses a publication built on a version no longer current, also when two race", async () => {
-    const ada = await person("builder");
-    const workflow = await workflowOf(ada);
-    await publish(ada, workflow.id, definitionOf());
-    await expect(
-      outcome(
-        publish(ada, workflow.id, definitionOf({ status: "2.0.0" }), null)
-      )
-    ).resolves.toBe("workflow.version_conflict");
-    const raced = await Promise.all(
-      ["2.0.0", "3.0.0"].map(
-        async (version) =>
-          await outcome(
-            publish(ada, workflow.id, definitionOf({ status: version }), 1)
-          )
-      )
-    );
-    expect(raced.toSorted()).toStrictEqual(["ok", "workflow.version_conflict"]);
-    const versions = await workflowVersions(env, ada, workflow.id);
-    const current = await getWorkflowResource(env, ada, workflow.id);
-    // The one that lost may have built a version of its own: never live,
-    // so never labelled.
-    const live = versions.filter(({ label }) => label !== null);
-    expect({
-      current: live
-        .map(({ version }) => version)
-        .includes(current.currentVersion ?? 0),
-      live: live.length,
-    }).toStrictEqual({ current: true, live: 2 });
   });
 
   it("refuses a definition the format refuses, with its diagnostics and none of its values", async () => {
@@ -355,7 +298,7 @@ describe("publishing a version", () => {
     const workflow = await workflowOf(admin);
     const published = await publish(admin, workflow.id, holding(63));
     await expect(
-      problemCodes(publish(admin, workflow.id, holding(64), 1))
+      problemCodes(publish(admin, workflow.id, holding(64)))
     ).resolves.toStrictEqual(["workflow.too_many_permissions /permissions"]);
     expect(
       published.bindings.map(({ contractId }) => contractId).toSorted()
@@ -382,17 +325,21 @@ describe("roles in a workflow", () => {
       versions: 1,
     });
     for (const attempt of [
-      publish(reader, workflow.id, definitionOf({ status: "2.0.0" }), 1),
-      workflowDefinition(env, reader, workflow.id, 1),
-      shareWorkflowResource(env, reader, workflow.id, {
-        type: "person",
-        id: plainUser.userId,
-        role: "user",
-      }),
-      deleteWorkflowResource(env, reader, workflow.id),
+      async () =>
+        await publish(reader, workflow.id, definitionOf({ status: "2.0.0" })),
+      async () => await workflowDefinition(env, reader, workflow.id, 1),
+      async () =>
+        await shareWorkflowResource(env, reader, workflow.id, {
+          type: "person",
+          id: plainUser.userId,
+          role: "user",
+        }),
+      async () => {
+        await deleteWorkflowResource(env, reader, workflow.id);
+      },
     ]) {
       // oxlint-disable-next-line no-await-in-loop -- one refusal at a time
-      await expect(outcome(attempt)).resolves.toBe("role.forbidden");
+      await expect(outcome(attempt())).resolves.toBe("role.forbidden");
     }
     // Someone whose organization role doesn't build is never a builder.
     await expect(
@@ -651,7 +598,7 @@ describe("role ceilings", () => {
     expect({
       role: seen.role,
       publish: await outcome(
-        publish(plain, workflow.id, definitionOf({ status: "2.0.0" }), 1)
+        publish(plain, workflow.id, definitionOf({ status: "2.0.0" }))
       ),
     }).toStrictEqual({ role: "user", publish: "role.forbidden" });
   });
@@ -765,15 +712,14 @@ describe("Grasp staff", () => {
         })
       ),
       bind: await outcome(
-        publish(staff, workflow.id, bindingDefinition(model, "2.0.0"), 1)
+        publish(staff, workflow.id, bindingDefinition(model, "2.0.0"))
       ),
     }).toStrictEqual({ unshare: "role.forbidden", bind: "role.forbidden" });
     // Reading, and a version that binds nothing new, as for Apps.
     const plain = await publish(
       staff,
       workflow.id,
-      definitionOf({ status: "ok" }),
-      1
+      definitionOf({ status: "ok" })
     );
     expect({
       version: plain.version,
@@ -793,27 +739,16 @@ describe("Grasp staff", () => {
 
     expect({
       dropped: await outcome(
-        publish(staff, workflow.id, definitionOf({ status: "2.0.0" }), 1)
+        publish(staff, workflow.id, definitionOf({ status: "2.0.0" }))
       ),
       kept: await outcome(
-        publish(staff, workflow.id, bindingDefinition(model, "2.0.0"), 1)
+        publish(staff, workflow.id, bindingDefinition(model, "2.0.0"))
       ),
     }).toStrictEqual({ dropped: "role.forbidden", kept: "ok" });
   });
 });
 
 describe("stored versions", () => {
-  it("are the same version for a retry that only formats the definition differently", async () => {
-    const ada = await person("builder");
-    const workflow = await workflowOf(ada);
-    const definition = definitionOf();
-    const first = await publish(ada, workflow.id, definition);
-    const reformatted = JSON.stringify(JSON.parse(definition), null, 2);
-    await expect(publish(ada, workflow.id, reformatted)).resolves.toStrictEqual(
-      first
-    );
-  });
-
   it("are refused, never served, once their record no longer matches its hashes", async () => {
     const ada = await person("builder");
     const child = await workflowOf(ada, "child");
@@ -928,16 +863,9 @@ const written = async (statement: string, id: string): Promise<string> =>
 /** A deleted workflow of `by`'s that published `versions` versions. */
 const deletedWorkflow = async (by: Acting, versions = 1) => {
   const workflow = await workflowOf(by, "gone");
-  let basedOn: number | null = null;
   for (const version of Array.from({ length: versions }, (_, at) => at)) {
     // oxlint-disable-next-line no-await-in-loop -- one publication after another
-    const published = await publish(
-      by,
-      workflow.id,
-      definitionOf({ status: `v${version}` }),
-      basedOn
-    );
-    basedOn = published.version;
+    await publish(by, workflow.id, definitionOf({ status: `v${version}` }));
   }
   await deleteWorkflowResource(env, by, workflow.id);
   return workflow;
@@ -1060,7 +988,6 @@ describe("releasing a deleted workflow's name", () => {
     const binding = await bindWorkflowToApp(env, ada, workflow.id, {
       app,
       alias: "greet",
-      version: 1,
     });
     const trigger = await createTriggerResource(env, ada, {
       kind: "webhook",
@@ -1179,7 +1106,6 @@ describe("releasing a deleted workflow's name", () => {
       await bindWorkflowToApp(env, ada, workflow.id, {
         app,
         alias: "greet",
-        version: 1,
       });
       await deleteWorkflowResource(env, ada, workflow.id);
       return workflow;

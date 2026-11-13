@@ -635,7 +635,6 @@ export const jsonWorkflowAppsOf = (idp: Idp) => {
     await builder.api.workflowResources.bindToApp(workflow.id, {
       app,
       alias,
-      version: 1,
     });
     // Committed, sealed as it is made current, and published.
     await release(builder, app, requestsApp(alias, declares));

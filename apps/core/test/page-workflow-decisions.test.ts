@@ -14,13 +14,12 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { callAppFunction, callPageFunction } from "../src/app-functions.ts";
-import { appPublishing } from "../src/app-publish.ts";
 import type { Release } from "../src/app-releases.ts";
 import {
   bindWorkflowToApp,
   unbindWorkflowFromApp,
 } from "../src/app-workflow-bindings.ts";
-import { appFor, versionFiles } from "../src/apps.ts";
+import { appKind, appFor, versionFiles } from "../src/apps.ts";
 import { sealedWorkflowPins } from "../src/bound-workflows.ts";
 import { decisionOutcome } from "../src/decisions/decisions.ts";
 import { withDraftReferences } from "../src/draft-references.ts";
@@ -35,7 +34,6 @@ import {
   publishCatalogContract,
   resolveCatalogKeys,
 } from "../src/workflow-catalog.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import {
   confirmPageDecision,
@@ -69,6 +67,7 @@ import {
 } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // The decisions of the workflows an App binds, in the references its
 // pages import: each decision the App declares for the workflow
@@ -212,14 +211,15 @@ const boundApp = async (
     fixture.owner,
     `approve-${unique()}`
   );
-  await publishWorkflowVersion(env, fixture.owner, workflow.id, {
-    definition: definitionOf(key, looped),
-    basedOn: null,
-  });
+  await publishDefinition(
+    env,
+    fixture.owner,
+    workflow.id,
+    definitionOf(key, looped)
+  );
   const { id } = await bindWorkflowToApp(env, fixture.owner, workflow.id, {
     app: fixture.app,
     alias: "review",
-    version: 1,
   });
   return { fixture, binding: id, workflowId: workflow.id };
 };
@@ -284,14 +284,15 @@ const eventApp = async (): Promise<Fixture> => {
     fixture.owner,
     `wait-${unique()}`
   );
-  await publishWorkflowVersion(env, fixture.owner, workflow.id, {
-    definition: eventDefinitionOf(key),
-    basedOn: null,
-  });
+  await publishDefinition(
+    env,
+    fixture.owner,
+    workflow.id,
+    eventDefinitionOf(key)
+  );
   await bindWorkflowToApp(env, fixture.owner, workflow.id, {
     app: fixture.app,
     alias: "review",
-    version: 1,
   });
   return fixture;
 };
@@ -471,7 +472,7 @@ const answerOf = (result: FunctionResult): unknown =>
 const decisionInbox = async (looped = false) => {
   const { fixture, workflowId, binding } = await boundApp(looped);
   const release = await seal(fixture);
-  await rollback(env, appPublishing, fixture.owner, fixture.app, 1);
+  await rollback(env, appKind, fixture.owner, fixture.app, 1);
   const [reviewer, starter, outsider] = await Promise.all([
     person("admin"),
     person("admin"),
@@ -1375,7 +1376,7 @@ describe(
         reviewed: { version: 1 },
       });
       const release = await seal(fixture);
-      await rollback(env, appPublishing, owner, app, 1);
+      await rollback(env, appKind, owner, app, 1);
       const asked = await requestPermission(
         env,
         owner,

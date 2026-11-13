@@ -26,7 +26,7 @@ import type {
 } from "@grasp-os/shared/chat";
 import type { DependencyRequest } from "@grasp-os/shared/dependencies";
 import { chatIdSchema } from "@grasp-os/shared/ids";
-import type { AppId, ChatId } from "@grasp-os/shared/ids";
+import type { ChatId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { ModelEfforts } from "@grasp-os/shared/models";
 import { requireBuilder } from "@grasp-os/shared/roles";
@@ -35,7 +35,7 @@ import { subjectSchema } from "@grasp-os/shared/subject";
 import type { Subject, SubjectKind } from "@grasp-os/shared/subject";
 import { z } from "zod";
 
-import { firstAgentId, turnAgent } from "./agents.ts";
+import { turnAgent } from "./agents.ts";
 import { createFromBlueprint } from "./app-blueprints.ts";
 import { createApp, editableApp } from "./apps.ts";
 import { chatAgentOf, chatAgentsFor } from "./chat-agents.ts";
@@ -127,7 +127,7 @@ const workflowNameOf = (planned: string): string => {
 // Where it is: the leaf module, which what this module imports can import.
 export { personalWorkspaceId } from "./personal-workspace.ts";
 
-export const chatAgentId = firstAgentId;
+export { firstAgentId as chatAgentId } from "./agents.ts";
 
 /**
  * Most chats one connection follows at once: a page shows one, and a page
@@ -302,38 +302,21 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     });
   }
 
-  async forApp(app: string): Promise<ChatSummary> {
+  /**
+   * The person's chat for an App or a workflow they may change (`ChatsApi.forSubject`):
+   * the one that last worked on it, or null while none did.
+   */
+  async forSubject(subject: Subject): Promise<ChatSummary | null> {
     return await withPerson(this.#check, async (person) => {
-      // A builder's, of an App that isn't archived: the chat changes it.
-      const { id, name } = await editableApp(this.#env, person, app);
-      const kept = await this.#chatsOf(person.userId).subjectChat(
-        person.userId,
-        id,
-        await chatsWorkedOn(this.#env, { kind: "app", id }, person.userId)
-      );
-      if (kept !== null) {
-        return kept;
+      const parsed = subjectSchema.safeParse(subject);
+      if (!parsed.success) {
+        throw agentErrors.create("agent.invalid_request");
       }
-      // No new chat with a paused agent: it couldn't answer in it.
-      await turnAgent(this.#env, chatAgentId);
-      return await this.#appChat(person, id, name);
-    });
-  }
-
-  async forWorkflow(workflow: string): Promise<ChatSummary | null> {
-    return await withPerson(this.#check, async (person) => {
-      // A builder's, not Grasp staff's: the chat changes its draft.
-      requireNotStaff(person);
-      const { id } = await requireWorkflowRole(
-        this.#env,
-        person,
-        workflow,
-        "builder"
-      );
+      const { kind, id } = await this.#subjectOf(person, parsed.data);
       return await this.#chatsOf(person.userId).subjectChat(
         person.userId,
-        null,
-        await chatsWorkedOn(this.#env, { kind: "workflow", id }, person.userId)
+        { kind, id },
+        await chatsWorkedOn(this.#env, { kind, id }, person.userId)
       );
     });
   }
@@ -343,26 +326,6 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       this.#check,
       async (person) => await mentionablePeople(this.#env, person)
     );
-  }
-
-  /** A new chat of `person`'s for App `id`, named after it. */
-  async #appChat(
-    person: Identity,
-    id: AppId,
-    name: string
-  ): Promise<ChatSummary> {
-    // An App's name always fits a chat's title.
-    const title = chatTitleSchema.parse(name);
-    const chat = await this.#chatsOf(person.userId).createChat(
-      title,
-      person.userId,
-      chatAgentId,
-      actorOf(person),
-      "web",
-      undefined,
-      id
-    );
-    return summaryOfMade(chat);
   }
 
   async rename(chatId: string, title: string): Promise<void> {
@@ -593,8 +556,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
 
   /**
    * What a question names nothing else for is about, in a chat made for an
-   * App (`forApp`): that App, while the person still builds it;
-   * nothing otherwise.
+   * App: that App, while the person still builds it; nothing otherwise.
    */
   async #chatSubjectOf(
     person: Identity,

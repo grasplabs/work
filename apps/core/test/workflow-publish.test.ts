@@ -16,10 +16,9 @@ import {
   setTriggerEnabled,
 } from "../src/trigger-resources.ts";
 import { editWorkflowDraft, workflowDraft } from "../src/workflow-editor.ts";
-import { workflowPublishing } from "../src/workflow-publish.ts";
+import { workflowKind } from "../src/workflow-publish.ts";
 import {
   createWorkflowResource,
-  workflowDraftKind,
   workflowVersions,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
@@ -49,14 +48,14 @@ const publishedWorkflow = async (by: Identity, text: string) => {
   const workflow = await createWorkflowResource(env, by, `flow-${unique()}`);
   await saved(by, workflow.id, text);
   const { revision } = await workflowDraft(env, by, workflow.id);
-  await publish(env, workflowPublishing, by, workflow.id, revision, "First");
+  await publish(env, workflowKind, by, workflow.id, revision);
   return workflow;
 };
 
 /** Publishes workflow `id`'s draft as it is now. */
 const published = async (by: Identity, id: string) => {
   const { revision } = await workflowDraft(env, by, id);
-  return await publish(env, workflowPublishing, by, id, revision, "Next");
+  return await publish(env, workflowKind, by, id, revision);
 };
 
 /** The workflow version trigger `id`'s current version pins. */
@@ -126,7 +125,7 @@ describe("a workflow's draft", () => {
     }
     const restored = await restoreCheckpoint(
       env,
-      workflowDraftKind,
+      workflowKind,
       workflow.id,
       ada,
       oldest.number,
@@ -134,7 +133,7 @@ describe("a workflow's draft", () => {
     );
     const now = await workflowDraft(env, ada, workflow.id);
     const staleRestore = await outcome(
-      restoreCheckpoint(env, workflowDraftKind, workflow.id, ada, 1, 2)
+      restoreCheckpoint(env, workflowKind, workflow.id, ada, 1, 2)
     );
 
     expect({
@@ -164,7 +163,7 @@ describe("a workflow's draft", () => {
 });
 
 describe("publishing a workflow", { timeout: 60_000 }, () => {
-  it("moves its enabled triggers onto the version it makes live, leaves a disabled one and a running run where they were, and labels the version", async () => {
+  it("moves its triggers onto the version it makes live, a disabled one too, leaves a running run where it was, and labels the version", async () => {
     const admin = await person("admin");
     const workflow = await publishedWorkflow(
       admin,
@@ -209,7 +208,7 @@ describe("publishing a workflow", { timeout: 60_000 }, () => {
         .map(({ detail }) => detail.version),
     }).toStrictEqual({
       live: { version: 2, label: true },
-      triggers: [2, 1],
+      triggers: [2, 2],
       run: { version: 1, ended: false },
       labelled: [
         { version: 2, labelled: true },
@@ -234,11 +233,11 @@ describe("publishing a workflow", { timeout: 60_000 }, () => {
     await saved(admin, workflow.id, greetingOf(undefined, "Unpublished"));
     const { revision } = await workflowDraft(env, admin, workflow.id);
     const unseen = await outcome(
-      rollback(env, workflowPublishing, admin, workflow.id, 1, revision - 1)
+      rollback(env, workflowKind, admin, workflow.id, 1, revision - 1)
     );
     const back = await rollback(
       env,
-      workflowPublishing,
+      workflowKind,
       admin,
       workflow.id,
       1,
@@ -294,7 +293,7 @@ describe("publishing a workflow", { timeout: 60_000 }, () => {
       }),
     };
     const back = await outcome(
-      rollback(lossy, workflowPublishing, admin, workflow.id, 1, revision)
+      rollback(lossy, workflowKind, admin, workflow.id, 1, revision)
     );
     const draft = await workflowDraft(env, admin, workflow.id);
     const events = await allEvents();

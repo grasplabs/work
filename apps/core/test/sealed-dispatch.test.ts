@@ -13,7 +13,6 @@ import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { releaseIdsOf } from "../src/apps.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { editWorkflowDraft, workflowDraft } from "../src/workflow-editor.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import {
   candidateActivation,
@@ -38,6 +37,7 @@ import { fakeProvider } from "./model-provider.ts";
 import { engineOfTest } from "./run-host.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // A JSON workflow's run on the run host (resource-runs.ts,
 // `runActivation`), whatever started it: an independent run, a test run of
@@ -416,8 +416,11 @@ const requestsApp = async (
     builder,
     `greet-${unique()}`
   );
-  await publishWorkflowVersion(env, builder, resource.id, {
-    definition: definitionOf(
+  await publishDefinition(
+    env,
+    builder,
+    resource.id,
+    definitionOf(
       steps,
       {
         ai: { contract: keys.model },
@@ -425,13 +428,11 @@ const requestsApp = async (
         decisions: { approval: { contract: keys.approval } },
       },
       status
-    ),
-    basedOn: null,
-  });
+    )
+  );
   await bindWorkflowToApp(env, builder, resource.id, {
     app: app.app,
     alias: "followUp",
-    version: 1,
   });
   await seal(app);
   const release = await loadRelease(env, app.app, 1);

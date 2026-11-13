@@ -2,7 +2,7 @@ import { kitModuleName, packageModuleName } from "@grasp-os/compiler";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { appPublishing } from "../src/app-publish.ts";
+import { appKind } from "../src/apps.ts";
 import { decideDependency } from "../src/packages/requests.ts";
 import { resolveDependencies } from "../src/packages/resolve.ts";
 import { buildAppCode, buildPages } from "../src/pages.ts";
@@ -144,7 +144,7 @@ describe("an App's approved packages", () => {
 
     const pages = await buildPages(env, files.files, fixture.app);
     await seal(fixture);
-    await rollback(env, appPublishing, fixture.owner, fixture.app, 1);
+    await rollback(env, appKind, fixture.owner, fixture.app, 1);
     const doubled = await calledAs(
       fixture.owner,
       fixture.app,
@@ -181,7 +181,7 @@ describe("an App's approved packages", () => {
 
     const pages = await buildPages(env, files.files, fixture.app);
     await seal(fixture);
-    await rollback(env, appPublishing, fixture.owner, fixture.app, 1);
+    await rollback(env, appKind, fixture.owner, fixture.app, 1);
     const doubled = await calledAs(
       fixture.owner,
       fixture.app,
@@ -288,7 +288,7 @@ export const Route = createFileRoute("/")({ component: () => <p>{String(renderTo
     const fixture = await appWith(appFiles(page, server), "Charts");
     await approved(fixture, [page, server]);
     await seal(fixture);
-    await rollback(env, appPublishing, fixture.owner, fixture.app, 1);
+    await rollback(env, appKind, fixture.owner, fixture.app, 1);
 
     const reached = await calledAs(fixture.owner, fixture.app, {
       name: "points.reached",
@@ -383,7 +383,7 @@ export default appTest(schema, {
 
     const published = await rollback(
       env,
-      appPublishing,
+      appKind,
       fixture.owner,
       fixture.app,
       1
@@ -398,7 +398,7 @@ export default appTest(schema, {
     const fixture = await appWith(files, "Charts");
     const request = await approved(fixture, [page, server]);
     await seal(fixture);
-    await rollback(env, appPublishing, fixture.owner, fixture.app, 1);
+    await rollback(env, appKind, fixture.owner, fixture.app, 1);
     await reportToOsv(server, "1.0.0", "MAL-2026-50001");
     await rescannedUntil(request.id, new Date());
 

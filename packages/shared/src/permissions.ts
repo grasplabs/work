@@ -535,7 +535,7 @@ export type BlueprintWorkflow = z.infer<typeof blueprintWorkflowSchema>;
  * An App's active permission on a connection or to start a workflow goes
  * back to requested when someone who couldn't grant
  * it (Grasp staff included) makes another version of the App current
- * (`AppVersionsApi.publish`, `AppDraftsApi.publish`), until an admin
+ * (`drafts.publish`, `versions.rollback`), until an admin
  * grants it again.
  */
 export const permissionStatusSchema = z.enum([
@@ -570,7 +570,7 @@ export interface Permission {
   requestedAt: string;
   /**
    * Who granted it last, and when. On a requested permission, it was
-   * granted before and is asked for again (`AppVersionsApi.publish`);
+   * granted before and is asked for again (`drafts.publish`);
    * only `status` says what it allows.
    */
   grantedBy: string | null;

@@ -11,13 +11,13 @@ import {
   workflowStartReceipts,
 } from "../src/db/core/schema.ts";
 import { workflowActivity } from "../src/workflow-own.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import {
   createWorkflowResource,
   shareWorkflowResource,
 } from "../src/workflow-resources.ts";
 import { greetingOf } from "./json-workflow-apps.ts";
 import { unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // A workflow's own files and activity (src/workflow-own.ts), as its page
 // reads them. These tests start from the ways they can fail: someone with
@@ -48,10 +48,7 @@ const greeting = async () => {
   const ada = await person("builder");
   const uma = await person("user");
   const workflow = await createWorkflowResource(env, ada, `greet-${unique()}`);
-  await publishWorkflowVersion(env, ada, workflow.id, {
-    definition: greetingOf(),
-    basedOn: null,
-  });
+  await publishDefinition(env, ada, workflow.id, greetingOf());
   await shareWorkflowResource(env, ada, workflow.id, {
     type: "person",
     id: uma.userId,

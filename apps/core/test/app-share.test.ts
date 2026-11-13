@@ -3,7 +3,7 @@ import type { AppId } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { appDraftKind } from "../src/apps.ts";
+import { appKind } from "../src/apps.ts";
 import { readDraft, saveDraft } from "../src/drafts.ts";
 import { agentWriting } from "./draft-writers.ts";
 import { mockIdp } from "./idp.ts";
@@ -43,10 +43,10 @@ const writeDraft = async (
   app: AppId,
   changes: Record<string, string>
 ): Promise<number> => {
-  const { id: chatId } = await person.api.chats.forApp(app);
+  const { id: chatId } = await person.api.chats.create("App changes");
   const written = await saveDraft(
     env,
-    appDraftKind,
+    appKind,
 
     app,
     await readDraft(env, { kind: "app", id: app }),
@@ -74,8 +74,7 @@ const share = async (
   if (changed.length > 0) {
     ({ version: published } = await builder.api.drafts.publish(
       { kind: "app", id: app },
-      revision,
-      "Shared"
+      revision
     ));
   }
   const added = teams.filter((team) => !shared.has(team));

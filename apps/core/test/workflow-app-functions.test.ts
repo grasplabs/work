@@ -7,8 +7,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { appPublishing } from "../src/app-publish.ts";
-import { findApp } from "../src/apps.ts";
+import { appKind, findApp } from "../src/apps.ts";
 import { appHost } from "../src/durable-objects.ts";
 import { rollback } from "../src/publish.ts";
 import { reviewDraft } from "../src/version-review.ts";
@@ -651,7 +650,7 @@ export const stamp = action({
       const refused = await refusal(
         rollback(
           { ...env, DB: racing },
-          appPublishing,
+          appKind,
           await builder.api.whoami(),
           app,
           version

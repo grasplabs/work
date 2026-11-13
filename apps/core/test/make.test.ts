@@ -516,7 +516,10 @@ describe("Make something", { timeout: 120_000 }, () => {
     const again = await outcome(build());
     const after = await madeBy(builder);
     const updates = await watched(stub, chat.id, builder.userId);
-    const { id: appChat } = await builder.api.chats.forApp(made.app?.id ?? "");
+    const appChat = await builder.api.chats.forSubject({
+      kind: "app",
+      id: made.app?.id ?? "",
+    });
 
     expect({
       made,
@@ -526,7 +529,7 @@ describe("Make something", { timeout: 120_000 }, () => {
         .flatMap(({ messages }) => messages)
         .findLast(({ role }) => role === "user"),
       stopped: updates.at(-1)?.stopped,
-      appChat,
+      appChat: appChat?.id,
       again,
     }).toMatchObject({
       made: { app: { name: "Month-end close" } },

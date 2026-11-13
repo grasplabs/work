@@ -63,7 +63,6 @@ import {
 } from "../src/permissions.ts";
 import { StoreHost } from "../src/store-host.ts";
 import { setWorkflowParams } from "../src/workflow-params.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import {
   appWorkflowStarts,
@@ -84,6 +83,7 @@ import { objectSchema } from "./json-workflow-apps.ts";
 import { sleeping, woken } from "./runs.ts";
 import { outcome, unique } from "./sign-in.ts";
 import { applied } from "./store-schemas.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // Starting independent workflows from an App's server functions
 // (function-host.ts, workflow-start-intents.ts): an action's
@@ -359,10 +359,7 @@ const workflowOf = async (owner: Identity, waits = false) => {
     owner,
     `follow-up-${unique()}`
   );
-  await publishWorkflowVersion(env, owner, workflow.id, {
-    definition: definitionOf(waits),
-    basedOn: null,
-  });
+  await publishDefinition(env, owner, workflow.id, definitionOf(waits));
   return workflow;
 };
 
@@ -467,7 +464,6 @@ const fixture = async (
   const binding = await bindWorkflowToApp(env, ada, workflow.id, {
     app,
     alias: "followUp",
-    version: 1,
   });
   const asked = await requestPermission(
     env,
@@ -790,10 +786,12 @@ describe("an action starting a workflow", () => {
         args: { who: "Ada" },
         key: `key-${unique()}`,
       });
-      await publishWorkflowVersion(env, ada, id, {
-        definition: definitionOf(true).replace('"1 hour"', '"2 hours"'),
-        basedOn: 1,
-      });
+      await publishDefinition(
+        env,
+        ada,
+        id,
+        definitionOf(true).replace('"1 hour"', '"2 hours"')
+      );
     });
     const started = await call(fx, fx.bob, "requests.kickOff", { who: "Bob" });
     expect(started.ok).toBeTruthy();
@@ -1015,7 +1013,6 @@ describe("App code starting a workflow it didn't declare", () => {
       await bindWorkflowToApp(env, ada, other.id, {
         app,
         alias: "other",
-        version: 1,
       });
       const asked = await requestPermission(
         env,

@@ -12,11 +12,11 @@ import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import type { Idp } from "./idp.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
 import { openRpc, routed, signedInWithRole, unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 /** An admin, signed in, with their `connections` and `workflows` APIs and who they are to core. */
 export const connectingAdmin = async (idp: Idp) => {
@@ -107,8 +107,11 @@ export const crmWorkflow = async (by: Admin, connectionId: string) => {
     by.identity,
     `crm-${unique()}`
   );
-  await publishWorkflowVersion(env, by.identity, workflow.id, {
-    definition: JSON.stringify({
+  await publishDefinition(
+    env,
+    by.identity,
+    workflow.id,
+    JSON.stringify({
       $schema: workflowSchemaUrl,
       args: objectSchema({}),
       returns: objectSchema({ status: { kind: "string" } }),
@@ -123,9 +126,8 @@ export const crmWorkflow = async (by: Admin, connectionId: string) => {
         action: "HUBSPOT_LIST_CONTACTS",
         args: {},
       })),
-    }),
-    basedOn: null,
-  });
+    })
+  );
   const asked = await requestPermission(
     env,
     by.identity,

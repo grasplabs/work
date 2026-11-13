@@ -7,12 +7,11 @@ import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { notNullFailed } from "./db/d1.ts";
 import {
   changesAnything,
   draftOf,
   draftRevised,
-  emptiedWithLive,
+  emptyDraftStatements,
   emptyDraft,
   filesOf,
   rebaseDraft,
@@ -24,10 +23,10 @@ import type { DraftKind, DraftState } from "./drafts.ts";
 // its versions (GRA-1665): one step each, run by one of its builders as
 // themselves, never by a chat's agent. The steps every kind shares are
 // here: the draft is published only at the revision the builder read,
-// only when it changes something, checked, built as the next version,
+// only when it changes something, checked and built as the next version,
 // and made live over the version live when the publish began, the draft
 // emptied over it in the batch that makes it live. What differs by kind
-// (how a draft is checked, built and made live) is its `PublishSteps`
+// (how a draft is built and made live) is its `DraftKind.steps`
 // (app-publish.ts, workflow-publish.ts). A version takes its label
 // (`YY.MM.N`) only in the batch that first makes it live, so a publish
 // that fails takes none.
@@ -38,7 +37,7 @@ import type { DraftKind, DraftState } from "./drafts.ts";
 // - A publish over a draft the builder never saw: refused once the draft
 //   moved past the revision they read (`draft.conflict`), checked as it
 //   is, and emptied over the new version in the batch that makes it live
-//   (drafts.ts, `emptiedWithLive`), so it never keeps changes the live
+//   (drafts.ts, `emptyDraftStatements`), so it never keeps changes the live
 //   version has. A write that landed meanwhile keeps the draft as it is,
 //   over the version it read, and the publish then moves it onto the
 //   version live (`rebaseDraft`), so that write is neither lost nor a
@@ -49,39 +48,30 @@ import type { DraftKind, DraftState } from "./drafts.ts";
 //   version live when it began (its kind's `activate`, compared and set
 //   in the statement that does it); the other is `draft.conflict`.
 // - A roll back over unseen changes: it discards the draft's changes
-//   only over the revision the builder read, in the batch that makes the
-//   version live, and a write meanwhile fails that batch
-//   (`draft.conflict`), as a draft over the newer version would carry all
-//   of it back as its own changes.
+//   only over the revision the builder read. A write that lands after
+//   that, before the batch that makes the version live, is discarded with
+//   them in that batch, audited, its own checkpoint kept to restore: the
+//   roll back never fails once an App's store took the version's schema,
+//   and a draft over the newer version would carry all of it back as its
+//   own changes.
 // - A batch whose answer was lost, tried again (`retriedBatch`): the
 //   draft's statements hold again for the write they made, so the retry
 //   is answered as the publish or roll back it is (drafts.ts,
-//   `emptiedWithLive`), and the draft's followers are told
+//   `emptyDraftStatements`), and the draft's followers are told
 //   (`draftRevised`).
 
-/** What a kind does at each step of a publish (app-publish.ts, workflow-publish.ts). */
+/** How a kind publishes a draft (its `DraftKind.steps`). */
 export interface PublishSteps {
   /**
-   * Refuses `draft` of subject `id`, whose files are `files`, when it may
-   * not be published as it is: its kind's checks.
-   */
-  check: (
-    env: Env,
-    by: Identity,
-    id: string,
-    draft: DraftState,
-    files: Map<string, string>
-  ) => Promise<void>;
-  /**
-   * Makes `draft` the subject's next version, with `message`, built and
-   * checked as its kind builds one: its number. A version whose build
-   * fails is marked so, and never made live; the failure is thrown.
+   * Makes `draft` the subject's next version, its files `files`, checked
+   * and built as its kind builds one: its number. A version whose check
+   * or build fails is never made live, and the failure is thrown.
    */
   build: (
     env: Env,
     by: Identity,
     id: string,
-    built: { draft: DraftState; files: Map<string, string>; message: string }
+    built: { draft: DraftState; files: Map<string, string> }
   ) => Promise<number>;
   /**
    * Makes `version` live over `basedOn` (null for none), audited as
@@ -103,12 +93,6 @@ export interface PublishSteps {
   ) => Promise<string>;
 }
 
-/** A kind of subject: its draft and its publish. */
-export interface Publishable {
-  draft: DraftKind;
-  steps: PublishSteps;
-}
-
 /** A version number as a caller sends it. */
 const versionSchema = z.int().min(1);
 
@@ -121,20 +105,21 @@ const nothing = async (): Promise<BatchItem<"sqlite">[]> =>
 
 /**
  * Publishes the draft of the subject `input` names, at `revision`, the
- * one `by` read, for `by`, who may write it (`DraftKind.editable`), with
- * `message`: checked, built as its next version and made live over the
- * version live now, the draft emptied over it with the batch that does.
- * Refused with `draft.conflict` once the draft moved past `revision` or
- * another version went live, `draft.empty` when it changes nothing, and as
- * its kind's check refuses it, with nothing built.
+ * one `by` read, for `by`, who may write it (`DraftKind.editable`):
+ * checked, built as its next version and made live over the version live
+ * now, the draft emptied over it with the batch that does. Refused with
+ * `draft.conflict` once the draft moved past `revision` or another
+ * version went live, `draft.empty` when it changes nothing, and as its
+ * kind's build refuses it, with nothing made live. A draft left over an
+ * older version that holds nothing the live one hasn't is emptied, and
+ * the live version answered.
  */
 export const publish = async (
   env: Env,
-  { draft: kind, steps }: Publishable,
+  kind: DraftKind,
   by: Identity,
   input: unknown,
-  revision: number,
-  message: string
+  revision: number
 ): Promise<LiveVersion> => {
   const id = await kind.editable(env, by, input);
   const subject = { kind: kind.kind, id };
@@ -142,40 +127,42 @@ export const publish = async (
   if (read.revision !== revision) {
     throw draftErrors.create("draft.conflict");
   }
-  const basedOn = await kind.liveVersion(env, id);
+  const basedOn = await kind.currentVersion(env, id);
+  const liveBase = await kind.liveBase(env, id);
   // A draft left over an older version (written while a publish went
   // live, or restored from before one) is published as it reads, over the
   // version live: never a dead end, nothing of it lost.
-  const draft = await rebasedOnto(
-    env,
-    kind,
-    id,
-    read,
-    await kind.liveBase(env, id)
-  );
+  const draft = await rebasedOnto(env, kind, id, read, liveBase);
   if (!changesAnything(draft)) {
-    throw draftErrors.create("draft.empty");
+    if (!changesAnything(read)) {
+      throw draftErrors.create("draft.empty");
+    }
+    // What it holds is live already: nothing is left to publish, and its
+    // changes over the older version go.
+    await emptyDraft(env, kind, id, { revision, base: liveBase, by });
+    if (basedOn === null) {
+      throw draftErrors.create("draft.empty");
+    }
+    const label = await kind.steps.activate(env, by, id, {
+      version: basedOn,
+      basedOn,
+      action: "version.published",
+      alongside: nothing,
+    });
+    return { subject, version: basedOn, label };
   }
   const files = await filesOf(env, kind, id, draft);
-  await steps.check(env, by, id, draft, files);
-  const version = await steps.build(env, by, id, { draft, files, message });
+  const version = await kind.steps.build(env, by, id, { draft, files });
   const at = new Date();
-  const label = await steps.activate(env, by, id, {
+  const label = await kind.steps.activate(env, by, id, {
     version,
     basedOn,
     action: "version.published",
     alongside: async (live) =>
-      await emptiedWithLive(
+      await emptyDraftStatements(
         drizzle(env.DB),
         subject,
-        {
-          revision: draft.revision,
-          base: version,
-          by,
-          at,
-          rollsBack: false,
-          discards: false,
-        },
+        { revision: draft.revision, base: version, by, at, rollsBack: false },
         live
       ),
   });
@@ -204,13 +191,13 @@ export const publish = async (
  * it, its unpublished changes discarded, audited, with the batch that
  * makes it live: what a builder confirms rolling back, over `revision`,
  * the draft's revision they read (`draft.conflict` once it moved since,
- * or when it has changes and none was given), and only while the draft is
- * still at the revision read here (`draft.conflict` for a write
- * meanwhile). A version live already only resets the draft.
+ * or when it has changes and none was given). A write that lands after
+ * that is discarded with them (drafts.ts, `emptyDraftStatements`). A
+ * version live already only resets the draft.
  */
 export const rollback = async (
   env: Env,
-  { draft: kind, steps }: Publishable,
+  kind: DraftKind,
   by: Identity,
   input: unknown,
   versionInput: unknown,
@@ -225,14 +212,16 @@ export const rollback = async (
     versionInput
   );
   const draft = await draftOf(env, kind, id);
-  const discards = changesAnything(draft);
   // Unpublished changes go only over the revision the builder read: never
   // unseen.
-  if ((discards || revision !== undefined) && revision !== draft.revision) {
+  if (
+    (changesAnything(draft) || revision !== undefined) &&
+    revision !== draft.revision
+  ) {
     throw draftErrors.create("draft.conflict");
   }
-  const resets = discards || draft.base !== version;
-  const current = await kind.liveVersion(env, id);
+  const resets = changesAnything(draft) || draft.base !== version;
+  const current = await kind.currentVersion(env, id);
   if (current === version) {
     if (resets) {
       await emptyDraft(env, kind, id, {
@@ -242,7 +231,7 @@ export const rollback = async (
         live: true,
       });
     }
-    const label = await steps.activate(env, by, id, {
+    const label = await kind.steps.activate(env, by, id, {
       version,
       basedOn: current,
       action: "version.rolled_back",
@@ -258,36 +247,26 @@ export const rollback = async (
     throw draftErrors.create("draft.conflict");
   }
   const at = new Date();
-  let label: string;
-  try {
-    label = await steps.activate(env, by, id, {
-      version,
-      basedOn,
-      action: "version.rolled_back",
-      alongside: resets
-        ? async (live) =>
-            await emptiedWithLive(
-              drizzle(env.DB),
-              subject,
-              {
-                revision: draft.revision,
-                base: version,
-                by,
-                at,
-                rollsBack: true,
-                discards,
-              },
-              live
-            )
-        : nothing,
-    });
-  } catch (error) {
-    // The draft moved since it was read: rolled back over nothing.
-    if (notNullFailed(error, "drafts.revision")) {
-      throw draftErrors.create("draft.conflict");
-    }
-    throw error;
-  }
+  const label = await kind.steps.activate(env, by, id, {
+    version,
+    basedOn,
+    action: "version.rolled_back",
+    alongside: resets
+      ? async (live) =>
+          await emptyDraftStatements(
+            drizzle(env.DB),
+            subject,
+            {
+              revision: draft.revision,
+              base: version,
+              by,
+              at,
+              rollsBack: true,
+            },
+            live
+          )
+      : nothing,
+  });
   // Told even when no row of the draft changed: a draft with no changes
   // reads as over the version live, so its builders' open pages follow
   // the version that went live.

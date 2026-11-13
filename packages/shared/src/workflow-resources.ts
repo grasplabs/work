@@ -13,7 +13,7 @@ import type {
   WorkflowDiagram,
   WorkflowRunTrace,
 } from "./workflow-diagrams.ts";
-import type { WorkflowLifecycleApi } from "./workflow-lifecycle.ts";
+import type { WorkflowPauseApi } from "./workflow-pause.ts";
 import type { WorkflowTriggersApi } from "./workflow-triggers.ts";
 import type { RunAiProviderWait } from "./workflows.ts";
 
@@ -64,16 +64,6 @@ export const workflowShareSchema = workflowMemberSchema.extend({
   role: workflowRoleSchema,
 });
 
-/**
- * A version to publish: the definition's text, and the current version
- * the publisher built on (null for the first), so two publications don't
- * silently move the current version past each other.
- */
-export const workflowPublishSchema = z.strictObject({
-  definition: z.string(),
-  basedOn: z.number().int().positive().nullable(),
-});
-
 export const workflowResourceErrors = defineErrorFamily({
   "workflow.resource_invalid": "That isn't a valid request for a workflow.",
   "workflow.resource_unavailable":
@@ -88,8 +78,6 @@ export const workflowResourceErrors = defineErrorFamily({
     "What names the deleted workflow kept changing while its name was released. Try again in a moment.",
   "workflow.definition_invalid":
     "The workflow definition isn't a valid grasp-workflow/2 document.",
-  "workflow.version_conflict":
-    "Someone published another version since you started from this one. Start again from the current version.",
   "workflow.version_not_found": "This workflow has no such version.",
   "workflow.resource_bound":
     "The current version of another workflow calls this one, or a trigger starts it, so it can't be deleted.",
@@ -583,19 +571,22 @@ export interface WorkflowState {
   bytes: number;
 }
 
-/** An App's binding of an exact version of a workflow, by an alias of the App's. */
+/**
+ * An App's binding of a workflow, by an alias of the App's: its starts
+ * run the workflow's live version.
+ */
 export const appWorkflowBindingSchema = z.strictObject({
   app: identifierSchema,
   alias: z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u),
-  version: z.int().min(1),
 });
 
-/** An App's binding of a workflow version. */
+/** An App's binding of a workflow. */
 export interface AppWorkflowBinding {
   id: string;
   app: string;
   alias: string;
   workflowId: string;
+  /** The workflow's live version when it was bound, whose contract was checked. */
   version: number;
   boundBy: string;
   boundAt: string;
@@ -876,19 +867,37 @@ export interface WorkflowShareCandidates {
   projects: { id: string; name: string }[];
 }
 
-/** Someone a workflow is shared with. */
+/** Someone a workflow is shared with, as an App's (`AppMember`). */
 export interface WorkflowMember {
   type: "person" | "team" | "project";
   id: string;
   /**
-   * A project's name, for a project row: null for a project the person
-   * isn't in, whose name is its members' alone. People and teams are
-   * named from the share candidates.
+   * The person's, team's or project's name; null once they are gone, and
+   * for a project the person isn't in, whose name is its members' alone.
    */
-  projectName?: string | null;
+  name: string | null;
   role: WorkflowRole;
+  /** Who shared it with them, or last changed their role. */
   addedBy: string;
   addedAt: string;
+}
+
+/**
+ * Whom a workflow is shared with (`workflowResources.members`), as an
+ * App's members (`apps.members`): anyone with a role in it lists them;
+ * its builders change them, never Grasp staff.
+ */
+export interface WorkflowMembersApi {
+  list: (id: string) => Promise<WorkflowMember[]>;
+  /** Shares it (`workflowShareSchema`), or changes the role of someone it is shared with. */
+  add: (id: string, member: unknown) => Promise<WorkflowMember>;
+  /** Stops sharing it with them (`workflowMemberSchema`). */
+  remove: (id: string, member: unknown) => Promise<void>;
+  /**
+   * Whom its builders may share it with: the organization's people and
+   * teams, by name and ID alone (no address, no role, no team's members).
+   */
+  candidates: (id: string) => Promise<WorkflowShareCandidates>;
 }
 
 /**
@@ -1184,22 +1193,11 @@ export interface WorkflowResourcesApi {
    * saved as the draft's next revision, checked; for builders.
    */
   editStep: (id: string, input: unknown) => Promise<WorkflowDraft>;
-  /** One version's definition text, exactly as published; for builders. */
-  definition: (id: string, version: number) => Promise<string>;
   /**
    * One version's portable source: its definition and the code generated
    * from it, read back from what was sealed; for builders.
    */
   source: (id: string, version: number) => Promise<WorkflowVersionSource>;
-  share: (id: string, input: unknown) => Promise<void>;
-  unshare: (id: string, input: unknown) => Promise<void>;
-  members: (id: string) => Promise<WorkflowMember[]>;
-  /**
-   * Whom its builders may share it with: the organization's people and
-   * teams, by name and ID alone (no address, no role, no team's members).
-   * For whoever may share it (`share`), never Grasp staff.
-   */
-  shareCandidates: (id: string) => Promise<WorkflowShareCandidates>;
   /**
    * Whether its owner lets people ask Stephen to start it in a chat app;
    * for anyone with a role in it.
@@ -1332,7 +1330,8 @@ export interface WorkflowResourcesApi {
   /** Publishes a catalog contract; for the organization's admins. */
   publishContract: (input: unknown) => Promise<CatalogContractEntry>;
   /** Whether it is paused, and pausing and resuming it. */
-  readonly lifecycle: WorkflowLifecycleApi;
+  readonly pause: WorkflowPauseApi;
+  readonly members: WorkflowMembersApi;
   /** Its triggers: list, create, move to a version, enable and delete. */
   readonly triggers: WorkflowTriggersApi;
   /**

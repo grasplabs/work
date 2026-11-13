@@ -4,14 +4,13 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { callAppFunction, invocationFor } from "../src/app-functions.ts";
-import { appPublishing } from "../src/app-publish.ts";
 import {
   loadRelease,
   readBackRelease,
   sealRelease,
 } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
-import { isPublished } from "../src/apps.ts";
+import { appKind, isPublished } from "../src/apps.ts";
 import { hostFunctionCall } from "../src/function-host.ts";
 import type { Runner } from "../src/function-host.ts";
 import { rollback } from "../src/publish.ts";
@@ -100,12 +99,12 @@ const twoVersions = async (
 ): Promise<Fixture & { first: Release; second: Release }> => {
   const fixture = await appWith(files("one"));
   const first = await seal(fixture);
-  await rollback(env, appPublishing, fixture.owner, fixture.app, 1);
+  await rollback(env, appKind, fixture.owner, fixture.app, 1);
   // The sweep sees version 1 current.
   await sweepReleases(env, start);
   await commitDefined(env, fixture.owner, fixture.app, files("two"), "Two");
   const second = await seal(fixture, 2);
-  await rollback(env, appPublishing, fixture.owner, fixture.app, 2);
+  await rollback(env, appKind, fixture.owner, fixture.app, 2);
   await sweepReleases(env, start);
   return { ...fixture, first, second };
 };
@@ -361,13 +360,7 @@ describe("shared bytes", { timeout: 120_000 }, () => {
     };
     const publishing = async () => {
       try {
-        return await rollback(
-          env,
-          appPublishing,
-          fixture.owner,
-          fixture.app,
-          1
-        );
+        return await rollback(env, appKind, fixture.owner, fixture.app, 1);
       } finally {
         state.sealing = false;
       }
@@ -707,7 +700,7 @@ describe("a deleted release", { timeout: 120_000 }, () => {
             .run()
       )
     ).resolves.toContain("apps are made current from a published version");
-    const back = await rollback(env, appPublishing, owner, app, 1);
+    const back = await rollback(env, appKind, owner, app, 1);
     const events = await allEvents();
     const published = events.filter(
       (event) =>

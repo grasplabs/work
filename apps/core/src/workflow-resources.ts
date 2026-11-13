@@ -2,7 +2,6 @@ import { generatedWorkflowEntry } from "@grasp-os/compiler";
 import type { ValueDescriptor } from "@grasp-os/runtime/app";
 import { schemaFromDescriptor } from "@grasp-os/runtime/host";
 import type { FunctionManifest } from "@grasp-os/runtime/host";
-import type { FileDiff } from "@grasp-os/shared/apps";
 import { actorOf, auditDetailMaxKeys } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import {
@@ -21,7 +20,6 @@ import {
   catalogKeySchema,
   workflowNameSchema,
   workflowNamespace,
-  workflowPublishSchema,
   workflowResourceErrors,
   workflowShareSchema,
   workflowMemberSchema,
@@ -45,7 +43,6 @@ import {
   bindingsOf as documentBindings,
   definitionFormat,
   eachStep,
-  formatLimits,
   isSensitive,
 } from "@grasp-os/workflow-schema/format";
 import type {
@@ -73,7 +70,6 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { diffFiles } from "./apps.ts";
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import {
@@ -84,6 +80,8 @@ import {
   drafts,
   sdkResourceBindings,
   projectItems,
+  teams,
+  users,
   workflowResourceMembers,
   workflowResourceProcesses,
   workflowResources,
@@ -92,7 +90,7 @@ import {
   workflowStateWrites,
 } from "./db/core/schema.ts";
 import { isUniqueViolation, notNullFailed } from "./db/d1.ts";
-import type { Builder, DraftKind } from "./drafts.ts";
+import type { Builder } from "./drafts.ts";
 import { checkWorkflowExpressions, withinBuildWait } from "./pages.ts";
 import { namedProjectsFor, requireStillBuilt } from "./project-access.ts";
 import { projectStillBuiltSql } from "./project-sql.ts";
@@ -188,7 +186,7 @@ import { quotaLimits } from "./workflows/quotas.ts";
 // - Two publications racing. A publication names the current version it
 //   built on; its batch inserts the version only while that is still the
 //   current one and the workflow is live, and moves the current version in
-//   the same transaction (`workflow.version_conflict` otherwise).
+//   the same transaction (`draft.conflict` otherwise).
 // - An App gaining a workflow. Nothing here reads Apps: no column, key or
 //   role of an App reaches a workflow, so neither grouping a workflow with
 //   an App, nor sharing, nor deleting that App, gives anyone a role in it
@@ -1573,63 +1571,6 @@ export const versionContract = async (
   return storedContractSchema.parse(JSON.parse(row.contract));
 };
 
-/**
- * Version `version` of workflow `id`, if it was published from the
- * definition `parsed` (its canonical JSON's hash, `definitionHashOf`, so
- * whitespace and key order aside): what a
- * retried publication that landed answers. Read off the text alone: a
- * saved version passed its checks as it was published, and nothing is
- * written for it again. Its bindings are answered as pinned;
- * `publishWorkflowVersion` answers them as its caller may see them.
- */
-const savedPublication = async (
-  env: Env,
-  { id, version }: { id: string; version: number },
-  parsed: unknown
-): Promise<WorkflowResourceVersion | undefined> => {
-  if (parsed === undefined) {
-    return undefined;
-  }
-  const row = await drizzle(env.DB)
-    .select()
-    .from(workflowResourceVersions)
-    .where(
-      and(
-        eq(workflowResourceVersions.workflowResourceId, id),
-        eq(workflowResourceVersions.version, version)
-      )
-    )
-    .get();
-  if (
-    row === undefined ||
-    row.definitionJsonHash !== (await definitionHashOf(parsed))
-  ) {
-    return undefined;
-  }
-  const bindings = await bindingsOf(env, id);
-  return await versionOf(
-    env,
-    catalogOnce(env),
-    row,
-    bindings.get(row.version) ?? []
-  );
-};
-
-/**
- * `version` of workflow `id` as `by` may see it (`visibleTo`): every
- * answer to a publication, new, raced or retried, tells no more of what
- * it binds than the version's listing does.
- */
-const seenBy = async (
-  env: Env,
-  by: Acting,
-  version: WorkflowResourceVersion
-): Promise<WorkflowResourceVersion> => {
-  const byVersion = await bindingsOf(env, version.resourceId, version.version);
-  const pinned = byVersion.get(version.version) ?? [];
-  return { ...version, bindings: pinned };
-};
-
 /** The number of workflow `id`'s latest version; 0 while it has none. */
 const latestVersionOf = async (env: Env, id: string): Promise<number> => {
   const row = await drizzle(env.DB)
@@ -1651,10 +1592,6 @@ interface Publication {
   bindings: PinnedBinding[];
   /** What it runs: the code generated from it, compiled (workflow-builds.ts). */
   compiled: CompiledBuild;
-  /** Admits the write, right before it commits: throws to write nothing. */
-  admit: (() => Promise<void>) | undefined;
-  /** The number it takes, if named: else the one past the latest. */
-  version: number | undefined;
 }
 
 /**
@@ -1669,20 +1606,12 @@ const buildVersion = async (
   by: Acting,
   publication: Publication
 ): Promise<WorkflowResourceVersion> => {
-  const {
-    workflow,
-    checked,
-    definition,
-    definitionHash,
-    bindings,
-    compiled,
-    admit,
-  } = publication;
+  const { workflow, checked, definition, definitionHash, bindings, compiled } =
+    publication;
   // Bounded when the definition was checked (`inspectDefinition`).
   const contractText = canonicalJson(contractOf(checked));
   const contractHash = await sha256Hex(contractText);
-  const version =
-    publication.version ?? (await latestVersionOf(env, workflow.id)) + 1;
+  const version = (await latestVersionOf(env, workflow.id)) + 1;
   // A document names no version of its own: publication numbers it, past
   // every one an earlier holder of a released name published
   // (`firstFreeVersion`), so a contract key never names two workflows.
@@ -1734,9 +1663,6 @@ const buildVersion = async (
     // that names them; inside the cleanup, so a store that fails halfway
     // gives its references back too.
     await storeBuild(env, seal, compiled);
-    // After the slow work (compiling, storing the build), right before the
-    // row lands: refused, it gives its reservations back as below.
-    await admit?.();
     await auditedBatch(env, db, [
       db.insert(workflowResourceVersions).values({
         // Only while the workflow is live: otherwise NULL, which fails
@@ -1745,9 +1671,6 @@ const buildVersion = async (
         WHERE id = ${workflow.id} AND deleted_at IS NULL)`,
         version,
         contractVersion,
-        // Written in step with `contract_version`, which the release
-        // before reads (schema.ts).
-        definitionVersion: contractVersion,
         status: "published",
         definition,
         definitionJsonHash: definitionHash,
@@ -1820,12 +1743,6 @@ const buildVersion = async (
   };
 };
 
-/** A publication's input, its definition bounded by the format's bytes. */
-const publishSchema = workflowPublishSchema.refine(
-  ({ definition }) => bytesOf(definition) <= formatLimits.bytes,
-  { path: ["definition"], message: "Larger than a definition may be" }
-);
-
 /**
  * What identifies a binding: its alias, its kind, and the catalog contract
  * it binds by its key, so the same alias on another contract or kind is
@@ -1892,17 +1809,14 @@ export const checkPublication = async (
 /**
  * Builds `definition` as workflow `workflow`'s next version for `by`:
  * checked (`checkPublication`), compiled once, here (no start or resume
- * compiles anything), and written, not live (`buildVersion`), as
- * `version` if named. Another version built at once takes the number:
- * `draft.conflict`. `admit`, if given, admits the write right before it
- * commits.
+ * compiles anything), and written, not live (`buildVersion`). Another
+ * version built at once takes the number: `draft.conflict`.
  */
 export const buildWorkflowVersion = async (
   env: Env,
   by: Acting,
   workflow: Live,
-  definition: string,
-  { admit, version }: { admit?: () => Promise<void>; version?: number } = {}
+  definition: string
 ): Promise<WorkflowResourceVersion> => {
   const { checked, bindings } = await checkPublication(
     env,
@@ -1914,20 +1828,14 @@ export const buildWorkflowVersion = async (
   const definitionHash = await definitionHashOf(checked.document);
   const compiled = await compileWorkflow(env, checked, definition, workflow.id);
   try {
-    return await seenBy(
-      env,
-      by,
-      await buildVersion(env, by, {
-        workflow,
-        checked,
-        definition,
-        definitionHash,
-        bindings,
-        compiled,
-        admit,
-        version,
-      })
-    );
+    return await buildVersion(env, by, {
+      workflow,
+      checked,
+      definition,
+      definitionHash,
+      bindings,
+      compiled,
+    });
   } catch (error) {
     if (notNullFailed(error, "workflow_resource_versions.manifest_hash")) {
       // A reference of its build went before the row could name it, which
@@ -1947,62 +1855,6 @@ export const buildWorkflowVersion = async (
   }
 };
 
-/**
- * The version of workflow `id` that a publication of `input` (its
- * definition, and the live version it built on) makes, for `by`, who must
- * build it, built (`buildWorkflowVersion`) but not activated: a retry of
- * a publication that landed (the same definition, on the same version)
- * answers the version it built before, before its bindings are resolved
- * again, as the builder may have lost a contract it binds since.
- * `workflow.version_conflict` when the live version isn't the one it
- * built on. What app-blueprints.ts publishes a blueprint's workflows
- * with, and tests their fixtures (workflow-publish.ts,
- * `publishWorkflowVersion`).
- */
-export const buildPublication = async (
-  env: Env,
-  by: Acting,
-  id: unknown,
-  input: unknown,
-  admit?: () => Promise<void>
-): Promise<{ workflow: Live; version: WorkflowResourceVersion }> => {
-  const workflow = await requireWorkflowRole(env, by, id, "builder");
-  const { definition, basedOn } = workflowResourceErrors.parse(
-    "workflow.resource_invalid",
-    publishSchema,
-    input
-  );
-  const landed = { id: workflow.id, version: (basedOn ?? 0) + 1 };
-  const saved = await savedPublication(env, landed, parsedJson(definition));
-  if (saved !== undefined) {
-    return { workflow, version: await seenBy(env, by, saved) };
-  }
-  if (basedOn !== workflow.currentVersion) {
-    throw workflowResourceErrors.create("workflow.version_conflict");
-  }
-  try {
-    return {
-      workflow,
-      // Numbered after the version it built on, as its retry names it.
-      version: await buildWorkflowVersion(env, by, workflow, definition, {
-        admit,
-        version: landed.version,
-      }),
-    };
-  } catch (error) {
-    if (draftErrors.codeOf(error) !== "draft.conflict") {
-      throw error;
-    }
-    // Another publication took the number: this one's, if it was this
-    // very definition.
-    const won = await savedPublication(env, landed, parsedJson(definition));
-    if (won === undefined) {
-      throw workflowResourceErrors.create("workflow.version_conflict");
-    }
-    return { workflow, version: await seenBy(env, by, won) };
-  }
-};
-
 /** The file a workflow's draft and versions are, as drafts.ts holds them. */
 export const workflowFile = "workflow.json";
 
@@ -2012,7 +1864,7 @@ export const workflowFile = "workflow.json";
  * one of whose rows (their own, their teams', their projects') makes them
  * a builder, whose role builds.
  */
-const stillBuildsSql = (id: string, by: Builder): SQL => {
+export const stillBuiltBy = (by: Builder, id: string): SQL => {
   const live = sql`EXISTS (SELECT 1 FROM ${workflowResources}
     WHERE ${workflowResources.id} = ${id} AND ${workflowResources.deletedAt} IS NULL)`;
   if (isAdmin(by.role)) {
@@ -2027,50 +1879,6 @@ const stillBuildsSql = (id: string, by: Builder): SQL => {
       WHERE ${workflowResourceMembers.workflowResourceId} = ${id}
         AND ${workflowResourceMembers.role} = 'builder'
         AND ${rowsOf(workflowResourceMembers, by)})))`;
-};
-
-/**
- * What a workflow's draft is (drafts.ts): one file, `workflow.json`,
- * written by the workflow's builders, never Grasp staff, while it isn't
- * deleted, over its live version.
- */
-export const workflowDraftKind: DraftKind = {
-  kind: "workflow",
-  readable: async (env, by, input) => {
-    const { id } = await requireWorkflowRole(env, by, input, "builder");
-    return id;
-  },
-  editable: async (env, by, input) => {
-    requireNotStaff(by);
-    const { id } = await requireWorkflowRole(env, by, input, "builder");
-    return id;
-  },
-  stillEditable: stillBuildsSql,
-  liveVersion: async (env, id) => {
-    const workflow = await liveWorkflow(env, id);
-    return workflow?.currentVersion ?? null;
-  },
-  liveBase: async (env, id) => {
-    const workflow = await liveWorkflow(env, id);
-    return workflow?.currentVersion ?? null;
-  },
-  versionFiles: async (env, id, version) => {
-    const row = await drizzle(env.DB)
-      .select({ definition: workflowResourceVersions.definition })
-      .from(workflowResourceVersions)
-      .where(
-        and(
-          eq(workflowResourceVersions.workflowResourceId, id),
-          eq(workflowResourceVersions.version, version)
-        )
-      )
-      .get();
-    if (row === undefined) {
-      throw workflowResourceErrors.create("workflow.version_not_found");
-    }
-    return new Map([[workflowFile, row.definition]]);
-  },
-  versionDefinition: async () => await Promise.resolve(null),
 };
 
 /**
@@ -2204,15 +2012,14 @@ export const workflowVersion = async (
 
 /**
  * The definition of version `version` of workflow `id`, exactly as
- * published, for its builders: its parameters' defaults may be sensitive.
+ * published: text that no longer hashes to what was published is
+ * refused (`workflow.version_corrupt`), never handed out.
  */
-export const workflowDefinition = async (
+export const publishedDefinition = async (
   env: Env,
-  by: Acting,
-  id: unknown,
+  id: string,
   version: unknown
 ): Promise<string> => {
-  const workflow = await requireWorkflowRole(env, by, id, "builder");
   if (typeof version !== "number" || !Number.isSafeInteger(version)) {
     throw workflowResourceErrors.create("workflow.version_not_found");
   }
@@ -2224,7 +2031,7 @@ export const workflowDefinition = async (
     .from(workflowResourceVersions)
     .where(
       and(
-        eq(workflowResourceVersions.workflowResourceId, workflow.id),
+        eq(workflowResourceVersions.workflowResourceId, id),
         eq(workflowResourceVersions.version, version)
       )
     )
@@ -2232,8 +2039,6 @@ export const workflowDefinition = async (
   if (row === undefined) {
     throw workflowResourceErrors.create("workflow.version_not_found");
   }
-  // Served only as published: text that no longer hashes to what was
-  // published is refused, never handed out.
   let hash: string | undefined;
   try {
     hash = await definitionHashOf(JSON.parse(row.definition));
@@ -2241,26 +2046,24 @@ export const workflowDefinition = async (
     hash = undefined;
   }
   if (hash !== row.definitionHash) {
-    throw corrupt(workflow.id, version);
+    throw corrupt(id, version);
   }
   return row.definition;
 };
 
 /**
- * How version `to` of workflow `id` differs from `from`: its one file,
- * `workflow.json`, each exactly as published. For its builders.
+ * The definition of version `version` of workflow `id`, exactly as
+ * published (`publishedDefinition`), for its builders: its parameters'
+ * defaults may be sensitive.
  */
-export const diffWorkflowVersions = async (
+export const workflowDefinition = async (
   env: Env,
   by: Acting,
   id: unknown,
-  from: unknown,
-  to: unknown
-): Promise<FileDiff[]> => {
-  const filesOf = async (version: unknown) =>
-    new Map([[workflowFile, await workflowDefinition(env, by, id, version)]]);
-  const [before, after] = await Promise.all([filesOf(from), filesOf(to)]);
-  return diffFiles(before, after);
+  version: unknown
+): Promise<string> => {
+  const workflow = await requireWorkflowRole(env, by, id, "builder");
+  return await publishedDefinition(env, workflow.id, version);
 };
 
 /**
@@ -2403,6 +2206,71 @@ export const exportedWorkflowVersion = async (
 };
 
 /**
+ * Whom workflow `id` is shared with, for anyone with a role in it, each
+ * by name, as an App's members are (app-members.ts): the people still in
+ * the organization, the teams that still exist and the projects, in the
+ * order they were shared. A project's name only for someone in it: to
+ * anyone else it stays unnamed.
+ */
+export const workflowMembers = async (
+  env: Env,
+  by: Acting,
+  id: unknown
+): Promise<WorkflowMember[]> => {
+  const workflow = await requireWorkflowRole(env, by, id, "user");
+  const rows = await drizzle(env.DB)
+    .select({
+      row: workflowResourceMembers,
+      person: users.name,
+      team: teams.name,
+    })
+    .from(workflowResourceMembers)
+    .leftJoin(
+      users,
+      and(
+        eq(workflowResourceMembers.memberType, "person"),
+        eq(users.id, workflowResourceMembers.memberId)
+      )
+    )
+    .leftJoin(
+      teams,
+      and(
+        eq(workflowResourceMembers.memberType, "team"),
+        eq(teams.id, workflowResourceMembers.memberId)
+      )
+    )
+    .where(
+      and(
+        eq(workflowResourceMembers.workflowResourceId, workflow.id),
+        stillMembers(workflowResourceMembers)
+      )
+    )
+    .orderBy(
+      asc(workflowResourceMembers.addedAt),
+      asc(workflowResourceMembers.memberType),
+      asc(workflowResourceMembers.memberId)
+    );
+  const projectNames = await namedProjectsFor(
+    env,
+    by,
+    rows
+      .filter(({ row }) => row.memberType === "project")
+      .map(({ row }) => row.memberId)
+  );
+  return rows.map(({ row, person, team }) => ({
+    type: row.memberType,
+    id: row.memberId,
+    name:
+      row.memberType === "project"
+        ? (projectNames.get(row.memberId) ?? null)
+        : (person ?? team),
+    role: row.role,
+    addedBy: row.addedBy,
+    addedAt: row.addedAt.toISOString(),
+  }));
+};
+
+/**
  * Shares workflow `id` with a person or team in a role, for `by`, who must
  * build it and isn't Grasp staff: never with its owner; as a builder, only
  * with someone whose organization role builds. Sharing again changes the
@@ -2413,7 +2281,7 @@ export const shareWorkflowResource = async (
   by: Acting,
   id: unknown,
   input: unknown
-): Promise<void> => {
+): Promise<WorkflowMember> => {
   requireNotStaff(by);
   const workflow = await requireWorkflowRole(env, by, id, "builder");
   const { role, ...member } = workflowResourceErrors.parse(
@@ -2500,6 +2368,14 @@ export const shareWorkflowResource = async (
     }
     throw error;
   }
+  const shared = await workflowMembers(env, by, workflow.id);
+  const added = shared.find(
+    (each) => each.type === member.type && each.id === member.id
+  );
+  if (added === undefined) {
+    throw unavailable();
+  }
+  return added;
 };
 
 /**
@@ -2606,51 +2482,6 @@ export const unshareWorkflowResource = async (
       )
     ),
   ]);
-};
-
-/**
- * Whom workflow `id` is shared with, for anyone with a role in it: the
- * people still in the organization and the teams that still exist, in the
- * order they were shared.
- */
-export const workflowMembers = async (
-  env: Env,
-  by: Acting,
-  id: unknown
-): Promise<WorkflowMember[]> => {
-  const workflow = await requireWorkflowRole(env, by, id, "user");
-  const rows = await drizzle(env.DB)
-    .select()
-    .from(workflowResourceMembers)
-    .where(
-      and(
-        eq(workflowResourceMembers.workflowResourceId, workflow.id),
-        stillMembers(workflowResourceMembers)
-      )
-    )
-    .orderBy(
-      asc(workflowResourceMembers.addedAt),
-      asc(workflowResourceMembers.memberType),
-      asc(workflowResourceMembers.memberId)
-    );
-  // A project's name only for someone in it: it is its members' alone.
-  const projectNames = await namedProjectsFor(
-    env,
-    by,
-    rows
-      .filter(({ memberType }) => memberType === "project")
-      .map(({ memberId }) => memberId)
-  );
-  return rows.map((row) => ({
-    type: row.memberType,
-    id: row.memberId,
-    ...(row.memberType === "project"
-      ? { projectName: projectNames.get(row.memberId) ?? null }
-      : {}),
-    role: row.role,
-    addedBy: row.addedBy,
-    addedAt: row.addedAt.toISOString(),
-  }));
 };
 
 /**

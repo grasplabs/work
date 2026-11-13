@@ -6,10 +6,9 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { callAppFunction, callPageFunction } from "../src/app-functions.ts";
-import { appPublishing } from "../src/app-publish.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
+import { appKind } from "../src/apps.ts";
 import { rollback } from "../src/publish.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
@@ -31,6 +30,7 @@ import {
   startedRuns,
 } from "./sealed-workflow-starts-harness.ts";
 import { unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // Starting workflows from a sealed App's functions, as they run in their
 // sandbox (spec 7.4, 9.5): the action's start and the mutation's staged
@@ -119,10 +119,7 @@ describe("a workflow reference's run list", { timeout: 120_000 }, () => {
     const pinned = await offered();
     // A newer version of the workflow live, which the alias follows: the
     // run Bob started keeps its version, still watchable.
-    await publishWorkflowVersion(env, owner, workflow.id, {
-      definition: definitionOf("1 second"),
-      basedOn: 1,
-    });
+    await publishDefinition(env, owner, workflow.id, definitionOf("1 second"));
     const newer = await offered();
     // Completed, then its details removed, as the retention sweep removes
     // them: its watch has no output to show.
@@ -386,7 +383,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       .first<{ manifest: string }>();
     const immutable =
       // As migration 0245 left it: only a version's label changes.
-      "CREATE TRIGGER workflow_resource_versions_immutable_update BEFORE UPDATE OF workflow_resource_id, version, definition_version, definition, definition_json_hash, profile_version, evaluator_hash, contract, contract_hash, manifest, manifest_hash, author_id, created_at, seal_id, contract_version, status ON workflow_resource_versions BEGIN SELECT RAISE(ABORT, 'workflow_resource_versions are immutable'); END";
+      "CREATE TRIGGER workflow_resource_versions_immutable_update BEFORE UPDATE OF workflow_resource_id, version, definition_version, definition, definition_json_hash, profile_version, evaluator_hash, contract, contract_hash, manifest, manifest_hash, author_id, created_at, seal_id, status ON workflow_resource_versions BEGIN SELECT RAISE(ABORT, 'workflow_resource_versions are immutable'); END";
     await env.DB.batch([
       env.DB.prepare(
         "DROP TRIGGER workflow_resource_versions_immutable_update"
@@ -409,7 +406,6 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
     await bindWorkflowToApp(env, owner, other.id, {
       app,
       alias: "followUp",
-      version: 1,
     });
     expect({
       unverified: pageOf(unverified),
@@ -427,14 +423,10 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
     // what it reads: the alias follows the workflow's live version, so
     // each release that binds it tells the runs of every version of it.
     // A failure's own words never leave.
-    await publishWorkflowVersion(env, owner, workflow.id, {
-      definition: failingDefinition,
-      basedOn: 1,
-    });
+    await publishDefinition(env, owner, workflow.id, failingDefinition);
     await bindWorkflowToApp(env, owner, workflow.id, {
       app,
       alias: "followUp",
-      version: 2,
     });
     const secret = `Secret-${unique()}`;
     const failed = await kickOff(bob, secret);
@@ -452,7 +444,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       "Seal again"
     );
     const next = await seal(fixture, 2);
-    await rollback(env, appPublishing, owner, app, 2);
+    await rollback(env, appKind, owner, app, 2);
     const nextHistory = queryReference(next, "followUp", "history");
     const askNext = async (input: unknown) => {
       const answer = await callAppFunction(
@@ -504,8 +496,11 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       owner,
       `loop-${unique()}`
     );
-    await publishWorkflowVersion(env, owner, workflow.id, {
-      definition: JSON.stringify({
+    await publishDefinition(
+      env,
+      owner,
+      workflow.id,
+      JSON.stringify({
         $schema: workflowSchemaUrl,
         args: objectSchema({ who: { kind: "string" } }),
         returns: objectSchema({ status: { kind: "string" } }),
@@ -518,9 +513,8 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
             do: [passing("greet")],
           },
         ],
-      }),
-      basedOn: null,
-    });
+      })
+    );
     const { fixture, release } = await pinnedApp(
       admin,
       [bob],
@@ -574,10 +568,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       owner,
       `long-${unique()}`
     );
-    await publishWorkflowVersion(env, owner, workflow.id, {
-      definition: longDefinitionOf(60),
-      basedOn: null,
-    });
+    await publishDefinition(env, owner, workflow.id, longDefinitionOf(60));
     const { fixture, release } = await pinnedApp(
       admin,
       [bob],

@@ -69,6 +69,7 @@ import {
 import { redact } from "@grasp-os/shared/redact";
 import { canBuild, roleSchema } from "@grasp-os/shared/roles";
 import { subjectSchema } from "@grasp-os/shared/subject";
+import type { Subject } from "@grasp-os/shared/subject";
 import { customWidgetsMax } from "@grasp-os/shared/widgets";
 import type { CustomWidgetId, WidgetSpec } from "@grasp-os/shared/widgets";
 import { DurableObject } from "cloudflare:workers";
@@ -3682,17 +3683,17 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * `personId`'s chat for an App or a workflow: the one that last worked on
-   * it, as their list shows it, whether made for App `appId` or one among
-   * `drafted`, whose agent wrote its draft (a chat started on Chat that
-   * built it), so its page carries on where they left it, with all it
-   * knows; `null` while they have none. A workflow has no chat made for
-   * it (`appId` null): only one that drafted it. A chat others share on a
-   * chat platform is never one.
+   * `personId`'s chat for `subject`, an App or a workflow: the one that
+   * last worked on it, as their list shows it, whether made for the App
+   * or one among `drafted`, whose agent wrote its draft (a chat started on
+   * Chat that built it), so its page carries on where they left it, with
+   * all it knows; `null` while they have none, when the next question
+   * there starts one. A chat others share on a chat platform is never
+   * one.
    */
   subjectChat(
     personId: string,
-    appId: AppId | null,
+    subject: Subject,
     drafted: readonly string[]
   ): ChatSummary | null {
     const chat = this.#db
@@ -3702,7 +3703,7 @@ export class Workspace extends DurableObject<Env> {
         and(
           eq(chats.personId, personId),
           or(
-            appId === null ? undefined : eq(chats.appId, appId),
+            subject.kind === "app" ? eq(chats.appId, subject.id) : undefined,
             sql`${chats.id} IN (SELECT value FROM json_each(${JSON.stringify(drafted)}))`
           ),
           isNull(chats.thread)
@@ -4488,7 +4489,7 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * The turn and code step (its tool call's ID) of the chat's code run
-   * `runId`, from the run's own record: what a draft's undo point names,
+   * `runId`, from the run's own record: what a draft's checkpoint names,
    * never what the run's code says. Nulls for a run that isn't there.
    */
   codeRunOf(

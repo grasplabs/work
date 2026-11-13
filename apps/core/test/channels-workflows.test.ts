@@ -4,7 +4,6 @@ import { z } from "zod";
 
 import { memberOf } from "../src/auth/identity.ts";
 import type { Acting } from "../src/auth/identity.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import {
   createWorkflowResource,
   setWorkflowAskable,
@@ -26,6 +25,7 @@ import {
   watched,
 } from "./teams-door.ts";
 import type { TeamsPerson } from "./teams-door.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // Workflows people start by asking Stephen in Teams
 // (src/channels/workflow-offers.ts): a workflow whose owner lets people
@@ -58,10 +58,7 @@ const owner = async (): Promise<Acting> => {
  */
 const sharedWorkflow = async (by: Acting, userId: string, askable: boolean) => {
   const workflow = await createWorkflowResource(env, by, `ask-${unique()}`);
-  await publishWorkflowVersion(env, by, workflow.id, {
-    definition: greetingOf(),
-    basedOn: null,
-  });
+  await publishDefinition(env, by, workflow.id, greetingOf());
   await shareWorkflowResource(env, by, workflow.id, {
     type: "person",
     id: userId,
@@ -294,10 +291,7 @@ describe(
         by,
         `ask-${unique()}`
       );
-      await publishWorkflowVersion(env, by, notShared.id, {
-        definition: greetingOf(),
-        basedOn: null,
-      });
+      await publishDefinition(env, by, notShared.id, greetingOf());
       await setWorkflowAskable(env, by, notShared.id, true);
 
       const listed = await ann.api.workflowResources.askableWorkflows();

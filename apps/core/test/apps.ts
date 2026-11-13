@@ -10,8 +10,7 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 import { vi } from "vite-plus/test";
 
-import { appPublishing } from "../src/app-publish.ts";
-import { commitFiles, latestVersion } from "../src/apps.ts";
+import { appKind, commitFiles, latestVersion } from "../src/apps.ts";
 import { rollback } from "../src/publish.ts";
 import { sessionRecheckMs } from "../src/session-check.ts";
 import { commitApp, definitionInput, sourceParts } from "./app-definitions.ts";
@@ -117,7 +116,7 @@ export const published = async (app: string): Promise<void> => {
   };
   const latest = await latestVersion(env, appIdSchema.parse(app));
   if (latest !== null) {
-    await rollback(env, appPublishing, by, app, latest);
+    await rollback(env, appKind, by, app, latest);
     return;
   }
   const first = await commitFiles(
@@ -127,7 +126,7 @@ export const published = async (app: string): Promise<void> => {
     { "README.md": "An App.\n" },
     "First"
   );
-  await rollback(env, appPublishing, by, app, first.version);
+  await rollback(env, appKind, by, app, first.version);
 };
 
 /**

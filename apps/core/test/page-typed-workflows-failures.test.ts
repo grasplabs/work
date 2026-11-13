@@ -8,7 +8,6 @@ import { z } from "zod";
 import { callAppFunction } from "../src/app-functions.ts";
 import { appHost } from "../src/durable-objects.ts";
 import { revokeRelease } from "../src/release-retention.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import {
   repairResourceTerminations,
   terminateResourceRun,
@@ -41,6 +40,7 @@ import {
 import { sleeping, whileEngineRefuses } from "./runs.ts";
 import { person as actingPerson } from "./sealed-apps.ts";
 import { auditedDuring, outcome } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // A page's typed `useWorkflow` through the real host (spec 10.4,
 // page-workflows.ts; the threat model is on GRA-626): its starts and
@@ -78,10 +78,12 @@ describe(
       const before = shown();
       // A newer version live, which the alias follows: the next read,
       // which another run's end causes, still shows the run on its own.
-      await publishWorkflowVersion(env, builder.acting, fixture.workflow, {
-        definition: greetingOf("1 hour", "Version 2"),
-        basedOn: 1,
-      });
+      await publishDefinition(
+        env,
+        builder.acting,
+        fixture.workflow,
+        greetingOf("1 hour", "Version 2")
+      );
       await terminateResourceRun(
         env,
         builder.acting,

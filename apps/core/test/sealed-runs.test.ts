@@ -15,7 +15,6 @@ import { z } from "zod";
 
 import { revokeWorkflowBinding } from "../src/workflow-bindings.ts";
 import { generatedModule } from "../src/workflow-builds.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import {
   exportedWorkflowVersion,
   versionContract,
@@ -82,6 +81,7 @@ import type {
 } from "./sealed-run-harness.ts";
 import { failingStep, taskStep } from "./sealed-runs.ts";
 import { unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // A run of a sealed build of a generated JSON workflow on the run host
 // (sealed-run.ts), from its threat model. The isolate runs the build's
@@ -140,7 +140,7 @@ const publishedBefore = async (
     ),
     env.DB.prepare(
       // Back as migration 0245 left it: only a version's label changes.
-      "CREATE TRIGGER workflow_resource_versions_immutable_update BEFORE UPDATE OF workflow_resource_id, version, definition_version, definition, definition_json_hash, profile_version, evaluator_hash, contract, contract_hash, manifest, manifest_hash, author_id, created_at, seal_id, contract_version, status ON workflow_resource_versions BEGIN SELECT RAISE(ABORT, 'workflow_resource_versions are immutable'); END"
+      "CREATE TRIGGER workflow_resource_versions_immutable_update BEFORE UPDATE OF workflow_resource_id, version, definition_version, definition, definition_json_hash, profile_version, evaluator_hash, contract, contract_hash, manifest, manifest_hash, author_id, created_at, seal_id, status ON workflow_resource_versions BEGIN SELECT RAISE(ABORT, 'workflow_resource_versions are immutable'); END"
     ),
   ]);
   return old;
@@ -881,13 +881,15 @@ return { before, after: await late };
     const definition = z
       .looseObject({ result: z.json() })
       .parse(JSON.parse(first?.definition ?? "{}"));
-    await publishWorkflowVersion(env, by, workflow.id, {
-      definition: JSON.stringify({
+    await publishDefinition(
+      env,
+      by,
+      workflow.id,
+      JSON.stringify({
         ...definition,
         result: { status: "done again" },
-      }),
-      basedOn: 1,
-    });
+      })
+    );
     const listed = await workflowVersions(env, by, workflow.id);
     expect({
       start: await startOfFirst(format1),

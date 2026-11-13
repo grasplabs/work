@@ -3,9 +3,9 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { addMember } from "../src/app-members.ts";
-import { appPublishing } from "../src/app-publish.ts";
 import { setArchived } from "../src/app-status.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
+import { appKind } from "../src/apps.ts";
 import { deleteStore } from "../src/data-stores.ts";
 import { rollback } from "../src/publish.ts";
 import {
@@ -526,7 +526,6 @@ describe("an App's archive", () => {
         bindWorkflowToApp(env, other, crypto.randomUUID(), {
           app,
           alias: "followUp",
-          version: 1,
         })
       ),
       commit: await outcome(
@@ -582,7 +581,7 @@ describe("an App's archive", () => {
           ...env,
           DB: racingDb(archive, /update "apps" set "current_version"/iu),
         },
-        appPublishing,
+        appKind,
         by,
         app,
         version

@@ -4,8 +4,7 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 import { expect } from "vite-plus/test";
 
-import { appPublishing } from "../../src/app-publish.ts";
-import { createApp, findApp } from "../../src/apps.ts";
+import { appKind, createApp, findApp } from "../../src/apps.ts";
 import type { Acting } from "../../src/auth/identity.ts";
 import { rollback } from "../../src/publish.ts";
 import { runInSession } from "../../src/sandbox-session.ts";
@@ -94,7 +93,7 @@ export const activation = async (
   on: Env = env
 ): Promise<unknown> => {
   try {
-    await rollback(on, appPublishing, owner, app, 1);
+    await rollback(on, appKind, owner, app, 1);
     const found = await findApp(env, app);
     return found?.currentVersion;
   } catch (error) {

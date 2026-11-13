@@ -55,8 +55,8 @@ import { isRestricted } from "./restricted.ts";
 import { approvalServing, requireTargetServes } from "./workflow-bindings.ts";
 import { buildOf } from "./workflow-builds.ts";
 import type { SealedBuild } from "./workflow-builds.ts";
-import { isPaused } from "./workflow-lifecycle.ts";
 import { frozenParams } from "./workflow-params.ts";
+import { isPaused } from "./workflow-pause.ts";
 import { bindingsOf, requireWorkflowRole } from "./workflow-resources.ts";
 import { workflowRoleSql } from "./workflow-roles.ts";
 import { workflowStateOf } from "./workflow-state.ts";
@@ -124,7 +124,7 @@ import type { StateSnapshot } from "./workflows/state-snapshots.ts";
 //   admitting statement, not from the session's list of teams.
 // - A person who left: every principal must be an active member when the
 //   statement runs.
-// - A paused workflow (workflow-lifecycle.ts): a new start is refused
+// - A paused workflow (workflow-pause.ts): a new start is refused
 //   (`workflow.paused`), and a pause moves the policy generation on, so
 //   one decided before it is refused as it is admitted.
 // - The same start sent twice: one receipt per invoker, person acted for
@@ -530,17 +530,18 @@ interface Required {
 
 /**
  * That everything `required` (JSON text of `Required`) names still holds
- * for version `version` of workflow `id`, as SQL: each approval active,
- * given for this version; each permission active and the workflow's own.
+ * for workflow `id`, as SQL: each approval active, which serves the
+ * declaration it was frozen for; each permission active and the
+ * workflow's own.
  * One bound value, read with `json_each`, so the
  * statement stays within D1's bound parameters however many bindings a
  * version declares.
  */
-const requiredSql = (id: string, version: number, required: string): SQL =>
+const requiredSql = (id: string, required: string): SQL =>
   sql`(NOT EXISTS (SELECT 1 FROM json_each(${required}, '$.approvals') AS needed
       WHERE NOT EXISTS (SELECT 1 FROM workflow_binding_approvals AS approval
         WHERE approval.id = needed.value AND approval.workflow_resource_id = ${id}
-          AND approval.reviewed_version = ${version} AND approval.status = 'active'))
+          AND approval.status = 'active'))
     AND NOT EXISTS (SELECT 1 FROM json_each(${required}, '$.permissions') AS needed
       WHERE NOT EXISTS (SELECT 1 FROM permissions AS held
         WHERE held.id = needed.value AND held.status = 'active'
@@ -564,7 +565,7 @@ const frozenBindings = async (
   const required: Required = { approvals: [], permissions: [] };
   for (const binding of declared) {
     // oxlint-disable-next-line no-await-in-loop -- one point lookup per binding
-    const approval = await approvalServing(env, id, version, binding);
+    const approval = await approvalServing(env, id, binding);
     if (approval === undefined) {
       throw workflowResourceErrors.create("workflow.binding_unapproved", {
         issues: [`${binding.alias}: No approval serves its contract.`],
@@ -1229,7 +1230,7 @@ export const decideWorkflowStart = async (
   // A new start only: one admitted before, retried under its key, answers
   // what it admitted, whatever was revoked since (its run, if it hasn't
   // ended, stops at its next call).
-  // Paused (workflow-lifecycle.ts): nothing starts. A pause moves the
+  // Paused (workflow-pause.ts): nothing starts. A pause moves the
   // policy generation on, so a start decided before it is refused as it
   // is admitted.
   if (await isPaused(env, id)) {
@@ -1271,7 +1272,7 @@ export const decideWorkflowStart = async (
     AND EXISTS (SELECT 1 FROM workflow_resource_versions AS pinned
       WHERE pinned.workflow_resource_id = ${id} AND pinned.version = ${version}
         AND pinned.manifest_hash = ${manifestHash})
-    AND ${requiredSql(id, version, JSON.stringify(bindings.required))}
+    AND ${requiredSql(id, JSON.stringify(bindings.required))}
     AND ${rule.holds})`;
   const decided = await drizzle(env.DB).get<{ holds: number }>(
     sql`SELECT ${holds} AS holds`

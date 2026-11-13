@@ -54,7 +54,6 @@ import { StoreHost } from "../src/store-host.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { dispatchSendEventIntent } from "../src/workflow-event-sends.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { appWorkflowStarts } from "../src/workflow-start-intents.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
@@ -69,6 +68,7 @@ import { objectSchema } from "./json-workflow-apps.ts";
 import { liveStatus } from "./runs.ts";
 import { unique } from "./sign-in.ts";
 import { applied } from "./store-schemas.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // The events a mutation sends workflow runs (spec 10.7.4; function-host.ts stages
 // them, workflow-event-sends.ts admits and delivers them), from their
@@ -397,10 +397,7 @@ const fixture = async (
     },
   });
   const workflow = await createWorkflowResource(env, ada, `review-${unique()}`);
-  await publishWorkflowVersion(env, ada, workflow.id, {
-    definition: definitionOf(contract),
-    basedOn: null,
-  });
+  await publishDefinition(env, ada, workflow.id, definitionOf(contract));
   await approveWorkflowBinding(env, admin, workflow.id, {
     alias: "jobEvents",
     target: { kind: "event" },
@@ -409,7 +406,6 @@ const fixture = async (
   await bindWorkflowToApp(env, ada, workflow.id, {
     app,
     alias: "review",
-    version: 1,
   });
   await granted(admin, ada, app, workflow.id, ["start"]);
   const send = await granted(admin, ada, app, workflow.id, ["send"]);
@@ -764,12 +760,14 @@ describe(
             },
           },
         });
-        await publishWorkflowVersion(env, ada, workflowId, {
-          definition: definitionOf(contract, {
+        await publishDefinition(
+          env,
+          ada,
+          workflowId,
+          definitionOf(contract, {
             laterEvents: { contract },
-          }),
-          basedOn: 1,
-        });
+          })
+        );
         for (const alias of ["jobEvents", "laterEvents"]) {
           // oxlint-disable-next-line no-await-in-loop -- one approval after the other
           await approveWorkflowBinding(env, admin, workflowId, {
@@ -781,7 +779,6 @@ describe(
         await bindWorkflowToApp(env, ada, workflowId, {
           app,
           alias: "review",
-          version: 2,
         });
       });
       const raw = async (event: string) =>

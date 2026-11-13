@@ -1,7 +1,7 @@
 import { isAppLayout } from "@grasp-os/compiler";
 import { appDataErrors } from "@grasp-os/shared/app-data";
 import type { AppDataPage, AppDataTable } from "@grasp-os/shared/app-data";
-import type { AppPreviewApi } from "@grasp-os/shared/app-drafts";
+import type { AppPreviewApi } from "@grasp-os/shared/app-review";
 import { previewShownSchema, readOnlyRevision } from "@grasp-os/shared/chat";
 import type {
   PreviewAt,
@@ -24,8 +24,8 @@ import { drizzle } from "drizzle-orm/d1";
 
 import {
   appFor,
+  appKind,
   changeEntry,
-  draftFiles,
   editableApp,
   findVersion,
   hasPages,
@@ -34,7 +34,7 @@ import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import { withReferencesText } from "./draft-references.ts";
 import type { PageModules } from "./draft-references.ts";
 import { draftReferences, draftTestData } from "./draft-runs.ts";
-import { changesAnything, readCheckpoint } from "./drafts.ts";
+import { changesAnything, filesOf, readCheckpoint } from "./drafts.ts";
 import type { DraftState } from "./drafts.ts";
 import { appPreview } from "./durable-objects.ts";
 import { leaseFor } from "./page-delivery.ts";
@@ -412,7 +412,7 @@ export class AppPreviewRpc extends CoreRpcTarget implements AppPreviewApi {
     if (checkpoint !== undefined || version !== undefined) {
       const draft = await this.#readOnlyDraft(id, { checkpoint, version });
       return {
-        files: await draftFiles(this.#env, id, draft),
+        files: await filesOf(this.#env, appKind, id, draft),
         references: async () => ({
           references: await draftReferences(this.#env, id, draft),
           serverUnbuilt: false,
@@ -427,7 +427,7 @@ export class AppPreviewRpc extends CoreRpcTarget implements AppPreviewApi {
     const shows =
       draft.base !== null && !changesAnything(draft) ? draft.base : undefined;
     return {
-      files: await draftFiles(this.#env, id, draft),
+      files: await filesOf(this.#env, appKind, id, draft),
       // Of the very build its files are of, or the last that built.
       references: async () => {
         try {

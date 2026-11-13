@@ -14,12 +14,11 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { appPublishing } from "../src/app-publish.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { applyVersionSchema } from "../src/app-schema.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
-import { appFor } from "../src/apps.ts";
+import { appKind, appFor } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { appHost } from "../src/durable-objects.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
@@ -31,7 +30,6 @@ import {
 import { rollback } from "../src/publish.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { testApp } from "./app-definitions.ts";
@@ -57,6 +55,7 @@ import {
   signedInApi,
   unique,
 } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // A page's typed `send` (spec 10.4.6; page-workflows.ts, and the run
 // inbox it admits to, workflows/run-events.ts) through the real host, from
@@ -269,10 +268,12 @@ const invoicesApp = async (
     builder.acting,
     `review-${unique()}`
   );
-  await publishWorkflowVersion(env, builder.acting, workflow.id, {
-    definition: definitionOf(contract),
-    basedOn: null,
-  });
+  await publishDefinition(
+    env,
+    builder.acting,
+    workflow.id,
+    definitionOf(contract)
+  );
   await approveWorkflowBinding(env, admin.acting, workflow.id, {
     alias: "jobEvents",
     target: { kind: "event" },
@@ -282,11 +283,10 @@ const invoicesApp = async (
   await bindWorkflowToApp(env, builder.acting, workflow.id, {
     app: fixture.app,
     alias: "review",
-    version: 1,
   });
   await seal(fixture);
   const switched = await outcome(
-    rollback(env, appPublishing, builder.acting, fixture.app, 1)
+    rollback(env, appKind, builder.acting, fixture.app, 1)
   );
   if (switched !== "ok") {
     if (!forcedCurrent) {

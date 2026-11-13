@@ -3,7 +3,7 @@ import { chatIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { appDraftKind } from "../src/apps.ts";
+import { appKind } from "../src/apps.ts";
 import { chatWork, readDraft, saveDraft } from "../src/drafts.ts";
 import {
   appName,
@@ -360,7 +360,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     });
     await saveDraft(
       env,
-      appDraftKind,
+      appKind,
 
       app,
       await readDraft(env, { kind: "app", id: app }),

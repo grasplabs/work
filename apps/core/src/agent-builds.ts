@@ -54,11 +54,10 @@ import {
   carriedOverBinding,
 } from "./app-workflow-bindings.ts";
 import {
-  appDraftKind,
   appFor,
+  appKind,
   applyChanges,
   draftDefinition,
-  draftFiles,
   editableApp,
   findVersion,
   readStored,
@@ -70,7 +69,13 @@ import { inspectDraft } from "./draft-references.ts";
 import type { DraftInspection } from "./draft-references.ts";
 import { callDraft, draftRunOf } from "./draft-runs.ts";
 import type { DraftRun } from "./draft-runs.ts";
-import { changesAnything, draftOf, saveDraft, turnSubjects } from "./drafts.ts";
+import {
+  changesAnything,
+  draftOf,
+  filesOf,
+  saveDraft,
+  turnSubjects,
+} from "./drafts.ts";
 import type { DraftState, DraftWriter } from "./drafts.ts";
 import { appPreview, workspace } from "./durable-objects.ts";
 import { resolveDependencies } from "./packages/resolve.ts";
@@ -704,7 +709,10 @@ export const saveDraftChanges = async (
   },
   admit?: () => Promise<void>
 ): Promise<string[]> => {
-  const base = await draftFiles(env, id, { base: draft.base, changes: {} });
+  const base = await filesOf(env, appKind, id, {
+    base: draft.base,
+    changes: {},
+  });
   // The base's definition, read once: what the draft's own falls back to,
   // and what it is no copy of once it is the same again.
   const baseDefinition =
@@ -757,7 +765,7 @@ export const saveDraftChanges = async (
   const ownText = definitionText(own);
   await saveDraft(
     env,
-    appDraftKind,
+    appKind,
     id,
     draft,
     {
@@ -798,8 +806,8 @@ export const draftDefinitions = async (
       before: AppDefinition | null;
     }
 > => {
-  const draft = await draftOf(env, appDraftKind, id);
-  const files = await draftFiles(env, id, draft);
+  const draft = await draftOf(env, appKind, id);
+  const files = await filesOf(env, appKind, id, draft);
   let current: AppDefinition;
   let before: AppDefinition | null;
   try {
@@ -835,7 +843,7 @@ export const draftDefinitions = async (
  * definition can't take; otherwise the definition after it, what it does
  * to the App's records (`plan`), and what `save` answered. The chat's
  * agent's definition tools (`BuildApi.define`) and the workspace's Data
- * view (`AppDraftsApi.define`) both change it here.
+ * view (`apps.define`) both change it here.
  */
 export const defineInDraft = async <Saved>(
   env: Env,
@@ -871,19 +879,14 @@ export const defineInDraft = async <Saved>(
   // definition checked after each, and saved once or not at all.
   let result: { definition: AppDefinition } = { definition: held.own };
   for (const each of Array.isArray(parsed) ? parsed : [parsed]) {
-    // A workflow's contract is what the version bound has, read for the
-    // person binding it, and the version is recorded with it: the tools
+    // A workflow's contract is what its live version has, read for the
+    // person binding it, and that version is recorded with it: the tools
     // never take either written by hand.
     let applied: DefinitionOperation;
     if (each.op === "bindWorkflow") {
       // One after the other: each operation applies to the last.
       // oxlint-disable-next-line no-await-in-loop -- see above
-      const bindable = await bindableContract(
-        env,
-        by,
-        each.workflow,
-        each.version
-      );
+      const bindable = await bindableContract(env, by, each.workflow);
       // oxlint-disable-next-line no-await-in-loop -- as above
       const carried = await carriedOverBinding(
         env,
@@ -996,7 +999,7 @@ export const turnCheck = async (
     const drafts = await Promise.all(
       written.toSorted().map(async (named) => {
         const { id } = await appFor(env, by, named, "builder");
-        return { id, draft: await draftOf(env, appDraftKind, id) };
+        return { id, draft: await draftOf(env, appKind, id) };
       })
     );
     const at = JSON.stringify(
@@ -1014,7 +1017,7 @@ export const turnCheck = async (
         if (!changesAnything(draft)) {
           return [];
         }
-        const files = await draftFiles(env, id, draft);
+        const files = await filesOf(env, appKind, id, draft);
         const check = await checkFiles(
           env,
           id,
@@ -1139,12 +1142,14 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
       "build.files",
       async (by) => {
         const id = await this.#readable(by, app);
-        const draft = await draftOf(this.env, appDraftKind, id);
+        const draft = await draftOf(this.env, appKind, id);
         return {
           base: draft.base,
           revision: draft.revision,
           changed: Object.keys(draft.changes).toSorted(),
-          files: Object.fromEntries(await draftFiles(this.env, id, draft)),
+          files: Object.fromEntries(
+            await filesOf(this.env, appKind, id, draft)
+          ),
         };
       },
       (found) => ({
@@ -1183,11 +1188,11 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
           changes
         );
         refuseGeneratedFiles(Object.keys(written));
-        const draft = await draftOf(this.env, appDraftKind, found.id);
+        const draft = await draftOf(this.env, appKind, found.id);
         if (expected.revision !== draft.revision) {
           throw draftErrors.create("draft.conflict");
         }
-        const files = await draftFiles(this.env, found.id, draft);
+        const files = await filesOf(this.env, appKind, found.id, draft);
         return await this.#save(by, found, draft, files, written);
       },
       (written) => ({
@@ -1302,8 +1307,8 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
       "build.check",
       async (by) => {
         const id = await this.#readable(by, app);
-        const draft = await draftOf(this.env, appDraftKind, id);
-        const files = await draftFiles(this.env, id, draft);
+        const draft = await draftOf(this.env, appKind, id);
+        const files = await filesOf(this.env, appKind, id, draft);
         return await checkFiles(this.env, id, draft, Object.fromEntries(files));
       },
       (checked) => ({

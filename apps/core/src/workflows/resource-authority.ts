@@ -109,8 +109,8 @@ export interface CallingRun {
    */
   readonly restricted: boolean;
   /**
-   * For a test run of a draft's checkpoint (candidate-runs.ts): each
-   * binding the checkpoint declares, by alias, with the catalog contract it
+   * For a test run of a draft at one revision (candidate-runs.ts): each
+   * binding the draft declares, by alias, with the catalog contract it
    * was checked against and the answer the start gave it, if any. Every
    * call it makes is answered from these and goes nowhere (`makeCall`);
    * one through a binding with no answer fails
@@ -242,7 +242,7 @@ export const requireCallAuthority = async (
   run: CallingRun,
   binding: FrozenCatalogBinding
 ): Promise<void> => {
-  const { workflowId: id, version } = run;
+  const { workflowId: id } = run;
   const permission =
     "permissionId" in binding.target ? binding.target.permissionId : null;
   const permissionHolds =
@@ -258,7 +258,6 @@ export const requireCallAuthority = async (
       AND EXISTS (SELECT 1 FROM workflow_binding_approvals AS approval
         WHERE approval.id = ${binding.approval}
           AND approval.workflow_resource_id = ${id}
-          AND approval.reviewed_version = ${version}
           AND approval.alias = ${binding.alias}
           AND approval.status = 'active')
       AND ${permissionHolds}

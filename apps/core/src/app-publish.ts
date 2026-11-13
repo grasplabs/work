@@ -13,7 +13,6 @@ import { sealedEvidence, sealRelease } from "./app-releases.ts";
 import { requireAppTestsPass } from "./app-tests.ts";
 import {
   activateVersion,
-  appDraftKind,
   changeEntry,
   commitDraft,
   draftDefinition,
@@ -27,10 +26,10 @@ import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { appVersions } from "./db/core/schema.ts";
 import { indexAppNow } from "./knowledge/apps-collection.ts";
 import { requireMigrationEvidence } from "./migration-run.ts";
-import type { Publishable } from "./publish.ts";
+import type { PublishSteps } from "./publish.ts";
 
 // Publishing an App (spec 8, 16, 22, GRA-1665): its steps of publish.ts's
-// publish and roll back (`appPublishing`). Building a version seals its
+// publish and roll back (`appSteps`). Building a version seals its
 // release, bound to the App's store (app-releases.ts), checks its
 // migrations passed on their fixtures, runs its App tests on fixture
 // stores (app-tests.ts), and marks it `published` (`buildRelease`);
@@ -188,75 +187,58 @@ const buildRelease = async (
 };
 
 /**
- * How an App's draft is published (publish.ts): checked as a chat's
- * agent's turn checks it (`checkFiles`, with what the App's preview of it
- * ran into), committed as it was checked as the App's next version
- * (`commitDraft`), built, sealed and tested (`buildRelease`), and made
- * live (`activateVersion`), then indexed into the Apps collection
+ * How an App's draft is published (`appKind.steps`, apps.ts): checked as
+ * a chat's agent's turn checks it (`checkFiles`, with what the App's
+ * preview of it ran into), committed as it was checked as the App's next
+ * version (`commitDraft`), built, sealed and tested (`buildRelease`), and
+ * made live (`activateVersion`), then indexed into the Apps collection
  * (knowledge/apps-collection.ts): its entry holds the live version once
  * this returns, unless indexing failed or raced another; the clock then
  * heals it within 15 minutes. A version committed whose build fails is
  * marked `failed` and never live, with no label; the draft keeps its
  * changes over its base.
  */
-export const appPublishing: Publishable = {
-  draft: appDraftKind,
-  steps: {
-    // Checked as it is built (`build`), once the number its version takes
-    // is read: of two publishes of one draft at once, the second finds it
-    // taken as it commits (`draft.conflict`), never committing a version
-    // that can't go live.
-    check: async () => {
-      await Promise.resolve();
-    },
-    build: async (env, by, id, { draft, files, message }) => {
-      const app = appIdSchema.parse(id);
-      const version = await nextVersion(env, app);
-      const check = await checkFiles(
-        env,
-        app,
-        draft,
-        Object.fromEntries(files)
-      );
-      if (!check.passed) {
-        throw appErrors.create("app.draft_failed");
-      }
-      const defined = await draftDefinition(env, app, draft);
-      await commitDraft(
-        env,
-        by,
-        app,
-        {
-          parent: draft.base,
-          version,
-          files,
-          definition: defined?.definition ?? null,
-        },
-        message
-      );
+export const appSteps: PublishSteps = {
+  // Checked as it is built, once the number its version takes is read:
+  // of two publishes of one draft at once, the second finds it taken as
+  // it commits (`draft.conflict`), never committing a version that
+  // can't go live.
+  build: async (env, by, id, { draft, files }) => {
+    const app = appIdSchema.parse(id);
+    const version = await nextVersion(env, app);
+    const check = await checkFiles(env, app, draft, Object.fromEntries(files));
+    if (!check.passed) {
+      throw appErrors.create("app.draft_failed");
+    }
+    const defined = await draftDefinition(env, app, draft);
+    await commitDraft(env, by, app, {
+      parent: draft.base,
+      version,
+      files,
+      definition: defined?.definition ?? null,
+    });
+    await buildRelease(env, by, app, version);
+    return version;
+  },
+  activate: async (env, by, id, { version, basedOn, action, alongside }) => {
+    const app = appIdSchema.parse(id);
+    if (!(await isPublished(env, app, version))) {
+      await findVersion(env, app, version);
       await buildRelease(env, by, app, version);
-      return version;
-    },
-    activate: async (env, by, id, { version, basedOn, action, alongside }) => {
-      const app = appIdSchema.parse(id);
-      if (!(await isPublished(env, app, version))) {
-        await findVersion(env, app, version);
-        await buildRelease(env, by, app, version);
-      }
-      const live = await activateVersion(
-        env,
-        by,
-        app,
-        version,
-        basedOn,
-        action,
-        alongside
-      );
-      await indexAppNow(env, app);
-      if (live.liveLabel === null) {
-        throw new Error("A live App version has no label.");
-      }
-      return live.liveLabel;
-    },
+    }
+    const live = await activateVersion(
+      env,
+      by,
+      app,
+      version,
+      basedOn,
+      action,
+      alongside
+    );
+    await indexAppNow(env, app);
+    if (live.liveLabel === null) {
+      throw new Error("A live App version has no label.");
+    }
+    return live.liveLabel;
   },
 };

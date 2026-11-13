@@ -9,12 +9,11 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { appPublishing } from "../src/app-publish.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
+import { appKind } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { exportAppDefinition } from "../src/definition-export.ts";
 import { rollback } from "../src/publish.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import {
   createWorkflowResource,
   shareWorkflowResource,
@@ -24,6 +23,7 @@ import type { TestApp } from "./app-definitions.ts";
 import { published as publishedApp } from "./apps.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import { auditedDuring, outcome, refusal, unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // Exporting an App's definition (definition-export.ts): its current
 // sealed release and the exact workflow versions it binds, as portable
@@ -100,10 +100,7 @@ const definitionOf = (params: Record<string, unknown>): string =>
 /** A workflow `by` created and published `params` to, as version 1. */
 const published = async (by: Acting, params: Record<string, unknown>) => {
   const workflow = await createWorkflowResource(env, by, `greet-${unique()}`);
-  await publishWorkflowVersion(env, by, workflow.id, {
-    definition: definitionOf(params),
-    basedOn: null,
-  });
+  await publishDefinition(env, by, workflow.id, definitionOf(params));
   return workflow;
 };
 
@@ -130,11 +127,10 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       await bindWorkflowToApp(env, owner, workflow.id, {
         app,
         alias,
-        version: 1,
       });
     }
     const release = await seal(fixture);
-    await rollback(env, appPublishing, owner, app, 1);
+    await rollback(env, appKind, owner, app, 1);
 
     let exported: Awaited<ReturnType<typeof exportAppDefinition>> | undefined;
     const audited = await auditedDuring(async () => {
@@ -288,10 +284,9 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
     await bindWorkflowToApp(env, owner, theirs.id, {
       app,
       alias: "followUp",
-      version: 1,
     });
     await seal(fixture);
-    await rollback(env, appPublishing, owner, app, 1);
+    await rollback(env, appKind, owner, app, 1);
 
     const exported = await exportAppDefinition(env, owner, app);
     expect({
@@ -315,7 +310,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
   it("refuses a package past its byte budget, or one whose files hold a known secret format, naming the file and never the match", async () => {
     const budgeted = await appWith(files(), "Requests");
     await seal(budgeted);
-    await rollback(env, appPublishing, budgeted.owner, budgeted.app, 1);
+    await rollback(env, appKind, budgeted.owner, budgeted.app, 1);
     // Built here, so no file of the repository holds one.
     const token = ["ghp", "_", "Q".repeat(36)].join("");
     const leaky = await appWith(
@@ -325,7 +320,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       "Requests"
     );
     await seal(leaky);
-    await rollback(env, appPublishing, leaky.owner, leaky.app, 1);
+    await rollback(env, appKind, leaky.owner, leaky.app, 1);
 
     const refused = await refusal(
       exportAppDefinition(env, leaky.owner, leaky.app)
@@ -358,7 +353,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
     const fixture = await appWith(files(), "Requests");
     const { owner, app } = fixture;
     await seal(fixture);
-    await rollback(env, appPublishing, owner, app, 1);
+    await rollback(env, appKind, owner, app, 1);
     await publishedApp(app);
     const user = await person("user");
     await env.DB.prepare(

@@ -25,6 +25,7 @@ import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { bindWorkflowToApp } from "./app-workflow-bindings.ts";
 import { appFor } from "./apps.ts";
 import type { Acting } from "./auth/identity.ts";
+import type { ChatWriter } from "./drafts.ts";
 import { workspace } from "./durable-objects.ts";
 import { requireResourceRole } from "./permission-resources.ts";
 import { requestPermission } from "./permissions.ts";
@@ -39,7 +40,6 @@ import {
   editWorkflowStep,
   workflowDraft,
 } from "./workflow-editor.ts";
-import type { ChatWriter } from "./workflow-editor.ts";
 import {
   candidateRunFor,
   startCandidateRun,
@@ -318,8 +318,8 @@ export class WorkflowBuildApi extends WorkerEntrypoint<Env, AgentScope> {
   }
 
   /**
-   * Binds version `binding.version` of the workflow to App `binding.app`
-   * under `binding.alias`, replacing the alias's binding.
+   * Binds the workflow to App `binding.app` under `binding.alias`,
+   * replacing the alias's binding: its starts run the live version.
    */
   async bind(
     workflow: unknown,
@@ -576,8 +576,8 @@ workflowBuild: {
    * Nothing here publishes: a person reviews and publishes the draft in Grasp, as for an App. Tell them it is ready once it
    * passes and its test runs do what they asked.
    */
-  /** Binds the workflow to an App the person builds under \`alias\`, replacing that alias's binding: \`version\` a published one whose events, decisions and listen tasks the App declares. Its starts run the workflow's live version. */
-  bind(workflow: string, binding: { app: string; alias: string; version: number }): Promise<{ id: string; app: string; alias: string; version: number }>;
+  /** Binds the workflow to an App the person builds under \`alias\`, replacing that alias's binding: the App must declare the events, decisions and listen tasks of the workflow's live version, which its starts run. */
+  bind(workflow: string, binding: { app: string; alias: string }): Promise<{ id: string; app: string; alias: string; version: number }>;
   /** Asks for a permission for the workflow itself (a connection for its connection permissions, or \`{ type: "platform" }\` with actions \`["brain"]\` for its brain permission), \`binding\` its alias; nothing holds until an admin grants it. */
   requestPermission(workflow: string, request: {
     object:

@@ -31,7 +31,6 @@ import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { setWorkflowParams } from "../src/workflow-params.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import {
   createWorkflowResource,
   workflowVersions,
@@ -47,6 +46,7 @@ import { connectModels, fakeProviderFor } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
 import { liveStatus } from "./runs.ts";
 import { unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 /** The model the organization chose, the one a binding may name. */
 export const allowedModel = "mistral/mistral-large-latest";
@@ -143,10 +143,7 @@ export const definitionOf = ({
 /** A workflow of `by`'s, published once from `draft`. */
 export const published = async (by: Identity, draft: Draft) => {
   const workflow = await createWorkflowResource(env, by, `calls-${unique()}`);
-  await publishWorkflowVersion(env, by, workflow.id, {
-    definition: definitionOf(draft),
-    basedOn: null,
-  });
+  await publishDefinition(env, by, workflow.id, definitionOf(draft));
   const [version] = await workflowVersions(env, by, workflow.id);
   return { workflow, executable: version?.build?.hash !== undefined };
 };
@@ -487,7 +484,6 @@ export const startingApp = async (
   await bindWorkflowToApp(env, by, workflowId, {
     app,
     alias: "flow",
-    version: 1,
   });
   await granted(by, admin, {
     subject: { type: "app", appId: app },

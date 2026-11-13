@@ -4272,18 +4272,11 @@ export const workflowResourceVersions = sqliteTable(
       .references(() => workflowResources.id),
     version: integer().notNull(),
     /**
-     * Read by nothing: `contract_version` holds the same. Written in step
-     * with it, as the release before reads it and its unique index keeps
-     * a semantic version naming one content; dropped in a later release
-     * (expand, then contract).
-     */
-    definitionVersion: text("definition_version").notNull(),
-    /**
      * The semantic version publication gives the version's contract (its
-     * catalog key's), unique per workflow. Migration 0245 filled it from
-     * `definition_version` for the versions before it.
+     * catalog key's), unique per workflow: the column keeps its first
+     * name, which the release before writes too.
      */
-    contractVersion: text("contract_version").notNull().default(""),
+    contractVersion: text("definition_version").notNull(),
     definition: text().notNull(),
     definitionJsonHash: text("definition_json_hash").notNull(),
     profileVersion: text("profile_version").notNull(),
@@ -4324,7 +4317,7 @@ export const workflowResourceVersions = sqliteTable(
     primaryKey({ columns: [table.workflowResourceId, table.version] }),
     uniqueIndex("workflow_resource_versions_definition_version").on(
       table.workflowResourceId,
-      table.definitionVersion
+      table.contractVersion
     ),
     uniqueIndex("workflow_resource_versions_label").on(
       table.workflowResourceId,
@@ -5294,12 +5287,12 @@ export const workflowCatalogContracts = sqliteTable(
 /**
  * Which concrete resource serves each catalog binding of an independent
  * workflow (src/workflow-bindings.ts): approved by an admin for the
- * declaration they reviewed (its kind, contract key and fingerprint) in
- * the exact version they reviewed (`reviewed_version`), and serving that
- * version alone: another version, newer or older, is code nobody reviewed
- * for it. `target` is the resource (JSON, `WorkflowBindingTarget`). At
- * most one active approval per version and alias; approving another
- * revokes it in the same batch. Revoked rows stay.
+ * declaration they reviewed (its alias, kind, contract key and
+ * fingerprint), in the version they reviewed it in (`reviewed_version`),
+ * and serving every version that declares it so. `target` is the resource
+ * (JSON, `WorkflowBindingTarget`). At most one active approval per
+ * binding; approving another revokes it in the same batch, and revoking
+ * one holds for every version. Revoked rows stay.
  */
 export const workflowBindingApprovals = sqliteTable(
   "workflow_binding_approvals",
@@ -5325,8 +5318,23 @@ export const workflowBindingApprovals = sqliteTable(
     revokedAt: timestamp("revoked_at"),
   },
   (table) => [
+    /**
+     * Unused since an approval serves every version declaring its binding
+     * (src/workflow-bindings.ts): kept while a release that relies on it
+     * may serve or be rolled back to, dropped in a later one.
+     */
     uniqueIndex("workflow_binding_approvals_active_idx")
       .on(table.workflowResourceId, table.reviewedVersion, table.alias)
+      .where(sql`${table.status} = 'active'`),
+    // One active approval per binding: its alias's declaration.
+    uniqueIndex("workflow_binding_approvals_binding_idx")
+      .on(
+        table.workflowResourceId,
+        table.alias,
+        table.kind,
+        table.contractId,
+        table.fingerprint
+      )
       .where(sql`${table.status} = 'active'`),
   ]
 );
@@ -5500,7 +5508,7 @@ export const workflowResourceDraftInspections = sqliteTable(
 );
 
 /**
- * Whether each independent workflow is paused (src/workflow-lifecycle.ts):
+ * Whether each independent workflow is paused (src/workflow-pause.ts):
  * one row, once it was paused, moved on by every write (`revision`), each
  * write only over the revision it read. While `paused_at` is set it
  * starts no runs (workflow-starts.ts). Its stage and go-live columns are
@@ -5649,7 +5657,7 @@ export const workflowCandidateRuns = sqliteTable(
 );
 
 /**
- * Tests of a draft's checkpoint over recent real items (GRA-513,
+ * Tests of a draft at one revision over recent real items (GRA-513,
  * workflows/item-tests.ts): one row per item, the run whose input it took,
  * and the test run that ran it, or why none did. A started item's row is
  * written with its test run's, and none changes; swept with the test runs,

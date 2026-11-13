@@ -85,7 +85,7 @@ import {
 } from "./db/core/schema.ts";
 import { isUniqueViolation, retriedBatch } from "./db/d1.ts";
 import { subjectEntry } from "./drafts.ts";
-import type { DraftKind } from "./drafts.ts";
+import type { DraftKind, DraftState } from "./drafts.ts";
 import { appMemoryPath, requireWithinLimit } from "./knowledge/memory-files.ts";
 import { madeCurrent } from "./permissions.ts";
 import { buildOnSave } from "./save-builds.ts";
@@ -864,62 +864,6 @@ export const versionFiles = async (
   return Object.fromEntries(await readTree(env, app, row.tree));
 };
 
-/**
- * App `app`'s live version, or while none is live its latest whose
- * publish didn't fail (the first of an App made from a blueprint): what a
- * draft with no changes is over, and the only base a draft is published
- * over (publish.ts). Never simply the latest: after a roll back that is a
- * version nobody uses, and a draft whose publish failed leaves its
- * version behind, which a discard must not bring back.
- */
-const liveBase = async (env: Env, app: string): Promise<number | null> => {
-  const { id, currentVersion } = await findApp(env, app);
-  if (currentVersion !== null) {
-    return currentVersion;
-  }
-  const latest = await drizzle(env.DB)
-    .select({ version: appVersions.version })
-    .from(appVersions)
-    .where(
-      and(eq(appVersions.appId, id), sql`${appVersions.status} IS NOT 'failed'`)
-    )
-    .orderBy(desc(appVersions.version))
-    .limit(1)
-    .get();
-  return latest?.version ?? null;
-};
-
-/**
- * What an App's draft is (drafts.ts): written by the App's builders while
- * it isn't archived, over its live version.
- */
-export const appDraftKind: DraftKind = {
-  kind: "app",
-  readable: async (env, by, input) => {
-    const { id } = await appFor(env, by, input, "builder");
-    return id;
-  },
-  editable: async (env, by, input) => {
-    const { id } = await editableApp(env, by, input);
-    return id;
-  },
-  liveVersion: async (env, app) => {
-    const { currentVersion } = await findApp(env, app);
-    return currentVersion;
-  },
-  stillEditable: (app, by) =>
-    sql`NOT ${archivedNow(app)} AND ${stillBuiltBy(by, appIdSchema.parse(app))}`,
-  liveBase,
-  versionFiles: async (env, app, version) =>
-    new Map(
-      Object.entries(await versionFiles(env, appIdSchema.parse(app), version))
-    ),
-  versionDefinition: async (env, app, version) => {
-    const row = await findVersion(env, appIdSchema.parse(app), version);
-    return row.definition;
-  },
-};
-
 /** Creates an App, with no versions yet. */
 export const createApp = async (
   env: Env,
@@ -1260,38 +1204,6 @@ export const commitFiles = async (
   return { ...toVersion(row), builds };
 };
 
-/** An App's draft (drafts.ts), as a commit takes it. */
-export interface DraftChanges {
-  /** The version it began over; null for an App that had none. */
-  base: number | null;
-  /** New content by path, or null to delete a file. */
-  changes: Record<string, string | null>;
-  /**
-   * Its own definition, as stored (`definitionText`); null while it is
-   * its base's.
-   */
-  definition: string | null;
-}
-
-/** A draft's files: its base version's, with its changes over them. */
-export const draftFiles = async (
-  env: Env,
-  app: AppId,
-  { base, changes }: Pick<DraftChanges, "base" | "changes">
-): Promise<Map<string, string>> => {
-  const files = new Map(
-    base === null ? [] : Object.entries(await versionFiles(env, app, base))
-  );
-  for (const [path, content] of Object.entries(changes)) {
-    if (content === null) {
-      files.delete(path);
-    } else {
-      files.set(path, content);
-    }
-  }
-  return files;
-};
-
 /**
  * A draft's definition (`readStored`): its own, else its base version's;
  * null for a draft of an App with no version that hasn't written yet.
@@ -1299,7 +1211,7 @@ export const draftFiles = async (
 export const draftDefinition = async (
   env: Env,
   app: AppId,
-  { base, definition }: Pick<DraftChanges, "base" | "definition">
+  { base, definition }: Pick<DraftState, "base" | "definition">
 ): Promise<StoredDefinition | null> => {
   if (definition !== null) {
     return await readStored({ definition });
@@ -1322,22 +1234,23 @@ export interface DraftCommit {
   definition: AppDefinition | null;
 }
 
+/** The message of every version a publish commits from a draft. */
+const publishedMessage = "Published from the draft.";
+
 /**
  * Commits the App's draft (`DraftCommit`) as its next version, by
- * `by`, one of its builders publishing it (app-publish.ts), with
- * `message`: not live yet, which the publish makes it. Its files were
- * built as they were checked. A version committed meanwhile takes the
- * number: `draft.conflict`.
+ * `by`, one of its builders publishing it (app-publish.ts): not live
+ * yet, which the publish makes it. Its files were built as they were
+ * checked. A version committed meanwhile takes the number:
+ * `draft.conflict`.
  */
 export const commitDraft = async (
   env: Env,
   by: Acting,
   app: unknown,
-  { parent, version, files, definition }: DraftCommit,
-  message: unknown
+  { parent, version, files, definition }: DraftCommit
 ): Promise<AppVersion> => {
   const { id: appId, name } = await editableApp(env, by, app);
-  const text = appErrors.parse("app.invalid", commitMessageSchema, message);
   const latest =
     parent === null ? undefined : await findVersion(env, appId, parent);
   const carried = await carriedDefinitions(env, appId, latest);
@@ -1363,7 +1276,7 @@ export const commitDraft = async (
     definitionHash: stored.definition.hash,
     files: files.size,
     authorId: by.userId,
-    message: text,
+    message: publishedMessage,
     createdAt: new Date(),
     approved: null,
     pages: hasPages(files),
@@ -1445,7 +1358,7 @@ export const listVersions = async (
 
 export const getVersion = async (
   env: Env,
-  by: Identity,
+  by: Member,
   app: unknown,
   version: unknown
 ): Promise<AppVersion> => {
@@ -1472,23 +1385,6 @@ export const diffFiles = (
       ? []
       : [{ path, change: "modified", before: old, after: now }];
   });
-};
-
-/** How the files of version `to` differ from those of `from`, by path. */
-export const diffVersions = async (
-  env: Env,
-  by: Identity,
-  app: unknown,
-  from: unknown,
-  to: unknown
-): Promise<FileDiff[]> => {
-  const { id: appId } = await appFor(env, by, app, "builder");
-  const treeOf = async (version: unknown) => {
-    const { tree } = await findVersion(env, appId, version);
-    return await readTree(env, appId, tree);
-  };
-  const [before, after] = await Promise.all([treeOf(from), treeOf(to)]);
-  return diffFiles(before, after);
 };
 
 /**
@@ -1655,7 +1551,7 @@ const firstLive = (
  * the batch that makes it live, and keeps it after; its first live
  * version opens the App to everyone it is shared with. `alsoWhenLive`
  * adds to that batch what goes only with it: the draft emptied over the
- * version (drafts.ts, `emptiedWithLive`), audited as `action`. Made current
+ * version (drafts.ts, `emptyDraftStatements`), audited as `action`. Made current
  * by someone who couldn't grant them, the version is unapproved and the
  * App's permissions that change things for the person using it are asked
  * for again (`madeCurrent`), but for an App's first version copied from a
@@ -1935,4 +1831,79 @@ export const activateVersion = async (
   // a new version ready, and switch to it (pages-rpc.ts, `watchVersion`).
   waitUntil(versionMadeCurrent(env, appId));
   return toApp(changed);
+};
+
+/**
+ * App `app`'s live version, or while none is live its latest whose
+ * publish didn't fail (the first of an App made from a blueprint): what a
+ * draft with no changes is over, and the only base a draft is published
+ * over (publish.ts). Never simply the latest: after a roll back that is a
+ * version nobody uses, and a draft whose publish failed leaves its
+ * version behind, which a discard must not bring back.
+ */
+const liveBase = async (env: Env, app: string): Promise<number | null> => {
+  const { id, currentVersion } = await findApp(env, app);
+  if (currentVersion !== null) {
+    return currentVersion;
+  }
+  const latest = await drizzle(env.DB)
+    .select({ version: appVersions.version })
+    .from(appVersions)
+    .where(
+      and(eq(appVersions.appId, id), sql`${appVersions.status} IS NOT 'failed'`)
+    )
+    .orderBy(desc(appVersions.version))
+    .limit(1)
+    .get();
+  return latest?.version ?? null;
+};
+
+/**
+ * An App as drafts and versions see it (drafts.ts, publish.ts): its draft
+ * written by its builders while it isn't archived, over its live version,
+ * and published as app-publish.ts' `appSteps` publish it.
+ */
+export const appKind: DraftKind = {
+  kind: "app",
+  readable: async (env, by, input) => {
+    const { id } = await appFor(env, by, input, "builder");
+    return id;
+  },
+  editable: async (env, by, input) => {
+    const { id } = await editableApp(env, by, input);
+    return id;
+  },
+  stillEditable: (app, by) =>
+    sql`NOT ${archivedNow(app)} AND ${stillBuiltBy(by, appIdSchema.parse(app))}`,
+  currentVersion: async (env, app) => {
+    const { currentVersion } = await findApp(env, app);
+    return currentVersion;
+  },
+  liveBase,
+  versionFiles: async (env, app, version) =>
+    new Map(
+      Object.entries(await versionFiles(env, appIdSchema.parse(app), version))
+    ),
+  versionDefinition: async (env, app, version) => {
+    const row = await findVersion(env, appIdSchema.parse(app), version);
+    return row.definition;
+  },
+  versions: {
+    list: async (env, by, app, before) =>
+      await listVersions(env, by, app, before),
+    get: async (env, by, app, version) =>
+      await getVersion(env, by, app, version),
+  },
+  // Imported when used, not at the top: publishing reaches back into this
+  // module.
+  steps: {
+    build: async (env, by, id, built) => {
+      const { appSteps } = await import("./app-publish.ts");
+      return await appSteps.build(env, by, id, built);
+    },
+    activate: async (env, by, id, activated) => {
+      const { appSteps } = await import("./app-publish.ts");
+      return await appSteps.activate(env, by, id, activated);
+    },
+  },
 };

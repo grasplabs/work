@@ -2,7 +2,7 @@ import type { AuditDetailValue, AuditEntry } from "@grasp-os/shared/audit";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { ChatWork } from "@grasp-os/shared/chat";
 import { draftErrors } from "@grasp-os/shared/drafts";
-import type { Draft, DraftCheckpoint } from "@grasp-os/shared/drafts";
+import type { Draft, DraftCheckpoint, Version } from "@grasp-os/shared/drafts";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -22,6 +22,7 @@ import {
 } from "./db/core/schema.ts";
 import { notNullFailed } from "./db/d1.ts";
 import { draftWatch } from "./durable-objects.ts";
+import type { PublishSteps } from "./publish.ts";
 
 // The draft of an App or a workflow (GRA-1665): one per subject, in core's
 // database, shared by everyone who builds it and by their chats' agents
@@ -29,8 +30,9 @@ import { draftWatch } from "./durable-objects.ts";
 // calls these, having checked the writer may write the subject's draft
 // (its kind's `editable`) and, for an agent, that its code run is still
 // open. What differs by kind (who may write, which version a draft is
-// over, a version's files) is its `DraftKind` (apps.ts,
-// workflow-resources.ts); publishing a draft is publish.ts's.
+// over, a version's files, how it is published) is its `DraftKind`
+// (app-publish.ts, workflow-publish.ts); publishing a draft is
+// publish.ts's.
 //
 // Threat model, and how each is closed:
 //
@@ -61,7 +63,7 @@ import { draftWatch } from "./durable-objects.ts";
 //   read.
 // - A publish whose answer was lost. Its batch, tried again
 //   (`retriedBatch`), finds its own draft statements done: each holds
-//   again for the very write it made (`emptiedWithLive`), so the retry is
+//   again for the very write it made (`emptyDraftStatements`), so the retry is
 //   answered as the publish it is, never as `draft.conflict`.
 
 /**
@@ -81,8 +83,10 @@ export interface DraftState {
 export type Builder = Pick<Acting, "userId" | "role" | "teams">;
 
 /**
- * What a draft does as its subject's kind has it (apps.ts' `appDrafts`,
- * workflow-resources.ts' `workflowDrafts`).
+ * One kind of subject, an App or a workflow, as drafts and versions see
+ * it: who reads and writes its draft, the versions a draft is over, and
+ * how a draft is published (app-publish.ts' `appKind`,
+ * workflow-publish.ts' `workflowKind`).
  */
 export interface DraftKind {
   kind: SubjectKind;
@@ -91,18 +95,20 @@ export interface DraftKind {
   /**
    * The subject `input` names, whose draft `by` may write now: its ID, or
    * refused (an archived App, a deleted workflow, no role to build it).
+   * Grasp staff never reach it: their sessions are refused before
+   * (session-check.ts, `fullAccess`).
    */
   editable: (env: Env, by: Acting, input: unknown) => Promise<string>;
   /** That `by` may still write subject `id`'s draft, as SQL. */
   stillEditable: (id: string, by: Builder) => SQL;
   /** The version live now; null for none. */
-  liveVersion: (env: Env, id: string) => Promise<number | null>;
+  currentVersion: (env: Env, id: string) => Promise<number | null>;
   /**
    * The version a draft with no changes is over, and the only one a draft
    * is published over: the live one, or what stands in for it.
    */
   liveBase: (env: Env, id: string) => Promise<number | null>;
-  /** The files of `version` of subject `id`. */
+  /** The files of `version` of subject `id`, exactly as published. */
   versionFiles: (
     env: Env,
     id: string,
@@ -114,6 +120,31 @@ export interface DraftKind {
     id: string,
     version: number
   ) => Promise<string | null>;
+  /** Subject `input`'s versions as `by` may read them. */
+  versions: {
+    /** Newest first, a page at a time: the newest, or those before `before`. */
+    list: (
+      env: Env,
+      by: Acting,
+      input: unknown,
+      before?: unknown
+    ) => Promise<Version[]>;
+    get: (
+      env: Env,
+      by: Acting,
+      input: unknown,
+      version: unknown
+    ) => Promise<Version>;
+  };
+  /** How its draft is published (publish.ts). */
+  steps: PublishSteps;
+}
+
+/** The chat whose agent writes a draft: in which turn and code step. */
+export interface ChatWriter {
+  chatId: string;
+  turnId: string | null;
+  callId: string | null;
 }
 
 /**
@@ -123,13 +154,7 @@ export interface DraftKind {
  * audited with `detail`.
  */
 export type DraftWriter = { by: Acting } & (
-  | {
-      chat: {
-        chatId: string;
-        turnId: string | null;
-        callId: string | null;
-      };
-    }
+  | { chat: ChatWriter }
   | { detail: Record<string, AuditDetailValue> }
 );
 
@@ -345,16 +370,28 @@ const nextRevision = (
   sql`(SELECT ${revision + 1} WHERE COALESCE((SELECT revision FROM drafts WHERE subject_kind = ${kind.kind} AND subject_id = ${id}), 0) = ${revision} AND ${kind.stillEditable(id, by)})`;
 
 /**
- * Tells everyone who follows `subject`'s draft that it moved
- * (draft-watch.ts), whoever moved it. Never thrown for: the write landed,
- * and a follower reads the draft afresh at its next call anyway.
+ * Tells everyone who follows `subject`'s draft that it moved to
+ * `revision` (draft-watch.ts), whoever moved it; read now when the
+ * caller can't know it (a publish or roll back, whose batch may have
+ * landed over a write since). Never thrown for: the write landed, and a
+ * follower reads the draft afresh at its next call anyway.
  */
 export const draftRevised = async (
   env: Env,
-  subject: Subject
+  subject: Subject,
+  revision?: number
 ): Promise<void> => {
   try {
-    await draftWatch(env, subject).revised();
+    if (revision === undefined) {
+      const row = await drizzle(env.DB)
+        .select({ revision: drafts.revision })
+        .from(drafts)
+        .where(ofSubject(drafts, subject))
+        .get();
+      await draftWatch(env, subject).revised(row?.revision ?? 0);
+      return;
+    }
+    await draftWatch(env, subject).revised(revision);
   } catch (error) {
     log.warn("draft.watch_untold", { ...subject, ...errorFields(error) });
   }
@@ -365,7 +402,7 @@ export const draftRevised = async (
  * next revision first (`nextRevision`): refused as its kind's `editable`
  * refuses `by` now when they may no longer write it, else
  * `draft.conflict` when another write took it since. Then tells its
- * followers (`draftRevised`).
+ * followers it is at `revision` (`draftRevised`).
  */
 const writeOver = async (
   env: Env,
@@ -373,7 +410,8 @@ const writeOver = async (
   kind: DraftKind,
   id: string,
   by: Acting,
-  statements: Parameters<typeof auditedBatch>[2]
+  statements: Parameters<typeof auditedBatch>[2],
+  revision: number
 ): Promise<void> => {
   try {
     await auditedBatch(env, db, statements);
@@ -384,7 +422,7 @@ const writeOver = async (
     }
     throw error;
   }
-  await draftRevised(env, { kind: kind.kind, id });
+  await draftRevised(env, { kind: kind.kind, id }, revision);
 };
 
 /**
@@ -700,35 +738,43 @@ export const saveDraft = async (
     updatedAt
   );
   await admit?.();
-  await writeOver(env, db, kind, id, by, [
-    draftRow(db, kind, id, after, draft.revision, by, updatedAt),
-    ...Object.entries(changes).map(([path, content]) =>
-      db
-        .insert(draftFiles)
-        .values({ subjectKind: kind.kind, subjectId: id, path, content })
-        .onConflictDoUpdate({
-          target: [
-            draftFiles.subjectKind,
-            draftFiles.subjectId,
-            draftFiles.path,
-          ],
-          set: { content },
+  await writeOver(
+    env,
+    db,
+    kind,
+    id,
+    by,
+    [
+      draftRow(db, kind, id, after, draft.revision, by, updatedAt),
+      ...Object.entries(changes).map(([path, content]) =>
+        db
+          .insert(draftFiles)
+          .values({ subjectKind: kind.kind, subjectId: id, path, content })
+          .onConflictDoUpdate({
+            target: [
+              draftFiles.subjectKind,
+              draftFiles.subjectId,
+              draftFiles.path,
+            ],
+            set: { content },
+          })
+      ),
+      ...unchanged.map((path) =>
+        db
+          .delete(draftFiles)
+          .where(and(ofSubject(draftFiles, subject), eq(draftFiles.path, path)))
+      ),
+      ...checkpoint.statements,
+      outboxed(
+        db,
+        subjectEntry(by, "draft.saved", subject, {
+          revision: after.revision,
+          ...("detail" in writer ? writer.detail : {}),
         })
-    ),
-    ...unchanged.map((path) =>
-      db
-        .delete(draftFiles)
-        .where(and(ofSubject(draftFiles, subject), eq(draftFiles.path, path)))
-    ),
-    ...checkpoint.statements,
-    outboxed(
-      db,
-      subjectEntry(by, "draft.saved", subject, {
-        revision: after.revision,
-        ...("detail" in writer ? writer.detail : {}),
-      })
-    ),
-  ]);
+      ),
+    ],
+    after.revision
+  );
   return after;
 };
 
@@ -770,37 +816,47 @@ export const emptyDraft = async (
         updatedAt
       )
     : undefined;
-  await writeOver(env, db, kind, id, by, [
-    draftRow(db, kind, id, emptied, revision, by, updatedAt),
-    db.delete(draftFiles).where(ofSubject(draftFiles, subject)),
-    ...(checkpoint?.statements ?? []),
-    outboxed(
-      db,
-      subjectEntry(by, "draft.discarded", subject, { revision: revision + 1 })
-    ),
-  ]);
+  await writeOver(
+    env,
+    db,
+    kind,
+    id,
+    by,
+    [
+      draftRow(db, kind, id, emptied, revision, by, updatedAt),
+      db.delete(draftFiles).where(ofSubject(draftFiles, subject)),
+      ...(checkpoint?.statements ?? []),
+      outboxed(
+        db,
+        subjectEntry(by, "draft.discarded", subject, { revision: revision + 1 })
+      ),
+    ],
+    revision + 1
+  );
 };
 
 /**
- * The statements that empty `subject`'s draft at `revision` over `base`,
- * the version a publish or roll back makes live, kept as a checkpoint of
- * `by`'s (the draft as the live version), each only while `live` (SQL)
- * holds: what the publish adds to the batch that makes the version live
- * (its kind's `activate`), so the draft is emptied with it or not at all,
- * and never keeps changes the live version has. A publish of the draft: a
- * write that landed on the draft since `revision` keeps it as it is, over
- * the version it was based on, its work kept, which the publish then
- * moves onto the version live (`rebaseDraft`). A roll back (`rollsBack`):
- * a write since fails the whole batch (`drafts.revision` NULL), so nothing
- * goes live that would leave a draft over a newer version, whose every
- * change would read as the draft's; with `discards`, it drops the draft's
- * unpublished changes, audited as `by`'s discard.
+ * The statements that empty `subject`'s draft over `base`, the version a
+ * publish or roll back makes live, kept as a checkpoint of `by`'s (the
+ * draft as the live version), each only while `live` (SQL) holds: what
+ * the publish adds to the batch that makes the version live (its kind's
+ * `activate`), so the draft is emptied with it or not at all, and never
+ * keeps changes the live version has.
+ *
+ * A publish empties the draft only while it is still at `revision`, the
+ * one it published: a write that landed since keeps the draft as it is,
+ * over the version it was based on, its work kept, which the publish
+ * then moves onto the version live (`rebaseDraft`). A roll back
+ * (`rollsBack`) empties it whatever landed since, so it never fails
+ * after the App's store took the version's schema: what the draft held
+ * as it landed, a write since included, is discarded, audited as `by`'s
+ * discard, and stays restorable from its own checkpoint.
  *
  * Each statement holds again for the write it made itself, at `at` by
  * `by`, so a batch tried again after its answer was lost
  * (`retriedBatch`) does nothing twice and fails on nothing.
  */
-export const emptiedWithLive = async (
+export const emptyDraftStatements = async (
   db: CoreDb,
   subject: Subject,
   {
@@ -809,26 +865,36 @@ export const emptiedWithLive = async (
     by,
     at,
     rollsBack,
-    discards,
   }: {
     revision: number;
     base: number;
     by: Pick<Acting, "userId" | "staff" | "actor">;
     at: Date;
     rollsBack: boolean;
-    discards: boolean;
   },
   live: SQL
 ) => {
   const { kind, id } = subject;
-  // The first statement below landed, now or in an earlier try: none but
-  // it leaves the draft at the next revision over `base`, by `by`, at `at`.
-  const ours = sql`revision = ${revision + 1} AND base = ${base} AND updated_by = ${by.userId} AND updated_at = ${at.getTime()}`;
-  const emptied = sql`${live} AND EXISTS (SELECT 1 FROM drafts WHERE subject_kind = ${kind} AND subject_id = ${id} AND ${ours})`;
+  const ofDraft = sql`subject_kind = ${kind} AND subject_id = ${id}`;
+  // The draft row below landed, now or in an earlier try: nothing else
+  // leaves the draft over `base`, by `by`, at `at`.
+  const ours = sql`EXISTS (SELECT 1 FROM drafts WHERE ${ofDraft} AND base = ${base} AND updated_by = ${by.userId} AND updated_at = ${at.getTime()})`;
+  const emptied = sql`${live} AND ${ours}`;
   // Its checkpoint isn't kept yet: false in a try after the one that kept it.
-  const unkept = sql`NOT EXISTS (SELECT 1 FROM draft_checkpoints WHERE subject_kind = ${kind} AND subject_id = ${id} AND revision = ${revision + 1} AND person_id = ${by.userId} AND created_at = ${at.getTime()})`;
+  const unkept = sql`NOT EXISTS (SELECT 1 FROM draft_checkpoints WHERE ${ofDraft} AND base = ${base} AND person_id = ${by.userId} AND created_at = ${at.getTime()})`;
+  const holdsChanges = sql`(EXISTS (SELECT 1 FROM draft_files WHERE ${ofDraft}) OR EXISTS (SELECT 1 FROM drafts WHERE ${ofDraft} AND definition IS NOT NULL))`;
   const contentHash = await contentHashOf(base, {}, null);
   return [
+    // What a roll back discards, told before the draft row moves.
+    ...(rollsBack
+      ? [
+          outboxedWhere(
+            db,
+            subjectEntry(by, "draft.discarded", subject, { version: base }),
+            sql`${live} AND ${holdsChanges} AND NOT ${ours}`
+          ),
+        ]
+      : []),
     // Its row made, for a draft never written yet (revision 0), as
     // `draftRow` makes it, in the table's column order.
     db
@@ -840,34 +906,20 @@ export const emptiedWithLive = async (
         target: [drafts.subjectKind, drafts.subjectId],
         set: {
           base,
-          revision: rollsBack
-            ? sql`CASE WHEN ${drafts.revision} = ${revision} THEN ${revision + 1} WHEN ${ours} THEN ${revision + 1} END`
-            : revision + 1,
+          revision: sql`${drafts.revision} + 1`,
           definition: null,
           updatedAt: at,
           updatedBy: by.userId,
         },
-        setWhere: rollsBack ? undefined : eq(drafts.revision, revision),
+        setWhere: rollsBack ? sql`NOT ${ours}` : eq(drafts.revision, revision),
       }),
     db.delete(draftFiles).where(and(ofSubject(draftFiles, subject), emptied)),
-    // Told before the checkpoint below, which it is told only without.
-    ...(discards
-      ? [
-          outboxedWhere(
-            db,
-            subjectEntry(by, "draft.discarded", subject, {
-              revision: revision + 1,
-            }),
-            sql`${emptied} AND ${unkept}`
-          ),
-        ]
-      : []),
     // Numbered in the statement, after whichever checkpoint landed last,
     // in the table's column order.
     db
       .insert(draftCheckpoints)
       .select(
-        sql`SELECT ${kind}, ${id}, COALESCE((SELECT MAX(number) FROM draft_checkpoints WHERE subject_kind = ${kind} AND subject_id = ${id}), 0) + 1, ${revision + 1}, ${base}, NULL, ${contentHash}, ${by.userId}, NULL, NULL, NULL, NULL, ${at.getTime()} WHERE ${emptied} AND ${unkept}`
+        sql`SELECT ${kind}, ${id}, COALESCE((SELECT MAX(number) FROM draft_checkpoints WHERE ${ofDraft}), 0) + 1, (SELECT revision FROM drafts WHERE ${ofDraft}), ${base}, NULL, ${contentHash}, ${by.userId}, NULL, NULL, NULL, NULL, ${at.getTime()} WHERE ${emptied} AND ${unkept}`
       ),
   ];
 };
@@ -881,7 +933,7 @@ const byPath = (one: string, other: string): number => {
 };
 
 /** Most checkpoints one `draftCheckpointsOf` call answers. */
-export const checkpointsPerPage = 50;
+const checkpointsPerPage = 50;
 
 /**
  * The paths each of `checkpoints` changed against the one before it, by
@@ -1070,17 +1122,25 @@ const replaceDraft = async (
     },
     createdAt
   );
-  await writeOver(env, db, kind, id, by, [
-    draftRow(db, kind, id, draft, revision, by, createdAt),
-    db.delete(draftFiles).where(ofSubject(draftFiles, subject)),
-    ...Object.entries(draft.changes).map(([path, content]) =>
-      db
-        .insert(draftFiles)
-        .values({ subjectKind: kind.kind, subjectId: id, path, content })
-    ),
-    ...kept.statements,
-    outboxed(db, entry(kept.row.number)),
-  ]);
+  await writeOver(
+    env,
+    db,
+    kind,
+    id,
+    by,
+    [
+      draftRow(db, kind, id, draft, revision, by, createdAt),
+      db.delete(draftFiles).where(ofSubject(draftFiles, subject)),
+      ...Object.entries(draft.changes).map(([path, content]) =>
+        db
+          .insert(draftFiles)
+          .values({ subjectKind: kind.kind, subjectId: id, path, content })
+      ),
+      ...kept.statements,
+      outboxed(db, entry(kept.row.number)),
+    ],
+    revision + 1
+  );
   return kept.row.number;
 };
 
@@ -1135,7 +1195,7 @@ const rebaseTries = 3;
 /**
  * Moves subject `id`'s draft onto the version live once a write left it
  * over an older one, as a write that landed while a publish went live
- * does (`emptiedWithLive`): the same files, as changes over the version
+ * does (`emptyDraftStatements`): the same files, as changes over the version
  * live (`rebasedOnto`), as a checkpoint of `by`'s, audited as theirs. So
  * the stored draft says what is still unshared. Read again after a write
  * meanwhile, a few times; one left over the older version still publishes
@@ -1244,7 +1304,7 @@ export const chatWork = async (
 /**
  * The chats of `personId`'s whose agent wrote `subject`'s draft: those a
  * checkpoint names, for the subject's page to carry on in
- * (`ChatsApi.forApp`).
+ * (`ChatsApi.forSubject`).
  */
 export const chatsWorkedOn = async (
   env: Env,

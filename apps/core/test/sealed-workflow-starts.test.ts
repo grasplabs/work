@@ -8,14 +8,13 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { callAppFunction, evaluateAppQuery } from "../src/app-functions.ts";
-import { appPublishing } from "../src/app-publish.ts";
 import {
   bindWorkflowToApp,
   unbindWorkflowFromApp,
 } from "../src/app-workflow-bindings.ts";
+import { appKind } from "../src/apps.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { rollback } from "../src/publish.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
@@ -32,6 +31,7 @@ import {
 } from "./sealed-workflow-starts-harness.ts";
 import { unique } from "./sign-in.ts";
 import { tiledPage } from "./split-pages.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // Starting workflows from a sealed App's functions, as they run in their
 // sandbox (spec 7.4, 9.5): the action's start and the mutation's staged
@@ -46,7 +46,7 @@ describe("a sealed App's functions", { timeout: 120_000 }, () => {
     const fixture = await appWith(files(), "Requests");
     const { owner, app } = fixture;
     const release = await seal(fixture);
-    await rollback(env, appPublishing, owner, app, 1);
+    await rollback(env, appKind, owner, app, 1);
     const bob = await person("user");
     await env.DB.prepare(
       "INSERT INTO app_members (app_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'user', ?, ?)"
@@ -58,14 +58,10 @@ describe("a sealed App's functions", { timeout: 120_000 }, () => {
       owner,
       `greet-${unique()}`
     );
-    await publishWorkflowVersion(env, owner, workflow.id, {
-      definition: definitionOf(),
-      basedOn: null,
-    });
+    await publishDefinition(env, owner, workflow.id, definitionOf());
     await bindWorkflowToApp(env, owner, workflow.id, {
       app,
       alias: "followUp",
-      version: 1,
     });
     const asked = await requestPermission(
       env,
@@ -143,7 +139,7 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
     const fixture = await appWith(files(), "Requests");
     const { owner, app } = fixture;
     const release = await seal(fixture);
-    await rollback(env, appPublishing, owner, app, 1);
+    await rollback(env, appKind, owner, app, 1);
     const [bob, carol] = await Promise.all([person("user"), person("user")]);
     for (const member of [bob, carol]) {
       // oxlint-disable-next-line no-await-in-loop -- two rows, one each
@@ -158,14 +154,10 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
       owner,
       `greet-${unique()}`
     );
-    await publishWorkflowVersion(env, owner, workflow.id, {
-      definition: definitionOf(),
-      basedOn: null,
-    });
+    await publishDefinition(env, owner, workflow.id, definitionOf());
     const binding = await bindWorkflowToApp(env, owner, workflow.id, {
       app,
       alias: "followUp",
-      version: 1,
     });
     const asked = await requestPermission(
       env,
@@ -477,7 +469,6 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
     await bindWorkflowToApp(env, owner, other.id, {
       app: first.app,
       alias: "followUp",
-      version: 1,
     });
     const rebound = {
       fresh: runIds(await ask({ pagination: {} })),

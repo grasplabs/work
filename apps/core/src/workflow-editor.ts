@@ -12,16 +12,11 @@ import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 
 import type { Acting } from "./auth/identity.ts";
 import { draftOf, filesOf, saveDraft } from "./drafts.ts";
-import type { DraftState, DraftWriter } from "./drafts.ts";
-import { requireNotStaff } from "./sharing.ts";
+import type { ChatWriter, DraftState, DraftWriter } from "./drafts.ts";
 import { withCurrentFunctionNames } from "./workflow-app-functions.ts";
 import { workflowDiagram } from "./workflow-diagram.ts";
-import {
-  definitionProblems,
-  requireWorkflowRole,
-  workflowDraftKind,
-  workflowFile,
-} from "./workflow-resources.ts";
+import { workflowKind } from "./workflow-publish.ts";
+import { definitionProblems, workflowFile } from "./workflow-resources.ts";
 import { applyStepEdit } from "./workflow-steps.ts";
 
 // A workflow's draft as its editor and its builders' agents write it
@@ -42,7 +37,7 @@ import { applyStepEdit } from "./workflow-steps.ts";
 //   while it has no problems. A publish or a test run checks it again.
 // - Disclosure: a definition can hold a sensitive parameter's default,
 //   so only the workflow's builders read or edit its draft, as only they
-//   read its published definitions. Grasp staff don't edit it.
+//   read its published definitions (`workflowKind`).
 // - Growth: an edit is bounded as a definition is (1 MiB), and its
 //   problems as below.
 
@@ -88,7 +83,7 @@ const textOf = async (
   id: string,
   draft: DraftState
 ): Promise<string> => {
-  const files = await filesOf(env, workflowDraftKind, id, draft);
+  const files = await filesOf(env, workflowKind, id, draft);
   return files.get(workflowFile) ?? starterDefinition;
 };
 
@@ -121,7 +116,7 @@ export const draftText = async (
   id: string,
   revision: number
 ): Promise<string> => {
-  const draft = await draftOf(env, workflowDraftKind, id);
+  const draft = await draftOf(env, workflowKind, id);
   if (draft.revision !== revision) {
     throw draftErrors.create("draft.conflict");
   }
@@ -132,29 +127,16 @@ export const draftText = async (
 export const workflowDraft = async (
   env: Env,
   by: Acting,
-  id: unknown
+  input: unknown
 ): Promise<WorkflowDraft> => {
-  const workflow = await requireWorkflowRole(env, by, id, "builder");
-  const draft = await draftOf(env, workflowDraftKind, workflow.id);
-  return await shown(
-    env,
-    by,
-    workflow.id,
-    draft.revision,
-    await textOf(env, workflow.id, draft)
-  );
+  const id = await workflowKind.readable(env, by, input);
+  const draft = await draftOf(env, workflowKind, id);
+  return await shown(env, by, id, draft.revision, await textOf(env, id, draft));
 };
-
-/** The chat whose agent writes a draft: in which turn and code step. */
-export interface ChatWriter {
-  chatId: string;
-  turnId: string | null;
-  callId: string | null;
-}
 
 /**
  * Saves `input` (`workflowDraftEditSchema`) as workflow `id`'s draft for
- * `by`, who must build it and isn't Grasp staff, over the revision they
+ * `by`, who may write it (`workflowKind.editable`), over the revision they
  * read (`draft.conflict` otherwise): as their own checkpoint, or the turn
  * of `chat`'s agent's. The text is kept as written, problems and all; a
  * text that is the live version's again is no change. `step` names the
@@ -165,7 +147,7 @@ export interface ChatWriter {
 export const editWorkflowDraft = async (
   env: Env,
   by: Acting,
-  id: unknown,
+  workflowInput: unknown,
   input: unknown,
   {
     chat,
@@ -177,8 +159,7 @@ export const editWorkflowDraft = async (
     step?: { kind: "change" | "insert"; pointer: string };
   } = {}
 ): Promise<WorkflowDraft> => {
-  requireNotStaff(by);
-  const workflow = await requireWorkflowRole(env, by, id, "builder");
+  const id = await workflowKind.editable(env, by, workflowInput);
   const { revision, source: given } = workflowResourceErrors.parse(
     "workflow.resource_invalid",
     workflowDraftEditSchema,
@@ -187,15 +168,15 @@ export const editWorkflowDraft = async (
   // Each App function it calls named as its App names it now: the hint
   // its code's member is named by (workflow-app-functions.ts).
   const source = await withCurrentFunctionNames(env, by, given);
-  const draft = await draftOf(env, workflowDraftKind, workflow.id);
+  const draft = await draftOf(env, workflowKind, id);
   if (draft.revision !== revision) {
     throw draftErrors.create("draft.conflict");
   }
-  const live = await filesOf(env, workflowDraftKind, workflow.id, {
+  const live = await filesOf(env, workflowKind, id, {
     base: draft.base,
     changes: {},
   });
-  const after = await shown(env, by, workflow.id, revision + 1, source);
+  const after = await shown(env, by, id, revision + 1, source);
   const writer: DraftWriter =
     chat === undefined
       ? {
@@ -210,8 +191,8 @@ export const editWorkflowDraft = async (
       : { by, chat };
   await saveDraft(
     env,
-    workflowDraftKind,
-    workflow.id,
+    workflowKind,
+    id,
     draft,
     live.get(workflowFile) === source
       ? { changes: {}, unchanged: [workflowFile] }
@@ -223,8 +204,8 @@ export const editWorkflowDraft = async (
 };
 
 /**
- * Inserts or changes one step of workflow `id`'s draft for `by`, who must
- * build it (`workflowStepEditSchema`, workflow-steps.ts): applied to the
+ * Inserts or changes one step of workflow `id`'s draft for `by`, who may
+ * write it (`workflowStepEditSchema`, workflow-steps.ts): applied to the
  * draft as it is at the revision they read, and saved exactly as
  * `editWorkflowDraft` saves an edit. The canvas and a chat's agent both
  * edit a step through this.
@@ -232,22 +213,21 @@ export const editWorkflowDraft = async (
 export const editWorkflowStep = async (
   env: Env,
   by: Acting,
-  id: unknown,
+  workflowInput: unknown,
   input: unknown,
   writer: { chat?: ChatWriter; admit?: () => Promise<void> } = {}
 ): Promise<WorkflowDraft> => {
-  requireNotStaff(by);
-  const workflow = await requireWorkflowRole(env, by, id, "builder");
+  const id = await workflowKind.editable(env, by, workflowInput);
   const { revision, edit } = workflowResourceErrors.parse(
     "workflow.resource_invalid",
     workflowStepEditSchema,
     input
   );
-  const source = await draftText(env, workflow.id, revision);
+  const source = await draftText(env, id, revision);
   return await editWorkflowDraft(
     env,
     by,
-    workflow.id,
+    id,
     { revision, source: applyStepEdit(source, edit) },
     {
       ...writer,

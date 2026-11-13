@@ -4,7 +4,7 @@ import type { AppId, ChatId } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { appDraftKind } from "../src/apps.ts";
+import { appKind } from "../src/apps.ts";
 import { readDraft, saveDraft } from "../src/drafts.ts";
 import { testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
@@ -118,7 +118,7 @@ const agentWrites = async (
   const now = await readDraft(env, { kind: "app", id: app });
   await saveDraft(
     env,
-    appDraftKind,
+    appKind,
 
     app,
     { ...now, base: 1, revision: revision ?? now.revision },
@@ -218,7 +218,7 @@ describe("an App's draft", { timeout: 180_000 }, () => {
     ): Promise<void> => {
       await saveDraft(
         env,
-        appDraftKind,
+        appKind,
 
         app,
         await readDraft(env, { kind: "app", id: app }),
@@ -279,7 +279,7 @@ describe("an App's draft", { timeout: 180_000 }, () => {
       // oxlint-disable-next-line no-await-in-loop -- one turn after the other
       await saveDraft(
         env,
-        appDraftKind,
+        appKind,
 
         app,
         // oxlint-disable-next-line no-await-in-loop -- read as each turn writes
@@ -585,7 +585,7 @@ describe("an App's draft", { timeout: 180_000 }, () => {
       await failure(async () => {
         await saveDraft(
           env,
-          appDraftKind,
+          appKind,
 
           app,
           await readDraft(env, { kind: "app", id: app }),

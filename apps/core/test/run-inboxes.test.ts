@@ -22,7 +22,6 @@ import {
   ensureReleaseContract,
   publishCatalogContract,
 } from "../src/workflow-catalog.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { RunHost } from "../src/workflows/host.ts";
@@ -49,6 +48,7 @@ import { admittedFreely, liveStatus, runObject } from "./runs.ts";
 import { moduleOf } from "./sealed-run-harness.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // A run's inboxes (run-inboxes.ts), from their threat model: a reply
 // address of the run's own for each event binding whose pinned contract
@@ -153,8 +153,11 @@ const inboxWorkflow = async () => {
     admin,
     `inboxes-${unique()}`
   );
-  await publishWorkflowVersion(env, admin, workflow.id, {
-    definition: JSON.stringify({
+  await publishDefinition(
+    env,
+    admin,
+    workflow.id,
+    JSON.stringify({
       $schema: workflowSchemaUrl,
       args: objectSchema({}),
       returns: objectSchema({}),
@@ -170,9 +173,8 @@ const inboxWorkflow = async () => {
         listen("awaitReply", emailReplyType, "replies"),
         listen("awaitJob", completed, "jobs"),
       ],
-    }),
-    basedOn: null,
-  });
+    })
+  );
   const pending = await workflowPendingBindings(env, admin, workflow.id);
   for (const alias of ["replies", "jobs"]) {
     // oxlint-disable-next-line no-await-in-loop -- two approvals, in turn

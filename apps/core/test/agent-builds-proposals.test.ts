@@ -3,7 +3,7 @@ import { actorOf } from "@grasp-os/shared/audit";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { appDraftKind } from "../src/apps.ts";
+import { appKind } from "../src/apps.ts";
 import { readDraft, saveDraft } from "../src/drafts.ts";
 import {
   createdApp,
@@ -283,7 +283,7 @@ export const titles = action({
     const draft = await readDraft(env, { kind: "app", id: existing });
     await saveDraft(
       env,
-      appDraftKind,
+      appKind,
 
       existing,
       { ...draft, base: 1 },

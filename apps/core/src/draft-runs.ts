@@ -40,13 +40,13 @@ import {
 } from "./app-people.ts";
 import { loadDraftRelease, sealDraftRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
-import { draftDefinition, draftFiles, editableApp } from "./apps.ts";
+import { appKind, draftDefinition, editableApp } from "./apps.ts";
 import { memberRole } from "./auth/identity.ts";
 import { holdThrowawayStore, throwawayStore } from "./data-stores.ts";
 import type { OpenStore } from "./data-stores.ts";
 import { pageModulesOf } from "./draft-references.ts";
 import type { PageModules } from "./draft-references.ts";
-import { changesAnything } from "./drafts.ts";
+import { changesAnything, filesOf } from "./drafts.ts";
 import type { DraftState } from "./drafts.ts";
 import { appPreview } from "./durable-objects.ts";
 import { hostFunctionCall } from "./function-host.ts";
@@ -156,7 +156,7 @@ const draftSource = async (
   return held === null
     ? null
     : {
-        files: await draftFiles(env, app, draft),
+        files: await filesOf(env, appKind, app, draft),
         definition: held.definition,
       };
 };

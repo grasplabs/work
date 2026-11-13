@@ -8,7 +8,6 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { editWorkflowDraft, workflowDraft } from "../src/workflow-editor.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import {
   candidateRunFor,
@@ -26,6 +25,7 @@ import {
   refusedAs,
 } from "./sealed-run-harness.ts";
 import { refusal, signedInApi, unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // A grasp-workflow/2 workflow calling an App's functions through
 // `ctx.apps.<alias>.<path>` (GRA-1663), through its public interfaces:
@@ -284,10 +284,12 @@ const resumed = async (runId: string, create: string) =>
 /** A waiting run of a workflow whose `create` is granted, and its setting. */
 const waitingRun = async () => {
   const set = await setUp();
-  await publishWorkflowVersion(env, set.acting, set.workflow.id, {
-    definition: writingNotes(set.app, set.create, set.titles, true),
-    basedOn: null,
-  });
+  await publishDefinition(
+    env,
+    set.acting,
+    set.workflow.id,
+    writingNotes(set.app, set.create, set.titles, true)
+  );
   const grant = await requestGranted(
     idp,
     set.builder,
@@ -314,10 +316,12 @@ const endOf = (ran: unknown): unknown =>
 describe("a workflow calling an App's functions", () => {
   it("calls the functions it was granted by their IDs, and fails on one it wasn't", async () => {
     const { builder, acting, app, workflow, create, titles } = await setUp();
-    await publishWorkflowVersion(env, acting, workflow.id, {
-      definition: writingNotes(app, create, titles),
-      basedOn: null,
-    });
+    await publishDefinition(
+      env,
+      acting,
+      workflow.id,
+      writingNotes(app, create, titles)
+    );
     // Only `create` granted: its call goes through, `titles` is refused.
     await requestGranted(idp, builder, callRequest(workflow.id, app, create));
     const halfway = await ranWith(builder, workflow.id, "First");
@@ -333,10 +337,12 @@ describe("a workflow calling an App's functions", () => {
   it("keeps calling the same function after the App renamed it", async () => {
     const { builder, acting, app, workflow, create, titles, source } =
       await setUp();
-    await publishWorkflowVersion(env, acting, workflow.id, {
-      definition: writingNotes(app, create, titles),
-      basedOn: null,
-    });
+    await publishDefinition(
+      env,
+      acting,
+      workflow.id,
+      writingNotes(app, create, titles)
+    );
     await requestGranted(idp, builder, callRequest(workflow.id, app, create));
     await requestGranted(idp, builder, callRequest(workflow.id, app, titles));
     // `create` is `add` now, and an impostor took the path `create`.
@@ -369,11 +375,13 @@ export const create = mutation({
     const other = await setUp();
 
     const refused = await refusal(
-      publishWorkflowVersion(env, acting, workflow.id, {
-        // `titles` of another App: an ID this App never gave.
-        definition: writingNotes(app, create, other.titles),
-        basedOn: null,
-      })
+      // `titles` of another App: an ID this App never gave.
+      publishDefinition(
+        env,
+        acting,
+        workflow.id,
+        writingNotes(app, create, other.titles)
+      )
     );
 
     expect(problemsOf(refused)).toStrictEqual({
@@ -415,10 +423,7 @@ export const create = mutation({
       { timeout: 30_000, interval: 100 }
     );
     // A real run of the same definition, granted, reads what the App holds.
-    await publishWorkflowVersion(env, acting, workflow.id, {
-      definition: source,
-      basedOn: null,
-    });
+    await publishDefinition(env, acting, workflow.id, source);
     await requestGranted(idp, builder, callRequest(workflow.id, app, create));
     await requestGranted(idp, builder, callRequest(workflow.id, app, titles));
     const real = await ranWith(builder, workflow.id, "Real");
@@ -606,10 +611,12 @@ export const create = mutation({
 
   it("writes once when its step is run again after the App wrote, its answer lost", async () => {
     const { builder, acting, app, workflow, create, titles } = await setUp();
-    await publishWorkflowVersion(env, acting, workflow.id, {
-      definition: writingNotes(app, create, titles, true),
-      basedOn: null,
-    });
+    await publishDefinition(
+      env,
+      acting,
+      workflow.id,
+      writingNotes(app, create, titles, true)
+    );
     await requestGranted(idp, builder, callRequest(workflow.id, app, create));
     await requestGranted(idp, builder, callRequest(workflow.id, app, titles));
     const { runId } = await builder.api.workflowResources.start(workflow.id, {
@@ -660,10 +667,12 @@ return { note: made.output, titles: listed.output };`);
   it("refuses code that calls a function its step doesn't seal, of its own App or another", async () => {
     const { builder, acting, app, workflow, create, titles } = await setUp();
     const other = await setUp();
-    await publishWorkflowVersion(env, acting, workflow.id, {
-      definition: writingNotes(app, create, titles, true),
-      basedOn: null,
-    });
+    await publishDefinition(
+      env,
+      acting,
+      workflow.id,
+      writingNotes(app, create, titles, true)
+    );
     // Both of the App's functions granted: the build, never the grant,
     // decides what a step calls.
     await requestGranted(idp, builder, callRequest(workflow.id, app, create));

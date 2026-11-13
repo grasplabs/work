@@ -12848,6 +12848,18 @@
           ],
           "isUnique": true,
           "where": "\"workflow_binding_approvals\".\"status\" = 'active'"
+        },
+        "workflow_binding_approvals_binding_idx": {
+          "name": "workflow_binding_approvals_binding_idx",
+          "columns": [
+            "workflow_resource_id",
+            "alias",
+            "kind",
+            "contract_id",
+            "fingerprint"
+          ],
+          "isUnique": true,
+          "where": "\"workflow_binding_approvals\".\"status\" = 'active'"
         }
       },
       "foreignKeys": {
@@ -14931,14 +14943,6 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
-        },
-        "contract_version": {
-          "name": "contract_version",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "''"
         },
         "definition": {
           "name": "definition",

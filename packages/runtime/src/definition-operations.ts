@@ -383,7 +383,7 @@ const permissionFrom = (
       Object.keys(declared.decisions).length > 0)
   ) {
     return refuse(
-      "A workflow's events, listen tasks and decisions come from the version you bind: add the workflow with its args and returns, then declare them with `bindWorkflow`."
+      "A workflow's events, listen tasks and decisions come from the live version of the workflow you bind: add the workflow with its args and returns, then declare them with `bindWorkflow`."
     );
   }
   // A declaration is JSON data, which `readPermissionDeclaration` reads back.

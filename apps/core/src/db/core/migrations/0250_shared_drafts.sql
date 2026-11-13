@@ -53,33 +53,33 @@ CREATE TABLE `drafts` (
 	PRIMARY KEY(`subject_kind`, `subject_id`)
 );
 --> statement-breakpoint
-ALTER TABLE `workflow_resource_versions` ADD `contract_version` text DEFAULT '' NOT NULL;--> statement-breakpoint
 ALTER TABLE `workflow_resource_versions` ADD `label` text;--> statement-breakpoint
 ALTER TABLE `workflow_resource_versions` ADD `status` text;--> statement-breakpoint
 CREATE UNIQUE INDEX `workflow_resource_versions_label` ON `workflow_resource_versions` (`workflow_resource_id`,`label`);--> statement-breakpoint
--- Every App's draft and its undo points move into the drafts every
--- subject shares (src/drafts.ts), as they are: an App's undo points are
--- its draft's checkpoints. The App tables stay, unread, for the release
--- before (expand, then contract).
-INSERT INTO `drafts` (`subject_kind`, `subject_id`, `base`, `revision`, `definition`, `updated_at`, `updated_by`)
-SELECT 'app', `app_id`, `base`, `revision`, `definition`, `updated_at`, `updated_by` FROM `app_drafts`;--> statement-breakpoint
-INSERT INTO `draft_files` (`subject_kind`, `subject_id`, `path`, `content`)
-SELECT 'app', `app_id`, `path`, `content` FROM `app_draft_files`;--> statement-breakpoint
-INSERT INTO `draft_checkpoints` (`subject_kind`, `subject_id`, `number`, `revision`, `base`, `definition`, `content_hash`, `person_id`, `chat_id`, `turn_id`, `call_id`, `restored_from`, `created_at`)
-SELECT 'app', `app_id`, `number`, `revision`, `base`, `definition`, `content_hash`, `person_id`, `chat_id`, `turn_id`, `call_id`, `restored_from`, `created_at` FROM `app_draft_points`;--> statement-breakpoint
-INSERT INTO `draft_checkpoint_files` (`subject_kind`, `subject_id`, `number`, `path`, `sha256`)
-SELECT 'app', `app_id`, `number`, `path`, `sha256` FROM `app_draft_point_files`;--> statement-breakpoint
-INSERT INTO `draft_blobs` (`subject_kind`, `subject_id`, `sha256`, `content`)
-SELECT 'app', `app_id`, `sha256`, `content` FROM `app_draft_contents`;--> statement-breakpoint
--- A workflow version stays as it was written but for its label, given
--- the first time it goes live (src/workflow-publish.ts): the trigger that
--- refused every update refuses an update of any other column, the
--- contract version filled in here first.
+-- An approval serves every version declaring its binding
+-- (src/workflow-bindings.ts): of the active approvals of one binding,
+-- given each for a version of its own, the newest stays and serves them
+-- all; the rest are revoked, as approving it again would have.
+UPDATE `workflow_binding_approvals` SET `status` = 'revoked', `revoked_by` = `approved_by`, `revoked_at` = `approved_at`
+WHERE `status` = 'active' AND EXISTS (SELECT 1 FROM `workflow_binding_approvals` AS `newer`
+  WHERE `newer`.`workflow_resource_id` = `workflow_binding_approvals`.`workflow_resource_id`
+    AND `newer`.`alias` = `workflow_binding_approvals`.`alias`
+    AND `newer`.`kind` = `workflow_binding_approvals`.`kind`
+    AND `newer`.`contract_id` = `workflow_binding_approvals`.`contract_id`
+    AND `newer`.`fingerprint` = `workflow_binding_approvals`.`fingerprint`
+    AND `newer`.`status` = 'active'
+    AND (`newer`.`approved_at` > `workflow_binding_approvals`.`approved_at`
+      OR (`newer`.`approved_at` = `workflow_binding_approvals`.`approved_at` AND `newer`.`id` > `workflow_binding_approvals`.`id`)));--> statement-breakpoint
+CREATE UNIQUE INDEX `workflow_binding_approvals_binding_idx` ON `workflow_binding_approvals` (`workflow_resource_id`,`alias`,`kind`,`contract_id`,`fingerprint`) WHERE "workflow_binding_approvals"."status" = 'active';--> statement-breakpoint
+-- Drafts start empty, Apps' and workflows' alike: nothing is copied from
+-- `app_drafts` or `workflow_resource_drafts`, which stay unused for the
+-- release before (expand, then contract).
+--
+-- A workflow version stays as it was written but for its label, given the
+-- first time it goes live (src/workflow-publish.ts): the trigger that
+-- refused every update refuses an update of any other column.
 DROP TRIGGER `workflow_resource_versions_immutable_update`;--> statement-breakpoint
--- A workflow version's contract version is what its definition version
--- was: the code reads the new column alone.
-UPDATE `workflow_resource_versions` SET `contract_version` = `definition_version`;--> statement-breakpoint
-CREATE TRIGGER `workflow_resource_versions_immutable_update` BEFORE UPDATE OF `workflow_resource_id`, `version`, `definition_version`, `definition`, `definition_json_hash`, `profile_version`, `evaluator_hash`, `contract`, `contract_hash`, `manifest`, `manifest_hash`, `author_id`, `created_at`, `seal_id`, `contract_version`, `status` ON `workflow_resource_versions`
+CREATE TRIGGER `workflow_resource_versions_immutable_update` BEFORE UPDATE OF `workflow_resource_id`, `version`, `definition_version`, `definition`, `definition_json_hash`, `profile_version`, `evaluator_hash`, `contract`, `contract_hash`, `manifest`, `manifest_hash`, `author_id`, `created_at`, `seal_id`, `status` ON `workflow_resource_versions`
 BEGIN
 	SELECT RAISE(ABORT, 'workflow_resource_versions are immutable');
 END;

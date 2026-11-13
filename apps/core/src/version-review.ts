@@ -10,7 +10,7 @@ import type {
   RowRule,
   WorkflowBindingExtras,
 } from "@grasp-os/runtime/host";
-import type { AppDraftChanges } from "@grasp-os/shared/app-drafts";
+import type { AppReview } from "@grasp-os/shared/app-review";
 import type { App, ReviewChange, TableRowRules } from "@grasp-os/shared/apps";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalText } from "@grasp-os/shared/json";
@@ -23,8 +23,8 @@ import { definitionPlan } from "./app-definition.ts";
 import { versionManifest } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
 import {
+  appKind,
   draftDefinition,
-  draftFiles,
   findVersion,
   readStored,
   versionFiles,
@@ -35,13 +35,14 @@ import {
   workflowResourceVersions,
 } from "./db/core/schema.ts";
 import { draftRelease } from "./draft-runs.ts";
+import { filesOf } from "./drafts.ts";
 import type { DraftState } from "./drafts.ts";
 import { permissionsOpenTo } from "./permissions-open.ts";
 import { askedAgainBy } from "./permissions.ts";
 import { takesFile } from "./workflows/start-files.ts";
 
 // What publishing an App's draft changes, for the builder who publishes
-// it (`AppDraftsApi.changes`): worked out here from the draft and the App
+// it (`apps.review`): worked out here from the draft and the App
 // as they are now, never taken from whoever wrote it (a chat's agent,
 // say), so a draft can't describe itself as less than it is. Against the
 // live version: its server code, its migrations, what the App asks for
@@ -126,7 +127,7 @@ const boundTakesFile = async (
 };
 
 /**
- * The row rules of the draft's tables (`AppDraftChanges.rowRules`), as
+ * The row rules of the draft's tables (`AppReview.rowRules`), as
  * its schema's manifest holds them: what the store will enforce, read
  * from the draft, never from what its writer says of it.
  */
@@ -157,7 +158,7 @@ const rowRulesOf = (manifest: AppManifest): TableRowRules[] =>
 
 /**
  * Whether the draft may hand files people can read to the workflows it
- * binds (`AppDraftChanges.handsFilesToWorkflows`): a boundary whoever
+ * binds (`AppReview.handsFilesToWorkflows`): a boundary whoever
  * publishes it sees, whatever else changed.
  */
 const handsFilesOf = async (
@@ -188,7 +189,7 @@ const handsFilesOf = async (
 /**
  * The explicit migrations of the draft (`next`, its manifest) the live
  * version (`previous`, none while none is) doesn't have as they are (see
- * `AppDraftChanges.migrations`), read from each one's App manifest, so
+ * `AppReview.migrations`), read from each one's App manifest, so
  * wherever and however they are declared or registered. A migration
  * declared the same counts as modified when the server code changed
  * (`serverChanged`): its transform may run any of it.
@@ -197,9 +198,9 @@ const migrationsOf = (
   next: AppManifest,
   previous: AppManifest | undefined,
   serverChanged: boolean
-): NonNullable<AppDraftChanges["migrations"]> => {
+): NonNullable<AppReview["migrations"]> => {
   const had = previous?.migrations ?? {};
-  const listed: NonNullable<AppDraftChanges["migrations"]> = [];
+  const listed: NonNullable<AppReview["migrations"]> = [];
   for (const declared of Object.values(next.migrations)) {
     const old = Object.hasOwn(had, declared.name)
       ? had[declared.name]
@@ -274,7 +275,7 @@ const differences = <T>(
 
 /** What a draft's review reads from its manifest, or nulls when it can't be read. */
 type ManifestReview = Pick<
-  AppDraftChanges,
+  AppReview,
   "migrations" | "handsFilesToWorkflows" | "readsPeople" | "rowRules"
 >;
 
@@ -337,7 +338,7 @@ const definitionReviewOf = async (
   env: Env,
   found: Pick<App, "id" | "currentVersion">,
   draft: DraftState
-): Promise<{ changed: boolean; plan: AppDraftChanges["plan"] }> => {
+): Promise<{ changed: boolean; plan: AppReview["plan"] }> => {
   try {
     const own = await draftDefinition(env, found.id, draft);
     const live =
@@ -375,7 +376,7 @@ export const reviewDraft = async (
   draft: DraftState
 ): Promise<
   Pick<
-    AppDraftChanges,
+    AppReview,
     | "server"
     | "serverFiles"
     | "migrations"
@@ -390,7 +391,7 @@ export const reviewDraft = async (
 > => {
   const { currentVersion: current } = found;
   const files = ownFiles(
-    Object.fromEntries(await draftFiles(env, found.id, draft))
+    Object.fromEntries(await filesOf(env, appKind, found.id, draft))
   );
   const before =
     current === null

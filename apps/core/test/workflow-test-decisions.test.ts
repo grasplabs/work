@@ -7,16 +7,14 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { appPublishing } from "../src/app-publish.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { fixtureHostFor } from "../src/app-tests.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
-import { findApp, releaseIdsOf } from "../src/apps.ts";
+import { appKind, findApp, releaseIdsOf } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { rollback } from "../src/publish.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { runEngine } from "../src/workflows/engine.ts";
 import { testApp } from "./app-definitions.ts";
@@ -24,6 +22,7 @@ import type { TestApp } from "./app-definitions.ts";
 import { resumed, stopped, whileEngineRefuses } from "./runs.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // A decision a run an App's test started waits for (`identity.start`,
 // workflows/fixture-decisions.ts), from its threat model first: answered
@@ -195,14 +194,15 @@ const invoicesApp = async (
     builder,
     `approve-${unique()}`
   );
-  await publishWorkflowVersion(env, builder, workflow.id, {
-    definition: definitionOf(contract, steps, status),
-    basedOn: null,
-  });
+  await publishDefinition(
+    env,
+    builder,
+    workflow.id,
+    definitionOf(contract, steps, status)
+  );
   await bindWorkflowToApp(env, builder, workflow.id, {
     app: fixture.app,
     alias: "approval",
-    version: 1,
   });
   await seal(fixture);
   const release = await loadRelease(env, fixture.app, 1);
@@ -359,7 +359,7 @@ const activated = async (
   app: string
 ): Promise<unknown> => {
   try {
-    await rollback(env, appPublishing, by, app, 1);
+    await rollback(env, appKind, by, app, 1);
   } catch (error) {
     if (!isExpectedError(error)) {
       throw error;

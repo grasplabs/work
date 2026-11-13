@@ -214,7 +214,7 @@ describe("a Grasp staff member added as a member", () => {
     const { core } = await openRpc(session);
     const member = core.authenticate();
     const who = await whoami(session);
-    await builder.api.workflowResources.share(workflow, {
+    await builder.api.workflowResources.members.add(workflow, {
       type: "person",
       id: who.userId,
       role: "user",

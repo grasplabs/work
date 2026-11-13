@@ -4,9 +4,8 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
 
-import { appPublishing } from "../src/app-publish.ts";
 import type { Release } from "../src/app-releases.ts";
-import { createApp } from "../src/apps.ts";
+import { appKind, createApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { rollback } from "../src/publish.ts";
 import { appOf } from "./app-definitions.ts";
@@ -129,7 +128,7 @@ export const failuresOf = async (
   on: Env = env
 ): Promise<unknown> => {
   try {
-    await rollback(on, appPublishing, owner, app, 1);
+    await rollback(on, appKind, owner, app, 1);
   } catch (error) {
     if (isExpectedError(error) && error.code === "version.tests_failed") {
       return error.details?.failures;

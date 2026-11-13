@@ -3,7 +3,7 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { appDraftKind } from "../src/apps.ts";
+import { appKind } from "../src/apps.ts";
 import { readDraft, saveDraft } from "../src/drafts.ts";
 import { commitApp, redefined, testApp } from "./app-definitions.ts";
 import { release } from "./apps.ts";
@@ -103,7 +103,7 @@ describe("an App's draft files, for the App's code view", () => {
     const before = await builder.api.drafts.get({ kind: "app", id: app });
     await saveDraft(
       env,
-      appDraftKind,
+      appKind,
 
       app,
       await readDraft(env, { kind: "app", id: app }),

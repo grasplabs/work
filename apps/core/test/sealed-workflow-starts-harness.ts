@@ -4,18 +4,17 @@ import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
 
-import { appPublishing } from "../src/app-publish.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
-import { appFor } from "../src/apps.ts";
+import { appKind, appFor } from "../src/apps.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { rollback } from "../src/publish.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
 import { appWith, seal } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // What sealed-workflow-starts*.test.ts share: the App that binds a
 // workflow, and how they start its runs and read them.
@@ -134,10 +133,7 @@ export const greetingOf = async (owner: Identity) => {
     owner,
     `greet-${unique()}`
   );
-  await publishWorkflowVersion(env, owner, workflow.id, {
-    definition: definitionOf(),
-    basedOn: null,
-  });
+  await publishDefinition(env, owner, workflow.id, definitionOf());
   return workflow;
 };
 
@@ -153,7 +149,7 @@ export const requestsApp = async (
 ) => {
   const fixture = await appWith(files(), "Requests", owner);
   const release = await seal(fixture);
-  await rollback(env, appPublishing, fixture.owner, fixture.app, 1);
+  await rollback(env, appKind, fixture.owner, fixture.app, 1);
   for (const member of members) {
     // oxlint-disable-next-line no-await-in-loop -- a row each
     await env.DB.prepare(
@@ -165,7 +161,6 @@ export const requestsApp = async (
   const binding = await bindWorkflowToApp(env, fixture.owner, workflowId, {
     app: fixture.app,
     alias: "followUp",
-    version: 1,
   });
   const asked = await requestPermission(
     env,
@@ -219,10 +214,9 @@ export const pinnedApp = async (
   await bindWorkflowToApp(env, owner, workflowId, {
     app: fixture.app,
     alias: "followUp",
-    version: 1,
   });
   const release = await seal(fixture);
-  await rollback(env, appPublishing, owner, fixture.app, 1);
+  await rollback(env, appKind, owner, fixture.app, 1);
   for (const member of members) {
     // oxlint-disable-next-line no-await-in-loop -- a row each
     await env.DB.prepare(

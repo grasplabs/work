@@ -1,9 +1,8 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { appPublishing } from "../../src/app-publish.ts";
 import { sealRelease } from "../../src/app-releases.ts";
-import { findApp } from "../../src/apps.ts";
+import { appKind, findApp } from "../../src/apps.ts";
 import { platformPlaceWaitMs } from "../../src/platform-sandbox.ts";
 import { rollback } from "../../src/publish.ts";
 import { sandboxSubOwnerHeader } from "../../src/sandbox-headers.ts";
@@ -60,7 +59,7 @@ describe("an App's tests on-prem", { timeout: 180_000 }, () => {
       try {
         await rollback(
           envWith({ SANDBOX_HOST: watching }),
-          appPublishing,
+          appKind,
           built.owner,
           built.app,
           1

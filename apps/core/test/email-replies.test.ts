@@ -17,7 +17,6 @@ import {
   revokeWorkflowBinding,
 } from "../src/workflow-bindings.ts";
 import { ensureReleaseContract } from "../src/workflow-catalog.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { trustedAuthservId } from "../src/workflows/authentication-results.ts";
@@ -29,6 +28,7 @@ import { endLiveResourceRuns } from "./json-workflow-apps.ts";
 import { aroundEngine, liveStatus, runObject, woken } from "./runs.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // Replies to a run's mail, delivered to its inbox (inbound-email.ts,
 // `receiveReply`), from the threat model in run-inboxes.ts. Anyone the
@@ -101,8 +101,11 @@ const replyWorkflow = async (aliases: readonly string[] = ["replies"]) => {
     admin,
     `replies-${unique()}`
   );
-  await publishWorkflowVersion(env, admin, workflow.id, {
-    definition: JSON.stringify({
+  await publishDefinition(
+    env,
+    admin,
+    workflow.id,
+    JSON.stringify({
       $schema: workflowSchemaUrl,
       args: objectSchema({}),
       returns: objectSchema({ subject: { kind: "string" } }),
@@ -126,9 +129,8 @@ const replyWorkflow = async (aliases: readonly string[] = ["replies"]) => {
           timeout: "5 minutes",
         })),
       ],
-    }),
-    basedOn: null,
-  });
+    })
+  );
   const approvals: string[] = [];
   for (const alias of aliases) {
     // oxlint-disable-next-line no-await-in-loop -- approvals, in turn

@@ -1,8 +1,8 @@
 import { z } from "zod";
 
 import type { AppDataApi } from "./app-data.ts";
-import type { AppDraftChanges, AppPreviewApi } from "./app-drafts.ts";
 import { appLimits, appPathSegmentPattern } from "./app-limits.ts";
+import type { AppReview, AppPreviewApi } from "./app-review.ts";
 import type { AppVisitorEntry, AppVisitorGrants } from "./app-visitors.ts";
 import type { AppWebhooksApi } from "./app-webhooks.ts";
 import { businessProcessSchema } from "./business-processes.ts";
@@ -295,7 +295,7 @@ export type FileDiff =
 /** How something differs from the current version. */
 export type ReviewChange = "added" | "modified" | "removed";
 
-/** One row rule, as a draft's changes show it (`AppDraftChanges.rowRules`). */
+/** One row rule, as a draft's changes show it (`AppReview.rowRules`). */
 export type ReviewedRowRule =
   | { kind: "owner" }
   | { kind: "person"; field: string }
@@ -823,10 +823,10 @@ export interface AppsApi {
   answerers: (app: string) => Promise<AppAnswerer[]>;
   /**
    * What publishing the App's draft would change against its live
-   * version, and whether its checks pass (`AppDraftChanges`), to review
+   * version, and whether its checks pass (`AppReview`), to review
    * before publishing it at the revision this names (`DraftsApi.publish`).
    */
-  review: (app: string) => Promise<AppDraftChanges>;
+  review: (app: string) => Promise<AppReview>;
   /**
    * The data model of the App's draft, from its definition, and what
    * publishing the draft does to the App's records.

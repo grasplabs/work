@@ -10,7 +10,6 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import type { AgentScope } from "../src/agent-scope.ts";
 import { memberOf } from "../src/auth/identity.ts";
 import { confirmHeldStart, sweepHeldStartInputs } from "../src/held-starts.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import {
   createWorkflowResource,
   shareWorkflowResource,
@@ -21,6 +20,7 @@ import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { greetingOf } from "./json-workflow-apps.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // A chat's agent asking to start an independent workflow
 // (agent-workflows.ts, `start`; held-starts.ts), from its threat model:
@@ -49,10 +49,7 @@ const workflowFor = async (userId: string, shared = true) => {
     throw new Error("Expected the builder to be a member");
   }
   const workflow = await createWorkflowResource(env, by, `greet-${unique()}`);
-  await publishWorkflowVersion(env, by, workflow.id, {
-    definition: greetingOf(),
-    basedOn: null,
-  });
+  await publishDefinition(env, by, workflow.id, greetingOf());
   if (shared) {
     await shareWorkflowResource(env, by, workflow.id, {
       type: "person",

@@ -23,7 +23,6 @@ import {
 } from "../src/workflow-bindings.ts";
 import { generatedModule } from "../src/workflow-builds.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import {
@@ -55,6 +54,7 @@ import { engineOfTest } from "./run-host.ts";
 import { admittedFreely, liveStatus, runObject } from "./runs.ts";
 import { moduleOf as harnessModuleOf } from "./sealed-run-harness.ts";
 import { routed, unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // Waits on an event source's events by a match (event-waits.ts), from
 // their threat model. A run waits for `payment.paid` whose data's
@@ -151,15 +151,17 @@ const paymentWorkflow = async (on?: {
     },
   });
   const workflow = await createWorkflowResource(env, admin, `pay-${unique()}`);
-  await publishWorkflowVersion(env, admin, workflow.id, {
-    definition: JSON.stringify({
+  await publishDefinition(
+    env,
+    admin,
+    workflow.id,
+    JSON.stringify({
       $schema: workflowSchemaUrl,
       args: objectSchema({ invoice: { kind: "string" } }),
       permissions: { events: { payments: { contract } } },
       steps: [{ id: "linger", type: "wait", for: "1 hour" }, awaitPaid],
-    }),
-    basedOn: null,
-  });
+    })
+  );
   const source = on?.source ?? (await sourceOf(admin));
   const approval = await approveWorkflowBinding(env, admin, workflow.id, {
     alias: "payments",
@@ -1067,15 +1069,17 @@ describe("publishing and approving a wait on a webhook source's events", () => {
     /** Publishing `awaitPaid` changed by `change`: "published", or its problems' codes. */
     const publishing = async (change: Record<string, unknown>) => {
       try {
-        await publishWorkflowVersion(env, admin, workflow.id, {
-          definition: JSON.stringify({
+        await publishDefinition(
+          env,
+          admin,
+          workflow.id,
+          JSON.stringify({
             $schema: workflowSchemaUrl,
             args: objectSchema({ invoice: { kind: "string" } }),
             permissions: { events: { payments: { contract } } },
             steps: [{ ...awaitPaid, ...change }],
-          }),
-          basedOn: null,
-        });
+          })
+        );
         return "published";
       } catch (error) {
         return z

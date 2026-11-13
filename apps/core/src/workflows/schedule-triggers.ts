@@ -90,7 +90,7 @@ const minuteMs = 60_000;
  * next occurrence. `start_denied` is a trigger whose person left or lost
  * their role, whose `start` grant was revoked, or whose workflow is gone;
  * `start_invalid` an input the version no longer takes; `paused` a workflow
- * paused (workflow-lifecycle.ts), whose occurrences are skipped and never
+ * paused (workflow-pause.ts), whose occurrences are skipped and never
  * counted toward stopping. A trigger disabled,
  * deleted or moved meanwhile (`trigger_unavailable`) is read as due no
  * more, so it is let be.

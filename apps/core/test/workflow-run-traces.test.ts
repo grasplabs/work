@@ -17,7 +17,6 @@ import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import {
   createWorkflowResource,
   shareWorkflowResource,
@@ -36,6 +35,7 @@ import {
   serving,
 } from "./sealed-run-harness.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // A run laid over its version's diagram (resource-run-trace.ts): the
 // tasks its own journal reached, each step of them in order, with its loop
@@ -173,10 +173,7 @@ describe("a run's trace", () => {
       by,
       `traced-${unique()}`
     );
-    await publishWorkflowVersion(env, by, workflow.id, {
-      definition: definitionOf(routing),
-      basedOn: null,
-    });
+    await publishDefinition(env, by, workflow.id, definitionOf(routing));
     const ada = await ranFor(by, workflow.id, 1, "Ada");
     const grace = await ranFor(by, workflow.id, 1, "Grace");
     const declared = ["route", "greetAda", "greetOther", "finished"];
@@ -204,15 +201,14 @@ describe("a run's trace", () => {
       by,
       `traced-${unique()}`
     );
-    await publishWorkflowVersion(env, by, workflow.id, {
-      definition: definitionOf([failing("mark")]),
-      basedOn: null,
-    });
+    await publishDefinition(
+      env,
+      by,
+      workflow.id,
+      definitionOf([failing("mark")])
+    );
     const failed = await ranFor(by, workflow.id, 1, "Ada");
-    await publishWorkflowVersion(env, by, workflow.id, {
-      definition: definitionOf(routing),
-      basedOn: 1,
-    });
+    await publishDefinition(env, by, workflow.id, definitionOf(routing));
     expect(
       pathOf(await resourceRunTrace(env, by, workflow.id, failed))
     ).toStrictEqual({
@@ -229,8 +225,11 @@ describe("a run's trace", () => {
       by,
       `traced-${unique()}`
     );
-    await publishWorkflowVersion(env, by, workflow.id, {
-      definition: definitionOf([
+    await publishDefinition(
+      env,
+      by,
+      workflow.id,
+      definitionOf([
         passing("init"),
         {
           id: "eachName",
@@ -239,9 +238,8 @@ describe("a run's trace", () => {
           do: [passing("note")],
         },
         passing("finished"),
-      ]),
-      basedOn: null,
-    });
+      ])
+    );
     const run = await ranFor(by, workflow.id, 1, "Ada");
     const { steps } = await resourceRunTrace(env, by, workflow.id, run);
     const timed = steps.every(
@@ -277,15 +275,19 @@ describe("a run's trace", () => {
       by,
       `traced-${unique()}`
     );
-    await publishWorkflowVersion(env, by, workflow.id, {
-      definition: definitionOf([failing("mark")]),
-      basedOn: null,
-    });
+    await publishDefinition(
+      env,
+      by,
+      workflow.id,
+      definitionOf([failing("mark")])
+    );
     const raiser = await createWorkflowResource(env, by, `traced-${unique()}`);
-    await publishWorkflowVersion(env, by, raiser.id, {
-      definition: definitionOf([raising("refuse")]),
-      basedOn: null,
-    });
+    await publishDefinition(
+      env,
+      by,
+      raiser.id,
+      definitionOf([raising("refuse")])
+    );
     const failed = await ranFor(by, workflow.id, 1, "Ada");
     const raised = await ranFor(by, raiser.id, 1, "Ada");
     expect({
@@ -308,10 +310,7 @@ describe("a run's trace", () => {
       by,
       `traced-${unique()}`
     );
-    await publishWorkflowVersion(env, by, workflow.id, {
-      definition: definitionOf(routing),
-      basedOn: null,
-    });
+    await publishDefinition(env, by, workflow.id, definitionOf(routing));
     const run = await ranFor(by, workflow.id, 1, "Ada");
     // Past the 30 days its details are kept.
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -339,10 +338,7 @@ describe("a run's trace", () => {
       `traced-${unique()}`
     );
     const other = await createWorkflowResource(env, by, `traced-${unique()}`);
-    await publishWorkflowVersion(env, by, workflow.id, {
-      definition: definitionOf(routing),
-      basedOn: null,
-    });
+    await publishDefinition(env, by, workflow.id, definitionOf(routing));
     await shareWorkflowResource(env, by, workflow.id, {
       type: "person",
       id: user.userId,
@@ -450,8 +446,11 @@ describe("a run's trace, read over the session API", () => {
       builder.acting,
       `traced-${unique()}`
     );
-    await publishWorkflowVersion(env, builder.acting, workflow.id, {
-      definition: definitionOf(
+    await publishDefinition(
+      env,
+      builder.acting,
+      workflow.id,
+      definitionOf(
         [
           {
             id: "guard",
@@ -472,9 +471,8 @@ describe("a run's trace, read over the session API", () => {
           },
         ],
         { connections: { mail: { contract } } }
-      ),
-      basedOn: null,
-    });
+      )
+    );
     await unavailableMail(builder.acting, admin, workflow.id);
     const runId = await ranFor(builder.acting, workflow.id, 1, "Ada", serving);
 
@@ -517,8 +515,11 @@ describe("a run's trace, read over the session API", () => {
       builder.acting,
       `traced-${unique()}`
     );
-    await publishWorkflowVersion(env, builder.acting, workflow.id, {
-      definition: definitionOf(
+    await publishDefinition(
+      env,
+      builder.acting,
+      workflow.id,
+      definitionOf(
         [
           {
             id: "ask",
@@ -531,9 +532,8 @@ describe("a run's trace, read over the session API", () => {
           passing("finish"),
         ],
         { decisions: { approval: { contract } } }
-      ),
-      basedOn: null,
-    });
+      )
+    );
     await approveWorkflowBinding(env, admin, workflow.id, {
       alias: "approval",
       target: { kind: "decision", deciders: [`person:${reviewer.userId}`] },
@@ -633,8 +633,11 @@ describe("a run's trace, read over the session API", () => {
       );
       // More records than a trace reads: some four an item's step.
       const items = 600;
-      await publishWorkflowVersion(env, builder.acting, long.id, {
-        definition: definitionOf([
+      await publishDefinition(
+        env,
+        builder.acting,
+        long.id,
+        definitionOf([
           {
             id: "eachName",
             type: "forEach",
@@ -642,18 +645,19 @@ describe("a run's trace, read over the session API", () => {
             do: [quick("note")],
           },
           passing("finished"),
-        ]),
-        basedOn: null,
-      });
+        ])
+      );
       const short = await createWorkflowResource(
         env,
         builder.acting,
         `traced-${unique()}`
       );
-      await publishWorkflowVersion(env, builder.acting, short.id, {
-        definition: definitionOf(routing),
-        basedOn: null,
-      });
+      await publishDefinition(
+        env,
+        builder.acting,
+        short.id,
+        definitionOf(routing)
+      );
       const traceOf = async (id: string, runId: string) =>
         await builder.api.workflowResources.runTrace(id, runId);
       // Room for the loop's steps, past the tests' lowered step limit,

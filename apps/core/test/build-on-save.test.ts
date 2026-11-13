@@ -3,9 +3,8 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { appPublishing } from "../src/app-publish.ts";
 import { sealRelease } from "../src/app-releases.ts";
-import { versionFiles } from "../src/apps.ts";
+import { appKind, versionFiles } from "../src/apps.ts";
 import { versionPageCodes } from "../src/page-references.ts";
 import { buildPages, versionPages } from "../src/pages.ts";
 import { rollback } from "../src/publish.ts";
@@ -346,7 +345,7 @@ export const Route = createFileRoute("/")({ component: Desk });
     // Answers while builds are still held.
     const made = await rollback(
       { ...env, FILES: holding },
-      appPublishing,
+      appKind,
       by,
       app,
       version

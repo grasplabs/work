@@ -11,7 +11,6 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { editWorkflowDraft, workflowDraft } from "../src/workflow-editor.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import {
   createWorkflowResource,
   shareWorkflowResource,
@@ -27,6 +26,7 @@ import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { allEvents } from "./audit-events.ts";
 import { objectSchema, passing } from "./json-workflow-apps.ts";
 import { outcome, unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // A test of a workflow's draft over recent real items
 // (workflows/item-tests.ts), from its threat model: each item runs as a
@@ -137,10 +137,12 @@ const workflowOf = async (
   draft: Parameters<typeof definitionOf>[1]
 ) => {
   const workflow = await createWorkflowResource(env, by, `items-${unique()}`);
-  await publishWorkflowVersion(env, by, workflow.id, {
-    definition: definitionOf("Version 1", echo),
-    basedOn: null,
-  });
+  await publishDefinition(
+    env,
+    by,
+    workflow.id,
+    definitionOf("Version 1", echo)
+  );
   const { revision: base } = await workflowDraft(env, by, workflow.id);
   const saved = await editWorkflowDraft(env, by, workflow.id, {
     revision: base,

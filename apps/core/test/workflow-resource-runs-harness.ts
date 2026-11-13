@@ -13,7 +13,6 @@ import { z } from "zod";
 
 import type { Acting } from "../src/auth/identity.ts";
 import { generatedModule } from "../src/workflow-builds.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { runEngine } from "../src/workflows/engine.ts";
@@ -29,6 +28,7 @@ import { runObject, whileEngineRefuses } from "./runs.ts";
 import { putArtifact } from "./sealed-apps.ts";
 import { moduleOf } from "./sealed-run-harness.ts";
 import { outcome, unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 /**
  * The harness of runs of JSON workflows, shared by the
@@ -102,10 +102,7 @@ export const failingDefinition = definitionOf([], {
 /** A workflow of `by`'s, published once from `definition`. */
 export const published = async (by: Acting, definition: string) => {
   const workflow = await createWorkflowResource(env, by, `run-${unique()}`);
-  await publishWorkflowVersion(env, by, workflow.id, {
-    definition,
-    basedOn: null,
-  });
+  await publishDefinition(env, by, workflow.id, definition);
   return workflow;
 };
 

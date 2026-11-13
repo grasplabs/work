@@ -4,7 +4,6 @@ import { z } from "zod";
 
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { revokePermission } from "../src/permissions.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { grantReviewed } from "./apps.ts";
 import { mockIdpWith } from "./idp.ts";
@@ -37,6 +36,7 @@ import {
   widerOf,
 } from "./page-typed-workflows-harness.ts";
 import { unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // A page's typed `useWorkflow` through the real host (spec 10.4,
 // page-workflows.ts; the threat model is on GRA-626): its starts and
@@ -58,10 +58,12 @@ const anotherWorkflow = async (
     builder.acting,
     `other-${unique()}`
   );
-  await publishWorkflowVersion(env, builder.acting, other.id, {
-    definition: greetingOf(hold, "Another"),
-    basedOn: null,
-  });
+  await publishDefinition(
+    env,
+    builder.acting,
+    other.id,
+    greetingOf(hold, "Another")
+  );
   return other.id;
 };
 
@@ -248,7 +250,7 @@ describe(
         env,
         builder.acting,
         await anotherWorkflow(builder),
-        { app, alias: "followUp", version: 1 }
+        { app, alias: "followUp" }
       );
       const channel = pageRuns(builder, app, lease, reference);
       const stopBinding = channel.followBinding(() => {
@@ -420,7 +422,7 @@ describe(
         env,
         builder.acting,
         await anotherWorkflow(builder, "1 hour"),
-        { app, alias: "followUp", version: 1 }
+        { app, alias: "followUp" }
       );
       await vi.waitFor(() => {
         expect(first.received.at(-1)?.outcome).toBeNull();
@@ -430,7 +432,6 @@ describe(
       await bindWorkflowToApp(env, builder.acting, fixture.workflow, {
         app,
         alias: "followUp",
-        version: 1,
       });
       await vi.waitFor(() => {
         expect(shownOf(first.received.at(-1)?.outcome)).toBe("running");

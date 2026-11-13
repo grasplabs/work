@@ -19,7 +19,6 @@ import {
   updateTriggerVersion,
 } from "../src/trigger-resources.ts";
 import { revokeWorkflowBinding } from "../src/workflow-bindings.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import { workflowDefinition } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { resourceRunTrace } from "../src/workflows/resource-run-trace.ts";
@@ -48,6 +47,7 @@ import {
   receiptsOf,
   started,
 } from "./workflow-calls.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // The calls of grasp-workflow/2 workflows on the run host (sealed-run.ts,
 // resource-calls.ts and resource-authority.ts), from their threat model:
@@ -528,15 +528,17 @@ describe("model calls", () => {
       const first = z
         .looseObject({ steps: z.array(z.looseObject({})) })
         .parse(JSON.parse(await workflowDefinition(env, ada, workflow.id, 1)));
-      await publishWorkflowVersion(env, ada, workflow.id, {
-        definition: JSON.stringify({
+      await publishDefinition(
+        env,
+        ada,
+        workflow.id,
+        JSON.stringify({
           ...first,
           steps: first.steps.map((step, index) =>
             index === 0 ? { ...step, title: "Wait a day" } : step
           ),
-        }),
-        basedOn: 1,
-      });
+        })
+      );
       const trigger = await createTriggerResource(env, ada, {
         kind: "webhook",
         workflowId: workflow.id,

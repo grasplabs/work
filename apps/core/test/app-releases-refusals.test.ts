@@ -3,16 +3,16 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { appPublishing } from "../src/app-publish.ts";
 import { sealRelease } from "../src/app-releases.ts";
 import {
+  appKind,
   commitDraft,
   createApp,
   draftDefinition,
-  draftFiles,
   nextVersion,
 } from "../src/apps.ts";
 import { deleteStore, openStore } from "../src/data-stores.ts";
+import { filesOf } from "../src/drafts.ts";
 import { buildAppCode } from "../src/pages.ts";
 import { rollback } from "../src/publish.ts";
 import {
@@ -182,7 +182,7 @@ JSON.stringify = (value, ...rest) => {
 
   it("binds its own App's store alone: another App's seal, by a builder of both, never reaches it", async () => {
     const first = await appWith(notesFiles());
-    await rollback(env, appPublishing, first.owner, first.app, 1);
+    await rollback(env, appKind, first.owner, first.app, 1);
     const second = await appWith(withTable("beta"), "Beta", first.owner);
     const sealed = await seal(second);
     const opened = await openStore(env, first.store);
@@ -218,7 +218,7 @@ JSON.stringify = (value, ...rest) => {
   it("keeps its store from being deleted while any release kept binds it, and lets it go once retention removed them", async () => {
     const fixture = await appWith(notesFiles());
     await seal(fixture);
-    await rollback(env, appPublishing, fixture.owner, fixture.app, 1);
+    await rollback(env, appKind, fixture.owner, fixture.app, 1);
     const current = await failure(async () => {
       await deleteStore(env, fixture.owner, fixture.store);
     });
@@ -237,7 +237,7 @@ JSON.stringify = (value, ...rest) => {
       "Two"
     );
     await seal(fixture, 2);
-    await rollback(env, appPublishing, fixture.owner, fixture.app, 2);
+    await rollback(env, appKind, fixture.owner, fixture.app, 2);
     const retained = await failure(async () => {
       await deleteStore(env, fixture.owner, fixture.store);
     });
@@ -356,13 +356,12 @@ export const reach = action({
     const draft = {
       parent: 1,
       version: await nextVersion(env, fixture.app),
-      files: await draftFiles(env, fixture.app, changes),
+      files: await filesOf(env, appKind, fixture.app, changes),
       definition: defined?.definition ?? null,
     };
     await expect(
       failure(
-        async () =>
-          await commitDraft(env, fixture.owner, fixture.app, draft, "No schema")
+        async () => await commitDraft(env, fixture.owner, fixture.app, draft)
       )
       // Its schema generated from its definition again: the version it
       // would commit is the one it is over.

@@ -8,17 +8,15 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { appPublishing } from "../src/app-publish.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { fixtureHostFor, sweepTestFixtures } from "../src/app-tests.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
-import { findApp, releaseIdsOf } from "../src/apps.ts";
+import { appKind, findApp, releaseIdsOf } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { rollback } from "../src/publish.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { setWorkflowParams } from "../src/workflow-params.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { runEngine, runObjectOf } from "../src/workflows/engine.ts";
@@ -30,6 +28,7 @@ import { liveStatus, sleeping, statusOnce } from "./runs.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import { auditedDuring, unique } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // Workflow runs in an App's tests (`appTest`, spec 28.2): a test identity
 // starts a workflow the release under test binds, and the run is real, on
@@ -139,10 +138,7 @@ const workflowOf = async (
   shape: Parameters<typeof definitionOf>[1] = {}
 ): Promise<string> => {
   const workflow = await createWorkflowResource(env, by, `greet-${unique()}`);
-  await publishWorkflowVersion(env, by, workflow.id, {
-    definition: definitionOf(steps, shape),
-    basedOn: null,
-  });
+  await publishDefinition(env, by, workflow.id, definitionOf(steps, shape));
   return workflow.id;
 };
 
@@ -157,7 +153,6 @@ const requestsApp = async (
   await bindWorkflowToApp(env, builder, workflowId, {
     app: fixture.app,
     alias: "followUp",
-    version: 1,
   });
   await seal(fixture);
   const release = await loadRelease(env, fixture.app, 1);
@@ -266,7 +261,7 @@ const activated = async (
   app: string
 ): Promise<unknown> => {
   try {
-    await rollback(env, appPublishing, by, app, 1);
+    await rollback(env, appKind, by, app, 1);
   } catch (error) {
     if (!isExpectedError(error)) {
       throw error;
@@ -940,17 +935,19 @@ export default appTest(schema, {
         by,
         `wider-${unique()}`
       );
-      await publishWorkflowVersion(env, by, workflow.id, {
-        definition: JSON.stringify({
+      await publishDefinition(
+        env,
+        by,
+        workflow.id,
+        JSON.stringify({
           ...JSON.parse(definitionOf([])),
           returns: objectSchema({
             status: { kind: "string" },
             secret: { kind: "string" },
           }),
           result: { status: "hello", secret: "ultramarine" },
-        }),
-        basedOn: null,
-      });
+        })
+      );
       return workflow.id;
     });
     const session = await sessionOf(release);

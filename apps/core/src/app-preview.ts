@@ -7,7 +7,7 @@ import type { PageProblem, ServerLog } from "@grasp-os/shared/pages";
 import { dataErrors } from "@grasp-os/shared/stores";
 import { DurableObject } from "cloudflare:workers";
 
-import { appDraftKind } from "./apps.ts";
+import { appKind } from "./apps.ts";
 import { emptyThrowawayStore } from "./data-stores.ts";
 import { isPageModules } from "./draft-references.ts";
 import type { PageModules } from "./draft-references.ts";
@@ -109,7 +109,7 @@ export class AppPreview extends DurableObject<Env> {
     if (!fallback && changesAnything(draft)) {
       return draft;
     }
-    const base = await appDraftKind.liveBase(this.env, this.#app);
+    const base = await appKind.liveBase(this.env, this.#app);
     if (base === null) {
       throw appErrors.create("app.not_running");
     }

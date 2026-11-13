@@ -4,7 +4,7 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { appDraftKind } from "../src/apps.ts";
+import { appKind } from "../src/apps.ts";
 import { emptyDraft, readDraft, saveDraft } from "../src/drafts.ts";
 import {
   endedRefusals,
@@ -168,7 +168,7 @@ export const Route = createFileRoute("/late")({ component: Page });
     ) =>
       await saveDraft(
         env,
-        appDraftKind,
+        appKind,
 
         existing,
         {
@@ -188,7 +188,7 @@ export const Route = createFileRoute("/late")({ component: Page });
       // Its only change written back as the base has it: none left.
       await written(1, {}, ["a.md"]),
       // A write that read the draft before a discard lands on nothing.
-      await emptyDraft(env, appDraftKind, existing, {
+      await emptyDraft(env, appKind, existing, {
         revision: 2,
         base: 1,
         ...writer,

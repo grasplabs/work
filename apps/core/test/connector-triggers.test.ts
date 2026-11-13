@@ -28,7 +28,6 @@ import {
   createTriggerResource,
   setTriggerEnabled,
 } from "../src/trigger-resources.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import {
   deliverConnectorEvent,
@@ -50,6 +49,7 @@ import { allEvents } from "./audit-events.ts";
 import { configuredLimits } from "./quota-limits.ts";
 import { outcome, unique } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // Connector triggers (workflows/connector-triggers.ts), from their threat
 // model: an event starts each trigger that takes it once, however often
@@ -95,8 +95,11 @@ const objectSchema = (fields: Record<string, unknown>) => ({
 const filing = async (admin: Identity) => {
   const workflow = await createWorkflowResource(env, admin, `file-${unique()}`);
   const fields = { subject: { kind: "string" }, folder: { kind: "string" } };
-  await publishWorkflowVersion(env, admin, workflow.id, {
-    definition: JSON.stringify({
+  await publishDefinition(
+    env,
+    admin,
+    workflow.id,
+    JSON.stringify({
       $schema: workflowSchemaUrl,
       args: objectSchema(fields),
       returns: objectSchema(fields),
@@ -105,9 +108,8 @@ const filing = async (admin: Identity) => {
         folder: { $expr: "args.folder" },
       },
       steps: [],
-    }),
-    basedOn: null,
-  });
+    })
+  );
   return workflow;
 };
 

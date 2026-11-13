@@ -11,7 +11,6 @@ import { z } from "zod";
 import { appFor } from "../src/apps.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import {
   createWorkflowResource,
   shareWorkflowResource,
@@ -33,6 +32,7 @@ import {
   staffPerson,
   unique,
 } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // Downloading a run's finished files from its run sheet (GRA-1306), from
 // its threat model (workflows/run-file-downloads.ts): through core's own route only, for the run's person
@@ -83,10 +83,7 @@ const filesWorkflow = async (builder: Member) => {
     builder.identity,
     `files-${unique()}`
   );
-  await publishWorkflowVersion(env, builder.identity, workflow.id, {
-    definition,
-    basedOn: null,
-  });
+  await publishDefinition(env, builder.identity, workflow.id, definition);
   return workflow.id;
 };
 

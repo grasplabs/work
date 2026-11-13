@@ -49,7 +49,7 @@ const fileIdSchema = z.uuid();
 export class ChatApi extends WorkerEntrypoint<Env, AgentScope> {
   /**
    * The chat, the person it acts for, the App the chat is for (null for
-   * none: `ChatsApi.forApp`), and the time now.
+   * none), and the time now.
    */
   async info(): Promise<{
     chatId: string;

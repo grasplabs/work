@@ -5,8 +5,8 @@ import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { appPublishing } from "../src/app-publish.ts";
 import { sealRelease } from "../src/app-releases.ts";
+import { appKind } from "../src/apps.ts";
 import { rollback } from "../src/publish.ts";
 import { commitApp } from "./app-definitions.ts";
 import { grantReviewed, racingDb, release, reviewedOf } from "./apps.ts";
@@ -306,13 +306,7 @@ describe("An App's next version", { timeout: 60_000 }, () => {
     };
 
     const events = await auditedDuring(async () => {
-      await rollback(
-        racing,
-        appPublishing,
-        await builder.api.whoami(),
-        app,
-        version
-      );
+      await rollback(racing, appKind, await builder.api.whoami(), app, version);
     });
     const listed = await permissionsOf(admin, app);
 
@@ -456,13 +450,7 @@ describe("An App's next version", { timeout: 60_000 }, () => {
     let answered = "";
     const events = await auditedDuring(async () => {
       answered = await outcome(
-        rollback(
-          racing,
-          appPublishing,
-          await builder.api.whoami(),
-          app,
-          version
-        )
+        rollback(racing, appKind, await builder.api.whoami(), app, version)
       );
     });
 
@@ -504,13 +492,7 @@ describe("An App's next version", { timeout: 60_000 }, () => {
     };
 
     // Checked as an admin when the request came in.
-    await rollback(
-      racing,
-      appPublishing,
-      await admin.api.whoami(),
-      app,
-      version
-    );
+    await rollback(racing, appKind, await admin.api.whoami(), app, version);
     const statuses = await env.DB.prepare(
       "SELECT binding, status FROM permissions WHERE subject_id = ? ORDER BY binding"
     )

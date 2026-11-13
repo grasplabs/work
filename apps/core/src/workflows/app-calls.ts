@@ -317,7 +317,7 @@ export const appCallKey = ({
 }: Pick<AppCall, "app" | "function">): string => `app:${app}/${fn}`;
 
 /**
- * What `call` of a test run of a draft's checkpoint answers: the answer
+ * What `call` of a test run of a draft at one revision answers: the answer
  * its start gave under `appCallKey` (`binding`, of kind `app`), checked
  * against what the function answers in the App's current version, as a
  * real call's would be. Nothing is called: only the App's release is

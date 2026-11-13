@@ -20,7 +20,6 @@ import { sweepReleases } from "../src/release-retention.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { editWorkflowDraft, workflowDraft } from "../src/workflow-editor.ts";
 import { setWorkflowParams } from "../src/workflow-params.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import {
   createWorkflowResource,
   deleteWorkflowResource,
@@ -39,6 +38,7 @@ import { withCpuKills } from "./cpu-kills.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
 import { whileEngineRefuses } from "./runs.ts";
 import { outcome, unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // Test runs of a workflow's draft (workflows/candidate-runs.ts),
 // from their threat model: a test run makes no call of any kind, a call
@@ -115,10 +115,7 @@ const draftedSource = async (
   const workflow = await createWorkflowResource(env, by, `test-${unique()}`);
   const source = sourceOf(workflow.name);
   if (publish) {
-    await publishWorkflowVersion(env, by, workflow.id, {
-      definition: source,
-      basedOn: null,
-    });
+    await publishDefinition(env, by, workflow.id, source);
   }
   const { revision: base } = await workflowDraft(env, by, workflow.id);
   const saved = await editWorkflowDraft(env, by, workflow.id, {

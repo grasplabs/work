@@ -22,7 +22,6 @@ import {
   setTriggerEnabled,
   updateTriggerVersion,
 } from "../src/trigger-resources.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import {
   createWorkflowResource,
   shareWorkflowResource,
@@ -36,6 +35,7 @@ import { startDueScheduleTriggers } from "../src/workflows/schedule-triggers.ts"
 import { allEvents } from "./audit-events.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
 import { outcome, unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // Independent schedule triggers (workflows/schedule-triggers.ts), from
 // their threat model: each concrete occurrence starts one run, however
@@ -100,10 +100,7 @@ const reporting = async (admin: Identity) => {
     admin,
     `report-${unique()}`
   );
-  await publishWorkflowVersion(env, admin, workflow.id, {
-    definition: definitionOf("report"),
-    basedOn: null,
-  });
+  await publishDefinition(env, admin, workflow.id, definitionOf("report"));
   return workflow;
 };
 
@@ -573,10 +570,12 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
   it("start nothing they missed while disabled, deleted or moved to another version", async () => {
     const admin = await person("admin");
     const workflow = await reporting(admin);
-    await publishWorkflowVersion(env, admin, workflow.id, {
-      definition: definitionOf("report", "2"),
-      basedOn: 1,
-    });
+    await publishDefinition(
+      env,
+      admin,
+      workflow.id,
+      definitionOf("report", "2")
+    );
     const disabled = await scheduleTrigger(admin, workflow.id);
     const deleted = await scheduleTrigger(admin, workflow.id);
     const moved = await scheduleTrigger(admin, workflow.id);
@@ -1081,10 +1080,12 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
     async ({ started, change }) => {
       const admin = await person("admin");
       const workflow = await reporting(admin);
-      await publishWorkflowVersion(env, admin, workflow.id, {
-        definition: definitionOf("report", "2"),
-        basedOn: 1,
-      });
+      await publishDefinition(
+        env,
+        admin,
+        workflow.id,
+        definitionOf("report", "2")
+      );
       const trigger = await scheduleTrigger(admin, workflow.id);
       const occurrence = lastMinute();
       await dueAt(trigger.id, occurrence);
@@ -1177,10 +1178,7 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
   it("take only a schedule, time zone and input that hold, for every version they move to", async () => {
     const admin = await person("admin");
     const workflow = await reporting(admin);
-    await publishWorkflowVersion(env, admin, workflow.id, {
-      definition: definitionOf("job", "2"),
-      basedOn: 1,
-    });
+    await publishDefinition(env, admin, workflow.id, definitionOf("job", "2"));
     const create = async (config: unknown) =>
       await outcome(
         createTriggerResource(env, admin, {

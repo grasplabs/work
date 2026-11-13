@@ -17,11 +17,10 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
-import { appPublishing } from "../src/app-publish.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import { appStartFiles } from "../src/app-start-files.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
-import { appFor, findApp } from "../src/apps.ts";
+import { appKind, appFor, findApp } from "../src/apps.ts";
 import type { Acting, Member } from "../src/auth/identity.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
@@ -29,7 +28,6 @@ import { rollback } from "../src/publish.ts";
 import { StoreHost } from "../src/store-host.ts";
 import { storeOutboxConsumers } from "../src/store-outbox-consumers.ts";
 import { reviewDraft } from "../src/version-review.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { resultOf, runOf } from "../src/workflows/resource-runs.ts";
 import { copyIntoRun, sweepRunFiles } from "../src/workflows/run-files.ts";
@@ -42,6 +40,7 @@ import { mockIdp } from "./idp.ts";
 import { appWith, seal } from "./sealed-apps.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { outcome, routed, signedInApi, unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // A page's start handing its run a file of the App (GRA-885; the
 // threat note is on the issue): the file read as the person may read it
@@ -164,18 +163,14 @@ const reviewsApp = async () => {
     builder.acting,
     `review-${unique()}`
   );
-  await publishWorkflowVersion(env, builder.acting, workflow.id, {
-    definition,
-    basedOn: null,
-  });
+  await publishDefinition(env, builder.acting, workflow.id, definition);
   const fixture = await appWith(files(), "Reviews", builder.acting);
   await bindWorkflowToApp(env, builder.acting, workflow.id, {
     app: fixture.app,
     alias: "review",
-    version: 1,
   });
   await seal(fixture);
-  await rollback(env, appPublishing, builder.acting, fixture.app, 1);
+  await rollback(env, appKind, builder.acting, fixture.app, 1);
   const asked = await requestPermission(
     env,
     builder.acting,
@@ -397,7 +392,7 @@ const dispatched = async (
 
 /**
  * What publishing a draft holding version `version` of the fixture's App
- * would change, as its builder reviews it (`AppDraftsApi.changes`).
+ * would change, as its builder reviews it (`apps.review`).
  */
 const reviewOf = async (
   fixture: { app: string; builder: { acting: Member } },
@@ -917,8 +912,11 @@ describe("a page's start handing its run a file", { timeout: 120_000 }, () => {
       fixture.builder.acting,
       `plain-${unique()}`
     );
-    await publishWorkflowVersion(env, fixture.builder.acting, plain.id, {
-      definition: JSON.stringify({
+    await publishDefinition(
+      env,
+      fixture.builder.acting,
+      plain.id,
+      JSON.stringify({
         ...JSON.parse(definition),
         args: {
           kind: "object",
@@ -929,13 +927,11 @@ describe("a page's start handing its run a file", { timeout: 120_000 }, () => {
             },
           },
         },
-      }),
-      basedOn: null,
-    });
+      })
+    );
     await fixture.builder.api.workflowResources.bindToApp(plain.id, {
       app: fixture.app,
       alias: "review",
-      version: 1,
     });
     // A version recording the workflow taking a file again.
     const { version } = await commitApp(

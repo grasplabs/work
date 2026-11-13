@@ -5,6 +5,7 @@ import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { draftOf } from "../src/drafts.ts";
 import { publish } from "../src/publish.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import {
@@ -12,10 +13,7 @@ import {
   editWorkflowStep,
   workflowDraft,
 } from "../src/workflow-editor.ts";
-import {
-  publishWorkflowVersion,
-  workflowPublishing,
-} from "../src/workflow-publish.ts";
+import { workflowKind } from "../src/workflow-publish.ts";
 import {
   createWorkflowResource,
   deleteWorkflowResource,
@@ -25,6 +23,7 @@ import {
 import { allEvents } from "./audit-events.ts";
 import { person as identityOf } from "./sealed-run-harness.ts";
 import { outcome, unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // A workflow's draft as its editor writes it (workflow-editor.ts, on
 // drafts.ts), from its threat model: two edits at once never both land,
@@ -95,7 +94,7 @@ const storedCheckpoints = async (id: string): Promise<number> => {
 
 /** Publishes workflow `id`'s draft at `revision`, as its builder `by` does. */
 const publishAt = async (by: Identity, id: string, revision: number) =>
-  await publish(env, workflowPublishing, by, id, revision, "Published");
+  await publish(env, workflowKind, by, id, revision);
 
 const workflowOf = async (by: Identity) =>
   await createWorkflowResource(env, by, `draft-${unique()}`);
@@ -144,19 +143,18 @@ describe("a workflow's draft", () => {
     );
   });
 
-  it("is the current version's definition before anyone edits it", async () => {
+  it("is the live version's definition once published, changing nothing over it", async () => {
     const ada = await person("builder");
     const workflow = await workflowOf(ada);
     const definition = definitionOf();
-    await publishWorkflowVersion(env, ada, workflow.id, {
-      definition,
-      basedOn: null,
-    });
+    await publishDefinition(env, ada, workflow.id, definition);
+    const draft = await draftOf(env, workflowKind, workflow.id);
     await expect(workflowDraft(env, ada, workflow.id)).resolves.toMatchObject({
-      revision: 0,
+      revision: draft.revision,
       source: definition,
       problems: [],
     });
+    expect(draft.changes).toStrictEqual({});
   });
 
   it("keeps the first of two edits of the same revision, and refuses the second", async () => {
@@ -392,10 +390,7 @@ describe("a workflow's draft", () => {
       source: mistyped,
     });
     const published = await outcome(
-      publishWorkflowVersion(env, ada, workflow.id, {
-        definition: mistyped,
-        basedOn: null,
-      })
+      publishDefinition(env, ada, workflow.id, mistyped)
     );
     expect({
       passed: passed.problems,
@@ -499,10 +494,9 @@ describe("a workflow's draft", () => {
     });
   });
 
-  it("is read and edited only by the workflow's builders, never by Grasp staff", async () => {
+  it("is read and edited only by the workflow's builders", async () => {
     const ada = await person("builder");
     const user = await person("builder");
-    const staff = await person("admin", true);
     const workflow = await workflowOf(ada);
     await shareWorkflowResource(env, ada, workflow.id, {
       type: "person",
@@ -517,12 +511,10 @@ describe("a workflow's draft", () => {
       read: await outcome(workflowDraft(env, user, workflow.id)),
       edit: await outcome(editWorkflowDraft(env, user, workflow.id, edit)),
       publish: await outcome(publishAt(user, workflow.id, 0)),
-      staff: await outcome(editWorkflowDraft(env, staff, workflow.id, edit)),
     }).toStrictEqual({
       read: "role.forbidden",
       edit: "role.forbidden",
       publish: "role.forbidden",
-      staff: "role.forbidden",
     });
   });
 
@@ -563,8 +555,11 @@ describe("a step edited on the canvas", () => {
   it("inserts and changes a step as the draft's next revision, nested ones too, keeping its ID, and audits which", async () => {
     const ada = await person("builder");
     const workflow = await workflowOf(ada);
-    await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: definitionOf({
+    await publishDefinition(
+      env,
+      ada,
+      workflow.id,
+      definitionOf({
         steps: [
           {
             id: "group",
@@ -575,11 +570,12 @@ describe("a step edited on the canvas", () => {
           },
           waitStep("finish"),
         ],
-      }),
-      basedOn: null,
-    });
+      })
+    );
+    // Published through the draft, which is at this revision since.
+    const { revision: start } = await workflowDraft(env, ada, workflow.id);
     const inserted = await editWorkflowStep(env, ada, workflow.id, {
-      revision: 0,
+      revision: start,
       edit: {
         kind: "insert",
         list: "/steps",
@@ -589,7 +585,7 @@ describe("a step edited on the canvas", () => {
       },
     });
     const otherwise = await editWorkflowStep(env, ada, workflow.id, {
-      revision: 1,
+      revision: start + 1,
       edit: {
         kind: "insert",
         list: "/steps/1/else",
@@ -599,7 +595,7 @@ describe("a step edited on the canvas", () => {
       },
     });
     const changed = await editWorkflowStep(env, ada, workflow.id, {
-      revision: 2,
+      revision: start + 2,
       edit: {
         kind: "change",
         pointer: "/steps/1/then/0",
@@ -611,8 +607,10 @@ describe("a step edited on the canvas", () => {
     const events = await allEvents();
     const audited = events
       .filter(
-        ({ action, target }) =>
-          action === "draft.saved" && target?.id === workflow.id
+        ({ action, target, detail }) =>
+          action === "draft.saved" &&
+          target?.id === workflow.id &&
+          "step" in detail
       )
       .map(({ detail }) => detail);
 
@@ -637,12 +635,12 @@ describe("a step edited on the canvas", () => {
       audited,
     }).toStrictEqual({
       inserted: {
-        revision: 1,
+        revision: start + 1,
         problems: [],
         steps: ["greet", "group", "finish"],
       },
       otherwise: ["then inner", "else elsewhere"],
-      changed: { revision: 3, problems: [], drawn: true },
+      changed: { revision: start + 3, problems: [], drawn: true },
       steps: [
         { id: "greet", type: "wait", for: "2 seconds" },
         {
@@ -659,19 +657,19 @@ describe("a step edited on the canvas", () => {
       ],
       audited: [
         {
-          revision: 1,
+          revision: start + 1,
           problems: 0,
           step: "insert",
           stepPointer: "/steps/0",
         },
         {
-          revision: 2,
+          revision: start + 2,
           problems: 0,
           step: "insert",
           stepPointer: "/steps/1/else/0",
         },
         {
-          revision: 3,
+          revision: start + 3,
           problems: 0,
           step: "change",
           stepPointer: "/steps/1/then/0",

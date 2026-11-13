@@ -6,7 +6,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { appDraftKind } from "../src/apps.ts";
+import { appKind } from "../src/apps.ts";
 import { draftSummary, readDraft, saveDraft } from "../src/drafts.ts";
 import {
   draftDefinitionOf,
@@ -49,7 +49,7 @@ const draftOver = async (
 ): Promise<void> => {
   await saveDraft(
     env,
-    appDraftKind,
+    appKind,
     appIdSchema.parse(app),
     { ...(await readDraft(env, { kind: "app", id: app })), base },
     { changes: { "notes.md": "Notes\n" }, unchanged: [] },
@@ -430,9 +430,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       revision: 2,
     });
     // Its builders see it as changing nothing.
-    await expect(
-      draftSummary(env, appDraftKind, existing)
-    ).resolves.toMatchObject({
+    await expect(draftSummary(env, appKind, existing)).resolves.toMatchObject({
       changed: [],
       revision: 2,
     });

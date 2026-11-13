@@ -8,7 +8,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { appDraftKind } from "../src/apps.ts";
+import { appKind } from "../src/apps.ts";
 import { readDraft, saveDraft } from "../src/drafts.ts";
 import { draftWatch } from "../src/durable-objects.ts";
 import { commitApp, sourceParts, withFiles } from "./app-definitions.ts";
@@ -76,12 +76,12 @@ const writeDraft = async (
   revision: number,
   base: number | null = 1
 ): Promise<void> => {
-  const { id: chatId } = await person.api.chats.forApp(app);
+  const { id: chatId } = await person.api.chats.create("App changes");
   const { files, definition } = sourceParts(changes);
   const now = await readDraft(env, { kind: "app", id: app });
   await saveDraft(
     env,
-    appDraftKind,
+    appKind,
 
     app,
     { ...now, base, revision },
@@ -214,23 +214,19 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
     }).toStrictEqual({ outside: "app.not_found", shared: 1, drafted: true });
   });
 
-  it("tells every builder's pages of each write, one builder's newest pages at most, so nobody crowds out the others", async () => {
+  it("tells every page that follows the draft of each write, whoever made it", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await notesApp(builder);
     const watched = draftWatch(env, { kind: "app", id: app });
     const heard = new Map<string, number[]>();
-    const follow = async (personId: string, page: string): Promise<void> => {
-      await watched.watch(personId, async (revision: number) => {
+    const follow = async (page: string): Promise<void> => {
+      await watched.watch(async (revision: number) => {
         heard.set(page, [...(heard.get(page) ?? []), revision]);
         await Promise.resolve();
       });
     };
-    // One builder opens a page more than they may follow at once.
-    for (let page = 1; page <= 21; page += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- opened one after the other
-      await follow(builder.userId, `mine-${page}`);
-    }
-    await follow("another-builder", "theirs");
+    await follow("mine");
+    await follow("theirs");
 
     await writeDraft(
       builder,
@@ -239,16 +235,8 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
       0
     );
 
-    expect({
-      oldest: heard.get("mine-1"),
-      newest: heard.get("mine-21"),
-      following: [...heard.keys()].filter((page) => page.startsWith("mine-"))
-        .length,
-      theirs: heard.get("theirs"),
-    }).toStrictEqual({
-      oldest: undefined,
-      newest: [1],
-      following: 20,
+    expect(Object.fromEntries(heard)).toStrictEqual({
+      mine: [1],
       theirs: [1],
     });
   });
@@ -266,7 +254,6 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
     );
     const heard: number[] = [];
     await draftWatch(env, { kind: "app", id: app }).watch(
-      builder.userId,
       async (revision: number) => {
         heard.push(revision);
         await Promise.resolve();
@@ -585,7 +572,7 @@ export const Route = createFileRoute("/elsewhere")({ component: Elsewhere });
       0
     );
     const beforePublish = await follow();
-    await drafts.publish({ kind: "app", id: app }, 1, "Published elsewhere");
+    await drafts.publish({ kind: "app", id: app }, 1);
     const published = await beforePublish.told();
     await beforePublish.release();
     const afterPublish = await apps.preview.open(app);

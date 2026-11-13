@@ -4,9 +4,8 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { addMember, removeMember } from "../src/app-members.ts";
-import { appPublishing } from "../src/app-publish.ts";
 import { loadRelease, sealRelease } from "../src/app-releases.ts";
-import { findApp } from "../src/apps.ts";
+import { appKind, findApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { rollback } from "../src/publish.ts";
 import { testApp, withFiles } from "./app-definitions.ts";
@@ -127,7 +126,7 @@ describe("publishing a version", { timeout: 120_000 }, () => {
         ...helloTest("hello"),
       })
     );
-    const made = await rollback(env, appPublishing, owner, app, 1);
+    const made = await rollback(env, appKind, owner, app, 1);
     const release = await loadRelease(env, app, 1);
     const events = await allEvents();
     const published = events.find(
@@ -157,11 +156,11 @@ describe("publishing a version", { timeout: 120_000 }, () => {
         ...helloTest("hello"),
       })
     );
-    await rollback(env, appPublishing, owner, app, 1);
+    await rollback(env, appKind, owner, app, 1);
     const failing = await committed(owner, app, helloTest("goodbye"));
     expect({
       refused: await failure(
-        async () => await rollback(env, appPublishing, owner, app, failing)
+        async () => await rollback(env, appKind, owner, app, failing)
       ),
       current: await currentOf(app),
       status: await statusOf(app, failing),
@@ -184,7 +183,7 @@ describe("publishing a version", { timeout: 120_000 }, () => {
 
   it("refuses a version that doesn't build, and leaves the current one", async () => {
     const { owner, app } = await appWith(helloFiles());
-    await rollback(env, appPublishing, owner, app, 1);
+    await rollback(env, appKind, owner, app, 1);
     const broken = await committed(owner, app, {
       "server/hello.ts": `import { v } from "@grasp-os/sdk";
 import { query } from "@server/_generated/server";
@@ -198,7 +197,7 @@ export const hello = query({
     });
     expect({
       refused: await failure(
-        async () => await rollback(env, appPublishing, owner, app, broken)
+        async () => await rollback(env, appKind, owner, app, broken)
       ),
       current: await currentOf(app),
       status: await statusOf(app, broken),
@@ -212,20 +211,11 @@ export const hello = query({
   it("refuses a caller's expected version that isn't current", async () => {
     const { owner, app } = await appWith(helloFiles("one"));
     await committed(owner, app, helloFiles("two"));
-    await rollback(env, appPublishing, owner, app, 1);
+    await rollback(env, appKind, owner, app, 1);
     const wrong = await failure(
-      async () =>
-        await rollback(env, appPublishing, owner, app, 2, undefined, null)
+      async () => await rollback(env, appKind, owner, app, 2, undefined, null)
     );
-    const right = await rollback(
-      env,
-      appPublishing,
-      owner,
-      app,
-      2,
-      undefined,
-      1
-    );
+    const right = await rollback(env, appKind, owner, app, 2, undefined, 1);
     expect({ wrong, right: right.version }).toStrictEqual({
       wrong: "draft.conflict",
       right: 2,
@@ -236,16 +226,16 @@ export const hello = query({
     const { owner, app } = await appWith(helloFiles("one"));
     await committed(owner, app, helloFiles("two"));
     await committed(owner, app, helloFiles("three"));
-    await rollback(env, appPublishing, owner, app, 1);
+    await rollback(env, appKind, owner, app, 1);
     // Version 3 is published and made current after version 2's publish
     // read version 1 as current, just before version 2 is marked.
     const racing = racingDb(async () => {
-      await rollback(env, appPublishing, owner, app, 3);
+      await rollback(env, appKind, owner, app, 3);
     }, /^update "app_versions" set "status"/iu);
     expect({
       refused: await failure(
         async () =>
-          await rollback({ ...env, DB: racing }, appPublishing, owner, app, 2)
+          await rollback({ ...env, DB: racing }, appKind, owner, app, 2)
       ),
       current: await currentOf(app),
       // Published all the same: a later publish only makes it current.
@@ -261,12 +251,12 @@ export const hello = query({
     const { owner, app } = await appWith(helloFiles("one"));
     await committed(owner, app, helloFiles("two"));
     await committed(owner, app, helloFiles("three"));
-    await rollback(env, appPublishing, owner, app, 1);
+    await rollback(env, appKind, owner, app, 1);
     const outcomes = await Promise.all(
       [2, 3].map(
         async (version) =>
           await failure(
-            async () => await rollback(env, appPublishing, owner, app, version)
+            async () => await rollback(env, appKind, owner, app, version)
           )
       )
     );
@@ -291,7 +281,7 @@ export const hello = query({
     // Sealed, then the publish stopped before its tests.
     const sealed = await sealRelease(env, { app, version: 1, by: owner });
     await expect(refusedByHand(app, 1)).resolves.toBeTruthy();
-    const made = await rollback(env, appPublishing, owner, app, 1);
+    const made = await rollback(env, appKind, owner, app, 1);
     const release = await loadRelease(env, app, 1);
     expect({
       current: made.version,
@@ -313,7 +303,7 @@ export const hello = query({
     await sealRelease(env, { app, version: 1, by: owner });
     // Marked, then the publish stopped before making it current.
     await markPublished(app, 1);
-    const made = await rollback(env, appPublishing, owner, app, 1);
+    const made = await rollback(env, appKind, owner, app, 1);
     expect({
       current: made.version,
       audited: await publishingOf(app),
@@ -332,7 +322,7 @@ export const hello = query({
         ...helloTest("hello"),
       })
     );
-    await rollback(env, appPublishing, owner, app, 1);
+    await rollback(env, appKind, owner, app, 1);
     await committed(
       owner,
       app,
@@ -340,8 +330,8 @@ export const hello = query({
         ...helloTest("two"),
       })
     );
-    await rollback(env, appPublishing, owner, app, 2);
-    const back = await rollback(env, appPublishing, owner, app, 1);
+    await rollback(env, appKind, owner, app, 2);
+    const back = await rollback(env, appKind, owner, app, 1);
     expect({
       current: back.version,
       published: await audited(app, "app.version.built"),
@@ -358,8 +348,8 @@ export const hello = query({
   it("refuses a rollback whose release changed in storage since it was published", async () => {
     const { owner, app } = await appWith(helloFiles("one"));
     await committed(owner, app, helloFiles("two"));
-    await rollback(env, appPublishing, owner, app, 1);
-    await rollback(env, appPublishing, owner, app, 2);
+    await rollback(env, appKind, owner, app, 1);
+    await rollback(env, appKind, owner, app, 2);
     const first = await loadRelease(env, app, 1);
     const second = await loadRelease(env, app, 2);
     const shared = new Set(second.manifest.artifacts.map((a) => a.sha256));
@@ -372,7 +362,7 @@ export const hello = query({
     await env.FILES.put(key, `${(await stored?.text()) ?? ""} `);
     expect({
       refused: await failure(
-        async () => await rollback(env, appPublishing, owner, app, 1)
+        async () => await rollback(env, appKind, owner, app, 1)
       ),
       current: await currentOf(app),
     }).toStrictEqual({ refused: "version.artifact_corrupt", current: 2 });
@@ -381,8 +371,8 @@ export const hello = query({
   it("counts a version published only while the release it tested is stored, whoever deleted it", async () => {
     const { owner, app } = await appWith(helloFiles("one"));
     await committed(owner, app, helloFiles("two"));
-    await rollback(env, appPublishing, owner, app, 1);
-    await rollback(env, appPublishing, owner, app, 2);
+    await rollback(env, appKind, owner, app, 1);
+    await rollback(env, appKind, owner, app, 2);
     // Deleted as an earlier release of core's sweep deletes it: the
     // version's own columns untouched.
     await env.DB.prepare(
@@ -392,7 +382,7 @@ export const hello = query({
       .run();
     const status = await statusOf(app, 1);
     const byHand = await refusedByHand(app, 1);
-    const back = await rollback(env, appPublishing, owner, app, 1);
+    const back = await rollback(env, appKind, owner, app, 1);
     expect({
       status,
       byHand,
@@ -413,7 +403,7 @@ export const hello = query({
 
   it("records a failure no code names as an unexpected one, and leaves the current version", async () => {
     const { owner, app } = await appWith(helloFiles("one"));
-    await rollback(env, appPublishing, owner, app, 1);
+    await rollback(env, appKind, owner, app, 1);
     const next = await committed(owner, app, helloFiles("two"));
     const put = env.FILES.put.bind(env.FILES);
     Reflect.set(env.FILES, "put", async () => {
@@ -423,7 +413,7 @@ export const hello = query({
     let refused: string;
     try {
       refused = await failure(
-        async () => await rollback(env, appPublishing, owner, app, next)
+        async () => await rollback(env, appKind, owner, app, next)
       );
     } finally {
       Reflect.set(env.FILES, "put", put);
@@ -452,7 +442,7 @@ export const hello = query({
     await removeMember(env, owner, app, { type: "person", id: other.userId });
     expect({
       refused: await failure(
-        async () => await rollback(env, appPublishing, other, app, 1)
+        async () => await rollback(env, appKind, other, app, 1)
       ),
       current: await currentOf(app),
       status: await statusOf(app, 1),
@@ -467,7 +457,7 @@ export const hello = query({
 
   it("refuses a row written already current, new or replacing an App, whoever writes", async () => {
     const { owner, app } = await appWith(helloFiles());
-    await rollback(env, appPublishing, owner, app, 1);
+    await rollback(env, appKind, owner, app, 1);
     await committed(owner, app, helloFiles("two"));
     const forged = crypto.randomUUID();
     const inserted = await failure(

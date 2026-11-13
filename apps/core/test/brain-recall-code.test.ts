@@ -22,13 +22,12 @@ import { appsReadableBy } from "../src/app-access.ts";
 import { callAppFunction } from "../src/app-functions.ts";
 import { addMember, listMembers, removeMember } from "../src/app-members.ts";
 import { anyTeamGrant, mayReadBrainTeamsOf } from "../src/app-provenance.ts";
-import { appPublishing } from "../src/app-publish.ts";
 import type { Release } from "../src/app-releases.ts";
 import { removeApp } from "../src/app-removal.ts";
 import { resetAppData } from "../src/app-schema.ts";
 import { updateApp } from "../src/app-settings.ts";
 import { setArchived } from "../src/app-status.ts";
-import { appFor } from "../src/apps.ts";
+import { appKind, appFor } from "../src/apps.ts";
 import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import { teamsOf } from "../src/auth/identity.ts";
 import {
@@ -54,7 +53,6 @@ import { approveResourceBinding } from "../src/resource-bindings.ts";
 import { createTriggerResource } from "../src/trigger-resources.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import {
   createWorkflowResource,
   shareWorkflowResource,
@@ -69,6 +67,7 @@ import { appWith, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
 import { webhookConfig } from "./source-config.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // The one recall code reaches (GRA-1731, and GRA-1842 for an App's grant
 // naming teams; the threat models are on the issues): an App's action (`ctx.brain.recall`), a workflow's step
@@ -292,7 +291,7 @@ export const ask = action({
 const askOf = async (owner: Member, users: Member[]) => {
   const fixture: Fixture = await appWith(askApp(), "Ask", owner);
   const release: Release = await seal(fixture);
-  await rollback(env, appPublishing, fixture.owner, fixture.app, 1);
+  await rollback(env, appKind, fixture.owner, fixture.app, 1);
   for (const user of users) {
     // oxlint-disable-next-line no-await-in-loop -- one at a time
     await env.DB.prepare(
@@ -367,8 +366,11 @@ const recallingWorkflow = async (
   const key = `brain-${unique()}`;
   await publishCatalogContract(env, admin, { key, kind: "brain" });
   const workflow = await createWorkflowResource(env, by, `recall-${unique()}`);
-  await publishWorkflowVersion(env, by, workflow.id, {
-    definition: JSON.stringify({
+  await publishDefinition(
+    env,
+    by,
+    workflow.id,
+    JSON.stringify({
       $schema: workflowSchemaUrl,
       args: {
         kind: "object",
@@ -393,9 +395,8 @@ const recallingWorkflow = async (
         },
         ...(hold === "after" ? [holdStep] : []),
       ],
-    }),
-    basedOn: null,
-  });
+    })
+  );
   const permissionId = await granted(
     by,
     admin,
@@ -1214,8 +1215,11 @@ const recallingThen = async (
   const key = `brain-${unique()}`;
   await publishCatalogContract(env, admin, { key, kind: "brain" });
   const workflow = await createWorkflowResource(env, by, `then-${unique()}`);
-  await publishWorkflowVersion(env, by, workflow.id, {
-    definition: JSON.stringify({
+  await publishDefinition(
+    env,
+    by,
+    workflow.id,
+    JSON.stringify({
       $schema: workflowSchemaUrl,
       args: {
         kind: "object",
@@ -1238,9 +1242,8 @@ const recallingThen = async (
         },
         ...then.steps,
       ],
-    }),
-    basedOn: null,
-  });
+    })
+  );
   const permissionId = await granted(
     by,
     admin,
@@ -1262,7 +1265,7 @@ describe("what code recalls, passed on", setUpTime, () => {
     // Bob's Notes, with no Brain, shared with Uma and Ben.
     const fixture: Fixture = await appWith(notesApp(), "Notes", bob);
     const release: Release = await seal(fixture);
-    await rollback(env, appPublishing, fixture.owner, fixture.app, 1);
+    await rollback(env, appKind, fixture.owner, fixture.app, 1);
     const notes = { ...fixture, release };
     for (const member of [uma, ben]) {
       // oxlint-disable-next-line no-await-in-loop -- one at a time
@@ -1451,7 +1454,7 @@ const boundToTeams = async (
 const keepOf = async (owner: Member) => {
   const fixture: Fixture = await appWith(keepApp(), "Keep", owner);
   const release: Release = await seal(fixture);
-  await rollback(env, appPublishing, fixture.owner, fixture.app, 1);
+  await rollback(env, appKind, fixture.owner, fixture.app, 1);
   return { ...fixture, release };
 };
 

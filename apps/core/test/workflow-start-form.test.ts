@@ -5,10 +5,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { rollback } from "../src/publish.ts";
-import {
-  publishWorkflowVersion,
-  workflowPublishing,
-} from "../src/workflow-publish.ts";
+import { workflowKind } from "../src/workflow-publish.ts";
 import {
   createWorkflowResource,
   shareWorkflowResource,
@@ -16,6 +13,7 @@ import {
 import { workflowStartForm } from "../src/workflow-start-form.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { auditedDuring, outcome, unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // Starting an independent workflow by hand from its page (GRA-1305): what
 // the page reads to start one (src/workflow-start-form.ts), and that the
@@ -80,10 +78,12 @@ const greetingWorkflow = async () => {
     person("user"),
   ]);
   const workflow = await createWorkflowResource(env, ada, `greet-${unique()}`);
-  await publishWorkflowVersion(env, ada, workflow.id, {
-    definition: definitionOf("1.0.0", greeting),
-    basedOn: null,
-  });
+  await publishDefinition(
+    env,
+    ada,
+    workflow.id,
+    definitionOf("1.0.0", greeting)
+  );
   await shareWorkflowResource(env, ada, workflow.id, {
     type: "person",
     id: uma.userId,
@@ -161,13 +161,15 @@ describe("starting an independent workflow by hand", () => {
   it("marks a field that takes a person, offers the organization's people and teams by name to pick, and takes a person, team or role", async () => {
     const { ada, uma } = await greetingWorkflow();
     const workflow = await createWorkflowResource(env, ada, `ask-${unique()}`);
-    await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: definitionOf("1.0.0", {
+    await publishDefinition(
+      env,
+      ada,
+      workflow.id,
+      definitionOf("1.0.0", {
         approver: { kind: "person" },
         note: { kind: "string" },
-      }),
-      basedOn: null,
-    });
+      })
+    );
     await shareWorkflowResource(env, ada, workflow.id, {
       type: "person",
       id: uma.userId,
@@ -237,13 +239,15 @@ describe("starting an independent workflow by hand", () => {
   it("runs the live version, the one rolled back to rather than one published after it, and none before any is published", async () => {
     const { ada, uma, workflow } = await greetingWorkflow();
     // Version 2 takes other input, and is rolled back from.
-    await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: definitionOf("1.1.0", {
+    await publishDefinition(
+      env,
+      ada,
+      workflow.id,
+      definitionOf("1.1.0", {
         who: { kind: "string" },
-      }),
-      basedOn: 1,
-    });
-    await rollback(env, workflowPublishing, ada, workflow.id, 1);
+      })
+    );
+    await rollback(env, workflowKind, ada, workflow.id, 1);
     const empty = await createWorkflowResource(env, ada, `new-${unique()}`);
     const live = await workflowStartForm(env, uma, workflow.id);
 

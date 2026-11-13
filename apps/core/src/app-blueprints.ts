@@ -84,11 +84,12 @@ import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { ensureReleaseContract } from "./workflow-catalog.ts";
-import { publishWorkflowVersion } from "./workflow-publish.ts";
+import { workflowKind } from "./workflow-publish.ts";
 import {
   createWorkflowResource,
   definitionProblems,
   deleteWorkflowResource,
+  workflowFile,
 } from "./workflow-resources.ts";
 
 // Blueprints: code to create Apps from, each its own record. A builder of
@@ -259,7 +260,7 @@ const discardShipped = async (
  */
 const createShippedWorkflows = async (
   env: Env,
-  by: Acting,
+  by: Acting & Identity,
   blueprint: string,
   shipped: readonly BlueprintWorkflow[]
 ): Promise<ShippedWorkflow[]> => {
@@ -299,17 +300,21 @@ const createShippedWorkflows = async (
       // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
       const workflow = await createWorkflowResource(env, by, name);
       made.push({ workflowId: workflow.id });
+      // Its first version, built and made live as a publish of its draft
+      // would (workflow-publish.ts), with no draft to empty.
       // oxlint-disable-next-line no-await-in-loop -- after its creation
-      const published = await publishWorkflowVersion(env, by, workflow.id, {
-        definition,
+      const version = await workflowKind.steps.build(env, by, workflow.id, {
+        draft: { base: null, changes: {}, definition: null, revision: 0 },
+        files: new Map([[workflowFile, definition]]),
+      });
+      // oxlint-disable-next-line no-await-in-loop -- after it is built
+      await workflowKind.steps.activate(env, by, workflow.id, {
+        version,
         basedOn: null,
+        action: "version.published",
+        alongside: async () => await Promise.resolve([]),
       });
-      created.push({
-        alias,
-        binding,
-        workflowId: workflow.id,
-        version: published.version,
-      });
+      created.push({ alias, binding, workflowId: workflow.id, version });
     }
   } catch (error) {
     await discardShipped(env, by, made);
@@ -485,7 +490,7 @@ export const unmarkBlueprint = async (
  */
 export const createFromBlueprint = async (
   env: Env,
-  by: Acting,
+  by: Acting & Identity,
   id: unknown,
   input: unknown,
   /** Admits the write, called right before it is committed: throws to refuse it. */

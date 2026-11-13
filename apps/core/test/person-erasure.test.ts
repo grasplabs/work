@@ -14,8 +14,8 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
 
-import { appPublishing } from "../src/app-publish.ts";
 import { formSubmissionOf, queueFormSent } from "../src/app-webhook-queue.ts";
+import { appKind } from "../src/apps.ts";
 import { organizationId } from "../src/auth/auth.ts";
 import { addSource } from "../src/brain-next.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
@@ -23,7 +23,6 @@ import { workspace, inJurisdiction } from "../src/durable-objects.ts";
 import type { Onboarding } from "../src/onboarding/store.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { rollback } from "../src/publish.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { testApp } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
@@ -53,6 +52,7 @@ import {
   staffPerson,
 } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // Erasing a person (GRA-903, GRA-1180), from its threat model first. An
 // admin erases someone they removed: their email, sign-ins and personal
@@ -171,17 +171,14 @@ const waitingRuns = async (adminId: string) => {
     { userId: adminId, role: "admin", teams: [], staff: false },
     `waits-${crypto.randomUUID().slice(0, 8)}`
   );
-  await publishWorkflowVersion(
+  await publishDefinition(
     env,
     { userId: adminId, role: "admin", teams: [], staff: false },
     workflow.id,
-    {
-      definition: JSON.stringify({
-        $schema: workflowSchemaUrl,
-        steps: [{ id: "hold", type: "wait", for: "1 hour" }],
-      }),
-      basedOn: null,
-    }
+    JSON.stringify({
+      $schema: workflowSchemaUrl,
+      steps: [{ id: "hold", type: "wait", for: "1 hour" }],
+    })
   );
   // A run for each, started while they were members, still waiting.
   const now = Date.now();
@@ -448,7 +445,7 @@ export const Route = createFileRoute("/")({ component: Desk });
     "Desk"
   );
   const release = await seal(fixture);
-  await rollback(env, appPublishing, fixture.owner, fixture.app, 1);
+  await rollback(env, appKind, fixture.owner, fixture.app, 1);
   return {
     app: fixture.app,
     storeId: storeIdSchema.parse(release.store?.storeId),

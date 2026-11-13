@@ -76,10 +76,12 @@ import { quotaLimits } from "./workflows/quotas.ts";
 //   organization.
 // - A trigger starting a version nobody made live. Each trigger version
 //   pins an exact, published workflow version. Publishing or rolling back
-//   the workflow moves each enabled trigger onto the version it makes
-//   live, as a new trigger version in the batch that makes it live
-//   (`triggersMovedTo`), audited with it; a disabled one stays where it
-//   was until its owner moves it. Moving a trigger by hand is a new
+//   the workflow moves each of its triggers, enabled or not, onto the
+//   version it makes live, as a new trigger version in the batch that
+//   makes it live (`triggersMovedTo`), audited with it, so none enabled
+//   later starts a version no longer live. A schedule's occurrence keeps
+//   its time as it moves: a start of it tried on the version before is
+//   refused, and the next clock run starts it on the version moved to. Moving a trigger by hand is a new
 //   trigger version too, audited, of the same workflow only. A run keeps
 //   the version it started on.
 // - Creating a trigger grants it something. Nothing: its creator must
@@ -740,8 +742,8 @@ export const updateTriggerVersion = async (
 };
 
 /**
- * What moves every enabled trigger of workflow `workflowId` onto its
- * version `version`, as that version goes live (workflow-publish.ts): a
+ * What moves every trigger of workflow `workflowId`, enabled or not, onto
+ * its version `version`, as that version goes live (workflow-publish.ts): a
  * new trigger version each, pinning it, its configuration and principal
  * as they were, written by the statements answered, each only while
  * `live` (SQL) holds, in the batch that makes the version live. A
@@ -775,7 +777,6 @@ export const triggersMovedTo = async (
     .where(
       and(
         isNull(triggerResources.deletedAt),
-        eq(triggerResources.enabled, true),
         eq(triggerResourceVersions.workflowResourceId, workflowId),
         sql`${triggerResourceVersions.workflowResourceVersion} IS NOT ${version}`
       )
@@ -814,7 +815,6 @@ export const triggersMovedTo = async (
                 ON current.trigger_id = trigger_resources.id
                 AND current.version = trigger_resources.current_version
               WHERE ${moved} AND trigger_resources.deleted_at IS NULL
-                AND trigger_resources.enabled = 1
                 AND current.workflow_resource_id = ${workflowId}
                 AND current.workflow_resource_version IS NOT ${version}
                 AND ${live}`

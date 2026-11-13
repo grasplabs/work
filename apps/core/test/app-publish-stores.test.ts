@@ -11,7 +11,6 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { callAppFunction } from "../src/app-functions.ts";
 import { addMember, removeMember } from "../src/app-members.ts";
-import { appPublishing } from "../src/app-publish.ts";
 import {
   loadRelease,
   readBackRelease,
@@ -19,7 +18,7 @@ import {
 } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { applyVersionSchema, resetAppData } from "../src/app-schema.ts";
-import { createApp, findApp } from "../src/apps.ts";
+import { appKind, createApp, findApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { deleteStore } from "../src/data-stores.ts";
 import { appDefaultStores } from "../src/db/core/schema.ts";
@@ -318,7 +317,7 @@ describe(
   () => {
     it("seals it on the App's own store, which the host creates, and its functions run", async () => {
       const { owner, app } = await appWith(notesFiles());
-      const activated = await rollback(env, appPublishing, owner, app, 1);
+      const activated = await rollback(env, appKind, owner, app, 1);
       expect(activated.version).toBe(1);
 
       const release = await loadRelease(env, app, 1);
@@ -338,12 +337,12 @@ describe(
 
     it("binds every later version to the same store, so the data stays", async () => {
       const { owner, app } = await appWith(notesFiles());
-      await rollback(env, appPublishing, owner, app, 1);
+      await rollback(env, appKind, owner, app, 1);
       const first = await loadRelease(env, app, 1);
       await call(owner, first, "notes.create", { title: "Kept" });
 
       await commitDefined(env, owner, app, notesFiles("Notes 2"), "Second");
-      await rollback(env, appPublishing, owner, app, 2);
+      await rollback(env, appKind, owner, app, 2);
       const second = await loadRelease(env, app, 2);
       expect(second.store?.storeId).toBe(first.store?.storeId);
       await expect(defaultStores(app)).resolves.toHaveLength(1);
@@ -357,7 +356,7 @@ describe(
 
     it("lets another builder of the App activate on the store the first one's activation created", async () => {
       const { owner, app } = await appWith(notesFiles());
-      await rollback(env, appPublishing, owner, app, 1);
+      await rollback(env, appKind, owner, app, 1);
       const first = await loadRelease(env, app, 1);
       await call(owner, first, "notes.create", { title: "Shared" });
       // A second builder, who doesn't manage the store the first created.
@@ -368,7 +367,7 @@ describe(
         role: "builder",
       });
       await commitDefined(env, other, app, notesFiles("Notes 2"), "Second");
-      const activated = await rollback(env, appPublishing, other, app, 2);
+      const activated = await rollback(env, appKind, other, app, 2);
       const second = await loadRelease(env, app, 2);
       expect([
         activated.version,
@@ -391,7 +390,7 @@ describe(
 
     it("creates no store for an App without tables", async () => {
       const { owner, app } = await appWith(emptyFiles);
-      await rollback(env, appPublishing, owner, app, 1);
+      await rollback(env, appKind, owner, app, 1);
       await expect(storeOf(app, 1)).resolves.toBeNull();
       await expect(defaultStores(app)).resolves.toHaveLength(0);
     });
@@ -399,8 +398,8 @@ describe(
     it("gives two Apps two stores, never one between them", async () => {
       const first = await appWith(notesFiles());
       const second = await appWith(notesFiles());
-      await rollback(env, appPublishing, first.owner, first.app, 1);
-      await rollback(env, appPublishing, second.owner, second.app, 1);
+      await rollback(env, appKind, first.owner, first.app, 1);
+      await rollback(env, appKind, second.owner, second.app, 1);
       const [a] = await defaultStores(first.app);
       const [b] = await defaultStores(second.app);
       expect(a?.storeId).toBeDefined();
@@ -411,9 +410,7 @@ describe(
       const { app } = await appWith(notesFiles());
       const stranger = await person("builder");
       await expect(
-        failure(
-          async () => await rollback(env, appPublishing, stranger, app, 1)
-        )
+        failure(async () => await rollback(env, appKind, stranger, app, 1))
       ).resolves.toBe("app.not_found");
       await expect(defaultStores(app)).resolves.toHaveLength(0);
       await expect(currentOf(app)).resolves.toBeNull();
@@ -422,8 +419,8 @@ describe(
     it("gives two first activations at once one store, listed and audited once", async () => {
       const { owner, app } = await appWith(notesFiles());
       const outcomes = await Promise.all([
-        failure(async () => await rollback(env, appPublishing, owner, app, 1)),
-        failure(async () => await rollback(env, appPublishing, owner, app, 1)),
+        failure(async () => await rollback(env, appKind, owner, app, 1)),
+        failure(async () => await rollback(env, appKind, owner, app, 1)),
       ]);
       expect(outcomes).toContain("ok");
       const stores = await defaultStores(app);
@@ -442,17 +439,17 @@ describe(
 
     it("refuses a revoked version, even one revoked as it is made current", async () => {
       const { owner, app } = await appWith(notesFiles());
-      await rollback(env, appPublishing, owner, app, 1);
+      await rollback(env, appKind, owner, app, 1);
       await commitDefined(env, owner, app, notesFiles("Notes 2"), "Second");
-      await rollback(env, appPublishing, owner, app, 2);
+      await rollback(env, appKind, owner, app, 2);
       await commitDefined(env, owner, app, notesFiles("Notes 3"), "Third");
-      await rollback(env, appPublishing, owner, app, 3);
+      await rollback(env, appKind, owner, app, 3);
       const admin = await person("admin");
 
       // Revoked before: refused at the check.
       await revokeRelease(env, admin, { app, version: 1 }, "Leaks data");
       await expect(
-        failure(async () => await rollback(env, appPublishing, owner, app, 1))
+        failure(async () => await rollback(env, appKind, owner, app, 1))
       ).resolves.toBe("version.revoked");
 
       // Revoked between the check and the change: refused by the change.
@@ -462,7 +459,7 @@ describe(
       await expect(
         failure(
           async () =>
-            await rollback({ ...env, DB: racing }, appPublishing, owner, app, 2)
+            await rollback({ ...env, DB: racing }, appKind, owner, app, 2)
         )
       ).resolves.toBe("version.revoked");
       await expect(currentOf(app)).resolves.toBe(3);
@@ -470,16 +467,16 @@ describe(
 
     it("rolls back onto the App's own store, making no second one, sealed again or not", async () => {
       const { owner, app } = await appWith(notesFiles());
-      await rollback(env, appPublishing, owner, app, 1);
+      await rollback(env, appKind, owner, app, 1);
       const [own] = await defaultStores(app);
       await commitDefined(env, owner, app, notesFiles("Notes 2"), "Second");
-      await rollback(env, appPublishing, owner, app, 2);
+      await rollback(env, appKind, owner, app, 2);
       // A rollback to a release still kept seals nothing.
-      await rollback(env, appPublishing, owner, app, 1);
-      await rollback(env, appPublishing, owner, app, 2);
+      await rollback(env, appKind, owner, app, 1);
+      await rollback(env, appKind, owner, app, 2);
       // One whose release retention let go is sealed again, on the same store.
       await sweptAway(app, 1);
-      const back = await rollback(env, appPublishing, owner, app, 1);
+      const back = await rollback(env, appKind, owner, app, 1);
       const bound = await env.DB.prepare(
         "SELECT DISTINCT target_id AS store FROM sdk_resource_bindings WHERE resource_id = ? AND kind = 'store'"
       )
@@ -498,10 +495,10 @@ describe(
 
     it("rolls back onto a fresh store once retention let go of the version and its store, and later versions share it", async () => {
       const { owner, app } = await appWith(notesFiles());
-      await rollback(env, appPublishing, owner, app, 1);
+      await rollback(env, appKind, owner, app, 1);
       const [deleted] = await defaultStores(app);
       await commitDefined(env, owner, app, withoutNotes, "No tables");
-      await rollback(env, appPublishing, owner, app, 2);
+      await rollback(env, appKind, owner, app, 2);
       // Version 1 kept binds its store; once retention lets it go, the
       // store can be deleted.
       await sweptAway(app, 1);
@@ -509,7 +506,7 @@ describe(
 
       // Published again, sealed anew on the App's fresh default store: its
       // records went with the store an admin deleted.
-      const back = await rollback(env, appPublishing, owner, app, 1);
+      const back = await rollback(env, appKind, owner, app, 1);
       expect(back.version).toBe(1);
 
       await commitDefined(
@@ -519,7 +516,7 @@ describe(
         notesFiles("Notes 3"),
         "Tables again"
       );
-      await rollback(env, appPublishing, owner, app, 3);
+      await rollback(env, appKind, owner, app, 3);
       const [fresh] = await defaultStores(app);
       expect(fresh?.storeId).not.toBe(deleted?.storeId);
       const release = await loadRelease(env, app, 3);
@@ -531,10 +528,10 @@ describe(
 
     it("refuses a version whose store is deleted as it is made current", async () => {
       const { owner, app } = await appWith(notesFiles());
-      await rollback(env, appPublishing, owner, app, 1);
+      await rollback(env, appKind, owner, app, 1);
       const [store] = await defaultStores(app);
       await commitDefined(env, owner, app, withoutNotes, "No tables");
-      await rollback(env, appPublishing, owner, app, 2);
+      await rollback(env, appKind, owner, app, 2);
       // Its store gone as the statement runs (deletion itself is refused
       // while version 1 is kept: this is the guard behind that).
       const racing = racingDb(async () => {
@@ -547,7 +544,7 @@ describe(
       await expect(
         failure(
           async () =>
-            await rollback({ ...env, DB: racing }, appPublishing, owner, app, 1)
+            await rollback({ ...env, DB: racing }, appKind, owner, app, 1)
         )
       ).resolves.toBe("data.store_unavailable");
       await expect(currentOf(app)).resolves.toBe(2);
@@ -555,7 +552,7 @@ describe(
 
     it("refuses a version that can't be sealed, and leaves the current one", async () => {
       const { owner, app } = await appWith(notesFiles());
-      await rollback(env, appPublishing, owner, app, 1);
+      await rollback(env, appKind, owner, app, 1);
       await commitDefined(
         env,
         owner,
@@ -566,7 +563,7 @@ describe(
         "Broken"
       );
       await expect(
-        failure(async () => await rollback(env, appPublishing, owner, app, 2))
+        failure(async () => await rollback(env, appKind, owner, app, 2))
       ).resolves.not.toBe("ok");
       await expect(currentOf(app)).resolves.toBe(1);
     });
@@ -601,7 +598,7 @@ describe("an App's store", { timeout: 120_000 }, () => {
       id: first.userId,
       role: "builder",
     });
-    await rollback(env, appPublishing, first, app, 1);
+    await rollback(env, appKind, first, app, 1);
     const [recorded] = await defaultStores(app);
     const store = recorded?.storeId ?? "";
     const whileBuilding = await deleting(first, store);
@@ -622,7 +619,7 @@ describe("an App's store", { timeout: 120_000 }, () => {
 
   it("is managed by none of the App's users, nor anyone outside it, nor a builder whose organization role no longer builds", async () => {
     const { owner, app } = await appWith(notesFiles());
-    await rollback(env, appPublishing, owner, app, 1);
+    await rollback(env, appKind, owner, app, 1);
     const [recorded] = await defaultStores(app);
     const store = recorded?.storeId ?? "";
     const reader = await person("builder");
@@ -668,17 +665,17 @@ describe("an App's store", { timeout: 120_000 }, () => {
 describe("a store's definitions", { timeout: 120_000 }, () => {
   it("are recorded once each, numbered, and bound by each version", async () => {
     const { owner, app } = await appWith(notesFiles());
-    await rollback(env, appPublishing, owner, app, 1);
+    await rollback(env, appKind, owner, app, 1);
     // The same schema and functions under another name: one definition.
     await commitDefined(env, owner, app, notesFiles("Notes 2"), "Renamed");
-    await rollback(env, appPublishing, owner, app, 2);
+    await rollback(env, appKind, owner, app, 2);
     // Another table: a second definition.
     const widened = testApp(
       notesSpec("Notes 3", { tags: { fields: { name: "v.string()" } } }),
       notesFiles("Notes 3").files
     );
     await commitDefined(env, owner, app, widened, "Tags");
-    await rollback(env, appPublishing, owner, app, 3);
+    await rollback(env, appKind, owner, app, 3);
     const [recorded] = await defaultStores(app);
     const store = recorded?.storeId ?? "";
     const definitions = await env.DB.prepare(
@@ -761,7 +758,7 @@ const teamRenamedMigration = async (
     }
   );
   const { owner, app } = await appWith(first);
-  await rollback(env, appPublishing, owner, app, 1);
+  await rollback(env, appKind, owner, app, 1);
   const [own] = await defaultStores(app);
   const store = env.DATA_STORES.getByName(own?.storeId ?? "");
   await runInDurableObject(store, (_, state) => {
@@ -813,7 +810,7 @@ export default defineMigration({
   );
 
   const published = await failure(
-    async () => await rollback(env, appPublishing, owner, app, second)
+    async () => await rollback(env, appKind, owner, app, second)
   );
   const stored = await runInDurableObject(store, (_, state) =>
     state.storage.sql
@@ -864,7 +861,7 @@ describe(
   () => {
     it("applies an optional field, and an older version made current again keeps its values", async () => {
       const { owner, app } = await appWith(evolvingFiles());
-      await rollback(env, appPublishing, owner, app, 1);
+      await rollback(env, appKind, owner, app, 1);
       await valueOf(owner, app, "notes.create", { title: "Launch" });
 
       const second = await nextVersion(
@@ -872,7 +869,7 @@ describe(
         app,
         evolvingFiles({ category: "v.string()" })
       );
-      await rollback(env, appPublishing, owner, app, second);
+      await rollback(env, appKind, owner, app, second);
       const renamed = await valueOf(owner, app, "notes.create", {
         title: "Hiring",
         category: "jobs",
@@ -884,7 +881,7 @@ describe(
 
       // Back to the first version: it reads and writes its own fields,
       // and the store keeps what the second stored.
-      await rollback(env, appPublishing, owner, app, 1);
+      await rollback(env, appKind, owner, app, 1);
       await valueOf(owner, app, "notes.rename", {
         id: renamed,
         title: "Hired",
@@ -895,7 +892,7 @@ describe(
       });
       const firstRows = await valueOf(owner, app, "notes.rows");
 
-      await rollback(env, appPublishing, owner, app, second);
+      await rollback(env, appKind, owner, app, second);
       expect({
         first: firstRows,
         second: await valueOf(owner, app, "notes.rows"),
@@ -911,16 +908,16 @@ describe(
 
     it("makes an older version current again after a newer one changed only its indexes", async () => {
       const { owner, app } = await appWith(evolvingFiles());
-      await rollback(env, appPublishing, owner, app, 1);
+      await rollback(env, appKind, owner, app, 1);
       await valueOf(owner, app, "notes.create", { title: "Launch" });
       const indexed = await nextVersion(
         owner,
         app,
         evolvingFiles({}, {}, { indexed: true })
       );
-      await rollback(env, appPublishing, owner, app, indexed);
+      await rollback(env, appKind, owner, app, indexed);
 
-      await rollback(env, appPublishing, owner, app, 1);
+      await rollback(env, appKind, owner, app, 1);
 
       expect({
         current: await currentOf(app),
@@ -932,7 +929,7 @@ describe(
       const { owner, app } = await appWith(
         evolvingFiles({ category: "v.string()" })
       );
-      await rollback(env, appPublishing, owner, app, 1);
+      await rollback(env, appKind, owner, app, 1);
       await valueOf(owner, app, "notes.create", {
         title: "Launch",
         category: "news",
@@ -944,9 +941,7 @@ describe(
         evolvingFiles({ category: "v.number()" })
       );
       await expect(
-        failure(
-          async () => await rollback(env, appPublishing, owner, app, retyped)
-        )
+        failure(async () => await rollback(env, appKind, owner, app, retyped))
       ).resolves.toBe("migration.required");
 
       expect({
@@ -960,7 +955,7 @@ describe(
 
     it("fills in a defaulted field as it publishes, and the records an older version wrote meanwhile", async () => {
       const { owner, app } = await appWith(evolvingFiles());
-      await rollback(env, appPublishing, owner, app, 1);
+      await rollback(env, appKind, owner, app, 1);
       await valueOf(owner, app, "notes.create", { title: "Launch" });
       const defaulted = await nextVersion(
         owner,
@@ -968,13 +963,13 @@ describe(
         evolvingFiles({}, { category: 'v.string().default("general")' })
       );
 
-      await rollback(env, appPublishing, owner, app, defaulted);
+      await rollback(env, appKind, owner, app, defaulted);
       const filled = await valueOf(owner, app, "notes.rows");
       // The first version, made current again, writes without the field;
       // made current again, the defaulted one fills it in.
-      await rollback(env, appPublishing, owner, app, 1);
+      await rollback(env, appKind, owner, app, 1);
       await valueOf(owner, app, "notes.create", { title: "Hiring" });
-      await rollback(env, appPublishing, owner, app, defaulted);
+      await rollback(env, appKind, owner, app, defaulted);
       const events = await allEvents();
 
       // One event per fill, counting its records: none per record.
@@ -1007,7 +1002,7 @@ describe(
 
     it("asks a value for the records that lack a new required field, and fills in the answer", async () => {
       const { owner, app } = await appWith(evolvingFiles());
-      await rollback(env, appPublishing, owner, app, 1);
+      await rollback(env, appKind, owner, app, 1);
       await valueOf(owner, app, "notes.create", { title: "Launch" });
       const required = evolvingFiles({}, { category: "v.string()" });
       // Its writes keep the field it requires.
@@ -1019,7 +1014,7 @@ describe(
       });
       const unanswered = await nextVersion(owner, app, files);
       const refused = await failure(
-        async () => await rollback(env, appPublishing, owner, app, unanswered)
+        async () => await rollback(env, appKind, owner, app, unanswered)
       );
       const answered = await nextVersion(
         owner,
@@ -1035,7 +1030,7 @@ describe(
           ],
         }))
       );
-      await rollback(env, appPublishing, owner, app, answered);
+      await rollback(env, appKind, owner, app, answered);
 
       expect({
         refused,
@@ -1049,7 +1044,7 @@ describe(
     it("keeps a renamed field's values by its stable ID, back and forth across a rollback", async () => {
       const first = evolvingFiles({ category: "v.string()" });
       const { owner, app } = await appWith(first);
-      await rollback(env, appPublishing, owner, app, 1);
+      await rollback(env, appKind, owner, app, 1);
       await valueOf(owner, app, "notes.create", {
         title: "Launch",
         category: "news",
@@ -1070,15 +1065,15 @@ describe(
         })
       );
 
-      await rollback(env, appPublishing, owner, app, second);
+      await rollback(env, appKind, owner, app, second);
       const moved = await valueOf(owner, app, "notes.rows");
       await valueOf(owner, app, "notes.create", {
         title: "Hiring",
         topic: "jobs",
       });
-      await rollback(env, appPublishing, owner, app, 1);
+      await rollback(env, appKind, owner, app, 1);
       const back = await valueOf(owner, app, "notes.rows");
-      await rollback(env, appPublishing, owner, app, second);
+      await rollback(env, appKind, owner, app, second);
 
       expect({
         moved,
@@ -1100,7 +1095,7 @@ describe(
     it("keeps a renamed table's records by its stable ID", async () => {
       const first = evolvingFiles();
       const { owner, app } = await appWith(first);
-      await rollback(env, appPublishing, owner, app, 1);
+      await rollback(env, appKind, owner, app, 1);
       const id = await valueOf(owner, app, "notes.create", { title: "Launch" });
       const renamed = definedWith(first, {
         op: "renameTable",
@@ -1117,7 +1112,7 @@ describe(
         })
       );
 
-      await rollback(env, appPublishing, owner, app, second);
+      await rollback(env, appKind, owner, app, second);
       await valueOf(owner, app, "notes.rename", { id, title: "Launched" });
 
       expect({
@@ -1150,7 +1145,7 @@ describe(
 
     it("keeps the store's version moving through a version without tables", async () => {
       const { owner, app } = await appWith(evolvingFiles());
-      await rollback(env, appPublishing, owner, app, 1);
+      await rollback(env, appKind, owner, app, 1);
       await valueOf(owner, app, "notes.create", { title: "Launch" });
       const empty = await nextVersion(
         owner,
@@ -1159,11 +1154,11 @@ describe(
           "server/notes.ts": "",
         })
       );
-      await rollback(env, appPublishing, owner, app, empty);
+      await rollback(env, appKind, owner, app, empty);
       const back = await nextVersion(owner, app, evolvingFiles());
 
       const published = await failure(
-        async () => await rollback(env, appPublishing, owner, app, back)
+        async () => await rollback(env, appKind, owner, app, back)
       );
 
       expect({
@@ -1210,7 +1205,7 @@ describe(
     it("runs a migration once on every record as it publishes, in one transaction with the schema", async () => {
       const first = evolvingFiles({ category: "v.string()" });
       const { owner, app } = await appWith(first);
-      await rollback(env, appPublishing, owner, app, 1);
+      await rollback(env, appKind, owner, app, 1);
       for (const [title, category] of [
         ["Launch", "news"],
         ["Hiring", "jobs!"],
@@ -1224,7 +1219,7 @@ describe(
         await migratedFiles(first, "row.category.length")
       );
 
-      await rollback(env, appPublishing, owner, app, second);
+      await rollback(env, appKind, owner, app, second);
 
       expect({
         rows: await valueOf(owner, app, "notes.rows"),
@@ -1252,7 +1247,7 @@ describe(
     it("changes nothing when its migration fails midway, and the current version keeps running", async () => {
       const first = evolvingFiles({ category: "v.string()" });
       const { owner, app } = await appWith(first);
-      await rollback(env, appPublishing, owner, app, 1);
+      await rollback(env, appKind, owner, app, 1);
       for (const title of ["Alpha", "Bad", "Zulu"]) {
         // oxlint-disable-next-line no-await-in-loop -- one note after the other
         await valueOf(owner, app, "notes.create", { title, category: "news" });
@@ -1267,7 +1262,7 @@ describe(
       );
 
       const refused = await failure(
-        async () => await rollback(env, appPublishing, owner, app, second)
+        async () => await rollback(env, appKind, owner, app, second)
       );
 
       expect({
@@ -1287,7 +1282,7 @@ describe(
 
     it("makes one of two conflicting versions current when both are published at once", async () => {
       const { owner, app } = await appWith(evolvingFiles());
-      await rollback(env, appPublishing, owner, app, 1);
+      await rollback(env, appKind, owner, app, 1);
       const asText = await nextVersion(
         owner,
         app,
@@ -1300,12 +1295,8 @@ describe(
       );
 
       const outcomes = await Promise.all([
-        failure(
-          async () => await rollback(env, appPublishing, owner, app, asText)
-        ),
-        failure(
-          async () => await rollback(env, appPublishing, owner, app, asNumber)
-        ),
+        failure(async () => await rollback(env, appKind, owner, app, asText)),
+        failure(async () => await rollback(env, appKind, owner, app, asNumber)),
       ]);
 
       const winner = outcomes[0] === "ok" ? asText : asNumber;
@@ -1335,13 +1326,13 @@ describe(
 
     it("finishes a publish whose store took the schema before it stopped", async () => {
       const { owner, app } = await appWith(evolvingFiles());
-      await rollback(env, appPublishing, owner, app, 1);
+      await rollback(env, appKind, owner, app, 1);
       const second = await nextVersion(
         owner,
         app,
         evolvingFiles({ category: "v.string()" })
       );
-      await rollback(env, appPublishing, owner, app, second);
+      await rollback(env, appKind, owner, app, second);
       // A rollback that stopped after its store took the first version's
       // schema, and before core made it current.
       await applyVersionSchema(
@@ -1351,7 +1342,7 @@ describe(
         second
       );
 
-      await rollback(env, appPublishing, owner, app, 1);
+      await rollback(env, appKind, owner, app, 1);
 
       const events = await allEvents();
       const made = events.filter(
@@ -1374,7 +1365,7 @@ describe(
     it("says a publish is unfinished when its migration can't be taken back, audits it, and finishes it as it is published again", async () => {
       const first = evolvingFiles({ category: "v.string()" });
       const { owner, app } = await appWith(first);
-      await rollback(env, appPublishing, owner, app, 1);
+      await rollback(env, appKind, owner, app, 1);
       await valueOf(owner, app, "notes.create", {
         title: "Launch",
         category: "news",
@@ -1391,7 +1382,7 @@ describe(
         async () =>
           await rollback(
             { ...env, DB: failingDb(/update "apps"/iu) },
-            appPublishing,
+            appKind,
             owner,
             app,
             second
@@ -1399,7 +1390,7 @@ describe(
       );
       const stranded = await codeOfCall(owner, app, "notes.rows");
       const events = await allEvents();
-      await rollback(env, appPublishing, owner, app, second);
+      await rollback(env, appKind, owner, app, second);
 
       expect({
         refused,
@@ -1429,14 +1420,14 @@ describe(
 
     it("puts the current version's schema back when the batch making another current fails, so it keeps working", async () => {
       const { owner, app } = await appWith(evolvingFiles());
-      await rollback(env, appPublishing, owner, app, 1);
+      await rollback(env, appKind, owner, app, 1);
       await valueOf(owner, app, "notes.create", { title: "Launch" });
       const second = await nextVersion(
         owner,
         app,
         evolvingFiles({ category: "v.string()" })
       );
-      await rollback(env, appPublishing, owner, app, second);
+      await rollback(env, appKind, owner, app, second);
       const third = await nextVersion(
         owner,
         app,
@@ -1448,7 +1439,7 @@ describe(
         async () =>
           await rollback(
             { ...env, DB: failingDb(/update "apps"/iu) },
-            appPublishing,
+            appKind,
             owner,
             app,
             third
@@ -1502,7 +1493,7 @@ const resetAudit = async (store: string) => {
 /** A Notes App with one note, made current, and its store. */
 const notedApp = async () => {
   const { owner, app } = await appWith(evolvingFiles());
-  await rollback(env, appPublishing, owner, app, 1);
+  await rollback(env, appKind, owner, app, 1);
   await valueOf(owner, app, "notes.create", { title: "Launch" });
   const bound = await storeOf(app, 1);
   return { owner, app, store: bound?.storeId ?? "" };
@@ -1544,7 +1535,7 @@ describe("resetting an App's data", { timeout: 120_000 }, () => {
 
   it("resets over a current version without tables, applying its schema (none) as its version", async () => {
     const { owner, app } = await appWith(evolvingFiles());
-    await rollback(env, appPublishing, owner, app, 1);
+    await rollback(env, appKind, owner, app, 1);
     await valueOf(owner, app, "notes.create", { title: "Launch" });
     const empty = await nextVersion(
       owner,
@@ -1553,14 +1544,14 @@ describe("resetting an App's data", { timeout: 120_000 }, () => {
         "server/notes.ts": "",
       })
     );
-    await rollback(env, appPublishing, owner, app, empty);
+    await rollback(env, appKind, owner, app, empty);
     const admin = await person("admin");
 
     const reset = await failure(async () => {
       await resetAppData(env, admin, app, "Notes");
     });
     // Its tables back, and empty: the reset took every record.
-    await rollback(env, appPublishing, owner, app, 1);
+    await rollback(env, appKind, owner, app, 1);
 
     expect({
       reset,
@@ -1570,7 +1561,7 @@ describe("resetting an App's data", { timeout: 120_000 }, () => {
 
   it("resets nothing, refusing nothing, for an App whose current version has no tables", async () => {
     const { owner, app } = await appWith(emptyFiles);
-    await rollback(env, appPublishing, owner, app, 1);
+    await rollback(env, appKind, owner, app, 1);
     const admin = await person("admin");
 
     await expect(

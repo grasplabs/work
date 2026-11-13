@@ -25,7 +25,6 @@ import {
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { editWorkflowDraft, workflowDraft } from "../src/workflow-editor.ts";
 import { setWorkflowParams } from "../src/workflow-params.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import {
   createWorkflowResource,
   shareWorkflowResource,
@@ -44,6 +43,7 @@ import { allEvents } from "./audit-events.ts";
 import { resumed, stopped, whileEngineRefuses } from "./runs.ts";
 import { outcome, unique } from "./sign-in.ts";
 import { reached } from "./teams-door.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // The decision step in JSON workflows (grasp-workflow/2's `decision`, the
 // run host's `step.decision`, resource-decisions.ts and the decision
@@ -236,10 +236,12 @@ const approvalWorkflow = async ({
     owner,
     `approve-${unique()}`
   );
-  await publishWorkflowVersion(env, owner, workflow.id, {
-    definition: definitionOf(contract, steps, status),
-    basedOn: null,
-  });
+  await publishDefinition(
+    env,
+    owner,
+    workflow.id,
+    definitionOf(contract, steps, status)
+  );
   const [version] = await workflowVersions(env, owner, workflow.id);
   const approval = await approveWorkflowBinding(env, admin, workflow.id, {
     alias: "invoiceApproval",

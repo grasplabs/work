@@ -33,7 +33,6 @@ import {
   setTriggerEnabled,
   updateTriggerVersion,
 } from "../src/trigger-resources.ts";
-import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import {
   createWorkflowResource,
   deleteWorkflowResource,
@@ -57,6 +56,7 @@ import { greetingOf } from "./json-workflow-apps.ts";
 import { configuredLimits } from "./quota-limits.ts";
 import { outcome, refusal, unique } from "./sign-in.ts";
 import { webhookConfig } from "./source-config.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // Starting an independent workflow (workflow-starts.ts), and the
 // permissions of independent resources it relies on (permissions.ts),
@@ -130,10 +130,12 @@ const workflowOf = async (owner: Person, versions = 1) => {
   );
   for (let version = 1; version <= versions; version += 1) {
     // oxlint-disable-next-line no-await-in-loop -- each builds on the one before
-    await publishWorkflowVersion(env, owner, workflow.id, {
-      definition: greetingOf(undefined, `Version ${version}`),
-      basedOn: version === 1 ? null : version - 1,
-    });
+    await publishDefinition(
+      env,
+      owner,
+      workflow.id,
+      greetingOf(undefined, `Version ${version}`)
+    );
   }
   return workflow;
 };

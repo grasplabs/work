@@ -1,4 +1,4 @@
-import type { AppDraftChanges } from "@grasp-os/shared/app-drafts";
+import type { AppReview } from "@grasp-os/shared/app-review";
 import type {
   AppVisitorEntry,
   AppVisitorGrants,
@@ -117,7 +117,7 @@ export class AppsRpc extends CoreRpcTarget implements AppsApi {
     return this.#preview;
   }
 
-  async review(app: string): Promise<AppDraftChanges> {
+  async review(app: string): Promise<AppReview> {
     return await withPerson(
       this.#check,
       async (by) => await reviewChanges(this.#env, by, app)
