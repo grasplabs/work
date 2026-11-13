@@ -133,7 +133,7 @@ const brainTeamVersionOf = (source: string): SourceVersionRef | undefined => {
 
 /**
  * Of the versions code's recall handed over in `sources`, those the
- * person's teams may still read (`readableVersionsAs`, not `personal`),
+ * person's teams may still read (`readableVersionsAs`, as `teams`),
  * in one read of the Brain per 500.
  */
 const readableBrainTeamVersions = async (
@@ -152,7 +152,7 @@ const readableBrainTeamVersions = async (
     env,
     scope.personId,
     pins.map(({ pin }) => pin),
-    { personal: false }
+    { reach: "teams" }
   );
   const readable = new Set(versions.map((ref) => brainTeamVersionRead(ref)));
   return pins.flatMap(({ source }) => (readable.has(source) ? [source] : []));

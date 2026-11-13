@@ -10,7 +10,7 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { requireNoBrainSource } from "./app-provenance.ts";
+import { recallsTheBrain } from "./app-provenance.ts";
 import { loadRelease } from "./app-releases.ts";
 import { editableApp } from "./apps.ts";
 import {
@@ -157,8 +157,13 @@ export const setAppVisitorGrants = async (
   if (version === null) {
     throw appVisitorErrors.create("visitor.invalid");
   }
-  if (parsed.data.length > 0) {
-    await requireNoBrainSource(env, appIdSchema.parse(found.id));
+  // An App that may hold what the Brain recalled grants visitors nothing
+  // (app-visitors.ts); taking every grant off stays possible.
+  if (
+    parsed.data.length > 0 &&
+    (await recallsTheBrain(env, appIdSchema.parse(found.id)))
+  ) {
+    throw appVisitorErrors.create("visitor.not_granted");
   }
   const release = await loadRelease(env, found.id, version);
   const wanted = [...new Set(parsed.data)].toSorted();

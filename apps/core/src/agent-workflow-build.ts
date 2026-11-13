@@ -491,12 +491,9 @@ const workflowBuildDeclaration = `/**
  * never an action. The ID is what is called, so the App renaming the function breaks nothing; a run calls
  * it only once an admin has granted the workflow \`call\` on that function, and it acts as the run's person,
  * within the App's roles and row rules. Each alias is used once across every kind. A files permission is
- * the run's own files, and a brain permission the Brain, read as the run's person's teams may (never
- * what only they may read), served by the workflow's own grant of the platform's \`brain\`
- * (\`requestPermission\` below). A run that recalled is in restricted mode from then on: it keeps no \`state\`
- * (a write fails the run), its connections' actions wait for its person to confirm, and an App it writes to
- * is put in restricted mode; an App that starts or follows such a workflow can't be shared, for now. A
- * \`call\` step reaches each (below). A file is handed on by its reference \`{ file, name, type, size,
+ * the run's own files, and a brain permission the Brain, read as only what everyone in the company may
+ * read (never a team's content, nor anyone's own), whoever the run acts for, served by the workflow's own grant of the platform's \`brain\`
+ * (\`requestPermission\` below): a \`call\` step reaches each (below). A file is handed on by its reference \`{ file, name, type, size,
  * sha256 }\`, never its content, and found by its \`file\` ID in its own run alone.
  * \`state\` declares what the workflow keeps between its runs: \`{ [key]: <descriptor> }\`, at
  * most 64 KB in all.

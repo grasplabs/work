@@ -47,11 +47,12 @@ export interface BrainPackItem {
 }
 
 /**
- * What the person may read of the organization's shared content that
- * answers the question (never their private chats or personal files),
- * best first, within the budget; the parts of the question nothing they may read holds
- * (`notFound`); and whether the budget left out or shortened a passage
- * found (`truncated`).
+ * What answers the question, best first, within the budget: from an App
+ * or a workflow, only what everyone in the company may read (never a
+ * team's content, nor anyone's private chats or personal files); from a
+ * chat's code, what that person's teams may read. Then the parts of the
+ * question nothing it may read holds (`notFound`), and whether the budget
+ * left out or shortened a passage found (`truncated`).
  */
 export interface BrainPack {
   readonly items: readonly BrainPackItem[];

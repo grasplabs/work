@@ -255,6 +255,14 @@ export interface Recall {
    */
   personal: boolean;
   /**
+   * Whether it reads only what everyone in the company may read: as no
+   * person and no team, so neither the person's own content nor any
+   * team's is found (`personal` is then ignored). Apps' and workflows'
+   * recall (brain-recall.ts) does: what code is handed may end up where
+   * any member reads it, so it holds nothing a member couldn't.
+   */
+  company?: boolean;
+  /**
    * Read each source as it was at this moment, to the millisecond and
    * including it: a version added at it counts. A caller who means "on
    * that day" passes the day's last millisecond in the time zone they
@@ -448,21 +456,34 @@ const accessOf = (readers: SourceReaders): Access => {
 };
 
 /**
- * `personId` as the Brain's reader: the person, and the teams core counts
- * them in now; the teams alone when not `personal`. Refused once they
- * have no current membership.
+ * Whom a reader reads as: the person and the teams core counts them in
+ * (`person`); those teams alone, as no person (`teams`); or the company
+ * alone, as no person and no team (`company`), which reads only what
+ * every member may.
+ */
+export type Reach = "person" | "teams" | "company";
+
+/** Every current member is in this group, and in no other way. */
+const companyGroup = "company";
+
+/**
+ * `personId` as the Brain's reader, as far as `reach` goes. Refused once
+ * they have no current membership, whatever the reach.
  */
 const readerOf = async (
   env: Pick<Env, "DB">,
   personId: string,
-  { personal = true }: { personal?: boolean } = {}
+  reach: Reach = "person"
 ): Promise<Reader> => {
   const member = await memberOf(env.DB, checked(idSchema, personId));
   if (member === undefined) {
     throw permissionErrors.create("permission.person_inactive");
   }
+  if (reach === "company") {
+    return { person: null, groups: [companyGroup] };
+  }
   return {
-    person: personal ? member.userId : null,
+    person: reach === "person" ? member.userId : null,
     groups: member.teams.map(({ id }) => teamGroup(id)),
   };
 };
@@ -574,18 +595,23 @@ const meaningOf = async (
  * With `personal`, from the shared store and their own together, packed
  * as one store holding both would pack them (`packAcross`); without, from
  * the shared store alone, as their teams may read it (a reader with no
- * person: no `owner` source matches). Refused once they are no longer a
- * member, or when `personId` isn't an ID.
+ * person: no `owner` source matches), or with `company` as the company
+ * alone. Refused once they are no longer a member, or when `personId`
+ * isn't an ID.
  */
 export const recallAs = async (
   env: BrainEnv & Pick<Env, "DB" | "EMBEDDER">,
   personId: string,
-  { question: asked, budget, asOf, personal }: Recall
+  { question: asked, budget, asOf, personal, company = false }: Recall
 ): Promise<RecalledPack> => {
   // As the Brain checks it, before the embedder sees any of it.
   const question = checked(questionSchema, asked);
+  let reach: Reach = personal ? "person" : "teams";
+  if (company) {
+    reach = "company";
+  }
   const [reader, meaning] = await Promise.all([
-    readerOf(env, personId, { personal }),
+    readerOf(env, personId, reach),
     // As of a moment the Brain never searches by meaning: nothing to embed.
     asOf === undefined ? meaningOf(env, question) : {},
   ]);
@@ -807,21 +833,22 @@ const versionRefsSchema = z.array(versionRefSchema);
  * Of `versions`, those the member `personId` may read now, as
  * `readSourceVersionAs` decides it, in the order given and each once,
  * without reading their text: for core to check what a chat once read
- * before it sends it again (history-access.ts). Not `personal`: those
- * their teams may read alone, as code's recall read them. Refused once
- * they are no longer a member. For the server only, as `addSource`.
+ * before it sends it again (history-access.ts), or a run what it
+ * recalled (workflows/resource-reads.ts): as far as `reach` goes, as the
+ * recall that handed them read. Refused once they are no longer a member.
+ * For the server only, as `addSource`.
  */
 export const readableVersionsAs = async (
   env: BrainEnv & Pick<Env, "DB">,
   personId: string,
   versions: readonly SourceVersionRef[],
-  { personal = true }: { personal?: boolean } = {}
+  { reach = "person" }: { reach?: Reach } = {}
 ): Promise<SourceVersionRef[]> => {
   const asked = checked(versionRefsSchema, versions);
   if (asked.length === 0) {
     return [];
   }
-  const reader = await readerOf(env, personId, { personal });
+  const reader = await readerOf(env, personId, reach);
   const parts = Array.from(
     { length: Math.ceil(asked.length / readableCheckMax) },
     (_, at) => asked.slice(at * readableCheckMax, (at + 1) * readableCheckMax)
@@ -953,9 +980,6 @@ export const erasePerson = async (
 // reaches which chat or run, and who may write each, is
 // instruction-files.ts's rule; the functions here only name them for the
 // Brain.
-
-/** Every current member is in this group, and in no other way. */
-const companyGroup = "company";
 
 /** An App's group: only for a reader who builds the App. */
 const appGroup = (appId: string): string => `app:${appId}`;

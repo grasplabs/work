@@ -2,12 +2,9 @@ import { delegateActorOf } from "@grasp-os/shared/audit";
 import { permissionIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
-import { eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
 
 import { brainPackSchema } from "../brain-pack.ts";
 import { isBrainRecall, recallFor } from "../brain-recall.ts";
-import { workflowResourceRuns } from "../db/core/schema.ts";
 import { runAuthority, runContext } from "./resource-authority.ts";
 import type { CallingRun, FrozenCatalogBinding } from "./resource-authority.ts";
 import { recordRunVersions } from "./run-evidence.ts";
@@ -16,16 +13,12 @@ import { recordRunVersions } from "./run-evidence.ts";
 // named calls (resource-calls.ts, `makeCall`): its binding frozen at the
 // start, its authority decided again first, its receipts kept. The
 // binding names the workflow's own `{ type: "platform" }` permission to
-// read the Brain, which `recallFor` checks again as it recalls, as the
+// read the Brain, which `recallFor` checks again as it recalls, for the
 // person the run acts for (who started it, or the workflow's owner for a
-// trigger's or a schedule's run), never more: the same request, checks
-// and pack as an App's action and a chat's code (threat model on
-// GRA-1731). What it hands the run is pinned with the run
-// (run-evidence.ts), and the run is in restricted mode from then on
-// (restricted.ts), set before it gets the pack: what one person's teams
-// may read stays in their run. It keeps no state for the workflow's other
-// runs (`workflow.state_restricted`), and its connections' actions, the
-// Apps it writes to and the models it may use follow restricted mode.
+// trigger's or a schedule's run), still a member, and of only what
+// everyone in the company may read: the same request, checks and pack as
+// an App's action (threat model on GRA-1731). What it hands the run is pinned with the run
+// (run-evidence.ts).
 
 /** A brain call, as a run's step asks it. */
 export interface BrainCall {
@@ -89,10 +82,6 @@ export const callBrain = async (
       // is checked again before anything leaves the run
       // (resource-reads.ts).
       keep: async ({ items }) => {
-        await drizzle(env.DB)
-          .update(workflowResourceRuns)
-          .set({ restricted: true })
-          .where(eq(workflowResourceRuns.id, run.runId));
         await recordRunVersions(env, run.runId, permissionId, items);
       },
     },

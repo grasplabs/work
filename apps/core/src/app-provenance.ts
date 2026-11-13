@@ -1,11 +1,10 @@
 import { collections } from "@grasp-os/brain/schema";
-import { appErrors } from "@grasp-os/shared/apps";
 import type { ConnectionOwner } from "@grasp-os/shared/connect";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Role } from "@grasp-os/shared/roles";
-import { and, eq, inArray, isNotNull, ne, or } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, ne, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -46,12 +45,7 @@ import type { CollectionAccess, PersonAccess } from "./knowledge/access.ts";
 // Apps collection: it is open to everyone, but Knowledge shows each entry
 // only to whoever may open its App, so its access says nothing of what
 // the App read there. No App is given it now (permissions.ts
-// `requireCollection`); one granted it before counts it unresolved. And so
-// does the platform's `brain` (`platform:brain`): an App or workflow that
-// recalls the Brain reads as whoever it acts for, any team's text, so what
-// it keeps can't be placed. An App that recalls the Brain is its owner's
-// alone for now; a grant of it to an App already shared is refused
-// (permissions.ts `requireUnsharedForBrain`).
+// `requireCollection`); one granted it before counts it unresolved.
 //
 // An App's code is treated as free of provenance, but for its AGENTS.md:
 // that is written from what the App's agents read, and is read only by
@@ -78,7 +72,7 @@ import type { CollectionAccess, PersonAccess } from "./knowledge/access.ts";
 
 /** A source as the audit log and refusals name it. */
 const sourceId = (
-  type: "connection" | "collection" | "app" | "platform",
+  type: "connection" | "collection" | "app",
   id: string
 ): string => `${type}:${id}`;
 
@@ -449,7 +443,7 @@ export const sourcesOfApps = async (
   );
   const sourceGrant = and(
     isNotNull(permissions.grantedAt),
-    inArray(permissions.objectType, ["connection", "collection", "platform"])
+    inArray(permissions.objectType, ["connection", "collection"])
   );
   const rows =
     all.length === 0
@@ -481,27 +475,16 @@ export const sourcesOfApps = async (
   const own = new Map(
     all.map((node) => [
       node,
-      {
-        connected: new Set<string>(),
-        read: new Set<string>(),
-        recalls: false,
-      },
+      { connected: new Set<string>(), read: new Set<string>() },
     ])
   );
   const add = (
-    of:
-      | { connected: Set<string>; read: Set<string>; recalls: boolean }
-      | undefined,
+    of: { connected: Set<string>; read: Set<string> } | undefined,
     { object, id, actions }: { object: string; id: string; actions: string }
   ): void => {
-    const granted = actionsSchema.parse(JSON.parse(actions));
     if (object === "connection") {
       of?.connected.add(id);
-    } else if (object === "platform") {
-      if (of !== undefined && granted.includes("brain")) {
-        of.recalls = true;
-      }
-    } else if (granted.includes("read")) {
+    } else if (actionsSchema.parse(JSON.parse(actions)).includes("read")) {
       of?.read.add(id);
     }
   };
@@ -521,7 +504,6 @@ export const sourcesOfApps = async (
             reached.flatMap((of) => [...(of?.connected ?? [])])
           ),
           read: new Set(reached.flatMap((of) => [...(of?.read ?? [])])),
-          recalls: reached.some((of) => of?.recalls === true),
         },
       ];
     })
@@ -541,14 +523,11 @@ export const sourcesOfApps = async (
   const ownerOf = new Map(owners.map((owner) => [owner.id, owner]));
   const accessById = new Map(readable.map((access) => [access.id, access]));
   return new Map(
-    [...granted].map(([app, { connected, read, recalls }]) => {
+    [...granted].map(([app, { connected, read }]) => {
       const sources: AppSources = {
         connections: [],
         collections: [],
-        unresolved: [
-          ...(reach.get(app)?.unresolved ?? []),
-          ...(recalls ? [sourceId("platform", "brain")] : []),
-        ],
+        unresolved: [...(reach.get(app)?.unresolved ?? [])],
       };
       for (const id of connected) {
         const owner = ownerOf.get(id);
@@ -583,27 +562,71 @@ export const sourcesOf = async (env: Env, app: AppId): Promise<AppSources> => {
   );
 };
 
-/** How the sources name the platform's `brain`: an App that recalls it. */
-export const brainSource = sourceId("platform", "brain");
-
 /**
- * Refuses, as `app.share_unreadable` naming `brainSource`, letting anyone
- * but its owner and admins into App `app` when it recalls the Brain, as
- * its sources say (directly, or through a workflow it starts or follows):
- * visitors from outside the organization, who read what its functions
- * answer them, as much as people it is shared with.
+ * Whether App `app` may hold what the Brain recalled: it, or a workflow
+ * or App it reaches through grants on workflows (`reachedThroughCalls`),
+ * or a workflow granted to call one of their functions, was ever granted
+ * the platform's `brain`; and so, failing closed, when the walk went past
+ * its caps. What code recalls is what everyone in the company may read
+ * (brain-recall.ts), so this matters only for someone outside it: a
+ * visitor (app-visitors.ts). One query past the walk.
  */
-export const requireNoBrainSource = async (
+export const recallsTheBrain = async (
   env: Env,
   app: AppId
-): Promise<void> => {
-  const { unresolved } = await sourcesOf(env, app);
-  if (unresolved.includes(brainSource)) {
-    throw appErrors.create("app.share_unreadable", {
-      sources: [brainSource],
-      people: [],
-    });
+): Promise<boolean> => {
+  const reached = await reachedThroughCalls(env, [app]);
+  const reach = reached.get(app);
+  if (reach?.unresolved.has(sourceId("app", "*")) === true) {
+    return true;
   }
+  const nodes = [...(reach?.nodes ?? [app])];
+  const reachedApps = nodes.filter((id) => !id.startsWith(workflowPrefix));
+  const reachedWorkflows = nodes.flatMap((id) =>
+    id.startsWith(workflowPrefix) ? [id.slice(workflowPrefix.length)] : []
+  );
+  const brainGrant = and(
+    eq(permissions.objectType, "platform"),
+    isNotNull(permissions.grantedAt),
+    sql`EXISTS (SELECT 1 FROM json_each(${permissions.actions}) WHERE value = 'brain')`
+  );
+  // The workflows granted to call a reached App's functions: what they
+  // recalled may be in what they sent it.
+  const callers = drizzle(env.DB)
+    .select({ id: permissions.subjectId })
+    .from(permissions)
+    .where(
+      and(
+        eq(permissions.subjectType, "workflow"),
+        eq(permissions.objectType, "app"),
+        isNotNull(permissions.grantedAt),
+        inList(permissions.objectId, reachedApps)
+      )
+    );
+  const found = await drizzle(env.DB)
+    .select({ id: permissions.id })
+    .from(permissions)
+    .where(
+      and(
+        brainGrant,
+        or(
+          and(
+            eq(permissions.subjectType, "app"),
+            inList(permissions.subjectId, reachedApps)
+          ),
+          and(
+            eq(permissions.subjectType, "workflow"),
+            or(
+              inList(permissions.subjectId, reachedWorkflows),
+              inArray(permissions.subjectId, callers)
+            )
+          )
+        )
+      )
+    )
+    .limit(1)
+    .get();
+  return found !== undefined;
 };
 
 /** Whether an App has read from anything at all. */

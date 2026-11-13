@@ -1,3 +1,5 @@
+// The old Brain package's errors, until the cutover (GRA-1735) moves
+// `brain.revoked` to the new one.
 import { brainErrors } from "@grasp-os/brain/contract";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import {
@@ -93,9 +95,9 @@ const requireOwnEvidenceReadable = async (
         runContext(run)
       );
     }
-    // As the run's recalls read them: its person's teams alone.
+    // As the run's recalls read them: the company alone.
     const readable = await readableVersionsAs(env, run.principal, versions, {
-      personal: false,
+      reach: "company",
     });
     const kept = new Set(
       readable.map(({ source, version }) =>
@@ -119,9 +121,9 @@ const requireOwnEvidenceReadable = async (
  * Refuses anything leaving a run of a JSON workflow (GRA-299) that recalled
  * what it may no longer read, as `brain.revoked`: each permission its
  * recalls came through still the run's, active, now (`authorize`), and
- * each version they handed it still one its person's teams may read
- * (`readableVersionsAs`): not erased, nor its readers narrowed away from
- * them. A test run recalls nothing, so has nothing to check.
+ * each version they handed it still one the whole company may read
+ * (`readableVersionsAs`, as `company`, as its recalls read): not erased,
+ * nor its readers narrowed away from the company. A test run recalls nothing, so has nothing to check.
  *
  * What a running run shows needs no check: its details (`resourceRunFor`)
  * hold its output or failure only once it ended, which this checks first,

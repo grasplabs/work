@@ -407,6 +407,28 @@ const visitorIdOf = (answer: unknown): string | null => {
 const refusal = (answer: unknown): string =>
   typeof answer === "string" ? "refused" : "answered";
 
+/** A permission row, granted, as an admin's grant writes it. */
+const grantedRow = (
+  subjectType: "app" | "workflow",
+  subject: string,
+  objectType: "platform" | "app",
+  object: string,
+  actions: string[]
+) =>
+  env.DB.prepare(
+    `INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id,
+      actions, binding, status, requested_by, requested_at, granted_by, granted_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'active', 'test', 0, 'test', 0)`
+  ).bind(
+    crypto.randomUUID(),
+    subjectType,
+    subject,
+    objectType,
+    object,
+    JSON.stringify(actions),
+    `GRANT_${unique().toUpperCase().replaceAll(/\W/gu, "_")}`
+  );
+
 /** A domain no other test has. */
 const newDomain = (): string => `visitors-${unique()}.test`;
 
@@ -1121,5 +1143,59 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
       "role.forbidden",
       expect.any(String),
     ]);
+  });
+
+  it("are refused once the App may hold what the Brain recalled, though they were let in first, and no visitor is let in again", async () => {
+    const domain = newDomain();
+    const [direct, viaWorkflow] = [await portal(domain), await portal(domain)];
+    const mail = await mailbox();
+    for (const { builder, app } of [direct, viaWorkflow]) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      await builder.api.apps.setVisitorGrants(app, ["portal.mine"]);
+    }
+    const ana = await visitor(mail, direct.link, `ana@${domain}`);
+    const bo = await visitor(mail, viaWorkflow.link, `bo@${domain}`);
+    const before = [
+      await call(direct.app, direct.version, ana, "portal.mine"),
+      await call(viaWorkflow.app, viaWorkflow.version, bo, "portal.mine"),
+    ];
+    // Then the Brain reaches one App by its own grant, and the other
+    // through a workflow granted to call its functions, as an admin's
+    // grants write them.
+    const workflow = `workflow_${unique().replaceAll("-", "")}`;
+    await env.DB.batch([
+      grantedRow("app", direct.app, "platform", "platform", ["brain"]),
+      grantedRow("workflow", workflow, "platform", "platform", ["brain"]),
+      grantedRow("workflow", workflow, "app", viaWorkflow.app, ["call"]),
+    ]);
+    expect({
+      before,
+      after: [
+        await call(direct.app, direct.version, ana, "portal.mine"),
+        await call(viaWorkflow.app, viaWorkflow.version, bo, "portal.mine"),
+      ],
+      listAgain: await outcome(
+        direct.builder.api.apps.setVisitors(direct.app, [
+          { kind: "domain", value: domain },
+        ])
+      ),
+      grantAgain: await outcome(
+        direct.builder.api.apps.setVisitorGrants(direct.app, ["portal.mine"])
+      ),
+      // Taking every visitor and grant off stays possible.
+      listNone: await outcome(
+        direct.builder.api.apps.setVisitors(direct.app, [])
+      ),
+      grantNone: await outcome(
+        direct.builder.api.apps.setVisitorGrants(direct.app, [])
+      ),
+    }).toStrictEqual({
+      before: [[], []],
+      after: ["visitor.not_granted", "visitor.not_granted"],
+      listAgain: "visitor.not_granted",
+      grantAgain: "visitor.not_granted",
+      listNone: "ok",
+      grantNone: "ok",
+    });
   });
 });

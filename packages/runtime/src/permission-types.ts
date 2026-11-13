@@ -96,9 +96,10 @@ export interface ConnectionPermission<
 }
 
 /**
- * A `brain` permission: the Brain, as the person each call acts for may
- * read it, never more. An admin binds it to the App's own permission to
- * read the Brain.
+ * A `brain` permission: recall from the Brain of only what everyone in
+ * the company may read, whoever a call acts for: never a team's content,
+ * nor anyone's own. An admin binds it to the App's own permission to read
+ * the Brain.
  */
 export interface BrainPermission<
   Operations extends readonly BrainOperation[] = readonly BrainOperation[],

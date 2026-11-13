@@ -13,11 +13,9 @@ import { platformGrantOf } from "./resource-platform.ts";
 // App's own `{ type: "platform" }` permissions to read the Brain. A
 // declaration grants nothing: it resolves only through an active binding
 // approved for exactly it, naming the App's own active permission, which
-// `recallFor` checks again as each recall is made, then reads as the
-// person the call acts for, never more (threat model on GRA-1731). Its
-// target is always the App, so `recallFor` answers the recall only when
-// that person is the App's owner: what an App recalls, it may keep where
-// its owner reads it.
+// `recallFor` checks again as each recall is made, then reads only what
+// everyone in the company may read, for whoever the call acts for (threat
+// model on GRA-1731).
 
 /** The contract every brain binding serves. */
 const brainContract = "grasp.brain@1";

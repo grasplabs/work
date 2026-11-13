@@ -77,9 +77,7 @@ import { personOf, requireOfferedConnection } from "./connections.ts";
 import { madeSensitiveByGrant, widenedByGrant } from "./data-policy.ts";
 import type { Grantee } from "./data-policy.ts";
 import {
-  appMembers,
   apps,
-  appVisitorEntries,
   appVersions,
   auditOutbox,
   permissions,
@@ -1286,43 +1284,6 @@ const requireServedFunction = async (env: Env, row: Row): Promise<void> => {
 };
 
 /**
- * Refuses the platform's `brain` to an App that is shared with anyone or
- * lets visitors in: an App that recalls the Brain is its owner's alone for
- * now, since what it keeps of a recall can't be placed (app-provenance.ts,
- * `platform:brain`). Sharing it or letting visitors in once granted is
- * refused there, and so is every call of someone it is shared with.
- */
-const requireUnsharedForBrain = async (env: Env, row: Row): Promise<void> => {
-  if (
-    row.subjectType !== "app" ||
-    row.objectType !== "platform" ||
-    !toPermission(row).actions.includes("brain")
-  ) {
-    return;
-  }
-  const db = drizzle(env.DB);
-  const [shared, visited] = await Promise.all([
-    db
-      .select({ appId: appMembers.appId })
-      .from(appMembers)
-      .where(eq(appMembers.appId, row.subjectId))
-      .get(),
-    db
-      .select({ appId: appVisitorEntries.appId })
-      .from(appVisitorEntries)
-      .where(eq(appVisitorEntries.appId, row.subjectId))
-      .get(),
-  ]);
-  if (shared !== undefined || visited !== undefined) {
-    throw permissionErrors.create("permission.invalid", {
-      issues: [
-        "An App that recalls the Brain can't be shared yet, and this App is shared or lets visitors in: take its people, teams and visitors off it first.",
-      ],
-    });
-  }
-};
-
-/**
  * Grants a requested permission, the admin's own request included. Only
  * from requested: an active or revoked one is refused, so a revoke is for
  * good. Audited with who asked for it.
@@ -1373,7 +1334,6 @@ export const grantPermission = async (
   }
   await requireNoBindingClash(env, found);
   await requireServedFunction(env, found);
-  await requireUnsharedForBrain(env, found);
   const db = drizzle(env.DB);
   const event = createAuditEvent(
     changeEntry(by, "permission.granted", toPermission(found), {

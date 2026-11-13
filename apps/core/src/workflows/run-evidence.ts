@@ -15,8 +15,8 @@ import { runBrainVersions } from "../db/core/schema.ts";
 // anything leave it (a model call, a connection call, an App function
 // call, a decision opened for people, its output), the host checks the
 // run may still read them all (resource-reads.ts): each permission still
-// the run's, and each version still one its person's teams may read, as
-// its recalls read them. A run that
+// the run's, and each version still one the whole company may read, as
+// its recalls read them (brain-recall.ts). A run that
 // lost read of something it recalled is refused from then on: its
 // journaled steps still hold that text, so no later recall can lift the
 // refusal. Recovery is a new run.

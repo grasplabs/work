@@ -112,9 +112,9 @@ export interface FilesActions {
 }
 
 /**
- * What a brain permission's steps do: recall, as the person the run acts
- * for may read the Brain, with the same request and pack as an App's
- * action and a chat's code (`brain-recall.ts`).
+ * What a brain permission's steps do: recall what everyone in the
+ * company may read, whoever the run acts for, with the same request and
+ * pack as an App's action (`brain-recall.ts`).
  */
 export interface BrainActions {
   readonly recall: (

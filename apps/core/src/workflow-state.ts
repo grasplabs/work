@@ -46,8 +46,7 @@ import { requireWorkflowRole } from "./workflow-resources.ts";
 //   results aren't (workflows/resource-runs.ts, workflow-own.ts).
 // - What a restricted run read reaching other runs (restricted.ts): such a
 //   run shares nothing with the workflow's other runs, so it keeps no
-//   state. A run that recalled the Brain is one (workflows/brain-calls.ts):
-//   what its person's teams may read never reaches another person's run. Its write is refused (`workflow.state_restricted`), by the
+//   state. Its write is refused (`workflow.state_restricted`), by the
 //   run's pinned flag, read in the batch.
 // - Oversized values: keys are names (`workflowStateKeySchema`) and values
 //   JSON; one workflow's state takes at most `workflowStateMaxBytes` in

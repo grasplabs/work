@@ -688,10 +688,10 @@ describe(
         },
         { inRecall }
       );
-      // Code's recall (an App's, a workflow's, a chat's code) never reads
-      // what only its person may read (GRA-1762): it reads as no person,
-      // so the holder's own sources are as hidden from it as anyone
-      // else's, and their own store is never addressed.
+      // Code's recall from an App or a workflow reads only what everyone
+      // in the company may: no person, no team. So nothing team-only
+      // reaches it even for someone in that team, nothing of the
+      // holder's own, and their own store is never addressed.
       const holderThroughCode = await watched(
         "the holder, through code's recall",
         {
@@ -699,14 +699,15 @@ describe(
           reader: { person: holder, groups: [`team:${secretTeam}`] },
           personal: false,
           sharedWord,
-          markers: [ownerMarker, noneMarker, narrowedMarker],
-          hiddenVersions: everyVersionOf(...ownerIds, noneId),
+          markers: [ownerMarker, teamMarker, noneMarker, narrowedMarker],
+          hiddenVersions: everyVersionOf(...ownerIds, teamId, noneId),
           hiddenInstructionFiles: [agentFile, appFile],
           instructionGroups,
           moments: [whileDraft],
         },
         {
           "the holder's own source": ownerMarker,
+          "a team's source, though the holder is in the team": teamMarker,
           "a source nobody is known to read": noneMarker,
           "a source narrowed away from the outsider": narrowedMarker,
         },

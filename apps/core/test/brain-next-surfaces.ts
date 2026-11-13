@@ -1149,12 +1149,21 @@ export const coreProbes = {
         "nothing"
       ),
       await check("the hidden versions", hiddenVersions, personId, "hidden"),
-      // As code's recall pinned them: the reader's teams alone.
+      // As a chat's code pinned them: the reader's teams alone.
       await answer(
-        "the hidden versions, not personal",
+        "the hidden versions, as the teams",
         async () =>
           await coreBrain.readableVersionsAs(env, personId, hiddenVersions, {
-            personal: false,
+            reach: "teams",
+          }),
+        "hidden"
+      ),
+      // As an App's or a run's recall pinned them: the company alone.
+      await answer(
+        "the hidden versions, as the company",
+        async () =>
+          await coreBrain.readableVersionsAs(env, personId, hiddenVersions, {
+            reach: "company",
           }),
         "hidden"
       ),
@@ -2531,35 +2540,49 @@ const meaningProbes = async ({
 /** Each export of core's brain-recall.ts. */
 type RecallMember = keyof typeof codeRecall;
 
+/** An App's code acting for `personId`: an App's recall reads as the company. */
+const readersApp = (personId: string): Authority =>
+  authoritySchema.parse({
+    subject: { type: "app", appId: `app-${crypto.randomUUID()}` },
+    onBehalfOf: personId,
+    mode: "interactive",
+    appVersion: 1,
+  });
+
 /**
- * An agent of `personId`'s holding an active grant to read the Brain, as
- * code's recall needs one (brain-recall.ts): its authority, and the
- * grant's ID.
+ * An App acting for `personId`, holding an active grant to read the
+ * Brain, as an App's recall needs one (brain-recall.ts): its authority,
+ * and the grant's ID. Code's recall from an App or a workflow reads only
+ * what everyone in the company may, so nothing of a team's or a person's
+ * may come back, whoever it acts for.
  */
-const agentWithBrain = async (
+const appWithBrain = async (
   personId: string
 ): Promise<{ authority: Authority; permissionId: string }> => {
-  const authority = readersAgent(personId);
+  const authority = readersApp(personId);
   const permissionId = crypto.randomUUID();
-  if (authority.subject.type !== "agent") {
-    throw new Error("Not an agent");
+  if (authority.subject.type !== "app") {
+    throw new Error("Not an App");
   }
   await env.DB.prepare(
-    "INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id, actions, binding, status, requested_by, requested_at) VALUES (?, 'agent', ?, 'platform', 'platform', '[\"brain\"]', 'BRAIN', 'active', ?, ?)"
+    "INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id, actions, binding, status, requested_by, requested_at) VALUES (?, 'app', ?, 'platform', 'platform', '[\"brain\"]', 'BRAIN', 'active', ?, ?)"
   )
-    .bind(permissionId, authority.subject.agentId, personId, Date.now())
+    .bind(permissionId, authority.subject.appId, personId, Date.now())
     .run();
   return { authority, permissionId };
 };
 
-/** Code recalling as `as`, in a chat of its own, under `grant`. */
+/** An App recalling as `as`, in its own context, under `grant`. */
 const callerOf = (as: Authority, grant: string): codeRecall.RecallCaller => ({
   authority: as,
-  context: {
-    type: "chat",
-    workspaceId: workspaceIdSchema.parse(crypto.randomUUID()),
-    chatId: chatIdSchema.parse(crypto.randomUUID()),
-  },
+  context:
+    as.subject.type === "app"
+      ? { type: "app", appId: as.subject.appId }
+      : {
+          type: "chat",
+          workspaceId: workspaceIdSchema.parse(crypto.randomUUID()),
+          chatId: chatIdSchema.parse(crypto.randomUUID()),
+        },
   permissionId: permissionIdSchema.parse(grant),
   actor: { type: "system" },
 });
@@ -2573,11 +2596,11 @@ const codeAsk = ({ question, budget, asOf }: PackAsk) => ({
 
 /** One probe per export of core's brain-recall.ts. */
 export const recallProbes = {
-  // Code's recall, as an App, a workflow and a chat make it: under an
-  // agent's grant of the reader's, asked every way the store is, as code
+  // Code's recall, as an App or a workflow makes it: under an App's
+  // grant, acting for the reader, asked every way the store is, as code
   // sends it, then every way it refuses, the markers in what is refused.
   recallFor: async (probing) => {
-    const { authority, permissionId } = await agentWithBrain(probing.personId);
+    const { authority, permissionId } = await appWithBrain(probing.personId);
     const recall = async (
       input: unknown,
       as = authority,
@@ -2621,7 +2644,7 @@ export const recallProbes = {
           await recall({ question: hidden, budget: whole, reader: hidden })
       ),
       await answer(
-        "the markers, under a grant the agent doesn't hold",
+        "the markers, under a grant the App doesn't hold",
         async () =>
           await recall(
             { question: hidden, budget: whole },
@@ -2634,7 +2657,7 @@ export const recallProbes = {
         async () =>
           await recall(
             { question: hidden, budget: whole },
-            readersAgent(stranger())
+            readersApp(stranger())
           )
       ),
     ];

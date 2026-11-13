@@ -1,6 +1,13 @@
+import { brainOf } from "@grasp-os/brain-next/contract";
+import { v } from "@grasp-os/runtime/app";
+import { readDefinition } from "@grasp-os/runtime/definition";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import type { FunctionResult } from "@grasp-os/shared/functions";
-import { permissionIdSchema } from "@grasp-os/shared/ids";
+import {
+  permissionIdSchema,
+  triggerIdSchema,
+  workflowResourceIdSchema,
+} from "@grasp-os/shared/ids";
 import { authoritySchema } from "@grasp-os/shared/permissions";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -14,12 +21,11 @@ import { callAppFunction } from "../src/app-functions.ts";
 import { addMember } from "../src/app-members.ts";
 import { publishVersion } from "../src/app-publish.ts";
 import type { Release } from "../src/app-releases.ts";
-import { setAppVisitorGrants } from "../src/app-visitor-grants.ts";
-import { setAppVisitors } from "../src/app-visitors.ts";
 import { appFor } from "../src/apps.ts";
 import { addSource, eraseSource } from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { recallFor } from "../src/brain-recall.ts";
+import { inJurisdiction } from "../src/durable-objects.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import {
   grantPermission,
@@ -27,6 +33,7 @@ import {
   revokePermission,
 } from "../src/permissions.ts";
 import { approveResourceBinding } from "../src/resource-bindings.ts";
+import { createTriggerResource } from "../src/trigger-resources.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import {
@@ -35,7 +42,6 @@ import {
   shareWorkflowResource,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
-import { readWorkflowState } from "../src/workflow-state.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
 import { testApp } from "./app-definitions.ts";
@@ -44,6 +50,7 @@ import { failingAuditLog } from "./failing-audit-log.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
+import { webhookConfig } from "./source-config.ts";
 
 // The one recall code reaches (GRA-1731; the threat model is on the
 // issue): an App's action (`ctx.brain.recall`), a workflow's step
@@ -53,10 +60,14 @@ import { unique } from "./sign-in.ts";
 // 1. Code without the grant to read the Brain recalls: a declaration, a
 //    workflow's step or an agent with no active grant gets nothing, and a
 //    revoked grant stops the next recall.
-// 2. A recall reads past its person: two people asking the same App get
-//    what each may read, never another's own or a team's they aren't in.
-// 3. The three surfaces drift apart: the same request answers the same
-//    pack in each.
+// 2. What an App or a workflow recalls reaches someone who couldn't read
+//    it at the source: it may end up in App data, a run's output, a
+//    decision or an App a run writes to, which any member may read. So it
+//    recalls only what everyone in the company may read, whoever calls:
+//    never a team's note, never anyone's own. A chat's code recalls as its
+//    person's teams, never their own: what it gets stays in their chat.
+// 3. The surfaces drift apart: an App and a workflow answer the same
+//    request the same pack.
 // 4. Untrusted input reaches the Brain, or a refusal or the audit log
 //    carries the question: each is refused in the same fixed words, and
 //    the audit event says who, for whom and how many, never what.
@@ -116,6 +127,22 @@ const added = async (
   return source;
 };
 
+/**
+ * A source everyone in the company may read, added to the shared store
+ * as its producer would: core's producers add none yet, so code's recall
+ * finds nothing else today.
+ */
+const forEveryone = async (text: string): Promise<SourceRef> => {
+  const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
+  await brainOf(inJurisdiction(env, env.BRAIN_STORE)).addSource({
+    source: `upload:${source.id}`,
+    change: crypto.randomUUID(),
+    text,
+    access: { kind: "audience", group: "company" },
+  });
+  return source;
+};
+
 /** A team of `members`, as core keeps one. */
 const teamOf = async (...members: Member[]): Promise<string> => {
   const team = crypto.randomUUID();
@@ -134,8 +161,9 @@ const teamOf = async (...members: Member[]): Promise<string> => {
 
 /**
  * Ada and Uma, each with a note of their own and one of a team of theirs,
- * and a team's note neither is in: each holding `word`, which nothing
- * else does. Code reads none of a person's own: only their teams' notes.
+ * a team's note neither is in, and a note for everyone: each holding
+ * `word`, which nothing else does. An App's or a workflow's recall reads
+ * the note for everyone alone; a chat's code its person's teams' notes.
  */
 const company = async () => {
   const word = `leave${unique().replaceAll(/\W/gu, "")}`;
@@ -167,6 +195,7 @@ const company = async () => {
     kind: "team",
     teamId: payroll,
   });
+  await forEveryone(`For everyone: ${word} is in the handbook.`);
   return { word, admin, ada, uma };
 };
 
@@ -419,7 +448,7 @@ const recallEvents = async (
   );
 
 describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
-  it("answers the same pack to the same request in each, of what its person's teams may read and never their own", async () => {
+  it("answers an App and a workflow the same pack, of what everyone in the company may read, and a chat's code what its person's teams may", async () => {
     const { word, admin, ada } = await company();
     const request = requestOf(word);
     // The App.
@@ -460,20 +489,21 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
     expect({
       app: textsOf(fromApp),
       sameInRun: fromRun,
-      sameInChat: returnedOf(fromCode?.text),
+      chat: textsOf(returnedOf(fromCode?.text)),
     }).toStrictEqual({
-      // Her team's note alone: never her own note, which only she may
-      // read (GRA-1762), nor Uma's, nor the team's she isn't in.
-      app: [`Ada's team: ${word} is planned in March.`],
+      // The note for everyone alone: never her team's, though she is in
+      // it, nor her own note (GRA-1762), nor anyone else's.
+      app: [`For everyone: ${word} is in the handbook.`],
       sameInRun: fromApp,
-      sameInChat: fromApp,
+      // Her chat's code: her team's note, never her own.
+      chat: [`Ada's team: ${word} is planned in March.`],
     });
     // Each audited for her, with what it found counted, never said.
     const events = await recallEvents(ada.userId, 3);
     expect(JSON.stringify(events)).not.toContain(word);
   });
 
-  it("answers an App's recall for its owner alone: an admin using it is refused the recall, and someone it is shared with the App", async () => {
+  it("answers everyone an App is shared with the same pack of what the whole company may read, admins included", async () => {
     const { word, admin, ada, uma } = await company();
     const app = await askOf(ada, []);
     const permissionId = await granted(
@@ -488,23 +518,58 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
       target: { kind: "brain", permissionId },
       reviewed: { version: 1 },
     });
-    // Uma is someone it is shared with all the same, as a share that
-    // raced the grant leaves her.
-    await env.DB.prepare(
-      "INSERT INTO app_members (app_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'user', ?, ?)"
-    )
-      .bind(app.app, uma.userId, ada.userId, Date.now())
-      .run();
+    // Shared with Uma as its owner shares any App.
+    await addMember(env, ada, app.app, {
+      type: "person",
+      id: uma.userId,
+      role: "user",
+    });
     const asks = { question: word, tokens: 800 };
+    const forEveryoneNote = [`For everyone: ${word} is in the handbook.`];
     expect({
       ada: textsOf(await askedOf(app, ada, asks)),
-      admin: await askedOf(app, admin, asks),
-      uma: await askedOf(app, uma, asks),
+      uma: textsOf(await askedOf(app, uma, asks)),
+      admin: textsOf(await askedOf(app, admin, asks)),
     }).toStrictEqual({
-      ada: [`Ada's team: ${word} is planned in March.`],
-      admin: { failed: "permission.unavailable" },
-      uma: { failed: "app.unreadable" },
+      ada: forEveryoneNote,
+      uma: forEveryoneNote,
+      admin: forEveryoneNote,
     });
+  });
+
+  it("answers a run nobody started by hand, which acts for the workflow's owner, only what the whole company may read", async () => {
+    const { word, admin, ada } = await company();
+    const { workflow } = await recallingWorkflow(ada, admin);
+    const trigger = await createTriggerResource(env, ada, {
+      kind: "webhook",
+      workflowId: workflow.id,
+      version: 1,
+      config: await webhookConfig(),
+    });
+    await granted(ada, admin, {
+      subject: {
+        type: "trigger",
+        triggerId: triggerIdSchema.parse(trigger.id),
+      },
+      object: {
+        type: "workflow",
+        workflowId: workflowResourceIdSchema.parse(workflow.id),
+      },
+      actions: ["start"],
+      binding: `START_${unique().toUpperCase().replaceAll(/\W/gu, "_")}`,
+    });
+    const { runId } = await startWorkflow(
+      env,
+      { type: "trigger", triggerId: trigger.id },
+      workflow.id,
+      { version: 1, args: { question: word, tokens: 800 }, key: unique() }
+    );
+    if (runId === null) {
+      throw new Error("The start admitted no run");
+    }
+    expect(textsOf(await endOf(ada, workflow.id, runId))).toStrictEqual([
+      `For everyone: ${word} is in the handbook.`,
+    ]);
   });
 
   it("recalls nothing without the grant to read the Brain, and stops at the next call once it is revoked", async () => {
@@ -610,30 +675,20 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
     });
   });
 
-  it("refuses what leaves a run once its person may no longer read what it recalled, and lets it through when nothing changed", async () => {
+  it("refuses what leaves a run once the company may no longer read what it recalled, and lets it through when nothing changed", async () => {
     const { admin, ada } = await company();
-    const [left, kept] = await Promise.all([teamOf(ada), teamOf(ada)]);
-    const words = [1, 2, 3, 4].map(
+    const elsewhere = await teamOf(admin);
+    const words = [1, 2, 3].map(
       (at) => `plan${at}${unique().replaceAll(/\W/gu, "")}`
     );
-    const [leftWord = "", erasedWord = "", keptWord = "", narrowedWord = ""] =
-      words;
-    await added(`Route plan: ${leftWord} departs at noon.`, {
-      kind: "team",
-      teamId: left,
-    });
-    const erased = await added(`Route plan: ${erasedWord} departs at one.`, {
-      kind: "team",
-      teamId: kept,
-    });
+    const [erasedWord = "", keptWord = "", narrowedWord = ""] = words;
+    const erased = await forEveryone(
+      `Route plan: ${erasedWord} departs at one.`
+    );
     const keptText = `Route plan: ${keptWord} departs at two.`;
-    await added(keptText, { kind: "team", teamId: kept });
-    const narrowed = await added(
-      `Route plan: ${narrowedWord} departs at three.`,
-      {
-        kind: "team",
-        teamId: kept,
-      }
+    await forEveryone(keptText);
+    const narrowed = await forEveryone(
+      `Route plan: ${narrowedWord} departs at three.`
     );
     const { workflow } = await recallingWorkflow(ada, admin, { hold: "after" });
     const runs = await Promise.all(
@@ -655,39 +710,31 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
                 .first<number>("n")
           )
         );
-        expect(pinned).toStrictEqual([1, 1, 1, 1]);
+        expect(pinned).toStrictEqual([1, 1, 1]);
       },
       { timeout: 10_000, interval: 50 }
     );
-    // She leaves the first plan's team; the second plan is erased.
-    await env.DB.prepare(
-      "DELETE FROM team_members WHERE team_id = ? AND user_id = ?"
-    )
-      .bind(left, ada.userId)
-      .run();
+    // The first plan is erased (it was in the shared store, as any
+    // source not one person's own is); the third narrowed to a team.
     await eraseSource(env, {
       source: erased,
-      readers: { kind: "team", teamId: kept },
+      readers: { kind: "none" },
       reason: "deleted",
     });
-    // The fourth is narrowed to a team she isn't in.
     await addSource(env, {
       source: narrowed,
       change: crypto.randomUUID(),
       text: `Route plan: ${narrowedWord} departs at four.`,
-      readers: { kind: "team", teamId: left },
+      readers: { kind: "team", teamId: elsewhere },
     });
-    const [afterLeaving, afterErasure, unchanged, afterNarrowing] =
-      await Promise.all(
-        runs.map(async (runId) => await endOf(ada, workflow.id, runId))
-      );
+    const [afterErasure, unchanged, afterNarrowing] = await Promise.all(
+      runs.map(async (runId) => await endOf(ada, workflow.id, runId))
+    );
     expect({
-      afterLeaving,
       afterErasure,
       afterNarrowing,
       unchanged: textsOf(unchanged),
     }).toStrictEqual({
-      afterLeaving: { failed: "brain.revoked" },
       afterErasure: { failed: "brain.revoked" },
       afterNarrowing: { failed: "brain.revoked" },
       unchanged: [keptText],
@@ -822,59 +869,57 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
   });
 });
 
-// What an App recalls, it may keep: its data outlives the call. Sharing
-// holds an App to what it may have read (app-provenance.ts): someone it
-// is shared with must be able to read every source it read.
+// What code recalls, it passes on: into an App's data, a decision, a run's
+// output. It holds only what everyone in the company may read, so whoever
+// reads it there could read it at the source.
 
-/** An App whose action keeps what it recalls in notes its members read. */
-const keepApp = () =>
+/** Bob's Notes: notes its members read and write, and no Brain. */
+const notesApp = () =>
   testApp(
     {
-      name: "Keep",
+      name: "Notes",
       tables: {
         notes: {
-          fields: { text: "v.string()" },
+          fields: { title: "v.string()" },
           access: { read: "appMembers", write: "appMembers" },
         },
       },
-      permissions: ['permission.brain({ operations: ["recall"] })'],
     },
     {
       "server/notes.ts": `import { v } from "@grasp-os/sdk";
-import { action, mutation, query } from "@server/_generated/server";
+import { mutation, query } from "@server/_generated/server";
 
-export const save = mutation({
-  args: { text: v.string() },
-  returns: v.null(),
-  handler: async (ctx, args) => {
-    await ctx.db.insert("notes", args);
-    return null;
-  },
+export const create = mutation({
+  args: { title: v.string() },
+  returns: v.id("notes"),
+  handler: async (ctx, args) => await ctx.db.insert("notes", args),
 });
 
-export const keep = action({
-  args: { question: v.string() },
-  returns: v.number(),
-  handler: async (ctx, args) => {
-    const pack = await ctx.brain.recall({
-      question: args.question,
-      budget: { tokens: 800 },
-    });
-    for (const item of pack.items) {
-      await ctx.runMutation(save, { text: item.text });
-    }
-    return pack.items.length;
-  },
-});
-
-export const list = query({
+export const titles = query({
   args: {},
   returns: v.array(v.string()),
-  handler: async (ctx) => (await ctx.db.query("notes").take(100)).map(({ text }) => text),
+  handler: async (ctx) => (await ctx.db.query("notes").take(100)).map((note) => note.title),
 });
 `,
     }
   );
+
+/** The stable ID App `app`'s current definition gives function `name`. */
+const functionIdOf = async (app: string, name: string): Promise<string> => {
+  const row = await env.DB.prepare(
+    "SELECT definition FROM app_versions WHERE app_id = ? ORDER BY version DESC LIMIT 1"
+  )
+    .bind(app)
+    .first<{ definition: string }>();
+  const { functions = [] } = readDefinition(
+    JSON.parse(row?.definition ?? "null")
+  );
+  const found = functions.find((fn) => fn.name === name);
+  if (found === undefined) {
+    throw new Error(`No function ${name}`);
+  }
+  return found.id;
+};
 
 /** What `name` of `app` answers `by`: its value, or its error's code. */
 const calledOf = async (
@@ -896,258 +941,176 @@ const calledOf = async (
   return result.ok ? result.value : { failed: result.error.code };
 };
 
-/** The Keep App of `owner`'s, sealed and current. */
-const keepOf = async (owner: Member) => {
-  const fixture: Fixture = await appWith(keepApp(), "Keep", owner);
-  const release: Release = await seal(fixture);
-  await publishVersion(env, fixture.owner, fixture.app, 1);
-  return { ...fixture, release };
-};
+/** What a run's recall handed on: its items' texts, joined. */
+const joinedTexts = "recalled.items.map((item) => item.text).join(' | ')";
 
-/** The code `run` was refused with, or "done". */
-const doneOr = async (run: () => Promise<unknown>): Promise<string> => {
-  try {
-    await run();
-    return "done";
-  } catch (error) {
-    return z.object({ code: z.string() }).parse(error).code;
-  }
-};
-
-/** Shares `app` of `owner`'s with `member`, as its owner does: "done", or the refusal's code. */
-const sharedWith = async (
-  app: string,
-  owner: Member,
-  member: Member
-): Promise<string> =>
-  await doneOr(
-    async () =>
-      await addMember(env, owner, app, {
-        type: "person",
-        id: member.userId,
-        role: "user",
-      })
+/**
+ * A workflow of `by`'s that recalls its args' question, its `brain`
+ * permission bound by `admin` to a grant of its own, then does `then`
+ * with what it recalled, under `permissions` beside its Brain's.
+ */
+const recallingThen = async (
+  by: Member,
+  admin: Member,
+  then: { permissions: Record<string, unknown>; steps: unknown[] }
+) => {
+  const key = `brain-${unique()}`;
+  await publishCatalogContract(env, admin, { key, kind: "brain" });
+  const workflow = await createWorkflowResource(env, by, `then-${unique()}`);
+  await publishWorkflowVersion(env, by, workflow.id, {
+    definition: JSON.stringify({
+      $schema: workflowSchemaUrl,
+      args: {
+        kind: "object",
+        fields: { question: { kind: "string" }, tokens: { kind: "number" } },
+      },
+      permissions: {
+        brain: { docs: { contract: key } },
+        ...then.permissions,
+      },
+      steps: [
+        {
+          id: "recalled",
+          type: "call",
+          brain: "docs",
+          action: "recall",
+          args: {
+            question: { $expr: "args.question" },
+            budget: { tokens: { $expr: "args.tokens" } },
+          },
+        },
+        ...then.steps,
+      ],
+    }),
+    basedOn: null,
+  });
+  const permissionId = await granted(
+    by,
+    admin,
+    brainGrant({ type: "workflow", workflowId: workflow.id })
   );
-
-describe("what an App recalls and keeps", setUpTime, () => {
-  it("is its owner's alone: shared with nobody, so nobody outside a team reads what it kept of that team's", async () => {
-    const { word, admin, ada, uma } = await company();
-    // Ben is in none of the teams whose notes hold the word.
-    const ben = await person("user");
-    const app = await keepOf(ada);
-    const permissionId = await granted(
-      ada,
-      admin,
-      brainGrant({ type: "app", appId: app.app }),
-      app.release.manifest.resourceVersion
-    );
-    await approveResourceBinding(env, admin, {
-      app: app.app,
-      alias: "brain",
-      target: { kind: "brain", permissionId },
-      reviewed: { version: 1 },
-    });
-    // Its owner shares it with Uma and Ben, as she would any App.
-    const shared = [
-      await sharedWith(app.app, ada, uma),
-      await sharedWith(app.app, ada, ben),
-    ];
-    // Ada keeps what she recalls: her own team's note.
-    const keptByAda = await calledOf(app, ada, "notes.keep", {
-      question: word,
-    });
-    const keptByUma = await calledOf(app, uma, "notes.keep", {
-      question: word,
-    });
-    const seenByBen = await calledOf(app, ben, "notes.list", {});
-    expect({
-      shared,
-      keptByAda,
-      keptByUma,
-      seenByBen,
-      seenByAda: await calledOf(app, ada, "notes.list", {}),
-    }).toStrictEqual({
-      shared: ["app.share_unreadable", "app.share_unreadable"],
-      keptByAda: 1,
-      keptByUma: { failed: "app.not_found" },
-      seenByBen: { failed: "app.not_found" },
-      seenByAda: [`Ada's team: ${word} is planned in March.`],
-    });
+  await approveWorkflowBinding(env, admin, workflow.id, {
+    alias: "docs",
+    target: { kind: "brain", permissionId },
+    reviewed: { version: 1 },
   });
+  return workflow;
+};
 
-  it("leaves an App without the Brain to share as before, and refuses the Brain to one that is shared", async () => {
-    const { admin, ada, uma } = await company();
-    const app = await keepOf(ada);
-    const shared = await sharedWith(app.app, ada, uma);
-    const asked = await requestPermission(
-      env,
-      ada,
-      brainGrant({ type: "app", appId: app.app }),
-      rolesOf(ada)
-    );
-    const grant = await doneOr(
-      async () =>
-        await grantPermission(env, admin, asked.id, {
-          version: app.release.manifest.resourceVersion,
-        })
-    );
-    expect({
-      shared,
-      grant,
-      umaReads: await calledOf(app, uma, "notes.list", {}),
-    }).toStrictEqual({
-      shared: "done",
-      grant: "permission.invalid",
-      umaReads: [],
-    });
-  });
-
-  it("keeps nothing of an admin's teams where the owner reads it: an admin using the App is refused the recall", async () => {
-    const { word, admin, ada } = await company();
-    const app = await keepOf(ada);
-    const permissionId = await granted(
-      ada,
-      admin,
-      brainGrant({ type: "app", appId: app.app }),
-      app.release.manifest.resourceVersion
-    );
-    await approveResourceBinding(env, admin, {
-      app: app.app,
-      alias: "brain",
-      target: { kind: "brain", permissionId },
-      reviewed: { version: 1 },
-    });
-    // The admin uses Ada's App, as admins may any App.
-    const keptByAdmin = await calledOf(app, admin, "notes.keep", {
-      question: word,
-    });
-    expect({
-      keptByAdmin,
-      seenByAda: await calledOf(app, ada, "notes.list", {}),
-    }).toStrictEqual({
-      // The function host's word for a refused permission.
-      keptByAdmin: { failed: "permission.unavailable" },
-      seenByAda: [],
-    });
-  });
-
-  it("lets no visitor into an App that recalls the Brain, and gives the Brain to no App that lets visitors in", async () => {
-    const { admin, ada } = await company();
-    const visitors = [{ kind: "address", value: "visitor@example.com" }];
-    const recalling = await keepOf(ada);
-    await granted(
-      ada,
-      admin,
-      brainGrant({ type: "app", appId: recalling.app }),
-      recalling.release.manifest.resourceVersion
-    );
-    const visited = await keepOf(ada);
-    const listed = await doneOr(
-      async () => await setAppVisitors(env, ada, visited.app, visitors)
-    );
-    const asked = await requestPermission(
-      env,
-      ada,
-      brainGrant({ type: "app", appId: visited.app }),
-      rolesOf(ada)
-    );
-    expect({
-      visitors: await doneOr(
-        async () => await setAppVisitors(env, ada, recalling.app, visitors)
-      ),
-      visitorFunctions: await doneOr(
-        async () =>
-          await setAppVisitorGrants(env, ada, recalling.app, ["notes.list"])
-      ),
-      // Taking every visitor off stays possible.
-      noVisitors: await doneOr(
-        async () => await setAppVisitors(env, ada, recalling.app, [])
-      ),
-      listed,
-      grantToVisited: await doneOr(
-        async () =>
-          await grantPermission(env, admin, asked.id, {
-            version: visited.release.manifest.resourceVersion,
-          })
-      ),
-    }).toStrictEqual({
-      visitors: "app.share_unreadable",
-      visitorFunctions: "app.share_unreadable",
-      noVisitors: "done",
-      listed: "done",
-      grantToVisited: "permission.invalid",
-    });
-  });
-});
-
-describe("what a workflow run recalls", setUpTime, () => {
-  it("never reaches the workflow's other runs or its builders: a run that recalled keeps no state", async () => {
+describe("what code recalls, passed on", setUpTime, () => {
+  it("reaches a shared App as what everyone in the company may read: never the team text of the person the run was for", async () => {
     const { word, admin, uma } = await company();
     const bob = await person("builder");
     const ben = await person("user");
-    const key = `brain-${unique()}`;
-    await publishCatalogContract(env, admin, { key, kind: "brain" });
-    const workflow = await createWorkflowResource(env, bob, `keep-${unique()}`);
-    await publishWorkflowVersion(env, bob, workflow.id, {
-      definition: JSON.stringify({
-        $schema: workflowSchemaUrl,
-        args: {
-          kind: "object",
-          fields: { question: { kind: "string" }, tokens: { kind: "number" } },
-        },
-        returns: packDescriptor,
-        state: { kept: { ...packDescriptor, optional: true } },
-        result: { $expr: "state.kept ?? recalled" },
-        permissions: { brain: { docs: { contract: key } } },
-        steps: [
-          {
-            id: "recalled",
-            type: "call",
-            brain: "docs",
-            action: "recall",
-            args: {
-              question: { $expr: "args.question" },
-              budget: { tokens: { $expr: "args.tokens" } },
-            },
-            state: { kept: { $expr: "output" } },
-          },
-        ],
-      }),
-      basedOn: null,
-    });
-    const permissionId = await granted(
-      bob,
-      admin,
-      brainGrant({ type: "workflow", workflowId: workflow.id })
-    );
-    await approveWorkflowBinding(env, admin, workflow.id, {
-      alias: "docs",
-      target: { kind: "brain", permissionId },
-      reviewed: { version: 1 },
-    });
+    // Bob's Notes, with no Brain, shared with Uma and Ben.
+    const fixture: Fixture = await appWith(notesApp(), "Notes", bob);
+    const release: Release = await seal(fixture);
+    await publishVersion(env, fixture.owner, fixture.app, 1);
+    const notes = { ...fixture, release };
     for (const member of [uma, ben]) {
       // oxlint-disable-next-line no-await-in-loop -- one at a time
-      await shareWorkflowResource(env, bob, workflow.id, {
+      await addMember(env, bob, notes.app, {
         type: "person",
         id: member.userId,
         role: "user",
       });
     }
-    const asks = { question: word, tokens: 800 };
-    const ranForUma = await ranOf(uma, workflow.id, asks);
-    const ranForBen = await ranOf(ben, workflow.id, asks);
-    const { entries } = await readWorkflowState(env, bob, workflow.id);
-    const umaTeam = `Uma's team: ${word} is planned in June.`;
-    expect({
-      uma: ranForUma,
-      benGetsUmasTeam: JSON.stringify(ranForBen).includes(umaTeam),
-      bobSees: JSON.stringify(entries).includes(umaTeam),
-    }).toStrictEqual({
-      // Its state write is refused (`workflow.state_restricted`) after its
-      // recall, which the run host reports as a failure after an effect.
-      uma: { failed: "workflow.failed_after_effect" },
-      benGetsUmasTeam: false,
-      bobSees: false,
+    const create = await functionIdOf(notes.app, "notes.create");
+    const workflow = await recallingThen(bob, admin, {
+      permissions: {
+        apps: {
+          notes: { app: notes.app, functions: { [create]: "notes.create" } },
+        },
+      },
+      steps: [
+        {
+          id: "made",
+          type: "call",
+          app: "notes",
+          function: create,
+          args: { title: { $expr: joinedTexts } },
+        },
+      ],
     });
+    await granted(
+      bob,
+      admin,
+      {
+        subject: { type: "workflow", workflowId: workflow.id },
+        object: { type: "app", appId: notes.app, function: create },
+        actions: ["call"],
+        binding: `NOTES_${unique().replaceAll(/\W/gu, "_").toUpperCase()}`,
+      },
+      1
+    );
+    await shareWorkflowResource(env, bob, workflow.id, {
+      type: "person",
+      id: uma.userId,
+      role: "user",
+    });
+    // A run for Uma, who is in her team: it recalls, then writes.
+    const ran = await ranOf(uma, workflow.id, { question: word, tokens: 800 });
+    expect({
+      ran: z.object({ failed: z.unknown() }).safeParse(ran).success,
+      benReads: await calledOf(notes, ben, "notes.titles", {}),
+    }).toStrictEqual({
+      ran: false,
+      benReads: [`For everyone: ${word} is in the handbook.`],
+    });
+  });
+
+  it("asks deciders about what everyone in the company may read, never the team text of the person the run was for", async () => {
+    const { word, admin, uma } = await company();
+    const bob = await person("builder");
+    const reviewer = await person("user");
+    const contract = `recalled-review-${unique()}`;
+    await publishCatalogContract(env, admin, {
+      key: contract,
+      kind: "decision",
+      input: JSON.stringify(v.object({ amount: v.number() }).descriptor),
+      response: JSON.stringify(v.null().descriptor),
+    });
+    const workflow = await recallingThen(bob, admin, {
+      permissions: { decisions: { review: { contract } } },
+      steps: [
+        {
+          id: "asked",
+          type: "decide",
+          decision: "review",
+          recipients: [`person:${reviewer.userId}`],
+          prompt: { $expr: joinedTexts },
+          input: { amount: 1 },
+        },
+      ],
+    });
+    await approveWorkflowBinding(env, admin, workflow.id, {
+      alias: "review",
+      target: { kind: "decision", deciders: [`person:${reviewer.userId}`] },
+      reviewed: { version: 1 },
+    });
+    await shareWorkflowResource(env, bob, workflow.id, {
+      type: "person",
+      id: uma.userId,
+      role: "user",
+    });
+    const runId = await startedRun(uma, workflow.id, {
+      question: word,
+      tokens: 800,
+    });
+    const asked = await vi.waitFor(
+      async () => {
+        const row = await env.DB.prepare(
+          "SELECT description FROM workflow_decisions WHERE resource_run_id = ?"
+        )
+          .bind(runId)
+          .first<{ description: string }>();
+        if (row === null) {
+          throw new Error("No decision yet");
+        }
+        return row.description;
+      },
+      { timeout: 20_000, interval: 100 }
+    );
+    expect(asked).toBe(`For everyone: ${word} is in the handbook.`);
   });
 });

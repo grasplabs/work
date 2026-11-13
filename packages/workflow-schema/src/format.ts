@@ -325,8 +325,9 @@ export type FilesAction = (typeof filesActions)[number];
 /**
  * What a `call` step on a `brain` permission does, as
  * `ctx.brain.<alias>.<action>` names it: recalls what bears on a question
- * (`{ question, budget: { tokens }, asOf? }`), as the run's person may
- * read the Brain, the same pack an App's action and a chat's code get.
+ * (`{ question, budget: { tokens }, asOf? }`), of what everyone in the
+ * company may read, whoever the run acts for: the same pack an App's
+ * action gets.
  */
 export const brainActions = ["recall"] as const;
 export type BrainAction = (typeof brainActions)[number];

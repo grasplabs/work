@@ -58,8 +58,8 @@ import { workflowReferenceLimits } from "./workflow-references.ts";
 // - `ai`: answers from the workspace's model (`ctx.ai.generate`);
 // - `connections`: some actions of a connection, through connect
 //   (`ctx.connections.<alias>`);
-// - `brain`: recalling from the Brain, as the person each call acts for
-//   may read it (`ctx.brain.recall`);
+// - `brain`: recalling from the Brain what everyone in the company may
+//   read (`ctx.brain.recall`);
 // - `workflows`: independent workflows the App starts
 //   (`ctx.workflows.<alias>.start`);
 // - `grasp`: the platform's own read-only functions, such as its
@@ -236,8 +236,9 @@ export const permission = Object.freeze({
     }) as ConnectionPermission<Alias, Contract, Actions>;
   },
   /**
-   * The Brain, as the person each call acts for may read it, never more:
-   * `operations: ["recall"]` (`ctx.brain.recall`). An App holds one.
+   * The Brain, only what everyone in the company may read, whoever a call
+   * acts for: `operations: ["recall"]` (`ctx.brain.recall`). An App holds
+   * one.
    */
   brain: <
     const Operations extends readonly [BrainOperation, ...BrainOperation[]],
