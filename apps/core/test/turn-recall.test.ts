@@ -1786,7 +1786,7 @@ describe("the recall before a question hands over memories", setUpTime, () => {
     });
   });
 
-  it("hands no memory of the person's own to a chat app's direct message, and none at all to a thread others read", async () => {
+  it("hands a chat app's direct message and a thread others read only the memories the whole company may read", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInWithRole(idp, "user");
     const { group } = await teamOf(person.userId);
@@ -1802,6 +1802,10 @@ describe("the recall before a question hands over memories", setUpTime, () => {
     });
     await rememberedAbout(group, `Depot ${depot}`, [
       { statement: teamStatement },
+    ]);
+    const companyStatement = `Depot ${depot} is open to everyone ${word()}`;
+    await rememberedAbout("company", `Depot ${depot}`, [
+      { statement: companyStatement },
     ]);
     const question = `What about depot ${depot}?`;
     /** What the model was sent of each memory, asked through `platform`. */
@@ -1832,6 +1836,7 @@ describe("the recall before a question hands over memories", setUpTime, () => {
       return {
         own: bodies.includes(ownStatement),
         team: bodies.includes(teamStatement),
+        company: bodies.includes(companyStatement),
       };
     };
 
@@ -1845,13 +1850,15 @@ describe("the recall before a question hands over memories", setUpTime, () => {
       web: {
         own: web.includes(ownStatement),
         team: web.includes(teamStatement),
+        company: web.includes(companyStatement),
       },
       direct: await sent("slack", false),
       thread: await sent("slack", true),
     }).toStrictEqual({
-      web: { own: true, team: true },
-      direct: { own: false, team: true },
-      thread: { own: false, team: false },
+      web: { own: true, team: true, company: true },
+      // Outside their own chat, the company's alone (GRA-1820).
+      direct: { own: false, team: false, company: true },
+      thread: { own: false, team: false, company: true },
     });
   });
 });
