@@ -1149,20 +1149,12 @@ const SharedUploads = ({ onErased }: { onErased: () => void }) => {
                         const answer = await readFrom(core, async (sources) => {
                           await sources.deleteUpload(upload.source.id);
                         });
-                        // Not found: read the list again, which shows what
+                        // Not found: read the lists again, which show what
                         // is there (or that they may no longer list it).
                         if (answer.state !== "ready" && !notFound(answer)) {
                           setActing(answer);
                           return;
                         }
-                        setActing(undefined);
-                        setMore(undefined);
-                        setListed(
-                          await readFrom(
-                            core,
-                            async (sources) => await sources.sharedUploads()
-                          )
-                        );
                         onErased();
                       })();
                     }}
@@ -1294,6 +1286,9 @@ export const SourcesPage = ({
         </section>
         {admin ? (
           <SharedUploads
+            // Read again from the start whenever the sources are (an
+            // upload, a new version, a delete), as the list below is.
+            key={`shared-${listing}`}
             onErased={() => {
               setListing((before) => before + 1);
             }}

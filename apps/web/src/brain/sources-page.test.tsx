@@ -1076,4 +1076,50 @@ describe(SourcesPage, () => {
       afterErase: ["deleteUpload u-3", "sharedUploads"],
     });
   });
+
+  it("reads an admin's shared uploads again after an upload", async () => {
+    const { calls } = await shown([], { admin: true });
+    const [, picker] = document.querySelectorAll("input");
+    const form = picker?.closest("form");
+    if (!(picker && form)) {
+      throw new TypeError("No upload form");
+    }
+    const before = calls.length;
+    await pick(picker, new File(["WEBVTT"], "notes.vtt", { type: "text/vtt" }));
+    await submitted(form);
+    await settle();
+
+    expect(
+      calls.slice(before).filter((call) => call.startsWith("sharedUploads"))
+    ).toStrictEqual(["sharedUploads"]);
+  });
+
+  it("reads an admin's shared uploads again after a new version from the panel", async () => {
+    const { calls } = await shown([], { admin: true });
+    await press("Handbook");
+    await settle();
+    const { picker, form } = versionFormOf();
+    const before = calls.length;
+    await pick(picker, new File(["WEBVTT"], "v2.vtt", { type: "text/vtt" }));
+    await submitted(form);
+    await settle();
+
+    expect(
+      calls.slice(before).filter((call) => call.startsWith("sharedUploads"))
+    ).toStrictEqual(["sharedUploads"]);
+  });
+
+  it("reads an admin's shared uploads again after a delete from the panel", async () => {
+    const { calls } = await shown([], { admin: true });
+    await press("Handbook");
+    await settle();
+    await press("Delete");
+    const before = calls.length;
+    await press("Delete for good");
+    await settle();
+
+    expect(
+      calls.slice(before).filter((call) => call.startsWith("sharedUploads"))
+    ).toStrictEqual(["sharedUploads"]);
+  });
 });
