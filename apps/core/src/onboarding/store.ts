@@ -7601,7 +7601,8 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   async #drainAudit(): Promise<void> {
-    const left = await drainObjectOutbox(this.env, this.ctx.storage.sql);
+    // Its events note nothing for the Brain: no note to try alone.
+    const left = await drainObjectOutbox(this.env, this.ctx.storage.sql, 0);
     if (left === 0) {
       this.#auditRetryMs = auditRetryMs.first;
       return;
