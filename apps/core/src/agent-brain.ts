@@ -33,6 +33,7 @@ import { recallFor } from "./brain-recall.ts";
 import { brainGaps } from "./brain-rpc.ts";
 import {
   brainDocumentRead,
+  brainCompanyVersionRead,
   brainGrantRead,
   brainTeamVersionRead,
 } from "./history-access.ts";
@@ -231,10 +232,10 @@ export class BrainAgentApi extends WorkerEntrypoint<Env, AgentScope> {
   /**
    * The recall, under the agent's permission to read the Brain: that grant
    * is recorded with the run before anything is read (`brainGrantRead`),
-   * and each version the pack hands over after (`brainTeamVersionRead`)
-   * before the code gets it, so what the run holds is withheld once the
-   * grant is revoked or the person's teams may no longer read one of them
-   * (history-access.ts). Without the grant `recallFor` refuses it, and
+   * and each version the pack hands over after (`brainTeamVersionRead`,
+   * or `brainCompanyVersionRead` as the company) before the code gets it,
+   * so what the run holds is withheld once the grant is revoked or its
+   * reach may no longer read one of them (history-access.ts). Without the grant `recallFor` refuses it, and
    * audits that.
    */
   async #recalled(scope: AgentScope, input: unknown): Promise<BrainPack> {
@@ -248,6 +249,11 @@ export class BrainAgentApi extends WorkerEntrypoint<Env, AgentScope> {
     if (grant !== undefined) {
       await recordRunReads(this.env, scope, [brainGrantRead]);
     }
+    // Where the turn is decides, as for the recall before its question
+    // (turn-recall.ts `readsAs`, GRA-1820): its person's teams only in
+    // their own chat in Grasp, in a turn they started (`ownChat`); the
+    // company alone anywhere else.
+    const reach = scope.ownChat === true ? "teams" : "company";
     return await recallFor(
       this.env,
       {
@@ -255,6 +261,7 @@ export class BrainAgentApi extends WorkerEntrypoint<Env, AgentScope> {
         context,
         permissionId:
           grant === undefined ? null : permissionIdSchema.parse(grant.id),
+        reach,
         actor: delegateActorOf(authority, scope.via),
         target: { type: "chat", id: scope.chatId },
         keep: async ({ items }) => {
@@ -262,7 +269,9 @@ export class BrainAgentApi extends WorkerEntrypoint<Env, AgentScope> {
             this.env,
             scope,
             items.map(({ source, version }) =>
-              brainTeamVersionRead({ source, version })
+              reach === "teams"
+                ? brainTeamVersionRead({ source, version })
+                : brainCompanyVersionRead({ source, version })
             )
           );
         },

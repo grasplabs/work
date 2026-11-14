@@ -996,6 +996,248 @@ const companyExport = async ({ markers }: Probing): Promise<string> => {
 };
 
 /**
+ * What the memory probes add to the shared store, as `probing`'s reader
+ * may not read it, every marker in it: a customer whose names, reference
+ * and memories hold them, readable by a group the reader isn't in
+ * (`hidden`); another (`drawn`), whose memory the reader's own set holds
+ * but which rests on a source of that group, so the reader may not read
+ * it either. And one the reader may read (`seen`), with a plain memory of
+ * theirs, which hidden memories end (the same writer, later) and contest
+ * (another source), and which the hidden group's reader confirmed over
+ * them. Each `hidden*` memory id is one the reader may not read.
+ */
+interface MemoryFixture {
+  hidden: string;
+  drawn: string;
+  seen: string;
+  hiddenMemory: string;
+  hiddenRef: string;
+  seenMemory: string;
+}
+
+/** Adds the memory probes' fixture (above), its own for each probe. */
+const memoryFixture = async ({
+  reader,
+  markers,
+}: Probing): Promise<MemoryFixture> => {
+  const group = stranger();
+  const text = markedText(markers);
+  const hiddenRef = `ref:${markers[0] ?? ""}`;
+  const marked = (key: string): NewEntity => ({
+    key,
+    kind: "customer",
+    names: [text],
+    identifiers: [{ type: "ref", value: hiddenRef }],
+  });
+  const memory = (
+    about: string,
+    basis: NewMemory["basis"],
+    extra: Partial<NewMemory> = {}
+  ): NewMemory => ({
+    about,
+    type: "fact",
+    statement: text,
+    speaker: { kind: "system" },
+    basis,
+    ...extra,
+  });
+  const version = await store().addSource({
+    source: keyOf(missingSource()),
+    change: crypto.randomUUID(),
+    text,
+    access: { kind: "audience", group },
+  });
+  const writer = stranger();
+  const hidden = await store().addMemories({
+    change: crypto.randomUUID(),
+    access: { kind: "audience", group },
+    entities: [marked("c")],
+    memories: [memory("c", { kind: "writer", writer: stranger() })],
+  });
+  // A group the reader is in: memories only one person may read are kept
+  // in that person's own store, never in the shared one this probes.
+  const theirs = reader.groups[0] ?? stranger();
+  const drawn = await store().addMemories({
+    change: crypto.randomUUID(),
+    access: { kind: "audience", group: theirs },
+    entities: [{ key: "c", kind: "customer", names: [text] }],
+    memories: [memory("c", { kind: "source", ...version, quote: text })],
+  });
+  const seen = await store().addMemories({
+    change: crypto.randomUUID(),
+    access: { kind: "audience", group: theirs },
+    entities: [{ key: "c", kind: "customer", names: ["Plain"] }],
+    memories: [
+      memory(
+        "c",
+        { kind: "writer", writer },
+        { attribute: "status", value: "Active", statement: "Plain" }
+      ),
+    ],
+  });
+  const seenId = seen.entities.c ?? "";
+  const ended = await store().addMemories({
+    change: crypto.randomUUID(),
+    access: { kind: "audience", group },
+    // Made for someone who sees the reader's entity and is in the group.
+    reader: { person: reader.person, groups: [group, theirs] },
+    entities: [{ key: "c", id: seenId, kind: "customer", names: [text] }],
+    memories: [
+      memory(
+        "c",
+        { kind: "writer", writer },
+        { attribute: "status", value: text }
+      ),
+      memory(
+        "c",
+        { kind: "source", ...version, quote: text },
+        { attribute: "status", value: markers.join("") }
+      ),
+    ],
+  });
+  await store().confirmMemory({
+    memory: ended.memories[0] ?? "",
+    reader: { person: stranger(), groups: [group] },
+  });
+  return {
+    hidden: hidden.entities.c ?? "",
+    drawn: drawn.entities.c ?? "",
+    seen: seenId,
+    hiddenMemory: hidden.memories[0] ?? "",
+    hiddenRef,
+    seenMemory: seen.memories[0] ?? "",
+  };
+};
+
+/**
+ * A marked memory in someone else's own store (`person:<id>`), readable by
+ * them alone: its entity's id and its own. Every probe of a person's
+ * memories asks for these and must answer as for ids no one holds.
+ */
+const othersOwnMemory = async (
+  markers: readonly string[]
+): Promise<{ entity: string; memory: string }> => {
+  const person = stranger();
+  const text = markedText(markers);
+  const added = await personalBrainOf(
+    inJurisdiction(env, env.BRAIN_STORE),
+    person
+  ).addMemories({
+    change: crypto.randomUUID(),
+    access: { kind: "owner", person },
+    entities: [
+      {
+        key: "c",
+        kind: "customer",
+        names: [text],
+        identifiers: [{ type: "ref", value: `ref:${first(markers)}` }],
+      },
+    ],
+    memories: [
+      {
+        about: "c",
+        attribute: "status",
+        value: text,
+        type: "fact",
+        statement: text,
+        speaker: { kind: "internal", person },
+        basis: { kind: "writer", writer: person },
+      },
+    ],
+  });
+  return { entity: added.entities.c ?? "", memory: added.memories[0] ?? "" };
+};
+
+/**
+ * The memory fixture (above) for a recall: and a relation, hidden from
+ * the reader, from their own entity ("Plain") to a person only hidden
+ * memories name, so a recall stepping along it, or naming the person,
+ * would show a marker. Asking "Plain" must find the reader's own alone.
+ * And a marked memory in someone else's own store.
+ */
+const plantRecallFixture = async (probing: Probing): Promise<MemoryFixture> => {
+  const fixture = await memoryFixture(probing);
+  const text = markedText(probing.markers);
+  const group = stranger();
+  const person = {
+    key: "p",
+    kind: "person" as const,
+    names: [text],
+    identifiers: [
+      {
+        type: "email" as const,
+        value: `${probing.markers[0] ?? "x"}@hidden.test`,
+      },
+    ],
+  };
+  const role = {
+    about: "p",
+    attribute: "role",
+    value: text,
+    type: "fact" as const,
+    statement: `Plain ${text}`,
+    speaker: { kind: "system" as const },
+    basis: { kind: "writer" as const, writer: stranger() },
+  };
+  // The reader's "Plain" is in their first group (the memory fixture's):
+  // a reader in none has no entity of theirs to relate a hidden one to.
+  const seenBy = probing.reader.groups.length > 0;
+  await store().addMemories({
+    change: crypto.randomUUID(),
+    access: { kind: "audience", group },
+    ...(seenBy
+      ? {
+          // Made for someone who sees the reader's entity and is in the group.
+          reader: {
+            person: probing.reader.person,
+            groups: [group, ...probing.reader.groups],
+          },
+          entities: [
+            { key: "c", id: fixture.seen, kind: "customer", names: ["Plain"] },
+            person,
+          ],
+          memories: [
+            {
+              about: "c",
+              attribute: "contact",
+              object: "p",
+              type: "fact",
+              statement: text,
+              speaker: { kind: "system" },
+              basis: { kind: "writer", writer: stranger() },
+            },
+            role,
+          ],
+        }
+      : { entities: [person], memories: [role] }),
+  });
+  // Someone else's own store, every marker in it: a recall that reads
+  // the reader's own store (their own source is there) reads theirs alone.
+  await othersOwnMemory(probing.markers);
+  return fixture;
+};
+
+/** The recall fixtures planted, by reader and markers. */
+const recallFixtures = new Map<string, Promise<MemoryFixture>>();
+
+/**
+ * The recall fixture (`plantRecallFixture`) for `probing`'s reader and
+ * markers, planted once in a pass and shared by every probe of it: a
+ * probe planting its own would add hidden sources between what the gate
+ * counts before and after a pass.
+ */
+const recallFixture = async (probing: Probing): Promise<MemoryFixture> => {
+  const key = JSON.stringify([
+    probing.personId,
+    probing.reader,
+    probing.markers,
+  ]);
+  const planted = recallFixtures.get(key) ?? plantRecallFixture(probing);
+  recallFixtures.set(key, planted);
+  return await planted;
+};
+
+/**
  * Ticks `person`'s own store until its export `id` is no longer being
  * written: at most 5 ticks, then fails.
  */
@@ -1060,6 +1302,68 @@ const erasedBefore = async (personId: string): Promise<string> => {
   await ageOwnErasure(personId);
   return personId;
 };
+
+/**
+ * The probe of a recall of core's (`recallAs`, `recallPassagesAs`): the
+ * markers, their twins and every way it can refuse, as the reader asks.
+ */
+const recallProbe =
+  (recall: typeof coreBrain.recallAs | typeof coreBrain.recallPassagesAs) =>
+  async (probing: Probing): Promise<Answer[]> => {
+    await recallFixture(probing);
+    const asked = async (asking: PackAsk) =>
+      await recall(env, probing.personId, {
+        ...asking,
+        personal: probing.personal,
+      });
+    const hidden = probing.markers.join(" ");
+    const whole = { tokens: recallBudgetMax };
+    return [
+      ...(await askedOfMarkers(probing, momentsOf(probing), asked)),
+      await answer(
+        "the shared word",
+        async () => await asked({ question: probing.sharedWord, budget: whole })
+      ),
+      await answer(
+        "the reader's own entity, which hidden relations name",
+        async () => await asked({ question: "Plain", budget: whole })
+      ),
+      await answer(
+        "nothing",
+        async () => await asked({ question: "", budget: whole })
+      ),
+      await answer(
+        "too long a question",
+        async () =>
+          await asked({
+            question: `${hidden} `
+              .repeat(questionMaxLength)
+              .slice(0, questionMaxLength + 1),
+            budget: whole,
+          })
+      ),
+      await answer(
+        "no tokens",
+        async () => await asked({ question: hidden, budget: { tokens: 0 } })
+      ),
+      await answer(
+        "a moment named by the markers",
+        async () =>
+          await asked(
+            unchecked({ question: hidden, budget: whole, asOf: hidden })
+          )
+      ),
+      await answer(
+        "the markers, as someone who isn't a member",
+        async () =>
+          await recall(env, stranger(), {
+            personal: true,
+            question: hidden,
+            budget: whole,
+          })
+      ),
+    ];
+  };
 
 /**
  * Adds in a group that core refuses, each answered with the markers in
@@ -1416,12 +1720,12 @@ export const coreProbes = {
     // The markers' pack joined by a pack of what the reader may read must
     // be their twins' pack joined by the same.
     const merged = async (words: readonly string[]) => {
-      const asked = await coreBrain.recallAs(env, personId, {
+      const asked = await coreBrain.recallPassagesAs(env, personId, {
         question: words.join(" "),
         budget: whole,
         personal,
       });
-      const shared = await coreBrain.recallAs(env, personId, {
+      const shared = await coreBrain.recallPassagesAs(env, personId, {
         question: sharedWord,
         budget: whole,
         personal,
@@ -1437,57 +1741,8 @@ export const coreProbes = {
       ),
     ];
   },
-  recallAs: async (probing) => {
-    const recall = async (asking: PackAsk) =>
-      await coreBrain.recallAs(env, probing.personId, {
-        ...asking,
-        personal: probing.personal,
-      });
-    const hidden = probing.markers.join(" ");
-    const whole = { tokens: recallBudgetMax };
-    return [
-      ...(await askedOfMarkers(probing, momentsOf(probing), recall)),
-      await answer(
-        "the shared word",
-        async () =>
-          await recall({ question: probing.sharedWord, budget: whole })
-      ),
-      await answer(
-        "nothing",
-        async () => await recall({ question: "", budget: whole })
-      ),
-      await answer(
-        "too long a question",
-        async () =>
-          await recall({
-            question: `${hidden} `
-              .repeat(questionMaxLength)
-              .slice(0, questionMaxLength + 1),
-            budget: whole,
-          })
-      ),
-      await answer(
-        "no tokens",
-        async () => await recall({ question: hidden, budget: { tokens: 0 } })
-      ),
-      await answer(
-        "a moment named by the markers",
-        async () =>
-          await recall(
-            unchecked({ question: hidden, budget: whole, asOf: hidden })
-          )
-      ),
-      await answer(
-        "the markers, as someone who isn't a member",
-        async () =>
-          await coreBrain.recallAs(env, stranger(), {
-            personal: true,
-            question: hidden,
-            budget: whole,
-          })
-      ),
-    ];
-  },
+  recallAs: recallProbe(coreBrain.recallAs),
+  recallPassagesAs: recallProbe(coreBrain.recallPassagesAs),
   // Adds without a check of who writes (instruction-files.ts checks
   // first): only to files no reader is, and its refusals.
   addInstructionFile: async ({ markers }) => {
@@ -3309,6 +3564,9 @@ const callerOf = (as: Authority, grant: string): codeRecall.RecallCaller => ({
           chatId: chatIdSchema.parse(crypto.randomUUID()),
         },
   permissionId: permissionIdSchema.parse(grant),
+  // An App's as the company; a chat's code as its person's teams, as in
+  // their own chat in Grasp.
+  reach: as.subject.type === "app" ? "company" : "teams",
   actor: { type: "system" },
 });
 
@@ -3410,120 +3668,6 @@ export const recallProbes = {
     ];
   },
 } satisfies Record<RecallMember, Probe>;
-
-/**
- * What the memory probes add to the shared store, as `probing`'s reader
- * may not read it, every marker in it: a customer whose names, reference
- * and memories hold them, readable by a group the reader isn't in
- * (`hidden`); another (`drawn`), whose memory the reader's own set holds
- * but which rests on a source of that group, so the reader may not read
- * it either. And one the reader may read (`seen`), with a plain memory of
- * theirs, which hidden memories end (the same writer, later) and contest
- * (another source), and which the hidden group's reader confirmed over
- * them. Each `hidden*` memory id is one the reader may not read.
- */
-interface MemoryFixture {
-  hidden: string;
-  drawn: string;
-  seen: string;
-  hiddenMemory: string;
-  hiddenRef: string;
-  seenMemory: string;
-}
-
-/** Adds the memory probes' fixture (above), its own for each probe. */
-const memoryFixture = async ({
-  reader,
-  markers,
-}: Probing): Promise<MemoryFixture> => {
-  const group = stranger();
-  const text = markedText(markers);
-  const hiddenRef = `ref:${markers[0] ?? ""}`;
-  const marked = (key: string): NewEntity => ({
-    key,
-    kind: "customer",
-    names: [text],
-    identifiers: [{ type: "ref", value: hiddenRef }],
-  });
-  const memory = (
-    about: string,
-    basis: NewMemory["basis"],
-    extra: Partial<NewMemory> = {}
-  ): NewMemory => ({
-    about,
-    type: "fact",
-    statement: text,
-    speaker: { kind: "system" },
-    basis,
-    ...extra,
-  });
-  const version = await store().addSource({
-    source: keyOf(missingSource()),
-    change: crypto.randomUUID(),
-    text,
-    access: { kind: "audience", group },
-  });
-  const writer = stranger();
-  const hidden = await store().addMemories({
-    change: crypto.randomUUID(),
-    access: { kind: "audience", group },
-    entities: [marked("c")],
-    memories: [memory("c", { kind: "writer", writer: stranger() })],
-  });
-  // A group the reader is in: memories only one person may read are kept
-  // in that person's own store, never in the shared one this probes.
-  const theirs = reader.groups[0] ?? stranger();
-  const drawn = await store().addMemories({
-    change: crypto.randomUUID(),
-    access: { kind: "audience", group: theirs },
-    entities: [{ key: "c", kind: "customer", names: [text] }],
-    memories: [memory("c", { kind: "source", ...version, quote: text })],
-  });
-  const seen = await store().addMemories({
-    change: crypto.randomUUID(),
-    access: { kind: "audience", group: theirs },
-    entities: [{ key: "c", kind: "customer", names: ["Plain"] }],
-    memories: [
-      memory(
-        "c",
-        { kind: "writer", writer },
-        { attribute: "status", value: "Active", statement: "Plain" }
-      ),
-    ],
-  });
-  const seenId = seen.entities.c ?? "";
-  const ended = await store().addMemories({
-    change: crypto.randomUUID(),
-    access: { kind: "audience", group },
-    // Made for someone who sees the reader's entity and is in the group.
-    reader: { person: reader.person, groups: [group, theirs] },
-    entities: [{ key: "c", id: seenId, kind: "customer", names: [text] }],
-    memories: [
-      memory(
-        "c",
-        { kind: "writer", writer },
-        { attribute: "status", value: text }
-      ),
-      memory(
-        "c",
-        { kind: "source", ...version, quote: text },
-        { attribute: "status", value: markers.join("") }
-      ),
-    ],
-  });
-  await store().confirmMemory({
-    memory: ended.memories[0] ?? "",
-    reader: { person: stranger(), groups: [group] },
-  });
-  return {
-    hidden: hidden.entities.c ?? "",
-    drawn: drawn.entities.c ?? "",
-    seen: seenId,
-    hiddenMemory: hidden.memories[0] ?? "",
-    hiddenRef,
-    seenMemory: seen.memories[0] ?? "",
-  };
-};
 
 /** The probes of the store's memories and entities. */
 const memoryProbes = {
@@ -3864,45 +4008,6 @@ const memoryProbes = {
 } satisfies Record<string, Probe>;
 
 /**
- * A marked memory in someone else's own store (`person:<id>`), readable by
- * them alone: its entity's id and its own. Every probe of a person's
- * memories asks for these and must answer as for ids no one holds.
- */
-const othersOwnMemory = async (
-  markers: readonly string[]
-): Promise<{ entity: string; memory: string }> => {
-  const person = stranger();
-  const text = markedText(markers);
-  const added = await personalBrainOf(
-    inJurisdiction(env, env.BRAIN_STORE),
-    person
-  ).addMemories({
-    change: crypto.randomUUID(),
-    access: { kind: "owner", person },
-    entities: [
-      {
-        key: "c",
-        kind: "customer",
-        names: [text],
-        identifiers: [{ type: "ref", value: `ref:${first(markers)}` }],
-      },
-    ],
-    memories: [
-      {
-        about: "c",
-        attribute: "status",
-        value: text,
-        type: "fact",
-        statement: text,
-        speaker: { kind: "internal", person },
-        basis: { kind: "writer", writer: person },
-      },
-    ],
-  });
-  return { entity: added.entities.c ?? "", memory: added.memories[0] ?? "" };
-};
-
-/**
  * A person's memories, as a surface reaches them for `personId`: core's
  * functions (brain-next.ts) or the callers' (brain-memories.ts). Each
  * saves in the person's own word, in their own store.
@@ -4151,6 +4256,122 @@ export const memoriesProbes = (() => {
   return { rememberFor: probes.remember, forgetFor: probes.forget };
 })() satisfies Record<keyof typeof brainMemories, Probe>;
 
+/** The probes of cards. */
+const linkingProbes = {
+  readCard: async (probing) => {
+    const { reader } = probing;
+    const fixture = await recallFixture(probing);
+    const read = async (
+      name: string,
+      entity: string,
+      about?: Answer["about"],
+      asOf?: Date
+    ) =>
+      await answer(
+        name,
+        async () =>
+          await store().readCard({
+            entity,
+            reader,
+            ...(asOf === undefined ? {} : { asOf }),
+          }),
+        about
+      );
+    // An add of the reader's names an entity as one of theirs and a hidden
+    // one are named: it links to theirs, never the hidden one, so its card
+    // holds no marker.
+    const linkedBeside = async (): Promise<Answer[]> => {
+      const [group] = reader.groups;
+      if (group === undefined) {
+        return [];
+      }
+      const name = `Twin ${crypto.randomUUID().slice(0, 8)}`;
+      const named = (
+        access: Access,
+        statement: string,
+        extra: { attribute?: string; value?: string } = {}
+      ) => ({
+        change: crypto.randomUUID(),
+        access,
+        entities: [{ key: "c", kind: "customer" as const, names: [name] }],
+        memories: [
+          {
+            about: "c",
+            type: "fact" as const,
+            statement,
+            speaker: { kind: "system" as const },
+            basis: { kind: "writer" as const, writer: stranger() },
+            ...extra,
+          },
+        ],
+      });
+      const text = markedText(probing.markers);
+      await store().addMemories(
+        named({ kind: "audience", group }, `${name} is a customer`)
+      );
+      await store().addMemories(
+        named({ kind: "audience", group: stranger() }, text, {
+          attribute: "status",
+          value: text,
+        })
+      );
+      const linked = await store().addMemories(
+        named({ kind: "audience", group }, `${name} renews in March`)
+      );
+      return [
+        await read(
+          "the reader's own, linked by a name a hidden entity holds too",
+          linked.entities.c ?? ""
+        ),
+      ];
+    };
+    return [
+      ...(await linkedBeside()),
+      await read("an entity no one added", crypto.randomUUID(), "nothing"),
+      await read(
+        "an entity only hidden memories name",
+        fixture.hidden,
+        "hidden"
+      ),
+      await read(
+        "an entity drawn from a hidden source",
+        fixture.drawn,
+        "hidden"
+      ),
+      await read(
+        "the reader's own, which hidden memories end, contest and relate",
+        fixture.seen
+      ),
+      await read(
+        "the reader's own, as of now",
+        fixture.seen,
+        undefined,
+        new Date()
+      ),
+      await read(
+        "the reader's own, before anything",
+        fixture.seen,
+        undefined,
+        new Date(0)
+      ),
+      await answer(
+        "the reader's own, a page of one at a time",
+        async () =>
+          await store().readCard({ entity: fixture.seen, reader, limit: 1 })
+      ),
+      await answer(
+        "the reader's own, after a cursor of markers",
+        async () =>
+          await store().readCard({
+            entity: fixture.seen,
+            reader,
+            after: unchecked({ memory: probing.markers.join("") }),
+          })
+      ),
+    ];
+  },
+} satisfies Record<string, Probe>;
+
 /** One probe per public method of the Brain's store. */
 export const storeProbes = {
   addSource: async ({ markers }) => {
@@ -4379,13 +4600,178 @@ export const storeProbes = {
       ),
     ];
   },
+  // What recall finds of passages alone: no memory, the same questions.
+  findPassages: async (probing) => {
+    await recallFixture(probing);
+    const find = async (asking: PackAsk) =>
+      await store().findPassages({ ...asking, reader: probing.reader });
+    const whole = { tokens: recallBudgetMax };
+    return [
+      await answer(
+        "the reader's own entity, which hidden relations name",
+        async () => await find({ question: "Plain", budget: whole })
+      ),
+      ...(await askedOfMarkers(probing, momentsOf(probing), find)),
+      await answer(
+        "the shared word",
+        async () => await find({ question: probing.sharedWord, budget: whole })
+      ),
+    ];
+  },
   // What recall finds before it is packed: the same questions, answered
   // as lists with their order keys, must hold no marker either.
   find: async (probing) => {
+    const fixture = await recallFixture(probing);
     const find = async (asking: PackAsk) =>
       await store().find({ ...asking, reader: probing.reader });
     const whole = { tokens: recallBudgetMax };
+    // A readable entity reached from the reader's "Plain" only through a
+    // hidden relation: finding "Plain" must be what it was before the
+    // relation was added.
+    const reachedThroughHidden = async (): Promise<Answer[]> => {
+      const [group] = probing.reader.groups;
+      if (group === undefined) {
+        return [];
+      }
+      const like = "a readable entity behind a hidden relation";
+      const keeper = `Keeper ${crypto.randomUUID().slice(0, 8)}`;
+      const readable = await store().addMemories({
+        change: crypto.randomUUID(),
+        access: { kind: "audience", group },
+        entities: [{ key: "q", kind: "person", names: [keeper] }],
+        memories: [
+          {
+            about: "q",
+            type: "fact",
+            statement: `${keeper} keeps the keys`,
+            speaker: { kind: "system" },
+            basis: { kind: "writer", writer: stranger() },
+          },
+        ],
+      });
+      const before = await answer(
+        `${like}, before the relation`,
+        async () => await find({ question: "Plain", budget: whole }),
+        "nothing"
+      );
+      const hidden = stranger();
+      await store().addMemories({
+        change: crypto.randomUUID(),
+        access: { kind: "audience", group: hidden },
+        // Made for someone who sees both entities and is in the group.
+        reader: {
+          person: probing.reader.person,
+          groups: [hidden, ...probing.reader.groups],
+        },
+        entities: [
+          { key: "c", id: fixture.seen, kind: "customer", names: [] },
+          {
+            key: "q",
+            id: readable.entities.q ?? "",
+            kind: "person",
+            names: [],
+          },
+        ],
+        memories: [
+          {
+            about: "c",
+            attribute: "contact",
+            object: "q",
+            type: "fact",
+            statement: markedText(probing.markers),
+            speaker: { kind: "system" },
+            basis: { kind: "writer", writer: stranger() },
+          },
+        ],
+      });
+      const after = await answer(
+        `${like}, after it`,
+        async () => await find({ question: "Plain", budget: whole }),
+        "hidden"
+      );
+      return [before, after].map((answered) => ({ ...answered, like }));
+    };
+    // A reader who names no person (a chat's code, an App's: `teams` or
+    // `company`), of the same groups: the shared store holds nothing one
+    // person alone may read, so every memory and entity read answers them
+    // byte for byte as it answers the person, and none throws on null.
+    const asNoPerson = async (): Promise<Answer[]> => {
+      const noPerson: Reader = { person: null, groups: probing.reader.groups };
+      const reads: [string, (reader: Reader) => Promise<unknown>][] = [
+        [
+          "finding Plain",
+          async (reader) =>
+            await store().find({ question: "Plain", budget: whole, reader }),
+        ],
+        [
+          "finding the markers",
+          async (reader) =>
+            await store().find({
+              question: probing.markers.join(" "),
+              budget: whole,
+              reader,
+            }),
+        ],
+        [
+          "the card of their own",
+          async (reader) =>
+            await store().readCard({ entity: fixture.seen, reader }),
+        ],
+        [
+          "the card of a hidden entity",
+          async (reader) =>
+            await store().readCard({ entity: fixture.hidden, reader }),
+        ],
+        [
+          "the memories of their own",
+          async (reader) =>
+            await store().readMemories({ entity: fixture.seen, reader }),
+        ],
+        [
+          "their own entity",
+          async (reader) =>
+            await store().readEntity({ entity: fixture.seen, reader }),
+        ],
+        [
+          "entities named Plain",
+          async (reader) =>
+            await store().findEntities({ name: "Plain", reader }),
+        ],
+        [
+          "entities by the hidden reference",
+          async (reader) =>
+            await store().findEntities({
+              identifier: { type: "ref", value: fixture.hiddenRef },
+              reader,
+            }),
+        ],
+      ];
+      const answers: Answer[] = [];
+      for (const [name, read] of reads) {
+        const like = `as no person: ${name}`;
+        // oxlint-disable-next-line no-await-in-loop -- one read at a time
+        const asPerson = await answer(
+          `${name}, as the person`,
+          async () => await read(probing.reader),
+          "nothing"
+        );
+        // oxlint-disable-next-line no-await-in-loop -- one read at a time
+        const asNone = await answer(
+          `${name}, as no person`,
+          async () => await read(noPerson),
+          "hidden"
+        );
+        answers.push({ ...asPerson, like }, { ...asNone, like });
+      }
+      return answers;
+    };
     return [
+      ...(await asNoPerson()),
+      ...(await reachedThroughHidden()),
+      await answer(
+        "the reader's own entity, which hidden relations name",
+        async () => await find({ question: "Plain", budget: whole })
+      ),
       ...(await askedOfMarkers(probing, momentsOf(probing), find)),
       await answer(
         "the shared word",
@@ -4399,6 +4785,7 @@ export const storeProbes = {
   },
   recall: async (probing) => {
     const { reader, markers } = probing;
+    await recallFixture(probing);
     const recall = async (asking: PackAsk, as: Reader = reader) =>
       await store().recall({ ...asking, reader: as });
     const hidden = markers.join(" ");
@@ -4466,6 +4853,10 @@ export const storeProbes = {
         "the shared word",
         async () =>
           await recall({ question: probing.sharedWord, budget: whole })
+      ),
+      await answer(
+        "the reader's own entity, which hidden relations name",
+        async () => await recall({ question: "Plain", budget: whole })
       ),
       await answer(
         "nothing",
@@ -5625,6 +6016,7 @@ export const storeProbes = {
     ];
   },
   ...memoryProbes,
+  ...linkingProbes,
 } satisfies Record<StoreMember, Probe>;
 
 /** A `SKILL.md` named `name`, holding no marker. */

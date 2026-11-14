@@ -962,6 +962,7 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
         }),
         context: { type: "chat", workspaceId: id, chatId: chat.id },
         permissionId: permissionIdSchema.parse(permissionId),
+        reach: "teams",
         actor: { type: "system" },
       },
       requestOf(word)

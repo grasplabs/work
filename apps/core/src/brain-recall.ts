@@ -7,7 +7,7 @@ import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
 
 import { appendAuditEvent } from "./audit-outbox.ts";
-import { codeRecallOf, recallAs } from "./brain-next.ts";
+import { codeRecallOf, recallPassagesAs } from "./brain-next.ts";
 import { authorize } from "./permissions.ts";
 
 // The Brain's recall for code: an App's action (resource-brain.ts), a
@@ -32,9 +32,13 @@ import { authorize } from "./permissions.ts";
 //   (App data, a run's state, a decision, an App a run writes to), so it
 //   holds nothing any member couldn't read at the source, whoever called.
 //   Team-scoped recall for code comes with GRA-1842, its grant naming
-//   the teams it reaches. A chat's code reads as the person the chat is
-//   for, their teams alone (`personal: false`): what it gets stays in
-//   that person's chat. The person is always the one the call acts for
+//   the teams it reaches. A chat's code (and its `searchBrain` tool)
+//   reads as the person the chat is for, their teams alone (`personal:
+//   false`), only in their own chat in Grasp in a turn they started,
+//   where what it gets stays theirs; anywhere else (a chat app's direct
+//   message, which the app keeps too; a turn a schedule or an event woke;
+//   a thread others share) as the company alone, as the recall before the
+//   question reads there (GRA-1820, turn-recall.ts). The person is always the one the call acts for
 //   (`onBehalfOf`, set by core from the session or the run, never by the
 //   code), and must still be a member; the Brain filters inside its own
 //   search, so a pack never holds more than that reader may read, and
@@ -56,6 +60,15 @@ export interface RecallCaller {
    * null when it holds none, and the recall is refused (and audited).
    */
   readonly permissionId: PermissionId | null;
+  /**
+   * Whom it reads as, besides never what only a person may read: the
+   * company alone (`company`: an App, a workflow, and a chat's code or
+   * `searchBrain` anywhere but its person's own chat in Grasp, in a turn
+   * they started), or the person's teams and the company (`teams`: a
+   * chat's code in that own chat alone). Set by core from where the call
+   * is made, never by the code.
+   */
+  readonly reach: "teams" | "company";
   /** How the audit log names it. */
   readonly actor: AuditActor;
   /** What the audit event is about: the App, the run or the chat. */
@@ -119,13 +132,15 @@ export const recallFor = async (
       caller.permissionId,
       caller.context
     );
-    // An App's or a workflow's as the company alone; a chat's code as
-    // its person's teams alone; never what only a person may read.
-    // Nothing code sends can change it.
-    const recalled = await recallAs(env, caller.authority.onBehalfOf, {
+    // As the caller's reach (`RecallCaller.reach`), never what only a
+    // person may read. Nothing code sends can change it.
+    // Passages alone (GRA-1742): the pack code gets is the SDK's
+    // `BrainPack`, which holds no memory, so none takes its budget or a
+    // word from `notFound`, and no entity reaches code.
+    const recalled = await recallPassagesAs(env, caller.authority.onBehalfOf, {
       ...recall,
       personal: false,
-      company: caller.authority.subject.type !== "agent",
+      company: caller.reach === "company",
     });
     // A capture is one person's own, kept only in their own store (core's
     // addSource refuses it anywhere else), which this recall never reads:

@@ -40,6 +40,8 @@ const served = async (
         authority: caller.authority,
         context: caller.context,
         permissionId,
+        // What an App is handed may end up wherever a member reads.
+        reach: "company",
         actor: caller.actor,
         target: { type: "app", id: caller.app },
       },

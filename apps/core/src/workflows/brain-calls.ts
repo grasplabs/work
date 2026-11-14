@@ -76,6 +76,8 @@ export const callBrain = async (
       authority,
       context: runContext(run),
       permissionId,
+      // What a run is handed may end up wherever a member reads.
+      reach: "company",
       actor: delegateActorOf(authority),
       target: { type: "workflow_run", id: run.runId },
       // Pinned with the run before the run gets it, so what it recalled
