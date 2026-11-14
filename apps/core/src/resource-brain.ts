@@ -4,19 +4,19 @@ import type { PermissionId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 
-import { recallFor, skillsCallFor } from "./brain-recall.ts";
+import { entitiesCallFor, recallFor, skillsCallFor } from "./brain-recall.ts";
 import type { ResourceAdapter, ServedBinding } from "./resource-adapter.ts";
 import { platformGrantOf } from "./resource-platform.ts";
 
-// A brain resource (resource-bindings.ts): `ctx.brain.recall` and
-// `ctx.brain.skills` for an App's actions, as an admin bound the App's
-// `brain` declaration to one of the App's own `{ type: "platform" }`
-// permissions to read the Brain. A declaration grants nothing: it
-// resolves only through an active binding approved for exactly it,
-// naming the App's own active permission, which `recallFor` and
-// `skillsCallFor` check again on each call, then read only what everyone
-// in the company may read, for whoever the call acts for (threat models
-// on GRA-1731 and GRA-1830).
+// A brain resource (resource-bindings.ts): `ctx.brain.recall`,
+// `ctx.brain.skills` and `ctx.brain.entities` for an App's actions, as an
+// admin bound the App's `brain` declaration to one of the App's own
+// `{ type: "platform" }` permissions to read the Brain. A declaration
+// grants nothing: it resolves only through an active binding approved for
+// exactly it, naming the App's own active permission, which `recallFor`,
+// `skillsCallFor` and `entitiesCallFor` check again on each call, then
+// read only what everyone in the company may read, for whoever the call
+// acts for (threat models on GRA-1731, GRA-1830 and GRA-1837).
 
 /** The contract every brain binding serves. */
 const brainContract = "grasp.brain@1";
@@ -44,6 +44,9 @@ const served = async (
     }
     if (method === "skills.select" || method === "skills.read") {
       return await skillsCallFor(env, brainCaller, method, args[0]);
+    }
+    if (method === "entities.get" || method === "entities.find") {
+      return await entitiesCallFor(env, brainCaller, method, args[0]);
     }
     throw permissionErrors.create("permission.denied");
   },

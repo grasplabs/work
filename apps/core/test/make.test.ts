@@ -573,6 +573,9 @@ describe("Make something", { timeout: 120_000 }, () => {
     } finally {
       await env.DB.prepare(`DROP TRIGGER ${refusing}`).run();
     }
+    // Build it goes on in a turn, which keeps it once under way, after
+    // `build` answered: read the chat once that turn ended.
+    await idle(builder, chat.id);
     const updates = await watched(stub, chat.id, builder.userId);
 
     expect({

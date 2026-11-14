@@ -36,6 +36,10 @@ export type {
   BrainRecall,
   BrainSkill,
   BrainSkillText,
+  BrainCard,
+  BrainEntity,
+  BrainEntityKind,
+  BrainMemory,
 } from "./brain-recall.ts";
 export type {
   AiClient,

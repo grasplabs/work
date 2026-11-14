@@ -498,8 +498,7 @@ const schemaProblem = (error: SchemaError): Problem => {
       code: "workflow.call_kind",
       message:
         "A call calls one member: a connection's action, an action on the run's files, an action on the Brain, or an App's function.",
-      remedy:
-        "Give it `connection` and `action` (with `into` or `from` if it keeps or attaches files), `files` and one of read, write, list and delete, `brain` and one of recall, skills.select and skills.read, or `app` and `function`.",
+      remedy: `Give it \`connection\` and \`action\` (with \`into\` or \`from\` if it keeps or attaches files), \`files\` and one of read, write, list and delete, \`brain\` and one of ${brainActions.join(", ")}, or \`app\` and \`function\`.`,
     });
   }
   if (keyword === "oneOf") {

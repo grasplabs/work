@@ -66,15 +66,24 @@ export type FrozenCatalogBinding = z.infer<typeof catalogBindingSchema>;
 
 const frozenBindingsSchema = z.array(catalogBindingSchema);
 
-/** The catalog bindings a start froze (its receipt's `bindings`), by alias. */
+/**
+ * The catalog bindings a start froze (its receipt's `bindings`), by alias.
+ * `workflow.format_unsupported` for a receipt an earlier platform release
+ * froze, such as one with a binding of a kind there is no more
+ * (`knowledge`): a receipt never changes, so such a run is refused as its
+ * version is (workflow-builds.ts), never read as this release's.
+ */
 export const frozenBindingsOf = (
   text: string
-): ReadonlyMap<string, FrozenCatalogBinding> =>
-  new Map(
-    frozenBindingsSchema
-      .parse(JSON.parse(text))
-      .map((binding) => [binding.alias, binding] as const)
+): ReadonlyMap<string, FrozenCatalogBinding> => {
+  const frozen = frozenBindingsSchema.safeParse(JSON.parse(text));
+  if (!frozen.success) {
+    throw workflowResourceErrors.create("workflow.format_unsupported");
+  }
+  return new Map(
+    frozen.data.map((binding) => [binding.alias, binding] as const)
   );
+};
 
 /** What a call of a run needs to know of it, from its row and receipt. */
 export interface CallingRun {
