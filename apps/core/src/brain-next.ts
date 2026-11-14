@@ -1906,14 +1906,10 @@ export const skillVersionRefOf = (given: SkillAt): SkillVersionRef => {
         }
       : { scope: given.scope, name: given.name, version: given.version }
   );
-  const skill: Skill =
-    at.scope === "team"
-      ? { scope: at.scope, team: at.team, name: at.name }
-      : { scope: at.scope, name: at.name };
   return {
     source: {
       producer: skillsKind,
-      id: skillKeyOf(skill).slice(skillsKind.length + 1),
+      id: skillKeyOf(at).slice(skillsKind.length + 1),
     },
     version: at.version,
   };
