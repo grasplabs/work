@@ -22,7 +22,6 @@ import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { expect, vi } from "vite-plus/test";
 
-import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { appFor } from "../src/apps.ts";
 import { personOf } from "../src/connections.ts";
 import { appHost } from "../src/durable-objects.ts";
@@ -33,13 +32,13 @@ import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { setWorkflowParams } from "../src/workflow-params.ts";
 import {
   createWorkflowResource,
-  publishWorkflowVersion,
   workflowVersions,
 } from "../src/workflow-resources.ts";
 import { appWorkflowStarts } from "../src/workflow-start-intents.ts";
 import type { CallingAgent } from "../src/workflow-start-intents.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
+import { standInBinding } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
 import { mailConnection } from "./mail-connection.ts";
@@ -47,6 +46,7 @@ import { connectModels, fakeProviderFor } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
 import { liveStatus } from "./runs.ts";
 import { unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 /** The model the organization chose, the one a binding may name. */
 export const allowedModel = "mistral/mistral-large-latest";
@@ -143,10 +143,7 @@ export const definitionOf = ({
 /** A workflow of `by`'s, published once from `draft`. */
 export const published = async (by: Identity, draft: Draft) => {
   const workflow = await createWorkflowResource(env, by, `calls-${unique()}`);
-  await publishWorkflowVersion(env, by, workflow.id, {
-    definition: definitionOf(draft),
-    basedOn: null,
-  });
+  await publishDefinition(env, by, workflow.id, definitionOf(draft));
   const [version] = await workflowVersions(env, by, workflow.id);
   return { workflow, executable: version?.build?.hash !== undefined };
 };
@@ -161,7 +158,7 @@ export const started = async (
     startEnv,
     { type: "person", person: by },
     id,
-    { version: 1, args: { who: "Ada" }, key: unique() }
+    { expected: 1, args: { who: "Ada" }, key: unique() }
   );
   if (runId === null) {
     const [version] = await workflowVersions(env, by, id);
@@ -411,8 +408,8 @@ export const mailingWorkflow = async (
 };
 
 /** A start request of Ada's, with a key of its own. */
-export const adaStart = () => ({
-  version: 1,
+export const adaStart = (version = 1) => ({
+  expected: version,
   args: { who: "Ada" },
   key: unique(),
 });
@@ -463,8 +460,8 @@ export const answer = (text: string) => ({
 });
 
 /**
- * An App of `by`'s, version 1 approved, binding version 1 of workflow
- * `workflowId` as `flow`, with a `start` grant of its own from `admin`; in
+ * An App of `by`'s, a stand-in version 1, binding workflow `workflowId`
+ * as `flow`, with a `start` grant of its own from `admin`; in
  * restricted mode when `restricted`. `start` starts it as App code does
  * (an action's `ctx.workflows.<alias>.start`), for `by`, made by `agent`'s call
  * when given: its run's ID.
@@ -484,11 +481,7 @@ export const startingApp = async (
       "INSERT INTO app_versions (app_id, version, tree, files, author_id, message, created_at, approved) VALUES (?, 1, 'tree', 0, ?, 'Version', ?, 1)"
     ).bind(app, by.userId, Date.now()),
   ]);
-  await bindWorkflowToApp(env, by, workflowId, {
-    app,
-    alias: "flow",
-    version: 1,
-  });
+  await standInBinding(app, "flow", workflowId, by);
   await granted(by, admin, {
     subject: { type: "app", appId: app },
     object: {

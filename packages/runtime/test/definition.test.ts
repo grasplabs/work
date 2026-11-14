@@ -333,15 +333,16 @@ describe("operations", () => {
         /no name/u,
       ],
       [{ op: "addIndex", table: "tasks", fields: ["title"] }, /has a name/u],
-      // A workflow's events, listens and decisions come from the version
-      // bound (`setWorkflowContract`), never written with it by hand.
+      // A workflow's events, listens and decisions come from the live
+      // version of the workflow bound (`setWorkflowContract`), never
+      // written with it by hand.
       [
         {
           op: "addPermission",
           permission:
             'permission.workflow("triage", { args: v.object({}), returns: v.null(), events: { edited: { type: "tasks.task.edited", data: v.null() } } })',
         },
-        /come from the version you bind/u,
+        /come from the live version of the workflow you bind/u,
       ],
       [
         {
@@ -349,7 +350,7 @@ describe("operations", () => {
           permission:
             'permission.workflow("triage", { args: v.object({}), returns: v.null(), decisions: { sign: { value: v.boolean(), context: v.null() } } })',
         },
-        /come from the version you bind/u,
+        /come from the live version of the workflow you bind/u,
       ],
       // A workflow's events, listens and decisions are set on a workflow
       // the App declares, never declaring one.

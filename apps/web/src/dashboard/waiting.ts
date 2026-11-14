@@ -7,7 +7,6 @@ import type {
   BindingApprovalItem,
   SignInAgainItem,
   SkillShareItem,
-  WorkflowGoLiveItem,
 } from "@grasp-os/shared/waiting";
 
 import type { PendingRequests } from "../activity/pending.tsx";
@@ -34,8 +33,6 @@ export interface Waiting {
   requests: Loaded<PendingRequests> | undefined;
   /** Decisions of workflows' runs that wait for the person's answer. */
   decisions: Loaded<DecisionView[]>;
-  /** Versions of workflows asked to go live that the person may approve or send back. */
-  workflowGoLives: Loaded<WorkflowGoLiveItem[]>;
   /** Starts of workflows the person's chats' agents asked for, held for them to confirm. */
   heldStarts: Loaded<HeldStart[]>;
   /** Versions of workflows whose bindings no admin approved, so their starts are refused. Admins only. */

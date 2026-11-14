@@ -267,7 +267,7 @@ export const liveStoreOf = async (
  * conditional statement, so of two creations at once one record wins and
  * both answer its store; the other's store is never listed, nor audited.
  * The versions sealed on a deleted store stay bound to it and are refused
- * as they are made current (`makeCurrent`): their data is gone, and a
+ * as they are made current (`activateVersion`): their data is gone, and a
  * fresh store isn't it. Its caller decides who may: only the App's
  * builders seal its versions (app-releases.ts).
  */
@@ -457,7 +457,7 @@ const boundSql = (id: StoreId): SQL =>
  * statement that requires it live, bound to no sealed release, and not
  * closing for another deletion (unless that mark lapsed,
  * `storeClosingMs`): the mark a seal's binding (app-releases.ts) and
- * `makeCurrent` honour, so of this deletion and a seal that binds
+ * `activateVersion` honour, so of this deletion and a seal that binds
  * the store, exactly one wins. True when this call holds the mark: only
  * then may it close the store.
  */

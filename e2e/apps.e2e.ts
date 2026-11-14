@@ -3,14 +3,13 @@ import type { Page } from "@playwright/test";
 
 import {
   changesOf,
-  commitApp,
   testApp,
   withFiles,
 } from "../apps/core/test/app-definitions.ts";
 import type { TestApp, TestSource } from "../apps/core/test/app-definitions.ts";
 import { fileCast } from "./contexts.ts";
 import { test } from "./csp.ts";
-import { apiOf, peopleIn, release } from "./people.ts";
+import { apiOf, drafted, peopleIn, release } from "./people.ts";
 import type { Person } from "./people.ts";
 import { origin } from "./stack.ts";
 
@@ -40,7 +39,7 @@ import { useMutation, useQuery } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { api } from "@server/_generated/api";
 
-function Counter() {
+const Counter = () => {
   const count = useQuery(api.counter.count, {});
   const addOne = useMutation(api.counter.addOne);
   return (
@@ -50,7 +49,7 @@ function Counter() {
       <Button onClick={() => void addOne({})}>Add one</Button>
     </main>
   );
-}
+};
 export const Route = createFileRoute("/")({ component: Counter });
 `;
 
@@ -100,7 +99,7 @@ const newApp = async (
       description: "Counts clicks",
     });
     if (Object.keys(files).length > 0) {
-      await release(api, id, files, "First version");
+      await release(api, id, files);
     }
     return id;
   });
@@ -158,18 +157,13 @@ test("a builder finds an App in the list, opens it and uses its page with live d
     const made = await Promise.all([
       ...live.map(async (each) => {
         const { id } = await api.apps.create({ name: `${each} ${run}` });
-        await release(
-          api,
-          id,
-          each === "books" ? twoPages() : counterApp(),
-          "First"
-        );
+        await release(api, id, each === "books" ? twoPages() : counterApp());
         return [each, id] as const;
       }),
-      // Committed, never published: no version live yet.
+      // Drafted, never published: no version live yet.
       ...drafts.map(async (each) => {
         const { id } = await api.apps.create({ name: `${each} ${run}` });
-        await commitApp(api.apps.files, id, counterApp(), "First");
+        await drafted(api, id, counterApp());
         return [each, id] as const;
       }),
     ]);
@@ -428,8 +422,7 @@ test("loading a page again after a new version shows that version, and the App's
       swapped,
       changesOf(twoPages(), {
         "src/routes/home.tsx": null,
-      }),
-      "Drop the second page"
+      })
     );
   });
   // Told over the tab's connection, the page holds nothing unsaved, so

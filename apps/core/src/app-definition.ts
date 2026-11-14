@@ -536,14 +536,17 @@ export type DraftOperation =
   | {
       /**
        * Declares, for workflow permission `alias`, the events, listen
-       * tasks and decisions version `version` of workflow `workflow` has,
-       * and records that version as the one the App binds there once the
-       * App version is current.
+       * tasks and decisions the live version of workflow `workflow` has,
+       * or only those named (`events`, `listens`, `decisions`), and
+       * records the workflow as the one the App binds there once the App
+       * version is current.
        */
       readonly op: "bindWorkflow";
       readonly alias: string;
       readonly workflow: string;
-      readonly version: number;
+      readonly events?: readonly string[];
+      readonly listens?: readonly string[];
+      readonly decisions?: readonly string[];
     };
 
 /** The operations the definition tools make, as `define` takes them. */
@@ -607,7 +610,9 @@ export const definitionOperationSchema: z.ZodType<DraftOperation> =
       op: z.literal("bindWorkflow"),
       alias: text,
       workflow: text,
-      version: z.int().min(1),
+      events: z.array(text).optional(),
+      listens: z.array(text).optional(),
+      decisions: z.array(text).optional(),
     }),
     z.strictObject({
       op: z.literal("moveField"),
@@ -629,13 +634,27 @@ export const definitionOperationsSchema = z.union([
 ]);
 
 /**
+ * What a person's `apps.define` takes besides the tools' operations: the
+ * definition written whole (`setDefinition`), checked whole, each
+ * workflow it binds anew held to whoever may bind it. Never the agent's,
+ * which changes a definition an operation at a time.
+ */
+export const personDefinitionOperationsSchema = z.union([
+  definitionOperationsSchema,
+  z.strictObject({ op: z.literal("setDefinition"), definition: z.json() }),
+]);
+
+/**
  * An audit's detail of one operation: its op, table and alias, and for a
- * workflow bound from the draft, the workflow and version it named.
+ * workflow bound from the draft, the workflow it named.
  */
 const singleDetail = (operation: unknown): Record<string, string | null> => {
   const parsed = definitionOperationSchema.safeParse(operation);
   if (!parsed.success) {
-    return { op: null };
+    const whole = personDefinitionOperationsSchema.safeParse(operation);
+    return {
+      op: whole.success && !Array.isArray(whole.data) ? whole.data.op : null,
+    };
   }
   const { data } = parsed;
   let table: string | null = null;
@@ -652,11 +671,8 @@ const singleDetail = (operation: unknown): Record<string, string | null> => {
   } else if (data.op === "removePermission" || data.op === "bindWorkflow") {
     alias = data.alias.slice(0, 64);
   }
-  // Which version a workflow's declared contract was read from.
   const bound: Record<string, string> =
-    data.op === "bindWorkflow"
-      ? { workflow: data.workflow.slice(0, 256), version: String(data.version) }
-      : {};
+    data.op === "bindWorkflow" ? { workflow: data.workflow.slice(0, 256) } : {};
   return { op: data.op, table, alias, ...bound };
 };
 

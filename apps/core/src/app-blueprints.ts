@@ -84,11 +84,12 @@ import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { ensureReleaseContract } from "./workflow-catalog.ts";
+import { workflowSteps } from "./workflow-publish.ts";
 import {
   createWorkflowResource,
   definitionProblems,
   deleteWorkflowResource,
-  publishWorkflowVersion,
+  workflowFile,
 } from "./workflow-resources.ts";
 
 // Blueprints: code to create Apps from, each its own record. A builder of
@@ -259,7 +260,7 @@ const discardShipped = async (
  */
 const createShippedWorkflows = async (
   env: Env,
-  by: Acting,
+  by: Acting & Identity,
   blueprint: string,
   shipped: readonly BlueprintWorkflow[]
 ): Promise<ShippedWorkflow[]> => {
@@ -299,17 +300,21 @@ const createShippedWorkflows = async (
       // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
       const workflow = await createWorkflowResource(env, by, name);
       made.push({ workflowId: workflow.id });
+      // Its first version, built and made live as a publish of its draft
+      // would (workflow-publish.ts), with no draft to empty.
       // oxlint-disable-next-line no-await-in-loop -- after its creation
-      const published = await publishWorkflowVersion(env, by, workflow.id, {
-        definition,
+      const version = await workflowSteps.build(env, by, workflow.id, {
+        draft: { base: null, changes: {}, definition: null, revision: 0 },
+        files: new Map([[workflowFile, definition]]),
+      });
+      // oxlint-disable-next-line no-await-in-loop -- after it is built
+      await workflowSteps.activate(env, by, workflow.id, {
+        version,
         basedOn: null,
+        action: "version.published",
+        alongside: async () => await Promise.resolve([]),
       });
-      created.push({
-        alias,
-        binding,
-        workflowId: workflow.id,
-        version: published.version,
-      });
+      created.push({ alias, binding, workflowId: workflow.id, version });
     }
   } catch (error) {
     await discardShipped(env, by, made);
@@ -410,10 +415,8 @@ export const markBlueprint = async (
         definition: definitionText(definition),
         appId: found.id,
         version: row.version,
-        // A copy's first version is approved only when this one was
-        // (`madeCurrent`), so code no admin approved doesn't pass as
-        // approved in its copies.
-        approved: row.approved === 1,
+        // Unused (schema.ts): what an admin grants is the access.
+        approved: false,
         permissions: await declarableOf(env, found.id),
         markedBy: by.userId,
         markedAt: new Date(),
@@ -485,7 +488,7 @@ export const unmarkBlueprint = async (
  */
 export const createFromBlueprint = async (
   env: Env,
-  by: Acting,
+  by: Acting & Identity,
   id: unknown,
   input: unknown,
   /** Admits the write, called right before it is committed: throws to refuse it. */
@@ -539,9 +542,6 @@ export const createFromBlueprint = async (
     blueprint.id
   );
   refuseAppWorkflows(files.keys());
-  const tree = await storedVersion(env, app, files, definition);
-  await storeTree(env, app, tree);
-  await storeTree(env, app, takenCode);
   // What the blueprint ships, as the release stored it: refused whole if
   // any of it isn't, with nothing made.
   const shipped = blueprintWorkflowSchema.array().parse(blueprint.workflows);
@@ -555,6 +555,32 @@ export const createFromBlueprint = async (
     blueprint.id,
     shipped
   );
+  // The copy's first version binds each workflow it got that its code
+  // declares, as a version binds one (`workflowBindings`): what its
+  // activation binds, and keeps bound (app-workflow-bindings.ts).
+  const declared = workflows.filter(({ alias }) =>
+    definition.permissions.some(
+      (held) => held.alias === alias && held["~permission"] === "workflows"
+    )
+  );
+  const bound: AppDefinition =
+    declared.length === 0
+      ? definition
+      : {
+          ...definition,
+          workflowBindings: declared
+            .map(({ alias, workflowId }) => ({ alias, workflowId }))
+            .toSorted((a, b) => (a.alias < b.alias ? -1 : 1)),
+        };
+  let tree: Awaited<ReturnType<typeof storedVersion>>;
+  try {
+    tree = await storedVersion(env, app, files, bound);
+    await storeTree(env, app, tree);
+    await storeTree(env, app, takenCode);
+  } catch (error) {
+    await discardShipped(env, by, workflows);
+    throw error;
+  }
   const starts = workflowStartRequests(by, app, workflows, blueprint.id);
 
   const now = new Date();
@@ -593,12 +619,11 @@ export const createFromBlueprint = async (
     definitionHash: tree.definition.hash,
     files: files.size,
     authorId: by.userId,
-    message: `Created from the blueprint ${blueprint.name}.`,
+    // Unused (schema.ts).
+    message: "",
     createdAt: now,
-    // The blueprint's code, which its requests came with: approved
-    // (`madeCurrent`) only when an admin approved it, unlike a version its
-    // builder commits; otherwise approved as any version is.
-    approved: blueprint.approved ? 1 : null,
+    // Unused (schema.ts): what an admin grants is the access.
+    approved: null,
     pages: hasPages(files),
     proposedBy: null,
     label: null,
@@ -991,7 +1016,7 @@ export const blueprintUpdate = async (
  * `app.conflict` when what they saw no longer holds: the blueprint
  * changed again, a version was committed meanwhile, or the update was
  * accepted already. Nothing goes live: a builder publishes the version
- * (`AppVersionsApi.publish`, app-publish.ts), and it asks for nothing.
+ * (`VersionsApi.rollback`, publish.ts), and it asks for nothing.
  */
 /**
  * Whether the update is still the one offered: the blueprint at the same
@@ -1085,7 +1110,8 @@ export const acceptBlueprintUpdate = async (
     definitionHash: tree.definition.hash,
     files: files.size,
     authorId: by.userId,
-    message: `Updated from the blueprint ${blueprint.name}.`,
+    // Unused (schema.ts).
+    message: "",
     createdAt: new Date(),
     approved: null,
     pages: hasPages(files),
@@ -1225,7 +1251,7 @@ export const installBuiltinBlueprint = async (
               definition: definition.text,
               appId: null,
               version: null,
-              approved: true,
+              approved: false,
               permissions: declared,
               workflows: shipped,
               markedBy: null,

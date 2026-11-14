@@ -2,6 +2,7 @@ import {
   definitionSources,
   definitionText,
 } from "@grasp-os/runtime/definition";
+import type { AppDefinition } from "@grasp-os/runtime/definition";
 import { ownFiles } from "@grasp-os/runtime/host";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { appErrors } from "@grasp-os/shared/apps";
@@ -14,37 +15,42 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { definitionRefusal } from "../src/app-definition.ts";
+import { reviewDraft } from "../src/app-review.ts";
 import { findApp } from "../src/apps.ts";
 import { memberOf } from "../src/auth/identity.ts";
-import { reviewDraft } from "../src/version-review.ts";
 import {
-  commitApp,
+  appOf,
   definitionInput,
   definitionOf,
+  publishApp,
   sourceParts,
   testApp,
   withFiles,
 } from "./app-definitions.ts";
-import type { TestSource } from "./app-definitions.ts";
-import { commitDefined, racingDb } from "./apps.ts";
+import {
+  appVersionOf,
+  appVersionsOf,
+  publishDefined,
+  racingDb,
+} from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { auditedDuring, outcome, signedInApi } from "./sign-in.ts";
 
-// An App's code is versioned as a whole: builders commit changes over its
-// latest version as the next version, which never changes afterwards. One
-// version runs (current) and another can wait for review (pending). Every
-// commit and every change of version is audited. Gone with App
-// workflows: the workflows an App's own version names.
+// An App's code is versioned as a whole: its builders write its draft and
+// publish it as its next version, which never changes afterwards and goes
+// live; one version runs (current), and any other can be made current
+// again. Every version and every change of version is audited.
 
 const idp = mockIdp();
 
 /** A signed-in person's App API, on a connection of their own. */
 const appsApi = async (role: Role) => {
   const person = await signedInApi(idp, role);
-  return { ...person, apps: person.api.apps };
+  return { ...person, apps: person.api.apps, versions: person.api.versions };
 };
 
 type Apps = Awaited<ReturnType<typeof appsApi>>["apps"];
+type Api = Awaited<ReturnType<typeof appsApi>>["api"];
 
 const refusalSchema = z.object({
   details: z.object({ issues: z.array(z.string()) }),
@@ -66,13 +72,34 @@ const issuesOf = async (promise: Promise<unknown>): Promise<string> => {
 const newApp = async (apps: Apps) =>
   await apps.create({ name: "Invoice desk", description: "Invoices@" });
 
-/** Commits `files` over the App's latest version. */
-const commit = async (
-  apps: Apps,
+/**
+ * Writes `changes` into App `app`'s draft over the revision read
+ * (`drafts.write`), after `definition` whole when given (`apps.define`):
+ * the draft as saved.
+ */
+const drafted = async (
+  api: Api,
   app: string,
-  files: TestSource,
-  message = "Change"
-) => await commitApp(apps.files, app, files, message);
+  changes: Record<string, string | null>,
+  definition?: unknown
+) => {
+  const subject = { kind: "app", id: app } as const;
+  let { revision } = await api.drafts.get(subject);
+  if (definition !== undefined) {
+    const defined = await api.apps.define(app, revision, {
+      op: "setDefinition",
+      definition,
+    });
+    if (!defined.ok) {
+      throw new Error(defined.problem);
+    }
+    revision += 1;
+  }
+  return await api.drafts.write(subject, revision, changes);
+};
+
+/** App `app`'s subject, as drafts and versions name it. */
+const subjectOf = (app: string) => ({ kind: "app", id: app }) as const;
 
 /**
  * Gives an App without versions a first one holding `files` exactly,
@@ -121,6 +148,7 @@ const withTable = (table: string) =>
 
 const first = withFiles(defined, {
   "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+
 const Page = () => <p>Inbox</p>;
 
 export const Route = createFileRoute("/")({ component: Page });
@@ -128,199 +156,179 @@ export const Route = createFileRoute("/")({ component: Page });
   "AGENTS.md": "# Invoice desk — facturen, 請求書 🧾\n",
 });
 
-// Making a version with workflows current compiles them and runs their
-// tests, as "names the pages and workflows" does. That takes half a
-// second locally, and several times that on a loaded runner, closer to
-// the default five seconds than the rest of this file. Nothing polls or
-// sleeps; sixty seconds is room for a slow runner, as the other tests
-// that release Apps give theirs.
+// Publishing checks, builds and seals each version, which takes seconds
+// on a loaded runner, closer to the default five than the rest of this
+// file. Nothing polls or sleeps; sixty seconds is room for a slow runner,
+// as the other tests that release Apps give theirs.
 describe("App code", { timeout: 60_000 }, () => {
-  it("reads back every version exactly as it was committed", async () => {
-    const { apps, userId } = await appsApi("builder");
-    const app = await newApp(apps);
-    const v1 = await commit(apps, app.id, first, "First page");
-    const v2 = await commit(apps, app.id, {
+  it("reads back every version exactly as it was published", async () => {
+    const { api, userId, versions } = await appsApi("builder");
+    const app = await newApp(api.apps);
+    const subject = subjectOf(app.id);
+    const second = {
       "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+
 const Page = () => <p>Invoices</p>;
 
 export const Route = createFileRoute("/")({ component: Page });
 `,
       "src/components/row.tsx": "export const Row = () => null;\n",
       "AGENTS.md": null,
-    });
+    };
+    await publishApp(api, app.id, first);
+    await publishApp(api, app.id, second);
 
-    expect({ v1, v2 }).toMatchObject({
-      // Its own four, and the four of server/_generated/.
-      v1: { version: 1, parent: null, files: 8, author: userId },
-      v2: { version: 2, parent: 1, files: 8, author: userId },
-    });
-    await expect(apps.files.read(app.id, 1)).resolves.toStrictEqual(
-      first.files
-    );
-    await expect(apps.files.read(app.id, 2)).resolves.toStrictEqual(
-      withFiles(defined, {
-        "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
-const Page = () => <p>Invoices</p>;
-
-export const Route = createFileRoute("/")({ component: Page });
-`,
-        "src/components/row.tsx": "export const Row = () => null;\n",
-      }).files
-    );
-    // A version reads back as committed; the commit's answer adds how its
-    // builds went (build-on-save.test.ts).
-    const { builds: _builds, ...committedV1 } = v1;
-    const [newestFirst, beforeTwo, one] = await Promise.all([
-      apps.versions.list(app.id),
-      apps.versions.list(app.id, 2),
-      apps.versions.get(app.id, 1),
+    const [newestFirst, beforeTwo, one, two] = await Promise.all([
+      versions.list(subject),
+      versions.list(subject, 2),
+      versions.get(subject, 1),
+      versions.get(subject, 2),
     ]);
+    expect({ one, two }).toMatchObject({
+      // Its own four, and the four of server/_generated/.
+      one: { version: 1, parent: null, files: 8, author: userId },
+      two: { version: 2, parent: 1, files: 8, author: userId },
+    });
     expect({
-      newestFirst: newestFirst.map(({ version, message }) => [
-        version,
-        message,
+      files: await Promise.all([
+        versions.files(subject, 1),
+        versions.files(subject, 2),
       ]),
+      newestFirst: appVersionsOf(newestFirst).map(({ version }) => version),
       beforeTwo,
-      one,
     }).toStrictEqual({
-      newestFirst: [
-        [2, "Change"],
-        [1, "First page"],
-      ],
-      beforeTwo: [committedV1],
-      one: committedV1,
+      files: [first.files, withFiles(defined, second).files],
+      newestFirst: [2, 1],
+      beforeTwo: [one],
     });
   });
 
-  it("reads the latest version without a version, and refuses a commit that changes nothing", async () => {
-    const { apps } = await appsApi("builder");
-    const app = await newApp(apps);
-    const none = await apps.files.read(app.id);
-    await commit(apps, app.id, first);
-    const afterFirst = await apps.files.read(app.id);
-    await commit(apps, app.id, {
+  it("reads the draft as the live version while it changes nothing, and publishes no draft that changes nothing", async () => {
+    const { api, versions } = await appsApi("builder");
+    const app = await newApp(api.apps);
+    const subject = subjectOf(app.id);
+    const none = await api.drafts.files(subject);
+    await publishApp(api, app.id, first);
+    const afterFirst = await api.drafts.files(subject);
+    await publishApp(api, app.id, {
       "AGENTS.md": "# Second\n",
       "src/routes/index.tsx": null,
     });
+    // What is already there, deleting what isn't, and deleting the
+    // schema its definition generates back, change nothing.
+    const nothing: string[] = [];
+    const unchanging: Record<string, string | null>[] = [
+      { "AGENTS.md": "# Second\n" },
+      { "src/routes/index.tsx": null },
+      { "server/schema.ts": null },
+    ];
+    for (const changes of unchanging) {
+      // oxlint-disable-next-line no-await-in-loop -- each over the draft as the last left it
+      nothing.push(await outcome(publishApp(api, app.id, changes)));
+    }
 
+    const listed = await versions.list(subject);
     expect({
       none,
       afterFirst,
-      latest: await apps.files.read(app.id),
-      one: await apps.files.read(app.id, 1),
+      latest: await api.drafts.files(subject),
+      one: await versions.files(subject, 1),
+      nothing,
+      versions: listed.length,
     }).toStrictEqual({
       none: {},
       afterFirst: first.files,
-      latest: withFiles(defined, {
-        "AGENTS.md": "# Second\n",
-      }).files,
+      latest: withFiles(defined, { "AGENTS.md": "# Second\n" }).files,
       one: first.files,
+      nothing: ["draft.empty", "draft.empty", "draft.empty"],
+      versions: 2,
     });
-    // What is already there, deleting what isn't, and deleting the
-    // schema its definition generates back, change nothing.
-    await expect(
-      Promise.all([
-        outcome(commit(apps, app.id, { "AGENTS.md": "# Second\n" })),
-        outcome(commit(apps, app.id, { "src/routes/index.tsx": null })),
-        outcome(commit(apps, app.id, { "server/schema.ts": null })),
-      ])
-    ).resolves.toStrictEqual([
-      "app.nothing_to_commit",
-      "app.nothing_to_commit",
-      "app.nothing_to_commit",
-    ]);
-    await expect(apps.versions.list(app.id)).resolves.toHaveLength(2);
   });
 
   it("gives an App a definition with its first version, and keeps its config and schema as the definition generates them", async () => {
-    const { apps } = await appsApi("builder");
-    const app = await newApp(apps);
-    // Pages alone: the first version gets an empty definition, named as
-    // the App is, and the config and schema generated from it.
-    await commit(apps, app.id, {
-      "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+    const { api, versions } = await appsApi("builder");
+    const app = await newApp(api.apps);
+    const subject = subjectOf(app.id);
+    const page = `import { createFileRoute } from "@tanstack/react-router";
+
 const Page = () => null;
 
 export const Route = createFileRoute("/")({ component: Page });
-`,
-    });
-    const pagesOnly = await apps.files.read(app.id);
+`;
+    // Pages alone: the first version gets an empty definition, named as
+    // the App is, and the config and schema generated from it.
+    await publishApp(api, app.id, { "src/routes/index.tsx": page });
+    const pagesOnly = await api.drafts.files(subject);
     // A config written by hand is generated over, whatever it held.
-    await commit(apps, app.id, {
+    await publishApp(api, app.id, {
       "grasp.config.ts": 'export default { name: "Mine" };\n',
       "AGENTS.md": "# Mine\n",
     });
-    const handwritten = await apps.files.read(app.id);
-    const invalid = await outcome(
-      apps.files.commit(app.id, {}, "Invalid", { name: 1 })
-    );
-    const versions = await apps.versions.list(app.id);
+    const handwritten = await api.drafts.files(subject);
+    // A definition that isn't one: refused, nothing of it kept.
+    const { revision } = await api.drafts.get(subject);
+    const invalid = await api.apps.define(app.id, revision, {
+      op: "setDefinition",
+      definition: { name: 1 },
+    });
+    const listed = await versions.list(subject);
     expect({
       pagesOnly,
       config: handwritten["grasp.config.ts"],
-      // A definition that isn't one: refused, nothing of the commit kept.
-      invalid,
-      versions: versions.map(({ version }) => version),
+      invalid: invalid.ok,
+      versions: listed.map(({ version }) => version),
     }).toStrictEqual({
-      pagesOnly: withFiles(defined, {
-        "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
-const Page = () => null;
-
-export const Route = createFileRoute("/")({ component: Page });
-`,
-      }).files,
+      pagesOnly: withFiles(defined, { "src/routes/index.tsx": page }).files,
       config: defined.files["grasp.config.ts"],
-      invalid: "app.definition_invalid",
+      invalid: false,
       versions: [2, 1],
     });
   });
 
-  it("holds each version's definition beside its files, never among them, and commits a change of the definition alone", async () => {
-    const { apps } = await appsApi("builder");
-    const app = await newApp(apps);
+  it("holds each version's definition beside its files, never among them, and publishes a change of the definition alone", async () => {
+    const { api } = await appsApi("builder");
+    const app = await newApp(api.apps);
+    const subject = subjectOf(app.id);
     const notes = definitionOf({
       name: "Invoice desk",
       tables: { notes: { fields: { title: "v.string()" } } },
     });
-    await commit(apps, app.id, first);
+    await publishApp(api, app.id, first);
     // The same files, another definition: a version of its own, its code
-    // generated from the definition it was committed with.
+    // generated from the definition it was published with.
     const unchanged = { "AGENTS.md": first.files["AGENTS.md"] ?? "" };
-    const redefinedVersion = await apps.files.commit(
-      app.id,
-      unchanged,
-      "Notes",
-      definitionInput(notes)
-    );
-    const files = await apps.files.read(app.id);
+    await drafted(api, app.id, unchanged, definitionInput(notes));
+    const { revision } = await api.drafts.get(subject);
+    const redefined = await api.drafts.publish(subject, revision);
+    const files = await api.drafts.files(subject);
     // The same files and definition again change nothing.
-    const again = await outcome(
-      apps.files.commit(app.id, unchanged, "Again", definitionInput(notes))
-    );
-    // A commit that names no definition keeps the latest version's.
-    await commit(apps, app.id, { "AGENTS.md": "# Notes\n" });
-    const latest = await apps.files.read(app.id);
+    await drafted(api, app.id, unchanged, definitionInput(notes));
+    const { revision: again } = await api.drafts.get(subject);
+    const unchangedAgain = await outcome(api.drafts.publish(subject, again));
+    // A write that names no definition keeps the draft's.
+    await publishApp(api, app.id, { "AGENTS.md": "# Notes\n" });
+    const latest = await api.drafts.files(subject);
     expect({
-      version: redefinedVersion.version,
+      version: redefined.version,
       paths: Object.keys(files).toSorted(),
       generated: {
         "grasp.config.ts": files["grasp.config.ts"],
         "server/schema.ts": files["server/schema.ts"],
       },
       kept: latest["server/schema.ts"],
-      again,
+      unchangedAgain,
     }).toStrictEqual({
       version: 2,
       paths: Object.keys(first.files).toSorted(),
       generated: definitionSources(notes),
       kept: definitionSources(notes)["server/schema.ts"],
-      again: "app.nothing_to_commit",
+      unchangedAgain: "draft.empty",
     });
   });
 
   it("reviews a change of the definition in a draft as a change of the server code, with what it does to the records, renames included", async () => {
-    const { apps, userId } = await appsApi("admin");
-    const app = await newApp(apps);
+    const { api, userId } = await appsApi("admin");
+    const app = await newApp(api.apps);
     const two = definitionOf({
       name: "Invoice desk",
       tables: {
@@ -346,53 +354,31 @@ export const Route = createFileRoute("/")({ component: Page });
         },
       ],
     };
-    const unchanged = { "AGENTS.md": first.files["AGENTS.md"] ?? "" };
-    await apps.files.commit(
-      app.id,
-      sourceParts(first).files,
-      "Notes",
-      definitionInput(two)
-    );
-    await apps.versions.publish(app.id, 1);
-    await apps.files.commit(
-      app.id,
-      unchanged,
-      "Swapped",
-      definitionInput(swapped)
-    );
-    await apps.files.commit(
-      app.id,
-      { "AGENTS.md": "# Notes\n" },
-      "Docs",
-      definitionInput(two)
-    );
-    // A rename: the title's values move to the heading.
-    await apps.files.commit(
-      app.id,
-      unchanged,
-      "Headings",
-      definitionInput({
-        ...two,
-        tables: [{ ...table, fields: [{ ...title, name: "heading" }, body] }],
-      })
-    );
-    // A draft holding each version, against version 1, live.
+    await publishApp(api, app.id, appOf(two, first.files));
+    // Drafts over the live version 1, each holding a change.
     const live = await findApp(env, app.id);
     const by = await memberOf(env.DB, userId);
     if (by === undefined) {
       throw new Error("Not a member");
     }
-    const reviewOf = async (version: number) =>
+    const reviewOf = async (
+      definition: AppDefinition,
+      changes: Record<string, string> = {}
+    ) =>
       await reviewDraft(env, by, live, {
-        base: version,
-        changes: {},
-        definition: null,
+        base: 1,
+        changes,
+        definition: definitionText(definition),
         revision: 0,
       });
     const [swappedReview, filesOnly, renamedReview] = await Promise.all([
-      reviewOf(2),
-      reviewOf(3),
-      reviewOf(4),
+      reviewOf(swapped),
+      reviewOf(two, { "AGENTS.md": "# Notes\n" }),
+      // A rename: the title's values move to the heading.
+      reviewOf({
+        ...two,
+        tables: [{ ...table, fields: [{ ...title, name: "heading" }, body] }],
+      }),
     ]);
     expect({
       serverFiles: swappedReview.serverFiles,
@@ -410,10 +396,10 @@ export const Route = createFileRoute("/")({ component: Page });
     });
   });
 
-  it("never changes a version's definition once committed", async () => {
-    const { apps } = await appsApi("builder");
-    const app = await newApp(apps);
-    await commit(apps, app.id, first);
+  it("never changes a version's definition once published", async () => {
+    const { api } = await appsApi("builder");
+    const app = await newApp(api.apps);
+    await publishApp(api, app.id, first);
     const other = definitionText(withTable("notes"));
     // Whether the database refuses to change `column` to `value`.
     const refused = async (column: string, value: string): Promise<boolean> => {
@@ -429,7 +415,7 @@ export const Route = createFileRoute("/")({ component: Page });
     expect({
       definition: await refused("definition", other),
       hash: await refused("definition_hash", await sha256Hex(other)),
-      files: await apps.files.read(app.id, 1),
+      files: await api.versions.files(subjectOf(app.id), 1),
     }).toStrictEqual({
       definition: true,
       hash: true,
@@ -438,24 +424,24 @@ export const Route = createFileRoute("/")({ component: Page });
   });
 
   it("refuses to build on or run a version that holds no definition, saying so", async () => {
-    const { apps, userId } = await appsApi("builder");
-    const app = await newApp(apps);
+    const { api, userId, versions } = await appsApi("builder");
+    const app = await newApp(api.apps);
     await storedUnchecked(app.id, userId, first.files, null);
     let refusal: unknown;
     try {
-      await commit(apps, app.id, { "AGENTS.md": "# Again\n" });
+      await drafted(api, app.id, { "AGENTS.md": "# Again\n" });
     } catch (error) {
       refusal = error;
     }
-    const seal = await outcome(apps.versions.publish(app.id, 1));
-    const versions = await apps.versions.list(app.id);
+    const seal = await outcome(versions.rollback(subjectOf(app.id), 1));
+    const listed = await versions.list(subjectOf(app.id));
     expect({
-      commit: appErrors.codeOf(refusal),
+      write: appErrors.codeOf(refusal),
       issues: definitionRefusal(refusal),
       seal,
-      versions: versions.map(({ version }) => version),
+      versions: listed.map(({ version }) => version),
     }).toStrictEqual({
-      commit: "app.definition_invalid",
+      write: "app.definition_invalid",
       issues: "The App's version holds no definition.",
       seal: "app.definition_invalid",
       versions: [1],
@@ -463,17 +449,19 @@ export const Route = createFileRoute("/")({ component: Page });
   });
 
   it("fails loudly when a version's files are missing or damaged", async () => {
-    const { apps } = await appsApi("builder");
-    const app = await newApp(apps);
-    const version = await commit(apps, app.id, first);
-    const key = `apps/${app.id}/trees/${version.tree}.json`;
+    const { api } = await appsApi("builder");
+    const app = await newApp(api.apps);
+    const subject = subjectOf(app.id);
+    await publishApp(api, app.id, first);
+    const { tree } = appVersionOf(await api.versions.get(subject, 1));
+    const key = `apps/${app.id}/trees/${tree}.json`;
     const object = await env.FILES.get(key);
     const stored = (await object?.text()) ?? "";
 
     await env.FILES.put(key, stored.replace("Inbox", "Outbox"));
-    const damaged = await outcome(apps.files.read(app.id, 1));
+    const damaged = await outcome(api.versions.files(subject, 1));
     await env.FILES.delete(key);
-    const missing = await outcome(apps.files.read(app.id, 1));
+    const missing = await outcome(api.versions.files(subject, 1));
     expect({ damaged, missing }).toStrictEqual({
       damaged: "internal.unexpected",
       missing: "internal.unexpected",
@@ -481,9 +469,9 @@ export const Route = createFileRoute("/")({ component: Page });
   });
 
   it("refuses paths that can't both exist: a file and its folder, or names differing only in case", async () => {
-    const { apps } = await appsApi("builder");
-    const app = await newApp(apps);
-    await commit(apps, app.id, { "src/components/card.tsx": "x" });
+    const { api } = await appsApi("builder");
+    const app = await newApp(api.apps);
+    await drafted(api, app.id, { "src/components/card.tsx": "x" });
     const refusals: Record<string, string | null>[] = [
       { "src/components": "x" },
       { "src/components/card.tsx/x.ts": "x" },
@@ -495,12 +483,12 @@ export const Route = createFileRoute("/")({ component: Page });
     // One after another, so each is refused for its paths alone.
     for (const changes of refusals) {
       // oxlint-disable-next-line no-await-in-loop -- sequential by design
-      outcomes.push(await issuesOf(commit(apps, app.id, changes)));
+      outcomes.push(await issuesOf(drafted(api, app.id, changes)));
     }
-    // Replacing the file with a folder of its name, in one commit, is fine.
+    // Replacing the file with a folder of its name, in one write, is fine.
     outcomes.push(
       await issuesOf(
-        commit(apps, app.id, {
+        drafted(api, app.id, {
           "src/components/card.tsx": null,
           "src/components/card.tsx/index.ts": "x",
         })
@@ -516,9 +504,9 @@ export const Route = createFileRoute("/")({ component: Page });
     ]);
   });
 
-  it("still takes other commits to an App whose paths already collide", async () => {
-    const { apps, userId } = await appsApi("builder");
-    const app = await newApp(apps);
+  it("still takes other writes to an App whose paths already collide", async () => {
+    const { api, userId } = await appsApi("builder");
+    const app = await newApp(api.apps);
     await storedUnchecked(app.id, userId, { "lib/a.ts": "x", "Lib/b.ts": "x" });
     const outcomes: string[] = [];
     const changes: Record<string, string>[] = [
@@ -528,7 +516,7 @@ export const Route = createFileRoute("/")({ component: Page });
     ];
     for (const changed of changes) {
       // oxlint-disable-next-line no-await-in-loop -- sequential by design
-      outcomes.push(await issuesOf(commit(apps, app.id, changed)));
+      outcomes.push(await issuesOf(drafted(api, app.id, changed)));
     }
     expect(outcomes).toStrictEqual([
       "ok",
@@ -537,57 +525,51 @@ export const Route = createFileRoute("/")({ component: Page });
     ]);
   });
 
-  it("keeps one of two commits over the same version, and refuses the other whole", async () => {
-    const { api, apps } = await appsApi("builder");
-    const app = await newApp(apps);
-    await commit(apps, app.id, first);
+  it("keeps one of two publishes over the same version, and refuses the other whole", async () => {
+    const { api, versions } = await appsApi("builder");
+    const app = await newApp(api.apps);
+    await publishApp(api, app.id, first);
     const theirs = { "AGENTS.md": "# Theirs\n" };
-    // Someone else commits after this commit read the latest version, and
-    // before its batch lands.
+    // Someone else publishes after this publish read the version live,
+    // and before its version lands.
     const racing: Env = {
       ...env,
       DB: racingDb(
-        async () => await commit(apps, app.id, theirs, "Theirs"),
+        async () => await publishApp(api, app.id, theirs),
         /^insert into "app_versions"/iu
       ),
     };
 
     await expect(
       outcome(
-        commitDefined(
-          racing,
-          await api.whoami(),
-          app.id,
-          { "AGENTS.md": "# Mine\n", "src/routes/mine.tsx": "x" },
-          "Mine"
-        )
+        publishDefined(racing, await api.whoami(), app.id, {
+          "AGENTS.md": "# Mine\n",
+        })
       )
-    ).resolves.toBe("app.conflict");
-    const versions = await apps.versions.list(app.id);
-    expect(
-      versions.map(({ version, message }) => [version, message])
-    ).toStrictEqual([
-      [2, "Theirs"],
-      [1, "Change"],
-    ]);
-    await expect(apps.files.read(app.id)).resolves.toStrictEqual(
-      withFiles(first, {
-        ...theirs,
-      }).files
-    );
+    ).resolves.toBe("draft.conflict");
+    const listed = await versions.list(subjectOf(app.id));
+    expect({
+      versions: listed.map(({ version }) => version),
+      live: await versions.files(subjectOf(app.id), 2),
+    }).toStrictEqual({
+      versions: [2, 1],
+      live: withFiles(first, theirs).files,
+    });
   });
 
   it("diffs two versions by path", async () => {
-    const { apps } = await appsApi("builder");
-    const app = await newApp(apps);
-    await commit(apps, app.id, first);
-    await commit(apps, app.id, {
+    const { api, versions } = await appsApi("builder");
+    const app = await newApp(api.apps);
+    await publishApp(api, app.id, first);
+    await publishApp(api, app.id, {
       "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+
 const Page = () => null;
 
 export const Route = createFileRoute("/")({ component: Page });
 `,
       "src/routes/detail.tsx": `import { createFileRoute } from "@tanstack/react-router";
+
 const Page = () => <p>Detail</p>;
 
 export const Route = createFileRoute("/detail")({ component: Page });
@@ -595,89 +577,87 @@ export const Route = createFileRoute("/detail")({ component: Page });
       "AGENTS.md": null,
     });
 
-    await expect(apps.versions.diff(app.id, 1, 2)).resolves.toStrictEqual([
-      {
-        path: "AGENTS.md",
-        change: "deleted",
-        before: first.files["AGENTS.md"],
-      },
-      {
-        path: "src/routes/detail.tsx",
-        change: "added",
-        after: `import { createFileRoute } from "@tanstack/react-router";
+    await expect(versions.diff(subjectOf(app.id), 1, 2)).resolves.toStrictEqual(
+      [
+        {
+          path: "AGENTS.md",
+          change: "deleted",
+          before: first.files["AGENTS.md"],
+        },
+        {
+          path: "src/routes/detail.tsx",
+          change: "added",
+          after: `import { createFileRoute } from "@tanstack/react-router";
+
 const Page = () => <p>Detail</p>;
 
 export const Route = createFileRoute("/detail")({ component: Page });
 `,
-      },
-      {
-        path: "src/routes/index.tsx",
-        change: "modified",
-        before: first.files["src/routes/index.tsx"],
-        after: `import { createFileRoute } from "@tanstack/react-router";
+        },
+        {
+          path: "src/routes/index.tsx",
+          change: "modified",
+          before: first.files["src/routes/index.tsx"],
+          after: `import { createFileRoute } from "@tanstack/react-router";
+
 const Page = () => null;
 
 export const Route = createFileRoute("/")({ component: Page });
 `,
-      },
-    ]);
-    await expect(apps.versions.diff(app.id, 2, 2)).resolves.toStrictEqual([]);
+        },
+      ]
+    );
+    await expect(versions.diff(subjectOf(app.id), 2, 2)).resolves.toStrictEqual(
+      []
+    );
   });
 
   it("runs the version published, labelled as it first goes live, without changing any version's files", async () => {
-    const { apps } = await appsApi("builder");
+    const { api, apps, versions } = await appsApi("builder");
     const app = await newApp(apps);
-    await commit(apps, app.id, first);
-    const one = await apps.versions.publish(app.id, 1);
-    await commit(apps, app.id, { "AGENTS.md": "# Changed\n" });
-
-    const approved = await apps.versions.publish(app.id, 2);
+    const subject = subjectOf(app.id);
+    const one = await publishApp(api, app.id, first);
+    const two = await publishApp(api, app.id, { "AGENTS.md": "# Changed\n" });
     const month = releaseMonthPrefix(new Date());
-    expect({ app, one, approved }).toMatchObject({
+    expect({ app, one, two }).toMatchObject({
       app: { currentVersion: null, liveLabel: null },
-      one: { currentVersion: 1, liveLabel: `${month}1` },
-      approved: { currentVersion: 2, liveLabel: `${month}2` },
+      one: { version: 1, label: `${month}1` },
+      two: { version: 2, label: `${month}2` },
     });
     // As its builder reads it: with their own role in it.
-    await expect(apps.get(app.id)).resolves.toStrictEqual({
-      ...approved,
+    await expect(apps.get(app.id)).resolves.toMatchObject({
+      currentVersion: 2,
+      liveLabel: `${month}2`,
       role: "builder",
     });
 
-    // Rolling back is publishing an earlier version again, under its
+    // Rolling back is making an earlier version live again, under its
     // label.
-    const rolledBack = await apps.versions.publish(app.id, 1);
-    expect(rolledBack).toMatchObject({
-      currentVersion: 1,
-      liveLabel: `${month}1`,
-    });
+    const rolledBack = await versions.rollback(subject, 1);
+    expect(rolledBack).toMatchObject({ version: 1, label: `${month}1` });
     await expect(
-      Promise.all([apps.files.read(app.id, 1), apps.files.read(app.id, 2)])
+      Promise.all([versions.files(subject, 1), versions.files(subject, 2)])
     ).resolves.toStrictEqual([
       first.files,
-      withFiles(first, {
-        "AGENTS.md": "# Changed\n",
-      }).files,
+      withFiles(first, { "AGENTS.md": "# Changed\n" }).files,
     ]);
     await expect(
       Promise.all([
-        outcome(apps.versions.publish(app.id, 3)),
-        outcome(apps.versions.publish(app.id, 0)),
+        outcome(versions.rollback(subject, 3)),
+        outcome(versions.rollback(subject, 0)),
       ])
-    ).resolves.toStrictEqual([
-      "app.version_not_found",
-      "app.version_not_found",
-    ]);
+    ).resolves.toStrictEqual(["app.version_not_found", "draft.invalid"]);
   });
 
   it("names the pages of the version that runs, and only those", async () => {
-    const { apps } = await appsApi("builder");
+    const { api, apps } = await appsApi("builder");
     const app = await newApp(apps);
-    await commit(apps, app.id, first);
     const none = await apps.contents(app.id);
-    await apps.versions.publish(app.id, 1);
-    await commit(apps, app.id, {
+    await publishApp(api, app.id, first);
+    const one = await apps.contents(app.id);
+    await publishApp(api, app.id, {
       "src/routes/archive.tsx": `import { createFileRoute } from "@tanstack/react-router";
+
 const Page = () => null;
 
 export const Route = createFileRoute("/archive")({ component: Page });
@@ -685,47 +665,46 @@ export const Route = createFileRoute("/archive")({ component: Page });
       // Not a page: code the pages share.
       "src/components/row.tsx": "export const Row = () => null;\n",
     });
-    // Committed, not yet current: what runs is still version 1.
-    const beforeCurrent = await apps.contents(app.id);
-    await apps.versions.publish(app.id, 2);
 
     expect({
       none,
-      beforeCurrent,
-      current: await apps.contents(app.id),
+      one,
+      two: await apps.contents(app.id),
     }).toStrictEqual({
       none: { version: null, pages: false },
-      beforeCurrent: { version: 1, pages: true },
-      current: { version: 2, pages: true },
+      one: { version: 1, pages: true },
+      two: { version: 2, pages: true },
     });
     await expect(outcome(apps.contents("no-such-app"))).resolves.toBe(
       "app.not_found"
     );
   });
 
-  it("audits every commit and version change, by identifiers only", async () => {
+  it("audits every version and change of version, by identifiers only", async () => {
     const aHash: unknown = expect.any(String);
-    const { apps, userId } = await appsApi("admin");
+    const { api, apps, userId, versions } = await appsApi("admin");
     const actor = { type: "person", userId };
-    let tree = "";
     const recorded = await auditedDuring(async () => {
       const app = await newApp(apps);
-      ({ tree } = await apps.files.commit(
-        app.id,
-        sourceParts(first).files,
-        "Secret plans in the message"
-      ));
-      await apps.versions.publish(app.id, 1);
+      await publishApp(api, app.id, {
+        ...sourceParts(first).files,
+        "AGENTS.md": "# Secret plans\n",
+      });
       // Already current: nothing changes, nothing is recorded.
-      await apps.versions.publish(app.id, 1);
+      await versions.rollback(subjectOf(app.id), 1);
     });
-    // The App's own events; indexing it into the Apps collection records
-    // its entry's (apps-collection.test.ts).
-    const events = recorded.filter(({ target: on }) => on?.type === "app");
+    // The App's own events but its draft's; indexing it into the Apps
+    // collection records its entry's (apps-collection.test.ts).
+    const events = recorded.filter(
+      ({ action, target: on }) =>
+        on?.type === "app" && !action.startsWith("draft.")
+    );
     expect(JSON.stringify(recorded)).not.toContain("Secret");
 
     const [created] = events;
     const target = { type: "app", id: created?.target?.id };
+    const app = created?.target?.id ?? "";
+    const { tree } = appVersionOf(await versions.get(subjectOf(app), 1));
     expect(
       events.map(({ actor: by, action, target: on, detail }) => ({
         by,
@@ -770,13 +749,13 @@ export const Route = createFileRoute("/archive")({ component: Page });
       // (app-publish.ts).
       {
         by: actor,
-        action: "app.version.published",
+        action: "app.version.built",
         on: target,
         detail: { version: 1, manifestHash: aHash },
       },
       {
         by: actor,
-        action: "app.version.current",
+        action: "version.published",
         on: target,
         // Its label, and what it replaced.
         detail: {
@@ -789,10 +768,15 @@ export const Route = createFileRoute("/archive")({ component: Page });
   });
 
   it("are made by builders and admins, and private to them", async () => {
-    const { apps: builder } = await appsApi("builder");
-    const { apps: user } = await appsApi("user");
+    const { api, apps: builder } = await appsApi("builder");
+    const {
+      apps: user,
+      versions: userVersions,
+      api: userApi,
+    } = await appsApi("user");
     const app = await newApp(builder);
-    await commit(builder, app.id, first);
+    const subject = subjectOf(app.id);
+    await publishApp(api, app.id, first);
 
     await expect(
       Promise.all([outcome(user.create({ name: "Mine" })), user.list()])
@@ -801,24 +785,20 @@ export const Route = createFileRoute("/archive")({ component: Page });
     const refused = await Promise.all([
       outcome(user.get(app.id)),
       outcome(user.contents(app.id)),
-      outcome(user.files.read(app.id, 1)),
-      outcome(user.files.commit(app.id, { "AGENTS.md": "# Mine\n" }, "Mine")),
-      outcome(user.versions.list(app.id)),
-      outcome(user.versions.diff(app.id, 1, 1)),
-      outcome(user.versions.publish(app.id, 1)),
+      outcome(userVersions.files(subject, 1)),
+      outcome(userApi.drafts.write(subject, 0, { "AGENTS.md": "# Mine\n" })),
+      outcome(userApi.drafts.files(subject)),
+      outcome(userVersions.list(subject)),
+      outcome(userVersions.diff(subject, 1, 1)),
+      outcome(userVersions.rollback(subject, 1)),
     ]);
     expect(new Set(refused)).toStrictEqual(new Set(["app.not_found"]));
-    await expect(builder.get(app.id)).resolves.toMatchObject({
-      currentVersion: null,
-    });
-    await expect(builder.files.read(app.id)).resolves.toStrictEqual(
-      first.files
-    );
+    await expect(api.drafts.files(subject)).resolves.toStrictEqual(first.files);
   });
 
   it("refuses paths outside the App and files over its limits", async () => {
-    const { apps } = await appsApi("builder");
-    const app = await newApp(apps);
+    const { api } = await appsApi("builder");
+    const app = await newApp(api.apps);
     const paths = [
       "../server.ts",
       "pages/../../x.ts",
@@ -833,7 +813,7 @@ export const Route = createFileRoute("/archive")({ component: Page });
     ];
     const refusedPaths = await Promise.all(
       paths.map(
-        async (path) => await outcome(commit(apps, app.id, { [path]: "x" }))
+        async (path) => await outcome(drafted(api, app.id, { [path]: "x" }))
       )
     );
     expect(refusedPaths).toStrictEqual(paths.map(() => "app.invalid"));
@@ -847,7 +827,8 @@ export const Route = createFileRoute("/archive")({ component: Page });
       Array.from(
         { length: Math.ceil(room / appLimits.fileLength) },
         (_, index) => [
-          `src/components/part-${index}.ts`,
+          // Notes, not code: saved as written, never formatted.
+          `notes/part-${index}.md`,
           "x".repeat(
             Math.min(appLimits.fileLength, room - index * appLimits.fileLength)
           ),
@@ -855,35 +836,33 @@ export const Route = createFileRoute("/archive")({ component: Page });
       )
     );
     // Exactly an App's limit is within it.
-    await commit(apps, app.id, full);
+    await drafted(api, app.id, full);
     await expect(
       Promise.all([
-        outcome(commit(apps, app.id, { "AGENTS.md": tooLong })),
-        outcome(commit(apps, app.id, { "AGENTS.md": "x" })),
-        outcome(commit(apps, app.id, {})),
-        outcome(commit(apps, app.id, { "AGENTS.md": "" }, " ")),
-        outcome(apps.create({ name: "" })),
+        outcome(drafted(api, app.id, { "AGENTS.md": tooLong })),
+        outcome(drafted(api, app.id, { "AGENTS.md": "x" })),
+        outcome(drafted(api, app.id, {})),
+        outcome(api.apps.create({ name: "" })),
       ])
     ).resolves.toStrictEqual([
       "app.invalid",
       "app.too_large",
       "app.invalid",
       "app.invalid",
-      "app.invalid",
     ]);
     // Deleting makes room.
     await expect(
-      commit(apps, app.id, {
-        "src/components/part-0.ts": null,
+      drafted(api, app.id, {
+        "notes/part-0.md": null,
         "AGENTS.md": "x",
       })
-    ).resolves.toMatchObject({ version: 2 });
+    ).resolves.toMatchObject({ revision: 2 });
   });
 
-  it("commits over a version that is over the limits only what is within them", async () => {
-    const { apps, userId } = await appsApi("builder");
-    const app = await newApp(apps);
-    // More files than an App may have now: committed when the limits were
+  it("takes no write over a version past the limits that grows it, and those that shrink it", async () => {
+    const { api, userId } = await appsApi("builder");
+    const app = await newApp(api.apps);
+    // More files than an App may have now: published when the limits were
     // higher, its definition among them.
     const count =
       appLimits.files + 2 - Object.keys(ownFiles(defined.files)).length;
@@ -901,11 +880,11 @@ export const Route = createFileRoute("/archive")({ component: Page });
       ).files
     );
 
-    // One after another: each is over the same version.
+    // One after another: each over the draft as the last left it.
     const steps: [string, Record<string, string | null>][] = [
       ["add", { "src/components/new.ts": "x" }],
       ["grow", { "src/components/part-0.ts": "xx" }],
-      // Still over them: no version until it's within them.
+      // Still over them, but smaller.
       ["shrink", { "src/components/part-0.ts": null }],
       [
         "shrink to fit",
@@ -915,26 +894,26 @@ export const Route = createFileRoute("/archive")({ component: Page });
     const outcomes: [string, string][] = [];
     for (const [step, changes] of steps) {
       // oxlint-disable-next-line no-await-in-loop -- steps are sequential by design
-      outcomes.push([step, await outcome(commit(apps, app.id, changes))]);
+      outcomes.push([step, await outcome(drafted(api, app.id, changes))]);
     }
     expect(outcomes).toStrictEqual([
       ["add", "app.too_large"],
       ["grow", "app.too_large"],
-      ["shrink", "app.too_large"],
+      ["shrink", "ok"],
       ["shrink to fit", "ok"],
     ]);
   });
 
   it("refuses Apps and versions that don't exist", async () => {
-    const { apps } = await appsApi("builder");
-    const app = await newApp(apps);
+    const { api, versions } = await appsApi("builder");
+    const app = await newApp(api.apps);
     await expect(
       Promise.all([
-        outcome(apps.get("no-such-app")),
-        outcome(commit(apps, "no-such-app", { "AGENTS.md": "x" })),
-        outcome(apps.files.read(app.id, 1)),
-        outcome(apps.versions.get(app.id, 1)),
-        outcome(apps.versions.diff(app.id, 1, 2)),
+        outcome(api.apps.get("no-such-app")),
+        outcome(drafted(api, "no-such-app", { "AGENTS.md": "x" })),
+        outcome(versions.files(subjectOf(app.id), 1)),
+        outcome(versions.get(subjectOf(app.id), 1)),
+        outcome(versions.diff(subjectOf(app.id), 1, 2)),
       ])
     ).resolves.toStrictEqual([
       "app.not_found",

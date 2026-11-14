@@ -91,6 +91,7 @@ export const readWaiting = async (
     const listed = read.items.flatMap((item) =>
       item.kind === "openQuestion" ||
       item.kind === "stoppedSchedule" ||
+      item.kind === "workflowChanged" ||
       item.kind === "packageNotice" ||
       item.kind === "stoppedEvents" ||
       item.kind === "appMessage"
@@ -150,9 +151,6 @@ export const readWaiting = async (
     ),
     decisions: partOf(feed, "decisions", (read) =>
       ofKind(read, "decision").map(({ decision }) => decision)
-    ),
-    workflowGoLives: partOf(feed, "workflowGoLives", (read) =>
-      ofKind(read, "workflowGoLive")
     ),
     ...(decidesRequests(identity)
       ? {

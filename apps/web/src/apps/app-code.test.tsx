@@ -1,6 +1,6 @@
-import type { AppDraft } from "@grasp-os/shared/app-drafts";
 // @vitest-environment happy-dom
 import type { AppFiles, ViewedApp } from "@grasp-os/shared/apps";
+import type { Draft } from "@grasp-os/shared/drafts";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
@@ -21,7 +21,7 @@ import { AppCode } from "./app-code.tsx";
 
 // An App's Code, in its workspace, against core's Apps API as the page
 // reaches it over RPC, faked: version 2 is live, and the App's draft, while
-// it changes the App, is read from `apps.drafts`. What the page drew
+// it changes the App, is read from `drafts`. What the page drew
 // (@pierre/diffs) is read from the shadow roots it draws in.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -90,8 +90,8 @@ const draftAt: Record<number, AppFiles> = {
 };
 
 /** The App's draft, at `revision`. */
-const appDraft = (revision: number): AppDraft => ({
-  app: appId,
+const appDraft = (revision: number): Draft => ({
+  subject: { kind: "app", id: appId },
   base: null,
   changed: Object.keys(draftAt[revision] ?? {}).toSorted(),
   deleted: [],
@@ -102,28 +102,26 @@ const appDraft = (revision: number): AppDraft => ({
 });
 
 /**
- * Core's App drafts, as far as the Code tab reads them: the draft's files
- * at the revision it is at now (`revisionNow`), as core reads them.
+ * Core's drafts, as far as the Code tab reads them: the App's draft's
+ * files at the revision it is at now (`revisionNow`), as core reads them.
  */
 let revisionNow = 1;
 const drafts = {
-  files: async (app: string): Promise<AppFiles> => {
+  files: async (subject: { kind: string; id: string }): Promise<AppFiles> => {
     await Promise.resolve();
-    if (app !== appId) {
+    if (subject.kind !== "app" || subject.id !== appId) {
       throw new Error("Not this App's draft");
     }
     return draftAt[revisionNow] ?? {};
   },
 };
 
-/** Core's Apps API, as far as the Code tab reads it, on `filesOf`. */
-const appsOn = (filesOf: Versions) => ({
-  drafts,
-  files: {
-    read: async (_app: string, at?: number): Promise<AppFiles> => {
-      await Promise.resolve();
-      return filesOf[at ?? 2] ?? {};
-    },
+/** Core's versions, as far as the Code tab reads them, on `filesOf`. */
+const versionsOn = (filesOf: Versions) => ({
+  files: async (_subject: { kind: string; id: string }, at: number) => {
+    await Promise.resolve();
+    const files: AppFiles = filesOf[at] ?? {};
+    return files;
   },
 });
 
@@ -168,11 +166,14 @@ const shown = async (
   versions: Versions = smallVersions,
   building = false
 ): Promise<void> => {
-  const apps = appsOn(versions);
+  const read = versionsOn(versions);
   const core = {
     withSession: async <T,>(
-      action: (session: { apps: typeof apps }) => Promise<T>
-    ): Promise<T> => await action({ apps }),
+      action: (session: {
+        versions: typeof read;
+        drafts: typeof drafts;
+      }) => Promise<T>
+    ): Promise<T> => await action({ versions: read, drafts }),
   };
   const rootRoute = createRootRoute({ component: Outlet });
   const page = createRoute({

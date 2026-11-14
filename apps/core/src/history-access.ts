@@ -2,10 +2,10 @@ import { brainErrors } from "@grasp-os/brain/contract";
 import { d1BrainStore } from "@grasp-os/brain/recall-store";
 import type { BrainStore, PinnedVersion } from "@grasp-os/brain/recall-store";
 import { collections } from "@grasp-os/brain/schema";
-import type { AppRole } from "@grasp-os/shared/apps";
 import type { AuditDetailValue } from "@grasp-os/shared/audit";
 import type { Permission } from "@grasp-os/shared/permissions";
 import { permissionErrors } from "@grasp-os/shared/permissions";
+import type { MemberRole } from "@grasp-os/shared/subject-members";
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -473,7 +473,7 @@ const appReadNeeds = (
   read: AppRead,
   appId: string,
   permissions: readonly Permission[]
-): { granted: boolean; role: AppRole } => {
+): { granted: boolean; role: MemberRole } => {
   if (read === "build") {
     // The person's own Apps, which the agent reads as them with no
     // permission of its own (agent-apps.ts).

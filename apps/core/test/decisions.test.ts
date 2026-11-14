@@ -151,7 +151,7 @@ describe("decisions", { timeout: 60_000 }, () => {
       `person:${decider.userId}`
     );
     const unshared = await decider.api.decisions.get(decision);
-    await people.builder.api.workflowResources.share(workflow.id, {
+    await people.builder.api.workflowResources.members.add(workflow.id, {
       type: "person",
       id: decider.userId,
       role: "user",

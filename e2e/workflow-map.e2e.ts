@@ -48,7 +48,7 @@ const mapFor = async (admin: Person): Promise<string> => {
     ]);
     // Live, for the people it is shared with (until then, its
     // builders' alone).
-    await api.apps.versions.publish(created.app.id, 1);
+    await api.versions.rollback({ kind: "app", id: created.app.id }, 1);
     return created.app.id;
   } finally {
     core[Symbol.dispose]();

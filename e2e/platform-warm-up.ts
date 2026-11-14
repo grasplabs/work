@@ -37,10 +37,12 @@ export const warmPlatform = async (builder: Person): Promise<void> => {
       name: `Platform warm-up ${crypto.randomUUID().slice(0, 8)}`,
       description: "Loads the platform's code before the tests.",
     });
-    const chat = await api.chats.forApp(app.id);
+    // A chat about the App, as its workspace starts one.
+    const chat = await api.chats.create(app.name);
     await api.chats.send(chat.id, {
       text: modelScripts.buildsTally.opener,
       model: e2eModel,
+      subject: { kind: "app", id: app.id },
     });
     const until = Date.now() + turnMs;
     let { running } = await api.chats.summary(chat.id);
@@ -55,7 +57,7 @@ export const warmPlatform = async (builder: Person): Promise<void> => {
       // oxlint-disable-next-line no-await-in-loop -- until the turn ends
       ({ running } = await api.chats.summary(chat.id));
     }
-    const draft = await api.apps.drafts.get(app.id);
+    const draft = await api.drafts.get({ kind: "app", id: app.id });
     if (draft.changed.length === 0) {
       throw new Error(
         `The platform's warm-up turn in chat ${chat.id} wrote no App files, so it loaded nothing`

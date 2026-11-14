@@ -12,12 +12,12 @@ import { sandboxCpuHeader } from "../src/sandbox-headers.ts";
 import { loadWorkflowBuild } from "../src/workflow-builds.ts";
 import {
   createWorkflowResource,
-  publishWorkflowVersion,
   workflowSource,
 } from "../src/workflow-resources.ts";
 import { lostAnswerDb, racingDb } from "./apps.ts";
 import { artifactKey } from "./sealed-apps.ts";
 import { outcome, refusal, unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // Compiling JSON workflows into SDK TypeScript and sealed JavaScript
 // (workflow-builds.ts, @grasp-os/workflow-schema's generate.ts), from the
@@ -72,10 +72,7 @@ const definitionOf = (status: unknown, steps: unknown[] = []): string =>
 /** A new workflow of `by`'s, published once from `definition`. */
 const published = async (by: Acting, definition: string) => {
   const workflow = await createWorkflowResource(env, by, `w-${unique()}`);
-  const version = await publishWorkflowVersion(env, by, workflow.id, {
-    definition,
-    basedOn: null,
-  });
+  const version = await publishDefinition(env, by, workflow.id, definition);
   return { workflow, version };
 };
 
@@ -268,15 +265,17 @@ describe("JSON workflow builds", () => {
   it("gives definitions that lower to the same program one executable identity", async () => {
     const by = await builder();
     const workflow = await createWorkflowResource(env, by, `w-${unique()}`);
-    const publish = async (basedOn: number | null, steps: unknown[]) =>
-      await publishWorkflowVersion(env, by, workflow.id, {
-        definition: definitionOf({ $expr: "params.greeting" }, steps),
-        basedOn,
-      });
-    const first = await publish(null, [finish()]);
+    const publish = async (steps: unknown[]) =>
+      await publishDefinition(
+        env,
+        by,
+        workflow.id,
+        definitionOf({ $expr: "params.greeting" }, steps)
+      );
+    const first = await publish([finish()]);
     // A title changes no program.
-    const relabelled = await publish(1, [finish("Finish up")]);
-    const changed = await publish(2, [
+    const relabelled = await publish([finish("Finish up")]);
+    const changed = await publish([
       { ...finish(), if: { $expr: 'args.who === "nobody"' } },
     ]);
     expect(identityOf(first)).not.toBe("");
@@ -380,14 +379,14 @@ describe("JSON workflow builds", () => {
     const by = await builder();
     const workflow = await createWorkflowResource(env, by, `w-${unique()}`);
     const lost = await outcome(
-      publishWorkflowVersion(
+      publishDefinition(
         {
           ...env,
           DB: lostAnswerDb(/^insert into "workflow_resource_versions"/iu),
         },
         by,
         workflow.id,
-        { definition: definitionOf("kept"), basedOn: null }
+        definitionOf("kept")
       )
     );
     await sweepReleases(env, new Date());
@@ -421,10 +420,7 @@ describe("JSON workflow builds", () => {
     const problemsOf = async (status: string) => {
       const workflow = await createWorkflowResource(env, by, `w-${unique()}`);
       const error = await refusal(
-        publishWorkflowVersion(env, by, workflow.id, {
-          definition: definitionOf({ $expr: status }),
-          basedOn: null,
-        })
+        publishDefinition(env, by, workflow.id, definitionOf({ $expr: status }))
       );
       return z
         .object({
@@ -446,20 +442,14 @@ describe("JSON workflow builds", () => {
     // Text that only looks like a read reads nothing.
     const quoted = await createWorkflowResource(env, by, `w-${unique()}`);
     await expect(
-      publishWorkflowVersion(env, by, quoted.id, {
-        definition: definitionOf("params.token"),
-        basedOn: null,
-      })
+      publishDefinition(env, by, quoted.id, definitionOf("params.token"))
     ).resolves.toMatchObject({ version: 1 });
   });
 
   it("refuses a publication whose build outlasts the build wait, or dies, as one to try again", async () => {
     const by = await builder();
     const workflow = await createWorkflowResource(env, by, `w-${unique()}`);
-    const request = () => ({
-      definition: definitionOf(`late ${unique()}`),
-      basedOn: null,
-    });
+    const request = () => definitionOf(`late ${unique()}`);
     const hungTargets: string[] = [];
     const diedTargets: string[] = [];
     const hung = compilerThat(
@@ -475,12 +465,12 @@ describe("JSON workflow builds", () => {
       throw new Error("Worker exceeded CPU time limit.");
     }, diedTargets);
     const late = await outcome(
-      publishWorkflowVersion(hung, by, workflow.id, request())
+      publishDefinition(hung, by, workflow.id, request())
     );
     const killed = await outcome(
-      publishWorkflowVersion(died, by, workflow.id, request())
+      publishDefinition(died, by, workflow.id, request())
     );
-    const saved = await publishWorkflowVersion(env, by, workflow.id, request());
+    const saved = await publishDefinition(env, by, workflow.id, request());
     expect({
       late,
       killed,
@@ -503,10 +493,8 @@ describe("JSON workflow builds", () => {
     const by = await builder();
     const workflow = await createWorkflowResource(env, by, `w-${unique()}`);
     // A read the type check takes, unique so no earlier check answers it.
-    const request = (name: string) => ({
-      definition: definitionOf({ $expr: `args.who + '${name}'` }),
-      basedOn: null,
-    });
+    const request = (name: string) =>
+      definitionOf({ $expr: `args.who + '${name}'` });
     const hung = checkerThat(
       async () =>
         // oxlint-disable-next-line promise/avoid-new -- a check that never answers
@@ -527,16 +515,16 @@ describe("JSON workflow builds", () => {
     );
     const [lateName, killedName, crashedName] = [unique(), unique(), unique()];
     const late = await outcome(
-      publishWorkflowVersion(hung, by, workflow.id, request(lateName))
+      publishDefinition(hung, by, workflow.id, request(lateName))
     );
     const killed = await outcome(
-      publishWorkflowVersion(died, by, workflow.id, request(killedName))
+      publishDefinition(died, by, workflow.id, request(killedName))
     );
     const crash = await outcome(
-      publishWorkflowVersion(crashed, by, workflow.id, request(crashedName))
+      publishDefinition(crashed, by, workflow.id, request(crashedName))
     );
     // The same expressions, checked again: nothing of the crash was kept.
-    const saved = await publishWorkflowVersion(
+    const saved = await publishDefinition(
       env,
       by,
       workflow.id,
@@ -553,10 +541,7 @@ describe("JSON workflow builds", () => {
   it("never caches a build the sandbox host stopped: one to try again, never a failed build", async () => {
     const by = await builder();
     const workflow = await createWorkflowResource(env, by, `w-${unique()}`);
-    const request = {
-      definition: definitionOf(`stopped ${unique()}`),
-      basedOn: null,
-    };
+    const request = definitionOf(`stopped ${unique()}`);
     // A sandbox host whose supervisor stops every call at its CPU bound.
     const stopping: Fetcher = {
       fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -591,7 +576,7 @@ describe("JSON workflow builds", () => {
       },
     };
     const stopped = await outcome(
-      publishWorkflowVersion(
+      publishDefinition(
         { ...env, SANDBOX_HOST: stopping },
         by,
         workflow.id,
@@ -599,7 +584,7 @@ describe("JSON workflow builds", () => {
       )
     );
     // The same module, built again: nothing of the stop was kept.
-    const saved = await publishWorkflowVersion(env, by, workflow.id, request);
+    const saved = await publishDefinition(env, by, workflow.id, request);
     expect({
       stopped,
       executable: saved.build?.hash !== undefined,
@@ -616,24 +601,18 @@ describe("JSON workflow builds", () => {
     const raced: Env = {
       ...env,
       DB: racingDb(async () => {
-        await publishWorkflowVersion(env, by, workflow.id, {
-          definition: definitionOf("winner"),
-          basedOn: null,
-        });
+        await publishDefinition(env, by, workflow.id, definitionOf("winner"));
       }, /insert into "workflow_resource_versions"/iu),
     };
     const lost = await outcome(
-      publishWorkflowVersion(raced, by, workflow.id, {
-        definition: definitionOf("loser"),
-        basedOn: null,
-      })
+      publishDefinition(raced, by, workflow.id, definitionOf("loser"))
     );
     const named = await sealedArtifacts(workflow.id, 1);
     expect({
       lost,
       ...(await referencesOf(workflow.id, since)),
     }).toStrictEqual({
-      lost: "workflow.version_conflict",
+      lost: "draft.conflict",
       reserved: [...new Set(named.map(({ sha256 }) => sha256))].toSorted(),
       stray: 0,
     });
@@ -667,23 +646,17 @@ describe("JSON workflow builds", () => {
       ...env,
       DB: racingDb(async () => {
         failure.code = await outcome(
-          publishWorkflowVersion(
+          publishDefinition(
             { ...env, FILES: failingFiles },
             by,
             workflow.id,
-            {
-              definition: definitionOf("failing"),
-              basedOn: null,
-            }
+            definitionOf("failing")
           )
         );
       }, /insert into "workflow_resource_versions"/iu),
     };
     const saved = await outcome(
-      publishWorkflowVersion(raced, by, workflow.id, {
-        definition: definitionOf("healthy"),
-        basedOn: null,
-      })
+      publishDefinition(raced, by, workflow.id, definitionOf("healthy"))
     );
     const named = await sealedArtifacts(workflow.id, 1);
     expect({
@@ -728,10 +701,12 @@ describe("JSON workflow builds", () => {
       },
     });
     const failed = await outcome(
-      publishWorkflowVersion({ ...env, FILES: files }, by, workflow.id, {
-        definition: definitionOf("first"),
-        basedOn: null,
-      })
+      publishDefinition(
+        { ...env, FILES: files },
+        by,
+        workflow.id,
+        definitionOf("first")
+      )
     );
     uploads.runningAtEnd = uploads.running;
     expect({
@@ -763,16 +738,15 @@ describe("JSON workflow builds", () => {
       },
     });
     const failed = await outcome(
-      publishWorkflowVersion({ ...env, FILES: failingFiles }, by, workflow.id, {
-        definition: definitionOf("first"),
-        basedOn: null,
-      })
+      publishDefinition(
+        { ...env, FILES: failingFiles },
+        by,
+        workflow.id,
+        definitionOf("first")
+      )
     );
     // The number goes to another publication, of other content.
-    await publishWorkflowVersion(env, by, workflow.id, {
-      definition: definitionOf("second"),
-      basedOn: null,
-    });
+    await publishDefinition(env, by, workflow.id, definitionOf("second"));
     const named = await sealedArtifacts(workflow.id, 1);
     expect({
       failed: failed === "ok",

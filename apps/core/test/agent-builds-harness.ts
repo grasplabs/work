@@ -4,7 +4,7 @@ import { appErrors } from "@grasp-os/shared/apps";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
 
-import { readDraft } from "../src/app-drafts.ts";
+import { readDraft } from "../src/drafts.ts";
 import { chatOf, setObjectEnv, toolStep } from "./agent-chat.ts";
 import type { WorkspaceStub } from "./agent-chat.ts";
 import { testApp } from "./app-definitions.ts";
@@ -140,7 +140,7 @@ export const setUp = async (
 export const draftDefinitionOf = async (
   app: string
 ): Promise<AppDefinition> => {
-  const draft = await readDraft(env, app);
+  const draft = await readDraft(env, { kind: "app", id: app });
   return readDefinition(JSON.parse(draft.definition ?? "null"));
 };
 

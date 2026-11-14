@@ -1,17 +1,9 @@
 import { isGeneratedServerFile } from "@grasp-os/runtime/host";
-import type {
-  AppDraft,
-  AppDraftHistoryPoint,
-} from "@grasp-os/shared/app-drafts";
-import type {
-  AppRelease,
-  AppVersion,
-  FileDiff,
-  ViewedApp,
-} from "@grasp-os/shared/apps";
+import type { AppRelease, FileDiff } from "@grasp-os/shared/apps";
+import type { Draft, DraftCheckpoint, Version } from "@grasp-os/shared/drafts";
 import { failureText } from "@grasp-os/shared/errors";
-import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import type { Subject } from "@grasp-os/shared/subject";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -42,7 +34,6 @@ import {
 import {
   Sheet,
   SheetContent,
-  SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@grasp-os/ui/components/sheet";
@@ -59,6 +50,13 @@ import {
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
+import { FileChanges } from "../apps/draft-changes.tsx";
+import {
+  ReleaseBadges,
+  ReleaseDialog,
+  ReleaseMenuItems,
+} from "../apps/release-controls.tsx";
+import type { ReleaseAction } from "../apps/release-controls.tsx";
 import type { CoreConnection } from "../core-connection.ts";
 import { decidesRequests } from "../dashboard/waiting.ts";
 import { readPeople } from "../directory.ts";
@@ -69,61 +67,62 @@ import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
-import { buildsApp } from "./app-role.ts";
-import { FileChanges } from "./draft-changes.tsx";
 import { isConflict, publishFailureText, settled } from "./publish-errors.ts";
-import {
-  ReleaseBadges,
-  ReleaseDialog,
-  ReleaseMenuItems,
-} from "./release-controls.tsx";
-import type { ReleaseAction } from "./release-controls.tsx";
-import { hasChanges, useAppDraft } from "./use-app-draft.ts";
+import { hasChanges, useDraft } from "./use-draft.ts";
 
-// An App's history, in its settings (app-settings.tsx), as a deployments
-// list reads: on top, while its draft has some, the unpublished changes,
-// each undo point core keeps of it (core's app-drafts.ts): who, through
-// Grasp's chat or by hand, when, and the files it touched, each to
-// preview read-only in the workspace or restore, and the draft to
-// discard. Below, every published version, newest first: its label, the
-// live one marked, its note, who published it and when, and a menu to see
-// what it changed against the version before it, preview it, or roll
-// back to it (`apps.versions.publish`). The draft is reset to the version
-// rolled back to, so the dialog says when that discards unpublished
-// changes, and goes over the draft's revision it read then: a draft
-// changed meanwhile is refused rather than lost. Core checks and seals it
-// first, and, for anyone but an admin, asks again for the App's
-// permissions to connections, workflows and other Apps; the dialog says
-// so. An admin revokes a version's release or holds it from the same
-// menu (release-controls.tsx). Restoring and discarding name the draft's
-// revision the person saw too.
+// The history of an App or a workflow, in its settings, as a deployments
+// list reads: on top, while its draft has some, the changes only its
+// builders see, each checkpoint core keeps of the draft (core's
+// drafts.ts): who, through Grasp's chat or by hand, when, and the files it
+// touched, each to restore (and, for an App, to preview read-only in its
+// workspace), and the draft to discard. Below, every published version,
+// newest first: its label, the live one marked, its note, who published
+// it and when, and a menu to see what it changed against the version
+// before it, preview an App's, or roll back to it (`versions.rollback`).
+// The draft is reset to the version rolled back to, so the dialog says
+// when that discards unpublished changes, and goes over the draft's
+// revision it read then: a draft changed meanwhile is refused rather than
+// lost. An admin revokes an App's release or holds it from the same menu
+// (release-controls.tsx). Restoring and discarding name the draft's
+// revision the person saw too. Apps and workflows have the one history.
 
 /** One more page of versions: core lists at most 100 at a time. */
 const pageSize = 100;
 
-/** Most files a point's line names before it counts the rest. */
+/** Most files a checkpoint's line names before it counts the rest. */
 const namedFiles = 3;
 
 /** What a version is called: its label, or, never live, that it wasn't. */
-const VersionName = ({ version }: { version: AppVersion }) =>
+const VersionName = ({ version }: { version: Version }) =>
   version.label === null ? (
     <Trans>Not shared yet</Trans>
   ) : (
     <span className="font-mono">{version.label}</span>
   );
 
-// -- Unpublished changes ---------------------------------------------------
+/**
+ * The version `version` was made from, to compare it with: an App's
+ * parent, or a workflow's version before it; none for a first.
+ */
+const parentOf = (version: Version): number | null => {
+  if (version.kind === "app") {
+    return version.parent;
+  }
+  return version.version > 1 ? version.version - 1 : null;
+};
+
+// -- Changes only its builders see ----------------------------------------
 
 /** What changing the draft from here asks the person to confirm. */
 export type Asked = { kind: "restore"; number: number } | { kind: "discard" };
 
 /**
- * Restores undo point `number` of the draft, or discards the draft, over
+ * Restores checkpoint `number` of the draft, or discards the draft, over
  * `revision`, the one the person saw: `onChanged` once it did; the
  * refusal otherwise.
  */
 export const useDraftChange = (
-  app: string,
+  subject: Subject,
   revision: number,
   onChanged: () => void
 ) => {
@@ -136,14 +135,14 @@ export const useDraftChange = (
     setFailure(undefined);
     const done = await settled(core, async (session) => {
       await (asked.kind === "restore"
-        ? session.apps.drafts.restorePoint(app, asked.number, revision)
-        : session.apps.drafts.discard(app, revision));
+        ? session.drafts.restore(subject, asked.number, revision)
+        : session.drafts.discard(subject, revision));
     });
     setBusy(false);
     if (!done.ok) {
       setFailure(
         isConflict(done.error)
-          ? t`Someone changed the App meanwhile. Look at its history again, then try again.`
+          ? t`Someone changed it meanwhile. Look at its history again, then try again.`
           : failureText(done.error)
       );
       return;
@@ -153,7 +152,7 @@ export const useDraftChange = (
   return { busy, failure, change };
 };
 
-/** Asks before restoring an undo point or discarding the draft. */
+/** Asks before restoring a checkpoint or discarding the draft. */
 export const ConfirmChange = ({
   asked,
   onConfirm,
@@ -183,13 +182,13 @@ export const ConfirmChange = ({
         <AlertDialogDescription>
           {asked?.kind === "discard" ? (
             <Trans>
-              They go, for everyone who builds this App. Its history in Settings
-              keeps them, so you can bring them back.
+              They go, for everyone who builds it. Its history in Settings keeps
+              them, so you can bring them back.
             </Trans>
           ) : (
             <Trans>
               Your changes go back to how they were then, for everyone who
-              builds this App. What came after stays in its history.
+              builds it. What came after stays in its history.
             </Trans>
           )}
         </AlertDialogDescription>
@@ -217,25 +216,25 @@ export const ConfirmChange = ({
   </AlertDialog>
 );
 
-/** Who made an undo point, and how, as its line says it. */
-const PointTitle = ({
-  point,
+/** Who made a checkpoint, and how, as its line says it. */
+const CheckpointTitle = ({
+  checkpoint,
   name,
 }: {
-  point: AppDraftHistoryPoint;
+  checkpoint: DraftCheckpoint;
   name: string;
 }) => {
-  if (point.restoredFrom !== null) {
+  if (checkpoint.restoredFrom !== null) {
     return <Trans>{name} restored an earlier state</Trans>;
   }
-  return point.chatId === null ? (
+  return checkpoint.chatId === null ? (
     <Trans>{name} edited it</Trans>
   ) : (
     <Trans>Grasp, in {name}&apos;s chat</Trans>
   );
 };
 
-/** The files an undo point touched, a few by name and a count of the rest. */
+/** The files a checkpoint touched, a few by name and a count of the rest. */
 const touchedText = (touched: readonly string[]): string => {
   const more = touched.length - namedFiles;
   return formatList(
@@ -249,43 +248,44 @@ const touchedText = (touched: readonly string[]): string => {
 };
 
 /**
- * The undo points of the draft's unpublished changes, newest first:
- * those after the last a publish or roll back left (which changes
- * nothing over the version it is over).
+ * The checkpoints of the draft's unpublished changes, newest first: those
+ * after the last a publish or roll back left (which changes nothing over
+ * the version it is over).
  */
-const unpublishedPoints = (
-  points: readonly AppDraftHistoryPoint[]
-): AppDraftHistoryPoint[] => {
-  const published = points.findIndex(({ changes }) => changes === 0);
-  return published === -1 ? [...points] : points.slice(0, published);
+const unpublishedCheckpoints = (
+  checkpoints: readonly DraftCheckpoint[]
+): DraftCheckpoint[] => {
+  const published = checkpoints.findIndex(({ changes }) => changes === 0);
+  return published === -1 ? [...checkpoints] : checkpoints.slice(0, published);
 };
 
-/** The undo points and people's names, as read at the draft's revision. */
-interface PointsRead {
-  points: AppDraftHistoryPoint[];
+/** The checkpoints and people's names, as read at the draft's revision. */
+interface CheckpointsRead {
+  checkpoints: DraftCheckpoint[];
   people: ReadonlyMap<string, string>;
 }
 
-/** The draft's undo points, read again at each of its revisions. */
-const usePoints = (
-  app: string,
+/** The draft's checkpoints, read again at each of its revisions. */
+const useCheckpoints = (
+  subject: Subject,
   revision: number
-): PointsRead | undefined | "failed" => {
+): CheckpointsRead | undefined | "failed" => {
   const core = useCore();
+  const { kind, id } = subject;
   const [read, setRead] = useState<{
     key: string;
-    read: PointsRead | "failed";
+    read: CheckpointsRead | "failed";
   }>();
-  const key = `${app}:${revision}`;
+  const key = `${kind}:${id}:${revision}`;
   useEffect(() => {
     let current = true;
     const load = async (): Promise<void> => {
       const found = await settled(core, async (session) => {
-        const [points, people] = await Promise.all([
-          session.apps.drafts.points(app),
+        const [checkpoints, people] = await Promise.all([
+          session.drafts.checkpoints({ kind, id }),
           readPeople(session),
         ]);
-        return { points, people };
+        return { checkpoints, people };
       });
       if (current) {
         setRead({ key, read: found.ok ? found.value : "failed" });
@@ -295,21 +295,35 @@ const usePoints = (
     return () => {
       current = false;
     };
-  }, [core, app, key]);
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `revision` says when to read again
+  }, [core, kind, id, key, revision]);
   return read?.key === key ? read.read : undefined;
 };
 
-/** One undo point: who, when and what; previewed or restored from here. */
-const PointItem = ({
-  app,
-  point,
+/** See it: an App's checkpoint, read-only in its workspace. */
+const SeeCheckpoint = ({ app, number }: { app: string; number: number }) => (
+  <Link
+    className={buttonVariants({ size: "sm", variant: "ghost" })}
+    params={{ app }}
+    search={{ point: number }}
+    to="/apps/$app"
+  >
+    <EyeIcon data-icon="inline-start" />
+    <Trans>See it</Trans>
+  </Link>
+);
+
+/** One checkpoint: who, when and what; restored from here. */
+const CheckpointItem = ({
+  subject,
+  checkpoint,
   name,
   latest,
   busy,
   onRestore,
 }: {
-  app: string;
-  point: AppDraftHistoryPoint;
+  subject: Subject;
+  checkpoint: DraftCheckpoint;
   name: string;
   latest: boolean;
   busy: boolean;
@@ -318,7 +332,7 @@ const PointItem = ({
   <Item render={<li />} size="sm" variant="row">
     <ItemContent>
       <ItemTitle>
-        <PointTitle name={name} point={point} />
+        <CheckpointTitle checkpoint={checkpoint} name={name} />
         {latest ? (
           <Badge variant="secondary">
             <Trans>Now</Trans>
@@ -326,25 +340,21 @@ const PointItem = ({
         ) : null}
       </ItemTitle>
       <ItemDescription>
-        <time dateTime={point.createdAt}>{formatSince(point.createdAt)}</time>
-        {point.touched.length === 0 ? null : (
+        <time dateTime={checkpoint.createdAt}>
+          {formatSince(checkpoint.createdAt)}
+        </time>
+        {checkpoint.touched.length === 0 ? null : (
           <span className="block truncate font-mono text-xs">
-            {touchedText(point.touched)}
+            {touchedText(checkpoint.touched)}
           </span>
         )}
       </ItemDescription>
     </ItemContent>
     {latest ? null : (
       <ItemActions>
-        <Link
-          className={buttonVariants({ size: "sm", variant: "ghost" })}
-          params={{ app }}
-          search={{ point: point.number }}
-          to="/apps/$app"
-        >
-          <EyeIcon data-icon="inline-start" />
-          <Trans>See it</Trans>
-        </Link>
+        {subject.kind === "app" ? (
+          <SeeCheckpoint app={subject.id} number={checkpoint.number} />
+        ) : null}
         <Button disabled={busy} onClick={onRestore} size="sm" variant="outline">
           <Trans>Restore</Trans>
         </Button>
@@ -354,36 +364,41 @@ const PointItem = ({
 );
 
 /**
- * The draft's unpublished changes, its undo points, and discarding it;
- * once they were undone (the draft changes nothing), the undo points they
- * left, to see and restore, while there are any.
+ * The draft's unpublished changes, its checkpoints, and discarding it;
+ * once they were undone (the draft changes nothing), the checkpoints they
+ * left, to restore, while there are any.
  */
-const UnpublishedChanges = ({
+const DraftCheckpoints = ({
   draft,
   onChanged,
 }: {
-  draft: AppDraft;
+  draft: Draft;
   onChanged: () => void;
 }) => {
   const { t } = useLingui();
-  const read = usePoints(draft.app, draft.revision);
+  const { subject } = draft;
+  const read = useCheckpoints(subject, draft.revision);
   const [asked, setAsked] = useState<Asked>();
   const { busy, failure, change } = useDraftChange(
-    draft.app,
+    subject,
     draft.revision,
     onChanged
   );
-  const points = typeof read === "object" ? unpublishedPoints(read.points) : [];
+  const checkpoints =
+    typeof read === "object" ? unpublishedCheckpoints(read.checkpoints) : [];
   const changing = hasChanges(draft);
-  // Undone, the draft is none of its points: each is one to restore.
-  const [newest] = changing ? points : [];
-  if (!changing && points.length === 0) {
+  // Undone, the draft is none of its checkpoints: each is one to restore.
+  const [newest] = changing ? checkpoints : [];
+  if (!changing && checkpoints.length === 0) {
     return null;
   }
   return (
-    <section aria-labelledby="app-unpublished" className="flex flex-col gap-3">
+    <section
+      aria-labelledby="draft-unpublished"
+      className="flex flex-col gap-3"
+    >
       <div className="flex flex-wrap items-center gap-2">
-        <h3 className="text-base font-medium" id="app-unpublished">
+        <h3 className="text-base font-medium" id="draft-unpublished">
           {changing ? (
             <Trans>Changes only you see</Trans>
           ) : (
@@ -409,23 +424,24 @@ const UnpublishedChanges = ({
       {read === "failed" ? (
         <ErrorText>{t`The history of your changes couldn't be read. Try again in a moment.`}</ErrorText>
       ) : null}
-      {points.length === 0 ? null : (
+      {checkpoints.length === 0 ? null : (
         <ItemGroup render={<ol />} variant="card">
-          {points.map((point) => (
-            <PointItem
-              app={draft.app}
+          {checkpoints.map((checkpoint) => (
+            <CheckpointItem
               busy={busy}
-              key={point.number}
-              latest={point.number === newest?.number}
+              checkpoint={checkpoint}
+              key={checkpoint.number}
+              latest={checkpoint.number === newest?.number}
               name={
                 typeof read === "object"
-                  ? (read.people.get(point.personId) ?? point.personId)
-                  : point.personId
+                  ? (read.people.get(checkpoint.personId) ??
+                    checkpoint.personId)
+                  : checkpoint.personId
               }
               onRestore={() => {
-                setAsked({ kind: "restore", number: point.number });
+                setAsked({ kind: "restore", number: checkpoint.number });
               }}
-              point={point}
+              subject={subject}
             />
           ))}
         </ItemGroup>
@@ -445,27 +461,27 @@ const UnpublishedChanges = ({
 };
 
 /**
- * The draft's unpublished changes, followed as it is written, or the undo
- * points of those undone; none without either.
+ * The draft's unpublished changes, followed as it is written, or the
+ * checkpoints of those undone; none without either.
  */
-const Unpublished = ({ app }: { app: string }) => {
-  const { draft, reread } = useAppDraft(app, 0);
+const Unpublished = ({ subject }: { subject: Subject }) => {
+  const { draft, reread } = useDraft(subject, 0);
   return draft === undefined ? null : (
-    <UnpublishedChanges draft={draft} onChanged={reread} />
+    <DraftCheckpoints draft={draft} onChanged={reread} />
   );
 };
 
 // -- Published versions ----------------------------------------------------
 
-/** Publishing `version` again, against the live one. */
+/** Making `version` live again, against the live one. */
 interface Move {
-  version: AppVersion;
+  version: Version;
   rollback: boolean;
 }
 
-/** A move, with the App's draft as read when it was asked for. */
+/** A move, with the draft as read when it was asked for. */
 interface AskedMove extends Move {
-  /** The draft's revision then, which the publish goes over. */
+  /** The draft's revision then, which the roll back goes over. */
   revision: number;
   /** Whether it discards the draft's unpublished changes. */
   discards: boolean;
@@ -489,15 +505,36 @@ const MoveTitle = ({
   );
 };
 
-/** The confirmation of a move: what it does, and that it asks again for permissions. */
+/**
+ * What a move does: an App's pages and workflows run on it; a workflow's
+ * triggers start it, while runs going keep their version.
+ */
+const MoveText = ({ kind }: { kind: Subject["kind"] }) => {
+  if (kind === "workflow") {
+    return (
+      <Trans>
+        Its triggers start it from now on; runs already going keep their
+        version. Grasp checks it first.
+      </Trans>
+    );
+  }
+  return (
+    <Trans>
+      Its pages and workflows run on it from now on. Grasp checks and builds it
+      first.
+    </Trans>
+  );
+};
+
+/** The confirmation of a move: what it does, and what it drops. */
 const MoveDialog = ({
+  kind,
   move,
-  admin,
   onConfirm,
   onOpenChange,
 }: {
+  kind: Subject["kind"];
   move: AskedMove | null;
-  admin: boolean;
   onConfirm: (move: AskedMove) => void;
   onOpenChange: (open: boolean) => void;
 }) => {
@@ -510,10 +547,6 @@ const MoveDialog = ({
             <MoveTitle label={label} rollback={move?.rollback === true} />
           </AlertDialogTitle>
           <AlertDialogDescription>
-            <Trans>
-              Its pages and workflows run on it from now on. Grasp checks and
-              builds it first.
-            </Trans>{" "}
             {move?.discards === true ? (
               <>
                 <strong>
@@ -524,12 +557,7 @@ const MoveDialog = ({
                 </strong>{" "}
               </>
             ) : null}
-            {admin ? null : (
-              <Trans>
-                Its permissions on connections, to start workflows and to call
-                other Apps wait for an admin to grant them again.
-              </Trans>
-            )}
+            <MoveText kind={kind} />
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -558,18 +586,19 @@ const MoveDialog = ({
 
 /** What a version changed against the one it was made from, in a sheet. */
 const VersionChanges = ({
-  app,
+  subject,
   version,
   onClose,
 }: {
-  app: string;
-  version: AppVersion;
+  subject: Subject;
+  version: Version;
   onClose: () => void;
 }) => {
   const { t } = useLingui();
   const core = useCore();
   const [read, setRead] = useState<Loaded<FileDiff[]>>();
-  const { parent } = version;
+  const { kind, id } = subject;
+  const parent = parentOf(version);
   useEffect(() => {
     const left = new AbortController();
     const load = async (): Promise<void> => {
@@ -579,8 +608,8 @@ const VersionChanges = ({
       const found = await loadFromCore(
         core,
         async (session) => {
-          const diffs = await session.apps.versions.diff(
-            app,
+          const diffs = await session.versions.diff(
+            { kind, id },
             parent,
             version.version
           );
@@ -597,7 +626,7 @@ const VersionChanges = ({
     return () => {
       left.abort();
     };
-  }, [core, app, parent, version.version]);
+  }, [core, kind, id, parent, version.version]);
   return (
     <Sheet
       onOpenChange={(open) => {
@@ -614,7 +643,6 @@ const VersionChanges = ({
               What <VersionName version={version} /> changed
             </Trans>
           </SheetTitle>
-          <SheetDescription>{version.message}</SheetDescription>
         </SheetHeader>
         <div className="overflow-y-auto px-4 pb-4">
           {read === undefined ? <LoadingLines lines={4} /> : null}
@@ -628,11 +656,21 @@ const VersionChanges = ({
   );
 };
 
-/** A version's menu: its changes, its preview, publishing it, its release. */
+/** See this version: an App's, read-only in its workspace. */
+const SeeVersion = ({ app, version }: { app: string; version: number }) => (
+  <DropdownMenuItem
+    render={<Link params={{ app }} search={{ version }} to="/apps/$app" />}
+  >
+    <EyeIcon />
+    <Trans>See this version</Trans>
+  </DropdownMenuItem>
+);
+
+/** A version's menu: its changes, its preview, rolling back, its release. */
 const VersionMenu = ({
-  app,
+  subject,
   version,
-  current,
+  live,
   builds,
   release,
   disabled,
@@ -640,9 +678,9 @@ const VersionMenu = ({
   onMove,
   onAsk,
 }: {
-  app: string;
-  version: AppVersion;
-  current: number | null;
+  subject: Subject;
+  version: Version;
+  live: number | null;
   builds: boolean;
   /** Its sealed release, for an admin; none for anyone else. */
   release: AppRelease | undefined;
@@ -652,12 +690,10 @@ const VersionMenu = ({
   onAsk: (action: ReleaseAction) => void;
 }) => {
   const { t } = useLingui();
-  // A revoked version can't be published again: core refuses it.
+  // A revoked version can't be made live again: core refuses it.
   const moves =
-    builds &&
-    version.version !== current &&
-    (release?.revokedAt ?? null) === null;
-  const rollback = current !== null && version.version < current;
+    builds && version.version !== live && (release?.revokedAt ?? null) === null;
+  const rollback = live !== null && version.version < live;
   const { label } = version;
   return (
     <DropdownMenu>
@@ -678,25 +714,14 @@ const VersionMenu = ({
         <EllipsisIcon />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        {version.parent === null ? null : (
+        {parentOf(version) === null ? null : (
           <DropdownMenuItem onClick={onShowChanges}>
             <GitCompareArrowsIcon />
             <Trans>View changes</Trans>
           </DropdownMenuItem>
         )}
-        {builds ? (
-          <DropdownMenuItem
-            render={
-              <Link
-                params={{ app }}
-                search={{ version: version.version }}
-                to="/apps/$app"
-              />
-            }
-          >
-            <EyeIcon />
-            <Trans>See this version</Trans>
-          </DropdownMenuItem>
+        {builds && subject.kind === "app" ? (
+          <SeeVersion app={subject.id} version={version.version} />
         ) : null}
         {moves ? (
           <DropdownMenuItem
@@ -729,13 +754,16 @@ const VersionItem = ({
   live,
   release,
   by,
+  details,
   menu,
 }: {
-  version: AppVersion;
+  version: Version;
   live: boolean;
   release: AppRelease | undefined;
   /** Who published it, as the list names them. */
   by: string;
+  /** What its kind says of it besides (`DraftHistory`'s `details`). */
+  details: ReactNode;
   menu: ReactNode;
 }) => {
   const since = formatSince(version.createdAt);
@@ -751,7 +779,7 @@ const VersionItem = ({
           ) : null}
           {release === undefined ? null : <ReleaseBadges release={release} />}
         </ItemTitle>
-        <ItemDescription>{version.message}</ItemDescription>
+        {details}
         <span className="text-muted-foreground text-xs">
           {/* A version never live (the first of an App made from a
             blueprint) was made, not published. */}
@@ -771,14 +799,29 @@ const VersionItem = ({
   );
 };
 
+/** What the versions list knows of the subject and the reader. */
+interface VersionsOf {
+  subject: Subject;
+  /** The version live now; null before the first. */
+  live: number | null;
+  /** Whether the reader builds it: rolls back, previews, restores. */
+  builds: boolean;
+  identity: Pick<Identity, "userId" | "role" | "staff">;
+  /** What its kind says of a version besides, under its note. */
+  renderDetails?: ((version: Version) => ReactNode) | undefined;
+}
+
 /**
- * The versions as read, newest first, with what each changed, its
- * preview and publishing it again for a builder, and their releases,
- * revoked or held, for an admin.
+ * The versions as read, newest first, with what each changed, and rolling
+ * back for a builder, and an App's releases, revoked or held, for an
+ * admin.
  */
-export const VersionsView = ({
-  app,
+const VersionsView = ({
+  subject,
+  live,
+  builds,
   identity,
+  renderDetails,
   versions,
   releases,
   people,
@@ -786,10 +829,8 @@ export const VersionsView = ({
   more = false,
   onMore,
   onRelease,
-}: {
-  app: ViewedApp;
-  identity: Pick<Identity, "userId" | "role" | "staff">;
-  versions: readonly AppVersion[];
+}: VersionsOf & {
+  versions: readonly Version[];
   /** Each sealed version's release, by version: read for admins only. */
   releases: ReadonlyMap<number, AppRelease>;
   /** People's names, by ID. */
@@ -812,15 +853,14 @@ export const VersionsView = ({
   const failure = askFailure ?? moveFailure;
   const [move, setMove] = useState<AskedMove | null>(null);
   const [asked, setAsked] = useState<ReleaseAction | null>(null);
-  const [showing, setShowing] = useState<AppVersion>();
-  const builds = buildsApp(app, identity) && !app.archived;
-  const acts = builds || decidesRequests(identity);
-  const current = app.currentVersion;
+  const [showing, setShowing] = useState<Version>();
+  // An App's admins revoke and hold its releases from the menu too.
+  const acts = builds || (subject.kind === "app" && decidesRequests(identity));
   // The draft is read as the move is asked for: the dialog says whether it
-  // discards changes, and the publish goes over that revision.
+  // discards changes, and the roll back goes over that revision.
   const askMove = (wanted: Move): void => {
     void run(async (session) => {
-      const draft = await session.apps.drafts.get(app.id);
+      const draft = await session.drafts.get(subject);
       setMove({
         ...wanted,
         revision: draft.revision,
@@ -837,11 +877,11 @@ export const VersionsView = ({
     const moved = await settled(
       core,
       async (session) =>
-        await session.apps.versions.publish(
-          app.id,
+        await session.versions.rollback(
+          subject,
           version.version,
           revision,
-          current
+          live
         )
     );
     setMoving(false);
@@ -871,21 +911,22 @@ export const VersionsView = ({
                 ? t`You`
                 : (people.get(each.author) ?? each.author)
             }
+            details={renderDetails?.(each)}
             key={each.version}
-            live={each.version === current}
+            live={each.version === live}
             menu={
               acts ? (
                 <VersionMenu
-                  app={app.id}
                   builds={builds}
-                  current={current}
                   disabled={busy}
+                  live={live}
                   onAsk={setAsked}
                   onMove={askMove}
                   onShowChanges={() => {
                     setShowing(each);
                   }}
                   release={releases.get(each.version)}
+                  subject={subject}
                   version={each}
                 />
               ) : null
@@ -903,7 +944,7 @@ export const VersionsView = ({
         </div>
       )}
       <MoveDialog
-        admin={isAdmin(identity.role)}
+        kind={subject.kind}
         move={move}
         onConfirm={(confirmed) => {
           void confirm(confirmed);
@@ -916,17 +957,17 @@ export const VersionsView = ({
       />
       {showing === undefined ? null : (
         <VersionChanges
-          app={app.id}
           onClose={() => {
             setShowing(undefined);
           }}
+          subject={subject}
           version={showing}
         />
       )}
-      {asked === null ? null : (
+      {asked === null || subject.kind !== "app" ? null : (
         <ReleaseDialog
           action={asked}
-          app={app.id}
+          app={subject.id}
           label={
             versions.find(({ version }) => version === asked.version)?.label ??
             null
@@ -942,37 +983,33 @@ export const VersionsView = ({
 };
 
 /**
- * The releases of a page of the App's versions, from before `before`, for
- * an admin; none for anyone else. A refusal stays one: unknown releases
- * aren't shown as none.
+ * The releases of a page of an App's versions, from before `before`, for
+ * an admin; none for anyone else, nor for a workflow, which has none. A
+ * refusal stays one: unknown releases aren't shown as none.
  */
 const releasesOf = async (
   core: Pick<CoreConnection, "withSession">,
-  app: string,
+  subject: Subject,
   admin: boolean,
   before: number | undefined,
   left?: AbortSignal
 ): Promise<Loaded<AppRelease[]>> => {
-  if (!admin) {
+  if (!admin || subject.kind !== "app") {
     return { state: "ready", data: [] };
   }
   return await loadFromCore(
     core,
-    async (session) => await session.apps.versions.releases(app, before),
+    async (session) => await session.apps.releases.list(subject.id, before),
     left
   );
 };
 
-/** The App's versions, read when History opens, a page at a time. */
-const Published = ({
-  app,
-  identity,
-}: {
-  app: ViewedApp;
-  identity: Pick<Identity, "userId" | "role" | "staff">;
-}) => {
+/** The versions, read when History opens, a page at a time. */
+const Published = (of: VersionsOf) => {
+  const { subject, live, identity } = of;
+  const { kind, id } = subject;
   const core = useCore();
-  const [pages, setPages] = useState<Loaded<AppVersion[]>[]>([]);
+  const [pages, setPages] = useState<Loaded<Version[]>[]>([]);
   const [people, setPeople] = useState<ReadonlyMap<string, string>>(new Map());
   // The releases' reads, a page at a time, kept to show one that failed.
   const [releaseReads, setReleaseReads] = useState<Loaded<AppRelease[]>[]>([]);
@@ -993,8 +1030,7 @@ const Published = ({
       return next;
     });
   };
-  // The newest page again whenever the App's versions move.
-  const moved = app.currentVersion;
+  // The newest page again whenever the live version moves.
   useEffect(() => {
     const left = new AbortController();
     newest.current = left;
@@ -1002,10 +1038,10 @@ const Published = ({
       const [loaded, found, named] = await Promise.all([
         loadFromCore(
           core,
-          async (session) => await session.apps.versions.list(app.id),
+          async (session) => await session.versions.list({ kind, id }),
           left.signal
         ),
-        releasesOf(core, app.id, admin, undefined, left.signal),
+        releasesOf(core, { kind, id }, admin, undefined, left.signal),
         loadFromCore(core, readPeople, left.signal),
       ]);
       if (!left.signal.aborted) {
@@ -1027,8 +1063,8 @@ const Published = ({
     return () => {
       left.abort();
     };
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `moved` says when to read again
-  }, [admin, app.id, core, moved]);
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `live` says when to read again
+  }, [admin, kind, id, core, live]);
   const [first] = pages;
   if (first === undefined) {
     return <LoadingLines lines={3} />;
@@ -1055,10 +1091,10 @@ const Published = ({
     const [loaded, read] = await Promise.all([
       loadFromCore(
         core,
-        async (session) => await session.apps.versions.list(app.id, oldest),
+        async (session) => await session.versions.list({ kind, id }, oldest),
         under
       ),
-      releasesOf(core, app.id, admin, oldest, under),
+      releasesOf(core, { kind, id }, admin, oldest, under),
     ]);
     // The newest page was read again meanwhile: this page followed pages
     // that are gone, and the list goes on from the new one instead.
@@ -1074,8 +1110,7 @@ const Published = ({
   };
   return (
     <VersionsView
-      app={app}
-      identity={identity}
+      {...of}
       more={reading}
       next={full ? oldest : null}
       onMore={() => {
@@ -1092,29 +1127,21 @@ const Published = ({
 };
 
 /**
- * History: the App's unpublished changes, for its builders, while it has
- * any, then its published versions.
+ * History, an App's or a workflow's: the changes only its builders see,
+ * for them, while it has any, then its published versions.
  */
-export const AppHistory = ({
-  app,
-  identity,
-}: {
-  app: ViewedApp;
-  identity: Pick<Identity, "userId" | "role" | "staff">;
-}) => (
+export const DraftHistory = (of: VersionsOf) => (
   <div className="flex flex-col gap-8">
-    {buildsApp(app, identity) && !app.archived ? (
-      <Unpublished app={app.id} />
-    ) : null}
-    <section aria-labelledby="app-published" className="flex flex-col gap-3">
+    {of.builds ? <Unpublished subject={of.subject} /> : null}
+    <section aria-labelledby="draft-published" className="flex flex-col gap-3">
       <h3
         className="flex items-center gap-2 text-base font-medium"
-        id="app-published"
+        id="draft-published"
       >
         <HistoryIcon aria-hidden className="size-4" />
         <Trans>Versions</Trans>
       </h3>
-      <Published app={app} identity={identity} />
+      <Published {...of} />
     </section>
   </div>
 );

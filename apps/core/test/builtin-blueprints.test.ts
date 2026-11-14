@@ -35,8 +35,8 @@ import {
 import type { Release } from "../src/builtins.ts";
 import { withDraftReferences } from "../src/draft-references.ts";
 import { buildPages } from "../src/pages.ts";
-import { appOf, commitApp } from "./app-definitions.ts";
-import { grantReviewed, racingDb } from "./apps.ts";
+import { appOf } from "./app-definitions.ts";
+import { commitApp, grantReviewed, racingDb } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { collectionWithNote, storedGrant } from "./knowledge.ts";
 import { fakeProvider, testModel } from "./model-provider.ts";
@@ -337,12 +337,15 @@ describe("the built-in blueprints", () => {
     const created = await builder.api.apps.blueprints.create("hello", {
       name: "Our hello",
     });
-    await builder.api.apps.versions.publish(created.app.id, 1);
+    await builder.api.versions.rollback({ kind: "app", id: created.app.id }, 1);
     expect({
       blueprint: created.app.blueprint,
       owner: created.app.owner,
       permissions: created.permissions,
-      files: await builder.api.apps.files.read(created.app.id, 1),
+      files: await builder.api.versions.files(
+        { kind: "app", id: created.app.id },
+        1
+      ),
       greeting: await calledAs(
         await builder.api.whoami(),
         created.app.id,
@@ -408,9 +411,11 @@ describe("the built-in blueprints", () => {
       const created = await builder.api.apps.blueprints.create(blueprint.id, {
         name: blueprint.name,
       });
-      // It becomes current, as its creator makes it: publishing builds,
-      // type-checks and tests it.
-      await builder.api.apps.versions.publish(created.app.id, 1);
+      // It becomes current, as its creator makes it.
+      await builder.api.versions.rollback(
+        { kind: "app", id: created.app.id },
+        1
+      );
       // Its pages pass the compiler's checks, with the references they
       // import (`@server/_generated/api`), as they do when saved and opened.
       if (
@@ -451,8 +456,14 @@ describe("the built-in blueprints", () => {
     expect({
       changed: stored?.tree !== before?.tree,
       audited: helloActions(events),
-      kept: await admin.api.apps.files.read(created.app.id, 1),
-      after: await admin.api.apps.files.read(after.app.id, 1),
+      kept: await admin.api.versions.files(
+        { kind: "app", id: created.app.id },
+        1
+      ),
+      after: await admin.api.versions.files(
+        { kind: "app", id: after.app.id },
+        1
+      ),
     }).toStrictEqual({
       changed: true,
       audited: ["blueprint.changed"],
@@ -638,7 +649,10 @@ describe("the built-in blueprints", () => {
     expect({
       leftBehind,
       deletedNext,
-      created: await admin.api.apps.files.read(created.app.id, 1),
+      created: await admin.api.versions.files(
+        { kind: "app", id: created.app.id },
+        1
+      ),
     }).toStrictEqual({
       leftBehind: [before?.tree ?? "", changed?.tree ?? ""].toSorted(
         (one, other) => one.localeCompare(other)
@@ -714,7 +728,7 @@ describe("the built-in blueprints", () => {
     });
   });
 
-  it("leave what a copy was granted as its builder makes its first version current and a release changes them, but not its next version or a rollback", async () => {
+  it("leave what a copy was granted as its builder makes a version current, a release changes the built-in, or a rollback", async () => {
     await reinstall();
     const admin = await signedInApi(idp, "admin");
     const builder = await signedInApi(idp, "builder");
@@ -727,10 +741,14 @@ describe("the built-in blueprints", () => {
     const granted = await grantReviewed(admin.api, asked?.id ?? "");
     const copy = { type: "app", appId: created.app.id } as const;
 
-    // Its first version is the blueprint's code, which the admin granted
-    // it for; a new release changes the built-in, not the copy.
+    // Its first version, then a new release of the built-in, then code
+    // of the builder's own, then back to the first: the grant is of the
+    // access, whichever version runs.
     const kept = await auditedDuring(async () => {
-      await builder.api.apps.versions.publish(created.app.id, 1);
+      await builder.api.versions.rollback(
+        { kind: "app", id: created.app.id },
+        1
+      );
       await expect(
         install(
           releaseWith({
@@ -742,27 +760,18 @@ describe("the built-in blueprints", () => {
           })
         )
       ).resolves.toBeTruthy();
-    });
-    const afterRelease = await admin.api.permissions.list(copy);
-
-    // Code of the builder's own is asked for again.
-    const { version } = await commitApp(
-      builder.api.apps.files,
-      created.app.id,
-      {
+      const { version } = await commitApp(builder.api, created.app.id, {
         [greetings]: `${hello().files[greetings]}\n// Mine.\n`,
-      },
-      "Mine"
-    );
-    await builder.api.apps.versions.publish(created.app.id, version);
-    const next = await admin.api.permissions.list(copy);
-
-    // Granted again for the builder's code, then rolled back to the first
-    // version by the builder: asked for again, as for any version but the
-    // first one's first time.
-    await grantReviewed(admin.api, asked?.id ?? "");
-    await builder.api.apps.versions.publish(created.app.id, 1);
-    const rolledBack = await admin.api.permissions.list(copy);
+      });
+      await builder.api.versions.rollback(
+        { kind: "app", id: created.app.id },
+        version
+      );
+      await builder.api.versions.rollback(
+        { kind: "app", id: created.app.id },
+        1
+      );
+    });
 
     expect({
       audited: kept.filter(
@@ -770,14 +779,10 @@ describe("the built-in blueprints", () => {
           action.startsWith("permission.") &&
           detail?.subjectId === created.app.id
       ),
-      afterRelease,
-      next: next.map(({ status, requestedBy }) => ({ status, requestedBy })),
-      rolledBack: rolledBack.map(({ status }) => status),
+      after: await admin.api.permissions.list(copy),
     }).toStrictEqual({
       audited: [],
-      afterRelease: [granted],
-      next: [{ status: "requested", requestedBy: builder.userId }],
-      rolledBack: ["requested"],
+      after: [granted],
     });
 
     await reinstall();
@@ -799,13 +804,10 @@ describe("the built-in blueprints", () => {
 
     // The builder's own greeting, made current.
     const mine = `${hello().files[greetings]}\n// Mine.\n`;
-    const { version: edited } = await commitApp(
-      builder.api.apps.files,
-      app.id,
-      { [greetings]: mine },
-      "Mine"
-    );
-    await builder.api.apps.versions.publish(app.id, edited);
+    const { version: edited } = await commitApp(builder.api, app.id, {
+      [greetings]: mine,
+    });
+    await builder.api.versions.rollback({ kind: "app", id: app.id }, edited);
 
     // A release that changes the greeting too, and adds a helper.
     const helper =
@@ -824,7 +826,7 @@ describe("the built-in blueprints", () => {
       throw new Error("No update was offered");
     }
     // Offered, not applied: the copy is as its builder left it.
-    const before = await builder.api.apps.files.read(app.id);
+    const before = await builder.api.drafts.files({ kind: "app", id: app.id });
     const stale = await outcome(
       builder.api.apps.blueprints.acceptUpdate(app.id, {
         to: offered.to,
@@ -861,7 +863,10 @@ describe("the built-in blueprints", () => {
     const { currentVersion: currentBefore } = await builder.api.apps.get(
       app.id
     );
-    await builder.api.apps.versions.publish(app.id, taken.version);
+    await builder.api.versions.rollback(
+      { kind: "app", id: app.id },
+      taken.version
+    );
     const { currentVersion: current } = await builder.api.apps.get(app.id);
 
     // A copy nobody edited takes the newer code whole; a copy of a marked
@@ -894,13 +899,19 @@ describe("the built-in blueprints", () => {
         action,
         detail.version ?? null,
       ]),
-      files: await builder.api.apps.files.read(app.id, taken.version),
+      files: await builder.api.versions.files(
+        { kind: "app", id: app.id },
+        taken.version
+      ),
       again,
       afterwards,
       currentBefore,
       current,
       whole: whole?.conflicts,
-      wholeFiles: await builder.api.apps.files.read(untouched.id, wholeVersion),
+      wholeFiles: await builder.api.versions.files(
+        { kind: "app", id: untouched.id },
+        wholeVersion
+      ),
       ofMarked: await builder.api.apps.blueprints.update(ofMarked.id),
     }).toStrictEqual({
       unchanged: null,
@@ -979,13 +990,18 @@ describe("the built-in blueprints", () => {
       name: "Re-IDed",
     });
     // Each side gives the one field another stable ID: the same code.
-    const created = await builder.api.apps.files.read(app.id);
-    const { version } = await builder.api.apps.files.commit(
-      app.id,
-      { "AGENTS.md": created["AGENTS.md"] ?? "" },
-      "Another ID",
-      JSON.parse(helloReIded("id7"))
-    );
+    const created = await builder.api.drafts.files({ kind: "app", id: app.id });
+    const subject = { kind: "app", id: app.id } as const;
+    const { revision } = await builder.api.drafts.get(subject);
+    const reIded: unknown = JSON.parse(helloReIded("id7"));
+    await builder.api.apps.define(app.id, revision, {
+      op: "setDefinition",
+      definition: reIded,
+    });
+    await builder.api.drafts.write(subject, revision + 1, {
+      "AGENTS.md": created["AGENTS.md"] ?? "",
+    });
+    const { version } = await builder.api.drafts.publish(subject, revision + 2);
     await install(releaseWith({ definition: helloReIded("id8") }));
     const offered = await builder.api.apps.blueprints.update(app.id);
     const taken =
@@ -1001,7 +1017,7 @@ describe("the built-in blueprints", () => {
       changes: offered?.changes,
       conflicts: offered?.conflicts,
       definitionConflict: offered?.definitionConflict,
-      // The copy's definition stays: nothing to commit.
+      // The copy's definition stays: nothing to publish.
       taken: taken?.version,
     }).toStrictEqual({
       changes: [],

@@ -31,7 +31,7 @@ import {
 import { signedInApi } from "./sign-in.ts";
 
 // A person's preview taking each write of an App's draft in the frame
-// they have open (apps.drafts.previewUpdate, spec 19.2.1): the page as one module for
+// they have open (apps.preview.update, spec 19.2.1): the page as one module for
 // React Fast Refresh, built without staging a frame or sealing anything
 // when only pages changed. The ways it can fail, from the threat model
 // in core's page-frame.ts: the frame handed another App's module, or
@@ -121,8 +121,8 @@ const scripts = (frame: LoadedFrame | null): string[] =>
 describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
   it("answers the page of the draft now by its module's address, staging only the modules the write changed where the open frame loads them, within the kit it loaded", async () => {
     const { builder, app, revision, write } = await setUp();
-    const { drafts } = builder.api.apps;
-    const opened = await drafts.preview(app);
+    const { apps } = builder.api;
+    const opened = await apps.preview.open(app);
     const frame = await loadFrame(opened);
     const next = await write(
       { "src/routes/index.tsx": deskSaying("Hot") },
@@ -130,14 +130,14 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     );
     // Warm, as the person's next write finds it: measured each time.
     const started = performance.now();
-    const updated = await drafts.previewUpdate(app, next, {});
+    const updated = await apps.preview.update(app, next, {});
     const updateMs = performance.now() - started;
     const again = await write(
       { "src/routes/index.tsx": deskSaying("Again") },
       next
     );
     const secondStarted = performance.now();
-    const second = await drafts.previewUpdate(app, again, {});
+    const second = await apps.preview.update(app, again, {});
     const secondMs = performance.now() - secondStarted;
     console.info(
       `preview update after a page write: ${Math.round(updateMs)} ms, then ${Math.round(secondMs)} ms`
@@ -186,18 +186,14 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     // Another builder of the organization, who doesn't build this App yet.
     const colleague = await signedInApi(idp, "builder");
     const outside = await codeOf(
-      colleague.api.apps.drafts.previewUpdate(app, revision, {})
+      colleague.api.apps.preview.update(app, revision, {})
     );
     await builder.api.apps.members.add(app, {
       type: "person",
       id: colleague.userId,
       role: "builder",
     });
-    const shared = await colleague.api.apps.drafts.previewUpdate(
-      app,
-      revision,
-      {}
-    );
+    const shared = await colleague.api.apps.preview.update(app, revision, {});
     expect({ outside, shared: refreshed(shared).revision }).toStrictEqual({
       outside: "app.not_found",
       shared: revision,
@@ -206,7 +202,7 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
 
   it("keeps what the preview's store holds across writes of its pages and its server code, while its schema stays", async () => {
     const { builder, app, revision, write } = await setUp();
-    const { drafts } = builder.api.apps;
+    const { apps } = builder.api;
     const call = async (at: number, path: string, input: unknown = {}) =>
       outcome(
         await previewCall(
@@ -221,7 +217,7 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
       { "src/routes/index.tsx": deskSaying("Changed") },
       revision
     );
-    await drafts.previewUpdate(app, next, {});
+    await apps.preview.update(app, next, {});
     const kept = await call(next, "notes.titles");
     const server = await write(
       {
@@ -259,11 +255,11 @@ export const Route = createFileRoute("/")({ component: Desk });
     const { revision, write } = await chatWithDraft(builder, app, {
       "src/routes/index.tsx": page.replace("Desk<", "Drafted<"),
     });
-    const opened = await builder.api.apps.drafts.preview(app);
+    const opened = await builder.api.apps.preview.open(app);
     const preview = await loadFrame(opened);
     // Its first version, opened read-only: the same code, which takes no
     // updates, so it is staged apart from the draft's writes.
-    const readOnlyOpened = await builder.api.apps.drafts.preview(app, 1);
+    const readOnlyOpened = await builder.api.apps.preview.open(app, 1);
     const readOnly = await loadFrame(readOnlyOpened);
     // The draft's next write, staged where the open preview loads it.
     const next = await write(
@@ -271,7 +267,7 @@ export const Route = createFileRoute("/")({ component: Desk });
       revision
     );
     const { entry } = refreshed(
-      await builder.api.apps.drafts.previewUpdate(app, next, {})
+      await builder.api.apps.preview.update(app, next, {})
     );
     const written = new URL(`${entry}.js`, preview?.page.entry).href;
     /** Whether `frame`'s policy runs the module the write staged. */
@@ -387,7 +383,7 @@ export const Route = createFileRoute("/")({ component: Desk });
 
   it("says the draft's server code doesn't build even of a page that calls none of it", async () => {
     const { builder, app, revision, write } = await setUp();
-    const { drafts } = builder.api.apps;
+    const { apps } = builder.api;
     const broken = await write(
       {
         "server/notes.ts": titlesUnbuilt,
@@ -402,12 +398,12 @@ export const Route = createFileRoute("/")({ component: Desk });
       },
       revision
     );
-    const update = refreshed(await drafts.previewUpdate(app, broken, {}));
+    const update = refreshed(await apps.preview.update(app, broken, {}));
     const fixed = await write(
       { "server/notes.ts": titlesSaying("fixed") },
       broken
     );
-    const afterFix = refreshed(await drafts.previewUpdate(app, fixed, {}));
+    const afterFix = refreshed(await apps.preview.update(app, fixed, {}));
     expect({
       broken: update.serverUnbuilt,
       fixed: afterFix.serverUnbuilt,

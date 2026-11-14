@@ -8,22 +8,18 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { publishVersion } from "../src/app-publish.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { fixtureHostFor, sweepTestFixtures } from "../src/app-tests.ts";
-import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
-import { findApp, releaseIdsOf } from "../src/apps.ts";
+import { appKind, findApp, releaseIdsOf } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
+import { rollback } from "../src/publish.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { setWorkflowParams } from "../src/workflow-params.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { runEngine, runObjectOf } from "../src/workflows/engine.ts";
-import { testApp } from "./app-definitions.ts";
+import { boundIn, testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
 import { passing } from "./json-workflow-apps.ts";
 import { fakeProvider } from "./model-provider.ts";
@@ -31,6 +27,7 @@ import { liveStatus, sleeping, statusOnce } from "./runs.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import { auditedDuring, unique } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // Workflow runs in an App's tests (`appTest`, spec 28.2): a test identity
 // starts a workflow the release under test binds, and the run is real, on
@@ -140,10 +137,7 @@ const workflowOf = async (
   shape: Parameters<typeof definitionOf>[1] = {}
 ): Promise<string> => {
   const workflow = await createWorkflowResource(env, by, `greet-${unique()}`);
-  await publishWorkflowVersion(env, by, workflow.id, {
-    definition: definitionOf(steps, shape),
-    basedOn: null,
-  });
+  await publishDefinition(env, by, workflow.id, definitionOf(steps, shape));
   return workflow.id;
 };
 
@@ -153,13 +147,12 @@ const requestsApp = async (
   tests: Record<string, string> = {}
 ) => {
   const builder = await person("builder");
-  const fixture = await appWith(filesWith(tests), "Requests", builder);
   const workflowId = await workflow(builder);
-  await bindWorkflowToApp(env, builder, workflowId, {
-    app: fixture.app,
-    alias: "followUp",
-    version: 1,
-  });
+  const fixture = await appWith(
+    boundIn(filesWith(tests), { followUp: workflowId }),
+    "Requests",
+    builder
+  );
   await seal(fixture);
   const release = await loadRelease(env, fixture.app, 1);
   return { builder, app: fixture.app, workflowId, release };
@@ -267,7 +260,7 @@ const activated = async (
   app: string
 ): Promise<unknown> => {
   try {
-    await publishVersion(env, by, app, 1);
+    await rollback(env, appKind, by, app, 1);
   } catch (error) {
     if (!isExpectedError(error)) {
       throw error;
@@ -339,7 +332,12 @@ describe("an App's workflow tests", { timeout: 180_000 }, () => {
       outcome,
       organization: await organizationRunsOf(workflowId),
       recorded: await recordedRuns(app),
-      runEvents: events.filter(({ action }) => action.startsWith("workflow.")),
+      // The run's own: never the binding the version makes as it goes live.
+      runEvents: events.filter(
+        ({ action }) =>
+          action.startsWith("workflow.") &&
+          !action.startsWith("workflow.app_binding.")
+      ),
     }).toStrictEqual({
       outcome: "current",
       organization: { receipts: 0, runs: 0 },
@@ -941,17 +939,19 @@ export default appTest(schema, {
         by,
         `wider-${unique()}`
       );
-      await publishWorkflowVersion(env, by, workflow.id, {
-        definition: JSON.stringify({
+      await publishDefinition(
+        env,
+        by,
+        workflow.id,
+        JSON.stringify({
           ...JSON.parse(definitionOf([])),
           returns: objectSchema({
             status: { kind: "string" },
             secret: { kind: "string" },
           }),
           result: { status: "hello", secret: "ultramarine" },
-        }),
-        basedOn: null,
-      });
+        })
+      );
       return workflow.id;
     });
     const session = await sessionOf(release);
@@ -1222,7 +1222,7 @@ export default appTest(schema, {
       env,
       { type: "person", person: builder },
       workflowId,
-      { version: 1, args: { who: "Ada" }, key: unique() }
+      { expected: 1, args: { who: "Ada" }, key: unique() }
     );
     if (runId === null) {
       throw new Error("The start admitted no run");

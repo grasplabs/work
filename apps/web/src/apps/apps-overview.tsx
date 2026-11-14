@@ -17,10 +17,10 @@ import { Link } from "@tanstack/react-router";
 import { LayoutGridIcon, SearchIcon } from "lucide-react";
 import { useState } from "react";
 
+import { StatusBadge } from "../drafts/status-badge.tsx";
 import { formatDate } from "../format.ts";
 import { Page, PageHeading } from "../frame/page.tsx";
 import { MakeSomethingLink } from "../make/make-link.tsx";
-import { StatusBadge } from "./app-status.tsx";
 
 // The Apps page: every App the person can open, newest first, as a grid of
 // cards (its icon, name, where it stands and when it was made), each
@@ -56,7 +56,7 @@ const AppCard = ({ overview: { app } }: { overview: AppOverview }) => {
         </div>
       </div>
       <div className="text-muted-foreground mt-auto flex items-center gap-2 text-xs">
-        <StatusBadge app={app} />
+        <StatusBadge archived={app.archived} live={app.currentVersion} />
         <span className="truncate">
           <Trans>Made {made}</Trans>
         </span>

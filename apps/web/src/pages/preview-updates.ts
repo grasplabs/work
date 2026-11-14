@@ -11,7 +11,7 @@ import { platformLimits } from "@grasp-os/shared/platform-limits";
 // The page's side of the App's preview taking its draft's writes in the
 // frame it has open (spec 19.2.1): each time core says the draft is
 // at a newer revision, the page asks core for the previewed page at
-// that revision (`apps.drafts.previewUpdate`, which builds each revision once,
+// that revision (`apps.preview.update`, which builds each revision once,
 // for every preview that asks for it, and stages its modules) and hands
 // the frame the address of the page's module over the frame's own
 // bridge; the frame imports it, loading from core only the modules the

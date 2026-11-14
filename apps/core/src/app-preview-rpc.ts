@@ -1,18 +1,7 @@
 import { isAppLayout } from "@grasp-os/compiler";
-import { ownFiles } from "@grasp-os/runtime/host";
-import { agentErrors } from "@grasp-os/shared/agent";
 import { appDataErrors } from "@grasp-os/shared/app-data";
 import type { AppDataPage, AppDataTable } from "@grasp-os/shared/app-data";
-import type {
-  AppDraft,
-  AppDraftChanges,
-  AppDraftHistoryPoint,
-  AppDraftPoint,
-  AppDraftProblem,
-  AppDraftsApi,
-} from "@grasp-os/shared/app-drafts";
-import { appErrors } from "@grasp-os/shared/apps";
-import type { App, AppFiles } from "@grasp-os/shared/apps";
+import type { AppPreviewApi } from "@grasp-os/shared/app-review";
 import { previewShownSchema, readOnlyRevision } from "@grasp-os/shared/chat";
 import type {
   PreviewAt,
@@ -21,16 +10,9 @@ import type {
   PreviewShown,
   PreviewUpdate,
 } from "@grasp-os/shared/chat";
-import type {
-  DataModelChange,
-  DraftDataModel,
-  IndexUse,
-} from "@grasp-os/shared/data-model";
-import { isExpectedError } from "@grasp-os/shared/errors";
 import { draftSealFailures } from "@grasp-os/shared/functions";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
-import { errorFields, log } from "@grasp-os/shared/log";
 import {
   pageErrors,
   pageHrefSchema,
@@ -41,49 +23,20 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { drizzle } from "drizzle-orm/d1";
 
 import {
-  checkFiles,
-  defineInDraft,
-  draftDefinitions,
-  saveDraftChanges,
-} from "./agent-builds.ts";
-import type { DraftCheck } from "./agent-builds.ts";
-import {
-  dataModelOf,
-  definitionPlan,
-  operationDetail,
-  usesOf,
-} from "./app-definition.ts";
-import {
-  draftOf,
-  draftPoints,
-  draftSummary,
-  emptyDraft,
-  liveBase,
-  readPoint,
-  restorePoint,
-} from "./app-drafts.ts";
-import type { Draft } from "./app-drafts.ts";
-import { publishDraft } from "./app-publish.ts";
-import {
   appFor,
+  appKind,
   changeEntry,
-  changesAnything,
-  diffFiles,
-  draftFiles,
   editableApp,
   findVersion,
   hasPages,
-  nextLabel,
-  versionFiles,
 } from "./apps.ts";
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import { withReferencesText } from "./draft-references.ts";
 import type { PageModules } from "./draft-references.ts";
 import { draftReferences, draftTestData } from "./draft-runs.ts";
+import { changesAnything, filesOf, readCheckpoint } from "./drafts.ts";
+import type { DraftState } from "./drafts.ts";
 import { appPreview } from "./durable-objects.ts";
-import { indexAppNow } from "./knowledge/apps-collection.ts";
-import { callbackFor, isStub } from "./page-callbacks.ts";
-import type { StillOpen } from "./page-callbacks.ts";
 import { leaseFor } from "./page-delivery.ts";
 import {
   appModules,
@@ -93,57 +46,21 @@ import {
   stageModules,
   updatingFrameAccess,
 } from "./page-frame.ts";
-import { buildAppCode, buildPages, versionPages } from "./pages.ts";
+import { versionPages } from "./pages.ts";
 import type { BuiltPage } from "./pages.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
-import { Subscription } from "./subscription.ts";
-import { reviewDraft } from "./version-review.ts";
 
-// A signed-in person's `apps.drafts` (GRA-1665): each App's one draft
-// (app-drafts.ts), which every builder of the App and their chats' agents
-// share, and its one preview (app-preview.ts), which every builder shares
-// too: the same test data for all, each acting as themselves. Only a
-// builder of the App reads, changes or previews it, checked at every
-// call, and a change of an archived App is refused; each write lands only
-// over the revision the person read (`app.conflict` once another write
-// landed), and is audited as theirs. Every write tells the App's preview,
-// which tells every page that follows the draft (`watch`), so each open
-// preview takes it at once, whoever made it. The preview's frames call
-// the draft on the path every page calls on, under the lease the bundle
-// carries (page-calls.ts, draft-runs.ts).
-
-/**
- * Most drafts one connection follows at once, as a connection follows at
- * most so many chats (chats-rpc.ts).
- */
-const maxWatches = 10;
-
-/** How a push to a page that follows a draft is refused. */
-const refusals = {
-  invalid: () => agentErrors.create("agent.invalid_request"),
-  closed: () => appErrors.create("app.preview_outdated"),
-};
+// A signed-in person's `apps.preview` (GRA-1665): each App's one preview
+// of its draft (app-preview.ts), which every builder shares, on one store
+// of test data. Only a builder of the App previews it, checked at every
+// call, and an archived App has none. The preview's frames call the draft
+// on the path every page calls on, under the lease the bundle carries
+// (page-calls.ts, draft-runs.ts); each open frame follows the draft's
+// writes through `drafts.watch` (drafts-rpc.ts).
 
 const encoder = new TextEncoder();
-
-/** Whether `by` builds App `app` now. */
-const buildsNow = async (
-  env: Env,
-  by: Identity,
-  app: AppId
-): Promise<boolean> => {
-  try {
-    await editableApp(env, by, app);
-    return true;
-  } catch (error) {
-    if (isExpectedError(error)) {
-      return false;
-    }
-    throw error;
-  }
-};
 
 /**
  * What the open frame of a preview imports of `built`, a build of its
@@ -173,9 +90,9 @@ const refreshOf = (
 });
 
 /**
- * What a preview builds (`AppDraftsRpc.#previewed`): its files, the
+ * What a preview builds (`AppPreviewRpc.#previewed`): its files, the
  * references their pages import, the draft's revision it is at
- * (`readOnlyRevision` for an undo point or a version opened read-only),
+ * (`readOnlyRevision` for a checkpoint or a version opened read-only),
  * and the App's version it `shows`, when it shows one rather than the
  * draft's changes.
  */
@@ -211,74 +128,14 @@ const buildFailed = (error: unknown): boolean =>
   typeof error.code === "string" &&
   (error.code === "page.build_failed" || draftSealFailures.has(error.code));
 
-/** Most problems a draft's review lists (`AppDraftChanges.check`). */
-const maxProblems = 50;
-
-/**
- * The errors `check` found, as a builder reads them before publishing:
- * its builds' errors by file, then what its preview ran into. Warnings
- * never fail a check, so they aren't listed.
- */
-const problemsOf = (check: DraftCheck): AppDraftProblem[] =>
-  [
-    ...[check.pages, check.server, check.lint].flatMap((build) =>
-      build.diagnostics
-        .filter(({ severity }) => severity === "error")
-        .map(({ file, line, message }) => ({ at: file, line, message }))
-    ),
-    ...check.preview.problems
-      .filter(({ kind }) => kind !== "warning")
-      .map(({ at, message }) => ({ at, line: null, message })),
-  ].slice(0, maxProblems);
-
-/** A draft revision as the page sends it: a count of writes. */
-const revisionOf = (revision: unknown): number => {
-  if (
-    typeof revision !== "number" ||
-    !Number.isSafeInteger(revision) ||
-    revision < 0
-  ) {
-    throw appErrors.create("app.invalid", {
-      issues: ["A draft revision, as the draft was read."],
-    });
-  }
-  return revision;
-};
-
-/** An undo point's number as the page sends it, to list those before it. */
-const pointOf = (point: unknown): number => {
-  if (typeof point !== "number" || !Number.isSafeInteger(point) || point < 1) {
-    throw appErrors.create("app.invalid", {
-      issues: ["An undo point's number, as the draft's history listed it."],
-    });
-  }
-  return point;
-};
-
-export class AppDraftsRpc extends CoreRpcTarget implements AppDraftsApi {
+export class AppPreviewRpc extends CoreRpcTarget implements AppPreviewApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
-  /** This connection's follows of drafts, each until it's released. */
-  readonly #watches = new Set<Disposable>();
-  /**
-   * Whether this connection may still follow drafts, before each push:
-   * its session holds, as the connection's own check last read it (at
-   * most `sessionRecheckMs` old, session-check.ts).
-   */
-  readonly #stillOpen: StillOpen;
 
   constructor(env: Env, check: SessionCheck) {
     super();
     this.#env = env;
     this.#check = check;
-    this.#stillOpen = async () => {
-      try {
-        await check();
-        return true;
-      } catch {
-        return false;
-      }
-    };
   }
 
   /** The App's preview of its draft (app-preview.ts). */
@@ -286,157 +143,12 @@ export class AppDraftsRpc extends CoreRpcTarget implements AppDraftsApi {
     return appPreview(this.#env, app);
   }
 
-  async get(app: string): Promise<AppDraft> {
-    return await withPerson(this.#check, async (by) => {
-      const { id } = await appFor(this.#env, by, app, "builder");
-      return await draftSummary(this.#env, id);
-    });
-  }
-
-  /**
-   * Every file of the App's draft, read as its writers read them
-   * (`draftOf`), so the code view shows what the preview builds.
-   */
-  async files(app: string): Promise<AppFiles> {
-    return await withPerson(this.#check, async (by) => {
-      const { id } = await appFor(this.#env, by, app, "builder");
-      const draft = await draftOf(this.#env, id);
-      return Object.fromEntries(await draftFiles(this.#env, id, draft));
-    });
-  }
-
-  async points(app: string, before?: number): Promise<AppDraftHistoryPoint[]> {
-    return await withPerson(this.#check, async (by) => {
-      const { id } = await appFor(this.#env, by, app, "builder");
-      return await draftPoints(
-        this.#env,
-        id,
-        before === undefined ? undefined : pointOf(before)
-      );
-    });
-  }
-
-  /**
-   * What publishing the App's draft would change against its live
-   * version, for one who builds it: its files, what it does to the App's
-   * records, the access the App holds and asks for, and its check, as
-   * publishing checks it (`checkFiles`). All read at the draft's revision
-   * now, which the person publishes over.
-   */
-  async changes(app: string): Promise<AppDraftChanges> {
-    return await withPerson(this.#check, async (by) => {
-      const found = await appFor(this.#env, by, app, "builder");
-      const { id, currentVersion } = found;
-      const draft = await draftOf(this.#env, id);
-      const files = await draftFiles(this.#env, id, draft);
-      const live = new Map(
-        currentVersion === null
-          ? []
-          : Object.entries(await versionFiles(this.#env, id, currentVersion))
-      );
-      const [review, check, next] = await Promise.all([
-        reviewDraft(this.#env, by, found, draft),
-        checkFiles(this.#env, id, draft, Object.fromEntries(files)),
-        nextLabel(this.#env, id, new Date()),
-      ]);
-      return {
-        ...review,
-        revision: draft.revision,
-        live: currentVersion,
-        liveLabel: found.liveLabel,
-        next,
-        files: diffFiles(live, files),
-        check: { passed: check.passed, problems: problemsOf(check) },
-      };
-    });
-  }
-
-  /**
-   * Makes undo point `point` the draft again, as a new point, over the
-   * `revision` the person read: only while they build the App and it
-   * isn't archived. Every open preview of the App takes it.
-   */
-  async restorePoint(
-    app: string,
-    point: number,
-    revision: number
-  ): Promise<AppDraftPoint> {
-    return await withPerson(this.#check, async (by) => {
-      const { id } = await editableApp(this.#env, by, app);
-      return await restorePoint(this.#env, by, id, point, revisionOf(revision));
-    });
-  }
-
-  /**
-   * Discards the draft's changes, over the `revision` the person read:
-   * the draft is over the App's live version again, and its undo points
-   * stay, to restore one. Only while they build the App and it isn't
-   * archived.
-   */
-  async discard(app: string, revision: number): Promise<void> {
-    await withPerson(this.#check, async (by) => {
-      const { id } = await editableApp(this.#env, by, app);
-      await emptyDraft(this.#env, id, {
-        revision: revisionOf(revision),
-        base: await liveBase(this.#env, id),
-        by,
-      });
-    });
-  }
-
-  /**
-   * Follows the App's draft for one page: `onRevision` hears its revision
-   * after each write, whoever made it (`AppPreview.revised`), so the
-   * page's open preview takes it at once. Only while the person builds
-   * the App, checked before each push; counts as one of the connection's
-   * watches.
-   */
-  async watch(
-    app: string,
-    onRevision: (revision: number) => void
-  ): Promise<Subscription> {
-    return await withPerson(this.#check, async (by) => {
-      const { id } = await appFor(this.#env, by, app, "builder");
-      if (!isStub(onRevision)) {
-        throw pageErrors.create("page.invalid");
-      }
-      if (this.#watches.size >= maxWatches) {
-        throw agentErrors.create("agent.too_many_watches");
-      }
-      const stillBuilds = async (): Promise<boolean> =>
-        (await this.#stillOpen()) && (await buildsNow(this.#env, by, id));
-      const listener = callbackFor(onRevision, stillBuilds, refusals, () => {
-        this.#watches.delete(listener);
-      });
-      this.#watches.add(listener);
-      const preview = this.#previewOf(id);
-      let watchId: string;
-      try {
-        watchId = await preview.watch(by.userId, listener);
-      } catch (error) {
-        listener[Symbol.dispose]();
-        throw error;
-      }
-      return new Subscription(async () => {
-        listener[Symbol.dispose]();
-        try {
-          await preview.unwatch(watchId);
-        } catch (error) {
-          log.warn("app.preview_unwatch_failed", {
-            app: id,
-            ...errorFields(error),
-          });
-        }
-      });
-    });
-  }
-
   /**
    * Clears the test data of the App's preview, for everyone who builds
    * it (`AppPreview.resetData`): only while the person builds the App and
    * it isn't archived. Audited as theirs first.
    */
-  async resetTestData(app: string): Promise<void> {
+  async resetData(app: string): Promise<void> {
     await withPerson(this.#check, async (by) => {
       const { id } = await editableApp(this.#env, by, app);
       const db = drizzle(this.#env.DB);
@@ -452,7 +164,7 @@ export class AppDraftsRpc extends CoreRpcTarget implements AppDraftsApi {
    * view shows in place of the App's records while it shows the draft
    * (draft-runs.ts, `draftTestData`).
    */
-  async testTables(app: string): Promise<AppDataTable[]> {
+  async tables(app: string): Promise<AppDataTable[]> {
     return await withPerson(this.#check, async (by) => {
       const { id } = await editableApp(this.#env, by, app);
       const tables = await draftTestData(this.#env, by, id);
@@ -463,7 +175,7 @@ export class AppDraftsRpc extends CoreRpcTarget implements AppDraftsApi {
     });
   }
 
-  async testRecords(
+  async records(
     app: string,
     table: string,
     cursor: string | null
@@ -485,143 +197,27 @@ export class AppDraftsRpc extends CoreRpcTarget implements AppDraftsApi {
   }
 
   /**
-   * Publishes the App's draft at `revision` (app-publish.ts,
-   * `publishDraft`), by the person themselves: only while they build the
-   * App and it isn't archived. Then indexes the App into the Apps
-   * collection (knowledge/apps-collection.ts): its entry holds the new
-   * version once this returns, unless indexing failed or raced another;
-   * the clock then heals it within 15 minutes.
-   */
-  async publish(app: string, revision: number, message?: string): Promise<App> {
-    return await withPerson(this.#check, async (by) => {
-      const { id } = await editableApp(this.#env, by, app);
-      const live = await publishDraft(
-        this.#env,
-        by,
-        id,
-        revisionOf(revision),
-        message ?? "Published from the draft."
-      );
-      await indexAppNow(this.#env, id);
-      return live;
-    });
-  }
-
-  /**
-   * What uses each of the draft's indexes, from what the compiler found
-   * building its server code and its pages (cached by their files, as
-   * the preview and the draft's check build them): none where a build
-   * fails, or can't run now, which the data model is shown without.
-   */
-  async #indexUses(
-    app: string,
-    files: ReadonlyMap<string, string>
-  ): Promise<IndexUse[]> {
-    // Never their copy of what Grasp generates, as the preview builds them.
-    const given = ownFiles(Object.fromEntries(files));
-    try {
-      const [code, pages] = await Promise.all([
-        buildAppCode(this.#env, given, app),
-        // Compiled for what each page calls, not type-checked: a page that
-        // calls a function reads as calling it whether or not it builds.
-        buildPages(this.#env, given, app, {
-          profile: "preview",
-          checks: false,
-        }),
-      ]);
-      return usesOf(code.ok ? (code.indexReads ?? []) : [], pages.calls ?? {});
-    } catch (error) {
-      log.warn("data_model.index_uses_failed", { app, ...errorFields(error) });
-      return [];
-    }
-  }
-
-  /**
-   * The data model of the App's draft (its definition), and what
-   * publishing it does to the App's records: only while the person builds
-   * the App, as for its files.
-   */
-  async dataModel(app: string): Promise<DraftDataModel> {
-    return await withPerson(this.#check, async (by) => {
-      const found = await appFor(this.#env, by, app, "builder");
-      const held = await draftDefinitions(this.#env, found);
-      if ("problem" in held) {
-        throw appErrors.create("app.definition_invalid", {
-          issues: [held.problem],
-        });
-      }
-      return {
-        model: dataModelOf(held.own),
-        plan: definitionPlan(held.before, held.own),
-        uses: await this.#indexUses(found.id, held.files),
-      };
-    });
-  }
-
-  /**
-   * Changes the definition in the App's draft by `operation`, by the
-   * person themselves, as a chat's agent's definition tools do
-   * (agent-builds.ts, `defineInDraft`), audited as theirs: only while
-   * they build the App and it isn't archived. With `preview`, saves
-   * nothing: what it would make of the model, and the plan, to show
-   * before it is made.
-   */
-  async define(
-    app: string,
-    operation: unknown,
-    preview = false
-  ): Promise<DataModelChange> {
-    return await withPerson(this.#check, async (by) => {
-      const found = await editableApp(this.#env, by, app);
-      const defined = await defineInDraft(
-        this.#env,
-        by,
-        found,
-        operation,
-        async (draft, files, changes, definition) => {
-          if (!preview) {
-            await saveDraftChanges(
-              this.#env,
-              { by, detail: operationDetail(operation) },
-              found,
-              { draft, files, changes, definition }
-            );
-          }
-        }
-      );
-      return defined.ok
-        ? {
-            ok: true,
-            model: dataModelOf(defined.definition),
-            plan: defined.plan,
-            change: defined.change,
-          }
-        : defined;
-    });
-  }
-
-  /**
    * The pages of the App's draft, to preview: only while the person
-   * builds the App, as the agent must to write it. With `point`, of that
-   * undo point of the draft, read-only: built the same way, but at
+   * builds the App, as the agent must to write it. With `checkpoint`, of that
+   * checkpoint of the draft, read-only: built the same way, but at
    * `readOnlyRevision`, with no lease, so it calls nothing. With
    * `version` instead, of that version of the App, read-only the same
    * way.
    */
-  async preview(
+  async open(
     app: string,
-    point?: number,
+    checkpoint?: number,
     version?: number
   ): Promise<PreviewBundle> {
     return await withPerson(this.#check, async (by) => {
       // As its recheck (`buildsNow`): an archived App has no preview.
       const { id, name } = await editableApp(this.#env, by, app);
-      const asked = point === undefined ? { version } : { point };
+      const asked = checkpoint === undefined ? { version } : { checkpoint };
       const load = async (): Promise<PreviewBundle> =>
         await this.#loadPreview(by, id, name, asked);
-      // A point or version opened read-only is one person's click, never
+      // A checkpoint or version opened read-only is one person's click, never
       // asked for again by a write: it builds as it is asked.
-      if (point !== undefined || version !== undefined) {
+      if (checkpoint !== undefined || version !== undefined) {
         return await load();
       }
       // The draft as it is now: one open per viewer and revision, shared
@@ -655,7 +251,7 @@ export class AppDraftsRpc extends CoreRpcTarget implements AppDraftsApi {
    * frame shows: it is handed only a build it can swap in, and otherwise
    * told whether what it shows is still what to show (`PreviewUpdate`).
    */
-  async previewUpdate(
+  async update(
     app: string,
     revision: number,
     shown: PreviewShown
@@ -770,16 +366,18 @@ export class AppDraftsRpc extends CoreRpcTarget implements AppDraftsApi {
   }
 
   /**
-   * What a read-only preview of App `id` opens: its undo point `point`,
+   * What a read-only preview of App `id` opens: its checkpoint `checkpoint`,
    * or else its version `version` as a draft over it with no changes.
    */
   async #readOnlyDraft(
     id: AppId,
-    { point, version }: { point?: number; version?: number | undefined }
-  ): Promise<Draft> {
-    if (point !== undefined) {
-      const { draft } = await readPoint(this.#env, id, point);
-      return draft;
+    {
+      checkpoint,
+      version,
+    }: { checkpoint?: number; version?: number | undefined }
+  ): Promise<DraftState> {
+    if (checkpoint !== undefined) {
+      return await readCheckpoint(this.#env, { kind: "app", id }, checkpoint);
     }
     const found = await findVersion(this.#env, id, version);
     return {
@@ -792,25 +390,29 @@ export class AppDraftsRpc extends CoreRpcTarget implements AppDraftsApi {
 
   /**
    * What `by`'s preview of App `id` builds: the files of its draft now,
-   * of its undo point `point` or its version `version`, or (`fallback`)
+   * of its checkpoint `checkpoint` or its version `version`, or (`fallback`)
    * of the version the draft is over in place of the draft, and the
-   * references their pages import, read over the same build. A point or
+   * references their pages import, read over the same build. A checkpoint or
    * version is read-only (`readOnlyRevision`). The draft now that changes
    * nothing, and the fallback, `shows` that version, read anew.
    */
   async #previewed(
     id: AppId,
     {
-      point,
+      checkpoint,
       version,
       fallback = false,
-    }: { point?: number; version?: number | undefined; fallback?: boolean }
+    }: {
+      checkpoint?: number;
+      version?: number | undefined;
+      fallback?: boolean;
+    }
   ): Promise<Previewed> {
     const preview = this.#previewOf(id);
-    if (point !== undefined || version !== undefined) {
-      const draft = await this.#readOnlyDraft(id, { point, version });
+    if (checkpoint !== undefined || version !== undefined) {
+      const draft = await this.#readOnlyDraft(id, { checkpoint, version });
       return {
-        files: await draftFiles(this.#env, id, draft),
+        files: await filesOf(this.#env, appKind, id, draft),
         references: async () => ({
           references: await draftReferences(this.#env, id, draft),
           serverUnbuilt: false,
@@ -825,7 +427,7 @@ export class AppDraftsRpc extends CoreRpcTarget implements AppDraftsApi {
     const shows =
       draft.base !== null && !changesAnything(draft) ? draft.base : undefined;
     return {
-      files: await draftFiles(this.#env, id, draft),
+      files: await filesOf(this.#env, appKind, id, draft),
       // Of the very build its files are of, or the last that built.
       references: async () => {
         try {
@@ -849,7 +451,7 @@ export class AppDraftsRpc extends CoreRpcTarget implements AppDraftsApi {
 
   /**
    * The bundle of `by`'s preview of App `id`, built from its draft now,
-   * or read-only from its undo point `point` or version `version`
+   * or read-only from its checkpoint `checkpoint` or version `version`
    * (`#previewed`). The draft now with changes that leave it no page that
    * builds opens on the version it is over instead, as a draft that
    * changes nothing would show it, said to be a `fallback`, its calls on
@@ -861,7 +463,7 @@ export class AppDraftsRpc extends CoreRpcTarget implements AppDraftsApi {
     by: Identity,
     id: AppId,
     name: string,
-    opened: { point?: number; version?: number | undefined }
+    opened: { checkpoint?: number; version?: number | undefined }
   ): Promise<PreviewBundle> {
     const now = await this.#previewed(id, opened);
     let shown = now;
@@ -986,7 +588,7 @@ export class AppDraftsRpc extends CoreRpcTarget implements AppDraftsApi {
    * of the draft by any builder's agent: text its code wrote, held to
    * size (`pageProblemSchema`).
    */
-  async previewReport(
+  async report(
     app: string,
     at: PreviewAt,
     path: string,

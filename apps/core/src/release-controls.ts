@@ -20,7 +20,7 @@ import { requireMemberAdmin } from "./permissions.ts";
 import { placeHold, releaseHold, revokeRelease } from "./release-retention.ts";
 
 // An admin's controls over an App's sealed releases (spec 16.3), as
-// `apps.versions` serves them: reading which were revoked and which legal
+// `apps.releases` serves them: reading which were revoked and which legal
 // holds keep them, revoking one, and placing or lifting a hold. What each
 // does, and what stops it going wrong, is in release-retention.ts. Here:
 //
