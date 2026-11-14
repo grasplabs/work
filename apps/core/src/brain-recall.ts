@@ -12,7 +12,11 @@ import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
 import { skillErrors } from "@grasp-os/shared/skills";
 
 import { appendAuditEvent } from "./audit-outbox.ts";
-import { codeRecallOf, recallAs, skillVersionRefOf } from "./brain-next.ts";
+import {
+  codeRecallOf,
+  recallPassagesAs,
+  skillVersionRefOf,
+} from "./brain-next.ts";
 import type { SkillAt, SkillVersionRef } from "./brain-next.ts";
 import { skillReadSchema, skillsSelectSchema } from "./brain-pack.ts";
 import { readSkillFor, selectSkillsFor } from "./brain-skills.ts";
@@ -131,11 +135,26 @@ export const recallFor = async (
     // An App's or a workflow's as the company alone; a chat's code as
     // its person's teams alone; never what only a person may read.
     // Nothing code sends can change it.
-    const pack: BrainPack = await recallAs(env, caller.authority.onBehalfOf, {
+    // Passages alone (GRA-1742): the pack code gets is the SDK's
+    // `BrainPack`, which holds no memory, so none takes its budget or a
+    // word from `notFound`, and no entity reaches code.
+    const recalled = await recallPassagesAs(env, caller.authority.onBehalfOf, {
       ...recall,
       personal: false,
       company: caller.authority.subject.type !== "agent",
     });
+    // A capture is one person's own, kept only in their own store (core's
+    // addSource refuses it anywhere else), which this recall never reads:
+    // none can be here. Narrowed for the SDK's type, never thrown over.
+    const pack: BrainPack = {
+      ...recalled,
+      items: recalled.items.flatMap((item) => {
+        const { producer, id } = item.source;
+        return producer === "capture"
+          ? []
+          : [{ ...item, source: { producer, id } }];
+      }),
+    };
     await caller.keep?.(pack);
     await audit({ items: pack.items.length, truncated: pack.truncated });
     return pack;

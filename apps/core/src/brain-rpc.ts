@@ -65,6 +65,7 @@ import { askMorePeople, workKnowledge } from "./brain-work.ts";
 import { catalogEntries, personOf } from "./connections.ts";
 import { organizations } from "./db/core/schema.ts";
 import { brainOf } from "./knowledge/ports.ts";
+import { nativeItemReads } from "./native-tool-classes.gen.ts";
 import { intakeIds } from "./onboarding/brain-intake.ts";
 import {
   isKickoffTeam,
@@ -663,23 +664,37 @@ const viaOf = (source: string): Connection["via"] =>
  * active connection to it (their own, or a shared one), and the active
  * connections to entries an admin hid or the catalog doesn't list (a toolkit it no longer
  * lists, say). A native provider is connected directly; a toolkit through
- * Composio. A connection matches the tool names that are its name.
+ * Composio. A connection matches the tool names that are its name. One
+ * the Brain keeps the person's reads from says so (`keepsReads`).
  */
 const connectionsOf = async (
   env: Env,
   person: Identity
 ): Promise<Connection[]> => {
-  const [entries, listed] = await Promise.all([
+  const [entries, connecting] = await Promise.all([
     catalogEntries(env),
-    personOf(env, person).then(
-      async (connecting) => await env.CONNECT.listConnections(connecting)
-    ),
+    personOf(env, person),
   ]);
+  const listed = await env.CONNECT.listConnections(connecting);
+  const activeListed = listed.filter(({ status }) => status === "active");
   const active = new Set(
-    listed
-      .filter(({ status }) => status === "active")
+    activeListed.map(({ source, provider }) => entryKey(source, provider))
+  );
+  // What capture keeps by (connection-capture.ts): a read through the
+  // person's own connection, of a native tool that answers one item. The
+  // same table, so the page cannot say more than the code keeps.
+  const keeping = new Set(
+    activeListed
+      .filter(
+        ({ source, provider, ownerUserId }) =>
+          source === "native" &&
+          ownerUserId === connecting.userId &&
+          Object.hasOwn(nativeItemReads, provider)
+      )
       .map(({ source, provider }) => entryKey(source, provider))
   );
+  const keepsReads = (key: string): { keepsReads?: true } =>
+    keeping.has(key) ? { keepsReads: true } : {};
   // A hidden entry isn't offered, but a connection to it still runs:
   // it stays, by its catalog name.
   const shown = entries.filter(
@@ -690,6 +705,7 @@ const connectionsOf = async (
     status: active.has(entryKey(source, id)) ? "connected" : "available",
     via: viaOf(source),
     matches: [name],
+    ...keepsReads(entryKey(source, id)),
   }));
   const listedKeys = new Set(
     entries.map(({ source, id }) => entryKey(source, id))
@@ -703,6 +719,7 @@ const connectionsOf = async (
         status: "connected",
         via: viaOf(source),
         matches: [provider],
+        ...keepsReads(each),
       };
     });
   return [...offered, ...unlisted];

@@ -56,13 +56,16 @@ import type {
   MemoryChangeOutcome,
   MemoryId,
   ExportStatus,
+  Finding,
   KeyState,
   HandOverPriority,
+  HandOverRequest,
   HandOverResult,
   HandOvers,
   ModelReply,
   Pack,
   PackItem,
+  PackMemory,
   PersonReader,
   Reader,
   RecallRequest,
@@ -225,7 +228,9 @@ const kindsWithoutColon = <const K extends string>(
  */
 // `chat`: a turn of a person's own chat, in their own store alone, in its
 // chat's group (brain-next-origins.ts `chatTurnSource`, GRA-1805).
-const producerKinds = kindsWithoutColon(["upload", "chat", "run"]);
+// `capture`: what a chat's agent read through its person's own connection
+// (connection-capture.ts, GRA-1730), in their own store alone.
+const producerKinds = kindsWithoutColon(["upload", "chat", "run", "capture"]);
 
 /**
  * The kinds the Sources page lists (`listSourcesAs`): not a chat's turns,
@@ -290,6 +295,7 @@ const newSourceSchema = z.strictObject({
   text: wellFormedString(),
   readers: sourceReadersSchema,
   group: sourceRefSchema.optional(),
+  readAt: z.date().optional(),
 });
 
 /** The most characters of a question `recallAs` takes, as the Brain's contract says. */
@@ -384,10 +390,35 @@ export interface RecalledItem extends Omit<PackItem, "source"> {
   source: SourceRef;
 }
 
-/** A pack, as recall answers (`recallAs`). */
-export interface RecalledPack extends Omit<Pack, "items"> {
-  items: RecalledItem[];
+/** A memory of a pack, citing its source as its producer named it. */
+export interface RecalledMemory extends Omit<PackMemory, "source"> {
+  source: SourceVersionRef | null;
 }
+
+/** A pack, as recall answers (`recallAs`): passages and memories. */
+export interface RecalledPack extends Omit<Pack, "items" | "memories"> {
+  items: RecalledItem[];
+  memories: RecalledMemory[];
+}
+
+/**
+ * A pack of passages alone (`recallPassagesAs`): what the chat hands its
+ * model and the Brain page shows, until each carries memories with their
+ * own checks when history is read again.
+ */
+export interface RecalledPassages {
+  items: RecalledItem[];
+  notFound: string[];
+  truncated: boolean;
+}
+
+/** `source` of the Brain as its producer named it, or none. */
+const versionRefOf = (
+  source: { source: SourceId; version: number } | null
+): SourceVersionRef | null =>
+  source === null
+    ? null
+    : { source: sourceRefOf(source.source), version: source.version };
 
 /** A version of a source, whole. */
 export interface SourceVersion extends SourceVersionRef {
@@ -622,9 +653,15 @@ export const addSource = async (
     text: string;
     readers: SourceReaders;
     group?: SourceRef;
+    /**
+     * When the producer read `text` where it lives: a text read before the
+     * source's current version was is not added (`newer`), whatever order
+     * the adds arrive in.
+     */
+    readAt?: Date;
   }
-): Promise<SourceVersionRef> => {
-  const { source, change, text, readers, group } = checked(
+): Promise<SourceVersionRef & { newer?: true }> => {
+  const { source, change, text, readers, group, readAt } = checked(
     newSourceSchema,
     added
   );
@@ -636,11 +673,18 @@ export const addSource = async (
       "Refused: only a source for one person alone is in a group, of its own producer"
     );
   }
+  // What an agent read through a person's own connection is theirs alone
+  // (connection-capture.ts): never in the shared store, so never in a
+  // recall that doesn't read their own store, such as code's.
+  if (source.producer === "capture" && readers.kind !== "owner") {
+    throw new Error("Refused: a capture is for one person alone");
+  }
   const access = accessOf(readers);
   const key = sourceKeyOf(source);
   let version: number;
+  let newer: true | undefined;
   try {
-    ({ version } = await whileNotRestoring(
+    ({ version, newer } = await whileNotRestoring(
       async () =>
         await keptIn(
           env,
@@ -653,6 +697,7 @@ export const addSource = async (
               text,
               access,
               ...(group === undefined ? {} : { group: sourceKeyOf(group) }),
+              ...(readAt === undefined ? {} : { readAt: readAt.getTime() }),
             })
         )
     ));
@@ -668,7 +713,7 @@ export const addSource = async (
     }
     throw error;
   }
-  return { source, version };
+  return { source, version, ...(newer === true ? { newer } : {}) };
 };
 
 /** Whether `vector` is one the Brain takes: finite numbers, not all zero. */
@@ -708,26 +753,18 @@ const meaningOf = async (
 };
 
 /**
- * A pack of what the member `personId` may read for `question`, as core
- * counts them now, within `budget.tokens` (the Brain's estimate,
- * `tokensOf`), and, with `asOf`, of each source as it was then: the
- * Brain's `recall`, by words, exact parts and, once a model ships, by
- * meaning: the question is embedded while its reader is read. Every item
- * cites its source, version and place; the pack says what was not found
- * and whether the budget cut it short, all from what they may read alone.
- * With `personal`, from the shared store and their own together, packed
- * as one store holding both would pack them (`packAcross`); without, from
- * the shared store alone, as their teams may read it (a reader with no
- * person: no `owner` source matches), or with `company` as the company
- * alone. Refused once they are no longer a member, or when `personId`
- * isn't an ID.
+ * The Brain's request of a recall by the member `personId`, as core counts
+ * them now: the question checked as the Brain checks it before the
+ * embedder sees any of it, and embedded while their reader is read. With
+ * `personal`, as the person (`person`: their own store too); without, as
+ * their teams (a reader with no person: no `owner` source matches); with
+ * `company`, as the company alone.
  */
-export const recallAs = async (
+const recallRequestAs = async (
   env: BrainEnv & Pick<Env, "DB" | "EMBEDDER">,
   personId: string,
   { question: asked, budget, asOf, personal, company = false }: Recall
-): Promise<RecalledPack> => {
-  // As the Brain checks it, before the embedder sees any of it.
+): Promise<RecallRequest> => {
   const question = checked(questionSchema, asked);
   let reach: Reach = personal ? "person" : "teams";
   if (company) {
@@ -738,36 +775,106 @@ export const recallAs = async (
     // As of a moment the Brain never searches by meaning: nothing to embed.
     asOf === undefined ? meaningOf(env, question) : {},
   ]);
-  const request: RecallRequest = {
+  return {
     question,
     reader,
     budget,
     ...(asOf === undefined ? {} : { asOf }),
     ...meaning,
   };
-  const own = ownBrainOf(env, reader);
-  const { items, notFound, truncated } =
-    own === undefined
-      ? await brain(env).recall(request)
-      : packAcross(
-          question,
-          budget.tokens,
-          // The same request of both, the shared store first, as ties go
-          // to the store given first.
-          await Promise.all([brain(env).find(request), own.find(request)])
-        );
+};
+
+/**
+ * What every store `request`'s reader may read from finds for it, by
+ * `finding` (`find`, or `findPassages` for passages alone): the shared
+ * store, and their own when the reader names them (`ownBrainOf`), the
+ * shared store first, as ties go to the store given first.
+ */
+const findingsOf = async (
+  env: BrainEnv,
+  request: RecallRequest,
+  finding: "find" | "findPassages"
+): Promise<Finding[]> => {
+  const own = ownBrainOf(env, request.reader);
+  return await Promise.all([
+    brain(env)[finding](request),
+    ...(own === undefined ? [] : [own[finding](request)]),
+  ]);
+};
+
+/** `items` of a pack, each citing its source as its producer named it. */
+const recalledItems = (items: Pack["items"]): RecalledItem[] =>
+  items.map(({ source, version, position, text, whole, found }) => ({
+    source: sourceRefOf(source),
+    version,
+    position,
+    text,
+    whole,
+    found,
+  }));
+
+/**
+ * A pack of what the member `personId` may read for `question`, as core
+ * counts them now, within `budget.tokens` (the Brain's estimate,
+ * `tokensOf`), and, with `asOf`, of each source as it was then: the
+ * Brain's `recall`, by words, exact parts, the entities the question
+ * names and, once a model ships, by meaning: passages and memories, each
+ * citing its source, version and place, and the contested facts among
+ * them; what was not found and whether the budget cut it short, all from
+ * what they may read alone. With `personal`, from the shared store and
+ * their own together, packed as one store holding both would pack them
+ * (`packAcross`); without, from the shared store alone, as their teams
+ * may read it, or with `company` as the company alone. Refused once they
+ * are no longer a member, or when `personId` isn't an ID. For a caller
+ * that hands memories on with their own checks: none yet. The chat, the
+ * Brain page and code (`recallFor`) take passages alone
+ * (`recallPassagesAs`).
+ */
+export const recallAs = async (
+  env: BrainEnv & Pick<Env, "DB" | "EMBEDDER">,
+  personId: string,
+  recall: Recall
+): Promise<RecalledPack> => {
+  const request = await recallRequestAs(env, personId, recall);
+  const { items, memories, contested, notFound, truncated } = packAcross(
+    request.question,
+    request.budget.tokens,
+    await findingsOf(env, request, "find")
+  );
   return {
-    items: items.map(({ source, version, position, text, whole, found }) => ({
-      source: sourceRefOf(source),
-      version,
-      position,
-      text,
-      whole,
-      found,
+    items: recalledItems(items),
+    memories: memories.map((memory) => ({
+      ...memory,
+      source: versionRefOf(memory.source),
     })),
+    contested,
     notFound,
     truncated,
   };
+};
+
+/**
+ * A pack of the passages alone that the member `personId` may read for
+ * `question`, as `recallAs` finds them, the whole budget theirs: the
+ * stores find passages alone (`findPassages`), so no memory is read,
+ * takes room, reaches the caller, or counts as found in `notFound`, and
+ * no memory way can fail the recall. What the
+ * chat hands its model and the Brain page shows (GRA-1742: memories reach
+ * them in their own pull request, re-checked when history is read again),
+ * and what code recalls (`recallFor`, the SDK's `BrainPack`).
+ */
+export const recallPassagesAs = async (
+  env: BrainEnv & Pick<Env, "DB" | "EMBEDDER">,
+  personId: string,
+  recall: Recall
+): Promise<RecalledPassages> => {
+  const request = await recallRequestAs(env, personId, recall);
+  const { items, notFound, truncated } = packAcross(
+    request.question,
+    request.budget.tokens,
+    await findingsOf(env, request, "findPassages")
+  );
+  return { items: recalledItems(items), notFound, truncated };
 };
 
 /** Where an item of a pack is: its source, version and place. */
@@ -775,31 +882,33 @@ const placeOf = ({ source, version, position }: RecalledItem): string =>
   JSON.stringify([sourceKeyOf(source), version, position]);
 
 /**
- * Two recalls for one reader as one pack within `budget.tokens`: the
- * first's items in their order, then the second's that the first doesn't
- * hold (the same passage of the same version), best first, each while it
- * fits as the Brain counts it (`packItemTokens`); cut short when either
- * was or one of the second's didn't fit. What was not found is the
- * second's: it was asked for what the first meant. Both must be packs of
- * the same reader's, as `recallAs` gave them.
+ * Two recalls of passages for one reader as one pack within
+ * `budget.tokens`, as one pass over both would fit them: the first's
+ * items in their order, then the second's that the first doesn't hold
+ * (the same passage of the same version), best first, each while it fits
+ * in what is left, as the Brain counts it (`packItemTokens`). Cut short
+ * when either was or anything was left out for room. What was not found
+ * is the second's: it was asked for what the first meant. Both must be
+ * packs of the same reader's, as `recallPassagesAs` gave them.
  */
 export const mergeRecalled = (
-  first: RecalledPack,
-  second: RecalledPack,
+  first: RecalledPassages,
+  second: RecalledPassages,
   budget: { tokens: number }
-): RecalledPack => {
-  const tokensOf = (item: RecalledItem): number =>
-    packItemTokens({ ...item, source: sourceKeyOf(item.source) });
-  const held = new Set(first.items.map((item) => placeOf(item)));
-  const items = [...first.items];
-  let used = items.reduce((sum, item) => sum + tokensOf(item), 0);
+): RecalledPassages => {
+  let used = 0;
   let truncated = first.truncated || second.truncated;
-  for (const item of second.items) {
+  const held = new Set<string>();
+  const items: RecalledItem[] = [];
+  for (const item of [...first.items, ...second.items]) {
     const place = placeOf(item);
     if (held.has(place)) {
       continue;
     }
-    const tokens = tokensOf(item);
+    const tokens = packItemTokens({
+      ...item,
+      source: sourceKeyOf(item.source),
+    });
     if (used + tokens > budget.tokens) {
       truncated = true;
       continue;
@@ -2346,7 +2455,8 @@ const embeddersOf = async (env: Env): Promise<Embedders> => ({
 // it to the queue by key alone (brain-sources.ts `relayHandOvers`, through
 // `queueHandOvers`); the queue's item asks core's producers for the source
 // as their records hold it when it runs (brain-sources.ts `producersOf`,
-// given to `workBrain`), and tells them how it ended. The readers are
+// given to `workBrain`), and every way it ends is recorded here, the same
+// for every producer: added, refused or skipped, with why. The readers are
 // checked here as an add's (`sourceReadersSchema`): a producer that names
 // none is refused, and nothing is added.
 
@@ -2354,20 +2464,13 @@ const embeddersOf = async (env: Env): Promise<Embedders> => ({
  * A source as its producer holds it now: its change, text and readers,
  * and the text to keep instead when `text` is past a source's bound
  * (`whenTooLarge`: what it is, saying plainly that the rest was too large
- * to keep, never a cut part of it); or nothing to hand over (`gone`); or
- * nothing, as the erasure of its one reader (`readers`, the store that
- * may hold it) has begun, when the Brain closes its key, as an add of it
- * may have landed after that erasure.
+ * to keep, never a cut part of it); or nothing to hand over (`gone`), and
+ * why; or nothing, as the erasure of its one reader (`readers`, the store
+ * that may hold it) has begun, when the Brain closes its key, as an add of
+ * it may have landed after that erasure.
  */
 export type Handed =
-  | {
-      kind: "gone";
-      /**
-       * Why a source its producer noted is not handed over, for those that
-       * record it (brain-sources.ts): what a note promised ends in this.
-       */
-      skipped?: HandOverSkip;
-    }
+  | { kind: "gone"; skipped: HandOverSkip }
   | { kind: "erased"; readers: SourceReaders }
   | {
       kind: "source";
@@ -2380,28 +2483,53 @@ export type Handed =
     };
 
 /**
- * Why a noted source is not handed over after all: its record restricted
- * since, deleted or gone, its reader no longer a member, or nothing of it
- * to keep (a question of no words).
+ * Why a noted source is not handed over after all, one of a fixed set:
+ * its record restricted since, deleted or gone, its details past their
+ * retention, its reader no longer a member, or nothing of it to keep (a
+ * question of no words).
  */
 export type HandOverSkip =
   | "restricted"
   | "deleted"
+  | "past_retention"
   | "not_a_member"
   | "no_text";
 
 /** How a hand-over that did something ended: added, or refused for good. */
 export type HandOverEnd = Exclude<HandOverResult, { kind: "nothing" }>;
 
+/** How a hand-over ended: added, refused for good, or skipped with why. */
+export type HandOverOutcome =
+  | HandOverEnd
+  | { kind: "skipped"; reason: HandOverSkip };
+
+/**
+ * One attempt at a hand-over, as its producer answers it: the source as
+ * its records hold it now, and the records of the one noted hand-over
+ * this attempt may end, read before the source was.
+ */
+export interface HandOverAttempt {
+  handed: Handed;
+  /**
+   * Records that the source's text leaves core now, if its noted hand-over
+   * is still open as this attempt read it: false when it is not (an
+   * earlier attempt ended it, its answer lost; or it was noted anew,
+   * which a later item hands over), and then nothing may leave.
+   */
+  started: () => Promise<boolean>;
+  /**
+   * Records how it ended and ends its noted hand-over, both or neither:
+   * nothing when that is not open as this attempt read it, so a noted
+   * hand-over ends in exactly one outcome. Throws when it can't, so the
+   * item is tried again.
+   */
+  ended: (outcome: HandOverOutcome) => Promise<void>;
+}
+
 /** Core's producers, as the Brain's hand-overs reach them (brain-sources.ts). */
 export interface Producers {
-  /** `source` as its producer's records hold it now. */
-  read: (source: SourceRef) => Promise<Handed>;
-  /**
-   * Records how the hand-over of `source` ended: once it did, and again
-   * on a repeat. Throws when it can't, so the item is tried again.
-   */
-  settled: (source: SourceRef, outcome: HandOverEnd) => Promise<void>;
+  /** Begins an attempt at handing `source` over. */
+  attempt: (source: SourceRef) => Promise<HandOverAttempt>;
 }
 
 /** The class of the Brain's work every hand-over takes. */
@@ -2429,21 +2557,21 @@ const isErasedRefusal = (error: unknown): boolean =>
   brainSourceErrors.codeOf(error) === "brain.source_erased";
 
 /**
- * Refuses the hand-over of `source` for `reason`: recorded first, then,
- * when its one reader's erasure began (`closing`), its key closed. In
- * that order, as closing the key takes this item off the queue with every
- * other of its key: a refusal recorded after could, failing, never be
- * tried again. A close that fails fails the item, which is tried again,
- * recording again: each attempt records its own.
+ * Refuses the hand-over `attempt` is at for `reason`: recorded first,
+ * then, when its one reader's erasure began (`closing`), its key closed.
+ * In that order, as closing the key takes this item off the queue with
+ * every other of its key: a refusal recorded after could, failing, never
+ * be tried again. A close that fails fails the item, which is tried again
+ * and closes it then, its refusal recorded once.
  */
 const refuse = async (
   env: Env,
-  producers: Producers,
+  attempt: HandOverAttempt,
   source: SourceRef,
   reason: HandOverEnd & { kind: "refused" },
   closing?: SourceReaders
 ): Promise<HandOverResult> => {
-  await producers.settled(source, reason);
+  await attempt.ended(reason);
   if (closing !== undefined) {
     await closeKey(env, source, closing);
   }
@@ -2455,13 +2583,17 @@ const refuse = async (
  * `addSource`, which takes it to the store its readers belong in, and says
  * how it ended (`HandOverResult`), which settles the item as done:
  *
- * - nothing, when the producer has nothing to hand over;
+ * - nothing, when the producer has nothing to hand over: skipped, with
+ *   its producer's reason;
  * - refused as `invalid`, when the producer's answer can't be added (no
  *   readers, a text that isn't one): never tried again;
  * - its text, or its `whenTooLarge` when the text is past a source's
  *   bound as given or as indexed (`fitsSourceText`); refused as
  *   `too_large` when neither fits;
  * - refused as `erased` when what it adds was erased: final.
+ *
+ * Each records its outcome, which ends the noted hand-over: once, as a
+ * repeat of an attempt that ended it records nothing (`HandOverAttempt`).
  *
  * A source for one person alone whose erasure has begun is erased (its key
  * closed), never left: when the producer says so (`erased`), as an add of
@@ -2476,15 +2608,16 @@ const handOver = async (
   producers: Producers,
   source: SourceRef
 ): Promise<HandOverResult> => {
-  const handed = await producers.read(source);
+  const attempt = await producers.attempt(source);
+  const { handed } = attempt;
   if (handed.kind === "gone") {
+    await attempt.ended({ kind: "skipped", reason: handed.skipped });
     return { kind: "nothing" };
   }
   const refused = async (
     reason: (HandOverEnd & { kind: "refused" })["reason"],
     closing?: SourceReaders
-  ) =>
-    await refuse(env, producers, source, { kind: "refused", reason }, closing);
+  ) => await refuse(env, attempt, source, { kind: "refused", reason }, closing);
   if (handed.kind === "erased") {
     return await refused("erased", handed.readers);
   }
@@ -2498,6 +2631,9 @@ const handOver = async (
   const text = texts.find((each) => fitsSourceText(each));
   if (text === undefined) {
     return await refused("too_large");
+  }
+  if (!(await attempt.started())) {
+    return { kind: "nothing" };
   }
   let version: number;
   try {
@@ -2521,7 +2657,7 @@ const handOver = async (
     return await refused("erased", readers.data);
   }
   const added: HandOverResult = { kind: "added", version };
-  await producers.settled(source, added);
+  await attempt.ended(added);
   return added;
 };
 
@@ -2536,28 +2672,35 @@ const handOversOf = (env: Env, producers: Producers): HandOvers => ({
  * alone, as what is added is what its producer answers when the item runs
  * (`workBrain`). One the Brain can't key (too long, a control character)
  * never will be: left out and counted in the log, never named, as an id
- * can echo what a person typed. Sent `handOversMax` at a time, one call
- * after the other: a call that fails leaves those after it unsent.
+ * can echo what a person typed. Returns those it left out, as given. Sent
+ * `handOversMax` at a time, one call after the other: a call that fails
+ * leaves those after it unsent.
  */
 export const queueHandOvers = async (
   env: BrainEnv,
   sources: readonly SourceRef[]
-): Promise<void> => {
-  const items = sources.flatMap((each) => {
+): Promise<SourceRef[]> => {
+  const items: HandOverRequest["items"] = [];
+  const unkeyable: SourceRef[] = [];
+  for (const each of sources) {
     const source = sourceRefSchema.safeParse(each);
-    return source.success
-      ? [{ source: sourceKeyOf(source.data), priority: handOverPriority }]
-      : [];
-  });
-  if (items.length < sources.length) {
-    log.warn("brain.hand_over.unkeyed", {
-      count: sources.length - items.length,
-    });
+    if (source.success) {
+      items.push({
+        source: sourceKeyOf(source.data),
+        priority: handOverPriority,
+      });
+    } else {
+      unkeyable.push(each);
+    }
+  }
+  if (unkeyable.length > 0) {
+    log.warn("brain.hand_over.unkeyed", { count: unkeyable.length });
   }
   for (let at = 0; at < items.length; at += handOversMax) {
     // oxlint-disable-next-line no-await-in-loop -- one call after the other
     await brain(env).handOver({ items: items.slice(at, at + handOversMax) });
   }
+  return unkeyable;
 };
 
 /**
