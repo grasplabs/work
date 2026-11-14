@@ -132,19 +132,28 @@ export const usePaged = <T, N, H = undefined>(
   read: (memories: Memories, next?: N) => Promise<Page<T, N, H>>,
   keyOf: (item: T) => string
 ) => {
-  const { loaded: first, current } = useHeldCoreRead<Page<T, N, H>>(
+  const {
+    loaded: first,
+    current,
+    id,
+  } = useHeldCoreRead<Page<T, N, H>>(
     key,
     async (session) => await read(session.brainMemories),
     scope
   );
+  // One identity owns everything paged beyond the first page: the read of
+  // that first page shown now. A list read again (a change, its kind
+  // left and come back to) is a new read, so rows, the place to go on
+  // from, waiting and errors of an earlier read are dropped, never merged.
+  const shown = id ?? `${key}#unread`;
   const [further, setFurther] = useState<{
-    key: string;
+    read: string;
     items: readonly T[];
     next: N | null;
   }>();
-  const { busy, failure, ask } = useAsk(key);
+  const { busy, failure, ask } = useAsk(shown);
   const firstPage = first?.state === "ready" ? first.data : undefined;
-  const mine = further?.key === key ? further : undefined;
+  const mine = further?.read === shown ? further : undefined;
   const seen = new Set<string>();
   const items = [...(firstPage?.items ?? []), ...(mine?.items ?? [])].filter(
     (item) => {
@@ -165,8 +174,8 @@ export const usePaged = <T, N, H = undefined>(
       async (memories) => await read(memories, next),
       (page) => {
         setFurther((now) => ({
-          key,
-          items: [...(now?.key === key ? now.items : []), ...page.items],
+          read: shown,
+          items: [...(now?.read === shown ? now.items : []), ...page.items],
           next: page.next,
         }));
       }

@@ -713,3 +713,240 @@ describe("the Memories page's actions", () => {
     });
   });
 });
+
+/** Which of the page's paged lists a case pages. */
+type Paged = "entities" | "memories" | "contested";
+
+/** The version a further page's cursor was read at. */
+const versionOf = (next: unknown): string => {
+  const cursor =
+    typeof next === "object" && next !== null && "after" in next
+      ? next.after
+      : next;
+  const version =
+    typeof cursor === "object" && cursor !== null && "v" in cursor
+      ? cursor.v
+      : undefined;
+  return typeof version === "string" ? version : "";
+};
+
+/**
+ * A faked core whose lists are read anew at each version: every row and
+ * every cursor carries the version it was read at, and the list `paged`
+ * has a second page. Each further page asked for records its cursor's
+ * version; a confirmation moves the version on.
+ */
+const versioned = (paged: Paged) => {
+  const cursors: string[] = [];
+  const state = { version: 1, cursors };
+  const nextOf = (list: Paged) =>
+    list === paged ? { v: String(state.version) } : null;
+  const fact = (name: string) => ({
+    about: entity(`f-${name}`, name),
+    attribute: "status" as const,
+    sides: [
+      memory(`m-${name}-a`, name, "Renewing", { contested: true }),
+      memory(`m-${name}-b`, name, "Churned", { contested: true }),
+    ],
+    more: false,
+  });
+  const api = {
+    contested: async (next?: unknown) => {
+      if (next !== undefined && next !== null) {
+        const v = versionOf(next);
+        state.cursors.push(v);
+        return await Promise.resolve({
+          facts: [fact(`Fact v${v} p2`)],
+          next: null,
+        });
+      }
+      const after = nextOf("contested");
+      return await Promise.resolve({
+        facts: [fact(`Fact v${state.version} p1`)],
+        next: after === null ? null : { store: "shared", after },
+      });
+    },
+    entities: async (kind: string, next?: unknown) => {
+      const label = kind === "customer" ? "Customer" : "Person";
+      if (next !== undefined && next !== null) {
+        const v = versionOf(next);
+        state.cursors.push(v);
+        return await Promise.resolve({
+          entities: [entity(`e-${label}-v${v}-p2`, `${label} v${v} p2`)],
+          next: null,
+        });
+      }
+      const listed =
+        paged === "memories"
+          ? [entity("e-a", "Account A"), entity("e-b", "Account B")]
+          : [
+              entity(
+                `e-${label}-v${state.version}-p1`,
+                `${label} v${state.version} p1`
+              ),
+            ];
+      const after = kind === "customer" ? nextOf("entities") : null;
+      return await Promise.resolve({
+        entities: listed,
+        next: after === null ? null : { store: "shared", after },
+      });
+    },
+    memories: async ({ id }: BrainEntityRef, next?: unknown) => {
+      const name = id === "e-a" ? "Account A" : "Account B";
+      if (next !== undefined && next !== null) {
+        const v = versionOf(next);
+        state.cursors.push(v);
+        return await Promise.resolve({
+          entity: entity(id, name),
+          memories: [memory(`m-${id}-v${v}-p2`, `${name} v${v} p2`, "Paying")],
+          next: null,
+        });
+      }
+      return await Promise.resolve({
+        entity: entity(id, name),
+        memories: [
+          memory(
+            `m-${id}-v${state.version}-p1`,
+            `${name} v${state.version} p1`,
+            "Paying"
+          ),
+        ],
+        next: nextOf("memories"),
+      });
+    },
+    confirm: async () => {
+      state.version += 1;
+      return await Promise.resolve("done");
+    },
+  };
+  return { state, api };
+};
+
+/** Picks `kind` in the kind select. */
+const pickKind = async (kind: string): Promise<void> => {
+  const select = document.querySelector("select");
+  if (!select) {
+    throw new TypeError("No kind select");
+  }
+  await act(async () => {
+    select.value = kind;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    await Promise.resolve();
+  });
+  await settle();
+};
+
+/** The list button named exactly `name`. */
+const listed = (name: string): HTMLButtonElement | undefined =>
+  [...document.querySelectorAll("section ul button")].find(
+    (each): each is HTMLButtonElement =>
+      each instanceof HTMLButtonElement && each.textContent === name
+  );
+
+/**
+ * Each paged list on the page, as a person uses it: load more, leave it
+ * or change something while away, come back. `leave` and `back` act on
+ * the page; `meanwhile` moves the faked core on (a change made elsewhere,
+ * a memory retired) unless the page's own action did.
+ */
+const pagedLists: {
+  name: string;
+  paged: Paged;
+  stale: string;
+  fresh: [string, string];
+  open?: () => Promise<void>;
+  leave: () => Promise<void>;
+  back: () => Promise<void>;
+  meanwhile: boolean;
+}[] = [
+  {
+    name: "the entities of a kind, after another kind was open",
+    paged: "entities",
+    stale: "Customer v1 p2",
+    fresh: ["Customer v2 p1", "Customer v2 p2"],
+    leave: async () => {
+      await pickKind("person");
+    },
+    back: async () => {
+      await pickKind("customer");
+    },
+    meanwhile: true,
+  },
+  {
+    name: "the memories of an entity, after another entity was open",
+    paged: "memories",
+    stale: "Account A v1 p2",
+    fresh: ["Account A v2 p1", "Account A v2 p2"],
+    open: async () => {
+      await press(listed("Account A"));
+    },
+    leave: async () => {
+      await press(listed("Account B"));
+    },
+    back: async () => {
+      await press(listed("Account A"));
+    },
+    meanwhile: true,
+  },
+  {
+    name: "the facts sources disagree on, after a confirmation",
+    paged: "contested",
+    stale: "Fact v1 p2",
+    fresh: ["Fact v2 p1", "Fact v2 p2"],
+    leave: async () => {
+      await press(buttons("This one is right")[0]);
+    },
+    back: async () => {
+      await settle();
+    },
+    meanwhile: false,
+  },
+];
+
+describe("the Memories page's paged lists, read again", () => {
+  afterEach(() => {
+    act(() => {
+      root?.unmount();
+    });
+    root = undefined;
+    document.body.replaceChildren();
+  });
+
+  it.each(pagedLists)(
+    "shows only a fresh read of $name, going on from the fresh read",
+    async ({ paged, stale, fresh, open, leave, back, meanwhile }) => {
+      const { state, api } = versioned(paged);
+      await shown(api);
+      await open?.();
+      await press(buttons("Show more")[0]);
+      const loaded = document.body.textContent.includes(stale);
+      await leave();
+      if (meanwhile) {
+        state.version += 1;
+      }
+      await back();
+      const returned = document.body.textContent;
+      // More is offered from the fresh read: pressed when it is.
+      const offered = buttons("Show more");
+      for (const more of offered.slice(0, 1)) {
+        // oxlint-disable-next-line no-await-in-loop -- at most one
+        await press(more);
+      }
+      expect({
+        loaded,
+        offeredOnReturn: offered.length,
+        staleOnReturn: returned.includes(stale),
+        freshOnReturn: returned.includes(fresh[0]),
+        goesOnFrom: state.cursors.at(-1),
+        freshMore: document.body.textContent.includes(fresh[1]),
+      }).toStrictEqual({
+        loaded: true,
+        offeredOnReturn: 1,
+        staleOnReturn: false,
+        freshOnReturn: true,
+        goesOnFrom: "2",
+        freshMore: true,
+      });
+    }
+  );
+});

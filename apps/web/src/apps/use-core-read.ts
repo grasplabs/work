@@ -6,20 +6,26 @@ import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 
 /**
- * `useCoreRead`, and whether what it gives is the read for `key` itself
+ * `useCoreRead`, whether what it gives is the read for `key` itself
  * (`current`) rather than an earlier one of the same `scope` held while
- * `key` is read.
+ * `key` is read, and which read it is (`id`, minted as each read lands,
+ * so a key read again is a new read).
  */
 export const useHeldCoreRead = <T>(
   key: string,
   read: (session: Session) => Promise<T>,
   scope?: string
-): { loaded: Loaded<T> | undefined; current: boolean } => {
+): {
+  loaded: Loaded<T> | undefined;
+  current: boolean;
+  id: string | undefined;
+} => {
   const core = useCore();
   const [held, setHeld] = useState<{
     key: string;
     scope: string | undefined;
     loaded: Loaded<T>;
+    id: string;
   }>();
   const onRead = useEffectEvent(
     async (signal: AbortSignal): Promise<Loaded<T>> =>
@@ -30,7 +36,7 @@ export const useHeldCoreRead = <T>(
     const load = async (): Promise<void> => {
       const loaded = await onRead(left.signal);
       if (!left.signal.aborted) {
-        setHeld({ key, scope, loaded });
+        setHeld({ key, scope, loaded, id: crypto.randomUUID() });
       }
     };
     void load();
@@ -39,13 +45,10 @@ export const useHeldCoreRead = <T>(
     };
   }, [key, scope]);
   if (held?.key === key) {
-    return { loaded: held.loaded, current: true };
+    return { loaded: held.loaded, current: true, id: held.id };
   }
-  return {
-    loaded:
-      scope !== undefined && held?.scope === scope ? held.loaded : undefined,
-    current: false,
-  };
+  const kept = scope !== undefined && held?.scope === scope ? held : undefined;
+  return { loaded: kept?.loaded, current: false, id: kept?.id };
 };
 
 /**
