@@ -129,6 +129,14 @@ const saveOutcome = async (
   );
 };
 
+/** How many events core's outbox moved aside (`audit_outbox_rejected`). */
+const rejectedCount = async (): Promise<number> => {
+  const row = await env.DB.prepare(
+    "SELECT count(*) AS count FROM audit_outbox_rejected"
+  ).first<{ count: number }>();
+  return row?.count ?? 0;
+};
+
 /** The texts `authority` gets in `context`, in order. */
 const textsFor = async (
   authority: Authority,
@@ -982,45 +990,28 @@ describe("instruction files, edited from a page", setUpTime, () => {
     });
   });
 
-  it("records a save once at the time it was answered when its version's own time can't be read just then", async () => {
+  it("records a save at its version's own time, on the first try and on a retry after the log has it: one event, no gap, nothing rejected", async () => {
     const person = await member("user");
     const file: InstructionFile = { scope: "person", personId: person.userId };
-    // The Brain, which takes the save but can't list its versions.
-    const stores = inJurisdiction(env, env.BRAIN_STORE);
-    const unlisted = {
-      getByName: (name: string) =>
-        new Proxy(stores.getByName(name), {
-          get: (stub, method): unknown => {
-            if (method === "listVersions") {
-              return async () => {
-                await Promise.resolve();
-                throw new Error("The Brain is out of reach");
-              };
-            }
-            const found: unknown = Reflect.get(stub, method);
-            return found;
-          },
-        }),
-      jurisdiction: () => unlisted,
-    };
-    // SAFETY: core reaches the Brain only through `getByName` (and
-    // `jurisdiction`), each store's methods passed on but the listing.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    const brainDown: Env = { ...env, BRAIN_STORE: unlisted as never };
-    const from = Date.now();
+    const change = crypto.randomUUID();
+    const sent = {
+      file,
+      change,
+      text: "Call me Sam.",
+      after: 0,
+    } as const;
+    const rejectedBefore = await rejectedCount();
 
-    let answered = "";
     const events = await auditedDuring(async () => {
-      answered = await outcome(
-        saveInstructionFile(brainDown, person, {
-          file,
-          change: crypto.randomUUID(),
-          text: "Call me Sam.",
-          after: 0,
-        })
-      );
+      await saveInstructionFile(env, person, sent);
+      await drainAuditOutboxes(env);
+      // Later, so a time taken from the clock would differ.
+      await scheduler.wait(20);
+      // Its answer lost: the same save again, once the log has its event.
+      await saveInstructionFile(env, person, sent);
       await drainAuditOutboxes(env);
     });
+    const [version] = await readInstructionFilesAs(env, person, [file]);
     const recorded = events.filter(
       ({ action, target }) =>
         action === "instructions.saved" &&
@@ -1028,17 +1019,13 @@ describe("instruction files, edited from a page", setUpTime, () => {
     );
 
     expect({
-      answered,
-      recorded: recorded.length,
-      atAnswer: recorded.every(
-        ({ at }) => Date.parse(at) >= from && Date.parse(at) <= Date.now()
-      ),
-      now: await instructionFileToEdit(env, person, file),
+      at: recorded.map(({ at }) => at),
+      gaps: events.filter(({ action }) => action === "audit.gap").length,
+      rejected: (await rejectedCount()) - rejectedBefore,
     }).toStrictEqual({
-      answered: "ok",
-      recorded: 1,
-      atAnswer: true,
-      now: { version: 1, text: "Call me Sam." },
+      at: [version?.addedAt.toISOString()],
+      gaps: 0,
+      rejected: 0,
     });
   });
 

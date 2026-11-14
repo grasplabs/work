@@ -3,14 +3,17 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { appKind } from "../src/apps.ts";
 import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
+import { keepMadeInChat } from "../src/drafts.ts";
 import { workspace } from "../src/durable-objects.ts";
-import { codeStep, says } from "./agent-chat.ts";
+import { codeStep, model, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { botConnectorMembersUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { saveInstructions } from "./instruction-saves.ts";
 import { newTeam, readCollection } from "./knowledge.ts";
+import { fakeProvider } from "./model-provider.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { callAuth, signedInApi, unique } from "./sign-in.ts";
 import {
@@ -314,6 +317,50 @@ describe("in a group chat", setUpTime, () => {
       // chat app keeps its answer too (workspace.ts, `answersAlone`).
       direct: [`Company ${u}`, `Agent ${u}`],
       group: [`Company ${u}`, `Agent ${u}`],
+    });
+  });
+
+  it("gives an App's file to its builder in their own chat in Grasp, never in their direct message", async () => {
+    const provider = await fakeProvider(
+      says("Hi."),
+      says("Still here."),
+      says("In Grasp.")
+    );
+    const ada = await memberAnsweredBy(idp, provider, "builder");
+    const u = unique();
+    const { id: appId } = await ada.api.apps.create({ name: `Desk ${u}` });
+    await save(ada, { scope: "app", appId }, `App ${u}`);
+    /** Keeps chat `chatId` as having worked on the App last, as Build it does. */
+    const workedOn = async (chatId: string) => {
+      await keepMadeInChat(env, appKind, appId, ada.userId, {
+        chatId,
+        turnId: null,
+        callId: null,
+      });
+    };
+    await post(messageFrom(ada.teams, { text: "Hi." }));
+    const [direct] = await chatsOf(ada.userId);
+    if (direct === undefined) {
+      throw new TypeError("Expected her direct message's chat");
+    }
+    await workedOn(direct.id);
+    await post(messageFrom(ada.teams, { text: "And now?" }));
+    const own = workspace(env, personalWorkspaceId(ada.userId));
+    const web = await own.createChat("In Grasp", ada.userId, chatAgentId);
+    await workedOn(web.id);
+    await own.ask(web.id, { text: "And here?", model });
+
+    const told = (index: number) =>
+      JSON.stringify(provider.requests[index]?.body ?? null).includes(
+        `App ${u}`
+      );
+    expect({
+      direct: { via: direct.via, toldApp: told(1) },
+      web: told(2),
+    }).toStrictEqual({
+      // While GRA-1821 is open: the chat app keeps the answer too.
+      direct: { via: "teams", toldApp: false },
+      web: true,
     });
   });
 

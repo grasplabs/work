@@ -1897,7 +1897,8 @@ export interface InstructionFileVersion {
  * is no longer the current version, and `brain.request_invalid` for an
  * add that isn't one, one without `after` among them. Every add that
  * lands makes a new version, even of the current text (the store's rule
- * for an add with `after`). Empty text empties the file: a
+ * for an add with `after`). Answers when that version was added, the
+ * same on a repeat of its change. Empty text empties the file: a
  * version of its own, which nothing loads. While the Brain restores an
  * export, refused with `brain.restoring`, to be made again later.
  * `change` is as `addSource`'s.
@@ -1908,7 +1909,7 @@ export interface InstructionFileVersion {
 export const addInstructionFile = async (
   env: BrainEnv,
   added: { file: InstructionFile; change: string; text: string; after: number }
-): Promise<{ file: InstructionFile; version: number }> => {
+): Promise<{ file: InstructionFile; version: number; addedAt: Date }> => {
   // Counted as a chat's prompt holds it, escaped, which is never shorter
   // than the text: the limit bounds what reaches a model.
   if (
@@ -1925,7 +1926,7 @@ export const addInstructionFile = async (
   // The store refuses a stale `after` (`staleVersion`); a person's editor
   // gets it as `instructions.changed`. 0 is the editor's "none yet", the
   // store's null.
-  const { version } = await whileNotRestoring(async () => {
+  const { version, addedAt } = await whileNotRestoring(async () => {
     try {
       return await keptIn(
         env,
@@ -1947,46 +1948,7 @@ export const addInstructionFile = async (
       throw error;
     }
   });
-  return { file, version };
-};
-
-/**
- * When the version `version` of the instruction file `file` was added, as
- * the store that holds it lists it (the person's own for theirs): what a
- * save's audit event takes as its time, so every try of one save makes
- * the same event. Refused when that store no longer lists that version.
- *
- * For instruction-files.ts only, after the add it answers for: nothing
- * here checks who reads.
- */
-export const instructionVersionAddedAt = async (
-  env: BrainEnv,
-  file: InstructionFile,
-  version: number
-): Promise<Date> => {
-  const checkedFile = checked(instructionFileSchema, file);
-  const access = instructionAccessOf(checkedFile);
-  if (access.kind === "none") {
-    throw new Error("An instruction file always has readers");
-  }
-  // Who the file's own access names, so the listing reads what it holds.
-  const reader =
-    access.kind === "owner"
-      ? { person: access.person, groups: [] }
-      : { person: null, groups: [access.group] };
-  const store =
-    access.kind === "owner" ? ownBrain(env, access.person) : brain(env);
-  const { versions } = await store.listVersions({
-    source: instructionKeyOf(checkedFile),
-    reader,
-    before: checked(z.int().min(1), version) + 1,
-    limit: 1,
-  });
-  const [listed] = versions;
-  if (listed?.version !== version) {
-    throw new Error("The Brain no longer lists that version");
-  }
-  return listed.addedAt;
+  return { file, version, addedAt };
 };
 
 const instructionFilesSchema = z

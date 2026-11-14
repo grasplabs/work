@@ -478,6 +478,15 @@ export interface SourceVersionRef {
 }
 
 /**
+ * What an instruction file's add answers: the version it made or already
+ * is, and when that version was added, the same on every repeat of its
+ * change.
+ */
+export interface AddedInstructions extends SourceVersionRef {
+  addedAt: Date;
+}
+
+/**
  * What an add answers: the version it made or already is, or, `newer`, the
  * source's current version, read later than the add's text (`readAt`):
  * then the add wrote nothing.
@@ -2485,9 +2494,10 @@ export interface Brain {
    * kept in that person's own store alone. With `after`, only over that
    * current version (null: none yet), checked in the writing transaction:
    * otherwise refused with `staleVersion`, nothing written; a change it
-   * has answers with its version first.
+   * has answers with its version first. Answers when that version was
+   * added too, so a repeat answers the time the first try made.
    */
-  addInstructions: (source: NewInstructions) => Promise<SourceVersionRef>;
+  addInstructions: (source: NewInstructions) => Promise<AddedInstructions>;
   /**
    * A pack of what the reader may read for the question, within its
    * budget. Two ways search at once, each among the passages of the

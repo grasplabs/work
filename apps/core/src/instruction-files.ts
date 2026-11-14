@@ -2,7 +2,6 @@ import { appErrors } from "@grasp-os/shared/apps";
 import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema, identifierSchema } from "@grasp-os/shared/ids";
-import { errorFields, log } from "@grasp-os/shared/log";
 import {
   authoritySchema,
   permissionErrors,
@@ -21,7 +20,6 @@ import type { Member } from "./auth/identity.ts";
 import {
   addInstructionFile,
   instructionFileOf,
-  instructionVersionAddedAt,
   readInstructionFilesAs,
 } from "./brain-next.ts";
 import type { InstructionFile, InstructionFileVersion } from "./brain-next.ts";
@@ -38,8 +36,10 @@ import type { InstructionFile, InstructionFileVersion } from "./brain-next.ts";
 //
 // - a chat of the person's own: the company's, the acting agent's, the
 //   App's when the App the chat worked on last is one they build now
-//   (never several Apps', nor a workflow's: none has a file), and, only
-//   in a turn whose answer reaches them alone (`personal`), their own;
+//   (never several Apps', nor a workflow's: none has a file; and only in
+//   their own chat in Grasp, never a chat app's direct message while
+//   GRA-1821 is open), and, only in a turn whose answer reaches them
+//   alone (`personal`), their own;
 // - an agent in a shared channel: the company's and the agent's, never a
 //   person's, which others there would read through the agent;
 // - an AI step of a workflow: none, so a run does the same whoever's
@@ -347,27 +347,23 @@ export const saveInstructionFile = async (
   const file = instructionFileOf(named.file);
   const member = await signedInMember(env, by, "write");
   await requireWriter(env, member, file);
-  const added = await addInstructionFile(env, { file, change, text, after });
+  const { addedAt, ...added } = await addInstructionFile(env, {
+    file,
+    change,
+    text,
+    after,
+  });
   // Recorded once the version is there, so an entry never reads as a
   // save that wasn't made, in core's outbox (`keepEvent`), which the
   // clock's drain hands to the log and tries again until the log has it:
   // a log out of reach neither fails the save, which is done, nor leaves
   // it unrecorded, and nobody has to save again for it. Every try makes
   // the same event: its ID from who saved which file under which change,
-  // its time the version's own, and the rest fixed by those, so the
-  // outbox and the log keep it once, a retry the log already has a
-  // duplicate, never a conflict: one event per save. A version whose time
-  // can't be read just now takes the time now: recorded all the same,
-  // and only a retry of that same save could then differ from it. Which
-  // file and version, never its text.
+  // its time the version's own (which the Brain answers a repeat of the
+  // change with too), and the rest fixed by those, so the outbox and the
+  // log keep it once, a retry the log already has a duplicate, never a
+  // conflict: one event per save. Which file and version, never its text.
   const id = instructionFileId(file);
-  let at: Date;
-  try {
-    at = await instructionVersionAddedAt(env, file, added.version);
-  } catch (error) {
-    log.warn("instructions.saved_time_unread", errorFields(error));
-    at = new Date();
-  }
   const event = createAuditEvent(
     {
       actor: actorOf(member),
@@ -379,7 +375,7 @@ export const saveInstructionFile = async (
   );
   await keepEvent(env, drizzle(env.DB), {
     ...event,
-    at: at.toISOString(),
+    at: addedAt.toISOString(),
     id: uuidFromHash(
       await sha256Hex(
         JSON.stringify(["instructions.saved", member.userId, id, change])

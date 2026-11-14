@@ -1965,38 +1965,6 @@ export const coreProbes = {
   },
   recallAs: recallProbe(coreBrain.recallAs),
   recallPassagesAs: recallProbe(coreBrain.recallPassagesAs),
-  // Reads a version's time without a check of who reads
-  // (instruction-files.ts reads only what it just saved): only of files no
-  // reader is, and its refusals.
-  instructionVersionAddedAt: async ({ markers }) => {
-    const at = async (name: string, file: InstructionFile, version = 1) =>
-      await answer(
-        name,
-        async () =>
-          await coreBrain.instructionVersionAddedAt(env, file, version)
-      );
-    // A file no reader is, just saved: its one version answers.
-    const saved = unwrittenFile();
-    const { version } = await coreBrain.addInstructionFile(env, {
-      file: saved,
-      change: crypto.randomUUID(),
-      text: "Kept.",
-      after: 0,
-    });
-    return [
-      await at("one just saved", saved, version),
-      await at("someone else's", unwrittenFile()),
-      await at("no version", unwrittenFile(), 0),
-      await at("an id of the markers and control characters", {
-        scope: "agent",
-        agentId: `${markers.join("\n")}\u0000`,
-      }),
-      await at(
-        "an unknown scope named by the markers",
-        unchecked({ scope: "team", teamId: markers.join("") })
-      ),
-    ];
-  },
   // Adds without a check of who writes (instruction-files.ts checks
   // first): only to files no reader is, and its refusals.
   addInstructionFile: async ({ markers }) => {

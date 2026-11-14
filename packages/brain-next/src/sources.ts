@@ -413,6 +413,31 @@ const record = (
   }
   return { source: added.source, version };
 };
+/**
+ * When the version `ref` was added: what an add answers beside it, the
+ * same however often its change is repeated. Refused once that version is
+ * gone (erased meanwhile).
+ */
+export const versionAddedAt = (
+  db: DrizzleSqliteDODatabase,
+  { source, version }: SourceVersionRef
+): Date => {
+  const found = db
+    .select({ addedAt: sourceVersions.addedAt })
+    .from(sourceVersions)
+    .where(
+      and(
+        eq(sourceVersions.source, source),
+        eq(sourceVersions.version, version)
+      )
+    )
+    .get();
+  if (found === undefined) {
+    throw new Error("The Brain no longer holds that version");
+  }
+  return found.addedAt;
+};
+
 /** What an add that must be made again says: the same words as a lost file's. */
 const addAgain = "The Brain lost the file while adding it: add it again";
 
