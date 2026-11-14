@@ -79,6 +79,7 @@ import { DurableObject, env } from "cloudflare:workers";
 import { z } from "zod";
 
 import { embedInProcess } from "../../../packages/embed/test/test-models.ts";
+import { organizationId } from "../src/auth/auth.ts";
 import { BrainMemoriesRpc } from "../src/brain-memories-rpc.ts";
 import * as brainMemories from "../src/brain-memories.ts";
 import * as coreBrain from "../src/brain-next.ts";
@@ -150,6 +151,13 @@ export interface Probing {
    * holding them must still find no instruction file, as none is indexed.
    */
   instructionGroups: readonly string[];
+  /**
+   * Uploads the reader may not read (brain-uploads.ts), each holding every
+   * marker: someone else's own, and a team's they aren't in. Each asked
+   * of, acted on or uploaded to must answer exactly as an upload no one
+   * made, and change nothing.
+   */
+  hiddenUploads?: readonly string[];
   /**
    * The teams the App grant of code's recall names (GRA-1842): its recall
    * reads, of these, the reader's alone. None when absent.
@@ -1535,7 +1543,7 @@ export const coreProbes = {
     return [
       await add("for someone else", { kind: "owner", personId: stranger() }),
       await add("for nobody", { kind: "none" }),
-      await add("an unknown kind", unchecked({ kind: "everyone" })),
+      await add("an unknown kind", unchecked({ kind: "anyone" })),
       await add("no person", unchecked({ kind: "owner", personId: "" })),
       await add(
         "a team named by the markers",
@@ -3099,6 +3107,26 @@ export const coreProbes = {
       const { ownStores } = await coreBrain.brainStaffReport(env);
       return { model: host.embedders.model, totals: ownStores };
     }),
+  ],
+  // A check of a text alone, which reads nothing of the Brain: it answers
+  // a code, never anything of the text.
+  sourceTextProblem: async ({ markers }) => [
+    await answer(
+      "a text holding the markers",
+      async () =>
+        await Promise.resolve(coreBrain.sourceTextProblem(markedText(markers)))
+    ),
+    await answer(
+      "whitespace alone",
+      async () => await Promise.resolve(coreBrain.sourceTextProblem(" \n\t"))
+    ),
+    await answer(
+      "past a source's bound",
+      async () =>
+        await Promise.resolve(
+          coreBrain.sourceTextProblem(oversizedText(markers))
+        )
+    ),
   ],
   // Pure: a skill's key as a run keeps it, from what the caller names
   // alone (a name it gives comes back as given), so no markers.
@@ -7639,6 +7667,100 @@ const sourcesAs = (personId: string): BrainSourcesRpc =>
     async () => await Promise.resolve(sessionOf(personId))
   );
 
+/** A new admin of the organization, as core's records keep one: their ID. */
+const adminMemberOf = async (): Promise<string> => {
+  const userId = crypto.randomUUID();
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO users (id, name, email, email_verified, created_at, updated_at) VALUES (?, 'Admin', ?, 1, ?, ?)"
+    ).bind(userId, `${userId}@acme.test`, Date.now(), Date.now()),
+    env.DB.prepare(
+      "INSERT INTO members (id, organization_id, user_id, role, created_at) VALUES (?, ?, ?, 'admin', ?)"
+    ).bind(crypto.randomUUID(), organizationId, userId, Date.now()),
+  ]);
+  return userId;
+};
+
+/** WebVTT captions holding every marker: a file the extractor reads. */
+const markedFile = (markers: readonly string[]) => ({
+  name: "Captions.vtt",
+  bytes: new TextEncoder().encode(
+    `WEBVTT\n\n00:00:00.000 --> 00:00:05.000\n${markedText(markers)}\n`
+  ),
+});
+
+/** A file of the reader's own, holding nothing of anyone else's. */
+const plainFile = () => ({
+  name: "Own.vtt",
+  bytes: new TextEncoder().encode(
+    "WEBVTT\n\n00:00:00.000 --> 00:00:05.000\nTheir own words\n"
+  ),
+});
+
+/**
+ * Asks `ask` of an upload no one made (`nothing`) and of each of the
+ * reader's hidden uploads (`hidden`), from one place, so their answers
+ * compare whole; then of one named by the markers, of one of the
+ * reader's own (an upload made for it, which they may act on), and as
+ * someone who isn't a member.
+ */
+const askedOfUploads = async (
+  { personId, hiddenUploads = [], markers }: Probing,
+  ask: (
+    asking: BrainSourcesRpc,
+    uploadId: string,
+    file: { name: string; bytes: Uint8Array }
+  ) => Promise<unknown>
+): Promise<Answer[]> => {
+  const askOf = async (
+    name: string,
+    uploadId: string,
+    about?: Answer["about"],
+    as = personId,
+    file = markedFile(markers)
+  ) =>
+    await answer(
+      name,
+      async () => await ask(sourcesAs(as), uploadId, file),
+      about
+    );
+  const asked: Answer[] = [
+    await askOf("an upload no one made", crypto.randomUUID(), "nothing"),
+  ];
+  for (const [index, uploadId] of hiddenUploads.entries()) {
+    // oxlint-disable-next-line no-await-in-loop -- one upload at a time
+    asked.push(await askOf(`hidden upload ${index}`, uploadId, "hidden"));
+  }
+  // One of their own to act on, as an answer too, for everyone: it holds
+  // nothing of anyone else's, and lands in the shared store, which a
+  // reader whose own store was erased still adds to.
+  let own: string = crypto.randomUUID();
+  const made = await answer("a file of their own, to act on", async () => {
+    const uploaded = await sourcesAs(personId).upload(
+      plainFile(),
+      {
+        kind: "everyone",
+      },
+      crypto.randomUUID()
+    );
+    own = uploaded.source.id;
+    return uploaded;
+  });
+  asked.push(
+    made,
+    await askOf("an upload named by the markers", markers.join("")),
+    // Their own, with nothing of anyone else's in what it adds.
+    await askOf("their own upload", own, undefined, personId, plainFile()),
+    await askOf(
+      "as someone who isn't a member",
+      hiddenUploads[0] ?? own,
+      undefined,
+      stranger()
+    )
+  );
+  return asked;
+};
+
 /** A source as the page names it after a list: its time as ISO 8601. */
 const pageAfter = (source: SourceRef) => ({
   addedAt: pastAll.toISOString(),
@@ -7799,7 +7921,123 @@ export const sourcesProbes = {
       ),
     ];
   },
-} satisfies Record<"list" | "versions" | "read" | "search", Probe>;
+  // Uploads (brain-uploads.ts): every way to name one the reader may not
+  // read answers as one no one made, and acts on nothing; an upload for
+  // readers they may not choose is refused before anything is kept.
+  uploadOf: async (probing) =>
+    await askedOfUploads(
+      probing,
+      async (asking, uploadId) => await asking.uploadOf(uploadId)
+    ),
+  uploadVersion: async (probing) =>
+    await askedOfUploads(
+      probing,
+      async (asking, uploadId, file) =>
+        await asking.uploadVersion(uploadId, file, crypto.randomUUID())
+    ),
+  deleteUpload: async (probing) =>
+    await askedOfUploads(probing, async (asking, uploadId) => {
+      await asking.deleteUpload(uploadId);
+    }),
+  upload: async ({ personId, markers }) => [
+    await answer(
+      "a file of their own, for everyone",
+      async () =>
+        await sourcesAs(personId).upload(
+          plainFile(),
+          { kind: "everyone" },
+          crypto.randomUUID()
+        )
+    ),
+    await answer(
+      "a file of their own, for only them",
+      async () =>
+        await sourcesAs(personId).upload(
+          plainFile(),
+          { kind: "me" },
+          crypto.randomUUID()
+        )
+    ),
+    await answer(
+      "for a team named by the markers",
+      async () =>
+        await sourcesAs(personId).upload(
+          markedFile(markers),
+          unchecked({ kind: "team", teamId: markers.join("") }),
+          crypto.randomUUID()
+        )
+    ),
+    await answer(
+      "for someone else alone",
+      async () =>
+        await sourcesAs(personId).upload(
+          markedFile(markers),
+          unchecked({ kind: "owner", personId: stranger() }),
+          crypto.randomUUID()
+        )
+    ),
+    await answer(
+      "a file named by the markers that isn't what its name says",
+      async () =>
+        await sourcesAs(personId).upload(
+          {
+            name: `${markers.join(" ")}.vtt`,
+            bytes: new TextEncoder().encode(markers.join(" ")),
+          },
+          { kind: "me" },
+          crypto.randomUUID()
+        )
+    ),
+    await answer(
+      "as someone who isn't a member",
+      async () =>
+        await sourcesAs(stranger()).upload(
+          markedFile(markers),
+          {
+            kind: "me",
+          },
+          crypto.randomUUID()
+        )
+    ),
+  ],
+  // An admin's listing of shared uploads: each by its file's name, team
+  // and uploader, never its text; refused to anyone else.
+  sharedUploads: async ({ personId, markers }) => {
+    const admin = await adminMemberOf();
+    return [
+      await answer(
+        "as the reader",
+        async () => await sourcesAs(personId).sharedUploads()
+      ),
+      await answer(
+        "as an admin",
+        async () => await sourcesAs(admin).sharedUploads()
+      ),
+      await answer(
+        "as an admin, after a place named by the markers",
+        async () =>
+          await sourcesAs(admin).sharedUploads(
+            unchecked({ uploadedAt: markers.join(" "), id: markers[0] })
+          )
+      ),
+      await answer(
+        "as someone who isn't a member",
+        async () => await sourcesAs(stranger()).sharedUploads()
+      ),
+    ];
+  },
+} satisfies Record<
+  | "list"
+  | "versions"
+  | "read"
+  | "search"
+  | "uploadOf"
+  | "uploadVersion"
+  | "deleteUpload"
+  | "upload"
+  | "sharedUploads",
+  Probe
+>;
 
 /** The memories' RPC for `personId`, signed in as a member. */
 const memoriesAs = (personId: string): BrainMemoriesRpc =>

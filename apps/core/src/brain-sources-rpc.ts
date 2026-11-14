@@ -9,6 +9,11 @@ import type {
   BrainSourcesApi,
   BrainSourceText,
   BrainSourceVersionPage,
+  BrainSharedUploadPage,
+  BrainSharedUploadsAfter,
+  BrainUpload,
+  BrainUploadFile,
+  BrainUploadReaders,
 } from "@grasp-os/shared/brain-sources";
 
 import {
@@ -18,6 +23,13 @@ import {
   recallAs,
 } from "./brain-next.ts";
 import type { ListedSource, RecalledMemory, SourceRef } from "./brain-next.ts";
+import {
+  brainUploadOf,
+  deleteBrainUpload,
+  sharedUploadsFor,
+  uploadToBrain,
+  uploadVersionToBrain,
+} from "./brain-uploads.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -32,7 +44,9 @@ import type { SessionCheck } from "./session-check.ts";
 // the workspace it refuses a Grasp staff session (session-check.ts
 // `fullAccess`). Nothing here is audited per read, as `recallAs` isn't:
 // what a source is and who may read it are the Brain's, and brain-next.ts
-// checks every source and version it is given with its own rules.
+// checks every source and version it is given with its own rules. Uploads
+// are brain-uploads.ts's, which checks the file, who may act on an upload
+// and its readers, and audits each.
 
 /**
  * `source` as core's Brain takes it: its own rules check the producer and
@@ -181,5 +195,51 @@ export class BrainSourcesRpc extends CoreRpcTarget implements BrainSourcesApi {
         truncated,
       };
     });
+  }
+
+  async upload(
+    file: BrainUploadFile,
+    readers: BrainUploadReaders,
+    uploadId: string
+  ): Promise<{ source: BrainSourceRef; version: number }> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await uploadToBrain(this.#env, person, file, readers, uploadId)
+    );
+  }
+
+  async uploadVersion(
+    uploadId: string,
+    file: BrainUploadFile,
+    versionId: string
+  ): Promise<{ source: BrainSourceRef; version: number }> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await uploadVersionToBrain(this.#env, person, uploadId, file, versionId)
+    );
+  }
+
+  async uploadOf(uploadId: string): Promise<BrainUpload | null> {
+    return await withPerson(
+      this.#check,
+      async (person) => await brainUploadOf(this.#env, person, uploadId)
+    );
+  }
+
+  async deleteUpload(uploadId: string): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      await deleteBrainUpload(this.#env, person, uploadId);
+    });
+  }
+
+  async sharedUploads(
+    after?: BrainSharedUploadsAfter | null
+  ): Promise<BrainSharedUploadPage> {
+    return await withPerson(
+      this.#check,
+      async (person) => await sharedUploadsFor(this.#env, person, after)
+    );
   }
 }

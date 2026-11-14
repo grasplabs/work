@@ -242,6 +242,7 @@
   "@grasp-os/core test/brain-suite.test.ts": 0.2,
   "@grasp-os/core test/brain-team-groups.test.ts": 1.3,
   "@grasp-os/core test/brain-transcripts.test.ts": 4.2,
+  "@grasp-os/core test/brain-uploads.test.ts": 1.4,
   "@grasp-os/core test/brain.test.ts": 8.1,
   "@grasp-os/core test/builtin-blueprints.test.ts": 24.3,
   "@grasp-os/core test/builtins.test.ts": 1.8,

@@ -171,6 +171,12 @@ const typeRules: readonly {
   // over, refused, or skipped with why (a chat's noted question it may no
   // longer keep: restricted, deleted, not a member, no text), by ids alone.
   { action: "brain.source", type: "action" },
+  // A file uploaded straight into the Brain (core's brain-uploads.ts):
+  // added, refused with why, failed, deleted or a delete failed, by IDs and
+  // counts, never its name or text; and an admin listing the shared
+  // uploads to erase one, with how many.
+  { action: "brain.upload.listed", type: "read" },
+  { action: "brain.upload", type: "action" },
   // A Grasp staff member reading the client's Brain report, and asking for
   // an action on it and its outcome (core's brain-report.ts).
   { action: "admin.brain.read", type: "read" },

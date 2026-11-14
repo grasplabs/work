@@ -1548,6 +1548,10 @@ msgstr "Ein Tag und eine Uhrzeit"
 msgid "A decision was put to people, or answered"
 msgstr "Eine Entscheidung wurde Personen vorgelegt oder beantwortet"
 
+#: src/brain/sources-page.tsx
+msgid "A deleted team"
+msgstr "Ein gelöschtes Team"
+
 #: src/apps/field-kinds.tsx
 msgid "A document or an image"
 msgstr "Ein Dokument oder ein Bild"
@@ -1784,6 +1788,10 @@ msgstr "Die Angabe eines Systems"
 #: src/workflows/requests/request-parts.tsx
 msgid "A team"
 msgstr "Ein Team"
+
+#: src/brain/sources-page.tsx
+msgid "A team can read this upload."
+msgstr "Ein Team kann diesen Upload lesen."
 
 #: src/apps/app-settings.tsx
 msgid "A team it is no longer shared with"
@@ -2553,6 +2561,14 @@ msgstr "Die Aussage einer externen Partei"
 #: src/workflows/requests/request-who.tsx
 msgid "An owner can turn this on."
 msgstr "Ein Inhaber kann das einschalten."
+
+#: src/brain/sources-page.tsx
+msgid "An upload"
+msgstr "Ein Upload"
+
+#: src/activity/audit-words.ts
+msgid "An upload into the Brain failed"
+msgstr "Ein Upload ins Brain ist fehlgeschlagen"
 
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "and {more} more"
@@ -4623,6 +4639,10 @@ msgstr "Kosten"
 msgid "Could be better"
 msgstr "Könnte besser sein"
 
+#: src/activity/audit-words.ts
+msgid "Couldn't erase an upload from the Brain"
+msgstr "Konnte einen Upload nicht aus dem Brain löschen"
+
 #: src/apps/app-owner.tsx
 msgid "Couldn't load who may answer for it."
 msgstr "Wer dafür verantwortlich sein darf, konnte nicht geladen werden."
@@ -4857,6 +4877,7 @@ msgstr "Version der Definition"
 #: src/agents/agent-page.tsx
 #: src/apps/app-remove.tsx
 #: src/brain/skills-page.tsx
+#: src/brain/sources-page.tsx
 #: src/chat/chat-menus.tsx
 #: src/chat/chat-more.tsx
 #: src/chat/delete-chat-dialog.tsx
@@ -4895,6 +4916,7 @@ msgstr "{projectName} löschen?"
 #: src/agents/agent-page.tsx
 #: src/apps/app-remove.tsx
 #: src/brain/skills-page.tsx
+#: src/brain/sources-page.tsx
 msgid "Delete for good"
 msgstr "Endgültig löschen"
 
@@ -4933,6 +4955,14 @@ msgstr "Diese Quelle löschen?"
 #: src/workflows/workflow-triggers.tsx
 msgid "Delete this trigger?"
 msgstr "Diesen Auslöser löschen?"
+
+#: src/brain/sources-page.tsx
+msgid "Delete this upload"
+msgstr "Diesen Upload löschen"
+
+#: src/brain/sources-page.tsx
+msgid "Delete this upload?"
+msgstr "Diesen Upload löschen?"
 
 #: src/workflows/delete-workflow.tsx
 msgid "Delete this workflow"
@@ -5478,6 +5508,10 @@ msgstr "Die Einträge bis {purged} wurden entfernt, als ihre Aufbewahrung endete
 msgid "Erase"
 msgstr "Löschen"
 
+#: src/brain/sources-page.tsx
+msgid "Erase {name} for good"
+msgstr "{name} endgültig löschen"
+
 #: src/settings/erasures.tsx
 msgid "Erase {name}?"
 msgstr "{name} löschen?"
@@ -5485,6 +5519,18 @@ msgstr "{name} löschen?"
 #: src/settings/erasures.tsx
 msgid "Erase {who}"
 msgstr "{who} löschen"
+
+#: src/brain/sources-page.tsx
+msgid "Erase for good"
+msgstr "Endgültig löschen"
+
+#: src/brain/sources-page.tsx
+msgid "Erase this upload for good"
+msgstr "Diesen Upload endgültig löschen"
+
+#: src/brain/sources-page.tsx
+msgid "Erase this upload for good?"
+msgstr "Diesen Upload endgültig löschen?"
 
 #: src/settings/erasures.tsx
 msgid "Erase…"
@@ -5497,6 +5543,10 @@ msgstr "Gelöscht"
 #: src/activity/audit-words.ts
 msgid "Erased a removed member"
 msgstr "Ein entferntes Mitglied gelöscht"
+
+#: src/activity/audit-words.ts
+msgid "Erased an upload from the Brain for good"
+msgstr "Hat einen Upload endgültig aus dem Brain gelöscht"
 
 #: src/activity/audit-words.ts
 msgid "Erased what the Brain kept from a connection, as it was disconnected"
@@ -5594,6 +5644,10 @@ msgstr "Jedes seiner Werkzeuge gehört zu einer dieser Arten. Jede ist für die 
 msgid "Every tool it has: Apps and agents use only what they are granted."
 msgstr "Jedes seiner Tools: Apps und Agenten nutzen nur, was ihnen erlaubt ist."
 
+#: src/brain/sources-page.tsx
+msgid "Every version of it is erased from the Brain for everyone who could read it. This can't be undone."
+msgstr "Jede Version davon wird für alle, die sie lesen konnten, aus dem Brain gelöscht. Das lässt sich nicht rückgängig machen."
+
 #: src/agents/agent-wakes.tsx
 msgid "Every weekday"
 msgstr "Jeden Werktag"
@@ -5603,11 +5657,16 @@ msgid "Every weekday at {time}"
 msgstr "Jeden Werktag um {time}"
 
 #: src/agents/agent-facts.tsx
+#: src/brain/sources-page.tsx
 #: src/knowledge/collection-markers.tsx
 #: src/knowledge/new-collection.tsx
 #: src/settings/stephen-audience.tsx
 msgid "Everyone"
 msgstr "Alle"
+
+#: src/brain/sources-page.tsx
+msgid "Everyone can read this upload."
+msgstr "Alle können diesen Upload lesen."
 
 #: src/dashboard/report.ts
 msgid "Everyone else, in the teams whose counts may be shown: {talked} of {asked}"
@@ -5932,6 +5991,7 @@ msgstr "Felder"
 msgid "Fields to search"
 msgstr "Zu durchsuchende Felder"
 
+#: src/brain/sources-page.tsx
 #: src/labels.ts
 msgid "File"
 msgstr "Datei"
@@ -7533,6 +7593,10 @@ msgstr "Sie läuft sofort nicht mehr, auch laufende Aufrufe nicht, und kann nie 
 msgid "It stops where it is and never goes on. What it already did stays done. This can't be undone."
 msgstr "Er hält an, wo er gerade ist, und läuft nie weiter. Was er schon getan hat, bleibt getan. Das lässt sich nicht rückgängig machen."
 
+#: src/brain/sources-page.tsx
+msgid "It takes {types} files of up to {size}. Who may read it stays as you choose: to share it with others, upload it again for them."
+msgstr "Hochgeladen werden können {types}-Dateien bis {size}. Wer sie lesen darf, bleibt, wie du es wählst: Um sie mit anderen zu teilen, lade sie für sie erneut hoch."
+
 #: src/settings/event-sources.tsx
 msgid "It takes no event until you make it a new secret."
 msgstr "Sie nimmt kein Ereignis an, bis Sie ihr ein neues Geheimnis erzeugen."
@@ -8225,6 +8289,10 @@ msgstr "London"
 msgid "Looked at the access to remove by hand"
 msgstr "Den von Hand zu entfernenden Zugriff angesehen"
 
+#: src/activity/audit-words.ts
+msgid "Looked at the uploads shared with a team or everyone"
+msgstr "Hat sich die mit einem Team oder allen geteilten Uploads angesehen"
+
 #: src/chat/package-requests.tsx
 msgctxt "an advisory's severity"
 msgid "Low"
@@ -8862,6 +8930,10 @@ msgstr "Neue Tabelle"
 msgid "New team"
 msgstr "Neues Team"
 
+#: src/brain/sources-page.tsx
+msgid "New version"
+msgstr "Neue Version"
+
 #: src/workflows/requests/request-summary.tsx
 msgid "New: “{label}”"
 msgstr "Neu: „{label}“"
@@ -9194,6 +9266,10 @@ msgstr "Keine Teams"
 #: src/settings/teams.tsx
 msgid "No teams yet."
 msgstr "Noch keine Teams."
+
+#: src/brain/sources-page.tsx
+msgid "No uploads are shared with a team or everyone."
+msgstr "Keine Uploads sind mit einem Team oder allen geteilt."
 
 #: src/workflows/workflow-triggers.tsx
 msgid "No webhook source yet: an admin adds one in Settings, with the URL and secret its sender uses."
@@ -10000,6 +10076,10 @@ msgstr "Nur Konten des Tenants {tenantId}."
 msgid "Only admins can change teams."
 msgstr "Nur Admins können Teams ändern."
 
+#: src/brain/sources-page.tsx
+msgid "Only an admin can remove an upload shared with a team or everyone. Ask an admin to remove it."
+msgstr "Nur ein Admin kann einen mit einem Team oder allen geteilten Upload entfernen. Bitte einen Admin, ihn zu entfernen."
+
 #: src/knowledge/new-collection.tsx
 msgid "Only an admin makes a collection for everyone or for teams."
 msgstr "Nur Admins erstellen eine Sammlung für alle oder für Teams."
@@ -10028,6 +10108,7 @@ msgstr "Nur seine Entwickler öffnen es, und seine Auslöser feuern nicht, bis e
 msgid "Only mapped"
 msgstr "Nur erfasst"
 
+#: src/brain/sources-page.tsx
 #: src/knowledge/new-collection.tsx
 msgid "Only me"
 msgstr "Nur ich"
@@ -10101,6 +10182,10 @@ msgstr "Nur Sie"
 #: src/brain/remember-dialog.tsx
 msgid "Only you and your agents read it, until you share it."
 msgstr "Nur du und deine Agenten lesen es, bis du es teilst."
+
+#: src/brain/sources-page.tsx
+msgid "Only you can read this upload."
+msgstr "Nur du kannst diesen Upload lesen."
 
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx
@@ -12884,6 +12969,10 @@ msgstr "Geteilte Postfächer, Kalender von Kolleginnen und Kollegen und die Date
 msgid "Shared mailboxes, registers and the company's records, after they press a card."
 msgstr "Geteilte Postfächer, Register und Datensätze des Unternehmens, nachdem die Person eine Karte bestätigt."
 
+#: src/brain/sources-page.tsx
+msgid "Shared uploads"
+msgstr "Geteilte Uploads"
+
 #: src/apps/app-sharing.tsx
 #: src/workflows/share-workflow.tsx
 msgid "Shared with"
@@ -13867,6 +13956,18 @@ msgstr "Team"
 msgctxt "what the Brain remembers about something"
 msgid "Team"
 msgstr "Team"
+
+#: src/brain/sources-page.tsx
+msgid "Team {name}"
+msgstr "Team {name}"
+
+#: src/brain/sources-page.tsx
+msgid "Team {team} can read this upload."
+msgstr "Team {team} kann diesen Upload lesen."
+
+#: src/brain/sources-page.tsx
+msgid "Team {teamName}"
+msgstr "Team {teamName}"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "team leads talked"
@@ -15044,6 +15145,10 @@ msgstr "Dieses Dokument hat sich geändert, seit Sie es geöffnet haben. Version
 msgid "This document is empty."
 msgstr "Dieses Dokument ist leer."
 
+#: src/brain/sources-page.tsx
+msgid "This file's text is too long for the Brain to keep. Split it into smaller files and upload those."
+msgstr "Der Text dieser Datei ist zu lang, als dass das Brain ihn behalten könnte. Teile sie in kleinere Dateien auf und lade diese hoch."
+
 #: src/routes/interview.tsx
 msgid "This interview can't be opened"
 msgstr "Dieses Gespräch lässt sich nicht öffnen"
@@ -15209,6 +15314,10 @@ msgstr "Diese Seite wurde gestoppt"
 #: src/pages/frame-failure.tsx
 msgid "This page's stored code no longer matches the code that was published, so it wasn't opened. Tell an admin."
 msgstr "Der gespeicherte Code dieser Seite stimmt nicht mehr mit dem veröffentlichten Code überein, daher wurde sie nicht geöffnet. Informieren Sie einen Admin."
+
+#: src/brain/sources-page.tsx
+msgid "This upload was already made with another file, which is kept as it was. Choose the file again to upload it as a new upload, or add it as a new version."
+msgstr "Dieser Upload wurde schon mit einer anderen Datei gemacht, die so bleibt, wie sie war. Wähle die Datei erneut, um sie als neuen Upload hochzuladen, oder füge sie als neue Version hinzu."
 
 #: src/pages/frame-failure.tsx
 msgid "This version can't open"
@@ -15706,6 +15815,7 @@ msgstr "Wird aktualisiert"
 msgid "Updating {name}…"
 msgstr "{name} wird aktualisiert…"
 
+#: src/brain/sources-page.tsx
 #: src/knowledge/uploads.tsx
 msgid "Upload"
 msgstr "Hochladen"
@@ -15715,17 +15825,38 @@ msgctxt "a source of the Brain"
 msgid "Upload"
 msgstr "Upload"
 
+#: src/brain/sources-page.tsx
+msgid "Upload a file"
+msgstr "Datei hochladen"
+
 #: src/knowledge/uploads.tsx
 msgid "Upload a PDF, Word or Excel file, or captions (.vtt)"
 msgstr "Laden Sie eine PDF-, Word- oder Excel-Datei oder Untertitel (.vtt) hoch"
+
+#: src/brain/sources-page.tsx
+msgid "Upload new version"
+msgstr "Neue Version hochladen"
+
+#: src/activity/audit-words.ts
+msgid "Uploaded a file into the Brain"
+msgstr "Hat eine Datei ins Brain hochgeladen"
+
+#: src/brain/sources-page.tsx
+msgid "Uploaded by {uploaderName}, {uploaded}"
+msgstr "Hochgeladen von {uploaderName}, {uploaded}"
 
 #: src/activity/audit-words.ts
 msgid "Uploaded to knowledge"
 msgstr "In das Wissen hochgeladen"
 
+#: src/brain/sources-page.tsx
 #: src/knowledge/uploads.tsx
 msgid "Uploading…"
 msgstr "Wird hochgeladen…"
+
+#: src/brain/sources-page.tsx
+msgid "Uploads shared with a team or everyone. Only an admin can erase one, for everyone and for good. Its text isn't shown here."
+msgstr "Mit einem Team oder allen geteilte Uploads. Nur ein Admin kann einen löschen, für alle und endgültig. Sein Text wird hier nicht gezeigt."
 
 #: src/settings/event-sources.tsx
 msgid "URL of {name}"
@@ -16152,6 +16283,10 @@ msgstr "Wurde von einer anderen App aufgerufen"
 #: src/activity/audit-words.ts
 msgid "Was refused adding a member to an App"
 msgstr "Durfte kein Mitglied zu einer App hinzufügen"
+
+#: src/activity/audit-words.ts
+msgid "Was refused an upload into the Brain, or its removal"
+msgstr "Ein Upload ins Brain oder dessen Entfernung wurde verweigert"
 
 #: src/activity/audit-words.ts
 msgid "Was refused approving packages that couldn't be checked"
@@ -16922,6 +17057,11 @@ msgid "Who leads it?"
 msgstr "Wer leitet es?"
 
 #: src/knowledge/new-collection.tsx
+msgid "Who may read it"
+msgstr "Wer sie lesen darf"
+
+#: src/brain/sources-page.tsx
+msgctxt "a file uploaded into the Brain"
 msgid "Who may read it"
 msgstr "Wer sie lesen darf"
 

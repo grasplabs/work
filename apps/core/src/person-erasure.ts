@@ -43,6 +43,7 @@ import {
   appVisitorCodes,
   appVisitorSessions,
   appWebhookDeliveries,
+  brainUploads,
   erasedSubjects,
   channelAccounts,
   channelConversations,
@@ -607,7 +608,8 @@ const apps: ErasureStep = {
 /**
  * What the Brain keeps that only they may read (brain-next.ts
  * `erasePerson`): whatever was added for them alone, their own
- * instruction file included, every version. Its place among the areas doesn't matter, and nothing
+ * instruction file included, every version; then core's record of
+ * their uploads for themselves alone. Its place among the areas doesn't matter, and nothing
  * orders a retry's pending areas: nothing of theirs lands after it,
  * whichever areas are still pending, as they were removed before they
  * could be erased, producers hand over nothing for someone no longer a
@@ -629,7 +631,22 @@ const brainSources: ErasureStep = {
       // Their hand-overs still open, which name them by id (a chat's
       // turns), end as erased: none keeps their id after this.
       await endHandOversOf(env, userId);
-      await completed(db, userId, "brain_sources");
+      // Only once the Brain erased them: their uploads for themselves alone
+      // (brain-uploads.ts) name nothing the Brain still holds, and nobody
+      // else may delete them, so their rows go with the area's completion.
+      // What they uploaded for a team or everyone is the company's, and
+      // keeps naming them by ID.
+      await db.batch([
+        db
+          .delete(brainUploads)
+          .where(
+            and(
+              eq(brainUploads.uploadedBy, userId),
+              eq(brainUploads.readers, "me")
+            )
+          ),
+        completed(db, userId, "brain_sources"),
+      ]);
       return;
     }
     // Their own store still deleting is the expected way for its first

@@ -36,6 +36,19 @@ describe("audit event types", () => {
     ).toStrictEqual(["action", "action", "action", "action", "action"]);
   });
 
+  it("files what is done to an upload into the Brain as actions, and an admin's listing of shared uploads as a read", () => {
+    expect(
+      [
+        "brain.upload.added",
+        "brain.upload.refused",
+        "brain.upload.failed",
+        "brain.upload.deleted",
+        "brain.upload.delete_failed",
+        "brain.upload.listed",
+      ].map((action) => typeOf(action))
+    ).toStrictEqual(["action", "action", "action", "action", "action", "read"]);
+  });
+
   it("files what was captured from a connection, and its erasure when it is disconnected, as actions", () => {
     expect(
       [

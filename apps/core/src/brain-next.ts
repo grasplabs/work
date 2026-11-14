@@ -3,11 +3,13 @@ import {
   brainOf,
   contestedCursorSchema,
   currentReadMax,
+  changeTaken,
   entitiesCursorSchema,
   entityAttributes,
   entityIdSchema,
   entityKinds,
   fitsSourceText,
+  isSourceText,
   erasedSource,
   changeReused,
   listPageMax,
@@ -184,6 +186,12 @@ const whileNotRestoring = async <T>(add: () => Promise<T>): Promise<T> => {
 /** A team's group name starts with this; the rest is the team's ID. */
 const teamPrefix = "team:";
 
+/**
+ * Every current member is in this group (`readerOf`), and in no other
+ * way: what everyone in the organization may read.
+ */
+const companyGroup = "company";
+
 /** A person's or a team's ID, as core passes it: never empty. */
 const idSchema = wellFormedString()
   .min(1)
@@ -192,6 +200,7 @@ const idSchema = wellFormedString()
 const sourceReadersSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("owner"), personId: idSchema }),
   z.strictObject({ kind: z.literal("team"), teamId: idSchema }),
+  z.strictObject({ kind: z.literal("everyone") }),
   z.strictObject({ kind: z.literal("none") }),
 ]);
 
@@ -673,6 +682,9 @@ const accessOf = (readers: SourceReaders): Access => {
     case "team": {
       return { kind: "audience", group: teamGroup(readers.teamId) };
     }
+    case "everyone": {
+      return { kind: "audience", group: companyGroup };
+    }
     case "none": {
       return { kind: "none" };
     }
@@ -692,9 +704,6 @@ const accessOf = (readers: SourceReaders): Access => {
  */
 export type Reach = "person" | "teams" | "company";
 
-/** Every current member is in this group, and in no other way. */
-const companyGroup = "company";
-
 /**
  * The member `personId` as the Brain's reader: the person, their teams as
  * core counts them now, and the company. Refused once they have no
@@ -712,6 +721,23 @@ const personReaderOf = async (
     person: member.userId,
     groups: [...member.teams.map(({ id }) => teamGroup(id)), companyGroup],
   };
+};
+
+/**
+ * What keeps `text` from being a source's text, by the store's own rules
+ * (`isSourceText`, `fitsSourceText`): `brain.source_no_text` for one of
+ * whitespace alone, or not well-formed; `brain.source_too_large` past a
+ * source's bound, as given or as indexed. `undefined` for a text the
+ * Brain keeps. For a producer that checks a text before it writes
+ * anything of its own (brain-uploads.ts); `addSource` checks it too.
+ */
+export const sourceTextProblem = (
+  text: string
+): "brain.source_no_text" | "brain.source_too_large" | undefined => {
+  if (!isSourceText(text)) {
+    return "brain.source_no_text";
+  }
+  return fitsSourceText(text) ? undefined : "brain.source_too_large";
 };
 
 /**
@@ -774,8 +800,14 @@ const readerOf = async (
  * the server, never from a person's input. An id is not a secret within
  * its kind (an upload's id is seen by those who can see the upload), so
  * a producer checks that whoever asks for the change may change that
- * source before it calls this; the Brain can't tell. An add an erasure
- * closed is refused with `brain.source_erased`: final, never retried.
+ * source before it calls this; the Brain can't tell. Refused with a
+ * code: `brain.source_erased` when an erasure closed what it adds,
+ * `brain.source_no_text` for a text of whitespace alone and
+ * `brain.source_too_large` past a source's bound (`sourceTextProblem`),
+ * each final, never to be retried; and `brain.source_change_taken` when
+ * `change` was added before with other text or readers (nothing changed),
+ * which an upload settles as refused, while `handOver` doesn't yet treat
+ * it as final: it throws, so the hand-over is tried again until parked.
  *
  * With `said`, the Brain also draws memories from the version on its work
  * queue, in `said.priority`'s class: whose words it is (`said.by`, the
@@ -817,6 +849,12 @@ export const addSource = async (
   // recall that doesn't read their own store, such as code's.
   if (source.producer === "capture" && readers.kind !== "owner") {
     throw new Error("Refused: a capture is for one person alone");
+  }
+  // The store's own rules for a text, here, so a producer is told what is
+  // wrong with it by a code, not by trying.
+  const problem = sourceTextProblem(text);
+  if (problem !== undefined) {
+    throw brainSourceErrors.create(problem);
   }
   const access = accessOf(readers);
   const key = sourceKeyOf(source);
@@ -861,6 +899,9 @@ export const addSource = async (
       (error.message === erasedSource || error.message === storeErased)
     ) {
       throw brainSourceErrors.create("brain.source_erased");
+    }
+    if (error instanceof Error && error.message === changeTaken) {
+      throw brainSourceErrors.create("brain.source_change_taken");
     }
     throw error;
   }
@@ -3222,8 +3263,11 @@ const handOver = async (
     return await refused("erased", handed.readers);
   }
   const readers = sourceReadersSchema.safeParse(handed.readers);
-  const texts = [handed.text, handed.whenTooLarge].filter(
-    (text) => wellFormedString().safeParse(text).success
+  // The store's own rule for a text (`isSourceText`): a text of
+  // whitespace alone, which an empty or image-only file gives, is refused
+  // as `invalid` here, never tried until it is parked.
+  const texts = [handed.text, handed.whenTooLarge].filter((text) =>
+    isSourceText(text)
   );
   if (!readers.success || texts.length < 2) {
     return await refused("invalid");

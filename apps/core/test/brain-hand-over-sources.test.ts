@@ -22,11 +22,16 @@ import { handOverNotes, loneNotesPerDrain } from "../src/brain-hand-overs.ts";
 import {
   erasePerson,
   eraseSource,
+  queueHandOvers,
   readSourceVersionAs,
   recallAs,
   workBrain,
 } from "../src/brain-next.ts";
-import type { Producers, SourceRef } from "../src/brain-next.ts";
+import type {
+  HandOverOutcome,
+  Producers,
+  SourceRef,
+} from "../src/brain-next.ts";
 import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { brainHandOvers, personErasures } from "../src/db/core/schema.ts";
 import { statementsWithin } from "../src/db/d1.ts";
@@ -798,6 +803,50 @@ describe("how a hand-over fails closed", () => {
       after: ["brain.source.handover_started", "brain.source.handover_refused"],
       version: null,
       queued: { waiting: false, parked: false },
+    });
+  });
+
+  it("refuses for good, as invalid, a hand-over whose text and whenTooLarge are whitespace alone, as an empty or image-only file gives, and never reads it again", async () => {
+    const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
+    const reads: string[] = [];
+    const ends: HandOverOutcome[] = [];
+    const blank: Producers = {
+      attempt: async (asked) => {
+        await Promise.resolve();
+        reads.push(asked.id);
+        return {
+          handed: {
+            kind: "source",
+            change: "v1",
+            text: " \n\t ",
+            whenTooLarge: "\n",
+            readers: { kind: "everyone" },
+          },
+          started: async () => {
+            await Promise.resolve();
+            return true;
+          },
+          ended: async (outcome) => {
+            await Promise.resolve();
+            ends.push(outcome);
+          },
+        };
+      },
+    };
+    await queueHandOvers(env, [source]);
+
+    await workBrain(env, later(), blank);
+    // Long past any retry's wait: a refused item is done, never read again.
+    await workBrain(env, later(60 * 60 * 1000), blank);
+
+    expect({
+      reads: reads.length,
+      ends,
+      kept: await store().keyState(`upload:${source.id}`),
+    }).toStrictEqual({
+      reads: 1,
+      ends: [{ kind: "refused", reason: "invalid" }],
+      kept: "free",
     });
   });
 
