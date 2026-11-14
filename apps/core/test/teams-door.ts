@@ -309,12 +309,16 @@ export const kept = async (conversation: string) => {
 };
 
 /**
- * A member of the client signed in once, writing to the bot on Teams,
- * whose chats `provider` answers. The organization has one provider at a
- * time, so people in one test share it: answer them all from one.
+ * A member of the client signed in once, as `role`, writing to the bot on
+ * Teams, whose chats `provider` answers. The organization has one provider
+ * at a time, so people in one test share it: answer them all from one.
  */
-export const memberAnsweredBy = async (idp: Idp, provider: FakeProvider) => {
-  const signedIn = await signedInApi(idp, "user");
+export const memberAnsweredBy = async (
+  idp: Idp,
+  provider: FakeProvider,
+  role: "user" | "builder" = "user"
+) => {
+  const signedIn = await signedInApi(idp, role);
   const { oid } = signedIn.person;
   if (typeof oid !== "string") {
     throw new TypeError("Expected an Entra object id");

@@ -17,22 +17,16 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { FileTextIcon, LibraryIcon, SearchXIcon } from "lucide-react";
 
 import { PageHeading } from "../frame/page.tsx";
-import {
-  CollectionDrawing,
-  MemoryDrawing,
-  Panel,
-} from "../knowledge/blocks.tsx";
+import { CollectionDrawing, Panel } from "../knowledge/blocks.tsx";
 import { CollectionMarkers } from "../knowledge/collection-markers.tsx";
 import { KnowledgeFrame } from "../knowledge/frame.tsx";
-import type { MemoryFiles } from "../knowledge/memory.ts";
 import { loadKnowledgeNav } from "../knowledge/nav-data.ts";
 import { NewCollection } from "../knowledge/new-collection.tsx";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 
 // Knowledge's home, a page to go on from, in the prototype's look
 // (grasplabs/prototype `components/brain-home.tsx`): what it is in two
-// sentences, the memory files agents always have in context, then a block
-// per collection the person may read, three to a row. Core lists only
+// sentences, then a block per collection the person may read, three to a row. Core lists only
 // those, and searches only those; the page shows what it gets.
 
 const SearchResults = ({
@@ -88,55 +82,6 @@ const SearchResults = ({
         </li>
       ))}
     </ol>
-  );
-};
-
-/** The memory files, as the first block: what every agent always has. */
-const MemoryBlock = ({ memory }: { memory: MemoryFiles }) => {
-  const { t } = useLingui();
-  return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-6">
-      <div className="sm:w-72 sm:flex-none">
-        <Panel short>
-          <MemoryDrawing />
-        </Panel>
-      </div>
-      <div className="flex min-w-0 flex-1 flex-col gap-2 text-sm">
-        <p className="text-muted-foreground leading-relaxed">
-          <Trans>What every agent has in its context, all the time.</Trans>
-        </p>
-        {memory.files.length === 0 ? (
-          <p className="text-muted-foreground">
-            <Trans>No memory files are written yet.</Trans>
-          </p>
-        ) : (
-          <ul className="flex flex-col gap-1">
-            {memory.files.map((file) => (
-              <li key={file.id}>
-                <Link
-                  className="font-medium hover:underline"
-                  params={{ collection: file.collectionId }}
-                  search={{ doc: file.id }}
-                  to="/knowledge/$collection"
-                >
-                  {file.path}
-                </Link>{" "}
-                <span className="text-muted-foreground">
-                  {file.collectionId === memory.personal
-                    ? t`(yours)`
-                    : t`(company)`}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-        {memory.memory === null ? (
-          <p className="text-muted-foreground">
-            <Trans>An admin hasn&apos;t set up company memory yet.</Trans>
-          </p>
-        ) : null}
-      </div>
-    </div>
   );
 };
 
@@ -266,7 +211,7 @@ const Knowledge = () => {
   const { nav, results, firstPages } = Route.useLoaderData();
   const { q } = Route.useSearch();
   const { identity } = Route.useRouteContext();
-  const { collections, memory } = nav;
+  const { collections } = nav;
   const names = new Map(
     collections.state === "ready"
       ? collections.data.map(({ id, name }) => [id, name])
@@ -289,8 +234,7 @@ const Knowledge = () => {
               <Trans>
                 Everything Grasp and its agents may read, in collections: your
                 own, your teams&apos; and your organization&apos;s. Agents read
-                a document when they need it, and always have the memory files
-                in mind.
+                a document when they need it.
               </Trans>
             }
             title={<Trans>Knowledge</Trans>}
@@ -306,15 +250,6 @@ const Knowledge = () => {
               ) : null}
             </section>
           )}
-          <section aria-labelledby="memory" className="flex flex-col gap-3">
-            <h2 className="text-sm font-medium" id="memory">
-              <Trans>Memory</Trans>
-            </h2>
-            <NotLoaded page={memory} />
-            {memory.state === "ready" ? (
-              <MemoryBlock memory={memory.data} />
-            ) : null}
-          </section>
           <section
             aria-labelledby="collections"
             className="flex flex-col gap-3"

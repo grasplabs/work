@@ -483,17 +483,17 @@ export const forgetPersonEntities = (
   );
 
 /**
- * Before a purge deletes `collectionId`'s documents: the entities only
- * they mention.
+ * Before a purge deletes the documents of `collectionIds`: the entities
+ * only they mention.
  */
 export const forgetCollectionEntities = (
   db: DrizzleD1Database,
-  collectionId: string,
+  collectionIds: readonly string[],
   condition: SQL = sql`1`
 ) =>
   forgetEntitiesOf(
     db,
-    sql`(SELECT ${brainLinkJobs.source} FROM ${brainLinkJobs} WHERE ${brainLinkJobs.documentId} IN (SELECT ${documents.id} FROM ${documents} WHERE ${documents.collectionId} = ${collectionId}))`,
+    sql`(SELECT ${brainLinkJobs.source} FROM ${brainLinkJobs} WHERE ${brainLinkJobs.documentId} IN (SELECT ${documents.id} FROM ${documents} WHERE ${documents.collectionId} IN (SELECT value FROM json_each(${JSON.stringify(collectionIds)}))))`,
     condition
   );
 

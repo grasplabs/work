@@ -859,6 +859,28 @@ export const Route = createFileRoute("/archive")({ component: Page });
     ).resolves.toMatchObject({ revision: 2 });
   });
 
+  // The App's own AGENTS.md keeps its 2,000-token limit (8,000
+  // characters) until GRA-1834 removes it; no chat loads it.
+  it("refuses an AGENTS.md over 8,000 characters at the App's root, and holds no other file to it", async () => {
+    const { api } = await appsApi("builder");
+    const app = await newApp(api.apps);
+    expect({
+      over: await outcome(
+        drafted(api, app.id, { "AGENTS.md": "x".repeat(8001) })
+      ),
+      atLimit: await outcome(
+        drafted(api, app.id, { "AGENTS.md": "x".repeat(8000) })
+      ),
+      elsewhere: await outcome(
+        drafted(api, app.id, { "docs/AGENTS.md": "x".repeat(9000) })
+      ),
+    }).toStrictEqual({
+      over: "knowledge.memory_too_large",
+      atLimit: "ok",
+      elsewhere: "ok",
+    });
+  });
+
   it("takes no write over a version past the limits that grows it, and those that shrink it", async () => {
     const { api, userId } = await appsApi("builder");
     const app = await newApp(api.apps);

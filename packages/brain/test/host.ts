@@ -273,8 +273,6 @@ export const noCopies: OnErase = {
   forgetFiles: async () => {
     await Promise.resolve();
   },
-  personalCollection: async (userId) =>
-    await Promise.resolve(`personal-${userId}`),
   requireRewritable: async () => {
     await Promise.resolve();
   },

@@ -87,9 +87,10 @@ test("someone who isn't an admin opens Settings on their profile, with only thei
   const page = await pageOf(member);
   await page.goto("/settings");
   await expect(page).toHaveURL(/\/settings\/profile$/u);
+  // Their own instruction file too, which every member writes.
   await expect(
     page.getByRole("navigation", { name: "Settings" }).getByRole("link")
-  ).toHaveText(["Profile", "Security"]);
+  ).toHaveText(["Profile", "Instructions", "Security"]);
 });
 
 test("on a phone the sections are one control above the section", async ({

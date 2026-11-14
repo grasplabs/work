@@ -489,9 +489,10 @@ const checkLimits = (
 };
 
 /**
- * `knowledge.memory_too_large` if the App's AGENTS.md, which agents
- * working on the App have in their context (knowledge/memory.ts), is over
- * its limit, and only if it also grew, as with `checkLimits`.
+ * `knowledge.memory_too_large` if the App's AGENTS.md is over its limit,
+ * and only if it also grew, as with `checkLimits`. No chat reads it any
+ * more (instruction-files.ts holds an App's file); it goes from the code
+ * with GRA-1834.
  */
 const checkMemory = (
   before: string | undefined,
@@ -501,7 +502,7 @@ const checkMemory = (
     after !== undefined &&
     (before === undefined || after.length > before.length);
   if (grew) {
-    requireWithinLimit("AGENTS.md", after);
+    requireWithinLimit(after);
   }
 };
 
@@ -524,8 +525,9 @@ export const versionTree = async (
 };
 
 /**
- * The hash of `files`' code: their tree without AGENTS.md, which an App's
- * agents write as they learn and nothing builds or runs. Two versions of
+ * The hash of `files`' code: their tree without AGENTS.md, which nothing
+ * builds, runs or (since instruction files moved to the new Brain) loads
+ * into a chat; it goes from the code with GRA-1834. Two versions of
  * the same code have the same hash, whatever their AGENTS.md: what the
  * release vouches for in a built-in blueprint (app-blueprints.ts).
  */

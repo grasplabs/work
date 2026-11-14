@@ -109,13 +109,6 @@ test("a person searches, edits a document, meets a newer version instead of over
       .filter({ has: page.getByRole("link", { name: collectionName }) });
     await expect(listed.getByText("Only the owner")).toBeVisible();
     await expect(collections.getByText(hiddenName)).toHaveCount(0);
-    // A first visit creates the person's Personal collection, listed at once.
-    await expect(
-      collections.getByRole("link", { name: "Personal", exact: true })
-    ).toBeVisible();
-    await expect(
-      page.getByRole("region", { name: "Memory" }).getByRole("alert")
-    ).toHaveCount(0);
 
     // Search sits at the top of the navigation, and runs on Enter.
     const search = page.getByRole("searchbox", { name: "Search Knowledge" });
