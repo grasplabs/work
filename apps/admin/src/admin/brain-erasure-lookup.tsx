@@ -44,8 +44,6 @@ const answerWords: Readonly<
     "Not done, and not tried again: the erasure of this person from the Brain was recorded as skipped. Raise it with engineering.",
   unavailable:
     "The Brain can't read its erasure ledger right now, or is applying it after a restore: try again shortly.",
-  unknown:
-    "The company's Grasp answered in a way this admin can't read yet: it runs a newer release. Try again once the admin is updated.",
   not_answered: "The company's Grasp didn't answer: try again.",
 };
 
@@ -53,16 +51,19 @@ const answerWords: Readonly<
 const wrongStates = new Set<BrainErasureResult["state"]>([
   "skipped",
   "unavailable",
-  "unknown",
   "not_answered",
 ]);
 
 /** What staff read when no erasure is recorded: a source may have gone with a person. */
 const notErasedWords: Readonly<Record<Kind, string>> = {
   source:
-    "No erasure of this source itself is recorded; erasing a person may have covered it.",
+    "No erasure of this source itself is recorded; erasing a person, or the chat or connection it came through, may have covered it.",
   person: "No: the ledger holds no erasure of this person.",
 };
+
+/** When the ledger recorded an erasure, in UTC and named so: staff pass it on to clients. */
+const ledgerTimeOf = (at: string): string =>
+  `${new Date(at).toLocaleString("en-GB", { dateStyle: "long", timeStyle: "short", timeZone: "UTC" })} UTC`;
 
 /** The line an answer about `kind` leaves, and whether it says something went wrong. */
 const saidOf = (
@@ -71,7 +72,7 @@ const saidOf = (
 ): { text: string; wrong: boolean } => {
   if (result.state === "erased") {
     return {
-      text: `Yes: erased from the Brain and recorded in its ledger on ${new Date(result.at).toLocaleString("en-GB", { dateStyle: "long", timeStyle: "short" })}; its files are deleted by the Brain's sweep once their grace period has passed.`,
+      text: `Yes: hidden for good and recorded in the Brain's ledger on ${ledgerTimeOf(result.at)}. Nothing can read it, and a restore can't bring it back; what the Brain kept of it is deleted in the background, its files after a 15-minute grace.`,
       wrong: false,
     };
   }

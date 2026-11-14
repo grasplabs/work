@@ -12,17 +12,17 @@ import {
   brainActionPath,
   brainActionPurpose,
   brainActionSchema,
+  brainErasureAnswerSchema,
   brainErasureLookupSchema,
   brainErasurePath,
   brainErasurePurpose,
-  brainErasureReadSchema,
   brainReportPath,
   brainReportPurpose,
   brainReportSchema,
 } from "@grasp-os/shared/brain-report";
 import type {
   BrainActionOutcome,
-  BrainErasureRead,
+  BrainErasureAnswer,
   BrainReport,
 } from "@grasp-os/shared/brain-report";
 import { z } from "zod";
@@ -92,7 +92,7 @@ export const brainErasureInputSchema = z.object({
 });
 
 /** Whether it was erased, or that its core didn't answer (`not_answered`). */
-export type BrainErasureResult = BrainErasureRead | { state: "not_answered" };
+export type BrainErasureResult = BrainErasureAnswer | { state: "not_answered" };
 
 /**
  * Whether what `staff` named was erased from a client's Brain, as its
@@ -113,7 +113,7 @@ export const lookUpBrainErasure = async (
       await signedCoreReport(request, {
         path: brainErasurePath,
         purpose: brainErasurePurpose,
-        schema: brainErasureReadSchema,
+        schema: brainErasureAnswerSchema,
         fields: { staff: { email: staff.email }, lookup },
       })
   );

@@ -714,29 +714,39 @@ const inStepOrder = (areas: readonly ErasureArea[]): ErasureArea[] => {
 };
 
 /**
- * Where the erasure of `userId` from the new Brain stands, as core records
- * it (`brain_sources`), in the area's own states (`ErasureAreaState`):
- * `pending` until the Brain's call returned, which is only once it erased
- * them (`brainSources`); `complete` after; `skipped` were it ever recorded
- * so (no step does today; the schema allows it); null when no erasure of
- * them was asked for. The area's state alone, for Grasp's staff asking
- * whether a person was erased (brain-report.ts): one statement, whoever is
- * named, so a person never erased reads as one who never existed.
+ * Where the erasure of `userId` from the Brain stands, as core records it,
+ * across both of its Brain areas: `brain` (the legacy Brain's purge, and
+ * their skill shares in core's database) and `brain_sources` (the new
+ * Brain: pending until its call returned, which is only once their own
+ * store was erased whole, files included). In the areas' own states
+ * (`ErasureAreaState`): `skipped` if either was recorded skipped (no step
+ * does today; the schema allows it), else `pending` while either is,
+ * else `complete`; null when no erasure of them was asked for. The areas'
+ * states alone, for Grasp's staff asking whether a person was erased
+ * (brain-report.ts): one statement, whoever is named, so a person never
+ * erased reads as one who never existed.
  */
 export const brainErasureStateOf = async (
   env: Env,
   userId: string
 ): Promise<ErasureAreaState | null> => {
-  const [area] = await drizzle(env.DB)
+  const areas = await drizzle(env.DB)
     .select({ state: personErasureAreas.state })
     .from(personErasureAreas)
     .where(
       and(
         eq(personErasureAreas.userId, userId),
-        eq(personErasureAreas.area, brainSources.area)
+        inArray(personErasureAreas.area, [brain.area, brainSources.area])
       )
     );
-  return area?.state ?? null;
+  const states = new Set(areas.map(({ state }) => state));
+  if (states.size === 0) {
+    return null;
+  }
+  if (states.has("skipped")) {
+    return "skipped";
+  }
+  return states.has("pending") ? "pending" : "complete";
 };
 
 /** Where `userId`'s erasure stands, or null if none was asked for. */

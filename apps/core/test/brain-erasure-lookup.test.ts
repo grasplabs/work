@@ -19,6 +19,12 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
+  chatSource,
+  chatTurnSource,
+  eraseCaptures,
+  eraseChat,
+} from "../src/brain-next-origins.ts";
+import {
   addSource,
   eraseSource,
   erasePerson,
@@ -278,31 +284,22 @@ describe("who may ask whether something was erased", () => {
 });
 
 describe("whether something was erased", () => {
-  it("says a source and a withdrawn person were erased, with when, recording each lookup without the key, the id or their hash", async () => {
+  it("says a source was erased, with when, recording the lookup without the key or its hash", async () => {
     const marked = marker();
-    const person = `person-${marked}`;
     const source = await ownSource(`someone-${marked}`, `${marked} is kept.`);
-    await ownSource(person, `${marked} is theirs.`);
     const before = Date.now();
     await eraseSource(env, {
       source,
       readers: { kind: "owner", personId: `someone-${marked}` },
       reason: "deleted",
     });
-    // A withdrawal: the shared store's alone, with no erasure in core's own
-    // record, so the ledger's answer is the answer.
-    await erasePerson(env, { personId: person, reason: "withdrawn" });
     const after = Date.now();
     const key = `upload:${source.id}`;
 
     const answers: Awaited<ReturnType<typeof lookUp>>[] = [];
     const events = await auditedDuring(async () => {
-      answers.push(
-        await lookUp({ kind: "source", key }),
-        await lookUp({ kind: "person", id: person })
-      );
+      answers.push(await lookUp({ kind: "source", key }));
     });
-    const hashes = [await sha256Hex(key), await sha256Hex(person)];
     const said = JSON.stringify({ answers, events });
 
     expect({
@@ -311,24 +308,19 @@ describe("whether something was erased", () => {
         const at = answer?.state === "erased" ? Date.parse(answer.at) : 0;
         return at >= before - 1000 && at <= after + 1000;
       }),
-      leaked: [marked, source.id, ...hashes].filter((each) =>
+      leaked: [marked, source.id, await sha256Hex(key)].filter((each) =>
         said.includes(each)
       ),
       events: lookups(events),
     }).toStrictEqual({
-      states: ["erased", "erased"],
-      when: [true, true],
+      states: ["erased"],
+      when: [true],
       leaked: [],
       events: [
         {
           action: "admin.brain.erasure.looked_up",
           actor: staffActor,
           detail: { kind: "source", outcome: "erased" },
-        },
-        {
-          action: "admin.brain.erasure.looked_up",
-          actor: staffActor,
-          detail: { kind: "person", outcome: "erased" },
         },
       ],
     });
@@ -376,35 +368,48 @@ describe("whether something was erased", () => {
   });
 });
 
-/** Whether `name` is the shared store's, the only one staff may address. */
-const isShared = (name: string): boolean => name === "brain";
-
-/**
- * The Brain's store binding, each store it is asked for by name, or by an
- * id made from one, recorded in `addressed`: the shared store is `brain`,
- * a person's own `person:<id>`. An id handed over ready-made is recorded
- * as `(id)`, which no shared lookup uses.
- */
-const recordingStore = (addressed: string[]): Env["BRAIN_STORE"] =>
-  new Proxy(env.BRAIN_STORE, {
-    get: (namespace, member): unknown => {
-      if (member === "jurisdiction") {
-        return () => recordingStore(addressed);
-      }
-      const value: unknown = Reflect.get(namespace, member, namespace);
-      if (typeof value !== "function") {
-        return value;
-      }
-      return (...args: unknown[]): unknown => {
-        if (member === "getByName" || member === "idFromName") {
-          addressed.push(String(args[0]));
-        } else if (member === "get") {
-          addressed.push("(id)");
-        }
-        return Reflect.apply(value, namespace, args);
-      };
-    },
+describe("whether something kept in a person's own store was erased", () => {
+  it("says a disconnected connection's captures and a deleted chat were erased, and a turn of that chat not by its own key", async () => {
+    const person = `person-${crypto.randomUUID()}`;
+    const connectionId = crypto.randomUUID();
+    const chatId = crypto.randomUUID();
+    await addSource(env, {
+      source: chatTurnSource(person, chatId, 1),
+      group: chatSource(person, chatId),
+      change: crypto.randomUUID(),
+      text: `${marker()} was asked.`,
+      readers: { kind: "owner", personId: person },
+    });
+    const captures = {
+      kind: "source",
+      key: `capture:${connectionId}`,
+    } as const;
+    const chat = { kind: "source", key: `chat:${person}/${chatId}` } as const;
+    const turn = { kind: "source", key: `chat:${person}/${chatId}/1` } as const;
+    const before = [await answerTo(captures), await answerTo(chat)];
+    // What disconnecting the connection and deleting the chat call.
+    await eraseCaptures(env, person, connectionId);
+    await eraseChat(env, person, chatId);
+    const [afterCaptures, afterChat, ofTurn] = [
+      await answerTo(captures),
+      await answerTo(chat),
+      await answerTo(turn),
+    ];
+    expect({
+      before,
+      captures: afterCaptures?.state,
+      chat: afterChat?.state,
+      // A turn's own key was never closed: the chat's was. The admin's
+      // "not erased" for a source names the chat it came through.
+      turn: ofTurn,
+    }).toStrictEqual({
+      before: [{ state: "not_erased" }, { state: "not_erased" }],
+      captures: "erased",
+      chat: "erased",
+      turn: { state: "not_erased" },
+    });
   });
+});
 
 describe("whether a person was erased, as core's own record and the shared ledger say", () => {
   it("says an erasure of a person not finished while core's erasure of them from the Brain is pending, and erased once it is complete", async () => {
@@ -432,39 +437,32 @@ describe("whether a person was erased, as core's own record and the shared ledge
     await ageOwnErasure(erased.userId);
     await retryErasures(env);
     const complete = await answerTo(lookup);
+    // Core's other Brain area (the legacy purge, their skill shares)
+    // pending again: never erased while any Brain area of theirs is.
+    await drizzle(env.DB)
+      .update(personErasureAreas)
+      .set({ state: "pending" })
+      .where(
+        and(
+          eq(personErasureAreas.userId, erased.userId),
+          eq(personErasureAreas.area, "brain")
+        )
+      );
+    const otherAreaPending = await answerTo(lookup);
 
     expect({
       pending,
       ledgerOnly,
       ownDeleting,
       complete: complete?.state,
+      otherAreaPending,
     }).toStrictEqual({
       pending: { state: "erasing" },
       ledgerOnly: { state: "erasing" },
       ownDeleting: { state: "erasing" },
       complete: "erased",
+      otherAreaPending: { state: "erasing" },
     });
-  });
-
-  it("never addresses a person's own store, for a person or a source", async () => {
-    const addressed: string[] = [];
-    const person = `person-${crypto.randomUUID()}`;
-    const source = await ownSource(person, `${marker()} is theirs.`);
-    await erasePerson(env, { personId: person, reason: "withdrawn" });
-    const coreEnv = { ...env, BRAIN_STORE: recordingStore(addressed) };
-
-    const ofPerson = await lookUp({ kind: "person", id: person }, coreEnv);
-    const ofSource = await lookUp(
-      { kind: "source", key: `upload:${source.id}` },
-      coreEnv
-    );
-    const answers = [ofPerson.status, ofSource.status];
-
-    expect({
-      answers,
-      personal: addressed.filter((name) => !isShared(name)),
-      shared: addressed.some(isShared),
-    }).toStrictEqual({ answers: [200, 200], personal: [], shared: true });
   });
 });
 
@@ -593,9 +591,12 @@ describe("whether a person was erased, when core recorded its erasure of them fr
 describe("whether something was erased, while the Brain reads its ledger", () => {
   it("answers unavailable, never not erased, and records that", async () => {
     const backup = await copyOfStore();
-    const person = `person-${crypto.randomUUID()}`;
-    await ownSource(person, `${marker()} is theirs.`);
-    await erasePerson(env, { personId: person, reason: "withdrawn" });
+    const source = await sharedSource(`${marker()} is to go.`);
+    await eraseSource(env, {
+      source,
+      readers: { kind: "none" },
+      reason: "deleted",
+    });
     const last = await runInDurableObject(storeObject(), (_store, state) =>
       state.storage.sql
         .exec<{ key: string }>(
@@ -611,7 +612,9 @@ describe("whether something was erased, while the Brain reads its ledger", () =>
       await restoreStore(backup);
       const answers: unknown[] = [];
       const events = await auditedDuring(async () => {
-        answers.push(await answerTo({ kind: "person", id: person }));
+        answers.push(
+          await answerTo({ kind: "source", key: `upload:${source.id}` })
+        );
       });
 
       expect({
@@ -619,7 +622,7 @@ describe("whether something was erased, while the Brain reads its ledger", () =>
         events: lookups(events).map(({ detail }) => detail),
       }).toStrictEqual({
         answers: [{ state: "unavailable" }],
-        events: [{ kind: "person", outcome: "unavailable" }],
+        events: [{ kind: "source", outcome: "unavailable" }],
       });
     } finally {
       await env.BRAIN_OBJECTS.delete(unknown);

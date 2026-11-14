@@ -839,14 +839,16 @@ export const erasureDue = (sql: SqlStorage): boolean =>
     .toArray().length > 0;
 /**
  * Whether the source or person whose subject is `subject` was erased, as
- * the store's record of the ledger holds it (contract.ts `ErasureStatus`),
- * in one statement: `erased` once every erasure of it is confirmed in the
- * ledger and none still hides versions the tick has to delete, with when
- * the latest was recorded; `erasing` until then; `not_erased` when the
- * record holds none. It reads the record alone, never what is kept, so
- * what was never erased answers as what never existed. An erased
- * version's file leaves the bucket by the sweep, past its grace, once no
- * version holds it (files.ts): not counted here.
+ * this store's record of the ledger holds it (contract.ts
+ * `ErasureStatus`), in one statement: `erased` once every erasure of it
+ * is confirmed in the ledger and none still hides versions this store's
+ * tick has to delete, with when the latest was recorded; `erasing` until
+ * then; `not_erased` when the record holds none. It reads the record
+ * alone, never what is kept, so what was never erased answers as what
+ * never existed. Not counted here: an erased version's file, which the
+ * sweep deletes past its 15-minute grace once no version holds it
+ * (files.ts), and anything another store (a person's own) still has to
+ * delete of what it hid.
  */
 export const erasureStatusOf = (
   sql: SqlStorage,

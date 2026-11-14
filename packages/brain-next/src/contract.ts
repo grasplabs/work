@@ -1185,9 +1185,13 @@ export type ErasureLookup = z.infer<typeof erasureLookupSchema>;
  * Whether what staff looked up was erased, and nothing else (no reason,
  * no count, no hash): `erased`, with when the ledger recorded the latest
  * erasure of it, once every erasure of it is written to the ledger and
- * none still holds versions to delete; `erasing` until then; `not_erased`
- * when the record holds no erasure of it, alike whether it ever existed;
- * `unavailable` while the store reads its erasure ledger.
+ * this store's tick has deleted the versions it hid: hidden for good,
+ * nothing can read it and a restore can't bring it back. Its files leave
+ * the bucket in the background, after a 15-minute grace (files.ts), and
+ * a person's own store deletes what it hid on its own tick: neither is
+ * waited for. `erasing` until then; `not_erased` when the record holds no
+ * erasure of it, alike whether it ever existed; `unavailable` while the
+ * store reads its erasure ledger.
  */
 export type ErasureStatus =
   | { state: "erased"; at: Date }

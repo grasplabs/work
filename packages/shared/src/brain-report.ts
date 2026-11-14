@@ -148,34 +148,17 @@ export const brainErasureStates = [
 
 /**
  * Whether it was erased, and nothing else: `erased`, with when the ledger
- * recorded it, once every part of the store and its queue is done; or one
- * of `brainErasureStates`. What core answers. Fields it doesn't name are
- * dropped, so an admin reads a core of a newer release that adds one.
+ * recorded it, once it is hidden for good (nothing can read it, and a
+ * restore can't bring it back) and recorded in the ledger; what the Brain
+ * kept of it is deleted in the background, its files after a 15-minute
+ * grace. Or one of `brainErasureStates`. What core answers, and what the
+ * admin reads: a state it doesn't name is a malformed answer.
  */
 export const brainErasureAnswerSchema = z.discriminatedUnion("state", [
   z.object({ state: z.literal("erased"), at: z.iso.datetime() }),
   z.object({ state: z.enum(brainErasureStates) }),
 ]);
 export type BrainErasureAnswer = z.infer<typeof brainErasureAnswerSchema>;
-
-/** Every state this release answers. */
-const answeredStates = new Set<string>(["erased", ...brainErasureStates]);
-
-/**
- * An answer as the admin reads it: core's, or `unknown` for a state this
- * release doesn't name (a core of a newer release, on a faster channel),
- * which the admin says it can't read, rather than refusing the answer. A
- * state it names that comes malformed is refused as before.
- */
-export const brainErasureReadSchema = z.union([
-  brainErasureAnswerSchema,
-  z
-    .object({
-      state: z.string().refine((state) => !answeredStates.has(state)),
-    })
-    .transform(() => ({ state: "unknown" as const })),
-]);
-export type BrainErasureRead = z.infer<typeof brainErasureReadSchema>;
 
 const isoTime = z.iso.datetime();
 const count = z.int().min(0);

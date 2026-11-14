@@ -77,6 +77,7 @@ import type {
   Reader,
   RecallRequest,
   RestoreStatus,
+  SourceErasure,
   SourceId,
   StepFailure,
   WayCounts,
@@ -1164,6 +1165,32 @@ const personErasureSchema = z.strictObject({
 });
 
 /**
+ * Erases `request` from `personId`'s own store, then closes its key in the
+ * shared store: the one way anything kept in a person's own store is
+ * erased (`eraseSource`, `eraseOwnGroup`), so every such erasure is in
+ * the shared ledger, which staff's erasure lookup reads (brain-report.ts),
+ * and none is answered "not erased" there. The shared entry is the key's
+ * hash and a time, never content; the shared store holds nothing under
+ * the key, and holds no group (it ignores `asGroup`). Only once the own
+ * store returned: the shared ledger never says erased while a copy can
+ * be read or come back after a restore. A failure of either throws, and
+ * the caller's retry does both, in order; both are safe to repeat.
+ * Answers what the own store answered.
+ */
+const erasedFromOwnStore = async (
+  env: BrainEnv,
+  personId: string,
+  request: SourceErasure
+): Promise<Awaited<ReturnType<Brain["eraseSource"]>>> => {
+  const answered = await ownBrain(env, personId).eraseSource(request);
+  await brain(env).eraseSource({
+    source: request.source,
+    reason: request.reason,
+  });
+  return answered;
+};
+
+/**
  * Erases `source` for good: every version, with everything kept of it,
  * and every source added in it as their group (`addSource`), all in one
  * call to the store. Its key is closed: a later add of it, or in it as a
@@ -1196,16 +1223,12 @@ export const eraseSource = async (
     erased
   );
   const request = { source: sourceKeyOf(source), reason };
-  // In its person's own store first, when it is theirs, and only once
-  // that returned closed in the shared store, whatever its readers: the
-  // shared ledger, which staff read, never says erased while a copy is
-  // left. A failure of the first leaves the shared store as it was, and
-  // the retry does both, in order.
   if (readers.kind === "owner") {
-    await ownBrain(env, readers.personId).eraseSource({
+    await erasedFromOwnStore(env, readers.personId, {
       ...request,
       ...(asGroup === undefined ? {} : { asGroup }),
     });
+    return;
   }
   await brain(env).eraseSource(request);
 };
@@ -1218,22 +1241,24 @@ const ownGroupErasureSchema = z.strictObject({
 
 /**
  * Erases the group `group` (`addSource`'s `group`) from `personId`'s own
- * store alone, as `eraseSource` with `asGroup` does there: every source
- * added in it, in one call, and the group closed, so a later add in it is
+ * store, as `eraseSource` with `asGroup` does there: every source added
+ * in it, in one call, and the group closed, so a later add in it is
  * refused, also after a restore of the store. For a group only their own
- * store can hold, so the shared store has no key of it to close: what an
- * agent read through their own connection (core's `addSource` refuses a
- * capture any other readers). Answers how many sources it erased, the
- * same each time it is repeated (none once their store was erased
- * whole). Safe to repeat; one that throws must be repeated until it
- * answers.
+ * store can hold content of: what an agent read through their own
+ * connection (core's `addSource` refuses a capture any other readers).
+ * Its key is then closed in the shared ledger too, as every erasure from
+ * an own store is (`erasedFromOwnStore`): a record, not content, so
+ * staff's lookup answers erased for it. Answers how many sources it
+ * erased, the same each time it is repeated (none once their store was
+ * erased whole). Safe to repeat; one that throws, in either store, must
+ * be repeated until it answers.
  */
 export const eraseOwnGroup = async (
   env: BrainEnv,
   erased: { personId: string; group: SourceRef; reason: ErasureReason }
 ): Promise<number> => {
   const { personId, group, reason } = checked(ownGroupErasureSchema, erased);
-  const answered = await ownBrain(env, personId).eraseSource({
+  const answered = await erasedFromOwnStore(env, personId, {
     source: sourceKeyOf(group),
     reason,
     asGroup: true,
@@ -2368,6 +2393,14 @@ export const addOwnSkill = async (
  * failed must be repeated until it returns, as `eraseSource`'s. Refused
  * once they are no longer a member (an erasure of the person erases their
  * whole store: `erasePerson`).
+ *
+ * The one erasure from an own store not closed in the shared ledger
+ * (`erasedFromOwnStore`): a person's skill's key (`skill:person:<name>`)
+ * names no person, so every member's skill of that name has the same key,
+ * and closing it there would make staff's lookup of that key answer
+ * erased for anyone's, once one member deleted theirs, and tell staff
+ * that someone had a skill of that name. Staff's lookup answers "not
+ * erased" for it, with its hedge.
  */
 export const eraseOwnSkill = async (
   env: BrainEnv & Pick<Env, "DB">,

@@ -708,7 +708,7 @@ describe("how an organization's Brain is doing", () => {
     });
   });
 
-  it("reads a skipped erasure as such, a state of a newer core's it doesn't name as unknown, and refuses a state it names that comes malformed", async () => {
+  it("reads a skipped erasure as such, and an erasure state it doesn't name, or one without what it needs, as not answered", async () => {
     const acme = await liveClient();
     acme.core.brain = brainReport(1_000_000);
     const asked = async (answered: { state: string; at?: string }) => {
@@ -722,11 +722,11 @@ describe("how an organization's Brain is doing", () => {
 
     expect({
       skipped: await asked({ state: "skipped" }),
-      newer: await asked({ state: "withheld_by_policy" }),
+      unnamed: await asked({ state: "withheld_by_policy" }),
       erasedWithoutWhen: await asked({ state: "erased" }),
     }).toStrictEqual({
       skipped: { state: "skipped" },
-      newer: { state: "unknown" },
+      unnamed: { state: "not_answered" },
       erasedWithoutWhen: { state: "not_answered" },
     });
   });

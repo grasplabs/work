@@ -32,7 +32,6 @@ import { consoleSigned } from "./console-signed.ts";
 import type { ConsoleRefusal } from "./console-signed.ts";
 import { errorResponse } from "./errors.ts";
 import { brainErasureStateOf } from "./person-erasure.ts";
-import type { ErasureAreaState } from "./person-erasure.ts";
 
 // How this client's Brain is doing, for Grasp's staff through the admin
 // (GRA-1733; `@grasp-os/shared/brain-report` says what the report holds).
@@ -189,32 +188,31 @@ export const brainActionResponse = async (
 };
 
 /**
- * A person's erasure as staff read it: the shared store's ledger
- * (`ledger`), with core's own record of their erasure from the Brain
- * (`core`, person-erasure.ts `brainErasureStateOf`), since a staff path
- * never addresses a person's own store (GRA-1762), and core marks that
- * area complete only once the Brain's erasure of them returned, which is
- * only once their own store was erased whole, its files included.
+ * A person's erasure as staff read it: core's own record of their erasure
+ * from the Brain (person-erasure.ts `brainErasureStateOf`, both Brain
+ * areas), and once that is complete the shared store's ledger, since a
+ * staff path never addresses a person's own store (GRA-1762), and core
+ * marks its areas complete only once the Brain's erasure of them
+ * returned, which is only once their own store was erased whole, files
+ * included.
  *
- * - `unavailable` while the shared ledger can't be read;
- * - with no erasure in core's record, the ledger's own answer: a person's
- *   withdrawal (`withdrawn`, the shared store's alone) reads `erased` once
- *   it is in the ledger and deleted, and someone never erased
- *   `not_erased`, as someone who never existed;
- * - `erasing` while core's erasure of them is under way, and also if core
- *   says complete but the ledger doesn't hold it (never read as done);
- * - `skipped` when core recorded it skipped: not done, not tried again;
- * - `erased`, at the ledger's time, once core's is complete and the
- *   ledger holds it.
+ * - `not_erased` when core holds no erasure of them, alike whether they
+ *   ever existed: one statement either way;
+ * - `erasing` while either area is pending, and also if core says complete
+ *   but the ledger doesn't hold it as erased (never read as done);
+ * - `skipped` when core recorded either skipped: not done, not tried again;
+ * - once complete, the ledger's answer: `erased` at its time, or
+ *   `unavailable` while it can't be read.
  */
-const personFound = (
-  ledger: BrainErasureAnswer,
-  core: ErasureAreaState | null
-): BrainErasureAnswer => {
-  if (ledger.state === "unavailable" || core === null) {
-    return ledger;
-  }
+const personFound = async (
+  env: Env,
+  personId: string
+): Promise<BrainErasureAnswer> => {
+  const core = await brainErasureStateOf(env, personId);
   switch (core) {
+    case null: {
+      return { state: "not_erased" };
+    }
     case "pending": {
       return { state: "erasing" };
     }
@@ -222,7 +220,13 @@ const personFound = (
       return { state: "skipped" };
     }
     case "complete": {
-      return ledger.state === "erased" ? ledger : { state: "erasing" };
+      const ledger = await brainErasureForStaff(env, {
+        kind: "person",
+        id: personId,
+      });
+      return ledger.state === "erased" || ledger.state === "unavailable"
+        ? ledger
+        : { state: "erasing" };
     }
     default: {
       const unhandled: never = core;
@@ -231,23 +235,14 @@ const personFound = (
   }
 };
 
-/**
- * What staff named, looked up: a source in the shared store's ledger; a
- * person there and in core's own record, both read whoever is named.
- */
+/** What staff named, looked up: a source in the shared store's ledger, a person as `personFound` says. */
 const erasureFound = async (
   env: Env,
   lookup: BrainErasureLookup
-): Promise<BrainErasureAnswer> => {
-  if (lookup.kind === "source") {
-    return await brainErasureForStaff(env, lookup);
-  }
-  const [ledger, core] = await Promise.all([
-    brainErasureForStaff(env, lookup),
-    brainErasureStateOf(env, lookup.id),
-  ]);
-  return personFound(ledger, core);
-};
+): Promise<BrainErasureAnswer> =>
+  lookup.kind === "source"
+    ? await brainErasureForStaff(env, lookup)
+    : await personFound(env, lookup.id);
 
 /**
  * The admin's lookup of an erasure: 200 with whether the source or person
