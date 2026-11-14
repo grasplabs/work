@@ -611,8 +611,8 @@ class Generator {
   }
 
   /**
-   * A call on the run's files or a Brain collection,
-   * `ctx.files.<alias>.<action>` or `ctx.brain.<alias>.<action>`: an action
+   * A call on the run's files or the Brain, `ctx.files.<alias>.<action>`
+   * or `ctx.brain.<alias>.<action>` (`.skills.select`): an action
    * of the format's own fixed list, sealed as its call, and declared.
    */
   #resourceCall(
@@ -644,7 +644,11 @@ class Generator {
               operation: step.action,
               arguments: args,
             },
-      member: `ctx.${kind}${memberOf(alias)}${memberOf(step.action)}`,
+      // A Brain action's path, `skills.select`, is a member of a member.
+      member: `ctx.${kind}${memberOf(alias)}${step.action
+        .split(".")
+        .map(memberOf)
+        .join("")}`,
     };
   }
 

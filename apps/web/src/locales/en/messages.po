@@ -11073,6 +11073,10 @@ msgstr "Read records of a sensitive table"
 msgid "Read restricted sources, and is held to them"
 msgstr "Read restricted sources, and is held to them"
 
+#: src/activity/audit-words.ts
+msgid "Read skills from the Brain"
+msgstr "Read skills from the Brain"
+
 #: src/settings/stephen-settings.tsx
 msgid "Read the company's"
 msgstr "Read the company's"
