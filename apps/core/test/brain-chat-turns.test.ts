@@ -12,7 +12,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import { drainObjectOutbox } from "../src/audit-outbox.ts";
 import { organizationId } from "../src/auth/auth.ts";
-import { handOverNotes } from "../src/brain-hand-overs.ts";
+import { handOverNotes, loneNotesPerDrain } from "../src/brain-hand-overs.ts";
 import {
   chatSource,
   chatTurnOf,
@@ -262,7 +262,7 @@ const notedFor = async (
     { length: count },
     (_, index) => `${personId}/${chatId}/${index + 1}`
   );
-  const held = await handOverNotes(env).required(
+  const held = await handOverNotes(env, loneNotesPerDrain).required(
     ids.map((id) => ({
       id: crypto.randomUUID(),
       at: new Date().toISOString(),
@@ -726,7 +726,7 @@ describe("a deleted chat", () => {
 
     await person.api.chats.remove(chatId);
     // The turn noted again, as a drain cut short notes it.
-    const held = await handOverNotes(env).required(
+    const held = await handOverNotes(env, loneNotesPerDrain).required(
       event === undefined ? [] : [event]
     );
     expect(held.ids, "the note was refused").toStrictEqual([]);
@@ -1110,8 +1110,8 @@ const openSortedFor = async (personId: string): Promise<string[]> => {
 };
 
 /**
- * Drains the Workspace object's outbox in the object, as its own drain
- * does: two at once when `twice`.
+ * Drains the Workspace object's outbox in the object, as its alarm does:
+ * two at once when `twice`.
  */
 const drainIn = async (
   stub: ReturnType<typeof workspace>,
@@ -1123,7 +1123,8 @@ const drainIn = async (
       await Promise.all(
         Array.from(
           { length: twice ? 2 : 1 },
-          async () => await drainObjectOutbox(env, state.storage.sql)
+          async () =>
+            await drainObjectOutbox(env, state.storage.sql, loneNotesPerDrain)
         )
       )
   );

@@ -180,16 +180,26 @@ const namesOf = (errors: readonly unknown[]): string[] =>
  * A batch's note is one transaction, so when it fails, nothing says which
  * event it failed for: each of its notings is then tried alone, and only
  * those that fail alone are held. So an event whose note keeps failing
- * holds itself and no other, and a note that failed for the batch's size
- * or mix (#2237's, over D1's bound parameters) is done event by event.
+ * holds itself and no other while fewer such events than a drain's tries
+ * alone sit ahead of the rest, and a note that failed for the batch's
+ * size or mix (#2237's, over D1's bound parameters) is done event by
+ * event. Once that many or more fail alone at the head of the outbox,
+ * each drain spends its tries on them, and the notings behind them whose
+ * batch's note fails are held untried, healthy ones too, until the notes
+ * at the head go through: their events still reach the log; only their
+ * notes wait.
  *
  * A note tried alone is a D1 query of its own, so a drain tries at most
- * `loneNotesPerDrain` alone, counted across its batches, whether they
- * fail or go through. Past that, a batch whose note fails holds its
+ * `loneNotes` alone, counted across its batches, whether they fail or go
+ * through: `loneNotesPerDrain` for a drain that runs alone in its
+ * invocation (the clock's, a Durable Object's alarm or erasure), none for
+ * a drain soon after a write, which shares its write's invocation with
+ * any number of others (every write of a clock task, or of a request
+ * that writes in a loop). Past that, a batch whose note fails holds its
  * notings without trying each, and the drain goes on: its events that
  * note nothing settle, so a newer sign-in still reaches the log behind
  * any number of notes that fail (up to the drain's own bound,
- * audit-outbox.ts `drain`), and the next drain tries the held ones alone
+ * audit-outbox.ts `drain`), and a later drain tries the held ones alone
  * again, oldest first. Ending the drain once the tries are spent would
  * keep the events behind them waiting for as long as that many notes keep
  * failing.
@@ -199,9 +209,10 @@ const namesOf = (errors: readonly unknown[]): string[] =>
  * batches' notes failed with.
  */
 export const handOverNotes = (
-  env: Pick<Env, "DB">
+  env: Pick<Env, "DB">,
+  loneNotes: number
 ): Required<Pick<Outbox, "required" | "drained">> => {
-  let left = loneNotesPerDrain;
+  let left = loneNotes;
   let notedAlone = 0;
   const why: unknown[] = [];
   return {

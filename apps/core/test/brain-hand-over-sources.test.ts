@@ -12,6 +12,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import {
+  auditedBatch,
   coreOutbox,
   drainLogged,
   drainMaxBatches,
@@ -291,7 +292,7 @@ const racing = (
  * checked, so an id no event could name is noted too.
  */
 const noteRun = async (id: string): Promise<void> => {
-  const held = await handOverNotes(env).required([
+  const held = await handOverNotes(env, loneNotesPerDrain).required([
     {
       id: crypto.randomUUID(),
       at: new Date().toISOString(),
@@ -1156,34 +1157,24 @@ const countedStatement = (
     },
   });
 
-/** A note's insert, as drizzle prepares it. */
-const noteInsert = /^insert into "brain_hand_overs"/iu;
-
 /**
  * `real`, counting the queries D1 charges an invocation (a statement run
- * on its own, or a batch, as one), and refusing a batch that notes in more
- * than one statement: a note too large for D1, as #2237's was, which each
- * note alone fits.
+ * on its own, or a batch, as one), and refusing a batch of more than one
+ * statement: here, a note too large for D1, as #2237's was, which each
+ * note alone fits. Nothing else these tests batch has more than one: a
+ * settle with no row moved aside is one delete, a write one insert.
  */
 const refusingLargeNotes = (
   real: D1Database
 ): { db: D1Database; counted: { queries: number } } => {
   const counted = { queries: 0 };
-  let notes = 0;
   return {
     counted,
     db: {
-      prepare: (query) => {
-        if (noteInsert.test(query)) {
-          notes += 1;
-        }
-        return countedStatement(real.prepare(query), counted);
-      },
+      prepare: (query) => countedStatement(real.prepare(query), counted),
       batch: async <T>(statements: D1PreparedStatement[]) => {
         counted.queries += 1;
-        const inBatch = notes;
-        notes = 0;
-        if (inBatch > 1) {
+        if (statements.length > 1) {
           await Promise.resolve();
           throw new Error("D1 refused a note this large");
         }
@@ -1284,14 +1275,14 @@ describe("a hand-over whose note keeps failing", () => {
     const ids = await outboxedMany(events);
     const { db, counted } = refusingLargeNotes(env.DB);
     const probed = { ...env, DB: db };
-    // A clock drain at a time, until the outbox is empty: at most as many
-    // as the notes take a drain's tries alone.
+    // The clock's drain, a minute at a time, until the outbox is empty: at
+    // most as many as the notes take a drain's tries alone.
     const queries: number[] = [];
     const drainsMost = runs.length / loneNotesPerDrain + 1;
     for (let drain = 0; drain < drainsMost; drain += 1) {
       counted.queries = 0;
       // oxlint-disable-next-line no-await-in-loop -- one drain after another
-      await drainLogged(probed, coreOutbox(probed), drainMaxBatches);
+      await drainAuditOutboxes(probed);
       queries.push(counted.queries);
       // oxlint-disable-next-line no-await-in-loop -- read after each drain
       const left = await waitingOf(ids);
@@ -1319,6 +1310,82 @@ describe("a hand-over whose note keeps failing", () => {
       waiting: [],
       noted: { rows: runs.length, own: runs.length },
       logged: { counts: ids.map(() => 1), inOrder: true },
+    });
+  });
+
+  it("tries no note alone in the drains soon after writes, however many share an invocation, and leaves each held note to the clock's drain, which notes it once", async () => {
+    // A batch of run ends at the head whose note D1 refuses as too large,
+    // then ten writes in one invocation, as a clock task or a request's
+    // loop makes them: each drains core's outbox soon after.
+    const runs = Array.from({ length: auditOutboxTakeMax }, () =>
+      crypto.randomUUID()
+    );
+    const held = await outboxedMany(runs.map(runEnd));
+    const { db, counted } = refusingLargeNotes(env.DB);
+    const probed = { ...env, DB: db };
+    const writes = Array.from({ length: 10 }, signIn);
+    const warned = vi.spyOn(console, "warn").mockReturnValue();
+    // A drain that held or noted alone ends in one of these.
+    const endings = new Set([
+      "audit.outbox.held",
+      "brain.hand_overs.noted_alone",
+    ]);
+    const drainsEnded = (): number =>
+      warned.mock.calls.filter(
+        ([fields]: unknown[]) =>
+          typeof fields === "object" &&
+          fields !== null &&
+          endings.has(String(Reflect.get(fields, "event")))
+      ).length;
+    let soon: number;
+    try {
+      await Promise.all(
+        writes.map(async (event) => {
+          const written = drizzle(db);
+          await auditedBatch(probed, written, [outboxedEvent(written, event)]);
+        })
+      );
+      await vi.waitFor(
+        () => {
+          expect(drainsEnded(), "every drain soon ended").toBe(writes.length);
+        },
+        { timeout: 10_000, interval: 50 }
+      );
+      soon = counted.queries;
+    } finally {
+      warned.mockRestore();
+    }
+    const waiting = await waitingOf(held);
+    await drainAuditOutboxes(probed);
+    const noted = await env.DB.prepare(
+      "SELECT count(*) AS rows, sum(noting IN (SELECT value FROM json_each(?))) AS own FROM brain_hand_overs WHERE source_id IN (SELECT value FROM json_each(?))"
+    )
+      .bind(JSON.stringify(held), JSON.stringify(runs))
+      .first<{ rows: number; own: number }>();
+    const written = writes.map(({ id }) => id);
+    const ids = [...held, ...written];
+    // The writes, at once, are stored in no order of their own.
+    const writesLogged = await loggedOf(written);
+
+    expect({
+      // Each write's own batch, and its drain soon's take, note and settle.
+      withinSoon: soon <= writes.length * 4,
+      waiting,
+      after: {
+        waiting: await waitingOf(ids),
+        noted,
+        held: await loggedOf(held),
+        writes: writesLogged.counts,
+      },
+    }).toStrictEqual({
+      withinSoon: true,
+      waiting: held,
+      after: {
+        waiting: [],
+        noted: { rows: runs.length, own: runs.length },
+        held: { counts: held.map(() => 1), inOrder: true },
+        writes: written.map(() => 1),
+      },
     });
   });
 
@@ -1428,8 +1495,9 @@ describe("a hand-over whose note keeps failing", () => {
 
     await Promise.all([
       drainAuditOutboxes(env),
-      // What a write's drain soon runs: one batch of core's outbox.
-      drainLogged(env, coreOutbox(env), 1),
+      // What a write's drain soon runs: one batch of core's outbox, no
+      // note tried alone.
+      drainLogged(env, coreOutbox(env, 0), 1),
     ]);
     const whileRefused = {
       waiting: await waitingOf([heldEnd, ...behind]),
@@ -1439,7 +1507,7 @@ describe("a hand-over whose note keeps failing", () => {
     await lift();
     await Promise.all([
       drainAuditOutboxes(env),
-      drainLogged(env, coreOutbox(env), 1),
+      drainLogged(env, coreOutbox(env, 0), 1),
     ]);
 
     expect({

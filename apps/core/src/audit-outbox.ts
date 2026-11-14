@@ -146,11 +146,12 @@ export const databaseOutbox = (
 /**
  * Core's own outbox, whose events note what core hands over to the new
  * Brain (`handOverNotes`) before they leave it: one whose note fails is
- * held, alone. One drain's: its notes count what the drain tried.
+ * held, alone. One drain's, which tries at most `loneNotes` notes alone:
+ * its notes count what the drain tried.
  */
-export const coreOutbox = (env: OutboxEnv): Outbox => ({
+export const coreOutbox = (env: OutboxEnv, loneNotes: number): Outbox => ({
   ...databaseOutbox("core", env.DB),
-  ...handOverNotes(env),
+  ...handOverNotes(env, loneNotes),
 });
 
 /**
@@ -169,9 +170,13 @@ export const coreOutbox = (env: OutboxEnv): Outbox => ({
  * JSON value (at a drain's most, 5,000 UUIDs: about 195 KB, within its
  * 8 MB a value).
  */
-const objectOutbox = (env: Pick<Env, "DB">, storage: SqlStorage): Outbox => ({
+const objectOutbox = (
+  env: Pick<Env, "DB">,
+  storage: SqlStorage,
+  loneNotes: number
+): Outbox => ({
   name: "workspace",
-  ...handOverNotes(env),
+  ...handOverNotes(env, loneNotes),
   take: async (held) =>
     await Promise.resolve(
       storage
@@ -493,14 +498,23 @@ export const drainLogged = async (
 
 /**
  * Drains a Durable Object's outbox (`objectOutbox`) as far as it goes,
- * logging a drain that fails: how many events are left in it, so the
- * object can try again later (its alarm) while any are.
+ * trying at most `loneNotes` notes alone (brain-hand-overs.ts
+ * `handOverNotes`), logging a drain that fails: how many events are left
+ * in it, so the object can try again later (its alarm) while any are.
+ * Its D1 queries are its notes alone (the outbox is the object's own):
+ * one a batch that notes something, and `loneNotes`, so at most 150 for
+ * an alarm's drain.
  */
 export const drainObjectOutbox = async (
   env: AuditLogEnv & Pick<Env, "DB">,
-  storage: SqlStorage
+  storage: SqlStorage,
+  loneNotes: number
 ): Promise<number> => {
-  await drainLogged(env, objectOutbox(env, storage), drainMaxBatches);
+  await drainLogged(
+    env,
+    objectOutbox(env, storage, loneNotes),
+    drainMaxBatches
+  );
   const [left] = storage
     .exec<{ count: number }>("SELECT count(*) AS count FROM audit_outbox")
     .toArray();
@@ -517,14 +531,18 @@ type AuditedDatabase = DrizzleD1Database & { $client: D1Database };
  * Drains `db`'s outbox, the one a change just wrote, one batch, in the
  * background: the change doesn't wait on the log, and its event normally
  * reaches it a moment later. A drain that fails is logged; the clock
- * trigger drains the event later.
+ * trigger drains the event later. It tries no note alone: it runs in its
+ * write's invocation, beside the drain soon of every other write there
+ * (a clock task's, a request's loop), so it makes three D1 queries at
+ * most (take, note, settle); a batch whose note fails is held for the
+ * clock's drain, which tries each alone.
  */
 const drainSoon = (env: OutboxEnv, db: AuditedDatabase): void => {
   const name = db.$client === env.KNOWLEDGE ? "knowledge" : "core";
   waitUntil(
     drainLogged(
       env,
-      name === "core" ? coreOutbox(env) : databaseOutbox(name, db.$client),
+      name === "core" ? coreOutbox(env, 0) : databaseOutbox(name, db.$client),
       1
     )
   );
