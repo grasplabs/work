@@ -220,6 +220,10 @@ const filesTypes: Readonly<Record<FilesAction, string>> = {
 const brainTypes: Readonly<Record<BrainAction, string>> = {
   recall:
     '{ readonly items: readonly { readonly source: { readonly producer: "upload" | "chat" | "run"; readonly id: string }; readonly version: number; readonly position: number; readonly text: string; readonly whole: boolean; readonly found: "exact" | "words" | "stop words" | "meaning" }[]; readonly notFound: readonly string[]; readonly truncated: boolean }',
+  "skills.select":
+    '{ readonly skills: readonly { readonly scope: "grasp" | "company"; readonly name: string; readonly version: number; readonly description: string }[] }',
+  "skills.read":
+    '{ readonly scope: "grasp" | "company"; readonly name: string; readonly version: number; readonly text: string }',
 };
 
 /**

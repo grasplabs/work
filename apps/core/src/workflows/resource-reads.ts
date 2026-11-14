@@ -10,7 +10,7 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { readableVersionsAs } from "../brain-next.ts";
-import type { SourceVersionRef } from "../brain-next.ts";
+import type { PinnedVersionRef } from "../brain-next.ts";
 import { runChatSources } from "../db/core/schema.ts";
 import { readableSources } from "../history-access.ts";
 import { authorize } from "../permissions.ts";
@@ -80,13 +80,14 @@ const requireOwnEvidenceReadable = async (
   if (rows.length === 0) {
     return;
   }
-  // SAFETY: core wrote each row from a pack's own item; checked again,
-  // strictly, by `readableVersionsAs`, which refuses a producer it
-  // doesn't know, and the run with it.
+  // SAFETY: core wrote each row from a pack's own item or a skill it
+  // handed the run (`skillVersionRefOf`); checked again, strictly, by
+  // `readableVersionsAs`, which refuses a producer it doesn't know, and
+  // the run with it.
   const versions = rows.map(
     ({ producer, sourceId, version }) =>
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-      ({ source: { producer, id: sourceId }, version }) as SourceVersionRef
+      ({ source: { producer, id: sourceId }, version }) as PinnedVersionRef
   );
   try {
     for (const permissionId of new Set(rows.map((row) => row.permissionId))) {

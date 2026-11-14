@@ -412,10 +412,10 @@ import { engineStepOf } from "./sealed-steps.ts";
 //   writes under the step's key, so an attempt, a round or a replay that
 //   writes again answers the file the first wrote, never a second one.
 // - The Brain reached past what the build seals (`grasp.brain`,
-//   `ctx.brain.<alias>.recall`). The permission and the action are
-//   sealed; a recall reads, under the workflow's own permission to read
-//   the Brain, checked as it recalls, what the run's person may read,
-//   never more (brain-calls.ts).
+//   `ctx.brain.<alias>.recall`, `.skills.select`, `.skills.read`). The
+//   permission and the action are sealed; a call reads, under the
+//   workflow's own permission to read the Brain, checked as it is made,
+//   what the run's person may read, never more (brain-calls.ts).
 // - A connection call keeping a file, or attaching run files, where it
 //   mustn't. Where a read's file goes (`into`) and where a write's
 //   attachments come from (`from`) are the sealed call's, each a files
