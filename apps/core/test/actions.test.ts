@@ -1295,6 +1295,11 @@ describe("resources", () => {
       read: await skillsOf("skills.read", {
         skill: { scope: "grasp", name: "draw-a-workflow", version: 1 },
       }),
+      // Nor, declared for `recall` alone, may it read entities.
+      card: await skillsOf("entities.get", {
+        entity: "00000000-0000-4000-8000-000000000000",
+      }),
+      found: await skillsOf("entities.find", { kind: "customer" }),
       recalled,
     };
     expect({
@@ -1325,6 +1330,8 @@ describe("resources", () => {
       skills: {
         select: "permission.not_allowed",
         read: "permission.not_allowed",
+        card: "permission.not_allowed",
+        found: "permission.not_allowed",
         recalled: false,
       },
       undeclaredAction: "permission.not_allowed",

@@ -5,6 +5,8 @@
 // answer to `BrainPack`, so that half is checked where it is made. This
 // file is type-checked by `vp check` and never run.
 import type {
+  Entity,
+  EntityKind,
   FoundBy,
   Pack,
   PackItem,
@@ -14,6 +16,8 @@ import { expectTypeOf } from "vite-plus/test";
 import type { z } from "zod";
 
 import type {
+  BrainEntity,
+  BrainEntityKind,
   BrainFound,
   BrainPack,
   BrainPackItem,
@@ -54,3 +58,8 @@ expectTypeOf<Exclude<keyof BrainRecall, "asOf">>().toEqualTypeOf<
   Exclude<keyof Request, "asOf" | "reader" | "meaning" | "withoutMeaning">
 >();
 expectTypeOf<Request["asOf"]>().toEqualTypeOf<Date | undefined>();
+
+// Entities, as code reads them: the Brain's kinds, and an entity as the
+// Brain gives one, its ID, kind and earliest name.
+expectTypeOf<BrainEntityKind>().toEqualTypeOf<EntityKind>();
+expectTypeOf<Mutable<BrainEntity>>().toEqualTypeOf<Entity>();

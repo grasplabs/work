@@ -1,6 +1,10 @@
 import { z } from "zod";
 
 import type {
+  BrainCard,
+  BrainEntitiesFind,
+  BrainEntity,
+  BrainMembersOf,
   BrainPack,
   BrainRecall,
   BrainSkill,
@@ -117,11 +121,12 @@ export interface FilesActions {
 }
 
 /**
- * What a brain permission's steps do, by action: recall what everyone in
- * the company may read, whoever the run acts for, with the same request
- * and pack as an App's action (`brain-recall.ts`), and select and read
- * its skills (`skills.select`, `skills.read`), as
- * `ctx.brain.<alias>.skills.select` and `.read`.
+ * What a brain permission's steps do, by action, with the same requests
+ * and answers as an App's action (`brain-recall.ts`): recall what everyone
+ * in the company may read, whoever the run acts for; select and read its
+ * skills (`skills.select`, `skills.read`); and read entities
+ * (`entities.get`, `entities.find`). A dotted action is a member of its group:
+ * `ctx.brain.<alias>.entities.get`.
  */
 export interface BrainActions {
   readonly recall: (
@@ -138,28 +143,28 @@ export interface BrainActions {
     },
     options: CallOptions
   ) => Promise<BrainSkillText>;
+  readonly "entities.get": (
+    request: {
+      readonly entity: string;
+      readonly asOf?: string;
+      readonly after?: string;
+    },
+    options: CallOptions
+  ) => Promise<BrainCard | null>;
+  readonly "entities.find": (
+    request: BrainEntitiesFind,
+    options: CallOptions
+  ) => Promise<{
+    readonly entities: readonly BrainEntity[];
+    readonly next: string | null;
+  }>;
 }
 
-/**
- * `ctx.brain.<alias>` for the brain actions `Listed`: `recall` as itself,
- * `skills.select` and `skills.read` as members of `skills`.
- */
-export type BrainMembers<Listed extends keyof BrainActions> = Pick<
+/** `ctx.brain.<alias>` for the brain actions `Listed` (`BrainMembersOf`). */
+export type BrainMembers<Listed extends keyof BrainActions> = BrainMembersOf<
   BrainActions,
-  Exclude<Listed, `skills.${string}`>
-> &
-  (Extract<Listed, `skills.${string}`> extends never
-    ? unknown
-    : {
-        readonly skills: {
-          readonly [
-            Action in Extract<
-              Listed,
-              `skills.${string}`
-            > as Action extends `skills.${infer Name}` ? Name : never
-          ]: BrainActions[Action];
-        };
-      });
+  Listed
+>;
 
 /**
  * How a decision ended: answered, by whom (their user ID) and with what

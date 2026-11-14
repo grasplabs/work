@@ -62,4 +62,14 @@ describe("an audit entry's words", () => {
       installed: undefined,
     });
   });
+
+  it("say code read entities, each by its own name", () => {
+    expect({
+      get: said("brain.entities.get"),
+      find: said("brain.entities.find"),
+    }).toStrictEqual({
+      get: "Read entities from the Brain",
+      find: "Read entities from the Brain",
+    });
+  });
 });

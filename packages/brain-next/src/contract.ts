@@ -2233,6 +2233,16 @@ export interface EntityPage {
   entities: Entity[];
   more: boolean;
   next?: EntitiesCursor;
+  /**
+   * Every version of a source what the page says rests on, each once:
+   * for each entity, the first memory the reader may read that mentions
+   * it (what makes it seen, and where it stands), the memory that gave
+   * its name, and the earliest that gave each name or identifier asked;
+   * and the first such memory of the entity past the page, which `more`
+   * says follows. None for what rests on a writer's word. For the host
+   * to keep with what it hands on (a run's pins); never shown to anyone.
+   */
+  restsOn: SourceVersionRef[];
 }
 
 /** An entity to read, for a reader. */
@@ -2389,6 +2399,18 @@ export interface Card {
   notes: Memory[];
   more: boolean;
   next?: MemoriesCursor;
+  /**
+   * Every version of a source what the card says rests on, each once: its
+   * memories'; the first memory the reader may read that mentions its
+   * entity (what makes it seen); the memories that gave its entity's name
+   * and each related one's; each contested memory's current rivals (what
+   * makes it contested); the memories each counted confirmation was made
+   * over (what makes one count); and the memory past the page, which
+   * `more` says follows. None for what rests on a writer's word. For the
+   * host to keep with what it hands on (a run's pins); never shown to
+   * anyone.
+   */
+  restsOn: SourceVersionRef[];
 }
 
 // Memories in a recall's pack (recall-memories.ts, pack.ts).

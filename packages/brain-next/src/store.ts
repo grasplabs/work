@@ -2159,7 +2159,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     const asked = checked(entitiesRequestSchema, request);
     this.#mayRead(asked.reader);
     if (!(await this.#readable())) {
-      return { entities: [], more: false };
+      return { entities: [], more: false, restsOn: [] };
     }
     return findEntities(this.ctx.storage.sql, {
       reader: asked.reader,

@@ -520,6 +520,77 @@ const missingSource = (): SourceRef => ({
 const keyOf = ({ producer, id }: SourceRef): string => `${producer}:${id}`;
 
 /**
+ * A supplier everyone in the company may read of, named in a writer's
+ * word: an entity a surface shows. Its id and name.
+ */
+const plainSupplier = async (): Promise<{ entity: string; name: string }> => {
+  const name = `Plain supplier ${crypto.randomUUID()}`;
+  const writer = stranger();
+  const added = await store().addMemories({
+    change: crypto.randomUUID(),
+    access: { kind: "audience", group: "company" },
+    entities: [{ key: "s", kind: "supplier", names: [name] }],
+    memories: [
+      {
+        about: "s",
+        type: "fact",
+        statement: `${name} supplies us.`,
+        speaker: { kind: "agent", agent: writer },
+        basis: { kind: "writer", writer },
+      },
+    ],
+  });
+  return { entity: added.entities.s ?? "", name };
+};
+
+/**
+ * A supplier everyone in the company may read of, whose status two
+ * writers give otherwise: a fact the reader may see contested.
+ */
+const contestedSupplier = async (): Promise<void> => {
+  const name = `Contested supplier ${crypto.randomUUID()}`;
+  const said = (value: string) => {
+    const writer = stranger();
+    return {
+      about: "s",
+      attribute: "status",
+      value,
+      type: "fact" as const,
+      statement: `${name} is ${value}`,
+      speaker: { kind: "agent" as const, agent: writer },
+      basis: { kind: "writer" as const, writer },
+    };
+  };
+  await store().addMemories({
+    change: crypto.randomUUID(),
+    access: { kind: "audience", group: "company" },
+    entities: [{ key: "s", kind: "supplier", names: [name] }],
+    memories: [said("Active"), said("Paused")],
+  });
+};
+
+/**
+ * `probe`, of a surface that shows entities to people or to code: what a
+ * page rests on (`restsOn`: the versions behind its names, matches and
+ * memories) is the host's to keep, so an answer carrying it hands the
+ * harness the markers, and is found as a leak.
+ */
+const showingEntities =
+  (probe: Probe): Probe =>
+  async (probing) => {
+    const answers = await probe(probing);
+    return answers.some(({ got }) => textOf(got).includes('"restsOn"'))
+      ? [
+          ...answers,
+          {
+            call: "an answer carrying what it rests on",
+            got: { value: probing.markers },
+          },
+        ]
+      : answers;
+  };
+
+/**
  * A change added twice to a source no one else has: the second time with
  * the markers in its text, which the Brain refuses. The refusal says only
  * that the change was added with other text or readers, nothing of them.
@@ -1008,6 +1079,12 @@ type CorePersonMember =
   | "contestedAs"
   | "confirmAs"
   | "correctAs";
+
+/** The exports of core's brain-next.ts for code's entities, probed after them (`coreCodeEntities`). */
+type CoreCodeMember =
+  | "companyCardAs"
+  | "companyEntitiesAs"
+  | "isCodeEntitiesRequest";
 
 // Exports (GRA-1755). A company's export holds what the company holds,
 // markers among them, by design: it is for an admin, and core's route
@@ -3174,7 +3251,10 @@ export const coreProbes = {
       );
     }),
   ],
-} satisfies Record<Exclude<CoreMember, CorePersonMember>, Probe>;
+} satisfies Record<
+  Exclude<CoreMember, CorePersonMember | CoreCodeMember>,
+  Probe
+>;
 
 /** Each export of core's instruction-files.ts. */
 type InstructionMember = keyof typeof instructionFiles;
@@ -4325,6 +4405,12 @@ const skillsCallerOf = (
   return caller;
 };
 
+/** An App reading entities as `as`, under `grant`, keeping nothing. */
+const entitiesCallerOf = (as: Authority, grant: string) => {
+  const { keep: _keep, ...caller } = callerOf(as, grant);
+  return caller;
+};
+
 /** A recall as code asks for one, from what a probe asks. */
 const codeAsk = ({ question, budget, asOf }: PackAsk) => ({
   question,
@@ -4534,6 +4620,145 @@ export const recallProbes = {
         { skill: shipped },
         { as: readersApp(stranger()) }
       ),
+    ];
+  },
+  // Code's entities, as an App reads them: under its grant to read the
+  // Brain, acting for the reader, as the company alone; every way they
+  // answer what the company may not read, then every way they refuse.
+  entitiesCallFor: showingEntities(async (probing) => {
+    const { personId, markers } = probing;
+    const { authority, permissionId } = await appWithBrain(personId);
+    const fixture = await recallFixture(probing);
+    const call = async (
+      name: string,
+      operation: coreBrain.CodeEntitiesOperation,
+      input: unknown,
+      about?: Answer["about"],
+      { as = authority, grant = permissionId } = {},
+      like?: string
+    ) =>
+      await answer(
+        name,
+        async () =>
+          await codeRecall.entitiesCallFor(
+            env,
+            entitiesCallerOf(as, grant),
+            operation,
+            input
+          ),
+        about,
+        like
+      );
+    const text = markedText(markers);
+    const named = await plainSupplier();
+    // One call site for every case: a refusal's stack is then the same,
+    // hidden or not.
+    const cases: [
+      string,
+      coreBrain.CodeEntitiesOperation,
+      unknown,
+      Answer["about"],
+      { as?: Authority; grant?: string },
+      string | undefined,
+    ][] = [
+      [
+        "a card no one has",
+        "entities.get",
+        { entity: crypto.randomUUID() },
+        "nothing",
+        {},
+        "card",
+      ],
+      [
+        "a hidden card",
+        "entities.get",
+        { entity: fixture.hidden },
+        "hidden",
+        {},
+        "card",
+      ],
+      [
+        "the reader's team's card",
+        "entities.get",
+        { entity: fixture.seen },
+        "hidden",
+        {},
+        "card",
+      ],
+      [
+        "a name no one gave",
+        "entities.find",
+        { name: markers.map(twinOf).join(" ") },
+        "nothing",
+        {},
+        "find",
+      ],
+      ["a hidden name", "entities.find", { name: text }, "hidden", {}, "find"],
+      // An entity it may see: what its name rests on stays core's.
+      [
+        "a card it may see",
+        "entities.get",
+        { entity: named.entity },
+        undefined,
+        {},
+        undefined,
+      ],
+      [
+        "a find of a name it may see",
+        "entities.find",
+        { name: named.name },
+        undefined,
+        {},
+        undefined,
+      ],
+      [
+        "a request naming readers of the markers",
+        "entities.find",
+        { name: text, readers: text },
+        undefined,
+        {},
+        undefined,
+      ],
+      [
+        "the markers, under a grant the App doesn't hold",
+        "entities.get",
+        { entity: fixture.hidden },
+        undefined,
+        { grant: crypto.randomUUID() },
+        undefined,
+      ],
+      [
+        "the markers, for someone who isn't a member",
+        "entities.find",
+        { name: text },
+        undefined,
+        { as: readersApp(stranger()) },
+        undefined,
+      ],
+    ];
+    const answers: Answer[] = [];
+    for (const [name, operation, input, about, as, like] of cases) {
+      // oxlint-disable-next-line no-await-in-loop -- one call site, one at a time
+      answers.push(await call(name, operation, input, about, as, like));
+    }
+    return answers;
+  }),
+  // Pure, as core's own, which it hands on: what a request is, never what
+  // it holds.
+  isCodeEntitiesRequest: async ({ markers }) => {
+    const is = async (name: string, operation: string, input: unknown) =>
+      await answer(name, async () => {
+        await Promise.resolve();
+        return codeRecall.isCodeEntitiesRequest(unchecked(operation), input);
+      });
+    const hidden = markers.join(" ");
+    return [
+      await is("a find", "entities.find", { kind: "customer" }),
+      await is("one naming a reader of the markers", "entities.find", {
+        name: hidden,
+        reader: hidden,
+      }),
+      await is("an operation of the markers", hidden, { name: hidden }),
     ];
   },
   // Pure: what a request is, never what it holds.
@@ -5287,6 +5512,7 @@ const memoryPageProbes = (calls: MemoryPageCalls) => {
     contested: async (probing: Probing): Promise<Answer[]> => {
       const { personId, markers } = probing;
       await scene(probing);
+      await contestedSupplier();
       return [
         // Hidden memories contest the reader's: none of it shows.
         await answer(
@@ -5423,8 +5649,23 @@ const corePageCalls: MemoryPageCalls = {
     await coreBrain.correctAs(env, personId, correction),
 };
 
+/**
+ * The page's `probes`, each showing entities (`showingEntities`): the
+ * page shows their names, never what those rest on.
+ */
+const showingPage = <
+  Probes extends Record<"entities" | "memories" | "contested", Probe>,
+>(
+  probes: Probes
+): Probes => ({
+  ...probes,
+  entities: showingEntities(probes.entities),
+  memories: showingEntities(probes.memories),
+  contested: showingEntities(probes.contested),
+});
+
 /** The page through core's own functions. */
-const corePageProbes = memoryPageProbes(corePageCalls);
+const corePageProbes = showingPage(memoryPageProbes(corePageCalls));
 
 /** A person's memories through core's own functions (brain-next.ts). */
 const corePersonProbes = personMemoryProbes({
@@ -5438,7 +5679,17 @@ const corePersonProbes = personMemoryProbes({
 const corePersonMemories = {
   rememberAs: corePersonProbes.remember,
   forgetAs: corePersonProbes.forget,
-  entitiesAs: corePageProbes.entities,
+  // A supplier besides: one more entity the page shows.
+  entitiesAs: showingEntities(async (probing) => [
+    ...(await corePageProbes.entities(probing)),
+    await answer("a supplier it may see", async () => {
+      await plainSupplier();
+      return await coreBrain.entitiesAs(env, probing.personId, {
+        kind: "supplier",
+        from: { store: "shared" },
+      });
+    }),
+  ]),
   memoriesAs: corePageProbes.memories,
   contestedAs: corePageProbes.contested,
   confirmAs: corePageProbes.confirm,
@@ -5485,6 +5736,134 @@ const corePersonMemories = {
     ),
   ],
 } satisfies Record<CorePersonMember, Probe>;
+
+// Code's entities (GRA-1837): read as the company alone, so everything a
+// team or a person may read is hidden from them, the reader's own team's
+// among it (the fixture's `seen`).
+const coreCodeEntities = {
+  companyCardAs: async (probing) => {
+    const { personId, markers } = probing;
+    // Someone else's own store too: code never reads one.
+    const [fixture, others] = await Promise.all([
+      recallFixture(probing),
+      othersOwnMemory(markers),
+    ]);
+    const read = async (
+      name: string,
+      request: Record<string, unknown>,
+      about?: Answer["about"],
+      as = personId
+    ) =>
+      await answer(
+        name,
+        async () => await coreBrain.companyCardAs(env, as, request),
+        about
+      );
+    return [
+      await read(
+        "an entity no one added",
+        { entity: crypto.randomUUID() },
+        "nothing"
+      ),
+      await read(
+        "one only hidden memories name",
+        { entity: fixture.hidden },
+        "hidden"
+      ),
+      await read(
+        "one drawn from a hidden source",
+        { entity: fixture.drawn },
+        "hidden"
+      ),
+      await read(
+        "one the reader's team alone reads",
+        { entity: fixture.seen },
+        "hidden"
+      ),
+      await read(
+        "one in someone else's own store",
+        { entity: others.entity },
+        "hidden"
+      ),
+      await read("as of the markers", {
+        entity: fixture.seen,
+        asOf: markers.join(""),
+      }),
+      await read("after a cursor of the markers", {
+        entity: fixture.seen,
+        after: btoa(JSON.stringify({ at: markers.join("") })),
+      }),
+      await read(
+        "as someone who isn't a member",
+        { entity: fixture.seen },
+        undefined,
+        stranger()
+      ),
+    ];
+  },
+  companyEntitiesAs: async (probing) => {
+    const { personId, markers } = probing;
+    const fixture = await recallFixture(probing);
+    const text = markedText(markers);
+    const find = async (
+      name: string,
+      request: Record<string, unknown>,
+      about?: Answer["about"],
+      like?: string
+    ) =>
+      await answer(
+        name,
+        async () => await coreBrain.companyEntitiesAs(env, personId, request),
+        about,
+        like
+      );
+    return [
+      await find(
+        "a name only hidden memories give",
+        { name: text },
+        "hidden",
+        "name"
+      ),
+      await find(
+        "a name no one gave",
+        { name: markers.map(twinOf).join(" ") },
+        "nothing",
+        "name"
+      ),
+      await find(
+        "an identifier only hidden memories give",
+        { identifier: { type: "ref", value: fixture.hiddenRef } },
+        "hidden",
+        "identifier"
+      ),
+      await find(
+        "an identifier no one gave",
+        { identifier: { type: "ref", value: `ref:${crypto.randomUUID()}` } },
+        "nothing",
+        "identifier"
+      ),
+      await find("a kind", { kind: "customer" }),
+      await find("nothing to find by", { after: markers.join("") }),
+    ];
+  },
+  // Pure: what a request is, never what it holds.
+  isCodeEntitiesRequest: async ({ markers }) => {
+    const is = async (name: string, operation: string, input: unknown) =>
+      await answer(name, async () => {
+        await Promise.resolve();
+        return coreBrain.isCodeEntitiesRequest(unchecked(operation), input);
+      });
+    const hidden = markers.join(" ");
+    return [
+      await is("a card", "entities.get", { entity: crypto.randomUUID() }),
+      await is("one naming its readers", "entities.find", {
+        name: hidden,
+        readers: hidden,
+      }),
+      await is("an operation of the markers", hidden, { entity: hidden }),
+    ];
+  },
+} satisfies Record<CoreCodeMember, Probe>;
 
 /** The person themselves, as brain-memories.ts takes a caller. */
 const personCaller = (personId: string): brainMemories.MemoryCaller => ({
@@ -8268,26 +8647,28 @@ export const memoriesRpcProbes = {
       await forget("not an id", { memory: markers }),
     ];
   },
-  ...memoryPageProbes({
-    entities: async (personId, kind, from) =>
-      await memoriesAs(personId).entities(
-        unchecked(kind),
-        unchecked(from === undefined ? undefined : onTheWire(from))
-      ),
-    memories: async (personId, entity, after) =>
-      await memoriesAs(personId).memories(
-        unchecked(entity),
-        unchecked(after === undefined ? undefined : onTheWire(after))
-      ),
-    contested: async (personId, from) =>
-      await memoriesAs(personId).contested(
-        unchecked(from === undefined ? undefined : onTheWire(from))
-      ),
-    confirm: async (personId, memory) =>
-      await memoriesAs(personId).confirm(unchecked(memory)),
-    correct: async (personId, correction) =>
-      await memoriesAs(personId).correct(unchecked(correction)),
-  }),
+  ...showingPage(
+    memoryPageProbes({
+      entities: async (personId, kind, from) =>
+        await memoriesAs(personId).entities(
+          unchecked(kind),
+          unchecked(from === undefined ? undefined : onTheWire(from))
+        ),
+      memories: async (personId, entity, after) =>
+        await memoriesAs(personId).memories(
+          unchecked(entity),
+          unchecked(after === undefined ? undefined : onTheWire(after))
+        ),
+      contested: async (personId, from) =>
+        await memoriesAs(personId).contested(
+          unchecked(from === undefined ? undefined : onTheWire(from))
+        ),
+      confirm: async (personId, memory) =>
+        await memoriesAs(personId).confirm(unchecked(memory)),
+      correct: async (personId, correction) =>
+        await memoriesAs(personId).correct(unchecked(correction)),
+    })
+  ),
 } satisfies Record<
   "forget" | "entities" | "memories" | "contested" | "confirm" | "correct",
   Probe
@@ -8309,7 +8690,7 @@ export const brainSurfaces = [
   {
     name: "core",
     module: coreBrain,
-    probes: { ...coreProbes, ...corePersonMemories },
+    probes: { ...coreProbes, ...corePersonMemories, ...coreCodeEntities },
   },
   { name: "instructions", module: instructionFiles, probes: instructionProbes },
   { name: "skills", module: brainSkills, probes: skillProbes },

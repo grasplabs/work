@@ -155,15 +155,15 @@ export const objectOf = (
     const named = object.teams ?? [];
     if (named.length === 0) {
       return i18n._(
-        msg`Company Brain, read only. This can recall what everyone in the company may read, never a team's or anyone's own content. It can never write to the Brain. Every recall is recorded`
+        msg`Company Brain, read only. This can recall and look up what everyone in the company may read, its entities and their memories included, never a team's or anyone's own content. It can never write to the Brain. Every read is recorded`
       );
     }
     const count = named.length;
     const teamNames = formatList(named.map((id) => teamName(directory, id)));
     return i18n._(
       msg`${plural(count, {
-        one: `Company Brain, read only. This App can recall what everyone in the company may read and what the team ${teamNames} may read, as far as the person it works for is in that team. Only people in that team can use it, its owner and admins too. It can never write to the Brain. Every recall is recorded`,
-        other: `Company Brain, read only. This App can recall what everyone in the company may read and what the teams ${teamNames} may read, as far as the person it works for is in them. Only people in all of them can use it, its owner and admins too. It can never write to the Brain. Every recall is recorded`,
+        one: `Company Brain, read only. This App can recall what everyone in the company may read and what the team ${teamNames} may read, as far as the person it works for is in that team, and look up the entities and memories everyone in the company may read. Only people in that team can use it, its owner and admins too. It can never write to the Brain. Every read is recorded`,
+        other: `Company Brain, read only. This App can recall what everyone in the company may read and what the teams ${teamNames} may read, as far as the person it works for is in them, and look up the entities and memories everyone in the company may read. Only people in all of them can use it, its owner and admins too. It can never write to the Brain. Every read is recorded`,
       })}`
     );
   }
