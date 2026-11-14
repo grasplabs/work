@@ -42,9 +42,10 @@ const idp = mockIdp();
 
 /**
  * An action a call form of the declaration names, as it lists each: its
- * name, then (past a line break, as the JSON body escapes it) its request.
+ * name (a dotted path, `skills.select`), then (past a line break, as the
+ * JSON body escapes it) its request.
  */
-const declaredAction = /`(?<action>[a-z]+)`(?:\\n +\*)? +\(/gu;
+const declaredAction = /`(?<action>[a-z]+(?:\.[a-z]+)*)`(?:\\n +\*)? +\(/gu;
 
 /** A call form of the declaration, `{ <kind>, action, args }`, at a line's start. */
 const callForm = /\\n +\* +`\{ [a-z]+, (?:action|function),/gu;

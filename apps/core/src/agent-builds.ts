@@ -1784,17 +1784,19 @@ build: {
    * grants it or not, and it allows nothing until then. \`binding\` is the
    * name the App's code reaches it by, such as \`MAIL\`. To recall the
    * Brain (\`ctx.brain.recall\`, declared as \`permission.brain({ operations:
-   * ["recall"] })\`), it asks for \`{ type: "platform" }\` with actions
+   * ["recall"] })\`), or to select and read its skills
+   * (\`ctx.brain.skills.select\` and \`.read\`, operations \`"skills.select"\`
+   * and \`"skills.read"\`), it asks for \`{ type: "platform" }\` with actions
    * \`["brain"]\`. A recall answers what everyone in the company may read,
    * never anyone's own content. To recall teams' content too, name those
    * teams by ID (\`{ type: "platform", teams: ["<team id>"] }\`): a recall
    * then also answers, of them, the teams the person it is for is in, and
-   * the App can be shared only with people in all of them. An App that
-   * recalls answers no visitor and invites no guest. Today everything in
-   * the Brain is one person's own: nothing readable by the whole company
-   * or by a team, so a recall returns an empty pack, with teams named or
-   * not: say so, and never build a feature that depends on it finding
-   * something.
+   * the App can be shared only with people in all of them; its skills stay
+   * the company's. An App that recalls answers no visitor and invites no
+   * guest. Today everything in the Brain is one person's own: nothing
+   * readable by the whole company or by a team, so a recall returns an
+   * empty pack, with teams named or not: say so, and never build a feature
+   * that depends on it finding something.
    */
   requestPermission(app: string, request: {
     object:

@@ -445,6 +445,13 @@ export const erasures = sqliteTable(
     erasedAt: integer("erased_at", { mode: "timestamp_ms" }).notNull(),
     /** Whether its ledger entry is known to be in the bucket, every part. */
     confirmed: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * How many sources a source's erasure covered as it was applied: its
+     * key's and each added in it as a group (erasure.ts `apply`), so a
+     * repeat answers what it erased. Null for one recorded before it was
+     * kept.
+     */
+    sources: integer(),
   },
   (table) => [
     // An add looks up whether its source, or its one reader, was erased.
@@ -830,6 +837,20 @@ export const memories = sqliteTable(
       table.lineage
     ),
     index("memories_object_idx").on(table.object),
+    // The relations between two given entities, and an entity's facts
+    // (object null) apart from its relations: what recall's walk seeks
+    // (recall-memories.ts), never reading a hub's relations whole. Added
+    // by a later migration than the table's: a store made before it gains
+    // it then.
+    index("memories_entity_object_idx").on(table.entity, table.object),
+    // A lineage's newer memories of the same value, for an attribute of
+    // many values (memories.ts `newerSql`): one seek, never the lineage.
+    index("memories_lineage_value_idx").on(
+      table.entity,
+      table.attribute,
+      table.lineage,
+      table.valueKey
+    ),
     index("memories_version_idx").on(table.source, table.version),
     index("memories_subject_idx").on(table.subject, table.version),
     index("memories_readers_idx").on(table.readers),
@@ -860,6 +881,9 @@ export const entityNames = sqliteTable(
       columns: [table.entity, table.memory, table.type, table.folded],
     }),
     index("entity_names_folded_idx").on(table.type, table.folded, table.entity),
+    // An entity's names of one type (its earliest name): without it the
+    // planner seeks by type alone, every name.
+    index("entity_names_entity_idx").on(table.entity, table.type, table.folded),
     index("entity_names_memory_idx").on(table.memory),
   ]
 );

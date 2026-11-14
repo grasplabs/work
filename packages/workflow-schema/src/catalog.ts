@@ -253,7 +253,7 @@ const requiredFields: Readonly<
   model: [],
   decision: ["input", "response"],
   event: ["events"],
-  // Served by the host's own contract (recall).
+  // Served by the host's own contract (recall, skills).
   brain: [],
   // The run's own files (GRA-724): the host's own contract too.
   files: [],

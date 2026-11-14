@@ -29,7 +29,7 @@ import { resetAppData } from "../src/app-schema.ts";
 import { updateApp } from "../src/app-settings.ts";
 import { setArchived } from "../src/app-status.ts";
 import { appFor } from "../src/apps.ts";
-import { drainAuditOutboxes } from "../src/audit-outbox.ts";
+import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import { teamsOf } from "../src/auth/identity.ts";
 import {
   addSource,

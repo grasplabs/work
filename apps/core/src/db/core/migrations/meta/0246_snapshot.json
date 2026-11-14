@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "785d41c7-df90-4e5a-9699-9650b749c15e",
+  "id": "fce325ba-6266-4153-b168-859e0ac3e28f",
   "prevId": "20fb28e1-175c-4465-ba79-527c5db1edd5",
   "tables": {
     "access_revocations": {
@@ -4196,15 +4196,23 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "relayed_at": {
+          "name": "relayed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
-        "brain_hand_overs_noted_at_idx": {
-          "name": "brain_hand_overs_noted_at_idx",
+        "brain_hand_overs_unrelayed_idx": {
+          "name": "brain_hand_overs_unrelayed_idx",
           "columns": [
             "noted_at"
           ],
-          "isUnique": false
+          "isUnique": false,
+          "where": "\"brain_hand_overs\".\"relayed_at\" IS NULL"
         }
       },
       "foreignKeys": {},
@@ -8128,13 +8136,6 @@
           "notNull": true,
           "autoincrement": false,
           "default": false
-        },
-        "teams": {
-          "name": "teams",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         }
       },
       "indexes": {

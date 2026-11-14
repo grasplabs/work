@@ -13,13 +13,16 @@ import type {
 } from "./contract.ts";
 import { exactsOf } from "./exact.ts";
 import type { Exact } from "./exact.ts";
+import { readMoment } from "./memories.ts";
 import { readableSql } from "./reader-sets.ts";
 import type { WayRunner } from "./recall-counts.ts";
+import { findMemories, memoriesByTheirWords } from "./recall-memories.ts";
+import type { Reached } from "./recall-memories.ts";
 import { nearChunks } from "./vectors.ts";
 import { termsOf } from "./words.ts";
 import type { Terms } from "./words.ts";
 
-// Recall: two ways at once, fused by rank into a pack (pack.ts). Words,
+// Recall: several ways at once, fused by rank into a pack (pack.ts). Words,
 // in one statement that finds, checks and ranks, and a second for the
 // stop words alone when the first finds little; exact, in one statement
 // that finds the chunks holding every word of an exact part, whose order
@@ -27,8 +30,11 @@ import type { Terms } from "./words.ts";
 // question's vector: meaning, the vector way's scan (vectors.ts), with
 // the access check inside it. The host embeds the question before it
 // calls, so what a store finds is one synchronous read of one snapshot
-// (`find`). Each way's lists are then merged, checked and fused across
-// every store recalled from, one or several (across.ts `packAcross`).
+// (`find`). In the same read, the memories the reader may read: by their
+// own words (with the words way), and along the entities the question
+// names (recall-memories.ts). Each way's lists are then merged, checked
+// and fused across every store recalled from, one or several (across.ts
+// `packAcross`).
 //
 // It searches the chunks of each source's current version (a version is
 // current once `current_versions` points at it, set in the transaction
@@ -428,19 +434,43 @@ const byMeaning = (
  * by meaning never as of a moment: vectors are kept for current versions
  * only, so the scan can't tell which were current then, and nearer chunks
  * added since would take every place. A way that throws fails the recall.
+ * Of `passages` alone (`findPassages`), no memory is read at all: none
+ * of the memory ways runs, nor counts.
  */
-export const find = (
+const findOf = (
   sql: SqlStorage,
   { question, reader, asOf, meaning }: RecallRequest,
-  way: WayRunner
+  way: WayRunner,
+  of: "passages" | "passages and memories"
 ): Finding => {
+  const withMemories = of === "passages and memories";
   const exacts = exactsOf(question);
   const terms = termsOf(question);
   const at: AsOf = asOf === undefined ? [] : [asOf.getTime()];
-  const words =
+  // Memories are read as of the moment asked, or the store's read moment
+  // (memories.ts `readMoment`), never the caller's clock: a memory written
+  // in the same millisecond is seen. Their two clocks say what was
+  // believed and true then, one moment for both (recall-memories.ts).
+  // Read only when memories are: passages alone need no moment of theirs.
+  const memoriesAt = withMemories ? (asOf?.getTime() ?? readMoment(sql)) : 0;
+  const {
+    memoryWords,
+    ...words
+  }: Pick<Finding, "words" | "stopWords" | "terms"> & {
+    memoryWords: Reached[];
+  } =
     terms.telling.length === 0
-      ? { words: [], stopWords: [], terms: [] }
-      : way("words", () => byWords(sql, terms, reader, at));
+      ? { words: [], stopWords: [], terms: [], memoryWords: [] }
+      : way("words", () => ({
+          ...byWords(sql, terms, reader, at),
+          memoryWords: withMemories
+            ? memoriesByTheirWords(sql, {
+                question,
+                reader,
+                at: memoriesAt,
+              })
+            : [],
+        }));
   const exact =
     exacts.length === 0
       ? { exact: [], capped: [] }
@@ -451,8 +481,32 @@ export const find = (
     asOf !== undefined
       ? []
       : way("meaning", () => byMeaning(sql, meaning, reader));
-  return { ...words, ...exact, meaning: meant };
+  const memories = withMemories
+    ? findMemories(
+        sql,
+        { question, reader, at: memoriesAt, words: memoryWords },
+        way
+      )
+    : { words: [], entities: [], rivals: [] };
+  return { ...words, ...exact, meaning: meant, memories };
 };
+
+/** What the reader may read for the question, passages and memories (`findOf`). */
+export const find = (
+  sql: SqlStorage,
+  request: RecallRequest,
+  way: WayRunner
+): Finding => findOf(sql, request, way, "passages and memories");
+
+/**
+ * The passages alone the reader may read for the question (`findOf`):
+ * what core hands where memories don't reach yet (its `recallPassagesAs`).
+ */
+export const findPassages = (
+  sql: SqlStorage,
+  request: RecallRequest,
+  way: WayRunner
+): Finding => findOf(sql, request, way, "passages");
 
 /**
  * What the reader may read for the question, as a pack within its budget

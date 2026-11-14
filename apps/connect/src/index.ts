@@ -339,8 +339,8 @@ export default class Connect
   // connect recorded, appends them to the audit log, then acknowledges them,
   // with those the log can't take, which connect moves aside.
 
-  async takeAuditEvents(): Promise<OutboxedAuditEvent[]> {
-    return await takeAuditEvents(this.env);
+  async takeAuditEvents(held?: unknown): Promise<OutboxedAuditEvent[]> {
+    return await takeAuditEvents(this.env, held);
   }
 
   async ackAuditEvents(appended: unknown, rejected?: unknown): Promise<void> {

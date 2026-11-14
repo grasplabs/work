@@ -11,7 +11,13 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { organizationId } from "../src/auth/auth.ts";
-import { addSource, eraseSource, recallAs } from "../src/brain-next.ts";
+import {
+  addSource,
+  eraseSource,
+  recallAs,
+  recallPassagesAs,
+  rememberAs,
+} from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
@@ -234,7 +240,7 @@ describe("the Brain's sources, as a person reads them", () => {
     });
   });
 
-  it("searches with recall itself: the same pack recall gives that person, cut short or not", async () => {
+  it("searches with recall of passages itself: the same pack it gives that person, cut short or not, and no memory", async () => {
     const [reader, other] = await Promise.all([
       signedInApi(idp, "user"),
       signedInApi(idp, "user"),
@@ -250,6 +256,16 @@ describe("the Brain's sources, as a person reads them", () => {
       await add(newSource(), long, owner(reader.userId));
     }
     await add(newSource(), `${asked} hidden`, owner(other.userId));
+    // A memory of theirs the question's word finds: the page shows none,
+    // so none is sent.
+    const remembered = `${asked} remembered note`;
+    await rememberAs(env, reader.userId, {
+      change: crypto.randomUUID(),
+      about: { kind: "customer", names: [`Depot ${word()}`] },
+      type: "fact",
+      statement: remembered,
+      quote: remembered,
+    });
 
     const questions = [asked, `${asked} ${missing}`, `"${missing}"`];
     const searched = await Promise.all(
@@ -260,7 +276,7 @@ describe("the Brain's sources, as a person reads them", () => {
     const recalled = await Promise.all(
       questions.map(
         async (question) =>
-          await recallAs(env, reader.userId, {
+          await recallPassagesAs(env, reader.userId, {
             question,
             budget: { tokens: brainSearchBudget },
             personal: true,
@@ -269,6 +285,13 @@ describe("the Brain's sources, as a person reads them", () => {
     );
 
     expect(searched).toStrictEqual(recalled);
+    expect({
+      fields: searched.map((pack) => Object.keys(pack).toSorted()),
+      memory: JSON.stringify(searched).includes(remembered),
+    }).toStrictEqual({
+      fields: questions.map(() => ["items", "notFound", "truncated"]),
+      memory: false,
+    });
     expect(
       searched.map(({ items, notFound, truncated }) => ({
         found: items.length > 0,

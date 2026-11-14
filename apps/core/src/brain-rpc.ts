@@ -62,10 +62,10 @@ import {
   knowledgeTranscriptSources,
 } from "./brain-transcripts.ts";
 import { askMorePeople, workKnowledge } from "./brain-work.ts";
+import { keepsReadsOf } from "./connection-capture-key.ts";
 import { catalogEntries, personOf } from "./connections.ts";
 import { organizations } from "./db/core/schema.ts";
 import { brainOf } from "./knowledge/ports.ts";
-import { nativeItemReads } from "./native-tool-classes.gen.ts";
 import { intakeIds } from "./onboarding/brain-intake.ts";
 import {
   isKickoffTeam,
@@ -685,12 +685,7 @@ const connectionsOf = async (
   // same table, so the page cannot say more than the code keeps.
   const keeping = new Set(
     activeListed
-      .filter(
-        ({ source, provider, ownerUserId }) =>
-          source === "native" &&
-          ownerUserId === connecting.userId &&
-          Object.hasOwn(nativeItemReads, provider)
-      )
+      .filter((connection) => keepsReadsOf(connection, connecting.userId))
       .map(({ source, provider }) => entryKey(source, provider))
   );
   const keepsReads = (key: string): { keepsReads?: true } =>

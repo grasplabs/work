@@ -1,16 +1,29 @@
-import type { BrainPack } from "@grasp-os/runtime/app";
+import type {
+  BrainPack,
+  BrainSkill,
+  BrainSkillText,
+} from "@grasp-os/runtime/app";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { functionErrors } from "@grasp-os/shared/functions";
 import type { PermissionId } from "@grasp-os/shared/ids";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
+import { skillErrors } from "@grasp-os/shared/skills";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { appendAuditEvent } from "./audit-outbox.ts";
 import { storedTeamsOf } from "./brain-grant-teams.ts";
-import { codeRecallOf, recallAs } from "./brain-next.ts";
+import {
+  codeRecallOf,
+  recallPassagesAs,
+  skillVersionRefOf,
+} from "./brain-next.ts";
+import type { SkillAt, SkillVersionRef } from "./brain-next.ts";
+import { skillReadSchema, skillsSelectSchema } from "./brain-pack.ts";
+import { readSkillFor, selectSkillsFor } from "./brain-skills.ts";
+import type { SkillsReach } from "./brain-skills.ts";
 import { permissions } from "./db/core/schema.ts";
 import { authorize } from "./permissions.ts";
 
@@ -154,8 +167,11 @@ export const recallFor = async (
     // workflow's as the company alone; a chat's code as its person's
     // teams alone; never what only a person may read. Nothing code sends
     // can change it.
+    // Passages alone (GRA-1742): the pack code gets is the SDK's
+    // `BrainPack`, which holds no memory, so none takes its budget or a
+    // word from `notFound`, and no entity reaches code.
     const { subject } = caller.authority;
-    const recalled = await recallAs(env, caller.authority.onBehalfOf, {
+    const recalled = await recallPassagesAs(env, caller.authority.onBehalfOf, {
       ...recall,
       personal: false,
       company: subject.type !== "agent",
@@ -181,6 +197,130 @@ export const recallFor = async (
     return pack;
   } catch (error) {
     const refused = inHostWords(error);
+    await audit({
+      refused: isExpectedError(refused) ? refused.code : "internal.unexpected",
+    });
+    throw refused;
+  }
+};
+
+/** What code asks of the Brain's skills: `ctx.brain.skills.<operation>`. */
+export type SkillsOperation = "skills.select" | "skills.read";
+
+/** `error` in the function host's words, a skill's refusals among them. */
+const inHostSkillWords = (error: unknown): unknown => {
+  const code = skillErrors.codeOf(error);
+  if (code === "skills.invalid") {
+    return functionErrors.create("permission.invalid_args");
+  }
+  if (code === "skills.not_found") {
+    return functionErrors.create("permission.item_not_found");
+  }
+  return inHostWords(error);
+};
+
+/**
+ * Whose skills code reads: Grasp's and the company's, never a person's
+ * own, which only ever reach that person's own chat (brain-skills.ts).
+ * Code's input is refused for naming a person's skill before this is
+ * asked (`skillReadSchema`, `grasp` and `company` alone).
+ */
+const codeSkills: SkillsReach = { personal: false };
+
+/**
+ * `skill` as code may be handed it: Grasp's or the company's. A person's
+ * own is never asked for (`codeSkills`); one coming back anyway fails the
+ * call, never passed on.
+ */
+const forCode = <Skill extends { scope: SkillAt["scope"] }>(
+  skill: Skill
+): Omit<Skill, "scope"> & { scope: "grasp" | "company" } => {
+  const { scope } = skill;
+  if (scope === "person") {
+    throw new Error("A person's own skill reached code");
+  }
+  return { ...skill, scope };
+};
+
+/** Who reads the Brain's skills: a recall's caller, with its own pins. */
+export interface SkillsCaller extends Omit<RecallCaller, "keep"> {
+  /**
+   * What the caller keeps of the skills it is handed, before it gets them:
+   * a run's pins, as a recall's (`recordRunVersions`). Run before the call
+   * is audited as answered, so skills that couldn't be kept are audited as
+   * refused, and nobody gets them.
+   */
+  readonly keep?: (versions: readonly SkillVersionRef[]) => Promise<void>;
+}
+
+/**
+ * The Brain's skills for an App's action or a workflow's step (GRA-1830):
+ * `skills.select` the skills for `input.task`, `skills.read` one at the
+ * version a selection gave, the same a chat's code selects and reads for
+ * the same person (brain-skills.ts), never the person's own (`codeSkills`). Checked, kept and audited as a recall
+ * is (`recallFor`, the threat model on GRA-1830): the input first, then
+ * the caller's grant to read the Brain, now, and the person it acts for
+ * still a member. Refused as `permission.invalid_args` for input that
+ * isn't a task or a skill, `permission.item_not_found` for a skill there
+ * isn't at that version, `permission.denied` without the grant and
+ * `permission.unavailable` once the person is no longer a member. Each
+ * skill handed over, a selection's or a read's, is kept by the caller
+ * first (`keep`), so a run checks it again before anything leaves it.
+ * Audited, answered or refused, before it returns: how many skills, or
+ * which version, never the task, a name or a text.
+ */
+export const skillsCallFor = async (
+  env: Env,
+  caller: SkillsCaller,
+  operation: SkillsOperation,
+  input: unknown
+): Promise<{ skills: readonly BrainSkill[] } | BrainSkillText> => {
+  const audit = async (detail: Record<string, string | number | boolean>) => {
+    await appendAuditEvent(env, {
+      actor: caller.actor,
+      action: `brain.${operation}`,
+      ...(caller.target === undefined ? {} : { target: caller.target }),
+      detail: { onBehalfOf: caller.authority.onBehalfOf, ...detail },
+    });
+  };
+  try {
+    // The input first, as a recall's: a caller with no grant and bad
+    // input is refused alike by both.
+    const request =
+      operation === "skills.select" ? skillsSelectSchema : skillReadSchema;
+    if (!request.safeParse(input).success) {
+      throw functionErrors.create("permission.invalid_args");
+    }
+    if (caller.permissionId === null) {
+      throw permissionErrors.create("permission.denied", { action: "brain" });
+    }
+    await authorize(
+      env,
+      caller.authority,
+      { type: "platform" },
+      "brain",
+      caller.permissionId,
+      caller.context
+    );
+    if (operation === "skills.select") {
+      const skills = await selectSkillsFor(
+        env,
+        caller.authority,
+        codeSkills,
+        input
+      );
+      const handed = skills.map((skill) => forCode(skill));
+      await caller.keep?.(handed.map((skill) => skillVersionRefOf(skill)));
+      await audit({ skills: handed.length });
+      return { skills: handed };
+    }
+    const read = await readSkillFor(env, caller.authority, codeSkills, input);
+    const handed = forCode(read);
+    await caller.keep?.([skillVersionRefOf(handed)]);
+    await audit({ scope: handed.scope, version: handed.version });
+    return handed;
+  } catch (error) {
+    const refused = inHostSkillWords(error);
     await audit({
       refused: isExpectedError(refused) ? refused.code : "internal.unexpected",
     });

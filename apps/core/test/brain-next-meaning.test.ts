@@ -154,6 +154,19 @@ describe("recall by meaning, through core", () => {
         ...item,
         source: sources.get(item.source) ?? { producer: "upload", id: "" },
       })),
+      memories: pack.memories.map((memory) => ({
+        ...memory,
+        source:
+          memory.source === null
+            ? null
+            : {
+                source: sources.get(memory.source.source) ?? {
+                  producer: "upload",
+                  id: "",
+                },
+                version: memory.source.version,
+              },
+      })),
     };
   };
 
