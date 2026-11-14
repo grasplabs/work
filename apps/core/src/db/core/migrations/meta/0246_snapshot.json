@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "a19c8b1f-fc36-462e-b1e3-8a213003f472",
+  "id": "fce325ba-6266-4153-b168-859e0ac3e28f",
   "prevId": "20fb28e1-175c-4465-ba79-527c5db1edd5",
   "tables": {
     "access_revocations": {
@@ -4196,15 +4196,23 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "relayed_at": {
+          "name": "relayed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
-        "brain_hand_overs_noted_at_idx": {
-          "name": "brain_hand_overs_noted_at_idx",
+        "brain_hand_overs_unrelayed_idx": {
+          "name": "brain_hand_overs_unrelayed_idx",
           "columns": [
             "noted_at"
           ],
-          "isUnique": false
+          "isUnique": false,
+          "where": "\"brain_hand_overs\".\"relayed_at\" IS NULL"
         }
       },
       "foreignKeys": {},
@@ -10516,20 +10524,12 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
-        },
-        "audience": {
-          "name": "audience",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         }
       },
       "indexes": {
-        "skill_decisions_sequence_idx": {
-          "name": "skill_decisions_sequence_idx",
+        "skill_decisions_seq_idx": {
+          "name": "skill_decisions_seq_idx",
           "columns": [
-            "audience",
             "name",
             "seq"
           ],
@@ -10545,7 +10545,6 @@
         "skill_decisions_open_idx": {
           "name": "skill_decisions_open_idx",
           "columns": [
-            "audience",
             "name"
           ],
           "isUnique": false,
@@ -10647,22 +10646,14 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
-        },
-        "audience": {
-          "name": "audience",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         }
       },
       "indexes": {
-        "skill_shares_waiting_idx": {
-          "name": "skill_shares_waiting_idx",
+        "skill_shares_pending_idx": {
+          "name": "skill_shares_pending_idx",
           "columns": [
             "requested_by",
-            "name",
-            "audience"
+            "name"
           ],
           "isUnique": true,
           "where": "status = 'pending'"

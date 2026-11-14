@@ -117,7 +117,12 @@ export type BrainStep = (typeof brainSteps)[number];
  * the store's overview names (core's brain-next.ts holds the two to the
  * same keys, as the steps).
  */
-export const brainSearchWays = ["words", "exact", "meaning"] as const;
+export const brainSearchWays = [
+  "words",
+  "exact",
+  "entities",
+  "meaning",
+] as const;
 export type BrainSearchWay = (typeof brainSearchWays)[number];
 
 /**
@@ -137,6 +142,9 @@ export type BrainWithoutMeaningReason =
 const stepFailureSchema = z
   .object({ at: isoTime, reason: z.enum(["timed_out", "failed"]) })
   .nullable();
+
+/** How many recalls searched by a way, and how many it failed. */
+const wayCountSchema = z.object({ recalls: count, failed: count });
 
 /** How many erasures of one kind are in the ledger, and how many not yet. */
 const erasureCountSchema = z.object({ written: count, unwritten: count });
@@ -255,10 +263,17 @@ export const brainReportSchema = z.object({
    */
   recall: z.object({
     since: isoTime,
-    ways: z.record(
-      z.enum(brainSearchWays),
-      z.object({ recalls: count, failed: count })
-    ),
+    ways: z.object({
+      words: wayCountSchema,
+      exact: wayCountSchema,
+      /**
+       * Core always sends it; optional only so the admin reads a core of
+       * an older release (one on a slower channel) and shows the rest of
+       * its report.
+       */
+      entities: wayCountSchema.optional(),
+      meaning: wayCountSchema,
+    }),
     withoutMeaning: z.record(z.enum(brainWithoutMeaningReasons), count),
   }),
   /**

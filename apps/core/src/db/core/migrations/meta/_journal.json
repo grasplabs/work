@@ -1727,8 +1727,15 @@
     {
       "idx": 246,
       "version": "6",
-      "when": 1794593844917,
-      "tag": "0246_pink_madame_web",
+      "when": 1794592802301,
+      "tag": "0246_absent_franklin_richards",
+      "breakpoints": true
+    },
+    {
+      "idx": 247,
+      "version": "6",
+      "when": 1794649706434,
+      "tag": "0247_warm_newton_destine",
       "breakpoints": true
     }
   ]

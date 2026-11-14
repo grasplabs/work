@@ -89,3 +89,44 @@ export const chunks = <T>(items: readonly T[], size: number): T[][] =>
   Array.from({ length: Math.ceil(items.length / size) }, (_, index) =>
     items.slice(index * size, (index + 1) * size)
   );
+
+/** The most parameters D1 binds to one statement. */
+export const boundParametersMax = 100;
+
+/**
+ * `rows` written as statements `statementOf` makes, each as many rows as
+ * D1 binds (`boundParametersMax`): each statement's own parameters are
+ * counted, and one over the limit is made again with fewer rows, so rows
+ * of any shape fit (a row without an optional column binds less than one
+ * with it), and so does what a statement binds once (a conflict clause).
+ * Throws when one row alone binds more than D1 takes.
+ */
+export const statementsWithin = <Row, Statement>(
+  rows: readonly Row[],
+  statementOf: (part: Row[]) => Statement & {
+    toSQL: () => { params: unknown[] };
+  }
+): Statement[] => {
+  const statements: Statement[] = [];
+  let at = 0;
+  // Each chunk starts at the size the last one was taken at: rows of one
+  // shape are built about once each.
+  let size = rows.length;
+  while (at < rows.length) {
+    size = Math.min(size, rows.length - at);
+    let statement = statementOf(rows.slice(at, at + size));
+    let bound = statement.toSQL().params.length;
+    while (bound > boundParametersMax) {
+      if (size === 1) {
+        throw new Error("One row binds more parameters than D1 takes");
+      }
+      // Fewer rows by the share over the limit: always fewer, at least one.
+      size = Math.max(1, Math.floor((size * boundParametersMax) / bound));
+      statement = statementOf(rows.slice(at, at + size));
+      bound = statement.toSQL().params.length;
+    }
+    statements.push(statement);
+    at += size;
+  }
+  return statements;
+};
