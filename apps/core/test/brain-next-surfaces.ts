@@ -4001,7 +4001,12 @@ export const recallProbes = {
   // Code's skills, as an App or a workflow selects and reads them: under
   // an App's grant, acting for the reader, as the company alone; tasks and
   // skills of the markers, then every way it refuses.
-  skillsCallFor: async ({ personId, markers, sharedWord }) => {
+  skillsCallFor: async ({
+    personId,
+    markers,
+    sharedWord,
+    hiddenTeamSkills,
+  }) => {
     const { authority, permissionId } = await appWithBrain(personId);
     await brainSkills.installShippedSkills(env);
     const call = async (
@@ -4093,6 +4098,18 @@ export const recallProbes = {
               "own read"
             )
         )
+      )),
+      // A team's skill (GRA-1844): code reads as the company alone, so a
+      // team's skill the reader isn't in answers as one no one wrote.
+      ...(await pairedOverTeamSkills(
+        hiddenTeamSkills,
+        async (team, name) =>
+          await codeRecall.skillsCallFor(
+            env,
+            skillsCallerOf(authority, permissionId),
+            "skills.read",
+            { skill: { scope: "team", team, name, version: 1 } }
+          )
       )),
       await call(
         "the markers, under a grant the App doesn't hold",
