@@ -366,6 +366,7 @@ export const finalFailures: ReadonlySet<string> = new Set([
   "upload.original_missing",
   "upload.superseded",
   "upload.conversion_unavailable",
+  "upload.text_too_large",
   "knowledge.too_large",
   "knowledge.too_many_sections",
   "knowledge.too_many_links",

@@ -1,11 +1,10 @@
 import type { AuditActor } from "@grasp-os/shared/audit";
-import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
 import { quietLoader } from "@grasp-os/shared/quiet-loader";
 import { isolateBase, withNode } from "@grasp-os/shared/runtime";
 import { transcriptSchema } from "@grasp-os/shared/transcripts";
-import type { Transcript } from "@grasp-os/shared/transcripts";
+import type { TranscriptInput } from "@grasp-os/shared/transcripts";
 import { uploadErrors, uploadTypes } from "@grasp-os/shared/uploads";
 import type { UploadMediaType } from "@grasp-os/shared/uploads";
 import { z } from "zod";
@@ -123,12 +122,12 @@ export interface ExtractInput {
 /** A file's text as Markdown, and its transcript when it is one (WebVTT). */
 export interface Extracted {
   markdown: string;
-  transcript?: Transcript;
+  transcript?: TranscriptInput;
 }
 
 /**
  * Turns a file into Markdown. Throws an expected error for what no retry
- * changes (`upload.too_complex`, `knowledge.too_large`),
+ * changes (`upload.too_complex`, `upload.text_too_large`),
  * `ExtractorUnavailableError` when it couldn't try, and any other error
  * when it couldn't read the file.
  */
@@ -372,7 +371,7 @@ export const localExtractor =
       return transcript === undefined ? { markdown } : { markdown, transcript };
     }
     if (extracted.ok || extracted.reason === "too_large") {
-      throw knowledgeErrors.create("knowledge.too_large");
+      throw uploadErrors.create("upload.text_too_large");
     }
     throw new Error("The extractor couldn't read the file");
   };
@@ -451,7 +450,7 @@ const conversionRequest = async (
  * the document sent again with what was written so far, until the answer
  * is whole. One that isn't within `markdownMaxBytes`, the requests a
  * conversion has (`conversionRequestsMax`) and its deadline fails as
- * `knowledge.too_large`: half a document is never saved.
+ * `upload.text_too_large`: half a document is never saved.
  */
 const platformConverter =
   (
@@ -476,7 +475,7 @@ const platformConverter =
       // oxlint-disable-next-line no-await-in-loop -- each continues the one before
       const answer = await conversionRequest(env, {
         model: ref,
-        purpose: "knowledge.conversion",
+        purpose: "upload.conversion",
         trigger,
         work: { platform: "document_conversion" },
         system: conversionInstructions,
@@ -505,7 +504,7 @@ const platformConverter =
         break;
       }
     }
-    throw knowledgeErrors.create("knowledge.too_large");
+    throw uploadErrors.create("upload.text_too_large");
   };
 
 /** Which extractor an upload got, as its audit events name it. */
