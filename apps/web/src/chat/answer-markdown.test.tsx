@@ -244,12 +244,22 @@ describe(AnswerMarkdown, () => {
 
   it("shows a link to a note or to an unsafe address as its words alone", async () => {
     await shown(
-      'Leave is [sixteen weeks](grasp:note/doc-1 "Sixteen weeks") and [this](javascript:alert(1)) runs nothing.'
+      'Leave is [sixteen weeks](grasp:note/doc-1 "Sixteen weeks"), [this](javascript:alert(1)) runs nothing and [that](data:text/html,hi) opens nothing.'
     );
     expect(document.querySelector("a, button")).toBeNull();
     expect(document.body.textContent).toContain(
-      "Leave is sixteen weeks and this runs nothing."
+      "Leave is sixteen weeks, this runs nothing and that opens nothing."
     );
+  });
+
+  it("asks before following a link to another host without a protocol", async () => {
+    await shown("See [the form](//forms.example/leave).");
+    expect(document.querySelector("a[href]")).toBeNull();
+    await press(button("the form"));
+    expect(opened).toStrictEqual([]);
+    expect(
+      document.querySelector('[role="alertdialog"]')?.textContent
+    ).toContain("//forms.example/leave");
   });
 
   it("renders nothing of raw HTML, and no image that would load", async () => {

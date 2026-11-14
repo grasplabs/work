@@ -62,15 +62,19 @@ export const downloadText = (
   }, downloadKeptMs);
 };
 
-/** A Markdown file's frontmatter, from its first line's `---` to the next line that is one. */
-const frontmatter = /^---\r?\n(?:.*\r?\n)*?---(?:\r?\n|$)/u;
+/**
+ * A Markdown file's frontmatter, from its first line's `---` to the next
+ * line that is one. A line is anything up to a line feed: `.` would stop
+ * at U+2028 and U+2029, which a name in it may hold.
+ */
+const frontmatter = /^---\r?\n(?:[^\n]*\n)*?---(?:\r?\n|$)/u;
 
 /**
  * `markdown` without its frontmatter, which only the file needs: a
  * brain note's export opens with one (brain/brain-markdown.ts), which the
  * printed page leaves out.
  */
-const withoutFrontmatter = (markdown: string): string =>
+export const withoutFrontmatter = (markdown: string): string =>
   markdown.replace(frontmatter, "");
 
 /** A backslash and what it escapes, as Markdown writes a character it would read as syntax. */

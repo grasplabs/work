@@ -280,8 +280,11 @@ const betterSection = (
   if (better.data === null) {
     return [];
   }
-  // Knowledge's kinds, which core still counts until it stops keeping
-  // Knowledge, are left out: the dashboard no longer shows them.
+  // Knowledge's own kinds, which core still counts until it stops keeping
+  // Knowledge, are left out: the dashboard no longer shows them. Knowledge's
+  // unanswered question has the same kind as an improvement signal's, so
+  // its count still comes in with that one: the counts carry no source to
+  // tell them apart.
   const counts = byKindOrder(
     better.data.filter((count): count is { kind: SignalKind; count: number } =>
       Object.hasOwn(signalKindLooks, count.kind)
