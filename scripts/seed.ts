@@ -802,12 +802,12 @@ const main = async (): Promise<void> => {
     }
     console.info(`${collections.length} Knowledge collections`);
 
-    const { instructionsWritten } = await seedBrain(
+    const { uploadsKept, instructionsWritten } = await seedBrain(
       (key) => sessionFor(sessions, key),
       teams
     );
     console.info(
-      `The Brain: ${uploads.length} uploads, ${skills.length} skills, ${instructionsWritten} new instruction files`
+      `The Brain: ${uploadsKept} of ${uploads.length} uploads, ${skills.length} skills, ${instructionsWritten} new instruction files`
     );
 
     const appIds = new Map<string, string>();

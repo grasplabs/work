@@ -8,16 +8,25 @@
  * admin approved it.
  *
  * It can run again and adds nothing twice: an upload and its next version
- * go under IDs fixed by their names, and core answers an ID it has with
- * the version it made (brain-uploads.ts); an instruction file is written
- * only while it was never written; a skill, its share and the share's
- * approval only while they are missing.
+ * go under IDs fixed by their uploader and name, and core answers an ID it
+ * has with the version it made (brain-uploads.ts); an instruction file is
+ * written only while it was never written; a skill, its share and the
+ * share's approval only while they are missing. It never undoes what
+ * someone did in the demo since: an upload they deleted, a skill they
+ * deleted, a share an admin declined or a file that differs from the
+ * seed's stay as they are, each said in one line.
  */
 import { createHash } from "node:crypto";
 
 import { firstAgentId } from "@grasp-os/shared/agents";
+import {
+  brainSourceErrors,
+  brainUploadErrors,
+} from "@grasp-os/shared/brain-sources";
 import type { BrainUploadReaders } from "@grasp-os/shared/brain-sources";
 import type { InstructionFileRef } from "@grasp-os/shared/instruction-files";
+import { skillErrors } from "@grasp-os/shared/skills";
+import { uploadErrors } from "@grasp-os/shared/uploads";
 
 import type { ChatSeed } from "./chats.ts";
 import type { PersonKey, TeamName } from "./company.ts";
@@ -170,9 +179,9 @@ export const uploads: UploadSeed[] = [
   },
 ];
 
-/** The upload `name`'s ID: fixed, so a second run is the same upload. */
-export const uploadIdOf = (name: string): string =>
-  seedUuid(`brain-upload:${name}`);
+/** The upload's ID: fixed by whose it is and its name, so a second run is the same upload. */
+const uploadIdOf = ({ by, name }: UploadSeed): string =>
+  seedUuid(`brain-upload:${by}:${name}`);
 
 /** An instruction file, by whom it is written. */
 interface InstructionSeed {
@@ -297,24 +306,68 @@ const readersOf = (
   return { kind: "team", teamId };
 };
 
-/** The upload, then its next version: each the same one when sent again. */
+/**
+ * What a refusal of the seed's upload means, when it means the demo has
+ * moved on: an upload deleted since (its ID is closed for good), or one
+ * whose stored file is another than the seed's text now. Undefined for
+ * any other refusal, which stops the seed.
+ */
+const movedOn = (error: unknown): string | undefined => {
+  const code = brainUploadErrors.codeOf(error);
+  if (
+    code === "brain.upload_retry_refused" ||
+    code === "brain.upload_deleted"
+  ) {
+    return "deleted in the demo";
+  }
+  if (code === "brain.upload_other_file") {
+    return "the stored file differs from the seed's text";
+  }
+  return undefined;
+};
+
+/** Core's code for a refused upload, for the line that names the file. */
+const codeOf = (error: unknown): string | undefined =>
+  brainUploadErrors.codeOf(error) ??
+  brainSourceErrors.codeOf(error) ??
+  uploadErrors.codeOf(error);
+
+/**
+ * The upload, then its next version: each the same one when sent again.
+ * One the demo moved on from is left as it is, with a line; any other
+ * refusal stops the seed, naming the file.
+ */
 const seedUpload = async (
   api: Api,
   upload: UploadSeed,
   teams: ReadonlyMap<TeamName, string>
-): Promise<void> => {
-  const id = uploadIdOf(upload.name);
-  await api.brainSources.upload(
-    { name: upload.name, bytes: wordDocument(upload.text) },
-    readersOf(upload.readers, teams),
-    id
-  );
-  if (upload.update !== undefined) {
-    await api.brainSources.uploadVersion(
-      id,
-      { name: upload.name, bytes: wordDocument(upload.update) },
-      seedUuid(`brain-upload-version:${upload.name}:2`)
+): Promise<boolean> => {
+  const id = uploadIdOf(upload);
+  try {
+    await api.brainSources.upload(
+      { name: upload.name, bytes: wordDocument(upload.text) },
+      readersOf(upload.readers, teams),
+      id
     );
+    if (upload.update !== undefined) {
+      await api.brainSources.uploadVersion(
+        id,
+        { name: upload.name, bytes: wordDocument(upload.update) },
+        seedUuid(`brain-upload-version:${upload.by}:${upload.name}:2`)
+      );
+    }
+    return true;
+  } catch (error) {
+    const why = movedOn(error);
+    if (why === undefined) {
+      const code = codeOf(error);
+      throw new Error(
+        `Uploading ${upload.name} as ${upload.by} was refused${code === undefined ? "" : ` (${code})`}: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error }
+      );
+    }
+    console.info(`Skipped ${upload.name} of ${upload.by}: ${why}`);
+    return false;
   }
 };
 
@@ -335,7 +388,11 @@ const seedInstructions = async (
   return true;
 };
 
-/** The skill, its share with the company, and the admin's approval: each once. */
+/**
+ * The skill, its share with the company, and the admin's approval: each
+ * once. A skill its owner deleted for good stays deleted, and a share
+ * asked once is never asked again, whatever an admin decided.
+ */
 const seedSkill = async (
   sessionFor: (key: PersonKey) => Session,
   seed: SkillSeed
@@ -344,14 +401,23 @@ const seedSkill = async (
   const overview = await own.overview();
   let version = overview.own.find(({ name }) => name === seed.name)?.version;
   if (version === undefined) {
-    ({ version } = await own.save(seed.text));
+    try {
+      ({ version } = await own.save(seed.text));
+    } catch (error) {
+      if (skillErrors.codeOf(error) !== "skills.name_erased") {
+        throw error;
+      }
+      console.info(
+        `Skipped the skill ${seed.name} of ${seed.by}: deleted in the demo`
+      );
+      return;
+    }
   }
   if (seed.sharedBy === undefined) {
     return;
   }
   const asked = overview.shares.some(
-    ({ name, audience, status }) =>
-      name === seed.name && audience.kind === "company" && status !== "declined"
+    ({ name, audience }) => name === seed.name && audience.kind === "company"
   );
   if (!asked) {
     await own.share(seed.name, version, "company");
@@ -374,10 +440,13 @@ const seedSkill = async (
 export const seedBrain = async (
   sessionFor: (key: PersonKey) => Session,
   teams: ReadonlyMap<TeamName, string>
-): Promise<{ instructionsWritten: number }> => {
+): Promise<{ uploadsKept: number; instructionsWritten: number }> => {
+  let uploadsKept = 0;
   for (const upload of uploads) {
     // oxlint-disable-next-line no-await-in-loop -- one file at a time
-    await seedUpload(sessionFor(upload.by).api, upload, teams);
+    if (await seedUpload(sessionFor(upload.by).api, upload, teams)) {
+      uploadsKept += 1;
+    }
   }
   let instructionsWritten = 0;
   for (const seed of instructionFiles) {
@@ -390,7 +459,7 @@ export const seedBrain = async (
     // oxlint-disable-next-line no-await-in-loop -- one skill at a time
     await seedSkill(sessionFor, seed);
   }
-  return { instructionsWritten };
+  return { uploadsKept, instructionsWritten };
 };
 
 /**
@@ -402,7 +471,11 @@ export const confirmAnsweredBy = async (
   chat: ChatSeed,
   answeredBy: string
 ): Promise<void> => {
-  const id = uploadIdOf(answeredBy);
+  const upload = uploads.find(({ name }) => name === answeredBy);
+  if (upload === undefined) {
+    throw new Error(`No seeded upload ${answeredBy}`);
+  }
+  const id = uploadIdOf(upload);
   const [first] = chat.turns;
   const { items } = await api.brainSources.search(first?.question ?? "");
   if (
