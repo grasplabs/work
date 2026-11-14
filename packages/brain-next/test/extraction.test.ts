@@ -2613,7 +2613,7 @@ describe("extracting memories", () => {
       // way (this tick) have ended, so it can't land inside the run: asked
       // for during the last call before the write (the check), it lands
       // after the write, and takes what the write wrote with the group.
-      const asked: Promise<void>[] = [];
+      const asked: Promise<unknown>[] = [];
       answers.set(token, (request) => {
         if (request.purpose === "brain.extract.check" && asked.length === 0) {
           asked.push(own.eraseSource({ source: group, reason: "deleted" }));
