@@ -134,7 +134,7 @@ describe("chat agent", () => {
       JSON.stringify(body)
     );
     const info =
-      "info(): Promise<{ chatId: string; personId: string; app: string | null; now: string }>";
+      "info(): Promise<{ chatId: string; personId: string; now: string }>";
     expect({
       listed: first?.includes("- env.chat: "),
       declaredUpFront: first?.includes(info),

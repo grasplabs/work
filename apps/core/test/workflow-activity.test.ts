@@ -92,7 +92,7 @@ describe("runs over time", () => {
     const workflow = await owner.api.workflowResources.create(
       `intake-${unique()}`
     );
-    await owner.api.workflowResources.share(workflow.id, {
+    await owner.api.workflowResources.members.add(workflow.id, {
       type: "person",
       id: user.userId,
       role: "user",

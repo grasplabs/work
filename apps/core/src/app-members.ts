@@ -1,16 +1,5 @@
-import {
-  appErrors,
-  appMemberRefSchema,
-  newAppMemberSchema,
-} from "@grasp-os/shared/apps";
-import type {
-  App,
-  AppMember,
-  AppMemberRef,
-  AppMembersApi,
-  NewAppMember,
-  ShareCandidates,
-} from "@grasp-os/shared/apps";
+import { appErrors } from "@grasp-os/shared/apps";
+import type { App } from "@grasp-os/shared/apps";
 import {
   actorOf,
   auditProvenanceMaxItems,
@@ -19,6 +8,17 @@ import {
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { roleSchema } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import {
+  newSubjectMemberSchema,
+  subjectMemberRefSchema,
+} from "@grasp-os/shared/subject-members";
+import type {
+  NewSubjectMember,
+  ShareCandidates,
+  SubjectMember,
+  SubjectMemberRef,
+  SubjectMembersApi,
+} from "@grasp-os/shared/subject-members";
 import { and, asc, eq, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -51,7 +51,6 @@ import {
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import {
-  buildsProjectsOf,
   namedProjectsFor,
   peopleInProject,
   requireStillBuilt,
@@ -60,7 +59,12 @@ import { projectStillBuiltSql } from "./project-sql.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
-import { memberEntry, requireNotStaff, requireSharable } from "./sharing.ts";
+import {
+  memberEntry,
+  requireNotStaff,
+  requireSharable,
+  shareCandidates,
+} from "./sharing.ts";
 import type { SharingRules } from "./sharing.ts";
 
 // Sharing an App: whom it is open to besides its owner and the admins,
@@ -72,7 +76,7 @@ import type { SharingRules } from "./sharing.ts";
 
 type Row = typeof appMembers.$inferSelect;
 
-const toMember = (row: Row, name: string | null): AppMember => ({
+const toMember = (row: Row, name: string | null): SubjectMember => ({
   type: row.memberType,
   id: row.memberId,
   name,
@@ -82,7 +86,7 @@ const toMember = (row: Row, name: string | null): AppMember => ({
 });
 
 /** The rows of `app` that are `member`. */
-const rowOf = (app: App, member: AppMemberRef) =>
+const rowOf = (app: App, member: SubjectMemberRef) =>
   and(
     eq(appMembers.appId, app.id),
     eq(appMembers.memberType, member.type),
@@ -98,7 +102,7 @@ const namedMembers = async (
   env: Env,
   by: Identity,
   where: SQL | undefined
-): Promise<AppMember[]> => {
+): Promise<SubjectMember[]> => {
   const rows = await drizzle(env.DB)
     .select({ row: appMembers, person: users.name, team: teams.name })
     .from(appMembers)
@@ -161,7 +165,7 @@ const invalid = (issue: string) =>
   appErrors.create("app.member_invalid", { issues: [issue] });
 
 /** What sharing an App with someone allows (sharing.ts). */
-const sharingRules = (app: App, member: NewAppMember): SharingRules => ({
+const sharingRules = (app: App, member: NewSubjectMember): SharingRules => ({
   owner: app.owner,
   builds: member.role === "builder",
   invalid,
@@ -174,7 +178,7 @@ const appMemberEntry = (
   by: Identity,
   action: "app.member.added" | "app.member.removed",
   app: App,
-  member: AppMemberRef & { role: string }
+  member: SubjectMemberRef & { role: string }
 ): AuditEntry => memberEntry(by, action, { type: "app", id: app.id }, member);
 
 /**
@@ -182,13 +186,13 @@ const appMemberEntry = (
  * tell (access-revocations.ts): the person, or everyone, for a team,
  * whose members each connection's own check sorts out.
  */
-const peopleOf = (member: AppMemberRef): string[] | null =>
+const peopleOf = (member: SubjectMemberRef): string[] | null =>
   member.type === "person" ? [member.id] : null;
 
 /** The people a row reaches now, by user ID: the person, or a team's or project's. */
 const peopleReachedBy = async (
   env: Env,
-  member: AppMemberRef
+  member: SubjectMemberRef
 ): Promise<string[]> => {
   if (member.type === "person") {
     return [member.id];
@@ -214,7 +218,7 @@ const peopleReachedBy = async (
 const checkedPeople = async (
   env: Env,
   app: App,
-  member: AppMemberRef
+  member: SubjectMemberRef
 ): Promise<Reader[]> => {
   const db = drizzle(env.DB);
   const people = await peopleReachedBy(env, member);
@@ -281,7 +285,7 @@ const requireReadable = async (
   env: Env,
   by: Identity,
   app: App,
-  member: NewAppMember
+  member: NewSubjectMember
 ): Promise<void> => {
   const sources = await sourcesOf(env, app.id);
   if (!hasSources(sources)) {
@@ -324,47 +328,11 @@ export const listMembers = async (
   env: Env,
   by: Identity,
   app: unknown
-): Promise<AppMember[]> => {
+): Promise<SubjectMember[]> => {
   // Whom it is shared with is none of its data: its owner and admins see
   // it outside a team its Brain grants name (GRA-1842).
   const { id } = await appFor(env, by, app, "user", { managing: true });
   return await namedMembers(env, by, eq(appMembers.appId, id));
-};
-
-/**
- * Whom `by` may share an App with: the organization's people, members now,
- * and its teams, each by name and ID alone. For whoever may share it
- * (`addMember`): a builder of the App, while it isn't archived. A builder
- * isn't an admin, so this, not the organization's member list, is what
- * they pick from; it says no more than a share names.
- */
-export const shareCandidates = async (
-  env: Env,
-  by: Identity,
-  app: unknown
-): Promise<ShareCandidates> => {
-  await editableApp(env, by, app);
-  const db = drizzle(env.DB);
-  const [people, organizationTeams, builtProjects] = await Promise.all([
-    db
-      .select({ id: users.id, name: users.name })
-      .from(members)
-      .innerJoin(users, eq(users.id, members.userId))
-      .where(
-        and(
-          eq(members.organizationId, organizationId),
-          notRemoved(members.userId)
-        )
-      )
-      .orderBy(asc(users.name), asc(users.id)),
-    db
-      .select({ id: teams.id, name: teams.name })
-      .from(teams)
-      .where(eq(teams.organizationId, organizationId))
-      .orderBy(asc(teams.name), asc(teams.id)),
-    buildsProjectsOf(env, by),
-  ]);
-  return { people, teams: organizationTeams, projects: builtProjects };
 };
 
 /**
@@ -377,10 +345,10 @@ export const addMember = async (
   by: Identity,
   app: unknown,
   input: unknown
-): Promise<AppMember> => {
+): Promise<SubjectMember> => {
   const found = await editableApp(env, by, app);
   requireNotStaff(by);
-  const member = appErrors.parse("app.invalid", newAppMemberSchema, input);
+  const member = appErrors.parse("app.invalid", newSubjectMemberSchema, input);
   await requireSharable(env, member, sharingRules(found, member), by);
   await requireReadable(env, by, found, member);
   const db = drizzle(env.DB);
@@ -477,7 +445,7 @@ export const removeMember = async (
   // in: it reads none of its data (GRA-1842).
   const found = await appFor(env, by, app, "builder", { managing: true });
   requireNotStaff(by);
-  const member = appErrors.parse("app.invalid", appMemberRefSchema, input);
+  const member = appErrors.parse("app.invalid", subjectMemberRefSchema, input);
   const db = drizzle(env.DB);
   const before = await db
     .select({ role: appMembers.role })
@@ -526,7 +494,7 @@ export const removeMember = async (
 };
 
 /** A signed-in person's `apps.members`. */
-export class AppMembersRpc extends CoreRpcTarget implements AppMembersApi {
+export class AppMembersRpc extends CoreRpcTarget implements SubjectMembersApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
 
@@ -536,30 +504,31 @@ export class AppMembersRpc extends CoreRpcTarget implements AppMembersApi {
     this.#check = check;
   }
 
-  async list(app: string): Promise<AppMember[]> {
+  async list(app: string): Promise<SubjectMember[]> {
     return await withPerson(
       this.#check,
       async (by) => await listMembers(this.#env, by, app)
     );
   }
 
-  async add(app: string, member: NewAppMember): Promise<AppMember> {
+  async add(app: string, member: NewSubjectMember): Promise<SubjectMember> {
     return await withPerson(
       this.#check,
       async (by) => await addMember(this.#env, by, app, member)
     );
   }
 
-  async remove(app: string, member: AppMemberRef): Promise<void> {
+  async remove(app: string, member: SubjectMemberRef): Promise<void> {
     await withPerson(this.#check, async (by) => {
       await removeMember(this.#env, by, app, member);
     });
   }
 
+  /** For whoever may share it (`addMember`): a builder, while it isn't archived. */
   async candidates(app: string): Promise<ShareCandidates> {
-    return await withPerson(
-      this.#check,
-      async (by) => await shareCandidates(this.#env, by, app)
-    );
+    return await withPerson(this.#check, async (by) => {
+      await editableApp(this.#env, by, app);
+      return await shareCandidates(this.#env, by);
+    });
   }
 }

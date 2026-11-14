@@ -138,7 +138,7 @@ ${body
 
 /** A test's check that its run failed with the error its workflow raises, `code`. */
 const failsWith = (code: string): string =>
-  `expect(await t.runs.untilTerminal(run)).toMatchObject({ status: "failed", code: ${JSON.stringify(code)} });`;
+  `await expect(t.runs.untilTerminal(run)).resolves.toMatchObject({ status: "failed", code: ${JSON.stringify(code)} });`;
 
 // Opportunity-to-Cash
 
@@ -217,9 +217,9 @@ const clientOnboarding: WorkflowSeed = {
   },
   tests: suite({
     "opens a complete file when nothing is missing": `const run = await desk.start(workflows.clientOnboarding, { client: "Fam. Willems", town: "Utrecht", documents: ${JSON.stringify(requiredDocuments)} });
-expect(await t.runs.untilTerminal(run)).toEqual({ status: "completed", result: { client: "Fam. Willems", town: "Utrecht", complete: true, chase: [] } });`,
+await expect(t.runs.untilTerminal(run)).resolves.toStrictEqual({ status: "completed", result: { client: "Fam. Willems", town: "Utrecht", complete: true, chase: [] } });`,
     "lists the documents to chase": `const run = await desk.start(workflows.clientOnboarding, { client: "D. Mulder", town: "Zeist", documents: ["identity"] });
-expect(await t.runs.untilTerminal(run)).toEqual({
+await expect(t.runs.untilTerminal(run)).resolves.toStrictEqual({
   status: "completed",
   result: { client: "D. Mulder", town: "Zeist", complete: false, chase: ["payslip", "employer statement", "bank statements"] },
 });`,
@@ -348,9 +348,9 @@ const emailTriage: WorkflowSeed = {
   },
   tests: suite({
     "sends a complaint to the complaints queue, urgently": `const run = await desk.start(workflows.emailTriage, { from: "M. Hendriks", subject: "Complaint", body: "I'm not happy with the valuation." });
-expect(await t.runs.untilTerminal(run)).toEqual({ status: "completed", result: { from: "M. Hendriks", queue: "complaints", urgent: true } });`,
+await expect(t.runs.untilTerminal(run)).resolves.toStrictEqual({ status: "completed", result: { from: "M. Hendriks", queue: "complaints", urgent: true } });`,
     "sends a question about a file to file status": `const run = await desk.start(workflows.emailTriage, { from: "S. Peeters", subject: "Where is my file?", body: "Has it gone to the lender?" });
-expect(await t.runs.untilTerminal(run)).toEqual({ status: "completed", result: { from: "S. Peeters", queue: "file status", urgent: false } });`,
+await expect(t.runs.untilTerminal(run)).resolves.toStrictEqual({ status: "completed", result: { from: "S. Peeters", queue: "file status", urgent: false } });`,
     "refuses an empty email": `const run = await desk.start(workflows.emailTriage, { from: "R. Bos", subject: "Question", body: "" });
 ${failsWith("triage.empty_email")}`,
   }),
@@ -471,7 +471,7 @@ const weeklyReport: WorkflowSeed = {
   },
   tests: suite({
     "plans the week's board pack": `const run = await desk.start(workflows.weeklyReport, { week: "2026-10-05" });
-expect(await t.runs.untilTerminal(run)).toEqual({
+await expect(t.runs.untilTerminal(run)).resolves.toStrictEqual({
   status: "completed",
   result: {
     week: "2026-10-05",

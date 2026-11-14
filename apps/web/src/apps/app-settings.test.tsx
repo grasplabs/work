@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
-import type { App, AppMember, ViewedApp } from "@grasp-os/shared/apps";
+import type { App, ViewedApp } from "@grasp-os/shared/apps";
 import type { ListedConnection } from "@grasp-os/shared/connect";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
+import type { SubjectMember } from "@grasp-os/shared/subject-members";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -58,7 +59,7 @@ const fakeCore = (
   const calls: string[] = [];
   /** Whether core is out of reach from now on. */
   const state = { unreachable: false };
-  let members: AppMember[] = [
+  let members: SubjectMember[] = [
     {
       type: "person",
       id: "user-ann",

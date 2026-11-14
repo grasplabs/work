@@ -71,7 +71,7 @@ import { requireResourceRunEvidenceReadable } from "./resource-reads.ts";
 //   uses, and the call throws (`workflow.decision_timed_out`): there is no
 //   outcome for it at all. What the answer carries (`value`) is held to
 //   the contract's response schema, exactly.
-// - A test run reaching a person. A test run of a draft's checkpoint opens
+// - A test run reaching a person. A test run of a draft at one revision opens
 //   nothing: its decision is answered from its start's fixtures
 //   (`candidateDecision`), checked as a real one is.
 

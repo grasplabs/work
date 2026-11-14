@@ -34,10 +34,7 @@ import {
   storedEvent,
   uuidFromHash,
 } from "../audit-outbox.ts";
-import {
-  triggerResources,
-  triggerResourceVersions,
-} from "../db/core/schema.ts";
+import { triggerResources } from "../db/core/schema.ts";
 import {
   authenticationOf,
   domainOf as domainNameOf,
@@ -145,8 +142,8 @@ import type { StartFiles } from "./start-files.ts";
 //   it is admitted: the trigger live and enabled, its creator still with
 //   a role, its own `start` grant active. A refusal for good is audited
 //   (`workflow.email.refused`) and the message dropped, never bounced. A
-//   trigger moved to another version as the message arrived fails it for
-//   now, to be started at the new version.
+//   version published as the message arrived fails it for now, to be
+//   started on the new one.
 // - The same message delivered twice: its start is keyed by the trigger
 //   and the message (its Message-ID, or bytes), so it is one run.
 //
@@ -623,19 +620,10 @@ const emailTakerAt = async (
   await drizzle(env.DB)
     .select({
       id: triggerResources.id,
-      version: triggerResources.currentVersion,
-      workflowId: triggerResourceVersions.workflowResourceId,
-      workflowVersion: triggerResourceVersions.workflowResourceVersion,
-      inputMapping: triggerResourceVersions.inputMapping,
+      workflowId: triggerResources.workflowResourceId,
+      inputMapping: triggerResources.inputMapping,
     })
     .from(triggerResources)
-    .innerJoin(
-      triggerResourceVersions,
-      and(
-        eq(triggerResourceVersions.triggerId, triggerResources.id),
-        eq(triggerResourceVersions.version, triggerResources.currentVersion)
-      )
-    )
     .where(
       and(
         eq(triggerResources.emailAddress, address),
@@ -788,8 +776,8 @@ const receiveForTrigger = async (
     await handed.done();
   }
   if (outcome === "unavailable") {
-    // Disabled or deleted as it arrived: no such address. (Moved to
-    // another version, it is tried again, at that version: `retry`.)
+    // Disabled or deleted as it arrived: no such address. (A version
+    // published as it arrived, it is tried again, on that one: `retry`.)
     message.setReject("No such address.");
     return;
   }

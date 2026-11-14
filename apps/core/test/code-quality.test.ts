@@ -233,6 +233,51 @@ describe("linting App code", { timeout: 60_000 }, () => {
     );
   });
 
+  it("counts an App test's functions given to appTest as test blocks, and an expect outside any block still not", async () => {
+    // The docs' testing guide's first suite, as written there, and an
+    // `expect` at the top of a test file, which no runner runs.
+    const suite = `import { appTest } from "@grasp-os/sdk/testing";
+import { api } from "@server/_generated/api";
+import { expect } from "vitest";
+
+import schema from "../server/schema";
+
+export default appTest(schema, {
+  "a task added is listed until it's done": async (t) => {
+    const ada = t.withIdentity({ name: "Ada" });
+    const id = await ada.mutation(api.tasks.add, { title: "Call the bank" });
+    const open = await ada.query(api.tasks.list, { done: false });
+    expect(open).toMatchObject([{ _id: id, title: "Call the bank" }]);
+
+    await ada.mutation(api.tasks.complete, { id });
+    await expect(
+      ada.query(api.tasks.list, { done: false })
+    ).resolves.toStrictEqual([]);
+  },
+  "a task needs a title": async (t) => {
+    const ada = t.withIdentity({ name: "Ada" });
+    await expect(
+      ada.mutation(api.tasks.add, { title: " " })
+    ).rejects.toMatchObject({ code: "contract.invalid_args" });
+  },
+});
+`;
+    const linted = await ultracite().lint({
+      "tests/tasks.test.ts": suite,
+      "tests/loose.test.ts":
+        'import { expect } from "vitest";\n\nexpect(1).toBe(1);\n',
+    });
+
+    expect(findings(linted)).toStrictEqual([
+      {
+        file: "tests/loose.test.ts",
+        line: 3,
+        column: 1,
+        rule: "vitest/no-standalone-expect",
+      },
+    ]);
+  });
+
   it("reports unused names as oxlint does, and a write keeps them, its fix not being safe", async () => {
     // An unused import, a local, a parameter after the last one used, and
     // one only a type predicate reads. Not a parameter before one used (a

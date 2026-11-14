@@ -7,18 +7,15 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { editWorkflowDraft, workflowDraft } from "../src/workflow-drafts.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { editWorkflowDraft, workflowDraft } from "../src/workflow-editor.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import {
   candidateRunFor,
   startCandidateRun,
 } from "../src/workflows/candidate-runs.ts";
-import { appOf, commitApp, testApp, withFiles } from "./app-definitions.ts";
+import { appOf, testApp, withFiles } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
-import { requestGranted } from "./apps.ts";
+import { commitApp, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -28,6 +25,7 @@ import {
   refusedAs,
 } from "./sealed-run-harness.ts";
 import { refusal, signedInApi, unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // A grasp-workflow/2 workflow calling an App's functions through
 // `ctx.apps.<alias>.<path>` (GRA-1663), through its public interfaces:
@@ -111,18 +109,17 @@ const redefined = async (
 
 type Builder = Awaited<ReturnType<typeof signedInApi>>;
 
-/**
- * Commits `app` over App `id` and makes it current, as an admin (made
- * current by its builder, the App's grants would be asked for again).
- */
+/** Commits `app` over App `id` and makes it current, as an admin. */
 const published = async (
   builder: Builder,
   id: string,
   app: TestApp
 ): Promise<unknown> => {
-  const { version } = await commitApp(builder.api.apps.files, id, app, "Next");
+  const { version } = await commitApp(builder.api, id, app);
   const admin = await signedInApi(idp, "admin");
-  return await refusal(admin.api.apps.versions.publish(id, version));
+  return await refusal(
+    admin.api.versions.rollback({ kind: "app", id }, version)
+  );
 };
 
 /**
@@ -227,7 +224,7 @@ const ended = async (
 /** A run of version 1 of workflow `id` writing `title`, once it ended. */
 const ranWith = async (builder: Builder, id: string, title: string) => {
   const { runId } = await builder.api.workflowResources.start(id, {
-    version: 1,
+    expected: 1,
     args: { title },
     key: unique(),
   });
@@ -284,10 +281,12 @@ const resumed = async (runId: string, create: string) =>
 /** A waiting run of a workflow whose `create` is granted, and its setting. */
 const waitingRun = async () => {
   const set = await setUp();
-  await publishWorkflowVersion(env, set.acting, set.workflow.id, {
-    definition: writingNotes(set.app, set.create, set.titles, true),
-    basedOn: null,
-  });
+  await publishDefinition(
+    env,
+    set.acting,
+    set.workflow.id,
+    writingNotes(set.app, set.create, set.titles, true)
+  );
   const grant = await requestGranted(
     idp,
     set.builder,
@@ -295,7 +294,7 @@ const waitingRun = async () => {
   );
   const { runId } = await set.builder.api.workflowResources.start(
     set.workflow.id,
-    { version: 1, args: { title: "Later" }, key: unique() }
+    { expected: 1, args: { title: "Later" }, key: unique() }
   );
   return { ...set, grant, runId };
 };
@@ -314,10 +313,12 @@ const endOf = (ran: unknown): unknown =>
 describe("a workflow calling an App's functions", () => {
   it("calls the functions it was granted by their IDs, and fails on one it wasn't", async () => {
     const { builder, acting, app, workflow, create, titles } = await setUp();
-    await publishWorkflowVersion(env, acting, workflow.id, {
-      definition: writingNotes(app, create, titles),
-      basedOn: null,
-    });
+    await publishDefinition(
+      env,
+      acting,
+      workflow.id,
+      writingNotes(app, create, titles)
+    );
     // Only `create` granted: its call goes through, `titles` is refused.
     await requestGranted(idp, builder, callRequest(workflow.id, app, create));
     const halfway = await ranWith(builder, workflow.id, "First");
@@ -333,10 +334,12 @@ describe("a workflow calling an App's functions", () => {
   it("keeps calling the same function after the App renamed it", async () => {
     const { builder, acting, app, workflow, create, titles, source } =
       await setUp();
-    await publishWorkflowVersion(env, acting, workflow.id, {
-      definition: writingNotes(app, create, titles),
-      basedOn: null,
-    });
+    await publishDefinition(
+      env,
+      acting,
+      workflow.id,
+      writingNotes(app, create, titles)
+    );
     await requestGranted(idp, builder, callRequest(workflow.id, app, create));
     await requestGranted(idp, builder, callRequest(workflow.id, app, titles));
     // `create` is `add` now, and an impostor took the path `create`.
@@ -369,11 +372,13 @@ export const create = mutation({
     const other = await setUp();
 
     const refused = await refusal(
-      publishWorkflowVersion(env, acting, workflow.id, {
-        // `titles` of another App: an ID this App never gave.
-        definition: writingNotes(app, create, other.titles),
-        basedOn: null,
-      })
+      // `titles` of another App: an ID this App never gave.
+      publishDefinition(
+        env,
+        acting,
+        workflow.id,
+        writingNotes(app, create, other.titles)
+      )
     );
 
     expect(problemsOf(refused)).toStrictEqual({
@@ -394,7 +399,7 @@ export const create = mutation({
       env,
       acting,
       workflow.id,
-      { expectedRevision: base, source }
+      { revision: base, source }
     );
     const { runId } = await startCandidateRun(env, acting, workflow.id, {
       revision,
@@ -415,10 +420,7 @@ export const create = mutation({
       { timeout: 30_000, interval: 100 }
     );
     // A real run of the same definition, granted, reads what the App holds.
-    await publishWorkflowVersion(env, acting, workflow.id, {
-      definition: source,
-      basedOn: null,
-    });
+    await publishDefinition(env, acting, workflow.id, source);
     await requestGranted(idp, builder, callRequest(workflow.id, app, create));
     await requestGranted(idp, builder, callRequest(workflow.id, app, titles));
     const real = await ranWith(builder, workflow.id, "Real");
@@ -461,7 +463,7 @@ export const create = mutation({
         { ...env, DB: counting },
         acting,
         workflow.id,
-        { expectedRevision: revision, source: text }
+        { revision, source: text }
       );
       return { codes: draft.problems.map(({ code }) => code), appReads };
     };
@@ -514,7 +516,7 @@ export const create = mutation({
     const save = async (text: string) => {
       const { revision } = await workflowDraft(env, acting, workflow.id);
       return await editWorkflowDraft(env, acting, workflow.id, {
-        expectedRevision: revision,
+        revision,
         source: text,
       });
     };
@@ -575,7 +577,7 @@ export const create = mutation({
     );
     const admin = await signedInApi(idp, "admin");
     const rolledBack = await refusal(
-      admin.api.apps.versions.publish(rolled.app, 1)
+      admin.api.versions.rollback({ kind: "app", id: rolled.app }, 1)
     );
     // A new version without the function the waiting run calls: refused
     // while the workflow holds its grant, so the run still reaches it.
@@ -606,14 +608,16 @@ export const create = mutation({
 
   it("writes once when its step is run again after the App wrote, its answer lost", async () => {
     const { builder, acting, app, workflow, create, titles } = await setUp();
-    await publishWorkflowVersion(env, acting, workflow.id, {
-      definition: writingNotes(app, create, titles, true),
-      basedOn: null,
-    });
+    await publishDefinition(
+      env,
+      acting,
+      workflow.id,
+      writingNotes(app, create, titles, true)
+    );
     await requestGranted(idp, builder, callRequest(workflow.id, app, create));
     await requestGranted(idp, builder, callRequest(workflow.id, app, titles));
     const { runId } = await builder.api.workflowResources.start(workflow.id, {
-      version: 1,
+      expected: 1,
       args: { title: "Once" },
       key: unique(),
     });
@@ -660,17 +664,19 @@ return { note: made.output, titles: listed.output };`);
   it("refuses code that calls a function its step doesn't seal, of its own App or another", async () => {
     const { builder, acting, app, workflow, create, titles } = await setUp();
     const other = await setUp();
-    await publishWorkflowVersion(env, acting, workflow.id, {
-      definition: writingNotes(app, create, titles, true),
-      basedOn: null,
-    });
+    await publishDefinition(
+      env,
+      acting,
+      workflow.id,
+      writingNotes(app, create, titles, true)
+    );
     // Both of the App's functions granted: the build, never the grant,
     // decides what a step calls.
     await requestGranted(idp, builder, callRequest(workflow.id, app, create));
     await requestGranted(idp, builder, callRequest(workflow.id, app, titles));
     const tampered = async (fn: string) => {
       const { runId } = await builder.api.workflowResources.start(workflow.id, {
-        version: 1,
+        expected: 1,
         args: { title: "Forged" },
         key: unique(),
       });

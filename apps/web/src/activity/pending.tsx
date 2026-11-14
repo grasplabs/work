@@ -10,11 +10,9 @@ import type { Session } from "../core.ts";
 import {
   appName,
   appsById,
+  readPeople,
   readTeams,
   teamName,
-  formatTime,
-  personName,
-  readPeople,
 } from "../directory.ts";
 import type { Directory } from "../directory.ts";
 import { formatList } from "../format.ts";
@@ -231,28 +229,6 @@ export const reviewedVersionText = (
     return i18n._(msg`Unknown`);
   }
   return reviewedLabel(request, directory) ?? i18n._(msg`None live`);
-};
-
-/**
- * Why a request is asked for again, if it is: it was granted before, and
- * making another version of its App current asked for it again.
- */
-export const askedAgain = (
-  request: Permission,
-  directory: Directory
-): string | undefined => {
-  const { grantedBy, grantedAt } = request;
-  if (grantedBy === null || grantedAt === null) {
-    return undefined;
-  }
-  const label = reviewedLabel(request, directory);
-  const person = personName(directory, grantedBy);
-  const date = formatTime(grantedAt);
-  return label === null
-    ? i18n._(msg`Asked again (previously granted by ${person} on ${date})`)
-    : i18n._(
-        msg`Asked again after ${label} was published (previously granted by ${person} on ${date})`
-      );
 };
 
 const versionChanged = msg`Another version of this App was published since this list was read. The list now shows it: review that version, then approve again.`;

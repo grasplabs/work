@@ -53,14 +53,15 @@ describe("sharing an independent workflow", { timeout: 60_000 }, () => {
     ]);
     const team = await newTeam(admin, [colleague]);
     const workflow = await workflowOf(owner);
-    await owner.api.workflowResources.share(workflow, {
+    await owner.api.workflowResources.members.add(workflow, {
       type: "person",
       id: user.userId,
       role: "user",
     });
     const staff = await staffApi();
 
-    const offered = await owner.api.workflowResources.shareCandidates(workflow);
+    const offered =
+      await owner.api.workflowResources.members.candidates(workflow);
     const person = offered.people.find(({ id }) => id === colleague.userId);
     const offeredTeam = offered.teams.find(({ id }) => id === team);
 
@@ -71,13 +72,15 @@ describe("sharing an independent workflow", { timeout: 60_000 }, () => {
         offeredTeam === undefined ? null : Object.keys(offeredTeam).toSorted(),
       // Shared with as a user, who may not share it on.
       byUser: await outcome(
-        user.api.workflowResources.shareCandidates(workflow)
+        user.api.workflowResources.members.candidates(workflow)
       ),
       // Without a role in it: told it doesn't exist.
       byStranger: await outcome(
-        stranger.api.workflowResources.shareCandidates(workflow)
+        stranger.api.workflowResources.members.candidates(workflow)
       ),
-      byStaff: await outcome(staff.workflowResources.shareCandidates(workflow)),
+      byStaff: await outcome(
+        staff.workflowResources.members.candidates(workflow)
+      ),
     }).toStrictEqual({
       person: ["id", "name"],
       team: ["id", "name"],
@@ -101,17 +104,17 @@ describe("sharing an independent workflow", { timeout: 60_000 }, () => {
       await outcome(who.api.workflowResources.get(workflow));
 
     const before = { ada: await sees(ada), teammate: await sees(teammate) };
-    await owner.api.workflowResources.share(workflow, {
+    await owner.api.workflowResources.members.add(workflow, {
       type: "person",
       id: ada.userId,
       role: "user",
     });
-    await owner.api.workflowResources.share(workflow, {
+    await owner.api.workflowResources.members.add(workflow, {
       type: "team",
       id: team,
       role: "user",
     });
-    const listed = await ada.api.workflowResources.members(workflow);
+    const listed = await ada.api.workflowResources.members.list(workflow);
     const shared = {
       ada: await sees(ada),
       teammate: await sees(teammate),
@@ -119,7 +122,7 @@ describe("sharing an independent workflow", { timeout: 60_000 }, () => {
       members: listed.map(({ type, id, role }) => ({ type, id, role })),
       // A user of it shares it with nobody.
       shareOn: await outcome(
-        ada.api.workflowResources.share(workflow, {
+        ada.api.workflowResources.members.add(workflow, {
           type: "person",
           id: outsider.userId,
           role: "user",
@@ -127,18 +130,18 @@ describe("sharing an independent workflow", { timeout: 60_000 }, () => {
       ),
       // Nobody without a builder's organization role builds it.
       asBuilder: await outcome(
-        owner.api.workflowResources.share(workflow, {
+        owner.api.workflowResources.members.add(workflow, {
           type: "person",
           id: outsider.userId,
           role: "builder",
         })
       ),
     };
-    await owner.api.workflowResources.unshare(workflow, {
+    await owner.api.workflowResources.members.remove(workflow, {
       type: "person",
       id: ada.userId,
     });
-    await owner.api.workflowResources.unshare(workflow, {
+    await owner.api.workflowResources.members.remove(workflow, {
       type: "team",
       id: team,
     });

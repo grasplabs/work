@@ -6,7 +6,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { permissions as permissionRows } from "../src/db/core/schema.ts";
 import { confirmPendingAction } from "../src/pending-actions.ts";
 import { reviewResourceBindings } from "../src/resource-bindings.ts";
-import { commitApp } from "./app-definitions.ts";
+import { commitApp } from "./apps.ts";
 import { mockIdpWith } from "./idp.ts";
 import {
   archiveFiles,
@@ -52,15 +52,13 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
     const held = await heldSend(mailer);
     const app = mailer.release.manifest.resourceId;
     await commitApp(
-      mailer.builder.api.apps.files,
+      mailer.builder.api,
       app,
-      mailFiles("microsoft-365.mail@1", `["send", "list", "createDraft"]`),
-      "More"
+      mailFiles("microsoft-365.mail@1", `["send", "list", "createDraft"]`)
     );
-    await mailer.builder.api.apps.versions.publish(app, 2);
-    // An admin grants the connection again, approving the version: only
-    // the binding, approved for the narrower declaration, is stale.
-    await mailer.admin.api.permissions.grant(mailer.permission, { version: 2 });
+    // The connection stays granted: only the binding, approved for the
+    // narrower declaration, is stale.
+    await mailer.builder.api.versions.rollback({ kind: "app", id: app }, 2);
     const refused = await failure(
       async () =>
         await confirmPendingAction(env, mailer.by, held.id, held.inputHash)
@@ -135,14 +133,8 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
     );
     const held = await heldSend(mailer);
     const app = mailer.release.manifest.resourceId;
-    await commitApp(
-      mailer.builder.api.apps.files,
-      app,
-      undeclaredMailFiles(),
-      "Quiet"
-    );
-    await mailer.builder.api.apps.versions.publish(app, 2);
-    await mailer.admin.api.permissions.grant(mailer.permission, { version: 2 });
+    await commitApp(mailer.builder.api, app, undeclaredMailFiles());
+    await mailer.builder.api.versions.rollback({ kind: "app", id: app }, 2);
     const refused = await failure(
       async () =>
         await mailer.builder.api.pendingActions.confirm(held.id, held.inputHash)

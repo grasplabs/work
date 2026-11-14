@@ -90,7 +90,7 @@ const releaseApp = async (
   const { core, api } = apiOf(builder);
   try {
     const { id } = await api.apps.create({ name });
-    await release(api, id, files, name);
+    await release(api, id, files);
     return id;
   } finally {
     core[Symbol.dispose]();

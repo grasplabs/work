@@ -1,6 +1,6 @@
 import { isGeneratedServerFile } from "@grasp-os/runtime/host";
-import type { AppDraft } from "@grasp-os/shared/app-drafts";
 import type { AppFiles, ViewedApp } from "@grasp-os/shared/apps";
+import type { Draft } from "@grasp-os/shared/drafts";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -33,7 +33,7 @@ import { useCoreRead } from "./use-core-read.ts";
 // changes it, that is the draft's files as they are now, read again at
 // each of its writes; otherwise the live version's. The App changes
 // through its chat, which the note says. Everything is read with core's
-// own reads for builders (`apps.drafts.files`, `apps.files.read`), which
+// own reads for builders (`drafts.files`, `versions.files`), which
 // refuse anyone else.
 //
 // What Grasp generates among an App's files (`server/_generated/`), which
@@ -252,7 +252,8 @@ const VersionFiles = ({
 }: OpenFile & { app: string; version: number }) => {
   const files = useCoreRead(
     `${app}/${version}`,
-    async (session) => await session.apps.files.read(app, version)
+    async (session) =>
+      await session.versions.files({ kind: "app", id: app }, version)
   );
   return files?.state === "ready" ? (
     // A version's own tree, the file asked for open while it has it.
@@ -270,7 +271,7 @@ const DraftFiles = ({ app, revision }: { app: string; revision: number }) => {
   const [asked, setAsked] = useState<string>();
   const files = useCoreRead(
     `${app}/${revision}`,
-    async (session) => await session.apps.drafts.files(app),
+    async (session) => await session.drafts.files({ kind: "app", id: app }),
     app
   );
   return files?.state === "ready" ? (
@@ -290,7 +291,7 @@ export const AppCode = ({
 }: {
   app: ViewedApp;
   /** The App's draft, while it changes the App. */
-  building?: AppDraft;
+  building?: Draft;
 }) => {
   const [file, setFile] = useState<string>();
   const current = app.currentVersion;

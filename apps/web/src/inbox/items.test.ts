@@ -14,7 +14,6 @@ import type { Permission } from "@grasp-os/shared/permissions";
 import type {
   BindingApprovalItem,
   SignInAgainItem,
-  WorkflowGoLiveItem,
 } from "@grasp-os/shared/waiting";
 import {
   createMemoryHistory,
@@ -125,21 +124,6 @@ const signInAgain: SignInAgainItem = {
   integration: { source: "native", id: "microsoft", name: "Microsoft 365" },
 };
 
-/** A version of a workflow asked to go live, waiting on an admin. */
-const workflowGoLive: WorkflowGoLiveItem = {
-  kind: "workflowGoLive",
-  id: "workflowGoLive:workflow-quotes:2",
-  at: "2026-10-12T12:00:00.000Z",
-  urgent: false,
-  waitsOn: { type: "admin" },
-  verdicts: ["approve", "reject"],
-  workflow: { id: "workflow-quotes", name: "Quotes" },
-  version: 2,
-  requestedBy: "builder-1",
-  revision: 3,
-  selfApproval: false,
-};
-
 const bindingApproval: BindingApprovalItem = {
   kind: "bindingApproval",
   id: "bindingApproval:workflow-quotes:2",
@@ -150,7 +134,6 @@ const bindingApproval: BindingApprovalItem = {
   pending: {
     workflow: { id: "workflow-quotes", name: "Quotes" },
     version: 2,
-    live: true,
     bindings: [
       {
         alias: "summary",
@@ -205,6 +188,15 @@ const waiting = (ranOut = true) =>
               read: false,
             },
             {
+              id: "changed-1",
+              type: "trigger_workflow_changed",
+              trigger: "trigger-1",
+              workflow: "workflow-1",
+              workflowName: "Nightly report",
+              at: "2026-10-12T08:00:00.000Z",
+              read: false,
+            },
+            {
               id: "revoked-1",
               type: "package_revoked",
               app: "app-invoices",
@@ -251,7 +243,6 @@ const waiting = (ranOut = true) =>
           id: "held-start-1",
           workflow: "greet",
           workflowName: "Greet",
-          version: 1,
           args: { who: "Ada" },
           argsHash: "hash-1",
           chatId: "chat-1",
@@ -279,7 +270,6 @@ const waiting = (ranOut = true) =>
         },
       ],
     },
-    workflowGoLives: { state: "ready", data: [workflowGoLive] },
     bindings: { state: "ready", data: [bindingApproval] },
   }) satisfies Waiting;
 
@@ -303,7 +293,7 @@ describe(inboxItems, () => {
         "signIn:connection-1",
         "stopped:stopped-1",
         "stoppedEvents:deaf-1",
-        "workflowGoLive:workflow-quotes:2",
+        "workflowChanged:changed-1",
       ].toSorted()
     );
   });
@@ -457,31 +447,6 @@ describe(inboxItems, () => {
     expect(kinds).not.toContain("unknownOutcome");
   });
 
-  it("marks a go-live the reader asked for, and decides as nobody else may, as self-approved", () => {
-    const own = {
-      ...waiting(),
-      workflowGoLives: {
-        state: "ready",
-        data: [{ ...workflowGoLive, selfApproval: true }],
-      },
-    } satisfies Waiting;
-    const [mine, theirs] = [own, waiting()].map((read) =>
-      inboxItems(read, admin, readAt).find(({ id }) => id === workflowGoLive.id)
-    );
-    expect({
-      mine: mine?.facts,
-      theirs: theirs?.facts,
-      said: mine?.body.at(-1),
-    }).toStrictEqual({
-      mine: [
-        { label: "Version", value: "2" },
-        { label: "Approval", value: "Self-approved" },
-      ],
-      theirs: [{ label: "Version", value: "2" }],
-      said: "You asked for this yourself, and nobody else may approve it, so you decide it. It is recorded as self-approved.",
-    });
-  });
-
   it("makes nothing of a part that couldn't be read, and says which", () => {
     const offline = { ...waiting(), held: { state: "offline" } } as const;
     const kinds = inboxItems(offline, admin, readAt).map(({ kind }) => kind);
@@ -511,7 +476,7 @@ describe(inInbox, () => {
       "packageNotice:revoked-1",
       "stopped:stopped-1",
       "stoppedEvents:deaf-1",
-      "workflowGoLive:workflow-quotes:2",
+      "workflowChanged:changed-1",
     ]);
   });
 });
@@ -535,20 +500,9 @@ describe(listed, () => {
       "bindingApproval",
       "stoppedEvents",
       "heldStart",
-      "goLive",
       "stoppedSchedule",
+      "workflowChanged",
     ]);
-    const quotes = items.find(({ id }) => id === workflowGoLive.id);
-    expect({
-      title: quotes?.title,
-      about: quotes?.about,
-      // It waits on an admin, not on the reader by name.
-      forWhom: quotes?.forWhom,
-    }).toStrictEqual({
-      title: "Let version 2 of Quotes go live?",
-      about: { kind: "independentWorkflow", workflow: "workflow-quotes" },
-      forWhom: undefined,
-    });
     expect(
       listed(items, "brain", "urgent").map(({ kind, title, about }) => ({
         kind,
@@ -566,6 +520,16 @@ describe(listed, () => {
     expect({ title: stopped?.title, about: stopped?.about }).toStrictEqual({
       title: "The schedule of Nightly report stopped",
       // Its workflow's Triggers, where it is turned on again.
+      about: {
+        kind: "independentWorkflow",
+        workflow: "workflow-1",
+        section: "triggers",
+      },
+    });
+    const changed = items.find(({ kind }) => kind === "workflowChanged");
+    expect({ title: changed?.title, about: changed?.about }).toStrictEqual({
+      title: "Your triggers start a new version of Nightly report",
+      // Its workflow's Triggers, where they are turned off.
       about: {
         kind: "independentWorkflow",
         workflow: "workflow-1",

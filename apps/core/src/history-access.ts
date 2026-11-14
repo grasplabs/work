@@ -2,9 +2,9 @@ import { brainErrors } from "@grasp-os/brain/contract";
 import { d1BrainStore } from "@grasp-os/brain/recall-store";
 import type { BrainStore, PinnedVersion } from "@grasp-os/brain/recall-store";
 import { collections } from "@grasp-os/brain/schema";
-import type { AppRole } from "@grasp-os/shared/apps";
 import type { Permission } from "@grasp-os/shared/permissions";
 import { permissionErrors } from "@grasp-os/shared/permissions";
+import type { MemberRole } from "@grasp-os/shared/subject-members";
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -180,6 +180,16 @@ const brainCompanyVersionPrefix = "brain-company-version:";
 export const brainCompanyVersionRead = (ref: SourceVersionRef): string =>
   `${brainCompanyVersionPrefix}${brainVersionRead(ref).slice(brainVersionPrefix.length)}`;
 
+// The memories' prefixes (below), beside the versions': what a recall as
+// the company pinned is either kind.
+const brainMemoryPrefix = "brain-memory:";
+const brainCompanyMemoryPrefix = "brain-company-memory:";
+
+/** Whether `source` is a pin of a recall as the company. */
+const isCompanyPin = (source: string): boolean =>
+  source.startsWith(brainCompanyVersionPrefix) ||
+  source.startsWith(brainCompanyMemoryPrefix);
+
 /**
  * Of the versions in `sources` pinned under `prefix`, those `reach` may
  * still read (`readableVersionsAs`), in one read of the Brain per 500.
@@ -216,39 +226,53 @@ const readableAt = async (
 };
 
 /**
- * Whether what a recall as the company handed over may still be sent in
- * this chat: not while anyone Grasp can't name as a member is in a chat
- * others share, as last kept from the platform's roster
- * (`chat_audiences`), nor while no roster is kept for one (GRA-1882): as
- * its first turn refuses a roster it couldn't read. The row can be gone
- * while the chat keeps its pins (core's database restored to before it,
- * a turn a restart cut short set up again without the turn's own check).
- * A chat nobody else shares keeps none, and reads as the company may.
+ * Why what a recall as the company handed over may not be sent in a chat
+ * others share, the history's own cause (GRA-1882): anyone Grasp can't
+ * name as a member is in it (`outsiders`), as last kept from the
+ * platform's roster (`chat_audiences`); or no roster is kept for it
+ * (`unkept`), as its first turn refuses a roster it couldn't read.
  */
-const companyStillReads = async (
+export type AudienceCut = "outsiders" | "unkept";
+
+/**
+ * Why the chat may not be sent what a recall as the company handed over,
+ * or `undefined` while it may (`AudienceCut`), or `sources` holds none
+ * of its pins. The row can be gone while
+ * the chat keeps its pins (core's database restored to before it, a turn
+ * a restart cut short set up again without the turn's own check). A chat
+ * nobody else shares keeps none, and reads as the company may.
+ */
+const audienceCut = async (
   env: Env,
-  scope: Omit<AgentScope, "runId">
-): Promise<boolean> => {
+  scope: Omit<AgentScope, "runId">,
+  sources: readonly string[]
+): Promise<AudienceCut | undefined> => {
+  if (!sources.some((source) => isCompanyPin(source))) {
+    return undefined;
+  }
   const audience = await audienceOf(env, chatContext(scope));
-  return audience === undefined ? scope.shared !== true : !audience.outsiders;
+  if (audience === undefined) {
+    return scope.shared === true ? "unkept" : undefined;
+  }
+  return audience.outsiders ? "outsiders" : undefined;
 };
 
 /**
  * Of the versions a recall as the company handed over in `sources`, those
- * everyone in the company may still read: none while anyone Grasp can't
- * name as a member is in a chat others share, as last kept from the
- * platform's roster (`chat_audiences`), so a guest joining withholds what
- * earlier turns recalled from the next request on (GRA-1820).
+ * everyone in the company may still read: none while the chat's audience
+ * cuts them (`cut`), so a guest joining withholds what earlier turns
+ * recalled from the next request on (GRA-1820).
  */
 const readableBrainCompanyVersions = async (
   env: Env,
   scope: Omit<AgentScope, "runId">,
-  sources: readonly string[]
+  sources: readonly string[],
+  cut: Promise<AudienceCut | undefined>
 ): Promise<string[]> => {
   if (!sources.some((source) => source.startsWith(brainCompanyVersionPrefix))) {
     return [];
   }
-  return (await companyStillReads(env, scope))
+  return (await cut) === undefined
     ? await readableAt(
         env,
         scope,
@@ -270,9 +294,6 @@ const readableBrainCompanyVersions = async (
 // as the company, anyone unnamed in the chat), or its writer retired it
 // (`readableMemoriesAs`), and with the agent's `brain` grant. A newer
 // memory that replaced it withholds nothing: the next recall brings that.
-
-const brainMemoryPrefix = "brain-memory:";
-const brainCompanyMemoryPrefix = "brain-company-memory:";
 
 /** The source a memory the new Brain handed a run is recorded as. */
 export const brainMemoryRead = ({ store, memory }: StoredMemoryPlace): string =>
@@ -353,18 +374,19 @@ const readableBrainMemories = async (
 
 /**
  * Of the memories a recall as the company handed over in `sources`, those
- * everyone in the company may still read: none while anyone Grasp can't
- * name as a member is in a chat others share (`companyStillReads`).
+ * everyone in the company may still read: none while the chat's audience
+ * cuts them (`cut`).
  */
 const readableBrainCompanyMemories = async (
   env: Env,
   scope: Omit<AgentScope, "runId">,
-  sources: readonly string[]
+  sources: readonly string[],
+  cut: Promise<AudienceCut | undefined>
 ): Promise<string[]> => {
   if (!sources.some((source) => source.startsWith(brainCompanyMemoryPrefix))) {
     return [];
   }
-  return (await companyStillReads(env, scope))
+  return (await cut) === undefined
     ? await readableMemoriesAt(
         env,
         scope,
@@ -476,7 +498,7 @@ const appReadNeeds = (
   read: AppRead,
   appId: string,
   permissions: readonly Permission[]
-): { granted: boolean; role: AppRole } => {
+): { granted: boolean; role: MemberRole } => {
   if (read === "build") {
     // The person's own Apps, which the agent reads as them with no
     // permission of its own (agent-apps.ts).
@@ -536,24 +558,38 @@ const withheldKindOf = (source: string): WithheldKind => {
 
 /**
  * What the audit says of the reads a history check newly withheld
- * (`chat.history_withheld`, one event a check, GRA-1882): how many runs,
- * how many sources, and how many of each kind, never which. A source
+ * (`chat.history_withheld`, one event a check, GRA-1882): how many runs
+ * it newly withheld (`runs`: none an earlier event withheld, so the
+ * events of a chat add up), how many sources, and how many of each kind,
+ * never which; and, when it cut what a recall as the company handed over
+ * for the chat's audience, why (`audience`, `AudienceCut`). A source
  * names what was read (a memory, a version of a producer's source, a
- * document with its text): the cause (a narrowed source, a revoked grant,
- * a person out of a team) is audited where it happened, and this records
- * its effect on the chat, which the event's target names.
+ * document with its text): every other cause (a narrowed source, a
+ * revoked grant, a person out of a team) is audited where it happened,
+ * and this records its effect on the chat, which the event's target
+ * names. A pin is counted under the kind its prefix names, parsed or
+ * not; one with none a collection's, as a bare ID is.
  */
-export const withheldDetail = (
-  withheld: readonly { runId: string; sourceId: string }[]
-): Record<string, number> => {
-  const sources = [...new Set(withheld.map(({ sourceId }) => sourceId))];
-  const detail: Record<string, number> = {
-    runs: new Set(withheld.map(({ runId }) => runId)).size,
-    sources: sources.length,
+export const withheldDetail = ({
+  runs,
+  sources,
+  audience,
+}: {
+  runs: number;
+  sources: readonly string[];
+  audience: AudienceCut | undefined;
+}): Record<string, number | string> => {
+  const distinct = [...new Set(sources)];
+  const detail: Record<string, number | string> = {
+    runs,
+    sources: distinct.length,
   };
-  for (const source of sources) {
+  for (const source of distinct) {
     const kind = withheldKindOf(source);
-    detail[kind] = (detail[kind] ?? 0) + 1;
+    detail[kind] = Number(detail[kind] ?? 0) + 1;
+  }
+  if (audience !== undefined && distinct.some(isCompanyPin)) {
+    detail.audience = audience;
   }
   return detail;
 };
@@ -673,16 +709,18 @@ const readableApps = async (
  * Brain, while the person (or, as the company read it, the company) may
  * read it and its writer has not retired it, replaced or expired or not.
  * Anything else, an unknown source or a bare connection included, is
- * not. Throws what the reads throw (a person who left, a database away):
- * the caller withholds everything then.
+ * not. With why the chat's audience cuts what a recall as the company
+ * handed over, when it holds any (`audience`). Throws what the reads
+ * throw (a person who left, a database away): the caller withholds
+ * everything then.
  */
 export const readableSources = async (
   env: Env,
   scope: Omit<AgentScope, "runId">,
   sourceIds: readonly string[]
-): Promise<Set<string>> => {
+): Promise<{ readable: Set<string>; audience?: AudienceCut }> => {
   if (sourceIds.length === 0) {
-    return new Set();
+    return { readable: new Set() };
   }
   const db = drizzle(env.KNOWLEDGE);
   const { condition } = await collectionsAllowed(env, db, {
@@ -697,6 +735,8 @@ export const readableSources = async (
     })
     .from(collections)
     .where(inList(collections.id, sourceIds));
+  // Read once for both kinds of company pin, so they agree.
+  const cut = audienceCut(env, scope, sourceIds);
   // `readableBrain` reads today's Brain, and goes with it (GRA-1735).
   const [
     apps,
@@ -713,12 +753,13 @@ export const readableSources = async (
     readableBrain(env, scope, sourceIds),
     readableBrainVersions(env, scope, sourceIds),
     readableAt(env, scope, sourceIds, brainTeamVersionPrefix, "teams"),
-    readableBrainCompanyVersions(env, scope, sourceIds),
+    readableBrainCompanyVersions(env, scope, sourceIds, cut),
     readableBrainMemories(env, scope, sourceIds),
-    readableBrainCompanyMemories(env, scope, sourceIds),
+    readableBrainCompanyMemories(env, scope, sourceIds, cut),
   ]);
-  return new Set([
-    ...known.flatMap(({ id, readable }) => (readable === 1 ? [id] : [])),
+  const audience = await cut;
+  const readable = new Set([
+    ...known.flatMap(({ id, readable: may }) => (may === 1 ? [id] : [])),
     ...apps,
     ...connections,
     ...brain,
@@ -728,4 +769,5 @@ export const readableSources = async (
     ...memories,
     ...companyMemories,
   ]);
+  return audience === undefined ? { readable } : { readable, audience };
 };

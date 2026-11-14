@@ -14,7 +14,11 @@ import {
   outboxedEventWhere,
   storedEvent,
 } from "./audit-outbox.ts";
-import { apps, appVisitorSessions } from "./db/core/schema.ts";
+import {
+  apps,
+  appVisitorSessions,
+  appWorkflowBindings,
+} from "./db/core/schema.ts";
 import { requireNotStaff } from "./sharing.ts";
 import {
   stopRetryMs,
@@ -213,6 +217,23 @@ export const setArchived = async (
     db
       .delete(appVisitorSessions)
       .where(and(eq(appVisitorSessions.appId, found.id), done)),
+    // A restored App's bindings keep no contract, only if the restore
+    // won: what it declares was checked against no workflow version made
+    // live while it was archived, so it holds no workflow back until its
+    // next version goes live and is checked again (app-workflow-bindings.ts).
+    ...(archived
+      ? []
+      : [
+          db
+            .update(appWorkflowBindings)
+            .set({ contract: null })
+            .where(
+              and(
+                eq(appWorkflowBindings.appId, found.id),
+                storedEvent(event.id)
+              )
+            ),
+        ]),
   ]);
   if (changed === undefined) {
     throw appErrors.create("app.conflict");

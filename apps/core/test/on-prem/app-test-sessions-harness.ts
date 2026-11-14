@@ -1,9 +1,9 @@
 import { env } from "cloudflare:workers";
 
-import { publishVersion } from "../../src/app-publish.ts";
 import { loadRelease } from "../../src/app-releases.ts";
 import type { Release } from "../../src/app-releases.ts";
-import { createApp } from "../../src/apps.ts";
+import { appKind, createApp } from "../../src/apps.ts";
+import { rollback } from "../../src/publish.ts";
 import { sandboxOwnerHeader } from "../../src/sandbox-headers.ts";
 import { commitDefined } from "../apps.ts";
 import { person } from "../sealed-apps.ts";
@@ -50,8 +50,8 @@ export const slowToAdmit = (
 export const notesRelease = async (): Promise<Release> => {
   const owner = await person("builder");
   const { id } = await createApp(env, owner, { name: "Notes" });
-  await commitDefined(env, owner, id, appFiles, "First version");
-  await publishVersion(env, owner, id, 1);
+  await commitDefined(env, owner, id, appFiles);
+  await rollback(env, appKind, owner, id, 1);
   return await loadRelease(env, id, 1);
 };
 

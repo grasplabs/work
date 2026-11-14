@@ -1,4 +1,4 @@
-import type { ChatSubjectKind } from "@grasp-os/shared/chat";
+import type { SubjectKind } from "@grasp-os/shared/subject";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   DropdownMenu,
@@ -19,15 +19,15 @@ import { useMentionKinds } from "./mentions.tsx";
 
 // What the chat is about and what it worked on, on the bar above its box
 // (`PromptInputSubjectBar`): one line, so the box stays as it is. On a
-// page about one thing (chat-subject.ts), that thing; elsewhere the App
-// the chat changed last, a way into its workspace, which carries this
-// chat on beside the App (`?chat=`). Anything else it worked on waits
-// behind "+N", the latest first. Nothing worked on and no subject: no
-// bar.
+// page about one thing (chat-subject.ts), that thing; elsewhere the App or
+// workflow the chat changed last, a way to its page, which carries this
+// chat on beside it (`?chat=`). Anything else it worked on waits behind
+// "+N", the latest first. Each says "Building…" while the running turn
+// writes its draft. Nothing worked on and no subject: no bar.
 
 /** One thing on the bar: of a kind, by ID and name. */
 interface Worked {
-  kind: ChatSubjectKind;
+  kind: SubjectKind;
   id: string;
   name: string;
 }
@@ -71,14 +71,22 @@ const WorkedLink = ({
 }: Omit<ComponentProps<"a">, "href"> & {
   worked: Worked;
   chatId: string | undefined;
-}) => (
-  <Link
-    {...props}
-    params={{ app: worked.id }}
-    search={chatId === undefined ? {} : { chat: chatId }}
-    to="/apps/$app"
-  />
-);
+}) =>
+  worked.kind === "app" ? (
+    <Link
+      {...props}
+      params={{ app: worked.id }}
+      search={chatId === undefined ? {} : { chat: chatId }}
+      to="/apps/$app"
+    />
+  ) : (
+    <Link
+      {...props}
+      params={{ workflow: worked.id }}
+      search={chatId === undefined ? {} : { chat: chatId }}
+      to="/workflows/$workflow"
+    />
+  );
 
 /**
  * The bar's line: `subject`, the page's, or else the latest of `work`,
@@ -104,17 +112,17 @@ export const SubjectBarContent = ({
     return null;
   }
   const { lead, others } = shown;
-  // The Apps the running turn wrote: their undo points of this chat moved
+  // What the running turn wrote: their checkpoints of this chat moved
   // since it began.
   const written = new Set(
     since === undefined
       ? []
       : work
           .filter((each) => each.work.updatedAt >= since)
-          .map((each) => each.work.id)
+          .map((each) => `${each.work.kind}:${each.work.id}`)
   );
   const building = (worked: Worked): boolean =>
-    worked.kind === "app" && written.has(worked.id);
+    written.has(`${worked.kind}:${worked.id}`);
   const count = others.length;
   return (
     <>
@@ -133,8 +141,8 @@ export const SubjectBarContent = ({
             render={
               <Button
                 aria-label={t`${plural(count, {
-                  one: "# more App this chat worked on",
-                  other: "# more Apps this chat worked on",
+                  one: "# more thing this chat worked on",
+                  other: "# more things this chat worked on",
                 })}`}
                 className="-my-1 ms-auto"
                 size="xs"

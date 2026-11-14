@@ -2,9 +2,8 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { revokePermission } from "../src/permissions.ts";
-import { publishWorkflowVersion } from "../src/workflow-resources.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { grantReviewed } from "./apps.ts";
 import { mockIdpWith } from "./idp.ts";
 import {
@@ -35,6 +34,8 @@ import {
   waitsShown,
   widerOf,
 } from "./page-typed-workflows-harness.ts";
+import { unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // A page's typed `useWorkflow` through the real host (spec 10.4,
 // page-workflows.ts; the threat model is on GRA-626): its starts and
@@ -45,6 +46,25 @@ import {
 // the descriptors the SDK generates.
 
 mockIdpWith(idp);
+
+/** Another workflow of `builder`'s, of the same contract, published. */
+const anotherWorkflow = async (
+  builder: Person,
+  hold?: string
+): Promise<string> => {
+  const other = await createWorkflowResource(
+    env,
+    builder.acting,
+    `other-${unique()}`
+  );
+  await publishDefinition(
+    env,
+    builder.acting,
+    other.id,
+    greetingOf(hold, "Another")
+  );
+  return other.id;
+};
 
 describe(
   "a page's typed workflow through the real host",
@@ -216,24 +236,16 @@ describe(
       });
     });
 
-    it("starts and shows nothing of another version the alias was bound to since the seal", async () => {
+    it("starts and shows nothing of the workflow it bound before, once a version binding another is published", async () => {
       const fixture = await boundApp({ hold: "1 hour" });
       const { builder, app, reference } = fixture;
       const lease = await pageOf(builder, app);
       const handle = await pageRuns(builder, app, lease, reference).start({
         who: "Ada",
       });
-      // Version 2, bound with no seal: the release's references were made
-      // for version 1.
-      await publishWorkflowVersion(env, builder.acting, fixture.workflow, {
-        definition: greetingOf(undefined, "Version 2"),
-        basedOn: 1,
-      });
-      await bindWorkflowToApp(env, builder.acting, fixture.workflow, {
-        app,
-        alias: "followUp",
-        version: 2,
-      });
+      // Another workflow bound by the App's next version: the run is of
+      // the first, and the App holds no grant on the other.
+      await fixture.rebind(await anotherWorkflow(builder));
       const channel = pageRuns(builder, app, lease, reference);
       const stopBinding = channel.followBinding(() => {
         // Read below.
@@ -377,7 +389,7 @@ describe(
       ]);
     });
 
-    it("shows nothing of a run and offers no start once the alias is rebound, then shows both again once rebound back, with nothing else changing", async () => {
+    it("shows nothing of a run and offers no start once a version rebinds the alias, then shows both again once the next binds it back", async () => {
       const fixture = await boundApp({ hold: "1 hour" });
       const { builder, app, reference } = fixture;
       const lease = await pageOf(builder, app);
@@ -398,26 +410,16 @@ describe(
         expect(waitsShown(first.received.at(-1)?.outcome)).toBe(1);
         expect(canRun()).toBeTruthy();
       }, settles);
-      // Rebound away: the page is told at once, nothing else needed.
-      await publishWorkflowVersion(env, builder.acting, fixture.workflow, {
-        definition: greetingOf("1 hour", "Version 2"),
-        basedOn: 1,
-      });
-      await bindWorkflowToApp(env, builder.acting, fixture.workflow, {
-        app,
-        alias: "followUp",
-        version: 2,
-      });
+      // Rebound away to another workflow by a version published: the page
+      // is told at once.
+      await fixture.rebind(await anotherWorkflow(builder, "1 hour"));
       await vi.waitFor(() => {
         expect(first.received.at(-1)?.outcome).toBeNull();
         expect(canRun()).toBeFalsy();
       }, settles);
-      // Bound back: shown again, at the same stage, and startable again.
-      await bindWorkflowToApp(env, builder.acting, fixture.workflow, {
-        app,
-        alias: "followUp",
-        version: 1,
-      });
+      // Bound back by the next: shown again, at the same stage, and
+      // startable again.
+      await fixture.rebind(fixture.workflow);
       await vi.waitFor(() => {
         expect(shownOf(first.received.at(-1)?.outcome)).toBe("running");
         expect(canRun()).toBeTruthy();

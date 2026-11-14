@@ -53,7 +53,7 @@ const requireChatPinsReadable = async (
   if (first === undefined) {
     return;
   }
-  const readable = await readableSources(
+  const { readable } = await readableSources(
     env,
     {
       workspaceId: workspaceIdSchema.parse(first.workspaceId),

@@ -58,13 +58,9 @@ import type { AppCall } from "./resource-calls.ts";
 //   one revoked) is refused that call (`workflow.call_denied`) until an
 //   admin grants it.
 // - A later version of the App changing what the function does. The
-//   grant trusts the code of the version an admin reviewed, as the App's
-//   own write grants do, and is treated alike: a version made current by
-//   someone who couldn't grant asks for it again (permissions.ts,
-//   `madeCurrent`, the same statement), so the workflow's calls are
-//   refused until an admin grants it over that version; one an admin
-//   makes current keeps it. A publish also refuses a version whose
-//   function no longer fits its callers (app-function-bindings.ts).
+//   grant is of the access, whichever version runs, as the App's own
+//   grants are: a publish refuses a version whose function no longer
+//   fits its callers (app-function-bindings.ts).
 // - A forged ID, or one from another App or tenant. The grant names the
 //   App and the function together, so an ID granted on one App reaches
 //   nothing on another, and an ID nobody granted reaches nothing; an ID
@@ -317,7 +313,7 @@ export const appCallKey = ({
 }: Pick<AppCall, "app" | "function">): string => `app:${app}/${fn}`;
 
 /**
- * What `call` of a test run of a draft's checkpoint answers: the answer
+ * What `call` of a test run of a draft at one revision answers: the answer
  * its start gave under `appCallKey` (`binding`, of kind `app`), checked
  * against what the function answers in the App's current version, as a
  * real call's would be. Nothing is called: only the App's release is
