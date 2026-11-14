@@ -4172,8 +4172,12 @@ msgid "Company Brain, read only. This can recall what everyone in the company ma
 msgstr "Company Brain, en lecture seule. Ceci peut retrouver ce que tout le monde dans l’entreprise peut lire, jamais le contenu d’une équipe ni celui d’une seule personne. Il ne peut jamais écrire dans le Brain. Chaque recherche est enregistrée"
 
 #: src/activity/pending.tsx
-msgid "Company Brain, write. This can remember facts in its own name that everyone in the company can read, and forget or correct them. It writes only while everyone in the company may read everything it can read. Every write is recorded"
-msgstr "Company Brain, en écriture. Il peut retenir en son propre nom des faits que tout le monde dans l'entreprise peut lire, et les oublier ou les corriger. Il n'écrit que tant que tout le monde dans l'entreprise peut lire tout ce qu'il peut lire. Chaque écriture est enregistrée"
+msgid "Company Brain, write. This App can remember facts in its own name that everyone in the company can read, and forget or correct them. It writes only while it is shared with everyone in the company, all of them may read every one of its tables, and everyone may read everything it reads. What people type into it and its own data can then be written for everyone to read. Every write is recorded"
+msgstr "Company Brain, en écriture. Cette App peut retenir en son propre nom des faits que tout le monde dans l'entreprise peut lire, et les oublier ou les corriger. Elle n'écrit que tant qu'elle est partagée avec tout le monde dans l'entreprise, que tous peuvent lire chacune de ses tables et que tout le monde peut lire tout ce qu'elle lit. Ce que les gens y saisissent et ses propres données peuvent alors être écrits pour que tout le monde les lise. Chaque écriture est enregistrée"
+
+#: src/activity/pending.tsx
+msgid "Company Brain, write. This workflow can remember facts in its own name that everyone in the company can read, and forget or correct them. It writes only while everyone in the company may read everything it reads, and never from a run started from a chat that had read something. What a run is started with and what a webhook sends it aren't tracked, so they can be written for everyone to read. Every write is recorded"
+msgstr "Company Brain, en écriture. Ce workflow peut retenir en son propre nom des faits que tout le monde dans l'entreprise peut lire, et les oublier ou les corriger. Il n'écrit que tant que tout le monde dans l'entreprise peut lire tout ce qu'il lit, et jamais depuis une exécution lancée depuis un chat qui avait lu quelque chose. Ce avec quoi une exécution est lancée et ce qu'un webhook lui envoie ne sont pas suivis, et peuvent donc être écrits pour que tout le monde les lise. Chaque écriture est enregistrée"
 
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"

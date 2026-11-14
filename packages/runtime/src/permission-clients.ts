@@ -133,7 +133,8 @@ interface BrainCalls {
   readonly forget: (request: { readonly memory: string }) => Promise<boolean>;
   /**
    * Corrects a memory everyone in the company may read, with a fix in the
-   * App's word, read by exactly that memory's readers and read first: the
+   * App's word, read by exactly that memory's readers, beside it, the two
+   * contested until a person confirms one: the
    * fix, or null for no memory it may correct.
    */
   readonly correct: (

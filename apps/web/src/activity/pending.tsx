@@ -103,11 +103,26 @@ export const subjectOf = (
 };
 
 /**
+ * The consent to write to the Brain, in plain words: what it writes, who
+ * reads it, when it may write (core's app-company.ts and
+ * workflows/brain-calls.ts), and what nothing tracks, which can then be
+ * written for everyone.
+ */
+const brainWriteConsent = (subject: Permission["subject"]): string =>
+  subject.type === "workflow"
+    ? i18n._(
+        msg`Company Brain, write. This workflow can remember facts in its own name that everyone in the company can read, and forget or correct them. It writes only while everyone in the company may read everything it reads, and never from a run started from a chat that had read something. What a run is started with and what a webhook sends it aren't tracked, so they can be written for everyone to read. Every write is recorded`
+      )
+    : i18n._(
+        msg`Company Brain, write. This App can remember facts in its own name that everyone in the company can read, and forget or correct them. It writes only while it is shared with everyone in the company, all of them may read every one of its tables, and everyone may read everything it reads. What people type into it and its own data can then be written for everyone to read. Every write is recorded`
+      );
+
+/**
  * What it asks for: a workflow by its name, connections and collections
  * by ID, as they have no names here.
  */
 export const objectOf = (
-  { object, actions, workflowNames, functionName }: Permission,
+  { subject, object, actions, workflowNames, functionName }: Permission,
   directory: Directory
 ): string => {
   if (object.type === "connection") {
@@ -151,11 +166,7 @@ export const objectOf = (
     );
   }
   if (object.type === "platform" && actions.includes("brain.write")) {
-    // Consent in plain words: what it writes, who reads it, and the rule
-    // that holds it to what everyone may read (core's brain-recall.ts).
-    return i18n._(
-      msg`Company Brain, write. This can remember facts in its own name that everyone in the company can read, and forget or correct them. It writes only while everyone in the company may read everything it can read. Every write is recorded`
-    );
+    return brainWriteConsent(subject);
   }
   if (object.type === "platform" && actions.includes("brain")) {
     // Consent in plain words: what it reads, whose access bounds it, and

@@ -26,8 +26,8 @@ import { indexMemoryWords } from "./words.ts";
 // Correcting a memory (contract.ts `correctMemory`): a fix beside it, never
 // a change to it. The fix is the corrector's word, filed under exactly the
 // readers of the memory it corrects, so nobody reads it who couldn't read
-// that memory, and everybody who could still can; and confirmed over what
-// it corrects, so it is read first. Found by its id, current and readable
+// that memory, and everybody who could still can; and, as a person's own
+// word, confirmed over what it corrects, so it is read first. Found by its id, current and readable
 // to the reader, in the statement every read of memories uses
 // (memories.ts), never by a list that a cap could cut.
 
@@ -157,9 +157,15 @@ const correctNow = (
     )
     .one();
   indexMemoryWords(sql, row, statement, new Map());
-  // Over what the reader may read of the attribute that says something
-  // else now: the memory corrected among them, unless the fix says the
-  // same. Under no attribute, over the memory alone.
+  // Confirmed only as a person's own word: a correction is how a person
+  // confirms a memory. Another writer's fix (an App's, a workflow's)
+  // stands beside what it corrects, the two contested, for a person to
+  // confirm one. Confirmed over what the reader may read of the attribute
+  // that says something else now: the memory corrected among them, unless
+  // the fix says the same. Under no attribute, over the memory alone.
+  if (speaker.kind !== "internal" || speaker.person !== writer) {
+    return fixId;
+  }
   const over =
     target.attribute === null
       ? [target]

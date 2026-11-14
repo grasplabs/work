@@ -4315,10 +4315,11 @@ export const forgetForCompanyAs = async (
 /**
  * Corrects a current memory of the shared store the company may read, for
  * the member `personId`, in `writer`'s word (contract `correctMemory`):
- * the fix under exactly that memory's readers, confirmed over what says
- * otherwise. The fix's id, or null alike when there is no such memory the
- * company may read that is current, it is a relation, or its readers
- * can't be kept. `change` as `rememberForCompanyAs`'s.
+ * the fix under exactly that memory's readers, beside what says otherwise
+ * and unconfirmed, since an agent's word is no person's confirmation. The
+ * fix's id, or null alike when there is no such memory the company may
+ * read that is current, it is a relation, or its readers can't be kept.
+ * `change` as `rememberForCompanyAs`'s.
  */
 export const correctForCompanyAs = async (
   env: BrainEnv & Pick<Env, "DB">,

@@ -521,7 +521,7 @@ const workflowBuildDeclaration = `/**
  *   value?, statement }\`, \`about\` an entity's \`kind\` and its \`id\`, or its \`names\` and \`identifiers\`: a fact
  *   in the workflow's own word, read by everyone in the company: \`{ memory, entity }\`), \`forget\` (\`{ memory }\`,
  *   one of its own: true once forgotten), \`correct\` (\`{ memory, value?, statement }\`: a fix read by that
- *   memory's readers and read first, \`{ memory }\`, or null), \`entities.get\` (\`{ entity, asOf?, after? }\`: an
+ *   memory's readers, beside it and contested with it until a person confirms one, \`{ memory }\`, or null), \`entities.get\` (\`{ entity, asOf?, after? }\`: an
  *   entity's card, its memories by \`attributes\`, its \`relations\` and \`notes\`, with \`next\` for the page after,
  *   or null) and \`entities.find\` (\`{ kind?, name?, identifier?, after? }\`: \`{ entities, next }\`); a write
  *   needs the workflow's own grant of the platform's \`brain.write\` too, and happens only while everyone in

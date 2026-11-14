@@ -98,19 +98,25 @@ const correction = (
   ...fix,
 });
 
-/** What `reader` reads of Acme's status: each memory's statement, who confirmed it, in the store's order. */
+/**
+ * What `reader` reads of Acme's status: each memory's statement, who
+ * confirmed it, and whether it is contested, in the store's order.
+ */
 const statusAsRead = async (
   entity: string,
   reader: Reader
-): Promise<{ statement: string; confirmedBy: string | null }[]> => {
+): Promise<
+  { statement: string; confirmedBy: string | null; contested: boolean }[]
+> => {
   const { memories } = await shared().readMemories({
     entity,
     reader,
     attribute: "status",
   });
-  return memories.map(({ statement, confirmed }) => ({
+  return memories.map(({ statement, confirmed, contested }) => ({
     statement,
     confirmedBy: confirmed?.by ?? null,
+    contested,
   }));
 };
 
@@ -125,7 +131,7 @@ const memoriesHeld = async (): Promise<number> =>
   );
 
 describe("correcting a memory", () => {
-  it("files the fix under the memory's own readers, confirmed by its writer and read first, and leaves the memory as it was", async () => {
+  it("files an App's fix under the memory's own readers, unconfirmed and contested with it, and leaves the memory as it was", async () => {
     const group = unique("group");
     const app = unique("app:corrector");
     const version = await addSource("Acme is active", audience(group));
@@ -146,13 +152,39 @@ describe("correcting a memory", () => {
       outsider: await statusAsRead(entity, groupsOf(unique("other"))),
       fix: typeof fix,
     }).toStrictEqual({
+      // An agent's word is no person's confirmation: both stand.
       member: [
-        { statement: "Acme left in May", confirmedBy: app },
-        { statement: "Acme is active", confirmedBy: null },
+        { statement: "Acme left in May", confirmedBy: null, contested: true },
+        { statement: "Acme is active", confirmedBy: null, contested: true },
       ],
       outsider: [],
       fix: "string",
     });
+  });
+
+  it("confirms a person's own correction in their name, read first, both sides still shown", async () => {
+    const group = unique("group");
+    const person = unique("person");
+    const version = await addSource("Acme is active", audience(group));
+    const { entity, memories } = await remember(audience(group), [
+      status({ kind: "source", ...version, quote: "Acme is active" }, "active"),
+    ]);
+    const reader = { person, groups: [group] };
+
+    await shared().correctMemory({
+      change: crypto.randomUUID(),
+      memory: memories[0] ?? "",
+      reader,
+      writer: person,
+      speaker: { kind: "internal", person },
+      value: "churned",
+      statement: "Acme left in May",
+    });
+
+    await expect(statusAsRead(entity, reader)).resolves.toStrictEqual([
+      { statement: "Acme left in May", confirmedBy: person, contested: true },
+      { statement: "Acme is active", confirmedBy: null, contested: true },
+    ]);
   });
 
   it("answers null alike for no such memory, a hidden one, one no longer current, a relation, and one whose readers can't be kept, and writes nothing", async () => {
@@ -239,7 +271,7 @@ describe("correcting a memory", () => {
     );
     // The last one is readable to that reader: only its readers stop it.
     await expect(statusAsRead(narrowed.entity, both)).resolves.toStrictEqual([
-      { statement: "Acme is active", confirmedBy: null },
+      { statement: "Acme is active", confirmedBy: null, contested: false },
     ]);
   });
 
@@ -271,8 +303,8 @@ describe("correcting a memory", () => {
       same: true,
       other: true,
       read: [
-        { statement: "Acme left", confirmedBy: app },
-        { statement: "Acme is active", confirmedBy: null },
+        { statement: "Acme left", confirmedBy: null, contested: true },
+        { statement: "Acme is active", confirmedBy: null, contested: true },
       ],
     });
   });

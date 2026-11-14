@@ -2823,11 +2823,13 @@ export interface Brain {
   confirmMemory: (request: ConfirmRequest) => Promise<MemoryChangeOutcome>;
   /**
    * Corrects a current memory the reader may read (`CorrectRequest`): the
-   * fix is written under exactly the memory's own readers, and confirmed,
-   * in the writer's name, over the current memories of the same entity and
+   * fix is written under exactly the memory's own readers; and, when it is
+   * a person's own word (an internal speaker who is its writer), confirmed
+   * in their name over the current memories of the same entity and
    * attribute the reader may read that say something else, so it is read
-   * first among them; all in one transaction, the memory found by its id
-   * alone. The memory itself is never changed. Answers the fix's id, or
+   * first among them. Another writer's fix is not confirmed: it stands
+   * beside the memory it corrects, contested with it, for a person to
+   * confirm one. All in one transaction, the memory found by its id alone. The memory itself is never changed. Answers the fix's id, or
    * null alike when there is no such memory, when the reader may not read
    * it or it is no longer current, when it is a relation, and when its
    * readers can't be kept: it rests on a version whose readers, or its

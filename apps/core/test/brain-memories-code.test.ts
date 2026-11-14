@@ -2,32 +2,35 @@ import { brainOf } from "@grasp-os/brain-next/contract";
 import type { Reader } from "@grasp-os/brain-next/contract";
 import { v } from "@grasp-os/runtime/app";
 import type { FunctionResult } from "@grasp-os/shared/functions";
-import { teamIdSchema } from "@grasp-os/shared/ids";
+import {
+  chatIdSchema,
+  teamIdSchema,
+  workflowResourceIdSchema,
+} from "@grasp-os/shared/ids";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
+import { stepIdempotencyKey } from "@grasp-os/shared/workflows";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { runInDurableObject } from "cloudflare:test";
-import { env } from "cloudflare:workers";
+import { env, exports } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import type { AgentScope } from "../src/agent-scope.ts";
 import { callAppFunction } from "../src/app-functions.ts";
+import { addMember, removeMember } from "../src/app-members.ts";
 import { publishVersion } from "../src/app-publish.ts";
 import type { Release } from "../src/app-releases.ts";
 import { appFor } from "../src/apps.ts";
-import { teamsOf } from "../src/auth/identity.ts";
-import {
-  correctForCompanyAs,
-  rememberForCompanyAs,
-} from "../src/brain-next.ts";
+import { memberOf, teamsOf } from "../src/auth/identity.ts";
+import { memoriesAs, recallAs } from "../src/brain-next.ts";
 import {
   answerDecision,
   confirmDecision,
   reviewDecision,
 } from "../src/decisions/decisions.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
-import { brainTeamVersionRead } from "../src/history-access.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import {
   grantPermission,
@@ -40,14 +43,20 @@ import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
+  shareWorkflowResource,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
+import { callingRunOf } from "../src/workflows/resource-authority.ts";
+import { makeCall } from "../src/workflows/resource-calls.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
+import { openTestRun, personalChatsOf } from "./agent-chat.ts";
 import { testApp } from "./app-definitions.ts";
+import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
+import { mockIdp } from "./idp.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
-import { unique } from "./sign-in.ts";
+import { signedInApi, unique } from "./sign-in.ts";
 
 // The Brain's memories and entities for code (GRA-1837; the threat model
 // is on the issue): an App's action (`ctx.brain.remember`, `.forget`,
@@ -69,6 +78,8 @@ import { unique } from "./sign-in.ts";
 //    carries what was said: one change, one memory; ids and counts only.
 // The leak harness (brain-next-leaks.test.ts) probes the same calls with
 // marked memories, every way they answer.
+
+const idp = mockIdp();
 
 /** Signing people in, sealing and granting can be slow on CI. */
 const setUpTime = { timeout: 120_000 };
@@ -195,15 +206,19 @@ const operations = [
   "entities.find",
 ] as const;
 
-/** An App whose action hands each operation what it is given, as JSON (`ask`). */
-const memoriesApp = () =>
+/**
+ * An App whose action hands each operation what it is given, as JSON
+ * (`ask`), with a table its members read (`appMembers`) or one of each
+ * owner's own rows (`owner`).
+ */
+const memoriesApp = (read: "appMembers" | "owner") =>
   testApp(
     {
       name: "Accounts",
       tables: {
         notes: {
           fields: { title: "v.string()" },
-          access: { read: "owner", write: "owner" },
+          access: { read, write: read },
         },
       },
       permissions: [
@@ -237,16 +252,44 @@ export const ask = action({
   );
 
 /**
- * The App of `owner`'s, sealed and current, its declaration bound by
+ * App `app` of `owner`'s shared with every member of the organization now
+ * but its admins and its owner, who have a role in it anyway: each of
+ * them, as a person.
+ */
+const sharedWithEveryone = async (owner: Member, app: string) => {
+  const { results } = await env.DB.prepare(
+    "SELECT user_id AS id FROM members WHERE organization_id = 'organization' AND role != 'admin' AND user_id != ? AND user_id NOT IN (SELECT user_id FROM member_removals)"
+  )
+    .bind(owner.userId)
+    .all<{ id: string }>();
+  for (const { id } of results) {
+    // oxlint-disable-next-line no-await-in-loop -- one share at a time
+    await addMember(env, owner, app, { type: "person", id, role: "user" });
+  }
+};
+
+/**
+ * The App of `owner`'s, sealed and current, shared with every member
+ * unless `everyone` is false, its declaration bound by
  * `admin` to its grant to read the Brain, and with `write`, its own grant
  * to write to it.
  */
 const appOf = async (
   owner: Member,
   admin: Member,
-  { write = true, teams }: { write?: boolean; teams?: string[] } = {}
+  {
+    write = true,
+    teams,
+    read = "appMembers",
+    everyone = true,
+  }: {
+    write?: boolean;
+    teams?: string[];
+    read?: "appMembers" | "owner";
+    everyone?: boolean;
+  } = {}
 ) => {
-  const fixture: Fixture = await appWith(memoriesApp(), "Accounts", owner);
+  const fixture: Fixture = await appWith(memoriesApp(read), "Accounts", owner);
   const release: Release = await seal(fixture);
   await publishVersion(env, fixture.owner, fixture.app, 1);
   const subject = { type: "app" as const, appId: fixture.app };
@@ -271,6 +314,9 @@ const appOf = async (
         version
       )
     : null;
+  if (everyone) {
+    await sharedWithEveryone(owner, fixture.app);
+  }
   return { ...fixture, release, writeId };
 };
 
@@ -296,6 +342,66 @@ const askedOf = async (
   );
   return result.ok ? result.value : { failed: result.error.code };
 };
+
+/**
+ * `namespace` with the shared store's `method` committing, then throwing
+ * as a lost reply does, the first time it is called: what the caller
+ * believes then, and asks again, is a write whose answer it never got.
+ */
+const losingFirstReply = (
+  namespace: Env["BRAIN_STORE"],
+  method: "addMemories" | "correctMemory" | "retireMemory"
+): Env["BRAIN_STORE"] => {
+  let lost = false;
+  const stubOf = (stub: object): object =>
+    new Proxy(stub, {
+      get: (target, property): unknown => {
+        const value: unknown = Reflect.get(target, property);
+        if (property !== method || typeof value !== "function") {
+          return typeof value === "function" ? value.bind(target) : value;
+        }
+        return async (...args: unknown[]): Promise<unknown> => {
+          const answer: unknown = await Reflect.apply(value, target, args);
+          if (!lost) {
+            lost = true;
+            throw new Error("The reply was lost (a test's)");
+          }
+          return answer;
+        };
+      },
+    });
+  const namespaceOf = (of: Env["BRAIN_STORE"]): Env["BRAIN_STORE"] =>
+    new Proxy(of, {
+      get: (target, property): unknown => {
+        if (property === "jurisdiction") {
+          return (jurisdiction: DurableObjectJurisdiction) =>
+            namespaceOf(target.jurisdiction(jurisdiction));
+        }
+        if (property === "getByName") {
+          return (name: string) => {
+            const stub = target.getByName(name);
+            return name === "brain" ? stubOf(stub) : stub;
+          };
+        }
+        const value: unknown = Reflect.get(target, property);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+  return namespaceOf(namespace);
+};
+
+/** How many memories `writer` wrote in the shared store, current or not. */
+const writtenBy = async (writer: string): Promise<number> =>
+  await runInDurableObject(
+    inJurisdiction(env, env.BRAIN_STORE).getByName("brain"),
+    (_instance, state) =>
+      state.storage.sql
+        .exec<{ count: number }>(
+          "SELECT count(*) AS count FROM memories WHERE writer = ?",
+          writer
+        )
+        .one().count
+  );
 
 /** A fact about a new customer `name`, as code remembers one. */
 const fact = (name: string) => ({
@@ -359,6 +465,16 @@ describe("memories and entities, as an App reaches them", setUpTime, () => {
         statement: "It left in May",
       })
     );
+    // As people see it: on the Brain page and in a recall, both sides
+    // contested, neither confirmed, since an App's word confirms nothing.
+    const onPage = await memoriesAs(env, ada.userId, {
+      entity: { store: "shared", id: other.entity },
+    });
+    const recalled = await recallAs(env, ada.userId, {
+      question: `${otherName} status`,
+      budget: { tokens: 2000 },
+      personal: false,
+    });
     const forgotOther = await askedOf(app, ada, "forget", {
       memory: other.memory,
     });
@@ -388,6 +504,19 @@ describe("memories and entities, as an App reaches them", setUpTime, () => {
       byTeam,
       // The fix under the company's readers too, read first.
       corrected: await statusOf(other.entity, company),
+      onPage: onPage.memories.map((memory) => ({
+        statement: memory.statement,
+        confirmed: memory.confirmed !== null,
+        contested: memory.contested,
+      })),
+      recalled: recalled.memories
+        .filter(({ about }) => about === other.entity)
+        .map((memory) => ({
+          statement: memory.statement,
+          confirmed: memory.confirmed,
+          contested: memory.contested,
+        }))
+        .toSorted((a, b) => a.statement.localeCompare(b.statement)),
       correctedByTeam: await statusOf(other.entity, teamOnly()),
       fixed: fix.memory.length > 0,
       forgotOther,
@@ -407,9 +536,25 @@ describe("memories and entities, as an App reaches them", setUpTime, () => {
       byCompany: [{ statement, confirmed: false }],
       byTeam: [],
       corrected: [
-        { statement: "It left in May", confirmed: true },
+        { statement: "It left in May", confirmed: false },
         { statement: `${otherName} is active`, confirmed: false },
       ],
+      onPage: [
+        { statement: "It left in May", confirmed: false, contested: true },
+        {
+          statement: `${otherName} is active`,
+          confirmed: false,
+          contested: true,
+        },
+      ],
+      recalled: [
+        { statement: "It left in May", confirmed: false, contested: true },
+        {
+          statement: `${otherName} is active`,
+          confirmed: false,
+          contested: true,
+        },
+      ].toSorted((a, b) => a.statement.localeCompare(b.statement)),
       correctedByTeam: [],
       fixed: true,
       forgotOther: false,
@@ -491,8 +636,12 @@ describe("memories and entities, as an App reaches them", setUpTime, () => {
     const revoked = await appOf(ada, admin);
     const unplaced = await appOf(ada, admin);
     // Its grant to read the Brain names a team of Ada's: what it reads of
-    // that team's may not reach the company.
-    const teamScoped = await appOf(ada, admin, { teams: [team] });
+    // that team's may not reach the company, and it can be shared with
+    // nobody outside the team (GRA-1842), so it is never the company's.
+    const teamScoped = await appOf(ada, admin, {
+      teams: [team],
+      everyone: false,
+    });
     // A connection it was granted that nobody can be placed for: connect
     // doesn't know it.
     await env.DB.prepare(
@@ -537,6 +686,73 @@ describe("memories and entities, as an App reaches them", setUpTime, () => {
       teamScoped: { failed: "permission.unavailable" },
       unplacedForget: { failed: "permission.unavailable" },
       unplacedReads: true,
+    });
+  });
+
+  it("writes only while everything the App holds is the whole company's: never with a table of owners' own rows, shared with one team, or once it is narrowed", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const uma = await person("user");
+    const team = await teamOf(uma);
+    // Owners' own notes: what one person wrote, only they read.
+    const ownRows = await appOf(ada, admin, { read: "owner" });
+    // Shared with one team only.
+    const oneTeam = await appOf(ada, admin, { everyone: false });
+    await addMember(env, ada, oneTeam.app, {
+      type: "team",
+      id: team,
+      role: "user",
+    });
+    // The whole company's: then narrowed, taking Uma's share away.
+    const wide = await appOf(ada, admin);
+    const before = await askedOf(wide, ada, "remember", fact("Wide"));
+    await removeMember(env, ada, wide.app, {
+      type: "person",
+      id: uma.userId,
+    });
+
+    expect({
+      ownRows: await askedOf(ownRows, ada, "remember", fact("Own rows")),
+      oneTeam: await askedOf(oneTeam, ada, "remember", fact("One team")),
+      before: rememberedSchema.safeParse(before).success,
+      narrowed: await askedOf(wide, ada, "remember", fact("Narrowed")),
+      // Forgetting and correcting are writes too.
+      narrowedForget: await askedOf(wide, ada, "forget", {
+        memory: rememberedSchema.parse(before).memory,
+      }),
+    }).toStrictEqual({
+      ownRows: { failed: "permission.unavailable" },
+      oneTeam: { failed: "permission.unavailable" },
+      before: true,
+      narrowed: { failed: "permission.unavailable" },
+      narrowedForget: { failed: "permission.unavailable" },
+    });
+  });
+
+  it("writes one memory and keeps one outcome when the store's reply to a write is lost and it is asked again", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const app = await appOf(ada, admin);
+    const namespace = env.BRAIN_STORE;
+    Reflect.set(env, "BRAIN_STORE", losingFirstReply(namespace, "addMemories"));
+    let answer: unknown;
+    try {
+      answer = await askedOf(app, ada, "remember", fact("Lost reply"));
+    } finally {
+      Reflect.set(env, "BRAIN_STORE", namespace);
+    }
+    const events = await memoryEvents(ada.userId, 2);
+
+    expect({
+      answered: rememberedSchema.safeParse(answer).success,
+      written: await writtenBy(`app:${app.app}`),
+      outcomes: events
+        .filter(({ action }) => action === "brain.memory.remembered")
+        .map(({ detail }) => detail?.outcome),
+    }).toStrictEqual({
+      answered: true,
+      written: 1,
+      outcomes: ["attempted", "done"],
     });
   });
 });
@@ -604,6 +820,33 @@ const memoriesWorkflow = async (
             input: { amount: 1 },
           },
         ];
+  // Remember the args' customer, read its card back, forget it.
+  const steps = [
+    {
+      id: "remembered",
+      type: "call",
+      brain: "docs",
+      action: "remember",
+      args: {
+        about: { kind: "customer", names: [{ $expr: "args.name" }] },
+        statement: { $expr: 'args.name + " is a customer"' },
+      },
+    },
+    {
+      id: "card",
+      type: "call",
+      brain: "docs",
+      action: "entities.get",
+      args: { entity: { $expr: "remembered.entity" } },
+    },
+    {
+      id: "forgot",
+      type: "call",
+      brain: "docs",
+      action: "forget",
+      args: { memory: { $expr: "remembered.memory" } },
+    },
+  ];
   await publishWorkflowVersion(env, by, workflow.id, {
     definition: JSON.stringify({
       $schema: workflowSchemaUrl,
@@ -624,33 +867,7 @@ const memoriesWorkflow = async (
           ? {}
           : { decisions: { go: { contract: decision } } }),
       },
-      steps: [
-        ...held,
-        {
-          id: "remembered",
-          type: "call",
-          brain: "docs",
-          action: "remember",
-          args: {
-            about: { kind: "customer", names: [{ $expr: "args.name" }] },
-            statement: { $expr: 'args.name + " is a customer"' },
-          },
-        },
-        {
-          id: "card",
-          type: "call",
-          brain: "docs",
-          action: "entities.get",
-          args: { entity: { $expr: "remembered.entity" } },
-        },
-        {
-          id: "forgot",
-          type: "call",
-          brain: "docs",
-          action: "forget",
-          args: { memory: { $expr: "remembered.memory" } },
-        },
-      ],
+      steps: [...held, ...steps],
     }),
     basedOn: null,
   });
@@ -711,6 +928,21 @@ const endOf = async (
   return run.status === "completed" ? run.result : { failed: run.error?.code };
 };
 
+/** How run `id` ended, as its row has it: its status and failure's code. */
+const rowEndOf = async (id: string) =>
+  await vi.waitFor(
+    async () => {
+      const run = await env.DB.prepare(
+        "SELECT status, failure_code AS code, ended_at AS ended FROM workflow_resource_runs WHERE id = ?"
+      )
+        .bind(id)
+        .first<{ status: string; code: string | null; ended: number | null }>();
+      expect(run?.ended ?? null).not.toBeNull();
+      return { status: run?.status, code: run?.code ?? null };
+    },
+    { timeout: 30_000, interval: 100 }
+  );
+
 /** The decision run `runId` opened, once it had recalled. */
 const openedIn = async (runId: string): Promise<string> =>
   await vi.waitFor(
@@ -745,88 +977,7 @@ const goOn = async (by: Member, decision: string): Promise<void> => {
   await answerDecision(env, by, decision, review.response, confirmation);
 };
 
-/** How many memories `writer` wrote in the shared store, current or not. */
-const writtenBy = async (writer: string): Promise<number> =>
-  await runInDurableObject(
-    inJurisdiction(env, env.BRAIN_STORE).getByName("brain"),
-    (_instance, state) =>
-      state.storage.sql
-        .exec<{ count: number }>(
-          "SELECT count(*) AS count FROM memories WHERE writer = ?",
-          writer
-        )
-        .one().count
-  );
-
 describe("memories and entities, as a workflow reaches them", setUpTime, () => {
-  // What a run's step writes is one change, its key the step's in every
-  // attempt and replay (workflows/brain-calls.ts), and a reply lost is
-  // asked again under it (brain-recall.ts `landed`): asked twice, it is
-  // one memory and one fix, the first's answer again.
-  it("writes one memory and one fix for one change, however often it is asked", async () => {
-    const ada = await person("builder");
-    const writer = `workflow:${unique()}`;
-    const change = `run:${unique()}:remembered`;
-    const remember = async () =>
-      await rememberForCompanyAs(
-        env,
-        ada.userId,
-        { writer, change },
-        fact(`Hooli ${unique().slice(0, 4)}`)
-      ).then(
-        () => "written",
-        (error: unknown) => z.object({ code: z.string() }).parse(error).code
-      );
-    const asked = {
-      about: { kind: "customer", names: ["Hooli"] },
-      statement: "Hooli is a customer",
-    };
-    const first = await rememberForCompanyAs(
-      env,
-      ada.userId,
-      { writer, change },
-      asked
-    );
-    const again = await rememberForCompanyAs(
-      env,
-      ada.userId,
-      { writer, change },
-      asked
-    );
-    const other = await written(`Pied ${unique()}`);
-    const correction = {
-      memory: other.memory,
-      value: "churned",
-      statement: "It left",
-    };
-    const fixChange = `run:${unique()}:fixed`;
-    const fixed = await correctForCompanyAs(
-      env,
-      ada.userId,
-      { writer, change: fixChange },
-      correction
-    );
-    const fixedAgain = await correctForCompanyAs(
-      env,
-      ada.userId,
-      { writer, change: fixChange },
-      correction
-    );
-
-    expect({
-      same: again,
-      fixedAgain,
-      // The same change with something else said is refused, never a second memory.
-      otherSaid: await remember(),
-      written: await writtenBy(writer),
-    }).toStrictEqual({
-      same: first,
-      fixedAgain: fixed,
-      otherSaid: "brain.request_invalid",
-      written: 2,
-    });
-  });
-
   it("remembers in the workflow's own word, reads its card back and forgets it, one memory per step", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
@@ -850,7 +1001,80 @@ describe("memories and entities, as a workflow reaches them", setUpTime, () => {
     }).toStrictEqual({ name, forgot: true, written: 1 });
   });
 
-  it("writes nothing once what the run recalled is erased, or when the chat that started it had read anything, and writes when nothing changed", async () => {
+  // A step whose attempt was cut off after its write runs again under its
+  // step's key, as every attempt and replay does (stepIdempotencyKey): its
+  // call made twice by hand under the key the run's own step takes, then
+  // by the run itself.
+  it("writes one memory and keeps one outcome for a step made again after its write, however often", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const reviewer = await person("user");
+    const workflow = await memoriesWorkflow(ada, admin, { holdFor: reviewer });
+    const name = `Umbrella ${unique()}`;
+    const runId = await startedRun(ada, workflow.id, { name, question: name });
+    const decision = await openedIn(runId);
+    const run = await callingRunOf(env, workflow.id, runId);
+    if (run === undefined) {
+      throw new Error("The run isn't running");
+    }
+    const again = async () =>
+      await makeCall(
+        env,
+        run,
+        "remembered",
+        {
+          name: "grasp.brain",
+          binding: "docs",
+          operation: "remember",
+          arguments: {
+            about: { kind: "customer", names: [name] },
+            statement: `${name} is a customer`,
+          },
+        },
+        {
+          // The key the run's own step takes (its receipts name it).
+          key: stepIdempotencyKey(runId, "remembered:task"),
+          deadline: Date.now() + 30_000,
+          requireHolds: () => {
+            // Holds.
+          },
+        }
+      );
+    const first = await again();
+    const second = await again();
+    await goOn(reviewer, decision);
+    const ended = await endOf(ada, workflow.id, runId);
+    const events = await vi.waitFor(
+      async () => {
+        const all = await allEvents();
+        const ofRun = all.filter(
+          ({ action, target }) =>
+            action === "brain.memory.remembered" && target?.id === runId
+        );
+        expect(ofRun).toHaveLength(4);
+        return ofRun;
+      },
+      { timeout: 10_000, interval: 50 }
+    );
+
+    expect({
+      same: second,
+      ended: z.object({ memory: z.string() }).parse(ended).memory,
+      // The step's one memory, though its call was made three times.
+      written: await writtenBy(`workflow:${workflow.id}`),
+      // Each attempt kept, and its one outcome.
+      outcomes: events
+        .map(({ detail }) => String(detail?.outcome))
+        .toSorted((a, b) => a.localeCompare(b)),
+    }).toStrictEqual({
+      same: first,
+      ended: rememberedSchema.parse(first).memory,
+      written: 1,
+      outcomes: ["attempted", "attempted", "attempted", "done"],
+    });
+  });
+
+  it("writes nothing once what the run recalled is erased, and writes when nothing changed", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const reviewer = await person("user");
@@ -868,60 +1092,157 @@ describe("memories and entities, as a workflow reaches them", setUpTime, () => {
       name: `Initech ${unique()}`,
       question: `${word} settlement`,
     };
-    const [unchanged, erased, chatted] = await Promise.all([
+    const [unchanged, erased] = await Promise.all([
       startedRun(ada, workflow.id, args),
       startedRun(ada, workflow.id, args),
-      startedRun(ada, workflow.id, { ...args, question: "nothing at all" }),
     ]);
-    const asked = await Promise.all([unchanged, erased, chatted].map(openedIn));
-    // The chat that started the third had read something, as its person
-    // may still: code's recall there, of a source the company may read
-    // too. Read as the chat's person, it can't be shown readable by
-    // everyone a write would reach, so the run writes nothing.
-    const chatRead = unique();
-    await store().addSource({
-      source: `upload:${chatRead}`,
-      change: crypto.randomUUID(),
-      text: "What the chat had read.",
-      access: { kind: "audience", group: "company" },
-    });
-    await env.DB.prepare(
-      "INSERT INTO run_chat_sources (run_id, source_id, workspace_id, chat_id, agent_id, person_id) VALUES (?, ?, ?, ?, ?, ?)"
-    )
-      .bind(
-        chatted,
-        brainTeamVersionRead({
-          source: { producer: "upload", id: chatRead },
-          version: 1,
-        }),
-        unique(),
-        unique(),
-        unique(),
-        ada.userId
-      )
-      .run();
-    // Answered one at a time: the unchanged run first, then the erasure,
-    // then the others.
-    const [first, second, third] = asked;
-    if (first === undefined || second === undefined || third === undefined) {
+    const [first, second] = await Promise.all(
+      [unchanged, erased].map(openedIn)
+    );
+    if (first === undefined || second === undefined) {
       throw new Error("A run opened no decision");
     }
+    // The unchanged run first, then the erasure, then the other.
     await goOn(reviewer, first);
     const left = await endOf(ada, workflow.id, unchanged);
     await store().eraseSource({ source: upload, reason: "deleted" });
     await goOn(reviewer, second);
-    await goOn(reviewer, third);
 
     expect({
       left: z.object({ forgot: z.boolean() }).safeParse(left).success,
       afterErasure: await endOf(ada, workflow.id, erased),
-      afterChat: await endOf(ada, workflow.id, chatted),
-      // The unchanged run's one memory, and none of the others'.
+      // The unchanged run's one memory, and none of the other's.
       written: await writtenBy(`workflow:${workflow.id}`),
     }).toStrictEqual({
       left: true,
       afterErasure: { failed: "brain.revoked" },
-      afterChat: { failed: "permission.denied" },
+      written: 1,
+    });
+  });
+
+  // Through a chat: its code recalls (a read the run is started with, as
+  // the chat's person may read it), then it starts a run that remembers,
+  // confirmed by its person. That read can't be shown readable by
+  // everyone the write would reach, so the run writes nothing; a run
+  // started from a chat that read nothing writes.
+  it("writes nothing from a run whose chat had read anything, and writes from one whose chat read nothing", async () => {
+    const user = await signedInApi(idp, "user");
+    const builder = await signedInApi(idp, "builder");
+    const admin = await person("admin");
+    const by = await memberOf(env.DB, builder.userId);
+    if (by === undefined) {
+      throw new Error("Not a member");
+    }
+    const key = `brain-${unique()}`;
+    await publishCatalogContract(env, admin, { key, kind: "brain" });
+    const workflow = await createWorkflowResource(env, by, `mem-${unique()}`);
+    await publishWorkflowVersion(env, by, workflow.id, {
+      definition: JSON.stringify({
+        $schema: workflowSchemaUrl,
+        args: { kind: "object", fields: { text: { kind: "string" } } },
+        returns: { kind: "object", fields: { memory: { kind: "string" } } },
+        result: { memory: { $expr: "remembered.memory" } },
+        permissions: { brain: { docs: { contract: key } } },
+        steps: [
+          {
+            id: "remembered",
+            type: "call",
+            brain: "docs",
+            action: "remember",
+            args: {
+              about: { kind: "customer", names: ["Probe Co"] },
+              statement: { $expr: "args.text" },
+            },
+          },
+        ],
+      }),
+      basedOn: null,
+    });
+    const subject = { type: "workflow" as const, workflowId: workflow.id };
+    const permissionId = await requestGranted(
+      idp,
+      builder,
+      platformGrant(subject, "brain")
+    );
+    await requestGranted(idp, builder, platformGrant(subject, "brain.write"));
+    await approveWorkflowBinding(env, admin, workflow.id, {
+      alias: "docs",
+      target: { kind: "brain", permissionId },
+      reviewed: { version: 1 },
+    });
+    await shareWorkflowResource(env, by, workflow.id, {
+      type: "person",
+      id: user.userId,
+      role: "user",
+    });
+    const chats = await personalChatsOf(user.userId);
+    await requestGranted(idp, builder, {
+      subject: { type: "agent", agentId: chats.agent.agentId },
+      object: {
+        type: "workflow",
+        workflowId: workflowResourceIdSchema.parse(workflow.id),
+      },
+      actions: ["start"],
+      binding: `START_${unique().toUpperCase().replaceAll("-", "_")}`,
+    });
+    await requestGranted(idp, builder, {
+      subject: { type: "agent", agentId: chats.agent.agentId },
+      object: { type: "platform" },
+      actions: ["brain"],
+      binding: `BRAIN_${unique().toUpperCase().replaceAll("-", "_")}`,
+    });
+    const scopeOf = async (chatId: string): Promise<AgentScope> => ({
+      workspaceId: chats.id,
+      agentId: chats.agent.agentId,
+      chatId: chatIdSchema.parse(chatId),
+      personId: user.userId,
+      runId: await openTestRun(chats.stub, chatIdSchema.parse(chatId)),
+      ownChat: true,
+    });
+    /** How a run started from chat `chatId` ended, its code recalling first with `recall`. */
+    const startedFrom = async (chatId: string, recall: boolean) => {
+      if (recall) {
+        const brain = exports.BrainAgentApi({ props: await scopeOf(chatId) });
+        await brain.recall({
+          question: "anything at all",
+          budget: { tokens: 400 },
+        });
+      }
+      const workflows = exports.WorkflowsApi({ props: await scopeOf(chatId) });
+      const held = await workflows.start(
+        workflow.id,
+        { text: `Probe ${unique()}` },
+        unique()
+      );
+      const listed = await user.api.heldStarts.list();
+      const shown = listed.find(({ id }) => id === held.held);
+      const confirmed = await user.api.heldStarts.confirm(
+        held.held,
+        shown?.argsHash ?? ""
+      );
+      return await rowEndOf(confirmed.run ?? confirmed.start);
+    };
+
+    const [recalling, quietly] = [await chats.newChat(), await chats.newChat()];
+    const recalled = recalling.chat.id;
+    const quiet = quietly.chat.id;
+    const afterRecall = await startedFrom(recalled, true);
+    const pins = await env.DB.prepare(
+      "SELECT count(*) AS n FROM run_chat_sources WHERE agent_id = ?"
+    )
+      .bind(chats.agent.agentId)
+      .first<{ n: number }>();
+    const noRead = await startedFrom(quiet, false);
+
+    expect({
+      afterRecall,
+      pins: pins?.n,
+      noRead,
+      written: await writtenBy(`workflow:${workflow.id}`),
+    }).toStrictEqual({
+      afterRecall: { status: "failed", code: "permission.denied" },
+      pins: 1,
+      noRead: { status: "completed", code: null },
       written: 1,
     });
   });

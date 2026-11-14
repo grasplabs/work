@@ -6,7 +6,9 @@ import type {
   BrainSkill,
   BrainSkillText,
 } from "@grasp-os/runtime/app";
+import { createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { functionErrors } from "@grasp-os/shared/functions";
 import type { PermissionId } from "@grasp-os/shared/ids";
@@ -18,7 +20,7 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { appendAuditEvent, keepAuditEvent } from "./audit-outbox.ts";
+import { appendAuditEvent, keepAuditEvent, keepEvent } from "./audit-outbox.ts";
 import { storedTeamsOf } from "./brain-grant-teams.ts";
 import {
   codeRecallOf,
@@ -400,7 +402,8 @@ export const skillsCallFor = async (
 //   write's attempt is kept before it writes (a write the log can't take
 //   writes nothing), and its outcome after, from what landed: a write
 //   whose reply was lost is asked again under the same change, which
-//   answers what it made, so one change is one memory and its one outcome.
+//   answers what it made, and its outcome is kept by an ID of the change,
+//   so one change is one memory and one `done`, a step replayed included.
 
 /** What code asks of the Brain's memories and entities: `ctx.brain.<operation>`. */
 export type MemoriesOperation = CodeMemoryOperation;
@@ -447,6 +450,16 @@ export interface MemoriesCaller extends Omit<RecallCaller, "keep"> {
 const idOf = (value: unknown): string | null => {
   const id = z.uuid().safeParse(value);
   return id.success ? id.data : null;
+};
+
+/**
+ * The ID of the outcome of change `change`, the same each time it is
+ * asked: its SHA-256 as a UUID (RFC 9562, version 8).
+ */
+const outcomeIdOf = async (change: string): Promise<string> => {
+  const hex = await sha256Hex(change);
+  const variant = ((Number.parseInt(hex.charAt(16), 16) % 4) + 8).toString(16);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-8${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 };
 
 /** `input`'s field `key`, if it is an object: what code sent, unchecked. */
@@ -742,10 +755,14 @@ export const memoriesCallFor = async (
     );
     throw refused;
   }
-  await keepAuditEvent(
-    env,
-    db,
-    entry({ ...asked, outcome: "done", ...done.detail })
-  );
+  // One outcome per change: a step replayed, or a write asked again, is
+  // the same write, and keeps the same event, by an ID of its change.
+  await keepEvent(env, db, {
+    ...createAuditEvent(
+      entry({ ...asked, outcome: "done", ...done.detail }),
+      "core"
+    ),
+    id: await outcomeIdOf(`${written}:${caller.change}`),
+  });
   return done.answer;
 };

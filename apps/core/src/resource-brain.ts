@@ -4,7 +4,7 @@ import type { PermissionId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 
-import { readableByEveryMember, sourcesOf } from "./app-provenance.ts";
+import { heldByTheWholeCompany } from "./app-company.ts";
 import { memoriesCallFor, recallFor, skillsCallFor } from "./brain-recall.ts";
 import type { MemoriesOperation } from "./brain-recall.ts";
 import type { ResourceAdapter, ServedBinding } from "./resource-adapter.ts";
@@ -21,8 +21,7 @@ import { platformGrantOf } from "./resource-platform.ts";
 // read only what everyone in the company may read, for whoever the call
 // acts for (threat models on GRA-1731, GRA-1830 and GRA-1837). A write
 // is in the App's own word (`app:<id>`), read by the company, and only
-// while every member may read every source the App may have read
-// (app-provenance.ts): its sharing rule, held for the whole company.
+// while everything the App holds is the company's (app-company.ts).
 
 /** The Brain's operations on memories and entities, as `memoriesCallFor` takes them. */
 const memoriesOperations: ReadonlySet<string> = new Set<MemoriesOperation>([
@@ -72,8 +71,10 @@ const served = async (
           writer: `app:${caller.app}`,
           // One change per call: a call is the App's one intent.
           change: `app:${caller.app}:${crypto.randomUUID()}`,
+          // Only while everything the App holds is the company's: what
+          // it writes, every member reads (app-company.ts).
           mayWrite: async () => {
-            if (!readableByEveryMember(await sourcesOf(env, caller.app))) {
+            if (!(await heldByTheWholeCompany(env, caller.app))) {
               throw permissionErrors.create("permission.denied", {
                 action: "brain.write",
               });

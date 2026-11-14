@@ -218,9 +218,10 @@ export const callBrain = async (
         change: `run:${run.runId}:${key}`,
         mayWrite: async () => {
           await requireNoChatReads(env, run.runId);
-          if (
-            !readableByEveryMember(await sourcesOfWorkflow(env, run.workflowId))
-          ) {
+          // Its sources read Knowledge's collections too (app-provenance.ts):
+          // that part leaves with Knowledge (GRA-1735).
+          const sources = await sourcesOfWorkflow(env, run.workflowId);
+          if (!readableByEveryMember(sources)) {
             throw permissionErrors.create("permission.denied", {
               action: "brain.write",
             });
