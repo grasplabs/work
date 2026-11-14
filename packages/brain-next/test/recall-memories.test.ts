@@ -593,6 +593,40 @@ describe("recall through memories, hidden versus absent", () => {
       byEntitiesOf(readerOf(unique("ann"), seen), `who is ${name}`)
     ).resolves.toStrictEqual([]);
   });
+
+  // A forgotten memory names nothing, as for a find (memories.ts
+  // `retiredSql`): the usual reason to forget is a wrong link, so a
+  // question by that name must not pull in what others said of it.
+  it("finds an entity by a name only a forgotten memory gave no more", async () => {
+    const group = unique("group");
+    const reader = readerOf(unique("ann"), group);
+    const [namer, other] = [unique("namer"), unique("other")];
+    const name = `${word()} holdings`;
+    const named = await remember(
+      audience(group),
+      [{ key: "e", kind: "customer", names: [name] }],
+      [fact("e", "Named by the namer", {}, namer)]
+    );
+    await remember(
+      audience(group),
+      [{ key: "e", id: named.entities.e ?? "", kind: "customer", names: [] }],
+      [fact("e", "Pays on time", {}, other)],
+      reader
+    );
+    const before = await byEntitiesOf(reader, `what about ${name}`);
+    await shared().retireMemory({
+      memory: named.memories[0] ?? "",
+      reader: { person: namer, groups: [group] },
+    });
+
+    expect({
+      before: before.toSorted(),
+      after: await byEntitiesOf(reader, `what about ${name}`),
+    }).toStrictEqual({
+      before: ["Named by the namer", "Pays on time"],
+      after: [],
+    });
+  });
 });
 
 /** A relation from `from` to `to`, under `attribute`. */

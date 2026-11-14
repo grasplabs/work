@@ -6190,6 +6190,10 @@ msgstr "Voor het team {team}"
 msgid "For whom"
 msgstr "Voor wie"
 
+#: src/brain/memories-page.tsx
+msgid "Forgotten, kept as history"
+msgstr "Vergeten, bewaard als geschiedenis"
+
 #: src/connections/groups.ts
 msgctxt "kind of app"
 msgid "Forms and surveys"
