@@ -122,15 +122,20 @@ const fakeCore = (
         return [];
       },
     },
-    // The App may use one HTTP connection, which no catalog entry lists.
+    // The App may use one HTTP connection, which no catalog entry lists,
+    // and asks for nothing more.
     permissions: {
-      list: async () =>
-        await Promise.resolve([
-          {
-            object: { type: "connection", connectionId: billing.id },
-            status: "granted",
-          },
-        ]),
+      list: async (_subject: unknown, status?: string) =>
+        await Promise.resolve(
+          status === "requested"
+            ? []
+            : [
+                {
+                  object: { type: "connection", connectionId: billing.id },
+                  status: "granted",
+                },
+              ]
+        ),
     },
     connections: {
       list: async (): Promise<ListedConnection[]> =>
