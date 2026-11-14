@@ -1,4 +1,5 @@
 import {
+  brainOf,
   exactCandidatesMax,
   recallBudgetMax,
 } from "@grasp-os/brain-next/contract";
@@ -32,6 +33,7 @@ import {
 } from "../src/brain-next.ts";
 import type {
   InstructionFile,
+  Said,
   SourceReaders,
   SourceRef,
 } from "../src/brain-next.ts";
@@ -57,6 +59,7 @@ import { mockIdp } from "./idp.ts";
 import { answeringProvider, testModel } from "./model-provider.ts";
 import { noProducers } from "./no-producers.ts";
 import { carrying } from "./platform-providers.ts";
+import { acmeTenant } from "./sign-in-config.ts";
 import { routed, signedInApi, signedInWithRole, unique } from "./sign-in.ts";
 import {
   member as teamsMember,
@@ -67,6 +70,7 @@ import {
   onGroupRoster,
   post,
   reached,
+  teamsPerson,
   watched as teamsWatched,
 } from "./teams-door.ts";
 import { connectDb } from "./test-env.ts";
@@ -100,7 +104,34 @@ import {
 
 const idp = mockIdp();
 
+/** The Brain's one store, as the test reads what extraction drew. */
+const brainStore = () =>
+  inJurisdiction(env, env.BRAIN_STORE).getByName("brain");
+
+/** Words said now by `by`, to draw memories from first. */
+const saidNow = (by: Said["by"]): Said => ({
+  by,
+  at: new Date(),
+  priority: "asked",
+});
 teamsWatched();
+
+let chatAgentGrant: Promise<unknown> | undefined;
+
+/**
+ * Grants the chat agent the Brain permission, once for the file: its
+ * binding name can be granted only once.
+ */
+const chatAgentReadsBrain = async (): Promise<void> => {
+  chatAgentGrant ??= (async () =>
+    await requestGranted(idp, await signedInApi(idp, "admin"), {
+      subject: { type: "agent", agentId: chatAgentId },
+      object: { type: "platform" },
+      actions: ["brain"],
+      binding: "BRAIN",
+    }))();
+  await chatAgentGrant;
+};
 
 /** A word nothing else holds. */
 const markerWord = (): string => `m${crypto.randomUUID().replaceAll("-", "")}`;
@@ -1120,6 +1151,158 @@ describe(
       });
     });
 
+    it("gives a reader nothing a model drew from what they may not read, and prompts a model with one version's text at a time", async () => {
+      // Extraction sends restricted text to a model on purpose, so the
+      // rule for prompts is: no marker in a prompt made for a reader who
+      // may not read it. An extraction prompt is made for its version's
+      // readers alone, so it may hold that version's marker and no other.
+      // The model tells everything it is shown, and more: every marker it
+      // saw as names, statements, quotes and values, and every other
+      // marker as names it never saw.
+      const [{ userId: holder }, { userId: outsider }] = await Promise.all([
+        signedInWithRole(idp, "user"),
+        signedInWithRole(idp, "user"),
+      ]);
+      const secretTeam = await newTeam(holder);
+      const ownTeam = await newTeam(outsider);
+      const sharedWord = `s${unique()}`;
+      const markers = {
+        "the holder's own words": markerWord(),
+        "a team's source the outsider isn't in": markerWord(),
+        "a source nobody is known to read": markerWord(),
+      };
+      const all = Object.values(markers);
+      const provider = await answeringProvider((requests) => {
+        const body = JSON.stringify(requests.at(-1)?.body);
+        if (body.includes("You check statements")) {
+          return {
+            text: JSON.stringify({
+              supported: Array.from({ length: 10 }, (_, index) => index),
+            }),
+            inputTokens: 10,
+            outputTokens: 10,
+          };
+        }
+        const shown = all.filter((marker) => body.includes(marker));
+        return {
+          text: JSON.stringify({
+            entities: [
+              { key: "c", kind: "customer", names: [...shown, ...all] },
+              { key: "p", kind: "person", names: shown },
+            ],
+            memories: shown.flatMap((marker) => [
+              {
+                about: "c",
+                attribute: "status",
+                value: marker,
+                type: "fact",
+                statement: `Customer ${marker} is active`,
+                quote: `Customer ${marker} is active`,
+              },
+              {
+                about: "p",
+                type: "instruction",
+                statement: `Always ask ${marker}`,
+                quote: `Always ask ${marker}`,
+              },
+            ]),
+          }),
+          inputTokens: 10,
+          outputTokens: 10,
+        };
+      });
+      const textOfMarker = (marker: string) =>
+        `${sharedWord}: Customer ${marker} is active. Always ask ${marker}.`;
+      const addSaid = async (
+        marker: string,
+        readers: SourceReaders,
+        by: Said["by"]
+      ): Promise<SourceRef> => {
+        const source = newSource();
+        await addSource(env, {
+          source,
+          change: crypto.randomUUID(),
+          text: textOfMarker(marker),
+          readers,
+          said: saidNow(by),
+        });
+        return source;
+      };
+      const own = await addSaid(
+        markers["the holder's own words"],
+        { kind: "owner", personId: holder },
+        { kind: "person", personId: holder }
+      );
+      const team = await addSaid(
+        markers["a team's source the outsider isn't in"],
+        { kind: "team", teamId: secretTeam },
+        { kind: "outside" }
+      );
+      const none = await addSaid(
+        markers["a source nobody is known to read"],
+        { kind: "none" },
+        { kind: "outside" }
+      );
+      // The outsider's own, drawn from too.
+      await addSaid(
+        `own${unique()}`,
+        { kind: "team", teamId: ownTeam },
+        { kind: "outside" }
+      );
+      await workBrain(env, new Date(), noProducers);
+
+      // Drawn for those who may read them: the test holds only if the
+      // model's memories exist.
+      const holderReads: number[] = [];
+      for (const name of [
+        markers["the holder's own words"],
+        markers["a team's source the outsider isn't in"],
+      ]) {
+        // oxlint-disable-next-line no-await-in-loop -- one name at a time
+        const found = await brainStore().findEntities({
+          reader: { person: holder, groups: [`team:${secretTeam}`] },
+          name,
+        });
+        holderReads.push(found.entities.length);
+      }
+      const prompts = provider.requests.map(({ body }) =>
+        all.filter((marker) => JSON.stringify(body).includes(marker))
+      );
+      const findings = await findingsOf(
+        "the outsider, after extraction",
+        {
+          personId: outsider,
+          reader: { person: outsider, groups: [`team:${ownTeam}`] },
+          personal: true,
+          sharedWord,
+          markers: all,
+          hiddenVersions: everyVersionOf(own, team, none),
+          hiddenInstructionFiles: [],
+          instructionGroups: ["company"],
+        },
+        markers
+      );
+
+      expect({
+        holderReads,
+        // Two calls for the team's version; one for the outsider's own,
+        // where the model proposed nothing to check; none for the one
+        // nobody may read, nor for the holder's own: it is kept in the
+        // holder's own store, which draws from it on its own tick.
+        promptCount: prompts.length,
+        mixed: prompts.filter((held) => held.length > 1),
+        findings,
+      }).toStrictEqual({
+        // In the shared store: nothing of the holder's own source; of the
+        // team's, the customer alone, as the instruction the model proposed
+        // about a person is never drawn from a source.
+        holderReads: [0, 1],
+        promptCount: 3,
+        mixed: [],
+        findings: [],
+      });
+    });
+
     it("gives someone who isn't a member, or was one, nothing of the company's instruction files", async () => {
       await answeringProvider(() => {});
       // Every member may read the company's files, so they are probed as
@@ -1477,13 +1660,7 @@ describe(
       // chat app keeps too (workspace.ts, `answersAlone`). A thread others
       // read is never their own chat either: no USER.md of theirs, and
       // none of their own chat's tools, their connections first.
-      const admin = await signedInApi(idp, "admin");
-      await requestGranted(idp, admin, {
-        subject: { type: "agent", agentId: chatAgentId },
-        object: { type: "platform" },
-        actions: ["brain"],
-        binding: "BRAIN",
-      });
+      await chatAgentReadsBrain();
       const depot = `d${unique()}`;
       const marker = markerWord();
       const userMarker = markerWord();
@@ -1603,6 +1780,156 @@ describe(
         postedInThreads: [false, false, false],
         postedInDirect: true,
         postedToBen: false,
+      });
+    });
+
+    it("recalls only what the whole company may read in every conversation but a person's own chat in Grasp, and nothing while anyone unnamed is in it", async () => {
+      // Through Teams' door as Teams posts (channels/door.ts): who is in a
+      // group chat or channel comes from its roster, read for each
+      // message. Ann asks in each; what reached the model tells what was
+      // recalled. A team she and Ben are both in, and one of hers alone,
+      // are never recalled where others read the answer, nor in her
+      // direct message, which Teams keeps too (GRA-1820).
+      await chatAgentReadsBrain();
+      const ann = await teamsMember(
+        idp,
+        ...Array.from({ length: 8 }, () => says("Noted."))
+      );
+      const ben = await memberAnsweredBy(idp, ann.provider);
+      const depot = `d${unique()}`;
+      const annTeam = markerWord();
+      const both = markerWord();
+      const own = markerWord();
+      const company = markerWord();
+      await add(`Depot ${depot} for Ann's team: ${annTeam}`, {
+        kind: "team",
+        teamId: await newTeam(ann.userId),
+      });
+      await add(`Depot ${depot} for both: ${both}`, {
+        kind: "team",
+        teamId: await newTeam(ann.userId, ben.userId),
+      });
+      await add(`Depot ${depot} Ann's own: ${own}`, {
+        kind: "owner",
+        personId: ann.userId,
+      });
+      // Everyone in the company may read it, as a producer would add it:
+      // core's producers add none yet.
+      await brainOf(inJurisdiction(env, env.BRAIN_STORE)).addSource({
+        source: `upload:${crypto.randomUUID()}`,
+        change: crypto.randomUUID(),
+        text: `Depot ${depot} for everyone: ${company}`,
+        access: { kind: "audience", group: "company" },
+      });
+      const question = `What about depot ${depot}?`;
+      /** What reached the model for what Ann posted. */
+      const sentFor = async (activity: unknown) => {
+        const before = ann.provider.requests.length;
+        await post(activity);
+        const sent = JSON.stringify(
+          ann.provider.requests.slice(before).map(({ body }) => body)
+        );
+        return {
+          answered: ann.provider.requests.length > before,
+          annTeam: sent.includes(annTeam),
+          both: sent.includes(both),
+          own: sent.includes(own),
+          company: sent.includes(company),
+        };
+      };
+      const askedIn = async (
+        conversation: string,
+        kind: "groupChat" | "channel" = "groupChat",
+        changes: Record<string, unknown> = {}
+      ) =>
+        await sentFor({
+          ...mentionIn(ann.teams, conversation, question, kind),
+          ...changes,
+        });
+      const withBen = newGroup();
+      await onGroupRoster(withBen, [
+        { person: ann.teams },
+        { person: ben.teams },
+      ]);
+      const withGuest = newGroup();
+      await onGroupRoster(withGuest, [
+        { person: ann.teams },
+        { person: ben.teams },
+        { person: teamsPerson(), userRole: "guest" },
+      ]);
+      // A channel where both are, then a guest joins before Ann asks again
+      // in the same thread: what was recalled before is sent no more.
+      const channel = `19:${unique()}@thread.tacv2`;
+      const thread = `${channel};messageid=${unique()}`;
+      await onGroupRoster(channel, [
+        { person: ann.teams },
+        { person: ben.teams },
+      ]);
+      // A meeting's chat, whose roster leaves out anonymous attendees: both
+      // on it, named a meeting by its channel data or by its id.
+      const meeting = newGroup();
+      const meetingById = `19:meeting_${unique()}@thread.v2`;
+      for (const conversation of [meeting, meetingById]) {
+        // oxlint-disable-next-line no-await-in-loop -- one roster at a time
+        await onGroupRoster(conversation, [
+          { person: ann.teams },
+          { person: ben.teams },
+        ]);
+      }
+
+      const inWithBen = await askedIn(withBen);
+      const inWithGuest = await askedIn(withGuest);
+      const beforeGuest = await askedIn(thread, "channel");
+      await onGroupRoster(channel, [
+        { person: ann.teams },
+        { person: ben.teams },
+        { person: teamsPerson(), userRole: "guest" },
+      ]);
+      const afterGuestJoined = await askedIn(thread, "channel");
+      const inMeeting = await askedIn(meeting, "groupChat", {
+        channelData: {
+          tenant: { id: acmeTenant },
+          meeting: { id: `MCMx${unique()}` },
+        },
+      });
+      const inMeetingById = await askedIn(meetingById);
+      const inDirect = await sentFor(
+        messageFrom(ann.teams, { text: question })
+      );
+      // Her own recall finds all four: what the model got is no empty Brain.
+      const texts = await textsFor(ann.userId, `depot ${depot}`);
+      const found = texts.join(" ");
+
+      const companyOnly = {
+        answered: true,
+        annTeam: false,
+        both: false,
+        own: false,
+        company: true,
+      };
+      const nothing = { ...companyOnly, company: false };
+      expect({
+        found: [annTeam, both, own, company].map((marker) =>
+          found.includes(marker)
+        ),
+        inWithBen,
+        inWithGuest,
+        beforeGuest,
+        afterGuestJoined,
+        inMeeting,
+        inMeetingById,
+        inDirect,
+      }).toStrictEqual({
+        found: [true, true, true, true],
+        inWithBen: companyOnly,
+        // Someone Grasp can't name as a member: nothing at all.
+        inWithGuest: nothing,
+        beforeGuest: companyOnly,
+        // Nothing recalled, and the earlier recall withheld from history.
+        afterGuestJoined: nothing,
+        inMeeting: nothing,
+        inMeetingById: nothing,
+        inDirect: companyOnly,
       });
     });
 

@@ -16,12 +16,14 @@ import {
   correctRequestSchema,
   contestedRequestSchema,
   currentRequestSchema,
+  contextTokensSchema,
   deploymentSchema,
   embedModelSchema,
   entitiesRequestSchema,
   entityKinds,
   entityNamesRequestSchema,
   entityRequestSchema,
+  erasureLookupSchema,
   exportFileRequestSchema,
   exportIdSchema,
   exportRequestSchema,
@@ -89,6 +91,8 @@ import type {
   OwnExportStart,
   KeyState,
   Finding,
+  ErasureLookup,
+  ErasureStatus,
   HandOverRequest,
   HandOvers,
   WorkRequest,
@@ -132,6 +136,7 @@ import {
   deleteStoreObjects,
   erase,
   eraseBatch,
+  erasureStatusOf,
   erasuresOverview,
   erasureDue,
   erasuresUnfinished,
@@ -223,6 +228,8 @@ import {
 export interface AlarmHost {
   ask: AskModel;
   embedders: Embedders;
+  /** The host's model's context window, in tokens; null when unknown. */
+  contextTokens: number | null;
   /**
    * Told the store's overview once each tick ends, done or failed, while
    * the store holds anything and wasn't erased: for the host's health row
@@ -1238,6 +1245,42 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   }
 
   /**
+   * Whether a source or a person was erased, from this store's record of
+   * its ledger alone (erasure.ts `erasureStatusOf`, by the SHA-256 the
+   * ledger names it by). A read: it changes nothing and leaves no work.
+   * `unavailable` while the ledger can't be read or is being replayed (the
+   * gate `#ready` throws for, answered instead).
+   *
+   * The shared store's alone: a person's own store refuses, as it refuses
+   * `handOver`, before it reads or makes anything. Staff's lookup (core's
+   * brain-report.ts) needs no answer of it: a source's erasure closes its
+   * key in the shared ledger only once the owner's own store returned, and
+   * a person's is done in core's own record (its `brain_sources` area)
+   * only once their own store answered erased whole, files included. So
+   * no staff path addresses a person's own store (GRA-1762), and a store
+   * that was never written is never asked into being.
+   */
+  async erasureStatus(request: ErasureLookup): Promise<ErasureStatus> {
+    if (this.#kind.kind === "unknown") {
+      this.#refuseNoOnes();
+    }
+    if (this.#kind.kind === "person") {
+      throw new Error(sharedOnly);
+    }
+    const lookup = checked(erasureLookupSchema, request);
+    const subject = await subjectOf(
+      lookup.kind === "source" ? lookup.source : lookup.person
+    );
+    // Through, the shared store's schema is made (`#start`); the gate,
+    // then the record, with no await between.
+    const ledger = await this.#ledgerStep();
+    if (ledger !== "through") {
+      return { state: "unavailable" };
+    }
+    return erasureStatusOf(this.ctx.storage.sql, lookup.kind, subject);
+  }
+
+  /**
    * One tick of the host's clock at `at`: the erasure ledger's entries
    * not yet written written, then one batch of what erasures still hold
    * deleted, then one batch of the sweep, then up
@@ -1249,9 +1292,15 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * bounded, so
    * none starves the next, and the queue runs whatever the others did.
    */
-  async work({ ask, at, embedders, handOvers }: WorkRequest): Promise<void> {
+  async work({
+    ask,
+    at,
+    embedders,
+    handOvers,
+    contextTokens,
+  }: WorkRequest): Promise<void> {
     await this.#changing(async () => {
-      await this.#workNow(ask, at, embedders, handOvers);
+      await this.#workNow(ask, at, embedders, contextTokens, handOvers);
     });
   }
 
@@ -1260,11 +1309,13 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     ask: AskModel,
     at: Date,
     embedders: Embedders,
+    contextTokens: number | null,
     handOvers?: HandOvers
   ): Promise<void> {
     await this.#ready();
     const tickAt = checked(tickAtSchema, at);
     const model = checked(embedModelSchema.nullable(), embedders.model);
+    const tokens = checked(contextTokensSchema, contextTokens);
     if (!this.#schema) {
       // Nothing was ever kept: nothing to do.
       return;
@@ -1276,6 +1327,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         model,
         embed: async (request) => await embedders.embed(request),
       },
+      tokens,
       handOvers
     );
   }
@@ -1289,6 +1341,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     ask: AskModel,
     tickAt: Date,
     embedders: Embedders,
+    contextTokens: number | null,
     handOvers: HandOvers | undefined
   ): Promise<void> {
     if (this.#work.restarting) {
@@ -1309,6 +1362,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         ask,
         embedders,
         bucket: this.#bucket,
+        contextTokens,
         ...(this.#kind.kind === "person" ? { owner: this.#kind.person } : {}),
         ...(handOvers === undefined || this.#kind.kind !== "shared"
           ? {}
@@ -1364,7 +1418,12 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         // Its report is counted as a write (`#report`).
         await this.#changing(async () => {
           try {
-            await this.#workNow(host.ask, new Date(), host.embedders);
+            await this.#workNow(
+              host.ask,
+              new Date(),
+              host.embedders,
+              host.contextTokens
+            );
           } finally {
             await this.#report(host);
           }

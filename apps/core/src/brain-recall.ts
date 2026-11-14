@@ -71,9 +71,14 @@ import { authorize, grantedPermissions } from "./permissions.ts";
 //   is handed may end up anywhere a member reads (a run's state, a
 //   decision, an App a run writes to), so a workflow's grant names no
 //   team (permissions.ts), and its recall holds nothing any member
-//   couldn't read at the source, whoever called. A chat's code reads as
-//   the person the chat is for, their teams alone (`personal: false`): what it gets stays in
-//   that person's chat. The person is always the one the call acts for
+//   couldn't read at the source, whoever called. A chat's code (and its
+//   `searchBrain` tool) reads as the person the chat is for, their teams
+//   alone (`personal: false`), only in their own chat in Grasp in a turn
+//   they started (`RecallCaller.reach`), where what it gets stays theirs;
+//   anywhere else (a chat app's direct message, which the app keeps too;
+//   a turn a schedule or an event woke) as the company alone, as the
+//   recall before the question reads there (GRA-1820, turn-recall.ts).
+//   The person is always the one the call acts for
 //   (`onBehalfOf`, set by core from the session or the run, never by the
 //   code), and must still be a member; the Brain filters inside its own
 //   search, so a pack never holds more than that reader may read, and
@@ -95,6 +100,15 @@ export interface RecallCaller {
    * null when it holds none, and the recall is refused (and audited).
    */
   readonly permissionId: PermissionId | null;
+  /**
+   * For a chat's code and its `searchBrain` alone: `teams` reads its
+   * person's teams and the company, only in their own chat in Grasp in a
+   * turn they started (agent-brain.ts); absent, it reads the company
+   * alone, wherever else it is called. Set by core from where the call is
+   * made, never by the code. An App's and a workflow's reach is their
+   * grant's (`recallFor`), whatever this says.
+   */
+  readonly reach?: "teams";
   /** How the audit log names it. */
   readonly actor: AuditActor;
   /** What the audit event is about: the App, the run or the chat. */
@@ -183,8 +197,9 @@ export const recallFor = async (
     );
     // An App's as the company and, of its grant's teams, the person's; a
     // workflow's as the company alone; a chat's code as its person's
-    // teams alone; never what only a person may read. Nothing code sends
-    // can change it.
+    // teams in their own chat (`reach`), and as the company alone
+    // anywhere else; never what only a person may read. Nothing code
+    // sends can change it.
     // Passages alone (GRA-1742): the pack code gets is the SDK's
     // `BrainPack`, which holds no memory, so none takes its budget or a
     // word from `notFound`, and no entity reaches code.
@@ -192,7 +207,7 @@ export const recallFor = async (
     const recalled = await recallPassagesAs(env, caller.authority.onBehalfOf, {
       ...recall,
       personal: false,
-      company: subject.type !== "agent",
+      company: subject.type !== "agent" || caller.reach !== "teams",
       teams:
         subject.type === "app"
           ? await grantTeamsOf(env, caller.permissionId)

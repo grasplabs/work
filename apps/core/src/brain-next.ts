@@ -36,12 +36,14 @@ import {
   storeErased,
   wellFormedString,
   modelWaitMaxSeconds,
+  modelRoles as brainModelRoles,
   packItemTokens,
   refusalPrefix,
   restoringNow,
   personalBrainOf,
   stillDeletingAtMostMs,
   storeBytesMax,
+  workPriorities,
   storeKindOf,
 } from "@grasp-os/brain-next/contract";
 import type {
@@ -77,7 +79,9 @@ import type {
   Reader,
   RecallRequest,
   RestoreStatus,
+  SourceErasure,
   SourceId,
+  Speaker,
   StepFailure,
   WayCounts,
   WorkOverview,
@@ -99,6 +103,8 @@ import {
 import type {
   BrainAction,
   BrainActionOutcome,
+  BrainErasureAnswer,
+  BrainErasureLookup,
   BrainReport,
   BrainSearchWay,
   BrainStep,
@@ -125,8 +131,10 @@ import {
 import type { OwnStoreHealth } from "./brain-own-stores.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { embedInBulk, embedderModel, questionVectorOf } from "./embedder.ts";
+import { parseModelRef } from "./model-catalog.ts";
 import { brainSpendByPurpose, spendMonth } from "./model-spend.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
+import { organizationTimeZone } from "./organization.ts";
 import { shippedSkills } from "./shipped-skills.ts";
 import { skillCards, skillCardsKept } from "./skill-cards.ts";
 import type { SkillCardText } from "./skill-cards.ts";
@@ -301,11 +309,69 @@ const sourceRefOf = (key: SourceId): SourceRef => {
 /** A change's key, from its producer: see `addSource`. */
 const changeSchema = producerIdSchema(sourceIdMaxLength);
 
+/**
+ * Whose words a source's text is, as core names them: a person of the
+ * company speaking for themselves (or an admin), an outside party (a
+ * customer's mail, a supplier's document), an agent, or the system. A
+ * producer that can't say for sure says the least trusted one. Each
+ * memory drawn records it; none drawn from a source is ever a preference
+ * or an instruction, whoever's words they were.
+ */
+const saidBySchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("person"), personId: idSchema }),
+  z.strictObject({ kind: z.literal("outside") }),
+  z.strictObject({ kind: z.literal("agent"), agentId: idSchema }),
+  z.strictObject({ kind: z.literal("system") }),
+]);
+
+/**
+ * To draw memories from a version as it is added: whose words it is, when
+ * they were said (what "next Friday" counts from, in the organization's
+ * time zone), and which class of the Brain's work it takes.
+ *
+ * It describes ONE message's own words: one speaker, one moment. A thread
+ * (a mail thread, a chat) is one source version per message, each with its
+ * own `said`, and the producer strips the history a message quotes or
+ * forwards before adding it: otherwise a customer's "we pay next Friday",
+ * quoted in a colleague's reply, would become the colleague's word and
+ * count from the reply's date. A document is one author's words at the
+ * moment it was saved.
+ */
+const saidSchema = z.strictObject({
+  by: saidBySchema,
+  // From 1970 on, as the Brain takes it (`extractSchema`).
+  at: z.date().min(new Date(0)),
+  priority: z.enum(workPriorities),
+});
+export type Said = z.infer<typeof saidSchema>;
+
+/** `by` as the Brain names whose word something is. */
+const speakerOf = (by: Said["by"]): Speaker => {
+  switch (by.kind) {
+    case "person": {
+      return { kind: "internal", person: by.personId };
+    }
+    case "agent": {
+      return { kind: "agent", agent: by.agentId };
+    }
+    case "outside": {
+      return { kind: "outside" };
+    }
+    case "system": {
+      return { kind: "system" };
+    }
+    default: {
+      throw new Error("Unknown speaker");
+    }
+  }
+};
+
 const newSourceSchema = z.strictObject({
   source: sourceRefSchema,
   change: changeSchema,
   text: wellFormedString(),
   readers: sourceReadersSchema,
+  said: saidSchema.optional(),
   group: sourceRefSchema.optional(),
   readAt: z.date().optional(),
 });
@@ -668,14 +734,21 @@ const readerOf = async (
  * a producer checks that whoever asks for the change may change that
  * source before it calls this; the Brain can't tell. An add an erasure
  * closed is refused with `brain.source_erased`: final, never retried.
+ *
+ * With `said`, the Brain also draws memories from the version on its work
+ * queue, in `said.priority`'s class: whose words it is (`said.by`, the
+ * producer's to know, recorded on every memory drawn) and when they were
+ * said. Without it, the
+ * version is kept and found, and nothing is drawn from it.
  */
 export const addSource = async (
-  env: BrainEnv,
+  env: BrainEnv & Pick<Env, "DB">,
   added: {
     source: SourceRef;
     change: string;
     text: string;
     readers: SourceReaders;
+    said?: Said;
     group?: SourceRef;
     /**
      * When the producer read `text` where it lives: a text read before the
@@ -685,7 +758,7 @@ export const addSource = async (
     readAt?: Date;
   }
 ): Promise<SourceVersionRef & { newer?: true }> => {
-  const { source, change, text, readers, group, readAt } = checked(
+  const { source, change, text, readers, said, group, readAt } = checked(
     newSourceSchema,
     added
   );
@@ -705,6 +778,17 @@ export const addSource = async (
   }
   const access = accessOf(readers);
   const key = sourceKeyOf(source);
+  const extract =
+    said === undefined
+      ? {}
+      : {
+          extract: {
+            speaker: speakerOf(said.by),
+            saidAt: said.at,
+            timeZone: await organizationTimeZone(env.DB),
+            priority: said.priority,
+          },
+        };
   let version: number;
   let newer: true | undefined;
   try {
@@ -720,6 +804,7 @@ export const addSource = async (
               change,
               text,
               access,
+              ...extract,
               ...(group === undefined ? {} : { group: sourceKeyOf(group) }),
               ...(readAt === undefined ? {} : { readAt: readAt.getTime() }),
             })
@@ -1174,6 +1259,32 @@ const personErasureSchema = z.strictObject({
 });
 
 /**
+ * Erases `request` from `personId`'s own store, then closes its key in the
+ * shared store: the one way anything kept in a person's own store is
+ * erased (`eraseSource`, `eraseOwnGroup`), so every such erasure is in
+ * the shared ledger, which staff's erasure lookup reads (brain-report.ts),
+ * and none is answered "not erased" there. The shared entry is the key's
+ * hash and a time, never content; the shared store holds nothing under
+ * the key, and holds no group (it ignores `asGroup`). Only once the own
+ * store returned: the shared ledger never says erased while a copy can
+ * be read or come back after a restore. A failure of either throws, and
+ * the caller's retry does both, in order; both are safe to repeat.
+ * Answers what the own store answered.
+ */
+const erasedFromOwnStore = async (
+  env: BrainEnv,
+  personId: string,
+  request: SourceErasure
+): Promise<Awaited<ReturnType<Brain["eraseSource"]>>> => {
+  const answered = await ownBrain(env, personId).eraseSource(request);
+  await brain(env).eraseSource({
+    source: request.source,
+    reason: request.reason,
+  });
+  return answered;
+};
+
+/**
  * Erases `source` for good: every version, with everything kept of it,
  * and every source added in it as their group (`addSource`), all in one
  * call to the store. Its key is closed: a later add of it, or in it as a
@@ -1206,16 +1317,12 @@ export const eraseSource = async (
     erased
   );
   const request = { source: sourceKeyOf(source), reason };
-  // In its person's own store first, when it is theirs, and only once
-  // that returned closed in the shared store, whatever its readers: the
-  // shared ledger, which staff read, never says erased while a copy is
-  // left. A failure of the first leaves the shared store as it was, and
-  // the retry does both, in order.
   if (readers.kind === "owner") {
-    await ownBrain(env, readers.personId).eraseSource({
+    await erasedFromOwnStore(env, readers.personId, {
       ...request,
       ...(asGroup === undefined ? {} : { asGroup }),
     });
+    return;
   }
   await brain(env).eraseSource(request);
 };
@@ -1228,22 +1335,24 @@ const ownGroupErasureSchema = z.strictObject({
 
 /**
  * Erases the group `group` (`addSource`'s `group`) from `personId`'s own
- * store alone, as `eraseSource` with `asGroup` does there: every source
- * added in it, in one call, and the group closed, so a later add in it is
+ * store, as `eraseSource` with `asGroup` does there: every source added
+ * in it, in one call, and the group closed, so a later add in it is
  * refused, also after a restore of the store. For a group only their own
- * store can hold, so the shared store has no key of it to close: what an
- * agent read through their own connection (core's `addSource` refuses a
- * capture any other readers). Answers how many sources it erased, the
- * same each time it is repeated (none once their store was erased
- * whole). Safe to repeat; one that throws must be repeated until it
- * answers.
+ * store can hold content of: what an agent read through their own
+ * connection (core's `addSource` refuses a capture any other readers).
+ * Its key is then closed in the shared ledger too, as every erasure from
+ * an own store is (`erasedFromOwnStore`): a record, not content, so
+ * staff's lookup answers erased for it. Answers how many sources it
+ * erased, the same each time it is repeated (none once their store was
+ * erased whole). Safe to repeat; one that throws, in either store, must
+ * be repeated until it answers.
  */
 export const eraseOwnGroup = async (
   env: BrainEnv,
   erased: { personId: string; group: SourceRef; reason: ErasureReason }
 ): Promise<number> => {
   const { personId, group, reason } = checked(ownGroupErasureSchema, erased);
-  const answered = await ownBrain(env, personId).eraseSource({
+  const answered = await erasedFromOwnStore(env, personId, {
     source: sourceKeyOf(group),
     reason,
     asGroup: true,
@@ -2378,6 +2487,14 @@ export const addOwnSkill = async (
  * failed must be repeated until it returns, as `eraseSource`'s. Refused
  * once they are no longer a member (an erasure of the person erases their
  * whole store: `erasePerson`).
+ *
+ * The one erasure from an own store not closed in the shared ledger
+ * (`erasedFromOwnStore`): a person's skill's key (`skill:person:<name>`)
+ * names no person, so every member's skill of that name has the same key,
+ * and closing it there would make staff's lookup of that key answer
+ * erased for anyone's, once one member deleted theirs, and tell staff
+ * that someone had a skill of that name. Staff's lookup answers "not
+ * erased" for it, with its hedge.
  */
 export const eraseOwnSkill = async (
   env: BrainEnv & Pick<Env, "DB">,
@@ -2467,11 +2584,13 @@ const waitOf = (error: unknown): ModelReply => {
  */
 const askModel =
   (env: Env): AskModel =>
-  async ({ purpose, system, input, timeoutMs }) => {
+  async ({ purpose, role, system, input, timeoutMs }) => {
     const signal = AbortSignal.timeout(timeoutMs);
     try {
       const { text } = await models(env).call({
-        model: modelForRole(await modelSettings(env), "careful"),
+        model: modelForRole(await modelSettings(env), role),
+        // A check asks the quick model to think little: the cheaper call.
+        ...(role === "quick" ? { effort: "low" as const } : {}),
         system,
         input,
         purpose,
@@ -2494,6 +2613,39 @@ const askModel =
       return waitOf(error);
     }
   };
+
+/**
+ * The context window of the models the Brain's work asks, in tokens: the
+ * smaller of the careful and the quick one's, from the gateway's catalog;
+ * null when either is an OpenAI-compatible endpoint's (the catalog gives
+ * such a model a window it doesn't know), or no model is set up (the
+ * calls then fail as the account's trouble). Null means a version is read
+ * as one piece: a model whose window it overflows refuses the call, and
+ * the item parks.
+ */
+const contextTokensOf = async (env: Env): Promise<number | null> => {
+  let settings: Awaited<ReturnType<typeof modelSettings>>;
+  try {
+    settings = await modelSettings(env);
+  } catch {
+    return null;
+  }
+  const windows = brainModelRoles.map((role) => {
+    try {
+      const ref = parseModelRef(modelForRole(settings, role));
+      if (ref === undefined || ref.provider === "openai-compatible") {
+        return null;
+      }
+      const window = ref.catalog.contextWindow;
+      return window > 0 ? window : null;
+    } catch {
+      return null;
+    }
+  });
+  return windows.every((window) => window !== null)
+    ? Math.min(...windows)
+    : null;
+};
 
 /**
  * Core's embedders, as the Brain's background work uses them: the bulk
@@ -2782,6 +2934,7 @@ export const workBrain = async (
     at,
     embedders: await embeddersOf(env),
     handOvers: handOversOf(env, producers),
+    contextTokens: await contextTokensOf(env),
   });
 };
 
@@ -2832,6 +2985,7 @@ export const alarmHostOf = async (
 ): Promise<{
   ask: AskModel;
   embedders: Embedders;
+  contextTokens: number | null;
   report: (overview: WorkOverview) => Promise<void>;
 }> => {
   const kind = storeKindOf(name);
@@ -2841,6 +2995,9 @@ export const alarmHostOf = async (
   return {
     ask: askModel(env),
     embedders: await embeddersOf(env),
+    // What extraction cuts the person's own sources to, as the shared
+    // store's tick does (`workBrain`).
+    contextTokens: await contextTokensOf(env),
     report: async (overview) => {
       const at = new Date();
       try {
@@ -3032,6 +3189,37 @@ export const actOnBrainForStaff = async (
       throw new Error(`No such action (${typeof unhandled})`);
     }
   }
+};
+
+/**
+ * Whether what Grasp's staff named (brain-report.ts) is erased, as the
+ * Brain's shared store's record of its ledger says: a source, by the
+ * Brain's key for it, or a person, by their id, each hashed by the store
+ * as its ledger names it. The answer is the store's alone, field by field:
+ * a state, and for `erased` when. Never a person's own store: a staff path
+ * addresses no personal object (GRA-1762), so a person's erasure is read
+ * with core's own record of it (brain-report.ts). A source's answer is the
+ * shared ledger's alone: that its key was closed there. `eraseSource`
+ * closes a source its owner keeps in their own store there first, hidden
+ * and recorded in that store's ledger, and in the shared store only once
+ * that returned, so the shared ledger never says erased while a copy can
+ * still be read or come back after a restore. That store's hidden rows
+ * are deleted by its own next tick, which this answer doesn't wait for:
+ * staff name a source by its key alone, and no staff path addresses a
+ * person's own store to ask.
+ */
+export const brainErasureForStaff = async (
+  env: BrainEnv,
+  lookup: BrainErasureLookup
+): Promise<BrainErasureAnswer> => {
+  const status = await brain(env).erasureStatus(
+    lookup.kind === "source"
+      ? { kind: "source", source: lookup.key }
+      : { kind: "person", person: lookup.id }
+  );
+  return status.state === "erased"
+    ? { state: "erased", at: status.at.toISOString() }
+    : { state: status.state };
 };
 
 // Memories, for a person core verified (GRA-1743): what a person's own

@@ -7,6 +7,8 @@
 // store's bucket. The threat model is on GRA-1762; each test names the
 // threat it holds.
 import type {
+  ErasureLookup,
+  ErasureStatus,
   Access,
   AskModel,
   Embedders,
@@ -1271,6 +1273,7 @@ const tick = async (who = person): Promise<void> => {
     at: new Date(),
     embedders: noModel,
     handOvers: noHandOvers,
+    contextTokens: null,
   });
 };
 
@@ -1451,6 +1454,7 @@ const leavingNone = [
   "correctMemory",
   // Cards likewise: read whole in their call (cards.ts).
   "erasePerson",
+  "erasureStatus",
   "exportFile",
   "exportStatus",
   "findEntities",
@@ -1479,6 +1483,80 @@ const leavingNone = [
   "startRestore",
   "workOverview",
 ];
+
+/** What `store` answers when asked whether `lookup` was erased. */
+const statusOf = async (
+  store: Store,
+  lookup: ErasureLookup
+): Promise<ErasureStatus> => await store.erasureStatus(lookup);
+
+describe("whether something was erased, asked of a person's own store", () => {
+  // Staff's erasure lookup is the shared store's alone (core reads a
+  // person's own erasure from its own record): their own store refuses it
+  // as it refuses `handOver`, whoever it names and whatever it holds, and
+  // asking never makes a store that was never written.
+  beforeEach(() => {
+    person = `person-${crypto.randomUUID()}`;
+  });
+
+  it("refuses, and makes nothing, while it was never written", async () => {
+    const who = `person-${crypto.randomUUID()}`;
+    const asked = await Promise.allSettled([
+      statusOf(own(who), { kind: "person", person: who }),
+      statusOf(own(who), { kind: "source", source: "test:never" }),
+    ]);
+
+    expect({
+      refused: asked.map((result) =>
+        result.status === "rejected" ? String(result.reason) : "answered"
+      ),
+      tables: await tablesOf(own(who)),
+      alarm: await alarmOf(own(who)),
+    }).toStrictEqual({
+      refused: [
+        "Error: The Brain refused it: only the shared store takes this",
+        "Error: The Brain refused it: only the shared store takes this",
+      ],
+      tables: [],
+      alarm: null,
+    });
+  });
+
+  it("refuses for a source of its own it erased, and for its person", async () => {
+    const who = `person-${crypto.randomUUID()}`;
+    const { source } = await add(own(who), "Marker of their own", theirs(who));
+    await own(who).eraseSource({ source, reason: "deleted" });
+
+    await expect(
+      statusOf(own(who), { kind: "source", source })
+    ).rejects.toThrow(/only the shared store takes this/u);
+    await expect(
+      statusOf(own(who), { kind: "person", person: who })
+    ).rejects.toThrow(/only the shared store takes this/u);
+  });
+
+  it("refuses once it was erased whole, and makes nothing again", async () => {
+    const { source } = await add(own(), "Marker of their own", theirs());
+    await eraseWhole();
+
+    await expect(statusOf(own(), { kind: "source", source })).rejects.toThrow(
+      /only the shared store takes this/u
+    );
+    await expect(statusOf(own(), { kind: "person", person })).rejects.toThrow(
+      /only the shared store takes this/u
+    );
+    await expect(tablesOf(own())).resolves.toStrictEqual([]);
+  });
+
+  it("refuses the question when its name says no one's", async () => {
+    await expect(
+      statusOf(env.BRAIN_STORE.getByName(`Person:${person}`), {
+        kind: "person",
+        person,
+      })
+    ).rejects.toThrow(/name doesn't say whose it is/u);
+  });
+});
 
 describe("a person's own store's alarm", () => {
   beforeEach(() => {
