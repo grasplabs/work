@@ -69,6 +69,7 @@ import {
   rebase,
   recallTextOf,
 } from "./chat-agent.ts";
+import type { Audience } from "./chat-audiences.ts";
 import { coreMessageProvider, shownBuiltSchema } from "./chat-messages.ts";
 import type { ShownBuilt } from "./chat-messages.ts";
 import { codeTimeoutMs } from "./code-mode.ts";
@@ -126,6 +127,14 @@ export interface TurnRequest {
   };
   /** A chat others share, which reads only what they all may. */
   shared: boolean;
+  /**
+   * Who is in a chat others share, as the turn was admitted for
+   * (`chat_audiences`, kept from the platform's roster for the message):
+   * with anyone Grasp can't name as a member in it, its recall reads
+   * nothing (turn-recall.ts). None in one's own; a shared chat's turn
+   * without it recalls nothing.
+   */
+  audience?: Audience;
   /**
    * Whether the answer reaches the person alone, so the recall before the
    * question may hold what only they may read (their own store,
@@ -1127,14 +1136,16 @@ export class ChatHarness {
    */
   async #recall(
     turn: CodeTurn,
-    { question: { text }, shared, personal }: TurnRequest
+    { question: { text }, shared, audience, personal }: TurnRequest
   ) {
     const { messages } = await this.#conversation.context(context);
     return await recallForTurn(
       {
         env: this.#env,
         turn,
-        conversation: shared ? "shared" : "own",
+        conversation: shared
+          ? { outsiders: audience?.outsiders ?? null }
+          : "own",
         personal,
         history: messages,
         provenance: this.#sources,

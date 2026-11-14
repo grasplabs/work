@@ -36,12 +36,14 @@ import {
   storeErased,
   wellFormedString,
   modelWaitMaxSeconds,
+  modelRoles as brainModelRoles,
   packItemTokens,
   refusalPrefix,
   restoringNow,
   personalBrainOf,
   stillDeletingAtMostMs,
   storeBytesMax,
+  workPriorities,
   storeKindOf,
 } from "@grasp-os/brain-next/contract";
 import type {
@@ -78,6 +80,7 @@ import type {
   RecallRequest,
   RestoreStatus,
   SourceId,
+  Speaker,
   StepFailure,
   WayCounts,
   WorkOverview,
@@ -125,8 +128,10 @@ import {
 import type { OwnStoreHealth } from "./brain-own-stores.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { embedInBulk, embedderModel, questionVectorOf } from "./embedder.ts";
+import { parseModelRef } from "./model-catalog.ts";
 import { brainSpendByPurpose, spendMonth } from "./model-spend.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
+import { organizationTimeZone } from "./organization.ts";
 import { shippedSkills } from "./shipped-skills.ts";
 import { skillCards, skillCardsKept } from "./skill-cards.ts";
 import type { SkillCardText } from "./skill-cards.ts";
@@ -303,11 +308,69 @@ const sourceRefOf = (key: SourceId): SourceRef => {
 /** A change's key, from its producer: see `addSource`. */
 const changeSchema = producerIdSchema(sourceIdMaxLength);
 
+/**
+ * Whose words a source's text is, as core names them: a person of the
+ * company speaking for themselves (or an admin), an outside party (a
+ * customer's mail, a supplier's document), an agent, or the system. A
+ * producer that can't say for sure says the least trusted one. Each
+ * memory drawn records it; none drawn from a source is ever a preference
+ * or an instruction, whoever's words they were.
+ */
+const saidBySchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("person"), personId: idSchema }),
+  z.strictObject({ kind: z.literal("outside") }),
+  z.strictObject({ kind: z.literal("agent"), agentId: idSchema }),
+  z.strictObject({ kind: z.literal("system") }),
+]);
+
+/**
+ * To draw memories from a version as it is added: whose words it is, when
+ * they were said (what "next Friday" counts from, in the organization's
+ * time zone), and which class of the Brain's work it takes.
+ *
+ * It describes ONE message's own words: one speaker, one moment. A thread
+ * (a mail thread, a chat) is one source version per message, each with its
+ * own `said`, and the producer strips the history a message quotes or
+ * forwards before adding it: otherwise a customer's "we pay next Friday",
+ * quoted in a colleague's reply, would become the colleague's word and
+ * count from the reply's date. A document is one author's words at the
+ * moment it was saved.
+ */
+const saidSchema = z.strictObject({
+  by: saidBySchema,
+  // From 1970 on, as the Brain takes it (`extractSchema`).
+  at: z.date().min(new Date(0)),
+  priority: z.enum(workPriorities),
+});
+export type Said = z.infer<typeof saidSchema>;
+
+/** `by` as the Brain names whose word something is. */
+const speakerOf = (by: Said["by"]): Speaker => {
+  switch (by.kind) {
+    case "person": {
+      return { kind: "internal", person: by.personId };
+    }
+    case "agent": {
+      return { kind: "agent", agent: by.agentId };
+    }
+    case "outside": {
+      return { kind: "outside" };
+    }
+    case "system": {
+      return { kind: "system" };
+    }
+    default: {
+      throw new Error("Unknown speaker");
+    }
+  }
+};
+
 const newSourceSchema = z.strictObject({
   source: sourceRefSchema,
   change: changeSchema,
   text: wellFormedString(),
   readers: sourceReadersSchema,
+  said: saidSchema.optional(),
   group: sourceRefSchema.optional(),
   readAt: z.date().optional(),
 });
@@ -670,14 +733,21 @@ const readerOf = async (
  * a producer checks that whoever asks for the change may change that
  * source before it calls this; the Brain can't tell. An add an erasure
  * closed is refused with `brain.source_erased`: final, never retried.
+ *
+ * With `said`, the Brain also draws memories from the version on its work
+ * queue, in `said.priority`'s class: whose words it is (`said.by`, the
+ * producer's to know, recorded on every memory drawn) and when they were
+ * said. Without it, the
+ * version is kept and found, and nothing is drawn from it.
  */
 export const addSource = async (
-  env: BrainEnv,
+  env: BrainEnv & Pick<Env, "DB">,
   added: {
     source: SourceRef;
     change: string;
     text: string;
     readers: SourceReaders;
+    said?: Said;
     group?: SourceRef;
     /**
      * When the producer read `text` where it lives: a text read before the
@@ -687,7 +757,7 @@ export const addSource = async (
     readAt?: Date;
   }
 ): Promise<SourceVersionRef & { newer?: true }> => {
-  const { source, change, text, readers, group, readAt } = checked(
+  const { source, change, text, readers, said, group, readAt } = checked(
     newSourceSchema,
     added
   );
@@ -707,6 +777,17 @@ export const addSource = async (
   }
   const access = accessOf(readers);
   const key = sourceKeyOf(source);
+  const extract =
+    said === undefined
+      ? {}
+      : {
+          extract: {
+            speaker: speakerOf(said.by),
+            saidAt: said.at,
+            timeZone: await organizationTimeZone(env.DB),
+            priority: said.priority,
+          },
+        };
   let version: number;
   let newer: true | undefined;
   try {
@@ -722,6 +803,7 @@ export const addSource = async (
               change,
               text,
               access,
+              ...extract,
               ...(group === undefined ? {} : { group: sourceKeyOf(group) }),
               ...(readAt === undefined ? {} : { readAt: readAt.getTime() }),
             })
@@ -2637,11 +2719,13 @@ const waitOf = (error: unknown): ModelReply => {
  */
 const askModel =
   (env: Env): AskModel =>
-  async ({ purpose, system, input, timeoutMs }) => {
+  async ({ purpose, role, system, input, timeoutMs }) => {
     const signal = AbortSignal.timeout(timeoutMs);
     try {
       const { text } = await models(env).call({
-        model: modelForRole(await modelSettings(env), "careful"),
+        model: modelForRole(await modelSettings(env), role),
+        // A check asks the quick model to think little: the cheaper call.
+        ...(role === "quick" ? { effort: "low" as const } : {}),
         system,
         input,
         purpose,
@@ -2664,6 +2748,39 @@ const askModel =
       return waitOf(error);
     }
   };
+
+/**
+ * The context window of the models the Brain's work asks, in tokens: the
+ * smaller of the careful and the quick one's, from the gateway's catalog;
+ * null when either is an OpenAI-compatible endpoint's (the catalog gives
+ * such a model a window it doesn't know), or no model is set up (the
+ * calls then fail as the account's trouble). Null means a version is read
+ * as one piece: a model whose window it overflows refuses the call, and
+ * the item parks.
+ */
+const contextTokensOf = async (env: Env): Promise<number | null> => {
+  let settings: Awaited<ReturnType<typeof modelSettings>>;
+  try {
+    settings = await modelSettings(env);
+  } catch {
+    return null;
+  }
+  const windows = brainModelRoles.map((role) => {
+    try {
+      const ref = parseModelRef(modelForRole(settings, role));
+      if (ref === undefined || ref.provider === "openai-compatible") {
+        return null;
+      }
+      const window = ref.catalog.contextWindow;
+      return window > 0 ? window : null;
+    } catch {
+      return null;
+    }
+  });
+  return windows.every((window) => window !== null)
+    ? Math.min(...windows)
+    : null;
+};
 
 /**
  * Core's embedders, as the Brain's background work uses them: the bulk
@@ -2952,6 +3069,7 @@ export const workBrain = async (
     at,
     embedders: await embeddersOf(env),
     handOvers: handOversOf(env, producers),
+    contextTokens: await contextTokensOf(env),
   });
 };
 
@@ -3002,6 +3120,7 @@ export const alarmHostOf = async (
 ): Promise<{
   ask: AskModel;
   embedders: Embedders;
+  contextTokens: number | null;
   report: (overview: WorkOverview) => Promise<void>;
 }> => {
   const kind = storeKindOf(name);
@@ -3011,6 +3130,9 @@ export const alarmHostOf = async (
   return {
     ask: askModel(env),
     embedders: await embeddersOf(env),
+    // What extraction cuts the person's own sources to, as the shared
+    // store's tick does (`workBrain`).
+    contextTokens: await contextTokensOf(env),
     report: async (overview) => {
       const at = new Date();
       try {

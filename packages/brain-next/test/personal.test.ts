@@ -1271,6 +1271,7 @@ const tick = async (who = person): Promise<void> => {
     at: new Date(),
     embedders: noModel,
     handOvers: noHandOvers,
+    contextTokens: null,
   });
 };
 
