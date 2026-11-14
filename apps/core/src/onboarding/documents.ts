@@ -1,4 +1,5 @@
 import { actorOf } from "@grasp-os/shared/audit";
+import { brainUploadErrors } from "@grasp-os/shared/brain-sources";
 import type { InterviewLocale } from "@grasp-os/shared/onboarding";
 import {
   documentErrors,
@@ -14,6 +15,7 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { uploadErrors, uploadTypes } from "@grasp-os/shared/uploads";
 import { z } from "zod";
 
+import { deleteBrainUpload, uploadToBrain } from "../brain-uploads.ts";
 import { localExtractor } from "../files/extract.ts";
 import { modelSettings, modelForRole, models } from "../models.ts";
 import { NAMED } from "./stephen.ts";
@@ -27,12 +29,14 @@ import { onboardingStore } from "./store.ts";
 // can't use it without: an old version or a draft, or a team he can't
 // tell.
 //
-// The onboarding keeps that reading, in its own store, and nothing else
-// of the document (GRA-1889): the file is the company's working material
-// for the interviews, not something to recall, and nothing reads it again
-// once it is read. So its text is extracted in the sandbox, sent once
-// through the gateway, and dropped; it is never kept in the Brain or in
-// Knowledge, where a chat, an App or a workflow could recall it.
+// The onboarding keeps that reading in its own store. The file is kept
+// whole in the Brain (GRA-1889), as an upload of the admin who shared it
+// for them alone (brain-uploads.ts): it shows in their own Sources, only
+// they recall it, and only they delete it; erasing them erases it. Its
+// upload's ID is the document's. Read first, then uploaded, then the
+// reading kept: a share that fails leaves neither behind. Removing a
+// document (`removeDocument`) erases the file, when the one removing it
+// shared it, and forgets the reading with every drawing made with it.
 
 /** Old Office formats, refused with the way out. */
 const oldOffice = new Set(["doc", "xls", "ppt", "rtf"]);
@@ -142,10 +146,51 @@ const requireReadable = (name: string): keyof typeof uploadTypes => {
 };
 
 /**
+ * Erases the upload `id` as `person`, when they may: their own. Nothing
+ * when there is none, or it is another person's alone, which only they
+ * may delete (brain-uploads.ts `mayDelete`).
+ */
+const eraseFile = async (
+  env: Env,
+  person: Identity,
+  id: string
+): Promise<void> => {
+  try {
+    await deleteBrainUpload(env, person, id);
+  } catch (error) {
+    if (brainUploadErrors.codeOf(error) !== "brain.upload_not_found") {
+      throw error;
+    }
+  }
+};
+
+/**
+ * Keeps the file whole, as `person`'s upload `id` for them alone; nothing
+ * of it once that fails, whatever the Brain made of it meanwhile.
+ */
+const keepFile = async (
+  env: Env,
+  person: Identity,
+  id: string,
+  { name, bytes }: ShareDocumentInput
+): Promise<void> => {
+  try {
+    await uploadToBrain(env, person, { name, bytes }, { kind: "me" }, id);
+  } catch (error) {
+    await eraseFile(env, person, id);
+    throw documentErrors.create(
+      brainUploadErrors.codeOf(error) === "brain.upload_text_too_long"
+        ? "document.too_complex"
+        : "document.not_read"
+    );
+  }
+};
+
+/**
  * Shares a document: its text read in the extractor's sandbox (never sent
  * out to be converted: it stays in the Worker) and read through the model
- * gateway as the onboarding's; then its reading kept, under an ID of its
- * own. Counted as reading.
+ * gateway as the onboarding's; then the file kept for `person` alone, and
+ * its reading under the same ID. Counted as reading.
  */
 export const shareDocument = async (
   env: Env,
@@ -155,7 +200,7 @@ export const shareDocument = async (
   const extension = requireReadable(input.name);
   const model = await readingModel(env);
   const store = onboardingStore(env);
-  // What the gateway records the call read: this document, by its ID.
+  // The document's ID, its upload's: what the gateway records the call read.
   const id = crypto.randomUUID();
   let text: string;
   try {
@@ -212,8 +257,37 @@ export const shareDocument = async (
     tokensOut: answered.usage.outputTokens,
     seconds: 0,
   });
-  return await store.addDocument(
-    { id, name: input.name, reading: documentReadingOf(answered.output) },
-    actorOf(person)
-  );
+  const reading = documentReadingOf(answered.output);
+  await keepFile(env, person, id, input);
+  try {
+    return await store.addDocument(
+      { id, name: input.name, reading },
+      actorOf(person)
+    );
+  } catch (error) {
+    await eraseFile(env, person, id);
+    throw error;
+  }
+};
+
+/**
+ * Removes the shared document `id`, as `person`: its file erased first,
+ * when it is theirs (another admin's stays in that admin's own Sources
+ * until they delete it), then its reading forgotten, with every drawing
+ * made since it was shared and what of those the brain holds (the store's
+ * `forgetDocuments`, audited by counts). Either step that fails leaves the
+ * rest to a second remove. `document.not_found` when there is none.
+ */
+export const removeDocument = async (
+  env: Env,
+  person: Identity,
+  id: string
+): Promise<void> => {
+  const store = onboardingStore(env);
+  const shared = await store.documents();
+  if (!shared.some((document) => document.id === id)) {
+    throw documentErrors.create("document.not_found");
+  }
+  await eraseFile(env, person, id);
+  await store.forgetDocuments([id], actorOf(person));
 };

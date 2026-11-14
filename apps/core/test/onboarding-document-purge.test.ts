@@ -602,6 +602,45 @@ describe(
       });
     });
 
+    it("takes its reading, the answer and every drawing made with it out of the store, both databases, the audit log and the turns when an admin removes it, and draws the work again", async () => {
+      const { api: admin } = await signedInApi(idp, "admin");
+      const word = sentinelOf();
+      const id = await share(admin, `removed-${unique()}.docx`, word);
+      const ids = await team();
+      await toldAll(ids);
+      const drewWith = await drawAll(ids, word, word);
+      await intakeAlike();
+      const before = await leftOf(admin, ids, word);
+      await admin.onboarding.removeDocument(id);
+      const removedDetail = await detailOf("onboarding.document.purged");
+      const drewAgainWith = await drawAll(ids, "Zendesk", word);
+      await intakeAlike();
+      const after = await leftOf(admin, ids, word);
+      const tickets = await ticketsOf(ids.team);
+      expect({
+        drewWith,
+        before: before.shown,
+        removed: removedDetail?.documents,
+        drewAgainWith,
+        after,
+        drawnAgain: tickets?.drawn?.steps.map(({ tool }) => tool),
+      }).toStrictEqual({
+        drewWith: true,
+        before: { documents: true, brief: true, brain: true },
+        removed: 1,
+        drewAgainWith: false,
+        after: {
+          store: [],
+          core: [],
+          knowledge: [],
+          audit: false,
+          turns: false,
+          shown: { documents: false, brief: false, brain: false },
+        },
+        drawnAgain: ["Zendesk", "Zendesk"],
+      });
+    });
+
     it("forgets a reading holding a purged term, and keeps one holding none", async () => {
       const signed = await signedInApi(idp, "admin");
       const { api: admin } = signed;

@@ -186,8 +186,8 @@ export const coreErasure = (env: Env): OnErase => ({
   ...uploadErasure(env),
   ...appsErasure(env),
   // No copy core keeps is a Knowledge document's by its place: the
-  // onboarding's readings were the one, and it keeps no file since
-  // GRA-1889 (onboarding/document-erasure.ts).
+  // onboarding's readings were the one, and their files are uploads in
+  // the Brain since GRA-1889 (onboarding/document-erasure.ts).
   forgetDocuments: async () => {
     // Nothing to forget.
   },

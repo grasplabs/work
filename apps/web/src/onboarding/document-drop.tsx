@@ -1,8 +1,18 @@
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@grasp-os/ui/components/alert-dialog";
 import { Button } from "@grasp-os/ui/components/button";
 import { Progress } from "@grasp-os/ui/components/progress";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { plural } from "@lingui/core/macro";
-import { useLingui } from "@lingui/react/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
 import {
   ArrowUpIcon,
   CircleAlertIcon,
@@ -210,6 +220,61 @@ const useReading = (row: DocumentRow): number => {
 };
 
 /**
+ * Removes a document that was read, once confirmed: it can't be undone.
+ * Stephen forgets what he read in it, and the file goes from the Brain of
+ * the admin who shared it, when that is who removes it.
+ */
+const RemoveRead = ({
+  file,
+  onRemove,
+}: {
+  file: string;
+  onRemove: () => void;
+}) => {
+  const { t } = useLingui();
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <Button
+        aria-label={t`Remove ${file}`}
+        data-remove
+        onClick={() => {
+          setOpen(true);
+        }}
+        size="icon-sm"
+        variant="ghost"
+      >
+        <XIcon />
+      </Button>
+      <AlertDialog onOpenChange={setOpen} open={open}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t`Remove ${file}?`}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t`I forget what I read in it, and draw again what I drew with it. If you shared it, its file is deleted from your Brain too; if another admin did, it stays in theirs until they delete it. This can’t be undone.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>
+              <Trans>Cancel</Trans>
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setOpen(false);
+                onRemove();
+              }}
+              variant="destructive"
+            >
+              {t`Remove`}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+};
+
+/**
  * One document. While it is read, a bar fills and a count goes up, both
  * from one value, so they always agree; read, the label turns and the
  * check draws.
@@ -265,6 +330,23 @@ const Row = ({ row, onRemove }: { row: DocumentRow; onRemove: () => void }) => {
       </>
     );
   }
+  // A failed row goes at once; a read one, once confirmed.
+  let action = <span aria-hidden="true" className="size-8" />;
+  if (row.state === "failed") {
+    action = (
+      <Button
+        aria-label={t`Remove ${file}`}
+        data-remove
+        onClick={onRemove}
+        size="icon-sm"
+        variant="ghost"
+      >
+        <XIcon />
+      </Button>
+    );
+  } else if (row.state === "read") {
+    action = <RemoveRead file={file} onRemove={onRemove} />;
+  }
   return (
     <li className={cn("min-w-0 overflow-hidden", rowEntrance)}>
       <div className="bg-card document-row mt-2 grid min-h-14 items-center gap-x-3 rounded-lg border py-2 pr-2 pl-2.25">
@@ -301,19 +383,7 @@ const Row = ({ row, onRemove }: { row: DocumentRow; onRemove: () => void }) => {
             </span>
           ) : null}
         </span>
-        {row.state === "failed" ? (
-          <Button
-            aria-label={t`Remove ${file}`}
-            data-remove
-            onClick={onRemove}
-            size="icon-sm"
-            variant="ghost"
-          >
-            <XIcon />
-          </Button>
-        ) : (
-          <span aria-hidden="true" className="size-8" />
-        )}
+        {action}
       </div>
     </li>
   );

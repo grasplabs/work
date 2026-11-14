@@ -1165,6 +1165,8 @@ const Documents = (props: StepProps) => {
   const saidProblemOf = useSaidProblemOf();
   const [pending, setPending] = useState<Pending[]>([]);
   const [fresh, setFresh] = useState(false);
+  // Why a document that was read could not be removed.
+  const [removeProblem, setRemoveProblem] = useState<string>();
   // Whether the step is still on screen: a reading that ends after it is left is kept, but not said.
   const here = useRef(true);
   useEffect(() => {
@@ -1221,7 +1223,7 @@ const Documents = (props: StepProps) => {
     }
     told.current += 1;
   };
-  // Core keeps two documents of the same name as two: each row is its own upload, by an id of its own.
+  // Core keeps two documents of the same name as two: each is its own upload in the Brain, by an id of its own.
   const take = (from: (File | PickedFile)[]) => {
     const added = from.map((each, at): Pending => ({
       key: crypto.randomUUID(),
@@ -1330,6 +1332,17 @@ const Documents = (props: StepProps) => {
       await refresh();
     }
   };
+  // A document that was read, removed in core: its reading forgotten, its file erased when theirs.
+  const removeKept = async (id: string) => {
+    setRemoveProblem(undefined);
+    const removed = await run(async (session) => {
+      await session.onboarding.removeDocument(id);
+      return true;
+    }, setRemoveProblem);
+    if (removed === true) {
+      await refresh();
+    }
+  };
   const reading = pending.filter((each) => each.state === "reading");
   const count = kept.length;
   const rows: DocumentRow[] = [
@@ -1363,10 +1376,15 @@ const Documents = (props: StepProps) => {
         <DocumentDrop
           onAdd={take}
           onRemove={(row) => {
+            if (row.state === "read") {
+              void removeKept(row.key);
+              return;
+            }
             setPending((now) => now.filter((each) => each.key !== row.key));
           }}
           rows={rows}
         />
+        <ErrorText>{removeProblem}</ErrorText>
         {suites.length === 0 ? null : (
           <div className="flex flex-col items-center gap-2">
             <div className="flex flex-wrap justify-center gap-2">

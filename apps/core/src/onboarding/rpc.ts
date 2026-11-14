@@ -83,7 +83,7 @@ import {
   placeItems,
   sharePlaceFile,
 } from "./document-places.ts";
-import { shareDocument } from "./documents.ts";
+import { removeDocument, shareDocument } from "./documents.ts";
 import { gateView, openAsFlowSays } from "./gate.ts";
 import { connectHr, onboardingHr, readOnboardingHr } from "./hr.ts";
 import { mondayOf } from "./rules.ts";
@@ -428,6 +428,14 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
         input
       );
       return await shareDocument(this.#env, person, parsed);
+    });
+  }
+
+  async removeDocument(id: string): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      const parsed = documentErrors.parse("document.invalid", z.string(), id);
+      await removeDocument(this.#env, person, parsed);
     });
   }
 

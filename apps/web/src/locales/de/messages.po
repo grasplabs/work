@@ -3502,6 +3502,7 @@ msgstr "Ausführen nicht möglich: {unread}"
 #: src/knowledge/new-collection.tsx
 #: src/knowledge/new-document.tsx
 #: src/link-confirmation.tsx
+#: src/onboarding/document-drop.tsx
 #: src/onboarding/place-picker.tsx
 #: src/projects/file-item-dialog.tsx
 #: src/projects/project-dialog.tsx
@@ -7050,6 +7051,10 @@ msgstr "Diese konnte ich nicht lesen"
 #: src/onboarding/about-story.tsx
 msgid "I do every interview myself. Here’s what that sounds like."
 msgstr "Jedes Interview führe ich selbst. So klingt das."
+
+#: src/onboarding/document-drop.tsx
+msgid "I forget what I read in it, and draw again what I drew with it. If you shared it, its file is deleted from your Brain too; if another admin did, it stays in theirs until they delete it. This can’t be undone."
+msgstr "Ich vergesse, was ich darin gelesen habe, und zeichne neu, was ich damit gezeichnet habe. Hast du es geteilt, wird die Datei auch aus deinem Brain gelöscht; hat ein anderer Admin es geteilt, bleibt sie in dessen Brain, bis sie dort gelöscht wird. Das lässt sich nicht rückgängig machen."
 
 #: src/onboarding/hr-leads.tsx
 msgid "I found nobody in {name}."
@@ -11409,6 +11414,7 @@ msgstr "Etwas merken"
 #: src/apps/data-model-changes.tsx
 #: src/apps/field-editor.tsx
 #: src/connections/tool-permissions.tsx
+#: src/onboarding/document-drop.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/ai-providers.tsx
 msgid "Remove"
@@ -11424,6 +11430,10 @@ msgstr "Entfernen"
 #: src/onboarding/document-drop.tsx
 msgid "Remove {file}"
 msgstr "{file} entfernen"
+
+#: src/onboarding/document-drop.tsx
+msgid "Remove {file}?"
+msgstr "{file} entfernen?"
 
 #: src/settings/ai-providers.tsx
 msgid "Remove {label}"

@@ -341,9 +341,10 @@ export const kickoff = sqliteTable(
 );
 
 /**
- * Documents the company's admin shared (onboarding/documents.ts), by an ID
- * of their own: Stephen's reading of each (JSON, `DocumentReading`), and
- * the admin's answer to its question. The file itself is never kept.
+ * Documents the company's admin shared (onboarding/documents.ts), by their
+ * file's upload in the Brain (brain-uploads.ts): Stephen's reading of each
+ * (JSON, `DocumentReading`), and the admin's answer to its question. The
+ * file itself is the Brain's.
  */
 export const documents = sqliteTable("documents", {
   id: text().primaryKey(),

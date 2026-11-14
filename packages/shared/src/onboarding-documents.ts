@@ -7,8 +7,9 @@ import { uploadMaxBytes, uploadNameSchema } from "./uploads.ts";
 // Documents the company's admin shares in the onboarding (core's
 // onboarding/documents.ts): each is read at once for what it is about, the
 // tools and teams it names, and what it leaves open about the work, which
-// Stephen asks the people who do it, and only that reading is kept. He
-// asks the admin only what nobody else can say, with answers to pick from.
+// Stephen asks the people who do it. The reading is the onboarding's; the
+// file is kept in the Brain for the admin who shared it alone. He asks
+// the admin only what nobody else can say, with answers to pick from.
 // From the prototype's `lib/document-reading.ts`.
 
 /** The longest text of one document that is read, in characters. */
@@ -50,7 +51,7 @@ export interface DocumentReading {
 
 /** A document shared in the onboarding. */
 export interface OnboardingDocument {
-  /** Its ID, the onboarding's own. */
+  /** Its ID: its file's upload's, in the Brain of the admin who shared it. */
   id: string;
   name: string;
   /** ISO 8601. */
@@ -79,8 +80,16 @@ export const documentAnswerMaxLength = 200;
 /** What the company's admin does with documents in the onboarding. */
 export interface OnboardingDocumentsApi {
   documents: () => Promise<OnboardingDocument[]>;
-  /** Reads the file at once and keeps its reading, never the file. */
+  /**
+   * Reads the file at once and keeps its reading; the file itself is kept
+   * in the Brain for the admin who shared it alone.
+   */
   shareDocument: (input: ShareDocumentInput) => Promise<OnboardingDocument>;
+  /**
+   * Forgets a document's reading and what was drawn with it, and erases
+   * its file when the admin removing it shared it. Can't be undone.
+   */
+  removeDocument: (id: string) => Promise<void>;
   /** Keeps the admin's answer to a document's question. */
   answerDocument: (id: string, answer: string) => Promise<OnboardingDocument>;
 }

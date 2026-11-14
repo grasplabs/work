@@ -76,6 +76,7 @@ import {
   watched as teamsWatched,
 } from "./teams-door.ts";
 import { connectDb } from "./test-env.ts";
+import { wordFile } from "./word-file.ts";
 import {
   builder,
   definitionOf,
@@ -1893,30 +1894,55 @@ describe(
 
     it("gives away nothing core's producers handed over to whoever the producer would not let read it", async () => {
       // Planted through each producer, as core hands them over: a run that
-      // ended for the person it acted for, and a turn of a person's own
-      // chat (GRA-1805), its question and answer both marked (the question
-      // alone is kept). Then core's
-      // surfaces are probed as the outsider and as an admin, neither of
-      // whom reads either.
-      const [otherAdmin, { userId: outsider }, runner, chatter] =
+      // ended for the person it acted for, a turn of a person's own chat
+      // (GRA-1805), its question and answer both marked (the question
+      // alone is kept), and a document another admin shared in the
+      // onboarding (GRA-1889), for them alone. Then core's surfaces are
+      // probed as the outsider and as an admin, neither of whom reads any.
+      const [otherAdmin, { userId: outsider }, runner, chatter, sharer] =
         await Promise.all([
           signedInApi(idp, "admin"),
           signedInWithRole(idp, "user"),
           builder(),
           signedInApi(idp, "user"),
+          signedInApi(idp, "admin"),
         ]);
       const sharedWord = `s${unique()}`;
       const markers = {
         "a run of someone else": markerWord(),
         "a question in someone else's chat": markerWord(),
         "an answer in someone else's chat": markerWord(),
+        "a document another admin shared in the onboarding": markerWord(),
       };
       const {
         "a run of someone else": runMarker,
         "a question in someone else's chat": askedMarker,
         "an answer in someone else's chat": answerMarker,
+        "a document another admin shared in the onboarding": sharedMarker,
       } = markers;
-      await answeringProvider(() => says(`${sharedWord} ${answerMarker}`));
+      // The onboarding's reading of a document is the model's answer as
+      // data; every other prompt is answered with the chat's words.
+      await answeringProvider((requests) =>
+        JSON.stringify(requests.at(-1)?.body ?? null).includes("<document")
+          ? says(
+              JSON.stringify({
+                about: "How claims are booked.",
+                tools: [],
+                teams: [],
+                unclear: [],
+                question: "",
+                options: [],
+              })
+            )
+          : says(`${sharedWord} ${answerMarker}`)
+      );
+      const shared = await sharer.api.onboarding.shareDocument({
+        locale: "en",
+        name: `claims-${unique()}.docx`,
+        bytes: wordFile([
+          `${sharedWord} claims are booked as ${sharedMarker}.`,
+        ]),
+      });
       const chat = await chatter.api.chats.create("Questions");
       await workspace(env, personalWorkspaceId(chatter.userId)).ask(
         chatIdSchema.parse(chat.id),
@@ -1954,6 +1980,8 @@ describe(
         markers: Object.values(markers),
         hiddenVersions: everyVersionOf(
           { producer: "run", id: runId ?? "" },
+          // The shared document's file: an upload, by the document's ID.
+          { producer: "upload", id: shared.id },
           ...(turn === undefined ? [] : [turn])
         ),
         hiddenInstructionFiles: [],
@@ -1973,13 +2001,15 @@ describe(
       ];
       const runnerFinds = await textsFor(runner.userId, runMarker);
       const chatterFinds = await textsFor(chatter.userId, askedMarker);
+      const sharerFinds = await textsFor(sharer.userId, sharedMarker);
 
       expect({
         findings,
-        // The runner and the chatter do find theirs.
+        // The runner, the chatter and the admin who shared do find theirs.
         runner: runnerFinds.length,
         chatter: chatterFinds.length,
-      }).toStrictEqual({ findings: [], runner: 1, chatter: 1 });
+        sharer: sharerFinds.length,
+      }).toStrictEqual({ findings: [], runner: 1, chatter: 1, sharer: 1 });
     });
 
     it("never wakes or addresses one person's own store for another's activity, their store's own work or staff's report", async () => {

@@ -9,10 +9,11 @@ import { onboardingStore } from "./store.ts";
 // reading holding one whole, with every drawing made since it was shared
 // and what of those the brain holds (the store's `forgetDocuments`). Never
 // rewritten instead: the model's words for the document may say a term
-// otherwise than the purge spells it. The onboarding keeps no file, so a
-// purge naming a Knowledge document never names one of these (GRA-1889),
-// and a reading names no person, so a personal purge has no one to forget
-// here.
+// otherwise than the purge spells it. The file is an upload in the Brain,
+// never a Knowledge document (GRA-1889), so a purge naming a document
+// never names one of these; an admin removes one instead (documents.ts
+// `removeDocument`). A reading names no person, so a personal purge has no
+// one to forget here.
 
 /** Every text a document's reading keeps: its name, the reading and the admin's answer. */
 const textsOf = ({ name, reading, answer }: OnboardingDocument): string[] => [
