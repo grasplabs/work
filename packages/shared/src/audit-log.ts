@@ -210,7 +210,9 @@ const typeRules: readonly {
   // A call of the chat agent's code that nothing else records: a listing,
   // a catalog or a run's status, or a call refused before it did anything.
   // Its calls that can change something (a connector call, an App's
-  // export) record themselves under their own actions.
+  // export) record themselves under their own actions. The recall before a
+  // chat's question (method `brain.recall`, core's turn-recall.ts) says
+  // what it read as (`reads`, `TurnRecallReads` in audit.ts).
   { action: "agent.call", type: "read" },
   { action: "model", type: "model_call" },
   { action: "permission", type: "permission" },

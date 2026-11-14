@@ -31,10 +31,12 @@ import {
 } from "../src/turn-recall.ts";
 import {
   chatOf,
+  codeStep,
   model,
   says,
   setObjectEnv,
   toolResults,
+  toolStep,
 } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents, loggedEvents } from "./audit-events.ts";
@@ -77,6 +79,52 @@ const owner = (personId: string): SourceReaders => ({
   kind: "owner",
   personId,
 });
+
+/**
+ * Adds `text` as a source everyone in the company may read, to the shared
+ * store as a producer would: core's producers add none yet. Every test's
+ * person reads it, so its text holds only words no other test asks for.
+ */
+const forEveryone = async (text: string): Promise<SourceRef> => {
+  const source = newSource();
+  await brainOf(inJurisdiction(env, env.BRAIN_STORE)).addSource({
+    source: `upload:${source.id}`,
+    change: crypto.randomUUID(),
+    text,
+    access: { kind: "audience", group: "company" },
+  });
+  return source;
+};
+
+/** What happens to a recalled source: nothing. */
+const leftAlone = async () => {
+  // Nothing changes: what was recalled stays in the chat's history.
+};
+/** A new version only a team may read: the person's own team even. */
+const narrowedToTeam = async (
+  source: SourceRef,
+  depot: string,
+  teamId: string
+) => {
+  await brainOf(inJurisdiction(env, env.BRAIN_STORE)).addSource({
+    source: `upload:${source.id}`,
+    change: crypto.randomUUID(),
+    text: `${depot} now only for the team.`,
+    access: { kind: "audience", group: `team:${teamId}` },
+  });
+};
+/** The source erased. */
+const erasedWhole = async (
+  source: SourceRef,
+  _depot: string,
+  teamId: string
+) => {
+  await eraseSource(env, {
+    source,
+    readers: { kind: "team", teamId },
+    reason: "deleted",
+  });
+};
 
 /** Adds `text` to the Brain as a new source `readers` may read. */
 const added = async (text: string, readers: SourceReaders) => {
@@ -383,6 +431,7 @@ describe("the recall before a chat's question", setUpTime, () => {
       recalls: recalls.map(({ detail }) => ({
         versions: detail.versions,
         run: detail.run,
+        reads: detail.reads,
         outcome: detail.outcome,
       })),
       saysWhat: JSON.stringify(recalls).includes(depot),
@@ -391,6 +440,8 @@ describe("the recall before a chat's question", setUpTime, () => {
         {
           versions: 1,
           run: recallRunIn(provider.requests[0]?.body),
+          // Her own chat: as her, her own store too; no count of people.
+          reads: "person",
           outcome: "ok",
         },
       ],
@@ -829,12 +880,13 @@ describe("a recall before a question that doesn't hand over", setUpTime, () => {
 });
 
 describe("what the recall before a question may reach", setUpTime, () => {
-  it("holds what only the person may read where the answer reaches them alone: their own chat in Grasp, in a turn they started", async () => {
+  it("reads as the person only in their own chat in Grasp, in a turn they started, and as the company alone everywhere else", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInWithRole(idp, "user");
     const depot = word();
     const ownMarker = word();
     const teamMarker = word();
+    const companyMarker = word();
     const teamId = crypto.randomUUID();
     const db = drizzle(env.DB);
     await db.insert(teams).values({
@@ -858,7 +910,14 @@ describe("what the recall before a question may reach", setUpTime, () => {
       kind: "team",
       teamId,
     });
+    await forEveryone(`${depot} ${companyMarker}`);
     const question = `What about depot ${depot}?`;
+    /** What of each source reached the model, in `bodies`. */
+    const of = (bodies: string) => ({
+      own: bodies.includes(ownMarker),
+      team: bodies.includes(teamMarker),
+      company: bodies.includes(companyMarker),
+    });
     const granted = async (agentId: string) => {
       await requestGranted(idp, admin, {
         subject: { type: "agent", agentId },
@@ -875,11 +934,7 @@ describe("what the recall before a question may reach", setUpTime, () => {
       await granted(agentId);
       const provider = await fakeProvider(says("Noted."));
       await ask(agentId);
-      const bodies = JSON.stringify(provider.requests.map(({ body }) => body));
-      return {
-        own: bodies.includes(ownMarker),
-        team: bodies.includes(teamMarker),
-      };
+      return of(JSON.stringify(provider.requests.map(({ body }) => body)));
     };
     const through =
       (platform: string, shared?: boolean) => async (agentId: string) =>
@@ -912,24 +967,24 @@ describe("what the recall before a question may reach", setUpTime, () => {
     const teamsChat = await sent(through("teams"));
     const thread = await sent(through("slack", true));
 
+    const companyOnly = { own: false, team: false, company: true };
     expect({
-      web: { own: web.includes(ownMarker), team: web.includes(teamMarker) },
-      unattended: {
-        own: unattended.includes(ownMarker),
-        team: unattended.includes(teamMarker),
-      },
+      web: of(web),
+      unattended: of(unattended),
       slack,
       teams: teamsChat,
       thread,
     }).toStrictEqual({
-      web: { own: true, team: true },
-      // Not started by them: their team's, never their own.
-      unattended: { own: false, team: true },
-      // Kept by the chat app too: their team's, never their own.
-      slack: { own: false, team: true },
-      teams: { own: false, team: true },
-      // Read by others too: nothing, not even their team's.
-      thread: { own: false, team: false },
+      // Theirs alone to read: their own, their team's and the company's.
+      web: { own: true, team: true, company: true },
+      // Not started by them: what the whole company may read alone.
+      unattended: companyOnly,
+      // Kept by the chat app too, whoever reads it later: the company's.
+      slack: companyOnly,
+      teams: companyOnly,
+      // Read by others (here only the person is on its roster): the
+      // company's, never their team's or their own.
+      thread: companyOnly,
     });
   });
 
@@ -974,6 +1029,410 @@ describe("what the recall before a question may reach", setUpTime, () => {
       answered: provider.requests.length,
       marker: sent.includes(marker),
     }).toStrictEqual({ answered: 1, marker: false });
+  });
+
+  it("reads as the turn's place for what the chat's own search and code recall too: their teams only in their own chat in Grasp, the company alone elsewhere", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = await signedInWithRole(idp, "user");
+    const teamId = crypto.randomUUID();
+    const db = drizzle(env.DB);
+    await db.insert(teams).values({
+      id: teamId,
+      name: `Team ${unique()}`,
+      organizationId,
+      createdAt: new Date(),
+    });
+    await db.insert(teamMembers).values({
+      id: crypto.randomUUID(),
+      teamId,
+      userId: person.userId,
+      createdAt: new Date(),
+    });
+    // A question the recall before it finds nothing for: what reaches the
+    // model of a depot is the code's or the tool's.
+    const question = "Please look that up.";
+    /**
+     * A depot of its own for one probe, held by the person's own source,
+     * their team's and the company's, and the turn's model steps: code
+     * that recalls it (`env.brain.recall`), or the `searchBrain` tool.
+     */
+    const probeOf = async (way: "code" | "tool") => {
+      const depot = word();
+      const markers = { own: word(), team: word(), company: word() };
+      await added(`Depot ${depot} own ${markers.own}`, owner(person.userId));
+      await added(`Depot ${depot} team ${markers.team}`, {
+        kind: "team",
+        teamId,
+      });
+      await forEveryone(`${depot} ${markers.company}`);
+      const asked = { question: `depot ${depot}`, budget: { tokens: 800 } };
+      const step =
+        way === "code"
+          ? codeStep(
+              `export default async (self, env) => { const pack = await env.brain.recall(${JSON.stringify(asked)}); return pack.items.map(({ text }) => text).join(" | "); };`
+            )
+          : toolStep("searchBrain", { question: asked.question });
+      /** Which sources reached the model, in `bodies`. */
+      const found = (bodies: unknown[]) => {
+        const sent = JSON.stringify(bodies);
+        return {
+          own: sent.includes(markers.own),
+          team: sent.includes(markers.team),
+          company: sent.includes(markers.company),
+        };
+      };
+      return { steps: [step, says("Noted.")], found };
+    };
+    const granted = async (agentId: string) => {
+      await requestGranted(idp, admin, {
+        subject: { type: "agent", agentId },
+        object: { type: "platform" },
+        actions: ["brain"],
+        binding: "BRAIN",
+      });
+    };
+    /** Asked in the person's own web chat, by them or by an event. */
+    const inWeb = async (way: "code" | "tool", unattended: boolean) => {
+      const { steps, found } = await probeOf(way);
+      const chat = await recallingChatOf(person.userId, ...steps);
+      await (unattended
+        ? chat.stub.askUnattended(chat.chat.id, { text: question, model })
+        : chat.ask(question));
+      return found(chat.provider.requests.map(({ body }) => body));
+    };
+    /** Asked through a chat app, in a direct message or a shared thread. */
+    const inApp = async (
+      way: "code" | "tool",
+      platform: string,
+      shared: boolean
+    ) => {
+      const { steps, found } = await probeOf(way);
+      const agentId = crypto.randomUUID();
+      await granted(agentId);
+      const provider = await fakeProvider(...steps);
+      await workspace(env, personalWorkspaceId(person.userId)).askThrough(
+        person.userId,
+        agentId,
+        platform,
+        question,
+        undefined,
+        shared
+          ? {
+              thread: `C${unique()}`,
+              kind: "group",
+              audience: { members: [person.userId], outsiders: false },
+            }
+          : { kind: "direct" }
+      );
+      return found(provider.requests.map(({ body }) => body));
+    };
+    const each = async (way: "code" | "tool") => ({
+      web: await inWeb(way, false),
+      unattended: await inWeb(way, true),
+      slack: await inApp(way, "slack", false),
+      teams: await inApp(way, "teams", false),
+      thread: await inApp(way, "slack", true),
+    });
+
+    const companyOnly = { own: false, team: false, company: true };
+    const expected = {
+      // Their own chat, asked there and then: their teams' and the
+      // company's, never their own store (code never reads it).
+      web: { own: false, team: true, company: true },
+      unattended: companyOnly,
+      slack: companyOnly,
+      teams: companyOnly,
+      // A thread others share offers no brain to the code at all.
+      thread: { own: false, team: false, company: false },
+    };
+    expect({
+      code: await each("code"),
+      tool: await each("tool"),
+    }).toStrictEqual({ code: expected, tool: expected });
+  });
+
+  it("recalls in a chat others share only what the company may read, nothing with anyone unnamed in it, nor in a turn nobody started there", async () => {
+    const depot = word();
+    const teamMarker = word();
+    const companyMarker = word();
+    const admin = await signedInApi(idp, "admin");
+    const [ann, ben] = await Promise.all([
+      signedInWithRole(idp, "user"),
+      signedInWithRole(idp, "user"),
+    ]);
+    const teamId = crypto.randomUUID();
+    const db = drizzle(env.DB);
+    await db.insert(teams).values({
+      id: teamId,
+      name: `Team ${unique()}`,
+      organizationId,
+      createdAt: new Date(),
+    });
+    await db.insert(teamMembers).values(
+      [ann, ben].map(({ userId }) => ({
+        id: crypto.randomUUID(),
+        teamId,
+        userId,
+        createdAt: new Date(),
+      }))
+    );
+    // A team both are in: still never recalled where others read the answer.
+    await added(`Depot ${depot} opens at ${teamMarker}`, {
+      kind: "team",
+      teamId,
+    });
+    await forEveryone(`${depot} ${companyMarker}`);
+    const agentId = crypto.randomUUID();
+    await requestGranted(idp, admin, {
+      subject: { type: "agent", agentId },
+      object: { type: "platform" },
+      actions: ["brain"],
+      binding: "BRAIN",
+    });
+    const provider = await fakeProvider(
+      says("Noted."),
+      says("Noted."),
+      says("Noted.")
+    );
+    const stub = workspace(env, personalWorkspaceId(ann.userId));
+    const question = `What about depot ${depot}?`;
+    /**
+     * For what `ask` asked: how many recalls its chat holds, as its last
+     * request carried them, and which sources reached the model.
+     */
+    const sentFor = async (ask: () => Promise<unknown>) => {
+      const before = provider.requests.length;
+      await ask();
+      const sent = provider.requests.slice(before).map(({ body }) => body);
+      const bodies = JSON.stringify(sent);
+      return {
+        recalls: stringsIn(sent.at(-1)).filter((text) =>
+          recallHeader.test(text)
+        ).length,
+        team: bodies.includes(teamMarker),
+        company: bodies.includes(companyMarker),
+      };
+    };
+    /** Ann asks in a group she and Ben are in, as its door does. */
+    const inGroup = async (outsiders: boolean) =>
+      await stub.askThrough(ann.userId, agentId, "teams", question, undefined, {
+        thread: `19:${unique()}@thread.v2`,
+        kind: "group",
+        audience: { members: [ann.userId, ben.userId], outsiders },
+      });
+
+    let chatId = "";
+    const named = await sentFor(async () => {
+      ({ chatId } = await inGroup(false));
+    });
+    // The same chat, woken by a schedule or an event: no roster read for it.
+    const unattended = await sentFor(
+      async () => await stub.askUnattended(chatId, { text: question, model })
+    );
+    // Someone Grasp can't name as a member is in it: a guest, say.
+    const withOutsider = await sentFor(async () => await inGroup(true));
+    // What the shared chat's recall was recorded as reading: never who.
+    const [recorded] = recallsIn(
+      await eventsOf(agentId, (events) => recallsIn(events, chatId).length > 0),
+      chatId
+    );
+
+    expect({
+      named,
+      unattended,
+      withOutsider,
+      recorded: {
+        reads: recorded?.detail.reads,
+        names: JSON.stringify(recorded).includes(ben.userId),
+      },
+    }).toStrictEqual({
+      named: { recalls: 1, team: false, company: true },
+      // Only the first question's recall, as the chat's history holds it.
+      unattended: { recalls: 1, team: false, company: true },
+      withOutsider: { recalls: 0, team: false, company: false },
+      recorded: { reads: "company", names: false },
+    });
+  });
+
+  it("withholds what a chat others share recalled once the whole company may no longer read it: narrowed to a team, or erased", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = await signedInWithRole(idp, "user");
+    const teamId = crypto.randomUUID();
+    const db = drizzle(env.DB);
+    await db.insert(teams).values({
+      id: teamId,
+      name: `Team ${unique()}`,
+      organizationId,
+      createdAt: new Date(),
+    });
+    await db.insert(teamMembers).values({
+      id: crypto.randomUUID(),
+      teamId,
+      userId: person.userId,
+      createdAt: new Date(),
+    });
+    const agentId = crypto.randomUUID();
+    await requestGranted(idp, admin, {
+      subject: { type: "agent", agentId },
+      object: { type: "platform" },
+      actions: ["brain"],
+      binding: "BRAIN",
+    });
+    const stub = workspace(env, personalWorkspaceId(person.userId));
+    /**
+     * A thread others share recalls a company source, `change` happens to
+     * it, then the person asks there again of something else: whether the
+     * second turn's requests still carry what the first recalled.
+     */
+    const resentAfter = async (
+      change: (source: SourceRef, depot: string) => Promise<unknown>
+    ) => {
+      const depot = word();
+      const marker = word();
+      const source = await forEveryone(`${depot} ${marker}`);
+      const provider = await fakeProvider(says("Noted."), says("Noted."));
+      const thread = `19:${unique()}@thread.tacv2;messageid=${unique()}`;
+      const ask = async (text: string) =>
+        await stub.askThrough(
+          person.userId,
+          agentId,
+          "teams",
+          text,
+          undefined,
+          {
+            thread,
+            kind: "channel",
+            audience: { members: [person.userId], outsiders: false },
+          }
+        );
+      await ask(`What about depot ${depot}?`);
+      const first = JSON.stringify(provider.requests.map(({ body }) => body));
+      await change(source, depot);
+      const before = provider.requests.length;
+      await ask("Thanks, and what else is new?");
+      const second = provider.requests.slice(before).map(({ body }) => body);
+      return {
+        recalled: first.includes(marker),
+        answered: second.length > 0,
+        resent: JSON.stringify(second).includes(marker),
+      };
+    };
+
+    const unchanged = await resentAfter(async () => {
+      // Nothing changes: what was recalled stays in the chat's history.
+    });
+    const narrowed = await resentAfter(async (source, depot) => {
+      // A new version only a team may read, the person's own team even.
+      await brainOf(inJurisdiction(env, env.BRAIN_STORE)).addSource({
+        source: `upload:${source.id}`,
+        change: crypto.randomUUID(),
+        text: `Depot ${depot} now only for the team.`,
+        access: { kind: "audience", group: `team:${teamId}` },
+      });
+    });
+    const erased = await resentAfter(async (source) => {
+      await eraseSource(env, {
+        source,
+        readers: { kind: "team", teamId },
+        reason: "deleted",
+      });
+    });
+
+    expect({ unchanged, narrowed, erased }).toStrictEqual({
+      unchanged: { recalled: true, answered: true, resent: true },
+      narrowed: { recalled: true, answered: true, resent: false },
+      erased: { recalled: true, answered: true, resent: false },
+    });
+  });
+
+  it("withholds what a chat's code or search recalled in a direct message once the whole company may no longer read it", async () => {
+    const admin = await signedInApi(idp, "admin");
+    /**
+     * In a new person's Teams direct message, code (`env.brain.recall`)
+     * or the `searchBrain` tool recalls a company source; `change`
+     * happens to it; they ask again of something else: whether the second
+     * turn's requests still carry what the first recalled.
+     */
+    const resentAfter = async (
+      way: "code" | "tool",
+      change: (
+        source: SourceRef,
+        depot: string,
+        teamId: string
+      ) => Promise<unknown>
+    ) => {
+      const person = await signedInWithRole(idp, "user");
+      const teamId = crypto.randomUUID();
+      const db = drizzle(env.DB);
+      await db.insert(teams).values({
+        id: teamId,
+        name: `Team ${unique()}`,
+        organizationId,
+        createdAt: new Date(),
+      });
+      await db.insert(teamMembers).values({
+        id: crypto.randomUUID(),
+        teamId,
+        userId: person.userId,
+        createdAt: new Date(),
+      });
+      const agentId = crypto.randomUUID();
+      await requestGranted(idp, admin, {
+        subject: { type: "agent", agentId },
+        object: { type: "platform" },
+        actions: ["brain"],
+        binding: "BRAIN",
+      });
+      const depot = word();
+      const marker = word();
+      const source = await forEveryone(`${depot} ${marker}`);
+      const asked = { question: depot, budget: { tokens: 800 } };
+      const step =
+        way === "code"
+          ? codeStep(
+              `export default async (self, env) => { const pack = await env.brain.recall(${JSON.stringify(asked)}); return pack.items.map(({ text }) => text).join(" | "); };`
+            )
+          : toolStep("searchBrain", { question: asked.question });
+      const provider = await fakeProvider(step, says("Noted."), says("Noted."));
+      const ask = async (text: string) =>
+        await workspace(env, personalWorkspaceId(person.userId)).askThrough(
+          person.userId,
+          agentId,
+          "teams",
+          text,
+          undefined,
+          { kind: "direct" }
+        );
+      // A question the recall before it finds nothing for.
+      await ask("Please look that up.");
+      const first = JSON.stringify(provider.requests.map(({ body }) => body));
+      await change(source, depot, teamId);
+      const before = provider.requests.length;
+      await ask("Thanks, and what else is new?");
+      const second = provider.requests.slice(before).map(({ body }) => body);
+      return {
+        recalled: first.includes(marker),
+        answered: second.length > 0,
+        resent: JSON.stringify(second).includes(marker),
+      };
+    };
+    const kept = { recalled: true, answered: true, resent: true };
+    const withheld = { recalled: true, answered: true, resent: false };
+    expect({
+      code: {
+        unchanged: await resentAfter("code", leftAlone),
+        narrowed: await resentAfter("code", narrowedToTeam),
+        erased: await resentAfter("code", erasedWhole),
+      },
+      tool: {
+        unchanged: await resentAfter("tool", leftAlone),
+        narrowed: await resentAfter("tool", narrowedToTeam),
+        erased: await resentAfter("tool", erasedWhole),
+      },
+    }).toStrictEqual({
+      code: { unchanged: kept, narrowed: withheld, erased: withheld },
+      tool: { unchanged: kept, narrowed: withheld, erased: withheld },
+    });
   });
 
   it("never hands one person's sources to another's chat, however the analysis is steered", async () => {

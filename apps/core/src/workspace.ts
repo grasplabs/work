@@ -129,6 +129,11 @@ import {
 } from "./channels/stephen-rules.ts";
 import type { HeldWriteRefusal, TurnCheck } from "./channels/stephen-rules.ts";
 import { questionText } from "./chat-agent.ts";
+import {
+  audienceMaxMembers,
+  audienceOf,
+  keepAudience,
+} from "./chat-audiences.ts";
 import { revokeChatPermissions } from "./chat-connections.ts";
 import type {
   TurnCapture,
@@ -194,11 +199,6 @@ import { dropHeldStarts } from "./held-starts.ts";
 import { readableSources, withheldSourceDetail } from "./history-access.ts";
 import { instructionFilesFor } from "./instruction-files.ts";
 import type { InstructionContext } from "./instruction-files.ts";
-import {
-  audienceMaxMembers,
-  audienceOf,
-  keepAudience,
-} from "./knowledge/access.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
 import { cited } from "./knowledge/citations.ts";
 import { brainOf } from "./knowledge/ports.ts";
@@ -295,7 +295,7 @@ const throttled = (tell: (text: string) => unknown) => {
 /**
  * A chat others share on a chat platform, as its door names it: the Chat
  * SDK's thread, whether it is a group chat or a channel, and who is in it
- * now (`Audience` in knowledge/access.ts).
+ * now (`Audience` in chat-audiences.ts).
  */
 const sharedChatSchema = z.strictObject({
   thread: z.string().min(1).max(2048),
@@ -2146,6 +2146,7 @@ export class Workspace extends DurableObject<Env> {
           makeOf(chat)
         ),
         shared,
+        audience,
         personal: answersAlone(chat, unattended),
         readsBrain: await hasBrainGrant(this.env, authority),
         context,

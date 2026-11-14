@@ -3,7 +3,7 @@ import { memoriesPublish, turnMemoryLimits } from "@grasp-os/brain/memories";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { keepAudience } from "../src/knowledge/access.ts";
+import { keepAudience } from "../src/chat-audiences.ts";
 import { sharedChatsOf } from "../src/knowledge/memory-publish.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
 import { newChat } from "./contexts.ts";

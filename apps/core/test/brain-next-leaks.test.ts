@@ -1,4 +1,5 @@
 import {
+  brainOf,
   exactCandidatesMax,
   recallBudgetMax,
 } from "@grasp-os/brain-next/contract";
@@ -56,6 +57,7 @@ import { addedSharedFile, saveInstructions } from "./instruction-saves.ts";
 import { answeringProvider, testModel } from "./model-provider.ts";
 import { noProducers } from "./no-producers.ts";
 import { carrying } from "./platform-providers.ts";
+import { acmeTenant } from "./sign-in-config.ts";
 import { routed, signedInApi, signedInWithRole, unique } from "./sign-in.ts";
 import {
   member as teamsMember,
@@ -66,6 +68,7 @@ import {
   onGroupRoster,
   post,
   reached,
+  teamsPerson,
   watched as teamsWatched,
 } from "./teams-door.ts";
 import { connectDb } from "./test-env.ts";
@@ -100,6 +103,23 @@ import {
 const idp = mockIdp();
 
 teamsWatched();
+
+let chatAgentGrant: Promise<unknown> | undefined;
+
+/**
+ * Grants the chat agent the Brain permission, once for the file: its
+ * binding name can be granted only once.
+ */
+const chatAgentReadsBrain = async (): Promise<void> => {
+  chatAgentGrant ??= (async () =>
+    await requestGranted(idp, await signedInApi(idp, "admin"), {
+      subject: { type: "agent", agentId: chatAgentId },
+      object: { type: "platform" },
+      actions: ["brain"],
+      binding: "BRAIN",
+    }))();
+  await chatAgentGrant;
+};
 
 /** A word nothing else holds. */
 const markerWord = (): string => `m${crypto.randomUUID().replaceAll("-", "")}`;
@@ -1475,13 +1495,7 @@ describe(
       // read is never their own chat either: no instruction file of
       // theirs, and none of their own chat's tools, their connections
       // first.
-      const admin = await signedInApi(idp, "admin");
-      await requestGranted(idp, admin, {
-        subject: { type: "agent", agentId: chatAgentId },
-        object: { type: "platform" },
-        actions: ["brain"],
-        binding: "BRAIN",
-      });
+      await chatAgentReadsBrain();
       const depot = `d${unique()}`;
       const marker = markerWord();
       const userMarker = markerWord();
@@ -1599,6 +1613,156 @@ describe(
         postedInThreads: [false, false, false],
         postedInDirect: true,
         postedToBen: false,
+      });
+    });
+
+    it("recalls only what the whole company may read in every conversation but a person's own chat in Grasp, and nothing while anyone unnamed is in it", async () => {
+      // Through Teams' door as Teams posts (channels/door.ts): who is in a
+      // group chat or channel comes from its roster, read for each
+      // message. Ann asks in each; what reached the model tells what was
+      // recalled. A team she and Ben are both in, and one of hers alone,
+      // are never recalled where others read the answer, nor in her
+      // direct message, which Teams keeps too (GRA-1820).
+      await chatAgentReadsBrain();
+      const ann = await teamsMember(
+        idp,
+        ...Array.from({ length: 8 }, () => says("Noted."))
+      );
+      const ben = await memberAnsweredBy(idp, ann.provider);
+      const depot = `d${unique()}`;
+      const annTeam = markerWord();
+      const both = markerWord();
+      const own = markerWord();
+      const company = markerWord();
+      await add(`Depot ${depot} for Ann's team: ${annTeam}`, {
+        kind: "team",
+        teamId: await newTeam(ann.userId),
+      });
+      await add(`Depot ${depot} for both: ${both}`, {
+        kind: "team",
+        teamId: await newTeam(ann.userId, ben.userId),
+      });
+      await add(`Depot ${depot} Ann's own: ${own}`, {
+        kind: "owner",
+        personId: ann.userId,
+      });
+      // Everyone in the company may read it, as a producer would add it:
+      // core's producers add none yet.
+      await brainOf(inJurisdiction(env, env.BRAIN_STORE)).addSource({
+        source: `upload:${crypto.randomUUID()}`,
+        change: crypto.randomUUID(),
+        text: `Depot ${depot} for everyone: ${company}`,
+        access: { kind: "audience", group: "company" },
+      });
+      const question = `What about depot ${depot}?`;
+      /** What reached the model for what Ann posted. */
+      const sentFor = async (activity: unknown) => {
+        const before = ann.provider.requests.length;
+        await post(activity);
+        const sent = JSON.stringify(
+          ann.provider.requests.slice(before).map(({ body }) => body)
+        );
+        return {
+          answered: ann.provider.requests.length > before,
+          annTeam: sent.includes(annTeam),
+          both: sent.includes(both),
+          own: sent.includes(own),
+          company: sent.includes(company),
+        };
+      };
+      const askedIn = async (
+        conversation: string,
+        kind: "groupChat" | "channel" = "groupChat",
+        changes: Record<string, unknown> = {}
+      ) =>
+        await sentFor({
+          ...mentionIn(ann.teams, conversation, question, kind),
+          ...changes,
+        });
+      const withBen = newGroup();
+      await onGroupRoster(withBen, [
+        { person: ann.teams },
+        { person: ben.teams },
+      ]);
+      const withGuest = newGroup();
+      await onGroupRoster(withGuest, [
+        { person: ann.teams },
+        { person: ben.teams },
+        { person: teamsPerson(), userRole: "guest" },
+      ]);
+      // A channel where both are, then a guest joins before Ann asks again
+      // in the same thread: what was recalled before is sent no more.
+      const channel = `19:${unique()}@thread.tacv2`;
+      const thread = `${channel};messageid=${unique()}`;
+      await onGroupRoster(channel, [
+        { person: ann.teams },
+        { person: ben.teams },
+      ]);
+      // A meeting's chat, whose roster leaves out anonymous attendees: both
+      // on it, named a meeting by its channel data or by its id.
+      const meeting = newGroup();
+      const meetingById = `19:meeting_${unique()}@thread.v2`;
+      for (const conversation of [meeting, meetingById]) {
+        // oxlint-disable-next-line no-await-in-loop -- one roster at a time
+        await onGroupRoster(conversation, [
+          { person: ann.teams },
+          { person: ben.teams },
+        ]);
+      }
+
+      const inWithBen = await askedIn(withBen);
+      const inWithGuest = await askedIn(withGuest);
+      const beforeGuest = await askedIn(thread, "channel");
+      await onGroupRoster(channel, [
+        { person: ann.teams },
+        { person: ben.teams },
+        { person: teamsPerson(), userRole: "guest" },
+      ]);
+      const afterGuestJoined = await askedIn(thread, "channel");
+      const inMeeting = await askedIn(meeting, "groupChat", {
+        channelData: {
+          tenant: { id: acmeTenant },
+          meeting: { id: `MCMx${unique()}` },
+        },
+      });
+      const inMeetingById = await askedIn(meetingById);
+      const inDirect = await sentFor(
+        messageFrom(ann.teams, { text: question })
+      );
+      // Her own recall finds all four: what the model got is no empty Brain.
+      const texts = await textsFor(ann.userId, `depot ${depot}`);
+      const found = texts.join(" ");
+
+      const companyOnly = {
+        answered: true,
+        annTeam: false,
+        both: false,
+        own: false,
+        company: true,
+      };
+      const nothing = { ...companyOnly, company: false };
+      expect({
+        found: [annTeam, both, own, company].map((marker) =>
+          found.includes(marker)
+        ),
+        inWithBen,
+        inWithGuest,
+        beforeGuest,
+        afterGuestJoined,
+        inMeeting,
+        inMeetingById,
+        inDirect,
+      }).toStrictEqual({
+        found: [true, true, true, true],
+        inWithBen: companyOnly,
+        // Someone Grasp can't name as a member: nothing at all.
+        inWithGuest: nothing,
+        beforeGuest: companyOnly,
+        // Nothing recalled, and the earlier recall withheld from history.
+        afterGuestJoined: nothing,
+        inMeeting: nothing,
+        inMeetingById: nothing,
+        inDirect: companyOnly,
       });
     });
 

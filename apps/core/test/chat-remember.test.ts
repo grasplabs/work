@@ -3,9 +3,9 @@ import type { ChatMessage } from "@grasp-os/shared/chat";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { keepAudience } from "../src/chat-audiences.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
-import { keepAudience } from "../src/knowledge/access.ts";
 import {
   codeStep,
   model,
