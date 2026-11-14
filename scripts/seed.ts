@@ -5,8 +5,8 @@
  * the company's name, people in teams and roles, the onboarding's roster and plan, the
  * prototype's Apps with the workflows core can run, 30 days of their
  * runs, a page over each App's own records (scripts/seed/pages.ts),
- * Knowledge, and
- * chats. Run it while `vp run dev` runs.
+ * Knowledge, the Brain's uploads, instruction files and skills
+ * (scripts/seed/brain.ts), and chats. Run it while `vp run dev` runs.
  *
  * Everything goes through core's API as the person who would do it, signed
  * in through the local fake IdP; only what no API does is written into the
@@ -24,16 +24,29 @@
 import { definitionText as appDefinitionText } from "@grasp-os/runtime/definition";
 import type { AppDefinition } from "@grasp-os/runtime/definition";
 import { appErrors } from "@grasp-os/shared/apps";
+import {
+  brainSourceErrors,
+  brainUploadErrors,
+} from "@grasp-os/shared/brain-sources";
+import { instructionFileErrors } from "@grasp-os/shared/instruction-files";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { onboardingErrors, planDays } from "@grasp-os/shared/onboarding";
 import { organizationErrors } from "@grasp-os/shared/organization";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
+import { skillErrors } from "@grasp-os/shared/skills";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { z } from "zod";
 
 import { appDefinition, appFiles } from "./seed/app-files.ts";
 import { apps, decisionResponse } from "./seed/apps.ts";
 import type { AppSeed, WorkflowSeed } from "./seed/apps.ts";
+import {
+  brainChats,
+  confirmAnsweredBy,
+  seedBrain,
+  skills,
+  uploads,
+} from "./seed/brain.ts";
 import { chats, writeTranscript } from "./seed/chats.ts";
 import { companyName, people, roster, teamNames } from "./seed/company.ts";
 import type { Person, PersonKey, TeamName } from "./seed/company.ts";
@@ -728,18 +741,25 @@ const seedOrganization = async (adminSession: Session): Promise<boolean> => {
   return true;
 };
 
-/** The chats, each in its person's Workspace object. */
+/**
+ * The chats, each in its person's Workspace object; one whose answer names
+ * an upload only once recall, as its person, finds that upload.
+ */
 const seedChats = async (
   sessions: ReadonlyMap<PersonKey, Session>
 ): Promise<number> => {
   let created = 0;
   const now = Date.now();
-  for (const chat of chats) {
+  for (const chat of [...chats, ...brainChats]) {
     const { api } = sessionFor(sessions, chat.by);
     // oxlint-disable-next-line no-await-in-loop -- one chat at a time
     const listed = await api.chats.list();
     if (listed.some(({ title }) => title === chat.title)) {
       continue;
+    }
+    if (chat.answeredBy !== undefined) {
+      // oxlint-disable-next-line no-await-in-loop -- one chat at a time
+      await confirmAnsweredBy(api, chat, chat.answeredBy);
     }
     // oxlint-disable-next-line no-await-in-loop -- one chat at a time
     const { id } = await api.chats.create(chat.title);
@@ -782,6 +802,14 @@ const main = async (): Promise<void> => {
     }
     console.info(`${collections.length} Knowledge collections`);
 
+    const { instructionsWritten } = await seedBrain(
+      (key) => sessionFor(sessions, key),
+      teams
+    );
+    console.info(
+      `The Brain: ${uploads.length} uploads, ${skills.length} skills, ${instructionsWritten} new instruction files`
+    );
+
     const appIds = new Map<string, string>();
     for (const seed of apps) {
       // oxlint-disable-next-line no-await-in-loop -- one App at a time
@@ -813,9 +841,13 @@ const main = async (): Promise<void> => {
 try {
   await main();
 } catch (error) {
-  // An App or Knowledge error says what core refused, in its own words.
+  // An App, Knowledge or Brain error says what core refused, in its own words.
   const coded =
     appErrors.codeOf(error) ??
+    brainSourceErrors.codeOf(error) ??
+    brainUploadErrors.codeOf(error) ??
+    instructionFileErrors.codeOf(error) ??
+    skillErrors.codeOf(error) ??
     knowledgeErrors.codeOf(error) ??
     onboardingErrors.codeOf(error) ??
     organizationErrors.codeOf(error) ??
