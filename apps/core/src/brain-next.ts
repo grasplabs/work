@@ -1086,27 +1086,47 @@ export const recalledTokens = ({ items, memories }: RecalledPack): number =>
   memories.reduce((sum, memory) => sum + memoryTokens(memory), 0);
 
 /**
- * Of two copies of one passage or memory, the fuller: the one that takes
- * more of the budget holds more of it (a passage whole rather than its
- * best part; a memory with its quote, then the passage around it), `one`
- * on a tie.
+ * Of two copies of one memory, the fuller: the one that takes more of the
+ * budget holds all the other does (its statement, then its quote, then the
+ * passage around it: a memory's quote and passage are its own, whatever
+ * the question), `one` on a tie.
  */
-const fuller = <T>(
-  one: T,
-  other: T | undefined,
-  tokens: (copy: T) => number
-): T => (other !== undefined && tokens(other) > tokens(one) ? other : one);
+const fuller = (
+  one: RecalledMemory,
+  other: RecalledMemory | undefined
+): RecalledMemory =>
+  other !== undefined && memoryTokens(other) > memoryTokens(one) ? other : one;
+
+/**
+ * The copies of one passage two recalls hold, `one` and `other` (if any):
+ * one of them when its text holds the other's (the whole passage, or the
+ * same excerpt), else both. Each recall chose its excerpt for its own
+ * question (pack.ts `quoteOf`), so neither need hold the other: the
+ * opening one found and the answer the other did are both kept, which
+ * both recalls' budgets already paid for.
+ */
+const excerpts = (
+  one: RecalledItem,
+  other: RecalledItem | undefined
+): RecalledItem[] => {
+  if (other === undefined || one.text.includes(other.text)) {
+    return [one];
+  }
+  return other.text.includes(one.text) ? [other] : [one, other];
+};
 
 /**
  * Two recalls for one reader as one pack, `second` packed within what
  * `first` left of the budget (`recalledTokens`), so nothing of either is
  * left out for room: the first's passages and memories in their order,
- * then the second's others in theirs. One both hold (the same passage of
- * the same version, the same memory) is held once, as the fuller of the
- * two copies, so it shows no less than either recall gave: the budget
- * paid for both, so one less copy keeps the pack within it. A memory's
- * fuller copy holds all the other does, so what was not found, the
- * second's (asked for what the first meant), stays true of the pack. A
+ * then the second's others in theirs. A memory both hold is held once, as
+ * the fuller copy, which holds all the other does. A passage both hold
+ * (the same place of the same version) is held once when one excerpt
+ * holds the other, else as both excerpts, the second's right after the
+ * first's (`excerpts`). So nothing shows less than either recall gave,
+ * and the pack takes no more than both did: within the budget. What was
+ * not found is the second's (asked for what the first meant), true of the
+ * pack. A
  * contested fact is listed with every side either recall listed: each
  * packed every side of a fact or none. Cut short when either was.
  */
@@ -1139,14 +1159,14 @@ export const mergeRecalled = (
   }
   return {
     items: [
-      ...first.items.map((item) =>
-        fuller(item, secondItems.get(placeOf(item)), itemTokens)
+      ...first.items.flatMap((item) =>
+        excerpts(item, secondItems.get(placeOf(item)))
       ),
       ...second.items.filter((item) => !firstPlaces.has(placeOf(item))),
     ],
     memories: [
       ...first.memories.map((memory) =>
-        fuller(memory, secondMemories.get(memoryKeyOf(memory)), memoryTokens)
+        fuller(memory, secondMemories.get(memoryKeyOf(memory)))
       ),
       ...second.memories.filter(
         (memory) => !firstKeys.has(memoryKeyOf(memory))

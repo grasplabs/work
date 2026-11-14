@@ -622,10 +622,11 @@ const readableApps = async (
  * was handed is still in its collection for it to read, unpurged; a
  * version of the new Brain, while the person may read it (their teams and
  * the company, for what code's recall handed over); a memory of the new
- * Brain, while the person may read it and it is current for them. Anything
- * else, an unknown source or a bare connection included, is not. Throws
- * what the reads throw (a person who left, a database away): the caller
- * withholds everything then.
+ * Brain, while the person (or, as the company read it, the company) may
+ * read it and its writer has not retired it, replaced or expired or not.
+ * Anything else, an unknown source or a bare connection included, is
+ * not. Throws what the reads throw (a person who left, a database away):
+ * the caller withholds everything then.
  */
 export const readableSources = async (
   env: Env,

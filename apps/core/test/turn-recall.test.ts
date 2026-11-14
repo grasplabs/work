@@ -2190,12 +2190,17 @@ const sidesOf = (...packs: RecalledPack[]): string[] =>
     ),
   ].toSorted();
 
+/** `keys` each once, in the order each first appears. */
+const onceEach = (keys: readonly string[]): string[] => [...new Set(keys)];
+
 /**
  * What a merge of `first` and `second` must hold, whatever their shape:
- * within `budget`; every passage and memory of the first once, in its
- * order, then the second's others in theirs; none showing less than
- * either pass handed over, so the second's `notFound` stays true; and
- * every side of every contested fact either pass listed.
+ * within `budget`; every passage and memory of the first, in its order,
+ * then the second's others in theirs; none showing less than either pass
+ * handed over (a passage's every excerpt held by a copy kept of it, a
+ * memory at least as full), so the second's `notFound` stays true; no
+ * copy of a passage that another kept copy holds; and every side of
+ * every contested fact either pass listed.
  */
 const mergedHolds = (
   first: RecalledPack,
@@ -2204,24 +2209,29 @@ const mergedHolds = (
   budget: number
 ) => {
   const firstKeys = keysOf(first);
-  /** The tokens of `merged`'s copy of the passage or memory at `key`. */
+  /** The tokens of `merged`'s copy of the memory at `key`. */
   const mergedTokens = (key: string): number =>
     recalledTokens({
       ...merged,
-      items: merged.items.filter((item) => placeOf(item) === key),
+      items: [],
       memories: merged.memories.filter((memory) => memoryKeyOf(memory) === key),
     });
+  /** The texts of `merged`'s copies of the passage at `place`. */
+  const copiesAt = (place: string): string[] =>
+    merged.items.flatMap((item) =>
+      placeOf(item) === place ? [item.text] : []
+    );
   return {
     within: recalledTokens(merged) <= budget,
     order:
-      JSON.stringify(keysOf(merged).toSorted()) ===
+      JSON.stringify(onceEach(keysOf(merged)).toSorted()) ===
         JSON.stringify(
           [
             ...firstKeys,
             ...keysOf(second).filter((key) => !firstKeys.includes(key)),
           ].toSorted()
         ) &&
-      JSON.stringify(merged.items.map((item) => placeOf(item))) ===
+      JSON.stringify(onceEach(merged.items.map((item) => placeOf(item)))) ===
         JSON.stringify([
           ...first.items.map((item) => placeOf(item)),
           ...second.items
@@ -2235,21 +2245,33 @@ const mergedHolds = (
             .map((memory) => memoryKeyOf(memory))
             .filter((key) => !firstKeys.includes(key)),
         ]),
-    // Each passage and memory once, never less of it than either recall
-    // handed over: a memory's fuller copy holds all the other does, so
-    // the second's `notFound` stays true.
-    noLess: [first, second].every((pack) =>
-      [
-        ...pack.items.map((item) => ({
-          key: placeOf(item),
-          tokens: recalledTokens({ ...pack, items: [item], memories: [] }),
-        })),
-        ...pack.memories.map((memory) => ({
-          key: memoryKeyOf(memory),
-          tokens: recalledTokens({ ...pack, items: [], memories: [memory] }),
-        })),
-      ].every(({ key, tokens }) => mergedTokens(key) >= tokens)
+    // Never less of anything than either recall handed over: each
+    // excerpt of a passage is held by a copy kept of it, and a memory's
+    // kept copy is at least as full (it holds all the other does), so the
+    // second's `notFound` stays true.
+    noLess: [first, second].every(
+      (pack) =>
+        pack.items.every((item) =>
+          copiesAt(placeOf(item)).some((text) => text.includes(item.text))
+        ) &&
+        pack.memories.every(
+          (memory) =>
+            mergedTokens(memoryKeyOf(memory)) >=
+            recalledTokens({ ...pack, items: [], memories: [memory] })
+        )
     ),
+    // No copy of a passage another kept copy of it holds, and a memory
+    // once.
+    noRepeat:
+      onceEach(merged.items.map((item) => placeOf(item))).every((place) =>
+        copiesAt(place).every((text, at, copies) =>
+          copies.every(
+            (other, otherAt) => otherAt === at || !other.includes(text)
+          )
+        )
+      ) &&
+      onceEach(merged.memories.map((memory) => memoryKeyOf(memory))).length ===
+        merged.memories.length,
     notFound:
       JSON.stringify(merged.notFound) === JSON.stringify(second.notFound),
     contested:
@@ -2290,11 +2312,30 @@ const within = (pack: RecalledPack, tokens: number): RecalledPack => {
   return kept;
 };
 
+/** A part of the handbook's first passage, as recall gives it. */
+const handbookPassage = (text: string, whole = false): RecalledItem => ({
+  source: { producer: "upload", id: "handbook" },
+  version: 1,
+  position: 0,
+  text,
+  whole,
+  found: "words",
+});
+/** `items` as a pack cut short. */
+const cutPack = (items: RecalledItem[]): RecalledPack => ({
+  items,
+  memories: [],
+  contested: [],
+  notFound: [],
+  truncated: true,
+});
+
 /** Every property `mergedHolds` checks, holding. */
 const holding = {
   within: true,
   order: true,
   noLess: true,
+  noRepeat: true,
   notFound: true,
   contested: true,
   truncated: true,
@@ -2339,6 +2380,30 @@ describe("two recalls merged into one pack", setUpTime, () => {
   // Packs of every shape, sharing passages and memories, contested ones
   // among them, the second packed within what the first left: the merged
   // pack holds every property above.
+  // A thin first pass can quote a passage's opening (found by meaning),
+  // the rewritten question the answer later in the same passage: neither
+  // excerpt holds the other, and both were paid for.
+  it("keeps both excerpts of one passage when neither holds the other, and one when one does", () => {
+    const opening = "The depot opens its doors to drivers.";
+    const answer = "Keys are kept at the north gate.";
+    const both = mergeRecalled(
+      cutPack([handbookPassage(opening)]),
+      cutPack([handbookPassage(answer)])
+    );
+    const held = mergeRecalled(
+      cutPack([handbookPassage(opening)]),
+      cutPack([handbookPassage(`${opening} ${answer}`, true)])
+    );
+
+    expect({
+      both: both.items.map(({ text }) => text),
+      held: held.items.map(({ text }) => text),
+    }).toStrictEqual({
+      both: [opening, answer],
+      held: [`${opening} ${answer}`],
+    });
+  });
+
   it("never goes over the budget, and shows no less of anything than either pass, whatever their shape", () => {
     let seed = 7;
     const random = (): number => {
@@ -2346,18 +2411,25 @@ describe("two recalls merged into one pack", setUpTime, () => {
       return seed / 2_147_483_648;
     };
     const count = (most: number): number => Math.floor(random() * (most + 1));
-    // Each passage as its best part or whole, and each memory without its
-    // quote or with it: a pass holds either copy.
+    // Each passage as its opening, its answer (two excerpts neither of
+    // which holds the other, as two questions quote it) or whole, and each
+    // memory without its quote or with it: a pass holds one copy of each.
     const items: RecalledItem[][] = Array.from({ length: 12 }, (_, index) => {
+      const opening = `Opening ${index} ${"word ".repeat(count(60))}`.trim();
+      const answer = `Answer ${index} ${"word ".repeat(count(60))}`.trim();
       const whole: RecalledItem = {
         source: { producer: "upload", id: `s${index}` },
         version: 1,
         position: 0,
-        text: "word ".repeat(2 + count(120)),
+        text: `${opening} ${"more ".repeat(count(40))}${answer}`,
         whole: true,
         found: "words",
       };
-      return [{ ...whole, text: "word", whole: false }, whole];
+      return [
+        { ...whole, text: opening, whole: false },
+        { ...whole, text: answer, whole: false },
+        whole,
+      ];
     });
     const memories: RecalledMemory[][] = Array.from(
       { length: 12 },

@@ -2090,8 +2090,10 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   }
 
   /**
-   * Of some memories, by id, those the reader may read and that are
-   * current for them now (memories.ts): none in a store that holds nothing.
+   * Of some memories, by id, those the reader may read now and their
+   * writer has not retired (memories.ts), replaced and expired ones
+   * included: never a way to tell which are current. None in a store that
+   * holds nothing.
    */
   async readableMemories(
     request: ReadableMemoriesRequest
