@@ -1,9 +1,11 @@
 import type { AuditEvent } from "@grasp-os/shared/audit";
+import { errorName, log } from "@grasp-os/shared/log";
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
+import type { Held } from "./audit-outbox.ts";
 import { brainHandOvers, personErasures } from "./db/core/schema.ts";
 import { statementsWithin } from "./db/d1.ts";
 
@@ -12,13 +14,15 @@ import { statementsWithin } from "./db/d1.ts";
 // Brain's queue runs the hand-over).
 //
 // Each is noted from the audit event of the change that touched it, which
-// core writes in the same batch as the change (core's outbox). The drain
-// that takes the event to the log notes the hand-over before the event
-// leaves its outbox, and a drain that fails to note it keeps the event for
-// the next drain (audit-outbox.ts). So every change that was made is noted
-// at least once, and nothing else is: no person, App or agent can note
-// one. A source noted again while its hand-over is open is one intent: by
-// the same event, nothing changes; by another, the newer noting takes its
+// core writes in the same batch as the change (core's outbox, or a
+// Durable Object's). The drain that takes the event to the log notes the
+// hand-over before the event leaves its outbox, and holds an event it
+// fails to note for the next drain (audit-outbox.ts): that event alone,
+// so a note that keeps failing keeps no other event from the log
+// (`handOverNotes`). So every change that was made is noted at least
+// once, and nothing else is: no person, App or agent can note one. A
+// source noted again while its hand-over is open is one intent: by the
+// same event, nothing changes; by another, the newer noting takes its
 // place, and its hand-over reads the source as it is then.
 //
 // A noting stays until its hand-over ends, and it ends in the same batch
@@ -113,20 +117,16 @@ const intentsOf = (
 };
 
 /**
- * Notes the hand-overs `events` (audit events the log now has) call for,
- * each in place of one of its source noted before by another event, to be
- * relayed again. Safe to repeat: a drain cut short notes them again, and
- * an event that noted a hand-over still open changes nothing. Throws when
- * they can't be noted, so the drain keeps the events for the next one.
+ * Notes `intents`, each in place of one of its source noted before by
+ * another event, to be relayed again: all in one D1 batch, which is one
+ * transaction, so all of them or (throwing) none. Safe to repeat: a drain
+ * cut short notes them again, and an event that noted a hand-over still
+ * open changes nothing.
  */
-export const noteHandOvers = async (
+const noted = async (
   env: Pick<Env, "DB">,
-  events: readonly AuditEvent[]
+  intents: readonly (HandOverIntent & { noting: string })[]
 ): Promise<void> => {
-  const intents = intentsOf(events);
-  if (intents.length === 0) {
-    return;
-  }
   const db = drizzle(env.DB);
   const notedAt = new Date();
   // As many rows an insert as D1 binds, counted from the insert itself.
@@ -148,6 +148,73 @@ export const noteHandOvers = async (
   if (first !== undefined) {
     await db.batch([first, ...rest]);
   }
+};
+
+/**
+ * What a drain must do with an outbox's events before they leave it
+ * (audit-outbox.ts `required`), for one drain, batch by batch: notes the
+ * hand-overs `events` (audit events the log now has) call for, and
+ * answers the events whose note failed, which the drain holds for the
+ * next.
+ *
+ * A batch's note is one transaction, so when it fails, nothing says which
+ * event it failed for: each of its notings is then tried alone, and only
+ * those that fail alone are held. So an event whose note keeps failing
+ * holds itself and no other, and a note that failed for the batch's size
+ * or mix (#2237's, over D1's bound parameters) is done event by event, in
+ * this drain, with one warning naming the errors.
+ *
+ * A note tried alone is a D1 query of its own, and D1 takes 1,000 a Worker
+ * invocation, which the clock's every task shares. So once no notings of
+ * a batch go through alone (the database refusing every note), the drain's
+ * later batches hold their notings after their batch's one failed note,
+ * without trying each: a drain then makes about one query for each noting
+ * of that first batch, and one for each batch after it. A later drain
+ * tries them alone again.
+ */
+export const handOverNotes = (
+  env: Pick<Env, "DB">
+): ((events: readonly AuditEvent[]) => Promise<Held>) => {
+  let alone = true;
+  return async (events) => {
+    const intents = intentsOf(events);
+    try {
+      await noted(env, intents);
+      return { ids: [], errors: [] };
+    } catch (error) {
+      if (!alone) {
+        return {
+          ids: intents.map(({ noting }) => noting),
+          errors: [errorName(error)],
+        };
+      }
+      const each = await Promise.allSettled(
+        intents.map(async (intent) => {
+          await noted(env, [intent]);
+        })
+      );
+      const failed = intents.filter(
+        (_, index) => each[index]?.status === "rejected"
+      );
+      alone = failed.length < intents.length;
+      const errors = [
+        ...new Set([
+          errorName(error),
+          ...each.flatMap((one) =>
+            one.status === "rejected" ? [errorName(one.reason)] : []
+          ),
+        ]),
+      ].toSorted();
+      if (failed.length === 0) {
+        // Done: nothing is held, so the drain logs nothing of it.
+        log.warn("brain.hand_overs.noted_alone", {
+          notings: intents.length,
+          errors: errors.join(","),
+        });
+      }
+      return { ids: failed.map(({ noting }) => noting), errors };
+    }
+  };
 };
 
 /** The hand-overs noted longest ago and not yet relayed, at most `limit`. */

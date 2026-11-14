@@ -4,15 +4,15 @@ import {
   recallBudgetMax,
   sourceIdMaxLength,
 } from "@grasp-os/brain-next/contract";
-import { createAuditEvent } from "@grasp-os/shared/audit";
+import { auditOutboxTakeMax, createAuditEvent } from "@grasp-os/shared/audit";
+import type { AuditEvent } from "@grasp-os/shared/audit";
 import { env } from "cloudflare:workers";
-import { inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { drainAuditOutboxes } from "../src/audit-drains.ts";
-import { outboxedEvent } from "../src/audit-outbox.ts";
-import { noteHandOvers } from "../src/brain-hand-overs.ts";
+import { coreOutbox, drainLogged, outboxedEvent } from "../src/audit-outbox.ts";
+import { handOverNotes } from "../src/brain-hand-overs.ts";
 import {
   erasePerson,
   eraseSource,
@@ -27,8 +27,9 @@ import { statementsWithin } from "../src/db/d1.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { shareWorkflowResource } from "../src/workflow-resources.ts";
 import { sweepWorkflowStartDetails } from "../src/workflows/retention.ts";
-import { allEvents } from "./audit-events.ts";
+import { allEvents, loggedEvents } from "./audit-events.ts";
 import { textOf } from "./brain-next-surfaces.ts";
+import { refusingNotes } from "./refused-notes.ts";
 import { person, startingApp } from "./workflow-calls.ts";
 import {
   builder,
@@ -55,6 +56,8 @@ import {
 //   retention.
 // - A hand-over lost: an intent noted again while the relay ran, an id
 //   the Brain can't key, a noting that fails.
+// - A note that keeps failing holding up the log: one event's, more
+//   held than a batch, every note refused, two drains at once (GRA-1875).
 // - A noted hand-over that ends in no outcome, or in two: a run gone,
 //   restricted or past its retention records nothing; an attempt whose
 //   answer was lost, or that failed after its outcome, records it again;
@@ -283,7 +286,7 @@ const racing = (
  * checked, so an id no event could name is noted too.
  */
 const noteRun = async (id: string): Promise<void> => {
-  await noteHandOvers(env, [
+  await handOverNotes(env)([
     {
       id: crypto.randomUUID(),
       at: new Date().toISOString(),
@@ -393,19 +396,89 @@ const erasureRecorded = async (personId: string): Promise<void> => {
 const openAmong = async (
   ids: readonly string[]
 ): Promise<{ open: string[]; unrelayed: string[] }> => {
-  const rows = await drizzle(env.DB)
-    .select({
-      sourceId: brainHandOvers.sourceId,
-      relayedAt: brainHandOvers.relayedAt,
-    })
-    .from(brainHandOvers)
-    .where(inArray(brainHandOvers.sourceId, [...ids]));
+  // One bound value, however many: D1 binds 100 a statement.
+  const { results: rows } = await env.DB.prepare(
+    "SELECT source_id AS sourceId, relayed_at AS relayedAt FROM brain_hand_overs WHERE source_id IN (SELECT value FROM json_each(?))"
+  )
+    .bind(JSON.stringify(ids))
+    .all<{ sourceId: string; relayedAt: number | null }>();
   return {
     open: rows.map(({ sourceId }) => sourceId).toSorted(),
     unrelayed: rows
       .filter(({ relayedAt }) => relayedAt === null)
       .map(({ sourceId }) => sourceId)
       .toSorted(),
+  };
+};
+
+/** A person signing in, as core's outbox keeps it. */
+const signIn = (): AuditEvent =>
+  createAuditEvent(
+    {
+      actor: { type: "person", userId: crypto.randomUUID() },
+      action: "member.signed_in_from_directory",
+    },
+    "core"
+  );
+
+/** A permission granted, as core's outbox keeps it. */
+const permissionGranted = (): AuditEvent =>
+  createAuditEvent(
+    {
+      actor: { type: "person", userId: crypto.randomUUID() },
+      action: "permission.granted",
+      target: { type: "app", id: crypto.randomUUID() },
+    },
+    "core"
+  );
+
+/** A run's end, as core's outbox keeps it, for run `id`. */
+const runEnd = (id: string): AuditEvent =>
+  createAuditEvent(
+    {
+      actor: { type: "system" },
+      action: "workflow.run.completed",
+      target: { type: "workflow_run", id },
+    },
+    "core"
+  );
+
+/** Stores `events` in core's outbox, one after another, as changes do. */
+const outboxed = async (...events: AuditEvent[]): Promise<string[]> => {
+  const db = drizzle(env.DB);
+  for (const event of events) {
+    // oxlint-disable-next-line no-await-in-loop -- one after another, in order
+    await outboxedEvent(db, event);
+  }
+  return events.map(({ id }) => id);
+};
+
+/** Those of `ids` still in core's outbox, in the order they were stored. */
+const waitingOf = async (ids: readonly string[]): Promise<string[]> => {
+  const { results } = await env.DB.prepare(
+    "SELECT id FROM audit_outbox WHERE id IN (SELECT value FROM json_each(?)) ORDER BY rowid"
+  )
+    .bind(JSON.stringify(ids))
+    .all<{ id: string }>();
+  return results.map(({ id }) => id);
+};
+
+/**
+ * How the log holds `ids`, read without draining: each one's count, and
+ * whether those it holds are in the order of `ids`.
+ */
+const loggedOf = async (
+  ids: readonly string[]
+): Promise<{ counts: number[]; inOrder: boolean }> => {
+  const events = await loggedEvents();
+  const logged = events.map(({ id }) => id);
+  const positions = ids.map((id) => logged.indexOf(id));
+  const present = positions.filter((at) => at !== -1);
+  return {
+    counts: ids.map((id) => logged.filter((each) => each === id).length),
+    inOrder: present.every(
+      (at, index) => index === 0 || at > (present[index - 1] ?? at)
+    ),
   };
 };
 
@@ -807,46 +880,47 @@ describe("how a hand-over fails closed", () => {
     });
   });
 
-  it("keeps the events in their outbox while their hand-overs can't be noted, and notes them on the next drain", async () => {
-    // A run's end, as core's outbox holds its event until a drain takes it.
-    const id = crypto.randomUUID();
-    const event = createAuditEvent(
-      {
-        actor: { type: "system" },
-        action: "workflow.run.completed",
-        target: { type: "workflow_run", id },
-      },
-      "core"
-    );
-    await outboxedEvent(drizzle(env.DB), event);
-    const inOutbox = async (): Promise<boolean> => {
-      const row = await env.DB.prepare(
-        "SELECT 1 FROM audit_outbox WHERE id = ?"
-      )
-        .bind(event.id)
-        .first();
-      return row !== null;
-    };
-    await drainAuditOutboxes({
-      ...env,
-      DB: racing(env.DB, /^insert into "brain_hand_overs"/iu, async () => {
-        await Promise.resolve();
-        throw new Error("D1 is out of reach");
-      }),
-    }).catch(() => 0);
-    const whileFailing = {
-      inOutbox: await inOutbox(),
-      noted: await openAmong([id]),
-    };
-    await drainAuditOutboxes(env);
+  it("notes each event alone in the same drain when its batch's note fails, keeps none in the outbox, and says so once, by the errors' names", async () => {
+    // Two runs' ends, as core's outbox holds their events until a drain
+    // takes them.
+    const ids = [crypto.randomUUID(), crypto.randomUUID()];
+    const events = await outboxed(...ids.map(runEnd));
+    const warned = vi.spyOn(console, "warn").mockReturnValue();
+    try {
+      // The batch's note fails; each note after it, alone, goes through.
+      await drainAuditOutboxes({
+        ...env,
+        DB: racing(env.DB, /^insert into "brain_hand_overs"/iu, async () => {
+          await Promise.resolve();
+          throw new Error("D1 failed this batch");
+        }),
+      });
 
-    expect({
-      whileFailing,
-      after: { inOutbox: await inOutbox(), noted: await openAmong([id]) },
-    }).toStrictEqual({
-      whileFailing: { inOutbox: true, noted: { open: [], unrelayed: [] } },
-      after: { inOutbox: false, noted: { open: [id], unrelayed: [id] } },
-    });
+      expect({
+        waiting: await waitingOf(events),
+        noted: await openAmong(ids),
+        warned: warned.mock.calls
+          .map(([fields]: unknown[]) => fields)
+          .filter(
+            (fields) =>
+              typeof fields === "object" &&
+              fields !== null &&
+              Reflect.get(fields, "event") === "brain.hand_overs.noted_alone"
+          ),
+      }).toStrictEqual({
+        waiting: [],
+        noted: { open: ids.toSorted(), unrelayed: ids.toSorted() },
+        warned: [
+          {
+            event: "brain.hand_overs.noted_alone",
+            notings: 2,
+            errors: "Error",
+          },
+        ],
+      });
+    } finally {
+      warned.mockRestore();
+    }
   });
 
   it("notes every run whose end a drain takes at once, however many, and empties the outbox", async () => {
@@ -1042,6 +1116,217 @@ describe("how a hand-over fails closed", () => {
       ],
       recalled: [{ source: { producer: "run", id }, version: 1 }],
       open: { open: [], unrelayed: [] },
+    });
+  });
+});
+
+describe("a hand-over whose note keeps failing", () => {
+  it("holds only the run end whose note fails, across drains, while sign-ins and permission changes before and after it reach the log in order, and is noted once, then handed over once, when it can be", async () => {
+    const runner = await builder();
+    const said = word();
+    const workflow = await published(
+      runner,
+      definitionOf([], { value: { status: said } })
+    );
+    const { runId } = await start(runner, workflow.id);
+    const id = runId ?? "";
+    const before = await outboxed(signIn(), permissionGranted());
+    const lift = await refusingNotes({ id });
+    await ended(runner, workflow.id, runId);
+    const after = await outboxed(signIn(), permissionGranted());
+    // Three clock drains while its note is refused.
+    const waiting: string[][] = [];
+    for (let drain = 0; drain < 3; drain += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one drain after another
+      await drainAuditOutboxes(env);
+      // oxlint-disable-next-line no-await-in-loop -- read after each drain
+      waiting.push(await waitingOf([...before, ...after]));
+    }
+    const events = await loggedEvents();
+    const end = events.find(
+      ({ action, target }) =>
+        action === "workflow.run.completed" && target?.id === id
+    );
+    const endId = end?.id ?? "";
+    const whileRefused = {
+      waiting,
+      end: await waitingOf([endId]),
+      logged: await loggedOf([...before, endId, ...after]),
+      noted: await openAmong([id]),
+    };
+    await lift();
+    await handOverNow();
+
+    expect({
+      whileRefused,
+      after: {
+        end: await waitingOf([endId]),
+        logged: await loggedOf([...before, endId, ...after]),
+        ended: await endingsFor(id),
+        recalled: await recalled(runner.userId, said),
+        open: await openAmong([id]),
+      },
+    }).toStrictEqual({
+      whileRefused: {
+        waiting: [[], [], []],
+        end: [endId],
+        logged: { counts: [1, 1, 1, 1, 1], inOrder: true },
+        noted: { open: [], unrelayed: [] },
+      },
+      after: {
+        end: [],
+        logged: { counts: [1, 1, 1, 1, 1], inOrder: true },
+        ended: ["brain.source.handed_over"],
+        recalled: [{ source: { producer: "run", id }, version: 1 }],
+        open: { open: [], unrelayed: [] },
+      },
+    });
+  });
+
+  it("lets newer events through past more held notes than a drain takes at once, and notes every one once they can be", async () => {
+    const marker = crypto.randomUUID();
+    // A full batch of run ends whose notes are refused, and one more,
+    // ahead of a sign-in, a run end that can be noted, and a permission.
+    const refused = Array.from(
+      { length: auditOutboxTakeMax + 1 },
+      (_, index) => `${marker}-${index}`
+    );
+    const lift = await refusingNotes({ prefix: `${marker}-` });
+    const held = await outboxed(...refused.map(runEnd));
+    const newerRun = crypto.randomUUID();
+    const newer = await outboxed(
+      signIn(),
+      runEnd(newerRun),
+      permissionGranted()
+    );
+
+    await drainAuditOutboxes(env);
+    const whileRefused = {
+      held: await waitingOf(held),
+      newerOthers: await waitingOf([newer[0] ?? "", newer[2] ?? ""]),
+      logged: await loggedOf([...held, ...newer]),
+    };
+    await lift();
+    await drainAuditOutboxes(env);
+
+    expect({
+      whileRefused,
+      after: {
+        waiting: await waitingOf([...held, ...newer]),
+        logged: await loggedOf([...held, ...newer]),
+        noted: await openAmong([...refused, newerRun]),
+      },
+    }).toStrictEqual({
+      whileRefused: {
+        held,
+        newerOthers: [],
+        logged: { counts: [...held, ...newer].map(() => 1), inOrder: true },
+      },
+      after: {
+        waiting: [],
+        logged: { counts: [...held, ...newer].map(() => 1), inOrder: true },
+        noted: {
+          open: [...refused, newerRun].toSorted(),
+          unrelayed: [...refused, newerRun].toSorted(),
+        },
+      },
+    });
+  });
+
+  it("holds every run end while the database refuses every note, skips none, lets every other event through, and notes each once it can", async () => {
+    const runs = [crypto.randomUUID(), crypto.randomUUID()];
+    const lift = await refusingNotes();
+    const events = [
+      signIn(),
+      runEnd(runs[0] ?? ""),
+      permissionGranted(),
+      runEnd(runs[1] ?? ""),
+      signIn(),
+    ];
+    const ids = await outboxed(...events);
+    const ends = [ids[1] ?? "", ids[3] ?? ""];
+
+    await drainAuditOutboxes(env);
+    await drainAuditOutboxes(env);
+    const whileRefused = {
+      waiting: await waitingOf(ids),
+      logged: await loggedOf(ids),
+      noted: await openAmong(runs),
+    };
+    await lift();
+    await drainAuditOutboxes(env);
+
+    expect({
+      whileRefused,
+      after: {
+        waiting: await waitingOf(ids),
+        logged: await loggedOf(ids),
+        noted: await openAmong(runs),
+      },
+    }).toStrictEqual({
+      whileRefused: {
+        waiting: ends,
+        logged: { counts: [1, 1, 1, 1, 1], inOrder: true },
+        noted: { open: [], unrelayed: [] },
+      },
+      after: {
+        waiting: [],
+        logged: { counts: [1, 1, 1, 1, 1], inOrder: true },
+        noted: { open: runs.toSorted(), unrelayed: runs.toSorted() },
+      },
+    });
+  });
+
+  it("keeps the stored order and loses or doubles nothing when the clock's drain and a drain soon after a write run at once past a held note", async () => {
+    const refusedRun = crypto.randomUUID();
+    const lift = await refusingNotes({ id: refusedRun });
+    const [heldEnd = ""] = await outboxed(runEnd(refusedRun));
+    // More than a batch behind it: sign-ins, permissions and run ends.
+    const runs = Array.from({ length: 50 }, () => crypto.randomUUID());
+    const behind = await outboxed(
+      ...runs.flatMap((run) => [signIn(), runEnd(run), permissionGranted()])
+    );
+
+    await Promise.all([
+      drainAuditOutboxes(env),
+      // What a write's drain soon runs: one batch of core's outbox.
+      drainLogged(env, coreOutbox(env), 1),
+    ]);
+    const whileRefused = {
+      waiting: await waitingOf([heldEnd, ...behind]),
+      logged: await loggedOf([heldEnd, ...behind]),
+      noted: await openAmong(runs),
+    };
+    await lift();
+    await Promise.all([
+      drainAuditOutboxes(env),
+      drainLogged(env, coreOutbox(env), 1),
+    ]);
+
+    expect({
+      whileRefused,
+      after: {
+        waiting: await waitingOf([heldEnd]),
+        logged: await loggedOf([heldEnd, ...behind]),
+        noted: await openAmong([refusedRun]),
+      },
+    }).toStrictEqual({
+      whileRefused: {
+        waiting: [heldEnd],
+        logged: {
+          counts: [heldEnd, ...behind].map(() => 1),
+          inOrder: true,
+        },
+        noted: { open: runs.toSorted(), unrelayed: runs.toSorted() },
+      },
+      after: {
+        waiting: [],
+        logged: {
+          counts: [heldEnd, ...behind].map(() => 1),
+          inOrder: true,
+        },
+        noted: { open: [refusedRun], unrelayed: [refusedRun] },
+      },
     });
   });
 });

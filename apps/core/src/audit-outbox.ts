@@ -26,7 +26,7 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { auditLog } from "./audit-log.ts";
 import type { AuditLogEnv } from "./audit-log.ts";
-import { noteHandOvers } from "./brain-hand-overs.ts";
+import { handOverNotes } from "./brain-hand-overs.ts";
 import { auditOutbox } from "./db/core/schema.ts";
 import { isRemovedAppRefusal } from "./db/d1.ts";
 
@@ -45,9 +45,9 @@ import { isRemovedAppRefusal } from "./db/d1.ts";
 // connect's over RPC, which is how connect's events reach the log at all
 // (connect can't reach core).
 //
-// Core's own events also note what core hands over to the new Brain
-// (brain-hand-overs.ts): before they leave the outbox, and a drain that
-// can't note them keeps them for the next.
+// Core's own events, and a Durable Object's, also note what core hands
+// over to the new Brain (brain-hand-overs.ts) before they leave the
+// outbox: an event a drain can't note is held, alone, for the next drain.
 
 /** Most batches one clock drain of an outbox appends: 5,000 events. */
 export const drainMaxBatches = 50;
@@ -140,15 +140,12 @@ export const databaseOutbox = (
 
 /**
  * Core's own outbox, whose events note what core hands over to the new
- * Brain (`noteHandOvers`) before they leave it.
+ * Brain (`handOverNotes`) before they leave it: one whose note fails is
+ * held, alone. For one drain: its notes learn from the drain's batches.
  */
 export const coreOutbox = (env: OutboxEnv): Outbox => ({
   ...databaseOutbox("core", env.DB),
-  required: async (events) => {
-    await noteHandOvers(env, events);
-    // It holds none: one that fails keeps the whole batch.
-    return noneHeld;
-  },
+  required: handOverNotes(env),
 });
 
 /**
@@ -157,16 +154,19 @@ export const coreOutbox = (env: OutboxEnv): Outbox => ({
  * the same transaction as the change. Its rows go in rowid order. A row
  * the log can't take is recorded with an `audit.gap`, as any outbox's, and
  * removed: the object keeps no rejected table. Its events note what core
- * hands over to the new Brain (`noteHandOvers`: a chat's turns) before
- * they leave it, as core's own outbox's do.
+ * hands over to the new Brain (`handOverNotes`: a chat's turns) before
+ * they leave it, as core's own outbox's do, in core's database: while that
+ * is out of reach, the events that note something are held, and every
+ * other reaches the log. For one drain.
+ *
+ * Its take binds two values and its settle one, within Durable Object
+ * SQLite's 100 bound parameters a statement; the held IDs are one bound
+ * JSON value (at a drain's most, 5,000 UUIDs: about 195 KB, within its
+ * 8 MB a value).
  */
 const objectOutbox = (env: Pick<Env, "DB">, storage: SqlStorage): Outbox => ({
   name: "workspace",
-  required: async (events) => {
-    await noteHandOvers(env, events);
-    // It holds none: one that fails keeps the whole batch.
-    return noneHeld;
-  },
+  required: handOverNotes(env),
   take: async (held) =>
     await Promise.resolve(
       storage
@@ -422,10 +422,12 @@ const drainBatch = async (
  * Held rows are the oldest, so each drain walks them first, a batch at a
  * time, before the rows after them: past `maxBatches` full batches of held
  * rows (5,000 at the clock's 50 of 100) a drain reaches nothing newer.
- * That takes thousands of disconnects whose erasure fails at once (a
- * release whose erasure throws for everyone); an operator then sees
- * `audit.outbox.held` with that count and the error's name every minute,
- * and connect's newer events missing from the log until it is fixed.
+ * That takes thousands of events whose `required` step fails at once:
+ * connect's disconnects whose erasure fails (capture-erasures.ts), or
+ * core's or a Durable Object's events whose hand-over can't be noted
+ * (a release whose step throws for everyone). An operator then sees
+ * `audit.outbox.held` with that count and the errors' names every minute,
+ * and that outbox's newer events missing from the log until it is fixed.
  */
 const drain = async (
   env: AuditLogEnv,

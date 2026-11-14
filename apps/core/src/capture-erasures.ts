@@ -4,7 +4,7 @@ import { brainSourceErrors } from "@grasp-os/shared/brain-sources";
 import { connectionOwnersMax } from "@grasp-os/shared/connect";
 import type { ConnectionOwner } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import { log } from "@grasp-os/shared/log";
+import { errorName, log } from "@grasp-os/shared/log";
 
 import { auditLog } from "./audit-log.ts";
 import type { AuditLogEnv } from "./audit-log.ts";
@@ -144,13 +144,10 @@ const eraseEach = async (
       ids: due.flatMap(({ disconnect }, index) =>
         settled[index]?.status === "rejected" ? [disconnect.id] : []
       ),
-      // Each error's name alone: its message could carry what it was about.
       errors: [
         ...new Set(
           settled.flatMap((each) =>
-            each.status === "rejected"
-              ? [each.reason instanceof Error ? each.reason.name : "unknown"]
-              : []
+            each.status === "rejected" ? [errorName(each.reason)] : []
           )
         ),
       ],
