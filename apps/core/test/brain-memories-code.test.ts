@@ -2,6 +2,7 @@ import { brainOf } from "@grasp-os/brain-next/contract";
 import type { Reader } from "@grasp-os/brain-next/contract";
 import { v } from "@grasp-os/runtime/app";
 import type { FunctionResult } from "@grasp-os/shared/functions";
+import { teamIdSchema } from "@grasp-os/shared/ids";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
@@ -99,16 +100,39 @@ const granted = async (
 /** A platform permission of `action` for `subject`, as an admin gives it. */
 const platformGrant = (
   subject: PermissionRequest["subject"],
-  action: "brain" | "brain.write"
+  action: "brain" | "brain.write",
+  teams?: string[]
 ): PermissionRequest => ({
   subject,
-  object: { type: "platform" },
+  object:
+    teams === undefined
+      ? { type: "platform" }
+      : {
+          type: "platform",
+          teams: teams.map((team) => teamIdSchema.parse(team)),
+        },
   actions: [action],
   binding: `BRAIN_${unique().replaceAll(/\W/gu, "_").toUpperCase()}`,
 });
 
 /** The shared store, as core reaches it. */
 const store = () => brainOf(inJurisdiction(env, env.BRAIN_STORE));
+
+/** A team of `members`, as core keeps one: its ID. */
+const teamOf = async (...members: Member[]): Promise<string> => {
+  const team = crypto.randomUUID();
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO teams (id, name, organization_id, created_at) VALUES (?, 'Accounts', 'organization', ?)"
+    ).bind(team, Date.now()),
+    ...members.map((member) =>
+      env.DB.prepare(
+        "INSERT INTO team_members (id, team_id, user_id, created_at) VALUES (?, ?, ?, ?)"
+      ).bind(crypto.randomUUID(), team, member.userId, Date.now())
+    ),
+  ]);
+  return team;
+};
 
 /** Whom code reads as, and whom a team alone reads as. */
 const company: Reader = { person: null, groups: ["company"] };
@@ -216,7 +240,11 @@ export const ask = action({
  * `admin` to its grant to read the Brain, and with `write`, its own grant
  * to write to it.
  */
-const appOf = async (owner: Member, admin: Member, { write = true } = {}) => {
+const appOf = async (
+  owner: Member,
+  admin: Member,
+  { write = true, teams }: { write?: boolean; teams?: string[] } = {}
+) => {
   const fixture: Fixture = await appWith(memoriesApp(), "Accounts", owner);
   const release: Release = await seal(fixture);
   await publishVersion(env, fixture.owner, fixture.app, 1);
@@ -225,7 +253,7 @@ const appOf = async (owner: Member, admin: Member, { write = true } = {}) => {
   const permissionId = await granted(
     owner,
     admin,
-    platformGrant(subject, "brain"),
+    platformGrant(subject, "brain", teams),
     version
   );
   await approveResourceBinding(env, admin, {
@@ -452,12 +480,15 @@ describe("memories and entities, as an App reaches them", setUpTime, () => {
     });
   });
 
-  it("writes nothing without its own grant to write, once that is revoked, or from an App whose sources not every member may read, which still reads", async () => {
+  it("writes nothing without its own grant to write, once that is revoked, from an App whose sources not every member may read, or from one whose grant names teams; and still reads", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const readOnly = await appOf(ada, admin, { write: false });
     const revoked = await appOf(ada, admin);
     const unplaced = await appOf(ada, admin);
+    // Its grant to read the Brain names a team of Ada's: what it reads of
+    // that team's may not reach the company.
+    const teamScoped = await appOf(ada, admin, { teams: [await teamOf(ada)] });
     // A connection it was granted that nobody can be placed for: connect
     // doesn't know it.
     await env.DB.prepare(
@@ -483,6 +514,7 @@ describe("memories and entities, as an App reaches them", setUpTime, () => {
       readOnly: await askedOf(readOnly, ada, "remember", fact("Read only")),
       revoked: await askedOf(revoked, ada, "remember", fact("Revoked")),
       unplaced: await askedOf(unplaced, ada, "remember", fact("Unplaced")),
+      teamScoped: await askedOf(teamScoped, ada, "remember", fact("Teams")),
       unplacedForget: await askedOf(unplaced, ada, "forget", {
         memory: crypto.randomUUID(),
       }),
@@ -498,6 +530,7 @@ describe("memories and entities, as an App reaches them", setUpTime, () => {
       readOnly: { failed: "permission.unavailable" },
       revoked: { failed: "permission.unavailable" },
       unplaced: { failed: "permission.unavailable" },
+      teamScoped: { failed: "permission.unavailable" },
       unplacedForget: { failed: "permission.unavailable" },
       unplacedReads: true,
     });

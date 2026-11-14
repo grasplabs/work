@@ -11,6 +11,7 @@ import {
   identifierMaxLength,
   identifierSchema,
   runIdSchema,
+  teamIdSchema,
   triggerIdSchema,
   workflowResourceIdSchema,
   workspaceIdSchema,
@@ -120,6 +121,27 @@ const collectionObjectSchema = z.strictObject({
 });
 
 /**
+ * Most teams one `brain` permission names: the Brain reads as at most
+ * 1,000 groups (`readerGroupsMax` in `@grasp-os/brain-next/contract`), and
+ * the company is always one of them.
+ */
+export const brainTeamsMax = 999;
+
+/**
+ * The teams an App's `brain` permission names: what a request may name,
+ * and the only shape core reads back from storage (core's
+ * brain-grant-teams.ts). Team IDs, at least one, at most `brainTeamsMax`,
+ * each once.
+ */
+export const brainTeamsSchema = z
+  .array(teamIdSchema)
+  .min(1)
+  .max(brainTeamsMax)
+  .refine((teams) => new Set(teams).size === teams.length, {
+    message: "Each team once",
+  });
+
+/**
  * What the platform itself offers an App, as a permission's object, one
  * action per permission (its stub does that one thing):
  *
@@ -142,7 +164,18 @@ const collectionObjectSchema = z.strictObject({
  *   of its own, with its own consent, held beside `brain`, so an approved
  *   read grant never gains writes.
  */
-const platformObjectSchema = z.strictObject({ type: z.literal("platform") });
+const platformObjectSchema = z.strictObject({
+  type: z.literal("platform"),
+  /**
+   * The teams an App's `brain` permission reaches beyond what everyone in
+   * the company may read, by ID (a rename changes nothing): its recall
+   * reads, of these, the teams the person it acts for is in, and the App
+   * is shared only with people in all of them (core's brain-recall.ts and
+   * app-provenance.ts). Absent, it reaches the company alone. At most
+   * `brainTeamsMax`, each once; only on an App's `brain` permission.
+   */
+  teams: brainTeamsSchema.optional(),
+});
 
 /**
  * What a permission gives access to: a connection (all of it, or one
@@ -408,6 +441,18 @@ const checkGrant = (
       message: "A platform permission has one action",
     });
   }
+  // Only the Brain is read as far as teams go.
+  if (
+    object.type === "platform" &&
+    object.teams !== undefined &&
+    !actions.includes("brain")
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["object", "teams"],
+      message: "Only a permission to read the Brain names teams",
+    });
+  }
   // The audit log records the actions as one identifier-sized value.
   if (actions.join(" ").length > identifierMaxLength) {
     context.addIssue({
@@ -452,6 +497,15 @@ export const declaredPermissionSchema = z
         code: "custom",
         path: ["actions"],
         message: "An App only reads a collection",
+      });
+    }
+    // Teams are its requester's, as a connection is someone's: whoever
+    // creates from it names their own.
+    if (object.type === "platform" && object.teams !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["object", "teams"],
+        message: "A blueprint names no teams",
       });
     }
   });
@@ -686,6 +740,8 @@ export const permissionErrors = defineErrorFamily({
     "A shared connection is granted by an admin. You can withdraw the request.",
   "permission.denied_before":
     "The person already turned this down in this chat. Don't ask again unless they say so.",
+  "permission.team_brain_workflow":
+    "An App whose permission to read the Brain names teams can't be called from a workflow, and an App a workflow may call can't name teams.",
   "permission.too_many_requests":
     "This chat already has too many connection requests waiting. Wait until the person decides them.",
 });

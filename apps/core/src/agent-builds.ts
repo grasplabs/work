@@ -1792,16 +1792,22 @@ build: {
    * forget or correct in the App's own word (\`ctx.brain.remember\`,
    * \`.forget\`, \`.correct\`, read by everyone in the company), a second one
    * with \`["brain.write"]\` too, which writes only while everyone in the
-   * company may read everything the App may read. A recall answers only what everyone in the company may
-   * read, whoever calls, never a team's content; and an App that recalls
-   * answers no visitor and invites no guest. Today nothing readable by the
-   * whole company is in the Brain, so a recall returns an empty pack: say
-   * so, and never build a feature that depends on it finding something.
+   * company may read everything the App may read (never from an App whose
+   * permission names teams). A recall answers what everyone in the company may read,
+   * never anyone's own content. To recall teams' content too, name those
+   * teams by ID (\`{ type: "platform", teams: ["<team id>"] }\`): a recall
+   * then also answers, of them, the teams the person it is for is in, and
+   * the App can be shared only with people in all of them; its skills stay
+   * the company's. An App that recalls answers no visitor and invites no
+   * guest. Today everything in the Brain is one person's own: nothing
+   * readable by the whole company or by a team, so a recall returns an
+   * empty pack, with teams named or not: say so, and never build a feature
+   * that depends on it finding something.
    */
   requestPermission(app: string, request: {
     object:
       | { type: "connection"; connectionId: string; resource?: string }
-      | { type: "platform" }
+      | { type: "platform"; teams?: string[] }
       | { type: "workflow"; workflowId: string };
     actions: string[];
     binding: string;

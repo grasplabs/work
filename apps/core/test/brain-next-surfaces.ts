@@ -149,6 +149,11 @@ export interface Probing {
    */
   instructionGroups: readonly string[];
   /**
+   * The teams the App grant of code's recall names (GRA-1842): its recall
+   * reads, of these, the reader's alone. None when absent.
+   */
+  codeTeams?: readonly string[];
+  /**
    * Names of skills someone else wrote for themselves, each a marker,
    * in their own store (brain-next.ts): each asked of as the reader's own
    * must answer exactly as its twin, a skill no one wrote.
@@ -3688,13 +3693,15 @@ const readersApp = (personId: string): Authority =>
 
 /**
  * An App acting for `personId`, holding an active grant to read the
- * Brain, as an App's recall needs one (brain-recall.ts): its authority,
- * and the grant's ID. Code's recall from an App or a workflow reads only
- * what everyone in the company may, so nothing of a team's or a person's
- * may come back, whoever it acts for.
+ * Brain, as an App's recall needs one (brain-recall.ts), naming `teams`
+ * when given: its authority, and the grant's ID. Code's recall from an
+ * App reads what everyone in the company may and, of the grant's teams,
+ * those its person is in; so nothing of another team's or of a person's
+ * own may come back, whoever it acts for.
  */
 const appWithBrain = async (
-  personId: string
+  personId: string,
+  teams?: readonly string[]
 ): Promise<{ authority: Authority; permissionId: string }> => {
   const authority = readersApp(personId);
   const permissionId = crypto.randomUUID();
@@ -3702,9 +3709,15 @@ const appWithBrain = async (
     throw new Error("Not an App");
   }
   await env.DB.prepare(
-    "INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id, actions, binding, status, requested_by, requested_at) VALUES (?, 'app', ?, 'platform', 'platform', '[\"brain\"]', 'BRAIN', 'active', ?, ?)"
+    "INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id, actions, binding, status, requested_by, requested_at, teams) VALUES (?, 'app', ?, 'platform', 'platform', '[\"brain\"]', 'BRAIN', 'active', ?, ?, ?)"
   )
-    .bind(permissionId, authority.subject.appId, personId, Date.now())
+    .bind(
+      permissionId,
+      authority.subject.appId,
+      personId,
+      Date.now(),
+      teams === undefined ? null : JSON.stringify(teams)
+    )
     .run();
   return { authority, permissionId };
 };
@@ -3752,7 +3765,10 @@ export const recallProbes = {
   // grant, acting for the reader, asked every way the store is, as code
   // sends it, then every way it refuses, the markers in what is refused.
   recallFor: async (probing) => {
-    const { authority, permissionId } = await appWithBrain(probing.personId);
+    const { authority, permissionId } = await appWithBrain(
+      probing.personId,
+      probing.codeTeams
+    );
     const recall = async (
       input: unknown,
       as = authority,

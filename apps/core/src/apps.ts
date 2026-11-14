@@ -289,10 +289,12 @@ export const appFor = async (
   env: Env,
   by: Person,
   input: unknown,
-  needed: AppRole
+  needed: AppRole,
+  /** For what manages the App without reading its data (`requireAppRole`). */
+  options: { managing?: boolean } = {}
 ): Promise<App> => {
   const app = await findApp(env, input);
-  await requireAppRole(env, by, app, needed);
+  await requireAppRole(env, by, app, needed, options);
   return app;
 };
 
@@ -320,9 +322,11 @@ export const usableApp = async (
 export const editableApp = async (
   env: Env,
   by: Person,
-  input: unknown
+  input: unknown,
+  /** For what manages the App without reading its data (`requireAppRole`). */
+  options: { managing?: boolean } = {}
 ): Promise<App> => {
-  const app = await appFor(env, by, input, "builder");
+  const app = await appFor(env, by, input, "builder", options);
   requireNotArchived(app);
   return app;
 };
