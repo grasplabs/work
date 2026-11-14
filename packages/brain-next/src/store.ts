@@ -15,6 +15,7 @@ import {
   confirmRequestSchema,
   contestedRequestSchema,
   currentRequestSchema,
+  contextTokensSchema,
   deploymentSchema,
   embedModelSchema,
   entitiesRequestSchema,
@@ -219,6 +220,8 @@ import {
 export interface AlarmHost {
   ask: AskModel;
   embedders: Embedders;
+  /** The host's model's context window, in tokens; null when unknown. */
+  contextTokens: number | null;
   /**
    * Told the store's overview once each tick ends, done or failed, while
    * the store holds anything and wasn't erased: for the host's health row
@@ -1245,9 +1248,15 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * bounded, so
    * none starves the next, and the queue runs whatever the others did.
    */
-  async work({ ask, at, embedders, handOvers }: WorkRequest): Promise<void> {
+  async work({
+    ask,
+    at,
+    embedders,
+    handOvers,
+    contextTokens,
+  }: WorkRequest): Promise<void> {
     await this.#changing(async () => {
-      await this.#workNow(ask, at, embedders, handOvers);
+      await this.#workNow(ask, at, embedders, contextTokens, handOvers);
     });
   }
 
@@ -1256,11 +1265,13 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     ask: AskModel,
     at: Date,
     embedders: Embedders,
+    contextTokens: number | null,
     handOvers?: HandOvers
   ): Promise<void> {
     await this.#ready();
     const tickAt = checked(tickAtSchema, at);
     const model = checked(embedModelSchema.nullable(), embedders.model);
+    const tokens = checked(contextTokensSchema, contextTokens);
     if (!this.#schema) {
       // Nothing was ever kept: nothing to do.
       return;
@@ -1272,6 +1283,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         model,
         embed: async (request) => await embedders.embed(request),
       },
+      tokens,
       handOvers
     );
   }
@@ -1285,6 +1297,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     ask: AskModel,
     tickAt: Date,
     embedders: Embedders,
+    contextTokens: number | null,
     handOvers: HandOvers | undefined
   ): Promise<void> {
     if (this.#work.restarting) {
@@ -1305,6 +1318,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         ask,
         embedders,
         bucket: this.#bucket,
+        contextTokens,
         ...(this.#kind.kind === "person" ? { owner: this.#kind.person } : {}),
         ...(handOvers === undefined || this.#kind.kind !== "shared"
           ? {}
@@ -1360,7 +1374,12 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         // Its report is counted as a write (`#report`).
         await this.#changing(async () => {
           try {
-            await this.#workNow(host.ask, new Date(), host.embedders);
+            await this.#workNow(
+              host.ask,
+              new Date(),
+              host.embedders,
+              host.contextTokens
+            );
           } finally {
             await this.#report(host);
           }

@@ -41,6 +41,12 @@ export const modelEfforts = ["low", "medium", "high", "xhigh", "max"] as const;
 /** One of {@link modelEfforts}. */
 export type ModelEffort = (typeof modelEfforts)[number];
 
+/**
+ * Most characters of what a call is for (its purpose, such as
+ * `chat.turn`): what the model gateway takes, and the audit log records.
+ */
+export const modelPurposeMaxLength = 64;
+
 /** The effort of a call that names none. */
 export const defaultModelEffort: ModelEffort = "medium";
 

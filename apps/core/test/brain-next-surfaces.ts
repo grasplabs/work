@@ -978,6 +978,7 @@ const exportSettled = async (id: string): Promise<void> => {
       at: new Date(),
       embedders: noEmbedders,
       handOvers: noHandOvers,
+      contextTokens: null,
     });
     // oxlint-disable-next-line no-await-in-loop -- a tick at a time
     const status = await store().exportStatus({ id });
@@ -1259,6 +1260,7 @@ const ownExportSettled = async (person: string, id: string): Promise<void> => {
       at: new Date(),
       embedders: noEmbedders,
       handOvers: noHandOvers,
+      contextTokens: null,
     });
     // oxlint-disable-next-line no-await-in-loop -- a tick at a time
     const status = await personalStore(person).ownExport({ person });
@@ -2172,6 +2174,7 @@ export const coreProbes = {
           at,
           embedders: noEmbedders,
           handOvers: noHandOvers,
+          contextTokens: null,
         });
       },
       "a marked item worked to parking"
@@ -3403,6 +3406,7 @@ const queuedVectors = async ({
           at: nextDay(),
           embedders,
           handOvers: noHandOvers,
+          contextTokens: null,
         });
       }
     );
@@ -6115,6 +6119,7 @@ export const storeProbes = {
           at,
           embedders: noEmbedders,
           handOvers: noHandOvers,
+          contextTokens: null,
         });
       },
       "a marked item worked by the store"
@@ -6128,6 +6133,7 @@ export const storeProbes = {
               at,
               embedders: noEmbedders,
               handOvers: noHandOvers,
+              contextTokens: null,
             });
           })
       )
@@ -6140,6 +6146,7 @@ export const storeProbes = {
         at: nextDay(),
         embedders: leakyEmbedders(markers),
         handOvers: noHandOvers,
+        contextTokens: null,
       });
     }),
     await answer("a tick at no time", async () => {
@@ -6148,6 +6155,7 @@ export const storeProbes = {
         at: unchecked(markers.join(" ")),
         embedders: leakyEmbedders(markers),
         handOvers: noHandOvers,
+        contextTokens: null,
       });
     }),
   ],
@@ -6265,6 +6273,7 @@ export const storeProbes = {
               throw new Error(`Could not hand over ${markers.join(" ")}`);
             },
           },
+          contextTokens: null,
         });
       }),
     ];
@@ -6330,6 +6339,7 @@ export const storeProbes = {
         at: nextDay(),
         embedders: leakyEmbedders(markers),
         handOvers: noHandOvers,
+        contextTokens: null,
       });
     }),
     ...(await workMarked(
@@ -6341,6 +6351,7 @@ export const storeProbes = {
           at,
           embedders: noEmbedders,
           handOvers: noHandOvers,
+          contextTokens: null,
         });
       },
       "a marked item worked after a re-embed"
@@ -6355,6 +6366,7 @@ export const storeProbes = {
           at,
           embedders: noEmbedders,
           handOvers: noHandOvers,
+          contextTokens: null,
         });
       },
       "a marked item worked to parking"
