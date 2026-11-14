@@ -1,4 +1,8 @@
-import type { Embedders, HandOvers } from "@grasp-os/brain-next/contract";
+import type {
+  Embedders,
+  HandOvers,
+  WorkPriority,
+} from "@grasp-os/brain-next/contract";
 import {
   defineWork,
   enqueueWork,
@@ -16,7 +20,6 @@ import type {
   NewWork,
   WorkContext,
   WorkDefinition,
-  WorkPriority,
 } from "@grasp-os/brain-next/work";
 import { graspAi } from "@grasp-os/shared/ai-providers";
 import { runInDurableObject } from "cloudflare:test";
@@ -130,6 +133,19 @@ const mediumWork = defineWork({
   kind: kindOf("medium"),
   payload,
   timeLimitMs: 1000,
+  run: async ({ key }, context) => {
+    await handle(key, context);
+  },
+});
+
+/**
+ * Work of the longest kind the queue takes (48 characters), for a call
+ * whose purpose, with the longest step (32), would be past what the
+ * gateway takes.
+ */
+const longWork = defineWork({
+  kind: kindOf("longkind10"),
+  payload,
   run: async ({ key }, context) => {
     await handle(key, context);
   },
@@ -634,14 +650,56 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
     behaviours.clear();
     await runInDurableObject(store(), (_store, state) => {
       state.storage.sql.exec(
-        "DELETE FROM work_items WHERE running = 0 AND kind IN (?, ?, ?)",
+        "DELETE FROM work_items WHERE running = 0 AND kind IN (?, ?, ?, ?)",
         testWork.kind,
         quickWork.kind,
-        mediumWork.kind
+        mediumWork.kind,
+        longWork.kind
       );
       state.storage.sql.exec(
         "UPDATE work_model_bucket SET paused_until = 0, paused_since = NULL, pause_reason = NULL"
       );
+    });
+  });
+
+  it("refuses at once, sends nothing and parks a call whose purpose is past what the gateway takes", async () => {
+    const provider = await answeringProvider(() => answer);
+    const key = keyOf("long-purpose");
+    const step = "s".repeat(32);
+    const codes: string[] = [];
+    behaviours.set(key, async ({ ask }) => {
+      try {
+        await ask({ system: "Say something.", input: "Something.", step });
+        codes.push("answered");
+      } catch (error) {
+        codes.push(error instanceof WorkError ? error.code : "other");
+        throw error;
+      }
+    });
+    await enqueue({ key, priority: "asked" }, longWork);
+    await tick();
+    // The same request fails the same way every time: parked after this
+    // one attempt.
+    const [item] = await runInDurableObject(store(), (_store, state) =>
+      state.storage.sql
+        .exec<{ attempts: number; parked: number }>(
+          "SELECT attempts, parked_at IS NOT NULL AS parked FROM work_items WHERE kind = ? AND key = ?",
+          longWork.kind,
+          key
+        )
+        .toArray()
+    );
+
+    expect({
+      purpose: `brain.${longWork.kind}.${step}`.length,
+      codes,
+      sent: provider.requests.length,
+      item,
+    }).toStrictEqual({
+      purpose: 87,
+      codes: ["invalid_request"],
+      sent: 0,
+      item: { attempts: 1, parked: 1 },
     });
   });
 
@@ -1086,6 +1144,7 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
         at: later(40 * 60_000),
         embedders: noEmbedders,
         handOvers: noHandOvers,
+        contextTokens: null,
       });
     }
     const meanwhile = await queue([item]);
@@ -1263,7 +1322,7 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
     });
   });
 
-  it("fails an item whose model request can't be sent as its own, never as the host gone", async () => {
+  it("parks at once an item whose model request can't be sent, as its own failure, never as the host gone", async () => {
     reset();
     const tooLong = keyOf("too-long");
     behaviours.set(tooLong, async ({ ask }) => {
@@ -1273,17 +1332,15 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
       });
     });
     await enqueue({ key: tooLong, priority: "asked" });
-    for (let tickNumber = 0; tickNumber < workAttemptsMax; tickNumber += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- tick after tick
-      await tick(2 * 60 * 60_000);
-    }
+    // One tick: the same request fails the same way every time.
+    await tick(2 * 60 * 60_000);
     const { parked, paused } = await queue([tooLong]);
     expect({
       paused,
       parked: parked.map(({ attempts, error }) => ({ attempts, error })),
     }).toStrictEqual({
       paused: null,
-      parked: [{ attempts: workAttemptsMax, error: "invalid_request" }],
+      parked: [{ attempts: 1, error: "invalid_request" }],
     });
   });
 
@@ -1490,6 +1547,7 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
       at,
       embedders: noEmbedders,
       handOvers: noHandOvers,
+      contextTokens: null,
     });
     const { paused } = await queue();
     expect({
@@ -1593,6 +1651,7 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
       at: later(1000),
       embedders: noEmbedders,
       handOvers: noHandOvers,
+      contextTokens: null,
     });
     await enqueue({ key: plain, priority: "archive" });
     // Within the pause's minute: nothing runs, not even work with no model.

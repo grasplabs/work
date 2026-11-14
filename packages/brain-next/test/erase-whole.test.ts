@@ -170,6 +170,7 @@ const tick = async (person: string, embedding = false): Promise<void> => {
         return { kind: "nothing" };
       },
     },
+    contextTokens: null,
   });
 };
 

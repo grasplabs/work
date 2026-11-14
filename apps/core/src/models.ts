@@ -47,6 +47,7 @@ import {
   defaultModelEffort,
   modelEfforts,
   modelErrors,
+  modelPurposeMaxLength,
 } from "@grasp-os/shared/models";
 import type {
   ModelEffort,
@@ -287,7 +288,7 @@ const sessionShape = {
    */
   effort: z.enum(modelEfforts).optional(),
   /** Why the call is made, for the audit log. */
-  purpose: z.string().max(64).regex(purposePattern),
+  purpose: z.string().max(modelPurposeMaxLength).regex(purposePattern),
   /** Who or what asked: a person, an agent, an App or a workflow run. */
   trigger: auditActorSchema,
   /**
