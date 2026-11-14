@@ -40,7 +40,7 @@ export interface Waiting {
   heldStarts: Loaded<HeldStart[]>;
   /** Versions of workflows whose bindings no admin approved, so their starts are refused. Admins only. */
   bindings?: Loaded<BindingApprovalItem[]>;
-  /** Asks to share a skill with the company, which an admin decides. Admins only. */
+  /** Asks to share a skill with the company or a team, which an admin decides. Admins only. */
   skillShares?: Loaded<SkillShareItem[]>;
 }
 

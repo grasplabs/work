@@ -184,6 +184,10 @@ msgstr "{asker} heeft er op {askedOn} al om gevraagd."
 msgid "{asker} asked to share their skill {name} with the company. Approved, every member's agents use it. Read it on the skills page before you decide."
 msgstr "{asker} vraagt om de skill {name} met het bedrijf te delen. Na goedkeuring gebruiken de agents van alle leden hem. Lees hem op de skillspagina voordat je beslist."
 
+#: src/inbox/items.ts
+msgid "{asker} asked to share their skill {name} with the team {team}. Approved, its members' agents use it. Read it on the skills page before you decide."
+msgstr "{asker} vraagt om de skill {name} met het team {team} te delen. Na goedkeuring gebruiken de agents van de leden hem. Lees hem op de skillspagina voordat je beslist."
+
 #: src/workflows/traces.tsx
 #: src/workflows/workflow-diagram.tsx
 msgid "{attempts, plural, one {# attempt} other {# attempts}}"
@@ -1237,6 +1241,22 @@ msgstr "{team} geïnterviewd"
 msgid "{team} says the same"
 msgstr "{team} zegt hetzelfde"
 
+#: src/brain/skills-page.tsx
+msgid "{team}, not added yet"
+msgstr "{team}, nog niet toegevoegd"
+
+#: src/brain/skills-page.tsx
+msgid "{team}, version {version}"
+msgstr "{team}, versie {version}"
+
+#: src/brain/skills-page.tsx
+msgid "{team}, version {version}; a new version is on its way"
+msgstr "{team}, versie {version}; er is een nieuwe versie onderweg"
+
+#: src/brain/skills-page.tsx
+msgid "{team}, version {version}; being taken out of use"
+msgstr "{team}, versie {version}; wordt buiten gebruik gesteld"
+
 #: src/brain/thinking/use-thinking.ts
 msgid "{team}: “{words}”"
 msgstr "{team}: ‘{words}’"
@@ -2147,6 +2167,14 @@ msgstr "Toegevoegd aan de skills van het bedrijf, en sindsdien niet meer in gebr
 msgid "Added to the company's skills."
 msgstr "Toegevoegd aan de skills van het bedrijf."
 
+#: src/brain/skills-page.tsx
+msgid "Added to the team's skills, and since taken out of use."
+msgstr "Toegevoegd aan de skills van het team, en sindsdien niet meer in gebruik."
+
+#: src/brain/skills-page.tsx
+msgid "Added to the team's skills."
+msgstr "Toegevoegd aan de skills van het team."
+
 #: src/projects/file-item-dialog.tsx
 msgid "Adding an app or workflow shares it with nobody. Only those it is shared with see it here."
 msgstr "Een app of workflow toevoegen deelt die met niemand. Alleen wie er toegang toe heeft, ziet die hier."
@@ -2775,6 +2803,10 @@ msgstr "Goedgekeurd, maar een latere beslissing over deze skill kwam eerder dan 
 msgid "Approved, but not added to the company's skills yet."
 msgstr "Goedgekeurd, maar nog niet toegevoegd aan de skills van het bedrijf."
 
+#: src/brain/skills-page.tsx
+msgid "Approved, but not added to the team's skills yet."
+msgstr "Goedgekeurd, maar nog niet toegevoegd aan de skills van het team."
+
 #: src/inbox/item-detail.tsx
 msgid "Approved: {alias} of {name}."
 msgstr "Goedgekeurd: {alias} van {name}."
@@ -2801,8 +2833,20 @@ msgid "Approving it replaces Grasp's own skill {name} for everyone."
 msgstr "Met goedkeuring vervangt hij Grasps eigen skill {name} voor iedereen."
 
 #: src/brain/skills-page.tsx
+msgid "Approving it replaces Grasp's own skill {name} for the members of {team}."
+msgstr "Met goedkeuring vervangt hij Grasps eigen skill {name} voor de leden van {team}."
+
+#: src/brain/skills-page.tsx
 msgid "Approving it replaces the company's own skill {name} for everyone."
 msgstr "Met goedkeuring vervangt hij de eigen skill {name} van het bedrijf voor iedereen."
+
+#: src/brain/skills-page.tsx
+msgid "Approving it replaces the company's own skill {name} for the members of {team}."
+msgstr "Met goedkeuring vervangt hij de eigen skill {name} van het bedrijf voor de leden van {team}."
+
+#: src/brain/skills-page.tsx
+msgid "Approving it replaces the team {team}'s own skill {name} for its members."
+msgstr "Met goedkeuring vervangt hij de eigen skill {name} van het team {team} voor de leden ervan."
 
 #: src/apps/apps-overview.tsx
 #: src/chat/mentions.tsx
@@ -5507,6 +5551,10 @@ msgstr "Elke rij wordt eerst gecontroleerd. Klopt er één niet, dan wordt niets
 msgid "Every team Grasp spoke to: who they are, how they work and what slows them down."
 msgstr "Elk team waarmee Grasp sprak: wie ze zijn, hoe ze werken en wat ze ophoudt."
 
+#: src/brain/skills-page.tsx
+msgid "Every team's skills"
+msgstr "Skills van alle teams"
+
 #: src/apps/reset-test-data.tsx
 msgid "Every test record goes, for everyone who builds this App. The App's live data isn't touched."
 msgstr "Alle testrecords verdwijnen, voor iedereen die deze App bouwt. De live gegevens van de App blijven ongemoeid."
@@ -6088,6 +6136,10 @@ msgstr "voor alle modelaanroepen deze maand"
 msgid "For everyone"
 msgstr "Voor iedereen"
 
+#: src/brain/skills-page.tsx
+msgid "For everyone in the company"
+msgstr "Voor iedereen in het bedrijf"
+
 #: src/connections/request-app-dialog.tsx
 msgid "For example Personio or Twinfield"
 msgstr "Bijvoorbeeld Personio of Twinfield"
@@ -6119,6 +6171,10 @@ msgstr "Voor de {role}"
 #: src/agents/new-agent.tsx
 msgid "For the company"
 msgstr "Voor het bedrijf"
+
+#: src/brain/skills-page.tsx
+msgid "For the team {team}"
+msgstr "Voor het team {team}"
 
 #: src/agents/agent-wakes.tsx
 msgid "For whom"
@@ -6874,8 +6930,8 @@ msgid "How they would notice: not said yet."
 msgstr "Hoe ze het zouden merken: nog niet gezegd."
 
 #: src/brain/skills-page.tsx
-msgid "How things are done here. Your own skills are used in your own chats alone. Sharing one with the company waits for an admin, and from then on everyone's agents use it. A skill is guidance: it never grants access."
-msgstr "Hoe het hier gaat. Je eigen skills worden alleen in je eigen chats gebruikt. Deel je er een met het bedrijf, dan wacht dat op een admin, en daarna gebruiken de agents van iedereen hem. Een skill is een handleiding: hij geeft nooit toegang."
+msgid "How things are done here. Your own skills are used in your own chats alone. Sharing one with the company or one of your teams waits for an admin, and from then on the agents of everyone in it use it. A skill is guidance: it never grants access."
+msgstr "Hoe het hier gaat. Je eigen skills worden alleen in je eigen chats gebruikt. Deel je er een met het bedrijf of een van je teams, dan wacht dat op een admin, en daarna gebruiken de agents van iedereen daarin hem. Een skill is een handleiding: hij geeft nooit toegang."
 
 #: src/interview/closed.tsx
 msgid "How was talking to {who}?"
@@ -9100,6 +9156,10 @@ msgstr "Geen tabellen"
 msgid "No tables yet"
 msgstr "Nog geen tabellen"
 
+#: src/brain/skills-page.tsx
+msgid "No team has a skill of its own yet."
+msgstr "Nog geen enkel team heeft eigen skills."
+
 #: src/routes/_shell.settings.profile.tsx
 msgid "No teams"
 msgstr "Geen teams"
@@ -9299,6 +9359,10 @@ msgstr "Geen: de provider ervan is verwijderd."
 #: src/connections/connection-list.tsx
 msgid "None."
 msgstr "Geen."
+
+#: src/brain/skills-page.tsx
+msgid "Not added yet"
+msgstr "Nog niet toegevoegd"
 
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/workflows/workflow-triggers.tsx
@@ -11687,6 +11751,10 @@ msgid "Retire"
 msgstr "Buiten gebruik stellen"
 
 #: src/brain/skills-page.tsx
+msgid "Retire {name} for {team}?"
+msgstr "{name} voor {team} buiten gebruik stellen?"
+
+#: src/brain/skills-page.tsx
 msgid "Retire {name}?"
 msgstr "{name} buiten gebruik stellen?"
 
@@ -12710,6 +12778,10 @@ msgid "Share {name}"
 msgstr "{name} delen"
 
 #: src/inbox/items.ts
+msgid "Share {name} with {team}?"
+msgstr "{name} met {team} delen?"
+
+#: src/inbox/items.ts
 msgid "Share {name} with the company?"
 msgstr "{name} met het bedrijf delen?"
 
@@ -12745,6 +12817,10 @@ msgstr "Deel in plaats daarvan deze versie"
 #: src/workflows/share-workflow.tsx
 msgid "Share with"
 msgstr "Delen met"
+
+#: src/brain/skills-page.tsx
+msgid "Share with a team"
+msgstr "Met een team delen"
 
 #: src/brain/skills-page.tsx
 msgid "Share with the company"
@@ -13993,6 +14069,10 @@ msgstr "De agent vraagt om npm-pakketten voor {subject}"
 #: src/activity/audit-words.ts
 msgid "The agent looked something up"
 msgstr "De agent heeft iets opgezocht"
+
+#: src/brain/skills-page.tsx
+msgid "The agents of {team}'s members no longer use {name}. Its versions stay as history, and a new approved share of its name with the team brings it back."
+msgstr "De agents van de leden van {team} gebruiken {name} niet meer. De versies blijven als geschiedenis bewaard, en een nieuw goedgekeurd deelverzoek met deze naam voor het team brengt hem terug."
 
 #: src/agents/agents-overview.tsx
 msgid "The agents you can ask. Each has its own job and knows its own part of the company."
@@ -15802,6 +15882,14 @@ msgstr "Versie {version}, nog niet live"
 msgid "Version {version}, which runs now"
 msgstr "Versie {version}, die nu draait"
 
+#: src/brain/skills-page.tsx
+msgid "Version {version}; a new version is on its way"
+msgstr "Versie {version}; er is een nieuwe versie onderweg"
+
+#: src/brain/skills-page.tsx
+msgid "Version {version}; being taken out of use"
+msgstr "Versie {version}; wordt buiten gebruik gesteld"
+
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/workflows/workflow-status.tsx
 msgid "Version {waiting} waits for approval to run for the team"
@@ -17544,6 +17632,14 @@ msgstr "Je team heeft deze"
 #: src/apps/app-status.tsx
 msgid "Your team uses it"
 msgstr "Je team gebruikt het"
+
+#: src/brain/skills-page.tsx
+msgid "Your teams have no skills of their own yet."
+msgstr "Je teams hebben nog geen eigen skills."
+
+#: src/brain/skills-page.tsx
+msgid "Your teams' skills"
+msgstr "Skills van je teams"
 
 #: src/inbox/items.ts
 msgid "Your triggers stopped hearing new files"
