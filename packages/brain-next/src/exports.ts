@@ -23,7 +23,7 @@ import type {
 } from "./contract.ts";
 import { subjectOf } from "./erasure.ts";
 import { fileKeyOf, hashOf } from "./files.ts";
-import { readerSetKeyOf } from "./reader-sets.ts";
+import { accessOfKey, readerSetKeyOf } from "./reader-sets.ts";
 import { answerSchema } from "./remember.ts";
 import {
   isRestoring,
@@ -558,23 +558,6 @@ LIMIT ?3`;
 const selectSql: Record<ExportScope["kind"], string> = {
   company: selectSqlOf("company"),
   person: selectSqlOf("person"),
-};
-
-/** A set of readers' key (reader-sets.ts) as the access it names, if the contract can name it. */
-const accessOfKey = (key: string): Access | undefined => {
-  const principals = z
-    .array(z.tuple([z.enum(["person", "group"]), z.string()]))
-    .parse(JSON.parse(key));
-  const [first, ...rest] = principals;
-  let access: Access = { kind: "none" };
-  if (first?.[0] === "person") {
-    access = { kind: "owner", person: first[1] };
-  } else if (first?.[0] === "group") {
-    access = { kind: "audience", group: first[1] };
-  }
-  return rest.length === 0 && readerSetKeyOf(access) === key
-    ? access
-    : undefined;
 };
 
 /**

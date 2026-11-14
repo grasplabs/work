@@ -107,7 +107,7 @@ const pack: BrainSearchPack = {
       quote: null,
       context: null,
       source: { source: handbook, version: 2 },
-      said: null,
+      said: "outside",
       confirmed: false,
       contested: true,
       found: "entities",
@@ -413,6 +413,7 @@ describe(SourcesPage, () => {
         "Through what you asked about",
         "Invoices over 10,000 need a second approval",
         "A system's word",
+        "An outside party's word",
       ].map((text) => resultText.includes(text)),
       nothingMatched: resultText.includes("Nothing you may read matched."),
       notFound: resultText.includes(
@@ -425,7 +426,7 @@ describe(SourcesPage, () => {
       source: panel().includes("Invoices are paid on Fridays."),
       calls,
     }).toStrictEqual({
-      memories: Array.from({ length: 13 }, () => true),
+      memories: Array.from({ length: 14 }, () => true),
       nothingMatched: false,
       notFound: true,
       passage: { before: false, opened: true },

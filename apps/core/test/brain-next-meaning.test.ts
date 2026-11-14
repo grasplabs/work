@@ -157,8 +157,8 @@ describe("recall by meaning, through core", () => {
       memories: pack.memories.map((memory) => ({
         ...memory,
         store: "shared" as const,
-        // This file adds no memory: none is anyone's word.
-        said: null,
+        // This file adds no memory: a type's adapter, never compared.
+        said: "system" as const,
         source:
           memory.source === null
             ? null

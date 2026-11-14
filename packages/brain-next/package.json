@@ -18,6 +18,7 @@
   "dependencies": {
     "@grasp-os/shared": "workspace:*",
     "drizzle-orm": "catalog:",
+    "temporal-polyfill": "catalog:",
     "yaml": "catalog:",
     "zod": "catalog:"
   },

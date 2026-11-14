@@ -2518,6 +2518,10 @@ msgstr "Ein altes Format: als PDF oder neuere Datei speichern"
 msgid "An outside API that Apps and workflows can call through Grasp, once you allow them to: only this origin, with these methods, under these paths."
 msgstr "Eine externe API, die Apps und Workflows über Grasp aufrufen können, sobald Sie es ihnen erlauben: nur dieser Origin, mit diesen Methoden, unter diesen Pfaden."
 
+#: src/brain/sources-page.tsx
+msgid "An outside party's word"
+msgstr "Die Aussage einer externen Partei"
+
 #: src/workflows/requests/request-who.tsx
 msgid "An owner can turn this on."
 msgstr "Ein Inhaber kann das einschalten."

@@ -8,22 +8,28 @@ import type { z } from "zod";
 import type { BrainBucket } from "./bucket.ts";
 import {
   modelReplySchema,
+  modelRoles,
+  purposeMaxLength,
   modelTimeoutMaxMs,
   parkedListed,
   sourceIdMaxLength,
   wellFormedString,
   workErrors,
+  workErrorsParkedAtOnce,
+  workPriorities,
 } from "./contract.ts";
 import type {
   AskModel,
   EmbedModel,
   EmbedReply,
   Embedders,
+  ModelRole,
   HandOvers,
   ModelTrouble,
   OverdueWork,
   WorkErrorCode,
   WorkOverview,
+  WorkPriority,
 } from "./contract.ts";
 import { workItems, workModelBucket } from "./db/schema.ts";
 import { WorkError } from "./work-error.ts";
@@ -116,28 +122,13 @@ export { WorkError } from "./work-error.ts";
 // now) with the real time since the tick began added. Backoffs, pauses,
 // returns from parking and the bucket go by it.
 
-/** The classes of work, the first first: an item of a class runs before any of the next. */
-export const workPriorities = [
-  /** What someone just asked about. */
-  "asked",
-  /** What people upload on purpose. */
-  "upload",
-  /** Conversations, meetings and runs. */
-  "conversation",
-  /** Recent documents. */
-  "recent",
-  /** Old documents and archives, which may never reach the front. */
-  "archive",
-] as const;
-export type WorkPriority = (typeof workPriorities)[number];
-
 /** Most items under way at once, across every tick. */
 export const workAtOnce = 4;
 
 /** Most items of one connection under way at once. */
 export const workPerConnection = 2;
 
-/** Attempts an item gets before it is parked. */
+/** Attempts an item gets before it is parked (but one, for `workErrorsParkedAtOnce`). */
 export const workAttemptsMax = 5;
 
 /** Times an item is parked before it stays parked. */
@@ -211,6 +202,23 @@ export const workRequestMaxLength = 1_000_000;
 const kindPattern = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$/u;
 const kindMaxLength = 48;
 
+/**
+ * A model call as a handler asks it: its instructions and its one
+ * message; for a kind that makes calls of more than one kind, which step
+ * this is (a lowercase word: the call's purpose is `brain.<kind>.<step>`,
+ * else `brain.<kind>`); and which of the host's models (careful, unless
+ * said).
+ */
+export interface AskRequest {
+  system: string;
+  input: string;
+  step?: string;
+  role?: ModelRole;
+}
+
+/** A step's name: one lowercase word. */
+const stepPattern = /^[a-z][a-z0-9_]{0,31}$/u;
+
 /** What a handler may use while it runs an item. */
 export interface WorkContext {
   /** The store's storage, to read what the item is about and write what it made. */
@@ -221,7 +229,7 @@ export interface WorkContext {
    * `WorkError` for the item's own failures, and `WorkWaitsError` while the
    * queue is paused: let both through.
    */
-  ask: (request: { system: string; input: string }) => Promise<string>;
+  ask: (request: AskRequest) => Promise<string>;
   /**
    * The host's embedders: the model they run now (null while none ships),
    * and `embed`, which embeds passages with it in what is left of the
@@ -233,6 +241,11 @@ export interface WorkContext {
   };
   /** The host's Brain bucket, where the store keeps what it keeps in R2. */
   bucket: BrainBucket;
+  /**
+   * The context window of the host's models, in tokens; null when the
+   * host doesn't know it (contract.ts `contextTokensSchema`).
+   */
+  contextTokens: number | null;
   /**
    * The host's side of hand-overs (contract.ts `HandOvers`): the shared
    * store's tick only, as hand-overs are queued there alone.
@@ -251,6 +264,13 @@ export interface WorkContext {
    * throws.
    */
   again: (progress: number) => void;
+  /**
+   * Keeps `payload` (its kind's, checked) as what the item carries from
+   * now on, on disk before it returns: a later attempt of the item, after
+   * a failure or the store stopping, runs with it. For what a run must not
+   * do twice: a model's answer it is part-way through writing, say.
+   */
+  keep: (payload: unknown) => void;
   /** Aborted once the item's time is up: end then, by throwing. */
   signal: AbortSignal;
 }
@@ -263,6 +283,7 @@ export interface WorkHost {
   ask: AskModel;
   embedders: Embedders;
   bucket: BrainBucket;
+  contextTokens: number | null;
   /** The shared store's tick only (`WorkContext.handOvers`). */
   handOvers?: HandOvers;
   /** A person's own store's tick only (`WorkContext.owner`). */
@@ -361,7 +382,12 @@ export const defineWork = <Payload>(
       if (!parsed.success) {
         throw new WorkError("invalid_payload");
       }
-      await definition.run(parsed.data, context);
+      await definition.run(parsed.data, {
+        ...context,
+        keep: (next) => {
+          context.keep(JSON.stringify(definition.payload.parse(next)));
+        },
+      });
     },
   });
   return definition;
@@ -557,7 +583,10 @@ const fail = (
   now: number,
   { interrupted }: { interrupted: boolean }
 ): void => {
-  if (item.attempts >= workAttemptsMax) {
+  if (
+    item.attempts >= workAttemptsMax ||
+    workErrorsParkedAtOnce.includes(error)
+  ) {
     putBack(storage, item, {
       parkedAt: new Date(now),
       parks: item.parks + 1,
@@ -972,12 +1001,19 @@ const askWithin = async (
   state: WorkState,
   ask: AskModel,
   kind: string,
-  request: { system: string; input: string },
+  { system, input, step, role = "careful" }: AskRequest,
   attempt: Attempt
 ): Promise<string> => {
   const { now, signal, deadline } = attempt;
   signal.throwIfAborted();
-  if (!sendable(request)) {
+  const purpose =
+    step === undefined ? `brain.${kind}` : `brain.${kind}.${step}`;
+  if (
+    !sendable({ system, input }) ||
+    (step !== undefined && !stepPattern.test(step)) ||
+    purpose.length > purposeMaxLength ||
+    !modelRoles.includes(role)
+  ) {
     throw new WorkError("invalid_request");
   }
   if (attempt.calls >= workCallsMax) {
@@ -989,8 +1025,10 @@ const askWithin = async (
   let reply: unknown = undefined;
   try {
     reply = await ask({
-      purpose: `brain.${kind}`,
-      ...request,
+      purpose,
+      role,
+      system,
+      input,
       timeoutMs: Math.max(1, left - Math.min(1000, Math.floor(left / 10))),
     });
   } catch {
@@ -1162,10 +1200,20 @@ const runItem = async (
         storage,
         signal,
         bucket: host.bucket,
+        contextTokens: host.contextTokens,
         handOvers: host.handOvers,
         owner: host.owner,
         again: (progress) => {
           again = { progress };
+        },
+        // The payload as JSON, from `defineWork`'s check: on this attempt's
+        // own row alone, never one an erasure or a newer item replaced.
+        keep: (payload) => {
+          drizzle(storage)
+            .update(workItems)
+            .set({ payload: String(payload) })
+            .where(claimedRow(item))
+            .run();
         },
         ask: async (request) =>
           await askWithin(

@@ -2518,6 +2518,10 @@ msgstr "Een oud formaat: sla het op als pdf of nieuwer bestand"
 msgid "An outside API that Apps and workflows can call through Grasp, once you allow them to: only this origin, with these methods, under these paths."
 msgstr "Een externe API die apps en workflows via Grasp kunnen aanroepen, zodra je ze dat toestaat: alleen deze origin, met deze methoden, onder deze paden."
 
+#: src/brain/sources-page.tsx
+msgid "An outside party's word"
+msgstr "Het woord van een externe partij"
+
 #: src/workflows/requests/request-who.tsx
 msgid "An owner can turn this on."
 msgstr "Een eigenaar kan dit aanzetten."

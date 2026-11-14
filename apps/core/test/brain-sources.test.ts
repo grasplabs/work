@@ -354,7 +354,7 @@ describe("the Brain's sources, as a person reads them", () => {
         store: "shared",
         statement: teamStatement,
         source: { source: teamSource, version: 1 },
-        said: null,
+        said: "system",
       },
       hidden: false,
     });

@@ -161,6 +161,69 @@ export const accessSchema = z.discriminatedUnion("kind", [
 ]);
 export type Access = z.infer<typeof accessSchema>;
 
+/** The classes of work, the first first: an item of a class runs before any of the next. */
+export const workPriorities = [
+  /** What someone just asked about. */
+  "asked",
+  /** What people upload on purpose. */
+  "upload",
+  /** Conversations, meetings and runs. */
+  "conversation",
+  /** Recent documents. */
+  "recent",
+  /** Old documents and archives, which may never reach the front. */
+  "archive",
+] as const;
+export type WorkPriority = (typeof workPriorities)[number];
+
+/**
+ * Whose word a memory is: an internal person's (`person`, as the host
+ * names them: the one who said it, or who confirmed it), an outside
+ * party's (a customer's mail, a supplier's document), an agent's (`agent`,
+ * as the host names it) or the system's.
+ */
+export const speakerSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("internal"), person: principalSchema }),
+  z.strictObject({ kind: z.literal("outside") }),
+  z.strictObject({ kind: z.literal("agent"), agent: principalSchema }),
+  z.strictObject({ kind: z.literal("system") }),
+]);
+export type Speaker = z.infer<typeof speakerSchema>;
+
+/** Whether `timeZone` is a time zone the runtime knows (IANA, as `Intl` takes it). */
+const isTimeZone = (timeZone: string): boolean => {
+  try {
+    // Throws a RangeError for a zone it doesn't know.
+    return (
+      new Intl.DateTimeFormat("en", { timeZone }).resolvedOptions().timeZone !==
+      ""
+    );
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Memories to draw from a version as it is added (extraction.ts): whose
+ * words its text is (`speaker`, a `Speaker`: the host's to say, never a
+ * model's), when they were said (`saidAt`), in which time zone their
+ * relative dates count ("next Friday"), and which class of work the
+ * drawing takes (`workPriorities`). A version added without it is kept
+ * and found, and no memory is drawn from it. The text is one message's
+ * own words: a thread is one version per message, its quoted or
+ * forwarded history stripped by the host (core's `said`).
+ */
+export const extractSchema = z.strictObject({
+  speaker: speakerSchema,
+  // From 1970 on: the queue keeps it as milliseconds since then.
+  saidAt: z.date().min(new Date(0)),
+  timeZone: z.string().min(1).max(64).refine(isTimeZone, {
+    message: "Is no time zone",
+  }),
+  priority: z.enum(workPriorities),
+});
+export type Extract = z.infer<typeof extractSchema>;
+
 /**
  * Whether `text` is within a source's bound (`sourceTextMaxBytes`), as
  * given and as the word index takes it: folding can grow a text many
@@ -174,9 +237,10 @@ export const fitsSourceText = (text: string): boolean =>
 
 /**
  * A version of a source to add: which source, the change it is, its text,
- * who may read this version, and, in a person's own store alone, the
- * group it is erased with (`Brain.eraseSource` of the group's key): a key its own key starts
- * with, then "/". A source keeps the group of its first version.
+ * who may read this version; in a person's own store alone, the group it
+ * is erased with (`Brain.eraseSource` of the group's key): a key its own
+ * key starts with, then "/", a source keeping the group of its first
+ * version; and, to draw memories from it, whose words it is (`extract`).
  */
 export const newSourceSchema = z.strictObject({
   source: sourceIdSchema,
@@ -193,6 +257,7 @@ export const newSourceSchema = z.strictObject({
       message: `At most ${sourceTextMaxBytes} bytes as indexed`,
     }),
   access: accessSchema,
+  extract: extractSchema.optional(),
   /**
    * When the producer read this text from where it lives, in milliseconds
    * since the epoch, if it read it: an add of a text read before the
@@ -231,7 +296,7 @@ export const instructionsTextSchema = wellFormedString()
 // a person over the version they saw (`after`), never a read that a later
 // one may hold off.
 export const newInstructionsSchema = newSourceSchema
-  .omit({ group: true, readAt: true })
+  .omit({ extract: true, group: true, readAt: true })
   .extend({
     text: instructionsTextSchema,
     /**
@@ -692,18 +757,39 @@ export interface SourceVersion extends SourceVersionRef {
 }
 
 /**
+ * Which of the host's models a call asks for: its careful one, or its
+ * quick one, cheaper, for a check (the host's model roles).
+ */
+export const modelRoles = ["careful", "quick"] as const;
+
+/** Most characters of a model call's purpose, `brain.<kind>[.<step>]`: what the host's gateway takes. */
+export { modelPurposeMaxLength as purposeMaxLength } from "@grasp-os/shared/models";
+export type ModelRole = (typeof modelRoles)[number];
+
+/**
  * A model call the Brain's background work asks its host to make, through
- * the host's model gateway: what the call is for (`brain.<kind of work>`),
- * its instructions, its one message, and how long it may take: what is
- * left of its item's time, less a moment. The host cancels the call when
- * that is over, and says so (`timed_out`).
+ * the host's model gateway: what the call is for (`brain.<kind of work>`,
+ * and `.<step>` for a kind that makes calls of more than one kind), which
+ * of its models, its instructions, its one message, and how long it may
+ * take: what is left of its item's time, less a moment. The host cancels
+ * the call when that is over, and says so (`timed_out`).
  */
 export interface ModelRequest {
+  /** At most {@link purposeMaxLength} characters. */
   purpose: string;
+  role: ModelRole;
   system: string;
   input: string;
   timeoutMs: number;
 }
+
+/**
+ * The context window, in tokens, of the models the Brain's work asks (the
+ * smallest of them): what a piece of a source read at once is cut to
+ * (extraction.ts). Null when the host doesn't know it: then a version is
+ * read whole, and a model whose window it overflows refuses the call.
+ */
+export const contextTokensSchema = z.int().positive().nullable();
 
 /** Most milliseconds a model call may be given: an item's longest time. */
 export const modelTimeoutMaxMs = 4 * 60_000;
@@ -769,8 +855,27 @@ export const workErrors = {
   erased: "What it works on was erased.",
   embedder_unavailable: "The embedder gave no vectors for it.",
   no_progress: "It asked to go on without having done any of its work.",
+  invalid_answer: "The model's answer isn't what its work takes.",
+  window_too_small:
+    "The model's context window can't hold the work's instructions.",
+  restoring:
+    "The store is restoring an export, so it adds nothing until that is done: it is tried again.",
 } as const;
 export type WorkErrorCode = keyof typeof workErrors;
+
+/**
+ * Errors an item meets the same way on every attempt while the release
+ * and the host's models stay as they are: a call the queue won't send
+ * (`invalid_request`: its purpose, step, role or size, fixed by the code
+ * and the item's payload), or a window too small for the work
+ * (`window_too_small`: the window is the host's models'). Parked at the
+ * first, never tried again within minutes; it comes back a day later, as
+ * any parked item, when a release or the models may have changed.
+ */
+export const workErrorsParkedAtOnce: readonly WorkErrorCode[] = [
+  "invalid_request",
+  "window_too_small",
+];
 
 /** Items of one kind waiting in the queue. */
 export interface WaitingWork {
@@ -1038,7 +1143,7 @@ export interface Embedders {
 // that fails is retried and, after too many failures, parked where staff
 // see it.
 
-/** The classes of work a hand-over may take (work.ts `workPriorities`). */
+/** The classes of work a hand-over may take (`workPriorities`). */
 export const handOverPriorities = ["conversation"] as const;
 export type HandOverPriority = (typeof handOverPriorities)[number];
 
@@ -1106,6 +1211,12 @@ export interface WorkRequest {
   at: Date;
   embedders: Embedders;
   handOvers: HandOvers;
+  /**
+   * The context window of the models `ask` asks, in tokens (the smallest
+   * of them): what extraction cuts a source's text to, a piece at a time
+   * (`contextTokensSchema`). Null when the host doesn't know it.
+   */
+  contextTokens: number | null;
 }
 
 /**
@@ -1170,6 +1281,32 @@ export const personErasureSchema = z.strictObject({
   reason: z.enum(erasureReasons),
 });
 export type PersonErasure = z.infer<typeof personErasureSchema>;
+
+/**
+ * What staff look up in the store's record of its erasure ledger: a
+ * source, by its key, or a person, by their id, as they were erased.
+ */
+export const erasureLookupSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("source"), source: sourceIdSchema }),
+  z.strictObject({ kind: z.literal("person"), person: principalSchema }),
+]);
+export type ErasureLookup = z.infer<typeof erasureLookupSchema>;
+
+/**
+ * Whether what staff looked up was erased, and nothing else (no reason,
+ * no count, no hash): `erased`, with when the ledger recorded the latest
+ * erasure of it, once every erasure of it is written to the ledger and
+ * this store's tick has deleted the versions it hid: hidden for good,
+ * nothing can read it and a restore can't bring it back. Its files leave
+ * the bucket in the background, after a 15-minute grace (files.ts), and
+ * a person's own store deletes what it hid on its own tick: neither is
+ * waited for. `erasing` until then; `not_erased` when the record holds no
+ * erasure of it, alike whether it ever existed; `unavailable` while the
+ * store reads its erasure ledger.
+ */
+export type ErasureStatus =
+  | { state: "erased"; at: Date }
+  | { state: "erasing" | "not_erased" | "unavailable" };
 
 /**
  * What every refusal of the store starts with: a call refused for what it
@@ -1600,20 +1737,6 @@ export const memoryTypes = [
 ] as const;
 export type MemoryType = (typeof memoryTypes)[number];
 
-/**
- * Whose word a memory is: an internal person's (`person`, as the host
- * names them: the one who said it, or who confirmed it), an outside
- * party's (a customer's mail, a supplier's document), an agent's (`agent`,
- * as the host names it) or the system's.
- */
-export const speakerSchema = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("internal"), person: principalSchema }),
-  z.strictObject({ kind: z.literal("outside") }),
-  z.strictObject({ kind: z.literal("agent"), agent: principalSchema }),
-  z.strictObject({ kind: z.literal("system") }),
-]);
-export type Speaker = z.infer<typeof speakerSchema>;
-
 /** Most memories one add takes, and most entities. */
 export const memoriesPerAddMax = 100;
 
@@ -1791,7 +1914,7 @@ export type NewMemory = z.infer<typeof newMemorySchema>;
  *
  * The change key is unique per change within the store, and comes from
  * the change's intent, never minted per attempt: for extraction, the
- * source and version (one add per version); for `remember`, the writer
+ * source, version and piece (one add per piece); for `remember`, the writer
  * and what they said. So a retry, from any caller, is the same change.
  *
  * `extracted` says a version of a source is fully extracted: every memory
@@ -2548,6 +2671,15 @@ export interface Brain {
    * Answers alike whatever they held, and is safe to repeat.
    */
   erasePerson: (request: PersonErasure) => Promise<void>;
+  /**
+   * Whether a source or a person was erased, from the store's record of
+   * its ledger alone (`ErasureStatus`). For staff, who name what a client
+   * gave them: it reads nothing but that record, so what was never erased
+   * answers as what never existed. The shared store's alone: a person's
+   * own store refuses, as it does `handOver` (staff's lookup reads a
+   * person's own erasure from core's record of it, never from their store).
+   */
+  erasureStatus: (request: ErasureLookup) => Promise<ErasureStatus>;
   /**
    * Starts an export of the company's Brain for `deployment`, written by
    * the queue a part a run as files in the store's part of the bucket

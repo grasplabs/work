@@ -143,15 +143,13 @@ const MemoryFoundBadge = ({ found }: { found: BrainMemoryFoundBy }) => {
   return <Badge variant="secondary">{label}</Badge>;
 };
 
-/** Whose word a memory not drawn from a source is. */
+/** Whose word a memory is, as its producer said it. */
 const SaidBadge = ({ said }: { said: BrainSearchMemory["said"] }) => {
   const { t } = useLingui();
-  if (said === null) {
-    return null;
-  }
   const label = {
     you: t`Your own word`,
-    someone: t`Someone's word`,
+    person: t`Someone's word`,
+    outside: t`An outside party's word`,
     agent: t`An agent's word`,
     system: t`A system's word`,
   }[said];
@@ -194,9 +192,8 @@ const MemoryResult = ({
           </Collapsible>
         )}
         <span className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
-          {source === null ? (
-            <SaidBadge said={memory.said} />
-          ) : (
+          <SaidBadge said={memory.said} />
+          {source === null ? null : (
             <>
               <ProducerBadge producer={source.source.producer} />
               <Button

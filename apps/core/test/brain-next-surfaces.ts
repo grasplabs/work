@@ -978,6 +978,7 @@ const exportSettled = async (id: string): Promise<void> => {
       at: new Date(),
       embedders: noEmbedders,
       handOvers: noHandOvers,
+      contextTokens: null,
     });
     // oxlint-disable-next-line no-await-in-loop -- a tick at a time
     const status = await store().exportStatus({ id });
@@ -1265,6 +1266,7 @@ const ownExportSettled = async (person: string, id: string): Promise<void> => {
       at: new Date(),
       embedders: noEmbedders,
       handOvers: noHandOvers,
+      contextTokens: null,
     });
     // oxlint-disable-next-line no-await-in-loop -- a tick at a time
     const status = await personalStore(person).ownExport({ person });
@@ -1304,6 +1306,36 @@ const readersExport = async (personId: string): Promise<string[]> => {
     )
   );
 };
+
+/**
+ * The Brain's store binding, refusing every store but the shared one, by
+ * name or by an id made from a name: a staff path addresses no person's
+ * own store (GRA-1762), so a probe through it that tries fails.
+ */
+const sharedOnly = (): Env["BRAIN_STORE"] =>
+  new Proxy(env.BRAIN_STORE, {
+    get: (namespace, member): unknown => {
+      if (member === "jurisdiction") {
+        return () => sharedOnly();
+      }
+      const value: unknown = Reflect.get(namespace, member, namespace);
+      if (typeof value !== "function") {
+        return value;
+      }
+      return (...args: unknown[]): unknown => {
+        const named =
+          member === "getByName" || member === "idFromName"
+            ? String(args[0])
+            : null;
+        if (member === "get" || (named !== null && named !== "brain")) {
+          throw new Error(
+            "A staff lookup addressed a store but the shared one"
+          );
+        }
+        return Reflect.apply(value, namespace, args);
+      };
+    },
+  });
 
 /**
  * `personId`, once a first erasure of them settled and its time passed: a
@@ -1847,6 +1879,16 @@ export const coreProbes = {
         "nothing"
       ),
       await check("the hidden memories", hidden, personId, "hidden"),
+      // As a recall as the company pinned them (a turn outside the
+      // person's own chat): the company alone, never their own store.
+      await answer(
+        "the hidden memories, as the company",
+        async () =>
+          await coreBrain.readableMemoriesAs(env, personId, hidden, {
+            reach: "company",
+          }),
+        "hidden"
+      ),
       await check("the reader's own memory", [
         { store: "shared", memory: fixture.seenMemory },
       ]),
@@ -2255,6 +2297,7 @@ export const coreProbes = {
           at,
           embedders: noEmbedders,
           handOvers: noHandOvers,
+          contextTokens: null,
         });
       },
       "a marked item worked to parking"
@@ -2595,6 +2638,81 @@ export const coreProbes = {
             version: 1,
           })
       )),
+    ];
+  },
+  brainErasureForStaff: async ({ markers }) => {
+    const look = async (
+      name: string,
+      lookup: unknown,
+      about?: Answer["about"],
+      like?: string
+    ) =>
+      await answer(
+        name,
+        async () =>
+          await coreBrain.brainErasureForStaff(
+            { ...env, BRAIN_STORE: sharedOnly() },
+            unchecked(lookup)
+          ),
+        about,
+        like
+      );
+    const holder = stranger();
+    const kept = missingSource();
+    const erased = missingSource();
+    for (const source of [kept, erased]) {
+      // oxlint-disable-next-line no-await-in-loop -- one add at a time
+      await coreBrain.addSource(env, {
+        source,
+        change: crypto.randomUUID(),
+        text: markedText(markers),
+        readers: { kind: "owner", personId: holder },
+      });
+    }
+    await coreBrain.eraseSource(env, {
+      source: erased,
+      readers: { kind: "owner", personId: holder },
+      reason: "deleted",
+    });
+    return [
+      await look(
+        "a source no one added",
+        { kind: "source", key: keyOf(missingSource()) },
+        "nothing"
+      ),
+      await look(
+        "someone else's marked source, never erased",
+        { kind: "source", key: keyOf(kept) },
+        "hidden"
+      ),
+      await look(
+        "someone with nothing",
+        { kind: "person", id: stranger() },
+        "nothing",
+        "person"
+      ),
+      await look(
+        "someone with marked sources, never erased",
+        { kind: "person", id: holder },
+        "hidden",
+        "person"
+      ),
+      await look("an erased marked source", {
+        kind: "source",
+        key: keyOf(erased),
+      }),
+      await look("a key of the markers", {
+        kind: "source",
+        key: `upload:${markers.join(" ")}`,
+      }),
+      await look("an id of the markers, too long", {
+        kind: "person",
+        id: markers.join("").repeat(300),
+      }),
+      await look("a kind named by the markers", {
+        kind: markers.join(" "),
+        id: stranger(),
+      }),
     ];
   },
   // Each of someone else's own skills, asked of as the reader's own,
@@ -3486,6 +3604,7 @@ const queuedVectors = async ({
           at: nextDay(),
           embedders,
           handOvers: noHandOvers,
+          contextTokens: null,
         });
       }
     );
@@ -3770,6 +3889,9 @@ const callerOf = (as: Authority, grant: string): codeRecall.RecallCaller => ({
           chatId: chatIdSchema.parse(crypto.randomUUID()),
         },
   permissionId: permissionIdSchema.parse(grant),
+  // An App's as the company; a chat's code as its person's teams, as in
+  // their own chat in Grasp.
+  ...(as.subject.type === "app" ? {} : { reach: "teams" as const }),
   actor: { type: "system" },
 });
 
@@ -6239,6 +6361,7 @@ export const storeProbes = {
           at,
           embedders: noEmbedders,
           handOvers: noHandOvers,
+          contextTokens: null,
         });
       },
       "a marked item worked by the store"
@@ -6252,6 +6375,7 @@ export const storeProbes = {
               at,
               embedders: noEmbedders,
               handOvers: noHandOvers,
+              contextTokens: null,
             });
           })
       )
@@ -6264,6 +6388,7 @@ export const storeProbes = {
         at: nextDay(),
         embedders: leakyEmbedders(markers),
         handOvers: noHandOvers,
+        contextTokens: null,
       });
     }),
     await answer("a tick at no time", async () => {
@@ -6272,6 +6397,7 @@ export const storeProbes = {
         at: unchecked(markers.join(" ")),
         embedders: leakyEmbedders(markers),
         handOvers: noHandOvers,
+        contextTokens: null,
       });
     }),
   ],
@@ -6389,6 +6515,7 @@ export const storeProbes = {
               throw new Error(`Could not hand over ${markers.join(" ")}`);
             },
           },
+          contextTokens: null,
         });
       }),
     ];
@@ -6454,6 +6581,7 @@ export const storeProbes = {
         at: nextDay(),
         embedders: leakyEmbedders(markers),
         handOvers: noHandOvers,
+        contextTokens: null,
       });
     }),
     ...(await workMarked(
@@ -6465,6 +6593,7 @@ export const storeProbes = {
           at,
           embedders: noEmbedders,
           handOvers: noHandOvers,
+          contextTokens: null,
         });
       },
       "a marked item worked after a re-embed"
@@ -6479,6 +6608,7 @@ export const storeProbes = {
           at,
           embedders: noEmbedders,
           handOvers: noHandOvers,
+          contextTokens: null,
         });
       },
       "a marked item worked to parking"
@@ -6514,6 +6644,109 @@ export const storeProbes = {
       async () => await store().rebuildWords()
     ),
   ],
+  erasureStatus: async ({ markers }) => {
+    const look = async (
+      name: string,
+      request: unknown,
+      about?: Answer["about"],
+      like?: string
+    ) =>
+      await answer(
+        name,
+        async () => await store().erasureStatus(unchecked(request)),
+        about,
+        like
+      );
+    const holder = stranger();
+    const kept = keyOf(missingSource());
+    const erased = keyOf(missingSource());
+    for (const source of [kept, erased]) {
+      // oxlint-disable-next-line no-await-in-loop -- one add at a time
+      await store().addSource({
+        source,
+        change: crypto.randomUUID(),
+        text: markedText(markers),
+        access: { kind: "owner", person: holder },
+      });
+    }
+    await store().eraseSource({ source: erased, reason: "deleted" });
+    // A person's own store refuses it, whatever it holds and whoever it
+    // names: each answer is scanned for the markers, as every probe's is.
+    // (Two stores' refusals differ only in the store's id, which its name,
+    // given by the caller, already decides.)
+    const owner = stranger();
+    const ownErased = keyOf(missingSource());
+    for (const source of [keyOf(missingSource()), ownErased]) {
+      // oxlint-disable-next-line no-await-in-loop -- one add at a time
+      await personalStore(owner).addSource({
+        source,
+        change: crypto.randomUUID(),
+        text: markedText(markers),
+        access: { kind: "owner", person: owner },
+      });
+    }
+    await personalStore(owner).eraseSource({
+      source: ownErased,
+      reason: "deleted",
+    });
+    const askOwn = async (name: string, request: unknown) =>
+      await answer(
+        name,
+        async () => await personalStore(owner).erasureStatus(unchecked(request))
+      );
+    return [
+      await askOwn(
+        "a person's own store holding marked sources, of its person",
+        {
+          kind: "person",
+          person: owner,
+        }
+      ),
+      await askOwn("a person's own store, of its erased marked source", {
+        kind: "source",
+        source: ownErased,
+      }),
+      await askOwn("a person's own store, of a key of the markers", {
+        kind: "source",
+        source: `upload:${markers.join(" ")}`,
+      }),
+      await look(
+        "a source no one added",
+        { kind: "source", source: keyOf(missingSource()) },
+        "nothing"
+      ),
+      await look(
+        "someone else's marked source, never erased",
+        { kind: "source", source: kept },
+        "hidden"
+      ),
+      await look(
+        "someone with nothing",
+        { kind: "person", person: stranger() },
+        "nothing",
+        "person"
+      ),
+      await look(
+        "someone with marked sources, never erased",
+        { kind: "person", person: holder },
+        "hidden",
+        "person"
+      ),
+      await look("an erased marked source", {
+        kind: "source",
+        source: erased,
+      }),
+      await look("a key of the markers", {
+        kind: "source",
+        source: `upload:${markers.join(" ")}`,
+      }),
+      await look("an unknown field", {
+        kind: "person",
+        person: stranger(),
+        extra: markers.join(" "),
+      }),
+    ];
+  },
   // As core's (above), through the contract itself.
   startExport: async ({ reader, markers }) => [
     await answer("the company's export, started", async () => {
