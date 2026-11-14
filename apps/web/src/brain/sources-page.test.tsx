@@ -7,6 +7,7 @@ import type {
   BrainSourcesAfter,
   BrainUploadReaders,
 } from "@grasp-os/shared/brain-sources";
+import { uploadMaxBytes } from "@grasp-os/shared/uploads";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -123,6 +124,10 @@ interface Faked {
   versioning?: Promise<boolean>;
   /** Holds each delete until it settles. */
   deleting?: Promise<boolean>;
+  /** Deletes, then answers not found: a delete done before, its answer lost. */
+  deleteAnswerLost?: boolean;
+  /** Refuses the first new version with this, as a lost answer would. */
+  firstVersionRefused?: string;
 }
 
 /** A question nothing the person may read holds: its pack is empty. */
@@ -143,11 +148,15 @@ const shown = async (
     deleting,
     admin = false,
     handbookNotDeletable = false,
+    deleteAnswerLost = false,
+    firstVersionRefused,
   }: Faked = {}
 ) => {
   const calls: string[] = [];
   /** The upload id each upload was sent with, in order. */
   const uploadIds: string[] = [];
+  /** The version id each new version was sent with, in order. */
+  const versionIds: string[] = [];
   const brainSources = {
     list: async (after?: BrainSourcesAfter) => {
       await Promise.resolve();
@@ -225,9 +234,14 @@ const shown = async (
     },
     uploadVersion: async (
       uploadId: string,
-      file: { name: string; bytes: Uint8Array }
+      file: { name: string; bytes: Uint8Array },
+      versionId: string
     ) => {
+      versionIds.push(versionId);
       await (versioning ?? Promise.resolve());
+      if (firstVersionRefused !== undefined && versionIds.length === 1) {
+        throw new Error(firstVersionRefused);
+      }
       calls.push(`uploadVersion ${uploadId} ${file.name}`);
       return { source: handbook, version: 3 };
     },
@@ -270,6 +284,12 @@ const shown = async (
     deleteUpload: async (uploadId: string) => {
       await (deleting ?? Promise.resolve());
       calls.push(`deleteUpload ${uploadId}`);
+      if (deleteAnswerLost) {
+        throw Object.assign(
+          new Error("There's no such upload, or you may not change it."),
+          { code: "brain.upload_not_found" }
+        );
+      }
     },
   };
   const core = {
@@ -302,7 +322,51 @@ const shown = async (
     await router.load();
   });
   await settle();
-  return { calls, uploadIds };
+  return { calls, uploadIds, versionIds };
+};
+
+/** Chooses `file` in `picker`. */
+const pick = async (picker: HTMLInputElement, file: File): Promise<void> => {
+  await act(async () => {
+    Object.defineProperty(picker, "files", {
+      configurable: true,
+      value: [file],
+    });
+    picker.dispatchEvent(new Event("change", { bubbles: true }));
+    await Promise.resolve();
+  });
+};
+
+/** Sends `form`. */
+const submitted = async (form: HTMLFormElement): Promise<void> => {
+  await act(async () => {
+    form.requestSubmit();
+    await Promise.resolve();
+  });
+  await settle();
+};
+
+/** The opened upload's new version picker and its form. */
+const versionFormOf = () => {
+  const picker = [...document.querySelectorAll("input")].find(
+    (input) =>
+      input.type === "file" && input.closest("[data-slot=card]") !== null
+  );
+  const form = picker?.closest("form");
+  if (!(picker && form)) {
+    throw new TypeError("No new version form");
+  }
+  return { picker, form };
+};
+
+/** A file whose size the browser reports as `size`, its bytes never read. */
+const fileSized = (name: string, size: number): File => {
+  const file = new File(["WEBVTT"], name, { type: "text/vtt" });
+  Object.defineProperty(file, "size", { value: size });
+  file.arrayBuffer = () => {
+    throw new Error("Read a file past the limit");
+  };
+  return file;
 };
 
 /** Presses the button whose text starts with `label`. */
@@ -868,6 +932,99 @@ describe(SourcesPage, () => {
       listed: [true, true, true],
       after: true,
       calls: ["sharedUploads", "deleteUpload u-3", "sharedUploads"],
+    });
+  });
+
+  it("refuses a file past the limit, new or as a new version, before reading or sending it", async () => {
+    const { calls, uploadIds, versionIds } = await shown([]);
+    const [, picker] = document.querySelectorAll("input");
+    const form = picker?.closest("form");
+    if (!(picker && form)) {
+      throw new TypeError("No upload form");
+    }
+    const tooLarge = uploadMaxBytes + 1;
+    await pick(picker, fileSized("large.vtt", tooLarge));
+    await submitted(form);
+    const uploadText = section("Upload a file");
+    await press("Handbook");
+    await settle();
+    const version = versionFormOf();
+    await pick(version.picker, fileSized("large 2.vtt", tooLarge));
+    await submitted(version.form);
+
+    expect({
+      sent: [uploadIds.length, versionIds.length],
+      calls: calls.filter((call) => call.startsWith("upload")),
+      said: [uploadText, panel()].map((text) =>
+        text.includes("This file is over the upload limit of 10 MB.")
+      ),
+    }).toStrictEqual({ sent: [0, 0], calls: [], said: [true, true] });
+  });
+
+  it("retries a new version with the same version's id, and gives another file a new one", async () => {
+    const lost = "The connection was lost.";
+    const { versionIds } = await shown([], { firstVersionRefused: lost });
+    await press("Handbook");
+    await settle();
+    const { picker, form } = versionFormOf();
+    await pick(picker, new File(["WEBVTT"], "v2.vtt", { type: "text/vtt" }));
+    await submitted(form);
+    const refusedText = panel();
+    await submitted(form);
+    // The panel shows the new version, with a form of its own.
+    const next = versionFormOf();
+    await pick(
+      next.picker,
+      new File(["WEBVTT"], "v3.vtt", { type: "text/vtt" })
+    );
+    await submitted(next.form);
+
+    expect({
+      refused: refusedText.includes(lost),
+      sameOnRetry: versionIds[0] === versionIds[1],
+      newForAnotherFile: versionIds[2] !== versionIds[1],
+      ids: versionIds.length,
+    }).toStrictEqual({
+      refused: true,
+      sameOnRetry: true,
+      newForAnotherFile: true,
+      ids: 3,
+    });
+  });
+
+  it("takes a delete answered as not found as done, its first answer lost: gone, with no refusal shown", async () => {
+    const { calls } = await shown([], { admin: true, deleteAnswerLost: true });
+    await press("Handbook");
+    await settle();
+    await press("Delete");
+    await press("Delete for good");
+    await settle();
+    const closed = panel();
+    await press("Erase for good");
+    const confirm = [...document.querySelectorAll("button")].findLast(
+      (button) => button.textContent.trim() === "Erase for good"
+    );
+    await act(async () => {
+      confirm?.click();
+      await Promise.resolve();
+    });
+    await settle();
+    await settle();
+
+    expect({
+      closed,
+      refusalShown: document.body.textContent.includes(
+        "There's no such upload"
+      ),
+      shared: section("Shared uploads").includes(
+        "No uploads are shared with a team or everyone."
+      ),
+      deletes: calls.filter((call) => call.startsWith("delete")),
+    }).toStrictEqual({
+      closed: "",
+      refusalShown: false,
+      shared: true,
+      deletes: ["deleteUpload u-1", "deleteUpload u-3"],
     });
   });
 });

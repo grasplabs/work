@@ -203,7 +203,12 @@ export interface BrainSourcesApi {
   /** Uploads `file` as the next version of their upload `uploadId`, for the same readers. */
   uploadVersion: (
     uploadId: string,
-    file: BrainUploadFile
+    file: BrainUploadFile,
+    /**
+     * The version's id, a UUID the page mints for the file it was given
+     * and sends again when it retries: a retry is the same version.
+     */
+    versionId: string
   ) => Promise<{ source: BrainSourceRef; version: number }>;
   /** An upload they may read, with what they may do to it: null when there is none or they may not read it, alike. */
   uploadOf: (uploadId: string) => Promise<BrainUpload | null>;

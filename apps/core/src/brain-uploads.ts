@@ -525,15 +525,25 @@ export const uploadToBrain = async (
 
 /**
  * Uploads `input` as the next version of `uploadId`, for its readers, as
- * `person`, who must be its uploader. Its readers are read again after the
- * file is, right before the add.
+ * `person`, who must be its uploader, under `versionIdInput`: the id the
+ * page mints for the file it was given and sends again when it retries (a
+ * UUID). It is the version's change, so a retry after a lost answer is
+ * the version it made, even after a later one, and the same id sent with
+ * another file is refused (`brain.upload_other_file`). Its readers are
+ * read again after the file is, right before the add.
  */
 export const uploadVersionToBrain = async (
   env: Env,
   person: Identity,
   uploadId: unknown,
-  input: unknown
+  input: unknown,
+  versionIdInput: unknown
 ): Promise<SourceVersionRef> => {
+  const versionId = uploadIdSchema.safeParse(versionIdInput);
+  // The upload's own id is its first version's change.
+  if (!versionId.success || versionId.data === uploadId) {
+    throw uploadErrors.create("upload.invalid");
+  }
   const asked = await memberNow(env, person);
   const before = await readableUpload(env, asked, uploadId);
   if (!mayAddVersion(asked, before)) {
@@ -554,8 +564,7 @@ export const uploadVersionToBrain = async (
     .where(eq(brainUploads.id, row.id));
   return await addVersion(env, person, row, file, text, {
     first: false,
-    // One change per upload request, minted before its one try.
-    change: crypto.randomUUID(),
+    change: versionId.data,
   });
 };
 

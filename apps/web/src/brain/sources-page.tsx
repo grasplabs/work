@@ -18,7 +18,11 @@ import {
   firstLineOf,
 } from "@grasp-os/shared/brain-sources";
 import { failureText } from "@grasp-os/shared/errors";
-import { uploadMaxBytes, uploadTypes } from "@grasp-os/shared/uploads";
+import {
+  uploadErrors,
+  uploadMaxBytes,
+  uploadTypes,
+} from "@grasp-os/shared/uploads";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import { Card, CardContent } from "@grasp-os/ui/components/card";
@@ -127,11 +131,26 @@ const UploadRefusal = ({
   );
 };
 
-/** A file as core takes it: its name and its bytes. */
-const fileOf = async (file: File) => ({
-  name: file.name,
-  bytes: new Uint8Array(await file.arrayBuffer()),
-});
+/**
+ * A file as core takes it: its name and its bytes. Refused here, as core
+ * would, before reading and sending it all: the size the browser reports
+ * only saves the trip. Core checks the bytes that arrive.
+ */
+const fileOf = async (file: File) => {
+  if (file.size > uploadMaxBytes) {
+    throw uploadErrors.create("upload.too_large");
+  }
+  return { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) };
+};
+
+/**
+ * Whether `answer` is a delete done: one refused as not found was done
+ * before, its answer lost (a delete the person could press was theirs to
+ * make), so the upload is gone either way.
+ */
+const deleteDone = (answer: Read<unknown>): boolean =>
+  answer.state === "ready" ||
+  (answer.state === "refused" && answer.code === "brain.upload_not_found");
 
 /** The file types an upload may be, for the file picker: core's own list. */
 const uploadAccept = Object.keys(uploadTypes)
@@ -422,7 +441,9 @@ const UploadActions = ({
   const [upload, setUpload] = useState<Read<BrainUpload | null>>({
     state: "loading",
   });
-  const [file, setFile] = useState<File>();
+  // The new version's id, minted for the file chosen and sent again when
+  // it is retried, so a retry after a lost answer is the same version.
+  const [file, setFile] = useState<{ chosen: File; versionId: string }>();
   const [acting, setActing] = useState<Read<unknown>>();
   // Which action is under way: a new version shows it uploads.
   const [uploading, setUploading] = useState(false);
@@ -477,7 +498,11 @@ const UploadActions = ({
               const answer = await readFrom(
                 core,
                 async (sources) =>
-                  await sources.uploadVersion(source.id, await fileOf(file))
+                  await sources.uploadVersion(
+                    source.id,
+                    await fileOf(file.chosen),
+                    file.versionId
+                  )
               );
               setUploading(false);
               setActing(answer);
@@ -495,7 +520,12 @@ const UploadActions = ({
               accept={uploadAccept}
               id={fileId}
               onChange={(event) => {
-                setFile(event.target.files?.[0]);
+                const chosen = event.target.files?.[0];
+                setFile(
+                  chosen === undefined
+                    ? undefined
+                    : { chosen, versionId: crypto.randomUUID() }
+                );
               }}
               type="file"
             />
@@ -529,10 +559,12 @@ const UploadActions = ({
               const answer = await readFrom(core, async (sources) => {
                 await sources.deleteUpload(source.id);
               });
-              setActing(answer);
-              if (answer.state === "ready") {
+              if (deleteDone(answer)) {
+                setActing(undefined);
                 onDeleted(source);
+                return;
               }
+              setActing(answer);
             })();
           }}
           title={t`Delete this upload?`}
@@ -1097,17 +1129,19 @@ const SharedUploads = ({ onErased }: { onErased: () => void }) => {
                         const answer = await readFrom(core, async (sources) => {
                           await sources.deleteUpload(upload.source.id);
                         });
-                        setActing(answer);
-                        if (answer.state === "ready") {
-                          setMore(undefined);
-                          setListed(
-                            await readFrom(
-                              core,
-                              async (sources) => await sources.sharedUploads()
-                            )
-                          );
-                          onErased();
+                        if (!deleteDone(answer)) {
+                          setActing(answer);
+                          return;
                         }
+                        setActing(undefined);
+                        setMore(undefined);
+                        setListed(
+                          await readFrom(
+                            core,
+                            async (sources) => await sources.sharedUploads()
+                          )
+                        );
+                        onErased();
                       })();
                     }}
                     title={t`Erase this upload for good?`}

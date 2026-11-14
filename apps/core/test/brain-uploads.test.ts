@@ -136,7 +136,11 @@ const askedOf = async (person: Person, uploadId: string) => ({
   info: await person.api.brainSources.uploadOf(uploadId),
   version: await outcome(
     async () =>
-      await person.api.brainSources.uploadVersion(uploadId, fileOf("Again"))
+      await person.api.brainSources.uploadVersion(
+        uploadId,
+        fileOf("Again"),
+        crypto.randomUUID()
+      )
   ),
   deleted: await outcome(async () => {
     await person.api.brainSources.deleteUpload(uploadId);
@@ -475,7 +479,8 @@ describe("uploading a file straight into the Brain", () => {
       );
       const next = await uploader.api.brainSources.uploadVersion(
         source.id,
-        fileOf(`Handbook ${second}`, "Handbook 2.vtt")
+        fileOf(`Handbook ${second}`, "Handbook 2.vtt"),
+        crypto.randomUUID()
       );
 
       expect({
@@ -489,7 +494,8 @@ describe("uploading a file straight into the Brain", () => {
           async () =>
             await other.api.brainSources.uploadVersion(
               source.id,
-              fileOf("Overwritten")
+              fileOf("Overwritten"),
+              crypto.randomUUID()
             )
         ),
       }).toStrictEqual({
@@ -505,6 +511,81 @@ describe("uploading a file straight into the Brain", () => {
           mayDelete: false,
         },
         byOther: { refused: "brain.upload_not_allowed" },
+      });
+    }
+  );
+
+  it(
+    "keeps a retried new version the version it made, even after a later version, and refuses its id sent again with another file",
+    slow,
+    async () => {
+      const uploader = await signedInApi(idp, "user");
+      const { source } = await uploader.api.brainSources.upload(
+        fileOf(`Policy ${word()}`, "Policy.vtt"),
+        everyone,
+        crypto.randomUUID()
+      );
+      const [second, third] = [word(), word()];
+      const secondId = crypto.randomUUID();
+      const secondFile = fileOf(`Policy ${second}`, "Policy 2.vtt");
+      await uploader.api.brainSources.uploadVersion(
+        source.id,
+        secondFile,
+        secondId
+      );
+      await uploader.api.brainSources.uploadVersion(
+        source.id,
+        fileOf(`Policy ${third}`, "Policy 3.vtt"),
+        crypto.randomUUID()
+      );
+
+      // The second's answer was lost, and the page sends it again.
+      const retried = await uploader.api.brainSources.uploadVersion(
+        source.id,
+        secondFile,
+        secondId
+      );
+      const otherFile = await outcome(
+        async () =>
+          await uploader.api.brainSources.uploadVersion(
+            source.id,
+            fileOf(`Policy ${word()}`, "Policy 4.vtt"),
+            secondId
+          )
+      );
+      const badIds = [
+        await outcome(
+          async () =>
+            await uploader.api.brainSources.uploadVersion(
+              source.id,
+              secondFile,
+              source.id
+            )
+        ),
+        await outcome(
+          async () =>
+            await uploader.api.brainSources.uploadVersion(
+              source.id,
+              secondFile,
+              "v2"
+            )
+        ),
+      ];
+      const { versions } = await uploader.api.brainSources.versions(source);
+
+      expect({
+        retried,
+        otherFile,
+        badIds,
+        versions: versions.length,
+        current: await found(uploader, third),
+      }).toStrictEqual({
+        retried: { source, version: 2 },
+        otherFile: { refused: "brain.upload_other_file" },
+        // Its first version's change, and no UUID.
+        badIds: [{ refused: "upload.invalid" }, { refused: "upload.invalid" }],
+        versions: 3,
+        current: [source.id],
       });
     }
   );
@@ -628,7 +709,8 @@ describe("uploading a file straight into the Brain", () => {
         async () =>
           await uploader.api.brainSources.uploadVersion(
             source.id,
-            fileOf(`Late ${late}`)
+            fileOf(`Late ${late}`),
+            crypto.randomUUID()
           )
       );
       const foundLate = await found(uploader, late);

@@ -7031,7 +7031,7 @@ export const sourcesProbes = {
     await askedOfUploads(
       probing,
       async (asking, uploadId, file) =>
-        await asking.uploadVersion(uploadId, file)
+        await asking.uploadVersion(uploadId, file, crypto.randomUUID())
     ),
   deleteUpload: async (probing) =>
     await askedOfUploads(probing, async (asking, uploadId) => {

@@ -144,7 +144,7 @@ export const rpcParamNames: ParamNames = {
     "sharedUploads": ["after"],
     "upload": ["file","readers","uploadId"],
     "uploadOf": ["uploadId"],
-    "uploadVersion": ["uploadId","file"],
+    "uploadVersion": ["uploadId","file","versionId"],
     "versions": ["source","before"],
   },
   "ChannelAccountsRpc": {
