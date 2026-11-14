@@ -5415,6 +5415,10 @@ msgstr "Effacé"
 msgid "Erased a removed member"
 msgstr "A effacé un membre retiré"
 
+#: src/activity/audit-words.ts
+msgid "Erased what the Brain kept from a connection, as it was disconnected"
+msgstr "A effacé ce que le Brain avait conservé d’une connexion, lors de sa déconnexion"
+
 #: src/settings/erasures.tsx
 msgid "Erasing, {done} of {total}"
 msgstr "Effacement, {done} sur {total}"
@@ -5628,6 +5632,10 @@ msgstr "Tout ce que je lis et chaque conversation que je mène passe par un mod�
 #: src/onboarding/setup-steps.tsx
 msgid "Everything I read and every conversation I have runs on an AI model. Yours is Grasp’s AI, and it is ready."
 msgstr "Tout ce que je lis et chaque conversation que je mène passe par un modèle d’IA. Le vôtre est l’IA de Grasp, et elle est prête."
+
+#: src/connections/connection-list.tsx
+msgid "Everything the Brain kept from it is erased for good."
+msgstr "Tout ce que le Brain en avait conservé est effacé définitivement."
 
 #: src/interview/closed.tsx
 msgid "Everything you told me is removed for good and cannot be brought back. Is only something wrong? Then put it right with “Add something” instead."

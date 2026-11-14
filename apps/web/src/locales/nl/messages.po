@@ -5415,6 +5415,10 @@ msgstr "Gewist"
 msgid "Erased a removed member"
 msgstr "Een verwijderd lid gewist"
 
+#: src/activity/audit-words.ts
+msgid "Erased what the Brain kept from a connection, as it was disconnected"
+msgstr "Gewist wat het Brain van een verbinding had bewaard, toen die werd losgekoppeld"
+
 #: src/settings/erasures.tsx
 msgid "Erasing, {done} of {total}"
 msgstr "Wordt gewist, {done} van {total}"
@@ -5628,6 +5632,10 @@ msgstr "Alles wat ik lees en elk gesprek dat ik voer, loopt via een AI-model. Ge
 #: src/onboarding/setup-steps.tsx
 msgid "Everything I read and every conversation I have runs on an AI model. Yours is Grasp’s AI, and it is ready."
 msgstr "Alles wat ik lees en elk gesprek dat ik voer, loopt via een AI-model. Die van jullie is de AI van Grasp, en die staat klaar."
+
+#: src/connections/connection-list.tsx
+msgid "Everything the Brain kept from it is erased for good."
+msgstr "Alles wat het Brain ervan heeft bewaard, wordt voorgoed gewist."
 
 #: src/interview/closed.tsx
 msgid "Everything you told me is removed for good and cannot be brought back. Is only something wrong? Then put it right with “Add something” instead."

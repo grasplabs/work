@@ -1261,6 +1261,40 @@ export const eraseSource = async (
   await brain(env).eraseSource(request);
 };
 
+const ownGroupErasureSchema = z.strictObject({
+  personId: idSchema,
+  group: sourceRefSchema,
+  reason: z.enum(erasureReasons),
+});
+
+/**
+ * Erases the group `group` (`addSource`'s `group`) from `personId`'s own
+ * store alone, as `eraseSource` with `asGroup` does there: every source
+ * added in it, in one call, and the group closed, so a later add in it is
+ * refused, also after a restore of the store. For a group only their own
+ * store can hold, so the shared store has no key of it to close: what an
+ * agent read through their own connection (core's `addSource` refuses a
+ * capture any other readers). Answers how many sources it erased, the
+ * same each time it is repeated (none once their store was erased
+ * whole). Safe to repeat; one that throws must be repeated until it
+ * answers.
+ */
+export const eraseOwnGroup = async (
+  env: BrainEnv,
+  erased: { personId: string; group: SourceRef; reason: ErasureReason }
+): Promise<number> => {
+  const { personId, group, reason } = checked(ownGroupErasureSchema, erased);
+  const answered = await ownBrain(env, personId).eraseSource({
+    source: sourceKeyOf(group),
+    reason,
+    asGroup: true,
+  });
+  if (answered === undefined) {
+    throw new Error("A person's own store answers what it erased");
+  }
+  return answered.sources;
+};
+
 /**
  * Erases what only `personId` may read, added up to now: their own
  * sources' every version (their uploads, chats and runs, their

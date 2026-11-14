@@ -1983,6 +1983,64 @@ export const coreProbes = {
       }),
     ];
   },
+  // A group of one person's own store (GRA-1827: a disconnected
+  // connection's captures), erased there alone. Its caller acts for that
+  // person, so it answers how many of their sources it erased: a count,
+  // never a marker or anything of what they held.
+  eraseOwnGroup: async ({ markers }) => {
+    const personId = stranger();
+    const group: SourceRef = {
+      producer: "capture",
+      id: `connection-${crypto.randomUUID()}`,
+    };
+    await coreBrain.addSource(env, {
+      source: { producer: "capture", id: `${group.id}/${crypto.randomUUID()}` },
+      change: crypto.randomUUID(),
+      text: markedText(markers),
+      readers: { kind: "owner", personId },
+      group,
+    });
+    const erase = async (
+      name: string,
+      erased: Parameters<typeof coreBrain.eraseOwnGroup>[1]
+    ) =>
+      await answer(
+        name,
+        async () => await coreBrain.eraseOwnGroup(env, erased)
+      );
+    return [
+      await erase("someone's marked group", {
+        personId,
+        group,
+        reason: "deleted",
+      }),
+      await erase("the same erasure again", {
+        personId,
+        group,
+        reason: "deleted",
+      }),
+      await erase("a group no one added in", {
+        personId,
+        group: { producer: "capture", id: `connection-${crypto.randomUUID()}` },
+        reason: "deleted",
+      }),
+      await erase("a group named by the markers", {
+        personId,
+        group: unchecked({ producer: "capture", id: markers.join("") }),
+        reason: "deleted",
+      }),
+      await erase("a person named by the markers", {
+        personId: unchecked(markers.join("\n")),
+        group,
+        reason: "deleted",
+      }),
+      await erase("a reason named by the markers", {
+        personId,
+        group,
+        reason: unchecked(markers.join(" ")),
+      }),
+    ];
+  },
   // A rule of time alone: it reads nothing of the Brain.
   stillDeletingTooLong: async () => [
     await answer("an erasure asked for now", async () => {

@@ -123,6 +123,10 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     action: "brain.source.handover_skipped",
     text: msg`Didn't keep something noted for the Brain, and recorded why`,
   },
+  {
+    action: "brain.capture.erased",
+    text: msg`Erased what the Brain kept from a connection, as it was disconnected`,
+  },
   { action: "agent.call", text: msg`The agent looked something up` },
   { action: "model.refused", text: msg`A model call was refused` },
   { action: "model", text: msg`Called a model` },
