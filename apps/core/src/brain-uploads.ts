@@ -32,6 +32,7 @@ import {
   auditedBatch,
   outboxed,
   outboxedEvent,
+  outboxedIfChanged,
   uuidFromHash,
 } from "./audit-outbox.ts";
 import { memberOf } from "./auth/identity.ts";
@@ -47,6 +48,7 @@ import type { SourceReaders, SourceVersionRef } from "./brain-next.ts";
 import { brainUploads, teams, users } from "./db/core/schema.ts";
 import { ExtractorUnavailableError, localExtractor } from "./files/extract.ts";
 import { hasText, signatures } from "./files/upload-checks.ts";
+import { onboardingStore } from "./onboarding/store.ts";
 
 // Files a person uploads straight into the Brain, on Brain › Sources
 // (GRA-1824; its threat model is on the issue). The uploader chooses who
@@ -671,9 +673,18 @@ export const brainUploadOf = async (
  * (`mayDelete`; anyone else who may read it is refused, audited, as
  * `brain.upload_admin_only`): its key erased in
  * the Brain, every version, then its row forgotten, with
- * `brain.upload.deleted`. An erasure that failed is recorded
- * (`brain.upload.delete_failed`) and leaves the upload as it was, to
- * delete again: the erasure is safe to repeat.
+ * `brain.upload.deleted`, once however many deletes ran at once. An
+ * erasure that failed is recorded (`brain.upload.delete_failed`) and
+ * leaves the upload as it was, to delete again: the erasure is safe to
+ * repeat.
+ *
+ * An upload for its uploader alone may be the file of a document an admin
+ * shared in the onboarding (onboarding/documents.ts), whose ID it shares:
+ * deleting it is that admin's hard delete, so what was read from it goes
+ * too, the reading and every drawing made with it (the store's
+ * `forgetDocuments`, which answers 0 and writes nothing for any other ID).
+ * Before the row goes, so a forget that failed is tried again by the next
+ * delete.
  */
 export const deleteBrainUpload = async (
   env: Env,
@@ -716,9 +727,13 @@ export const deleteBrainUpload = async (
     ]);
     throw error;
   }
+  if (row.readers === "me") {
+    await onboardingStore(env).forgetDocuments([row.id], actor);
+  }
   await auditedBatch(env, db, [
     db.delete(brainUploads).where(eq(brainUploads.id, row.id)),
-    outboxed(db, {
+    // Only by the delete that took the row: two at once record it once.
+    outboxedIfChanged(db, {
       actor,
       target,
       action: "brain.upload.deleted",

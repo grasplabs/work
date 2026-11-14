@@ -1333,15 +1333,17 @@ const Documents = (props: StepProps) => {
     }
   };
   // A document that was read, removed in core: its reading forgotten, its file erased when theirs.
-  const removeKept = async (id: string) => {
+  const removeKept = async (id: string): Promise<boolean> => {
     setRemoveProblem(undefined);
     const removed = await run(async (session) => {
       await session.onboarding.removeDocument(id);
       return true;
     }, setRemoveProblem);
-    if (removed === true) {
-      await refresh();
+    if (removed !== true) {
+      return false;
     }
+    await refresh();
+    return true;
   };
   const reading = pending.filter((each) => each.state === "reading");
   const count = kept.length;
@@ -1375,15 +1377,16 @@ const Documents = (props: StepProps) => {
       <Onward>
         <DocumentDrop
           onAdd={take}
-          onRemove={(row) => {
+          onRemove={async (row) => {
             if (row.state === "read") {
-              void removeKept(row.key);
-              return;
+              return await removeKept(row.key);
             }
             setPending((now) => now.filter((each) => each.key !== row.key));
+            return true;
           }}
           rows={rows}
         />
+        <p className="text-muted-foreground text-xs">{t`I keep each file in your Brain, for you alone.`}</p>
         <ErrorText>{removeProblem}</ErrorText>
         {suites.length === 0 ? null : (
           <div className="flex flex-col items-center gap-2">

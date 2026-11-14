@@ -165,6 +165,23 @@ const eraseFile = async (
 };
 
 /**
+ * Takes back the file of a share that failed (`eraseFile`). Should that
+ * fail too, the file stays as `person`'s own upload, in their Sources for
+ * them to delete: the share still answers why it failed.
+ */
+const takeBack = async (
+  env: Env,
+  person: Identity,
+  id: string
+): Promise<void> => {
+  try {
+    await eraseFile(env, person, id);
+  } catch {
+    // Left in their own Sources (see above).
+  }
+};
+
+/**
  * Keeps the file whole, as `person`'s upload `id` for them alone; nothing
  * of it once that fails, whatever the Brain made of it meanwhile.
  */
@@ -177,7 +194,7 @@ const keepFile = async (
   try {
     await uploadToBrain(env, person, { name, bytes }, { kind: "me" }, id);
   } catch (error) {
-    await eraseFile(env, person, id);
+    await takeBack(env, person, id);
     throw documentErrors.create(
       brainUploadErrors.codeOf(error) === "brain.upload_text_too_long"
         ? "document.too_complex"
@@ -264,19 +281,21 @@ export const shareDocument = async (
       { id, name: input.name, reading },
       actorOf(person)
     );
-  } catch (error) {
-    await eraseFile(env, person, id);
-    throw error;
+  } catch {
+    await takeBack(env, person, id);
+    throw documentErrors.create("document.not_read");
   }
 };
 
 /**
  * Removes the shared document `id`, as `person`: its file erased first,
- * when it is theirs (another admin's stays in that admin's own Sources
- * until they delete it), then its reading forgotten, with every drawing
- * made since it was shared and what of those the brain holds (the store's
- * `forgetDocuments`, audited by counts). Either step that fails leaves the
- * rest to a second remove. `document.not_found` when there is none.
+ * when it is theirs, which forgets its reading too (brain-uploads.ts
+ * `deleteBrainUpload`); another admin's file stays in that admin's own
+ * Sources until they delete it. Then its reading forgotten, if it is still
+ * there, with every drawing made since it was shared and what of those the
+ * brain holds (the store's `forgetDocuments`, audited by counts). A step
+ * that fails leaves the document listed, for a second remove to finish.
+ * `document.not_found` when there is none.
  */
 export const removeDocument = async (
   env: Env,

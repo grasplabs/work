@@ -229,15 +229,18 @@ const RemoveRead = ({
   onRemove,
 }: {
   file: string;
-  onRemove: () => void;
+  onRemove: () => Promise<void>;
 }) => {
   const { t } = useLingui();
   const [open, setOpen] = useState(false);
+  // While core removes it: pressed again, it would remove it twice.
+  const [removing, setRemoving] = useState(false);
   return (
     <>
       <Button
         aria-label={t`Remove ${file}`}
         data-remove
+        disabled={removing}
         onClick={() => {
           setOpen(true);
         }}
@@ -261,7 +264,11 @@ const RemoveRead = ({
             <AlertDialogAction
               onClick={() => {
                 setOpen(false);
-                onRemove();
+                setRemoving(true);
+                void (async () => {
+                  await onRemove();
+                  setRemoving(false);
+                })();
               }}
               variant="destructive"
             >
@@ -279,7 +286,13 @@ const RemoveRead = ({
  * from one value, so they always agree; read, the label turns and the
  * check draws.
  */
-const Row = ({ row, onRemove }: { row: DocumentRow; onRemove: () => void }) => {
+const Row = ({
+  row,
+  onRemove,
+}: {
+  row: DocumentRow;
+  onRemove: () => Promise<void>;
+}) => {
   const { t, i18n } = useLingui();
   const file = row.name;
   const percent = useReading(row);
@@ -337,7 +350,9 @@ const Row = ({ row, onRemove }: { row: DocumentRow; onRemove: () => void }) => {
       <Button
         aria-label={t`Remove ${file}`}
         data-remove
-        onClick={onRemove}
+        onClick={() => {
+          void onRemove();
+        }}
         size="icon-sm"
         variant="ghost"
       >
@@ -396,7 +411,8 @@ export const DocumentDrop = ({
 }: {
   rows: DocumentRow[];
   onAdd: (files: File[]) => void;
-  onRemove: (row: DocumentRow) => void;
+  /** Whether it was removed: one read is removed in core, which may fail. */
+  onRemove: (row: DocumentRow) => Promise<boolean>;
 }) => {
   const { t } = useLingui();
   const zone = useRef<HTMLDivElement>(null);
@@ -491,12 +507,14 @@ export const DocumentDrop = ({
     );
   };
 
-  // Focus stays in the list: the next document's remove button, else the target.
-  const remove = (row: DocumentRow) => {
-    onRemove(row);
+  // Said once it is removed, or that it wasn't; focus goes to the target.
+  const remove = async (row: DocumentRow) => {
     setError("");
     const file = row.name;
-    setAnnouncement(t`${file} removed`);
+    const removed = await onRemove(row);
+    setAnnouncement(
+      removed ? t`${file} removed` : t`${file} couldn’t be removed`
+    );
     requestAnimationFrame(() => {
       trigger.current?.focus();
     });
@@ -724,8 +742,8 @@ export const DocumentDrop = ({
         {rows.map((row) => (
           <Row
             key={row.key}
-            onRemove={() => {
-              remove(row);
+            onRemove={async () => {
+              await remove(row);
             }}
             row={row}
           />

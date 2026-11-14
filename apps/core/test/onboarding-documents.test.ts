@@ -5,8 +5,9 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { recallAs } from "../src/brain-next.ts";
+import { deleteBrainUpload } from "../src/brain-uploads.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
-import { shareDocument } from "../src/onboarding/documents.ts";
+import { removeDocument, shareDocument } from "../src/onboarding/documents.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { retryErasures } from "../src/person-erasure.ts";
 import { allEvents } from "./audit-events.ts";
@@ -246,6 +247,46 @@ const refusing = <T extends Rpc.DurableObjectBranded | undefined>(
       },
     });
   return wrapped(namespace);
+};
+
+/** Someone signed in, with their API. */
+type Signed = Awaited<ReturnType<typeof signedInApi>>;
+
+/** `admin` shares a file that says `marker`, read as `reading`. */
+const shareAs = async (admin: Signed, marker: string) => {
+  const { result } = await answering(
+    [answer(reading)],
+    async () =>
+      await admin.api.onboarding.shareDocument({
+        locale: "en",
+        name: `shared-${crypto.randomUUID()}.docx`,
+        bytes: fileWith(marker),
+      })
+  );
+  return result;
+};
+
+/** Whether core still names the upload `id` (`brain_uploads`). */
+const uploadNamed = async (id: string): Promise<boolean> => {
+  const row = await env.DB.prepare("SELECT 1 FROM brain_uploads WHERE id = ?")
+    .bind(id)
+    .first();
+  return row !== null;
+};
+
+/** The actions of the audit log's events on the upload `id`, outboxes drained. */
+const uploadEvents = async (id: string): Promise<string[]> => {
+  const events = await allEvents();
+  return events
+    .filter(({ target }) => target?.id === id)
+    .map(({ action }) => action);
+};
+
+/** How many readings the audit log says were forgotten, outboxes drained. */
+const forgettings = async (): Promise<number> => {
+  const events = await allEvents();
+  return events.filter(({ action }) => action === "onboarding.document.purged")
+    .length;
 };
 
 /** Core's env, but `binding` as `replaced`. */
@@ -545,6 +586,79 @@ describe("documents shared in the onboarding", { timeout: 60_000 }, () => {
   });
 });
 
+describe(
+  "a shared document's file deleted from Brain › Sources",
+  {
+    timeout: 60_000,
+  },
+  () => {
+    it("takes the reading with it, as a remove does, recorded once", async () => {
+      const admin = await signedInApi(idp, "admin");
+      const shared = await shareAs(admin, markerOf("fromsources"));
+      const before = await forgettings();
+      await admin.api.brainSources.deleteUpload(shared.id);
+      expect({
+        listed: await listed(admin.api, shared.name),
+        forgotten: (await forgettings()) - before,
+        events: await uploadEvents(shared.id),
+      }).toStrictEqual({
+        listed: false,
+        forgotten: 1,
+        events: ["brain.upload.added", "brain.upload.deleted"],
+      });
+    });
+
+    it("leaves any other upload of theirs alone to delete as before", async () => {
+      const admin = await signedInApi(idp, "admin");
+      const id = crypto.randomUUID();
+      await admin.api.brainSources.upload(
+        { name: "Notes.docx", bytes: fileWith(markerOf("ownnotes")) },
+        { kind: "me" },
+        id
+      );
+      const before = await forgettings();
+      await admin.api.brainSources.deleteUpload(id);
+      expect({
+        named: await uploadNamed(id),
+        forgotten: (await forgettings()) - before,
+        events: await uploadEvents(id),
+      }).toStrictEqual({
+        named: false,
+        forgotten: 0,
+        events: ["brain.upload.added", "brain.upload.deleted"],
+      });
+    });
+
+    it("fails while its reading can't be forgotten, and a second delete finishes both", async () => {
+      const admin = await signedInApi(idp, "admin");
+      const shared = await shareAs(admin, markerOf("forgetonsources"));
+      const first = await outcome(
+        deleteBrainUpload(
+          envWith("ONBOARDING", refusing(env.ONBOARDING, "forgetDocuments")),
+          await admin.api.whoami(),
+          shared.id
+        )
+      );
+      const between = {
+        listed: await listed(admin.api, shared.name),
+        named: await uploadNamed(shared.id),
+      };
+      await admin.api.brainSources.deleteUpload(shared.id);
+      expect({
+        first,
+        between,
+        listed: await listed(admin.api, shared.name),
+        named: await uploadNamed(shared.id),
+      }).toStrictEqual({
+        first: "Error: forgetDocuments refused by the test",
+        between: { listed: true, named: true },
+        listed: false,
+        named: false,
+      });
+    });
+  }
+);
+
 describe("a document whose sharer is erased", { timeout: 60_000 }, () => {
   it("loses its file with them, and keeps its reading as the company's", async () => {
     const [sharer, other] = await Promise.all([
@@ -697,9 +811,114 @@ export default class extends WorkerEntrypoint {
     );
     const { api: admin } = await signedInApi(idp, "admin");
     expect({ ...failed, listed: await listed(admin, name) }).toStrictEqual({
-      refused: "Error: addDocument refused by the test",
+      refused: "document.not_read",
       ...nothing,
       listed: false,
+    });
+  });
+
+  it("stays listed when its reading can't be forgotten on remove, its file already erased, and a second remove finishes", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const marker = markerOf("forgetfails");
+    const shared = await shareAs(admin, marker);
+    const first = await outcome(
+      removeDocument(
+        envWith("ONBOARDING", refusing(env.ONBOARDING, "forgetDocuments")),
+        await admin.api.whoami(),
+        shared.id
+      )
+    );
+    const between = {
+      listed: await listed(admin.api, shared.name),
+      recalled: await recalls(admin.userId, `ledger code ${marker}`, marker),
+    };
+    const second = await outcome(
+      admin.api.onboarding.removeDocument(shared.id)
+    );
+    expect({
+      first,
+      between,
+      second,
+      listed: await listed(admin.api, shared.name),
+      named: await uploadNamed(shared.id),
+    }).toStrictEqual({
+      first: "Error: forgetDocuments refused by the test",
+      between: { listed: true, recalled: false },
+      second: "ok",
+      listed: false,
+      named: false,
+    });
+  });
+
+  it("stays listed with its file when the file can't be erased on remove, recorded, and a second remove finishes", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const marker = markerOf("erasefails");
+    const question = `ledger code ${marker}`;
+    const shared = await shareAs(admin, marker);
+    const first = await outcome(
+      removeDocument(
+        envWith("BRAIN_STORE", refusing(env.BRAIN_STORE, "eraseSource")),
+        await admin.api.whoami(),
+        shared.id
+      )
+    );
+    const between = {
+      listed: await listed(admin.api, shared.name),
+      recalled: await recalls(admin.userId, question, marker),
+      events: await uploadEvents(shared.id),
+    };
+    const second = await outcome(
+      admin.api.onboarding.removeDocument(shared.id)
+    );
+    expect({
+      first,
+      between,
+      second,
+      listed: await listed(admin.api, shared.name),
+      recalled: await recalls(admin.userId, question, marker),
+      events: await uploadEvents(shared.id),
+    }).toStrictEqual({
+      first: "Error: eraseSource refused by the test",
+      between: {
+        listed: true,
+        recalled: true,
+        events: ["brain.upload.added", "brain.upload.delete_failed"],
+      },
+      second: "ok",
+      listed: false,
+      recalled: false,
+      events: [
+        "brain.upload.added",
+        "brain.upload.delete_failed",
+        "brain.upload.deleted",
+      ],
+    });
+  });
+
+  it("is removed once when two removes run at once", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const shared = await shareAs(admin, markerOf("twice"));
+    const before = await forgettings();
+    const both = await Promise.all([
+      outcome(admin.api.onboarding.removeDocument(shared.id)),
+      outcome(admin.api.onboarding.removeDocument(shared.id)),
+    ]);
+    expect({
+      // Each removed it, or found it already gone, never anything else.
+      both: {
+        removed: both.includes("ok"),
+        other: both.filter(
+          (each) => each !== "ok" && each !== "document.not_found"
+        ),
+      },
+      listed: await listed(admin.api, shared.name),
+      forgotten: (await forgettings()) - before,
+      events: await uploadEvents(shared.id),
+    }).toStrictEqual({
+      both: { removed: true, other: [] },
+      listed: false,
+      forgotten: 1,
+      events: ["brain.upload.added", "brain.upload.deleted"],
     });
   });
 });

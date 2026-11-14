@@ -559,6 +559,10 @@ msgid "{field} in {table} needs a change in code before this can be published."
 msgstr "{field} en {table} necesita un cambio en el código antes de poder publicarse."
 
 #: src/onboarding/document-drop.tsx
+msgid "{file} couldn’t be removed"
+msgstr "No se pudo eliminar {file}"
+
+#: src/onboarding/document-drop.tsx
 msgid "{file} removed"
 msgstr "{file} eliminado"
 
@@ -7067,6 +7071,10 @@ msgstr "No encontré a nadie en {signIn}."
 #: src/interview/sound-check.tsx
 msgid "I hear you. Shall we start?"
 msgstr "Te oigo. ¿Empezamos?"
+
+#: src/onboarding/setup-steps.tsx
+msgid "I keep each file in your Brain, for you alone."
+msgstr "Guardo cada archivo en tu Brain, solo para ti."
 
 #: src/interview/words.ts
 msgid "I lost the connection. Please check your internet. I have kept what you said, and I keep trying."
