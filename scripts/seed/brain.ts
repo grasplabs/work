@@ -391,7 +391,9 @@ const seedInstructions = async (
 /**
  * The skill, its share with the company, and the admin's approval: each
  * once. A skill its owner deleted for good stays deleted, and a share
- * asked once is never asked again, whatever an admin decided.
+ * asked once is never asked again, whatever an admin decided. The admin
+ * approves only the share this run asked for, by its ID: any other
+ * request waits for an admin to read it, also one of the same skill.
  */
 const seedSkill = async (
   sessionFor: (key: PersonKey) => Session,
@@ -419,18 +421,11 @@ const seedSkill = async (
   const asked = overview.shares.some(
     ({ name, audience }) => name === seed.name && audience.kind === "company"
   );
-  if (!asked) {
-    await own.share(seed.name, version, "company");
+  if (asked) {
+    return;
   }
-  const { skills: admin } = sessionFor(seed.sharedBy).api;
-  const { requests } = await admin.overview();
-  const waiting = requests?.find(
-    ({ name, audience, status }) =>
-      name === seed.name && audience.kind === "company" && status === "pending"
-  );
-  if (waiting !== undefined) {
-    await admin.approve(waiting.id);
-  }
+  const share = await own.share(seed.name, version, "company");
+  await sessionFor(seed.sharedBy).api.skills.approve(share.id);
 };
 
 /**

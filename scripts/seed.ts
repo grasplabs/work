@@ -457,9 +457,10 @@ const startBindingOf = (alias: string): string =>
 
 /**
  * The App's permission to start each of its workflows from its pages,
- * asked by the App's owner and granted by an admin, where it has none;
- * one still requested (a seed stopped before granting it) is granted
- * now. One someone revoked is left revoked: that was their decision.
+ * asked by the App's owner and granted by an admin, where it has none.
+ * The admin grants only the request this run made: one already requested
+ * waits for an admin to review it, and one someone revoked is left
+ * revoked: that was their decision.
  */
 const seedStartPermissions = async (
   appSeed: AppSeed,
@@ -476,27 +477,22 @@ const seedStartPermissions = async (
   for (const { alias } of appSeed.workflows) {
     const workflowId = workflowIds.get(alias);
     const binding = startBindingOf(alias);
-    const had = held.find(({ binding: name }) => name === binding);
     if (
       workflowId === undefined ||
-      (had !== undefined && had.status !== "requested")
+      held.some(({ binding: name }) => name === binding)
     ) {
       continue;
     }
-    let id = had?.id;
-    if (id === undefined) {
-      // oxlint-disable-next-line no-await-in-loop -- one request at a time
-      const requested = await sessionFor(
-        sessions,
-        appSeed.owner
-      ).api.permissions.request({
-        subject: { type: "app", appId: app },
-        object: { type: "workflow", workflowId },
-        actions: ["start"],
-        binding,
-      });
-      ({ id } = requested);
-    }
+    // oxlint-disable-next-line no-await-in-loop -- one request at a time
+    const { id } = await sessionFor(
+      sessions,
+      appSeed.owner
+    ).api.permissions.request({
+      subject: { type: "app", appId: app },
+      object: { type: "workflow", workflowId },
+      actions: ["start"],
+      binding,
+    });
     // oxlint-disable-next-line no-await-in-loop -- one grant at a time
     await adminSession.api.permissions.grant(id, { version: currentVersion });
   }
