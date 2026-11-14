@@ -166,7 +166,7 @@ export const forgedModule = async (id: string, code: string): Promise<void> => {
       "UPDATE workflow_resource_versions SET manifest = ?, manifest_hash = ? WHERE workflow_resource_id = ? AND version = 1"
     ).bind(text, await sha256Hex(text), id),
     env.DB.prepare(
-      // As migration 0248 left it: only a version's label changes.
+      // As migration 0249 left it: only a version's label changes.
       "CREATE TRIGGER workflow_resource_versions_immutable_update BEFORE UPDATE OF workflow_resource_id, version, definition_version, definition, definition_json_hash, profile_version, evaluator_hash, contract, contract_hash, manifest, manifest_hash, author_id, created_at, seal_id ON workflow_resource_versions BEGIN SELECT RAISE(ABORT, 'workflow_resource_versions are immutable'); END"
     ),
   ]);

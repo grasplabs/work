@@ -1135,7 +1135,7 @@ export const appVersions = sqliteTable(
 
 /**
  * Unused since every subject's draft is in `drafts` (src/drafts.ts),
- * which started empty (migration 0248): nothing reads or writes
+ * which started empty (migration 0249): nothing reads or writes
  * it. Kept while a release that writes it may serve or be rolled back to
  * (expand, then contract); dropped in a later release, as are the four
  * tables after it.
@@ -4417,7 +4417,7 @@ export const triggerResources = sqliteTable(
      * bound at creation: who created it, never the workflow's owner). Every
      * trigger is created with all three (trigger-resources.ts); the empty
      * default is only there because SQLite adds a NOT NULL column only with
-     * one, and migration 0249 copied each existing trigger's from the
+     * one, and migration 0250 copied each existing trigger's from the
      * version it ran (`trigger_resource_versions`).
      */
     workflowResourceId: text("workflow_resource_id").notNull().default(""),
@@ -4580,7 +4580,7 @@ export const keptEventKeys = sqliteTable(
 
 /**
  * Unused since a trigger has no versions and keeps its configuration on
- * its own row (`trigger_resources`, where migration 0249 copied each
+ * its own row (`trigger_resources`, where migration 0250 copied each
  * trigger's): written and read by nothing. Dropped in a later release
  * (expand, then contract).
  */
