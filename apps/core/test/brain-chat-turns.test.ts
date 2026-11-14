@@ -803,17 +803,27 @@ describe("a deleted chat", () => {
     await putBack();
     await handedTo(person.userId, `Again ${marker}`);
     await person.api.chats.remove(chatId);
+    // The turn that answered without its instruction files says so.
+    const logged = await allEvents();
+    const withoutFiles = logged.filter(
+      ({ action, detail }) =>
+        action === "agent.call" &&
+        detail.method === "brain.instructions" &&
+        detail.chat === chatId
+    );
 
     expect({
       refused: refused === "ok" ? "deleted" : "refused",
       kept: listed.map(({ id }) => id),
       again,
       after: await recalled(person.userId, marker),
+      withoutFiles: withoutFiles.map(({ detail }) => detail.unavailable),
     }).toStrictEqual({
       refused: "refused",
       kept: [chatId],
       again: "ok",
       after: [],
+      withoutFiles: [true],
     });
   });
 

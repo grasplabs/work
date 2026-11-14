@@ -94,10 +94,14 @@ import { unicode61Dropped, unicode61Kept } from "./unicode61.ts";
 // asks (GDPR erasure): an admin prepares a purge, which says how much it
 // removes and returns a token, and confirms it with that token. Two kinds:
 //
-// - `personal`: the person's Personal collection (their USER.md and
-//   whatever else is in it) is deleted with every version, section, link,
-//   transcript and search row, and so are their Brain memories and command receipts
+// - `personal`: every collection only the person reads (`access` "me",
+//   theirs: whatever made it, a Personal collection they once had among
+//   them) is deleted with every version, section, link, transcript and
+//   search row, and so are their Brain memories and command receipts
 //   (memories.ts). One batch, with its audit event, which counts them.
+//   Collections they own that others read too are the company's, and
+//   stay. Core runs one only for a person being erased (core's rpc.ts
+//   `requireErasing`, person-erasure.ts).
 // - `content`: every occurrence of some terms (a name, an email address, a
 //   passage), in any case and as a whole word as the search index's
 //   tokenizer draws words (never inside a longer word, except in scripts
@@ -284,8 +288,6 @@ export interface OnErase {
    * document: running it again finishes it.
    */
   forgetFiles: (by: Writer, scope: ErasedFiles) => Promise<void>;
-  /** The collection a personal purge of `userId` deletes. */
-  personalCollection: (userId: string) => Promise<string>;
   /**
    * Refuses (throws) the purge of `document` while the host would write a
    * term back into it (`holds` tells): core's Apps collection, whose
@@ -400,7 +402,7 @@ const purgeEntry = (
     | "knowledge.purged"
     | "knowledge.purge.resumed",
   input: PurgeInput,
-  scope: { collectionId?: string; documentIds: string[] },
+  scope: { collectionIds?: readonly string[]; documentIds: string[] },
   counts: Partial<Counts> & {
     inLongerWords?: number;
     memories?: number;
@@ -410,9 +412,8 @@ const purgeEntry = (
 ): BrainEvent => ({
   actor: by.actor,
   action,
-  ...(scope.collectionId === undefined
-    ? {}
-    : { target: { type: "collection", id: scope.collectionId } }),
+  // A personal purge names its person, and how many collections it takes:
+  // one event, whatever their number.
   provenance: scope.documentIds.slice(0, purgeMaxDocuments),
   detail: {
     ...(purgeId === undefined ? {} : { purgeId }),
@@ -421,6 +422,9 @@ const purgeEntry = (
     ...(input.type === "personal"
       ? { userId: input.userId }
       : { terms: input.terms.length }),
+    ...(scope.collectionIds === undefined
+      ? {}
+      : { collections: scope.collectionIds.length }),
     ...counts,
   },
 });
@@ -464,7 +468,7 @@ const resumed = async <C>(
   brain: Brain<C>,
   by: Writer,
   input: PurgeInput,
-  scope: { collectionId?: string; documentIds: string[] },
+  scope: { collectionIds?: readonly string[]; documentIds: string[] },
   purgeId: string
 ): Promise<void> => {
   await auditedBatch(brain.ports, brain.db, [
@@ -477,27 +481,45 @@ const resumed = async <C>(
 
 // Personal purges.
 
-/** The person's Personal collection's documents, as a subquery. */
-const documentsIn = (db: DrizzleD1Database, collectionId: string) =>
+/** `collectionIds` as one SQL value: a JSON array, so any number binds once. */
+const idsOf = (collectionIds: readonly string[]): string =>
+  JSON.stringify(collectionIds);
+
+/** The documents of `collectionIds`, as a subquery. */
+const documentsIn = (db: DrizzleD1Database, collectionIds: readonly string[]) =>
   db
     .select({ id: documents.id })
     .from(documents)
-    .where(eq(documents.collectionId, collectionId));
+    .where(
+      sql`${documents.collectionId} IN (SELECT value FROM json_each(${idsOf(collectionIds)}))`
+    );
 
-/** What purging `userId`'s Personal collection deletes. */
+/**
+ * What purging `userId` deletes: every collection only they read, that
+ * they own (`access` "me"), whatever made it, the Personal collection a
+ * person once had among them. Read anew by each run, so one made since
+ * the purge was prepared goes too.
+ */
 const personalScope = async (
   db: DrizzleD1Database,
-  { userId }: PersonalPurge,
-  onErase: OnErase
-): Promise<{ collectionId: string; documentIds: string[]; counts: Counts }> => {
-  const collectionId = await onErase.personalCollection(userId);
-  const found = await documentsIn(db, collectionId);
+  { userId }: PersonalPurge
+): Promise<{
+  collectionIds: string[];
+  documentIds: string[];
+  counts: Counts;
+}> => {
+  const owned = await db
+    .select({ id: collections.id })
+    .from(collections)
+    .where(and(eq(collections.owner, userId), eq(collections.access, "me")));
+  const collectionIds = owned.map(({ id }) => id);
+  const found = await documentsIn(db, collectionIds);
   const [versionCount] = await db
     .select({ count: count() })
     .from(versions)
-    .where(inArray(versions.documentId, documentsIn(db, collectionId)));
+    .where(inArray(versions.documentId, documentsIn(db, collectionIds)));
   return {
-    collectionId,
+    collectionIds,
     documentIds: found.map(({ id }) => id),
     counts: {
       documents: found.length,
@@ -507,8 +529,8 @@ const personalScope = async (
 };
 
 /**
- * Deletes `userId`'s Personal collection and everything in it, and their
- * Brain memories and receipts, in one batch: all or nothing. Its audit
+ * Deletes every collection only `userId` reads (`personalScope`) and
+ * everything in them, and their Brain memories and receipts, in one batch: all or nothing. Its audit
  * event comes first, with the rebuild it owes, before anything changes;
  * then the host forgets the files it keeps as its documents (`OnErase`
  * `forgetFiles`: core deletes the uploads' originals); then the batch.
@@ -530,13 +552,9 @@ const purgePersonal = async <C>(
   fresh: boolean
 ): Promise<PurgeResult> => {
   const { db } = brain;
-  const { collectionId, documentIds, counts } = await personalScope(
-    db,
-    input,
-    onErase
-  );
+  const { collectionIds, documentIds, counts } = await personalScope(db, input);
   const memoryCounts = await personCounts(db, input.userId);
-  const inCollection = documentsIn(db, collectionId);
+  const inCollection = documentsIn(db, collectionIds);
   const secure = await secureDeleteReady(db);
   // Recorded before anything changes, the host's files included, so no
   // purge goes unrecorded however far it gets, with the rebuild it owes
@@ -555,7 +573,7 @@ const purgePersonal = async <C>(
           by,
           "knowledge.purged",
           input,
-          { collectionId, documentIds },
+          { collectionIds, documentIds },
           { ...counts, ...memoryCounts },
           purgeId
         )
@@ -567,12 +585,12 @@ const purgePersonal = async <C>(
   );
   const { purgeId } = open;
   if (open.resumed) {
-    await resumed(brain, by, input, { collectionId, documentIds }, purgeId);
+    await resumed(brain, by, input, { collectionIds, documentIds }, purgeId);
   }
   // Resumed, what it began with may be gone: the index is rebuilt then.
   const plan =
     secure && !open.resumed
-      ? await collectionPlan(brain, db, collectionId, indexedValuesOf)
+      ? await collectionPlan(brain, db, collectionIds, indexedValuesOf)
       : ({ kind: "unknown" } as const);
   // The versions' payloads, unreferenced once they go, are collected right
   // after: erased from R2 too.
@@ -585,7 +603,10 @@ const purgePersonal = async <C>(
   let deleted: StepCounts = {};
   try {
     await runStep(brain, open, "host_files", async () => {
-      await onErase.forgetFiles(by, { collectionId });
+      for (const collectionId of collectionIds) {
+        // oxlint-disable-next-line no-await-in-loop -- one collection at a time, as each may refuse
+        await onErase.forgetFiles(by, { collectionId });
+      }
     });
     deleted = await runStep(brain, open, "records", async (save) => {
       // Each delete only while this run holds the purge: one that lost it
@@ -598,7 +619,7 @@ const purgePersonal = async <C>(
               rebuildOwedIfChanged(
                 db,
                 `${purgeId}:changed`,
-                collectionId,
+                collectionIds,
                 plan.versions
               ),
             ]
@@ -606,7 +627,7 @@ const purgePersonal = async <C>(
         ...released.before,
         // The entities only its documents name, with their keys, before the
         // documents take their mentions with them.
-        forgetCollectionEntities(db, collectionId, holds),
+        forgetCollectionEntities(db, collectionIds, holds),
         // The matches its documents were evidence for, as a content purge
         // forgets them (`forgetMatchesOn`): entities named elsewhere stay.
         db
@@ -631,10 +652,20 @@ const purgePersonal = async <C>(
           .where(and(inArray(versions.documentId, inCollection), holds)),
         db
           .delete(documents)
-          .where(and(eq(documents.collectionId, collectionId), holds)),
+          .where(
+            and(
+              sql`${documents.collectionId} IN (SELECT value FROM json_each(${idsOf(collectionIds)}))`,
+              holds
+            )
+          ),
         db
           .delete(collections)
-          .where(and(eq(collections.id, collectionId), holds)),
+          .where(
+            and(
+              sql`${collections.id} IN (SELECT value FROM json_each(${idsOf(collectionIds)}))`,
+              holds
+            )
+          ),
         ...released.after,
         ...forgetPerson(db, input.userId, brain.ports.clock(), holds),
       ];
@@ -2212,7 +2243,7 @@ export const preparePurge = async <C>(
 ): Promise<PurgePlan> => {
   const parsed = parseInput(input);
   const { db } = brain;
-  let scope: { collectionId?: string; documentIds: string[] };
+  let scope: { collectionIds?: string[]; documentIds: string[] };
   let counts: Counts;
   let originals: number;
   // A personal purge deletes whole documents: nothing is left in a word.
@@ -2222,12 +2253,11 @@ export const preparePurge = async <C>(
   // content purge counts none (see below).
   let records: { memories?: number; receipts?: number } = {};
   if (parsed.type === "personal") {
-    ({ counts, ...scope } = await personalScope(db, parsed, onErase));
+    ({ counts, ...scope } = await personalScope(db, parsed));
     records = await personCounts(db, parsed.userId);
-    originals =
-      scope.collectionId === undefined
-        ? 0
-        : await onErase.countFiles([{ collectionId: scope.collectionId }]);
+    originals = await onErase.countFiles(
+      (scope.collectionIds ?? []).map((collectionId) => ({ collectionId }))
+    );
   } else {
     const named = await documentsNamed(
       db,

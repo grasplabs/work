@@ -298,12 +298,12 @@ export const isOverInstructionsLimit = (text: string): boolean =>
   text.length > instructionsMaxLength;
 
 /**
- * An instruction file's text: some text, at most `instructionsMaxLength`
- * UTF-16 units (`.length`), the one rule for it, which the host checks
- * with too.
+ * An instruction file's text: at most `instructionsMaxLength` UTF-16
+ * units (`.length`), the one rule for it, which the host checks with
+ * too. It may be empty: an emptied file is a version of its own, and
+ * its host loads nothing for it.
  */
 export const instructionsTextSchema = wellFormedString()
-  .regex(/\S/u, { message: "Holds no text" })
   // Not zod's `max`, which counts code points.
   .refine((text) => !isOverInstructionsLimit(text), {
     message: `At most ${instructionsMaxLength} UTF-16 units`,
@@ -328,7 +328,9 @@ export const newInstructionsSchema = newSourceSchema
      * is refused with `staleVersion` otherwise. Given, the add always makes
      * a new version, even of the current text and readers, so every add
      * that lands moves the version. A change the store already has answers
-     * with the version it made first, so a retry still adds nothing twice.
+     * with the version it made first, so a retry still adds nothing twice;
+     * sent over a version at or past that one, it is no retry, and is
+     * refused with `staleVersion`.
      * Left out, an add writes whatever is current, and current text and
      * readers make no new version.
      */
@@ -475,6 +477,15 @@ export interface RecallOverview {
 export interface SourceVersionRef {
   source: SourceId;
   version: number;
+}
+
+/**
+ * What an instruction file's add answers: the version it made or already
+ * is, and when that version was added, the same on every repeat of its
+ * change.
+ */
+export interface AddedInstructions extends SourceVersionRef {
+  addedAt: Date;
 }
 
 /**
@@ -2485,9 +2496,10 @@ export interface Brain {
    * kept in that person's own store alone. With `after`, only over that
    * current version (null: none yet), checked in the writing transaction:
    * otherwise refused with `staleVersion`, nothing written; a change it
-   * has answers with its version first.
+   * has answers with its version first. Answers when that version was
+   * added too, so a repeat answers the time the first try made.
    */
-  addInstructions: (source: NewInstructions) => Promise<SourceVersionRef>;
+  addInstructions: (source: NewInstructions) => Promise<AddedInstructions>;
   /**
    * A pack of what the reader may read for the question, within its
    * budget. Two ways search at once, each among the passages of the

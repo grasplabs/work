@@ -804,7 +804,12 @@ const hiddenIdsOf = (
   });
 
 /** The kinds of conversation a context names. */
-const conversations = ["own", "direct", "channel"] as const;
+/** Every kind of chat an agent works in, as its instruction files see it. */
+const conversations = [
+  ["their own chat", { conversation: "own", personal: true }],
+  ["a chat not theirs alone", { conversation: "own", personal: false }],
+  ["a shared channel", { conversation: "channel" }],
+] as const;
 /**
  * Work whose items carry the markers and whose handler fails with them in
  * its error, so the queue's surfaces show whether either gets out: its
@@ -1972,6 +1977,7 @@ export const coreProbes = {
             file,
             change: crypto.randomUUID(),
             text: as,
+            after: 0,
           })
       );
     return [
@@ -3206,7 +3212,7 @@ export const instructionProbes = {
         like
       );
     const asked: Answer[] = [];
-    for (const conversation of conversations) {
+    for (const [kind, context] of conversations) {
       // A context naming another agent, or another person, by a real id:
       // refused alike, whatever their file holds.
       for (const [field, ids, unwritten] of [
@@ -3218,43 +3224,57 @@ export const instructionProbes = {
         ["personId", hiddenIdsOf(probing, "person"), stranger],
       ] as const) {
         for (const id of ids) {
-          const like = `${conversation}, naming ${field} ${id}`;
+          const like = `${kind}, naming ${field} ${id}`;
           asked.push(
             // oxlint-disable-next-line no-await-in-loop -- one at a time
             await side(
               like,
               "nothing",
-              unchecked({ conversation, [field]: unwritten() })
+              unchecked({ ...context, [field]: unwritten() })
             ),
             // oxlint-disable-next-line no-await-in-loop -- one at a time
-            await side(like, "hidden", unchecked({ conversation, [field]: id }))
+            await side(like, "hidden", unchecked({ ...context, [field]: id }))
           );
         }
       }
     }
-    // A shared channel gives what a direct message does, but never a
+    // A shared channel gives what a chat of theirs does, but never a
     // person's file, the reader's own included: others there would read
-    // it through the agent.
+    // it through the agent. Nor does a chat whose answer doesn't reach
+    // them alone (a chat app's direct message while GRA-1821 is open, a
+    // turn nobody asked for): it gives what a shared channel does.
     asked.push(
       await side(
         "a shared channel",
         "nothing",
-        { conversation: "direct" },
+        { conversation: "own", personal: true },
         (file) => file.scope !== "person"
       ),
-      await side("a shared channel", "hidden", { conversation: "channel" })
+      await side("a shared channel", "hidden", { conversation: "channel" }),
+      await side("a chat not theirs alone", "nothing", {
+        conversation: "channel",
+      }),
+      await side("a chat not theirs alone", "hidden", {
+        conversation: "own",
+        personal: false,
+      })
     );
-    // An App they use but don't build: its file is for its builders.
+    // An App they use but don't build: its file is for its builders. What
+    // a chat whose work names that App last gives (workspace.ts
+    // `lastAppOf`, its id as the context's `appId`), however its work came
+    // to name it.
     if (usedApps !== undefined) {
       const like = "an App they use";
       asked.push(
         await side(like, "nothing", {
           conversation: "own",
           appId: usedApps.withoutFile,
+          personal: true,
         }),
         await side(like, "hidden", {
           conversation: "own",
           appId: usedApps.withFile,
+          personal: true,
         })
       );
     }
@@ -3264,19 +3284,30 @@ export const instructionProbes = {
       await side(noApp, "nothing", {
         conversation: "own",
         appId: crypto.randomUUID(),
+        personal: true,
       })
     );
     for (const appId of hiddenAppsOf(probing)) {
       asked.push(
         // oxlint-disable-next-line no-await-in-loop -- one App at a time
-        await side(noApp, "hidden", { conversation: "own", appId })
+        await side(noApp, "hidden", {
+          conversation: "own",
+          appId,
+          personal: true,
+        })
       );
     }
     const inWorkflow = authoritySchema.parse({ ...agent, mode: "workflow" });
     asked.push(
       await raw("a workflow step", inWorkflow),
-      await raw("their own chat", agent, { conversation: "own" }),
-      await raw("a direct message", agent, { conversation: "direct" }),
+      await raw("their own chat", agent, {
+        conversation: "own",
+        personal: true,
+      }),
+      await raw("a chat not theirs alone", agent, {
+        conversation: "own",
+        personal: false,
+      }),
       await raw("a shared channel", agent, { conversation: "channel" }),
       ...(usedApps === undefined
         ? []
@@ -3284,10 +3315,12 @@ export const instructionProbes = {
             await raw("an App they use", agent, {
               conversation: "own",
               appId: usedApps.withFile,
+              personal: true,
             }),
           ]),
       await raw("as someone who isn't a member", readersAgent(stranger()), {
-        conversation: "direct",
+        conversation: "own",
+        personal: true,
       }),
       await raw(
         "as an App's code",
@@ -3297,7 +3330,7 @@ export const instructionProbes = {
           mode: "interactive",
           appVersion: 1,
         }),
-        { conversation: "own" }
+        { conversation: "own", personal: true }
       ),
       await raw("no context", agent),
       await raw(
@@ -3308,7 +3341,7 @@ export const instructionProbes = {
       await raw(
         "an authority acting for the markers",
         unchecked({ ...agent, onBehalfOf: markers.join("") }),
-        { conversation: "direct" }
+        { conversation: "own", personal: true }
       )
     );
     return asked;
@@ -3334,6 +3367,7 @@ export const instructionProbes = {
             file,
             change: crypto.randomUUID(),
             text: as,
+            after: 0,
           })
       );
     /** One side of the comparison `like`: the refusal of a save. */
@@ -3352,6 +3386,7 @@ export const instructionProbes = {
                 file,
                 change: crypto.randomUUID(),
                 text: "Not the markers",
+                after: 0,
               })
           ),
         about,
@@ -3463,6 +3498,105 @@ export const instructionProbes = {
         text.padEnd(instructionsMaxLength + 1, " x")
       ),
       await save("no text", session, own, " ")
+    );
+    return asked;
+  },
+  // A read to edit is let in by the rule that lets a save in: every
+  // comparison holds what it gives over a hidden file to what it gives
+  // over one no one wrote; then the plain reads, scanned for the markers.
+  instructionFileToEdit: async (probing) => {
+    const { personId, markers, usedApps } = probing;
+    const session = sessionOf(personId);
+    const own: InstructionFile = { scope: "person", personId };
+    const read = async (
+      name: string,
+      by: Identity | Authority,
+      file: unknown
+    ) =>
+      await answer(
+        name,
+        async () => await instructionFiles.instructionFileToEdit(env, by, file)
+      );
+    /** One side of the comparison `like`. */
+    const side = async (
+      like: string,
+      about: "hidden" | "nothing",
+      file: InstructionFile
+    ) =>
+      await answer(
+        `${like}, ${about}`,
+        async () =>
+          await refusalOf(
+            async () =>
+              await instructionFiles.instructionFileToEdit(env, session, file)
+          ),
+        about,
+        like
+      );
+    const asked: Answer[] = [];
+    for (const id of hiddenIdsOf(probing, "person")) {
+      const like = `another person's file ${id}`;
+      asked.push(
+        // oxlint-disable-next-line no-await-in-loop -- one at a time
+        await side(like, "nothing", unwrittenFile()),
+        // oxlint-disable-next-line no-await-in-loop -- one at a time
+        await side(like, "hidden", { scope: "person", personId: id })
+      );
+    }
+    for (const id of hiddenIdsOf(probing, "agent")) {
+      const like = `an agent's file ${id}`;
+      asked.push(
+        // oxlint-disable-next-line no-await-in-loop -- one at a time
+        await side(like, "nothing", {
+          scope: "agent",
+          agentId: `agent-${crypto.randomUUID()}`,
+        }),
+        // oxlint-disable-next-line no-await-in-loop -- one at a time
+        await side(like, "hidden", { scope: "agent", agentId: id })
+      );
+    }
+    const noApp = "an App no one made";
+    asked.push(
+      await side(noApp, "nothing", { scope: "app", appId: crypto.randomUUID() })
+    );
+    for (const appId of hiddenAppsOf(probing)) {
+      // oxlint-disable-next-line no-await-in-loop -- one App at a time
+      asked.push(await side(noApp, "hidden", { scope: "app", appId }));
+    }
+    if (usedApps !== undefined) {
+      const like = "an App they use";
+      asked.push(
+        await side(like, "nothing", {
+          scope: "app",
+          appId: usedApps.withoutFile,
+        }),
+        await side(like, "hidden", { scope: "app", appId: usedApps.withFile })
+      );
+    }
+    for (const [index, file] of probing.hiddenInstructionFiles.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one file at a time
+      asked.push(await read(`hidden file ${index}`, session, file));
+    }
+    asked.push(
+      await read("their own", session, own),
+      await read("the company's", session, {
+        scope: "company",
+        name: "instructions",
+      }),
+      await read("as their agent", readersAgent(personId), own),
+      await read(
+        "as an identity named by the markers",
+        unchecked({ ...session, name: markers.join(""), extra: 1 }),
+        own
+      ),
+      await read("as someone who isn't a member", sessionOf(stranger()), {
+        scope: "person",
+        personId: stranger(),
+      }),
+      await read("a file named by the markers", session, {
+        scope: "person",
+        personId: markers.join(""),
+      })
     );
     return asked;
   },

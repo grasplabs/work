@@ -312,7 +312,9 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
     section === "Workflows" ? [section, "Requests"] : [section]
   );
   const menu = ["Sign out"];
-  const account = ["Profile", "Security"];
+  // Each person's own instruction file is theirs to write, whatever their
+  // role: in every person's Settings.
+  const account = ["Profile", "Instructions", "Security"];
   expect({
     admin: await sidebarOf(admin),
     builder: await sidebarOf(builder),

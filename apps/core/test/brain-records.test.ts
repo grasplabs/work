@@ -10,6 +10,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { mockIdp } from "./idp.ts";
+import { ownCollectionOf } from "./knowledge.ts";
 import {
   auditedDuring,
   openRpc,
@@ -508,7 +509,7 @@ type Signed = Awaited<ReturnType<typeof signedInApi>>;
 
 /** Saves `text` as a note in `person`'s Personal collection. */
 const noteOf = async (person: Signed, text: string) => {
-  const { personal } = await person.api.memory.collections();
+  const personal = await ownCollectionOf(person);
   return await person.api.knowledge.saveDocument({
     collectionId: personal,
     path: `notes/${unique()}.md`,

@@ -116,6 +116,7 @@ import type {
 import { brainSourceErrors, firstLineOf } from "@grasp-os/shared/brain-sources";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { instructionFileErrors } from "@grasp-os/shared/instruction-files";
+import type { InstructionFileRef } from "@grasp-os/shared/instruction-files";
 import { log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
 import type { ModelErrorCode } from "@grasp-os/shared/models";
@@ -134,6 +135,7 @@ import {
 import type { OwnStoreHealth } from "./brain-own-stores.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { embedInBulk, embedderModel, questionVectorOf } from "./embedder.ts";
+import { promptTextOf } from "./instructions-text.ts";
 import { parseModelRef } from "./model-catalog.ts";
 import { brainSpendByPurpose, spendMonth } from "./model-spend.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
@@ -1803,7 +1805,8 @@ const instructionIdSchema = producerIdSchema(
 /**
  * An instruction file, by its scope: one of the company's two (its
  * instructions, and its lasting facts), one person's, one App's or one
- * agent's.
+ * agent's. The wire's `InstructionFileRef`, checked: a scope added to one
+ * and not the other fails to compile.
  */
 const instructionFileSchema = z.discriminatedUnion("scope", [
   z.strictObject({
@@ -1816,7 +1819,7 @@ const instructionFileSchema = z.discriminatedUnion("scope", [
   }),
   z.strictObject({ scope: z.literal("app"), appId: instructionIdSchema }),
   z.strictObject({ scope: z.literal("agent"), agentId: instructionIdSchema }),
-]);
+]) satisfies z.ZodType<InstructionFileRef>;
 
 /** An instruction file, by its scope. */
 export type InstructionFile = z.infer<typeof instructionFileSchema>;
@@ -1873,6 +1876,7 @@ const newInstructionsSchema = z.strictObject({
   file: instructionFileSchema,
   change: changeSchema,
   text: instructionsTextSchema,
+  after: z.int().min(0),
 });
 
 /** A version of an instruction file, whole. */
@@ -1884,10 +1888,19 @@ export interface InstructionFileVersion {
 }
 
 /**
- * Adds `text` as the next version of the instruction file `file`; the one
- * before stays as history. Refused over `instructionsMaxLength` UTF-16
- * units with `instructions.too_large`, and with no text; while the Brain
- * restores an export with `brain.restoring`, to be made again later.
+ * Adds `text` as the next version of the instruction file `file`, over
+ * its version `after` (0 for none), which every add names, so none
+ * overwrites a version it never saw; the one before stays as history.
+ * Refused over `instructionsMaxLength` UTF-16 units as a chat's prompt
+ * holds it (`promptTextOf`, never shorter than the text), with
+ * `instructions.too_large`, and with `instructions.changed` when `after`
+ * is no longer the current version, and `brain.request_invalid` for an
+ * add that isn't one, one without `after` among them. Every add that
+ * lands makes a new version, even of the current text (the store's rule
+ * for an add with `after`). Answers when that version was added, the
+ * same on a repeat of its change. Empty text empties the file: a
+ * version of its own, which nothing loads. While the Brain restores an
+ * export, refused with `brain.restoring`, to be made again later.
  * `change` is as `addSource`'s.
  *
  * For instruction-files.ts only, which checks who may write `file` first:
@@ -1895,19 +1908,27 @@ export interface InstructionFileVersion {
  */
 export const addInstructionFile = async (
   env: BrainEnv,
-  added: { file: InstructionFile; change: string; text: string }
-): Promise<{ file: InstructionFile; version: number }> => {
-  if (typeof added.text === "string" && isOverInstructionsLimit(added.text)) {
+  added: { file: InstructionFile; change: string; text: string; after: number }
+): Promise<{ file: InstructionFile; version: number; addedAt: Date }> => {
+  // Counted as a chat's prompt holds it, escaped, which is never shorter
+  // than the text: the limit bounds what reaches a model.
+  if (
+    typeof added.text === "string" &&
+    isOverInstructionsLimit(promptTextOf(added.text))
+  ) {
     throw instructionFileErrors.create("instructions.too_large", {
       maxLength: instructionsMaxLength,
     });
   }
-  const { file, change } = checked(newInstructionsSchema, added);
+  const { file, change, after } = checked(newInstructionsSchema, added);
   const access = instructionAccessOf(file);
   const key = instructionKeyOf(file);
-  const { version } = await whileNotRestoring(
-    async () =>
-      await keptIn(
+  // The store refuses a stale `after` (`staleVersion`); a person's editor
+  // gets it as `instructions.changed`. 0 is the editor's "none yet", the
+  // store's null.
+  const { version, addedAt } = await whileNotRestoring(async () => {
+    try {
+      return await keptIn(
         env,
         key,
         access,
@@ -1917,10 +1938,17 @@ export const addInstructionFile = async (
             change,
             text: added.text,
             access,
+            after: after === 0 ? null : after,
           })
-      )
-  );
-  return { file, version };
+      );
+    } catch (error) {
+      if (error instanceof Error && error.message === staleVersion) {
+        throw instructionFileErrors.create("instructions.changed");
+      }
+      throw error;
+    }
+  });
+  return { file, version, addedAt };
 };
 
 const instructionFilesSchema = z

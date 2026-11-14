@@ -57,6 +57,7 @@ import {
   versionRequestSchema,
 } from "./contract.ts";
 import type {
+  AddedInstructions,
   AddedVersion,
   Card,
   CardRequest,
@@ -198,6 +199,7 @@ import {
   readCurrent,
   readVersion,
   readableVersions,
+  versionAddedAt,
 } from "./sources.ts";
 import type { SourcesStore } from "./sources.ts";
 import {
@@ -844,7 +846,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * Adds a version of an instruction file, as `addSource` does, kept
    * whole: no chunks, no words, so recall never finds it.
    */
-  async addInstructions(source: NewInstructions): Promise<SourceVersionRef> {
+  async addInstructions(source: NewInstructions): Promise<AddedInstructions> {
     const adding = checked(newInstructionsSchema, source);
     if (!isWholeKey(adding.source)) {
       throw new Error(onlyInstructions);
@@ -858,9 +860,18 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     }
     return await this.#changing(async () => {
       await this.#readyToWrite();
-      return await this.#unlessErasedMeanwhile(
-        async () => await addVersion(this.#sources, adding, { indexed: false })
-      );
+      return await this.#unlessErasedMeanwhile(async () => {
+        const { source: added, version } = await addVersion(
+          this.#sources,
+          adding,
+          { indexed: false }
+        );
+        return {
+          source: added,
+          version,
+          addedAt: versionAddedAt(this.#sources.db, { source: added, version }),
+        };
+      });
     });
   }
 

@@ -4,20 +4,22 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { advanceExports } from "../src/knowledge/brain-export.ts";
-import { saveUserMemory } from "../src/knowledge/memory.ts";
-import { actingFor, newChat } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import {
   apiWith,
-  newAgent,
   purged,
   rebuildFailingOnce,
   rememberAs,
   saveOver,
   setUpTime,
+  erasing,
 } from "./knowledge-purge.ts";
 import type { Person } from "./knowledge-purge.ts";
-import { newTeam, storedVersionTexts as versionTexts } from "./knowledge.ts";
+import {
+  newTeam,
+  ownCollectionOf,
+  storedVersionTexts as versionTexts,
+} from "./knowledge.ts";
 import {
   auditedDuring,
   openRpc,
@@ -71,13 +73,12 @@ const answerOf = (
 
 /** `owner`'s USER.md, holding `text`, and a document in a collection of their own. */
 const privateDocumentsOf = async (owner: Person, text: string) => {
-  const agent = newAgent();
-  const user = await saveUserMemory(
-    env,
-    actingFor(agent, owner.userId),
-    await newChat(agent),
-    { type: "own" },
-    { text: `# About me\n${text}`, ifVersion: 0 }
+  const personal = await ownCollectionOf(owner);
+  const user = await saveOver(
+    owner,
+    personal,
+    "USER.md",
+    `# About me\n${text}`
   );
   const mine = await owner.api.knowledge.createCollection({
     name: `Mine ${unique()}`,
@@ -582,7 +583,7 @@ describe(
       const owner = await personOf("admin");
       const other = await personOf("admin");
       const secret = `Benefit${unique()}`;
-      const { personal } = await owner.api.memory.collections();
+      const personal = await ownCollectionOf(owner);
       const note = await saveOver(
         owner,
         personal,
@@ -676,7 +677,7 @@ describe(
         "leave.md",
         `# Leave\nAsk ${secret}.`
       );
-      const { personal } = await owner.api.memory.collections();
+      const personal = await ownCollectionOf(owner);
       const own = await saveOver(
         owner,
         personal,
@@ -700,14 +701,12 @@ describe(
         .bind(owner.userId)
         .first<{ id: string }>();
       const purgeId = open?.id ?? "";
-      // They leave: their Personal collection goes, and they are an admin
-      // no more.
+      // They leave: removed, and erased, their own collections go.
       await purged(other, {
         type: "personal",
         userId: owner.userId,
         reason: "offboarding",
       });
-      await other.api.members.setRole(owner.userId, "user");
       const stuck = {
         prepare: await outcome(other.api.knowledge.preparePurge(input)),
         exportOpen: await outcome(
@@ -836,7 +835,7 @@ describe(
       const owner = await personOf("admin");
       const other = await personOf("admin");
       const secret = `Diagnosis${unique()}`;
-      const { personal } = await owner.api.memory.collections();
+      const personal = await ownCollectionOf(owner);
       const note = await saveOver(
         owner,
         personal,
@@ -879,13 +878,14 @@ describe(
     it("answers a personal purge left unfinished as it answers an ID nobody has", async () => {
       const admin = await personOf("admin");
       const leaver = await personOf("user");
-      const { personal } = await leaver.api.memory.collections();
+      const personal = await ownCollectionOf(leaver);
       await saveOver(leaver, personal, "notes.md", "# Notes\nMine.");
       const input: PurgeInput = {
         type: "personal",
         userId: leaver.userId,
         reason: "offboarding",
       };
+      await erasing(admin, leaver.userId);
       const failing = await rebuildFailingOnce(admin);
       const first = await admin.api.knowledge.preparePurge(input);
       await refusal(failing.knowledge.purge(input, first.token));

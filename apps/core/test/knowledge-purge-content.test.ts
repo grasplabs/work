@@ -3,19 +3,11 @@ import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { forContext } from "../src/knowledge/memory.ts";
-import { actingFor, newChat } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
+import { apiWith, purged, saveOver, setUpTime } from "./knowledge-purge.ts";
 import {
-  apiWith,
-  newAgent,
-  purged,
-  saveOver,
-  setUpTime,
-} from "./knowledge-purge.ts";
-import {
-  storedVersionTexts as versionTexts,
   storeTextUnderneath,
+  storedVersionTexts as versionTexts,
 } from "./knowledge.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
 
@@ -69,18 +61,16 @@ describe("a purge of content", setUpTime, () => {
       "other.md",
       `# Other\n${name} is here too.`
     );
-    const memory = await admin.api.memory.collections();
-    const memoryId = memory.memory ?? "";
+    const { id: companyNotes } = await admin.api.knowledge.createCollection({
+      name: `Company ${unique()}`,
+      access: "everyone",
+    });
     const company = await saveOver(
       admin,
-      memoryId,
-      "MEMORY.md",
+      companyNotes,
+      "company.md",
       `# Company\n${name} runs payroll.`
     );
-    const agent = newAgent();
-    const work = await newChat(agent);
-    const asAgent = actingFor(agent, admin.userId);
-    const before = await forContext(env, asAgent, work, { type: "own" });
 
     const input: PurgeInput = {
       type: "content",
@@ -93,7 +83,6 @@ describe("a purge of content", setUpTime, () => {
       outcomeOf = await purged(admin, input);
     });
 
-    const after = await forContext(env, asAgent, work, { type: "own" });
     const current = await owner.api.knowledge.getDocument(leave.id);
     const hits = await owner.api.knowledge.search(name);
     const backlinks = await owner.api.knowledge.backlinks(other.id);
@@ -117,9 +106,6 @@ describe("a purge of content", setUpTime, () => {
       company: companyTexts.filter(
         (text) => text.includes(name) || text.includes("(removed)")
       ),
-      memoryBefore: before.text.includes(name),
-      memoryAfter: after.text.includes(name),
-      memoryKeyChanged: after.key !== before.key,
       hits: hits.hits.map(({ documentId }) => documentId),
       backlinks: backlinks.backlinks.map(({ documentId }) => documentId),
     }).toStrictEqual({
@@ -145,9 +131,6 @@ describe("a purge of content", setUpTime, () => {
         "# Company\n(removed) runs payroll.",
         "# Company\n(removed) runs payroll.",
       ],
-      memoryBefore: true,
-      memoryAfter: false,
-      memoryKeyChanged: true,
       hits: [other.id],
       backlinks: [leave.id],
     });

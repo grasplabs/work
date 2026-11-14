@@ -38,6 +38,33 @@ export const knowledgeRacing = (first: () => Promise<void>): D1Database => {
   };
 };
 
+/** The name of the collection `ownCollectionOf` keeps a person's notes in. */
+const ownNotes = "Own notes";
+
+/**
+ * A collection only `person` reads, made by them through Knowledge as
+ * anyone can make one: the one named "Own notes" they made before, or a
+ * new one. Returns its ID.
+ */
+export const ownCollectionOf = async (person: {
+  userId: string;
+  api: { knowledge: KnowledgeApi };
+}): Promise<string> => {
+  const listed = await person.api.knowledge.listCollections();
+  const made = listed.find(
+    ({ name, owner, access }) =>
+      name === ownNotes && owner === person.userId && access === "me"
+  );
+  if (made !== undefined) {
+    return made.id;
+  }
+  const { id } = await person.api.knowledge.createCollection({
+    name: ownNotes,
+    access: "me",
+  });
+  return id;
+};
+
 /** A new team with `members`, made by an admin; returns its ID. */
 export const newTeam = async (
   admin: { session: string },

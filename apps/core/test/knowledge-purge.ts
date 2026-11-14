@@ -4,7 +4,9 @@ import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 
+import { emailHashOf, emailKeyVersion } from "../src/erased-people.ts";
 import type { Idp } from "./idp.ts";
+import { ownCollectionOf } from "./knowledge.ts";
 import { openRpc, signedInApi, unique } from "./sign-in.ts";
 
 // What the tests of purging personal data from Knowledge share
@@ -105,8 +107,40 @@ export const holding = async (term: string): Promise<string[]> => {
   return [...found].toSorted();
 };
 
+/**
+ * `userId` removed by `admin`, and their erasure begun and not yet run:
+ * the rows `erasePerson` (person-erasure.ts) writes before its steps run,
+ * its own name, email hash and every area pending, which its steps would
+ * then finish. What lets a personal purge of them run (rpc.ts
+ * `requireErasing`) while the test drives the purge itself.
+ */
+export const erasing = async (admin: Person, userId: string): Promise<void> => {
+  // Removing someone removed already is safe: it finishes what is left.
+  await admin.api.members.remove(userId);
+  const preview = await admin.api.members.erasure(userId);
+  if (preview.erasure !== null) {
+    return;
+  }
+  const now = Date.now();
+  const emailHash =
+    preview.email === null ? null : await emailHashOf(env, preview.email);
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO person_erasures (user_id, name, email_hash, email_key_version, requested_by, requested_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, NULL)"
+    ).bind(userId, preview.name, emailHash, emailKeyVersion, admin.userId, now),
+    ...preview.areas.map((area) =>
+      env.DB.prepare(
+        "INSERT INTO person_erasure_areas (user_id, area, state, attempts, updated_at) VALUES (?, ?, 'pending', 0, ?)"
+      ).bind(userId, area, now)
+    ),
+  ]);
+};
+
 /** Prepares `input` as `admin` and confirms it with the token. */
 export const purged = async (admin: Person, input: PurgeInput) => {
+  if (input.type === "personal") {
+    await erasing(admin, input.userId);
+  }
   const plan = await admin.api.knowledge.preparePurge(input);
   const result = await admin.api.knowledge.purge(input, plan.token);
   return { plan, result };
@@ -326,10 +360,10 @@ export const rebuildFailingOnce = async (person: Person) => {
 export const purgesWith = (idp: Idp) => {
   const personOf = async (role: Role) => await signedInApi(idp, role);
 
-  /** A person whose Personal collection holds `files`, by path. */
+  /** A person whose own collection (only they read it) holds `files`, by path. */
   const leaverWith = async (files: Record<string, string>) => {
     const leaver = await personOf("user");
-    const { personal } = await leaver.api.memory.collections();
+    const personal = await ownCollectionOf(leaver);
     for (const [path, text] of Object.entries(files)) {
       // oxlint-disable-next-line no-await-in-loop -- one document at a time
       await saveOver(leaver, personal, path, text);

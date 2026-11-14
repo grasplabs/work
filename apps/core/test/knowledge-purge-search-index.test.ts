@@ -15,8 +15,10 @@ import {
   saveOver,
   setUpTime,
   watchingPurge,
+  erasing,
 } from "./knowledge-purge.ts";
 import type { Person } from "./knowledge-purge.ts";
+import { ownCollectionOf } from "./knowledge.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
 // Purging personal data from Knowledge. These tests start from the ways a
@@ -49,6 +51,7 @@ const purgeCounted = async (
     userId: leaver.userId,
     reason: "offboarding",
   };
+  await erasing(admin, leaver.userId);
   const { token } = await counting.api.knowledge.preparePurge(input);
   await counting.api.knowledge.purge(input, token);
   return counting.written;
@@ -201,6 +204,7 @@ describe("a personal purge's search index", setUpTime, () => {
       userId: leaver.userId,
       reason: "offboarding",
     };
+    await erasing(admin, leaver.userId);
     // The first run's rebuild fails, once its deletes committed.
     let failed = false;
     let failNext = false;
@@ -305,7 +309,7 @@ describe("a personal purge's search index", setUpTime, () => {
     /** Purges a person with `files`, saying what it logged and rebuilt. */
     const purgeLogged = async (files: Record<string, string>[]) => {
       const leaver = await personOf("user");
-      const { personal } = await leaver.api.memory.collections();
+      const personal = await ownCollectionOf(leaver);
       for (const version of files) {
         for (const [path, text] of Object.entries(version)) {
           // oxlint-disable-next-line no-await-in-loop -- one save at a time
