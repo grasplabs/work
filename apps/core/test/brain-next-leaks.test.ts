@@ -755,11 +755,13 @@ describe(
       );
 
       // Through the upload producer too (brain-uploads.ts): the holder's
-      // file for only them, and one for a team the outsider isn't in.
+      // file for only them, and one for a team the outsider isn't in,
+      // each with its marker in its file's name as well as its text, as a
+      // name is its readers' alone too (an admin's shared uploads).
       const uploaded = async (marker: string, readers: BrainUploadReaders) => {
         const { source } = await holderApi.api.brainSources.upload(
           {
-            name: "Captions.vtt",
+            name: `Captions ${marker}.vtt`,
             bytes: new TextEncoder().encode(
               `WEBVTT\n\n00:00:00.000 --> 00:00:05.000\nUploaded ${sharedWord} ${marker}\n`
             ),

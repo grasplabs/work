@@ -150,9 +150,13 @@ export interface BrainUpload {
  */
 export interface BrainSharedUpload {
   source: BrainSourceRef;
-  name: string;
+  /**
+   * The file's name: null when the admin may not read the upload (a
+   * team's they aren't in), as its name is its readers' alone too.
+   */
+  name: string | null;
   readers: BrainUploadReaders;
-  /** The team's name, for a team's upload: null for everyone's. */
+  /** The team's name, for a team's upload: null for everyone's, and for a team since deleted. */
   teamName: string | null;
   uploaderName: string;
   /** ISO 8601. */

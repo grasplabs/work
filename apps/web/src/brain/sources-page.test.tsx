@@ -50,6 +50,8 @@ const minutes: BrainSourceRef = { producer: "chat", id: "c-1" };
 const older: BrainSourceRef = { producer: "run", id: "r-1" };
 const uploaded: BrainSourceRef = { producer: "upload", id: "u-2" };
 const shared: BrainSourceRef = { producer: "upload", id: "u-3" };
+/** A shared upload for a team since deleted, which the admin may not read. */
+const unnamed: BrainSourceRef = { producer: "upload", id: "u-4" };
 
 /** The teams the person is in. */
 const teams = [{ id: "t-1", name: "Finance" }];
@@ -271,20 +273,30 @@ const shown = async (
     sharedUploads: async () => {
       await Promise.resolve();
       calls.push("sharedUploads");
-      const erased = calls.includes(`deleteUpload ${shared.id}`);
+      // One the admin may read, by name; one for a team since deleted
+      // that they weren't in, without it.
+      const uploads = [
+        {
+          source: shared,
+          name: "Payroll.vtt",
+          readers: { kind: "team" as const, teamId: "t-2" },
+          teamName: "Payroll",
+          uploaderName: "Ada",
+          uploadedAt: "2026-11-10T09:00:00.000Z",
+        },
+        {
+          source: unnamed,
+          name: null,
+          readers: { kind: "team" as const, teamId: "t-3" },
+          teamName: null,
+          uploaderName: "Grace",
+          uploadedAt: "2026-11-09T09:00:00.000Z",
+        },
+      ];
       return {
-        uploads: erased
-          ? []
-          : [
-              {
-                source: shared,
-                name: "Payroll.vtt",
-                readers: { kind: "team" as const, teamId: "t-2" },
-                teamName: "Payroll",
-                uploaderName: "Ada",
-                uploadedAt: "2026-11-10T09:00:00.000Z",
-              },
-            ],
+        uploads: uploads.filter(
+          ({ source }) => !calls.includes(`deleteUpload ${source.id}`)
+        ),
         next: null,
       };
     },
@@ -920,7 +932,7 @@ describe(SourcesPage, () => {
     }).toStrictEqual({ told: true, deleteOffered: false, sharedListed: false });
   });
 
-  it("lists shared uploads for an admin, by name, team and uploader, and erases one for good", async () => {
+  it("lists shared uploads for an admin, by name only if they may read it, team and uploader, and erases one for good", async () => {
     const { calls } = await shown([], { admin: true });
     const sharedText = section("Shared uploads");
     await press("Erase for good");
@@ -936,18 +948,23 @@ describe(SourcesPage, () => {
     await settle();
 
     expect({
-      listed: ["Payroll.vtt", "Team Payroll", "Uploaded by Ada"].map((text) =>
-        sharedText.includes(text)
-      ),
-      after: section("Shared uploads").includes(
-        "No uploads are shared with a team or everyone."
+      listed: [
+        "Payroll.vtt",
+        "Team Payroll",
+        "Uploaded by Ada",
+        "An upload",
+        "A deleted team",
+        "Uploaded by Grace",
+      ].map((text) => sharedText.includes(text)),
+      after: ["Payroll.vtt", "An upload"].map((text) =>
+        section("Shared uploads").includes(text)
       ),
       calls: calls.filter(
         (call) => call.startsWith("sharedUploads") || call.startsWith("delete")
       ),
     }).toStrictEqual({
-      listed: [true, true, true],
-      after: true,
+      listed: [true, true, true, true, true, true],
+      after: [false, true],
       calls: ["sharedUploads", "deleteUpload u-3", "sharedUploads"],
     });
   });
@@ -1009,18 +1026,21 @@ describe(SourcesPage, () => {
     });
   });
 
-  it("takes a delete answered as not found as done, its first answer lost: gone, with no refusal shown", async () => {
+  it("reads again what is there after a delete answered as not found, done before or no longer theirs, with no refusal shown", async () => {
     const { calls } = await shown([], { admin: true, deleteAnswerLost: true });
     await press("Handbook");
     await settle();
     await press("Delete");
+    const before = calls.length;
     await press("Delete for good");
     await settle();
-    const closed = panel();
+    const afterPanel = calls.slice(before);
+    // The first row's: Payroll.vtt.
     await press("Erase for good");
     const confirm = [...document.querySelectorAll("button")].findLast(
       (button) => button.textContent.trim() === "Erase for good"
     );
+    const beforeErase = calls.length;
     await act(async () => {
       confirm?.click();
       await Promise.resolve();
@@ -1029,19 +1049,22 @@ describe(SourcesPage, () => {
     await settle();
 
     expect({
-      closed,
       refusalShown: document.body.textContent.includes(
         "There's no such upload"
       ),
-      shared: section("Shared uploads").includes(
-        "No uploads are shared with a team or everyone."
+      // The list and the opened source, read again: still open.
+      afterPanel: afterPanel.filter(
+        (call) => call === "list" || call === "versions u-1"
       ),
-      deletes: calls.filter((call) => call.startsWith("delete")),
+      stillOpen: panel().includes("Handbook"),
+      afterErase: calls
+        .slice(beforeErase)
+        .filter((call) => call !== "list" && !call.startsWith("read")),
     }).toStrictEqual({
-      closed: "",
       refusalShown: false,
-      shared: true,
-      deletes: ["deleteUpload u-1", "deleteUpload u-3"],
+      afterPanel: ["list", "versions u-1"],
+      stillOpen: true,
+      afterErase: ["deleteUpload u-3", "sharedUploads"],
     });
   });
 });

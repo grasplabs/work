@@ -28,7 +28,7 @@ import { and, desc, eq, lt, ne, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { auditedBatch, outboxed } from "./audit-outbox.ts";
+import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
 import { memberOf } from "./auth/identity.ts";
 import type { Member } from "./auth/identity.ts";
 import { uploadSource } from "./brain-next-origins.ts";
@@ -92,13 +92,25 @@ const mayGrant = (member: Member, readers: BrainUploadReaders): boolean =>
 
 /** `row`'s readers, as the page names them. */
 const readersOf = (row: UploadRow): BrainUploadReaders => {
-  if (row.readers === "team" && row.teamId !== null) {
-    return { kind: "team", teamId: row.teamId };
+  switch (row.readers) {
+    case "team": {
+      // The table refuses a team row without its team
+      // (`brain_uploads_team_named`): one would be read nowhere.
+      if (row.teamId === null) {
+        throw new Error(`Upload ${row.id} is for a team, but names none`);
+      }
+      return { kind: "team", teamId: row.teamId };
+    }
+    case "everyone": {
+      return { kind: "everyone" };
+    }
+    case "me": {
+      return { kind: "me" };
+    }
+    default: {
+      throw new Error(`Upload ${row.id} has unknown readers`);
+    }
   }
-  if (row.readers === "everyone") {
-    return { kind: "everyone" };
-  }
-  return { kind: "me" };
 };
 
 /** `row`'s readers, as core's Brain module names them. */
@@ -392,13 +404,14 @@ const addVersion = async (
   { first, change }: { first: boolean; change: string }
 ): Promise<SourceVersionRef> => {
   const db = drizzle(env.DB);
+  const entry = (action: string, detail: Record<string, unknown>) => ({
+    actor: actorOf(person),
+    target: { type: "brain_upload", id: row.id },
+    action,
+    detail: { ...detailOf(row, file), ...detail },
+  });
   const event = (action: string, detail: Record<string, unknown>) =>
-    outboxed(db, {
-      actor: actorOf(person),
-      target: { type: "brain_upload", id: row.id },
-      action,
-      detail: { ...detailOf(row, file), ...detail },
-    });
+    outboxed(db, entry(action, detail));
   const forgotten = db.delete(brainUploads).where(eq(brainUploads.id, row.id));
   let added: SourceVersionRef;
   try {
@@ -420,13 +433,29 @@ const addVersion = async (
       : auditedBatch(env, db, [refused]));
     throw refusal.error(first);
   }
+  // Only an add that made a version past the row's records it: a retry
+  // the Brain answers with the version it made before (its answer lost),
+  // even after a later one, changes nothing and is audited once.
   await auditedBatch(env, db, [
-    // The name of the file its current version came from.
     db
       .update(brainUploads)
-      .set({ name: file.name })
-      .where(eq(brainUploads.id, row.id)),
-    event("brain.upload.added", { version: added.version }),
+      .set({
+        version: added.version,
+        // The name of the file its current version came from, kept here
+        // only for an upload shared with others: one for its uploader
+        // alone keeps its name in their own store.
+        ...(row.readers === "me" ? {} : { name: file.name }),
+      })
+      .where(
+        and(
+          eq(brainUploads.id, row.id),
+          lt(brainUploads.version, added.version)
+        )
+      ),
+    outboxedIfChanged(
+      db,
+      entry("brain.upload.added", { version: added.version })
+    ),
   ]);
   return added;
 };
@@ -483,7 +512,9 @@ export const uploadToBrain = async (
     .values({
       id: id.data,
       uploadedBy: person.userId,
-      name: file.name,
+      // Shared only: an upload for its uploader alone keeps even its name
+      // in their own store.
+      name: readers.kind === "me" ? null : file.name,
       readers: readers.kind,
       teamId: readers.kind === "team" ? readers.teamId : null,
       createdAt: now,
@@ -670,8 +701,8 @@ const sharedAfterSchema = z.strictObject({
 /**
  * For an admin: a page of the uploads shared with a team or everyone,
  * newest first, after `afterInput` (where the page before ended): each by
- * its file's name, who may read it, who uploaded it and when, so they can
- * erase one they may not read. Never an upload one person alone may read,
+ * who may read it, who uploaded it and when, and by its file's name when
+ * they may read it, so they can erase one they may not read. Never an upload one person alone may read,
  * and never any text. Refused (`role.forbidden`) for anyone else. Each
  * page asked is audited once, with how many it listed.
  */
@@ -696,10 +727,7 @@ export const sharedUploadsFor = async (
   const at = after === undefined ? undefined : new Date(after.uploadedAt);
   const rows = await db
     .select({
-      id: brainUploads.id,
-      name: brainUploads.name,
-      readers: brainUploads.readers,
-      teamId: brainUploads.teamId,
+      upload: brainUploads,
       teamName: teams.name,
       uploaderName: users.name,
       createdAt: brainUploads.createdAt,
@@ -720,6 +748,8 @@ export const sharedUploadsFor = async (
     )
     .orderBy(desc(brainUploads.createdAt), desc(brainUploads.id))
     .limit(sharedPageSize + 1);
+  // Shown by name only to an admin who may read it: a team's upload is
+  // its members' alone, its name too.
   const page = rows.slice(0, sharedPageSize);
   await auditedBatch(env, db, [
     outboxed(db, {
@@ -729,18 +759,15 @@ export const sharedUploadsFor = async (
       detail: { count: page.length },
     }),
   ]);
-  const last = page.at(-1);
+  const last = page.at(-1)?.upload;
   return {
-    uploads: page.map((row) => ({
-      source: uploadSource(row.id),
-      name: row.name,
-      readers:
-        row.readers === "team" && row.teamId !== null
-          ? { kind: "team", teamId: row.teamId }
-          : { kind: "everyone" },
-      teamName: row.teamName,
-      uploaderName: row.uploaderName,
-      uploadedAt: row.createdAt.toISOString(),
+    uploads: page.map(({ upload, teamName, uploaderName }) => ({
+      source: uploadSource(upload.id),
+      name: mayRead(member, upload) ? upload.name : null,
+      readers: readersOf(upload),
+      teamName,
+      uploaderName,
+      uploadedAt: upload.createdAt.toISOString(),
     })),
     next:
       rows.length > sharedPageSize && last !== undefined

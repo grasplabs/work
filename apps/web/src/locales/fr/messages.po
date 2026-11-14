@@ -1528,6 +1528,10 @@ msgstr "Un jour et une heure"
 msgid "A decision was put to people, or answered"
 msgstr "Une décision a été soumise à des personnes, ou tranchée"
 
+#: src/brain/sources-page.tsx
+msgid "A deleted team"
+msgstr "Une équipe supprimée"
+
 #: src/apps/field-kinds.tsx
 msgid "A document or an image"
 msgstr "Un document ou une image"
@@ -2517,6 +2521,10 @@ msgstr "Une API externe que les applications et les workflows peuvent appeler vi
 #: src/workflows/requests/request-who.tsx
 msgid "An owner can turn this on."
 msgstr "Un propriétaire peut l’activer."
+
+#: src/brain/sources-page.tsx
+msgid "An upload"
+msgstr "Un fichier importé"
 
 #: src/activity/audit-words.ts
 msgid "An upload into the Brain failed"

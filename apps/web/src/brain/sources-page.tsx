@@ -147,13 +147,12 @@ const fileOf = async (file: File) => {
 };
 
 /**
- * Whether `answer` is a delete done: one refused as not found was done
- * before, its answer lost (a delete the person could press was theirs to
- * make), so the upload is gone either way.
+ * Whether `answer` is a delete refused as not found: one done before, its
+ * answer lost, or one they may no longer make (an admin no longer one).
+ * The page reads again what is there, rather than say which.
  */
-const deleteDone = (answer: Read<unknown>): boolean =>
-  answer.state === "ready" ||
-  (answer.state === "refused" && answer.code === "brain.upload_not_found");
+const notFound = (answer: Read<unknown>): boolean =>
+  answer.state === "refused" && answer.code === "brain.upload_not_found";
 
 /** The file types an upload may be, for the file picker: core's own list. */
 const uploadAccept = Object.keys(uploadTypes)
@@ -562,9 +561,15 @@ const UploadActions = ({
               const answer = await readFrom(core, async (sources) => {
                 await sources.deleteUpload(source.id);
               });
-              if (deleteDone(answer)) {
+              if (answer.state === "ready") {
                 setActing(undefined);
                 onDeleted(source);
+                return;
+              }
+              if (notFound(answer)) {
+                // Read again: gone, or still there without Delete.
+                setActing(undefined);
+                onChanged(source);
                 return;
               }
               setActing(answer);
@@ -1102,17 +1107,23 @@ const SharedUploads = ({ onErased }: { onErased: () => void }) => {
       {listed.state === "ready" && listed.data.uploads.length > 0 ? (
         <ItemGroup render={<ul />} spacing="tight">
           {listed.data.uploads.map((upload) => {
-            const { name, uploaderName, teamName } = upload;
+            const { uploaderName, teamName, readers } = upload;
+            // Named only for an admin who may read it; else told apart by
+            // its team, uploader and the minute it was uploaded.
+            const name = upload.name ?? t`An upload`;
             const uploaded = formatDateTime(upload.uploadedAt);
+            let readBy = t`Everyone`;
+            if (readers.kind === "team") {
+              readBy =
+                teamName === null ? t`A deleted team` : t`Team ${teamName}`;
+            }
             return (
               <li key={upload.source.id}>
                 <Item size="sm">
                   <ItemContent>
                     <span className="min-w-0 text-sm">{name}</span>
                     <span className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
-                      <Badge variant="outline">
-                        {teamName === null ? t`Everyone` : t`Team ${teamName}`}
-                      </Badge>
+                      <Badge variant="outline">{readBy}</Badge>
                       <span>
                         <Trans>
                           Uploaded by {uploaderName}, {uploaded}
@@ -1132,7 +1143,9 @@ const SharedUploads = ({ onErased }: { onErased: () => void }) => {
                         const answer = await readFrom(core, async (sources) => {
                           await sources.deleteUpload(upload.source.id);
                         });
-                        if (!deleteDone(answer)) {
+                        // Not found: read the list again, which shows what
+                        // is there (or that they may no longer list it).
+                        if (answer.state !== "ready" && !notFound(answer)) {
                           setActing(answer);
                           return;
                         }

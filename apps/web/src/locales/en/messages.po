@@ -1528,6 +1528,10 @@ msgstr "A day and time"
 msgid "A decision was put to people, or answered"
 msgstr "A decision was put to people, or answered"
 
+#: src/brain/sources-page.tsx
+msgid "A deleted team"
+msgstr "A deleted team"
+
 #: src/apps/field-kinds.tsx
 msgid "A document or an image"
 msgstr "A document or an image"
@@ -2517,6 +2521,10 @@ msgstr "An outside API that Apps and workflows can call through Grasp, once you 
 #: src/workflows/requests/request-who.tsx
 msgid "An owner can turn this on."
 msgstr "An owner can turn this on."
+
+#: src/brain/sources-page.tsx
+msgid "An upload"
+msgstr "An upload"
 
 #: src/activity/audit-words.ts
 msgid "An upload into the Brain failed"

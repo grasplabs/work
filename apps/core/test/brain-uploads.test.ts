@@ -281,6 +281,13 @@ describe("uploading a file straight into the Brain", () => {
         );
       };
       const listed = await listedIds();
+      await uploader.api.brainSources.uploadVersion(
+        source.id,
+        fileOf("Another note", "Diary.vtt"),
+        crypto.randomUUID()
+      );
+      // Its name is theirs alone too: kept in their own store, never here.
+      const [row] = await rowsWith(source.id);
       // From the list, as the page deletes it: by the source it lists.
       const { sources } = await uploader.api.brainSources.list();
       const fromList = sources.find((each) => each.source.id === source.id);
@@ -289,6 +296,7 @@ describe("uploading a file straight into the Brain", () => {
       expect({
         kept,
         listed,
+        nameInCore: row?.name,
         afterDelete: await listedIds(),
         ownAfter: await personalBrainOf(namespace, uploader.userId).keyState(
           key
@@ -296,6 +304,7 @@ describe("uploading a file straight into the Brain", () => {
       }).toStrictEqual({
         kept: { shared: "free", own: "held" },
         listed: [`${source.id} true`],
+        nameInCore: null,
         afterDelete: [],
         ownAfter: "erased",
       });
@@ -572,6 +581,8 @@ describe("uploading a file straight into the Brain", () => {
         ),
       ];
       const { versions } = await uploader.api.brainSources.versions(source);
+      const [row] = await rowsWith(source.id);
+      const actions = await actionsOf(source.id);
 
       expect({
         retried,
@@ -579,6 +590,11 @@ describe("uploading a file straight into the Brain", () => {
         badIds,
         versions: versions.length,
         current: await found(uploader, third),
+        // The retry changed nothing: the current file's name stays, and
+        // each version was audited as added once.
+        name: row?.name,
+        added: actions.filter((action) => action === "brain.upload.added")
+          .length,
       }).toStrictEqual({
         retried: { source, version: 2 },
         otherFile: { refused: "brain.upload_other_file" },
@@ -586,6 +602,8 @@ describe("uploading a file straight into the Brain", () => {
         badIds: [{ refused: "upload.invalid" }, { refused: "upload.invalid" }],
         versions: 3,
         current: [source.id],
+        name: "Policy 3.vtt",
+        added: 3,
       });
     }
   );
@@ -810,7 +828,8 @@ describe("uploading a file straight into the Brain", () => {
       };
       const asStranger = await askedOf(stranger, shared.source.id);
       const asAdminOfOwn = await askedOf(admin, own.source.id);
-      // The admin isn't in the team: the listing names it, never its text.
+      // The admin isn't in the team: the listing shows it without its
+      // name, and never its text.
       const listing = await admin.api.brainSources.sharedUploads();
       const listed = listing.uploads.find(
         ({ source }) => source.id === shared.source.id
@@ -835,7 +854,9 @@ describe("uploading a file straight into the Brain", () => {
           ({ source }) => source.id === own.source.id
         ),
         adminSees,
-        textInReplies: textOf([listing, adminSees]).includes(secret),
+        textInReplies: [secret, "Payroll.vtt"].some((said) =>
+          textOf([listing, adminSees]).includes(said)
+        ),
         afterErase: {
           rows: rowsAfterErase.length,
           mateFinds: await found(mate, secret),
@@ -853,7 +874,7 @@ describe("uploading a file straight into the Brain", () => {
         asAdminOfOwn: await askedOf(admin, missing),
         listed: {
           source: shared.source,
-          name: "Payroll.vtt",
+          name: null,
           readers: teamReaders(teamId),
           teamName: `Team ${teamId}`,
           uploaderName: String(uploader.person.name),
@@ -870,6 +891,48 @@ describe("uploading a file straight into the Brain", () => {
         afterErase: { rows: 0, mateFinds: [], mateSees: null },
         nonAdminListing: { refused: "role.forbidden" },
         refusedAs: { reason: "admin_only", readers: "team" },
+      });
+    }
+  );
+
+  it(
+    "lists a shared upload to an admin by name only if they may read it, and a team's since deleted as its team's still",
+    slow,
+    async () => {
+      const [uploader, admin] = await Promise.all([
+        signedInApi(idp, "user"),
+        signedInApi(idp, "admin"),
+      ]);
+      const teamId = await teamOf(uploader);
+      const forTeam = await uploader.api.brainSources.upload(
+        fileOf(`Rota ${word()}`, "Rota.vtt"),
+        teamReaders(teamId),
+        crypto.randomUUID()
+      );
+      const forAll = await uploader.api.brainSources.upload(
+        fileOf(`Handbook ${word()}`, "Handbook.vtt"),
+        everyone,
+        crypto.randomUUID()
+      );
+      await drizzle(env.DB).delete(teams).where(eq(teams.id, teamId));
+      const { uploads } = await admin.api.brainSources.sharedUploads();
+      const shown = (id: string) => {
+        const upload = uploads.find(({ source }) => source.id === id);
+        return upload === undefined
+          ? undefined
+          : {
+              name: upload.name,
+              readers: upload.readers,
+              teamName: upload.teamName,
+            };
+      };
+
+      expect({
+        forTeam: shown(forTeam.source.id),
+        forAll: shown(forAll.source.id),
+      }).toStrictEqual({
+        forTeam: { name: null, readers: teamReaders(teamId), teamName: null },
+        forAll: { name: "Handbook.vtt", readers: everyone, teamName: null },
       });
     }
   );
