@@ -232,9 +232,10 @@ export interface AlarmHost {
   contextTokens: number | null;
   /**
    * Told the store's overview once each tick ends, done or failed, while
-   * the store holds anything and wasn't erased: for the host's health row
-   * of the store. Whatever it throws is dropped, and the tick's work
-   * stands.
+   * the store has its schema and wasn't erased: for the host's health row
+   * of the store, which the host keeps or drops by what the overview says
+   * it holds (`holding`). Whatever it throws is dropped, and the tick's
+   * work stands.
    */
   report: (overview: WorkOverview) => Promise<void>;
 }
@@ -1440,9 +1441,10 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
 
   /**
    * The store's overview told its host as a tick ends (`AlarmHost.report`):
-   * one snapshot, read at once. Not once the store was erased, nor while it
-   * holds nothing: its host keeps no row for it then. What the host throws
-   * is dropped: the row is only stale until the next tick.
+   * one snapshot, read at once. Not once the store was erased, nor before
+   * it has its schema; one that holds nothing says so (`holding`), and its
+   * host keeps no row for it then. What the host throws is dropped: the
+   * row is only stale until the next tick.
    */
   async #report(host: AlarmHost): Promise<void> {
     if (this.#erased || !this.#schema) {

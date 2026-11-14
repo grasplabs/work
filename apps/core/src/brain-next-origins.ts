@@ -159,11 +159,11 @@ type ErasureReason = Parameters<typeof eraseSource>[1]["reason"];
 const erasingAtOnce = 8;
 
 /**
- * Erases every one of `sources` for `reason`, each with the readers its
- * producer adds it with (which say whose own store it may be in), a few
- * at a time; throws once one failed, after those under way with it
- * settled. Safe to repeat: a source erased before is erased again alike,
- * so whoever retries passes them all again.
+ * Erases `sources` for `reason`, each with the readers its producer adds
+ * it with (which say whose own store it may be in), a few at a time, until
+ * one fails: then throws its error once those under way with it settled,
+ * and starts none after them. Safe to repeat: a source erased before is
+ * erased again alike, so whoever retries passes them all again.
  */
 export const eraseSources = async (
   env: Pick<Env, "BRAIN_STORE" | "DURABLE_OBJECT_JURISDICTION">,
