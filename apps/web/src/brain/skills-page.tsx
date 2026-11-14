@@ -1,10 +1,17 @@
 import { failureText } from "@grasp-os/shared/errors";
 import type {
+  CompanySkill,
+  DecidedTeamSkill,
   ListedSkill,
+  ListedTeamSkill,
   OwnSkillShare,
+  SkillAudienceAsked,
   SkillShare,
+  SkillShareAudience,
+  SkillInUse,
   SkillShareRequest,
   SkillsOverview,
+  SkillTeam,
 } from "@grasp-os/shared/skills";
 import {
   AlertDialog,
@@ -20,6 +27,12 @@ import {
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import { Card, CardContent } from "@grasp-os/ui/components/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@grasp-os/ui/components/dropdown-menu";
 import {
   Field,
   FieldDescription,
@@ -46,11 +59,12 @@ import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
 import { useCore } from "../use-core.ts";
 
-// Skills (GRA-1754): the person's own, which they write, edit and delete,
-// for their own chats alone; asking to share one with the company, which
-// waits for an admin; the company's skills; and, for the organization's
-// admins, the shares waiting for them, each with the exact text an
-// approval adds, and retiring a company skill. Core holds every rule
+// Skills (GRA-1754, GRA-1844): the person's own, which they write, edit
+// and delete, for their own chats alone; asking to share one with the
+// company or one of their teams, which waits for an admin; the company's
+// skills and their teams'; and, for the organization's admins, the shares
+// waiting for them, each with the exact text an approval adds and whom
+// for, and retiring a shared skill. Core holds every rule
 // (skill-shares.ts): the page only asks. Texts are shown as text, never
 // markup.
 
@@ -91,9 +105,9 @@ The steps.
 
 /**
  * Where the person's share stands: added (a later decision may replace it
- * since), or added and since taken out of use when the company has no
+ * since), or added and since taken out of use when its audience has no
  * such skill now (retired); otherwise waiting; declined; approved and on
- * its way to the company's skills; or approved but overtaken by a later
+ * its way to its audience's skills; or approved but overtaken by a later
  * decision before it was added.
  */
 const ShareStatus = ({
@@ -101,19 +115,33 @@ const ShareStatus = ({
   live,
 }: {
   share: SkillShare;
-  /** Whether the company has a skill of its name now. */
+  /** Whether its audience has a skill of its name now. */
   live: boolean;
 }) => {
+  const forTeam = share.audience.kind === "team";
   if (share.version !== null) {
-    return live ? (
-      <Badge variant="passed">
-        <Trans>Added to the company&apos;s skills.</Trans>
-      </Badge>
-    ) : (
+    if (live) {
+      return (
+        <Badge variant="passed">
+          {forTeam ? (
+            <Trans>Added to the team&apos;s skills.</Trans>
+          ) : (
+            <Trans>Added to the company&apos;s skills.</Trans>
+          )}
+        </Badge>
+      );
+    }
+    return (
       <Badge variant="outline">
-        <Trans>
-          Added to the company&apos;s skills, and since taken out of use.
-        </Trans>
+        {forTeam ? (
+          <Trans>
+            Added to the team&apos;s skills, and since taken out of use.
+          </Trans>
+        ) : (
+          <Trans>
+            Added to the company&apos;s skills, and since taken out of use.
+          </Trans>
+        )}
       </Badge>
     );
   }
@@ -131,17 +159,37 @@ const ShareStatus = ({
       </Badge>
     );
   }
-  return share.superseded ? (
-    <Badge variant="outline">
-      <Trans>
-        Approved, but a later decision on this skill came before it was added.
-      </Trans>
-    </Badge>
-  ) : (
+  if (share.superseded) {
+    return (
+      <Badge variant="outline">
+        <Trans>
+          Approved, but a later decision on this skill came before it was added.
+        </Trans>
+      </Badge>
+    );
+  }
+  return (
     <Badge variant="attention">
-      <Trans>Approved, but not added to the company&apos;s skills yet.</Trans>
+      {forTeam ? (
+        <Trans>Approved, but not added to the team&apos;s skills yet.</Trans>
+      ) : (
+        <Trans>Approved, but not added to the company&apos;s skills yet.</Trans>
+      )}
     </Badge>
   );
+};
+
+/** A team's name, or its ID once the team is gone. */
+const teamName = (team: { id: string; name: string | null }): string =>
+  team.name ?? team.id;
+
+/** Whom a share is for, in a whole sentence. */
+const ShareAudience = ({ audience }: { audience: SkillShareAudience }) => {
+  if (audience.kind === "company") {
+    return <Trans>For everyone in the company</Trans>;
+  }
+  const team = teamName(audience.team);
+  return <Trans>For the team {team}</Trans>;
 };
 
 /**
@@ -233,16 +281,75 @@ const ShareLabel = ({ waiting }: { waiting: Waiting | undefined }) => {
 /** A share of a skill that waits: of its current text, or of an older one a new ask replaces. */
 type Waiting = "current" | "replaceable";
 
-/** Of each of the person's skills with a share that waits: which kind. */
+/** The key of a skill's shares for an audience: its name, and whom for. */
+const waitingKey = (name: string, audience: SkillShareAudience): string =>
+  audience.kind === "company"
+    ? `company ${name}`
+    : `team:${audience.team.id} ${name}`;
+
+/** Of each of the person's skills and audiences with a share that waits: which kind. */
 const waitingOf = (shares: OwnSkillShare[] = []): Map<string, Waiting> =>
   new Map(
     shares
       .filter(({ status }) => status === "pending")
-      .map(({ name, outdated }): [string, Waiting] => [
-        name,
+      .map(({ name, audience, outdated }): [string, Waiting] => [
+        waitingKey(name, audience),
         outdated ? "replaceable" : "current",
       ])
   );
+
+/** The person's teams' share of `name` that waits, by team. */
+const waitingForTeams = (
+  waiting: Map<string, Waiting>,
+  name: string,
+  teams: readonly SkillTeam[]
+): Map<string, Waiting | undefined> =>
+  new Map(
+    teams.map(({ id }) => [
+      id,
+      waiting.get(waitingKey(name, { kind: "team", team: { id, name: null } })),
+    ])
+  );
+
+/**
+ * Sharing a skill with one of the person's teams: a team with a share of
+ * its current text waiting can't be asked again; one of an older text can
+ * (the waiting one goes).
+ */
+const ShareWithTeam = ({
+  teams,
+  waiting,
+  disabled,
+  onShare,
+}: {
+  teams: readonly SkillTeam[];
+  waiting: Map<string, Waiting | undefined>;
+  disabled: boolean;
+  onShare: (team: string) => void;
+}) => (
+  <DropdownMenu>
+    <DropdownMenuTrigger
+      render={
+        <Button disabled={disabled} size="sm" type="button" variant="outline" />
+      }
+    >
+      <Trans>Share with a team</Trans>
+    </DropdownMenuTrigger>
+    <DropdownMenuContent align="end">
+      {teams.map((team) => (
+        <DropdownMenuItem
+          disabled={waiting.get(team.id) === "current"}
+          key={team.id}
+          onClick={() => {
+            onShare(team.id);
+          }}
+        >
+          {team.name}
+        </DropdownMenuItem>
+      ))}
+    </DropdownMenuContent>
+  </DropdownMenu>
+);
 
 /** Whether `page` still lists the person's own skill `name`. */
 const listsOwn = (page: Read<SkillsOverview>, name: string): boolean =>
@@ -252,6 +359,8 @@ const listsOwn = (page: Read<SkillsOverview>, name: string): boolean =>
 const OwnSkill = ({
   skill,
   waiting,
+  teams,
+  teamsWaiting,
   busy,
   reading,
   onEdit,
@@ -259,13 +368,17 @@ const OwnSkill = ({
   onRemove,
 }: {
   skill: ListedSkill;
-  /** Undefined while no share of it waits. */
+  /** Undefined while no share of it with the company waits. */
   waiting: Waiting | undefined;
+  /** The teams the person is in, which they may share it with. */
+  teams: readonly SkillTeam[];
+  /** Of each of those teams, the share of it that waits, if one does. */
+  teamsWaiting: Map<string, Waiting | undefined>;
   busy: boolean;
   /** A skill is being read into the editor: nothing is deleted meanwhile. */
   reading: boolean;
   onEdit: () => void;
-  onShare: () => void;
+  onShare: (audience: SkillAudienceAsked) => void;
   onRemove: () => void;
 }) => {
   const { t } = useLingui();
@@ -293,13 +406,25 @@ const OwnSkill = ({
         </Button>
         <Button
           disabled={busy || waiting === "current"}
-          onClick={onShare}
+          onClick={() => {
+            onShare("company");
+          }}
           size="sm"
           type="button"
           variant="outline"
         >
           <ShareLabel waiting={waiting} />
         </Button>
+        {teams.length === 0 ? null : (
+          <ShareWithTeam
+            disabled={busy}
+            onShare={(team) => {
+              onShare({ team });
+            }}
+            teams={teams}
+            waiting={teamsWaiting}
+          />
+        )}
         <Confirmed
           confirm={t`Delete for good`}
           description={t`${name} and every version of it are deleted for good, with a share of it that waits. You can't use its name again.`}
@@ -313,7 +438,57 @@ const OwnSkill = ({
   );
 };
 
-/** A share waiting for an admin, with the exact text approving it adds. */
+/** What approving a share replaces for its audience, in a whole sentence; nothing when nothing. */
+const Replaces = ({ request }: { request: SkillShareRequest }) => {
+  const { name, audience, replaces } = request;
+  if (replaces === null) {
+    return null;
+  }
+  if (audience.kind === "company") {
+    return (
+      <p className="text-sm">
+        {replaces === "grasp" ? (
+          <Trans>
+            Approving it replaces Grasp&apos;s own skill {name} for everyone.
+          </Trans>
+        ) : (
+          <Trans>
+            Approving it replaces the company&apos;s own skill {name} for
+            everyone.
+          </Trans>
+        )}
+      </p>
+    );
+  }
+  const team = teamName(audience.team);
+  if (replaces === "team") {
+    return (
+      <p className="text-sm">
+        <Trans>
+          Approving it replaces the team {team}&apos;s own skill {name} for its
+          members.
+        </Trans>
+      </p>
+    );
+  }
+  return (
+    <p className="text-sm">
+      {replaces === "grasp" ? (
+        <Trans>
+          Approving it replaces Grasp&apos;s own skill {name} for the members of{" "}
+          {team}.
+        </Trans>
+      ) : (
+        <Trans>
+          Approving it replaces the company&apos;s own skill {name} for the
+          members of {team}.
+        </Trans>
+      )}
+    </p>
+  );
+};
+
+/** A share waiting for an admin, with the exact text approving it adds and whom for. */
 const ShareRequest = ({
   request,
   busy,
@@ -332,21 +507,10 @@ const ShareRequest = ({
     <Card render={<li />} size="sm">
       <CardContent>
         <span className="text-sm font-medium">{name}</span>
-        {request.replaces === "company" ? (
-          <p className="text-sm">
-            <Trans>
-              Approving it replaces the company&apos;s own skill {name} for
-              everyone.
-            </Trans>
-          </p>
-        ) : null}
-        {request.replaces === "grasp" ? (
-          <p className="text-sm">
-            <Trans>
-              Approving it replaces Grasp&apos;s own skill {name} for everyone.
-            </Trans>
-          </p>
-        ) : null}
+        <p className="text-sm">
+          <ShareAudience audience={request.audience} />
+        </p>
+        <Replaces request={request} />
         <p className="text-muted-foreground text-xs">
           <Trans>
             Asked by {asker} on {asked}
@@ -372,13 +536,265 @@ const ShareRequest = ({
   );
 };
 
-/** The skills page: the person's own, their shares, the company's, and for admins what waits. */
-export const SkillsPage = () => {
+/** One of the person's teams' skills, as their agents use it. */
+const TeamSkill = ({ skill }: { skill: ListedTeamSkill }) => {
+  const { name, version } = skill;
+  const team = skill.team.name;
+  return (
+    <Item size="sm" variant="outline">
+      <ItemContent>
+        <span className="text-sm font-medium">{name}</span>
+        <span className="text-muted-foreground text-sm">
+          {skill.description}
+        </span>
+        <span className="text-muted-foreground text-xs">
+          <Trans>
+            {team}, version {version}
+          </Trans>
+        </span>
+      </ItemContent>
+    </Item>
+  );
+};
+
+/**
+ * Where a shared skill stands, in a whole sentence: the version in use,
+ * and a new version or its retirement on its way; a team's by its name.
+ */
+const InUseLine = ({
+  team,
+  inUse,
+}: {
+  /** The team's name, or null for the company's. */
+  team: string | null;
+  inUse: SkillInUse;
+}) => {
+  const { version, onItsWay } = inUse;
+  if (version === null) {
+    return team === null ? (
+      <Trans>Not added yet</Trans>
+    ) : (
+      <Trans>{team}, not added yet</Trans>
+    );
+  }
+  if (onItsWay === "version") {
+    return team === null ? (
+      <Trans>Version {version}; a new version is on its way</Trans>
+    ) : (
+      <Trans>
+        {team}, version {version}; a new version is on its way
+      </Trans>
+    );
+  }
+  if (onItsWay === "retirement") {
+    return team === null ? (
+      <Trans>Version {version}; being taken out of use</Trans>
+    ) : (
+      <Trans>
+        {team}, version {version}; being taken out of use
+      </Trans>
+    );
+  }
+  return team === null ? (
+    <Trans>Version {version}</Trans>
+  ) : (
+    <Trans>
+      {team}, version {version}
+    </Trans>
+  );
+};
+
+/** One of the company's skills; for admins, with Retire while no retirement is on its way. */
+const CompanySkillItem = ({
+  skill,
+  admin,
+  busy,
+  onRetire,
+}: {
+  skill: CompanySkill;
+  admin: boolean;
+  busy: boolean;
+  onRetire: () => void;
+}) => {
   const { t } = useLingui();
+  const { name } = skill;
+  return (
+    <Item size="sm" variant="outline">
+      <ItemContent>
+        <span className="text-sm font-medium">{name}</span>
+        {skill.description === null ? null : (
+          <span className="text-muted-foreground text-sm">
+            {skill.description}
+          </span>
+        )}
+        <span className="text-muted-foreground text-xs">
+          <InUseLine inUse={skill} team={null} />
+        </span>
+      </ItemContent>
+      {admin && skill.onItsWay !== "retirement" ? (
+        <ItemActions>
+          <Confirmed
+            confirm={t`Retire`}
+            description={t`Nobody's agents use ${name} from then on. Its versions stay as history, and a new approved share of its name brings it back.`}
+            disabled={busy}
+            label={t`Retire`}
+            onConfirm={onRetire}
+            title={t`Retire ${name}?`}
+          />
+        </ItemActions>
+      ) : null}
+    </Item>
+  );
+};
+
+/** A team's skill in use, for an admin, in the team or not: with Retire. */
+const DecidedSkill = ({
+  skill,
+  busy,
+  onRetire,
+}: {
+  skill: DecidedTeamSkill;
+  busy: boolean;
+  onRetire: () => void;
+}) => {
+  const { t } = useLingui();
+  const { name } = skill;
+  const team = teamName(skill.team);
+  return (
+    <Item size="sm" variant="outline">
+      <ItemContent>
+        <span className="text-sm font-medium">{name}</span>
+        <span className="text-muted-foreground text-xs">
+          <InUseLine inUse={skill} team={team} />
+        </span>
+      </ItemContent>
+      {skill.onItsWay === "retirement" ? null : (
+        <ItemActions>
+          <Confirmed
+            confirm={t`Retire`}
+            description={t`The agents of ${team}'s members no longer use ${name}. Its versions stay as history, and a new approved share of its name with the team brings it back.`}
+            disabled={busy}
+            label={t`Retire`}
+            onConfirm={onRetire}
+            title={t`Retire ${name} for ${team}?`}
+          />
+        </ItemActions>
+      )}
+    </Item>
+  );
+};
+
+/**
+ * For the organization's admins: every team's skill in use, as core's
+ * decisions have it, whether or not they are in the team, to retire one.
+ */
+const EveryTeamsSkills = ({
+  data,
+  busy,
+  onRetire,
+}: {
+  data: SkillsOverview | undefined;
+  busy: boolean;
+  onRetire: (skill: DecidedTeamSkill) => void;
+}) => {
+  const heading = useId();
+  if (data?.teamSkills === null || data?.teamSkills === undefined) {
+    return null;
+  }
+  return (
+    <section aria-labelledby={heading} className="flex flex-col gap-3">
+      <h2 className="text-sm font-medium" id={heading}>
+        <Trans>Every team&apos;s skills</Trans>
+      </h2>
+      {data.teamSkills.length === 0 ? (
+        <p className="text-muted-foreground text-sm">
+          <Trans>No team has a skill of its own yet.</Trans>
+        </p>
+      ) : null}
+      <ItemGroup render={<ul />} spacing="tight">
+        {data.teamSkills.map((skill) => (
+          <li key={`${skill.team.id} ${skill.name}`}>
+            <DecidedSkill
+              busy={busy}
+              onRetire={() => {
+                onRetire(skill);
+              }}
+              skill={skill}
+            />
+          </li>
+        ))}
+      </ItemGroup>
+    </section>
+  );
+};
+
+/** The person's own asks to share, newest first, while they have any. */
+const AskedShares = ({ data }: { data: SkillsOverview | undefined }) => {
+  const heading = useId();
+  if (data === undefined || data.shares.length === 0) {
+    return null;
+  }
+  return (
+    <section aria-labelledby={heading} className="flex flex-col gap-3">
+      <h2 className="text-sm font-medium" id={heading}>
+        <Trans>What you asked to share</Trans>
+      </h2>
+      <ItemGroup render={<ul />} spacing="tight">
+        {data.shares.map((share) => (
+          <li key={share.id}>
+            <Item size="sm">
+              <ItemContent>
+                <span className="text-sm">{share.name}</span>
+                <span className="text-muted-foreground text-xs">
+                  <ShareAudience audience={share.audience} />
+                </span>
+                <span className="text-muted-foreground text-xs">
+                  {formatDateTime(share.requestedAt)}
+                </span>
+              </ItemContent>
+              <ItemActions>
+                <ShareStatus live={share.inUse} share={share} />
+              </ItemActions>
+            </Item>
+          </li>
+        ))}
+      </ItemGroup>
+    </section>
+  );
+};
+
+/** The person's teams' skills, while they are in a team. */
+const TeamSkills = ({ data }: { data: SkillsOverview | undefined }) => {
+  const heading = useId();
+  if (data === undefined || data.teams.length === 0) {
+    return null;
+  }
+  return (
+    <section aria-labelledby={heading} className="flex flex-col gap-3">
+      <h2 className="text-sm font-medium" id={heading}>
+        <Trans>Your teams&apos; skills</Trans>
+      </h2>
+      {data.team.length === 0 ? (
+        <p className="text-muted-foreground text-sm">
+          <Trans>Your teams have no skills of their own yet.</Trans>
+        </p>
+      ) : null}
+      <ItemGroup render={<ul />} spacing="tight">
+        {data.team.map((skill) => (
+          <li key={`${skill.team.id} ${skill.name}`}>
+            <TeamSkill skill={skill} />
+          </li>
+        ))}
+      </ItemGroup>
+    </section>
+  );
+};
+
+/** The skills page: the person's own, their shares, the company's and their teams', and for admins what waits. */
+export const SkillsPage = () => {
   const core = useCore();
   const editorId = useId();
   const ownHeading = useId();
-  const sharesHeading = useId();
   const companyHeading = useId();
   const requestsHeading = useId();
   const [overview, setOverview] = useState<Read<SkillsOverview>>({
@@ -508,6 +924,7 @@ export const SkillsPage = () => {
   }
   const data = overview.state === "ready" ? overview.data : undefined;
   const waiting = waitingOf(data?.shares);
+  const teams = data?.teams ?? [];
   /** Saving or reading into the editor: it holds still meanwhile. */
   const editorBusy = busy || reading !== null;
 
@@ -521,9 +938,9 @@ export const SkillsPage = () => {
           <PageHeaderDescription>
             <Trans>
               How things are done here. Your own skills are used in your own
-              chats alone. Sharing one with the company waits for an admin, and
-              from then on everyone&apos;s agents use it. A skill is guidance:
-              it never grants access.
+              chats alone. Sharing one with the company or one of your teams
+              waits for an admin, and from then on the agents of everyone in it
+              use it. A skill is guidance: it never grants access.
             </Trans>
           </PageHeaderDescription>
         </PageHeader>
@@ -608,52 +1025,25 @@ export const SkillsPage = () => {
                       }
                     );
                   }}
-                  onShare={() => {
+                  onShare={(audience) => {
                     act(
                       async (skills) =>
-                        await skills.share(skill.name, skill.version)
+                        await skills.share(skill.name, skill.version, audience)
                     );
                   }}
                   skill={skill}
-                  waiting={waiting.get(skill.name)}
+                  teams={teams}
+                  teamsWaiting={waitingForTeams(waiting, skill.name, teams)}
+                  waiting={waiting.get(
+                    waitingKey(skill.name, { kind: "company" })
+                  )}
                 />
               </li>
             ))}
           </ItemGroup>
         </section>
 
-        {data !== undefined && data.shares.length > 0 ? (
-          <section
-            aria-labelledby={sharesHeading}
-            className="flex flex-col gap-3"
-          >
-            <h2 className="text-sm font-medium" id={sharesHeading}>
-              <Trans>What you asked to share</Trans>
-            </h2>
-            <ItemGroup render={<ul />} spacing="tight">
-              {data.shares.map((share) => (
-                <li key={share.id}>
-                  <Item size="sm">
-                    <ItemContent>
-                      <span className="text-sm">{share.name}</span>
-                      <span className="text-muted-foreground text-xs">
-                        {formatDateTime(share.requestedAt)}
-                      </span>
-                    </ItemContent>
-                    <ItemActions>
-                      <ShareStatus
-                        live={data.company.some(
-                          ({ name }) => name === share.name
-                        )}
-                        share={share}
-                      />
-                    </ItemActions>
-                  </Item>
-                </li>
-              ))}
-            </ItemGroup>
-          </section>
-        ) : null}
+        <AskedShares data={data} />
 
         {data?.requests === null || data?.requests === undefined ? null : (
           <section
@@ -700,42 +1090,33 @@ export const SkillsPage = () => {
             </p>
           ) : null}
           <ItemGroup render={<ul />} spacing="tight">
-            {data?.company.map((skill) => {
-              const { name, version } = skill;
-              return (
-                <li key={name}>
-                  <Item size="sm" variant="outline">
-                    <ItemContent>
-                      <span className="text-sm font-medium">{name}</span>
-                      <span className="text-muted-foreground text-sm">
-                        {skill.description}
-                      </span>
-                      <span className="text-muted-foreground text-xs">
-                        <Trans>Version {version}</Trans>
-                      </span>
-                    </ItemContent>
-                    {data.requests === null ? null : (
-                      <ItemActions>
-                        <Confirmed
-                          confirm={t`Retire`}
-                          description={t`Nobody's agents use ${name} from then on. Its versions stay as history, and a new approved share of its name brings it back.`}
-                          disabled={busy}
-                          label={t`Retire`}
-                          onConfirm={() => {
-                            act(async (skills) => {
-                              await skills.retire(name);
-                            });
-                          }}
-                          title={t`Retire ${name}?`}
-                        />
-                      </ItemActions>
-                    )}
-                  </Item>
-                </li>
-              );
-            })}
+            {data?.company.map((skill) => (
+              <li key={skill.name}>
+                <CompanySkillItem
+                  admin={data.requests !== null}
+                  busy={busy}
+                  onRetire={() => {
+                    act(async (skills) => {
+                      await skills.retire(skill.name, "company");
+                    });
+                  }}
+                  skill={skill}
+                />
+              </li>
+            ))}
           </ItemGroup>
         </section>
+
+        <TeamSkills data={data} />
+        <EveryTeamsSkills
+          busy={busy}
+          data={data}
+          onRetire={(skill) => {
+            act(async (skills) => {
+              await skills.retire(skill.name, { team: skill.team.id });
+            });
+          }}
+        />
       </div>
     </div>
   );

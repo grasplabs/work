@@ -8,6 +8,7 @@ import {
   drainMaxBatches,
 } from "./audit-outbox.ts";
 import type { Outbox } from "./audit-outbox.ts";
+import { loneNotesPerDrain } from "./brain-hand-overs.ts";
 import { eraseCapturesOfDisconnects } from "./capture-erasures.ts";
 
 // The drains that reach connect's outbox (audit-outbox.ts), each with
@@ -39,7 +40,8 @@ export const drainAuditOutboxes = async (
 ): Promise<number> => {
   const counts = await Promise.all(
     [
-      coreOutbox(env),
+      // The one drain of its invocation that tries notes alone.
+      coreOutbox(env, loneNotesPerDrain),
       databaseOutbox("knowledge", env.KNOWLEDGE),
       connectOf(env, connectAppended),
     ].map(async (outbox) => await drainLogged(env, outbox, drainMaxBatches))

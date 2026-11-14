@@ -41,9 +41,10 @@ import type {
 } from "./brain-next.ts";
 import { skillReadSchema, skillsSelectSchema } from "./brain-pack.ts";
 import { readSkillFor, selectSkillsFor } from "./brain-skills.ts";
-import type { SkillsReach } from "./brain-skills.ts";
+import type { HeldNow, SkillsReach } from "./brain-skills.ts";
 import { permissions } from "./db/core/schema.ts";
 import { authorize, grantedPermissions } from "./permissions.ts";
+import { heldNothing } from "./skill-needs.ts";
 
 // The Brain's recall for code: an App's action (resource-brain.ts), a
 // workflow's step (workflows/brain-calls.ts) and a chat's code
@@ -253,24 +254,34 @@ const inHostSkillWords = (error: unknown): unknown => {
 };
 
 /**
- * Whose skills code reads: Grasp's and the company's, never a person's
- * own, which only ever reach that person's own chat (brain-skills.ts).
- * Code's input is refused for naming a person's skill before this is
- * asked (`skillReadSchema`, `grasp` and `company` alone).
+ * How far code's skills go: Grasp's and the company's alone. Never a
+ * person's own, which only ever reach that person's own chat, and never a
+ * team's (GRA-1844: decided for now; whether an App whose Brain grant is
+ * scoped to teams gets their skills is GRA-1844's follow-up with #2234).
+ * Code's input is refused for naming any other scope before this is asked
+ * (`skillReadSchema`, `grasp` and `company` alone).
  */
-const codeSkills: SkillsReach = { personal: false };
+const codeSkills: SkillsReach = "company";
+
+/**
+ * What code holds of what a skill may need (skill-needs.ts): nothing. No
+ * App or workflow has a truthful set of connections and tools to meet a
+ * skill's needs against yet, so a skill that declares any is never
+ * listed, selected or read from code: it is as if it weren't there.
+ */
+const codeHolds: HeldNow = async () => await Promise.resolve(heldNothing);
 
 /**
  * `skill` as code may be handed it: Grasp's or the company's. A person's
- * own is never asked for (`codeSkills`); one coming back anyway fails the
- * call, never passed on.
+ * own or a team's is never asked for (`codeSkills`); one coming back
+ * anyway fails the call, never passed on.
  */
 const forCode = <Skill extends { scope: SkillAt["scope"] }>(
   skill: Skill
-): Omit<Skill, "scope"> & { scope: "grasp" | "company" } => {
+): Skill & { scope: "grasp" | "company" } => {
   const { scope } = skill;
-  if (scope === "person") {
-    throw new Error("A person's own skill reached code");
+  if (scope !== "grasp" && scope !== "company") {
+    throw new Error("A person's own or a team's skill reached code");
   }
   return { ...skill, scope };
 };
@@ -290,7 +301,9 @@ export interface SkillsCaller extends Omit<RecallCaller, "keep"> {
  * The Brain's skills for an App's action or a workflow's step (GRA-1830):
  * `skills.select` the skills for `input.task`, `skills.read` one at the
  * version a selection gave, the same a chat's code selects and reads for
- * the same person (brain-skills.ts), never the person's own (`codeSkills`). Checked, kept and audited as a recall
+ * the same person (brain-skills.ts), at the company's reach and holding no
+ * needs (`codeSkills`, `codeHolds`): never the person's own, never a
+ * team's, never one that declares what it needs. Checked, kept and audited as a recall
  * is (`recallFor`, the threat model on GRA-1830): the input first, then
  * the caller's grant to read the Brain, now, and the person it acts for
  * still a member. Refused as `permission.invalid_args` for input that
@@ -340,6 +353,7 @@ export const skillsCallFor = async (
         env,
         caller.authority,
         codeSkills,
+        codeHolds,
         input
       );
       const handed = skills.map((skill) => forCode(skill));
@@ -347,7 +361,13 @@ export const skillsCallFor = async (
       await audit({ skills: handed.length });
       return { skills: handed };
     }
-    const read = await readSkillFor(env, caller.authority, codeSkills, input);
+    const read = await readSkillFor(
+      env,
+      caller.authority,
+      codeSkills,
+      codeHolds,
+      input
+    );
     const handed = forCode(read);
     await caller.keep?.([skillVersionRefOf(handed)]);
     await audit({ scope: handed.scope, version: handed.version });
