@@ -6,8 +6,8 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import { keepAudience } from "../src/chat-audiences.ts";
 import { collectionTeams, permissions } from "../src/db/core/schema.ts";
-import { keepAudience } from "../src/knowledge/access.ts";
 import {
   advanceExports,
   brainExportPath,
