@@ -47,6 +47,7 @@ import { stampedMessageRun } from "./mail-stamps.ts";
 import type { StampedRun } from "./mail-stamps.ts";
 import { runFileTypeShown } from "./office-files.ts";
 import { heldRunOf } from "./resource-authority.ts";
+import type { CallingRun } from "./resource-authority.ts";
 import { admitRunEvent, eventIdOf, notStartedYet } from "./run-events.ts";
 import { isRunFileText } from "./run-files.ts";
 import {
@@ -923,7 +924,18 @@ const receiveReply = async (
   // The run's frozen bindings, ended or not: a reply its run took before
   // it ended, delivered again, is still the event it took
   // (`admitRunEvent`), never dropped as if it were lost.
-  const run = await heldRunOf(env, inbox.runId);
+  let run: CallingRun | undefined;
+  try {
+    run = await heldRunOf(env, inbox.runId);
+  } catch (error) {
+    // A run an earlier release started (resource-authority.ts
+    // `frozenBindingsOf`): no reply reaches it again, as one that ended.
+    if (
+      workflowResourceErrors.codeOf(error) !== "workflow.format_unsupported"
+    ) {
+      throw error;
+    }
+  }
   if (run === undefined) {
     await replyDropped(env, inbox, "run_ended", id);
     return;
