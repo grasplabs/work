@@ -7,7 +7,7 @@ import {
 import type { Source, Transcript } from "@grasp-os/shared/brain";
 import { documentIdSchema } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
-import type { Transcript as StoredTranscript } from "@grasp-os/shared/transcripts";
+import type { TranscriptInput } from "@grasp-os/shared/transcripts";
 
 import { brainOf } from "./knowledge/ports.ts";
 
@@ -58,7 +58,7 @@ const minuteOf = (ms: number): string => {
 export const shownTranscript = ({
   turns,
   chapters,
-}: StoredTranscript): Transcript => {
+}: TranscriptInput): Transcript => {
   const starts = turns.map(({ startMs }) => startMs);
   const timed = starts.every((start) => start !== undefined);
   const atOf = (index: number): string => {

@@ -720,7 +720,7 @@ describe("uploads", { timeout: 60_000 }, () => {
 
     expect(failures).toStrictEqual({
       malformed: "upload.unreadable",
-      oversized: "knowledge.too_large",
+      oversized: "upload.text_too_large",
       unknownReason: "upload.unreadable",
     });
   });

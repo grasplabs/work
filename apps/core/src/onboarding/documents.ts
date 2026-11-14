@@ -4,7 +4,6 @@ import type { OnErase } from "@grasp-os/brain/purge";
 import { actorOf, auditActorSchema } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import { collectionIdSchema } from "@grasp-os/shared/ids";
-import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import type { InterviewLocale } from "@grasp-os/shared/onboarding";
 import {
   documentErrors,
@@ -258,7 +257,7 @@ export const shareDocument = async (
     // Too large or complex stays so, however often it is tried again.
     const permanent =
       uploadErrors.codeOf(error) === "upload.too_complex" ||
-      knowledgeErrors.codeOf(error) === "knowledge.too_large";
+      uploadErrors.codeOf(error) === "upload.text_too_large";
     throw documentErrors.create(
       permanent ? "document.too_complex" : "document.not_read"
     );
