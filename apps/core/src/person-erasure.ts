@@ -36,6 +36,7 @@ import {
   erasePerson as eraseFromBrain,
   stillDeletingTooLong,
 } from "./brain-next.ts";
+import { endHandOversOf } from "./brain-sources.ts";
 import { personalWorkspaceId } from "./chats-rpc.ts";
 import {
   accounts,
@@ -623,6 +624,9 @@ const brainSources: ErasureStep = {
     });
     const db = drizzle(env.DB);
     if (outcome === "erased") {
+      // Their hand-overs still open, which name them by id (a chat's
+      // turns), end as erased: none keeps their id after this.
+      await endHandOversOf(env, userId);
       // Only once the Brain erased them: their uploads for themselves alone
       // (brain-uploads.ts) name nothing the Brain still holds, and nobody
       // else may delete them, so their rows go with the area's completion.

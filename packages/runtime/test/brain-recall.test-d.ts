@@ -31,10 +31,13 @@ expectTypeOf<Mutable<Omit<BrainPackItem, "source">>>().toEqualTypeOf<
   Omit<PackItem, "source">
 >();
 
-// The pack: the same fields, apart from its items.
-expectTypeOf<keyof BrainPack>().toEqualTypeOf<keyof Pack>();
+// The pack: the same fields, apart from its items, and passages alone:
+// code gets no memory and no contested fact (core's `recallPassagesAs`;
+// memories for code are GRA-1837's).
+type Passages = Omit<Pack, "memories" | "contested">;
+expectTypeOf<keyof BrainPack>().toEqualTypeOf<keyof Passages>();
 expectTypeOf<Mutable<Omit<BrainPack, "items" | "notFound">>>().toEqualTypeOf<
-  Omit<Pack, "items" | "notFound">
+  Omit<Passages, "items" | "notFound">
 >();
 expectTypeOf<BrainPack["notFound"][number]>().toEqualTypeOf<
   Pack["notFound"][number]

@@ -271,9 +271,13 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.audit_outbox": { kept: "audit events on their way to the log (D2)" },
   "core.audit_outbox_rejected": { kept: "audit events the log refused (D2)" },
   "core.brain_capture_intents": { company: "outcomes of runs (D3), by run" },
-  "core.brain_hand_overs": {
-    none: "a source's kind and ID until the new Brain's queue takes it",
-  },
+  // What core has still to hand over to the new Brain, by a source's kind
+  // and id, until its hand-over ends. A chat turn's id names its person
+  // (`<person>/<chat>/<answer>`); a run's names nobody. Their erasure ends
+  // their open ones as erased once the Brain erased what was theirs
+  // (person-erasure.ts, brain-sources.ts `endHandOversOf`), also one whose
+  // item the queue parked for good.
+  "core.brain_hand_overs": { erased: "brain" },
   // A person's own Brain store's health, keyed by the SHA-256 of their ID:
   // removed once the Brain's erasure erased their store (brain-next.ts
   // `erasePerson`).

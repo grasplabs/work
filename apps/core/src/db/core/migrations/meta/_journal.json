@@ -1727,8 +1727,15 @@
     {
       "idx": 246,
       "version": "6",
-      "when": 1794649000513,
-      "tag": "0246_brain_uploads",
+      "when": 1794592802301,
+      "tag": "0246_absent_franklin_richards",
+      "breakpoints": true
+    },
+    {
+      "idx": 247,
+      "version": "6",
+      "when": 1794650673148,
+      "tag": "0247_brain_uploads",
       "breakpoints": true
     }
   ]

@@ -19,7 +19,7 @@ import {
   listSourcesAs,
   listVersionsAs,
   readSourceVersionAs,
-  recallAs,
+  recallPassagesAs,
 } from "./brain-next.ts";
 import type { ListedSource, SourceRef } from "./brain-next.ts";
 import {
@@ -36,11 +36,12 @@ import type { SessionCheck } from "./session-check.ts";
 // The Brain's sources over `/rpc` (`session.brainSources`), for anyone
 // signed in who is a member: each call is the Brain's own as that person
 // (brain-next.ts), which reads them with the teams core counts them in
-// now and answers only from what they may read. Search is `recallAs`
-// with a fixed budget, its pack handed on as it is: the page ranks
-// nothing of its own. Like the rest of the workspace it refuses a Grasp
+// now and answers only from what they may read. Search is
+// `recallPassagesAs` with a fixed budget, its pack of passages handed on
+// as it is: the page ranks nothing of its own, and shows no memory, so
+// none is sent. Like the rest of the workspace it refuses a Grasp
 // staff session (session-check.ts `fullAccess`). Nothing here is audited
-// per read, as `recallAs` isn't: what a source is and who may read it
+// per read, as `recallPassagesAs` isn't: what a source is and who may read it
 // are the Brain's, and brain-next.ts checks every source and version it
 // is given with its own rules. Uploads are brain-uploads.ts's, which
 // checks the file, who may act on an upload and its readers, and audits
@@ -153,7 +154,7 @@ export class BrainSourcesRpc extends CoreRpcTarget implements BrainSourcesApi {
     return await withPerson(
       this.#check,
       async (person) =>
-        await recallAs(this.#env, person.userId, {
+        await recallPassagesAs(this.#env, person.userId, {
           question,
           budget: { tokens: brainSearchBudget },
           // Their own Brain page: what is theirs alone is theirs to find.

@@ -24,9 +24,9 @@ import { foldForSearch } from "./words.ts";
 // a relation relates to. Checked inside every statement, before anything
 // is capped.
 //
-// An add links an entity on exact identifiers alone, never on a name: the
-// first entity of the same kind holding one (`linkedBy`). Linking by name
-// and proposals of likely matches are the linker's (GRA-1740).
+// An add links an entity on its exact identifiers: the first entity of
+// the same kind holding one (`linkedBy`); given none, by an exact name of
+// two words or more (linking.ts `linkedByName`).
 
 /** An entity's kind as stored. */
 const kindSchema = z.enum(entityKinds);
@@ -49,14 +49,19 @@ export const foldIdentifier = ({ type, value }: Identifier): string =>
   type === "email" ? value.toLowerCase() : value;
 
 /**
- * An entity the reader may see: a memory they may read mentions it.
+ * An entity the reader may see: a memory they may read mentions it; with
+ * `learnedBy` (an expression, milliseconds), one learned by then.
  */
-const mentionedSql = (entity: string): string => `(
+export const mentionedSql = (entity: string, learnedBy?: string): string => {
+  const learned =
+    learnedBy === undefined ? "" : `AND m.learned_at <= ${learnedBy}`;
+  return `(
   EXISTS (SELECT 1 FROM memories AS m
-    WHERE m.entity = ${entity} AND ${visibleSql("m")})
+    WHERE m.entity = ${entity} ${learned} AND ${visibleSql("m")})
   OR EXISTS (SELECT 1 FROM memories AS m
-    WHERE m.object = ${entity} AND ${visibleSql("m")})
+    WHERE m.object = ${entity} ${learned} AND ${visibleSql("m")})
 )`;
+};
 
 /**
  * Whether the memory `alias` is read by exactly the set of readers whose
@@ -65,7 +70,7 @@ const mentionedSql = (entity: string): string => `(
  * its source's current version's, the version not hidden by an erasure.
  * So everyone who may read an add with those readers may read it too.
  */
-const coveredSql = (alias: string): string => `(
+export const coveredSql = (alias: string): string => `(
   ${alias}.readers = ?3
   AND (${alias}.source IS NULL OR EXISTS (
     SELECT 1 FROM source_versions AS based
@@ -100,11 +105,11 @@ export const linkedBy = (
     .exec<{ row: number | null }>(
       `SELECT min(entities.row) AS row
       FROM json_each(?2) AS asked
-      JOIN entity_names
+      CROSS JOIN entity_names
         ON entity_names.type = asked.value ->> 0
         AND entity_names.folded = asked.value ->> 1
-      JOIN memories AS m ON m.row = entity_names.memory
-      JOIN entities ON entities.row = entity_names.entity
+      CROSS JOIN memories AS m ON m.row = entity_names.memory
+      CROSS JOIN entities ON entities.row = entity_names.entity
       WHERE entities.kind = ?1 AND ${coveredSql("m")}`,
       kind,
       JSON.stringify(identifiers.map((id) => [id.type, foldIdentifier(id)])),
@@ -199,26 +204,33 @@ const firstMentionSql = (entity: string): string => `(SELECT min(first) FROM (
 // Its cost: by kind alone, every entity of that kind is checked for a
 // memory the reader may read (and its first one found) before the limit,
 // so it grows with the entities of the kind. A name or an identifier
-// narrows it through `entity_names` first. No cheap bound keeps the order
-// exact; measure before a client's scale.
+// drives it from `entity_names` instead: it reads the entities so named.
+// No cheap bound keeps the order exact; measure before a client's scale.
 const findSql = `
 WITH ${readableSql},
 found AS MATERIALIZED (
   SELECT entities.row AS row, entities.id AS id, entities.kind AS kind,
     ${firstMentionSql("entities.row")} AS first
-  FROM entities
-  WHERE (?1 IS NULL OR entities.kind = ?1)
-    -- Found through the index of names when one is asked: the first.
-    AND (json_array_length(?4) = 0 OR entities.row IN (
-      SELECT entity_names.entity FROM entity_names
-      WHERE entity_names.type = ?4 ->> '$[0][0]'
+  FROM (
+    -- Driven from the index of names when one is asked (the first), each
+    -- entity once, reached by its row: never every entity.
+    SELECT entities.row, entities.id, entities.kind
+    FROM (
+      SELECT DISTINCT entity_names.entity AS entity FROM entity_names
+      WHERE json_array_length(?4) > 0
+        AND entity_names.type = ?4 ->> '$[0][0]'
         AND entity_names.folded = ?4 ->> '$[0][1]'
-    ))
+    ) AS named
+    CROSS JOIN entities ON entities.row = named.entity
+    UNION ALL
+    SELECT row, id, kind FROM entities WHERE json_array_length(?4) = 0
+  ) AS entities
+  WHERE (?1 IS NULL OR entities.kind = ?1)
     AND NOT EXISTS (
       SELECT 1 FROM json_each(?4) AS asked
       WHERE NOT EXISTS (
         SELECT 1 FROM entity_names
-        JOIN memories AS m ON m.row = entity_names.memory
+        CROSS JOIN memories AS m ON m.row = entity_names.memory
         WHERE entity_names.entity = entities.row
           AND entity_names.type = asked.value ->> 0
           AND entity_names.folded = asked.value ->> 1
@@ -242,7 +254,7 @@ const firstNameSql = `
 WITH ${readableSql}
 SELECT asked.value AS entity, (
   SELECT entity_names.value FROM entity_names
-  JOIN memories AS m ON m.row = entity_names.memory
+  CROSS JOIN memories AS m ON m.row = entity_names.memory
   WHERE entity_names.entity = asked.value AND entity_names.type = 'name'
     AND m.learned_at <= ?4 AND ${visibleSql("m")}
   ORDER BY m.learned_at, m.id, entity_names.folded
@@ -251,7 +263,7 @@ SELECT asked.value AS entity, (
 FROM json_each(?1) AS asked`;
 
 /** Entities found, as the reader sees them: with the earliest name they may see. */
-const asSeen = (
+export const asSeen = (
   sql: SqlStorage,
   found: readonly { row: number; id: string; kind: string }[],
   reader: Reader,
@@ -297,7 +309,7 @@ given AS (
       ORDER BY m.learned_at, m.id
     ) AS copy
   FROM entity_names
-  JOIN memories AS m ON m.row = entity_names.memory
+  CROSS JOIN memories AS m ON m.row = entity_names.memory
   WHERE entity_names.entity = ?1 AND m.learned_at <= ?4 AND ${visibleSql("m")}
 )
 SELECT type, value, folded, learned, memory FROM given
