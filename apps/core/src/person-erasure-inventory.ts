@@ -142,12 +142,13 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // deleted; on asks they decided as an admin, `decided_by` is cleared,
   // and the decision stays.
   "core.skill_shares": { erased: "brain" },
-  // Admins' decisions on the company's skills, with the text each decided:
-  // the company's, and what the Brain follows, so they stay. Who decided
-  // (`decided_by`) is cleared when that admin is erased.
+  // Admins' decisions on the company's and the teams' skills, with the
+  // text each decided: the company's, and what the Brain follows, so they
+  // stay. Who decided (`decided_by`) is cleared when that admin is erased.
+  // Their audience (`audience`) names the company or a team, never a person.
   "core.skill_decisions": {
     company:
-      "decisions on the company's skills, unnamed once their decider is erased",
+      "decisions on the company's and the teams' skills, unnamed once their decider is erased",
   },
   // The names of the skills they deleted for good: theirs alone.
   "core.skill_deletions": { erased: "brain" },

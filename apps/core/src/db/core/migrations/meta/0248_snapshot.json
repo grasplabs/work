@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "a33ef4e2-847c-46e0-8bc7-4d6b3d300109",
+  "id": "9469332c-8f7b-4e17-aa53-bd0299b62bfa",
   "prevId": "7b2388c7-a8bd-4977-a00a-06f3fb9a2e41",
   "tables": {
     "access_revocations": {
@@ -4457,78 +4457,6 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
-    },
-    "brain_uploads": {
-      "name": "brain_uploads",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "uploaded_by": {
-          "name": "uploaded_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "readers": {
-          "name": "readers",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "team_id": {
-          "name": "team_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "version": {
-          "name": "version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {
-        "brain_uploads_team_named": {
-          "name": "brain_uploads_team_named",
-          "value": "\"brain_uploads\".\"readers\" <> 'team' OR \"brain_uploads\".\"team_id\" IS NOT NULL"
-        }
-      }
     },
     "build_leases": {
       "name": "build_leases",
@@ -10603,12 +10531,20 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "audience": {
+          "name": "audience",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
-        "skill_decisions_seq_idx": {
-          "name": "skill_decisions_seq_idx",
+        "skill_decisions_sequence_idx": {
+          "name": "skill_decisions_sequence_idx",
           "columns": [
+            "audience",
             "name",
             "seq"
           ],
@@ -10624,6 +10560,7 @@
         "skill_decisions_open_idx": {
           "name": "skill_decisions_open_idx",
           "columns": [
+            "audience",
             "name"
           ],
           "isUnique": false,
@@ -10725,14 +10662,22 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "audience": {
+          "name": "audience",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
-        "skill_shares_pending_idx": {
-          "name": "skill_shares_pending_idx",
+        "skill_shares_waiting_idx": {
+          "name": "skill_shares_waiting_idx",
           "columns": [
             "requested_by",
-            "name"
+            "name",
+            "audience"
           ],
           "isUnique": true,
           "where": "status = 'pending'"

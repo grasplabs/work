@@ -62,6 +62,7 @@ import { noProducers } from "./no-producers.ts";
 import { carrying } from "./platform-providers.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { routed, signedInApi, signedInWithRole, unique } from "./sign-in.ts";
+import { holdsNothing } from "./stored-skills.ts";
 import {
   member as teamsMember,
   memberAnsweredBy,
@@ -116,6 +117,14 @@ const saidNow = (by: Said["by"]): Said => ({
   priority: "asked",
 });
 teamsWatched();
+
+/** A chat's agent acting for `personId`. */
+const agentFor = (personId: string) =>
+  authoritySchema.parse({
+    subject: { type: "agent", agentId: `agent-${unique()}` },
+    onBehalfOf: personId,
+    mode: "interactive",
+  });
 
 let chatAgentGrant: Promise<unknown> | undefined;
 
@@ -529,6 +538,7 @@ describe(
         "an upload for a team the outsider isn't in": markerWord(),
         "what the holder's agent fetched through a connection": markerWord(),
         "the holder's own skill": markerWord(),
+        "a team's skill the outsider isn't in": markerWord(),
       };
       const {
         "the holder's own source": ownerMarker,
@@ -544,6 +554,7 @@ describe(
         "an upload for a team the outsider isn't in": teamUploadMarker,
         "what the holder's agent fetched through a connection": captureMarker,
         "the holder's own skill": holderSkillMarker,
+        "a team's skill the outsider isn't in": teamSkillMarker,
       } = markers;
       // Instruction files the outsider may not get: the holder's own,
       // another agent's than theirs, and an App's they don't build (one no
@@ -605,20 +616,52 @@ describe(
       const holderSkill = await holderApi.api.skills.save(
         `---\nname: ${holderSkillMarker}\ndescription: How to ${sharedWord} ${holderSkillMarker}\n---\nSteps ${sharedWord} ${holderSkillMarker}`
       );
-      await holderApi.api.skills.share(holderSkill.name, holderSkill.version);
+      await holderApi.api.skills.share(
+        holderSkill.name,
+        holderSkill.version,
+        "company"
+      );
       // The holder's own chat lists it, and selects it for a task of it.
       await expect(
-        selectSkillsFor(
-          env,
-          authoritySchema.parse({
-            subject: { type: "agent", agentId: `agent-${unique()}` },
-            onBehalfOf: holder,
-            mode: "interactive",
-          }),
-          { personal: true },
-          { task: holderSkillMarker }
-        )
+        selectSkillsFor(env, agentFor(holder), "person", holdsNothing, {
+          task: holderSkillMarker,
+        })
       ).resolves.toMatchObject([{ scope: "person", name: holderSkillMarker }]);
+      // A skill of the holder's team, named by its marker: shared with the
+      // team on the holder's session and approved by an admin, so the
+      // team's members alone are given it.
+      const deciderApi = await signedInApi(idp, "admin");
+      const teamSkill = await holderApi.api.skills.save(
+        `---\nname: ${teamSkillMarker}\ndescription: How to ${sharedWord} ${teamSkillMarker}\n---\nSteps ${sharedWord} ${teamSkillMarker}`
+      );
+      const teamShare = await holderApi.api.skills.share(
+        teamSkill.name,
+        teamSkill.version,
+        { team: secretTeam }
+      );
+      await deciderApi.api.skills.approve(teamShare.id);
+      /** The team skills `personId`'s agent selects for the team skill's task. */
+      const teamSkillsOf = async (personId: string): Promise<string[]> => {
+        const selected = await selectSkillsFor(
+          env,
+          agentFor(personId),
+          "teams",
+          holdsNothing,
+          { task: teamSkillMarker }
+        );
+        return selected.flatMap((skill) =>
+          skill.scope === "team" ? [`${skill.team}:${skill.name}`] : []
+        );
+      };
+      const teamSkillSelected: Record<
+        "byTheHolder" | "byTheOutsider" | "joined" | "left",
+        string[]
+      > = {
+        byTheHolder: await teamSkillsOf(holder),
+        byTheOutsider: await teamSkillsOf(outsider),
+        joined: [],
+        left: [],
+      };
       // No recall ever finds an instruction file, a reader's own included.
       const inRecall = {
         "the holder's instruction file": holderFileMarker,
@@ -866,6 +909,7 @@ describe(
           ownUploadMarker,
           teamUploadMarker,
           holderSkillMarker,
+          teamSkillMarker,
         ],
         hiddenVersions: everyVersionOf(
           ...ownerIds,
@@ -879,6 +923,7 @@ describe(
         hiddenUploads: [ownUpload.id, teamUpload.id],
         hiddenInstructionFiles: [holderFile, agentFile, appFile, usedAppFile],
         hiddenSkills: [holderSkillMarker],
+        hiddenTeamSkills: [{ team: secretTeam, name: teamSkillMarker }],
         usedApps,
         instructionGroups,
         moments: [whileDraft],
@@ -897,9 +942,11 @@ describe(
       // theirs to read, and nothing else is.
       await join(secretTeam, outsider);
       const joinedFinds = await textsFor(outsider, teamMarker);
+      teamSkillSelected.joined = await teamSkillsOf(outsider);
       const {
         "a team's source the outsider isn't in": _joined,
         "an upload for a team the outsider isn't in": _joinedUpload,
+        "a team's skill the outsider isn't in": _joinedSkill,
         ...notJoined
       } = markers;
       const inTheTeam = await watched(
@@ -923,6 +970,7 @@ describe(
             captureId
           ),
           hiddenUploads: [ownUpload.id],
+          hiddenTeamSkills: [],
         },
         notJoined,
         { inRecall }
@@ -931,6 +979,7 @@ describe(
       // Leaving counts from the very next recall too.
       await leave(secretTeam, outsider);
       const leftFinds = await textsFor(outsider, teamMarker);
+      teamSkillSelected.left = await teamSkillsOf(outsider);
       const outAgain = await watched(
         "the outsider, out of the team again",
         asOutsider([ownTeam]),
@@ -1069,6 +1118,7 @@ describe(
       const {
         "a team's source the outsider isn't in": _team,
         "an upload for a team the outsider isn't in": _teamUpload,
+        "a team's skill the outsider isn't in": _teamSkill,
         ...notTeams
       } = markers;
       const asTeamMate = await watched(
@@ -1194,6 +1244,7 @@ describe(
         cappedFinds,
         joinedFinds,
         leftFinds,
+        teamSkillSelected,
         holderAppFile: holderAppFiles.some(({ text }) => text === usedAppText),
         outsiderOpens,
       }).toStrictEqual({
@@ -1206,6 +1257,13 @@ describe(
         cappedFinds: [{ text: capped, found: "exact" }],
         joinedFinds: [teamSource],
         leftFinds: [],
+        // From the very next call after joining, and leaving.
+        teamSkillSelected: {
+          byTheHolder: [`${secretTeam}:${teamSkillMarker}`],
+          byTheOutsider: [],
+          joined: [`${secretTeam}:${teamSkillMarker}`],
+          left: [],
+        },
         holderAppFile: true,
         outsiderOpens: "opens it",
       });

@@ -283,7 +283,7 @@ const brain: ErasureStep = {
     };
     // Their asks to share a skill, with the text a waiting one holds, and
     // the names of the skills they deleted. A decision on an ask of theirs
-    // is the company's, and keeps its text: the Brain follows it all the
+    // is the company's (or its team's), and keeps its text: the Brain follows it all the
     // same (skill-shares.ts). Who decided anything goes too, if it was
     // them: the decision stays, unnamed.
     await db.batch([

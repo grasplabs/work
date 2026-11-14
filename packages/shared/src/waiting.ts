@@ -179,7 +179,7 @@ export interface DecisionItem extends ItemBase {
 }
 
 /**
- * A person's ask to share one of their skills with the company: for the
+ * A person's ask to share one of their skills with the company or a team: for the
  * organization's own admins, who read its text and decide it on the
  * skills page (`SkillsApi.approve`, `decline`).
  */
