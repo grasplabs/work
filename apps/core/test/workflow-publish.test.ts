@@ -185,6 +185,34 @@ describe("a workflow's draft", () => {
       staleRestore: "draft.conflict",
     });
   });
+
+  it("keeps a draft left over an older version, written back to that version, as a change over the live one", async () => {
+    const ada = await person("builder");
+    const first = greetingOf(undefined, "v1");
+    const workflow = await publishedWorkflow(ada, first);
+    await saved(ada, workflow.id, greetingOf(undefined, "v2"));
+    await published(ada, workflow.id);
+    // Left over version 1, as a write that landed while version 2 went
+    // live leaves it.
+    await saveDraft(
+      env,
+      workflowKind,
+      workflow.id,
+      await draftOf(env, workflowKind, workflow.id),
+      { changes: { "workflow.json": greetingOf(undefined, "Mine") } },
+      { by: ada, detail: {} }
+    );
+    await env.DB.prepare(
+      "UPDATE drafts SET base = 1 WHERE subject_kind = 'workflow' AND subject_id = ?"
+    )
+      .bind(workflow.id)
+      .run();
+
+    await saved(ada, workflow.id, first);
+    const draft = await workflowDraft(env, ada, workflow.id);
+
+    expect(draft.source).toBe(first);
+  });
 });
 
 describe("publishing a workflow", { timeout: 60_000 }, () => {

@@ -176,8 +176,10 @@ export const editWorkflowDraft = async (
   if (draft.revision !== revision) {
     throw draftErrors.create("draft.conflict");
   }
+  // The live version's text, whatever version the draft is over: only
+  // that is no change, as a draft with no changes reads as it.
   const live = await filesOf(env, workflowKind, id, {
-    base: draft.base,
+    base: await workflowKind.liveBase(env, id),
     changes: {},
   });
   const after = await shown(env, by, id, revision + 1, source);
