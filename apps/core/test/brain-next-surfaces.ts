@@ -939,7 +939,12 @@ type CorePersonMember =
   | "rememberAs"
   | "forgetAs"
   | "memoryChoices"
-  | "ownEntityAs";
+  | "ownEntityAs"
+  | "entitiesAs"
+  | "memoriesAs"
+  | "contestedAs"
+  | "confirmAs"
+  | "correctAs";
 
 // Exports (GRA-1755). A company's export holds what the company holds,
 // markers among them, by design: it is for an admin, and core's route
@@ -4185,6 +4190,357 @@ const personMemoryProbes = (calls: PersonMemoryCalls) => {
   } satisfies Record<keyof PersonMemoryCalls, Probe>;
 };
 
+/**
+ * The Brain's Memories page (GRA-1746) for `personId`, as a surface
+ * reaches it: core's functions (brain-next.ts), the callers' that audit
+ * (brain-memories.ts) or the page's RPC (brain-memories-rpc.ts). Places
+ * and cursors are as core's functions take them, their moments dates; a
+ * surface that carries them as text converts them itself.
+ */
+interface MemoryPageCalls {
+  entities: (
+    personId: string,
+    kind: unknown,
+    from?: Readonly<Record<string, unknown>>
+  ) => Promise<unknown>;
+  memories: (
+    personId: string,
+    entity: Readonly<Record<string, unknown>>,
+    after?: Readonly<Record<string, unknown>>
+  ) => Promise<unknown>;
+  contested: (
+    personId: string,
+    from?: Readonly<Record<string, unknown>>
+  ) => Promise<unknown>;
+  confirm: (
+    personId: string,
+    memory: Readonly<Record<string, unknown>>
+  ) => Promise<unknown>;
+  correct: (
+    personId: string,
+    correction: Readonly<Record<string, unknown>>
+  ) => Promise<unknown>;
+}
+
+/**
+ * The entities a probe of the page asks of: one no one added (`nothing`),
+ * and as hidden: one only hidden memories name, one drawn from a hidden
+ * source, and one in someone else's own store, asked of in the reader's.
+ */
+const pageEntities = (
+  fixture: MemoryFixture,
+  others: { entity: string }
+): [string, Readonly<Record<string, unknown>>, Answer["about"]][] => [
+  [
+    "an entity no one added",
+    { store: "shared", id: crypto.randomUUID() },
+    "nothing",
+  ],
+  [
+    "one only hidden memories name",
+    { store: "shared", id: fixture.hidden },
+    "hidden",
+  ],
+  [
+    "one drawn from a hidden source",
+    { store: "shared", id: fixture.drawn },
+    "hidden",
+  ],
+  [
+    "one in someone else's own store",
+    { store: "own", id: others.entity },
+    "hidden",
+  ],
+];
+
+/**
+ * The memories a probe of the page asks of: one no one saved (`nothing`),
+ * and as hidden: a hidden one, and one in someone else's own store, asked
+ * of in the reader's.
+ */
+const pageMemories = (
+  fixture: MemoryFixture,
+  others: { entity: string; memory: string }
+): [string, Readonly<Record<string, unknown>>, Answer["about"]][] => [
+  [
+    "a memory no one saved",
+    { store: "shared", entity: fixture.hidden, memory: crypto.randomUUID() },
+    "nothing",
+  ],
+  [
+    "a hidden memory",
+    { store: "shared", entity: fixture.hidden, memory: fixture.hiddenMemory },
+    "hidden",
+  ],
+  [
+    "a memory in someone else's own store",
+    { store: "own", entity: others.entity, memory: others.memory },
+    "hidden",
+  ],
+];
+
+/** A plain correction of `wrong`, holding no marker. */
+const plainCorrection = (wrong: Readonly<Record<string, unknown>>) => ({
+  wrong,
+  right: "Plain correction",
+  change: crypto.randomUUID(),
+});
+
+/** A store's place in a listing past every item: a page after it is empty. */
+const placePast = (entity: string) => ({
+  at: new Date(),
+  learnedAt: pastAll,
+  entity,
+});
+
+/** The probes of the Memories page over `calls`, one per call. */
+const memoryPageProbes = (calls: MemoryPageCalls) => {
+  /** The fixture of hidden memories, and someone else's own memory. */
+  const scene = async (probing: Probing) =>
+    await Promise.all([
+      memoryFixture(probing),
+      othersOwnMemory(probing.markers),
+    ]);
+  return {
+    entities: async (probing: Probing): Promise<Answer[]> => {
+      const { personId, markers } = probing;
+      const [fixture] = await scene(probing);
+      const list = async (
+        name: string,
+        from?: Readonly<Record<string, unknown>>,
+        about?: Answer["about"],
+        as = personId
+      ) =>
+        await answer(
+          name,
+          async () => await calls.entities(as, "customer", from),
+          about
+        );
+      return [
+        await list("every customer they may see"),
+        await list("their own store's first page", { store: "own" }),
+        await list("the shared store's first page", { store: "shared" }),
+        await list(
+          "after an entity no one added",
+          { store: "shared", after: placePast(crypto.randomUUID()) },
+          "nothing"
+        ),
+        await list(
+          "after a hidden entity",
+          { store: "shared", after: placePast(fixture.hidden) },
+          "hidden"
+        ),
+        await list(
+          "as someone who isn't a member",
+          undefined,
+          undefined,
+          stranger()
+        ),
+        await answer(
+          "a kind named by the markers",
+          async () => await calls.entities(personId, markers.join(""))
+        ),
+        await list("a store named by the markers", { store: markers.join("") }),
+        await list("after a place named by the markers", {
+          store: "shared",
+          after: {
+            ...placePast(markers.join("")),
+            learnedAt: markers.join(" "),
+          },
+        }),
+      ];
+    },
+    memories: async (probing: Probing): Promise<Answer[]> => {
+      const { personId, markers } = probing;
+      const [fixture, others] = await scene(probing);
+      return [
+        ...(await Promise.all(
+          pageEntities(fixture, others).map(
+            async ([name, entity, about]) =>
+              await answer(
+                name,
+                async () => await calls.memories(personId, entity),
+                about
+              )
+          )
+        )),
+        // The reader's entity, which hidden memories end and contest.
+        await answer(
+          "an entity they may see",
+          async () =>
+            await calls.memories(personId, {
+              store: "shared",
+              id: fixture.seen,
+            })
+        ),
+        await answer(
+          "as someone who isn't a member",
+          async () =>
+            await calls.memories(stranger(), {
+              store: "own",
+              id: others.entity,
+            })
+        ),
+        await answer(
+          "after a place named by the markers",
+          async () =>
+            await calls.memories(
+              personId,
+              { store: "shared", id: fixture.seen },
+              {
+                at: new Date(),
+                learned: new Date(),
+                attribute: markers.join(""),
+                confirmed: false,
+                learnedAt: new Date(),
+                memory: markers.join(""),
+              }
+            )
+        ),
+      ];
+    },
+    contested: async (probing: Probing): Promise<Answer[]> => {
+      const { personId, markers } = probing;
+      await scene(probing);
+      return [
+        // Hidden memories contest the reader's: none of it shows.
+        await answer(
+          "every fact they may read",
+          async () => await calls.contested(personId)
+        ),
+        await answer(
+          "the shared store's first page",
+          async () => await calls.contested(personId, { store: "shared" })
+        ),
+        await answer(
+          "as someone who isn't a member",
+          async () => await calls.contested(stranger())
+        ),
+        await answer(
+          "after a place named by the markers",
+          async () =>
+            await calls.contested(personId, {
+              store: "shared",
+              after: {
+                at: new Date(),
+                learnedAt: new Date(),
+                entity: markers.join(""),
+                attribute: markers.join(" "),
+              },
+            })
+        ),
+      ];
+    },
+    confirm: async (probing: Probing): Promise<Answer[]> => {
+      const { personId, markers } = probing;
+      const [fixture, others] = await scene(probing);
+      const asked: Answer[] = [];
+      for (const [name, memory, about] of pageMemories(fixture, others)) {
+        // oxlint-disable-next-line no-await-in-loop -- one write at a time
+        const answered = await answer(
+          name,
+          // A confirmation names the memory by its store and id alone.
+          async () =>
+            await calls.confirm(personId, {
+              store: memory.store,
+              memory: memory.memory,
+            }),
+          about
+        );
+        asked.push(answered);
+      }
+      asked.push(
+        await answer(
+          "as someone who isn't a member",
+          async () =>
+            await calls.confirm(stranger(), {
+              store: "own",
+              memory: others.memory,
+            })
+        ),
+        await answer(
+          "an id of the markers",
+          async () =>
+            await calls.confirm(personId, {
+              store: "shared",
+              memory: markers.join(""),
+            })
+        )
+      );
+      return asked;
+    },
+    correct: async (probing: Probing): Promise<Answer[]> => {
+      const { personId, markers } = probing;
+      const [fixture, others] = await scene(probing);
+      const asked: Answer[] = [];
+      for (const [name, memory, about] of pageMemories(fixture, others)) {
+        // oxlint-disable-next-line no-await-in-loop -- one write at a time
+        const answered = await answer(
+          name,
+          async () => await calls.correct(personId, plainCorrection(memory)),
+          about
+        );
+        asked.push(answered);
+      }
+      const hidden = {
+        store: "shared",
+        entity: fixture.hidden,
+        memory: fixture.hiddenMemory,
+      };
+      asked.push(
+        await answer(
+          "as someone who isn't a member",
+          async () => await calls.correct(stranger(), plainCorrection(hidden))
+        ),
+        await answer(
+          "a change named by the markers",
+          async () =>
+            await calls.correct(personId, {
+              ...plainCorrection(hidden),
+              change: markers.join(""),
+            })
+        ),
+        await answer(
+          "too long a correction of the markers",
+          async () =>
+            await calls.correct(personId, {
+              ...plainCorrection(hidden),
+              right: oversizedText(markers),
+            })
+        )
+      );
+      return asked;
+    },
+  } satisfies Record<keyof MemoryPageCalls, Probe>;
+};
+
+/** The page's calls through core's own functions (brain-next.ts). */
+const corePageCalls: MemoryPageCalls = {
+  entities: async (personId, kind, from) =>
+    await coreBrain.entitiesAs(env, personId, {
+      kind,
+      ...(from === undefined ? {} : { from }),
+    }),
+  memories: async (personId, entity, after) =>
+    await coreBrain.memoriesAs(env, personId, {
+      entity,
+      ...(after === undefined ? {} : { after }),
+    }),
+  contested: async (personId, from) =>
+    await coreBrain.contestedAs(
+      env,
+      personId,
+      from === undefined ? {} : { from }
+    ),
+  confirm: async (personId, memory) =>
+    await coreBrain.confirmAs(env, personId, memory),
+  correct: async (personId, correction) =>
+    await coreBrain.correctAs(env, personId, correction),
+};
+
+/** The page through core's own functions. */
+const corePageProbes = memoryPageProbes(corePageCalls);
+
 /** A person's memories through core's own functions (brain-next.ts). */
 const corePersonProbes = personMemoryProbes({
   remember: async (personId, remembered) =>
@@ -4197,6 +4553,11 @@ const corePersonProbes = personMemoryProbes({
 const corePersonMemories = {
   rememberAs: corePersonProbes.remember,
   forgetAs: corePersonProbes.forget,
+  entitiesAs: corePageProbes.entities,
+  memoriesAs: corePageProbes.memories,
+  contestedAs: corePageProbes.contested,
+  confirmAs: corePageProbes.confirm,
+  correctAs: corePageProbes.correct,
   // An entity of the reader's own store: one in the shared store, one in
   // someone else's own store and one no one added answer alike.
   ownEntityAs: async (probing) => {
@@ -4254,7 +4615,21 @@ export const memoriesProbes = (() => {
     forget: async (personId, memory) =>
       await brainMemories.forgetFor(env, personCaller(personId), memory),
   });
-  return { rememberFor: probes.remember, forgetFor: probes.forget };
+  // The callers' confirmation and correction, audited: what core's
+  // functions answer, as the page's probes ask them.
+  const page = memoryPageProbes({
+    ...corePageCalls,
+    confirm: async (personId, memory) =>
+      await brainMemories.confirmFor(env, personCaller(personId), memory),
+    correct: async (personId, correction) =>
+      await brainMemories.correctFor(env, personCaller(personId), correction),
+  });
+  return {
+    rememberFor: probes.remember,
+    forgetFor: probes.forget,
+    confirmFor: page.confirm,
+    correctFor: page.correct,
+  };
 })() satisfies Record<keyof typeof brainMemories, Probe>;
 
 /** The probes of cards. */
@@ -6485,10 +6860,26 @@ const memoriesAs = (personId: string): BrainMemoriesRpc =>
     async () => await Promise.resolve(sessionOf(personId))
   );
 
+/** `value` as the page sends it over RPC: every date as ISO 8601, at any depth. */
+const onTheWire = (value: unknown): unknown => {
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (typeof value === "object" && value !== null) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, each]: [string, unknown]) => [
+        key,
+        onTheWire(each),
+      ])
+    );
+  }
+  return value;
+};
+
 /**
- * The chat's undo of a saved memory (brain-memories-rpc.ts, as
- * `session.brainMemories`), as the signed-in person, with what a page
- * could send instead.
+ * The chat's undo of a saved memory and the Brain's Memories page
+ * (brain-memories-rpc.ts, as `session.brainMemories`), as the signed-in
+ * person, with what a page could send instead.
  */
 export const memoriesRpcProbes = {
   forget: async (probing) => {
@@ -6531,7 +6922,30 @@ export const memoriesRpcProbes = {
       await forget("not an id", { memory: markers }),
     ];
   },
-} satisfies Record<"forget", Probe>;
+  ...memoryPageProbes({
+    entities: async (personId, kind, from) =>
+      await memoriesAs(personId).entities(
+        unchecked(kind),
+        unchecked(from === undefined ? undefined : onTheWire(from))
+      ),
+    memories: async (personId, entity, after) =>
+      await memoriesAs(personId).memories(
+        unchecked(entity),
+        unchecked(after === undefined ? undefined : onTheWire(after))
+      ),
+    contested: async (personId, from) =>
+      await memoriesAs(personId).contested(
+        unchecked(from === undefined ? undefined : onTheWire(from))
+      ),
+    confirm: async (personId, memory) =>
+      await memoriesAs(personId).confirm(unchecked(memory)),
+    correct: async (personId, correction) =>
+      await memoriesAs(personId).correct(unchecked(correction)),
+  }),
+} satisfies Record<
+  "forget" | "entities" | "memories" | "contested" | "confirm" | "correct",
+  Probe
+>;
 
 /** One way into the Brain: a module, or the store's class, and its probes. */
 interface Surface {

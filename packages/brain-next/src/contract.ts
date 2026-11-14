@@ -31,6 +31,15 @@ export type KeyState = "free" | "held" | "erased";
 export const erasedSource = "The Brain refused it: what this adds was erased";
 
 /**
+ * What `addMemories` answers a change added before with other memories:
+ * the message alone, so a caller tells it from any other failure by
+ * comparing it whole (a host that lets a person retry by a change key
+ * answers it as theirs to start again).
+ */
+export const changeReused =
+  "The Brain refused it: this change was added before with other memories";
+
+/**
  * What a person's own store erased whole answers an add, or any call that
  * would write: they were erased, for good, so the add is refused as
  * `erasedSource` is, and never tried again.

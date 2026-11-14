@@ -1,12 +1,15 @@
 import { packAcross, sourcesAcross } from "@grasp-os/brain-next/across";
 import {
   brainOf,
+  contestedCursorSchema,
   currentReadMax,
+  entitiesCursorSchema,
   entityAttributes,
   entityIdSchema,
   entityKinds,
   fitsSourceText,
   erasedSource,
+  changeReused,
   listPageMax,
   erasureReasons,
   exportFileNameSchema,
@@ -16,6 +19,7 @@ import {
   instructionsMaxLength,
   instructionsTextSchema,
   isOverInstructionsLimit,
+  memoriesCursorSchema,
   memoryIdSchema,
   memoryTypes,
   namesPerEntityMax,
@@ -47,6 +51,9 @@ import type {
   AskModel,
   AttributeRule,
   Brain,
+  ContestedCursor,
+  Entity,
+  EntitiesCursor,
   ErasureReason,
   Embedders,
   EntityKind,
@@ -80,6 +87,11 @@ import type {
 } from "@grasp-os/brain-next/contract";
 import { skillCardOf, skillNameSchema } from "@grasp-os/brain-next/skills";
 import { brainExportErrors } from "@grasp-os/shared/brain-exports";
+import { brainMemoryErrors } from "@grasp-os/shared/brain-memories";
+import type {
+  BrainEntityKind,
+  BrainMemoryAttribute,
+} from "@grasp-os/shared/brain-memories";
 import {
   brainReportSchema,
   brainSearchWays,
@@ -3218,6 +3230,53 @@ export const rememberAs = async (
   };
 };
 
+/** The names and identifiers of `entity` that `reader` may see in `store`, each page read. */
+const entityNamesOf = async (
+  store: Brain,
+  reader: Reader,
+  entity: EntityId
+): Promise<{ names: string[]; identifiers: Identifier[] }> => {
+  const names: string[] = [];
+  const identifiers: Identifier[] = [];
+  let after: EntityNamesCursor | undefined;
+  do {
+    // oxlint-disable-next-line no-await-in-loop -- each page after the last
+    const page = await store.readEntityNames({
+      entity,
+      reader,
+      ...(after === undefined ? {} : { after }),
+    });
+    for (const { type, value } of page.names) {
+      if (type === "name") {
+        names.push(value);
+      } else {
+        identifiers.push({ type, value });
+      }
+    }
+    after = page.more ? page.next : undefined;
+  } while (after !== undefined);
+  return { names, identifiers };
+};
+
+/**
+ * The exact identifier a person's own entity carries for the shared
+ * entity it stands for (`correctAs`): one form, minted here alone, so
+ * every correction of that shared entity links to the same entity of
+ * theirs. Kept only in their own store, and never shown as one of the
+ * entity's identifiers (`ownEntityAs` leaves it out).
+ */
+const sharedEntityRefPrefix = "grasp:shared-entity:";
+
+/** The identifier of the person's own entity for shared entity `id`. */
+const sharedEntityRefOf = (id: EntityId): Identifier => ({
+  type: "ref",
+  value: `${sharedEntityRefPrefix}${id}`,
+});
+
+/** Whether `identifier` is one `sharedEntityRefOf` made. */
+const isSharedEntityRef = ({ type, value }: Identifier): boolean =>
+  type === "ref" && value.startsWith(sharedEntityRefPrefix);
+
 /**
  * An entity of a person's own store, as they may read it: its kind, the
  * earliest name they may see (`name`), and every name and exact
@@ -3249,26 +3308,14 @@ export const ownEntityAs = async (
   if (read === null) {
     return null;
   }
-  const names: string[] = [];
-  const identifiers: Identifier[] = [];
-  let after: EntityNamesCursor | undefined;
-  do {
-    // oxlint-disable-next-line no-await-in-loop -- each page after the last
-    const page = await store.readEntityNames({
-      entity: id,
-      reader,
-      ...(after === undefined ? {} : { after }),
-    });
-    for (const { type, value } of page.names) {
-      if (type === "name") {
-        names.push(value);
-      } else {
-        identifiers.push({ type, value });
-      }
-    }
-    after = page.more ? page.next : undefined;
-  } while (after !== undefined);
-  return { kind: read.kind, name: read.name, names, identifiers };
+  const { names, identifiers } = await entityNamesOf(store, reader, id);
+  return {
+    kind: read.kind,
+    name: read.name,
+    names,
+    // What stands for a shared entity is core's own link, not one of it.
+    identifiers: identifiers.filter((each) => !isSharedEntityRef(each)),
+  };
 };
 
 /**
@@ -3294,4 +3341,487 @@ export const forgetAs = async (
   } catch (error) {
     throw erasedAs(error);
   }
+};
+
+// The Brain's Memories page (GRA-1746), for a person core verified: the
+// entities they may see, what the Brain remembers about one, history
+// included, the facts sources disagree on, and their confirmation or
+// correction. Each reads as them, from what they may read alone, in the
+// store each entity and memory is in: their own (theirs alone) or the
+// shared one, whose ids are their own, so each is named with its store.
+// A listing reads their own store first, then the shared one, a page of
+// one store's at a time, with that store's own place to go on from: what
+// they may not read takes no place in a page nor says more follow.
+
+/** Which store: the person's own (theirs alone), or the shared one. */
+export type MemoryStoreName = "own" | "shared";
+
+export type {
+  ContestedCursor,
+  EntitiesCursor,
+  MemoriesCursor,
+} from "@grasp-os/brain-next/contract";
+
+// The page's own lists of kinds and attributes (shared's
+// brain-memories.ts, which can't reach the Brain's contract) are the
+// Brain's, both ways: a kind or an attribute added to one fails here.
+type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+type AnyAttribute = {
+  [K in EntityKind]: keyof (typeof entityAttributes)[K];
+}[EntityKind];
+const listsAgree: [
+  Same<EntityKind, BrainEntityKind>,
+  Same<AnyAttribute, BrainMemoryAttribute>,
+] = [true, true];
+void listsAgree;
+
+const memoryStoreSchema = z.enum(["own", "shared"]);
+
+/** `store` as `reader` reaches it. */
+const storeNamed = (
+  env: BrainEnv,
+  reader: PersonReader,
+  store: MemoryStoreName
+): Brain => (store === "own" ? ownBrain(env, reader.person) : brain(env));
+
+/** Where a listing goes on: in `store`, after `after` (from its start when absent). */
+export interface StorePlace<C> {
+  store: MemoryStoreName;
+  after?: C;
+}
+
+/** A page of a listing across both stores, and where it goes on: null at the last. */
+export interface AcrossStores<T, C> {
+  items: T[];
+  next: StorePlace<C> | null;
+}
+
+/** A page of one store's listing, as each of the Brain's listings pages. */
+interface StorePage<T, C> {
+  items: T[];
+  more: boolean;
+  next?: C;
+}
+
+/**
+ * A page of a listing across the person's own store and the shared one,
+ * from `from` (their own store's start when absent): a page of the store
+ * it is in, and once their own store has no more, the shared one's first
+ * page with it. Their own store's part is left out while it fails
+ * (`ownOr`), never the shared one's.
+ */
+const acrossStores = async <T, C>(
+  from: StorePlace<C> | undefined,
+  read: (store: MemoryStoreName, after?: C) => Promise<StorePage<T, C>>
+): Promise<AcrossStores<T, C>> => {
+  const place: StorePlace<C> = from ?? { store: "own" };
+  const page =
+    place.store === "own"
+      ? await ownOr(async () => await read("own", place.after), {
+          items: [],
+          more: false,
+        })
+      : await read("shared", place.after);
+  const { items } = page;
+  if (page.more && page.next !== undefined) {
+    return { items, next: { store: place.store, after: page.next } };
+  }
+  if (place.store === "shared") {
+    return { items, next: null };
+  }
+  const shared = await read("shared");
+  return {
+    items: [...items, ...shared.items],
+    next:
+      shared.more && shared.next !== undefined
+        ? { store: "shared", after: shared.next }
+        : null,
+  };
+};
+
+/** An entity in one of the stores, as a listing names it. */
+export interface StoredEntity {
+  store: MemoryStoreName;
+  id: EntityId;
+  kind: EntityKind;
+  name: string | null;
+  /**
+   * The person's own entity stands for a shared one (a correction made
+   * it) that they may no longer read: shown with no name at all, as for
+   * one there isn't.
+   */
+  unreadable: boolean;
+}
+
+/**
+ * `entity` as the page names it, as `reader` may see it now. One of the
+ * person's own that a correction made stands for a shared entity
+ * (`sharedEntityRefOf`) and holds no name of its own: its name is that
+ * shared entity's earliest name the reader may see, read live from the
+ * shared store, as the page reads a shared entity, never kept; when they
+ * may no longer read it, or it is gone, alike, `unreadable`. Any other
+ * entity as the store gives it. Per entity: the store has no read of
+ * several entities at once, so a page of own entities takes at most a
+ * page of these, each two reads (its identifiers, the shared entity).
+ */
+const liveNamed = async (
+  env: BrainEnv,
+  reader: PersonReader,
+  store: MemoryStoreName,
+  entity: Entity
+): Promise<StoredEntity> => {
+  const plain = { store, ...entity, unreadable: false };
+  if (store !== "own" || entity.name !== null) {
+    return plain;
+  }
+  const { identifiers } = await entityNamesOf(
+    ownBrain(env, reader.person),
+    reader,
+    entity.id
+  );
+  const standsFor = identifiers.find(isSharedEntityRef);
+  if (standsFor === undefined) {
+    return plain;
+  }
+  const shared = await brain(env).readEntity({
+    entity: standsFor.value.slice(sharedEntityRefPrefix.length),
+    reader,
+  });
+  return shared === null
+    ? { ...plain, unreadable: true }
+    : { ...plain, name: shared.name };
+};
+
+const entitiesWantedSchema = z.strictObject({
+  kind: z.enum(entityKinds),
+  from: z
+    .strictObject({
+      store: memoryStoreSchema,
+      after: entitiesCursorSchema.optional(),
+    })
+    .optional(),
+});
+
+/**
+ * A page of the entities of `kind` the member `personId` may see, their
+ * own store's first, then the shared one's, each in the order the store
+ * finds them, from `from`. Refused once they are no longer a member.
+ */
+export const entitiesAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  wanted:
+    | { kind: EntityKind; from?: StorePlace<EntitiesCursor> }
+    | Readonly<Record<string, unknown>>
+): Promise<AcrossStores<StoredEntity, EntitiesCursor>> => {
+  const { kind, from } = checked(entitiesWantedSchema, wanted);
+  // The person on their own Brain page: both stores (`"person"` reach).
+  const reader = await personReaderOf(env, personId);
+  return await acrossStores(from, async (store, after) => {
+    const found = await storeNamed(env, reader, store).findEntities({
+      reader,
+      kind,
+      ...(after === undefined ? {} : { after }),
+    });
+    return {
+      items: await Promise.all(
+        found.entities.map(
+          async (each) => await liveNamed(env, reader, store, each)
+        )
+      ),
+      more: found.more,
+      next: found.next,
+    };
+  });
+};
+
+const entityRefSchema = z.strictObject({
+  store: memoryStoreSchema,
+  id: entityIdSchema,
+});
+
+/**
+ * A memory as the page shows it: the store's own, with the source it was
+ * drawn from as its producer named it, and the entity it relates to with
+ * its earliest name the reader may see.
+ */
+export interface StoredMemory extends Omit<Memory, "source" | "object"> {
+  store: MemoryStoreName;
+  source: { source: SourceRef; version: number } | null;
+  object: { id: EntityId; name: string | null } | null;
+}
+
+/** `memories` of `store`, as the page shows them to `reader` (above). */
+const storedMemories = async (
+  store: Brain,
+  name: MemoryStoreName,
+  reader: Reader,
+  memories: readonly Memory[]
+): Promise<StoredMemory[]> => {
+  const objects = [
+    ...new Set(
+      memories.flatMap(({ object }) => (object === null ? [] : [object]))
+    ),
+  ];
+  const names = new Map(
+    await Promise.all(
+      objects.map(async (id) => {
+        const read = await store.readEntity({ entity: id, reader });
+        return [id, read?.name ?? null] as const;
+      })
+    )
+  );
+  return memories.map(({ source, object, ...memory }) => ({
+    ...memory,
+    store: name,
+    source:
+      source === null
+        ? null
+        : { source: sourceRefOf(source.source), version: source.version },
+    object:
+      object === null ? null : { id: object, name: names.get(object) ?? null },
+  }));
+};
+
+const memoriesWantedSchema = z.strictObject({
+  entity: entityRefSchema,
+  after: memoriesCursorSchema.optional(),
+});
+
+/** A page of an entity's memories, and where it goes on: null at the last. */
+export interface StoredMemoryPage {
+  /**
+   * The entity as the reader may see it now (`liveNamed`), what the page
+   * names it by: null alike when there is none and when they may no
+   * longer see it.
+   */
+  entity: StoredEntity | null;
+  memories: StoredMemory[];
+  next: MemoriesCursor | null;
+}
+
+/**
+ * A page of what the Brain remembers about `entity` that the member
+ * `personId` may read, history included, in the store's order, after
+ * `after`: none, alike, for an entity there isn't or they may not see.
+ * Refused once they are no longer a member.
+ */
+export const memoriesAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  wanted:
+    | { entity: { store: MemoryStoreName; id: string }; after?: MemoriesCursor }
+    | Readonly<Record<string, unknown>>
+): Promise<StoredMemoryPage> => {
+  const { entity, after } = checked(memoriesWantedSchema, wanted);
+  // The person on their own Brain page: both stores (`"person"` reach).
+  const reader = await personReaderOf(env, personId);
+  const store = storeNamed(env, reader, entity.store);
+  const [page, read] = await Promise.all([
+    store.readMemories({
+      entity: entity.id,
+      reader,
+      history: true,
+      ...(after === undefined ? {} : { after }),
+    }),
+    store.readEntity({ entity: entity.id, reader }),
+  ]);
+  return {
+    entity:
+      read === null ? null : await liveNamed(env, reader, entity.store, read),
+    memories: await storedMemories(store, entity.store, reader, page.memories),
+    next: page.more && page.next !== undefined ? page.next : null,
+  };
+};
+
+/** A fact sources disagree on, as the page shows it. */
+export interface StoredContestedFact {
+  about: StoredEntity;
+  attribute: string;
+  sides: StoredMemory[];
+  more: boolean;
+}
+
+const contestedWantedSchema = z.strictObject({
+  from: z
+    .strictObject({
+      store: memoryStoreSchema,
+      after: contestedCursorSchema.optional(),
+    })
+    .optional(),
+});
+
+/**
+ * A page of the facts sources disagree on that the member `personId` may
+ * read, their own store's first, then the shared one's, from `from`: each
+ * with the entity it is about and its first sides, as the store gives
+ * them. Refused once they are no longer a member.
+ */
+export const contestedAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  wanted:
+    | { from?: StorePlace<ContestedCursor> }
+    | Readonly<Record<string, unknown>> = {}
+): Promise<AcrossStores<StoredContestedFact, ContestedCursor>> => {
+  const { from } = checked(contestedWantedSchema, wanted);
+  // The person on their own Brain page: both stores (`"person"` reach).
+  const reader = await personReaderOf(env, personId);
+  return await acrossStores(from, async (name, after) => {
+    const store = storeNamed(env, reader, name);
+    const page = await store.listContested({
+      reader,
+      ...(after === undefined ? {} : { after }),
+    });
+    const facts = await Promise.all(
+      page.facts.map(async ({ about, attribute, memories, more }) => {
+        const entity = await store.readEntity({ entity: about, reader });
+        // Read after the listing: who may read a source can change in
+        // between, and a fact they may no longer read is left out, as the
+        // store leaves out what that change hides (contract v11).
+        return entity === null
+          ? []
+          : [
+              {
+                about: await liveNamed(env, reader, name, entity),
+                attribute,
+                sides: await storedMemories(store, name, reader, memories),
+                more,
+              },
+            ];
+      })
+    );
+    return { items: facts.flat(), more: page.more, next: page.next };
+  });
+};
+
+const memoryRefSchema = z.strictObject({
+  store: memoryStoreSchema,
+  entity: entityIdSchema,
+  memory: memoryIdSchema,
+});
+
+/** A memory, by its store and id, with the entity it is about. */
+export type StoredMemoryRef = z.infer<typeof memoryRefSchema>;
+
+const memoryPlaceSchema = memoryRefSchema.omit({ entity: true });
+
+/** A memory, by its store and id. */
+export type StoredMemoryPlace = z.infer<typeof memoryPlaceSchema>;
+
+/**
+ * The member `personId` confirms memory `memory`, current and one they may
+ * read, over the current memories they may read that say otherwise, as
+ * their own word (the Brain's `confirmMemory`): `nothing` alike for one
+ * there isn't, they may not read, or that isn't current. Refused once
+ * they are no longer a member.
+ */
+export const confirmAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  memory: StoredMemoryPlace | Readonly<Record<string, unknown>>
+): Promise<MemoryChangeOutcome> => {
+  const { store, memory: id } = checked(memoryPlaceSchema, memory);
+  // The person on their own Brain page: both stores (`"person"` reach).
+  const reader = await personReaderOf(env, personId);
+  try {
+    return await storeNamed(env, reader, store).confirmMemory({
+      memory: id,
+      reader,
+    });
+  } catch (error) {
+    throw erasedAs(error);
+  }
+};
+
+const correctionSchema = z.strictObject({
+  wrong: memoryRefSchema,
+  right: memoryText(valueMaxLength),
+  // Minted once by the page when the person starts the correction.
+  change: z.uuid(),
+});
+
+/** A correction, as `correctAs` takes it. */
+export type Correction = z.input<typeof correctionSchema>;
+
+/**
+ * The member `personId` says memory `wrong` is wrong, and what is right
+ * (`right`): saved as their own word, readable by them alone, in their own
+ * store (`rememberAs`), and confirmed there over what they may read that
+ * says otherwise. About the same entity: in their own store by its id;
+ * from the shared one, the entity of theirs that stands for it, found by
+ * its exact identifier (`sharedEntityRefOf`) alone, made at the first
+ * correction with no name of its own (`liveNamed` names it). Under the same
+ * attribute when it holds a value, so a newer correction of a one-value
+ * attribute ends the one before. A wrong memory that is their own word is
+ * retired too, as `forgetAs` retires it: on a many-value attribute the
+ * correction would otherwise stand beside it.
+ *
+ * The shared store is left as it is: a correction others may read would
+ * widen what the person read, theirs to publish, not this. What is saved
+ * is built from what never changes for one correction (the entity's id
+ * and kind, the memory's attribute and type, the text), so the same
+ * `change` again answers what it saved while the wrong memory is one they
+ * may still read, whatever else has happened to it since (ended by it, or
+ * retired), and confirms and retires again, each a repeat that records
+ * nothing new. Once they may no longer read it (its source narrowed or
+ * erased), a retry answers null, as for any memory they may not read: a
+ * correction an earlier try saved stays in their own store, where the
+ * page shows it and they can confirm it themselves. The same `change`
+ * with other text is refused (`brain.correction_reused`). Null alike when
+ * the memory isn't one they may read and when it is a relation. Refused
+ * once they are no longer a member.
+ */
+export const correctAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  correction: Correction | Readonly<Record<string, unknown>>
+): Promise<RememberedMemory | null> => {
+  const { wrong, right, change } = checked(correctionSchema, correction);
+  // The person on their own Brain page: both stores (`"person"` reach).
+  const reader = await personReaderOf(env, personId);
+  const store = storeNamed(env, reader, wrong.store);
+  const [read, entity] = await Promise.all([
+    keptMemory(store, reader, wrong.entity, wrong.memory),
+    store.readEntity({ entity: wrong.entity, reader }),
+  ]);
+  // A relation names another entity, which the person's own word can't:
+  // it is not one a correction takes, alike for one there isn't.
+  if (read === undefined || entity === null || read.object !== null) {
+    return null;
+  }
+  // No name of the shared entity is copied: a copy would outlive a
+  // narrowing or an erasure of the source that gave it. The page names
+  // it live (`liveNamed`).
+  const about =
+    wrong.store === "own"
+      ? { id: entity.id, kind: entity.kind }
+      : { kind: entity.kind, identifiers: [sharedEntityRefOf(entity.id)] };
+  const attribute = read.attribute ?? undefined;
+  let saved: RememberedMemory;
+  try {
+    saved = await rememberAs(env, personId, {
+      change: `correct:${change}`,
+      about,
+      ...(attribute === undefined ? {} : { attribute, value: right }),
+      type: read.type,
+      statement: right,
+      quote: right,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === changeReused) {
+      throw brainMemoryErrors.create("brain.correction_reused");
+    }
+    throw error;
+  }
+  const own = ownBrain(env, reader.person);
+  try {
+    await own.confirmMemory({ memory: saved.memory, reader });
+    if (wrong.store === "own" && read.writer === reader.person) {
+      await own.retireMemory({ memory: read.id, reader });
+    }
+  } catch (error) {
+    throw erasedAs(error);
+  }
+  return saved;
 };

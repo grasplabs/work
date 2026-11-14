@@ -1,7 +1,7 @@
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
 
-import { attributeRuleOf, restoringNow } from "./contract.ts";
+import { attributeRuleOf, changeReused, restoringNow } from "./contract.ts";
 import type {
   AddedMemories,
   AttributeRule,
@@ -130,10 +130,6 @@ export interface RememberStore {
 }
 
 const encoder = new TextEncoder();
-
-/** What a refused repeat of a change says. */
-const otherMemories =
-  "The Brain refused it: this change was added before with other memories";
 
 /**
  * The entities of an add as rows: each known `id` (of its kind), else
@@ -484,7 +480,7 @@ export const writeAdd = (
       .toArray();
     if (before !== undefined) {
       if (before.hash !== hash) {
-        throw new Error(otherMemories);
+        throw new Error(changeReused);
       }
       return answerSchema.parse(JSON.parse(before.answer));
     }
