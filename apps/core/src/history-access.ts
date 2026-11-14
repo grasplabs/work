@@ -15,7 +15,11 @@ import { chatAuthority, chatContext, connectionReadOf } from "./agent-scope.ts";
 import type { AgentScope } from "./agent-scope.ts";
 import { appFor } from "./apps.ts";
 import { memberOf } from "./auth/identity.ts";
-import { readableMemoriesAs, readableVersionsAs } from "./brain-next.ts";
+import {
+  readableMemoriesAs,
+  readableVersionsAs,
+  versionRefSchema,
+} from "./brain-next.ts";
 import type { StoredMemoryPlace, SourceVersionRef } from "./brain-next.ts";
 import { audienceOf } from "./chat-audiences.ts";
 import { connectionOwnersOf } from "./connections.ts";
@@ -103,11 +107,17 @@ export const brainVersionRead = ({
 }: SourceVersionRef): string =>
   `${brainVersionPrefix}${JSON.stringify([source.producer, source.id, version])}`;
 
-const brainVersionSchema = z.tuple([
-  z.string().min(1),
-  z.string().min(1),
-  z.int().min(1),
-]);
+/**
+ * A pin's version as the Brain names one (`versionRefSchema`): of a kind
+ * of source a producer has, by an id it could give.
+ */
+const brainVersionSchema = z
+  .tuple([z.unknown(), z.unknown(), z.unknown()])
+  .transform(([producer, id, version]) => ({
+    source: { producer, id },
+    version,
+  }))
+  .pipe(versionRefSchema);
 
 /** The version a `brainVersionRead` source names, if it is one. */
 const brainVersionOf = (source: string): SourceVersionRef | undefined => {
@@ -120,15 +130,10 @@ const brainVersionOf = (source: string): SourceVersionRef | undefined => {
   } catch {
     return undefined;
   }
+  // One the Brain couldn't name (a kind no producer has now) is withheld
+  // alone, as no version it may read; never failing the whole check.
   const pin = brainVersionSchema.safeParse(parsed);
-  if (!pin.success) {
-    return undefined;
-  }
-  const [producer, id, version] = pin.data;
-  // SAFETY: checked again, strictly, by `readableVersionsAs`, which
-  // refuses a producer it doesn't know: the check then withholds all.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  return { source: { producer, id } as SourceVersionRef["source"], version };
+  return pin.success ? pin.data : undefined;
 };
 
 /**

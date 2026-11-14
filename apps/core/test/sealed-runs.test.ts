@@ -158,12 +158,14 @@ const startOfFirst = async (old: Sealed): Promise<unknown> =>
       )
   );
 
-/** A manifest of format 1, as releases before format 2 sealed one. */
-const ofFormat1 = (manifest: string): string =>
-  JSON.stringify({
-    ...z.looseObject({}).parse(JSON.parse(manifest)),
-    formatVersion: 1,
-  });
+/** `manifest` as a release of format `formatVersion` sealed it. */
+const ofFormat =
+  (formatVersion: number) =>
+  (manifest: string): string =>
+    JSON.stringify({
+      ...z.looseObject({}).parse(JSON.parse(manifest)),
+      formatVersion,
+    });
 
 /** A contract as format 1 stored it: its `args` and `returns` as `input` and `output`. */
 const contractOfFormat1 = (contract: string): string => {
@@ -869,8 +871,12 @@ return { before, after: await late };
     await expect(startOfFirst(earlier)).resolves.toBe(
       "workflow.format_unsupported"
     );
+    // As a version sealed in format 2, whose Brain steps searched and read.
+    await expect(
+      startOfFirst(await publishedBefore(ofFormat(2)))
+    ).resolves.toBe("workflow.format_unsupported");
     // As a version published before format 2, its contract as it stored it.
-    const format1 = await publishedBefore(ofFormat1, contractOfFormat1);
+    const format1 = await publishedBefore(ofFormat(1), contractOfFormat1);
     const { workflow, by } = format1;
     const start = await startOfFirst(format1);
     // A new version beside it, published as any is.

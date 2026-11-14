@@ -24,6 +24,7 @@ import {
   outcomeUnknownMetaKey,
   provenanceMetaKey,
   provenanceSchema,
+  readAsSchema,
   resourceMetaKey,
   stampMetaKey,
   stampPattern,
@@ -647,9 +648,19 @@ const issuesOf = (error: z.ZodError): string =>
 /** The properties a tool that answers a file answers it with (`contentAs`). */
 const fileAnswerFields = ["name", "contentType", "encoding", "content"];
 
+/** Whether `input` has an `as` property that takes `as`. */
+const takesAs = (input: z.ZodObject, as: string): boolean => {
+  const field: unknown = Object.hasOwn(input.shape, "as")
+    ? input.shape.as
+    : undefined;
+  return field instanceof z.ZodType && field.safeParse(as).success;
+};
+
 /**
  * Whether a tool declaring `answersFile` has its shape: read-only, an `as`
- * input, and the file answer's fields among its output's.
+ * input that takes each of `readAsSchema`'s (core keeps a file read as
+ * text, a run's files one read as base64), and the file answer's fields
+ * among its output's.
  */
 const answersFileShape = ({
   readOnly,
@@ -661,7 +672,7 @@ const answersFileShape = ({
   output: z.ZodObject;
 }): boolean =>
   readOnly &&
-  Object.hasOwn(input.shape, "as") &&
+  readAsSchema.options.every((as) => takesAs(input, as)) &&
   fileAnswerFields.every((field) => Object.hasOwn(output.shape, field));
 
 /**
@@ -698,7 +709,7 @@ const checkDeclared = (
   }
   if (definition.answersFile === true && !answersFileShape(definition)) {
     throw new Error(
-      `${name}: a tool that answers a file is read-only, takes \`as\`, and answers \`name\`, \`contentType\`, \`encoding\` and \`content\``
+      `${name}: a tool that answers a file is read-only, takes \`as\` as text or base64, and answers \`name\`, \`contentType\`, \`encoding\` and \`content\``
     );
   }
 };

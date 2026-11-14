@@ -22,6 +22,7 @@ import {
   teamMembers,
   teams,
 } from "../db/core/schema.ts";
+import { statementsWithin } from "../db/d1.ts";
 import { readOrganization } from "../organization.ts";
 import type { Sorted } from "./request-sorting.ts";
 
@@ -392,10 +393,15 @@ export const keepCardsOf = async (
   try {
     const db = drizzle(env.DB);
     const now = new Date();
-    await db
-      .insert(stephenRequestCards)
-      .values(keys.map((key) => ({ key, requestId, createdAt: now })))
-      .onConflictDoNothing();
+    const [first, ...rest] = statementsWithin(keys, (part) =>
+      db
+        .insert(stephenRequestCards)
+        .values(part.map((key) => ({ key, requestId, createdAt: now })))
+        .onConflictDoNothing()
+    );
+    if (first !== undefined) {
+      await db.batch([first, ...rest]);
+    }
   } catch (error) {
     log.warn("stephen_requests.cards_unkept", errorFields(error));
   }

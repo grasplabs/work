@@ -137,18 +137,24 @@ const sourceOf = async (admin: Identity) => {
  * takes `payment.paid` from a webhook source, approved for a source of
  * its own.
  */
-const paymentWorkflow = async (on?: {
-  admin: Identity;
-  source: Awaited<ReturnType<typeof sourceOf>>;
-}) => {
+const paymentWorkflow = async (
+  on?: {
+    admin: Identity;
+    source: Awaited<ReturnType<typeof sourceOf>>;
+  },
+  types: readonly string[] = [paid]
+) => {
   const admin = on?.admin ?? (await person("admin"));
   const contract = `payments-${unique()}`;
   await publishCatalogContract(env, admin, {
     key: contract,
     kind: "event",
-    events: {
-      [paid]: { data: paymentData, browser: false, ingress: "webhook" },
-    },
+    events: Object.fromEntries(
+      types.map((type) => [
+        type,
+        { data: paymentData, browser: false, ingress: "webhook" },
+      ])
+    ),
   });
   const workflow = await createWorkflowResource(env, admin, `pay-${unique()}`);
   await publishDefinition(
@@ -159,7 +165,10 @@ const paymentWorkflow = async (on?: {
       $schema: workflowSchemaUrl,
       args: objectSchema({ invoice: { kind: "string" } }),
       permissions: { events: { payments: { contract } } },
-      steps: [{ id: "linger", type: "wait", for: "1 hour" }, awaitPaid],
+      steps: [
+        { id: "linger", type: "wait", for: "1 hour" },
+        { ...awaitPaid, eventType: types.length === 1 ? paid : types },
+      ],
     })
   );
   const source = on?.source ?? (await sourceOf(admin));
@@ -675,6 +684,39 @@ describe(
           { data: invoice("INV-2"), taken: [] },
           { data: invoice("INV-1"), taken: [runId] },
         ],
+      });
+    });
+
+    it("takes the event of its match when it waits on many types at once", async () => {
+      // More types than one statement of D1's 100 bound parameters keeps
+      // the wait of.
+      const types = [
+        paid,
+        ...Array.from({ length: 15 }, (_, at) => `payment.step${at}`),
+      ];
+      const paying = await paymentWorkflow(undefined, types);
+      const runId = await waitingRun(paying, "INV-1");
+      const statuses: number[] = [];
+      const ran = await ranAs(
+        runId,
+        waiting(),
+        inboxEngine(runId, keptOfTest(), async () => {
+          statuses.push(
+            await send(paying.source, invoice("INV-1"), {
+              type: "payment.step10",
+            })
+          );
+        })
+      );
+
+      expect({
+        statuses,
+        ran,
+        inbox: await inboxOf(runId),
+      }).toStrictEqual({
+        statuses: [202],
+        ran: { ended: "INV-1", tampered: [] },
+        inbox: ["INV-1"],
       });
     });
 

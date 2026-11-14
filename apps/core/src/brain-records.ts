@@ -57,7 +57,7 @@ import { z } from "zod";
 
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
 import { brainRecords, workflowResources } from "./db/core/schema.ts";
-import { inList } from "./db/d1.ts";
+import { inList, statementsWithin } from "./db/d1.ts";
 
 // The brain's records, as core keeps them (`brain_records`), and adding
 // them (`brain.addRecords`). Threat model, and how each is closed (the
@@ -300,9 +300,6 @@ const types = [
   "vision",
 ] as const;
 
-/** Rows one insert writes: four columns each, within D1's 100 bound parameters. */
-const rowsPerInsert = 20;
-
 /** The records `input` holds, each once, or why it holds none. */
 const recordsOf = (input: unknown): BrainRecord[] => {
   const parsed = brainRecordsSchema.safeParse(input);
@@ -448,21 +445,16 @@ const writeRecords = async (
     body: bodyOf(record),
     addedAt,
   });
-  // Four columns a row: a statement inserts at most `rowsPerInsert` rows,
-  // within D1's 100 bound parameters.
-  const [first, ...more] = Array.from(
-    { length: Math.ceil(fresh.length / rowsPerInsert) },
-    (_, index) =>
-      fresh.slice(index * rowsPerInsert, (index + 1) * rowsPerInsert).map(row)
+  // As many rows an insert as D1 binds, counted from the insert itself.
+  const [first, ...more] = statementsWithin(fresh, (part) =>
+    db.insert(brainRecords).values(part.map(row))
   );
   if (first === undefined) {
     return;
   }
-  const insert = (rows: ReturnType<typeof row>[]) =>
-    db.insert(brainRecords).values(rows);
   await auditedBatch(env, db, [
-    insert(first),
-    ...more.map(insert),
+    first,
+    ...more,
     outboxed(db, {
       actor,
       action: "brain.records.added",

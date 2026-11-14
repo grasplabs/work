@@ -2,7 +2,10 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "@earendil-works/pi-ai";
 import type { Static } from "@earendil-works/pi-ai";
 import { delegateActorOf } from "@grasp-os/shared/audit";
-import type { ChatSavedMemory } from "@grasp-os/shared/brain-memories";
+import type {
+  BrainEntityKind,
+  ChatSavedMemory,
+} from "@grasp-os/shared/brain-memories";
 import { z } from "zod";
 
 import { rememberName } from "./agent-messages.ts";
@@ -10,6 +13,7 @@ import { chatAuthority, chatContext } from "./agent-scope.ts";
 import type { AgentScope } from "./agent-scope.ts";
 import { rememberFor } from "./brain-memories.ts";
 import { memoryChoices, ownEntityAs } from "./brain-next.ts";
+import type { Remembered } from "./brain-next.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
 
 // The agent remembers on its own (GRA-1814, the plan's decision 13): in a
@@ -153,7 +157,7 @@ const checkSchema = z.object({ theirs: z.boolean() });
 export type Subject =
   | { readonly self: true }
   | {
-      readonly kind: string;
+      readonly kind: BrainEntityKind;
       /** The name the notice shows: the earliest the store holds. */
       readonly name: string;
       /** Every name, as the check is given them. */
@@ -219,7 +223,7 @@ const subjectOf = async (
   about: Proposed["about"]
 ): Promise<{
   subject: Subject;
-  entity: Readonly<Record<string, unknown>>;
+  entity: Remembered["about"];
 } | null> => {
   const self = { type: "ref" as const, value: `grasp:person:${personId}` };
   if (about === "me") {

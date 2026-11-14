@@ -7,7 +7,12 @@ import { reset, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { recallLimit } from "../src/contract.ts";
+import {
+  questionMaxLength,
+  recallLimit,
+  valueMaxLength,
+} from "../src/contract.ts";
+import { foldName } from "../src/entities.ts";
 import { audience, fact, readerOf, word } from "./entity-helpers.ts";
 
 // What reading memories costs the store, against what the question is not
@@ -82,11 +87,12 @@ const seekMargin = 8;
 const namedSizes = [100, 5000, 20_000];
 
 /**
- * Rows read for each name that begins with two words next to each other
- * in the question: its index entry, the memory that gave it, and its
- * reader check (measured: 2 rows a name).
+ * Rows the walk over the question's words may read a step (a run of
+ * them): the run's next word, the probe of the index of names for a name
+ * beginning with the run, and the seek of the run, with what the other
+ * ways read more for a long question (measured: 3.5 to 4 rows a step).
  */
-const rowsPerPairName = 3;
+const rowsPerStep = 5;
 
 /** Whether `rows` is within `seekMargin` of `alone`, and never fewer. */
 const flat = (alone: number, rows: number): boolean =>
@@ -334,23 +340,24 @@ describe("what reading memories costs", () => {
     }
   );
 
-  // What finding the entities a question names reads: a seek a word of
-  // the question and a seek a pair of its words. Names that begin with
-  // one of its words cost nothing; names that begin with two of its words
-  // next to each other are read (at most `rowsPerPairName` each): the
-  // remaining cost, as a common first and last name shared by many.
+  // What finding the entities a question names reads: a seek of each run
+  // of the question's words that some name begins with, and of the next
+  // run only while one does. Names that begin with the question's first
+  // word, two or three of its words cost nothing: as a common first name,
+  // or first and last name, shared by many, readable or hidden.
   it.each([
-    ["the question's first word", 1, true],
-    ["the question's first two words", 2, false],
+    ["the question's first word", 1],
+    ["the question's first two words", 2],
+    ["the question's first three words", 3],
   ] as const)(
     "finds the named entities among names beginning with %s",
-    async (_shape, shared, flatExpected) => {
+    async (_shape, shared) => {
       const { stub, rowsReadBy } = await countedStore();
       const group = `seen-${crypto.randomUUID()}`;
       const hidden = `hidden-${crypto.randomUUID()}`;
       const reader = readerOf("reader", group);
-      const [first, second, own] = [word(), word(), word()];
-      const name = `${first} ${second} ${own}`;
+      const [first, second, third, own] = [word(), word(), word(), word()];
+      const name = `${first} ${second} ${third} ${own}`;
       await add(
         stub,
         group,
@@ -358,7 +365,7 @@ describe("what reading memories costs", () => {
         [fact("a", `${name} keeps a note`)]
       );
       const alike = () =>
-        shared === 1 ? `${first} ${word()}` : `${first} ${second} ${word()}`;
+        [...[first, second, third].slice(0, shared), word()].join(" ");
       const ask = async () => await finding(stub, reader, name);
       const rows = [await rowsReadBy(ask)];
       let have = 0;
@@ -383,15 +390,87 @@ describe("what reading memories costs", () => {
       }
       const [alone = 0, ...grown] = rows;
 
-      expect(
-        grown.map((read, index) =>
-          flatExpected
-            ? flat(alone, read)
-            : read - alone <= rowsPerPairName * (namedSizes[index] ?? 0)
-        )
-      ).toStrictEqual([true, true, true]);
+      expect(grown.map((read) => flat(alone, read))).toStrictEqual([
+        true,
+        true,
+        true,
+      ]);
     },
     300_000
+  );
+
+  // The most the walk over the question's words can read: a step for each
+  // run of words some name begins with, so at most every word times the
+  // words of the longest name such a run begins, and one more. At the
+  // contract's limits: the most words a question folds into (U+FDFA folds
+  // into four words, three when written together: 2,000 of them, the most
+  // characters a question has, give 6,001), against no name, against
+  // hidden names of the most characters a name folds to that repeat its
+  // words from each of its offsets, and the most one-letter words against
+  // a hidden name of the most of them. A name the reader may not read
+  // steers the walk as one they may: bounded so, never by the store.
+  it.each([
+    "no name",
+    "hidden names at each offset",
+    "a hidden name of one letter",
+  ] as const)(
+    "reads at most a step a word and name word for the question of the most words, against %s",
+    async (shape) => {
+      const { stub, rowsReadBy } = await countedStore();
+      const group = `seen-${crypto.randomUUID()}`;
+      const hidden = `hidden-${crypto.randomUUID()}`;
+      const reader = readerOf("reader", group);
+      const question =
+        shape === "a hidden name of one letter"
+          ? Array.from({ length: questionMaxLength / 2 }, () => "z").join(" ")
+          : "\u{FDFA}".repeat(questionMaxLength);
+      const words = foldName(question).split(" ");
+      const names: string[] = [];
+      if (shape === "hidden names at each offset") {
+        for (let offset = 1; offset <= 3; offset += 1) {
+          let name = words[offset] ?? "";
+          for (const next of words.slice(offset + 1)) {
+            if (name.length + 1 + next.length > valueMaxLength) {
+              break;
+            }
+            name = `${name} ${next}`;
+          }
+          names.push(name);
+        }
+      }
+      if (shape === "a hidden name of one letter") {
+        names.push(
+          Array.from({ length: (valueMaxLength + 1) / 2 }, () => "z").join(" ")
+        );
+      }
+      const alone = await rowsReadBy(
+        async () => await finding(stub, reader, "z")
+      );
+      if (names.length > 0) {
+        await add(
+          stub,
+          hidden,
+          names.map((name, index) => ({
+            key: `n${index}`,
+            kind: "person" as const,
+            names: [name],
+          })),
+          names.map((_, index) => fact(`n${index}`, `named ${index}`))
+        );
+      }
+      const rows = await rowsReadBy(
+        async () => await finding(stub, reader, question)
+      );
+      const nameWords = Math.max(
+        0,
+        ...names.map((name) => name.split(" ").length)
+      );
+
+      expect(
+        rows - alone <= rowsPerStep * words.length * (nameWords + 1)
+      ).toBeTruthy();
+    },
+    120_000
   );
 
   it("reads no entity two steps out once the nearer steps fill the list", async () => {

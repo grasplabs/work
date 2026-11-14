@@ -9,12 +9,13 @@ import type { AppRelease } from "@grasp-os/shared/apps";
 import type { AppId } from "@grasp-os/shared/ids";
 import { identifierSchema } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, asc, desc, eq, inArray, lt } from "drizzle-orm";
+import { and, asc, desc, eq, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { findApp } from "./apps.ts";
 import type { Acting } from "./auth/identity.ts";
 import { sdkReleaseManifests, sdkReleasePins } from "./db/core/schema.ts";
+import { inList } from "./db/d1.ts";
 import { requireMemberAdmin } from "./permissions.ts";
 import { placeHold, releaseHold, revokeRelease } from "./release-retention.ts";
 
@@ -98,7 +99,8 @@ const releasesOf = async (
             and(
               eq(sdkReleasePins.appId, app),
               eq(sdkReleasePins.holderKind, "hold"),
-              inArray(
+              // One bound parameter for the whole page of versions.
+              inList(
                 sdkReleasePins.version,
                 manifests.map((manifest) => manifest.version)
               )

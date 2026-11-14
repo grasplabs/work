@@ -17,7 +17,7 @@ import { drizzle } from "drizzle-orm/d1";
 
 import { organizationId } from "../auth/auth.ts";
 import { collectionTeams, teams } from "../db/core/schema.ts";
-import { inList } from "../db/d1.ts";
+import { inList, statementsWithin } from "../db/d1.ts";
 import { canCreate, canWrite } from "./access.ts";
 import type { Reader } from "./access.ts";
 import { portsOf, brainOf } from "./ports.ts";
@@ -171,10 +171,14 @@ export const createCollection = async (
   };
   // The teams first, in core's database: should the collection then fail,
   // they name a collection nobody has, which nothing reads.
-  if (teamIds.length > 0) {
-    await drizzle(env.DB)
+  const db = drizzle(env.DB);
+  const [first, ...rest] = statementsWithin(teamIds, (part) =>
+    db
       .insert(collectionTeams)
-      .values(teamIds.map((teamId) => ({ collectionId: row.id, teamId })));
+      .values(part.map((teamId) => ({ collectionId: row.id, teamId })))
+  );
+  if (first !== undefined) {
+    await db.batch([first, ...rest]);
   }
   // A new ID: created now, with its audit event.
   await ensureCollection(brainOf(env), row, actorOf(person));

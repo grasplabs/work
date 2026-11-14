@@ -78,7 +78,10 @@ export const notNullFailed = (error: unknown, column: string): boolean =>
  * `value IN (...values)`, bound as one parameter however many values there
  * are: D1 binds at most 100 to one statement.
  */
-export const inList = (value: SQLWrapper, values: readonly string[]): SQL =>
+export const inList = (
+  value: SQLWrapper,
+  values: readonly (string | number)[]
+): SQL =>
   sql`${value} IN (SELECT value FROM json_each(${JSON.stringify(values)}))`;
 
 /**

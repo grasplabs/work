@@ -324,8 +324,9 @@ const instructionFileId = (file: InstructionFile): string => {
  * `instructions.changed` once `after`, the version it was edited from
  * (0 for none), is no longer the current one; `permission.invalid` for an
  * `Identity` or file that isn't one, or a save that isn't one (one that
- * names no `after` among them). Empty text empties the file, which then
- * loads nowhere. `change` names this save, minted before its first
+ * names no `after` among them); `brain.restoring` while the Brain restores
+ * an export, to be saved again later. Empty text empties the file, which
+ * then loads nowhere. `change` names this save, minted before its first
  * try, so a retry saves it once.
  *
  * A person's route passes the session's `Identity` as the RPC layer built

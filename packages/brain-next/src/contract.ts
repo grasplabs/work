@@ -1216,8 +1216,9 @@ export interface HandOvers {
   /**
    * Hands `source` over as the host's records hold it now, and says how
    * it ended (`HandOverResult`). Throws only for a failure worth trying
-   * again (a store out of reach, an audit write that failed). Safe to
-   * repeat.
+   * again (a store out of reach, an audit write that failed, the store
+   * restoring an export): never refused for a restore, which would settle
+   * it. Safe to repeat.
    */
   handOver: (source: SourceId) => Promise<HandOverResult>;
 }
