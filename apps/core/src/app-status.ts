@@ -145,7 +145,8 @@ export const setArchived = async (
   // Grasp staff never archive a client's App: whom it reaches is the
   // client's decision, as whom it is shared with is (app-members.ts).
   requireNotStaff(by);
-  const found = await appFor(env, by, input, "builder");
+  // Archiving or restoring reads none of its data.
+  const found = await appFor(env, by, input, "builder", { managing: true });
   if (found.archived === archived) {
     return found;
   }

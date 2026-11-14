@@ -31,7 +31,7 @@ const onApp = (actions: string[]): Permission => ({
   chat: null,
 });
 
-const directory = { people: new Map(), apps: new Map() };
+const directory = { people: new Map(), teams: new Map(), apps: new Map() };
 
 describe("a pending request on an App", () => {
   it("says which of the App's functions each action calls, and no more", () => {

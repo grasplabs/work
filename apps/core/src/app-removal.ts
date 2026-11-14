@@ -213,7 +213,8 @@ export const removeApp = async (
   input: unknown
 ): Promise<void> => {
   requireNotStaff(by);
-  const found = await appFor(env, by, input, "builder");
+  // Removing it reads none of its data.
+  const found = await appFor(env, by, input, "builder", { managing: true });
   if (found.owner !== by.userId && !isAdmin(by.role)) {
     throw appErrors.create("app.remove_forbidden");
   }
