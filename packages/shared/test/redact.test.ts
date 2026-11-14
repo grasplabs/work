@@ -390,10 +390,13 @@ describe("redacting credentials", () => {
         `session: ${run}: cookie: ${run}|\nCookie: [redacted]\n`.repeat(66),
       flood: redact(flood) === flood,
       cookies: redact(`cookie=${"cookie=".repeat(150_000)}`),
+      // Eight megabytes in one run.
+      run: redact(`session: ${"a".repeat(8 * 1024 * 1024)}!`),
     }).toStrictEqual({
       lines: true,
       flood: true,
       cookies: "cookie=[redacted]",
+      run: "session: [redacted]!",
     });
   });
 

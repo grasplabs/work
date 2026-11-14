@@ -60,9 +60,12 @@ const token = String.raw`${tokenChar}{16,}=*`;
  * `%`, as frameworks URL-encode their cookies (Laravel's `eyJ…%3D`, Rails'
  * `…%3D%3D--…`, express's `s%3A…`), then any `=` padding, ending at a
  * space, a separator, a closing bracket or `!`. Sixteen hex characters are
- * 64 bits, the least a session id carries (OWASP).
+ * 64 bits, the least a session id carries (OWASP). Sixteen and then any
+ * more, not `{16,}`: V8 keeps each step of a counted repeat on its
+ * backtrack stack, which a run of megabytes overflowed.
  */
-const sessionValue = String.raw`[\w\-.~+/%]{16,}=*(?![^\s"'\\&,;)\]}>!])`;
+const sessionChar = String.raw`[\w\-.~+/%]`;
+const sessionValue = String.raw`${sessionChar}{16}${sessionChar}*=*(?![^\s"'\\&,;)\]}>!])`;
 
 /**
  * Known credential formats, each recognisable by its shape alone: the
