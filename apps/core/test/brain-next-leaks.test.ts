@@ -28,6 +28,7 @@ import {
   eraseSource,
   erasePerson,
   recallAs,
+  rememberAs,
   workBrain,
 } from "../src/brain-next.ts";
 import type {
@@ -1434,7 +1435,7 @@ describe(
     it("puts a person's own content in no chat-app conversation, their direct message included, and answers that one to them alone", async () => {
       // Through Teams' door as Teams posts (channels/door.ts), each turn
       // answered by the fake provider behind connect, which keeps what
-      // reached it. A person's own source reaches a model only in their
+      // reached it. A person's own source or memory reaches a model only in their
       // own chat in Grasp: not in a thread others read, nor, while
       // GRA-1821's decision is open, in their direct message, which the
       // chat app keeps too (workspace.ts, `answersAlone`). A thread others
@@ -1478,6 +1479,14 @@ describe(
         text: `Depot ${depot} keeps Ann's own note ${marker}`,
         readers: { kind: "owner", personId: ann.userId },
       });
+      const ownMemory = `Depot ${depot} keeps Ann's own memory ${marker}`;
+      await rememberAs(env, ann.userId, {
+        change: crypto.randomUUID(),
+        about: { kind: "customer", names: [`Depot ${depot}`] },
+        type: "fact",
+        statement: ownMemory,
+        quote: ownMemory,
+      });
       const agent = { type: "agent" as const, agentId: chatAgentId };
       await saveUserMemory(
         env,
@@ -1495,7 +1504,8 @@ describe(
           ann.provider.requests.slice(before).map(({ body }) => body)
         );
         return {
-          own: sent.includes(`Depot ${depot} keeps`),
+          own: sent.includes(`Depot ${depot} keeps Ann's own note`),
+          ownMemory: sent.includes(ownMemory),
           userMd: sent.includes(userMarker),
           connections: sent.includes(`held:${marker}`),
           ran: sent.includes(`:${marker}`),
@@ -1556,13 +1566,20 @@ describe(
         found: 1,
         inThreads: threads.map(() => ({
           own: false,
+          ownMemory: false,
           userMd: false,
           connections: false,
           ran: true,
         })),
         // Her own chat on Teams: its tools and her USER.md, as on main
         // (knowledge/memory.ts); her own store, not while GRA-1821 is open.
-        inDirect: { own: false, userMd: true, connections: true, ran: true },
+        inDirect: {
+          own: false,
+          ownMemory: false,
+          userMd: true,
+          connections: true,
+          ran: true,
+        },
         postedInThreads: [false, false, false],
         postedInDirect: true,
         postedToBen: false,

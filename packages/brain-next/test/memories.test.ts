@@ -3196,3 +3196,127 @@ describe("names that grow when folded", () => {
     });
   });
 });
+
+describe("which memories a reader may still read", () => {
+  // GRA-1864 threat 5: what a host checks before it sends again a memory
+  // it once recalled.
+  it("answers, in the order asked and each once, the memories the reader may read that are current, alike for one unknown, hidden or retired", async () => {
+    const group = unique("group");
+    const writer = unique("writer");
+    const version = await addSource("Acme is active", audience(group));
+    const {
+      memories: [mine = "", sourced = ""],
+    } = await remember(
+      audience(group),
+      [customer()],
+      [
+        fact({ kind: "writer", writer }, { statement: "Mine" }),
+        fact(
+          { kind: "source", ...version, quote: "Acme is active" },
+          { statement: "Sourced" }
+        ),
+      ]
+    );
+    const {
+      memories: [hidden = ""],
+    } = await remember(
+      audience(unique("elsewhere")),
+      [customer()],
+      [fact({ kind: "writer", writer }, { statement: "Hidden" })]
+    );
+    const reader = readerOf(writer, group);
+    const asked = [sourced, crypto.randomUUID(), mine, hidden, mine];
+
+    const before = await shared().readableMemories({ memories: asked, reader });
+    // Someone who left the group reads none of it.
+    const left = await shared().readableMemories({
+      memories: asked,
+      reader: readerOf(writer),
+    });
+    await shared().retireMemory({ memory: mine, reader });
+    const retired = await shared().readableMemories({
+      memories: asked,
+      reader,
+    });
+
+    expect({ before, left, retired }).toStrictEqual({
+      before: [sourced, mine],
+      left: [],
+      retired: [sourced],
+    });
+  });
+
+  it("leaves out a memory once its source is narrowed or erased, or a newer one of its lineage the reader may read ends it, never one they can't read", async () => {
+    const group = unique("group");
+    const writer = unique("writer");
+    const narrowedSource = await addSource(
+      "Acme is in Rotterdam",
+      audience(group)
+    );
+    const erasedSource = await addSource("Acme pays late", audience(group));
+    const {
+      entities,
+      memories: [narrowed = "", erased = "", active = ""],
+    } = await remember(
+      audience(group),
+      [customer()],
+      [
+        fact(
+          { kind: "source", ...narrowedSource, quote: "Acme is in Rotterdam" },
+          { statement: "Acme is in Rotterdam" }
+        ),
+        fact(
+          { kind: "source", ...erasedSource, quote: "Acme pays late" },
+          { statement: "Acme pays late" }
+        ),
+        fact(
+          { kind: "writer", writer },
+          { attribute: "status", value: "Active", statement: "Active" }
+        ),
+      ]
+    );
+    const right = unique("right");
+    const {
+      memories: [churned = ""],
+    } = await remember(
+      audience(right),
+      [customer({ id: entities.c ?? "" })],
+      [
+        fact(
+          { kind: "writer", writer },
+          { attribute: "status", value: "Churned", statement: "Churned" }
+        ),
+      ],
+      shared(),
+      crypto.randomUUID(),
+      readerOf(unique("adder"), group, right)
+    );
+    const asked = [narrowed, erased, active, churned];
+    const reader = readerOf(unique("reader"), group);
+    const both = readerOf(unique("both"), group, right);
+
+    const before = await shared().readableMemories({ memories: asked, reader });
+    // The same writer's newer status, readable to `both` alone, ends the
+    // older one for them, and only for them.
+    const lineage = await shared().readableMemories({
+      memories: asked,
+      reader: both,
+    });
+    await addSource(
+      "Acme is in Rotterdam",
+      audience(unique("narrower")),
+      narrowedSource.source
+    );
+    await shared().eraseSource({
+      source: erasedSource.source,
+      reason: "deleted",
+    });
+    const after = await shared().readableMemories({ memories: asked, reader });
+
+    expect({ before, lineage, after }).toStrictEqual({
+      before: [narrowed, erased, active],
+      lineage: [narrowed, erased, churned],
+      after: [active],
+    });
+  });
+});

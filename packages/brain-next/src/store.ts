@@ -37,6 +37,7 @@ import {
   ownExportRequestSchema,
   ownExportStartSchema,
   personErasureSchema,
+  readableMemoriesRequestSchema,
   readableRequestSchema,
   recallRequestSchema,
   restoringNow,
@@ -70,7 +71,9 @@ import type {
   MemoriesRead,
   MemoriesRequest,
   MemoryChangeOutcome,
+  MemoryId,
   NewMemories,
+  ReadableMemoriesRequest,
   RetireRequest,
   AskModel,
   ChangeRequest,
@@ -169,6 +172,7 @@ import {
   confirmMemory,
   listContested,
   readMoment,
+  readableMemories,
   readMemories,
   retireMemory,
 } from "./memories.ts";
@@ -2024,6 +2028,20 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       ...(asked.after === undefined ? {} : { after: asked.after }),
       limit: asked.limit,
     });
+  }
+
+  /**
+   * Of some memories, by id, those the reader may read and that are
+   * current for them now (memories.ts): none in a store that holds nothing.
+   */
+  async readableMemories(
+    request: ReadableMemoriesRequest
+  ): Promise<MemoryId[]> {
+    const asked = checked(readableMemoriesRequestSchema, request);
+    this.#mayRead(asked.reader);
+    return (await this.#readable())
+      ? readableMemories(this.ctx.storage.sql, asked)
+      : [];
   }
 
   /** Retires one of the reader's own memories (memories.ts). */

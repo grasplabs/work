@@ -156,6 +156,7 @@ describe("recall by meaning, through core", () => {
       })),
       memories: pack.memories.map((memory) => ({
         ...memory,
+        store: "shared" as const,
         source:
           memory.source === null
             ? null

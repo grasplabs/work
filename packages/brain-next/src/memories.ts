@@ -15,6 +15,7 @@ import type {
   EntityId,
   Memory,
   MemoryChangeOutcome,
+  MemoryId,
   PersonReader,
   Reader,
 } from "./contract.ts";
@@ -617,6 +618,44 @@ SELECT * FROM (
 WHERE side <= ?11
 ORDER BY fact_first, about, attribute, side`,
 });
+
+/**
+ * `?1` the memory ids asked about (JSON): the ids of those the reader may
+ * read that are current as of `?4`, judged as every read judges them
+ * (`memoriesSql`), a seek by id each.
+ */
+const readableMemoriesSql = memoriesSql({
+  base: `SELECT memories.row AS row FROM json_each(?1) AS asked
+    CROSS JOIN memories ON memories.id = asked.value`,
+  filter: "judged.is_current = 1",
+  order: "m.row",
+  outer: "SELECT id FROM rows",
+});
+
+/**
+ * Of `memories`, those the reader may read and that are current for them
+ * now (contract.ts `readableMemories`), in the order asked, each once.
+ */
+export const readableMemories = (
+  sql: SqlStorage,
+  { memories, reader }: { memories: readonly MemoryId[]; reader: Reader }
+): MemoryId[] => {
+  const asked = [...new Set(memories)];
+  if (asked.length === 0) {
+    return [];
+  }
+  const readable = new Set(
+    memoryRows(
+      sql,
+      readableMemoriesSql,
+      JSON.stringify(asked),
+      reader,
+      readMoment(sql),
+      asked.length
+    ).map(({ id }) => id)
+  );
+  return asked.filter((id) => readable.has(id));
+};
 
 /**
  * A page of the contested facts the reader may read (contract.ts

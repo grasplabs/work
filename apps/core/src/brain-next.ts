@@ -37,6 +37,7 @@ import {
   wellFormedString,
   modelWaitMaxSeconds,
   packItemTokens,
+  packMemoryTokens,
   refusalPrefix,
   restoringNow,
   personalBrainOf,
@@ -402,8 +403,21 @@ export interface RecalledItem extends Omit<PackItem, "source"> {
   source: SourceRef;
 }
 
-/** A memory of a pack, citing its source as its producer named it. */
+/**
+ * Which store a memory is in: the person's own (theirs alone), or the
+ * shared one. A memory's id is its store's own, so it is named with it
+ * (`StoredMemoryPlace`).
+ */
+const memoryStoreSchema = z.enum(["own", "shared"]);
+
+type MemoryStore = z.infer<typeof memoryStoreSchema>;
+
+/**
+ * A memory of a pack, citing its source as its producer named it, and
+ * the store it is in.
+ */
 export interface RecalledMemory extends Omit<PackMemory, "source"> {
+  store: MemoryStore;
   source: SourceVersionRef | null;
 }
 
@@ -414,9 +428,8 @@ export interface RecalledPack extends Omit<Pack, "items" | "memories"> {
 }
 
 /**
- * A pack of passages alone (`recallPassagesAs`): what the chat hands its
- * model and the Brain page shows, until each carries memories with their
- * own checks when history is read again.
+ * A pack of passages alone (`recallPassagesAs`): what code recalls
+ * (brain-recall.ts) until it carries memories with its own checks.
  */
 export interface RecalledPassages {
   items: RecalledItem[];
@@ -826,6 +839,19 @@ const recalledItems = (items: Pack["items"]): RecalledItem[] =>
   }));
 
 /**
+ * The store each memory `findings` found is in (`findingsOf`: the shared
+ * store's first, then the reader's own), by id.
+ */
+const storesOf = (findings: readonly Finding[]): Map<string, MemoryStore> =>
+  new Map(
+    findings.flatMap(({ memories }, at) =>
+      [...memories.words, ...memories.entities, ...memories.rivals].map(
+        ({ id }) => [id, at === 0 ? "shared" : "own"] as const
+      )
+    )
+  );
+
+/**
  * A pack of what the member `personId` may read for `question`, as core
  * counts them now, within `budget.tokens` (the Brain's estimate,
  * `tokensOf`), and, with `asOf`, of each source as it was then: the
@@ -837,10 +863,11 @@ const recalledItems = (items: Pack["items"]): RecalledItem[] =>
  * their own together, packed as one store holding both would pack them
  * (`packAcross`); without, from the shared store alone, as their teams
  * may read it, or with `company` as the company alone. Refused once they
- * are no longer a member, or when `personId` isn't an ID. For a caller
- * that hands memories on with their own checks: none yet. The chat, the
- * Brain page and code (`recallFor`) take passages alone
- * (`recallPassagesAs`).
+ * are no longer a member, or when `personId` isn't an ID. Each memory
+ * names the store it is in. What the chat hands its model before a
+ * question (turn-recall.ts, each memory pinned and checked again before
+ * every later request: `readableMemoriesAs`) and the Brain page's search
+ * show. Code (`recallFor`) takes passages alone (`recallPassagesAs`).
  */
 export const recallAs = async (
   env: BrainEnv & Pick<Env, "DB" | "EMBEDDER">,
@@ -848,17 +875,23 @@ export const recallAs = async (
   recall: Recall
 ): Promise<RecalledPack> => {
   const request = await recallRequestAs(env, personId, recall);
+  const findings = await findingsOf(env, request, "find");
   const { items, memories, contested, notFound, truncated } = packAcross(
     request.question,
     request.budget.tokens,
-    await findingsOf(env, request, "find")
+    findings
   );
+  const stores = storesOf(findings);
   return {
     items: recalledItems(items),
-    memories: memories.map((memory) => ({
-      ...memory,
-      source: versionRefOf(memory.source),
-    })),
+    memories: memories.map((memory) => {
+      const store = stores.get(memory.memory);
+      // A packed memory is one a store found: never one of none.
+      if (store === undefined) {
+        throw new Error("A packed memory no store found");
+      }
+      return { ...memory, store, source: versionRefOf(memory.source) };
+    }),
     contested,
     notFound,
     truncated,
@@ -870,10 +903,8 @@ export const recallAs = async (
  * `question`, as `recallAs` finds them, the whole budget theirs: the
  * stores find passages alone (`findPassages`), so no memory is read,
  * takes room, reaches the caller, or counts as found in `notFound`, and
- * no memory way can fail the recall. What the
- * chat hands its model and the Brain page shows (GRA-1742: memories reach
- * them in their own pull request, re-checked when history is read again),
- * and what code recalls (`recallFor`, the SDK's `BrainPack`).
+ * no memory way can fail the recall. What code recalls (`recallFor`, the
+ * SDK's `BrainPack`).
  */
 export const recallPassagesAs = async (
   env: BrainEnv & Pick<Env, "DB" | "EMBEDDER">,
@@ -893,43 +924,100 @@ export const recallPassagesAs = async (
 const placeOf = ({ source, version, position }: RecalledItem): string =>
   JSON.stringify([sourceKeyOf(source), version, position]);
 
+/** A memory, by its store and id, as one string. */
+const memoryKeyOf = ({ store, memory }: StoredMemoryPlace): string =>
+  JSON.stringify([store, memory]);
+
+/** A memory of a pack as the Brain counts it (`packMemoryTokens`). */
+const memoryTokens = (memory: RecalledMemory): number =>
+  packMemoryTokens({
+    ...memory,
+    source:
+      memory.source === null
+        ? null
+        : {
+            source: sourceKeyOf(memory.source.source),
+            version: memory.source.version,
+          },
+  });
+
 /**
- * Two recalls of passages for one reader as one pack within
- * `budget.tokens`, as one pass over both would fit them: the first's
- * items in their order, then the second's that the first doesn't hold
- * (the same passage of the same version), best first, each while it fits
- * in what is left, as the Brain counts it (`packItemTokens`). Cut short
- * when either was or anything was left out for room. What was not found
- * is the second's: it was asked for what the first meant. Both must be
- * packs of the same reader's, as `recallPassagesAs` gave them.
+ * The tokens `pack` takes, as the Brain counts them (`packItemTokens`,
+ * `packMemoryTokens`): never more than the budget it was packed within.
+ */
+export const recalledTokens = ({ items, memories }: RecalledPack): number =>
+  items.reduce(
+    (sum, item) =>
+      sum + packItemTokens({ ...item, source: sourceKeyOf(item.source) }),
+    0
+  ) + memories.reduce((sum, memory) => sum + memoryTokens(memory), 0);
+
+/**
+ * The contested facts among `memories`: each entity's attribute, in one
+ * store, for which they hold more than one side, in the order of its
+ * first, as the Brain's pack lists them.
+ */
+const contestedOf = (
+  memories: readonly RecalledMemory[]
+): Pack["contested"] => {
+  const facts = new Map<string, Pack["contested"][number]>();
+  for (const { store, memory, about, attribute, contested } of memories) {
+    if (!contested || attribute === null) {
+      continue;
+    }
+    const key = JSON.stringify([store, about, attribute]);
+    const fact = facts.get(key) ?? { about, attribute, memories: [] };
+    fact.memories.push(memory);
+    facts.set(key, fact);
+  }
+  return [...facts.values()].filter(({ memories: sides }) => sides.length > 1);
+};
+
+/**
+ * Two recalls for one reader as one pack, `second` packed within what
+ * `first` left of the budget (`recalledTokens`), so nothing of either is
+ * left out for room: the first's passages and memories in their order,
+ * each one the second holds too (the same passage of the same version, the
+ * same memory) as the second packed it, then the second's others in
+ * theirs. So the pack takes at most the budget, and holds everything the
+ * second's `notFound` counted as found: what was not found is the
+ * second's, asked for what the first meant. A contested fact is listed
+ * when the pack holds more than one of its sides, whichever recall packed
+ * each; each packed every side of a fact or none. Cut short when either
+ * was.
  */
 export const mergeRecalled = (
-  first: RecalledPassages,
-  second: RecalledPassages,
-  budget: { tokens: number }
-): RecalledPassages => {
-  let used = 0;
-  let truncated = first.truncated || second.truncated;
-  const held = new Set<string>();
-  const items: RecalledItem[] = [];
-  for (const item of [...first.items, ...second.items]) {
-    const place = placeOf(item);
-    if (held.has(place)) {
-      continue;
-    }
-    const tokens = packItemTokens({
-      ...item,
-      source: sourceKeyOf(item.source),
-    });
-    if (used + tokens > budget.tokens) {
-      truncated = true;
-      continue;
-    }
-    held.add(place);
-    items.push(item);
-    used += tokens;
-  }
-  return { items, notFound: second.notFound, truncated };
+  first: RecalledPack,
+  second: RecalledPack
+): RecalledPack => {
+  const secondItems = new Map(
+    second.items.map((item) => [placeOf(item), item])
+  );
+  const secondMemories = new Map(
+    second.memories.map((memory) => [memoryKeyOf(memory), memory])
+  );
+  const items = [
+    ...first.items.map((item) => secondItems.get(placeOf(item)) ?? item),
+    ...second.items.filter(
+      (item) => !first.items.some((held) => placeOf(held) === placeOf(item))
+    ),
+  ];
+  const firstKeys = new Set(
+    first.memories.map((memory) => memoryKeyOf(memory))
+  );
+  const memories = [
+    ...first.memories.map(
+      (memory) => secondMemories.get(memoryKeyOf(memory)) ?? memory
+    ),
+    ...second.memories.filter((memory) => !firstKeys.has(memoryKeyOf(memory))),
+  ];
+  return {
+    items,
+    memories,
+    contested: contestedOf(memories),
+    notFound: second.notFound,
+    truncated: first.truncated || second.truncated,
+  };
 };
 
 /**
@@ -1843,6 +1931,82 @@ export const readableVersionsAs = async <Ref extends PinnedVersionRef>(
     const ask = asked[at];
     const key = ask === undefined ? undefined : versionKeyOf(ask);
     if (key === undefined || !kept.has(key) || seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+};
+
+const memoryPlacesSchema = z.array(
+  z.strictObject({ store: memoryStoreSchema, memory: memoryIdSchema })
+);
+
+/** Of `memories` (ids), those `reader` may read in `store` now and are current. */
+const readableMemoriesIn = async (
+  store: Brain,
+  reader: Reader,
+  memories: readonly string[]
+): Promise<string[]> => {
+  const parts = Array.from(
+    { length: Math.ceil(memories.length / readableCheckMax) },
+    (_, at) =>
+      memories.slice(at * readableCheckMax, (at + 1) * readableCheckMax)
+  );
+  const readable = await Promise.all(
+    parts.map(
+      async (part) =>
+        await store.readableMemories({ memories: [...part], reader })
+    )
+  );
+  return readable.flat();
+};
+
+/**
+ * Of `memories`, those the member `personId` may read now and that are
+ * current for them, as the store judges both (`readableMemories`): read
+ * with the teams core counts them in now, in the order given and each
+ * once. For core to check what a chat once handed over before it sends it
+ * again (history-access.ts). Each is asked of the store it names, and of
+ * no other: the shared one, or their own. Their own store failing answers
+ * none of its own (`ownOr`): what can't be checked is withheld. Refused
+ * once they are no longer a member. For the server only, as `addSource`.
+ */
+export const readableMemoriesAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  memories: readonly StoredMemoryPlace[]
+): Promise<StoredMemoryPlace[]> => {
+  const asked = checked(memoryPlacesSchema, memories);
+  if (asked.length === 0) {
+    return [];
+  }
+  const reader = await personReaderOf(env, personId);
+  const idsIn = (store: MemoryStore): string[] => [
+    ...new Set(
+      asked.flatMap((ref) => (ref.store === store ? [ref.memory] : []))
+    ),
+  ];
+  const shared = idsIn("shared");
+  const own = idsIn("own");
+  const [inShared, inOwn] = await Promise.all([
+    shared.length === 0 ? [] : readableMemoriesIn(brain(env), reader, shared),
+    own.length === 0
+      ? []
+      : ownOr(
+          async () =>
+            await readableMemoriesIn(ownBrain(env, reader.person), reader, own),
+          []
+        ),
+  ]);
+  const kept = new Set([
+    ...inShared.map((memory) => memoryKeyOf({ store: "shared", memory })),
+    ...inOwn.map((memory) => memoryKeyOf({ store: "own", memory })),
+  ]);
+  const seen = new Set<string>();
+  return asked.filter((ref) => {
+    const key = memoryKeyOf(ref);
+    if (!kept.has(key) || seen.has(key)) {
       return false;
     }
     seen.add(key);
@@ -3348,8 +3512,6 @@ const listsAgree: [
   Same<AnyAttribute, BrainMemoryAttribute>,
 ] = [true, true];
 void listsAgree;
-
-const memoryStoreSchema = z.enum(["own", "shared"]);
 
 /** `store` as `reader` reaches it. */
 const storeNamed = (

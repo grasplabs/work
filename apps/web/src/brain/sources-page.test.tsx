@@ -84,9 +84,41 @@ const pack: BrainSearchPack = {
       found: "meaning",
     },
   ],
+  memories: [
+    {
+      store: "own",
+      id: "m-1",
+      statement: "I pay invoices on Fridays",
+      quote: "pay them on Fridays",
+      context: {
+        position: 0,
+        text: "Remember: I pay them on Fridays, always.",
+      },
+      source: null,
+      yours: true,
+      confirmed: true,
+      contested: false,
+      found: "words",
+    },
+    {
+      store: "shared",
+      id: "m-2",
+      statement: "Invoices are paid on Fridays",
+      quote: null,
+      context: null,
+      source: { source: handbook, version: 2 },
+      yours: false,
+      confirmed: false,
+      contested: true,
+      found: "entities",
+    },
+  ],
   notFound: ["refunds", "INV-7"],
   truncated: true,
 };
+
+/** A question only memories answer: its pack holds no passage. */
+const remembered = "fridays";
 
 /** Lets every pending read settle. */
 const settle = async (): Promise<void> => {
@@ -169,9 +201,15 @@ const shown = async (
     search: async (question: string) => {
       calls.push(`search ${question}`);
       await (searched ?? Promise.resolve());
-      return question === unmatched
-        ? { items: [], notFound: [unmatched], truncated: false }
-        : pack;
+      if (question === unmatched) {
+        return {
+          items: [],
+          memories: [],
+          notFound: [unmatched],
+          truncated: false,
+        };
+      }
+      return question === remembered ? { ...pack, items: [] } : pack;
     },
   };
   const core = {
@@ -336,6 +374,49 @@ describe(SourcesPage, () => {
       truncated: true,
       opened: true,
       calls: ["list", "search invoices refunds", "versions u-1", "read u-1@1"],
+    });
+  });
+
+  it("shows every memory of the pack with where it came from, the passage around it on asking, and opens its source at its version", async () => {
+    const { calls } = await shown([]);
+    await search(remembered);
+    const resultText = section("Results");
+    const before = document.body.textContent;
+    await press("The passage around it");
+    const opened = document.body.textContent;
+    await press("Open version 2");
+
+    expect({
+      memories: [
+        "What the Brain remembers",
+        "I pay invoices on Fridays",
+        "pay them on Fridays",
+        "Your own word",
+        "Only you",
+        "Confirmed",
+        "By its words",
+        "Invoices are paid on Fridays",
+        "Upload",
+        "Sources disagree",
+        "Through what you asked about",
+      ].map((text) => resultText.includes(text)),
+      nothingMatched: resultText.includes("Nothing you may read matched."),
+      notFound: resultText.includes(
+        "Nothing you may read holds refunds and INV-7."
+      ),
+      passage: {
+        before: before.includes("Remember: I pay them on Fridays, always."),
+        opened: opened.includes("Remember: I pay them on Fridays, always."),
+      },
+      source: panel().includes("Invoices are paid on Fridays."),
+      calls,
+    }).toStrictEqual({
+      memories: Array.from({ length: 11 }, () => true),
+      nothingMatched: false,
+      notFound: true,
+      passage: { before: false, opened: true },
+      source: true,
+      calls: ["list", `search ${remembered}`, "versions u-1", "read u-1@2"],
     });
   });
 
