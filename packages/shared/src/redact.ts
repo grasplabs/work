@@ -184,14 +184,15 @@ const credentials: readonly (readonly [
 // neither a session character nor part of a JSON escape, when no format
 // above redacted part of it and it is not a `name=value`: express's
 // decoded `s:<id>.<sig>`, `user:<token>`, Tornado's `<time>|<hmac>`,
-// Bottle's `!<sig>?<data>`, a value after a curly quote or a parenthesis
-// (`session: “…”`, `session: (…)`). `:` stays out, as it would let a link
-// (`Session: https://…`) count. As for every name, a value ends at a
-// separator, so a `Cookie:` header keeps its pairs after the first
-// (`Cookie: theme=dark; sid=…`). The other way: a word of 16 or more
-// session characters after them reads as a credential ("Session:
-// internationalisation", "Session: kwartaalplanning": after the loanwords,
-// a Dutch or German compound often is).
+// Bottle's `!<sig>?<data>`, a `Bearer <token>` the Bearer format above
+// doesn't take (under 16 characters, or with `%`), a value after a curly
+// quote or a parenthesis (`session: “…”`, `session: (…)`). `:` stays
+// out, as it would let a link (`Session: https://…`) count. As for every
+// name, a value ends at a separator, so a `Cookie:` header keeps its
+// pairs after the first (`Cookie: theme=dark; sid=…`). The other way: a
+// word of 16 or more session characters after them reads as a credential
+// ("Session: internationalisation", "Session: kwartaalplanning": after the
+// loanwords, a Dutch or German compound often is), in escaped JSON too.
 // Prose after the other names loses its first word ("The secret: practice
 // daily", "Authorization: approved"): what follows them is a credential by
 // name, a short or word-like one too. What is left is bounded: such text
