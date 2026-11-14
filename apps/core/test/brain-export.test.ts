@@ -1,5 +1,6 @@
 import { ensureCollection } from "@grasp-os/brain/collections";
 import { collectionIdSchema } from "@grasp-os/shared/ids";
+import { onboardingDocumentsCollection } from "@grasp-os/shared/onboarding-documents";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
@@ -338,9 +339,31 @@ describe("exporting the company's Brain", setUpTime, () => {
     const admin = await signedInApi(idp, "admin");
     const other = await signedInApi(idp, "admin");
     const word = `onboardingword${unique().replaceAll("-", "")}`;
-    // A document shared in the onboarding: only its reading is kept, by
-    // the onboarding (onboarding/documents.ts), so nothing of it is the
-    // Brain's to export.
+    // As the onboarding kept a shared document before GRA-1889: in a
+    // collection of its own, which the export leaves out (core's
+    // `OnExport.excluded`) until the cutover removes Knowledge.
+    await ensureCollection(
+      brainOf(env),
+      {
+        id: collectionIdSchema.parse(onboardingDocumentsCollection),
+        name: "Onboarding documents",
+        description: "",
+        owner: admin.userId,
+        access: "admins",
+        sensitive: true,
+        source: "upload",
+        createdAt: new Date(),
+      },
+      { type: "system" }
+    );
+    await admin.api.knowledge.saveDocument({
+      collectionId: onboardingDocumentsCollection,
+      path: `claims-${unique()}.md`,
+      text: `# Claims\nTyped into ${word}.`,
+      ifVersion: 0,
+    });
+    // And as it keeps one now: its reading the onboarding's, its file the
+    // sharer's own upload in the new Brain, neither in this export.
     await fakeProvider({
       text: JSON.stringify({
         about: `How claims are typed into ${word}.`,

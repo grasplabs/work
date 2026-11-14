@@ -7057,8 +7057,8 @@ msgid "I do every interview myself. Here’s what that sounds like."
 msgstr "Jedes Interview führe ich selbst. So klingt das."
 
 #: src/onboarding/document-drop.tsx
-msgid "I forget what I read in it, and draw again what I drew with it. If you shared it, its file is deleted from your Brain too; if another admin did, it stays in theirs until they delete it. This can’t be undone."
-msgstr "Ich vergesse, was ich darin gelesen habe, und zeichne neu, was ich damit gezeichnet habe. Haben Sie es geteilt, wird die Datei auch aus Ihrem Brain gelöscht; hat ein anderer Admin es geteilt, bleibt sie in dessen Brain, bis sie dort gelöscht wird. Das lässt sich nicht rückgängig machen."
+msgid "I forget what I read in it, and draw again what I drew with it. If you shared it, its file in your Brain, if there is one, is deleted too; if another admin did, the file stays in theirs until they delete it. This can’t be undone."
+msgstr "Ich vergesse, was ich darin gelesen habe, und zeichne neu, was ich damit gezeichnet habe. Haben Sie es geteilt, wird die Datei in Ihrem Brain, falls es eine gibt, ebenfalls gelöscht; hat ein anderer Admin es geteilt, bleibt die Datei in dessen Brain, bis sie dort gelöscht wird. Das lässt sich nicht rückgängig machen."
 
 #: src/onboarding/hr-leads.tsx
 msgid "I found nobody in {name}."

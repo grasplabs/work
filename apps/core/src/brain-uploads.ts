@@ -42,6 +42,7 @@ import {
   addSource,
   eraseSource,
   listVersionsAs,
+  readSourceVersionAs,
   sourceTextProblem,
 } from "./brain-next.ts";
 import type { SourceReaders, SourceVersionRef } from "./brain-next.ts";
@@ -636,6 +637,25 @@ export const uploadVersionToBrain = async (
     first: false,
     change: versionId.data,
   });
+};
+
+/**
+ * Whether `kept`, a version of an upload of `person`'s, is still there for
+ * them, as the Brain reads it now: the authoritative read of whether it
+ * was deleted, since an erasure in the Brain answers only once nothing it
+ * covers is read any more, while core's row of the upload goes last. A
+ * read refused (they are no member any more) or failed counts as gone.
+ */
+export const uploadVersionKept = async (
+  env: Env,
+  person: Identity,
+  kept: SourceVersionRef
+): Promise<boolean> => {
+  try {
+    return (await readSourceVersionAs(env, person.userId, kept)) !== null;
+  } catch {
+    return false;
+  }
 };
 
 /**

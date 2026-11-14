@@ -15,7 +15,11 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { uploadErrors, uploadTypes } from "@grasp-os/shared/uploads";
 import { z } from "zod";
 
-import { deleteBrainUpload, uploadToBrain } from "../brain-uploads.ts";
+import {
+  deleteBrainUpload,
+  uploadToBrain,
+  uploadVersionKept,
+} from "../brain-uploads.ts";
 import { localExtractor } from "../files/extract.ts";
 import { modelSettings, modelForRole, models } from "../models.ts";
 import { NAMED } from "./stephen.ts";
@@ -190,9 +194,15 @@ const keepFile = async (
   person: Identity,
   id: string,
   { name, bytes }: ShareDocumentInput
-): Promise<void> => {
+): Promise<Awaited<ReturnType<typeof uploadToBrain>>> => {
   try {
-    await uploadToBrain(env, person, { name, bytes }, { kind: "me" }, id);
+    return await uploadToBrain(
+      env,
+      person,
+      { name, bytes },
+      { kind: "me" },
+      id
+    );
   } catch (error) {
     await takeBack(env, person, id);
     throw documentErrors.create(
@@ -275,9 +285,10 @@ export const shareDocument = async (
     seconds: 0,
   });
   const reading = documentReadingOf(answered.output);
-  await keepFile(env, person, id, input);
+  const kept = await keepFile(env, person, id, input);
+  let added: OnboardingDocument;
   try {
-    return await store.addDocument(
+    added = await store.addDocument(
       { id, name: input.name, reading },
       actorOf(person)
     );
@@ -285,6 +296,25 @@ export const shareDocument = async (
     await takeBack(env, person, id);
     throw documentErrors.create("document.not_read");
   }
+  // The sharer may delete the file from Sources while this share runs,
+  // and that delete erases the file, then forgets its reading. So the
+  // file is checked once the reading is kept:
+  // - a delete whose erasure (and so its forget, which comes after it)
+  //   landed before this check: the check sees the file gone, and the
+  //   share forgets the reading it kept and fails;
+  // - a delete whose erasure lands after this check: its forget comes
+  //   later still, after the reading was kept, and forgets it.
+  // A reading never outlives a delete that completed. The same holds for
+  // the sharer's erasure as a person: one that lands before the check
+  // leaves nothing; one after it leaves the reading without its file, as
+  // erasing a sharer always does. A remove can't race the share: it names
+  // the document by an ID that is answered only once the share is done.
+  if (!(await uploadVersionKept(env, person, kept))) {
+    await store.forgetDocuments([id], actorOf(person), person.userId);
+    await takeBack(env, person, id);
+    throw documentErrors.create("document.not_read");
+  }
+  return added;
 };
 
 /**

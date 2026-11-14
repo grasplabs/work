@@ -3,6 +3,7 @@ import { compatibilityDate } from "@grasp-os/shared/runtime";
 import { runDurableObjectAlarm } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import { recallAs } from "../src/brain-next.ts";
 import { deleteBrainUpload } from "../src/brain-uploads.ts";
@@ -289,6 +290,86 @@ const forgettings = async (): Promise<number> => {
     .length;
 };
 
+/**
+ * `namespace`, its objects' `method` held until `released` settles, with
+ * `reached` resolved as the first call arrives: a step the test lets go on.
+ */
+const holding = <T extends Rpc.DurableObjectBranded | undefined>(
+  namespace: DurableObjectNamespace<T>,
+  method: string,
+  reached: (args: unknown[]) => void,
+  released: Promise<boolean>
+): DurableObjectNamespace<T> => {
+  const stub = (real: DurableObjectStub<T>): DurableObjectStub<T> =>
+    new Proxy(real, {
+      get: (target, name, receiver): unknown => {
+        if (name !== method) {
+          return Reflect.get(target, name, receiver);
+        }
+        return async (...args: unknown[]): Promise<unknown> => {
+          reached(args);
+          await released;
+          const run: unknown = Reflect.get(target, name, target);
+          return typeof run === "function"
+            ? await Reflect.apply(run, target, args)
+            : undefined;
+        };
+      },
+    });
+  const wrapped = (
+    real: DurableObjectNamespace<T>
+  ): DurableObjectNamespace<T> =>
+    new Proxy(real, {
+      get: (target, name, receiver): unknown => {
+        if (name === "getByName") {
+          return (id: string) => stub(target.getByName(id));
+        }
+        if (name === "jurisdiction") {
+          return (where: DurableObjectJurisdiction) =>
+            wrapped(target.jurisdiction(where));
+        }
+        return Reflect.get(target, name, receiver);
+      },
+    });
+  return wrapped(namespace);
+};
+
+/** A step the test holds: the ID it was reached with, and letting it go on. */
+const held = () => {
+  const reached = Promise.withResolvers<string>();
+  const released = Promise.withResolvers<boolean>();
+  return {
+    reach: ([first]: unknown[]) => {
+      // A call's first argument: the reading kept, or the source erased.
+      const found = z.object({ id: z.string() }).safeParse(first);
+      const source = z
+        .object({ source: z.object({ id: z.string() }) })
+        .safeParse(first);
+      reached.resolve(
+        found.success ? found.data.id : (source.data?.source.id ?? "")
+      );
+    },
+    reached: reached.promise,
+    release: () => {
+      released.resolve(true);
+    },
+    released: released.promise,
+  };
+};
+
+/** What `promise` gives, or a failure saying `why` once 15 seconds pass. */
+const within = async <T>(promise: Promise<T>, why: string): Promise<T> => {
+  const timedOut = Promise.withResolvers<T>();
+  const timer = setTimeout(() => {
+    timedOut.reject(new Error(why));
+  }, 15_000);
+  try {
+    return await Promise.race([promise, timedOut.promise]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 /** Core's env, but `binding` as `replaced`. */
 const envWith = <K extends keyof Env>(binding: K, replaced: Env[K]): Env =>
   new Proxy(env, {
@@ -557,6 +638,42 @@ describe("documents shared in the onboarding", { timeout: 60_000 }, () => {
         kept: keptNowhere,
         missing: "document.not_found",
       },
+    });
+  });
+
+  it("forget the reading of one whose file is not in the Brain, and say no file was erased", async () => {
+    // As a document shared before its file went to the Brain (GRA-1889):
+    // a reading whose ID names no upload.
+    const admin = await signedInApi(idp, "admin");
+    const id = crypto.randomUUID();
+    const name = `older-${crypto.randomUUID()}.docx`;
+    await onboardingStore(env).addDocument(
+      {
+        id,
+        name,
+        reading: {
+          about: "How claims are booked.",
+          tools: [],
+          teams: [],
+          unclear: [],
+          ask: null,
+        },
+      },
+      { type: "system" }
+    );
+    const before = await forgettings();
+    const removed = await outcome(admin.api.onboarding.removeDocument(id));
+    expect({
+      removed,
+      listed: await listed(admin.api, name),
+      forgotten: (await forgettings()) - before,
+      // Nothing recorded of an upload: none was erased.
+      events: await uploadEvents(id),
+    }).toStrictEqual({
+      removed: "ok",
+      listed: false,
+      forgotten: 1,
+      events: [],
     });
   });
 
@@ -992,6 +1109,85 @@ export default class extends WorkerEntrypoint {
       listed: false,
       forgotten: 1,
       events: ["brain.upload.added", "brain.upload.deleted"],
+    });
+  });
+
+  it("keeps no reading when its sharer deletes its file from Sources before the reading is kept", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const name = `racing-${crypto.randomUUID()}.docx`;
+    const row = held();
+    await fakeProvider(answer(reading));
+    // (i) The share is held as it is about to keep the reading, its file
+    // uploaded; meanwhile its sharer deletes that file, erase and forget.
+    const sharing = outcome(
+      shareDocument(
+        envWith(
+          "ONBOARDING",
+          holding(env.ONBOARDING, "addDocument", row.reach, row.released)
+        ),
+        await admin.api.whoami(),
+        { locale: "en", name, bytes: fileWith(markerOf("racingfirst")) }
+      )
+    );
+    const id = await within(row.reached, "the share never kept its reading");
+    const deleted = await outcome(admin.api.brainSources.deleteUpload(id));
+    row.release();
+    expect({
+      deleted,
+      shared: await sharing,
+      listed: await listed(admin.api, name),
+    }).toStrictEqual({
+      deleted: "ok",
+      shared: "document.not_read",
+      listed: false,
+    });
+  });
+
+  it("keeps no reading when its file's erasure lands after the share checked it", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const name = `racinglate-${crypto.randomUUID()}.docx`;
+    const row = held();
+    const erase = held();
+    await fakeProvider(answer(reading));
+    // (ii) The share is held before it keeps the reading; its sharer's
+    // delete is held before it erases; the share then keeps its reading
+    // and checks its file, still there, and only then the erasure lands.
+    const sharing = outcome(
+      shareDocument(
+        envWith(
+          "ONBOARDING",
+          holding(env.ONBOARDING, "addDocument", row.reach, row.released)
+        ),
+        await admin.api.whoami(),
+        { locale: "en", name, bytes: fileWith(markerOf("racinglate")) }
+      )
+    );
+    const id = await within(row.reached, "the share never kept its reading");
+    const deleting = outcome(
+      deleteBrainUpload(
+        envWith(
+          "BRAIN_STORE",
+          holding(env.BRAIN_STORE, "eraseSource", erase.reach, erase.released)
+        ),
+        await admin.api.whoami(),
+        id
+      )
+    );
+    await within(erase.reached, "the delete never erased");
+    row.release();
+    const shared = await sharing;
+    const listedBefore = await listed(admin.api, name);
+    erase.release();
+    expect({
+      shared,
+      listedBefore,
+      deleted: await deleting,
+      listed: await listed(admin.api, name),
+    }).toStrictEqual({
+      shared: "ok",
+      listedBefore: true,
+      deleted: "ok",
+      listed: false,
     });
   });
 });

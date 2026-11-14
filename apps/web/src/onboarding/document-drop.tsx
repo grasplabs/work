@@ -254,7 +254,7 @@ const RemoveRead = ({
           <AlertDialogHeader>
             <AlertDialogTitle>{t`Remove ${file}?`}</AlertDialogTitle>
             <AlertDialogDescription>
-              {t`I forget what I read in it, and draw again what I drew with it. If you shared it, its file is deleted from your Brain too; if another admin did, it stays in theirs until they delete it. This can’t be undone.`}
+              {t`I forget what I read in it, and draw again what I drew with it. If you shared it, its file in your Brain, if there is one, is deleted too; if another admin did, the file stays in theirs until they delete it. This can’t be undone.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

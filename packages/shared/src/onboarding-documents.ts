@@ -12,6 +12,13 @@ import { uploadMaxBytes, uploadNameSchema } from "./uploads.ts";
 // the admin only what nobody else can say, with answers to pick from.
 // From the prototype's `lib/document-reading.ts`.
 
+/**
+ * The Knowledge collection the onboarding kept shared documents in before
+ * GRA-1889: kept out of the Brain's export until the cutover (GRA-1735)
+ * removes Knowledge whole.
+ */
+export const onboardingDocumentsCollection = "onboarding-documents";
+
 /** The longest text of one document that is read, in characters. */
 export const documentTextMaxLength = 120_000;
 
