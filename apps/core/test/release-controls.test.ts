@@ -158,6 +158,40 @@ describe("an App's releases over /rpc", () => {
     });
   });
 
+  it("are listed a full page at a time, each with its holds", async () => {
+    const { app } = await sealedTwice();
+    const admin = await signedInApi(idp, "admin");
+    // Releases 3 to 100 as copies of the first: a page of 100 names more
+    // versions than one statement of D1's 100 bound parameters takes.
+    await env.DB.prepare(
+      `WITH RECURSIVE later(version) AS (SELECT 3 UNION ALL SELECT version + 1 FROM later WHERE version < 100)
+       INSERT INTO sdk_release_manifests (app_id, version, manifest_hash, manifest, sealed_at, seal_id, package_graphs)
+       SELECT app_id, later.version, manifest_hash, manifest, sealed_at, seal_id, package_graphs
+       FROM sdk_release_manifests, later WHERE app_id = ? AND sdk_release_manifests.version = 1`
+    )
+      .bind(app)
+      .run();
+    await admin.api.apps.releases.placeHold(app, 1, {
+      hold: "case-1",
+      reason: "Litigation",
+    });
+
+    const listed = await admin.api.apps.releases.list(app);
+
+    expect({
+      versions: listed.map(({ version }) => version),
+      held: listed
+        .filter(({ holds }) => holds.length > 0)
+        .map(({ version, holds }) => ({
+          version,
+          holds: holds.map(({ hold }) => hold),
+        })),
+    }).toStrictEqual({
+      versions: Array.from({ length: 100 }, (_, at) => 100 - at),
+      held: [{ version: 1, holds: ["case-1"] }],
+    });
+  });
+
   it("are neither seen, revoked nor held by anyone but the organization's own admins", async () => {
     const fixture = await sealedTwice();
     const { app } = fixture;

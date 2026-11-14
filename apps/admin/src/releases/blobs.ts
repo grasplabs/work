@@ -8,13 +8,10 @@
  */
 import { blobKeys } from "@grasp-os/shared/release";
 import type { ReleaseManifest } from "@grasp-os/shared/release";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 import type { AdminDatabase } from "../db/act.ts";
 import { releaseBlobs } from "../db/schema.ts";
-
-/** Rows one insert writes: two parameters each, within D1's hundred. */
-const rowsPerInsert = 40;
 
 /**
  * Records the blobs `manifest` names as release `releaseId`'s, in place of
@@ -36,21 +33,16 @@ export const recordBlobs = async (
   if (recorded.size === keys.length && keys.every((key) => recorded.has(key))) {
     return;
   }
-  const inserts = [];
-  for (let at = 0; at < keys.length; at += rowsPerInsert) {
-    inserts.push(
-      db
-        .insert(releaseBlobs)
-        .values(
-          keys
-            .slice(at, at + rowsPerInsert)
-            .map((blobKey) => ({ releaseId, blobKey }))
-        )
-        .onConflictDoNothing()
-    );
-  }
   await db.batch([
     db.delete(releaseBlobs).where(eq(releaseBlobs.releaseId, releaseId)),
-    ...inserts,
+    // The keys as one JSON parameter, however many: D1 binds at most 100
+    // to a statement. The WHERE keeps SQLite from reading ON CONFLICT as
+    // a join.
+    db
+      .insert(releaseBlobs)
+      .select(
+        sql`SELECT ${releaseId}, value FROM json_each(${JSON.stringify(keys)}) WHERE true`
+      )
+      .onConflictDoNothing(),
   ]);
 };
