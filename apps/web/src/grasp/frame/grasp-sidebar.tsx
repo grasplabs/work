@@ -54,6 +54,7 @@ import type {
   SidebarMenuEntry,
   SidebarProfileProps,
 } from "../sidebar/index.ts";
+import { grasp } from "../tokens/tokens.stylex.ts";
 
 // The product's sidebar: Grasp UI's Sidebar (grasp/sidebar), filled with
 // the product's sections, the Apps' own entries, and the person's menu.
@@ -62,6 +63,15 @@ import type {
 // frame keeps); on a phone it is a sheet over the page.
 
 const styles = stylex.create({
+  // Beside the page: above the page's card, so that folded, its edge (where
+  // the pointer peeks it in) and its button to open it again are not under
+  // the card, and a peek slides in over the page.
+  beside: {
+    position: "relative",
+    zIndex: 40,
+    display: "flex",
+    flexShrink: 0,
+  },
   // The product's mark in the sidebar's head: 20px, as the head asks.
   mark: {
     width: "20px",
@@ -70,7 +80,9 @@ const styles = stylex.create({
   // The phone's sheet: the sidebar fills it.
   sheet: {
     display: "flex",
+    flexGrow: 1,
     height: "100%",
+    backgroundColor: grasp.shellGround,
   },
   unseen: {
     position: "absolute",
@@ -365,10 +377,16 @@ export const GraspSidebar = ({
           <span {...stylex.props(styles.unseen)}>
             <SheetTitle>{t`Sidebar`}</SheetTitle>
           </span>
-          <div {...stylex.props(styles.sheet)}>{sidebar}</div>
+          {/* The library shell's own sheet marker: in it, the Sidebar fills the sheet's width. */}
+          <div
+            data-slot="app-shell-sheet"
+            {...stylex.props(styles.sheet, stylex.defaultMarker())}
+          >
+            {sidebar}
+          </div>
         </SheetContent>
       </Sheet>
     );
   }
-  return sidebar;
+  return <div {...stylex.props(styles.beside)}>{sidebar}</div>;
 };
