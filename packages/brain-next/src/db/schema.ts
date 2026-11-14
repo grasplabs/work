@@ -315,7 +315,7 @@ export const workItems = sqliteTable(
     key: text().notNull(),
     /** What its handler is given, as JSON. */
     payload: text().notNull(),
-    /** Its class, the first first (work.ts `workPriorities`). */
+    /** Its class, the first first (contract.ts `workPriorities`). */
     priority: integer().notNull(),
     /** The connection it belongs to, if any: each has its own limit at once. */
     connection: text(),

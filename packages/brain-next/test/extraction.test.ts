@@ -32,6 +32,7 @@ import {
   proposeInstructions,
 } from "../src/extraction.ts";
 import type { BrainStore } from "../src/store.ts";
+import { workParkedMs } from "../src/work.ts";
 
 type Store = DurableObjectStub<BrainStore>;
 
@@ -1409,8 +1410,8 @@ describe("extracting memories", () => {
     });
     await tick(1, tokensOf(proposeInstructions));
     const asked = callsOf(token).length;
-    // Past the first failure's wait, with a model of a larger window.
-    await tick(2, null);
+    // Back from parked, with a model of a larger window.
+    await tick(workParkedMs / 60_000 + 1, null);
     const drawn = await readAs({ person: unique("p"), groups: [group] }, name);
 
     expect({
@@ -1467,6 +1468,25 @@ describe("extracting memories", () => {
         extract: fromOutside({ saidAt: new Date(-1) }),
       })
     ).rejects.toThrow("saidAt");
+  });
+
+  it("refuses to queue extraction in a time zone the platform doesn't know", async () => {
+    const { source, version } = await added("Words.", audience(unique("g")));
+    const queued = await runInDurableObject(shared(), (_instance, state) => {
+      try {
+        enqueueExtraction(
+          state.storage,
+          source,
+          version,
+          fromOutside({ timeZone: "Mars/Olympus_Mons" })
+        );
+        return "queued";
+      } catch {
+        return "refused";
+      }
+    });
+
+    expect(queued).toBe("refused");
   });
 
   it("writes what a piece kept without asking again when its write was refused, whole or not at all", async () => {
@@ -2255,7 +2275,7 @@ describe("extracting memories", () => {
     paceBoundMs
   );
 
-  it("fails a piece one of whose statements no check message can hold, before any check call", async () => {
+  it("parks at once a piece one of whose statements no check message can hold, before any check call", async () => {
     const token = unique("t");
     const group = unique("g");
     // Twenty names at the contract's longest, each a word of digits.
@@ -2290,10 +2310,16 @@ describe("extracting memories", () => {
     const source = unique("doc");
     await added(text, audience(group), { extract: fromOutside(), source });
     await tick(1, window);
+    // The same window fails it the same way every time: parked after
+    // this one attempt, not tried again within minutes.
     const [item] = await runInDurableObject(shared(), (_instance, state) =>
       state.storage.sql
-        .exec<{ last_error: string | null }>(
-          "SELECT last_error FROM work_items WHERE key = ?",
+        .exec<{
+          last_error: string | null;
+          attempts: number;
+          parked: number;
+        }>(
+          "SELECT last_error, attempts, parked_at IS NOT NULL AS parked FROM work_items WHERE key = ?",
           source
         )
         .toArray()
@@ -2301,10 +2327,10 @@ describe("extracting memories", () => {
 
     expect({
       calls: callsOf(token).map(({ purpose }) => purpose),
-      error: item?.last_error,
+      item,
     }).toStrictEqual({
       calls: ["brain.extract"],
-      error: "window_too_small",
+      item: { last_error: "window_too_small", attempts: 1, parked: 1 },
     });
   });
 

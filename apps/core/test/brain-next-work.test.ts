@@ -1,4 +1,8 @@
-import type { Embedders, HandOvers } from "@grasp-os/brain-next/contract";
+import type {
+  Embedders,
+  HandOvers,
+  WorkPriority,
+} from "@grasp-os/brain-next/contract";
 import {
   defineWork,
   enqueueWork,
@@ -16,7 +20,6 @@ import type {
   NewWork,
   WorkContext,
   WorkDefinition,
-  WorkPriority,
 } from "@grasp-os/brain-next/work";
 import { graspAi } from "@grasp-os/shared/ai-providers";
 import { runInDurableObject } from "cloudflare:test";
@@ -130,6 +133,19 @@ const mediumWork = defineWork({
   kind: kindOf("medium"),
   payload,
   timeLimitMs: 1000,
+  run: async ({ key }, context) => {
+    await handle(key, context);
+  },
+});
+
+/**
+ * Work of the longest kind the queue takes (48 characters), for a call
+ * whose purpose, with the longest step (32), would be past what the
+ * gateway takes.
+ */
+const longWork = defineWork({
+  kind: kindOf("longkind10"),
+  payload,
   run: async ({ key }, context) => {
     await handle(key, context);
   },
@@ -634,15 +650,40 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
     behaviours.clear();
     await runInDurableObject(store(), (_store, state) => {
       state.storage.sql.exec(
-        "DELETE FROM work_items WHERE running = 0 AND kind IN (?, ?, ?)",
+        "DELETE FROM work_items WHERE running = 0 AND kind IN (?, ?, ?, ?)",
         testWork.kind,
         quickWork.kind,
-        mediumWork.kind
+        mediumWork.kind,
+        longWork.kind
       );
       state.storage.sql.exec(
         "UPDATE work_model_bucket SET paused_until = 0, paused_since = NULL, pause_reason = NULL"
       );
     });
+  });
+
+  it("refuses at once, and sends nothing, a call whose purpose is past what the gateway takes", async () => {
+    const provider = await answeringProvider(() => answer);
+    const key = keyOf("long-purpose");
+    const step = "s".repeat(32);
+    const codes: string[] = [];
+    behaviours.set(key, async ({ ask }) => {
+      try {
+        await ask({ system: "Say something.", input: "Something.", step });
+        codes.push("answered");
+      } catch (error) {
+        codes.push(error instanceof WorkError ? error.code : "other");
+        throw error;
+      }
+    });
+    await enqueue({ key, priority: "asked" }, longWork);
+    await tick();
+
+    expect({
+      purpose: `brain.${longWork.kind}.${step}`.length,
+      codes,
+      sent: provider.requests.length,
+    }).toStrictEqual({ purpose: 87, codes: ["invalid_request"], sent: 0 });
   });
 
   it("runs items in priority order, never more than the set number at once", async () => {

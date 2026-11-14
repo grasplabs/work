@@ -6,22 +6,20 @@ import { z } from "zod";
 import {
   attributeRuleOf,
   entityAttributes,
+  extractSchema,
   entityKinds,
   identifierSchema,
   memoryTypes,
   namesPerEntityMax,
   newEntitySchema,
   newMemorySchema,
-  principalMaxLength,
   quoteMaxLength,
   restoringNow,
   sourceIdSchema,
-  speakerSchema,
   statementMaxLength,
   tokensOf,
   valueMaxLength,
   versionSchema,
-  workPriorities,
 } from "./contract.ts";
 import type {
   Access,
@@ -34,7 +32,7 @@ import type {
 } from "./contract.ts";
 import { bucketCallMs } from "./embedding.ts";
 import { fileKeyOf, hashOf } from "./files.ts";
-import { isOneReaderKey } from "./reader-sets.ts";
+import { accessOfKey } from "./reader-sets.ts";
 import { hashesOf, writeAdd } from "./remember.ts";
 import type { Adding } from "./remember.ts";
 import { isRestoring } from "./restoring.ts";
@@ -104,16 +102,20 @@ const windowShareOfPiece = 2;
 /** A call's answer takes at most this share of the window: core's gateway (`windowPerAnswer`). */
 const answerShareOfWindow = 4;
 
-/** What an item carries: the version, and whose words it is, when said, and where. */
+/**
+ * What an item carries: the version, and whose words it is, when said,
+ * and where, as the add gave them (the contract's `extractSchema`; when,
+ * as milliseconds since 1970).
+ */
 const payloadSchema = z.strictObject({
   source: sourceIdSchema,
   version: versionSchema,
   /** Where in the version's text this item's piece starts (UTF-16 units). */
   from: z.int().nonnegative(),
-  speaker: speakerSchema,
+  speaker: extractSchema.shape.speaker,
   saidAt: z.int().nonnegative(),
-  timeZone: z.string().min(1),
-  priority: z.enum(workPriorities),
+  timeZone: extractSchema.shape.timeZone,
+  priority: extractSchema.shape.priority,
   /**
    * What a run of this piece kept, in its adds, recorded before its first
    * add (`WorkContext.keep`): a rerun writes these and asks the model
@@ -765,29 +767,6 @@ const currentOf = (
     .toArray()
     .at(0);
 
-/** One principal of a reader set's key (reader-sets.ts `keyOf`). */
-const principalSchema = z.tuple([
-  z.enum(["person", "group"]),
-  z.string().min(1).max(principalMaxLength),
-]);
-
-/**
- * The access a reader set's key names: the reverse of reader-sets.ts
- * `keyOf` for the three kinds of access, so a memory's readers are the
- * version's exactly. Anything else throws: no memory is added.
- */
-const accessOfKey = (key: string): Access => {
-  const principals = z.array(principalSchema).max(1).parse(JSON.parse(key));
-  const [principal] = principals;
-  if (principal === undefined) {
-    return { kind: "none" };
-  }
-  const [kind, id] = principal;
-  return kind === "person"
-    ? { kind: "owner", person: id }
-    : { kind: "audience", group: id };
-};
-
 const encoder = new TextEncoder();
 
 /** The change key the memories of a piece of a version are added under: one per version and piece. */
@@ -1127,13 +1106,18 @@ const extractWork: WorkDefinition<Payload> = defineWork({
       return;
     }
     const access = accessOfKey(found.readers);
+    // A key the Brain doesn't write: nobody is known to read what is
+    // drawn from it, so nothing is.
+    if (access === undefined) {
+      throw new Error("The Brain holds readers it can't name");
+    }
     // Nobody may read it, nor anything drawn from it: no call. Nor for
     // what one person alone may read in the shared store, which keeps no
     // memory of theirs (remember.ts refuses it by the same rule): that
     // person's own store draws from what it holds.
     if (
       access.kind === "none" ||
-      (context.owner === undefined && isOneReaderKey(found.readers))
+      (context.owner === undefined && access.kind === "owner")
     ) {
       return;
     }

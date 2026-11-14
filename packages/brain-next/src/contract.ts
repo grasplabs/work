@@ -761,6 +761,9 @@ export interface SourceVersion extends SourceVersionRef {
  * quick one, cheaper, for a check (the host's model roles).
  */
 export const modelRoles = ["careful", "quick"] as const;
+
+/** Most characters of a model call's purpose, `brain.<kind>[.<step>]`: what the host's gateway takes. */
+export { modelPurposeMaxLength as purposeMaxLength } from "@grasp-os/shared/models";
 export type ModelRole = (typeof modelRoles)[number];
 
 /**
@@ -772,6 +775,7 @@ export type ModelRole = (typeof modelRoles)[number];
  * the call when that is over, and says so (`timed_out`).
  */
 export interface ModelRequest {
+  /** At most {@link purposeMaxLength} characters. */
   purpose: string;
   role: ModelRole;
   system: string;
@@ -858,6 +862,17 @@ export const workErrors = {
     "The store is restoring an export, so it adds nothing until that is done: it is tried again.",
 } as const;
 export type WorkErrorCode = keyof typeof workErrors;
+
+/**
+ * Errors an item meets the same way on every attempt while the host's
+ * models stay as they are (`window_too_small`: the window is the host's
+ * models'): parked at the first, never tried again within minutes. It
+ * comes back a day later, as any parked item, when the models may have
+ * changed.
+ */
+export const workErrorsParkedAtOnce: readonly WorkErrorCode[] = [
+  "window_too_small",
+];
 
 /** Items of one kind waiting in the queue. */
 export interface WaitingWork {

@@ -24,7 +24,7 @@ import {
   lineageOfWriter,
   stampWrite,
 } from "./memories.ts";
-import { isOneReaderKey, readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
+import { accessOfKey, readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
 import { isRestoring } from "./restoring.ts";
 import { indexMemoryWords } from "./words.ts";
 import type { WordMemo } from "./words.ts";
@@ -213,7 +213,7 @@ const holdVersion = (
   if (found === undefined) {
     throw refused(why);
   }
-  if (shared && isOneReaderKey(found.readers)) {
+  if (shared && accessOfKey(found.readers)?.kind === "owner") {
     throw refused(
       "what one person alone may read is kept in that person's own store"
     );

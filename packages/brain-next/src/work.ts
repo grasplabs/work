@@ -9,11 +9,13 @@ import type { BrainBucket } from "./bucket.ts";
 import {
   modelReplySchema,
   modelRoles,
+  purposeMaxLength,
   modelTimeoutMaxMs,
   parkedListed,
   sourceIdMaxLength,
   wellFormedString,
   workErrors,
+  workErrorsParkedAtOnce,
   workPriorities,
 } from "./contract.ts";
 import type {
@@ -120,16 +122,13 @@ export { WorkError } from "./work-error.ts";
 // now) with the real time since the tick began added. Backoffs, pauses,
 // returns from parking and the bucket go by it.
 
-export { workPriorities } from "./contract.ts";
-export type { WorkPriority } from "./contract.ts";
-
 /** Most items under way at once, across every tick. */
 export const workAtOnce = 4;
 
 /** Most items of one connection under way at once. */
 export const workPerConnection = 2;
 
-/** Attempts an item gets before it is parked. */
+/** Attempts an item gets before it is parked (but one, for `workErrorsParkedAtOnce`). */
 export const workAttemptsMax = 5;
 
 /** Times an item is parked before it stays parked. */
@@ -584,7 +583,10 @@ const fail = (
   now: number,
   { interrupted }: { interrupted: boolean }
 ): void => {
-  if (item.attempts >= workAttemptsMax) {
+  if (
+    item.attempts >= workAttemptsMax ||
+    workErrorsParkedAtOnce.includes(error)
+  ) {
     putBack(storage, item, {
       parkedAt: new Date(now),
       parks: item.parks + 1,
@@ -1004,9 +1006,12 @@ const askWithin = async (
 ): Promise<string> => {
   const { now, signal, deadline } = attempt;
   signal.throwIfAborted();
+  const purpose =
+    step === undefined ? `brain.${kind}` : `brain.${kind}.${step}`;
   if (
     !sendable({ system, input }) ||
     (step !== undefined && !stepPattern.test(step)) ||
+    purpose.length > purposeMaxLength ||
     !modelRoles.includes(role)
   ) {
     throw new WorkError("invalid_request");
@@ -1020,7 +1025,7 @@ const askWithin = async (
   let reply: unknown = undefined;
   try {
     reply = await ask({
-      purpose: step === undefined ? `brain.${kind}` : `brain.${kind}.${step}`,
+      purpose,
       role,
       system,
       input,

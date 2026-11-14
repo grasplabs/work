@@ -47,24 +47,41 @@ const keyOf = (principals: readonly Principal[]): string =>
     .toSorted(byCodeUnits)
     .join(",")}]`;
 
-/**
- * Whether the set of readers keyed `key` (`readerSetKeyOf`) is one person
- * alone: what is drawn from such an item is theirs alone, and lies only
- * in their own store.
- */
-export const isOneReaderKey = (key: string): boolean => {
-  const principals: unknown = JSON.parse(key);
-  return (
-    Array.isArray(principals) &&
-    principals.length === 1 &&
-    Array.isArray(principals[0]) &&
-    principals[0][0] === "person"
-  );
-};
-
 /** The key of the set of readers `access` names. */
 export const readerSetKeyOf = (access: Access): string =>
   keyOf(principalsOf(access));
+
+/** A key's principals as {@link keyOf} writes them, before they are checked to be one. */
+const keyPrincipalsSchema = z
+  .array(z.tuple([z.enum(["person", "group"]), z.string()]))
+  .max(1);
+
+/**
+ * The access a set of readers' key names: the inverse of
+ * {@link readerSetKeyOf}, the one way the Brain reads a key back. Undefined
+ * for anything `readerSetKeyOf` doesn't write, so a key it can't name is
+ * never read as someone's.
+ */
+export const accessOfKey = (key: string): Access | undefined => {
+  let parsed: unknown = undefined;
+  try {
+    parsed = JSON.parse(key);
+  } catch {
+    return undefined;
+  }
+  const principals = keyPrincipalsSchema.safeParse(parsed);
+  if (!principals.success) {
+    return undefined;
+  }
+  const [principal] = principals.data;
+  let access: Access = { kind: "none" };
+  if (principal?.[0] === "person") {
+    access = { kind: "owner", person: principal[1] };
+  } else if (principal?.[0] === "group") {
+    access = { kind: "audience", group: principal[1] };
+  }
+  return readerSetKeyOf(access) === key ? access : undefined;
+};
 
 /**
  * The sets of readers a reader is in, as a common table `readable` for a
