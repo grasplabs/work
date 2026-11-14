@@ -180,7 +180,7 @@ export type BuiltCall =
       readonly outputSchema: Json;
     }
   | {
-      /** A recall of the Brain (brain-calls.ts). */
+      /** A recall of the Brain, or of its skills (brain-calls.ts). */
       readonly name: "grasp.brain";
       readonly binding: string;
       readonly operation: BrainCall["operation"];
@@ -920,7 +920,7 @@ const candidateAnswer = async (
     }
     case "grasp.brain": {
       requireBrainRequest(call);
-      requireBrainAnswer(answer);
+      requireBrainAnswer(call, answer);
       return boundedAnswer(answer, "output");
     }
     // A test run keeps no file: its files calls answer what its start

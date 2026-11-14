@@ -47,6 +47,7 @@ import { permissionErrors } from "@grasp-os/shared/permissions";
 import { isAdmin, requireAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { StephenReach } from "@grasp-os/shared/stephen-reach";
+import { waitUntil } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -83,7 +84,9 @@ import {
 } from "./audit-outbox.ts";
 import { providerIds, signInConfig } from "./auth/config.ts";
 import { identify } from "./auth/identity.ts";
+import { eraseCaptures } from "./brain-next-origins.ts";
 import { listAppRequests, requestApp } from "./catalog-requests.ts";
+import { keepsReadsOf, mayHoldCapturesOf } from "./connection-capture-key.ts";
 import {
   accounts,
   hiddenConnectors,
@@ -184,6 +187,34 @@ export const connectionOwnersOf = async (
     pages.map(async (page) => await env.CONNECT.connectionOwners(page))
   );
   return owners.flat();
+};
+
+/**
+ * Erases what the Brain kept through `connectionId` (connection-
+ * capture.ts) once `person` disconnected it, in the background
+ * (`waitUntil`), when it is their own native connection
+ * (`mayHoldCapturesOf`). The disconnect never waits on it: should it
+ * fail, it is logged, and the drain of connect's audit outbox erases them
+ * before the disconnect's event leaves it (capture-erasures.ts), which
+ * also records the erasure. Until it ran, a read under way may still land
+ * in the connection's group, and goes with it.
+ */
+const eraseCapturesSoon = async (
+  env: Env,
+  person: ConnectionPerson,
+  connectionId: string
+): Promise<void> => {
+  try {
+    const [owner] = await connectionOwnersOf(env, [connectionId]);
+    if (owner !== undefined && mayHoldCapturesOf(owner, person.userId)) {
+      await eraseCaptures(env, person.userId, connectionId);
+    }
+  } catch (error) {
+    log.warn("connection.captures_not_erased_yet", {
+      connectionId,
+      ...errorFields(error),
+    });
+  }
 };
 
 /** The organization's tenant at `provider`, from the sign-in config. */
@@ -536,6 +567,9 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
         connection.connectedBy === null
           ? null
           : (names.get(connection.connectedBy) ?? null),
+      ...(keepsReadsOf(connection, person.userId)
+        ? { keepsReads: true as const }
+        : {}),
     }));
   }
 
@@ -595,7 +629,15 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
 
   async disconnect(connectionId: string): Promise<{ revoked: boolean }> {
     const person = await this.#person();
-    return await this.#env.CONNECT.disconnect({ person, connectionId });
+    // A revocation never waits on the Brain: connect stops it first, and
+    // what the Brain kept through it goes in the background
+    // (`eraseCapturesSoon`), so a slow store never holds the answer up.
+    const disconnected = await this.#env.CONNECT.disconnect({
+      person,
+      connectionId,
+    });
+    waitUntil(eraseCapturesSoon(this.#env, person, connectionId));
+    return disconnected;
   }
 
   // Anyone signed in may see what can be connected; connect checks the

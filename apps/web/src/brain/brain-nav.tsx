@@ -15,6 +15,7 @@ import {
   ChevronDownIcon,
   InboxIcon,
   LibraryIcon,
+  LightbulbIcon,
   NotebookPenIcon,
   BookOpenIcon,
   TargetIcon,
@@ -342,6 +343,11 @@ export const BrainNav = ({
   const onActivity = Boolean(matchRoute({ to: "/brain/activity" }));
   const onMemory = Boolean(matchRoute({ to: "/brain/memory" }));
   const onSources = Boolean(matchRoute({ to: "/brain/sources" }));
+  const onMemories = Boolean(matchRoute({ to: "/brain/memories" }));
+  const memoriesLabel = t({
+    message: "Memories",
+    context: "the Brain's memories page",
+  });
   const sourcesLabel = t({
     message: "Sources",
     context: "the Brain's sources page",
@@ -440,6 +446,13 @@ export const BrainNav = ({
           <LibraryIcon />
         </PageSidebarRailButton>
         <PageSidebarRailButton
+          active={onMemories}
+          label={memoriesLabel}
+          render={<Link to="/brain/memories" />}
+        >
+          <LightbulbIcon />
+        </PageSidebarRailButton>
+        <PageSidebarRailButton
           active={onSkills}
           label={skillsLabel}
           render={<Link to="/brain/skills" />}
@@ -488,6 +501,9 @@ export const BrainNav = ({
         </Link>
         <Link className={topLinkClass} to="/brain/sources">
           <TopLinkContent icon={LibraryIcon} label={sourcesLabel} />
+        </Link>
+        <Link className={topLinkClass} to="/brain/memories">
+          <TopLinkContent icon={LightbulbIcon} label={memoriesLabel} />
         </Link>
         <Link className={topLinkClass} to="/brain/skills">
           <TopLinkContent icon={BookOpenIcon} label={skillsLabel} />

@@ -2139,7 +2139,8 @@ describe("a group in a person's own store", () => {
     release();
 
     await expect(adding).resolves.toMatchObject({ version: 1 });
-    await expect(erasing).resolves.toBeUndefined();
+    // Both turns, the one in flight among them, counted as it erased them.
+    await expect(erasing).resolves.toMatchObject({ sources: 2 });
     await expect(foundFor("Wombat")).resolves.toStrictEqual([]);
   });
 

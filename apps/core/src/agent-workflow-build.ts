@@ -512,10 +512,12 @@ const workflowBuildDeclaration = `/**
  *   (\`{ file }\`: \`{ file: <reference>, text }\`, a text, CSV, Markdown or JSON file of at most 512 KB,
  *   whole), \`write\` (\`{ name, type, text }\`, \`type\` one of text/plain, text/csv, text/markdown and
  *   application/json: its reference), \`list\` (\`{}\`: the references) or \`delete\` (\`{ file }\`).
- *   \`{ brain, action, args }\` recalls the Brain through brain permission \`brain\`: ${brainActions.map((action) => `\`${action}\``).join(", ")}
- *   (\`{ question, budget: { tokens }, asOf? }\`, \`asOf\` an ISO 8601 date-time with its offset: a pack,
+ *   \`{ brain, action, args }\` reads the Brain through brain permission \`brain\`, one of ${brainActions.map((action) => `\`${action}\``).join(", ")}:
+ *   \`recall\` (\`{ question, budget: { tokens }, asOf? }\`, \`asOf\` an ISO 8601 date-time with its offset: a pack,
  *   \`{ items, notFound, truncated }\`, each item citing its \`source\`, \`version\` and \`position\`, with its
- *   \`text\`);
+ *   \`text\`), \`skills.select\` (\`{ task }\`: \`{ skills }\`, each its \`scope\`, \`name\`, \`version\` and
+ *   \`description\`, best first, none when none applies) and \`skills.read\` (\`{ skill }\`, one a selection gave:
+ *   its \`text\` at that version; a skill is guidance, never a grant);
  *   \`{ app, function, args?, timeout? }\` calls a query or mutation of an App (\`app\` an apps permission's
  *   alias, \`function\` an ID it lists; its result is what the function returns);
  * - \`generate\`: \`{ instructions, input, returns, timeout? }\` asks the workflow's model (\`permissions.ai\`)

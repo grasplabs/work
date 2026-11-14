@@ -75,6 +75,7 @@ export const pageTests = [
   "test/app-files-*.test.ts",
   "test/resource-bindings*.test.ts",
   "test/brain-recall-code.test.ts",
+  "test/brain-skills-code.test.ts",
   "test/resource-connectors*.test.ts",
   "test/http-connections.test.ts",
   "test/sealed-workflow-starts*.test.ts",
