@@ -98,7 +98,8 @@ import {
 } from "./fixtures/brain-tasks.ts";
 import type { BrainSplit, BrainTask } from "./fixtures/brain-tasks.ts";
 import type { Idp } from "./idp.ts";
-import { newTeam, readCollection } from "./knowledge.ts";
+import { saveInstructions } from "./instruction-saves.ts";
+import { newTeam, ownCollectionOf, readCollection } from "./knowledge.ts";
 import { answeringProvider } from "./model-provider.ts";
 import type { ProviderReply, SentRequest } from "./model-provider.ts";
 import { spentMicros, usageRows } from "./model-usage.ts";
@@ -151,8 +152,8 @@ export const fullContextChars = 60_000;
 
 /**
  * The instructions every arm answers by, so all answer alike: the
- * company's AGENTS.md, in every chat's memory (the system prompt), never
- * in the question. The person's message is what they typed, as in the
+ * company's instruction file, in every chat's system prompt, never in
+ * the question. The person's message is what they typed, as in the
  * product, so whatever the platform reads from it (a recall's query)
  * reads only that.
  */
@@ -612,21 +613,26 @@ export const setUpBrainCompany = async (idp: Idp): Promise<BrainCompany> => {
     });
     documents.set(key, { id: saved.id, version: saved.currentVersion });
   }
-  // The answer protocol, as the company's rules every chat follows.
-  const { memory } = await admin.api.memory.collections();
-  if (memory === null) {
-    throw new Error("The admin's Memory collection wasn't set up");
-  }
-  await admin.api.knowledge.saveDocument({
-    collectionId: memory,
-    path: "AGENTS.md",
-    text: answerProtocol,
-    ifVersion: 0,
-  });
+  // The answer protocol, as the company's instructions every chat starts
+  // with.
+  await saveInstructions(
+    admin.api,
+    { scope: "company", name: "instructions" },
+    answerProtocol
+  );
   for (const persona of brainPersonas) {
     const person = people[persona];
+    // Their own instruction file, which their chats start with; and the
+    // same text as a USER.md in their Personal collection, the private
+    // document the permission probes read (permission-probing.ts).
     // oxlint-disable-next-line no-await-in-loop -- one person at a time
-    const { personal } = await person.api.memory.collections();
+    await saveInstructions(
+      person.api,
+      { scope: "person", personId: person.userId },
+      brainMemories[persona]
+    );
+    // oxlint-disable-next-line no-await-in-loop -- one person at a time
+    const personal = await ownCollectionOf(person);
     // oxlint-disable-next-line no-await-in-loop -- one person at a time
     await person.api.knowledge.saveDocument({
       collectionId: personal,
@@ -681,8 +687,8 @@ export const applyWindow = async (
 
 /** A person's current USER.md, or nothing while they have none. */
 const userMemoryOf = async (person: Person): Promise<string> => {
-  const { knowledge, memory } = person.api;
-  const { personal } = await memory.collections();
+  const { knowledge } = person.api;
+  const personal = await ownCollectionOf(person);
   const { documents } = await knowledge.listDocuments(personal);
   const user = documents.find(({ path }) => path === "USER.md");
   if (user === undefined) {
@@ -1284,7 +1290,7 @@ const changeState = async (
     return;
   }
   const person = company.people[place.persona];
-  const { personal } = await person.api.memory.collections();
+  const personal = await ownCollectionOf(person);
   await person.api.knowledge.saveDocument({
     collectionId: personal,
     path: `notes/control-${crypto.randomUUID()}.md`,
@@ -2175,18 +2181,19 @@ const fieldOf = (request: SentRequest, field: string): unknown =>
     : null;
 
 /**
- * The person's memory and the listed skills: theirs and this run's own.
- * Memory is a section of one block per file (`<memory source=… file=…>`):
- * each goes, whichever files there are.
+ * The person's memory, the instruction files and the listed skills:
+ * theirs and this run's own. The instruction files are a section of one
+ * block per file (`<instructions>` holding `<file of=…>`), its person's
+ * own among them: it goes whole, whichever files there are.
  */
 const ownSections =
-  /<(?<section>memory|skills)(?: [^>]*)?>[\s\S]*?<\/\k<section>>/gu;
+  /<(?<section>memory|instructions|skills)(?: [^>]*)?>[\s\S]*?<\/\k<section>>/gu;
 
 /**
  * What each request told the model before the chat: the agent's
  * instructions and the API declarations, as the system prompt carries
- * them, without the memory and skills sections, which differ by person
- * and run and are pinned apart (sources and skills).
+ * them, without the memory, instruction-file and skills sections, which
+ * differ by person and run and are pinned apart (sources and skills).
  */
 const promptOf = (request: SentRequest): string =>
   systemTextOf(request.body).replaceAll(ownSections, "<$<section>/>");

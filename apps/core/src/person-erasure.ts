@@ -253,9 +253,10 @@ const identity: ErasureStep = {
 /**
  * What the Brain and Knowledge hold of them (GRA-1185), through the
  * Brain's own personal purge, the one way it erases a person (purge.ts),
- * as an admin's purge on the Knowledge page runs it, for the admin who
- * asked: their memories, their outcomes with the Brain's tombstone that
- * keeps them from coming back, their Personal collection with every
+ * which core lets run only while their erasure is unfinished (rpc.ts
+ * `requireErasing`), for the admin who asked: their memories, their outcomes with the Brain's tombstone that
+ * keeps them from coming back, every collection only they read (their
+ * own, `access` "me"; collections they made for others stay) with every
  * version, section, transcript and payload, core's copies of what they
  * gave (`coreErasure`), and the search index. It is one batch, safe to run
  * again, so a failure leaves the area pending and the clock runs it again.

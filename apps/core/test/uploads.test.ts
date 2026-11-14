@@ -25,7 +25,8 @@ import {
 import { runEngine } from "../src/workflows/engine.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam, storedVersionTexts } from "./knowledge.ts";
+import { erasing } from "./knowledge-purge.ts";
+import { newTeam, ownCollectionOf, storedVersionTexts } from "./knowledge.ts";
 import { runMinuteTasks } from "./maintenance.ts";
 import { connectWithoutGraspKeys } from "./platform-providers.ts";
 import { finished } from "./runs.ts";
@@ -1402,10 +1403,10 @@ export default class extends WorkerEntrypoint {
     }).toStrictEqual({ stored: false, upload: "upload.not_found" });
   });
 
-  it("delete the originals in a Personal collection a purge deletes", async () => {
+  it("delete the originals in a collection only its owner reads once that person is purged", async () => {
     const person = await signedInApi(idp, "user");
     const admin = await signedInApi(idp, "admin");
-    const { personal } = await person.api.memory.collections();
+    const personal = await ownCollectionOf(person);
     const upload = await uploaded(
       { api: person.api, collectionId: personal },
       "offices.xlsx"
@@ -1415,6 +1416,7 @@ export default class extends WorkerEntrypoint {
       userId: person.userId,
       reason: "offboarding",
     };
+    await erasing(admin, person.userId);
     const plan = await admin.api.knowledge.preparePurge(input);
     await admin.api.knowledge.purge(input, plan.token);
 
@@ -1432,7 +1434,7 @@ export default class extends WorkerEntrypoint {
   it("record a personal purge before its originals go, though its batch then fails", async () => {
     const person = await signedInApi(idp, "user");
     const admin = await signedInApi(idp, "admin");
-    const { personal } = await person.api.memory.collections();
+    const personal = await ownCollectionOf(person);
     const upload = await uploaded(
       { api: person.api, collectionId: personal },
       "offices.xlsx"
@@ -1442,6 +1444,7 @@ export default class extends WorkerEntrypoint {
       userId: person.userId,
       reason: "offboarding",
     };
+    await erasing(admin, person.userId);
     const { token } = await admin.api.knowledge.preparePurge(input);
     // Knowledge refusing the batch that deletes the collection, once the
     // originals are gone.
@@ -1480,7 +1483,8 @@ export default class extends WorkerEntrypoint {
         const events = await allEvents();
         const purged = events.filter(
           (event) =>
-            event.action === "knowledge.purged" && event.target?.id === personal
+            event.action === "knowledge.purged" &&
+            event.detail.userId === person.userId
         );
         if (purged.length === 0) {
           throw new Error("Not recorded yet");

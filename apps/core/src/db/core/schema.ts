@@ -3368,7 +3368,7 @@ export const sharedMailboxPointers = sqliteTable("shared_mailbox_pointers", {
 
 /**
  * The company's agents an admin made or changed (agents.ts): one row per
- * agent, by the ID its permissions, audit events and memory path name.
+ * agent, by the ID its permissions, audit events and instruction file name.
  * `face` is the figure it is drawn with; `job` one line on what it is
  * for; `instructions` what it is told on top of Grasp's own rules;
  * `modelRole` the role it asks the gateway for, or null for the model a

@@ -145,25 +145,3 @@ export const CollectionDrawing = ({
   }
   return collection.access === "teams" ? <TeamsDrawing /> : <SharedDrawing />;
 };
-
-/** A notebook with a pen: what every agent always has in mind. */
-export const MemoryDrawing = () => (
-  <svg
-    aria-hidden="true"
-    className="h-32"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    strokeWidth={1.5}
-    viewBox="0 0 200 120"
-  >
-    <rect className={surface} height="84" rx="7" width="72" x="58" y="18" />
-    <path className={line} d="M70 18 V102" fill="none" />
-    <path
-      className={line}
-      d="M80 36 H118 M80 48 H118 M80 60 H108 M80 72 H114"
-      fill="none"
-    />
-    <path className={tinted} d="M142 30 L152 30 L152 88 L147 98 L142 88 Z" />
-    <path className={line} d="M142 40 H152" fill="none" />
-  </svg>
-);

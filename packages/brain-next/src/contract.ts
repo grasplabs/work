@@ -298,12 +298,12 @@ export const isOverInstructionsLimit = (text: string): boolean =>
   text.length > instructionsMaxLength;
 
 /**
- * An instruction file's text: some text, at most `instructionsMaxLength`
- * UTF-16 units (`.length`), the one rule for it, which the host checks
- * with too.
+ * An instruction file's text: at most `instructionsMaxLength` UTF-16
+ * units (`.length`), the one rule for it, which the host checks with
+ * too. It may be empty: an emptied file is a version of its own, and
+ * its host loads nothing for it.
  */
 export const instructionsTextSchema = wellFormedString()
-  .regex(/\S/u, { message: "Holds no text" })
   // Not zod's `max`, which counts code points.
   .refine((text) => !isOverInstructionsLimit(text), {
     message: `At most ${instructionsMaxLength} UTF-16 units`,

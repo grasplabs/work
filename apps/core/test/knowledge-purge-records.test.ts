@@ -23,20 +23,19 @@ import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
-import { saveUserMemory } from "../src/knowledge/memory.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
-import { actingFor, newChat } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import {
-  newAgent,
   payOwedRebuilds,
   purged,
-  purgesWith,
   rebuildFailingOnce,
+  purgesWith,
   rememberAs,
   saveOver,
   setUpTime,
+  erasing,
 } from "./knowledge-purge.ts";
+import { ownCollectionOf } from "./knowledge.ts";
 import {
   auditedDuring,
   openRpc,
@@ -601,19 +600,14 @@ describe("a purge's record", setUpTime, () => {
       userId: leaver.userId,
       reason: "offboarding",
     };
+    await erasing(admin, leaver.userId);
     const failing = await rebuildFailingOnce(admin);
     const { token } = await admin.api.knowledge.preparePurge(input);
     await outcome(failing.knowledge.purge(input, token));
-    // Written before the run again, in a Personal collection made anew:
+    // Written before the run again, in a collection only they read, made anew:
     // it goes too, and counts.
-    const agent = newAgent();
-    await saveUserMemory(
-      env,
-      actingFor(agent, leaver.userId),
-      await newChat(agent),
-      { type: "own" },
-      { text: "# About me\nTwo.", ifVersion: 0 }
-    );
+    const personal = await ownCollectionOf(leaver);
+    await saveOver(leaver, personal, "notes.md", "# Notes\nTwo.");
     const person = await purged(admin, input);
     const personStatus = await admin.api.knowledge.purgeStatus(
       person.result.purgeId
@@ -635,52 +629,6 @@ describe("a purge's record", setUpTime, () => {
       document: { documents: 1, versions: 1 },
       records: { documents: 2, versions: 2 },
       result: { documents: 2, versions: 2 },
-    });
-  });
-
-  it("finishes an unfinished purge run again whose document another purge deleted meanwhile", async () => {
-    const admin = await personOf("admin");
-    const secret = `meijer${unique()}`;
-    // The admin's own Personal collection: another person's is theirs alone.
-    const { personal } = await admin.api.memory.collections();
-    const named = await saveOver(
-      admin,
-      personal,
-      "people.md",
-      `# People\nWrite to ${secret}.`
-    );
-    const input: PurgeInput = {
-      type: "content",
-      documentIds: [named.id],
-      terms: [secret],
-      reason: "other",
-    };
-    const failing = await rebuildFailingOnce(admin);
-    const first = await admin.api.knowledge.preparePurge(input);
-    await outcome(failing.knowledge.purge(input, first.token));
-    // A personal purge deletes the document the first one names.
-    await purged(admin, {
-      type: "personal",
-      userId: admin.userId,
-      reason: "offboarding",
-    });
-    const resumed = await purged(admin, input);
-    const status = await admin.api.knowledge.purgeStatus(
-      resumed.result.purgeId
-    );
-    // Strict as ever for a purge not begun: the document is gone.
-    const other = await outcome(
-      admin.api.knowledge.preparePurge({ ...input, terms: [`${secret}x`] })
-    );
-
-    expect({
-      state: status.state,
-      step: stateOf(status)[`document:${named.id}`],
-      other,
-    }).toStrictEqual({
-      state: "complete",
-      step: "complete",
-      other: "knowledge.not_found",
     });
   });
 

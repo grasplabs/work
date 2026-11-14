@@ -66,7 +66,7 @@ import { recall } from "@grasp-os/brain/recall";
 import { relationsExplain, relationsFor } from "@grasp-os/brain/relations";
 import { search } from "@grasp-os/brain/search";
 import { follow, read } from "@grasp-os/brain/tools";
-import { knowledgeErrors } from "@grasp-os/shared/knowledge";
+import { knowledgeErrors, purgeInputSchema } from "@grasp-os/shared/knowledge";
 import type {
   BacklinkPage,
   Collection,
@@ -99,10 +99,13 @@ import type {
 } from "@grasp-os/shared/knowledge";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { and, eq, isNull } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { gapAnswerErasure } from "../brain-gaps.ts";
 import { brainRecordErasure } from "../brain-records.ts";
+import { personErasures } from "../db/core/schema.ts";
 import { documentReadingErasure } from "../onboarding/documents.ts";
 import {
   drawingErasure,
@@ -119,7 +122,6 @@ import { coreExport } from "./brain-export.ts";
 import { catalog } from "./catalog.ts";
 import { createCollection, listCollections } from "./collection-rules.ts";
 import { copySkill, skillCollections } from "./grasp-skills.ts";
-import { personalCollectionId } from "./memory-files.ts";
 import { sharedChatsOf } from "./memory-publish.ts";
 import { personWriter, restoreVersion, saveDocument } from "./person-writes.ts";
 import { brainOf } from "./ports.ts";
@@ -185,7 +187,6 @@ export const coreErasure = (env: Env): OnErase => {
     ]),
     ...uploadErasure(env),
     ...appsErasure(env),
-    personalCollection: personalCollectionId,
     forgetDocuments: readings.forgetDocuments,
   };
 };
@@ -203,6 +204,40 @@ const purgerOf = (person: Identity): Writer => {
     throw roleErrors.create("role.forbidden");
   }
   return personWriter(person);
+};
+
+/**
+ * Refuses a personal purge of anyone nobody is erasing now: it takes
+ * everything only they read (purge.ts), which is theirs alone, admins'
+ * included, while they are a member. Only their erasure runs one
+ * (person-erasure.ts), so this lets one through while it is unfinished,
+ * for an admin to finish by hand; before anything is counted, read or
+ * recorded. A content purge is not a person's: it passes.
+ */
+const requireErasing = async (env: Env, input: PurgeInput): Promise<void> => {
+  // Read as the purge reads it (purge.ts), so no shape it takes for a
+  // person's slips past.
+  const purging = knowledgeErrors.parse(
+    "knowledge.invalid",
+    purgeInputSchema,
+    input
+  );
+  if (purging.type !== "personal") {
+    return;
+  }
+  const erasing = await drizzle(env.DB)
+    .select({ userId: personErasures.userId })
+    .from(personErasures)
+    .where(
+      and(
+        eq(personErasures.userId, purging.userId),
+        isNull(personErasures.completedAt)
+      )
+    )
+    .get();
+  if (erasing === undefined) {
+    throw knowledgeErrors.create("knowledge.purge_not_erasing");
+  }
 };
 
 /**
@@ -488,16 +523,16 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
   }
 
   async preparePurge(input: PurgeInput): Promise<PurgePlan> {
-    return await withPerson(
-      this.#check,
-      async (person) =>
-        await preparePurge(
-          brainOf(this.#env),
-          purgerOf(person),
-          input,
-          coreErasure(this.#env)
-        )
-    );
+    return await withPerson(this.#check, async (person) => {
+      const by = purgerOf(person);
+      await requireErasing(this.#env, input);
+      return await preparePurge(
+        brainOf(this.#env),
+        by,
+        input,
+        coreErasure(this.#env)
+      );
+    });
   }
 
   async prepareBrainExport(): Promise<{
@@ -569,19 +604,19 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     token: string,
     options?: { fresh?: boolean }
   ): Promise<PurgeResult> {
-    return await withPerson(
-      this.#check,
-      async (person) =>
-        await purge(
-          brainOf(this.#env),
-          purgerOf(person),
-          input,
-          token,
-          coreErasure(this.#env),
-          // Only a boolean: a client's value is checked here, as Cap'n
-          // Web checks no types.
-          { fresh: options?.fresh === true }
-        )
-    );
+    return await withPerson(this.#check, async (person) => {
+      const by = purgerOf(person);
+      await requireErasing(this.#env, input);
+      return await purge(
+        brainOf(this.#env),
+        by,
+        input,
+        token,
+        coreErasure(this.#env),
+        // Only a boolean: a client's value is checked here, as Cap'n
+        // Web checks no types.
+        { fresh: options?.fresh === true }
+      );
+    });
   }
 }

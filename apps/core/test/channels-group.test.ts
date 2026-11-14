@@ -1,3 +1,4 @@
+import type { InstructionFileRef } from "@grasp-os/shared/instruction-files";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -8,6 +9,7 @@ import { codeStep, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { botConnectorMembersUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
+import { saveInstructions } from "./instruction-saves.ts";
 import { newTeam, readCollection } from "./knowledge.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { callAuth, signedInApi, unique } from "./sign-in.ts";
@@ -134,6 +136,13 @@ const toldAfter = (
   };
 };
 
+/** Saves `text` as the next version of `file`, as `by` does from a page. */
+const save = async (
+  by: Awaited<ReturnType<typeof signedInApi>>,
+  file: InstructionFileRef,
+  text: string
+) => await saveInstructions(by.api, file, text);
+
 /** Adds `userId` to the team `teamId`, as an admin does. */
 const addToTeam = async (
   admin: { session: string },
@@ -249,7 +258,7 @@ describe("in a group chat", setUpTime, () => {
 
   it("gives the agent no way to act or hold a write, only to read", async () => {
     const actsWith = codeStep(
-      `export default async (self, env) => ["connections", "apps", "build", "workflows", "memory", "brain", "knowledge"].filter((name) => { try { return env[name] !== undefined; } catch { return false; } }).join(",");`
+      `export default async (self, env) => ["connections", "apps", "build", "workflows", "brain", "knowledge"].filter((name) => { try { return env[name] !== undefined; } catch { return false; } }).join(",");`
     );
     const ann = await member(
       idp,
@@ -266,7 +275,7 @@ describe("in a group chat", setUpTime, () => {
 
     const told = (index: number) =>
       JSON.stringify(ann.provider.requests[index]?.body ?? null);
-    expect(told(1)).toContain("connections,apps,build,workflows,memory");
+    expect(told(1)).toContain("connections,apps,build,workflows,knowledge");
     expect(told(3)).toContain('\\"knowledge\\"');
     expect(told(3)).not.toContain("connections,");
     // Nor any of the tools that write, ask for a connection or read the
@@ -275,6 +284,37 @@ describe("in a group chat", setUpTime, () => {
       true,
       false,
     ]);
+  });
+
+  it("starts from the company's and the agent's instruction files, and never a person's, the asker's own included, in a group or a direct message", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const ann = await member(idp, says("In private."), says("In the group."));
+    const u = unique();
+    await save(
+      admin,
+      { scope: "company", name: "instructions" },
+      `Company ${u}`
+    );
+    await save(admin, { scope: "agent", agentId: chatAgentId }, `Agent ${u}`);
+    await save(ann, { scope: "person", personId: ann.userId }, `Ann's ${u}`);
+    const group = newGroup();
+    await onGroupRoster(group, [{ person: ann.teams }]);
+
+    await post(messageFrom(ann.teams, { text: "Hi." }));
+    await post(mentionIn(ann.teams, group, "Hi."));
+
+    const told = (index: number) => {
+      const body = JSON.stringify(ann.provider.requests[index]?.body ?? null);
+      return [`Company ${u}`, `Agent ${u}`, `Ann's ${u}`].filter((marker) =>
+        body.includes(marker)
+      );
+    };
+    expect({ direct: told(0), group: told(1) }).toStrictEqual({
+      // Her direct message isn't hers alone while GRA-1821 is open: the
+      // chat app keeps its answer too (workspace.ts, `answersAlone`).
+      direct: [`Company ${u}`, `Agent ${u}`],
+      group: [`Company ${u}`, `Agent ${u}`],
+    });
   });
 
   it("takes nothing not said to Stephen: no line, no roster read, no turn", async () => {

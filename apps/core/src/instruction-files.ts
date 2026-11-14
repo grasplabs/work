@@ -1,4 +1,8 @@
+import { appErrors } from "@grasp-os/shared/apps";
+import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema, identifierSchema } from "@grasp-os/shared/ids";
+import { errorFields, log } from "@grasp-os/shared/log";
 import {
   authoritySchema,
   permissionErrors,
@@ -6,15 +10,18 @@ import {
 import type { Authority } from "@grasp-os/shared/permissions";
 import { requireAdmin, roleErrors, roleSchema } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { readAgent } from "./agents.ts";
-import { appFor, editableApp } from "./apps.ts";
+import { companyAgent } from "./agents.ts";
+import { editableApp } from "./apps.ts";
+import { keepEvent, uuidFromHash } from "./audit-outbox.ts";
 import { memberOf } from "./auth/identity.ts";
 import type { Member } from "./auth/identity.ts";
 import {
   addInstructionFile,
   instructionFileOf,
+  instructionVersionAddedAt,
   readInstructionFilesAs,
 } from "./brain-next.ts";
 import type { InstructionFile, InstructionFileVersion } from "./brain-next.ts";
@@ -27,16 +34,23 @@ import type { InstructionFile, InstructionFileVersion } from "./brain-next.ts";
 // signed-in person's `Identity`, and the role and membership behind both
 // are read from core's records at each call.
 //
-// Which files, by where the agent works, as today's memory has them:
+// Which files, by where the agent works:
 //
-// - a person's own chat: the company's, the acting agent's, the App's
-//   when they work on one they build, and their own;
-// - an agent in a direct message: the company's, the agent's and the
-//   person's it acts for;
+// - a chat of the person's own: the company's, the acting agent's, the
+//   App's when the App the chat worked on last is one they build now
+//   (never several Apps', nor a workflow's: none has a file), and, only
+//   in a turn whose answer reaches them alone (`personal`), their own;
 // - an agent in a shared channel: the company's and the agent's, never a
 //   person's, which others there would read through the agent;
 // - an AI step of a workflow: none, so a run does the same whoever's
 //   files changed.
+//
+// `personal` is the turn's one gate for a person's own content, as their
+// own recall and their own skills take it (workspace.ts, `answersAlone`):
+// their attended chat in Grasp. Not a turn nobody asked for there and
+// then (a wake-up, an event), which what woke it steers; nor, while
+// GRA-1821 is open, a chat app's direct message, which the chat app keeps
+// too, though the plan lists their file there.
 //
 // Shared files first, so the part many chats share comes first and stays
 // the same.
@@ -49,18 +63,19 @@ import type { InstructionFile, InstructionFileVersion } from "./brain-next.ts";
 
 /**
  * Where an agent works in a chat, beyond who it is and whom it acts for
- * (its `Authority`): which kind of conversation, and in a person's own
- * chat the App they work on. The kind is vouched for by the chat's host,
- * which knows whether the chat is shared on its platform, as it does for
- * today's memory (workspace.ts); an `Authority` doesn't carry it. The App
- * is checked here: its file is given only to one of its builders.
+ * (its `Authority`): a chat others share, or one of the person's own, with
+ * the App they work on and whether its answer reaches them alone
+ * (`personal`). Both are vouched for by the chat's host, which knows
+ * whether the chat is shared on its platform and who asked the turn
+ * (workspace.ts); an `Authority` carries neither. The App is checked
+ * here: its file is given only to one of its builders.
  */
 const instructionContextSchema = z.discriminatedUnion("conversation", [
   z.strictObject({
     conversation: z.literal("own"),
     appId: appIdSchema.optional(),
+    personal: z.boolean(),
   }),
-  z.strictObject({ conversation: z.literal("direct") }),
   z.strictObject({ conversation: z.literal("channel") }),
 ]);
 
@@ -76,11 +91,72 @@ const memberNamed = async (env: Env, userId: string): Promise<Member> => {
   return member;
 };
 
+/**
+ * Whether `member` may change the App `appId` now, as its builders change
+ * it (`editableApp`, app-access.ts): their role in it, and, shared with
+ * them, that they may read every source it holds; and that it isn't
+ * archived. The App's file reaches a chat on the rule that lets it be
+ * edited. Any other answer to that check is no; anything else still
+ * fails the call.
+ */
+const buildsApp = async (
+  env: Env,
+  member: Member,
+  appId: string
+): Promise<boolean> => {
+  try {
+    await editableApp(env, member, appId);
+    return true;
+  } catch (error) {
+    if (
+      roleErrors.codeOf(error) === "role.forbidden" ||
+      appErrors.codeOf(error) === "app.not_found" ||
+      appErrors.codeOf(error) === "app.unreadable" ||
+      appErrors.codeOf(error) === "app.archived"
+    ) {
+      return false;
+    }
+    throw error;
+  }
+};
+
 /** The company's files, the same in every context that gets them. */
 const companyFiles: InstructionFile[] = [
   { scope: "company", name: "instructions" },
   { scope: "company", name: "facts" },
 ];
+
+/** The files `context` gets, read as `member`, in the order above. */
+const filesOf = async (
+  env: Env,
+  member: Member,
+  context: z.output<typeof instructionContextSchema>,
+  { agent, person }: { agent: InstructionFile; person: InstructionFile }
+): Promise<InstructionFileVersion[]> => {
+  if (context.conversation === "channel") {
+    return await readInstructionFilesAs(env, member, [...companyFiles, agent]);
+  }
+  // Theirs only where the answer reaches them alone (above).
+  const own = context.personal ? [person] : [];
+  const { appId } = context;
+  // An App's file is for those who may change it, while it isn't
+  // archived. A chat about an App they no longer build, or one put away,
+  // goes on without it, as with an App that has none: refusing would end
+  // the chat over a file, and tell them it exists.
+  if (appId === undefined || !(await buildsApp(env, member, appId))) {
+    return await readInstructionFilesAs(env, member, [
+      ...companyFiles,
+      agent,
+      ...own,
+    ]);
+  }
+  return await readInstructionFilesAs(
+    env,
+    member,
+    [...companyFiles, agent, { scope: "app", appId }, ...own],
+    appId
+  );
+};
 
 /**
  * The instruction files the agent `authority` gets in `context`, as they
@@ -89,8 +165,9 @@ const companyFiles: InstructionFile[] = [
  * workflow's AI step (`mode` "workflow") gets none and needs no context.
  * Refused with `permission.context_invalid` for code that isn't an agent,
  * and for a chat without a context or with one that isn't one; with
- * `permission.person_inactive` once the person is no longer a member;
- * and, working on an App, when they don't build it (`appFor`).
+ * `permission.person_inactive` once the person is no longer a member.
+ * Working on an App they don't build, its file is left out; where the
+ * answer doesn't reach them alone (`personal` false), the person's own.
  */
 export const instructionFilesFor = async (
   env: Env,
@@ -121,42 +198,9 @@ export const instructionFilesFor = async (
     agentId: authority.subject.agentId,
   };
   const person: InstructionFile = { scope: "person", personId: member.userId };
-  switch (context.conversation) {
-    case "channel": {
-      return await readInstructionFilesAs(env, member, [
-        ...companyFiles,
-        agent,
-      ]);
-    }
-    case "direct": {
-      return await readInstructionFilesAs(env, member, [
-        ...companyFiles,
-        agent,
-        person,
-      ]);
-    }
-    case "own": {
-      const { appId } = context;
-      if (appId === undefined) {
-        return await readInstructionFilesAs(env, member, [
-          ...companyFiles,
-          agent,
-          person,
-        ]);
-      }
-      // As today: an App's file is for those who build it.
-      await appFor(env, member, appId, "builder");
-      return await readInstructionFilesAs(
-        env,
-        member,
-        [...companyFiles, agent, { scope: "app", appId }, person],
-        appId
-      );
-    }
-    default: {
-      throw permissionErrors.create("permission.context_invalid");
-    }
-  }
+  const read = await filesOf(env, member, context, { agent, person });
+  // An emptied file is a version of its own, which nothing loads.
+  return read.filter(({ text }) => text.trim() !== "");
 };
 
 /**
@@ -174,6 +218,27 @@ const identitySchema = z.strictObject({
   onboardingOnly: z.literal(true).optional(),
   expiresAt: z.string(),
 }) satisfies z.ZodType<Identity>;
+
+/**
+ * The signed-in person `by`, as a member now: refused with
+ * `permission.denied` for any code's `Authority`, whoever it acts for, and
+ * `permission.invalid` for anything that isn't a session's `Identity`.
+ */
+const signedInMember = async (
+  env: Env,
+  by: Identity | Authority,
+  action: "read" | "write"
+): Promise<Member> => {
+  if (typeof by === "object" && by !== null && "subject" in by) {
+    throw permissionErrors.create("permission.denied", { action });
+  }
+  const person = permissionErrors.parse(
+    "permission.invalid",
+    identitySchema,
+    by
+  );
+  return await memberNamed(env, person.userId);
+};
 
 /** Refuses `member` writing `file`, unless the rule above lets them. */
 const requireWriter = async (
@@ -194,13 +259,12 @@ const requireWriter = async (
     }
     case "agent": {
       requireAdmin(member);
-      // Never a person's own agent's (agents.ts): what it is told is its
-      // owner's to say, in its instructions, and an admin who learnt its
-      // ID from the audit log tells it nothing.
-      const agent = await readAgent(env, file.agentId);
-      if (agent !== undefined && agent.ownerId !== null) {
-        throw roleErrors.create("role.forbidden");
-      }
+      // Only an agent the company has has a file: none is kept under an
+      // ID nobody made, one an admin deleted, or a person's own agent's
+      // (agents.ts), which is its owner's to instruct; each answers alike,
+      // so an admin who learnt an own agent's ID from the audit log learns
+      // nothing more and tells it nothing.
+      await companyAgent(env, file.agentId);
       return;
     }
     case "app": {
@@ -214,16 +278,55 @@ const requireWriter = async (
 };
 
 /**
+ * A save as a person's page sends it, checked whole before anything is
+ * read: `after`, the version it was edited from (0 for a file never
+ * written), named by every save, whatever the caller's types said. The
+ * file is checked as `instructionFileOf` checks it; `change` and `text`
+ * as the Brain checks them (`addInstructionFile`).
+ */
+const savedSchema = z.strictObject({
+  file: z.unknown(),
+  change: z.string(),
+  text: z.string(),
+  after: z.int().min(0),
+});
+
+/** The file's own ID in the audit log: its scope and whose it is. */
+const instructionFileId = (file: InstructionFile): string => {
+  switch (file.scope) {
+    case "company": {
+      return `company:${file.name}`;
+    }
+    case "person": {
+      return `person:${file.personId}`;
+    }
+    case "app": {
+      return `app:${file.appId}`;
+    }
+    case "agent": {
+      return `agent:${file.agentId}`;
+    }
+    default: {
+      throw new Error("Unknown instruction file");
+    }
+  }
+};
+
+/**
  * Saves `text` as the next version of the instruction file `file`, by the
  * signed-in person `by`, once the rule above lets them, with their role
  * read from core's records now. Refused with `permission.denied` for any
  * code's `Authority` (an agent's, an App's, a workflow's), whoever it
  * acts for; `permission.person_inactive` for someone no longer a member;
  * `role.forbidden` (or the App's own refusals) for a file not theirs to
- * write; `instructions.too_large` over `instructionsMaxLength` UTF-16
- * units; `permission.invalid` for an `Identity` or file that isn't one.
- * `change` names this save, minted before its first try, so a retry saves
- * it once.
+ * write; `agent.unknown` for an agent the company doesn't have;
+ * `instructions.too_large` over `instructionsMaxLength` UTF-16 units;
+ * `instructions.changed` once `after`, the version it was edited from
+ * (0 for none), is no longer the current one; `permission.invalid` for an
+ * `Identity` or file that isn't one, or a save that isn't one (one that
+ * names no `after` among them). Empty text empties the file, which then
+ * loads nowhere. `change` names this save, minted before its first
+ * try, so a retry saves it once.
  *
  * A person's route passes the session's `Identity` as the RPC layer built
  * it, never one assembled by code acting for someone: code passes its own
@@ -232,17 +335,82 @@ const requireWriter = async (
 export const saveInstructionFile = async (
   env: Env,
   by: Identity | Authority,
-  saved: { file: InstructionFile; change: string; text: string }
+  saved: { file: InstructionFile; change: string; text: string; after: number }
 ): Promise<{ file: InstructionFile; version: number }> => {
-  if (typeof by === "object" && by !== null && "subject" in by) {
-    throw permissionErrors.create("permission.denied", { action: "write" });
-  }
-  const person = permissionErrors.parse(
+  // A save without `after` would overwrite whatever is current.
+  const { change, text, after, ...named } = permissionErrors.parse(
     "permission.invalid",
-    identitySchema,
-    by
+    savedSchema,
+    saved
   );
-  const file = instructionFileOf(saved.file);
-  await requireWriter(env, await memberNamed(env, person.userId), file);
-  return await addInstructionFile(env, { ...saved, file });
+  const file = instructionFileOf(named.file);
+  const member = await signedInMember(env, by, "write");
+  await requireWriter(env, member, file);
+  const added = await addInstructionFile(env, { file, change, text, after });
+  // Recorded once the version is there, so an entry never reads as a
+  // save that wasn't made, in core's outbox (`keepEvent`), which the
+  // clock's drain hands to the log and tries again until the log has it:
+  // a log out of reach neither fails the save, which is done, nor leaves
+  // it unrecorded, and nobody has to save again for it. Every try makes
+  // the same event: its ID from who saved which file under which change,
+  // its time the version's own, and the rest fixed by those, so the
+  // outbox and the log keep it once, a retry the log already has a
+  // duplicate, never a conflict: one event per save. A version whose time
+  // can't be read just now takes the time now: recorded all the same,
+  // and only a retry of that same save could then differ from it. Which
+  // file and version, never its text.
+  const id = instructionFileId(file);
+  let at: Date;
+  try {
+    at = await instructionVersionAddedAt(env, file, added.version);
+  } catch (error) {
+    log.warn("instructions.saved_time_unread", errorFields(error));
+    at = new Date();
+  }
+  const event = createAuditEvent(
+    {
+      actor: actorOf(member),
+      action: "instructions.saved",
+      target: { type: "instructions", id },
+      detail: { scope: file.scope, version: added.version },
+    },
+    "core"
+  );
+  await keepEvent(env, drizzle(env.DB), {
+    ...event,
+    at: at.toISOString(),
+    id: uuidFromHash(
+      await sha256Hex(
+        JSON.stringify(["instructions.saved", member.userId, id, change])
+      )
+    ),
+  });
+  return added;
+};
+
+/**
+ * The instruction file `file` as it is now, for the signed-in person `by`
+ * to edit: only one they may write (the rule above), so this reads no
+ * file its saving wouldn't let them change. `null` while it was never
+ * written. Refused as `saveInstructionFile` refuses.
+ */
+export const instructionFileToEdit = async (
+  env: Env,
+  by: Identity | Authority,
+  input: unknown
+): Promise<{ version: number; text: string } | null> => {
+  const file = instructionFileOf(input);
+  const member = await signedInMember(env, by, "read");
+  await requireWriter(env, member, file);
+  // An App's file is read as one of its builders, which `requireWriter`
+  // has just checked.
+  const [found] = await readInstructionFilesAs(
+    env,
+    member,
+    [file],
+    file.scope === "app" ? file.appId : undefined
+  );
+  return found === undefined
+    ? null
+    : { version: found.version, text: found.text };
 };

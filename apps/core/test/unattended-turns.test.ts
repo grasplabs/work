@@ -9,7 +9,7 @@ import { outcome, signedInApi } from "./sign-in.ts";
 // A turn nobody asked for there and then (`Workspace.askUnattended`): what
 // wakes an agent asks through it. These start from the ways it can fail:
 // a change going out with nobody there; a change held for good; a write
-// that never passes connect (the agent's memory) made anyway; the same
+// that never passes connect (offering a workflow) made anyway; the same
 // chat's next turn, which a person asks, still only reading.
 
 const idp = mockIdp();
@@ -36,10 +36,6 @@ const changes = calls("mail.search", filing);
 
 /** Reaches someone outside the chat: mail to Ben. */
 const sendsMail = calls("mail.send", invoiceMail);
-
-const savesMemory = codeStep(
-  "export default async (self, env) => { try { await env.memory.saveUser({ text: 'Prefers short answers.', ifVersion: 0 }); return 'saved'; } catch (error) { return error.message; } };"
-);
 
 /** The chat's person, a mail connection its agent may send through, and both ways to ask. */
 const setUp = async (...replies: Parameters<typeof chatOf>[1][]) => {
@@ -123,28 +119,6 @@ describe("a turn nobody was there for", setUpTime, () => {
       ],
       waiting: [],
       sent: { calls: 0, sent: [] },
-    });
-  });
-
-  it("refuses a write that never passes connect, and the chat's next turn, asked by its person, makes it", async () => {
-    const { chat, woken, said } = await setUp(
-      savesMemory,
-      says("I can't keep that now."),
-      savesMemory,
-      says("Kept.")
-    );
-    await woken("Remember what you learned.");
-    const unattended = await said();
-    await chat.ask("Remember that I prefer short answers.");
-    const both = await said();
-    expect({
-      unattended,
-      attended: both.slice(unattended.length),
-    }).toStrictEqual({
-      unattended: [
-        "Returned:\nNobody asked for this just now, so the agent can only read. What it wants to change waits for its person.",
-      ],
-      attended: ["Returned:\nsaved"],
     });
   });
 

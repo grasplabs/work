@@ -47,7 +47,6 @@ import { captureRead } from "../src/connection-capture.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
 import { instructionFilesFor } from "../src/instruction-files.ts";
-import { saveUserMemory } from "../src/knowledge/memory.ts";
 import { codeStep, says } from "./agent-chat.ts";
 import { published, requestGranted } from "./apps.ts";
 import { brainModules } from "./brain-next-modules.ts";
@@ -56,8 +55,8 @@ import { copyOfStore, restoreStore } from "./brain-next-store-copy.ts";
 import type { StoreCopy } from "./brain-next-store-copy.ts";
 import { brainSurfaces, membersOf, textOf } from "./brain-next-surfaces.ts";
 import type { Answer, Probe, Probing } from "./brain-next-surfaces.ts";
-import { actingFor, newChat } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
+import { addedSharedFile, saveInstructions } from "./instruction-saves.ts";
 import { answeringProvider, testModel } from "./model-provider.ts";
 import { noProducers } from "./no-producers.ts";
 import { carrying } from "./platform-providers.ts";
@@ -603,6 +602,7 @@ describe(
           file,
           change: crypto.randomUUID(),
           text: `Instructions ${sharedWord} ${marker}`,
+          after: 0,
         });
       }
       const instructionMarkers = [
@@ -1193,7 +1193,7 @@ describe(
           onBehalfOf: holder,
           mode: "interactive",
         }),
-        { conversation: "own", appId: withFile }
+        { conversation: "own", appId: withFile, personal: true }
       );
       // And the outsider does use it: it is theirs to open.
       const outsiderMember = await memberOf(env.DB, outsider);
@@ -1433,17 +1433,13 @@ describe(
       ]);
       await admin.api.members.remove(former.userId);
       const marker = markerWord();
-      const companyFiles: InstructionFile[] = [
+      const companyFiles: Extract<InstructionFile, { scope: "company" }>[] = [
         { scope: "company", name: "instructions" },
         { scope: "company", name: "facts" },
       ];
       for (const file of companyFiles) {
         // oxlint-disable-next-line no-await-in-loop -- one file at a time
-        await addInstructionFile(env, {
-          file,
-          change: crypto.randomUUID(),
-          text: `Company instructions ${marker}`,
-        });
+        await addedSharedFile(file, `Company instructions ${marker}`);
       }
       const forbidden = { "the company's instruction files": marker };
       const findings: Finding[] = [];
@@ -1535,6 +1531,7 @@ describe(
         file: holderFile,
         change: crypto.randomUUID(),
         text: `Instructions ${sharedWord} ${fileMarker}`,
+        after: 0,
       });
       const backup = await copyOfStore();
 
@@ -1777,8 +1774,9 @@ describe(
       // own chat in Grasp: not in a thread others read, nor, while
       // GRA-1821's decision is open, in their direct message, which the
       // chat app keeps too (workspace.ts, `answersAlone`). A thread others
-      // read is never their own chat either: no USER.md of theirs, and
-      // none of their own chat's tools, their connections first.
+      // read is never their own chat either: no instruction file of
+      // theirs, and none of their own chat's tools, their connections
+      // first.
       await chatAgentReadsBrain();
       const depot = `d${unique()}`;
       const marker = markerWord();
@@ -1819,13 +1817,10 @@ describe(
         statement: ownMemory,
         quote: ownMemory,
       });
-      const agent = { type: "agent" as const, agentId: chatAgentId };
-      await saveUserMemory(
-        env,
-        actingFor(agent, ann.userId),
-        await newChat(agent),
-        { type: "own" },
-        { text: `Call me ${userMarker}.`, ifVersion: 0 }
+      await saveInstructions(
+        ann.api,
+        { scope: "person", personId: ann.userId },
+        `Call me ${userMarker}.`
       );
       const question = `What about depot ${depot}?`;
       /** What reached the model for what `ask` posted. */
@@ -1903,12 +1898,13 @@ describe(
           connections: false,
           ran: true,
         })),
-        // Her own chat on Teams: its tools and her USER.md, as on main
-        // (knowledge/memory.ts); her own store, not while GRA-1821 is open.
+        // Her own chat on Teams: its tools; her own instruction file, her
+        // own memories and her own store's recall, not while GRA-1821 is
+        // open (workspace.ts, `answersAlone`).
         inDirect: {
           own: false,
           ownMemory: false,
-          userMd: true,
+          userMd: false,
           connections: true,
           ran: true,
         },

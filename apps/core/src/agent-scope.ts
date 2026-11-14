@@ -100,8 +100,8 @@ export interface AgentApi {
 /**
  * An agent's ID: letters, digits and `-` only (as the organization's ID,
  * every chat's agent, is), so it reads the same in a permission, an audit
- * event and a memory path (`agents/<id>/AGENTS.md`), and never reaches
- * into another's.
+ * event and the key of its instruction file (brain-next.ts), and never
+ * reaches into another's.
  */
 export const workspaceAgentIdSchema = z.string().regex(/^[A-Za-z0-9-]{1,64}$/u);
 

@@ -30,6 +30,7 @@ import { finishedByTheClock } from "./brain-next-own-store.ts";
 import { consentCode } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { answering, answeringWith, holdAlarm } from "./interview-link.ts";
+import { ownCollectionOf } from "./knowledge.ts";
 import { runMinuteTasks } from "./maintenance.ts";
 import { onboardingLog } from "./onboarding-log.ts";
 import {
@@ -95,6 +96,27 @@ const emailOf = async (userId: string): Promise<string | undefined> => {
   return row?.email;
 };
 
+/** A note `who` keeps in a collection only they read. */
+const noteOf = async (who: Person, text: string) => {
+  const personal = await ownCollectionOf(who);
+  return await who.api.knowledge.saveDocument({
+    collectionId: personal,
+    path: `notes/${crypto.randomUUID().slice(0, 8)}.md`,
+    text,
+    ifVersion: 0,
+  });
+};
+
+/** Whether Knowledge still has document `documentId`. */
+const inKnowledge = async (documentId: string): Promise<number> => {
+  const row = await env.KNOWLEDGE.prepare(
+    "SELECT count(*) AS count FROM documents WHERE id = ?"
+  )
+    .bind(documentId)
+    .first<{ count: number }>();
+  return row?.count ?? 0;
+};
+
 /** WebVTT captions saying `text`: a file the extractor reads. */
 const captions = (text: string): Uint8Array =>
   new TextEncoder().encode(
@@ -127,27 +149,6 @@ const storedOf = async (claims: Record<string, unknown>) => {
     .bind(String(claims.sub))
     .first<{ count: number }>();
   return { users: users?.count ?? 0, accounts: held?.count ?? 0 };
-};
-
-/** A note `who` keeps in their own Personal collection. */
-const noteOf = async (who: Person, text: string) => {
-  const { personal } = await who.api.memory.collections();
-  return await who.api.knowledge.saveDocument({
-    collectionId: personal,
-    path: `notes/${crypto.randomUUID().slice(0, 8)}.md`,
-    text,
-    ifVersion: 0,
-  });
-};
-
-/** Whether Knowledge still has document `documentId`. */
-const inKnowledge = async (documentId: string): Promise<number> => {
-  const row = await env.KNOWLEDGE.prepare(
-    "SELECT count(*) AS count FROM documents WHERE id = ?"
-  )
-    .bind(documentId)
-    .first<{ count: number }>();
-  return row?.count ?? 0;
 };
 
 /** Whether run `runId` of an independent workflow was asked to stop. */
@@ -1133,7 +1134,7 @@ describe("erasing a person", () => {
     });
   });
 
-  it("purges what the Brain and Knowledge hold of them, their Personal collection with it, and leaves everyone else's", async () => {
+  it("purges what the Brain and Knowledge hold of them, every collection only they read with it, and leaves everyone else's", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInApi(idp, "builder");
     const other = await signedInApi(idp, "user");

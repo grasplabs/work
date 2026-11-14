@@ -66,6 +66,7 @@ import {
   permissionActionSchema,
   permissionErrors,
 } from "@grasp-os/shared/permissions";
+import type { Authority } from "@grasp-os/shared/permissions";
 import { redact } from "@grasp-os/shared/redact";
 import { canBuild, roleSchema } from "@grasp-os/shared/roles";
 import { subjectSchema } from "@grasp-os/shared/subject";
@@ -195,12 +196,14 @@ import {
   dashboardWidgets,
   dashboards,
 } from "./db/workspace/schema.ts";
+import { chatWork } from "./drafts.ts";
 import { callObject, chatSession } from "./durable-objects.ts";
 import { dropHeldStarts } from "./held-starts.ts";
 import { readableSources, withheldSourceDetail } from "./history-access.ts";
+import { instructionFilesFor } from "./instruction-files.ts";
+import type { InstructionContext } from "./instruction-files.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
 import { cited } from "./knowledge/citations.ts";
-import { forContext } from "./knowledge/memory.ts";
 import { brainOf } from "./knowledge/ports.ts";
 import { hasBrainGrant } from "./knowledge/recall-grants.ts";
 import { inputTokens, modelSettings, models } from "./models.ts";
@@ -321,6 +324,38 @@ const chatPlaceSchema = z.union([
   sharedChatSchema,
 ]);
 export type ChatPlace = z.infer<typeof chatPlaceSchema>;
+
+/**
+ * The App chat `chatId` worked on last, as its work names it (`chatWork`
+ * in drafts.ts: the latest of the subjects its agent wrote or its Build it
+ * made); null when that is a workflow, or it worked on nothing. Only its
+ * App's builders get its file, checked at each turn (instruction-files.ts).
+ */
+const lastAppOf = async (env: Env, chatId: string): Promise<string | null> => {
+  const [last] = await chatWork(env, chatId);
+  return last?.kind === "app" ? last.id : null;
+};
+
+/**
+ * Where a chat's agent works, for its instruction files: never a person's
+ * own file, nor an App's, where others read the answer (a chat others
+ * share); in a chat of theirs, the App it worked on last (`lastAppOf`),
+ * and their own file only in a turn whose answer reaches them alone
+ * (`personal`, `answersAlone`): the one gate their own recall and skills
+ * take too.
+ */
+const instructionContextOf = (
+  shared: boolean,
+  appId: string | null,
+  personal: boolean
+): InstructionContext => {
+  if (shared) {
+    return { conversation: "channel" };
+  }
+  return appId === null
+    ? { conversation: "own", personal }
+    : { conversation: "own", appId, personal };
+};
 
 /** The title of a chat others share on `platform`. */
 const sharedTitle = (platform: string, kind: SharedChat["kind"]): string =>
@@ -2077,11 +2112,14 @@ export class Workspace extends DurableObject<Env> {
         throw permissionErrors.create("permission.context_invalid");
       }
       // Before the model is admitted: what memory reads is a source too.
+      // Whether the turn's answer reaches its person alone: the one gate
+      // for their own content, whatever reads it (`answersAlone`).
+      const personal = answersAlone(chat, unattended);
       const context = await this.#turnContext(
         scope,
         authority,
         work,
-        shared,
+        { shared, personal },
         agent
       );
       // Refuses a model the deployment or its rules don't allow before
@@ -2124,7 +2162,7 @@ export class Workspace extends DurableObject<Env> {
         ),
         shared,
         audience,
-        personal: answersAlone(chat, unattended),
+        personal,
         readsBrain: await hasBrainGrant(this.env, authority),
         context,
         capture: {
@@ -2417,26 +2455,45 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * What the model reads this turn besides the question: the memory of the
-   * person's own chat (the company's files and their USER.md, read now and
-   * recorded as sources), the skills it may use, from the Brain, and
-   * how to answer on the chat platform it came through, if any.
+   * What the model reads this turn besides the question: the instruction
+   * files of where it works (instruction-files.ts, read now, so an edit
+   * counts from the next turn), the skills it may use, from the Brain,
+   * and how to answer on the chat platform it came through, if any.
    */
   async #turnContext(
     scope: Parameters<typeof auditAgentCall>[1],
-    authority: Parameters<typeof forContext>[1],
+    authority: Authority,
     work: Extract<WorkContext, { type: "chat" }>,
-    shared: boolean,
+    { shared, personal }: { shared: boolean; personal: boolean },
     agent: Awaited<ReturnType<typeof turnAgent>>
   ): Promise<TurnContext> {
-    // Never the person's own USER.md where others read the answer.
-    const memory = await forContext(
-      this.env,
-      authority,
-      work,
-      shared ? { type: "channel" } : { type: "own" }
-    );
-    this.#keepSources(work.chatId, memory.provenance.collectionIds);
+    const { via } = this.#chat(work.chatId);
+    // A Brain that can't give the files leaves the turn without them, as
+    // it does without skills (below) and without the person's own file
+    // when their store fails (brain-next.ts): missing guidance is no
+    // question of access. A refusal (who it acts for, where) still
+    // refuses the turn. One that went without them is recorded, as the
+    // skills' call records it (`unavailable`, below).
+    let instructions: Awaited<ReturnType<typeof instructionFilesFor>> = [];
+    try {
+      const appId = shared ? null : await lastAppOf(this.env, work.chatId);
+      instructions = await instructionFilesFor(
+        this.env,
+        authority,
+        instructionContextOf(shared, appId, personal)
+      );
+    } catch (error) {
+      if (permissionErrors.codeOf(error) !== undefined) {
+        throw error;
+      }
+      log.warn("instructions.turn_unavailable", {
+        errorName: error instanceof Error ? error.name : typeof error,
+      });
+      await auditAgentCall(this.env, scope, {
+        method: "brain.instructions",
+        detail: { files: 0, turn: true, unavailable: true },
+      });
+    }
     // The skills the chat may use, from the Brain: guidance, never a grant
     // (brain-skills.ts). Their own skills only where the scope says so, a
     // turn they asked for in their own chat, and their teams' only where
@@ -2469,7 +2526,6 @@ export class Workspace extends DurableObject<Env> {
         ...(unavailable ? { unavailable } : {}),
       },
     });
-    const { via } = this.#chat(work.chatId);
     // A chat that came through a chat platform: how to answer there.
     const channel = via === "web" ? undefined : await channelText();
     // Only who builds reads Grasp's docs, in their own chat: thousands of
@@ -2482,7 +2538,7 @@ export class Workspace extends DurableObject<Env> {
       agent === undefined ? [] : await documentsOf(this.env, agent.id);
     const documents = kept.map(({ id, name, type }) => ({ id, name, type }));
     return {
-      memory,
+      instructions: instructions.map(({ file, text }) => ({ file, text })),
       skills,
       channel,
       builds,

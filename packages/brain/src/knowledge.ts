@@ -683,6 +683,8 @@ export const knowledgeErrors = errorFamily({
     "This document has too many links to save. Split it into several documents.",
   "knowledge.conflict":
     "This document changed since you opened it. Load the latest version and apply your change to it.",
+  "knowledge.purge_not_erasing":
+    "A person's own data is purged only by erasing them, in Members and roles.",
   "knowledge.purge_expired":
     "This purge wasn't confirmed in time, or isn't the one prepared. Prepare it again.",
   "knowledge.unavailable":

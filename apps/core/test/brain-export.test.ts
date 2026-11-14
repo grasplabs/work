@@ -12,12 +12,11 @@ import {
   advanceExports,
   brainExportPath,
 } from "../src/knowledge/brain-export.ts";
-import { saveUserMemory } from "../src/knowledge/memory.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
-import { actingFor, newChat } from "./contexts.ts";
+import { newChat } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
-import { newAgent, purged } from "./knowledge-purge.ts";
-import { newTeam } from "./knowledge.ts";
+import { newAgent, purged, saveOver } from "./knowledge-purge.ts";
+import { newTeam, ownCollectionOf } from "./knowledge.ts";
 import {
   openRpc,
   outcome,
@@ -159,13 +158,8 @@ describe("exporting the company's Brain", setUpTime, () => {
     });
     // Ada's own: her Personal collection, and a record of her own.
     const agent = newAgent();
-    await saveUserMemory(
-      env,
-      actingFor(agent, ada.userId),
-      await newChat(agent),
-      { type: "own" },
-      { text: `# About me\nCall me ${own}.`, ifVersion: 0 }
-    );
+    const personal = await ownCollectionOf(ada);
+    await saveOver(ada, personal, "USER.md", `# About me\nCall me ${own}.`);
     await ada.api.knowledge.remember(
       { kind: "fact", text: `I like ${own}.` },
       { idempotencyKey: `key-${unique()}` }

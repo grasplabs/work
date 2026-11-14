@@ -1,29 +1,45 @@
 import {
+  brainOf,
   instructionsMaxLength,
+  personalBrainOf,
   recallBudgetMax,
 } from "@grasp-os/brain-next/contract";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { authoritySchema } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
-import { recallAs } from "../src/brain-next.ts";
-import type { InstructionFile } from "../src/brain-next.ts";
+import { drainAuditOutboxes } from "../src/audit-drains.ts";
+import { auditLog } from "../src/audit-log.ts";
 import {
+  addInstructionFile,
+  erasePerson,
+  readInstructionFilesAs,
+  recallAs,
+} from "../src/brain-next.ts";
+import type { InstructionFile } from "../src/brain-next.ts";
+import { inJurisdiction } from "../src/durable-objects.ts";
+import {
+  instructionFileToEdit,
   instructionFilesFor,
   saveInstructionFile,
 } from "../src/instruction-files.ts";
 import type { InstructionContext } from "../src/instruction-files.ts";
+import { outlook, requestGranted } from "./apps.ts";
+import { ageOwnErasure } from "./brain-next-own-store.ts";
 import { actingFor } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
+import { keptAgent } from "./instruction-saves.ts";
 import {
+  auditedDuring,
   outcome,
   signedInApi,
   signedInWithRole,
   unique,
   whoami,
 } from "./sign-in.ts";
+import { connectDb } from "./test-env.ts";
 
 // Instruction files (GRA-1771), from the threat model on the issue: a
 // context gets a file its rule leaves out, above all a person's file in a
@@ -68,7 +84,20 @@ const inWorkflow = (agentId: string, personId: string): Authority =>
     mode: "workflow",
   });
 
-/** Saves `text` to `file` as `by`, with a change of its own. */
+/** The version of `file` now as `by` would read it to edit; 0 for none or unreadable. */
+const versionNow = async (
+  by: Identity | Authority,
+  file: InstructionFile
+): Promise<number> => {
+  try {
+    const now = await instructionFileToEdit(env, by, file);
+    return now?.version ?? 0;
+  } catch {
+    return 0;
+  }
+};
+
+/** Saves `text` to `file` as `by`, from its version now, with a change of its own. */
 const save = async (
   by: Identity,
   file: InstructionFile,
@@ -78,6 +107,7 @@ const save = async (
     file,
     change: crypto.randomUUID(),
     text,
+    after: await versionNow(by, file),
   });
   return version;
 };
@@ -87,10 +117,17 @@ const saveOutcome = async (
   by: Identity | Authority,
   file: InstructionFile,
   text = `x ${unique()}`
-): Promise<string> =>
-  await outcome(
-    saveInstructionFile(env, by, { file, change: crypto.randomUUID(), text })
+): Promise<string> => {
+  const after = await versionNow(by, file);
+  return await outcome(
+    saveInstructionFile(env, by, {
+      file,
+      change: crypto.randomUUID(),
+      text,
+      after,
+    })
   );
+};
 
 /** The texts `authority` gets in `context`, in order. */
 const textsFor = async (
@@ -115,6 +152,19 @@ const markersFor = async (
   );
 };
 
+/** A personal connection of `ownerId`'s: their mailbox, which nobody else reads. */
+const mailboxOf = async (ownerId: string): Promise<string> => {
+  const id = `connection-mailbox-${unique()}`;
+  const now = Date.now();
+  await connectDb()
+    .prepare(
+      "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, created_at, updated_at) VALUES (?, 'microsoft', 'personal', ?, 'active', 'native', 'microsoft-365', ?, ?)"
+    )
+    .bind(id, ownerId, now, now)
+    .run();
+  return id;
+};
+
 /** The Brain's store, read directly, as only these tests do. */
 const store = () => env.BRAIN_STORE.getByName("brain");
 
@@ -126,7 +176,10 @@ describe("instruction files", setUpTime, () => {
       builderWithApi(),
     ]);
     const { id: appId } = await builder.api.apps.create({ name: "Desk" });
-    const [agentId, otherAgentId] = [newAgentId(), newAgentId()];
+    const [agentId, otherAgentId] = await Promise.all([
+      keptAgent(),
+      keptAgent(),
+    ]);
     const u = unique();
     const markers = {
       companyInstructions: `company instructions ${u}`,
@@ -164,13 +217,20 @@ describe("instruction files", setUpTime, () => {
     const asAgent = agentFor(agentId, personId);
 
     const got = {
-      ownChat: await markersFor(markers, asAgent, { conversation: "own" }),
+      ownChat: await markersFor(markers, asAgent, {
+        conversation: "own",
+        personal: true,
+      }),
       ownChatOnApp: await markersFor(markers, asAgent, {
         conversation: "own",
         appId,
+        personal: true,
       }),
-      directMessage: await markersFor(markers, asAgent, {
-        conversation: "direct",
+      // A chat of theirs whose answer doesn't reach them alone: a chat
+      // app's direct message while GRA-1821 is open, a turn nobody asked.
+      notTheirsAlone: await markersFor(markers, asAgent, {
+        conversation: "own",
+        personal: false,
       }),
       sharedChannel: await markersFor(markers, asAgent, {
         conversation: "channel",
@@ -179,12 +239,12 @@ describe("instruction files", setUpTime, () => {
       otherPersonsChat: await markersFor(
         markers,
         agentFor(agentId, other.userId),
-        { conversation: "own" }
+        { conversation: "own", personal: true }
       ),
-      otherAgentsMessage: await markersFor(
+      otherAgentsChat: await markersFor(
         markers,
         agentFor(otherAgentId, personId),
-        { conversation: "direct" }
+        { conversation: "own", personal: true }
       ),
     };
     expect(got).toStrictEqual({
@@ -196,7 +256,7 @@ describe("instruction files", setUpTime, () => {
         "app",
         "person",
       ],
-      directMessage: ["companyInstructions", "companyFacts", "agent", "person"],
+      notTheirsAlone: ["companyInstructions", "companyFacts", "agent"],
       sharedChannel: ["companyInstructions", "companyFacts", "agent"],
       workflowStep: [],
       otherPersonsChat: [
@@ -205,7 +265,7 @@ describe("instruction files", setUpTime, () => {
         "agent",
         "otherPerson",
       ],
-      otherAgentsMessage: [
+      otherAgentsChat: [
         "companyInstructions",
         "companyFacts",
         "otherAgent",
@@ -215,6 +275,7 @@ describe("instruction files", setUpTime, () => {
     const files = await instructionFilesFor(env, asAgent, {
       conversation: "own",
       appId,
+      personal: true,
     });
     expect(files.map(({ file }) => file)).toStrictEqual([
       { scope: "company", name: "instructions" },
@@ -225,7 +286,7 @@ describe("instruction files", setUpTime, () => {
     ]);
   });
 
-  it("gives a direct message only the file of the person the agent acts for, whatever the context holds", async () => {
+  it("gives a chat only the file of the person the agent acts for, and none where its answer doesn't reach them alone, whatever the context holds", async () => {
     const [one, other] = await Promise.all([member("user"), member("user")]);
     const u = unique();
     await save(one, { scope: "person", personId: one.userId }, `one ${u}`);
@@ -237,8 +298,17 @@ describe("instruction files", setUpTime, () => {
     const asAgent = agentFor(newAgentId(), one.userId);
 
     await expect(
-      textsFor(asAgent, { conversation: "direct" })
+      textsFor(asAgent, { conversation: "own", personal: true })
     ).resolves.not.toContain(`other ${u}`);
+    // A chat app's direct message, while GRA-1821 is open: not theirs
+    // alone, so not their own file either (the plan lists it there).
+    const direct = await textsFor(asAgent, {
+      conversation: "own",
+      personal: false,
+    });
+    expect(
+      [`one ${u}`, `other ${u}`].filter((text) => direct.includes(text))
+    ).toStrictEqual([]);
     // A context naming someone else is no context.
     const named = await outcome(
       instructionFilesFor(
@@ -246,7 +316,8 @@ describe("instruction files", setUpTime, () => {
         asAgent,
         // SAFETY: a call from outside TypeScript can send any shape.
         {
-          conversation: "direct",
+          conversation: "own",
+          personal: true,
           personId: other.userId,
         } as InstructionContext
       )
@@ -261,7 +332,9 @@ describe("instruction files", setUpTime, () => {
       person.userId
     );
     await expect(
-      outcome(instructionFilesFor(env, asApp, { conversation: "own" }))
+      outcome(
+        instructionFilesFor(env, asApp, { conversation: "own", personal: true })
+      )
     ).resolves.toBe("permission.context_invalid");
     // A chat needs its context: which kind of conversation it is.
     await expect(
@@ -274,7 +347,8 @@ describe("instruction files", setUpTime, () => {
     const asAgent = agentFor(newAgentId(), person.userId);
     const scopesNow = async (): Promise<string[]> => {
       const files = await instructionFilesFor(env, asAgent, {
-        conversation: "direct",
+        conversation: "own",
+        personal: true,
       });
       return files.map(({ file }) => file.scope);
     };
@@ -299,11 +373,14 @@ describe("instruction files", setUpTime, () => {
       file,
       change,
       text: "first",
+      after: 0,
     });
+    // Its answer lost, the same save again, from the same version.
     const retried = await saveInstructionFile(env, person, {
       file,
       change,
       text: "first",
+      after: 0,
     });
     const second = await save(person, file, "second");
 
@@ -311,7 +388,7 @@ describe("instruction files", setUpTime, () => {
     const files = await instructionFilesFor(
       env,
       agentFor(newAgentId(), person.userId),
-      { conversation: "own" }
+      { conversation: "own", personal: true }
     );
     expect(files.at(-1)).toMatchObject({ file, version: 2, text: "second" });
   });
@@ -330,11 +407,16 @@ describe("instruction files", setUpTime, () => {
     await expect(saveOutcome(person, file, `${atMost}${astral}`)).resolves.toBe(
       "instructions.too_large"
     );
-    await expect(saveOutcome(person, file, " \n ")).resolves.toBe(
-      "brain.request_invalid"
-    );
+    // Counted as the prompt holds it too, its markup escaped: a few
+    // thousand ampersands are several times as long there.
     await expect(
-      textsFor(agentFor(newAgentId(), person.userId), { conversation: "own" })
+      saveOutcome(person, file, "&".repeat(instructionsMaxLength / 2))
+    ).resolves.toBe("instructions.too_large");
+    await expect(
+      textsFor(agentFor(newAgentId(), person.userId), {
+        conversation: "own",
+        personal: true,
+      })
     ).resolves.toContain(atMost);
   });
 
@@ -348,7 +430,10 @@ describe("instruction files", setUpTime, () => {
     ]);
     const { id: appId } = await builder.api.apps.create({ name: "Desk" });
     const company: InstructionFile = { scope: "company", name: "instructions" };
-    const agent: InstructionFile = { scope: "agent", agentId: newAgentId() };
+    const agent: InstructionFile = {
+      scope: "agent",
+      agentId: await keptAgent(),
+    };
     const app: InstructionFile = { scope: "app", appId };
     const own: InstructionFile = { scope: "person", personId: user.userId };
 
@@ -390,7 +475,7 @@ describe("instruction files", setUpTime, () => {
 
   it("never lets an agent write a file, whoever it acts for, its own person's included", async () => {
     const admin = await member("admin");
-    const agentId = newAgentId();
+    const agentId = await keptAgent();
     const files: InstructionFile[] = [
       { scope: "company", name: "instructions" },
       { scope: "company", name: "facts" },
@@ -457,12 +542,13 @@ describe("instruction files", setUpTime, () => {
       outcome(
         instructionFilesFor(env, agentFor(newAgentId(), person.userId), {
           conversation: "own",
+          personal: true,
         })
       )
     ).resolves.toBe("permission.person_inactive");
   });
 
-  it("gives an App's file only to a person who builds the App, and holds it to the App in the Brain too", async () => {
+  it("gives an App's file only to a person who builds the App, leaves it out for anyone else, and holds it to the App in the Brain too", async () => {
     const [builder, outsider] = await Promise.all([
       builderWithApi(),
       builderWithApi(),
@@ -470,16 +556,16 @@ describe("instruction files", setUpTime, () => {
     const { id: appId } = await builder.api.apps.create({ name: "Desk" });
     const marker = `app ${unique()}`;
     await save(builder.identity, { scope: "app", appId }, marker);
-    const onApp = { conversation: "own", appId } as const;
+    const onApp = { conversation: "own", appId, personal: true } as const;
 
     await expect(
       textsFor(agentFor(newAgentId(), builder.userId), onApp)
     ).resolves.toContain(marker);
+    // Someone who doesn't build it gets what a chat without an App gets,
+    // as with an App that has no file: no refusal that says it exists.
     await expect(
-      outcome(
-        instructionFilesFor(env, agentFor(newAgentId(), outsider.userId), onApp)
-      )
-    ).resolves.toBe("app.not_found");
+      textsFor(agentFor(newAgentId(), outsider.userId), onApp)
+    ).resolves.not.toContain(marker);
     // A reader of the whole company, who passed no builder check, gets
     // nothing of it from the store itself.
     await expect(
@@ -490,6 +576,80 @@ describe("instruction files", setUpTime, () => {
     ).resolves.toStrictEqual([]);
   });
 
+  it("leaves an App's file out for a builder it was shared with once the App holds data they can't read", async () => {
+    const [owner, shared] = await Promise.all([
+      builderWithApi(),
+      builderWithApi(),
+    ]);
+    const { id: appId } = await owner.api.apps.create({ name: "Desk" });
+    await owner.api.apps.members.add(appId, {
+      type: "person",
+      id: shared.userId,
+      role: "builder",
+    });
+    const marker = `app ${unique()}`;
+    await save(owner.identity, { scope: "app", appId }, marker);
+    const onApp = { conversation: "own", appId, personal: true } as const;
+    const before = await textsFor(agentFor(newAgentId(), shared.userId), onApp);
+
+    // The App is granted the owner's own mailbox, which the builder it is
+    // shared with can't read: they no longer open the App, nor its file.
+    await requestGranted(idp, owner, {
+      ...outlook(appId, "MAIL"),
+      object: {
+        type: "connection",
+        connectionId: await mailboxOf(owner.userId),
+      },
+    });
+    const after = await textsFor(agentFor(newAgentId(), shared.userId), onApp);
+    const ownerTexts = await textsFor(
+      agentFor(newAgentId(), owner.userId),
+      onApp
+    );
+
+    expect({
+      before: before.includes(marker),
+      after: after.includes(marker),
+      opens: await outcome(shared.api.apps.get(appId)),
+      owner: ownerTexts.includes(marker),
+    }).toStrictEqual({
+      before: true,
+      after: false,
+      opens: "app.unreadable",
+      owner: true,
+    });
+  });
+
+  it("leaves an archived App's file out, as its builders can't change it, and gives it again once it is restored", async () => {
+    const builder = await builderWithApi();
+    const { id: appId } = await builder.api.apps.create({ name: "Desk" });
+    const marker = `app ${unique()}`;
+    await save(builder.identity, { scope: "app", appId }, marker);
+    const onApp = { conversation: "own", appId, personal: true } as const;
+    const loaded = async () => {
+      const texts = await textsFor(
+        agentFor(newAgentId(), builder.userId),
+        onApp
+      );
+      return texts.includes(marker);
+    };
+
+    const before = await loaded();
+    await builder.api.apps.archive(appId);
+    const archived = await loaded();
+    const edit = await outcome(
+      builder.api.instructions.read({ scope: "app", appId })
+    );
+    await builder.api.apps.restore(appId);
+
+    expect({ before, archived, edit, restored: await loaded() }).toStrictEqual({
+      before: true,
+      archived: false,
+      edit: "app.archived",
+      restored: true,
+    });
+  });
+
   it("never lets recall return an instruction file, shared or a person's", async () => {
     const admin = await member("admin");
     const word = `w${unique()}`;
@@ -497,7 +657,7 @@ describe("instruction files", setUpTime, () => {
     await save(admin, { scope: "company", name: "facts" }, `${word} company`);
     await save(
       admin,
-      { scope: "agent", agentId: newAgentId() },
+      { scope: "agent", agentId: await keptAgent() },
       `${word} agent`
     );
 
@@ -529,9 +689,20 @@ describe("instruction files", setUpTime, () => {
       `:person:${person.userId}`,
       `../person/${person.userId}`,
     ];
+    // No agent is kept under such an ID, so no admin saves one's file;
+    // and were one written to the Brain, its key is its own.
     for (const agentId of shaped) {
       // oxlint-disable-next-line no-await-in-loop -- a few, in order
-      await save(admin, { scope: "agent", agentId }, `agent ${agentId}`);
+      await expect(
+        saveOutcome(admin, { scope: "agent", agentId })
+      ).resolves.toBe("agent.unknown");
+      // oxlint-disable-next-line no-await-in-loop -- a few, in order
+      await addInstructionFile(env, {
+        file: { scope: "agent", agentId },
+        change: crypto.randomUUID(),
+        text: `agent ${agentId}`,
+        after: 0,
+      });
     }
 
     for (const agentId of shaped) {
@@ -559,7 +730,10 @@ describe("instruction files", setUpTime, () => {
     const asAgent = agentFor(newAgentId(), userId);
     const malformed: unknown[] = [
       { conversation: "channel", appId: "app" },
-      { conversation: "direct", appId: "app" },
+      { conversation: "direct" },
+      // Whether its answer reaches them alone is always said.
+      { conversation: "own" },
+      { conversation: "own", personal: "yes" },
       { conversation: "channel", people: ["someone"] },
       { conversation: "own", agentId: "another" },
       { conversation: "elsewhere" },
@@ -578,5 +752,527 @@ describe("instruction files", setUpTime, () => {
     expect(outcomes).toStrictEqual(
       malformed.map(() => "permission.context_invalid")
     );
+  });
+});
+
+type Api = Awaited<ReturnType<typeof signedInApi>>["api"];
+
+/** The version of `file` `api` reads to edit now; 0 for none or refused. */
+const versionAs = async (api: Api, file: InstructionFile): Promise<number> => {
+  try {
+    const now = await api.instructions.read(file);
+    return now?.version ?? 0;
+  } catch {
+    return 0;
+  }
+};
+
+/** How `api`'s save of `text` to `file`, from its version now, ends: "ok" or the refusal's code. */
+const saved = async (api: Api, file: InstructionFile, text: string) => {
+  const after = await versionAs(api, file);
+  return await outcome(
+    api.instructions.save({ file, change: crypto.randomUUID(), text, after })
+  );
+};
+
+/** How `api`'s read of `file` ends: "ok" or the refusal's code. */
+const read = async (api: Api, file: InstructionFile) =>
+  await outcome(api.instructions.read(file));
+
+describe("instruction files, edited from a page", setUpTime, () => {
+  it("lets a person read and save their own file, an admin the company's and an agent's, a builder their App's, and nobody anything else", async () => {
+    const [admin, person, builder] = await Promise.all([
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "builder"),
+    ]);
+    const { id: appId } = await builder.api.apps.create({ name: "Desk" });
+    const u = unique();
+    const own = { scope: "person", personId: person.userId } as const;
+    const company = { scope: "company", name: "instructions" } as const;
+    const agent = { scope: "agent", agentId: await keptAgent() } as const;
+    const app = { scope: "app", appId } as const;
+    const saves = {
+      own: await saved(person.api, own, `Mine ${u}`),
+      company: await saved(admin.api, company, `Company ${u}`),
+      agent: await saved(admin.api, agent, `Agent ${u}`),
+      app: await saved(builder.api, app, `App ${u}`),
+      companyByMember: await saved(person.api, company, "Planted"),
+      agentByMember: await saved(person.api, agent, "Planted"),
+      appByMember: await saved(person.api, app, "Planted"),
+      someoneElsesByAdmin: await saved(admin.api, own, "Planted"),
+      tooLarge: await saved(
+        person.api,
+        own,
+        "x".repeat(instructionsMaxLength + 1)
+      ),
+    };
+    const companyNow = await admin.api.instructions.read(company);
+    const reads = {
+      own: await person.api.instructions.read(own),
+      // Other tests save the company's too: its text, whatever the version.
+      company: companyNow?.text,
+      app: await builder.api.instructions.read(app),
+      neverWritten: await builder.api.instructions.read({
+        scope: "person",
+        personId: builder.userId,
+      }),
+      someoneElsesByAdmin: await read(admin.api, own),
+      companyByMember: await read(person.api, company),
+      appByMember: await read(person.api, app),
+    };
+
+    expect({ saves, reads }).toStrictEqual({
+      saves: {
+        own: "ok",
+        company: "ok",
+        agent: "ok",
+        app: "ok",
+        companyByMember: "role.forbidden",
+        agentByMember: "role.forbidden",
+        appByMember: "app.not_found",
+        someoneElsesByAdmin: "role.forbidden",
+        tooLarge: "instructions.too_large",
+      },
+      reads: {
+        own: { version: 1, text: `Mine ${u}` },
+        company: `Company ${u}`,
+        app: { version: 1, text: `App ${u}` },
+        neverWritten: null,
+        someoneElsesByAdmin: "role.forbidden",
+        companyByMember: "role.forbidden",
+        appByMember: "app.not_found",
+      },
+    });
+  });
+
+  it("refuses through the session a file whose text, escaped as the prompt holds it, is over the limit, and keeps the one before", async () => {
+    const person = await signedInApi(idp, "user");
+    const own = { scope: "person", personId: person.userId } as const;
+    const first = await person.api.instructions.save({
+      file: own,
+      change: crypto.randomUUID(),
+      text: "Kept.",
+      after: 0,
+    });
+    // Within the limit as text, several times over it escaped.
+    const escaped = await outcome(
+      person.api.instructions.save({
+        file: own,
+        change: crypto.randomUUID(),
+        text: "&".repeat(instructionsMaxLength / 2),
+        after: first.version,
+      })
+    );
+
+    expect({
+      escaped,
+      now: await person.api.instructions.read(own),
+    }).toStrictEqual({
+      escaped: "instructions.too_large",
+      now: { version: first.version, text: "Kept." },
+    });
+  });
+
+  it("records each save once, by whom and of which file and version, and never its text", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const text = `Secret rule ${unique()}`;
+    const file = { scope: "company", name: "facts" } as const;
+    const after = await versionAs(admin.api, file);
+    const change = crypto.randomUUID();
+
+    const warned = vi.spyOn(console, "warn");
+    const events = await auditedDuring(async () => {
+      await admin.api.instructions.save({ file, change, text, after });
+      // Later, so a time taken from the clock would differ.
+      await scheduler.wait(20);
+      // Its answer lost, the same save again: one save, one entry, the
+      // same each try, so the log takes the retry as a duplicate.
+      await admin.api.instructions.save({ file, change, text, after });
+    });
+    const recorded = events.filter(
+      ({ action }) => action === "instructions.saved"
+    );
+    const [entry] = recorded;
+    const replay =
+      entry === undefined ? undefined : await auditLog(env).append([entry]);
+    const conflicting = warned.mock.calls.filter((call) =>
+      JSON.stringify(call).includes("audit.conflicting_duplicate")
+    );
+    warned.mockRestore();
+
+    expect({
+      conflictsWarned: conflicting.length,
+      replayConflicts: replay?.conflicts,
+      saved: recorded.map(({ actor, target, detail }) => ({
+        actor,
+        target,
+        scope: detail.scope,
+        numbered: typeof detail.version,
+      })),
+      carriesText: JSON.stringify(events).includes(text),
+    }).toStrictEqual({
+      conflictsWarned: 0,
+      replayConflicts: 0,
+      saved: [
+        {
+          actor: { type: "person", userId: admin.userId },
+          target: { type: "instructions", id: "company:facts" },
+          scope: "company",
+          numbered: "number",
+        },
+      ],
+      carriesText: false,
+    });
+  });
+
+  it("answers a save as saved and records it once, though the log refuses its event at first", async () => {
+    const person = await member("user");
+    const file: InstructionFile = { scope: "person", personId: person.userId };
+    // The audit log, out of reach for its first append: the save's own.
+    const log = auditLog(env);
+    let refused = 0;
+    const refusing = {
+      append: async (events: Parameters<typeof log.append>[0]) => {
+        if (refused === 0) {
+          refused += 1;
+          throw new Error("The audit log is out of reach");
+        }
+        return await log.append(events);
+      },
+    };
+    const namespace = {
+      getByName: () => refusing,
+      jurisdiction: () => namespace,
+    };
+    // SAFETY: core reaches the log only through `getByName(...).append`.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    const logDown: Env = { ...env, AUDIT_LOG: namespace as never };
+
+    let answered = "";
+    const events = await auditedDuring(async () => {
+      answered = await outcome(
+        saveInstructionFile(logDown, person, {
+          file,
+          change: crypto.randomUUID(),
+          text: "Call me Sam.",
+          after: 0,
+        })
+      );
+      // The system tries the event again, as the clock's drain does.
+      await drainAuditOutboxes(env);
+    });
+
+    expect({
+      // Saved, so the page shows it saved: nothing is left for the person
+      // to try again.
+      answered,
+      refused,
+      recorded: events.filter(
+        ({ action, target }) =>
+          action === "instructions.saved" &&
+          target?.id === `person:${person.userId}`
+      ).length,
+      now: await instructionFileToEdit(env, person, file),
+    }).toStrictEqual({
+      answered: "ok",
+      refused: 1,
+      recorded: 1,
+      now: { version: 1, text: "Call me Sam." },
+    });
+  });
+
+  it("records a save once at the time it was answered when its version's own time can't be read just then", async () => {
+    const person = await member("user");
+    const file: InstructionFile = { scope: "person", personId: person.userId };
+    // The Brain, which takes the save but can't list its versions.
+    const stores = inJurisdiction(env, env.BRAIN_STORE);
+    const unlisted = {
+      getByName: (name: string) =>
+        new Proxy(stores.getByName(name), {
+          get: (stub, method): unknown => {
+            if (method === "listVersions") {
+              return async () => {
+                await Promise.resolve();
+                throw new Error("The Brain is out of reach");
+              };
+            }
+            const found: unknown = Reflect.get(stub, method);
+            return found;
+          },
+        }),
+      jurisdiction: () => unlisted,
+    };
+    // SAFETY: core reaches the Brain only through `getByName` (and
+    // `jurisdiction`), each store's methods passed on but the listing.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    const brainDown: Env = { ...env, BRAIN_STORE: unlisted as never };
+    const from = Date.now();
+
+    let answered = "";
+    const events = await auditedDuring(async () => {
+      answered = await outcome(
+        saveInstructionFile(brainDown, person, {
+          file,
+          change: crypto.randomUUID(),
+          text: "Call me Sam.",
+          after: 0,
+        })
+      );
+      await drainAuditOutboxes(env);
+    });
+    const recorded = events.filter(
+      ({ action, target }) =>
+        action === "instructions.saved" &&
+        target?.id === `person:${person.userId}`
+    );
+
+    expect({
+      answered,
+      recorded: recorded.length,
+      atAnswer: recorded.every(
+        ({ at }) => Date.parse(at) >= from && Date.parse(at) <= Date.now()
+      ),
+      now: await instructionFileToEdit(env, person, file),
+    }).toStrictEqual({
+      answered: "ok",
+      recorded: 1,
+      atAnswer: true,
+      now: { version: 1, text: "Call me Sam." },
+    });
+  });
+
+  it("refuses a save made from a version someone has saved over since, and keeps theirs", async () => {
+    const [ada, ben] = await Promise.all([
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "admin"),
+    ]);
+    const file = { scope: "agent", agentId: await keptAgent() } as const;
+    const first = await ada.api.instructions.save({
+      file,
+      change: crypto.randomUUID(),
+      text: "First.",
+      after: 0,
+    });
+    // Both open it at that version; Ada saves first.
+    const adas = await outcome(
+      ada.api.instructions.save({
+        file,
+        change: crypto.randomUUID(),
+        text: "Ada's.",
+        after: first.version,
+      })
+    );
+    const bens = await outcome(
+      ben.api.instructions.save({
+        file,
+        change: crypto.randomUUID(),
+        text: "Ben's.",
+        after: first.version,
+      })
+    );
+    const now = await ben.api.instructions.read(file);
+
+    expect({ adas, bens, now }).toStrictEqual({
+      adas: "ok",
+      bens: "instructions.changed",
+      now: { version: first.version + 1, text: "Ada's." },
+    });
+  });
+
+  it("empties a file with an empty save, keeping the version before, and loads nothing for it", async () => {
+    const person = await signedInApi(idp, "user");
+    const own = { scope: "person", personId: person.userId } as const;
+    const marker = `Mine ${unique()}`;
+    const first = await person.api.instructions.save({
+      file: own,
+      change: crypto.randomUUID(),
+      text: marker,
+      after: 0,
+    });
+    const emptied = await person.api.instructions.save({
+      file: own,
+      change: crypto.randomUUID(),
+      text: "",
+      after: first.version,
+    });
+    const loadsTheirs = async () => {
+      const loaded = await textsFor(agentFor(newAgentId(), person.userId), {
+        conversation: "own",
+        personal: true,
+      });
+      return loaded.some((text) => text === marker || text.trim() === "");
+    };
+    const whenEmpty = await loadsTheirs();
+    // Only whitespace holds nothing either.
+    const blank = await person.api.instructions.save({
+      file: own,
+      change: crypto.randomUUID(),
+      text: " \n ",
+      after: emptied.version,
+    });
+
+    expect({
+      emptied: emptied.version,
+      whenEmpty,
+      blank: blank.version,
+      read: await person.api.instructions.read(own),
+      whenBlank: await loadsTheirs(),
+    }).toStrictEqual({
+      emptied: first.version + 1,
+      whenEmpty: false,
+      blank: first.version + 2,
+      read: { version: first.version + 2, text: " \n " },
+      whenBlank: false,
+    });
+  });
+
+  it("keeps no file for an agent the company doesn't have", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const nobody = { scope: "agent", agentId: newAgentId() } as const;
+
+    expect({
+      save: await saved(admin.api, nobody, "Planted"),
+      read: await read(admin.api, nobody),
+    }).toStrictEqual({ save: "agent.unknown", read: "agent.unknown" });
+  });
+
+  it("saves only from a version the client names: refused without one, refused from a stale one, and a first save from none", async () => {
+    const person = await signedInApi(idp, "user");
+    const own = { scope: "person", personId: person.userId } as const;
+    const sent = async (asked: Record<string, unknown>) =>
+      await outcome(
+        person.api.instructions.save(
+          // SAFETY: as a client may send it: Cap'n Web checks no types.
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+          asked as never
+        )
+      );
+
+    const withoutAfter = await sent({
+      file: own,
+      change: crypto.randomUUID(),
+      text: "No version named.",
+    });
+    const first = await sent({
+      file: own,
+      change: crypto.randomUUID(),
+      text: "First.",
+      after: 0,
+    });
+    const second = await sent({
+      file: own,
+      change: crypto.randomUUID(),
+      text: "Second.",
+      after: 1,
+    });
+    const stale = await sent({
+      file: own,
+      change: crypto.randomUUID(),
+      text: "From the first.",
+      after: 1,
+    });
+    // Nor does core's own add to the Brain, behind the rule's check.
+    const addedWithoutAfter = await outcome(
+      addInstructionFile(
+        env,
+        // SAFETY: as a caller whose types are wrong may pass it.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+        {
+          file: own,
+          change: crypto.randomUUID(),
+          text: "No version named here either.",
+        } as never
+      )
+    );
+
+    expect({
+      withoutAfter,
+      first,
+      second,
+      stale,
+      addedWithoutAfter,
+      now: await person.api.instructions.read(own),
+    }).toStrictEqual({
+      withoutAfter: "permission.invalid",
+      first: "ok",
+      second: "ok",
+      stale: "instructions.changed",
+      addedWithoutAfter: "brain.request_invalid",
+      now: { version: 2, text: "Second." },
+    });
+  });
+
+  it("keeps a person's own file in their own store alone, checks a save's version there, loads it in their chats alone, and erases it with them", async () => {
+    const [person, other] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+    ]);
+    const file = { scope: "person", personId: person.userId } as const;
+    const key = `instructions:person:${person.userId}`;
+    const reader = { person: person.userId, groups: ["company"] };
+    const namespace = inJurisdiction(env, env.BRAIN_STORE);
+    const sent = async (text: string, after: number) =>
+      await outcome(
+        person.api.instructions.save({
+          file,
+          change: crypto.randomUUID(),
+          text,
+          after,
+        })
+      );
+    const marker = `Mine ${unique()}`;
+
+    const saves = {
+      first: await sent("Mine.", 0),
+      stale: await sent("From nothing.", 0),
+      second: await sent(marker, 1),
+    };
+    const ownStore = await personalBrainOf(
+      namespace,
+      person.userId
+    ).readCurrent({ sources: [key], reader });
+    const sharedStore = await brainOf(namespace).readCurrent({
+      sources: [key],
+      reader,
+    });
+    const theirChat = await textsFor(agentFor(newAgentId(), person.userId), {
+      conversation: "own",
+      personal: true,
+    });
+    const othersChat = await textsFor(agentFor(newAgentId(), other.userId), {
+      conversation: "own",
+      personal: true,
+    });
+    const erasing = {
+      personId: person.userId,
+      reason: "person_erased",
+    } as const;
+    await Promise.allSettled([erasePerson(env, erasing)]);
+    await ageOwnErasure(person.userId);
+    const erased = await erasePerson(env, erasing);
+    const afterErasure = await readInstructionFilesAs(
+      env,
+      { userId: person.userId },
+      [file]
+    );
+
+    expect({
+      saves,
+      ownStore: ownStore.map(({ version, text }) => ({ version, text })),
+      sharedStore,
+      theirChat: theirChat.includes(marker),
+      othersChat: othersChat.includes(marker),
+      erased,
+      afterErasure: afterErasure.map(({ text }) => text),
+    }).toStrictEqual({
+      saves: { first: "ok", stale: "instructions.changed", second: "ok" },
+      ownStore: [{ version: 2, text: marker }],
+      sharedStore: [],
+      theirChat: true,
+      othersChat: false,
+      erased: "erased",
+      afterErasure: [],
+    });
   });
 });

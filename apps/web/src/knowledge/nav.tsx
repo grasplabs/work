@@ -17,12 +17,7 @@ import {
 import { Spinner } from "@grasp-os/ui/components/spinner";
 import { useLingui } from "@lingui/react/macro";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import {
-  ChevronDownIcon,
-  LibraryIcon,
-  NotebookPenIcon,
-  SearchIcon,
-} from "lucide-react";
+import { ChevronDownIcon, LibraryIcon, SearchIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
@@ -37,7 +32,7 @@ import type { Folder } from "./tree.ts";
 
 // Knowledge's navigation in the page sidebar, in the prototype's look
 // (grasplabs/prototype `components/brain-nav.tsx`): search at the top, the
-// home, the memory files pinned under it, then one entry per collection
+// home, then one entry per collection
 // the person may read, which opens in place to its folders and documents
 // along a thin guide line, a page at a time. The open document is marked
 // and its folders open. It folds to a rail of icons.
@@ -400,8 +395,6 @@ export const KnowledgeTree = ({
   }
   const { listed, more } = useListed(opened, at, data);
   const openDoc = at.document?.id;
-  const memoryFiles =
-    data.memory.state === "ready" ? data.memory.data.files : [];
   return (
     <div className="flex h-full min-h-0 flex-col">
       <PageSidebarTop fold={fold} joined>
@@ -416,22 +409,8 @@ export const KnowledgeTree = ({
           <LibraryIcon className="text-muted-foreground group-data-[status=active]:text-foreground size-4 flex-none" />
           <span className="min-w-0 flex-1 truncate">{t`Knowledge`}</span>
         </Link>
-        {memoryFiles.map((file) => (
-          <Link
-            aria-current={file.id === openDoc ? "page" : undefined}
-            className="group hover:bg-accent aria-[current=page]:bg-accent flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm aria-[current=page]:font-medium"
-            key={file.id}
-            params={{ collection: file.collectionId }}
-            search={{ doc: file.id }}
-            to="/knowledge/$collection"
-          >
-            <NotebookPenIcon className="text-muted-foreground size-4 flex-none" />
-            <span className="min-w-0 flex-1 truncate">{file.path}</span>
-          </Link>
-        ))}
         <span aria-hidden="true" className="bg-border my-2 h-px" />
         <NotLoaded page={data.collections} />
-        <NotLoaded page={data.memory} />
         {data.collections.state === "ready"
           ? data.collections.data.map((collection) => {
               const expanded = opened.has(collection.id);

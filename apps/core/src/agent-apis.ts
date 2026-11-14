@@ -10,7 +10,6 @@ import { connectionsApi } from "./agent-connections.ts";
 import { dashboardApi } from "./agent-dashboard.ts";
 import { documentsOf, readAgentDocument } from "./agent-documents.ts";
 import { knowledgeApi } from "./agent-knowledge.ts";
-import { memoryApi } from "./agent-memory.ts";
 import { auditRefusal, auditToolCall, requireOpenRun } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { sharedSkillsApi, skillsApi } from "./agent-skills.ts";
@@ -274,7 +273,6 @@ export const agentApis: readonly AgentApi[] = [
   buildApi,
   workflowsApi,
   workflowBuildApi,
-  memoryApi,
   skillsApi,
   brainAgentApi,
   dashboardApi,
@@ -288,7 +286,7 @@ export const agentApis: readonly AgentApi[] = [
  * read for everyone in it, and Grasp's and the company's skills, which
  * every member may read, never its person's own. No connections, so nothing is read
  * from or written to anyone's own accounts, and nothing is held for a
- * person to confirm; no Apps, builds, workflows or memory saves, which act
+ * person to confirm; no Apps, builds or workflows, which act
  * as the one person who asked; no brain, which reads as that person.
  */
 const sharedApiNames: ReadonlySet<string> = new Set(["chat", "knowledge"]);

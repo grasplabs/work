@@ -68,8 +68,8 @@ import {
 } from "./transcripts.ts";
 import type { ReadAt } from "./transcripts.ts";
 
-// Saving a document: its frontmatter is read and checked (and a memory
-// file's size, memory-files.ts), its Markdown split into sections and its
+// Saving a document: its frontmatter is read and checked (and anything
+// else the host refuses, its `onWrite`), its Markdown split into sections and its
 // links found, its text stored as an immutable payload in R2
 // (payloads.ts), and then one D1 batch (a transaction) commits the
 // payload, adds the next version, replaces the links, updates the document
@@ -334,8 +334,7 @@ const conflict = (existing: DocumentRow | undefined) =>
 /**
  * Reads `text` for the document at `path` in `collection`, refused as a
  * save would refuse it: as the host's `onWrite` port refuses it (core's:
- * the Grasp skills by anything but their sync, a memory file over its
- * size limit), over a document's limits, or frontmatter that doesn't fit
+ * the Grasp skills by anything but their sync), over a document's limits, or frontmatter that doesn't fit
  * its type. A purge's text (`purge`) is checked for the fields every type
  * has only (`parseBaseFields`), whatever its type says.
  */

@@ -7,7 +7,8 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { eventsAfter, logHead } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam } from "./knowledge.ts";
+import { erasing } from "./knowledge-purge.ts";
+import { newTeam, ownCollectionOf } from "./knowledge.ts";
 import {
   callAuth,
   letSessionRecheckPass,
@@ -460,10 +461,10 @@ describe("transcripts on the brain's sources", { timeout: 120_000 }, () => {
     });
   });
 
-  it("is gone with the person's Personal collection after a personal purge", async () => {
+  it("is gone with the collection only its owner reads once that person is purged", async () => {
     const leaver = await signedInApi(idp, "user");
     const admin = await signedInApi(idp, "admin");
-    const { personal } = await leaver.api.memory.collections();
+    const personal = await ownCollectionOf(leaver);
     const upload = await uploaded(
       { api: leaver.api, collectionId: personal },
       "One to one.vtt",
@@ -475,6 +476,7 @@ describe("transcripts on the brain's sources", { timeout: 120_000 }, () => {
       userId: leaver.userId,
       reason: "offboarding",
     };
+    await erasing(admin, leaver.userId);
     const plan = await admin.api.knowledge.preparePurge(input);
     await admin.api.knowledge.purge(input, plan.token);
 
