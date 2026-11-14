@@ -2453,11 +2453,26 @@ export class Workspace extends DurableObject<Env> {
   ): Promise<TurnContext> {
     const chat = this.#chat(work.chatId);
     const { via } = chat;
-    const instructions = await instructionFilesFor(
-      this.env,
-      authority,
-      instructionContextOf(shared, chat, scope.unattended === true)
-    );
+    // A Brain that can't give the files leaves the turn without them, as
+    // it does without skills (below) and without the person's own file
+    // when their store fails (brain-next.ts): missing guidance is no
+    // question of access. A refusal (who it acts for, where) still
+    // refuses the turn.
+    let instructions: Awaited<ReturnType<typeof instructionFilesFor>> = [];
+    try {
+      instructions = await instructionFilesFor(
+        this.env,
+        authority,
+        instructionContextOf(shared, chat, scope.unattended === true)
+      );
+    } catch (error) {
+      if (permissionErrors.codeOf(error) !== undefined) {
+        throw error;
+      }
+      log.warn("instructions.turn_unavailable", {
+        errorName: error instanceof Error ? error.name : typeof error,
+      });
+    }
     // The skills the chat may use, from the Brain: guidance every member
     // may read, as the company's instruction file, never a grant
     // (brain-skills.ts). Their own skills only where the scope says so
