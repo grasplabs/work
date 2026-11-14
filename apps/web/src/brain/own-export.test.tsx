@@ -711,35 +711,43 @@ describe("the person's own export", () => {
     expect(faked.calls).toStrictEqual(["read"]);
   });
 
-  // One read at a time, whatever asks for it. While the export may be
-  // being written and the last read failed (so Try again shows and the
-  // follow-up runs), read A is held in flight and B arrives: A is never
-  // ended, no other read starts while it is, at most one follows it, and
-  // what is shown is the latest read's answer. (The read after a start
-  // can't overlap these: its button shows only when nothing is followed.)
+  // Each pair of triggers that can ask for a read while another is under
+  // way: the export being written and the last read failed (so Try again
+  // shows and the follow-up runs), read A is held in flight and B arrives:
+  // A is never ended, no other read starts while it is, at most one
+  // follows it, and what is shown is the latest read's answer. With the
+  // page hidden when A lands, a read the page asked for on its own waits
+  // until it is seen; one a person asked for goes at once. (The read after
+  // a start can't overlap these: its button shows only when nothing is
+  // followed.)
+  const tryAgainBeforeDue = {
+    a: "Try again, just before the follow-up comes due",
+    b: "the follow-up coming due",
+    first: async () => {
+      await advance(followEveryMs - 100);
+      clickTryAgain();
+    },
+    arrives: async () => {
+      await advance(100);
+    },
+  };
+  const dueBeforeTryAgain = {
+    a: "the follow-up coming due",
+    b: "Try again",
+    first: async () => {
+      await advance(followEveryMs);
+    },
+    arrives: async () => {
+      await Promise.resolve();
+      clickTryAgain();
+    },
+  };
+
   it.each([
-    {
-      a: "Try again, just before the follow-up comes due",
-      b: "the follow-up coming due",
-      first: async () => {
-        await advance(followEveryMs - 100);
-        clickTryAgain();
-      },
-      arrives: async () => {
-        await advance(100);
-      },
-    },
-    {
-      a: "the follow-up coming due",
-      b: "Try again",
-      first: async () => {
-        await advance(followEveryMs);
-      },
-      arrives: async () => {
-        await Promise.resolve();
-        clickTryAgain();
-      },
-    },
+    { ...tryAgainBeforeDue, hidden: false, readsWhileHidden: 0 },
+    { ...tryAgainBeforeDue, hidden: true, readsWhileHidden: 0 },
+    { ...dueBeforeTryAgain, hidden: false, readsWhileHidden: 0 },
+    { ...dueBeforeTryAgain, hidden: true, readsWhileHidden: 1 },
     {
       a: "Try again",
       b: "the page seen again, a read due meanwhile",
@@ -751,6 +759,8 @@ describe("the person's own export", () => {
       arrives: async () => {
         await visibility("visible");
       },
+      hidden: false,
+      readsWhileHidden: 0,
     },
     {
       a: "the follow-up coming due",
@@ -762,10 +772,12 @@ describe("the person's own export", () => {
         await visibility("hidden");
         await visibility("visible");
       },
+      hidden: false,
+      readsWhileHidden: 0,
     },
   ])(
-    "ends no read in flight, $a, when $b arrives, and reads once after it at most",
-    async ({ first, arrives }) => {
+    "ends no read in flight, $a, when $b arrives, and reads once after it at most (hidden when it lands: $hidden)",
+    async ({ first, arrives, hidden, readsWhileHidden }) => {
       vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
       const faked = route(exported("writing"));
       await shown(faked, () => said().includes(writingSaid), "writing");
@@ -787,6 +799,9 @@ describe("the person's own export", () => {
       // While A is in flight: once it landed, the next read's start ends
       // its signal, which then ends nothing.
       const endedA = faked.seen[base]?.aborted;
+      if (hidden) {
+        await visibility("hidden");
+      }
       faked.shown = exported("done", twoFiles);
       faked.holdRead = undefined;
       await act(async () => {
@@ -795,15 +810,20 @@ describe("the person's own export", () => {
       });
       await until(() => said() === readySaid, "the latest answer");
       await until(() => true, "a read after A, if any");
+      const hiddenReads = hidden ? faked.calls.length - whileA : 0;
+      await visibility("visible");
+      await until(() => true, "a read due once the page is seen, if any");
       const after = faked.calls.length - base;
       expect({
         whileA: whileA - base,
         endedA,
+        hiddenReads,
         atMostOneAfter: after === 1 || after === 2,
         shown: said(),
       }).toStrictEqual({
         whileA: 1,
         endedA: false,
+        hiddenReads: readsWhileHidden,
         atMostOneAfter: true,
         shown: readySaid,
       });
