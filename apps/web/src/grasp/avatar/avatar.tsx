@@ -140,7 +140,7 @@ export const Avatar = ({
     >
       {/* The class only: UI SDK hides the image with its own style until it has loaded. An avatar
           never opens larger: data-no-zoom keeps a page's image zoom (the docs' own) off it. */}
-      {src === undefined || src === "" ? null : (
+      {src !== undefined && src !== "" && (
         <AvatarImage
           src={src}
           alt=""

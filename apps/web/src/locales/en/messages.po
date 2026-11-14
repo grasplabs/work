@@ -2620,7 +2620,7 @@ msgstr "App page"
 msgid "App spend"
 msgstr "App spend"
 
-#: src/grasp/frame/profile-menu.tsx
+#: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.settings.tsx
 msgid "Appearance"
 msgstr "Appearance"
@@ -4559,6 +4559,7 @@ msgid "Current plan"
 msgstr "Current plan"
 
 #: src/frame/person-menu.tsx
+#: src/grasp/frame/grasp-sidebar.tsx
 msgid "Dark"
 msgstr "Dark"
 
@@ -6105,7 +6106,7 @@ msgctxt "programme stage"
 msgid "Getting ready"
 msgstr "Getting ready"
 
-#: src/grasp/frame/profile-menu.tsx
+#: src/grasp/frame/grasp-sidebar.tsx
 msgid "Getting started"
 msgstr "Getting started"
 
@@ -7821,6 +7822,7 @@ msgid "Lift the legal hold {hold} from version {label}?"
 msgstr "Lift the legal hold {hold} from version {label}?"
 
 #: src/frame/person-menu.tsx
+#: src/grasp/frame/grasp-sidebar.tsx
 #: src/settings/backdrop-settings.tsx
 msgid "Light"
 msgstr "Light"
@@ -12326,7 +12328,7 @@ msgstr "Setting up {name}…"
 
 #: src/apps/app-page.tsx
 #: src/frame/app-sidebar.tsx
-#: src/grasp/frame/profile-menu.tsx
+#: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.settings.tsx
 msgid "Settings"
@@ -12610,7 +12612,7 @@ msgid "Sign in with your organization's account."
 msgstr "Sign in with your organization's account."
 
 #: src/frame/person-menu.tsx
-#: src/grasp/frame/profile-menu.tsx
+#: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.settings.security.tsx
 #: src/routes/staff.tsx
 msgid "Sign out"
@@ -13194,7 +13196,7 @@ msgctxt "tab: an interview written up short"
 msgid "Summary"
 msgstr "Summary"
 
-#: src/grasp/frame/profile-menu.tsx
+#: src/grasp/frame/grasp-sidebar.tsx
 msgid "Support"
 msgstr "Support"
 
@@ -13216,7 +13218,7 @@ msgstr "Switch a team off and nobody in it gets a link."
 msgid "Switch now"
 msgstr "Switch now"
 
-#: src/grasp/frame/profile-menu.tsx
+#: src/grasp/frame/grasp-sidebar.tsx
 msgid "Switch organization"
 msgstr "Switch organization"
 
@@ -13229,6 +13231,7 @@ msgid "Switch to your own keys"
 msgstr "Switch to your own keys"
 
 #: src/frame/person-menu.tsx
+#: src/grasp/frame/grasp-sidebar.tsx
 msgid "System"
 msgstr "System"
 

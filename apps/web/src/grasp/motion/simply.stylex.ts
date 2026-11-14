@@ -46,4 +46,8 @@ export const simply = stylex.defineVars({
   open: { default: grasp.collapsibleOpen, [REDUCED]: "0s" },
   /** The active bar sliding to its tab: active-bar-move, 0s with reduced motion. */
   slide: { default: grasp.activeBarMove, [REDUCED]: "0s" },
+  /** A switch's thumb travelling on its spring: switch-travel, 0s with reduced motion. */
+  travel: { default: grasp.switchTravel, [REDUCED]: "0s" },
+  /** A switch's light following its thumb: switch-trail, 0s with reduced motion. */
+  trail: { default: grasp.switchTrail, [REDUCED]: "0s" },
 });

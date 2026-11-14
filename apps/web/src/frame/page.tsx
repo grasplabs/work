@@ -4,15 +4,9 @@ import {
   EmptyDescription,
   EmptyHeader,
 } from "@grasp-os/ui/components/empty";
-import {
-  PageHeader,
-  PageHeaderActions,
-  PageHeaderContent,
-  PageHeaderDescription,
-  PageHeaderMeta,
-  PageHeaderTitle,
-} from "@grasp-os/ui/components/page-header";
 import type { ReactNode } from "react";
+
+import { PageHeader } from "../grasp/page-header/index.ts";
 
 // A page's body and heading, as the prototype has them
 // (`components/page.tsx`).
@@ -41,41 +35,28 @@ export const Page = ({
 );
 
 /**
- * Every page's heading, the one way to head a page: its title, one quiet
- * line under it (at most two lines with `clamp`, for a description someone
- * wrote), small marks such as a status (`meta`), and the page's actions on
- * the right. Built of the kit's `PageHeader` parts alone.
+ * Every page's heading, the one way to head a page: Grasp UI's PageHeader
+ * (grasp/page-header), with the page's title, one quiet line under it, and
+ * the page's actions at the end of the title row.
  */
 export const PageHeading = ({
   title,
   description,
-  clamp = false,
   meta,
   action,
-  actionAt = "end",
 }: {
   title: ReactNode;
   description?: ReactNode;
-  clamp?: boolean;
+  /** Beside the title: a mark that says where its subject stands, such as a status. */
   meta?: ReactNode;
   action?: ReactNode;
-  /** Where `action` stands: at the heading's foot, or on the title's line. */
-  actionAt?: "end" | "start";
 }) => (
-  <PageHeader align={actionAt}>
-    <PageHeaderContent>
-      <PageHeaderTitle>{title}</PageHeaderTitle>
-      {description === undefined ? null : (
-        <PageHeaderDescription lines={clamp ? "two" : "all"}>
-          {description}
-        </PageHeaderDescription>
-      )}
-      {meta === undefined ? null : <PageHeaderMeta>{meta}</PageHeaderMeta>}
-    </PageHeaderContent>
-    {action === undefined ? null : (
-      <PageHeaderActions>{action}</PageHeaderActions>
-    )}
-  </PageHeader>
+  <PageHeader
+    title={title}
+    {...(description === undefined ? {} : { description })}
+    {...(meta === undefined ? {} : { aside: meta })}
+    {...(action === undefined ? {} : { actions: action })}
+  />
 );
 
 /** A list with nothing in it: one quiet line in a card, where the list would be. */

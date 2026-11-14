@@ -2620,7 +2620,7 @@ msgstr "App-pagina"
 msgid "App spend"
 msgstr "Uitgaven per app"
 
-#: src/grasp/frame/profile-menu.tsx
+#: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.settings.tsx
 msgid "Appearance"
 msgstr "Weergave"
@@ -4559,6 +4559,7 @@ msgid "Current plan"
 msgstr "Huidig abonnement"
 
 #: src/frame/person-menu.tsx
+#: src/grasp/frame/grasp-sidebar.tsx
 msgid "Dark"
 msgstr "Donker"
 
@@ -6105,7 +6106,7 @@ msgctxt "programme stage"
 msgid "Getting ready"
 msgstr "In voorbereiding"
 
-#: src/grasp/frame/profile-menu.tsx
+#: src/grasp/frame/grasp-sidebar.tsx
 msgid "Getting started"
 msgstr "Aan de slag"
 
@@ -7821,6 +7822,7 @@ msgid "Lift the legal hold {hold} from version {label}?"
 msgstr "Juridische bewaarplicht {hold} van versie {label} opheffen?"
 
 #: src/frame/person-menu.tsx
+#: src/grasp/frame/grasp-sidebar.tsx
 #: src/settings/backdrop-settings.tsx
 msgid "Light"
 msgstr "Licht"
@@ -12326,7 +12328,7 @@ msgstr "{name} wordt opgezet…"
 
 #: src/apps/app-page.tsx
 #: src/frame/app-sidebar.tsx
-#: src/grasp/frame/profile-menu.tsx
+#: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.settings.tsx
 msgid "Settings"
@@ -12610,7 +12612,7 @@ msgid "Sign in with your organization's account."
 msgstr "Log in met het account van je organisatie."
 
 #: src/frame/person-menu.tsx
-#: src/grasp/frame/profile-menu.tsx
+#: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.settings.security.tsx
 #: src/routes/staff.tsx
 msgid "Sign out"
@@ -13194,7 +13196,7 @@ msgctxt "tab: an interview written up short"
 msgid "Summary"
 msgstr "Samenvatting"
 
-#: src/grasp/frame/profile-menu.tsx
+#: src/grasp/frame/grasp-sidebar.tsx
 msgid "Support"
 msgstr "Ondersteuning"
 
@@ -13216,7 +13218,7 @@ msgstr "Zet een team uit en niemand erin krijgt een link."
 msgid "Switch now"
 msgstr "Nu wisselen"
 
-#: src/grasp/frame/profile-menu.tsx
+#: src/grasp/frame/grasp-sidebar.tsx
 msgid "Switch organization"
 msgstr "Organisatie wisselen"
 
@@ -13229,6 +13231,7 @@ msgid "Switch to your own keys"
 msgstr "Overstappen op je eigen sleutels"
 
 #: src/frame/person-menu.tsx
+#: src/grasp/frame/grasp-sidebar.tsx
 msgid "System"
 msgstr "Systeem"
 

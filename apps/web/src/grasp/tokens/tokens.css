@@ -728,14 +728,64 @@
   /* Room inside a menu item, round its icon, words and keys. */
   --grasp-menu-item-padding: var(--grasp-space-2);
   /* Switch: switch. */
-  /* The track of a switch: room for the thumb to travel its own width. */
-  --grasp-switch-width: 32px;
+  /* The track of a switch: Apple's proportion, about 63 to 28, so the thumb has room to travel. */
+  --grasp-switch-width: 40px;
   /* The height of a switch's track, on the first line of its label. */
   --grasp-switch-height: 18px;
-  /* The thumb of a switch: 2px inside its track all round. */
+  /* The height of a switch's thumb: 2px inside its track all round. */
   --grasp-switch-thumb: 14px;
-  /* A switch that is on, under a pointer: the same lighter step as a checked box. */
-  --grasp-switch-fill-hover: var(--grasp-checkbox-fill-hover);
+  /* The width of a switch's thumb: a pill, as Apple's (about 37 to 24). It travels 35% of the track. */
+  --grasp-switch-thumb-width: 22px;
+  /* How far a pressed thumb stretches towards the side it will travel to. It settles back on arrival. */
+  --grasp-switch-stretch: 4px;
+  /* The thumb's soft shadow, drawn round its whole shape, so a stretched thumb casts one shadow. */
+  --grasp-switch-thumb-shadow: drop-shadow(
+      0 0 0.5px
+        light-dark(oklch(0.173 0.028 169.36 / 0.22), oklch(0 0 none / 0.5))
+    )
+    drop-shadow(
+      0 1px 1.5px
+        light-dark(oklch(0.173 0.028 169.36 / 0.14), oklch(0 0 none / 0.4))
+    )
+    drop-shadow(
+      0 2px 3px
+        light-dark(oklch(0.173 0.028 169.36 / 0.08), oklch(0 0 none / 0.3))
+    );
+  /* The light inside a switch that is on: it rests behind the thumb and leans after it, as Approve's light leans. */
+  --grasp-switch-light: radial-gradient(
+    closest-side,
+    var(--grasp-light-lime) 0%,
+    color-mix(in oklch, var(--grasp-light-sea) 70%, transparent) 45%,
+    transparent 100%
+  );
+  /* The thumb's spring: a damping ratio of 0.6 in 20 steps. It passes its end by a tenth and settles. */
+  --grasp-switch-spring: linear(
+    0,
+    0.081,
+    0.266,
+    0.484,
+    0.689,
+    0.856,
+    0.976,
+    1.05,
+    1.086,
+    1.095,
+    1.086,
+    1.067,
+    1.047,
+    1.028,
+    1.012,
+    1.001,
+    0.995,
+    0.992,
+    0.991,
+    0.992,
+    1
+  );
+  /* The thumb travelling to its side on the spring, and the green crossing with it. At once with reduced motion. */
+  --grasp-switch-travel: 280ms;
+  /* The light following the thumb, a little after it lands. At once with reduced motion. */
+  --grasp-switch-trail: 300ms;
   /* A switch that is off, under a pointer or pressed: field-edge one small step stronger, so it never looks on. */
   --grasp-switch-track-hover: light-dark(
     oklch(0.29 0.05 162 / 0.2),
@@ -973,6 +1023,15 @@
   --grasp-resizable-grip-length: 24px;
   /* The width of a handle's grip. */
   --grasp-resizable-grip-width: 4px;
+  /* Flag: flag. */
+  /* A flag's height beside small words: a 28px button, a dense row. Flags are 3 by 2, so 18px wide. */
+  --grasp-flag-sm: 12px;
+  /* A flag's height beside words on the 20px line, where an icon would stand. 24px wide. */
+  --grasp-flag-md: 16px;
+  /* A flag's height that leads a list row or a phone field. 30px wide. */
+  --grasp-flag-lg: 20px;
+  /* The system's edge, drawn inside a flag and over it, so a white flag keeps its rim on a white ground. */
+  --grasp-flag-edge: var(--grasp-avatar-edge);
   /* Tag: tag. */
   /* The height of a tag, as Palermo's pill. */
   --grasp-tag-height: 24px;
@@ -1137,6 +1196,22 @@
   --grasp-shell-tracking: -0.01em;
   /* How fast what is pointed at answers. */
   --grasp-shell-answer: 100ms;
+  /* The line height of the person's name at the sidebar's foot. */
+  --grasp-shell-name-line: 18px;
+  /* The line height of the organisation under the person's name. */
+  --grasp-shell-note-line: 16px;
+  /* A row's count: its padding at the sides. */
+  --grasp-shell-count-inline: 5px;
+  /* The corner of the profile menu's panel. */
+  --grasp-shell-menu-corner: 8px;
+  /* The product's mark at the top of the sidebar. */
+  --grasp-shell-mark: 20px;
+  /* The least height of the page bar across the top of the page's card. */
+  --grasp-shell-bar: 48px;
+  /* The room under the last thing on a page. */
+  --grasp-shell-page-room-below: 32px;
+  /* The room under a page with a chat box floating over its foot, so its last row scrolls clear. */
+  --grasp-shell-page-room-chat: 96px;
   /* Carousel: carousel. */
   /* The room between two slides. */
   --grasp-carousel-gap: var(--grasp-space-4);
@@ -1243,6 +1318,10 @@
   --grasp-stepper-mark: var(--grasp-chip);
   /* How far a stepper's line stops short of each mark, so it never touches what it joins. */
   --grasp-stepper-line-gap: var(--grasp-space-1);
+  /* A theme's reveal, a circle growing from the switch a person pressed: the product's longest motion. */
+  --grasp-theme-reveal: 300ms;
+  /* A theme's crossfade of the whole page, when a product chooses it over the reveal. */
+  --grasp-theme-fade: 280ms;
   /* Code block: code block. */
   /* The ground of a block of code: one solid soft ground, no ring, as the docs' own code. */
   --grasp-code-block-fill: var(--grasp-soft);
@@ -1281,13 +1360,73 @@
   --grasp-syntax-inserted: var(--grasp-success);
   /* Lines removed, in a diff. */
   --grasp-syntax-deleted: var(--grasp-danger);
+  /* Artifact viewer: artifact viewer. */
+  /* The least room a viewer takes, while it loads and after. */
+  --grasp-viewer-min-height: 320px;
+  /* The least width a viewer takes in a box that shrinks to its content: a 320px screen less its gutters. */
+  --grasp-viewer-min-width: 280px;
+  /* The ground behind the document. */
+  --grasp-viewer-ground: var(--grasp-soft);
+  /* The widest a document's page of words gets: a comfortable line. */
+  --grasp-viewer-page-width: 720px;
+  /* Room inside a document's page, round its words. */
+  --grasp-viewer-page-inset: var(--grasp-space-8);
+  /* Room inside a document's page in a narrow panel. */
+  --grasp-viewer-page-inset-narrow: var(--grasp-space-4);
+  /* Room round the page on the ground. */
+  --grasp-viewer-gap: var(--grasp-space-6);
+  /* The height of the viewer's toolbar. */
+  --grasp-viewer-toolbar-height: var(--grasp-control-lg);
+  /* The height of a line of code or text at 100%. */
+  --grasp-viewer-line: 20px;
+  /* A word search found: a soft tint, never a border. */
+  --grasp-viewer-match: var(--grasp-attention-soft);
+  /* The match search is on now: a stronger tint. */
+  --grasp-viewer-match-current: light-dark(
+    oklch(0.86 0.13 95),
+    oklch(0.5 0.1 90)
+  );
+  /* A keyword in code, as the docs' code. */
+  --grasp-code-keyword: var(--grasp-lavender);
+  /* A number, a constant or a type in code. */
+  --grasp-code-constant: var(--grasp-pine);
+  /* A string in code. */
+  --grasp-code-string: var(--grasp-mint-deep);
+  /* A comment in code. */
+  --grasp-code-comment: var(--grasp-muted);
+  /* A function's name in code. */
+  --grasp-code-function: var(--grasp-ink);
+  /* Brackets, commas and operators in code. */
+  --grasp-code-punctuation: var(--grasp-muted);
+  /* A line added, in a diff. */
+  --grasp-code-inserted: var(--grasp-success);
+  /* A line removed, in a diff. */
+  --grasp-code-deleted: var(--grasp-danger);
+  /* The height of a row of a table in the viewer, at 100%: denser than a table on a page. */
+  --grasp-viewer-row: 32px;
+  /* Selected words over a PDF's drawn page: a see-through tint, so the drawn words show through. */
+  --grasp-viewer-text-selection: color-mix(in srgb, Highlight 40%, transparent);
+  /* Words a comment holds on to: a soft mint tint, never a border. */
+  --grasp-viewer-comment: light-dark(
+    oklch(0.95 0.045 168),
+    oklch(0.32 0.045 170)
+  );
+  /* The words of the comment open now: a stronger mint. */
+  --grasp-viewer-comment-active: light-dark(
+    oklch(0.87 0.11 166),
+    oklch(0.43 0.085 168)
+  );
+  /* The width of the viewer's comments panel beside the document. */
+  --grasp-viewer-panel-width: 320px;
+  /* The width of the viewer's outline beside the document. */
+  --grasp-viewer-outline-width: 240px;
   /* Data grid: data grid. */
   /* A data grid's row: a step denser than a table's, as a spreadsheet. */
   --grasp-grid-row-height: 36px;
   /* A data grid's head row. */
   --grasp-grid-head-height: 40px;
   /* The column of row numbers at a data grid's start. */
-  --grasp-grid-number-width: 48px;
+  --grasp-grid-number-width: 40px;
   /* The hairline round the active cell: pine on a light ground, mint on a dark one. */
   --grasp-grid-active-edge: light-dark(
     var(--grasp-light-pine),
@@ -1308,6 +1447,65 @@
     oklch(0.4321 0.0778 175.187 / 0.28),
     oklch(0.8005 0.1625 165.25 / 0.28)
   );
+  /* The hairlines between cells inside a selected range: mint and quiet, so the range reads as one block. */
+  --grasp-grid-range-line: light-dark(
+    oklch(0.8005 0.1625 165.25 / 0.3),
+    oklch(0.8005 0.1625 165.25 / 0.14)
+  );
+  /* The soft mint edge round a selected range, one of the looks on trial. */
+  --grasp-grid-range-ring: var(--grasp-light-mint);
+  /* Backdrop: backdrop colours. */
+  /* Sand's grains: pine on a light ground, sea on a dark one. */
+  --grasp-backdrop-grain: light-dark(
+    var(--grasp-light-pine),
+    var(--grasp-light-sea)
+  );
+  /* The one grain in a few that is mint. */
+  --grasp-backdrop-spark: var(--grasp-mint-deep);
+  /* A dither in Light: sea, half strength, so a full field reads as a tint. */
+  --grasp-backdrop-tone-light: oklch(0.882 0.094 160.99 / 0.5);
+  /* A dither in Deep: pine; on a dark ground a lifted pine, so it still shows. */
+  --grasp-backdrop-tone-deep: light-dark(
+    oklch(0.4321 0.0778 175.187 / 0.3),
+    oklch(0.72 0.12 168 / 0.3)
+  );
+  /* A dither in Mint. */
+  --grasp-backdrop-tone-mint: oklch(0.8005 0.1625 165.25 / 0.28);
+  /* A dither in Lime. */
+  --grasp-backdrop-tone-lime: oklch(0.851 0.182 131.04 / 0.34);
+  /* A dither in Ink: evergreen, faint; on a dark ground faint sea, the same quiet step the other way. */
+  --grasp-backdrop-tone-ink: light-dark(
+    oklch(0.267 0.048 169.88 / 0.16),
+    oklch(0.882 0.094 160.99 / 0.13)
+  );
+  /* Glass over a backdrop: the card's colour most of the way, over a blur of what is behind. */
+  --grasp-backdrop-glass: color-mix(
+    in oklch,
+    var(--grasp-shell-card) 62%,
+    transparent
+  );
+  /* Backdrop: backdrop sizes. */
+  /* The backdrop filter that goes with backdrop-glass. */
+  --grasp-backdrop-glass-blur: blur(14px) saturate(1.5);
+  /* The corner of the box to ask in, as glass: the composer's. */
+  --grasp-backdrop-glass-corner: 14px;
+  /* The height of the box to ask in, in a backdrop's preview. */
+  --grasp-backdrop-glass-height: 56px;
+  /* A backdrop's preview: a window on it, as wide as a screen. */
+  --grasp-backdrop-preview-ratio: 16 / 9;
+  /* How wide the question and the box stand in a backdrop's preview. */
+  --grasp-backdrop-preview-words: 62%;
+  /* How a dither thins from the far corners in: strongest at the edge, a trace under the words, never clear. */
+  --grasp-backdrop-dither-mask: radial-gradient(
+    150% 135% at 50% 110%,
+    rgb(0 0 0 / 0.05) 0%,
+    rgb(0 0 0 / 0.07) 40%,
+    rgb(0 0 0 / 0.22) 62%,
+    rgb(0 0 0 / 0.6) 80%,
+    black 96%
+  );
+  /* Between the question and the box to ask in, where a chat starts. */
+  --grasp-chat-start-gap: var(--grasp-space-8);
   /* Breakpoints, for scripts. A media query cannot read them: see tokens.stylex.ts. */
   /* Under 640px: one column, phone sizes, stacked rows. */
   --grasp-bp-phone: 40rem;

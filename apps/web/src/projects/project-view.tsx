@@ -327,7 +327,6 @@ export const ProjectView = ({
               </div>
             ) : undefined
           }
-          clamp
           description={
             project.description === "" ? undefined : project.description
           }

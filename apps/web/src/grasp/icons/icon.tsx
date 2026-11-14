@@ -75,7 +75,7 @@ export const Icon = ({ icon, label, style }: IconProps) => {
       {...stylex.props(styles.icon, pointers.has(icon) && styles.mirror, style)}
     >
       {icon.map(([tag, attrs], index) =>
-        // Hugeicons writes its stroke on each path; the token's stroke (set on the svg) replaces it.
+        // Hugeicons writes its stroke on each part; the token's stroke (set on the svg) replaces it.
         createElement(tag, {
           ...Object.fromEntries(
             Object.entries(attrs).filter(([name]) => !replaced.has(name))

@@ -20,12 +20,16 @@ export const ms = {
   holdDuration: 1000,
   tooltipDelay: 300,
   tooltipLeave: 100,
+  switchTravel: 280,
+  switchTrail: 300,
   progressSweep: 1400,
   toastDuration: 3500,
   toastDurationAction: 8000,
   activeBarMove: 200,
   composerLightIn: 280,
   shellAnswer: 100,
+  themeReveal: 300,
+  themeFade: 280,
 } as const;
 
 /** The breakpoints in CSS pixels (1rem = 16px). */

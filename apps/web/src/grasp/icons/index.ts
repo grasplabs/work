@@ -6,17 +6,15 @@
 //   <Icon icon={Plus} />            beside words
 //   <Icon icon={Plus} label="Add" />  standing alone, with a name
 import {
-  AiBrain01Icon,
-  AiUserIcon,
-  Message01Icon,
   Add01Icon,
-  Agreement01Icon,
+  AiBrain01Icon,
   AiMagicIcon,
+  AiUserIcon,
   Alert02Icon,
   AlertCircleIcon,
   Analytics01Icon,
-  AppWindowIcon,
   AppleIcon,
+  AppWindowIcon,
   Archive02Icon,
   ArrowDown01Icon,
   ArrowDown02Icon,
@@ -25,10 +23,12 @@ import {
   ArrowLeftRightIcon,
   ArrowRight01Icon,
   ArrowRight02Icon,
+  ArrowUp01Icon,
   ArrowUp02Icon,
   ArrowUpDownIcon,
   ArrowUpRight01Icon,
   Attachment01Icon,
+  BubbleChatAddIcon,
   BubbleChatIcon,
   CableIcon,
   Calendar03Icon,
@@ -58,10 +58,12 @@ import {
   FigmaIcon,
   File01Icon,
   FileEditIcon,
+  FitToScreenIcon,
   Folder01Icon,
   FolderKanbanIcon,
   GithubIcon,
   Globe02Icon,
+  GlobeIcon,
   GoBackward10SecIcon,
   GoForward10SecIcon,
   GoogleDocIcon,
@@ -78,6 +80,7 @@ import {
   InboxIcon,
   InformationCircleIcon,
   InstagramIcon,
+  KeyboardIcon,
   LeftToRightListBulletIcon,
   LeftToRightListDashIcon,
   Link04Icon,
@@ -85,6 +88,7 @@ import {
   Loading03Icon,
   Logout03Icon,
   Menu02Icon,
+  Message01Icon,
   Mic01Icon,
   MicrosoftIcon,
   MicrosoftTeamsIcon,
@@ -104,8 +108,9 @@ import {
   Redo02Icon,
   RefreshIcon,
   RepeatIcon,
-  Route02Icon,
   Search01Icon,
+  SearchAddIcon,
+  SearchMinusIcon,
   Sent02Icon,
   ServerStack01Icon,
   Settings01Icon,
@@ -113,7 +118,6 @@ import {
   SidebarLeftIcon,
   SlackIcon,
   SlidersHorizontalIcon,
-  SparklesIcon,
   StarIcon,
   StopIcon,
   StripeIcon,
@@ -149,8 +153,8 @@ import {
   ZoomIcon,
 } from "@hugeicons/core-free-icons";
 
-import { pointing } from "./icon";
 import type { IconData } from "./icon";
+import { pointing } from "./icon";
 
 export { Icon, type IconData, type IconProps } from "./icon";
 // The size and stroke variables live in ./icon.stylex.ts and are imported from there: StyleX
@@ -176,6 +180,9 @@ export const Moon: IconData = Moon02Icon;
 export const Play: IconData = PlayIcon;
 /** Search. Search01Icon. */
 export const Search: IconData = Search01Icon;
+
+/** Every language, or the world: the language switch's button. GlobeIcon. */
+export const Globe: IconData = GlobeIcon;
 /** Light. Sun03Icon. */
 export const Sun: IconData = Sun03Icon;
 /** Bold text. TextBoldIcon. */
@@ -448,23 +455,32 @@ export const Sliders: IconData = SlidersHorizontalIcon;
 export const Image: IconData = Image01Icon;
 /** A skill an agent can use. ZapIcon. */
 export const Skill: IconData = ZapIcon;
+/** A step up: the section before, in a viewer. ArrowUp01Icon. */
+export const ChevronUp: IconData = ArrowUp01Icon;
+/** The keyboard: the list of shortcuts. KeyboardIcon. */
+export const Keyboard: IconData = KeyboardIcon;
+/** Fit to the width: a viewer's zoom back to fit. FitToScreenIcon. */
+export const Fit: IconData = FitToScreenIcon;
+/** Zoom in. SearchAddIcon. */
+export const ZoomIn: IconData = SearchAddIcon;
+/** Zoom out. SearchMinusIcon. */
+export const ZoomOut: IconData = SearchMinusIcon;
+// Artifact viewer comments (artifact viewer step 4).
+/** Comments: a viewer's panel of them. BubbleChatIcon. */
+export const Comment: IconData = BubbleChatIcon;
+/** Add a comment on what is selected. BubbleChatAddIcon. */
+export const CommentAdd: IconData = BubbleChatAddIcon;
 // The app frame's sidebar and profile menu (Ruben's frame, ported by builder 1).
-/** A chat with an agent: the frame's Chat row. SparklesIcon. */
-export const Sparkle: IconData = SparklesIcon;
-/** What the workspace knows, joined up: the frame's Brain row. Route02Icon. */
-export const Waypoints: IconData = Route02Icon;
+/** A conversation: the frame's Chat row (Ruben's pick). Message01Icon. */
+export const Conversation: IconData = Message01Icon;
+/** What the workspace knows: the frame's Brain row (Ruben's pick). AiBrain01Icon. */
+export const Brain: IconData = AiBrain01Icon;
 /** Projects, as a board in a folder. FolderKanbanIcon. */
 export const Projects: IconData = FolderKanbanIcon;
 /** Apps, as panels on a page. DashboardSquare01Icon. */
 export const AppPanels: IconData = DashboardSquare01Icon;
 /** Something that runs again and again: workflows. RepeatIcon. */
 export const Cycle: IconData = RepeatIcon;
-/** Agents that help: a hand given. Agreement01Icon. */
-export const Helping: IconData = Agreement01Icon;
-/** A conversation: the frame's Chat row (Ruben's pick). Message01Icon. */
-export const Conversation: IconData = Message01Icon;
-/** What the workspace knows: the frame's Brain row (Ruben's pick). AiBrain01Icon. */
-export const Brain: IconData = AiBrain01Icon;
 /** Agents, people that are AI: the frame's Agents row (Ruben's pick). AiUserIcon. */
 export const AgentPerson: IconData = AiUserIcon;
 /** Integrations: a cable that connects. CableIcon. */
