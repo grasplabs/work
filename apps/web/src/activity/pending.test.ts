@@ -94,7 +94,7 @@ describe("a pending request to write to the Brain", () => {
         /shared with everyone in the company.+What people type into it and its own data can then be written for everyone to read/u
       ),
       expect.stringMatching(
-        /What a run is started with and what a webhook sends it aren't tracked/u
+        /What a run is started with \(by a person, an App or a trigger: a webhook, a mail, a connection's event\) and what is sent to it aren't tracked/u
       ),
     ]);
   });

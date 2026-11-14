@@ -109,7 +109,7 @@ export const subjectOf = (
 const brainWriteConsent = (subject: Permission["subject"]): string =>
   subject.type === "workflow"
     ? i18n._(
-        msg`Company Brain, write. This workflow can remember facts in its own name that everyone in the company can read, and forget or correct them. It writes only while everyone in the company may read everything it reads, and never from a run started from a chat that had read something. What a run is started with and what a webhook sends it aren't tracked, so they can be written for everyone to read. Every write is recorded`
+        msg`Company Brain, write. This workflow can remember facts in its own name that everyone in the company can read, and forget or correct them. It writes only while everyone in the company may read everything it reads, and never from a run started from a chat that had read something. What a run is started with (by a person, an App or a trigger: a webhook, a mail, a connection's event) and what is sent to it aren't tracked, so they can be written for everyone to read. Every write is recorded`
       )
     : i18n._(
         msg`Company Brain, write. This App can remember facts in its own name that everyone in the company can read, and forget or correct them. It writes only while it is shared with everyone in the company, all of them may read every one of its tables, and everyone may read everything it reads. What people type into it and its own data can then be written for everyone to read. Every write is recorded`

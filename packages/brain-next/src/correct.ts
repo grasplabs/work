@@ -6,7 +6,7 @@ import {
   newMemorySchema,
   restoringNow,
 } from "./contract.ts";
-import type { MemoryId, Reader, Speaker } from "./contract.ts";
+import type { CorrectedMemory, Reader, Speaker } from "./contract.ts";
 import { hashOf } from "./files.ts";
 import {
   confirmOver,
@@ -184,6 +184,23 @@ const correctNow = (
   return fixId;
 };
 
+/**
+ * The fix `fix` as a correction answers it: its id, and when the store
+ * learned it, the same on every repeat of its change. Null for one no
+ * longer held (an erasure took it since).
+ */
+const correctedOf = (sql: SqlStorage, fix: string): CorrectedMemory | null => {
+  const [held] = sql
+    .exec<{ learned_at: number }>(
+      "SELECT learned_at FROM memories WHERE id = ?",
+      fix
+    )
+    .toArray();
+  return held === undefined
+    ? null
+    : { memory: fix, learnedAt: new Date(held.learned_at) };
+};
+
 const encoder = new TextEncoder();
 
 /**
@@ -196,7 +213,7 @@ const encoder = new TextEncoder();
 export const correctMemory = async (
   storage: DurableObjectStorage,
   { change, ...correcting }: Correcting & { change: string }
-): Promise<MemoryId | null> => {
+): Promise<CorrectedMemory | null> => {
   const key = await hashOf(encoder.encode(`correct:${change}`));
   const { reader: _reader, ...asked } = correcting;
   const hash = await hashOf(encoder.encode(JSON.stringify(asked)));
@@ -218,17 +235,19 @@ export const correctMemory = async (
           "this change was made before as another correction"
         );
       }
-      return answerSchema.parse(JSON.parse(before.answer)).memories[0] ?? null;
+      const [made] = answerSchema.parse(JSON.parse(before.answer)).memories;
+      return made === undefined ? null : correctedOf(sql, made);
     }
     const fix = correctNow(sql, correcting);
-    if (fix !== null) {
-      sql.exec(
-        "INSERT INTO memory_changes (key, hash, answer) VALUES (?, ?, ?)",
-        key,
-        hash,
-        JSON.stringify({ memories: [fix], entities: {} })
-      );
+    if (fix === null) {
+      return null;
     }
-    return fix;
+    sql.exec(
+      "INSERT INTO memory_changes (key, hash, answer) VALUES (?, ?, ?)",
+      key,
+      hash,
+      JSON.stringify({ memories: [fix], entities: {} })
+    );
+    return correctedOf(sql, fix);
   });
 };

@@ -64,6 +64,7 @@ import type {
   AddedMemories,
   ConfirmRequest,
   CorrectRequest,
+  CorrectedMemory,
   MemoryId,
   ContestedPage,
   ContestedRequest,
@@ -2154,7 +2155,9 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   }
 
   /** Corrects a memory the reader may read, under its readers (correct.ts). */
-  async correctMemory(request: CorrectRequest): Promise<MemoryId | null> {
+  async correctMemory(
+    request: CorrectRequest
+  ): Promise<CorrectedMemory | null> {
     const { change, memory, reader, writer, speaker, value, statement } =
       checked(correctRequestSchema, request);
     this.#mayRead(reader);

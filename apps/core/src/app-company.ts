@@ -1,9 +1,10 @@
+import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { and, eq, inArray, ne, notExists, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { isOpenToUsers } from "./app-access.ts";
-import { readableByEveryMember, sourcesOf } from "./app-provenance.ts";
+import { holdingsOf, readableByEveryMember } from "./app-provenance.ts";
 import { loadRelease } from "./app-releases.ts";
 import { notRemoved, organizationId } from "./auth/auth.ts";
 import {
@@ -15,17 +16,18 @@ import {
 } from "./db/core/schema.ts";
 import { viaProjectSql } from "./project-sql.ts";
 
-// Whether everything an App holds is the whole company's (GRA-1837,
-// review round 1): what its code writes to the Brain is read by every
-// member, so it may write only what every member could already read
-// through the App. The App's data and what people type into it are its
-// own and tracked by nothing else, so the App itself must be the
-// company's: live, everyone in the organization with a role in it, every
-// one of its tables readable by every one of them, and every source it
-// may have read readable by every member (app-provenance.ts, which reads
-// Knowledge's collections too: that part leaves with Knowledge, GRA-1735).
-// Decided at each write, from the App's current version and whom it is
-// shared with now; anything it can't read answers no.
+// Whether everything code holds is the whole company's (GRA-1837,
+// review rounds 1 and 2): what an App's action or a workflow's run writes
+// to the Brain is read by every member, so it may write only what every
+// member could already read. An App's data and what people type into it
+// are tracked by nothing else, so every App it may hold data of must be
+// the company's: everyone in the organization with a role in it, and
+// every one of its tables readable by every one of them. Which those are
+// is the provenance walk's (app-provenance.ts `holdingsOf`), closed over
+// every grant that carries data to it, with every source it reaches
+// readable by every member. Decided at each write, from each App's
+// current version and whom it is shared with now; anything it can't read
+// or place answers no.
 
 /**
  * Whether every current member of the organization has a role in App
@@ -115,39 +117,72 @@ const tablesReadByEveryMember = async (
 };
 
 /**
- * Whether everything App `app` holds now is the whole company's (above):
- * false for an App that isn't there, isn't live, or anything not read.
+ * Whether App `app` is the whole company's now: there, shared with every
+ * member, and every table of its current version read by all of them.
+ * One of no version (nothing published yet) can't be placed: no.
+ */
+const appIsTheCompanys = async (env: Env, app: AppId): Promise<boolean> => {
+  const row = await drizzle(env.DB)
+    .select({ owner: apps.ownerId, currentVersion: apps.currentVersion })
+    .from(apps)
+    .where(eq(apps.id, app))
+    .get();
+  if (row?.currentVersion === null || row?.currentVersion === undefined) {
+    return false;
+  }
+  const [shared, tables] = await Promise.all([
+    sharedWithEveryMember(env, app, row.owner),
+    tablesReadByEveryMember(env, app, row.currentVersion),
+  ]);
+  return shared && tables;
+};
+
+/**
+ * Whether everything `caller` holds now is the whole company's (above):
+ * over everything the provenance walk reaches from it (app-provenance.ts
+ * `holdingsOf`: the Apps and workflows whose data it may hold through
+ * calls, starts, follows and events, both ways each grant carries data),
+ * every source readable by every member, and every App among them the
+ * company's (`appIsTheCompanys`). An App calling must also be live. No
+ * for anything not read or not placed: an App the walk can't place, or a
+ * walk past its caps, is an unresolved source.
  */
 export const heldByTheWholeCompany = async (
   env: Env,
-  app: AppId
+  caller: { readonly app: AppId } | { readonly workflow: string }
 ): Promise<boolean> => {
   try {
-    const row = await drizzle(env.DB)
-      .select({
-        owner: apps.ownerId,
-        currentVersion: apps.currentVersion,
-        archivedAt: apps.archivedAt,
-      })
-      .from(apps)
-      .where(eq(apps.id, app))
-      .get();
-    if (
-      row?.currentVersion === null ||
-      row?.currentVersion === undefined ||
-      !isOpenToUsers({
-        currentVersion: row.currentVersion,
-        archived: row.archivedAt !== null,
-      })
-    ) {
+    if ("app" in caller) {
+      const row = await drizzle(env.DB)
+        .select({
+          currentVersion: apps.currentVersion,
+          archivedAt: apps.archivedAt,
+        })
+        .from(apps)
+        .where(eq(apps.id, caller.app))
+        .get();
+      if (
+        row === undefined ||
+        !isOpenToUsers({
+          currentVersion: row.currentVersion,
+          archived: row.archivedAt !== null,
+        })
+      ) {
+        return false;
+      }
+    }
+    // Its sources and the Apps it reaches read Knowledge's collections
+    // too (app-provenance.ts): that part leaves with Knowledge (GRA-1735).
+    const { sources, apps: reached } = await holdingsOf(env, caller);
+    if (!readableByEveryMember(sources)) {
       return false;
     }
-    const [shared, tables, sources] = await Promise.all([
-      sharedWithEveryMember(env, app, row.owner),
-      tablesReadByEveryMember(env, app, row.currentVersion),
-      sourcesOf(env, app),
-    ]);
-    return shared && tables && readableByEveryMember(sources);
+    const each = await Promise.all(
+      reached.map(
+        async (app) => await appIsTheCompanys(env, appIdSchema.parse(app))
+      )
+    );
+    return each.every(Boolean);
   } catch {
     // What can't be read can't be shown to be the company's.
     return false;

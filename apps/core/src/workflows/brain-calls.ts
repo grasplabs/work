@@ -5,7 +5,7 @@ import { permissionErrors } from "@grasp-os/shared/permissions";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import type { BrainAction } from "@grasp-os/workflow-schema/format";
 
-import { readableByEveryMember, sourcesOfWorkflow } from "../app-provenance.ts";
+import { heldByTheWholeCompany } from "../app-company.ts";
 import {
   brainCardSchema,
   brainCorrectedSchema,
@@ -46,8 +46,8 @@ import { recordRunVersions } from "./run-evidence.ts";
 // change its step's key makes, so a step replayed writes once; and only
 // while every member may read everything the run may have read: its pins,
 // checked again before the call (resource-calls.ts `handsOut`), no read of
-// the chat that started it (one person's reach), and the workflow's
-// sources (app-provenance.ts).
+// the chat that started it (one person's reach), and everything the
+// workflow may hold through its grants (app-company.ts).
 
 /** A brain call, as a run's step asks it. */
 export interface BrainCall {
@@ -218,10 +218,10 @@ export const callBrain = async (
         change: `run:${run.runId}:${key}`,
         mayWrite: async () => {
           await requireNoChatReads(env, run.runId);
-          // Its sources read Knowledge's collections too (app-provenance.ts):
-          // that part leaves with Knowledge (GRA-1735).
-          const sources = await sourcesOfWorkflow(env, run.workflowId);
-          if (!readableByEveryMember(sources)) {
+          // Everything it may hold through its grants (app-company.ts).
+          if (
+            !(await heldByTheWholeCompany(env, { workflow: run.workflowId }))
+          ) {
             throw permissionErrors.create("permission.denied", {
               action: "brain.write",
             });

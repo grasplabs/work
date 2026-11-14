@@ -20,7 +20,12 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { appendAuditEvent, keepAuditEvent, keepEvent } from "./audit-outbox.ts";
+import {
+  appendAuditEvent,
+  keepAuditEvent,
+  keepEvent,
+  uuidFromHash,
+} from "./audit-outbox.ts";
 import { storedTeamsOf } from "./brain-grant-teams.ts";
 import {
   codeRecallOf,
@@ -402,8 +407,10 @@ export const skillsCallFor = async (
 //   write's attempt is kept before it writes (a write the log can't take
 //   writes nothing), and its outcome after, from what landed: a write
 //   whose reply was lost is asked again under the same change, which
-//   answers what it made, and its outcome is kept by an ID of the change,
-//   so one change is one memory and one `done`, a step replayed included.
+//   answers what it made; its outcome is kept by an ID of the change, at
+//   what the store recorded for it, so one change is one memory and one
+//   `done`, a step made again included. A forget's retire is answered
+//   with no stored time: its outcome is kept once per call.
 
 /** What code asks of the Brain's memories and entities: `ctx.brain.<operation>`. */
 export type MemoriesOperation = CodeMemoryOperation;
@@ -450,16 +457,6 @@ export interface MemoriesCaller extends Omit<RecallCaller, "keep"> {
 const idOf = (value: unknown): string | null => {
   const id = z.uuid().safeParse(value);
   return id.success ? id.data : null;
-};
-
-/**
- * The ID of the outcome of change `change`, the same each time it is
- * asked: its SHA-256 as a UUID (RFC 9562, version 8).
- */
-const outcomeIdOf = async (change: string): Promise<string> => {
-  const hex = await sha256Hex(change);
-  const variant = ((Number.parseInt(hex.charAt(16), 16) % 4) + 8).toString(16);
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-8${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 };
 
 /** `input`'s field `key`, if it is an object: what code sent, unchecked. */
@@ -580,6 +577,12 @@ const landed = async <T>(write: () => Promise<T>): Promise<T> => {
 interface Written {
   answer: Json;
   detail: Record<string, string | boolean | null>;
+  /**
+   * When the store recorded what the change made (a memory's or a fix's
+   * learned time), the same on every repeat: its outcome's time. None for
+   * a forget, whose retire the store answers without one.
+   */
+  at?: Date;
 }
 
 /** Runs write `operation` for `caller` (`memoriesCallFor`), checked already. */
@@ -592,10 +595,14 @@ const writeFor = async (
   const person = caller.authority.onBehalfOf;
   const as = { writer: caller.writer, change: caller.change };
   if (operation === "remember") {
-    const { memory, entity } = await landed(
+    const { memory, entity, learnedAt } = await landed(
       async () => await rememberForCompanyAs(env, person, as, input)
     );
-    return { answer: { memory, entity }, detail: { memory, entity } };
+    return {
+      answer: { memory, entity },
+      detail: { memory, entity },
+      at: learnedAt,
+    };
   }
   if (operation === "forget") {
     const outcome = await landed(
@@ -606,10 +613,13 @@ const writeFor = async (
   const fix = await landed(
     async () => await correctForCompanyAs(env, person, as, input)
   );
-  return {
-    answer: fix === null ? null : { memory: fix },
-    detail: { fix },
-  };
+  return fix === null
+    ? { answer: null, detail: { fix: null } }
+    : {
+        answer: { memory: fix.memory },
+        detail: { fix: fix.memory },
+        at: fix.learnedAt,
+      };
 };
 
 /** Runs read `operation` for `caller` (`memoriesCallFor`), checked already, audited once. */
@@ -755,14 +765,20 @@ export const memoriesCallFor = async (
     );
     throw refused;
   }
-  // One outcome per change: a step replayed, or a write asked again, is
-  // the same write, and keeps the same event, by an ID of its change.
+  const outcome = entry({ ...asked, outcome: "done", ...done.detail });
+  if (done.at === undefined) {
+    await keepAuditEvent(env, db, outcome);
+    return done.answer;
+  }
+  // One outcome per change: a step made again, or a write asked again, is
+  // the same write, and keeps the same event, whole: its ID from the
+  // change, its time what the store recorded for it, and the rest the
+  // change's too (the caller, the target, the ids it made), so a repeat
+  // after the first was drained is the event the log already holds.
   await keepEvent(env, db, {
-    ...createAuditEvent(
-      entry({ ...asked, outcome: "done", ...done.detail }),
-      "core"
-    ),
-    id: await outcomeIdOf(`${written}:${caller.change}`),
+    ...createAuditEvent(outcome, "core"),
+    id: uuidFromHash(await sha256Hex(JSON.stringify([written, caller.change]))),
+    at: done.at.toISOString(),
   });
   return done.answer;
 };

@@ -1,8 +1,10 @@
 import { brainOf } from "@grasp-os/brain-next/contract";
 import type { Reader } from "@grasp-os/brain-next/contract";
 import { v } from "@grasp-os/runtime/app";
+import { readDefinition } from "@grasp-os/runtime/definition";
 import type { FunctionResult } from "@grasp-os/shared/functions";
 import {
+  appIdSchema,
   chatIdSchema,
   teamIdSchema,
   workflowResourceIdSchema,
@@ -266,6 +268,101 @@ const sharedWithEveryone = async (owner: Member, app: string) => {
   }
 };
 
+/** A Diary App: each owner's own entries (`entries`, read by its owner alone). */
+const diaryApp = () =>
+  testApp(
+    {
+      name: "Diary",
+      tables: {
+        entries: {
+          fields: { title: "v.string()" },
+          access: { read: "owner", write: "owner" },
+        },
+      },
+    },
+    {
+      "server/diary.ts": `import { v } from "@grasp-os/sdk";
+import { mutation, query } from "@server/_generated/server";
+
+export const add = mutation({
+  args: { title: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await ctx.db.insert("entries", args);
+    return null;
+  },
+});
+
+export const mine = query({
+  args: {},
+  returns: v.array(v.string()),
+  handler: async (ctx) =>
+    (await ctx.db.query("entries").take(100)).map((entry) => entry.title),
+});
+`,
+    }
+  );
+
+/** App `test` of `owner`'s, sealed and current, named `name`; shared with every member with `everyone`. */
+const publishedApp = async (
+  owner: Member,
+  test: ReturnType<typeof testApp>,
+  name: string,
+  { everyone = false } = {}
+) => {
+  const fixture: Fixture = await appWith(test, name, owner);
+  const release: Release = await seal(fixture);
+  await rollback(env, appKind, fixture.owner, fixture.app, 1);
+  if (everyone) {
+    await sharedWithEveryone(owner, fixture.app);
+  }
+  return { ...fixture, release };
+};
+
+/** The stable ID of function `name` of `app`'s latest version. */
+const functionIdOf = async (app: string, name: string): Promise<string> => {
+  const row = await env.DB.prepare(
+    "SELECT definition FROM app_versions WHERE app_id = ? ORDER BY version DESC LIMIT 1"
+  )
+    .bind(app)
+    .first<{ definition: string }>();
+  const { functions = [] } = readDefinition(
+    JSON.parse(row?.definition ?? "null")
+  );
+  const found = functions.find((fn) => fn.name === name);
+  if (found === undefined) {
+    throw new Error(`No function ${name}`);
+  }
+  return found.id;
+};
+
+/**
+ * A grant an admin gave, as its row holds it: of `subject` (an App or a
+ * workflow) on `object` (a workflow or an App), with `actions`. What the
+ * provenance walk follows, whatever it is for.
+ */
+const grantRow = async (
+  subject: { type: "app" | "workflow"; id: string },
+  object: { type: "app" | "workflow"; id: string },
+  actions: readonly string[]
+): Promise<void> => {
+  await env.DB.prepare(
+    `INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id,
+      actions, binding, status, requested_by, requested_at, granted_by, granted_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'active', 'test', 0, 'test', 0)`
+  )
+    .bind(
+      crypto.randomUUID(),
+      subject.type,
+      subject.id,
+      object.type,
+      object.id,
+      JSON.stringify(actions),
+      `GRANT_${unique().replaceAll(/\W/gu, "_").toUpperCase()}`
+    )
+    .run();
+};
+
 /**
  * The App of `owner`'s, sealed and current, shared with every member
  * unless `everyone` is false, its declaration bound by
@@ -355,8 +452,13 @@ const losingFirstReply = (
     new Proxy(stub, {
       get: (target, property): unknown => {
         const value: unknown = Reflect.get(target, property);
-        if (property !== method || typeof value !== "function") {
-          return typeof value === "function" ? value.bind(target) : value;
+        if (typeof value !== "function") {
+          return value;
+        }
+        // An RPC stub's method takes no `bind`: it would be a remote call.
+        if (property !== method) {
+          return async (...args: unknown[]): Promise<unknown> =>
+            await Reflect.apply(value, target, args);
         }
         return async (...args: unknown[]): Promise<unknown> => {
           const answer: unknown = await Reflect.apply(value, target, args);
@@ -400,6 +502,26 @@ const writtenBy = async (writer: string): Promise<number> =>
         )
         .one().count
   );
+
+/**
+ * What the audit log's keeping has said so far of conflicts: the events
+ * moved out as ones the log refused (`audit_outbox_rejected`), the gaps
+ * recorded for them (`audit.gap`), and the warnings of an event ID held
+ * with other content (`audit.conflicting_duplicate`) among `warned`.
+ */
+const auditTrouble = async (warned: readonly unknown[][]) => {
+  const { results } = await env.DB.prepare(
+    "SELECT count(*) AS count FROM audit_outbox_rejected"
+  ).all<{ count: number }>();
+  const all = await allEvents();
+  return {
+    rejected: results[0]?.count ?? 0,
+    gaps: all.filter(({ action }) => action === "audit.gap").length,
+    conflicts: warned.filter((args) =>
+      JSON.stringify(args).includes("audit.conflicting_duplicate")
+    ).length,
+  };
+};
 
 /** A fact about a new customer `name`, as code remembers one. */
 const fact = (name: string) => ({
@@ -732,6 +854,8 @@ describe("memories and entities, as an App reaches them", setUpTime, () => {
     const ada = await person("builder");
     const app = await appOf(ada, admin);
     const namespace = env.BRAIN_STORE;
+    const warn = vi.spyOn(console, "warn");
+    const troubleBefore = await auditTrouble([]);
     Reflect.set(env, "BRAIN_STORE", losingFirstReply(namespace, "addMemories"));
     let answer: unknown;
     try {
@@ -740,6 +864,8 @@ describe("memories and entities, as an App reaches them", setUpTime, () => {
       Reflect.set(env, "BRAIN_STORE", namespace);
     }
     const events = await memoryEvents(ada.userId, 2);
+    const troubleAfter = await auditTrouble(warn.mock.calls);
+    warn.mockRestore();
 
     expect({
       answered: rememberedSchema.safeParse(answer).success,
@@ -747,10 +873,67 @@ describe("memories and entities, as an App reaches them", setUpTime, () => {
       outcomes: events
         .filter(({ action }) => action === "brain.memory.remembered")
         .map(({ detail }) => detail?.outcome),
+      trouble: troubleAfter,
     }).toStrictEqual({
       answered: true,
       written: 1,
       outcomes: ["attempted", "done"],
+      trouble: { ...troubleBefore, conflicts: 0 },
+    });
+  });
+
+  it("writes only while everything the App reaches through its grants is the company's: a clean chain writes, and once a workflow it starts can read an App's owners' own rows, or a deeper chain can, it writes nothing", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const wide = await appOf(ada, admin);
+    const deeper = await appOf(ada, admin);
+    const clean = await publishedApp(ada, memoriesApp("appMembers"), "Clean", {
+      everyone: true,
+    });
+    const diary = await publishedApp(ada, diaryApp(), "Diary");
+    const starts = async (app: string, workflow: string) => {
+      await grantRow(
+        { type: "app", id: app },
+        { type: "workflow", id: workflow },
+        ["start"]
+      );
+    };
+    const calls = async (workflow: string, app: string) => {
+      await grantRow(
+        { type: "workflow", id: workflow },
+        { type: "app", id: app },
+        ["call"]
+      );
+    };
+    // App → workflow → an App that is the company's.
+    const workflow = crypto.randomUUID();
+    await starts(wide.app, workflow);
+    await calls(workflow, clean.app);
+    const before = await askedOf(wide, ada, "remember", fact("Clean chain"));
+    // Then the workflow may call the Diary, whose rows are each owner's.
+    await calls(workflow, diary.app);
+    // App → workflow → workflow → the Diary.
+    const [first, second] = [crypto.randomUUID(), crypto.randomUUID()];
+    await starts(deeper.app, first);
+    await grantRow(
+      { type: "workflow", id: first },
+      { type: "workflow", id: second },
+      ["start"]
+    );
+    await calls(second, diary.app);
+
+    expect({
+      before: rememberedSchema.safeParse(before).success,
+      after: await askedOf(wide, ada, "remember", fact("Unclean chain")),
+      afterForget: await askedOf(wide, ada, "forget", {
+        memory: rememberedSchema.parse(before).memory,
+      }),
+      deeper: await askedOf(deeper, ada, "remember", fact("Deeper chain")),
+    }).toStrictEqual({
+      before: true,
+      after: { failed: "permission.unavailable" },
+      afterForget: { failed: "permission.unavailable" },
+      deeper: { failed: "permission.unavailable" },
     });
   });
 });
@@ -903,7 +1086,7 @@ const startedRun = async (
     env,
     { type: "person", person: by },
     id,
-    { version: 1, args, key: unique() }
+    { expected: 1, args, key: unique() }
   );
   if (runId === null) {
     throw new Error("The start admitted no run");
@@ -1040,10 +1223,16 @@ describe("memories and entities, as a workflow reaches them", setUpTime, () => {
           },
         }
       );
+    const warn = vi.spyOn(console, "warn");
+    const troubleBefore = await auditTrouble([]);
     const first = await again();
+    // Drained: the first `done` reaches the log before the repeat.
+    await allEvents();
     const second = await again();
     await goOn(reviewer, decision);
     const ended = await endOf(ada, workflow.id, runId);
+    const troubleAfter = await auditTrouble(warn.mock.calls);
+    warn.mockRestore();
     const events = await vi.waitFor(
       async () => {
         const all = await allEvents();
@@ -1072,6 +1261,9 @@ describe("memories and entities, as a workflow reaches them", setUpTime, () => {
       written: 1,
       outcomes: ["attempted", "attempted", "attempted", "done"],
     });
+    // The repeats' `done` is the event the log holds: none refused, no
+    // gap, no conflict.
+    expect(troubleAfter).toStrictEqual({ ...troubleBefore, conflicts: 0 });
   });
 
   it("writes nothing once what the run recalled is erased, and writes when nothing changed", async () => {
@@ -1117,6 +1309,105 @@ describe("memories and entities, as a workflow reaches them", setUpTime, () => {
       left: true,
       afterErasure: { failed: "brain.revoked" },
       written: 1,
+    });
+  });
+
+  it("writes nothing from a run that calls an App whose rows are each owner's own", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const diary = await publishedApp(ada, diaryApp(), "Diary");
+    const secret = `Ada's private note ${unique()}`;
+    const add = diary.release.app.functions["diary.add"];
+    await callAppFunction(
+      env,
+      ada,
+      diary.app,
+      JSON.stringify({
+        reference: { name: "diary.add", kind: add?.kind },
+        args: { title: secret },
+      })
+    );
+    const fn = await functionIdOf(diary.app, "diary.mine");
+    const key = `brain-${unique()}`;
+    await publishCatalogContract(env, admin, { key, kind: "brain" });
+    const workflow = await createWorkflowResource(
+      env,
+      ada,
+      `diary-${unique()}`
+    );
+    await publishDefinition(
+      env,
+      ada,
+      workflow.id,
+      JSON.stringify({
+        $schema: workflowSchemaUrl,
+        args: { kind: "object", fields: { name: { kind: "string" } } },
+        returns: { kind: "object", fields: { memory: { kind: "string" } } },
+        result: { memory: { $expr: "remembered.memory" } },
+        permissions: {
+          brain: { docs: { contract: key } },
+          apps: {
+            diary: { app: diary.app, functions: { [fn]: "diary.mine" } },
+          },
+        },
+        steps: [
+          { id: "read", type: "call", app: "diary", function: fn, args: {} },
+          {
+            id: "remembered",
+            type: "call",
+            brain: "docs",
+            action: "remember",
+            args: {
+              about: { kind: "customer", names: [{ $expr: "args.name" }] },
+              statement: { $expr: "read[0]" },
+            },
+          },
+        ],
+      })
+    );
+    const subject = { type: "workflow" as const, workflowId: workflow.id };
+    await granted(
+      ada,
+      admin,
+      {
+        subject,
+        object: {
+          type: "app",
+          appId: appIdSchema.parse(diary.app),
+          function: fn,
+        },
+        actions: ["call"],
+        binding: `DIARY_${unique().replaceAll(/\W/gu, "_").toUpperCase()}`,
+      },
+      1
+    );
+    const permissionId = await granted(
+      ada,
+      admin,
+      platformGrant(subject, "brain")
+    );
+    await granted(ada, admin, platformGrant(subject, "brain.write"));
+    await approveWorkflowBinding(env, admin, workflow.id, {
+      alias: "docs",
+      target: { kind: "brain", permissionId },
+      reviewed: { version: 1 },
+    });
+    const { runId } = await startWorkflow(
+      env,
+      { type: "person", person: ada },
+      workflow.id,
+      { expected: 1, args: { name: `Diary Co ${unique()}` }, key: unique() }
+    );
+    if (runId === null) {
+      throw new Error("The start admitted no run");
+    }
+
+    expect({
+      ended: await endOf(ada, workflow.id, runId),
+      written: await writtenBy(`workflow:${workflow.id}`),
+    }).toStrictEqual({
+      ended: { failed: "permission.denied" },
+      written: 0,
     });
   });
 

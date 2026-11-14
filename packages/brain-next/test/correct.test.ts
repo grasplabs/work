@@ -150,7 +150,7 @@ describe("correcting a memory", () => {
     expect({
       member: await statusAsRead(entity, groupsOf(group)),
       outsider: await statusAsRead(entity, groupsOf(unique("other"))),
-      fix: typeof fix,
+      fix: typeof fix?.memory,
     }).toStrictEqual({
       // An agent's word is no person's confirmation: both stand.
       member: [
@@ -296,7 +296,10 @@ describe("correcting a memory", () => {
     ).then(() => "answered", String);
 
     expect({
-      same: again === first,
+      // The same fix, learned at the same moment: what its change made.
+      same:
+        again?.memory === first?.memory &&
+        again?.learnedAt.getTime() === first?.learnedAt.getTime(),
       other: other.includes("made before as another correction"),
       read: await statusAsRead(entity, groupsOf(group)),
     }).toStrictEqual({
@@ -384,7 +387,7 @@ describe("correcting a memory", () => {
       })
     );
 
-    expect(fix).toBeTypeOf("string");
+    expect(fix?.memory).toBeTypeOf("string");
   });
 });
 

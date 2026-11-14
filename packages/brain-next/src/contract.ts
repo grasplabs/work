@@ -2213,6 +2213,12 @@ export const correctRequestSchema = z.strictObject({
 });
 export type CorrectRequest = z.input<typeof correctRequestSchema>;
 
+/** A correction's fix: its id, and when the store learned it, the same on every repeat of its change. */
+export interface CorrectedMemory {
+  memory: MemoryId;
+  learnedAt: Date;
+}
+
 /**
  * Where a page of `findEntities` ended: the moment the first page was
  * read (`at`), at which every later page is read too (a memory learned
@@ -2876,7 +2882,7 @@ export interface Brain {
    * attribute the reader may read that say something else, so it is read
    * first among them. Another writer's fix is not confirmed: it stands
    * beside the memory it corrects, contested with it, for a person to
-   * confirm one. All in one transaction, the memory found by its id alone. The memory itself is never changed. Answers the fix's id, or
+   * confirm one. All in one transaction, the memory found by its id alone. The memory itself is never changed. Answers the fix (`CorrectedMemory`), or
    * null alike when there is no such memory, when the reader may not read
    * it or it is no longer current, when it is a relation, and when its
    * readers can't be kept: it rests on a version whose readers, or its
@@ -2886,7 +2892,7 @@ export interface Brain {
    * or given where none is held) or that breaks an add's rules, and for a
    * change made before as another correction.
    */
-  correctMemory: (request: CorrectRequest) => Promise<MemoryId | null>;
+  correctMemory: (request: CorrectRequest) => Promise<CorrectedMemory | null>;
   /**
    * The entities the reader may see that match, in the order of the first
    * memory they may read that mentions each.

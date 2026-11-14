@@ -74,7 +74,7 @@ const served = async (
           // Only while everything the App holds is the company's: what
           // it writes, every member reads (app-company.ts).
           mayWrite: async () => {
-            if (!(await heldByTheWholeCompany(env, caller.app))) {
+            if (!(await heldByTheWholeCompany(env, { app: caller.app }))) {
               throw permissionErrors.create("permission.denied", {
                 action: "brain.write",
               });

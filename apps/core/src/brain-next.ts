@@ -4518,7 +4518,7 @@ export const rememberForCompanyAs = async (
   personId: string,
   { writer, change }: { writer: string; change: string },
   remembered: unknown
-): Promise<{ memory: MemoryId; entity: EntityId }> => {
+): Promise<{ memory: MemoryId; entity: EntityId; learnedAt: Date }> => {
   const { about, statement, ...memory } = checked(
     codeRememberedSchema,
     remembered
@@ -4549,10 +4549,16 @@ export const rememberForCompanyAs = async (
   }
   const [saved] = added.memories;
   const entity = added.entities.about;
-  if (saved === undefined || entity === undefined) {
+  // When the store learned it, read back as the company reads it: the
+  // same on every repeat of its change, for its outcome's record.
+  const kept =
+    saved === undefined || entity === undefined
+      ? undefined
+      : await keptMemory(brain(env), reader, entity, saved);
+  if (saved === undefined || entity === undefined || kept === undefined) {
     throw new Error("The Brain kept no memory");
   }
-  return { memory: saved, entity };
+  return { memory: saved, entity, learnedAt: kept.learnedAt };
 };
 
 /**
@@ -4592,7 +4598,7 @@ export const correctForCompanyAs = async (
   personId: string,
   { writer, change }: { writer: string; change: string },
   correction: unknown
-): Promise<MemoryId | null> => {
+): Promise<{ memory: MemoryId; learnedAt: Date } | null> => {
   const { memory, value, statement } = checked(
     codeCorrectionSchema,
     correction
