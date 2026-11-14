@@ -9,7 +9,6 @@ import type {
   StandardWidgetId,
 } from "@grasp-os/shared/dashboard";
 import { expectedMessageOf } from "@grasp-os/shared/errors";
-import type { KnowledgeSignals } from "@grasp-os/shared/knowledge-signals";
 import type { Programme } from "@grasp-os/shared/onboarding";
 import { canBuild, isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -229,10 +228,7 @@ const readSignals = async (
   session: Session,
   identity: Identity
 ): Promise<Signals> => {
-  const [apps, knowledge] = await Promise.all([
-    openableApps(session),
-    orNone<KnowledgeSignals>(session.knowledgeSignals.list()),
-  ]);
+  const apps = await openableApps(session);
   const improvement = await readImprovement(
     session,
     identity,
@@ -240,7 +236,6 @@ const readSignals = async (
   );
   return {
     improvement,
-    knowledge,
     appNames: new Map(apps.map(({ id, name }) => [id, name])),
   };
 };
