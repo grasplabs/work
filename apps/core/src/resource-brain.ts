@@ -4,18 +4,19 @@ import type { PermissionId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 
-import { recallFor } from "./brain-recall.ts";
+import { recallFor, skillsCallFor } from "./brain-recall.ts";
 import type { ResourceAdapter, ServedBinding } from "./resource-adapter.ts";
 import { platformGrantOf } from "./resource-platform.ts";
 
-// A brain resource (resource-bindings.ts): `ctx.brain.recall` for an App's
-// actions, as an admin bound the App's `brain` declaration to one of the
-// App's own `{ type: "platform" }` permissions to read the Brain. A
-// declaration grants nothing: it resolves only through an active binding
-// approved for exactly it, naming the App's own active permission, which
-// `recallFor` checks again as each recall is made, then reads only what
-// everyone in the company may read, for whoever the call acts for (threat
-// model on GRA-1731).
+// A brain resource (resource-bindings.ts): `ctx.brain.recall` and
+// `ctx.brain.skills` for an App's actions, as an admin bound the App's
+// `brain` declaration to one of the App's own `{ type: "platform" }`
+// permissions to read the Brain. A declaration grants nothing: it
+// resolves only through an active binding approved for exactly it,
+// naming the App's own active permission, which `recallFor` and
+// `skillsCallFor` check again on each call, then read only what everyone
+// in the company may read, for whoever the call acts for (threat models
+// on GRA-1731 and GRA-1830).
 
 /** The contract every brain binding serves. */
 const brainContract = "grasp.brain@1";
@@ -30,23 +31,21 @@ const served = async (
     canonicalJson({ contract: brainContract, permissionId })
   ),
   call: async (caller, { method, args }) => {
+    const brainCaller = {
+      authority: caller.authority,
+      context: caller.context,
+      permissionId,
+      actor: caller.actor,
+      target: { type: "app", id: caller.app },
+    } as const;
     // The function host allows only a declared operation through.
-    if (method !== "recall") {
-      throw permissionErrors.create("permission.denied");
+    if (method === "recall") {
+      return await recallFor(env, brainCaller, args[0]);
     }
-    return await recallFor(
-      env,
-      {
-        authority: caller.authority,
-        context: caller.context,
-        permissionId,
-        // What an App is handed may end up wherever a member reads.
-        reach: "company",
-        actor: caller.actor,
-        target: { type: "app", id: caller.app },
-      },
-      args[0]
-    );
+    if (method === "skills.select" || method === "skills.read") {
+      return await skillsCallFor(env, brainCaller, method, args[0]);
+    }
+    throw permissionErrors.create("permission.denied");
   },
 });
 

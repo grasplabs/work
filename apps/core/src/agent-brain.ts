@@ -253,7 +253,7 @@ export class BrainAgentApi extends WorkerEntrypoint<Env, AgentScope> {
     // (turn-recall.ts `readsAs`, GRA-1820): its person's teams only in
     // their own chat in Grasp, in a turn they started (`ownChat`); the
     // company alone anywhere else.
-    const reach = scope.ownChat === true ? "teams" : "company";
+    const ownChat = scope.ownChat === true;
     return await recallFor(
       this.env,
       {
@@ -261,7 +261,7 @@ export class BrainAgentApi extends WorkerEntrypoint<Env, AgentScope> {
         context,
         permissionId:
           grant === undefined ? null : permissionIdSchema.parse(grant.id),
-        reach,
+        ...(ownChat ? { reach: "teams" as const } : {}),
         actor: delegateActorOf(authority, scope.via),
         target: { type: "chat", id: scope.chatId },
         keep: async ({ items }) => {
@@ -269,7 +269,7 @@ export class BrainAgentApi extends WorkerEntrypoint<Env, AgentScope> {
             this.env,
             scope,
             items.map(({ source, version }) =>
-              reach === "teams"
+              ownChat
                 ? brainTeamVersionRead({ source, version })
                 : brainCompanyVersionRead({ source, version })
             )

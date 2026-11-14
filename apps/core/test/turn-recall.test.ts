@@ -96,6 +96,36 @@ const forEveryone = async (text: string): Promise<SourceRef> => {
   return source;
 };
 
+/** What happens to a recalled source: nothing. */
+const leftAlone = async () => {
+  // Nothing changes: what was recalled stays in the chat's history.
+};
+/** A new version only a team may read: the person's own team even. */
+const narrowedToTeam = async (
+  source: SourceRef,
+  depot: string,
+  teamId: string
+) => {
+  await brainOf(inJurisdiction(env, env.BRAIN_STORE)).addSource({
+    source: `upload:${source.id}`,
+    change: crypto.randomUUID(),
+    text: `${depot} now only for the team.`,
+    access: { kind: "audience", group: `team:${teamId}` },
+  });
+};
+/** The source erased. */
+const erasedWhole = async (
+  source: SourceRef,
+  _depot: string,
+  teamId: string
+) => {
+  await eraseSource(env, {
+    source,
+    readers: { kind: "team", teamId },
+    reason: "deleted",
+  });
+};
+
 /** Adds `text` to the Brain as a new source `readers` may read. */
 const added = async (text: string, readers: SourceReaders) => {
   const source = newSource();
@@ -1312,6 +1342,96 @@ describe("what the recall before a question may reach", setUpTime, () => {
       unchanged: { recalled: true, answered: true, resent: true },
       narrowed: { recalled: true, answered: true, resent: false },
       erased: { recalled: true, answered: true, resent: false },
+    });
+  });
+
+  it("withholds what a chat's code or search recalled in a direct message once the whole company may no longer read it", async () => {
+    const admin = await signedInApi(idp, "admin");
+    /**
+     * In a new person's Teams direct message, code (`env.brain.recall`)
+     * or the `searchBrain` tool recalls a company source; `change`
+     * happens to it; they ask again of something else: whether the second
+     * turn's requests still carry what the first recalled.
+     */
+    const resentAfter = async (
+      way: "code" | "tool",
+      change: (
+        source: SourceRef,
+        depot: string,
+        teamId: string
+      ) => Promise<unknown>
+    ) => {
+      const person = await signedInWithRole(idp, "user");
+      const teamId = crypto.randomUUID();
+      const db = drizzle(env.DB);
+      await db.insert(teams).values({
+        id: teamId,
+        name: `Team ${unique()}`,
+        organizationId,
+        createdAt: new Date(),
+      });
+      await db.insert(teamMembers).values({
+        id: crypto.randomUUID(),
+        teamId,
+        userId: person.userId,
+        createdAt: new Date(),
+      });
+      const agentId = crypto.randomUUID();
+      await requestGranted(idp, admin, {
+        subject: { type: "agent", agentId },
+        object: { type: "platform" },
+        actions: ["brain"],
+        binding: "BRAIN",
+      });
+      const depot = word();
+      const marker = word();
+      const source = await forEveryone(`${depot} ${marker}`);
+      const asked = { question: depot, budget: { tokens: 800 } };
+      const step =
+        way === "code"
+          ? codeStep(
+              `export default async (self, env) => { const pack = await env.brain.recall(${JSON.stringify(asked)}); return pack.items.map(({ text }) => text).join(" | "); };`
+            )
+          : toolStep("searchBrain", { question: asked.question });
+      const provider = await fakeProvider(step, says("Noted."), says("Noted."));
+      const ask = async (text: string) =>
+        await workspace(env, personalWorkspaceId(person.userId)).askThrough(
+          person.userId,
+          agentId,
+          "teams",
+          text,
+          undefined,
+          { kind: "direct" }
+        );
+      // A question the recall before it finds nothing for.
+      await ask("Please look that up.");
+      const first = JSON.stringify(provider.requests.map(({ body }) => body));
+      await change(source, depot, teamId);
+      const before = provider.requests.length;
+      await ask("Thanks, and what else is new?");
+      const second = provider.requests.slice(before).map(({ body }) => body);
+      return {
+        recalled: first.includes(marker),
+        answered: second.length > 0,
+        resent: JSON.stringify(second).includes(marker),
+      };
+    };
+    const kept = { recalled: true, answered: true, resent: true };
+    const withheld = { recalled: true, answered: true, resent: false };
+    expect({
+      code: {
+        unchanged: await resentAfter("code", leftAlone),
+        narrowed: await resentAfter("code", narrowedToTeam),
+        erased: await resentAfter("code", erasedWhole),
+      },
+      tool: {
+        unchanged: await resentAfter("tool", leftAlone),
+        narrowed: await resentAfter("tool", narrowedToTeam),
+        erased: await resentAfter("tool", erasedWhole),
+      },
+    }).toStrictEqual({
+      code: { unchanged: kept, narrowed: withheld, erased: withheld },
+      tool: { unchanged: kept, narrowed: withheld, erased: withheld },
     });
   });
 

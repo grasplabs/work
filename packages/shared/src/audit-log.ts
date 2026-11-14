@@ -139,6 +139,13 @@ const typeRules: readonly {
   // passages and whether the budget cut it short, or why it was refused;
   // never the question or what was found.
   { action: "brain.recall", type: "read" },
+  // An App or a workflow's run selecting or reading the Brain's skills for
+  // a person (core's src/brain-recall.ts): for whom, how many skills or
+  // which version, or why it was refused; never the task, a name or a
+  // text. Each named exactly: a release installing skills
+  // (`brain.skills.installed`) is no read.
+  { action: "brain.skills.select", type: "read" },
+  { action: "brain.skills.read", type: "read" },
   // A Grasp staff member reaching a namespace, method or route of the
   // client's deployment (core's staff-audit.ts): what they looked at or
   // did there, by its surface and identifiers, never its content.
@@ -205,7 +212,7 @@ const typeRules: readonly {
   // Its calls that can change something (a connector call, an App's
   // export) record themselves under their own actions. The recall before a
   // chat's question (method `brain.recall`, core's turn-recall.ts) says
-  // what it read as (`reads`, `turnRecallReadsSchema` in audit.ts).
+  // what it read as (`reads`, `TurnRecallReads` in audit.ts).
   { action: "agent.call", type: "read" },
   { action: "model", type: "model_call" },
   { action: "permission", type: "permission" },

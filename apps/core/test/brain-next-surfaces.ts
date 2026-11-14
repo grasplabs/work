@@ -149,6 +149,11 @@ export interface Probing {
    */
   instructionGroups: readonly string[];
   /**
+   * The teams the App grant of code's recall names (GRA-1842): its recall
+   * reads, of these, the reader's alone. None when absent.
+   */
+  codeTeams?: readonly string[];
+  /**
    * Names of skills someone else wrote for themselves, each a marker,
    * in their own store (brain-next.ts): each asked of as the reader's own
    * must answer exactly as its twin, a skill no one wrote.
@@ -1718,6 +1723,35 @@ export const coreProbes = {
           version: 1,
         },
       ]),
+      // A run's pins of skills: one never written, one named by the
+      // markers, one of the markers' scope, as the company, as a run's
+      // check reads them.
+      await answer(
+        "skills no one wrote, as the company",
+        async () =>
+          await coreBrain.readableVersionsAs(
+            env,
+            personId,
+            [
+              {
+                source: { producer: "skill", id: "company:unwritten" },
+                version: 1,
+              },
+              {
+                source: {
+                  producer: "skill",
+                  id: `company:${markers.join("-")}`,
+                },
+                version: 1,
+              },
+              {
+                source: { producer: "skill", id: `${markers.join("")}:x` },
+                version: 1,
+              },
+            ],
+            { reach: "company" }
+          )
+      ),
     ];
   },
   mergeRecalled: async ({ personId, personal, markers, sharedWord }) => {
@@ -2693,6 +2727,24 @@ export const coreProbes = {
       return { model: host.embedders.model, totals: ownStores };
     }),
   ],
+  // Pure: a skill's key as a run keeps it, from what the caller names
+  // alone (a name it gives comes back as given), so no markers.
+  skillVersionRefOf: async () => [
+    await answer("a skill", async () => {
+      await Promise.resolve();
+      return coreBrain.skillVersionRefOf({
+        scope: "grasp",
+        name: "draw-a-workflow",
+        version: 1,
+      });
+    }),
+    await answer("not a skill's scope", async () => {
+      await Promise.resolve();
+      return coreBrain.skillVersionRefOf(
+        unchecked({ scope: "upload", name: "draw-a-workflow", version: 1 })
+      );
+    }),
+  ],
 } satisfies Record<Exclude<CoreMember, CorePersonMember>, Probe>;
 
 /** Each export of core's instruction-files.ts. */
@@ -3594,13 +3646,15 @@ const readersApp = (personId: string): Authority =>
 
 /**
  * An App acting for `personId`, holding an active grant to read the
- * Brain, as an App's recall needs one (brain-recall.ts): its authority,
- * and the grant's ID. Code's recall from an App or a workflow reads only
- * what everyone in the company may, so nothing of a team's or a person's
- * may come back, whoever it acts for.
+ * Brain, as an App's recall needs one (brain-recall.ts), naming `teams`
+ * when given: its authority, and the grant's ID. Code's recall from an
+ * App reads what everyone in the company may and, of the grant's teams,
+ * those its person is in; so nothing of another team's or of a person's
+ * own may come back, whoever it acts for.
  */
 const appWithBrain = async (
-  personId: string
+  personId: string,
+  teams?: readonly string[]
 ): Promise<{ authority: Authority; permissionId: string }> => {
   const authority = readersApp(personId);
   const permissionId = crypto.randomUUID();
@@ -3608,9 +3662,15 @@ const appWithBrain = async (
     throw new Error("Not an App");
   }
   await env.DB.prepare(
-    "INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id, actions, binding, status, requested_by, requested_at) VALUES (?, 'app', ?, 'platform', 'platform', '[\"brain\"]', 'BRAIN', 'active', ?, ?)"
+    "INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id, actions, binding, status, requested_by, requested_at, teams) VALUES (?, 'app', ?, 'platform', 'platform', '[\"brain\"]', 'BRAIN', 'active', ?, ?, ?)"
   )
-    .bind(permissionId, authority.subject.appId, personId, Date.now())
+    .bind(
+      permissionId,
+      authority.subject.appId,
+      personId,
+      Date.now(),
+      teams === undefined ? null : JSON.stringify(teams)
+    )
     .run();
   return { authority, permissionId };
 };
@@ -3629,9 +3689,18 @@ const callerOf = (as: Authority, grant: string): codeRecall.RecallCaller => ({
   permissionId: permissionIdSchema.parse(grant),
   // An App's as the company; a chat's code as its person's teams, as in
   // their own chat in Grasp.
-  reach: as.subject.type === "app" ? "company" : "teams",
+  ...(as.subject.type === "app" ? {} : { reach: "teams" as const }),
   actor: { type: "system" },
 });
+
+/** An App reading skills as `as`, under `grant`, keeping nothing. */
+const skillsCallerOf = (
+  as: Authority,
+  grant: string
+): codeRecall.SkillsCaller => {
+  const { keep: _keep, ...caller } = callerOf(as, grant);
+  return caller;
+};
 
 /** A recall as code asks for one, from what a probe asks. */
 const codeAsk = ({ question, budget, asOf }: PackAsk) => ({
@@ -3646,7 +3715,10 @@ export const recallProbes = {
   // grant, acting for the reader, asked every way the store is, as code
   // sends it, then every way it refuses, the markers in what is refused.
   recallFor: async (probing) => {
-    const { authority, permissionId } = await appWithBrain(probing.personId);
+    const { authority, permissionId } = await appWithBrain(
+      probing.personId,
+      probing.codeTeams
+    );
     const recall = async (
       input: unknown,
       as = authority,
@@ -3705,6 +3777,119 @@ export const recallProbes = {
             { question: hidden, budget: whole },
             readersApp(stranger())
           )
+      ),
+    ];
+  },
+  // Code's skills, as an App or a workflow selects and reads them: under
+  // an App's grant, acting for the reader, as the company alone; tasks and
+  // skills of the markers, then every way it refuses.
+  skillsCallFor: async ({ personId, markers, sharedWord }) => {
+    const { authority, permissionId } = await appWithBrain(personId);
+    await brainSkills.installShippedSkills(env);
+    const call = async (
+      name: string,
+      operation: codeRecall.SkillsOperation,
+      input: unknown,
+      { as = authority, grant = permissionId } = {},
+      about?: Answer["about"],
+      like?: string
+    ) =>
+      await answer(
+        name,
+        async () =>
+          await codeRecall.skillsCallFor(
+            env,
+            skillsCallerOf(as, grant),
+            operation,
+            input
+          ),
+        about,
+        like
+      );
+    const hidden = markers.join(" ");
+    const [shipped] = await brainSkills.skillsFor(env, authority, {
+      personal: false,
+    });
+    return [
+      await call(
+        "the markers",
+        "skills.select",
+        { task: hidden },
+        {},
+        "hidden",
+        "the markers"
+      ),
+      await call(
+        "the markers",
+        "skills.select",
+        { task: markers.map(twinOf).join(" ") },
+        {},
+        "nothing",
+        "the markers"
+      ),
+      await call(
+        "beside the shared word",
+        "skills.select",
+        { task: `${sharedWord} ${hidden}` },
+        {},
+        "hidden",
+        "beside the shared word"
+      ),
+      await call(
+        "beside the shared word",
+        "skills.select",
+        { task: `${sharedWord} ${markers.map(twinOf).join(" ")}` },
+        {},
+        "nothing",
+        "beside the shared word"
+      ),
+      await call("a workflow, beside the markers", "skills.select", {
+        task: `draw a workflow ${hidden}`,
+      }),
+      await call("not a task", "skills.select", { task: markers }),
+      await call("a skill the release ships", "skills.read", {
+        skill: shipped,
+      }),
+      await call("a name of the markers", "skills.read", {
+        skill: { scope: "company", name: markers.join("-"), version: 1 },
+      }),
+      await call("a scope of the markers", "skills.read", {
+        skill: { scope: hidden, name: "draw-a-workflow", version: 1 },
+      }),
+      // A person's own skill, named by the markers or their twins: code
+      // may name none (each pair from one call site, as the answers are
+      // compared whole). That code never reaches the reader's own store,
+      // where their skills are, the pass's store watch holds.
+      ...(await Promise.all(
+        [markers.join("-"), markers.map(twinOf).join("-")].map(
+          async (name, at) =>
+            await call(
+              "a person's own skill",
+              "skills.read",
+              { skill: { scope: "person", name, version: 1 } },
+              {},
+              at === 0 ? "hidden" : "nothing",
+              "own read"
+            )
+        )
+      )),
+      await call(
+        "the markers, under a grant the App doesn't hold",
+        "skills.select",
+        { task: hidden },
+        { grant: crypto.randomUUID() }
+      ),
+      await call(
+        "the markers, for someone who isn't a member",
+        "skills.select",
+        { task: hidden },
+        { as: readersApp(stranger()) }
+      ),
+      await call(
+        "a skill, for someone who isn't a member",
+        "skills.read",
+        { skill: shipped },
+        { as: readersApp(stranger()) }
       ),
     ];
   },

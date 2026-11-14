@@ -224,8 +224,7 @@ export type AuditDetailValue = z.infer<typeof auditDetailValueSchema>;
  * event's `reads` (method `brain.recall`, core's turn-recall.ts): the
  * person, or the company alone. Never who.
  */
-export const turnRecallReadsSchema = z.enum(["person", "company"]);
-export type TurnRecallReads = z.infer<typeof turnRecallReadsSchema>;
+export type TurnRecallReads = "person" | "company";
 
 /**
  * One audit event, stored by core and connect in an outbox and appended to

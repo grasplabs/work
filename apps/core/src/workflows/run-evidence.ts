@@ -6,9 +6,10 @@ import { drizzle } from "drizzle-orm/d1";
 import { runBrainVersions } from "../db/core/schema.ts";
 
 // What a workflow run recalled stays pinned to the run (GRA-299, kept on
-// the new Brain by GRA-1731): every version its recalls handed it is kept
-// with the run, by its source and number, only ever added to, with the
-// permission to read the Brain it came through. Before the run lets
+// the new Brain by GRA-1731): every version its recalls handed it, and
+// every skill version it selected or read (GRA-1830), is kept with the
+// run, by its source and number, only ever added to, with the permission
+// to read the Brain it came through. Before the run lets
 // anything leave it (a model call, a connection call, an App function
 // call, a decision opened for people, its output), the host checks the
 // run may still read them all (resource-reads.ts): each permission still
