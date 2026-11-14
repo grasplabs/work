@@ -44,12 +44,24 @@ export const InstructionFileEditor = ({
   // What they typed, and the version they started from: saved only after
   // that version, so a save never overwrites one they didn't see.
   const [draft, setDraft] = useState<{ text: string; from: number }>();
-  // The last save tried, by the change that names it: a save of the same
-  // text again (one whose answer was lost) names the same change, so core
-  // saves it once; any other text, or any save after one went through, is
-  // a change of its own.
-  const [tried, setTried] = useState<{ change: string; text: string }>();
+  // The last save tried, by the change that names it, its text and the
+  // version it started from: the same text from the same version again
+  // (one whose answer was lost) names the same change, so core saves it
+  // once; any other text, a save from another version, or any save after
+  // one went through, is a change of its own.
+  const [tried, setTried] = useState<{
+    change: string;
+    text: string;
+    after: number;
+  }>();
   const savedText = saved?.text ?? "";
+  // A save the page now shows landed (its text, past the version it
+  // started from) is done: its change is never sent again.
+  const landed =
+    tried !== undefined &&
+    saved !== null &&
+    saved.text === tried.text &&
+    saved.version > tried.after;
   const text = draft?.text ?? savedText;
   const unchanged = draft === undefined || draft.text === savedText;
   // Someone saved since they started typing: theirs is shown only once
@@ -64,8 +76,14 @@ export const InstructionFileEditor = ({
       return;
     }
     const sent = text.trim() === "" ? "" : text;
-    const change = tried?.text === sent ? tried.change : crypto.randomUUID();
-    setTried({ change, text: sent });
+    const change =
+      tried !== undefined &&
+      !landed &&
+      tried.text === sent &&
+      tried.after === draft.from
+        ? tried.change
+        : crypto.randomUUID();
+    setTried({ change, text: sent, after: draft.from });
     void run(async (session) => {
       await changeThenRefresh(
         async () => {

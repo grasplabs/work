@@ -328,7 +328,9 @@ export const newInstructionsSchema = newSourceSchema
      * is refused with `staleVersion` otherwise. Given, the add always makes
      * a new version, even of the current text and readers, so every add
      * that lands moves the version. A change the store already has answers
-     * with the version it made first, so a retry still adds nothing twice.
+     * with the version it made first, so a retry still adds nothing twice;
+     * sent over a version at or past that one, it is no retry, and is
+     * refused with `staleVersion`.
      * Left out, an add writes whatever is current, and current text and
      * readers make no new version.
      */

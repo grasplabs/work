@@ -184,6 +184,16 @@ const madeBefore = (
     if (byChange.file !== hash || byChange.readers !== readers) {
       throw new Error(changeTaken);
     }
+    // Sent over a version at or past the one it made: no repeat of that
+    // add, which was over an earlier one. Refused as stale, never answered
+    // as if it had written.
+    if (
+      added.after !== undefined &&
+      added.after !== null &&
+      byChange.version <= added.after
+    ) {
+      throw new Error(staleVersion);
+    }
     return { source: added.source, version: byChange.version };
   }
   const current = db

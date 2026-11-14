@@ -1029,6 +1029,35 @@ describe("instruction files, edited from a page", setUpTime, () => {
     });
   });
 
+  it("refuses a save's change sent again from a version at or past the one it made, writing nothing, and answers a true repeat", async () => {
+    const person = await signedInApi(idp, "user");
+    const own = { scope: "person", personId: person.userId } as const;
+    const change = crypto.randomUUID();
+    const first = { file: own, change, text: "Short answers.", after: 0 };
+    await person.api.instructions.save(first);
+    await person.api.instructions.save({
+      file: own,
+      change: crypto.randomUUID(),
+      text: "Long answers.",
+      after: 1,
+    });
+
+    expect({
+      // Its answer lost: the very same save again.
+      repeat: await person.api.instructions.save(first),
+      // Its change again, with its text, from the newer version: another
+      // save, never answered as if it had written.
+      fromNewer: await outcome(
+        person.api.instructions.save({ ...first, after: 2 })
+      ),
+      now: await person.api.instructions.read(own),
+    }).toStrictEqual({
+      repeat: { version: 1 },
+      fromNewer: "instructions.changed",
+      now: { version: 2, text: "Long answers." },
+    });
+  });
+
   it("refuses a save made from a version someone has saved over since, and keeps theirs", async () => {
     const [ada, ben] = await Promise.all([
       signedInApi(idp, "admin"),
