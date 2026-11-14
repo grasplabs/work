@@ -31,6 +31,15 @@ export type KeyState = "free" | "held" | "erased";
 export const erasedSource = "The Brain refused it: what this adds was erased";
 
 /**
+ * What `addMemories` answers a change added before with other memories:
+ * the message alone, so a caller tells it from any other failure by
+ * comparing it whole (a host that lets a person retry by a change key
+ * answers it as theirs to start again).
+ */
+export const changeReused =
+  "The Brain refused it: this change was added before with other memories";
+
+/**
  * What a person's own store erased whole answers an add, or any call that
  * would write: they were erased, for good, so the add is refused as
  * `erasedSource` is, and never tried again.
@@ -1122,6 +1131,16 @@ export const erasureReasons = [
   "withdrawn",
 ] as const;
 export type ErasureReason = (typeof erasureReasons)[number];
+
+/**
+ * What a person's own store answers an erasure of a source
+ * (`Brain.eraseSource`): how many sources it covered, its key's and each
+ * added in it as a group, that held a version as it was applied; a repeat
+ * answers the same. None once the store was erased whole.
+ */
+export interface SourceErased {
+  sources: number;
+}
 
 /** A source to erase, every version of it, and why. */
 export const sourceErasureSchema = z.strictObject({
@@ -2522,11 +2541,13 @@ export interface Brain {
    * it (`<group>/…`) is refused and answers `erased` (`keyState`), named
    * in the group or not; a key no add named as a group closes alone, so
    * `upload:1` erased leaves `upload:1/x` free. Never an erasure by
-   * prefix: what is erased is the key and its group's members. It
-   * answers alike whether the source held anything, and is safe to
-   * repeat.
+   * prefix: what is erased is the key and its group's members. Safe to
+   * repeat. The shared store answers nothing, alike whether the source
+   * held anything; a person's own store, whose caller acts for that
+   * person, answers how many sources the erasure covered, the same each
+   * time it is repeated (`SourceErased`).
    */
-  eraseSource: (request: SourceErasure) => Promise<void>;
+  eraseSource: (request: SourceErasure) => Promise<SourceErased | undefined>;
   /**
    * Erases what only `person` may read, as `eraseSource` erases a source:
    * every version readable by them alone, added up to now, and whole each

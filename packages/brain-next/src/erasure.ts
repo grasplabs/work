@@ -644,7 +644,8 @@ const dropUnusedReaderSet = (sql: SqlStorage, readerSet: number): void => {
  * Applies the erasure `key` (`entry`, and for a person what it hid): the
  * store's record of it, and everything it covers hidden. Run it in one
  * transaction. Safe to repeat. Answers the sources whose current version
- * it hid, whose work under way is to stop.
+ * it hid, whose work under way is to stop, and how many sources it found
+ * a version of to hide, which the record keeps (`erasures.sources`).
  */
 const apply = (
   sql: SqlStorage,
@@ -652,7 +653,7 @@ const apply = (
   entry: LedgerEntry,
   hidden: Hidden | null,
   confirmed: boolean
-): string[] => {
+): { stopped: string[]; sources: number } => {
   sql.exec(
     `INSERT OR IGNORE INTO erasures
       (key, kind, subject, reason, erased_at, confirmed)
@@ -688,14 +689,24 @@ const apply = (
     }
   }
   const stopped: string[] = [];
+  let sources = 0;
   for (const [subject, versions] of bySubject) {
     for (const source of sourcesOf(sql, subject)) {
-      if (hideVersions(sql, source, rowsOf(sql, source, versions), key)) {
+      const rows = rowsOf(sql, source, versions);
+      sources += rows.length > 0 ? 1 : 0;
+      if (hideVersions(sql, source, rows, key)) {
         stopped.push(source);
       }
     }
   }
-  return stopped;
+  // The first count of `key` stands: applied again (a replay), the
+  // erasure answers what it erased then.
+  sql.exec(
+    "UPDATE erasures SET sources = ? WHERE key = ? AND sources IS NULL",
+    sources,
+    key
+  );
+  return { stopped, sources };
 };
 
 /** A version still to erase, as a batch takes it. */
@@ -1028,7 +1039,9 @@ const nextAt = (sql: SqlStorage): number => {
  * and not yet written is written first, from what it recorded
  * (`erased_versions`), however much the tick deleted meanwhile, and then
  * the call erases as a first one does, as of now. A source erased before
- * answers at once.
+ * answers at once. Answers, for a source, how many sources its erasure
+ * covered (`apply`), the same however often it is repeated: what its
+ * latest record counted (none for one recorded before records counted).
  */
 export const erase = async (
   store: ErasureStore,
@@ -1037,7 +1050,7 @@ export const erase = async (
   reason: ErasureReason,
   stop: (sources: string[]) => void,
   { asGroup = false }: { asGroup?: boolean } = {}
-): Promise<void> => {
+): Promise<number> => {
   const { storage } = store;
   const { sql } = storage;
   const subject = await subjectOf(id);
@@ -1064,8 +1077,18 @@ export const erase = async (
     asGroup &&
     store.groups &&
     !isKnownGroup(sql, subject);
+  /** What the latest record of this source's erasure counted. */
+  const counted = (): number =>
+    sql
+      .exec<{ sources: number | null }>(
+        `SELECT sources FROM erasures WHERE kind = 'source' AND subject = ?
+        ORDER BY key DESC LIMIT 1`,
+        subject
+      )
+      .toArray()
+      .at(0)?.sources ?? 0;
   if (before?.confirmed === 1 && !markingGroup) {
-    return;
+    return counted();
   }
   // A person's erasures recorded and not yet written (a call that failed)
   // are written first, from what they recorded, so none is left behind a
@@ -1100,7 +1123,7 @@ export const erase = async (
       if (asGroup && store.groups && kind === "source") {
         keepGroup(sql, subject);
       }
-      return { key, stopped: apply(sql, key, entry, hidden, false) };
+      return { key, stopped: apply(sql, key, entry, hidden, false).stopped };
     });
     recorded = { key: hid.key, kind };
     stop(hid.stopped);
@@ -1117,6 +1140,7 @@ export const erase = async (
   } catch {
     // Hidden and recorded: the tick deletes the rest, and shows a failure.
   }
+  return kind === "source" ? counted() : 0;
 };
 
 /**
@@ -1303,7 +1327,7 @@ export const replayStep = async ({
           if (group) {
             keepGroup(sql, entry.subject);
           }
-          return apply(sql, key, entry, hidden, true);
+          return apply(sql, key, entry, hidden, true).stopped;
         })) {
           stopped.push(source);
         }

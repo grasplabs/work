@@ -13,7 +13,7 @@ import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { appFor } from "../src/apps.ts";
-import { drainAuditOutboxes } from "../src/audit-outbox.ts";
+import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import { organizationId } from "../src/auth/auth.ts";
 import { memberOf } from "../src/auth/identity.ts";
 import {
@@ -203,6 +203,14 @@ const readingSurfaces = new Set([
   "sources versions",
   "sources read",
   "sources search",
+  "core entitiesAs",
+  "core entityAs",
+  "core memoriesAs",
+  "core contestedAs",
+  "memoriesRpc entities",
+  "memoriesRpc entity",
+  "memoriesRpc memories",
+  "memoriesRpc contested",
   "store listSources",
   "store listVersions",
   "store recall",

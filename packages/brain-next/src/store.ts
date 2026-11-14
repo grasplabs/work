@@ -101,6 +101,7 @@ import type {
   RecallRequest,
   Pack,
   RestoreStatus,
+  SourceErased,
   SourceErasure,
   SourceId,
   SourceList,
@@ -1091,25 +1092,30 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * hidden before it returns, deleted by its tick if not at once. Work
    * under way on it is stopped (work.ts `stopWorkOn`). A person's own
    * store erased whole holds nothing to erase: done, so a caller erasing
-   * that person's sources after them isn't held pending for good.
+   * that person's sources after them isn't held pending for good. A
+   * person's own store answers how many sources the erasure covered (none
+   * once erased whole); the shared one answers nothing, alike whatever
+   * there was.
    */
-  async eraseSource(request: SourceErasure): Promise<void> {
+  async eraseSource(request: SourceErasure): Promise<SourceErased | undefined> {
     const { source, reason, asGroup } = checked(sourceErasureSchema, request);
+    const own = this.#kind.kind === "person";
     if (await this.#erasedWhole()) {
-      return;
+      return own ? { sources: 0 } : undefined;
     }
-    await this.#changing(async () => {
+    return await this.#changing(async () => {
       await this.#readyToWrite();
-      await erase(
+      const covered = await erase(
         this.#erasures,
         "source",
         source,
         reason,
-        (sources) => {
-          stopWorkOn(this.#work, sources);
+        (stopped) => {
+          stopWorkOn(this.#work, stopped);
         },
         { asGroup: asGroup === true }
       );
+      return own ? { sources: covered } : undefined;
     });
   }
 
