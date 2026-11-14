@@ -58,7 +58,7 @@ import {
   knowledgeSignals,
   personErasures,
 } from "../db/core/schema.ts";
-import { chunks, inList } from "../db/d1.ts";
+import { chunks, inList, statementsWithin } from "../db/d1.ts";
 import { allowedCollections } from "./access.ts";
 import type { Reader } from "./access.ts";
 import type { KnowledgeTally } from "./usage-tally.ts";
@@ -107,9 +107,6 @@ const dayMs = 24 * 60 * 60 * 1000;
 
 /** Rows one read of documents or collections returns. */
 const pageRows = 500;
-
-/** Signals one insert writes: 9 columns each, within D1's 100 parameters. */
-const rowsPerInsert = 11;
 
 /** Inserts one batch writes. */
 const insertsPerBatch = 50;
@@ -556,8 +553,8 @@ export const storeKnowledgeSignals = async (
       computation: computation.id,
     }))
   );
-  const inserts = chunks(rows, rowsPerInsert).map((chunk) =>
-    db.insert(knowledgeSignals).values(chunk)
+  const inserts = statementsWithin(rows, (part) =>
+    db.insert(knowledgeSignals).values(part)
   );
   const previous =
     totals.read === null ? await latestComputation(db) : undefined;

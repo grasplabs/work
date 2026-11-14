@@ -39,7 +39,7 @@ import {
   workflowResourceRuns,
   workflowResources,
 } from "./db/core/schema.ts";
-import { chunks } from "./db/d1.ts";
+import { chunks, statementsWithin } from "./db/d1.ts";
 import { collectionsPerQuestion } from "./signal-tally.ts";
 import type { SignalTally } from "./signal-tally.ts";
 import { auditableCode } from "./workflows/host.ts";
@@ -100,9 +100,6 @@ const samples = 5;
 
 /** The most unanswered questions kept for each App workflow, or the deployment. */
 const questionsPerScope = 20;
-
-/** Signals one insert writes: 7 columns each, within D1's 100 parameters. */
-const rowsPerInsert = 14;
 
 /** Inserts one batch writes. */
 const insertsPerBatch = 50;
@@ -815,10 +812,10 @@ export const storeImprovementSignals = async (
 ): Promise<void> => {
   const rows = await computeSignals(env, computation.startedAt, totals);
   const db = drizzle(env.DB);
-  const inserts = chunks(rows, rowsPerInsert).map((chunk) =>
+  const inserts = statementsWithin(rows, (part) =>
     db
       .insert(improvementSignals)
-      .values(chunk.map((row) => ({ ...row, computation: computation.id })))
+      .values(part.map((row) => ({ ...row, computation: computation.id })))
   );
   for (const [first, ...rest] of chunks(inserts, insertsPerBatch)) {
     if (first !== undefined) {

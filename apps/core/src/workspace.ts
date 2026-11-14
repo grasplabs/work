@@ -3556,6 +3556,21 @@ export class Workspace extends DurableObject<Env> {
     // Marked as the rows are now, in the same transaction as the event: a
     // check that ran alongside this one marked, and audited, its own.
     const audited = this.ctx.storage.transactionSync(() => {
+      // Runs an earlier event withheld, as they were before this check
+      // unmarks any: counted by it, not again.
+      const counted = new Set(
+        this.#db
+          .selectDistinct({ runId: chatRunSources.runId })
+          .from(chatRunSources)
+          .where(
+            and(
+              eq(chatRunSources.chatId, chatId),
+              isNotNull(chatRunSources.withheldAt)
+            )
+          )
+          .all()
+          .map(({ runId }) => runId)
+      );
       for (const { runId, sourceId, withheldAt } of back) {
         this.#db
           .update(chatRunSources)
@@ -3570,20 +3585,6 @@ export class Workspace extends DurableObject<Env> {
           )
           .run();
       }
-      // Runs an earlier event withheld: counted by it, not again.
-      const counted = new Set(
-        this.#db
-          .selectDistinct({ runId: chatRunSources.runId })
-          .from(chatRunSources)
-          .where(
-            and(
-              eq(chatRunSources.chatId, chatId),
-              isNotNull(chatRunSources.withheldAt)
-            )
-          )
-          .all()
-          .map(({ runId }) => runId)
-      );
       const fresh = this.#db
         .update(chatRunSources)
         .set({ withheldAt: new Date() })

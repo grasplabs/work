@@ -33,7 +33,11 @@ export const erasureAreas = [
   "brain",
   "runs",
   "interview",
+  "brain_sources",
 ] as const;
+
+/** An area of a person's erasure (person-erasure.ts): one of `erasureAreas` but removal. */
+export type ErasureAreaName = Exclude<(typeof erasureAreas)[number], "removal">;
 
 /** What erasing a person does to a table that names one. */
 export type ErasureClass =
@@ -287,11 +291,11 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // their open ones as erased once the Brain erased what was theirs
   // (person-erasure.ts, brain-sources.ts `endHandOversOf`), also one whose
   // item the queue parked for good.
-  "core.brain_hand_overs": { erased: "brain" },
+  "core.brain_hand_overs": { erased: "brain_sources" },
   // A person's own Brain store's health, keyed by the SHA-256 of their ID:
   // removed once the Brain's erasure erased their store (brain-next.ts
   // `erasePerson`).
-  "core.brain_own_stores": { erased: "brain" },
+  "core.brain_own_stores": { erased: "brain_sources" },
   "core.brain_records": {
     company: "agreed facts naming roles; a gap's answer names who gave it",
   },

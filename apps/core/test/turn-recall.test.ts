@@ -1,5 +1,6 @@
 import { brainOf, personalBrainOf } from "@grasp-os/brain-next/contract";
 import type { AuditEvent } from "@grasp-os/shared/audit";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -168,6 +169,22 @@ const teamOf = async (
     group: `team:${teamId}`,
     teamId,
   };
+};
+
+/**
+ * A new version of `side.source`, its text the same, that `readers` may
+ * read: narrowed to them, or theirs again.
+ */
+const readersChanged = async (
+  side: { source: SourceRef; text: string },
+  readers: SourceReaders
+) => {
+  await addSource(env, {
+    source: side.source,
+    change: crypto.randomUUID(),
+    text: side.text,
+    readers,
+  });
 };
 
 /** Adds `text` to the Brain as a new source `readers` may read. */
@@ -1840,6 +1857,70 @@ describe("what the recall before a question may reach", setUpTime, () => {
       recordedBefore: true,
     });
   });
+
+  it("withholds the result whose pin it can't check, audited, and sends the rest of the chat's history", async () => {
+    const kept = `Depot ${word()} opens at seven`;
+    const unchecked = `Depot ${word()} opens at nine`;
+    const chat = await recallingChat(
+      says("Noted."),
+      says("Noted too."),
+      says("And again.")
+    );
+    await added(kept, owner(chat.personId));
+    await chat.ask(
+      `${kept.replace(" opens at seven", "")}: when does it open?`
+    );
+    await added(unchecked, owner(chat.personId));
+    const second = chat.provider.requests.length;
+    await chat.ask(
+      `${unchecked.replace(" opens at nine", "")}: when does it open?`
+    );
+    const run = recallRunIn(chat.provider.requests[second]?.body) ?? "";
+    // Beside what the second recall read, a pin of its run as no release
+    // writes one: of a kind of source no producer has.
+    const pin = `brain-version:${JSON.stringify(["gone", crypto.randomUUID(), 1])}`;
+    await runInDurableObject(chat.stub, (_instance, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO chat_run_sources (chat_id, run_id, source_id) VALUES (?, ?, ?)",
+        chat.chat.id,
+        run,
+        pin
+      );
+    });
+
+    const third = chat.provider.requests.length;
+    await chat.ask("Thanks!");
+    const body = JSON.stringify(chat.provider.requests[third]?.body);
+    const marked = await runInDurableObject(chat.stub, (_instance, state) =>
+      state.storage.sql
+        .exec<{ withheld: number }>(
+          "SELECT withheld_at IS NOT NULL AS withheld FROM chat_run_sources WHERE chat_id = ? AND run_id = ? AND source_id = ?",
+          chat.chat.id,
+          run,
+          pin
+        )
+        .toArray()
+    );
+    const events = await eventsOf(chat.agent.agentId, (all) =>
+      all.some(({ action }) => action === "chat.history_withheld")
+    );
+    expect({
+      recalled: run !== "",
+      kept: body.includes(kept),
+      unchecked: body.includes(unchecked),
+      withheld: body.includes(withheldResult),
+      marked,
+      audited: withheldIn(events, chat.chat.id).map(({ detail }) => detail),
+    }).toStrictEqual({
+      recalled: true,
+      kept: true,
+      unchecked: false,
+      withheld: true,
+      marked: [{ withheld: 1 }],
+      // Counted under the kind its prefix names, though it doesn't parse.
+      audited: [{ workspace: chat.id, runs: 1, sources: 1, passages: 1 }],
+    });
+  });
 });
 
 /** The shared store, where a team's memories are kept. */
@@ -2333,7 +2414,7 @@ describe("memories a recall handed over, read again", setUpTime, () => {
     });
   });
 
-  it("audits checks that overlap as one event for one narrowed source, and a second source narrowed after as a second, its runs counted once", async () => {
+  it("audits checks that overlap as one event for one narrowed source, and a second source narrowed as the first is restored as a second, its run counted once", async () => {
     const person = await signedInWithRole(idp, "user");
     const { readers, group } = await teamOf(person.userId);
     const depot = word();
@@ -2388,17 +2469,9 @@ describe("memories a recall handed over, read again", setUpTime, () => {
     };
     const outsider = await signedInWithRole(idp, "user");
     const { readers: elsewhere } = await teamOf(outsider.userId);
-    const narrow = async (side: typeof bays) => {
-      await addSource(env, {
-        source: side.source,
-        change: crypto.randomUUID(),
-        text: side.text,
-        readers: elsewhere,
-      });
-    };
     const head = await logHead();
 
-    await narrow(bays);
+    await readersChanged(bays, elsewhere);
     // Four checks at once, as the chat's object makes one before every
     // request: each reads the rows before any marks them.
     const guards = await Promise.all(
@@ -2407,9 +2480,15 @@ describe("memories a recall handed over, read again", setUpTime, () => {
         async () => await chat.stub.turnGuard(chat.chat.id)
       )
     );
-    await narrow(docks);
+    // One check finds the first readable again and the second narrowed,
+    // in the same run, withheld right up to it.
+    await readersChanged(bays, readers);
+    await readersChanged(docks, elsewhere);
     await chat.stub.turnGuard(chat.chat.id);
     const after = await eventsAfter(head);
+    // Both readable again: the run reaches the model again.
+    await readersChanged(docks, readers);
+    const restored = await chat.stub.turnGuard(chat.chat.id);
     const recallRun = recallRunIn(chat.provider.requests[0]?.body);
 
     expect({
@@ -2419,15 +2498,18 @@ describe("memories a recall handed over, read again", setUpTime, () => {
       guards: guards.map(({ withheld }) => withheld),
       events: withheldIn(after, chat.chat.id).map(({ detail }) => detail),
       gaps: after.filter(({ action }) => action === "audit.gap").length,
+      restored: restored.withheld,
     }).toStrictEqual({
       recalledBoth: [true, true],
       guards: Array.from({ length: 4 }, () => [recallRun]),
       events: [
         countsFor(bays, bayMemories, 1),
-        // The same run, withheld by the first event already.
+        // The same run, withheld by the first event and still so as the
+        // second check unmarked the first source.
         countsFor(docks, dockMemories, 0),
       ],
       gaps: 0,
+      restored: [],
     });
   });
 
