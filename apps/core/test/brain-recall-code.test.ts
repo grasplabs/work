@@ -1507,9 +1507,16 @@ describe("an App whose grant names teams", setUpTime, () => {
         id: member.userId,
         role: "user",
       });
-    // Ben is in Ada's team: shared. Uma isn't: refused.
+    // Ben is in Ada's team: shared. Uma isn't: refused. Nor is an admin
+    // outside it, alike; an admin in it is shared.
+    const adminInTeam = await person("admin");
+    await joined(teams.adas, adminInTeam);
     await share(ben);
+    await share(adminInTeam);
     await expect(share(uma)).rejects.toMatchObject({
+      code: "app.share_unreadable",
+    });
+    await expect(share(admin)).rejects.toMatchObject({
       code: "app.share_unreadable",
     });
     // The team renamed: nothing names it by its name.

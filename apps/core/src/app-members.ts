@@ -17,7 +17,7 @@ import {
   createAuditEvent,
 } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
-import { isAdmin, roleSchema } from "@grasp-os/shared/roles";
+import { roleSchema } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { and, asc, eq, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
@@ -29,8 +29,9 @@ import {
   readerOf,
   sourcesOf,
   unreadableBy,
+  unreadableTeamsBy,
 } from "./app-provenance.ts";
-import type { Reader } from "./app-provenance.ts";
+import type { AppSources, Reader } from "./app-provenance.ts";
 import { appFor, editableApp } from "./apps.ts";
 import {
   auditedBatch,
@@ -204,9 +205,10 @@ const peopleReachedBy = async (
 
 /**
  * Whom sharing `app` with `member` reaches now, as far as provenance goes:
- * the person, or each of the team's or project's people, with their teams. The App's
- * owner and admins aren't checked, nor anyone no longer in the
- * organization, who reaches nothing. A few queries, whatever the team's
+ * the person, or each of the team's or project's people, with their teams.
+ * The App's owner isn't checked, nor anyone no longer in the organization,
+ * who reaches nothing. Admins are, for the Brain's teams alone
+ * (`unreadableFor`). A few queries, whatever the team's
  * size.
  */
 const checkedPeople = async (
@@ -251,12 +253,22 @@ const checkedPeople = async (
   return roles.flatMap(({ userId, role }) => {
     // A role that isn't one of ours is no access, as auth/identity.ts has it.
     const known = roleSchema.safeParse(role);
-    if (!known.success || isAdmin(known.data)) {
+    if (!known.success) {
       return [];
     }
     return [readerOf(userId, teamsByPerson.get(userId) ?? [], known.data)];
   });
 };
+
+/**
+ * What of `sources` `person` can't read, as sharing decides it: an admin
+ * manages every App whatever it read, but for a team's content in the
+ * Brain, which is that team's members' alone, admins' too (GRA-1842).
+ */
+const unreadableFor = (sources: AppSources, person: Reader): string[] =>
+  person.admin
+    ? unreadableTeamsBy(sources.brainTeams, person)
+    : unreadableBy(sources, person);
 
 /**
  * Refuses sharing `app` with `member` when anyone it would reach now can't
@@ -279,7 +291,7 @@ const requireReadable = async (
   const refused = people
     .map((person) => ({
       userId: person.userId,
-      sources: unreadableBy(sources, person),
+      sources: unreadableFor(sources, person),
     }))
     .filter(({ sources: ids }) => ids.length > 0);
   if (refused.length === 0) {
