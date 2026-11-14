@@ -633,18 +633,32 @@ export const readMemoriesHeld = (
 ): { read: MemoriesRead; restsOn: SourceVersionRef[] } => {
   const { read, rows, limit, reader, at, learned } = readMemoryRows(sql, asked);
   const page = rows.slice(0, limit);
+  // The current memories of each entity (the memory's own: a relation's
+  // subject, whichever side the card is on) and attribute a contested
+  // memory of the page has, read once however many of them it holds.
+  const current = new Map<string, MemoryRow[]>();
+  const currentOf = (entityRow: number, attribute: string): MemoryRow[] => {
+    const key = JSON.stringify([entityRow, attribute]);
+    const memories =
+      current.get(key) ??
+      memoryRowsAt(
+        sql,
+        currentOfAttributeSql,
+        at,
+        entityRow,
+        reader,
+        learned,
+        -1,
+        attribute
+      );
+    current.set(key, memories);
+    return memories;
+  };
   const rivals = page.flatMap((row) =>
     row.contested === 1 && row.attribute !== null
-      ? memoryRowsAt(
-          sql,
-          currentOfAttributeSql,
-          at,
-          row.entity_row,
-          reader,
-          learned,
-          -1,
-          row.attribute
-        ).filter(({ value_key: key }) => key !== row.value_key)
+      ? currentOf(row.entity_row, row.attribute).filter(
+          ({ value_key: key }) => key !== row.value_key
+        )
       : []
   );
   const confirmations = page.flatMap(
