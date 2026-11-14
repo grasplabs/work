@@ -1,4 +1,3 @@
-import { brainErrors } from "@grasp-os/brain/contract";
 import {
   descriptorFromText,
   schemaFromDescriptor,
@@ -1018,7 +1017,7 @@ const chatPinsOf = async (
     throw denied();
   }
   if (sources.length > runEvidenceMaxRows) {
-    throw brainErrors.create("brain.budget_exceeded");
+    throw workflowResourceErrors.create("brain.budget_exceeded");
   }
   return {
     scope: {

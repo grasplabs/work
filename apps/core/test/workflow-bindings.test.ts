@@ -10,9 +10,11 @@ import type {
 } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { workflowBindingTargetSchema } from "@grasp-os/shared/workflow-resources";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import { startAppBinding } from "../src/app-workflow-bindings.ts";
 import { appFor } from "../src/apps.ts";
@@ -35,6 +37,7 @@ import {
   resolveCatalogKeys,
 } from "../src/workflow-catalog.ts";
 import { shareWorkflowResource } from "../src/workflow-members.ts";
+import { workflowActivity } from "../src/workflow-own.ts";
 import { setWorkflowParams, workflowParams } from "../src/workflow-params.ts";
 import {
   workflowKind,
@@ -54,12 +57,14 @@ import type {
 } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { sweepRunDetails } from "../src/workflows/retention.ts";
+import { admitRunEvent } from "../src/workflows/run-events.ts";
 import { storeOfNewApp } from "./app-stores.ts";
 import { racingDb, standInBinding } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
 import { connectModels } from "./model-provider.ts";
 import { outcome, refusal, unique } from "./sign-in.ts";
+import { testBinding } from "./test-env.ts";
 import { publishDefinition } from "./workflow-publishing.ts";
 
 // Catalog bindings, App bindings and parameters of independent workflows
@@ -674,6 +679,82 @@ describe("approving a workflow's binding", () => {
       wrongKind: "workflow.binding_invalid",
       unpublished: "workflow.binding_invalid",
       approved: "ok",
+    });
+  });
+
+  it("reads every approval once the migration removed those of kinds there are no more", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const key = await modelContract(admin);
+    const workflow = await workflowOf(ada, key);
+    await approveWorkflowBinding(env, admin, workflow.id, {
+      alias: "ai",
+      target: { kind: "model", model: allowedModel },
+      reviewed: { version: 1 },
+    });
+    // Approvals an earlier release wrote, of binding kinds there are no
+    // more: a Knowledge collection's, active and revoked, and a template's.
+    const stale = [
+      [
+        "notes",
+        "knowledge",
+        { kind: "knowledge", permissionId: "perm-old" },
+        "active",
+      ],
+      ["wiki", "knowledge", { kind: "knowledge", collections: {} }, "revoked"],
+      [
+        "letters",
+        "template",
+        { kind: "template", templateId: "t-old" },
+        "active",
+      ],
+    ] as const;
+    await env.DB.batch(
+      stale.map(([alias, kind, target, status]) =>
+        env.DB.prepare(
+          "INSERT INTO workflow_binding_approvals (id, workflow_resource_id, alias, kind, contract_id, fingerprint, target, reviewed_version, status, approved_by, approved_at, revoked_by, revoked_at) VALUES (?, ?, ?, ?, 'old/contract@1', 'f', ?, 1, ?, ?, ?, ?, ?)"
+        ).bind(
+          `approval-${unique()}`,
+          workflow.id,
+          alias,
+          kind,
+          JSON.stringify(target),
+          status,
+          admin.userId,
+          Date.now(),
+          status === "revoked" ? admin.userId : null,
+          status === "revoked" ? Date.now() : null
+        )
+      )
+    );
+    // The migration's own statements, as it ran them.
+    const removal = z
+      .array(z.object({ name: z.string(), queries: z.array(z.string()) }))
+      .parse(testBinding("CORE_MIGRATIONS"))
+      .find(({ name }) => name.includes("_knowledge_approvals_removed"));
+    if (removal === undefined) {
+      throw new Error("No migration removes the knowledge approvals");
+    }
+    await env.DB.batch(removal.queries.map((query) => env.DB.prepare(query)));
+
+    const { results } = await env.DB.prepare(
+      "SELECT target FROM workflow_binding_approvals"
+    ).all<{ target: string }>();
+    const activity = await workflowActivity(env, ada, workflow.id);
+    const listed = await listWorkflowBindings(env, ada, workflow.id);
+    expect({
+      unreadable: results.filter(
+        ({ target }) =>
+          !workflowBindingTargetSchema.safeParse(JSON.parse(target)).success
+      ),
+      listed: listed.map(({ alias, target }) => ({ alias, target })),
+      activity: activity.flatMap((entry) =>
+        entry.kind === "binding" ? [[entry.alias, entry.bindingKind]] : []
+      ),
+    }).toStrictEqual({
+      unreadable: [],
+      listed: [{ alias: "ai", target: { kind: "model", model: allowedModel } }],
+      activity: [["ai", "model"]],
     });
   });
 
@@ -1424,6 +1505,65 @@ describe("what a start freezes", () => {
       mutated: true,
       rebound: true,
     });
+  });
+});
+
+describe("a run an earlier release started", () => {
+  it("is refused as of a format this release doesn't read, when its receipt froze a binding of a kind there is no more", async () => {
+    const ada = await person("builder");
+    const workflow = await workflowOf(ada);
+    // A receipt and its running run as an earlier release froze them: a
+    // Knowledge collection's binding beside an event binding.
+    const runId = crypto.randomUUID();
+    const frozen = [
+      {
+        alias: "jobEvents",
+        kind: "event",
+        contractId: "old/events@1",
+        fingerprint: "f",
+        approval: "approval-events",
+        target: { kind: "event" },
+      },
+      {
+        alias: "notes",
+        kind: "knowledge",
+        contractId: "old/notes@1",
+        fingerprint: "f",
+        approval: "approval-notes",
+        target: { kind: "knowledge", permissionId: "perm-old" },
+      },
+    ];
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO workflow_start_receipts (id, invoker_type, invoker_id, idempotency_key, workflow_resource_id, workflow_resource_version, manifest_hash, principal_id, authority_generation, input_hash, bindings, created_at) VALUES (?, 'person', ?, ?, ?, 1, 'm', ?, 1, 'h', ?, ?)"
+      ).bind(
+        runId,
+        ada.userId,
+        `key-${runId}`,
+        workflow.id,
+        ada.userId,
+        JSON.stringify(frozen),
+        Date.now()
+      ),
+      env.DB.prepare(
+        "INSERT INTO workflow_resource_runs (id, workflow_resource_id, version, manifest_hash, build_hash, principal_id, status, created_at) VALUES (?, ?, 1, 'm', 'b', ?, 'running', ?)"
+      ).bind(runId, workflow.id, ada.userId, Date.now()),
+    ]);
+
+    await expect(
+      outcome(
+        admitRunEvent(env, {
+          workflowId: workflow.id,
+          runId,
+          binding: "jobEvents",
+          type: "grasp.job.completed",
+          key: `event-${unique()}`,
+          data: {},
+          source: "urn:test:sender",
+          sender: "test",
+        })
+      )
+    ).resolves.toBe("workflow.format_unsupported");
   });
 });
 

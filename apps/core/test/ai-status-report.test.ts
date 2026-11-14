@@ -130,7 +130,7 @@ const converted = async (month: string): Promise<void> => {
   ]);
   await models(inMonth(month)).platformCall({
     model: "openai/gpt-5.4-mini",
-    purpose: "knowledge.conversion",
+    purpose: "upload.conversion",
     trigger: newPerson(),
     work: { platform: "document_conversion" },
     input: "Write out this document as Markdown.",
