@@ -397,6 +397,34 @@ describe("a request a card's press belongs to", setUpTime, () => {
       },
     ]);
   });
+
+  it("is the one whose answer posted the card, however many cards that answer posted", async () => {
+    await env.DB.prepare(
+      "INSERT INTO stephen_requests (id, day, place, person_id, kind, outcome, tools, missing, chat_id) VALUES ('teams:many', '2026-10-01', 'teams', 'person-ann', 'answered', 'done', '[]', '[]', 'chat-1')"
+    ).run();
+    // More cards than one statement of D1's 100 bound parameters keeps.
+    const offers = Array.from({ length: 40 }, (_, at) => `offer-${at}`);
+    await keepCardsOf(
+      env,
+      "teams:many",
+      offers.map((offer) => `offer:${offer}`)
+    );
+
+    await pressedStart(env, {
+      userId: "person-ann",
+      offerId: "offer-39",
+      workflowId: "wf-1",
+      started: true,
+    });
+
+    const request = await env.DB.prepare(
+      "SELECT kind, tools FROM stephen_requests WHERE id = 'teams:many'"
+    ).first<{ kind: string; tools: string }>();
+    expect(request).toStrictEqual({
+      kind: "workflow",
+      tools: JSON.stringify([{ id: "workflow:wf-1", ok: true }]),
+    });
+  });
 });
 
 describe("the requests report", setUpTime, () => {

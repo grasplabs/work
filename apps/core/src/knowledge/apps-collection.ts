@@ -9,12 +9,13 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { and, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
+import { and, eq, isNotNull, ne, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { stringify } from "yaml";
 
 import { versionFiles } from "../apps.ts";
 import { appEntries, apps } from "../db/core/schema.ts";
+import { inList } from "../db/d1.ts";
 import { appEntryPath, appOfEntry, appsCollectionId } from "./app-entries.ts";
 import { appMemoryPath } from "./memory-files.ts";
 import { brainOf } from "./ports.ts";
@@ -378,9 +379,6 @@ export const forgetAppEntry = async (
   }
 };
 
-/** Most entry paths one query of `unforgottenApps` names. */
-const pathsPerQuery = 50;
-
 /**
  * The removed Apps whose entry wasn't forgotten yet: whose note is still
  * there, or whose entry isn't the tombstone, read from the entry itself.
@@ -401,39 +399,32 @@ const unforgottenApps = async (env: Env): Promise<string[]> => {
       .where(isNotNull(apps.removedAt)),
   ]);
   const tombstone = await sha256Hex(removedEntryText);
-  const pages = Array.from(
-    { length: Math.ceil(removed.length / pathsPerQuery) },
-    (_, page) =>
-      removed
-        .slice(page * pathsPerQuery, (page + 1) * pathsPerQuery)
-        .map(({ id }) => appEntryPath(id))
-  );
   const unforgotten = new Set(noted.map(({ id }) => id));
-  for (const paths of pages) {
-    // oxlint-disable-next-line no-await-in-loop -- one page at a time
-    const held = await drizzle(env.KNOWLEDGE)
-      .select({ path: documents.path })
-      .from(documents)
-      .innerJoin(
-        versions,
-        and(
-          eq(versions.documentId, documents.id),
-          eq(versions.number, documents.currentVersion)
-        )
+  const held = await drizzle(env.KNOWLEDGE)
+    .select({ path: documents.path })
+    .from(documents)
+    .innerJoin(
+      versions,
+      and(
+        eq(versions.documentId, documents.id),
+        eq(versions.number, documents.currentVersion)
       )
-      .innerJoin(brainPayloads, eq(brainPayloads.key, versions.payloadKey))
-      .where(
-        and(
-          eq(documents.collectionId, appsCollectionId),
-          inArray(documents.path, paths),
-          ne(brainPayloads.sha256, tombstone)
-        )
-      );
-    for (const { path } of held) {
-      const appId = appOfEntry(path);
-      if (appId !== undefined) {
-        unforgotten.add(appId);
-      }
+    )
+    .innerJoin(brainPayloads, eq(brainPayloads.key, versions.payloadKey))
+    .where(
+      and(
+        eq(documents.collectionId, appsCollectionId),
+        inList(
+          documents.path,
+          removed.map(({ id }) => appEntryPath(id))
+        ),
+        ne(brainPayloads.sha256, tombstone)
+      )
+    );
+  for (const { path } of held) {
+    const appId = appOfEntry(path);
+    if (appId !== undefined) {
+      unforgotten.add(appId);
     }
   }
   return [...unforgotten];

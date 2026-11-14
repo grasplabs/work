@@ -109,7 +109,7 @@ const audited = async <T>(
 export const rememberFor = async (
   env: Env,
   caller: MemoryCaller,
-  remembered: Remembered | Readonly<Record<string, unknown>>
+  remembered: Remembered
 ): Promise<RememberedMemory> =>
   await audited(
     env,

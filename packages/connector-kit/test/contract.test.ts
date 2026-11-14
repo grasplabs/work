@@ -51,15 +51,16 @@ const connectorWith = (
   });
 
 describe("a tool", () => {
-  it("answers a file only when read-only, taking `as` and answering a file's fields, as the manifest then says", () => {
-    const fileTool = (readOnly: boolean, output: z.ZodObject) =>
+  it("answers a file only when read-only, taking `as` as text or base64 and answering a file's fields, as the manifest then says", () => {
+    const fileTool = (
+      readOnly: boolean,
+      output: z.ZodObject,
+      as: z.ZodType = z.enum(["text", "base64"])
+    ) =>
       defineTool({
         name: "files.read",
         description: "Reads a file",
-        input: z.strictObject({
-          id: z.string(),
-          as: z.enum(["text", "base64"]),
-        }),
+        input: z.strictObject({ id: z.string(), as }),
         output,
         readOnly,
         reach: "own",
@@ -73,11 +74,37 @@ describe("a tool", () => {
       encoding: z.enum(["text", "base64"]),
       content: z.string().nullable(),
     });
-    expect(fileTool(true, fileOutput).action.answersFile).toBeTruthy();
-    expect(() => fileTool(false, fileOutput)).toThrow(/answers a file/u);
-    expect(() => fileTool(true, z.strictObject({ id: z.string() }))).toThrow(
-      /answers a file/u
-    );
+    /** Whether a tool of these answers a file, or how it was refused. */
+    const defined = (...args: Parameters<typeof fileTool>) => {
+      try {
+        return fileTool(...args).action.answersFile === true;
+      } catch (error) {
+        return error instanceof Error && /answers a file/u.test(error.message)
+          ? "refused"
+          : error;
+      }
+    };
+    expect({
+      read: defined(true, fileOutput),
+      optionalAs: defined(
+        true,
+        fileOutput,
+        z.enum(["text", "base64"]).optional()
+      ),
+      write: defined(false, fileOutput),
+      noFileFields: defined(true, z.strictObject({ id: z.string() })),
+      // An `as` that can't ask for text (core keeps none of it), or for
+      // base64 (no bytes for a run's files).
+      noText: defined(true, fileOutput, z.enum(["base64", "raw"])),
+      textOnly: defined(true, fileOutput, z.literal("text")),
+    }).toStrictEqual({
+      read: true,
+      optionalAs: true,
+      write: "refused",
+      noFileFields: "refused",
+      noText: "refused",
+      textOnly: "refused",
+    });
   });
 
   it("answers an item only when read-only, naming exactly that one item when it runs, as the manifest then says", async () => {

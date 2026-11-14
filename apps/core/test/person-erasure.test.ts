@@ -22,6 +22,10 @@ import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace, inJurisdiction } from "../src/durable-objects.ts";
 import type { Onboarding } from "../src/onboarding/store.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
+import {
+  erasureAreas,
+  erasureInventory,
+} from "../src/person-erasure-inventory.ts";
 import { rollback } from "../src/publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { testApp } from "./app-definitions.ts";
@@ -658,6 +662,27 @@ describe("erasing a person", () => {
       accounts: 0,
       sessions: 0,
       after: { name, email: null, removed: true },
+    });
+  });
+
+  it("runs the inventory's list of areas, and no other, so every table it files under an area is erased", async () => {
+    const { admin, person } = await removedPerson();
+
+    const { areas } = await admin.api.members.erasure(person.userId);
+
+    // Removal is not an area of the erasure: it comes before it. Connect's
+    // area files no table here: what it erases is in connect's database.
+    const filed = new Set(
+      Object.values(erasureInventory).flatMap((kind) =>
+        "erased" in kind && kind.erased !== "removal" ? [kind.erased] : []
+      )
+    );
+    expect({
+      listed: areas.toSorted(),
+      filedButNotRun: [...filed].filter((area) => !areas.includes(area)),
+    }).toStrictEqual({
+      listed: erasureAreas.filter((area) => area !== "removal").toSorted(),
+      filedButNotRun: [],
     });
   });
 

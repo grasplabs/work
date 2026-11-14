@@ -2934,6 +2934,28 @@ export const coreProbes = {
   ],
   // Pure: an audience as core stores it, and back; never the company for
   // anything that doesn't say so.
+  versionRefSchema: async () => [
+    await answer(
+      "a version",
+      async () =>
+        await Promise.resolve(
+          coreBrain.versionRefSchema.safeParse({
+            source: { producer: "upload", id: "probe-upload" },
+            version: 1,
+          }).success
+        )
+    ),
+    await answer(
+      "a kind no producer has",
+      async () =>
+        await Promise.resolve(
+          coreBrain.versionRefSchema.safeParse({
+            source: { producer: "gone", id: "probe-upload" },
+            version: 1,
+          }).success
+        )
+    ),
+  ],
   audienceKeyOf: async ({ markers }) => [
     await answer(
       "the company",
@@ -5273,7 +5295,7 @@ const corePageProbes = memoryPageProbes(corePageCalls);
 /** A person's memories through core's own functions (brain-next.ts). */
 const corePersonProbes = personMemoryProbes({
   remember: async (personId, remembered) =>
-    await coreBrain.rememberAs(env, personId, remembered),
+    await coreBrain.rememberAs(env, personId, unchecked(remembered)),
   forget: async (personId, memory) =>
     await coreBrain.forgetAs(env, personId, memory),
 });
@@ -5340,7 +5362,11 @@ const personCaller = (personId: string): brainMemories.MemoryCaller => ({
 export const memoriesProbes = (() => {
   const probes = personMemoryProbes({
     remember: async (personId, remembered) =>
-      await brainMemories.rememberFor(env, personCaller(personId), remembered),
+      await brainMemories.rememberFor(
+        env,
+        personCaller(personId),
+        unchecked(remembered)
+      ),
     forget: async (personId, memory) =>
       await brainMemories.forgetFor(env, personCaller(personId), memory),
   });

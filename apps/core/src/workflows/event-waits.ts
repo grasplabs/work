@@ -24,7 +24,7 @@ import {
   keptEvents,
   workflowBindingApprovals,
 } from "../db/core/schema.ts";
-import { inList } from "../db/d1.ts";
+import { inList, statementsWithin } from "../db/d1.ts";
 import { resolveCatalogKeys } from "../workflow-catalog.ts";
 import { isMatchKey, matchHashOf } from "./event-matches.ts";
 import type { MatchKey } from "./event-matches.ts";
@@ -686,24 +686,31 @@ export const enterMatchWait = async (
   }
   const db = drizzle(env.DB);
   const expiresAt = new Date(until);
-  await db
-    .insert(eventWaits)
-    .values(
-      types.map((eventType) => ({
-        runId: wait.run.runId,
-        step: wait.step,
-        eventType,
-        workflowId: wait.run.workflowId,
-        binding: wait.binding,
-        sourceId: source,
-        matchHash: wait.matchHash,
-        expiresAt,
-      }))
-    )
-    .onConflictDoUpdate({
-      target: [eventWaits.runId, eventWaits.step, eventWaits.eventType],
-      set: { sourceId: source, matchHash: wait.matchHash, expiresAt },
-    });
+  const [first, ...rest] = statementsWithin(types, (part) =>
+    db
+      .insert(eventWaits)
+      .values(
+        part.map((eventType) => ({
+          runId: wait.run.runId,
+          step: wait.step,
+          eventType,
+          workflowId: wait.run.workflowId,
+          binding: wait.binding,
+          sourceId: source,
+          matchHash: wait.matchHash,
+          expiresAt,
+        }))
+      )
+      .onConflictDoUpdate({
+        target: [eventWaits.runId, eventWaits.step, eventWaits.eventType],
+        set: { sourceId: source, matchHash: wait.matchHash, expiresAt },
+      })
+  );
+  // `types` is never empty (above): one batch, so the wait is entered for
+  // all its types or none.
+  if (first !== undefined) {
+    await db.batch([first, ...rest]);
+  }
   const refused: string[] = [];
   for (let attempt = 0; attempt < claimTries; attempt += 1) {
     // oxlint-disable-next-line no-await-in-loop -- one kept event after another

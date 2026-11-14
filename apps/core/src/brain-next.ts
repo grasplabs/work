@@ -394,7 +394,8 @@ export { questionMaxLength as recallQuestionMaxLength } from "@grasp-os/brain-ne
 /** A question as the Brain takes one (`recallRequestSchema`). */
 const questionSchema = wellFormedString().max(questionMaxLength);
 
-const versionRefSchema = z.strictObject({
+/** A version of a source, as its producer names the source. */
+export const versionRefSchema = z.strictObject({
   source: sourceRefSchema,
   version: z.int().positive(),
 });
@@ -808,6 +809,8 @@ const readerOf = async (
  * `change` was added before with other text or readers (nothing changed),
  * which an upload settles as refused, while `handOver` doesn't yet treat
  * it as final: it throws, so the hand-over is tried again until parked.
+ * And `brain.restoring` while the Brain restores an export: nothing is
+ * added, and the same add made again later is.
  *
  * With `said`, the Brain also draws memories from the version on its work
  * queue, in `said.priority`'s class: whose words it is (`said.by`, the
@@ -1883,8 +1886,9 @@ export interface InstructionFileVersion {
 /**
  * Adds `text` as the next version of the instruction file `file`; the one
  * before stays as history. Refused over `instructionsMaxLength` UTF-16
- * units with `instructions.too_large`, and with no text. `change` is as
- * `addSource`'s.
+ * units with `instructions.too_large`, and with no text; while the Brain
+ * restores an export with `brain.restoring`, to be made again later.
+ * `change` is as `addSource`'s.
  *
  * For instruction-files.ts only, which checks who may write `file` first:
  * nothing here does.
@@ -2347,8 +2351,9 @@ const skillTextOf = (name: string, text: unknown): string => {
  * text isn't a skill named `name` in the Agent Skills format (what it
  * needs, if it says, included) or is over `instructionsMaxLength` UTF-16
  * units, an instruction file's limit: both fail the same way every time,
- * until another release. Two adds at once may both say `changed`; the
- * store still keeps one version per text in a row.
+ * until another release. While the Brain restores an export, refused with
+ * `brain.restoring`, to be made again later. Two adds at once may both
+ * say `changed`; the store still keeps one version per text in a row.
  *
  * Grasp's own skills only: the release's install (brain-skills.ts) is its
  * one caller. Nothing here adds a shared skill: that write needs its own
@@ -3792,7 +3797,7 @@ const keptMemory = async (
 export const rememberAs = async (
   env: BrainEnv & Pick<Env, "DB">,
   personId: string,
-  remembered: Remembered | Readonly<Record<string, unknown>>
+  remembered: Remembered
 ): Promise<RememberedMemory> => {
   const { change, about, quote, ...memory } = checked(
     rememberedSchema,
