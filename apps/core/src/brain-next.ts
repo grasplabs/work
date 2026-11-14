@@ -414,6 +414,12 @@ export interface Recall {
    */
   company?: boolean;
   /**
+   * With `company`, the teams it reads beyond the company too: of these
+   * (an App's grant's, brain-recall.ts), those the person is in now, so
+   * never wider than the grant, nor than the person. None when absent.
+   */
+  teams?: readonly string[];
+  /**
    * Read each source as it was at this moment, to the millisecond and
    * including it: a version added at it counts. A caller who means "on
    * that day" passes the day's last millisecond in the time zone they
@@ -665,13 +671,14 @@ const personReaderOf = async (
 
 /**
  * The member `personId` as the Brain's reader, as far as `reach` goes
- * (`Reach`). Refused once they have no current membership, whatever the
- * reach.
+ * (`Reach`), and with `company`, of `teams` those they are in now.
+ * Refused once they have no current membership, whatever the reach.
  */
 const readerOf = async (
   env: Pick<Env, "DB">,
   personId: string,
-  reach: Reach
+  reach: Reach,
+  teams: readonly string[] = []
 ): Promise<Reader> => {
   const { person, groups } = await personReaderOf(env, personId);
   switch (reach) {
@@ -682,7 +689,12 @@ const readerOf = async (
       return { person: null, groups };
     }
     case "company": {
-      return { person: null, groups: [companyGroup] };
+      // Of `teams`, those the person is in now: a group of theirs.
+      const named = new Set(teams.map((id) => teamGroup(id)));
+      return {
+        person: null,
+        groups: [...groups.filter((group) => named.has(group)), companyGroup],
+      };
     }
     default: {
       throw new Error("Unknown reach");
@@ -852,12 +864,12 @@ const meaningOf = async (
  * embedder sees any of it, and embedded while their reader is read. With
  * `personal`, as the person (`person`: their own store too); without, as
  * their teams (a reader with no person: no `owner` source matches); with
- * `company`, as the company alone.
+ * `company`, as the company and, of `teams`, those they are in now.
  */
 const recallRequestAs = async (
   env: BrainEnv & Pick<Env, "DB" | "EMBEDDER">,
   personId: string,
-  { question: asked, budget, asOf, personal, company = false }: Recall
+  { question: asked, budget, asOf, personal, company = false, teams }: Recall
 ): Promise<RecallRequest> => {
   const question = checked(questionSchema, asked);
   let reach: Reach = personal ? "person" : "teams";
@@ -865,7 +877,7 @@ const recallRequestAs = async (
     reach = "company";
   }
   const [reader, meaning] = await Promise.all([
-    readerOf(env, personId, reach),
+    readerOf(env, personId, reach, teams),
     // As of a moment the Brain never searches by meaning: nothing to embed.
     asOf === undefined ? meaningOf(env, question) : {},
   ]);
@@ -918,8 +930,8 @@ const recalledItems = (items: Pack["items"]): RecalledItem[] =>
  * what they may read alone. With `personal`, from the shared store and
  * their own together, packed as one store holding both would pack them
  * (`packAcross`); without, from the shared store alone, as their teams
- * may read it, or with `company` as the company alone. Refused once they
- * are no longer a member, or when `personId` isn't an ID. For a caller
+ * may read it, or with `company` as the company and, of `teams`, those they
+ * are in. Refused once they are no longer a member, or when `personId` isn't an ID. For a caller
  * that hands memories on with their own checks: none yet. The chat, the
  * Brain page and code (`recallFor`) take passages alone
  * (`recallPassagesAs`).

@@ -230,7 +230,8 @@ export const resetAppData = async (
   name: unknown
 ): Promise<void> => {
   requireMemberAdmin(by);
-  const found = await editableApp(env, by, app);
+  // Resetting its data reads none of it.
+  const found = await editableApp(env, by, app, { managing: true });
   if (typeof name !== "string" || name !== found.name) {
     throw appErrors.create("app.reset_name_mismatch");
   }

@@ -23,6 +23,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { requireAppRole, requireNotArchived } from "./app-access.ts";
+import { mayReadBrainTeamsOf } from "./app-provenance.ts";
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import { appDefaultStores, apps, businessStores } from "./db/core/schema.ts";
@@ -404,7 +405,16 @@ const managedBy = async (
     throw dataErrors.create("data.store_unavailable");
   }
   if (app.removed) {
-    if (!isMemberAdmin(by)) {
+    // Its admins', and only those in every team whose Brain content it
+    // may hold (GRA-1842), as for a live App.
+    if (
+      !isMemberAdmin(by) ||
+      !(await mayReadBrainTeamsOf(
+        env,
+        app.id,
+        by.teams.map((team) => team.id)
+      ))
+    ) {
       throw dataErrors.create("data.store_unavailable");
     }
   } else {
