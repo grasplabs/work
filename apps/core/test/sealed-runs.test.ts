@@ -139,7 +139,7 @@ const publishedBefore = async (
       old.workflow.id
     ),
     env.DB.prepare(
-      // Back as migration 0249 left it: only a version's label changes.
+      // Back as migration 0250 left it: only a version's label changes.
       "CREATE TRIGGER workflow_resource_versions_immutable_update BEFORE UPDATE OF workflow_resource_id, version, definition_version, definition, definition_json_hash, profile_version, evaluator_hash, contract, contract_hash, manifest, manifest_hash, author_id, created_at, seal_id ON workflow_resource_versions BEGIN SELECT RAISE(ABORT, 'workflow_resource_versions are immutable'); END"
     ),
   ]);
