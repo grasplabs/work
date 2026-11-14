@@ -8,11 +8,9 @@ import {
   entityAttributes,
   entityKinds,
   identifierSchema,
-  memoriesPerAddMax,
   memoryTypes,
   namesPerEntityMax,
   newEntitySchema,
-  newMemoriesSchema,
   newMemorySchema,
   principalMaxLength,
   quoteMaxLength,
@@ -27,7 +25,6 @@ import {
 } from "./contract.ts";
 import type {
   Access,
-  AddedMemories,
   AttributeRule,
   EntityKind,
   Extract,
@@ -38,7 +35,8 @@ import type {
 import { bucketCallMs } from "./embedding.ts";
 import { fileKeyOf, hashOf } from "./files.ts";
 import { isOneReaderKey } from "./reader-sets.ts";
-import { addMemories } from "./remember.ts";
+import { hashesOf, writeAdd } from "./remember.ts";
+import type { Adding } from "./remember.ts";
 import { isRestoring } from "./restoring.ts";
 import { dayOf, endOfDay, resolveWhen, whenSchema } from "./when.ts";
 import type { Resolved, When } from "./when.ts";
@@ -951,104 +949,64 @@ const pieceTokensOf = (contextTokens: number | null): number | null => {
 };
 
 /**
- * `memories` in adds of at most `memoriesPerAddMax` memories that mention
- * at most `memoriesPerAddMax` entities (the contract's bounds for one
- * add), in order, each with the entities it mentions.
+ * Writes what a piece kept, `adding`, as one add, the version's mark
+ * (`extracted`) with it on its last piece, in one transaction that first
+ * asks again whether the version is still its source's current one and
+ * not being erased: so nothing of a version a newer one replaced, or an
+ * erasure took, is ever written, however the awaits before fell. All or
+ * nothing: no part of a piece stands without the rest. "superseded" when
+ * the version no longer is current, written nothing. One add, however
+ * many memories the piece kept: an add through the store takes at most
+ * `memoriesPerAddMax` (the contract's bound for one call); extraction
+ * writes inside the store, a piece at most what one answer of the model
+ * held. A restore under way refuses it (`restoringNow`): the item fails as
+ * `restoring`, and the queue tries it again.
  */
-const addsOf = (entities: NewEntity[], memories: NewMemory[]): Candidates[] => {
-  const adds: Candidates[] = [];
-  let batch: NewMemory[] = [];
-  for (const memory of memories) {
-    const next = keeping(entities, [...batch, memory]);
-    if (
-      batch.length > 0 &&
-      (next.memories.length > memoriesPerAddMax ||
-        next.entities.length > memoriesPerAddMax)
-    ) {
-      adds.push(keeping(entities, batch));
-      batch = [];
-    }
-    batch.push(memory);
-  }
-  adds.push(keeping(entities, batch));
-  return adds;
-};
-
-/**
- * Adds `adding`, checked whole by the store's own schema, as an add
- * through the store is; the store stamps it.
- */
-const add = async (
+const writePiece = async (
   { storage, owner }: WorkContext,
-  adding: z.input<typeof newMemoriesSchema>
-): Promise<AddedMemories> =>
-  await addMemories(
-    // The shared store's tick names no owner (`WorkContext.owner`).
-    { storage, db: drizzle(storage), shared: owner === undefined },
-    newMemoriesSchema.parse(adding)
-  );
-
-/**
- * `add`, its refusal while a restore runs (`restoringNow`, one that began
- * during the calls) failing the item as `restoring`: the queue tries it
- * again, as after any failure, and what the piece kept is written then
- * without a call.
- */
-const addRetried = async (
-  context: WorkContext,
-  adding: z.input<typeof newMemoriesSchema>
-): Promise<AddedMemories> => {
+  {
+    adding,
+    change,
+    access,
+    source,
+    version,
+    last,
+  }: {
+    adding: Candidates;
+    change: string;
+    access: Access;
+    source: SourceId;
+    version: number;
+    last: boolean;
+  }
+): Promise<"written" | "superseded"> => {
+  const full: Adding = {
+    change,
+    access,
+    entities: adding.entities,
+    memories: adding.memories,
+    ...(last ? { extracted: { source, version } } : {}),
+  };
+  const hashes = await hashesOf(full);
+  const { sql } = storage;
   try {
-    return await add(context, adding);
+    return storage.transactionSync(() => {
+      if (currentOf(sql, source, version) === undefined) {
+        return "superseded";
+      }
+      writeAdd(
+        // The shared store's tick names no owner (`WorkContext.owner`).
+        { storage, db: drizzle(storage), shared: owner === undefined },
+        full,
+        hashes
+      );
+      return "written";
+    });
   } catch (error) {
     if (error instanceof Error && error.message === restoringNow) {
       throw new WorkError("restoring");
     }
     throw error;
-  }
-};
-
-/**
- * Writes `adds` of a piece, in order, under `change` and `:1`, `:2` and
- * so on, the version's mark (`extracted`) with the last. An entity the
- * adds share is one entity: each later add names it by the id an earlier
- * one answered. A rerun gets the same ids, as an add repeated answers
- * what it first added.
- */
-const writeAdds = async (
-  context: WorkContext,
-  {
-    adds,
-    change,
-    access,
-    extracted,
-  }: {
-    adds: readonly Candidates[];
-    change: string;
-    access: Access;
-    extracted: { source: SourceId; version: number } | undefined;
-  }
-): Promise<void> => {
-  const ids = new Map<string, string>();
-  for (const [index, adding] of adds.entries()) {
-    // oxlint-disable-next-line no-await-in-loop -- one add after another, in order
-    const added = await addRetried(context, {
-      change: index === 0 ? change : `${change}:${index}`,
-      access,
-      memories: adding.memories,
-      entities: adding.entities.map((entity) => {
-        const id = ids.get(entity.key);
-        return id === undefined ? entity : { ...entity, id };
-      }),
-      ...(extracted !== undefined && index === adds.length - 1
-        ? { extracted }
-        : {}),
-    });
-    for (const [key, id] of Object.entries(added.entities)) {
-      if (!ids.has(key)) {
-        ids.set(key, id);
-      }
-    }
   }
 };
 
@@ -1153,9 +1111,7 @@ const addsOfChecked = (payload: Payload, checking: Checking): Candidates[] => {
     quoted: memories.length,
     supported: kept.memories.length,
   });
-  return kept.memories.length > 0 || checking.last
-    ? addsOf(kept.entities, kept.memories)
-    : [];
+  return kept.memories.length > 0 || checking.last ? [kept] : [];
 };
 
 const extractWork: WorkDefinition<Payload> = defineWork({
@@ -1243,21 +1199,28 @@ const extractWork: WorkDefinition<Payload> = defineWork({
         });
       }
     }
-    // Asked again after the calls: a newer version or an erasure (its
-    // versions erasing, then gone) may have landed meanwhile. (A version's
-    // readers never change.) A piece always ends somewhere by now.
-    if (
-      cut === undefined ||
-      (adds !== undefined && currentOf(sql, source, version) === undefined)
-    ) {
+    // A piece always ends somewhere by now.
+    if (cut === undefined) {
       return;
     }
-    await writeAdds(context, {
-      adds: adds ?? [],
-      change,
-      access,
-      extracted: cut.last ? { source, version } : undefined,
-    });
+    const [adding] = adds ?? [];
+    // Written in one transaction that asks again whether the version is
+    // current (a newer one or an erasure may have landed during any await
+    // before): superseded, the attempt ends, writing nothing.
+    if (
+      adding !== undefined &&
+      (await writePiece(context, {
+        adding,
+        change,
+        access,
+        source,
+        version,
+        last: cut.last,
+      })) === "superseded"
+    ) {
+      log.info("brain.extract_superseded", { version, from });
+      return;
+    }
     // The next piece, while the version is still current: checked and put
     // on the queue in one synchronous step, so it never replaces a newer
     // version's item.

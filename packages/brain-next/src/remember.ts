@@ -38,7 +38,7 @@ import type { WordMemo } from "./words.ts";
 // whatever was added since; with other memories, it is refused.
 
 /** An add as its schema reads it. */
-type Adding = z.output<typeof newMemoriesSchema>;
+export type Adding = z.output<typeof newMemoriesSchema>;
 
 /** A memory of an add, with where its entities are in the add and its attribute's rule. */
 interface Planned {
@@ -421,17 +421,15 @@ const markExtracted = (
   );
 };
 
-/**
- * Adds `adding` (above), or answers what its change added before. Its
- * memories are readable by its `access` (and, resting on a version, by
- * that version's readers too: memories.ts).
- */
-export const addMemories = async (
-  { storage, db, shared }: RememberStore,
-  adding: Adding
-): Promise<AddedMemories> => {
-  const planned = planOf(adding);
-  const { sql } = storage;
+/** What an add hashes before its transaction (`hashesOf`), for its write (`writeAdd`). */
+export interface AddHashes {
+  key: string;
+  hash: string;
+  subjects: ReadonlyMap<string, string>;
+}
+
+/** `adding`'s change key, content and sources, hashed: what its write needs, made before it. */
+export const hashesOf = async (adding: Adding): Promise<AddHashes> => {
   const key = await hashOf(encoder.encode(adding.change));
   const hash = await hashOf(
     encoder.encode(
@@ -456,7 +454,23 @@ export const addMemories = async (
       )
     )
   );
-  return storage.transactionSync(() => {
+  return { key, hash, subjects };
+};
+
+/**
+ * Writes `adding` (above), or answers what its change added before, with
+ * `hashes` made of it before (`hashesOf`). Synchronous: run it in a
+ * transaction, which a caller may share with checks of its own, so what it
+ * checks holds as the add writes.
+ */
+export const writeAdd = (
+  { storage, db, shared }: RememberStore,
+  adding: Adding,
+  { key, hash, subjects }: AddHashes
+): AddedMemories => {
+  const planned = planOf(adding);
+  const { sql } = storage;
+  {
     // Nothing is added while a restore runs (restoring.ts): it writes a
     // lineage's memories in their order, which an add between would break.
     if (isRestoring(sql)) {
@@ -518,5 +532,20 @@ export const addMemories = async (
       JSON.stringify(answer)
     );
     return answer;
-  });
+  }
+};
+
+/**
+ * Adds `adding` (above), or answers what its change added before. Its
+ * memories are readable by its `access` (and, resting on a version, by
+ * that version's readers too: memories.ts).
+ */
+export const addMemories = async (
+  store: RememberStore,
+  adding: Adding
+): Promise<AddedMemories> => {
+  // Checked before anything is hashed, as the add always was.
+  planOf(adding);
+  const hashes = await hashesOf(adding);
+  return store.storage.transactionSync(() => writeAdd(store, adding, hashes));
 };

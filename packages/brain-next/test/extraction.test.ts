@@ -385,6 +385,59 @@ const instructingProposal = (name: string) => ({
  */
 const paceBoundMs = 90_000;
 
+/**
+ * Lets `land` happen at the very await before a piece's write: as the
+ * write hashes its change key (`hashesOf`), the second hashing of
+ * those bytes in the run (the first asks whether the piece was added
+ * before). The store runs in the tests' isolate, so its hashing is
+ * this one; nothing else of it changes.
+ */
+const landingAtWrite = (change: string, land: () => Promise<void>) => {
+  const wanted = new TextEncoder().encode(change);
+  const real = crypto.subtle.digest.bind(crypto.subtle);
+  let seen = 0;
+  const same = (data: BufferSource): boolean => {
+    const bytes =
+      data instanceof ArrayBuffer
+        ? new Uint8Array(data)
+        : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    return (
+      bytes.length === wanted.length &&
+      bytes.every((byte, index) => byte === wanted[index])
+    );
+  };
+  return vi
+    .spyOn(crypto.subtle, "digest")
+    .mockImplementation(async (algorithm, data) => {
+      if (same(data)) {
+        seen += 1;
+        if (seen === 2) {
+          await land();
+        }
+      }
+      return await real(algorithm, data);
+    });
+};
+
+/** The events of attempts that found their version no longer current. */
+const supersededDuring = async (run: () => Promise<void>) => {
+  const lines: unknown[] = [];
+  const spy = vi.spyOn(console, "info").mockImplementation((line) => {
+    lines.push(line);
+  });
+  try {
+    await run();
+  } finally {
+    spy.mockRestore();
+  }
+  return lines.filter(
+    (line) =>
+      typeof line === "object" &&
+      line !== null &&
+      Reflect.get(line, "event") === "brain.extract_superseded"
+  ).length;
+};
+
 /** How long the store may take to start, its schema made and its first tick run. */
 const startMs = 30_000;
 
@@ -1416,7 +1469,7 @@ describe("extracting memories", () => {
     ).rejects.toThrow("saidAt");
   });
 
-  it("writes the rest of a piece's adds without asking again when the store stopped after the first", async () => {
+  it("writes what a piece kept without asking again when its write was refused, whole or not at all", async () => {
     const token = unique("t");
     const group = unique("g");
     const prefix = unique("Acct");
@@ -1424,9 +1477,23 @@ describe("extracting memories", () => {
     const count = 150;
     const nameOf = (index: number) => `${prefix}x${index}`;
     let asked = 0;
-    answers.set(token, (request) => {
+    const source = unique("doc");
+    // The piece's write is refused once: while the model is asked, its key
+    // comes to be held by another change, so the item fails after its
+    // calls, as a stop before the write would leave it.
+    const pieceKey = `extract:${await sha256(JSON.stringify([source, 1, 0]))}`;
+    const held = await sha256(pieceKey);
+    answers.set(token, async (request) => {
       if (request.purpose === "brain.extract") {
         asked += 1;
+        if (asked === 1) {
+          await runInDurableObject(shared(), (_instance, state) => {
+            state.storage.sql.exec(
+              "INSERT INTO memory_changes (key, hash, answer) VALUES (?, 'other', '{}')",
+              held
+            );
+          });
+        }
       }
       return answering({
         entities: Array.from({ length: count }, (_, index) => ({
@@ -1449,27 +1516,12 @@ describe("extracting memories", () => {
       { length: count },
       (_, index) => `${nameOf(index)} is active.`
     ).join(" ")}`;
-    const source = unique("doc");
-    // The store stops after the piece's first add: its second add's key
-    // is held by another change, so that add is refused and the item
-    // fails, as a stop between the two would leave it.
-    const pieceKey = `extract:${await sha256(JSON.stringify([source, 1, 0]))}`;
-    const second = await sha256(`${pieceKey}:1`);
-    await runInDurableObject(shared(), (_instance, state) => {
-      state.storage.sql.exec(
-        "INSERT INTO memory_changes (key, hash, answer) VALUES (?, 'other', '{}')",
-        second
-      );
-    });
     await added(text, audience(group), { extract: fromOutside(), source });
     await tick();
     const reader = { person: unique("p"), groups: [group] };
     const firstRun = await customersOf(reader, prefix);
     await runInDurableObject(shared(), (_instance, state) => {
-      state.storage.sql.exec(
-        "DELETE FROM memory_changes WHERE key = ?",
-        second
-      );
+      state.storage.sql.exec("DELETE FROM memory_changes WHERE key = ?", held);
     });
     // Past the failure's wait: the rerun.
     await tick(2);
@@ -1489,7 +1541,8 @@ describe("extracting memories", () => {
       first: memoriesOfFirst.map(({ statement }) => statement),
       last: memoriesOfLast.map(({ statement }) => statement),
     }).toStrictEqual({
-      firstRun: 100,
+      // The piece is one write: refused, nothing of it stands.
+      firstRun: 0,
       asked: 1,
       customers: count,
       first: [`${nameOf(0)} is active (1).`],
@@ -1806,7 +1859,7 @@ describe("extracting memories", () => {
     });
   });
 
-  it("goes on from where a piece ended when its adds stopped part-way and the window changed before the rerun", async () => {
+  it("goes on from where a piece ended when its write failed and the window changed before the rerun", async () => {
     const token = unique("t");
     const group = unique("g");
     const prefix = unique("Acct");
@@ -1819,8 +1872,24 @@ describe("extracting memories", () => {
     );
     const last = `${prefix}last is active in ${token}.`;
     const facts = Array.from({ length: count }, (_, index) => fact(index));
+    const source = unique("doc");
+    // The piece's write is refused once: while the model is first asked,
+    // its key comes to be held by another change, so the item fails after
+    // its calls, as a stop before the write would leave it.
+    const pieceKey = `extract:${await sha256(JSON.stringify([source, 1, 0]))}`;
+    const refusedKey = await sha256(pieceKey);
+    let first = true;
     // Whatever each piece holds, the model proposes the facts it holds.
-    answers.set(token, (request) => {
+    answers.set(token, async (request) => {
+      if (first && request.purpose === "brain.extract") {
+        first = false;
+        await runInDurableObject(shared(), (_instance, state) => {
+          state.storage.sql.exec(
+            "INSERT INTO memory_changes (key, hash, answer) VALUES (?, 'other', '{}')",
+            refusedKey
+          );
+        });
+      }
       const held = [...facts, last].filter((line) =>
         request.input.includes(line)
       );
@@ -1841,30 +1910,20 @@ describe("extracting memories", () => {
         })),
       })(request);
     });
-    const source = unique("doc");
     const text = `${facts.join(" ")} ${tail.join(" ")} ${last}`;
-    // The first piece holds the 150 facts (two adds) and not the rest.
+    // The first piece holds the 150 facts and not the rest.
     const window =
       2 *
       (tokensOf(proposeInstructions) +
         tokensOf(checkInstructions) +
         facts.reduce((tokens, line) => tokens + tokensOf(`${line} `), 0) +
         2);
-    // The store stops after the piece's first add: its second is refused.
-    const pieceKey = `extract:${await sha256(JSON.stringify([source, 1, 0]))}`;
-    const second = await sha256(`${pieceKey}:1`);
-    await runInDurableObject(shared(), (_instance, state) => {
-      state.storage.sql.exec(
-        "INSERT INTO memory_changes (key, hash, answer) VALUES (?, 'other', '{}')",
-        second
-      );
-    });
     await added(text, audience(group), { extract: fromOutside(), source });
     await tick(1, window);
     await runInDurableObject(shared(), (_instance, state) => {
       state.storage.sql.exec(
         "DELETE FROM memory_changes WHERE key = ?",
-        second
+        refusedKey
       );
     });
     // The rerun, with a model of a window that would hold the whole text.
@@ -2432,6 +2491,159 @@ describe("extracting memories", () => {
       drawn: ["active"],
       after: [],
       left: 0,
+    });
+  });
+  describe("a newer version, an erasure or a group erasure landing as a piece is written", () => {
+    const cases = [
+      ["a newer version that asks for memories", "newer, asking"],
+      ["a newer version that doesn't", "newer, not asking"],
+      ["an erasure of the source", "erased"],
+    ] as const;
+
+    it.each(cases)(
+      "writes nothing of the replaced version when %s lands there",
+      async (_what, kind) => {
+        const token = unique("t");
+        const name = unique("Raced");
+        const group = unique("g");
+        const source = unique("doc");
+        answers.set(token, (request) => {
+          const status = request.input.includes("lost") ? "lost" : "active";
+          return answering({
+            entities: [{ key: "c", kind: "customer", names: [name] }],
+            memories: [
+              customerFact(
+                `${name} is ${status}.`,
+                `${name} is ${status}`,
+                "status",
+                status
+              ),
+            ],
+          })(request);
+        });
+        const change = `extract:${await sha256(JSON.stringify([source, 1, 0]))}`;
+        const spy = landingAtWrite(change, async () => {
+          if (kind === "erased") {
+            await shared().eraseSource({ source, reason: "deleted" });
+            return;
+          }
+          await added(`${token}: ${name} is lost.`, audience(group), {
+            source,
+            ...(kind === "newer, asking" ? { extract: fromOutside() } : {}),
+          });
+        });
+        let superseded = 0;
+        try {
+          await added(`${token}: ${name} is active.`, audience(group), {
+            extract: fromOutside(),
+            source,
+          });
+          superseded = await supersededDuring(async () => {
+            await tick();
+          });
+        } finally {
+          spy.mockRestore();
+        }
+        await tick();
+        const reader = { person: unique("p"), groups: [group] };
+        const [entity] = await entitiesNamed(reader, name);
+        const history =
+          entity === undefined
+            ? []
+            : await memoriesAbout(entity.id, reader, true);
+        const written = await runInDurableObject(shared(), (_instance, state) =>
+          state.storage.sql
+            .exec<{ statement: string }>(
+              "SELECT statement FROM memories WHERE instr(statement, ?) > 0",
+              name
+            )
+            .toArray()
+            .map(({ statement }) => statement)
+        );
+
+        expect({
+          superseded,
+          read: history.map(({ value, source: from }) => ({
+            value,
+            version: from?.version,
+          })),
+          written,
+        }).toStrictEqual({
+          superseded: 1,
+          read: kind === "newer, asking" ? [{ value: "lost", version: 2 }] : [],
+          written: kind === "newer, asking" ? [`${name} is lost.`] : [],
+        });
+      }
+    );
+
+    it("leaves nothing of a chat turn whose group's erasure is asked for as its piece is checked", async () => {
+      const token = unique("t");
+      const name = unique("Turned");
+      const person = unique("person");
+      const own = env.BRAIN_STORE.getByName(`person:${person}`);
+      const group = `chat:${unique("c")}`;
+      const source = `${group}/${unique("turn")}`;
+      // A person's own store takes an erasure only once the calls under
+      // way (this tick) have ended, so it can't land inside the run: asked
+      // for during the last call before the write (the check), it lands
+      // after the write, and takes what the write wrote with the group.
+      const asked: Promise<void>[] = [];
+      answers.set(token, (request) => {
+        if (request.purpose === "brain.extract.check" && asked.length === 0) {
+          asked.push(own.eraseSource({ source: group, reason: "deleted" }));
+        }
+        return answering({
+          entities: [{ key: "c", kind: "customer", names: [name] }],
+          memories: [
+            customerFact(
+              `${name} is active.`,
+              `${name} is active`,
+              "status",
+              "active"
+            ),
+          ],
+        })(request);
+      });
+      await own.addSource({
+        source,
+        group,
+        change: crypto.randomUUID(),
+        text: `${token}: ${name} is active.`,
+        access: { kind: "owner", person },
+        extract: fromOutside({ speaker: { kind: "internal", person } }),
+      });
+      for (let round = 0; round < 3; round += 1) {
+        clock += 60_000;
+        // oxlint-disable-next-line no-await-in-loop -- the run, then the erasure carried through
+        await own.work({
+          ask,
+          at: new Date(clock),
+          embedders: noModel,
+          handOvers: noHandOvers,
+          contextTokens: null,
+        });
+      }
+      await Promise.all(asked);
+      clock += 60_000;
+      await own.work({
+        ask,
+        at: new Date(clock),
+        embedders: noModel,
+        handOvers: noHandOvers,
+        contextTokens: null,
+      });
+      const written = await runInDurableObject(
+        own,
+        (_instance, state) =>
+          state.storage.sql
+            .exec("SELECT 1 FROM memories WHERE instr(statement, ?) > 0", name)
+            .toArray().length
+      );
+
+      expect({ erasures: asked.length, written }).toStrictEqual({
+        erasures: 1,
+        written: 0,
+      });
     });
   });
 });
