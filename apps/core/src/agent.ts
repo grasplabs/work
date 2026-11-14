@@ -377,7 +377,7 @@ export interface QuestionSubject {
 const subjectNoteText = ({ kind, id, name }: QuestionSubject): string =>
   kind === "app"
     ? `The person asks this from the workspace of the App ${JSON.stringify(name)} (${id}): "this", "it" and "the App" mean that App. A change they ask for is a change to it: read and change its files with readFile, writeFile and editFile on app "${id}", then check it as any App: a builder publishes it.`
-    : `The person asks this from the page of the workflow ${JSON.stringify(name)} (${id}), its Flow beside this chat: "this", "it" and "the workflow" mean that workflow. A change they ask for is a change to its draft: read it with env.workflowBuild.draft("${id}") and change it with env.workflowBuild.edit or editStep, which the page draws as it changes; a builder publishes it.`;
+    : `The person asks this from the page of the workflow ${JSON.stringify(name)} (${id}), its Flow beside this chat: "this", "it" and "the workflow" mean that workflow. A change they ask for is a change to its draft: read it with env.workflowBuild.draft("${id}") and change it with env.workflowBuild.write or define, which the page draws as it changes; a builder publishes it.`;
 
 /**
  * Something a question mentions (`ChatQuestion.mentions`), as core found

@@ -261,7 +261,7 @@ describe("the chat for a workflow", () => {
     const id = JSON.stringify(made.id);
     const draft = `export default async (self, env) => {
   const draft = await env.workflowBuild.draft(${id});
-  await env.workflowBuild.edit(${id}, { revision: draft.revision, source: draft.source + "\\n" });
+  await env.workflowBuild.write(${id}, draft.source + "\\n", { revision: draft.revision });
 };`;
     const { stub, newChat } = await personalChatsOf(
       builder.userId,

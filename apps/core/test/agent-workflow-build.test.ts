@@ -142,10 +142,11 @@ describe("the agent building an independent workflow", () => {
     const build = `export default async (self, env) => {
       const created = { id: ${JSON.stringify(made.id)} };
       const started = await env.workflowBuild.draft(created.id);
-      const saved = await env.workflowBuild.edit(created.id, {
-        revision: started.revision,
-        source: ${JSON.stringify(definitionOf())},
-      });
+      const saved = await env.workflowBuild.write(
+        created.id,
+        ${JSON.stringify(definitionOf())},
+        { revision: started.revision },
+      );
       const { runId } = await env.workflowBuild.startTest(created.id, {
         revision: saved.revision,
         args: { who: "Ada" },
@@ -263,22 +264,25 @@ describe("the agent building an independent workflow", () => {
       const catalog = await env.workflowBuild.catalog();
       const created = { id: ${JSON.stringify(made.id)} };
       const started = await env.workflowBuild.draft(created.id);
-      const saved = await env.workflowBuild.edit(created.id, {
-        revision: started.revision,
-        source: ${JSON.stringify(definition)},
-      });
-      const renamed = await env.workflowBuild.editStep(created.id, {
-        revision: saved.revision,
-        edit: {
+      const saved = await env.workflowBuild.write(
+        created.id,
+        ${JSON.stringify(definition)},
+        { revision: started.revision },
+      );
+      const renamed = await env.workflowBuild.define(
+        created.id,
+        {
           kind: "change",
           pointer: "/steps/0",
           step: { ...JSON.parse(saved.source).steps[0], title: "Assess the claim" },
         },
-      });
-      const paused = await env.workflowBuild.editStep(created.id, {
-        revision: renamed.revision,
-        edit: { kind: "insert", list: "/steps", index: 0, id: "settle", step: { type: "wait", for: "1 second" } },
-      });
+        { revision: saved.revision },
+      );
+      const paused = await env.workflowBuild.define(
+        created.id,
+        { kind: "insert", list: "/steps", index: 0, id: "settle", step: { type: "wait", for: "1 second" } },
+        { revision: renamed.revision },
+      );
       return {
         catalog: catalog.filter(({ key }) => key === ${JSON.stringify(judge)}),
         problems: paused.problems,
@@ -398,7 +402,8 @@ describe("the agent building an independent workflow", () => {
     const id = JSON.stringify(theirs.id);
     const calls = tryEach({
       draft: `await env.workflowBuild.draft(${id})`,
-      edit: `await env.workflowBuild.edit(${id}, { revision: 0, source: "{}" })`,
+      write: `await env.workflowBuild.write(${id}, "{}", { revision: 0 })`,
+      define: `await env.workflowBuild.define(${id}, { kind: "insert", list: "/steps", index: 0, id: "settle", step: { type: "wait", for: "1 second" } }, { revision: 0 })`,
       startTest: `await env.workflowBuild.startTest(${id}, { revision: 1, args: {}, fixtures: {} })`,
       testRun: `await env.workflowBuild.testRun(${id}, "run-1")`,
       requestTheirs: `await env.workflowBuild.requestPermission(${id}, { object: { type: "workflow", workflowId: ${JSON.stringify(mine.id)} }, actions: ["start"], binding: "CHILD" })`,
@@ -411,7 +416,8 @@ describe("the agent building an independent workflow", () => {
     const [result] = await codeResults(chat.stub, chat.chat.id);
     expect(returned(result?.text)).toStrictEqual({
       draft: unavailable,
-      edit: unavailable,
+      write: unavailable,
+      define: unavailable,
       startTest: unavailable,
       testRun: unavailable,
       requestTheirs: unavailable,
@@ -465,7 +471,7 @@ describe("the agent building an independent workflow", () => {
     await fakeProvider(
       codeStep(
         tryEach({
-          edit: `(await env.workflowBuild.edit(${JSON.stringify(own.id)}, { revision: 0, source: ${JSON.stringify(definitionOf())} })).revision`,
+          write: `(await env.workflowBuild.write(${JSON.stringify(own.id)}, ${JSON.stringify(definitionOf())}, { revision: 0 })).revision`,
         })
       ),
       says("No.")
@@ -478,7 +484,7 @@ describe("the agent building an independent workflow", () => {
 
     const [result] = await codeResults(chat.stub, chat.chat.id);
     expect(returned(result?.text)).toStrictEqual({
-      edit: permissionErrors.create("permission.restricted").message,
+      write: permissionErrors.create("permission.restricted").message,
     });
   });
 });

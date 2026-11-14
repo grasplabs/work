@@ -1050,7 +1050,7 @@ const definitions = (known: Map<string, string>) => {
       label: "Edit a workflow",
       api: "workflowBuild",
       description:
-        "Saves a workflow's draft (its workflow.json `source`) over the revision you read (`env.workflowBuild.draft`), as `env.workflowBuild.edit` does, and returns the draft as saved, with its problems. Refused if anyone saved since. The person publishes it in Grasp.",
+        "Saves a workflow's draft (its workflow.json `source`) over the revision you read (`env.workflowBuild.draft`), as `env.workflowBuild.write` does, and returns the draft as saved, with its problems. Refused if anyone saved since. The person publishes it in Grasp.",
       parameters: Type.Object(
         {
           workflow: Type.String({
@@ -1069,7 +1069,7 @@ const definitions = (known: Map<string, string>) => {
       run: async (scope, { workflow, revision, source }) =>
         await exports
           .WorkflowBuildApi({ props: scope })
-          .edit(workflow, { revision, source }),
+          .write(workflow, source, { revision }),
     }),
   ];
 };
