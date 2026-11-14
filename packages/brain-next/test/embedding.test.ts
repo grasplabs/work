@@ -104,6 +104,7 @@ const tick = async (embedders: Embedders, aheadMs = 0): Promise<void> => {
     at: new Date(clock.at),
     embedders,
     handOvers: noHandOvers,
+    contextTokens: null,
   });
 };
 

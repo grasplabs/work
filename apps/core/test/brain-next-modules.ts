@@ -20,8 +20,8 @@ export const brainModules = {
   "apps/core/src/brain-skills.ts": "skills",
   // Runs core's workBrain on the clock, and hands nothing of it on.
   "apps/core/src/clock.ts": "core",
-  // Answers the staff with core's brainStaffReport and actOnBrainForStaff,
-  // through their schemas.
+  // Answers the staff with core's brainStaffReport, actOnBrainForStaff and
+  // brainErasureForStaff, through their schemas.
   "apps/core/src/brain-report.ts": "core",
   // The Brain's Sources page, for people: its own surface, each method
   // probed as the signed-in person.
@@ -42,7 +42,8 @@ export const brainModules = {
   // hands over from core's own records; answers nothing of the Brain.
   "apps/core/src/brain-sources.ts": "core",
   // Erases what an erased person alone may read with core's erasePerson,
-  // and answers nothing of it.
+  // and answers nothing of it: `brainErasureStateOf` says only where core's
+  // own record of that erasure stands, nothing the Brain answered.
   "apps/core/src/person-erasure.ts": "core",
   // Uploads straight into the Brain, reached only through the Sources
   // page's methods (brain-sources-rpc.ts), whose probes call each of them.

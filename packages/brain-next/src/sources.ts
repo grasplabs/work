@@ -40,6 +40,7 @@ import {
   subjectOf,
   subjectsOver,
 } from "./erasure.ts";
+import { enqueueExtraction, enqueueExtractionIfDue } from "./extraction.ts";
 import {
   fileKeyOf,
   hashOf,
@@ -164,6 +165,7 @@ const readAtOf = (added: NewSource): { readAt?: Date } =>
  */
 const madeBefore = (
   db: DrizzleSqliteDODatabase,
+  storage: DurableObjectStorage,
   { added, hash, readers }: Adding
 ): SourceVersionRef | undefined => {
   const byChange = db
@@ -215,6 +217,16 @@ const madeBefore = (
       ...readAtOf(added),
     })
     .run();
+  // A new change asking for memories of a version an earlier add kept
+  // without: drawn now, unless drawn already or under way.
+  if (added.extract !== undefined) {
+    enqueueExtractionIfDue(
+      storage,
+      added.source,
+      current.version,
+      added.extract
+    );
+  }
   return { source: added.source, version: current.version };
 };
 
@@ -291,7 +303,7 @@ const record = (
   }
   refuseByGroup(storage.sql, adding);
   // The same change, or the same text and readers, added meanwhile.
-  const before = madeBefore(db, adding);
+  const before = madeBefore(db, storage, adding);
   if (before !== undefined) {
     return before;
   }
@@ -348,6 +360,11 @@ const record = (
     // Embedded through the queue, put on it with the chunks: no crash
     // leaves chunks that are never embedded.
     enqueueEmbedding(storage, added.source, version);
+    // Memories drawn from it the same way, when its producer said whose
+    // words it is.
+    if (added.extract !== undefined) {
+      enqueueExtraction(storage, added.source, version, added.extract);
+    }
   }
   db.insert(sourceChanges)
     .values({
@@ -440,7 +457,7 @@ export const addVersion = async (
   if (isRestoring(storage.sql)) {
     throw new Error(restoringNow);
   }
-  const before = madeBefore(db, adding);
+  const before = madeBefore(db, storage, adding);
   if (before !== undefined) {
     return before;
   }

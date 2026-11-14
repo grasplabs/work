@@ -43,6 +43,7 @@ export const tick = async (store: Store): Promise<void> => {
     at: new Date(),
     embedders: noEmbedders,
     handOvers: noHandOvers,
+    contextTokens: null,
   });
 };
 

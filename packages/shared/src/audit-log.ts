@@ -150,6 +150,10 @@ const typeRules: readonly {
   // client's deployment (core's staff-audit.ts): what they looked at or
   // did there, by its surface and identifiers, never its content.
   { action: "staff.accessed", type: "read" },
+  // A Grasp staff member asking whether a source or a person was erased
+  // from the client's Brain (core's brain-report.ts): a read of its
+  // erasure ledger, whatever it answered.
+  { action: "admin.brain.erasure.looked_up", type: "read" },
   // A gap's owner asked (Grasp's), and a person answering or closing it.
   { action: "brain.gap.asked", type: "action" },
   // A purge rewriting answers, or forgetting who gave them.
@@ -216,7 +220,9 @@ const typeRules: readonly {
   // A call of the chat agent's code that nothing else records: a listing,
   // a catalog or a run's status, or a call refused before it did anything.
   // Its calls that can change something (a connector call, an App's
-  // export) record themselves under their own actions.
+  // export) record themselves under their own actions. The recall before a
+  // chat's question (method `brain.recall`, core's turn-recall.ts) says
+  // what it read as (`reads`, `TurnRecallReads` in audit.ts).
   { action: "agent.call", type: "read" },
   { action: "model", type: "model_call" },
   { action: "permission", type: "permission" },
