@@ -1,11 +1,12 @@
 import { useRender } from "@base-ui/react/use-render";
 import { useSidebar } from "@grasp-os/ui/components/sidebar";
 import * as stylex from "@stylexjs/stylex";
-import { PanelLeftIcon } from "lucide-react";
 import { Fragment } from "react";
 import type { ReactElement, ReactNode } from "react";
 
 import { focus } from "../focus/focus.ts";
+import { iconVars } from "../icons/icon.stylex.ts";
+import { Icon, SidebarToggle } from "../icons/index.ts";
 import { grasp, media } from "../tokens/tokens.stylex.ts";
 import { frame } from "./frame.stylex.ts";
 
@@ -43,6 +44,7 @@ const styles = stylex.create({
   // wider window only while the sidebar is closed, as its way back for the
   // keyboard (the pointer has the window's left edge).
   trigger: {
+    [iconVars.size]: grasp.iconSm,
     display: { default: "none", [media.belowTablet]: "inline-flex" },
     alignItems: "center",
     justifyContent: "center",
@@ -78,11 +80,6 @@ const styles = stylex.create({
   },
   triggerShown: {
     display: "inline-flex",
-  },
-  icon: {
-    width: grasp.iconSm,
-    height: grasp.iconSm,
-    strokeWidth: grasp.iconStroke,
   },
   crumbs: {
     display: "flex",
@@ -189,7 +186,7 @@ export const SidebarButton = ({
         focus.ring
       )}
     >
-      <PanelLeftIcon aria-hidden="true" {...stylex.props(styles.icon)} />
+      <Icon icon={SidebarToggle} />
     </button>
   );
 };

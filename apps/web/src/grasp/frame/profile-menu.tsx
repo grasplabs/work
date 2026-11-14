@@ -16,15 +16,6 @@ import { useSidebar } from "@grasp-os/ui/components/sidebar";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link, useLocation } from "@tanstack/react-router";
-import {
-  ArrowRightLeftIcon,
-  ChevronsUpDownIcon,
-  ContrastIcon,
-  ListChecksIcon,
-  LogOutIcon,
-  MessageCircleQuestionIcon,
-  SettingsIcon,
-} from "lucide-react";
 import { useEffect } from "react";
 
 import type { CoreConnection } from "../../core-connection.ts";
@@ -34,6 +25,17 @@ import { applyTheme, readTheme } from "../../frame/theme.ts";
 import { tourStops } from "../../tour/tour-script.ts";
 import { startTour } from "../../tour/tour-state.ts";
 import { focus } from "../focus/focus.ts";
+import { iconVars } from "../icons/icon.stylex.ts";
+import {
+  Checklist,
+  Contrast,
+  Icon,
+  Question,
+  Settings,
+  SignOut,
+  Swap,
+  UpDown,
+} from "../icons/index.ts";
 import { grasp, media } from "../tokens/tokens.stylex.ts";
 import { frame } from "./frame.stylex.ts";
 
@@ -111,9 +113,9 @@ const styles = stylex.create({
     color: frame.textSecondary,
   },
   chevrons: {
+    [iconVars.size]: frame.icon,
+    display: "flex",
     flexShrink: 0,
-    width: frame.icon,
-    height: frame.icon,
     color: frame.textTertiary,
   },
 });
@@ -153,10 +155,9 @@ export const ProfileMenu = ({
             <span {...stylex.props(styles.organization)}>{organization}</span>
           )}
         </span>
-        <ChevronsUpDownIcon
-          aria-hidden="true"
-          {...stylex.props(styles.chevrons)}
-        />
+        <span {...stylex.props(styles.chevrons)}>
+          <Icon icon={UpDown} />
+        </span>
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="start"
@@ -173,16 +174,16 @@ export const ProfileMenu = ({
                 startTour(identity.userId, pathname);
               }}
             >
-              <ListChecksIcon />
+              <Icon icon={Checklist} />
               {t`Getting started`}
             </DropdownMenuItem>
           ) : null}
           <DropdownMenuItem render={<Link to="/settings/profile" />}>
-            <SettingsIcon />
+            <Icon icon={Settings} />
             {t`Settings`}
           </DropdownMenuItem>
           <ThemeMenu
-            icon={ContrastIcon}
+            icon={<Icon icon={Contrast} />}
             label={t`Appearance`}
             userId={identity.userId}
           />
@@ -196,7 +197,7 @@ export const ProfileMenu = ({
               />
             }
           >
-            <MessageCircleQuestionIcon />
+            <Icon icon={Question} />
             {t`Support`}
           </DropdownMenuItem>
         </DropdownMenuGroup>
@@ -206,7 +207,7 @@ export const ProfileMenu = ({
               checked: one, until Grasp lets a person be in more. */}
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>
-              <ArrowRightLeftIcon />
+              <Icon icon={Swap} />
               {t`Switch organization`}
             </DropdownMenuSubTrigger>
             <DropdownMenuSubContent>
@@ -223,7 +224,7 @@ export const ProfileMenu = ({
             }}
             variant="destructive"
           >
-            <LogOutIcon />
+            <Icon icon={SignOut} />
             {t`Sign out`}
           </DropdownMenuItem>
         </DropdownMenuGroup>

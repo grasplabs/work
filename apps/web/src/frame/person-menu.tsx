@@ -36,6 +36,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useSyncExternalStore } from "react";
+import type { ReactNode } from "react";
 
 import { signOut } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
@@ -143,16 +144,16 @@ export const ThemeMenu = ({
   /** Its name, where a menu calls it otherwise ("Appearance"); "Theme" if not. */
   label?: string;
   /** Its icon, where a menu gives it one of its own; the theme's own if not. */
-  icon?: LucideIcon;
+  icon?: ReactNode;
 }) => {
   const { t, i18n } = useLingui();
   // Read where it is kept, so a choice made in another tab shows here too.
   const theme = useSyncExternalStore(onThemeChange, () => readTheme(userId));
-  const Icon = icon ?? themeIcons[theme];
+  const ThemeIcon = themeIcons[theme];
   return (
     <DropdownMenuSub>
       <DropdownMenuSubTrigger>
-        <Icon />
+        {icon ?? <ThemeIcon />}
         {label ?? t`Theme`}
         <span className="text-muted-foreground ml-auto">
           {i18n._(themeNames[theme])}

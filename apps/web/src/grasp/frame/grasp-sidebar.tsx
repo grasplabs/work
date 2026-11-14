@@ -6,19 +6,6 @@ import { useSidebar } from "@grasp-os/ui/components/sidebar";
 import { Plural, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link, useMatchRoute, useRouter } from "@tanstack/react-router";
-import {
-  AppWindowIcon,
-  CableIcon,
-  FolderKanbanIcon,
-  HandHelpingIcon,
-  InboxIcon,
-  IterationCwIcon,
-  PanelLeftIcon,
-  PanelsTopLeftIcon,
-  SearchIcon,
-  SparkleIcon,
-  WaypointsIcon,
-} from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 
 import { chatsKey, useChatsWindow } from "../../chat/chat-switcher.tsx";
@@ -29,6 +16,21 @@ import { appSplat } from "../../pages/app-address.ts";
 import { shortcutLabel } from "../../shortcuts.ts";
 import { useWorkflowsWaiting } from "../../workflows/nav-item.tsx";
 import { focus } from "../focus/focus.ts";
+import { iconVars } from "../icons/icon.stylex.ts";
+import {
+  AppPanels,
+  AppWindow,
+  Cable,
+  Cycle,
+  Helping,
+  Icon,
+  Inbox,
+  Projects,
+  Search,
+  SidebarToggle,
+  Sparkle,
+  Waypoints,
+} from "../icons/index.ts";
 import { grasp, media } from "../tokens/tokens.stylex.ts";
 import { frame } from "./frame.stylex.ts";
 import {
@@ -185,6 +187,7 @@ const styles = stylex.create({
     color: frame.textPrimary,
   },
   iconButton: {
+    [iconVars.size]: frame.icon,
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
@@ -209,10 +212,6 @@ const styles = stylex.create({
     transitionProperty: "color, background-color",
     transitionDuration: { default: frame.answer, [media.reduced]: "0s" },
     transitionTimingFunction: grasp.ease,
-  },
-  icon: {
-    width: frame.icon,
-    height: frame.icon,
   },
 });
 
@@ -239,7 +238,7 @@ const Tools = ({ search, onFold }: { search: boolean; onFold: () => void }) => {
           type="button"
           {...stylex.props(styles.iconButton, focus.ring)}
         >
-          <SearchIcon aria-hidden="true" {...stylex.props(styles.icon)} />
+          <Icon icon={Search} />
         </button>
       ) : null}
       {isMobile ? null : (
@@ -250,7 +249,7 @@ const Tools = ({ search, onFold }: { search: boolean; onFold: () => void }) => {
           type="button"
           {...stylex.props(styles.iconButton, focus.ring)}
         >
-          <PanelLeftIcon aria-hidden="true" {...stylex.props(styles.icon)} />
+          <Icon icon={SidebarToggle} />
         </button>
       )}
     </div>
@@ -285,7 +284,7 @@ const Sections = ({ identity }: { identity: Identity }) => {
       <NavList>
         <NavEntry
           current={at("/", false)}
-          icon={SparkleIcon}
+          icon={Sparkle}
           label={t`Chat`}
           render={<Link to="/" />}
         />
@@ -293,25 +292,25 @@ const Sections = ({ identity }: { identity: Identity }) => {
           count={waiting}
           countLabel={<ThingsWaiting waiting={waiting ?? 0} />}
           current={at("/dashboard", false)}
-          icon={InboxIcon}
+          icon={Inbox}
           label={t`Dashboard`}
           render={<Link to="/dashboard" />}
         />
         <NavEntry
           current={at("/brain")}
-          icon={WaypointsIcon}
+          icon={Waypoints}
           label={t`Brain`}
           render={<Link to="/brain" />}
         />
         <NavEntry
           current={at("/projects")}
-          icon={FolderKanbanIcon}
+          icon={Projects}
           label={t`Projects`}
           render={<Link to="/projects" />}
         />
         <NavEntry
           current={at("/apps")}
-          icon={PanelsTopLeftIcon}
+          icon={AppPanels}
           label={t`Apps`}
           render={<Link to="/apps" />}
         />
@@ -319,7 +318,7 @@ const Sections = ({ identity }: { identity: Identity }) => {
           count={workflowsWaiting}
           countLabel={<WorkflowsWaiting waiting={workflowsWaiting ?? 0} />}
           current={inWorkflows && !onRequests}
-          icon={IterationCwIcon}
+          icon={Cycle}
           label={t`Workflows`}
           render={<Link to="/workflows" />}
         >
@@ -339,13 +338,13 @@ const Sections = ({ identity }: { identity: Identity }) => {
         </NavEntry>
         <NavEntry
           current={at("/agents")}
-          icon={HandHelpingIcon}
+          icon={Helping}
           label={t`Agents`}
           render={<Link to="/agents" />}
         />
         <NavEntry
           current={at("/integrations")}
-          icon={CableIcon}
+          icon={Cable}
           label={t`Integrations`}
           render={<Link to="/integrations" />}
         />
@@ -375,7 +374,7 @@ const AppsEntries = ({ core }: { core: CoreConnection }) => {
                 fuzzy: true,
               }) !== false
             }
-            icon={AppWindowIcon}
+            icon={AppWindow}
             key={app.app}
             label={app.name}
             render={<Link params={{ app: app.app }} to="/apps/$app" />}

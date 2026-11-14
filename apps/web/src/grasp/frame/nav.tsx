@@ -1,9 +1,12 @@
 import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
 import * as stylex from "@stylexjs/stylex";
-import type { ComponentType, ReactElement, ReactNode, SVGProps } from "react";
+import type { ReactElement, ReactNode } from "react";
 
 import { focus } from "../focus/focus.ts";
+import { iconVars } from "../icons/icon.stylex.ts";
+import { Icon } from "../icons/index.ts";
+import type { IconData } from "../icons/index.ts";
 import { grasp, media } from "../tokens/tokens.stylex.ts";
 import { frame } from "./frame.stylex.ts";
 
@@ -23,6 +26,7 @@ const styles = stylex.create({
     listStyle: "none",
   },
   row: {
+    [iconVars.size]: frame.icon,
     position: "relative",
     display: "flex",
     alignItems: "center",
@@ -61,11 +65,6 @@ const styles = stylex.create({
   current: {
     color: frame.textPrimary,
     backgroundColor: frame.selected,
-  },
-  icon: {
-    flexShrink: 0,
-    width: frame.icon,
-    height: frame.icon,
   },
   name: {
     flexGrow: 1,
@@ -182,7 +181,7 @@ export const Unseen = ({ children }: { children: ReactNode }) => (
  */
 export const NavEntry = ({
   render,
-  icon: Icon,
+  icon,
   label,
   current = false,
   count,
@@ -192,7 +191,7 @@ export const NavEntry = ({
   children,
 }: {
   render: ReactElement;
-  icon: ComponentType<SVGProps<SVGSVGElement>>;
+  icon: IconData;
   label: string;
   current?: boolean;
   count?: number;
@@ -212,7 +211,7 @@ export const NavEntry = ({
         onClick,
         children: (
           <>
-            <Icon aria-hidden="true" {...stylex.props(styles.icon)} />
+            <Icon icon={icon} />
             <span {...stylex.props(styles.name)}>{label}</span>
             {counted ? (
               <span aria-hidden="true" {...stylex.props(styles.count)}>
