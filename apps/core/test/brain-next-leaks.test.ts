@@ -3,7 +3,8 @@ import {
   exactCandidatesMax,
   recallBudgetMax,
 } from "@grasp-os/brain-next/contract";
-import type { WorkOverview } from "@grasp-os/brain-next/contract";
+import type { Access, WorkOverview } from "@grasp-os/brain-next/contract";
+import { brainUploadReadersSchema } from "@grasp-os/shared/brain-sources";
 import type { BrainUploadReaders } from "@grasp-os/shared/brain-sources";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import { authoritySchema } from "@grasp-os/shared/permissions";
@@ -18,6 +19,7 @@ import { appFor } from "../src/apps.ts";
 import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import { organizationId } from "../src/auth/auth.ts";
 import { memberOf } from "../src/auth/identity.ts";
+import { handOverProducers } from "../src/brain-hand-overs.ts";
 import {
   brainExportsPath,
   brainRestorePath,
@@ -26,11 +28,17 @@ import {
   addInstructionFile,
   addSource,
   alarmHostOf,
+  brainExportFile,
+  brainExportStatus,
   brainStaffReport,
   eraseSource,
   erasePerson,
+  listVersionsAs,
+  readSourceVersionAs,
   recallAs,
   rememberAs,
+  startBrainExport,
+  versionRefSchema,
   workBrain,
 } from "../src/brain-next.ts";
 import type {
@@ -76,9 +84,7 @@ import {
   watched as teamsWatched,
 } from "./teams-door.ts";
 import { connectDb } from "./test-env.ts";
-import { wordFile } from "./word-file.ts";
 import {
-  builder,
   definitionOf,
   ended,
   published as publishedWorkflow,
@@ -144,8 +150,35 @@ const chatAgentReadsBrain = async (): Promise<void> => {
   await chatAgentGrant;
 };
 
-/** A word nothing else holds. */
-const markerWord = (): string => `m${crypto.randomUUID().replaceAll("-", "")}`;
+/**
+ * Every producer core hands sources to the Brain through, from core's own
+ * lists: each kind a source's key may have (brain-next.ts `producerKinds`,
+ * as `versionRefSchema` takes it) and each producer whose hand-overs core
+ * relays (brain-hand-overs.ts), an upload once for each choice of its
+ * readers. A new one is planted in the world the reader passes read, or
+ * the file fails naming it.
+ */
+const producerNames = (): string[] =>
+  [
+    ...new Set<string>([
+      ...versionRefSchema.shape.source.shape.producer.options,
+      ...Object.keys(handOverProducers),
+    ]),
+  ].flatMap((kind) =>
+    kind === "upload"
+      ? brainUploadReadersSchema.options.map(
+          ({ shape }) => `upload for ${shape.kind.value}`
+        )
+      : [kind]
+  );
+
+/**
+ * A word nothing else holds: 64 random bits. Short, as a pass asks every
+ * marker it may not read at once, in a question and in a name of the
+ * memory probes' fixture (brain-next-surfaces.ts), each with its limit.
+ */
+const markerWord = (): string =>
+  `m${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`;
 
 /** Something a pass found that it may not. */
 interface Finding {
@@ -248,6 +281,7 @@ const readingSurfaces = new Set([
   "core entitiesAs",
   "core memoriesAs",
   "core contestedAs",
+  "core ownEntityAs",
   "memoriesRpc entities",
   "memoriesRpc memories",
   "memoriesRpc contested",
@@ -258,6 +292,19 @@ const readingSurfaces = new Set([
   "store readVersion",
   "store readCurrent",
   "store searchVectors",
+  "store readMemories",
+  "store readableMemories",
+  "store findEntities",
+  "store readEntityNames",
+  "store readEntity",
+  "store readCard",
+  "store findPassages",
+  "store listContested",
+  "store readableVersions",
+  "store changeVersion",
+  "core recallPassagesAs",
+  "core readableVersionsAs",
+  "core readableMemoriesAs",
 ]);
 
 /** The reading surfaces' probes: every reader's pass goes through them. */
@@ -358,18 +405,20 @@ const watched = async (
 
 /**
  * The markers of `markers` that any request any model provider has got so
- * far carried, whoever's key it carried: as found by `pass`, the pass that
- * ran last.
+ * far carried, whoever's key it carried, past the `before` requests that
+ * carried each (by name) before: as found by `pass`, the pass that ran
+ * last.
  */
 const promptedWith = async (
   pass: string,
-  markers: Readonly<Record<string, string>>
+  markers: Readonly<Record<string, string>>,
+  before: Readonly<Record<string, number>> = {}
 ): Promise<Finding[]> => {
   const prompted: Finding[] = [];
   for (const [name, marker] of Object.entries(markers)) {
     // oxlint-disable-next-line no-await-in-loop -- one marker at a time
     const carried = await carrying(marker);
-    if (carried.length > 0) {
+    if (carried.length > (before[name] ?? 0)) {
       prompted.push({ pass, in: "model prompts", found: name });
     }
   }
@@ -495,6 +544,99 @@ const add = async (
   return source;
 };
 
+/** The trigger that holds the shared store's erasures (`whileErasureHeld`). */
+const heldErasures = "leaks_test_holds_erasures";
+
+/**
+ * Runs `run` while the shared store's erasures are held part-way: an
+ * erasure hides what it covers and returns, and every deletion of a
+ * version fails, in the erasure's own batch and in each tick's, so what
+ * it hid stays stored and hidden (erasure.ts) until a tick after `run`.
+ */
+const whileErasureHeld = async (run: () => Promise<void>): Promise<void> => {
+  await runInDurableObject(sharedStore(), (_store, state) => {
+    state.storage.sql.exec(
+      `CREATE TRIGGER IF NOT EXISTS ${heldErasures} BEFORE DELETE ON source_versions
+      BEGIN SELECT RAISE(ABORT, 'held by the test'); END`
+    );
+  });
+  try {
+    await run();
+  } finally {
+    await runInDurableObject(sharedStore(), (_store, state) => {
+      state.storage.sql.exec(`DROP TRIGGER IF EXISTS ${heldErasures}`);
+    });
+  }
+};
+
+/** Whether the shared store has an erasure recorded and not yet done. */
+const erasureUnfinished = async (): Promise<boolean> => {
+  const { erasing } = await sharedStore().workOverview();
+  return erasing > 0;
+};
+
+/** What a read answered: its value, or its error's message. */
+const answerOf = async (read: () => Promise<unknown>): Promise<string> => {
+  try {
+    return textOf(await read());
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+};
+
+/**
+ * `read` of what an erasure covers (`true`) against `read` of what no one
+ * added (`false`): "as if never added" when they answer alike, else what
+ * the first answered.
+ */
+const asIfNeverAdded = async (
+  read: (erased: boolean) => Promise<unknown>
+): Promise<string> => {
+  const erased = await answerOf(async () => await read(true));
+  const missing = await answerOf(async () => await read(false));
+  return erased === missing ? "as if never added" : erased;
+};
+
+/** What the holder's producers planted in the reader passes' world. */
+interface HoldersProduced {
+  ownUploadMarker: string;
+  captureMarker: string;
+  runMarker: string;
+  askedMarker: string;
+  answerMarker: string;
+  ownUpload: SourceRef;
+  captureId: SourceRef;
+  runSource: SourceRef;
+  turnSource: SourceRef;
+}
+
+/**
+ * What the holder's producers planted for the holder alone (an upload for
+ * only them, what their agent fetched, their run and their chat's turn):
+ * its markers, by name, and its sources. Kept in their own store, so no
+ * one else, and no recall of theirs that leaves that store out, may read
+ * any of it.
+ */
+const holdersOwnProduced = (world: HoldersProduced) => {
+  const forbidden = {
+    "the holder's upload for only them": world.ownUploadMarker,
+    "what the holder's agent fetched through a connection": world.captureMarker,
+    "the holder's run": world.runMarker,
+    "a question in the holder's chat": world.askedMarker,
+    "an answer in the holder's chat": world.answerMarker,
+  };
+  return {
+    forbidden,
+    markers: Object.values(forbidden),
+    sources: [
+      world.ownUpload,
+      world.captureId,
+      world.runSource,
+      world.turnSource,
+    ],
+  };
+};
+
 /** What `personId` recalls for `question`: each chunk's text. */
 const textsFor = async (
   personId: string,
@@ -587,7 +729,13 @@ describe(
         "what the holder's agent fetched through a connection": markerWord(),
         "the holder's own skill": markerWord(),
         "a team's skill the outsider isn't in": markerWord(),
+        "the holder's run": markerWord(),
+        "a question in the holder's chat": markerWord(),
+        "an answer in the holder's chat": markerWord(),
       };
+      // What every member may read, and nobody outside the company.
+      const companyMarkers = { "an upload for everyone": markerWord() };
+      const { "an upload for everyone": everyoneUploadMarker } = companyMarkers;
       const {
         "the holder's own source": ownerMarker,
         "a team's source the outsider isn't in": teamMarker,
@@ -603,6 +751,9 @@ describe(
         "what the holder's agent fetched through a connection": captureMarker,
         "the holder's own skill": holderSkillMarker,
         "a team's skill the outsider isn't in": teamSkillMarker,
+        "the holder's run": runMarker,
+        "a question in the holder's chat": askedMarker,
+        "an answer in the holder's chat": answerMarker,
       } = markers;
       // Instruction files the outsider may not get: the holder's own,
       // another agent's than theirs, and an App's they don't build (one no
@@ -876,12 +1027,16 @@ describe(
       // file for only them, and one for a team the outsider isn't in,
       // each with its marker in its file's name as well as its text, as a
       // name is its readers' alone too (an admin's shared uploads).
-      const uploaded = async (marker: string, readers: BrainUploadReaders) => {
+      const uploaded = async (
+        marker: string,
+        readers: BrainUploadReaders,
+        words = sharedWord
+      ) => {
         const { source } = await holderApi.api.brainSources.upload(
           {
             name: `Captions ${marker}.vtt`,
             bytes: new TextEncoder().encode(
-              `WEBVTT\n\n00:00:00.000 --> 00:00:05.000\nUploaded ${sharedWord} ${marker}\n`
+              `WEBVTT\n\n00:00:00.000 --> 00:00:05.000\nUploaded ${words} ${marker}\n`
             ),
           },
           readers,
@@ -894,6 +1049,59 @@ describe(
         kind: "team",
         teamId: secretTeam,
       });
+      // And one for everyone, without the shared word: the outsider may
+      // read it, and finds their own source by that word past the rest.
+      const everyoneUpload = await uploaded(
+        everyoneUploadMarker,
+        { kind: "everyone" },
+        "for everyone"
+      );
+
+      // Through each producer core hands over (brain-hand-overs.ts), as it
+      // does: a workflow run of the holder's that ended, and a turn of the
+      // holder's own chat (GRA-1805), its question and answer both marked
+      // (the question alone is kept). Each is the holder's alone.
+      const holderMember = await memberOf(env.DB, holder);
+      if (holderMember === undefined) {
+        throw new Error("The holder is not a member");
+      }
+      const workflow = await publishedWorkflow(
+        holderMember,
+        definitionOf([], { value: { status: `${sharedWord} ${runMarker}` } })
+      );
+      const { runId } = await start(holderMember, workflow.id);
+      await ended(holderMember, workflow.id, runId);
+      const runSource: SourceRef = { producer: "run", id: runId ?? "" };
+      await answeringProvider(() => says(`${sharedWord} ${answerMarker}`));
+      const chat = await holderApi.api.chats.create("Questions");
+      await workspace(env, personalWorkspaceId(holder)).ask(
+        chatIdSchema.parse(chat.id),
+        { text: `${sharedWord} ${askedMarker}?`, model: testModel }
+      );
+      await answeringProvider(() => {});
+      // Each reaches the Brain once its outbox drained and its hand-over
+      // was relayed and worked.
+      const turn = await vi.waitFor(
+        async () => {
+          await drainAuditOutboxes(env);
+          await relayHandOvers(env);
+          await workBrain(env, new Date(), producersOf(env));
+          const { items } = await recallAs(env, holder, {
+            personal: true,
+            question: askedMarker,
+            budget: { tokens: recallBudgetMax },
+          });
+          const [found] = items;
+          expect(found, "the chat's turn was never handed over").toBeDefined();
+          await expect(
+            textsFor(holder, runMarker),
+            "the run was never handed over"
+          ).resolves.toHaveLength(1);
+          return found?.source;
+        },
+        { timeout: 15_000, interval: 200 }
+      );
+      const turnSource: SourceRef = turn ?? { producer: "chat", id: "" };
 
       // The markers are there to find for those who may read them.
       await expect(textsFor(holder, teamMarker)).resolves.toStrictEqual([
@@ -908,6 +1116,11 @@ describe(
       // What the outsider finds by the shared word: their own source, past
       // the marked ones.
       const outsiderFinds = await textsFor(outsider, sharedWord);
+      /** Whether `personId` finds the upload for everyone. */
+      const findsEveryone = async (personId: string): Promise<boolean> => {
+        const texts = await textsFor(personId, everyoneUploadMarker);
+        return texts.some((text) => text.includes(everyoneUploadMarker));
+      };
       // The holder's own recall finds what was captured for them.
       const holderTexts = await textsFor(holder, `supplier ${captureMarker}`);
       const holderFindsCapture = holderTexts.some((text) =>
@@ -941,6 +1154,9 @@ describe(
           teamUploadMarker,
           holderSkillMarker,
           teamSkillMarker,
+          runMarker,
+          askedMarker,
+          answerMarker,
         ],
         hiddenVersions: everyVersionOf(
           ...ownerIds,
@@ -949,7 +1165,9 @@ describe(
           narrowedId,
           ownUpload,
           teamUpload,
-          captureId
+          captureId,
+          runSource,
+          turnSource
         ),
         hiddenUploads: [ownUpload.id, teamUpload.id],
         hiddenInstructionFiles: [holderFile, agentFile, appFile, usedAppFile],
@@ -972,6 +1190,58 @@ describe(
         }),
         { conversation: "own", appId: withFile, personal: true }
       );
+      // Each producer (`producerNames`) and what was planted through it
+      // above: the source, its marker by its name in `markers` or
+      // `companyMarkers`, and someone who may read it.
+      const plantedThrough: Readonly<
+        Record<string, { marker: string; source: SourceRef; reader: string }>
+      > = {
+        "upload for me": {
+          marker: "the holder's upload for only them",
+          source: ownUpload,
+          reader: holder,
+        },
+        "upload for team": {
+          marker: "an upload for a team the outsider isn't in",
+          source: teamUpload,
+          reader: holder,
+        },
+        "upload for everyone": {
+          marker: "an upload for everyone",
+          source: everyoneUpload,
+          reader: outsider,
+        },
+        capture: {
+          marker: "what the holder's agent fetched through a connection",
+          source: captureId,
+          reader: holder,
+        },
+        run: { marker: "the holder's run", source: runSource, reader: holder },
+        chat: {
+          marker: "a question in the holder's chat",
+          source: turnSource,
+          reader: holder,
+        },
+      };
+      // The model prompts that carried each marker while the world was
+      // planted, by the marker's name: the first test holds them to the
+      // holder's own chat, and each pass fails on any prompt after.
+      const promptedAtPlanting = Object.fromEntries(
+        await Promise.all(
+          Object.entries({ ...markers, ...companyMarkers }).map(
+            async ([name, marker]) => {
+              const carried = await carrying(marker);
+              return [name, carried.map(({ body }) => body)] as const;
+            }
+          )
+        )
+      );
+      const promptedBefore = Object.fromEntries(
+        Object.entries(promptedAtPlanting).map(([name, bodies]) => [
+          name,
+          bodies.length,
+        ])
+      );
       // And the outsider does use it: it is theirs to open.
       const outsiderMember = await memberOf(env.DB, outsider);
       const outsiderOpens =
@@ -990,12 +1260,23 @@ describe(
         holdersTeam,
         sharedWord,
         markers,
+        companyMarkers,
+        promptedAtPlanting,
+        promptedBefore,
+        plantedThrough,
         ownerMarker,
         teamMarker,
         noneMarker,
         narrowedMarker,
         captureMarker,
         captureId,
+        runMarker,
+        askedMarker,
+        answerMarker,
+        runSource,
+        turnSource,
+        everyoneUploadMarker,
+        everyoneUpload,
         toHolderMarker,
         agentFileMarker,
         appFileMarker,
@@ -1031,7 +1312,12 @@ describe(
             ({ text }) => text === usedAppText
           ),
           outsiderOpens,
+          everyoneFinds: {
+            holder: await findsEveryone(holder),
+            outsider: await findsEveryone(outsider),
+          },
         },
+        findsEveryone,
         handbook,
         capped,
       };
@@ -1058,10 +1344,64 @@ describe(
     const nothingGivenAway = { findings: [], holdersStoreAddressed: false };
 
     it("finds each planted marker for whoever may read it, and the outsider's own past them", async () => {
-      const { found, handbook, capped, secretTeam, teamSkillMarker } =
-        await plantedWorld();
+      const {
+        found,
+        handbook,
+        capped,
+        secretTeam,
+        teamSkillMarker,
+        findsEveryone,
+        promptedAtPlanting,
+      } = await plantedWorld();
+      // Every member finds the upload for everyone: one who joined after
+      // it was made, and an admin, too.
+      const [{ userId: member }, { userId: admin }] = await Promise.all([
+        signedInWithRole(idp, "user"),
+        signedInWithRole(idp, "admin"),
+      ]);
 
-      expect(found).toStrictEqual({
+      // What was sent to a model while planting: only the holder's own
+      // chat turn, which carries their question and what their chat is
+      // given (their instruction file, their skill, their team's skill).
+      // The passes count prompts from there, so this is where any other
+      // marker in a prompt then must fail.
+      const chat = promptedAtPlanting["a question in the holder's chat"] ?? [];
+      const ownChat = new Set([
+        "a question in the holder's chat",
+        "the holder's instruction file",
+        "the holder's own skill",
+        "a team's skill the outsider isn't in",
+      ]);
+
+      expect({
+        ...found,
+        everyoneFinds: {
+          ...found.everyoneFinds,
+          member: await findsEveryone(member),
+          admin: await findsEveryone(admin),
+        },
+        chatPrompts: chat.length,
+        prompted: Object.fromEntries(
+          Object.entries(promptedAtPlanting).map(([name, bodies]) => {
+            if (bodies.length === 0) {
+              return [name, 0];
+            }
+            return [
+              name,
+              textOf(bodies) === textOf(chat)
+                ? "in the holder's own chat"
+                : bodies.length,
+            ];
+          })
+        ),
+      }).toStrictEqual({
+        chatPrompts: 1,
+        prompted: Object.fromEntries(
+          Object.keys(promptedAtPlanting).map((name) => [
+            name,
+            ownChat.has(name) ? "in the holder's own chat" : 0,
+          ])
+        ),
         narrowedToHolder: "refused",
         outsiderFinds: [handbook],
         holderFindsCapture: true,
@@ -1072,12 +1412,181 @@ describe(
         },
         holderAppFile: true,
         outsiderOpens: "opens it",
+        everyoneFinds: {
+          holder: true,
+          outsider: true,
+          member: true,
+          admin: true,
+        },
+      });
+    });
+
+    it("plants a marker through every producer core hands sources over through, and every choice of an upload's readers", async () => {
+      const { plantedThrough, markers, companyMarkers } = await plantedWorld();
+      // Forbidden in the passes below: to all but the holder (`markers`),
+      // or to anyone outside the company (`companyMarkers`).
+      const forbidden = new Map(
+        Object.entries({ ...markers, ...companyMarkers })
+      );
+      /**
+       * Whether `producer` planted its source, of its kind, whose marker
+       * the passes forbid, and which someone who may read it recalls by
+       * that marker: that source, holding it.
+       */
+      const isPlanted = async (producer: string): Promise<boolean> => {
+        const planted = plantedThrough[producer];
+        const marker = forbidden.get(planted?.marker ?? "");
+        const kind = producer.startsWith("upload for ") ? "upload" : producer;
+        if (
+          planted === undefined ||
+          marker === undefined ||
+          planted.source.producer !== kind
+        ) {
+          return false;
+        }
+        const { items } = await recallAs(env, planted.reader, {
+          personal: true,
+          question: marker,
+          budget: { tokens: recallBudgetMax },
+        });
+        return items.some(
+          ({ source, text }) =>
+            textOf(source) === textOf(planted.source) && text.includes(marker)
+        );
+      };
+      const unplanted: string[] = [];
+      for (const producer of producerNames()) {
+        // oxlint-disable-next-line no-await-in-loop -- one producer at a time
+        if (!(await isPlanted(producer))) {
+          unplanted.push(producer);
+        }
+      }
+
+      expect(unplanted).toStrictEqual([]);
+    });
+
+    it("gives someone who isn't a member, or was one, nothing of the upload for everyone, nor anything else", async () => {
+      const world = await plantedWorld();
+      const { markers, companyMarkers } = world;
+      // Someone who never was a member, and someone an admin removed:
+      // through every surface that reads as the reader it is handed (the
+      // store's, and the instruction files' rules). Core's own refuse
+      // anyone who isn't a member before they read
+      // (`permission.person_inactive`): a probe that only ever gets errors
+      // covers nothing.
+      const [admin, former] = await Promise.all([
+        signedInApi(idp, "admin"),
+        signedInWithRole(idp, "user"),
+      ]);
+      await admin.api.members.remove(former.userId);
+      const forbidden = { ...markers, ...companyMarkers };
+      const among = surfaces.filter(
+        ([name]) =>
+          (readingSurfaces.has(name) && name.startsWith("store ")) ||
+          name === "instructions instructionFilesFor"
+      );
+      // As the outsider is probed, but using no App, and asking of the
+      // upload for everyone too.
+      const { usedApps: _usedApps, ...asOutsider } = world.asOutsider([]);
+      const findings: Finding[] = [];
+      for (const [pass, personId] of [
+        ["someone who never was a member", `stranger-${crypto.randomUUID()}`],
+        ["someone an admin removed", former.userId],
+      ] as const) {
+        findings.push(
+          // oxlint-disable-next-line no-await-in-loop -- one pass at a time
+          ...(await findingsOf(
+            pass,
+            {
+              ...asOutsider,
+              personId,
+              reader: { person: personId, groups: [] },
+              markers: [...asOutsider.markers, world.everyoneUploadMarker],
+              hiddenVersions: [
+                ...asOutsider.hiddenVersions,
+                ...everyVersionOf(world.everyoneUpload),
+              ],
+              hiddenUploads: [
+                ...(asOutsider.hiddenUploads ?? []),
+                world.everyoneUpload.id,
+              ],
+            },
+            forbidden,
+            { among, inRecall: world.inRecall }
+          ))
+        );
+      }
+
+      // Core's surfaces that read refuse the removed member as no longer
+      // one before anything is read: each call is refused so, or refused
+      // for its input, which is checked first. Not staff's report, which
+      // reads as no one, nor `readInstructionFilesAs`, which reads as a
+      // member its caller has checked (instruction-files.ts, whose
+      // `instructionFilesFor` is in the pass above).
+      const answeredOrOtherwise: string[] = [];
+      const neverInactive: string[] = [];
+      for (const [name, probe] of reading) {
+        if (
+          !name.startsWith("core ") ||
+          name === "core brainStaffReport" ||
+          name === "core readInstructionFilesAs"
+        ) {
+          continue;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- one surface at a time
+        const answers = await probe({
+          ...asOutsider,
+          personId: former.userId,
+          reader: { person: former.userId, groups: [] },
+        });
+        const inactive = answers.filter(
+          ({ got }) =>
+            "error" in got && textOf(got).includes("permission.person_inactive")
+        );
+        if (inactive.length === 0) {
+          neverInactive.push(name);
+        }
+        answeredOrOtherwise.push(
+          ...answers
+            .filter(
+              ({ got }) =>
+                !("error" in got) ||
+                !/permission\.person_inactive|brain\.request_invalid/u.test(
+                  textOf(got)
+                )
+            )
+            .map(({ call }) => `${name}: ${call}`)
+        );
+      }
+
+      expect({
+        findings: [
+          ...findings,
+          ...(await promptedWith(
+            "someone who isn't a member",
+            forbidden,
+            world.promptedBefore
+          )),
+        ],
+        answeredOrOtherwise,
+        neverInactive,
+      }).toStrictEqual({
+        findings: [],
+        answeredOrOtherwise: [],
+        neverInactive: [],
       });
     });
 
     it("gives the outsider no marker or hidden match through any surface, in an answer, a log line or a prompt", async () => {
-      const { holder, outsider, ownTeam, markers, inRecall, asOutsider } =
-        await plantedWorld();
+      const {
+        holder,
+        outsider,
+        ownTeam,
+        markers,
+        inRecall,
+        asOutsider,
+        promptedBefore,
+      } = await plantedWorld();
 
       const { findings, addressed } = await watched(
         "the outsider",
@@ -1089,7 +1598,7 @@ describe(
       expect({
         findings: [
           ...findings,
-          ...(await promptedWith("the outsider", markers)),
+          ...(await promptedWith("the outsider", markers, promptedBefore)),
         ],
         holdersStoreAddressed: addressed.includes(`person:${holder}`),
         // The binding was watched: the shared store and the outsider's own
@@ -1142,13 +1651,18 @@ describe(
             world.toHolderMarker,
             ...world.instructionMarkers,
             world.ownUploadMarker,
+            world.runMarker,
+            world.askedMarker,
+            world.answerMarker,
           ],
           hiddenVersions: everyVersionOf(
             ...world.ownerIds,
             world.noneId,
             world.narrowedId,
             world.ownUpload,
-            world.captureId
+            world.captureId,
+            world.runSource,
+            world.turnSource
           ),
           hiddenUploads: [world.ownUpload.id],
           hiddenTeamSkills: [],
@@ -1160,7 +1674,11 @@ describe(
       expect({
         findings: [
           ...findings,
-          ...(await promptedWith("the outsider, in the team", markers)),
+          ...(await promptedWith(
+            "the outsider, in the team",
+            markers,
+            world.promptedBefore
+          )),
         ],
         holdersStoreAddressed: addressed.includes(`person:${holder}`),
         outsideFinds,
@@ -1189,6 +1707,7 @@ describe(
         teamMarker,
         teamSource,
         teamSkillMarker,
+        promptedBefore,
       } = await plantedWorld();
 
       // In the team, whatever a pass before left (a retry of this one
@@ -1213,7 +1732,8 @@ describe(
           ...findings,
           ...(await promptedWith(
             "the outsider, out of the team again",
-            markers
+            markers,
+            promptedBefore
           )),
         ],
         holdersStoreAddressed: addressed.includes(`person:${holder}`),
@@ -1275,7 +1795,7 @@ describe(
 
       expect([
         ...findings,
-        ...(await promptedWith("the holder", markers)),
+        ...(await promptedWith("the holder", markers, world.promptedBefore)),
       ]).toStrictEqual([]);
     });
 
@@ -1299,11 +1819,13 @@ describe(
             world.teamMarker,
             world.noneMarker,
             world.narrowedMarker,
+            ...holdersOwnProduced(world).markers,
           ],
           hiddenVersions: everyVersionOf(
             ...world.ownerIds,
             world.teamId,
-            world.noneId
+            world.noneId,
+            ...holdersOwnProduced(world).sources
           ),
           hiddenInstructionFiles: [world.agentFile, world.appFile],
           instructionGroups: world.instructionGroups,
@@ -1314,6 +1836,7 @@ describe(
           "a team's source, though the holder is in the team": world.teamMarker,
           "a source nobody is known to read": world.noneMarker,
           "a source narrowed away from the outsider": world.narrowedMarker,
+          ...holdersOwnProduced(world).forbidden,
         },
         {
           among: surfaces.filter(([name]) => name.startsWith("recall ")),
@@ -1324,7 +1847,11 @@ describe(
       expect({
         findings: [
           ...findings,
-          ...(await promptedWith("the holder, through code's recall", markers)),
+          ...(await promptedWith(
+            "the holder, through code's recall",
+            markers,
+            world.promptedBefore
+          )),
         ],
         holdersStoreAddressed: addressed.includes(`person:${holder}`),
       }).toStrictEqual(nothingGivenAway);
@@ -1354,11 +1881,13 @@ describe(
             world.teamMarker,
             world.noneMarker,
             world.narrowedMarker,
+            ...holdersOwnProduced(world).markers,
           ],
           hiddenVersions: everyVersionOf(
             ...world.ownerIds,
             world.teamId,
-            world.noneId
+            world.noneId,
+            ...holdersOwnProduced(world).sources
           ),
           hiddenInstructionFiles: [world.agentFile, world.appFile],
           instructionGroups: world.instructionGroups,
@@ -1371,6 +1900,7 @@ describe(
             world.teamMarker,
           "a source nobody is known to read": world.noneMarker,
           "a source narrowed away from the outsider": world.narrowedMarker,
+          ...holdersOwnProduced(world).forbidden,
         },
         {
           among: surfaces.filter(([name]) => name === "recall recallFor"),
@@ -1379,7 +1909,10 @@ describe(
       );
 
       expect({
-        findings: [...findings, ...(await promptedWith(pass, markers))],
+        findings: [
+          ...findings,
+          ...(await promptedWith(pass, markers, world.promptedBefore)),
+        ],
         holdersStoreAddressed: addressed.includes(`person:${holder}`),
       }).toStrictEqual(nothingGivenAway);
     });
@@ -1401,7 +1934,7 @@ describe(
           },
           personal: false,
           sharedWord: world.sharedWord,
-          markers: [world.ownerMarker, world.ownUploadMarker],
+          markers: [world.ownerMarker, ...holdersOwnProduced(world).markers],
           hiddenVersions: [],
           hiddenInstructionFiles: [],
           instructionGroups: world.instructionGroups,
@@ -1409,7 +1942,7 @@ describe(
         },
         {
           "the holder's own source": world.ownerMarker,
-          "the holder's upload for only them": world.ownUploadMarker,
+          ...holdersOwnProduced(world).forbidden,
         },
         { among: surfaces.filter(([name]) => name === "core recallAs") }
       );
@@ -1419,7 +1952,8 @@ describe(
           ...findings,
           ...(await promptedWith(
             "the holder, recalling as an App does",
-            markers
+            markers,
+            world.promptedBefore
           )),
         ],
         holdersStoreAddressed: addressed.includes(`person:${holder}`),
@@ -1453,13 +1987,13 @@ describe(
             world.narrowedMarker,
             world.toHolderMarker,
             ...world.instructionMarkers,
-            world.ownUploadMarker,
+            ...holdersOwnProduced(world).markers,
           ],
           hiddenVersions: everyVersionOf(
             ...world.ownerIds,
             world.noneId,
             world.narrowedId,
-            world.ownUpload
+            ...holdersOwnProduced(world).sources
           ),
           hiddenUploads: [world.ownUpload.id],
           hiddenInstructionFiles: [
@@ -1478,18 +2012,23 @@ describe(
       expect({
         findings: [
           ...findings,
-          ...(await promptedWith("a team-mate of the holder's", markers)),
+          ...(await promptedWith(
+            "a team-mate of the holder's",
+            markers,
+            world.promptedBefore
+          )),
         ],
         holdersStoreAddressed: addressed.includes(`person:${holder}`),
       }).toStrictEqual(nothingGivenAway);
     });
 
-    it("gives an admin nothing they may not read through any surface that reads", async () => {
+    it("gives an admin nothing they may not read through any surface that reads, or any of core's", async () => {
       const world = await plantedWorld();
       const { holder, markers } = world;
 
-      // An admin, through every surface that reads: nothing of the
-      // holder's own, nor of a team they aren't in, reaches them.
+      // An admin, through every surface that reads and every one of
+      // core's: nothing of the holder's own, nor of a team they aren't in,
+      // reaches them.
       const { userId: admin } = await signedInWithRole(idp, "admin");
       const { findings, addressed } = await watched(
         "an admin",
@@ -1505,7 +2044,7 @@ describe(
             world.narrowedMarker,
             world.toHolderMarker,
             ...world.instructionMarkers,
-            world.ownUploadMarker,
+            ...holdersOwnProduced(world).markers,
             world.teamUploadMarker,
           ],
           hiddenVersions: everyVersionOf(
@@ -1513,7 +2052,7 @@ describe(
             world.teamId,
             world.noneId,
             world.narrowedId,
-            world.ownUpload,
+            ...holdersOwnProduced(world).sources,
             world.teamUpload
           ),
           hiddenUploads: [world.ownUpload.id, world.teamUpload.id],
@@ -1527,11 +2066,19 @@ describe(
           moments: [world.whileDraft],
         },
         markers,
-        { among: reading, inRecall: world.inRecall }
+        {
+          among: surfaces.filter(
+            ([name]) => readingSurfaces.has(name) || name.startsWith("core ")
+          ),
+          inRecall: world.inRecall,
+        }
       );
 
       expect({
-        findings: [...findings, ...(await promptedWith("an admin", markers))],
+        findings: [
+          ...findings,
+          ...(await promptedWith("an admin", markers, world.promptedBefore)),
+        ],
         holdersStoreAddressed: addressed.includes(`person:${holder}`),
       }).toStrictEqual(nothingGivenAway);
     });
@@ -1892,124 +2439,501 @@ describe(
       });
     });
 
-    it("gives away nothing core's producers handed over to whoever the producer would not let read it", async () => {
-      // Planted through each producer, as core hands them over: a run that
-      // ended for the person it acted for, a turn of a person's own chat
-      // (GRA-1805), its question and answer both marked (the question
-      // alone is kept), and a document another admin shared in the
-      // onboarding (GRA-1889), for them alone. Then core's surfaces are
-      // probed as the outsider and as an admin, neither of whom reads any.
-      const [otherAdmin, { userId: outsider }, runner, chatter, sharer] =
-        await Promise.all([
-          signedInApi(idp, "admin"),
-          signedInWithRole(idp, "user"),
-          builder(),
-          signedInApi(idp, "user"),
-          signedInApi(idp, "admin"),
-        ]);
+    /**
+     * A team's source with a version before its current one, both marked,
+     * and a memory drawn from each, about a customer only they name: what
+     * the two tests below erase through core, its markers by name, and the
+     * readers it had: the holder and a team-mate.
+     */
+    const teamSourceToErase = async () => {
+      await answeringProvider(() => {});
+      const [{ userId: holder }, { userId: teamMate }] = await Promise.all([
+        signedInWithRole(idp, "user"),
+        signedInWithRole(idp, "user"),
+      ]);
+      const teamId = await newTeam(holder, teamMate);
+      const group = `team:${teamId}`;
       const sharedWord = `s${unique()}`;
       const markers = {
-        "a run of someone else": markerWord(),
-        "a question in someone else's chat": markerWord(),
-        "an answer in someone else's chat": markerWord(),
-        "a document another admin shared in the onboarding": markerWord(),
+        "a version before the current one": markerWord(),
+        "the current version": markerWord(),
+        "a memory drawn from them": markerWord(),
+        "a customer only they name": markerWord(),
       };
-      const {
-        "a run of someone else": runMarker,
-        "a question in someone else's chat": askedMarker,
-        "an answer in someone else's chat": answerMarker,
-        "a document another admin shared in the onboarding": sharedMarker,
-      } = markers;
-      // The onboarding's reading of a document is the model's answer as
-      // data; every other prompt is answered with the chat's words.
-      await answeringProvider((requests) =>
-        JSON.stringify(requests.at(-1)?.body ?? null).includes("<document")
-          ? says(
-              JSON.stringify({
-                about: "How claims are booked.",
-                tools: [],
-                teams: [],
-                unclear: [],
-                question: "",
-                options: [],
-              })
-            )
-          : says(`${sharedWord} ${answerMarker}`)
+      const readers: SourceReaders = { kind: "team", teamId };
+      const source = await add(
+        `Minutes ${sharedWord} ${markers["a version before the current one"]}`,
+        readers
       );
-      const shared = await sharer.api.onboarding.shareDocument({
-        locale: "en",
-        name: `claims-${unique()}.docx`,
-        bytes: wordFile([
-          `${sharedWord} claims are booked as ${sharedMarker}.`,
-        ]),
-      });
-      const chat = await chatter.api.chats.create("Questions");
-      await workspace(env, personalWorkspaceId(chatter.userId)).ask(
-        chatIdSchema.parse(chat.id),
-        { text: `${sharedWord} ${askedMarker}?`, model: testModel }
+      await add(
+        `Minutes ${sharedWord} ${markers["the current version"]}`,
+        readers,
+        source
       );
-      const workflow = await publishedWorkflow(
-        runner,
-        definitionOf([], { value: { status: `${sharedWord} ${runMarker}` } })
-      );
-      const { runId } = await start(runner, workflow.id);
-      await ended(runner, workflow.id, runId);
-      // The turn reaches the queue once its Workspace's outbox drained.
-      const turn = await vi.waitFor(
-        async () => {
-          await drainAuditOutboxes(env);
-          await relayHandOvers(env);
-          await workBrain(env, new Date(), producersOf(env));
-          const { items } = await recallAs(env, chatter.userId, {
-            personal: true,
-            question: askedMarker,
-            budget: { tokens: recallBudgetMax },
-          });
-          const [found] = items;
-          expect(found, "the chat's turn was never handed over").toBeDefined();
-          return found?.source;
-        },
-        { timeout: 15_000, interval: 200 }
-      );
-
-      const probing = (personId: string): Probing => ({
-        personId,
-        reader: { person: personId, groups: [] },
-        personal: true,
-        sharedWord,
-        markers: Object.values(markers),
-        hiddenVersions: everyVersionOf(
-          { producer: "run", id: runId ?? "" },
-          // The shared document's file: an upload, by the document's ID.
-          { producer: "upload", id: shared.id },
-          ...(turn === undefined ? [] : [turn])
-        ),
-        hiddenInstructionFiles: [],
-        instructionGroups: [],
-      });
-      const among = surfaces.filter(([name]) => name.startsWith("core "));
-      const findings = [
-        ...(await findingsOf("the outsider", probing(outsider), markers, {
-          among,
+      const key = `${source.producer}:${source.id}`;
+      const customer = markers["a customer only they name"];
+      const drawn = await sharedStore().addMemories({
+        change: crypto.randomUUID(),
+        access: { kind: "audience", group },
+        entities: [
+          {
+            key: "c",
+            kind: "customer",
+            names: [`${sharedWord} ${customer}`],
+            identifiers: [{ type: "ref", value: `ref:${customer}` }],
+          },
+        ],
+        memories: [1, 2].map((version) => ({
+          about: "c",
+          type: "fact" as const,
+          statement: `${sharedWord} ${markers["a memory drawn from them"]} ${version}`,
+          speaker: { kind: "system" as const },
+          basis: {
+            kind: "source" as const,
+            source: key,
+            version,
+            quote: sharedWord,
+          },
         })),
-        ...(await findingsOf(
-          "an admin who doesn't read it",
-          probing(otherAdmin.userId),
-          markers,
-          { among }
-        )),
-      ];
-      const runnerFinds = await textsFor(runner.userId, runMarker);
-      const chatterFinds = await textsFor(chatter.userId, askedMarker);
-      const sharerFinds = await textsFor(sharer.userId, sharedMarker);
+      });
+      return {
+        holder,
+        teamMate,
+        group,
+        readers,
+        sharedWord,
+        markers,
+        source,
+        key,
+        customer,
+        entity: drawn.entities.c ?? "",
+      };
+    };
+
+    it("answers a team's source as erased to each of its readers, and leaves it out of an export, while its erasure is still under way, as once it is done", async () => {
+      const erasing = await teamSourceToErase();
+      const { group, sharedWord, markers, source, key, customer, entity } =
+        erasing;
+      const missing = newSource();
+      const unknownEntity = crypto.randomUUID();
+      const unknownWord = markerWord();
+      /**
+       * What `personId` gets of the source's versions, history, passages,
+       * memories and customer, through core and the store, each against
+       * what they get of what no one added.
+       */
+      const readsOf = async (personId: string) => {
+        const reader = { person: personId, groups: [group, "company"] };
+        const pack = await recallAs(env, personId, {
+          personal: true,
+          question: `${sharedWord} ${Object.values(markers).join(" ")}`,
+          budget: { tokens: recallBudgetMax },
+        });
+        return {
+          versions: await Promise.all(
+            [1, 2].map(
+              async (version) =>
+                await asIfNeverAdded(
+                  async (erased) =>
+                    await readSourceVersionAs(env, personId, {
+                      source: erased ? source : missing,
+                      version,
+                    })
+                )
+            )
+          ),
+          history: await asIfNeverAdded(
+            async (erased) =>
+              await listVersionsAs(env, personId, {
+                source: erased ? source : missing,
+              })
+          ),
+          // What it found: its "not found" holds the question's words.
+          recalled: markersIn(
+            [pack.items, pack.memories, pack.contested],
+            markers
+          ),
+          memories: await asIfNeverAdded(
+            async (erased) =>
+              await sharedStore().readMemories({
+                entity: erased ? entity : unknownEntity,
+                reader,
+                history: true,
+              })
+          ),
+          names: await asIfNeverAdded(
+            async (erased) =>
+              await sharedStore().readEntityNames({
+                entity: erased ? entity : unknownEntity,
+                reader,
+              })
+          ),
+          customer: await asIfNeverAdded(
+            async (erased) =>
+              await sharedStore().readEntity({
+                entity: erased ? entity : unknownEntity,
+                reader,
+              })
+          ),
+          byName: await asIfNeverAdded(
+            async (erased) =>
+              await sharedStore().findEntities({
+                reader,
+                name: `${sharedWord} ${erased ? customer : unknownWord}`,
+              })
+          ),
+          byReference: await asIfNeverAdded(
+            async (erased) =>
+              await sharedStore().findEntities({
+                reader,
+                identifier: {
+                  type: "ref",
+                  value: `ref:${erased ? customer : unknownWord}`,
+                },
+              })
+          ),
+          // Drawing from a version, as extraction does: refused alike.
+          drawing: await asIfNeverAdded(
+            async (erased) =>
+              await sharedStore().addMemories({
+                change: crypto.randomUUID(),
+                access: { kind: "audience", group },
+                entities: [{ key: "c", kind: "customer", names: ["Plain"] }],
+                memories: [
+                  {
+                    about: "c",
+                    type: "fact",
+                    statement: "Plain",
+                    speaker: { kind: "system" },
+                    basis: {
+                      kind: "source",
+                      source: erased ? key : `upload:${missing.id}`,
+                      version: 1,
+                      quote: sharedWord,
+                    },
+                  },
+                ],
+              })
+          ),
+        };
+      };
+      /** What each of its readers gets. */
+      const reads = async () => ({
+        holder: await readsOf(erasing.holder),
+        teamMate: await readsOf(erasing.teamMate),
+      });
+      /**
+       * The company's export, written: whether it holds no marker. Any
+       * export still being written (a probe's, which a test before started)
+       * is written first, so this one is started now.
+       */
+      const exportHoldsNone = async (): Promise<string[]> => {
+        const exported = async (): Promise<string[]> => {
+          const { id } = await startBrainExport(env);
+          let status = await brainExportStatus(env, { id });
+          for (let ticks = 0; status?.state === "writing"; ticks += 1) {
+            if (ticks === 20) {
+              throw new Error(
+                "An export was still being written after 20 ticks"
+              );
+            }
+            // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+            await workBrain(env, new Date(), noProducers);
+            // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+            status = await brainExportStatus(env, { id });
+          }
+          const files = await Promise.all(
+            (status?.files ?? []).map(
+              async (file) => await brainExportFile(env, { id, file })
+            )
+          );
+          return [
+            `${status?.state} with ${files.length > 0 ? "files" : "none"}`,
+            ...markersIn(files, markers),
+          ];
+        };
+        await exported();
+        return await exported();
+      };
+      const before = await reads();
+      let held = false;
+      let during;
+      let exportedDuring: string[] = [];
+      await whileErasureHeld(async () => {
+        await eraseSource(env, {
+          source,
+          readers: erasing.readers,
+          reason: "deleted",
+        });
+        held = await erasureUnfinished();
+        during = await reads();
+        exportedDuring = await exportHoldsNone();
+      });
+      await workBrain(env, new Date(), noProducers);
+      const after = await reads();
+      const erased = {
+        versions: ["as if never added", "as if never added"],
+        history: "as if never added",
+        recalled: [],
+        memories: "as if never added",
+        names: "as if never added",
+        customer: "as if never added",
+        byName: "as if never added",
+        byReference: "as if never added",
+        drawing: "as if never added",
+      };
+      /** The reads of `read` that answered as erased. */
+      const asErased = (read: Readonly<Record<string, unknown>>): string[] =>
+        Object.entries(erased)
+          .filter(([name, got]) => textOf(read[name]) === textOf(got))
+          .map(([name]) => name);
 
       expect({
-        findings,
-        // The runner, the chatter and the admin who shared do find theirs.
-        runner: runnerFinds.length,
-        chatter: chatterFinds.length,
-        sharer: sharerFinds.length,
-      }).toStrictEqual({ findings: [], runner: 1, chatter: 1, sharer: 1 });
+        // Before, each of them read it all: none of this holds by chance.
+        before: Object.values(before).map(asErased),
+        held,
+        during,
+        exportedDuring,
+        after,
+        unfinished: await erasureUnfinished(),
+      }).toStrictEqual({
+        before: [[], []],
+        held: true,
+        during: { holder: erased, teamMate: erased },
+        exportedDuring: ["done with files"],
+        after: { holder: erased, teamMate: erased },
+        unfinished: false,
+      });
+    });
+
+    /**
+     * What `pass` finds through `among` (every surface by default) as one
+     * of the readers of a team's source (`teamSourceToErase`), the holder
+     * or the team-mate, while its erasure through core is under way, and
+     * every model prompt that carried its markers.
+     */
+    const foundWhileErasing = async (
+      pass: string,
+      who: "holder" | "teamMate",
+      among?: readonly [string, Probe][]
+    ) => {
+      const erasing = await teamSourceToErase();
+      const personId = erasing[who];
+      const findings: Finding[] = [];
+      let held = false;
+      await whileErasureHeld(async () => {
+        await eraseSource(env, {
+          source: erasing.source,
+          readers: erasing.readers,
+          reason: "deleted",
+        });
+        held = await erasureUnfinished();
+        findings.push(
+          ...(await findingsOf(
+            pass,
+            {
+              personId,
+              reader: { person: personId, groups: [erasing.group] },
+              personal: true,
+              sharedWord: erasing.sharedWord,
+              markers: Object.values(erasing.markers),
+              hiddenVersions: everyVersionOf(erasing.source),
+              hiddenInstructionFiles: [],
+              instructionGroups: ["company"],
+            },
+            erasing.markers,
+            among === undefined ? {} : { among }
+          ))
+        );
+      });
+      await workBrain(env, new Date(), noProducers);
+      const carried = await Promise.all(
+        Object.values(erasing.markers).map(carrying)
+      );
+      return { held, findings, prompted: carried.flat() };
+    };
+
+    // One of its readers through every surface, and the other through
+    // every surface that reads: a test each, for its time.
+    it("gives a team's source's holder nothing of it through any surface while its erasure is still under way", async () => {
+      await expect(
+        foundWhileErasing(
+          "the holder, while its erasure is under way",
+          "holder"
+        )
+      ).resolves.toStrictEqual({ held: true, findings: [], prompted: [] });
+    });
+
+    it("gives a team-mate nothing of the team's source through any surface that reads while its erasure is still under way", async () => {
+      await expect(
+        foundWhileErasing(
+          "a team-mate, while its erasure is under way",
+          "teamMate",
+          reading
+        )
+      ).resolves.toStrictEqual({ held: true, findings: [], prompted: [] });
+    });
+
+    it("answers what a person's erasure hides as erased to them while it is still under way, though its source stays current for their team", async () => {
+      // A source in the shared store first for a team, then for one
+      // person of it alone, then for the team again: as the store takes it
+      // from whoever holds its namespace (core keeps one person's own in
+      // their own store, and never changes a source's kind of readers).
+      // Their erasure, which leaves them a member (withdrawn), hides the
+      // version for them alone, and the source stays current for the
+      // team: only the erasure's own mark hides that version, until a tick
+      // deletes it. Held part-way, every read of it as the person answers
+      // as once the erasure is done, as of when that version was current
+      // too: then the version before it.
+      const { userId: person } = await signedInWithRole(idp, "user");
+      const group = `team:${await newTeam(person)}`;
+      const reader = { person, groups: [group] };
+      const sharedWord = `s${unique()}`;
+      const marker = markerWord();
+      const key = `upload:${crypto.randomUUID()}`;
+      const theirs = crypto.randomUUID();
+      const hourMs = 3_600_000;
+      const now = Date.now();
+      /** Adds `text` as the source's next version, for `access`, `hoursAgo`. */
+      const addedAgo = async (
+        hoursAgo: number,
+        text: string,
+        access: Access,
+        change = crypto.randomUUID()
+      ): Promise<void> => {
+        vi.useFakeTimers({ toFake: ["Date"] });
+        vi.setSystemTime(now - hoursAgo * hourMs);
+        try {
+          await sharedStore().addSource({ source: key, change, text, access });
+        } finally {
+          vi.useRealTimers();
+        }
+      };
+      const first = `Plan ${sharedWord} first draft`;
+      const theirsText = `Plan ${sharedWord} ${marker}`;
+      await addedAgo(3, first, { kind: "audience", group });
+      await addedAgo(2, theirsText, { kind: "owner", person }, theirs);
+      await sharedStore().addSource({
+        source: key,
+        change: crypto.randomUUID(),
+        text: `Plan ${sharedWord} final`,
+        access: { kind: "audience", group },
+      });
+      const then = new Date(now - hourMs);
+      const budget = { tokens: recallBudgetMax };
+      /** What the person reads of the source, every way the store answers. */
+      const reads = async () => {
+        const version = await sharedStore().readVersion({
+          source: key,
+          version: 2,
+          reader,
+        });
+        const listed = await sharedStore().listSources({
+          reader,
+          prefixes: [key],
+        });
+        const recalledThen = await sharedStore().recall({
+          reader,
+          question: sharedWord,
+          budget,
+          asOf: then,
+        });
+        const markerThen = await sharedStore().recall({
+          reader,
+          question: marker,
+          budget,
+          asOf: then,
+        });
+        const readable = await sharedStore().readableVersions({
+          versions: [1, 2, 3].map((each) => ({ source: key, version: each })),
+          reader,
+        });
+        const history = await sharedStore().listVersions({
+          source: key,
+          reader,
+        });
+        return {
+          version: version?.text ?? null,
+          change: await sharedStore().changeVersion({
+            source: key,
+            change: theirs,
+            reader,
+          }),
+          readable: readable.map((each) => each.version),
+          history: history.versions.map((each) => each.version),
+          listed: listed.sources.map((each) => [each.version, each.versions]),
+          recalledThen: recalledThen.items.map(({ text }) => text),
+          markerThen: textOf([
+            markerThen.items,
+            markerThen.memories,
+            markerThen.contested,
+          ]).includes(marker),
+          drawing: await answerOf(
+            async () =>
+              await sharedStore().addMemories({
+                change: crypto.randomUUID(),
+                access: { kind: "audience", group },
+                entities: [{ key: "c", kind: "customer", names: ["Plain"] }],
+                memories: [
+                  {
+                    about: "c",
+                    type: "fact",
+                    statement: "Plain",
+                    speaker: { kind: "system" },
+                    basis: {
+                      kind: "source",
+                      source: key,
+                      version: 2,
+                      quote: sharedWord,
+                    },
+                  },
+                ],
+              })
+          ),
+        };
+      };
+      const before = await reads();
+      let held = false;
+      let during;
+      await whileErasureHeld(async () => {
+        await sharedStore().erasePerson({ person, reason: "withdrawn" });
+        held = await erasureUnfinished();
+        during = await reads();
+      });
+      await workBrain(env, new Date(), noProducers);
+      const after = await reads();
+      const erased = {
+        version: null,
+        change: null,
+        readable: [1, 3],
+        history: [3, 1],
+        listed: [[3, 2]],
+        recalledThen: [expect.stringContaining(first)],
+        markerThen: false,
+        drawing:
+          "The Brain refused it: memory 0 rests on a version this store doesn't hold",
+      };
+
+      expect({
+        before: {
+          version: before.version,
+          history: before.history,
+          recalledThen: before.recalledThen,
+        },
+        held,
+        during,
+        after,
+      }).toStrictEqual({
+        // Before, they read it, and it was the version then.
+        before: {
+          version: theirsText,
+          history: [3, 2, 1],
+          recalledThen: [expect.stringContaining(theirsText)],
+        },
+        held: true,
+        during: erased,
+        after: erased,
+      });
     });
 
     it("never wakes or addresses one person's own store for another's activity, their store's own work or staff's report", async () => {
@@ -2239,8 +3163,8 @@ describe(
         kind: "owner",
         personId: ann.userId,
       });
-      // Everyone in the company may read it, as a producer would add it:
-      // core's producers add none yet.
+      // Everyone in the company may read it, as an upload shared with
+      // everyone is (brain-uploads.ts), added to the shared store directly.
       await brainOf(inJurisdiction(env, env.BRAIN_STORE)).addSource({
         source: `upload:${crypto.randomUUID()}`,
         change: crypto.randomUUID(),

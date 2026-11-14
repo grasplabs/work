@@ -92,8 +92,9 @@ const owner = (personId: string): SourceReaders => ({
 
 /**
  * Adds `text` as a source everyone in the company may read, to the shared
- * store as a producer would: core's producers add none yet. Every test's
- * person reads it, so its text holds only words no other test asks for.
+ * store as an upload shared with everyone is (brain-uploads.ts). Every
+ * test's person reads it, so its text holds only words no other test asks
+ * for.
  */
 const forEveryone = async (text: string): Promise<SourceRef> => {
   const source = newSource();
