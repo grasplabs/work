@@ -18,8 +18,9 @@ import { decodeHTMLAttribute } from "entities/decode";
  * `name: value`: quoted, to its closing quote (or the end of the line),
  * spaces included; unquoted, to the next space or separator, with a
  * `Bearer` or `Basic` scheme of any length taken with it. After `session`
- * or `cookie`, the same, but only a value shaped like a credential (a
- * session's value, or a cookie string to its end: see its entry). JSON quoted
+ * or `cookie`, the same, but only for a value that starts as a credential
+ * does (16 session characters, or a cookie string, then to its end: see
+ * its entry). JSON quoted
  * once more, as a string inside JSON (`{\"password\":\"…\"}`), is
  * caught the same way, to the escaped closing quote. And in every link,
  * its parameters that sign or grant it (`redactLinks`, below). Anything else
@@ -52,20 +53,34 @@ const redactedAssignment = (...args: unknown[]): string => {
 /** A character of a token: what a `Bearer` value is written in (RFC 6750). */
 const tokenChar = String.raw`[\w\-.~+/]`;
 
-/** A token: 16 or more token characters, then any `=` padding. */
-const token = String.raw`${tokenChar}{16,}=*`;
+/**
+ * A token: 16 or more token characters, then any `=` padding. Sixteen and
+ * then any more, not `{16,}`: V8 keeps each step of a counted repeat on
+ * its backtrack stack, which a run of megabytes overflowed.
+ */
+const token = String.raw`${tokenChar}{16}${tokenChar}*=*`;
 
 /**
- * A session's value as servers write it: 16 or more token characters or
- * `%`, as frameworks URL-encode their cookies (Laravel's `eyJ…%3D`, Rails'
- * `…%3D%3D--…`, express's `s%3A…`), then any `=` padding, ending at a
- * space, a separator, a closing bracket or `!`. Sixteen hex characters are
- * 64 bits, the least a session id carries (OWASP). Sixteen and then any
- * more, not `{16,}`: V8 keeps each step of a counted repeat on its
- * backtrack stack, which a run of megabytes overflowed.
+ * A character of a session's value as servers write it: a token's, `%`, as
+ * frameworks URL-encode their cookies (Laravel's `eyJ…%3D`, Rails'
+ * `…%3D%3D--…`, express's `s%3A…`), and `*`, as an iron seal's
+ * (`Fe26.2**…`, hapi's and Nuxt's) separates its parts.
  */
-const sessionChar = String.raw`[\w\-.~+/%]`;
-const sessionValue = String.raw`${sessionChar}{16}${sessionChar}*=*(?![^\s"'\\&,;)\]}>!])`;
+const sessionChar = String.raw`[\w\-.~+/%*]`;
+
+/** What separates a name from its value: `=` or `:`, spaces, and a JSON key's closing quote, escaped or not. */
+const between = String.raw`(?<between>\\?["']?\s*[:=]\s*)`;
+
+/**
+ * A named value, whole: in escaped quotes, to the next escaped quote; in
+ * quotes, to the closing quote (or the end of the line), spaces included;
+ * unquoted, to the next space or separator, with a `Bearer` or `Basic`
+ * scheme of any length taken with it. Each character of a quoted value is
+ * taken by one alternative only (an escape, or anything but the quote, a
+ * backslash or a newline), and an escaped quote's value ends at the next
+ * escaped quote: it stays linear.
+ */
+const namedValue = String.raw`(?:(?<escapedQuote>\\["'])(?:(?!\k<escapedQuote>)[^\n])*(?<escapedClose>\k<escapedQuote>)?|(?<quote>["'])(?:\\.|(?!\k<quote>)[^\\\n])*(?<close>\k<quote>)?|(?:(?:bearer|basic)\s+)?[^\s"'&,;]+)`;
 
 /**
  * Known credential formats, each recognisable by its shape alone: the
@@ -91,26 +106,28 @@ const credentials: readonly (readonly [
   string | ((...args: unknown[]) => string),
 ])[] = [
   ...credentialFormats.map((pattern) => [pattern, "[redacted]"] as const),
-  // Each character of a quoted value is taken by one alternative only
-  // (an escape, or anything but the quote, a backslash or a newline), and
-  // an escaped quote's value ends at the next escaped quote: it stays
-  // linear. A name's prefix (`access_`) is word characters only, so a
-  // match starts once per word, not at every "-" of a flood.
+  // A name's prefix (`access_`) is word characters only, so a match
+  // starts once per word, not at every "-" of a flood.
   [
-    /\b(?<name>\w*?(?:api[_-]?key|apikey|token|secret|passwd|password|authorization|session[_-]?id|sessid))(?<between>\\?["']?\s*[:=]\s*)(?:(?<escapedQuote>\\["'])(?:(?!\k<escapedQuote>)[^\n])*(?<escapedClose>\k<escapedQuote>)?|(?<quote>["'])(?:\\.|(?!\k<quote>)[^\\\n])*(?<close>\k<quote>)?|(?:(?:bearer|basic)\s+)?[^\s"'&,;]+)/giu,
+    new RegExp(
+      String.raw`\b(?<name>\w*?(?:api[_-]?key|apikey|token|secret|passwd|password|authorization|session[_-]?id|sessid))${between}${namedValue}`,
+      "giu"
+    ),
     redactedAssignment,
   ],
   // `session` and `cookie`, alone or ending a name (`laravel_session`,
   // `authCookie`), are everyday words too ("Session: 45 minutes",
-  // "Possession: 61%"), so their value is redacted only when it is shaped
-  // like a credential: a session's value, whole, or a cookie string
-  // (`name=value`, a cookie's name being a token's characters, RFC 6265),
-  // with every pair after it to a quote or the end of the line. Quoted or
-  // not. Each part backs off at most over the run it read, once per name:
-  // linear.
+  // "Possession: 61%"), so their value is redacted only when it starts as
+  // a credential does: with 16 session characters (16 hex characters are
+  // 64 bits, the least a session id carries, OWASP), then as far as any
+  // named value; or with `name=`, a cookie string (a cookie's name being a
+  // token's characters, RFC 6265), then with every pair after it to a
+  // quote or the end of the line. Quoted, in a backtick (as Markdown
+  // writes code) or not. Where a value ends is never part of the rule:
+  // only how it starts.
   [
     new RegExp(
-      String.raw`\b(?<name>\w*?(?:session|cookie))(?<between>\\?["']?\s*[:=]\s*)(?<quote>\\?["'])?(?:${tokenChar}+=[^"'\\\n]*|${sessionValue})(?<close>\k<quote>)?`,
+      String.raw`\b(?<name>\w*?(?:session|cookie))${between}(?=(?:\\?["'\x60])?(?:${tokenChar}+=|${sessionChar}{16}))(?:${tokenChar}+=[^"'\\\n]*|${namedValue})`,
       "giu"
     ),
     redactedAssignment,
@@ -142,17 +159,22 @@ const credentials: readonly (readonly [
 // `#code=…` are not); a link `URL` can't parse; a link with no scheme
 // (`www.…`, `//host/…`); and an AWS secret key written as
 // `aws_secret_access_key = …` or bare (only its key ID, `AKIA…`, has a
-// shape of its own). After `session` or `cookie` (everyday words, so only
-// a credential's shape is redacted): a value under 16 characters
-// (`session=9f8e7d`); a value holding `:` or `|` (express's decoded
-// `s:<id>.<sig>`, `user:42:…`, `a|b`), as allowing them would blank a
-// link (`Session: https://…`); a quoted value with a space in it; and, in
-// a cookie string, the pairs after a quoted value (`c="d"; sid=…`), as the
+// shape of its own). After `session` or `cookie` (everyday words, so a
+// value is redacted only when it starts as a credential does), each class
+// but the last held by the differential test: a value under 16 characters
+// (`session=9f8e7d`); a value whose first 16 characters hold one that is
+// not a session character, `:`, `|` or a space among them (express's
+// decoded `s:<id>.<sig>`, `user:42:…`, Bottle's `!<sig>?<data>`), as `:`
+// would let a link (`Session: https://…`) start as one; a JSON Web
+// Encryption's last two segments, its ciphertext and tag, of no use
+// without its key (the JWT format takes its first three first); and, in a
+// cookie string, the pairs after a quoted value (`c="d"; sid=…`), as the
 // string ends at a quote so it never runs past the end of a JSON string
-// holding it. The other way, after them: a word
-// of 16 or more such characters (`Session: onboarding-workshop`) reads as
-// a session's value, and any `name=value` blanks the rest of its line
-// ("cookie: flavour=vanilla, then we walked" → "cookie: [redacted]").
+// holding it (never caught). The other way, after them: a word of 16 or
+// more session characters reads as a value
+// ("Session: internationalisation", "Sessie: kwartaalplanning", a Dutch or
+// German compound often is), and any `name=value` blanks the rest of its
+// line ("cookie: flavour=vanilla, then we walked" → "cookie: [redacted]").
 // Prose after the other names loses its first word ("The secret: practice
 // daily", "Authorization: approved"): what follows them is a credential by
 // name, a short or word-like one too. What is left is bounded: such text
