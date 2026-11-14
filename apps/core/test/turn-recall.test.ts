@@ -1,3 +1,4 @@
+import { brainOf } from "@grasp-os/brain-next/contract";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
@@ -9,8 +10,8 @@ import { organizationId } from "../src/auth/auth.ts";
 import { addSource, eraseSource } from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
-import { memberRemovals, teamMembers, teams } from "../src/db/core/schema.ts";
-import { workspace } from "../src/durable-objects.ts";
+import { teamMembers, teams } from "../src/db/core/schema.ts";
+import { inJurisdiction, workspace } from "../src/durable-objects.ts";
 import {
   analysisPurpose,
   recallTimeoutReason,
@@ -64,6 +65,21 @@ const owner = (personId: string): SourceReaders => ({
   kind: "owner",
   personId,
 });
+
+/**
+ * Adds `text` as a source everyone in the company may read, to the shared
+ * store as a producer would: core's producers add none yet.
+ */
+const forEveryone = async (text: string): Promise<SourceRef> => {
+  const source = newSource();
+  await brainOf(inJurisdiction(env, env.BRAIN_STORE)).addSource({
+    source: `upload:${source.id}`,
+    change: crypto.randomUUID(),
+    text,
+    access: { kind: "audience", group: "company" },
+  });
+  return source;
+};
 
 /** Adds `text` to the Brain as a new source `readers` may read. */
 const added = async (text: string, readers: SourceReaders) => {
@@ -371,7 +387,6 @@ describe("the recall before a chat's question", setUpTime, () => {
         versions: detail.versions,
         run: detail.run,
         reads: detail.reads,
-        members: detail.members,
         outcome: detail.outcome,
       })),
       saysWhat: JSON.stringify(recalls).includes(depot),
@@ -382,7 +397,6 @@ describe("the recall before a chat's question", setUpTime, () => {
           run: recallRunIn(provider.requests[0]?.body),
           // Her own chat: as her, her own store too; no count of people.
           reads: "person",
-          members: undefined,
           outcome: "ok",
         },
       ],
@@ -820,12 +834,13 @@ describe("a recall before a question that doesn't hand over", setUpTime, () => {
 });
 
 describe("what the recall before a question may reach", setUpTime, () => {
-  it("holds what only the person may read where the answer reaches them alone: their own chat in Grasp, in a turn they started", async () => {
+  it("reads as the person only in their own chat in Grasp, in a turn they started, and as the company alone everywhere else", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInWithRole(idp, "user");
     const depot = word();
     const ownMarker = word();
     const teamMarker = word();
+    const companyMarker = word();
     const teamId = crypto.randomUUID();
     const db = drizzle(env.DB);
     await db.insert(teams).values({
@@ -849,7 +864,14 @@ describe("what the recall before a question may reach", setUpTime, () => {
       kind: "team",
       teamId,
     });
+    await forEveryone(`Depot ${depot} is open to everyone at ${companyMarker}`);
     const question = `What about depot ${depot}?`;
+    /** What of each source reached the model, in `bodies`. */
+    const of = (bodies: string) => ({
+      own: bodies.includes(ownMarker),
+      team: bodies.includes(teamMarker),
+      company: bodies.includes(companyMarker),
+    });
     const granted = async (agentId: string) => {
       await requestGranted(idp, admin, {
         subject: { type: "agent", agentId },
@@ -866,11 +888,7 @@ describe("what the recall before a question may reach", setUpTime, () => {
       await granted(agentId);
       const provider = await fakeProvider(says("Noted."));
       await ask(agentId);
-      const bodies = JSON.stringify(provider.requests.map(({ body }) => body));
-      return {
-        own: bodies.includes(ownMarker),
-        team: bodies.includes(teamMarker),
-      };
+      return of(JSON.stringify(provider.requests.map(({ body }) => body)));
     };
     const through =
       (platform: string, shared?: boolean) => async (agentId: string) =>
@@ -903,25 +921,24 @@ describe("what the recall before a question may reach", setUpTime, () => {
     const teamsChat = await sent(through("teams"));
     const thread = await sent(through("slack", true));
 
+    const companyOnly = { own: false, team: false, company: true };
     expect({
-      web: { own: web.includes(ownMarker), team: web.includes(teamMarker) },
-      unattended: {
-        own: unattended.includes(ownMarker),
-        team: unattended.includes(teamMarker),
-      },
+      web: of(web),
+      unattended: of(unattended),
       slack,
       teams: teamsChat,
       thread,
     }).toStrictEqual({
-      web: { own: true, team: true },
-      // Not started by them: their team's, never their own.
-      unattended: { own: false, team: true },
-      // Kept by the chat app too: their team's, never their own.
-      slack: { own: false, team: true },
-      teams: { own: false, team: true },
-      // Read by everyone in it (here the person alone on its roster): what
-      // all of them may read, their team's, never their own.
-      thread: { own: false, team: true },
+      // Theirs alone to read: their own, their team's and the company's.
+      web: { own: true, team: true, company: true },
+      // Not started by them: what the whole company may read alone.
+      unattended: companyOnly,
+      // Kept by the chat app too, whoever reads it later: the company's.
+      slack: companyOnly,
+      teams: companyOnly,
+      // Read by others (here only the person is on its roster): the
+      // company's, never their team's or their own.
+      thread: companyOnly,
     });
   });
 
@@ -968,9 +985,10 @@ describe("what the recall before a question may reach", setUpTime, () => {
     }).toStrictEqual({ answered: 1, marker: false });
   });
 
-  it("recalls in a chat others share nothing once anyone in it is no longer a member, nor in a turn nobody started there", async () => {
+  it("recalls in a chat others share only what the company may read, nothing with anyone unnamed in it, nor in a turn nobody started there", async () => {
     const depot = word();
-    const marker = word();
+    const teamMarker = word();
+    const companyMarker = word();
     const admin = await signedInApi(idp, "admin");
     const [ann, ben] = await Promise.all([
       signedInWithRole(idp, "user"),
@@ -992,7 +1010,12 @@ describe("what the recall before a question may reach", setUpTime, () => {
         createdAt: new Date(),
       }))
     );
-    await added(`Depot ${depot} opens at ${marker}`, { kind: "team", teamId });
+    // A team both are in: still never recalled where others read the answer.
+    await added(`Depot ${depot} opens at ${teamMarker}`, {
+      kind: "team",
+      teamId,
+    });
+    await forEveryone(`Depot ${depot} is open to everyone at ${companyMarker}`);
     const agentId = crypto.randomUUID();
     await requestGranted(idp, admin, {
       subject: { type: "agent", agentId },
@@ -1009,64 +1032,59 @@ describe("what the recall before a question may reach", setUpTime, () => {
     const question = `What about depot ${depot}?`;
     /**
      * For what `ask` asked: how many recalls its chat holds, as its last
-     * request carried them, and whether the marker reached the model.
+     * request carried them, and which sources reached the model.
      */
     const sentFor = async (ask: () => Promise<unknown>) => {
       const before = provider.requests.length;
       await ask();
       const sent = provider.requests.slice(before).map(({ body }) => body);
+      const bodies = JSON.stringify(sent);
       return {
         recalls: stringsIn(sent.at(-1)).filter((text) =>
           recallHeader.test(text)
         ).length,
-        marker: JSON.stringify(sent).includes(marker),
+        team: bodies.includes(teamMarker),
+        company: bodies.includes(companyMarker),
       };
     };
     /** Ann asks in a group she and Ben are in, as its door does. */
-    const inGroup = async () =>
+    const inGroup = async (outsiders: boolean) =>
       await stub.askThrough(ann.userId, agentId, "teams", question, undefined, {
         thread: `19:${unique()}@thread.v2`,
         kind: "group",
-        audience: { members: [ann.userId, ben.userId], outsiders: false },
+        audience: { members: [ann.userId, ben.userId], outsiders },
       });
 
-    // Both may read it: recalled.
     let chatId = "";
-    const bothMembers = await sentFor(async () => {
-      ({ chatId } = await inGroup());
+    const named = await sentFor(async () => {
+      ({ chatId } = await inGroup(false));
     });
     // The same chat, woken by a schedule or an event: no roster read for it.
     const unattended = await sentFor(
       async () => await stub.askUnattended(chatId, { text: question, model })
     );
-    await db.insert(memberRemovals).values({
-      organizationId,
-      userId: ben.userId,
-      removedAt: new Date(),
-    });
-    const benRemoved = await sentFor(inGroup);
-    // What the shared chat's recall was recorded as reading: everyone in
-    // it, and how many they are, never who.
+    // Someone Grasp can't name as a member is in it: a guest, say.
+    const withOutsider = await sentFor(async () => await inGroup(true));
+    // What the shared chat's recall was recorded as reading: never who.
     const [recorded] = recallsIn(
       await eventsOf(agentId, (events) => recallsIn(events, chatId).length > 0),
       chatId
     );
 
     expect({
-      bothMembers,
+      named,
       unattended,
-      benRemoved,
+      withOutsider,
       recorded: {
         reads: recorded?.detail.reads,
-        members: recorded?.detail.members,
         names: JSON.stringify(recorded).includes(ben.userId),
       },
     }).toStrictEqual({
-      recorded: { reads: "everyone", members: 2, names: false },
-      bothMembers: { recalls: 1, marker: true },
+      named: { recalls: 1, team: false, company: true },
       // Only the first question's recall, as the chat's history holds it.
-      unattended: { recalls: 1, marker: true },
-      benRemoved: { recalls: 1, marker: false },
+      unattended: { recalls: 1, team: false, company: true },
+      withOutsider: { recalls: 0, team: false, company: false },
+      recorded: { reads: "company", names: false },
     });
   });
 

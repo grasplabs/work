@@ -96,15 +96,11 @@ import { log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
 import type { ModelErrorCode } from "@grasp-os/shared/models";
 import { permissionErrors } from "@grasp-os/shared/permissions";
-import { roleSchema } from "@grasp-os/shared/roles";
 import { skillErrors } from "@grasp-os/shared/skills";
-import { and, eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { memberOf } from "./auth/identity.ts";
 import type { Member } from "./auth/identity.ts";
-import { notRemoved, organizationId } from "./auth/membership-sql.ts";
 import { erasureBegun } from "./brain-hand-overs.ts";
 import {
   forgetOwnStoreHealth,
@@ -112,8 +108,6 @@ import {
   ownStoresTotals,
 } from "./brain-own-stores.ts";
 import type { OwnStoreHealth } from "./brain-own-stores.ts";
-import { members, teamMembers, teams } from "./db/core/schema.ts";
-import { inList } from "./db/d1.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { embedInBulk, embedderModel, questionVectorOf } from "./embedder.ts";
 import { brainSpendByPurpose, spendMonth } from "./model-spend.ts";
@@ -342,12 +336,6 @@ export interface Recall {
    */
   company?: boolean;
   /**
-   * Everyone in a conversation others share, by user ID (`Everyone`): it
-   * reads only what all of them may, as no person (`everyoneReaderOf`);
-   * `personal` and `company` are then ignored.
-   */
-  everyone?: readonly string[];
-  /**
    * Read each source as it was at this moment, to the millisecond and
    * including it: a version added at it counts. A caller who means "on
    * that day" passes the day's last millisecond in the time zone they
@@ -548,18 +536,7 @@ const accessOf = (readers: SourceReaders): Access => {
  * holds the company: what everyone may read, each of them may. A guest or
  * a visitor is never a member, so never a reader here.
  */
-export type Reach = "person" | "teams" | "company" | Everyone;
-
-/**
- * Everyone in a conversation others share (a group chat's or channel's
- * thread), as core kept them for the turn from the platform's own roster
- * (`chat_audiences`), by user ID: the reader of a recall whose answer all
- * of them read (`everyoneReaderOf`). Never inferred from who spoke there.
- * Whoever asks is counted among them whether listed or not.
- */
-export interface Everyone {
-  everyone: readonly string[];
-}
+export type Reach = "person" | "teams" | "company";
 
 /** Every current member is in this group, and in no other way. */
 const companyGroup = "company";
@@ -583,84 +560,6 @@ const personReaderOf = async (
   };
 };
 
-/** A reader who reads nothing: no person, no group. */
-const nobody: Reader = { person: null, groups: [] };
-
-/**
- * What everyone of `people` may read, as one reader (GRA-1820): no person,
- * and only the groups each of them is in, as `personReaderOf` counts them
- * now (their teams and the company). A source names one principal
- * (`accessOf`): a group every one of them is in, which is exactly what each
- * of them may read through that group; a person's never, as no person
- * reads here, so nobody's own content, and their own store is never
- * addressed (`ownBrainOf`). Asked of the store as one reader, in the same
- * statements as one person's recall, with no more groups than the asker
- * has: whatever the number of people, nothing more is read there. Here,
- * one batch of two reads, one snapshot: who of them is a member now, and
- * their teams. Refused once the asker (`personId`, counted whether listed
- * or not) is no longer a member; reads nothing (`nobody`) once anyone else
- * of them isn't, or an ID isn't one: what can't be decided for everyone
- * is read by no one.
- */
-const everyoneReaderOf = async (
-  env: Pick<Env, "DB">,
-  personId: string,
-  among: readonly string[]
-): Promise<Reader> => {
-  const asker = checked(idSchema, personId);
-  const people = [...new Set([asker, ...among])];
-  if (!people.every((id) => idSchema.safeParse(id).success)) {
-    return nobody;
-  }
-  // The two reads of `memberOf` (auth/identity.ts), for many people in one
-  // snapshot: who is a member as `memberRole` counts them, and their teams
-  // as `teamsOf` reads them. Keep the three in step: a member either
-  // counts differently is read here as someone else.
-  const db = drizzle(env.DB);
-  const [current, memberships] = await db.batch([
-    db
-      .select({ userId: members.userId })
-      .from(members)
-      .where(
-        and(
-          eq(members.organizationId, organizationId),
-          inList(members.userId, people),
-          // As `memberRole` counts a member: a role that is one of ours.
-          inList(members.role, roleSchema.options),
-          notRemoved(members.userId)
-        )
-      ),
-    db
-      .select({ userId: teamMembers.userId, teamId: teamMembers.teamId })
-      .from(teamMembers)
-      .innerJoin(teams, eq(teams.id, teamMembers.teamId))
-      .where(
-        and(
-          inList(teamMembers.userId, people),
-          eq(teams.organizationId, organizationId)
-        )
-      ),
-  ]);
-  const active = new Set(current.map(({ userId }) => userId));
-  if (!active.has(asker)) {
-    throw permissionErrors.create("permission.person_inactive");
-  }
-  if (people.some((id) => !active.has(id))) {
-    return nobody;
-  }
-  const holdersOf = new Map<string, Set<string>>();
-  for (const { userId, teamId } of memberships) {
-    const holders = holdersOf.get(teamId) ?? new Set<string>();
-    holders.add(userId);
-    holdersOf.set(teamId, holders);
-  }
-  // A team every one of them is in: its members are all of them.
-  const shared = [...holdersOf].flatMap(([teamId, holders]) =>
-    holders.size === people.length ? [teamGroup(teamId)] : []
-  );
-  return { person: null, groups: [...shared, companyGroup] };
-};
-
 /**
  * The member `personId` as the Brain's reader, as far as `reach` goes
  * (`Reach`). Refused once they have no current membership, whatever the
@@ -671,9 +570,6 @@ const readerOf = async (
   personId: string,
   reach: Reach
 ): Promise<Reader> => {
-  if (typeof reach === "object") {
-    return await everyoneReaderOf(env, personId, reach.everyone);
-  }
   const { person, groups } = await personReaderOf(env, personId);
   switch (reach) {
     case "person": {
@@ -839,24 +735,20 @@ const meaningOf = async (
  * With `personal`, from the shared store and their own together, packed
  * as one store holding both would pack them (`packAcross`); without, from
  * the shared store alone, as their teams may read it (a reader with no
- * person: no `owner` source matches), with `company` as the company
- * alone, or with `everyone` as what all of a conversation's people may.
- * Refused once they are no longer a member, or when `personId` isn't an
- * ID.
+ * person: no `owner` source matches), or with `company` as the company
+ * alone. Refused once they are no longer a member, or when `personId`
+ * isn't an ID.
  */
 export const recallAs = async (
   env: BrainEnv & Pick<Env, "DB" | "EMBEDDER">,
   personId: string,
-  { question: asked, budget, asOf, personal, company = false, everyone }: Recall
+  { question: asked, budget, asOf, personal, company = false }: Recall
 ): Promise<RecalledPack> => {
   // As the Brain checks it, before the embedder sees any of it.
   const question = checked(questionSchema, asked);
   let reach: Reach = personal ? "person" : "teams";
   if (company) {
     reach = "company";
-  }
-  if (everyone !== undefined) {
-    reach = { everyone };
   }
   const [reader, meaning] = await Promise.all([
     readerOf(env, personId, reach),

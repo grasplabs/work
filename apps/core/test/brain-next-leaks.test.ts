@@ -1,4 +1,5 @@
 import {
+  brainOf,
   exactCandidatesMax,
   recallBudgetMax,
 } from "@grasp-os/brain-next/contract";
@@ -1572,10 +1573,13 @@ describe(
       });
     });
 
-    it("recalls in a conversation others share only what everyone in it may read, nothing while a guest is in it, and from the next turn on as it changes", async () => {
+    it("recalls only what the whole company may read in every conversation but a person's own chat in Grasp, and nothing while anyone unnamed is in it", async () => {
       // Through Teams' door as Teams posts (channels/door.ts): who is in a
-      // group chat comes from its roster, read for each message. Ann asks
-      // in each; what reached the model tells what was recalled.
+      // group chat or channel comes from its roster, read for each
+      // message. Ann asks in each; what reached the model tells what was
+      // recalled. A team she and Ben are both in, and one of hers alone,
+      // are never recalled where others read the answer, nor in her
+      // direct message, which Teams keeps too (GRA-1820).
       await chatAgentReadsBrain();
       const ann = await teamsMember(
         idp,
@@ -1586,6 +1590,7 @@ describe(
       const annTeam = markerWord();
       const both = markerWord();
       const own = markerWord();
+      const company = markerWord();
       await add(`Depot ${depot} for Ann's team: ${annTeam}`, {
         kind: "team",
         teamId: await newTeam(ann.userId),
@@ -1598,18 +1603,19 @@ describe(
         kind: "owner",
         personId: ann.userId,
       });
+      // Everyone in the company may read it, as a producer would add it:
+      // core's producers add none yet.
+      await brainOf(inJurisdiction(env, env.BRAIN_STORE)).addSource({
+        source: `upload:${crypto.randomUUID()}`,
+        change: crypto.randomUUID(),
+        text: `Depot ${depot} for everyone: ${company}`,
+        access: { kind: "audience", group: "company" },
+      });
       const question = `What about depot ${depot}?`;
-      /** What reached the model for Ann's question in `conversation`. */
-      const askedIn = async (
-        conversation: string,
-        kind: "groupChat" | "channel" = "groupChat",
-        changes: Record<string, unknown> = {}
-      ) => {
+      /** What reached the model for what Ann posted. */
+      const sentFor = async (activity: unknown) => {
         const before = ann.provider.requests.length;
-        await post({
-          ...mentionIn(ann.teams, conversation, question, kind),
-          ...changes,
-        });
+        await post(activity);
         const sent = JSON.stringify(
           ann.provider.requests.slice(before).map(({ body }) => body)
         );
@@ -1618,8 +1624,18 @@ describe(
           annTeam: sent.includes(annTeam),
           both: sent.includes(both),
           own: sent.includes(own),
+          company: sent.includes(company),
         };
       };
+      const askedIn = async (
+        conversation: string,
+        kind: "groupChat" | "channel" = "groupChat",
+        changes: Record<string, unknown> = {}
+      ) =>
+        await sentFor({
+          ...mentionIn(ann.teams, conversation, question, kind),
+          ...changes,
+        });
       const withBen = newGroup();
       await onGroupRoster(withBen, [
         { person: ann.teams },
@@ -1631,35 +1647,14 @@ describe(
         { person: ben.teams },
         { person: teamsPerson(), userRole: "guest" },
       ]);
-      // A channel's thread, one chat for all its messages: Ann alone in
-      // the channel at first; Ben joins before her second question there.
+      // A channel where both are, then a guest joins before Ann asks again
+      // in the same thread: what was recalled before is sent no more.
       const channel = `19:${unique()}@thread.tacv2`;
-      await onGroupRoster(channel, [{ person: ann.teams }]);
       const thread = `${channel};messageid=${unique()}`;
-
-      const inWithBen = await askedIn(withBen);
-      const inWithGuest = await askedIn(withGuest);
-      const alone = await askedIn(thread, "channel");
       await onGroupRoster(channel, [
         { person: ann.teams },
         { person: ben.teams },
       ]);
-      const afterBenJoined = await askedIn(thread, "channel");
-      // A channel where both are, then a guest joins before Ann asks again
-      // in the same thread: what was recalled before is sent no more.
-      const guestJoins = `19:${unique()}@thread.tacv2`;
-      const guestThread = `${guestJoins};messageid=${unique()}`;
-      await onGroupRoster(guestJoins, [
-        { person: ann.teams },
-        { person: ben.teams },
-      ]);
-      const beforeGuest = await askedIn(guestThread, "channel");
-      await onGroupRoster(guestJoins, [
-        { person: ann.teams },
-        { person: ben.teams },
-        { person: teamsPerson(), userRole: "guest" },
-      ]);
-      const afterGuestJoined = await askedIn(guestThread, "channel");
       // A meeting's chat, whose roster leaves out anonymous attendees: both
       // on it, named a meeting by its channel data or by its id.
       const meeting = newGroup();
@@ -1671,6 +1666,16 @@ describe(
           { person: ben.teams },
         ]);
       }
+
+      const inWithBen = await askedIn(withBen);
+      const inWithGuest = await askedIn(withGuest);
+      const beforeGuest = await askedIn(thread, "channel");
+      await onGroupRoster(channel, [
+        { person: ann.teams },
+        { person: ben.teams },
+        { person: teamsPerson(), userRole: "guest" },
+      ]);
+      const afterGuestJoined = await askedIn(thread, "channel");
       const inMeeting = await askedIn(meeting, "groupChat", {
         channelData: {
           tenant: { id: acmeTenant },
@@ -1678,56 +1683,43 @@ describe(
         },
       });
       const inMeetingById = await askedIn(meetingById);
-      // Her own recall finds all three: what the model got is no empty Brain.
+      const inDirect = await sentFor(
+        messageFrom(ann.teams, { text: question })
+      );
+      // Her own recall finds all four: what the model got is no empty Brain.
       const texts = await textsFor(ann.userId, `depot ${depot}`);
       const found = texts.join(" ");
 
+      const companyOnly = {
+        answered: true,
+        annTeam: false,
+        both: false,
+        own: false,
+        company: true,
+      };
+      const nothing = { ...companyOnly, company: false };
       expect({
-        found: [annTeam, both, own].map((marker) => found.includes(marker)),
+        found: [annTeam, both, own, company].map((marker) =>
+          found.includes(marker)
+        ),
         inWithBen,
         inWithGuest,
-        alone,
-        afterBenJoined,
         beforeGuest,
         afterGuestJoined,
         inMeeting,
         inMeetingById,
+        inDirect,
       }).toStrictEqual({
-        found: [true, true, true],
-        // What both may read; never her team's alone, never her own.
-        inWithBen: { answered: true, annTeam: false, both: true, own: false },
+        found: [true, true, true, true],
+        inWithBen: companyOnly,
         // Someone Grasp can't name as a member: nothing at all.
-        inWithGuest: {
-          answered: true,
-          annTeam: false,
-          both: false,
-          own: false,
-        },
-        // Hers alone in it: her teams', still never her own.
-        alone: { answered: true, annTeam: true, both: true, own: false },
-        // From the next turn on, what her team alone may read is gone, from
-        // the recall and from the chat's history recalled before.
-        afterBenJoined: {
-          answered: true,
-          annTeam: false,
-          both: true,
-          own: false,
-        },
-        beforeGuest: { answered: true, annTeam: false, both: true, own: false },
+        inWithGuest: nothing,
+        beforeGuest: companyOnly,
         // Nothing recalled, and the earlier recall withheld from history.
-        afterGuestJoined: {
-          answered: true,
-          annTeam: false,
-          both: false,
-          own: false,
-        },
-        inMeeting: { answered: true, annTeam: false, both: false, own: false },
-        inMeetingById: {
-          answered: true,
-          annTeam: false,
-          both: false,
-          own: false,
-        },
+        afterGuestJoined: nothing,
+        inMeeting: nothing,
+        inMeetingById: nothing,
+        inDirect: companyOnly,
       });
     });
 

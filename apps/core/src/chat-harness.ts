@@ -130,11 +130,11 @@ export interface TurnRequest {
   /**
    * Who is in a chat others share, as the turn was admitted for
    * (`chat_audiences`, kept from the platform's roster for the message):
-   * the members Grasp names, and whether anyone else is in it. Its recall
-   * reads only what all of them may (turn-recall.ts). None in one's own;
-   * a shared chat's turn without it recalls nothing.
+   * with anyone Grasp can't name as a member in it, its recall reads
+   * nothing (turn-recall.ts). None in one's own; a shared chat's turn
+   * without it recalls nothing.
    */
-  everyone?: Audience;
+  audience?: Audience;
   /**
    * Whether the answer reaches the person alone, so the recall before the
    * question may hold what only they may read (their own store,
@@ -1136,14 +1136,16 @@ export class ChatHarness {
    */
   async #recall(
     turn: CodeTurn,
-    { question: { text }, shared, everyone, personal }: TurnRequest
+    { question: { text }, shared, audience, personal }: TurnRequest
   ) {
     const { messages } = await this.#conversation.context(context);
     return await recallForTurn(
       {
         env: this.#env,
         turn,
-        conversation: shared ? { everyone: everyone ?? null } : "own",
+        conversation: shared
+          ? { outsiders: audience?.outsiders ?? null }
+          : "own",
         personal,
         history: messages,
         provenance: this.#sources,

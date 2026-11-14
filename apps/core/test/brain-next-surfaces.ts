@@ -1391,15 +1391,6 @@ export const coreProbes = {
           }),
         "hidden"
       ),
-      // As a conversation others share pinned them: everyone in it.
-      await answer(
-        "the hidden versions, among everyone in a conversation",
-        async () =>
-          await coreBrain.readableVersionsAs(env, personId, hiddenVersions, {
-            reach: { everyone: [personId] },
-          }),
-        "hidden"
-      ),
       await check(
         "as someone who isn't a member",
         [{ source: hidden, version: 1 }],
@@ -1454,28 +1445,8 @@ export const coreProbes = {
       });
     const hidden = probing.markers.join(" ");
     const whole = { tokens: recallBudgetMax };
-    // As a conversation others share recalls (turn-recall.ts): what
-    // everyone in it may read, the reader among them, as no person.
-    const askedAmongEveryone = await askedOfMarkers(
-      probing,
-      [],
-      async (asking) =>
-        await coreBrain.recallAs(env, probing.personId, {
-          ...asking,
-          personal: false,
-          everyone: [probing.personId],
-        })
-    );
-    const amongEveryone = askedAmongEveryone.map((answered) => ({
-      ...answered,
-      call: `among everyone: ${answered.call}`,
-      ...(answered.like === undefined
-        ? {}
-        : { like: `among everyone: ${answered.like}` }),
-    }));
     return [
       ...(await askedOfMarkers(probing, momentsOf(probing), recall)),
-      ...amongEveryone,
       await answer(
         "the shared word",
         async () =>

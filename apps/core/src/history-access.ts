@@ -132,13 +132,8 @@ const brainVersionOf = (source: string): SourceVersionRef | undefined => {
 };
 
 /**
- * Of the new Brain's versions in `sources`, those the chat's readers may
- * still read, in one read of the Brain per 500 (`readableVersionsAs`):
- * its person in a chat of their own; in one others share, everyone in it
- * as last kept from the platform's roster (`chat_audiences`), as its
- * recall read (turn-recall.ts). So once someone joins who may read less,
- * or anyone Grasp can't name as a member (then none), what earlier turns
- * recalled is withheld from the next request on (GRA-1820).
+ * Of the new Brain's versions in `sources`, those the person may still
+ * read, in one read of the Brain per 500 (`readableVersionsAs`).
  */
 const readableBrainVersions = async (
   env: Env,
@@ -152,15 +147,10 @@ const readableBrainVersions = async (
   if (pins.length === 0) {
     return [];
   }
-  const audience = await audienceOf(env, chatContext(scope));
-  if (audience?.outsiders === true) {
-    return [];
-  }
   const versions = await readableVersionsAs(
     env,
     scope.personId,
-    pins.map(({ pin }) => pin),
-    audience === undefined ? {} : { reach: { everyone: audience.members } }
+    pins.map(({ pin }) => pin)
   );
   const readable = new Set(versions.map((ref) => brainVersionRead(ref)));
   return pins.flatMap(({ source }) => (readable.has(source) ? [source] : []));
@@ -178,21 +168,33 @@ const brainTeamVersionPrefix = "brain-team-version:";
 export const brainTeamVersionRead = (ref: SourceVersionRef): string =>
   `${brainTeamVersionPrefix}${brainVersionRead(ref).slice(brainVersionPrefix.length)}`;
 
+// What a chat's recall before a question read as the company alone
+// (turn-recall.ts: anywhere but the person's own chat in Grasp, in a turn
+// they started) is pinned under a prefix of its own too, and checked as
+// the company reads it: withheld once everyone in the company may no
+// longer read it, even if the person still may, and every one of them
+// once anyone Grasp can't name as a member is in a chat others share.
+
+const brainCompanyVersionPrefix = "brain-company-version:";
+
+/** The source a version a recall as the company handed a run is recorded as. */
+export const brainCompanyVersionRead = (ref: SourceVersionRef): string =>
+  `${brainCompanyVersionPrefix}${brainVersionRead(ref).slice(brainVersionPrefix.length)}`;
+
 /**
- * Of the versions code's recall handed over in `sources`, those the
- * person's teams and the company may still read (`readableVersionsAs`,
- * as `teams`), in one read of the Brain per 500.
+ * Of the versions in `sources` pinned under `prefix`, those `reach` may
+ * still read (`readableVersionsAs`), in one read of the Brain per 500.
  */
-const readableBrainTeamVersions = async (
+const readableAt = async (
   env: Env,
   scope: Omit<AgentScope, "runId">,
-  sources: readonly string[]
+  sources: readonly string[],
+  prefix: string,
+  reach: "teams" | "company"
 ): Promise<string[]> => {
   const pins = sources.flatMap((source) => {
-    const pin = source.startsWith(brainTeamVersionPrefix)
-      ? brainVersionOf(
-          `${brainVersionPrefix}${source.slice(brainTeamVersionPrefix.length)}`
-        )
+    const pin = source.startsWith(prefix)
+      ? brainVersionOf(`${brainVersionPrefix}${source.slice(prefix.length)}`)
       : undefined;
     return pin === undefined ? [] : [{ source, pin }];
   });
@@ -203,10 +205,42 @@ const readableBrainTeamVersions = async (
     env,
     scope.personId,
     pins.map(({ pin }) => pin),
-    { reach: "teams" }
+    { reach }
   );
-  const readable = new Set(versions.map((ref) => brainTeamVersionRead(ref)));
+  const readable = new Set(
+    versions.map(
+      (ref) =>
+        `${prefix}${brainVersionRead(ref).slice(brainVersionPrefix.length)}`
+    )
+  );
   return pins.flatMap(({ source }) => (readable.has(source) ? [source] : []));
+};
+
+/**
+ * Of the versions a recall as the company handed over in `sources`, those
+ * everyone in the company may still read: none while anyone Grasp can't
+ * name as a member is in a chat others share, as last kept from the
+ * platform's roster (`chat_audiences`), so a guest joining withholds what
+ * earlier turns recalled from the next request on (GRA-1820).
+ */
+const readableBrainCompanyVersions = async (
+  env: Env,
+  scope: Omit<AgentScope, "runId">,
+  sources: readonly string[]
+): Promise<string[]> => {
+  if (!sources.some((source) => source.startsWith(brainCompanyVersionPrefix))) {
+    return [];
+  }
+  const audience = await audienceOf(env, chatContext(scope));
+  return audience?.outsiders === true
+    ? []
+    : await readableAt(
+        env,
+        scope,
+        sources,
+        brainCompanyVersionPrefix,
+        "company"
+      );
 };
 
 /** Whether `error` refuses the Brain's read, rather than failing it. */
@@ -485,13 +519,15 @@ export const readableSources = async (
     .from(collections)
     .where(inList(collections.id, sourceIds));
   // `readableBrain` reads today's Brain, and goes with it (GRA-1735).
-  const [apps, connections, brain, versions, teamVersions] = await Promise.all([
-    readableApps(env, scope, sourceIds),
-    readableConnections(env, scope, sourceIds),
-    readableBrain(env, scope, sourceIds),
-    readableBrainVersions(env, scope, sourceIds),
-    readableBrainTeamVersions(env, scope, sourceIds),
-  ]);
+  const [apps, connections, brain, versions, teamVersions, companyVersions] =
+    await Promise.all([
+      readableApps(env, scope, sourceIds),
+      readableConnections(env, scope, sourceIds),
+      readableBrain(env, scope, sourceIds),
+      readableBrainVersions(env, scope, sourceIds),
+      readableAt(env, scope, sourceIds, brainTeamVersionPrefix, "teams"),
+      readableBrainCompanyVersions(env, scope, sourceIds),
+    ]);
   return new Set([
     ...known.flatMap(({ id, readable }) => (readable === 1 ? [id] : [])),
     ...apps,
@@ -499,5 +535,6 @@ export const readableSources = async (
     ...brain,
     ...versions,
     ...teamVersions,
+    ...companyVersions,
   ]);
 };

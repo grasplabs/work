@@ -23,11 +23,15 @@ import {
   recallAs,
   recallQuestionMaxLength,
 } from "./brain-next.ts";
-import type { Recall, RecalledPack } from "./brain-next.ts";
+import type { RecalledPack } from "./brain-next.ts";
 import { questionText } from "./chat-agent.ts";
 import { describeRun, sourceHash } from "./code-mode.ts";
 import type { CodeRunStatus } from "./code-run-statuses.ts";
-import { brainGrantRead, brainVersionRead } from "./history-access.ts";
+import {
+  brainCompanyVersionRead,
+  brainGrantRead,
+  brainVersionRead,
+} from "./history-access.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
 
 // The recall before a chat's question (GRA-1732), from the Brain
@@ -50,7 +54,8 @@ import { modelForRole, modelSettings, models } from "./models.ts";
 //
 // The recall is a run of the chat, as a dedicated tool's call is
 // (agent-tools.ts): opened, its reads pinned with it (the agent's `brain`
-// grant, and each version it hands over, `brainVersionRead`), recorded in
+// grant, and each version it hands over, `brainVersionRead`, or
+// `brainCompanyVersionRead` for a recall as the company), recorded in
 // the audit log as the agent's call (`brain.recall`, how many versions it
 // hands over, and its run: never what they say) before anything is handed
 // over, closed; one revoked meanwhile is recorded as failed after. So
@@ -165,16 +170,13 @@ interface Recalling {
   /** The turn: the person asking (`scope.personId`), the chat, its runs. */
   turn: Pick<CodeTurn, "scope" | "runs">;
   /**
-   * Who reads the answer: the person asking alone (`own`: their own chat
-   * in Grasp, or their direct message on a chat app, whose recall is not
-   * `personal`), or everyone in a group chat's or channel's thread, as the
-   * turn was admitted for (`TurnRequest`), or none known (`null`). A
-   * recall where others read the answer hands over only what all of them
-   * may read (`readsAs`).
+   * Where the answer goes: the person's own chat (`own`: in Grasp, or
+   * their direct message on a chat app), or a group chat's or channel's
+   * thread, with whether anyone Grasp can't name as a member is in it, as
+   * the turn was admitted for (`TurnRequest`), or `null` when nobody kept
+   * who is (`readsAs`).
    */
-  conversation:
-    | "own"
-    | { everyone: { members: readonly string[]; outsiders: boolean } | null };
+  conversation: "own" | { outsiders: boolean | null };
   /**
    * Whether the recall may hold what only the asker may read, from their
    * own store: only where the answer reaches them alone (`TurnRequest`).
@@ -255,7 +257,7 @@ const leftOf = (started: number, ms: number): number =>
  */
 const recalled = async (
   recalling: Recalling,
-  reads: Pick<Recall, "personal" | "everyone">,
+  reads: Reads,
   question: string,
   analysed: Promise<string | null | undefined>
 ): Promise<RecalledPack> => {
@@ -328,56 +330,36 @@ export interface TurnRecall {
 const isTimeout = (error: unknown): boolean =>
   error instanceof DOMException && error.name === "TimeoutError";
 
+/** Whom a turn's recall reads as: its person, or the company alone. */
+type Reads = { personal: true } | { personal: false; company: true };
+
 /**
- * Whom a turn's recall reads as, or none when it may not recall at all.
- * In a chat of one's own, its person (their own store only when
- * `personal`). In a
- * conversation others share (GRA-1820), only what every one of them may
- * read is recalled (`everyone`, brain-next.ts), and only when who they are
- * is known for this turn from the platform's own roster: not while anyone
- * Grasp can't name as a member is in it (a guest, another company's
- * people, an unread roster), whom nothing of the company's is for; not
- * without an audience kept for the turn; and not in a turn nobody started
- * there, a schedule's or an event's, for which no roster was read. Then
- * nothing is recalled, as before shared conversations recalled at all.
+ * Whom a turn's recall reads as, or none when it may not recall at all
+ * (GRA-1820, Nick's decision of 14 November 2026). Its person, their own
+ * store and teams too, only where the answer reaches them alone: their
+ * own chat in Grasp, in a turn they started (`personal`, workspace.ts
+ * `answersAlone`). Anywhere else, a group chat or channel, their direct
+ * message on a chat app (which the app keeps too), a turn a schedule or
+ * an event woke, only what everyone in the company may read: no team's
+ * content and nothing of anyone's own, whoever reads the answer now or
+ * later. In a chat others share, not even that while anyone Grasp can't
+ * name as a member is in it (a guest, another company's people, a
+ * meeting's anonymous attendees, an unread roster), nor without who is in
+ * it kept for the turn, nor in a turn nobody started there, for which no
+ * roster was read: then nothing is recalled.
  */
 const readsAs = ({
   conversation,
   personal,
   turn,
-}: Recalling): Pick<Recall, "personal" | "everyone"> | undefined => {
+}: Recalling): Reads | undefined => {
   if (conversation === "own") {
-    return { personal };
+    return personal ? { personal: true } : { personal: false, company: true };
   }
-  const { everyone } = conversation;
-  if (
-    everyone === null ||
-    everyone.outsiders ||
-    turn.scope.unattended === true
-  ) {
+  if (conversation.outsiders !== false || turn.scope.unattended === true) {
     return undefined;
   }
-  // Never the asker's own: others read the answer.
-  return { personal: false, everyone: everyone.members };
-};
-
-/**
- * What a recall read as, for its audit event: as its person (`person`,
- * their own store too), as their teams and the company (`teams`), or as
- * everyone in a conversation others share (`everyone`), with how many
- * people that is, the asker counted. Never who.
- */
-const readAsDetail = (
-  personId: string,
-  { personal, everyone }: Pick<Recall, "personal" | "everyone">
-): { reads: "person" | "teams" | "everyone"; members?: number } => {
-  if (everyone !== undefined) {
-    return {
-      reads: "everyone",
-      members: new Set([personId, ...everyone]).size,
-    };
-  }
-  return { reads: personal ? "person" : "teams" };
+  return { personal: false, company: true };
 };
 
 /**
@@ -397,7 +379,8 @@ export const recallForTurn = async (
     return undefined;
   }
   const { env, turn } = recalling;
-  const readAs = readAsDetail(turn.scope.personId, reads);
+  // What its audit event says it read as: never who.
+  const readAs = { reads: reads.personal ? "person" : "company" };
   // Alongside the first pass from the start; let go of once the recall
   // ends, however it ends, so no request of it outlives the recall. None
   // for a chat's first message: nothing before it to resolve.
@@ -430,7 +413,13 @@ export const recallForTurn = async (
     // Its answer can no longer be used: let go of now, not after the writes.
     analysis.abort();
     const versions = [
-      ...new Set(pack.items.map((item) => brainVersionRead(item))),
+      ...new Set(
+        pack.items.map((item) =>
+          reads.personal
+            ? brainVersionRead(item)
+            : brainCompanyVersionRead(item)
+        )
+      ),
     ];
     const call = {
       method: turnRecallMethod,
