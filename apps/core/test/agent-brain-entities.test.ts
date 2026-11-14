@@ -2,7 +2,7 @@ import { brainOf, personalBrainOf } from "@grasp-os/brain-next/contract";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { withheldResult } from "../src/agent.ts";
@@ -12,8 +12,9 @@ import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
-import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
+import { chatOf, codeResults, codeStep, model, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
+import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
@@ -36,6 +37,8 @@ import { signedInApi, signedInWithRole, unique } from "./sign-in.ts";
 //    erased or narrowed, the memory retired, or the person leaves the team.
 // 4. Code learns what exists that it may not see: an id it may not see
 //    answers exactly as one nobody holds.
+// 5. An answer not as code is handed one reaches code, or the audit log
+//    says it was handed over: it fails the call, audited as refused.
 // The leak harness (brain-next-leaks.test.ts) probes the same reads, as
 // the company and as the person's teams, every way they answer.
 
@@ -312,12 +315,54 @@ const narrowed: Change = async ({ source }) => {
   });
 };
 
+/** A new version of the source, its text changed, that `readers` may read. */
+const readBy =
+  (readers: SourceReaders): Change =>
+  async ({ source }) => {
+    await addSource(env, {
+      source,
+      change: crypto.randomUUID(),
+      text: "Changed.",
+      readers,
+    });
+  };
+
 /** The memory retired by its writer. */
 const retired: Change = async ({ memory, group }) => {
   await shared().retireMemory({
     memory,
     reader: { person: writer, groups: [group] },
   });
+};
+
+/**
+ * The Brain's stores addressed while `run` runs, by name (the shared one,
+ * `brain`; a person's own, `person:<id>`), and of those, the ones code's
+ * entity reads addressed (`codeCardAs` and `codeEntitiesAs` on the stack).
+ */
+const storesAddressed = async (
+  run: () => Promise<unknown>
+): Promise<{ all: string[]; byCode: string[] }> => {
+  const binding = env.BRAIN_STORE;
+  const all = new Set<string>();
+  const byCode = new Set<string>();
+  const codeReads = /codeCardAs|codeEntitiesAs/u;
+  const getByName = binding.getByName.bind(binding);
+  const spy = vi
+    .spyOn(binding, "getByName")
+    .mockImplementation((name, ...rest) => {
+      all.add(name);
+      if (codeReads.test(new Error("addressed").stack ?? "")) {
+        byCode.add(name);
+      }
+      return getByName(name, ...rest);
+    });
+  try {
+    await run();
+  } finally {
+    spy.mockRestore();
+  }
+  return { all: [...all].toSorted(), byCode: [...byCode].toSorted() };
 };
 
 describe("a chat's code reading the Brain's entities", setUpTime, () => {
@@ -589,6 +634,162 @@ describe("a chat's code reading the Brain's entities", setUpTime, () => {
     expect(returnedSchema.parse(paged?.text)).toStrictEqual({
       pages: [100, 1],
       different: 101,
+    });
+  });
+
+  it("addresses only the shared store from its code's reads, in its person's own chat asked or woken and in a direct message", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = await signedInWithRole(idp, "user");
+    const team = await teamOf(person.userId);
+    const ownName = `Own ${word()}`;
+    await ownCustomer(person.userId, ownName, `Own note ${word()}`);
+    const teamName = `Team ${word()}`;
+    const teamStatement = `Team note ${word()}`;
+    await sharedCustomer(`team:${team}`, teamName, teamStatement);
+    const code = () => readingCode([ownName, teamName]);
+    const own = `person:${person.userId}`;
+
+    const asked = await ownChatOf(admin, person.userId, code(), says("Done."));
+    const inAsked = await storesAddressed(async () => {
+      await asked.ask(word());
+    });
+    const woken = await ownChatOf(admin, person.userId, code(), says("Done."));
+    const inWoken = await storesAddressed(async () => {
+      await woken.stub.askUnattended(woken.chat.id, { text: word(), model });
+    });
+    const direct = await directMessageOf(
+      admin,
+      person.userId,
+      code(),
+      says("Done.")
+    );
+    let directChat = "";
+    const inDirect = await storesAddressed(async () => {
+      directChat = await direct.ask(word());
+    });
+
+    expect({
+      asked: {
+        // The turn's own recall reads their own store there: code never.
+        own: inAsked.all.includes(own),
+        byCode: inAsked.byCode,
+        read: await returnedIn(asked.stub, asked.chat.id),
+      },
+      woken: {
+        byCode: inWoken.byCode,
+        read: await returnedIn(woken.stub, woken.chat.id),
+      },
+      direct: {
+        byCode: inDirect.byCode,
+        read: await returnedIn(direct.stub, directChat),
+      },
+    }).toStrictEqual({
+      asked: {
+        own: true,
+        byCode: ["brain"],
+        read: `Returned:\n${JSON.stringify([`found ${teamName}: ${teamStatement}`])}`,
+      },
+      // A turn nobody started reads as the company alone.
+      woken: { byCode: ["brain"], read: "Returned:\n[]" },
+      direct: { byCode: ["brain"], read: "Returned:\n[]" },
+    });
+  });
+
+  it("still sends what its code read in its person's own chat once its source is narrowed to another team of theirs, or widened to the company", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = await signedInWithRole(idp, "user");
+    const [first, second] = [
+      await teamOf(person.userId),
+      await teamOf(person.userId),
+    ];
+    const ownChat = async (...replies: ProviderReply[]): Promise<Asking> => {
+      const chat = await ownChatOf(admin, person.userId, ...replies);
+      return {
+        ask: async () => {
+          await chat.ask(word());
+        },
+        requests: () => chat.provider.requests.map(({ body }) => body),
+      };
+    };
+    const readers: SourceReaders = { kind: "team", teamId: first };
+
+    expect({
+      toTheirOtherTeam: await sentAfter(
+        ownChat,
+        readers,
+        "source",
+        readBy({ kind: "team", teamId: second })
+      ),
+      toTheCompany: await sentAfter(
+        ownChat,
+        readers,
+        "source",
+        readBy({ kind: "everyone" })
+      ),
+    }).toStrictEqual({ toTheirOtherTeam: kept, toTheCompany: kept });
+  });
+
+  it("refuses its code a card the Brain answers outside its contract, audited as refused, never as handed over", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = await signedInWithRole(idp, "user");
+    const name = `Customer ${word()}`;
+    await sharedCustomer("company", name, `Renews ${word()}`);
+    const chat = await ownChatOf(
+      admin,
+      person.userId,
+      readingCode([name]),
+      says("Read.")
+    );
+    // The shared store answering a card of a kind no list has: as a
+    // mapping of core's gone wrong would hand code.
+    const binding = env.BRAIN_STORE;
+    const getByName = binding.getByName.bind(binding);
+    const spy = vi
+      .spyOn(binding, "getByName")
+      .mockImplementation((storeName, ...rest) => {
+        const store = getByName(storeName, ...rest);
+        return new Proxy(store, {
+          get: (target, key): unknown =>
+            key === "readCard"
+              ? async (request: Parameters<typeof target.readCard>[0]) => {
+                  const card = await target.readCard(request);
+                  return card === null
+                    ? null
+                    : { ...card, entity: { ...card.entity, kind: "starship" } };
+                }
+              : Reflect.get(target, key, target),
+        });
+      });
+    try {
+      await chat.ask(word());
+    } finally {
+      spy.mockRestore();
+    }
+
+    const events = await vi.waitFor(
+      async () => {
+        const all = await allEvents();
+        const reads = all.filter(
+          ({ action, detail }) =>
+            action === "brain.entities.get" &&
+            detail?.onBehalfOf === person.userId
+        );
+        expect(reads.length).toBeGreaterThanOrEqual(1);
+        return reads;
+      },
+      { timeout: 10_000, interval: 50 }
+    );
+    expect({
+      read: await returnedIn(chat.stub, chat.chat.id),
+      audited: events.map(({ detail }) => ({
+        found: detail?.found,
+        refused: detail?.refused,
+      })),
+    }).toStrictEqual({
+      read: `Returned:\n${JSON.stringify([
+        "failed An answer not as code is handed one reached the Brain's entities",
+      ])}`,
+      audited: [{ found: undefined, refused: "internal.unexpected" }],
     });
   });
 });

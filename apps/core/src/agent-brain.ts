@@ -5,6 +5,7 @@ import { permissionIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import type { Permission } from "@grasp-os/shared/permissions";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
+import { z } from "zod";
 
 import { asPerson } from "./agent-person.ts";
 import {
@@ -16,7 +17,6 @@ import {
   requireOpenRun,
 } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
-import { brainCardSchema, brainEntitiesSchema } from "./brain-pack.ts";
 import { entitiesCallFor, recallFor } from "./brain-recall.ts";
 import type { CodeEntitiesOperation, RecallCaller } from "./brain-recall.ts";
 import { brainGaps } from "./brain-rpc.ts";
@@ -127,29 +127,22 @@ const brainCallerOf = async (
   };
 };
 
+/** A page of entities, as far as the chat's line of the call counts it. */
+const pageSchema = z.object({ entities: z.array(z.unknown()) });
+
 /**
- * `answer` to `operation`, as code may be handed it: the same strict
- * shapes the function host holds an App's answers to (brain-pack.ts), so
- * a field the code mustn't see (what the answer rests on, among them)
- * fails the call, never passed on. And how many things it hands over, for
- * the chat's line of the call.
+ * How many things an entities answer handed over, for the chat's line of
+ * the call: its shape `entitiesCallFor` checked before it answered.
  */
 const handedOf = (
   operation: CodeEntitiesOperation,
   answer: Json
 ): Record<string, number> => {
   if (operation === "entities.get") {
-    const card = brainCardSchema.nullable().safeParse(answer);
-    if (!card.success) {
-      throw new Error("A card not as code is handed one reached a chat");
-    }
-    return { found: card.data === null ? 0 : 1 };
+    return { found: answer === null ? 0 : 1 };
   }
-  const page = brainEntitiesSchema.safeParse(answer);
-  if (!page.success) {
-    throw new Error("A page not as code is handed one reached a chat");
-  }
-  return { entities: page.data.entities.length };
+  const page = pageSchema.safeParse(answer);
+  return { entities: page.success ? page.data.entities.length : 0 };
 };
 
 /**

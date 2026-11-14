@@ -37,7 +37,12 @@ import type {
   SkillAt,
   SkillVersionRef,
 } from "./brain-next.ts";
-import { skillReadSchema, skillsSelectSchema } from "./brain-pack.ts";
+import {
+  brainCardSchema,
+  brainEntitiesSchema,
+  skillReadSchema,
+  skillsSelectSchema,
+} from "./brain-pack.ts";
 import { readSkillFor, selectSkillsFor } from "./brain-skills.ts";
 import type { HeldNow, SkillsReach } from "./brain-skills.ts";
 import { permissions } from "./db/core/schema.ts";
@@ -484,6 +489,21 @@ const memoriesOn = (card: CodeCard): number =>
     card.relations.length + card.notes.length
   );
 
+/**
+ * `answer` as code may be handed it: held to the strict shape every caller
+ * hands code (brain-pack.ts, as the function host holds an App's), before
+ * anything is kept or audited, so an answer core's own mapping got wrong
+ * fails the call and is audited as refused, never as handed over.
+ */
+const handedAs = <T>(schema: z.ZodType<T>, answer: Json): Json => {
+  if (!schema.safeParse(answer).success) {
+    throw new Error(
+      "An answer not as code is handed one reached the Brain's entities"
+    );
+  }
+  return answer;
+};
+
 /** Reads `operation` for `caller`, checked already: what it answers code, and what its audit says. */
 const readFor = async (
   env: Env,
@@ -507,24 +527,20 @@ const readFor = async (
     if (card === null) {
       return { answer: null, detail: { found: false, memories: 0 } };
     }
+    const answer = handedAs(brainCardSchema, codeCardOf(card));
     // Kept by the caller before it gets them, as a recall's pack is:
     // everything what the card says rests on (contract `restsOn`).
     await caller.keep?.(card.restsOn);
-    return {
-      answer: codeCardOf(card),
-      detail: { found: true, memories: memoriesOn(card) },
-    };
+    return { answer, detail: { found: true, memories: memoriesOn(card) } };
   }
   const page = await codeEntitiesAs(env, person, reach, input);
+  const answer = handedAs(brainEntitiesSchema, {
+    entities: page.entities.map((entity) => codeEntityOf(entity)),
+    next: page.next,
+  });
   // What the page says rests on, kept as a card's is.
   await caller.keep?.(page.restsOn);
-  return {
-    answer: {
-      entities: page.entities.map((entity) => codeEntityOf(entity)),
-      next: page.next,
-    },
-    detail: { entities: page.entities.length },
-  };
+  return { answer, detail: { entities: page.entities.length } };
 };
 
 /**
