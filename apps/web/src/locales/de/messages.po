@@ -10435,7 +10435,7 @@ msgstr "Verantwortlich"
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Owner"
-msgstr "Verantwortlich"
+msgstr "Verantwortliche Person"
 
 #: src/apps/app-settings.tsx
 msgctxt "who answers for an app"
@@ -13831,7 +13831,7 @@ msgstr "Technische Details"
 #: src/brain/memories-page.tsx
 msgctxt "a kind of thing the Brain remembers"
 msgid "Terms"
-msgstr "Begriffe"
+msgstr "Konditionen"
 
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"

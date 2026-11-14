@@ -4397,7 +4397,7 @@ msgstr "Koppelingen"
 #: src/brain/memories-page.tsx
 msgctxt "a kind of thing the Brain remembers"
 msgid "Connections"
-msgstr "Koppelingen"
+msgstr "Verbindingen"
 
 #: src/apps/app-settings.tsx
 msgctxt "an app's settings section"
@@ -10631,7 +10631,7 @@ msgstr "Mensen"
 #: src/brain/memories-page.tsx
 msgctxt "a kind of thing the Brain remembers"
 msgid "People"
-msgstr "Mensen"
+msgstr "Personen"
 
 #: src/inbox/inbox-page.tsx
 msgctxt "activity filter: what people did"
@@ -13831,7 +13831,7 @@ msgstr "Technische details"
 #: src/brain/memories-page.tsx
 msgctxt "a kind of thing the Brain remembers"
 msgid "Terms"
-msgstr "Begrippen"
+msgstr "Voorwaarden"
 
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
