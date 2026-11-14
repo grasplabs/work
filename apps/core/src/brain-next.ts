@@ -4131,14 +4131,15 @@ const liveNamed = async (
     : { ...plain, name: shared.name };
 };
 
+/** Where a page of entities across both stores goes on (`StorePlace`). */
+const entitiesFromSchema = z.strictObject({
+  store: memoryStoreSchema,
+  after: entitiesCursorSchema.optional(),
+});
+
 const entitiesWantedSchema = z.strictObject({
   kind: z.enum(entityKinds),
-  from: z
-    .strictObject({
-      store: memoryStoreSchema,
-      after: entitiesCursorSchema.optional(),
-    })
-    .optional(),
+  from: entitiesFromSchema.optional(),
 });
 
 /**
@@ -4500,31 +4501,29 @@ const cursorTextOf = (cursor: object | undefined): string | null =>
   cursor === undefined ? null : btoa(JSON.stringify(cursor));
 
 /** The moments a store's cursor holds, which JSON wrote as text. */
-const cursorMoments = ["at", "learned", "learnedAt"] as const;
+const cursorMoments: ReadonlySet<string> = new Set([
+  "at",
+  "learned",
+  "learnedAt",
+]);
 
 /**
  * A cursor `cursorTextOf` wrote, read back as `schema` (the store's own,
- * which the store checks again): refused as `brain.request_invalid` when
- * it isn't one.
+ * or a place across both stores holding one, which the store checks
+ * again): refused as `brain.request_invalid` when it isn't one.
  */
 const cursorOfText = <T>(schema: z.ZodType<T>, text: string): T => {
   let read: unknown;
   try {
-    read = JSON.parse(atob(text));
+    read = JSON.parse(atob(text), (key, value: unknown) =>
+      cursorMoments.has(key) && typeof value === "string"
+        ? new Date(value)
+        : value
+    );
   } catch {
     throw brainSourceErrors.create("brain.request_invalid");
   }
-  if (typeof read !== "object" || read === null || Array.isArray(read)) {
-    throw brainSourceErrors.create("brain.request_invalid");
-  }
-  const cursor: Record<string, unknown> = { ...read };
-  for (const moment of cursorMoments) {
-    const value = cursor[moment];
-    if (typeof value === "string") {
-      cursor[moment] = new Date(value);
-    }
-  }
-  return checked(schema, cursor);
+  return checked(schema, read);
 };
 
 /** A moment code reads as of: ISO 8601, with its offset. */
@@ -4532,12 +4531,21 @@ const codeMomentSchema = z.iso
   .datetime({ offset: true })
   .transform((at) => new Date(at));
 
-/** A card code asks for (`companyCardAs`). */
+/** A card code asks for (`codeCardAs`). */
 const codeCardSchema = z.strictObject({
   entity: entityIdSchema,
   asOf: codeMomentSchema.optional(),
   after: z.string().optional(),
 });
+
+/**
+ * Whom code reads entities as: the company alone (`company`), from the
+ * shared store, as an App, a workflow and a chat's code anywhere but its
+ * person's own chat do; or its person (`person`), their own store and
+ * then the shared one with their teams, as a chat's code does in their own
+ * chat in Grasp alone (agent-brain.ts). Set by core, never by the code.
+ */
+export type CodeReach = Extract<Reach, "person" | "company">;
 
 /** A memory on a card, its source as core names it. */
 export interface CardMemory extends Omit<Memory, "source"> {
@@ -4545,24 +4553,49 @@ export interface CardMemory extends Omit<Memory, "source"> {
 }
 
 /** An entity as code reads it. */
-export interface CompanyEntity {
+export interface CodeEntity {
   id: EntityId;
   kind: EntityKind;
   name: string | null;
 }
 
-/** The versions a page rests on (contract `restsOn`), as core names sources. */
-const restsOnOf = (
-  held: readonly { source: SourceId; version: number }[]
-): SourceVersionRef[] => held.flatMap((each) => versionRefOf(each) ?? []);
+/**
+ * Everything what code is handed rests on (contract `restsOn`,
+ * `restsOnWords`), core's to keep with the run or the chat and never
+ * code's to see: each version of a source, and each memory in a writer's
+ * own word, in the store it is in.
+ */
+export interface CodeRestsOn {
+  versions: SourceVersionRef[];
+  words: StoredMemoryPlace[];
+}
+
+/**
+ * What `answer` of `store` rests on, as core names it. A version of a
+ * kind no producer has fails the read (`sourceRefOf`): what can't be
+ * pinned is never handed over.
+ */
+const codeRestsOnOf = (
+  answer: {
+    restsOn: readonly { source: SourceId; version: number }[];
+    restsOnWords: readonly string[];
+  },
+  store: MemoryStoreName
+): CodeRestsOn => ({
+  versions: answer.restsOn.map(({ source, version }) => ({
+    source: sourceRefOf(source),
+    version,
+  })),
+  words: answer.restsOnWords.map((memory) => ({ store, memory })),
+});
 
 /**
  * A page of an entity's card as code reads it: the store's, memories cited
- * as core names sources, with every version what it says rests on
- * (`restsOn`): core's to keep with a run, never code's to see.
+ * as core names sources, with everything what it says rests on
+ * (`restsOn`): core's to keep, never code's to see.
  */
-export interface CompanyCard {
-  entity: CompanyEntity;
+export interface CodeCard {
+  entity: CodeEntity;
   attributes: {
     attribute: string;
     memories: CardMemory[];
@@ -4571,12 +4604,12 @@ export interface CompanyCard {
   relations: {
     attribute: string | null;
     side: "about" | "object";
-    other: CompanyEntity;
+    other: CodeEntity;
     memory: CardMemory;
   }[];
   notes: CardMemory[];
   next: string | null;
-  restsOn: SourceVersionRef[];
+  restsOn: CodeRestsOn;
 }
 
 /** `memory` with its source as core names it. */
@@ -4585,54 +4618,74 @@ const cardMemoryOf = ({ source, ...memory }: Memory): CardMemory => ({
   source: versionRefOf(source),
 });
 
+/** `card`, read from `store`, as code reads it. */
+const codeCardOf = (
+  card: NonNullable<Awaited<ReturnType<Brain["readCard"]>>>,
+  store: MemoryStoreName
+): CodeCard => ({
+  entity: card.entity,
+  attributes: card.attributes.map(({ memories, ...attribute }) => ({
+    ...attribute,
+    memories: memories.map((memory) => cardMemoryOf(memory)),
+  })),
+  relations: card.relations.map(({ memory, ...relation }) => ({
+    ...relation,
+    memory: cardMemoryOf(memory),
+  })),
+  notes: card.notes.map((memory) => cardMemoryOf(memory)),
+  next: cursorTextOf(card.next),
+  restsOn: codeRestsOnOf(card, store),
+});
+
 /**
- * A page of entity `entity`'s card as the company may read it, for the
- * member `personId` (code's reach: never a team's or a person's own), as
- * now or as of `asOf`, after `after` (a page's `next`): null alike when the
- * company may see no such entity and when nobody holds one. Refused once
- * `personId` is no longer a member, and as `brain.request_invalid` for a
- * request or cursor that isn't one.
+ * A page of entity `entity`'s card as `reach` may read it, for the member
+ * `personId`, as now or as of `asOf`, after `after` (a page's `next`).
+ * As the company, from the shared store alone, never a team's nor a
+ * person's own. As the person, from their own store, or else from the
+ * shared one with their teams: an entity is in one store alone, by an id
+ * that store made. Null alike when they may see no such entity and when
+ * nobody holds one. Refused once `personId` is no longer a member, and as
+ * `brain.request_invalid` for a request or cursor that isn't one.
  */
-export const companyCardAs = async (
+export const codeCardAs = async (
   env: BrainEnv & Pick<Env, "DB">,
   personId: string,
+  reach: CodeReach,
   request: unknown
-): Promise<CompanyCard | null> => {
+): Promise<CodeCard | null> => {
   const { entity, asOf, after } = checked(codeCardSchema, request);
-  const reader = await readerOf(env, personId, "company");
-  let card: Awaited<ReturnType<Brain["readCard"]>>;
-  try {
-    card = await brain(env).readCard({
-      entity,
-      reader,
-      ...(asOf === undefined ? {} : { asOf }),
-      ...(after === undefined
-        ? {}
-        : { after: cursorOfText(memoriesCursorSchema, after) }),
-    });
-  } catch (error) {
-    throw refusedAs(error);
-  }
-  if (card === null) {
-    return null;
-  }
-  return {
-    entity: card.entity,
-    attributes: card.attributes.map(({ memories, ...attribute }) => ({
-      ...attribute,
-      memories: memories.map((memory) => cardMemoryOf(memory)),
-    })),
-    relations: card.relations.map(({ memory, ...relation }) => ({
-      ...relation,
-      memory: cardMemoryOf(memory),
-    })),
-    notes: card.notes.map((memory) => cardMemoryOf(memory)),
-    next: cursorTextOf(card.next),
-    restsOn: restsOnOf(card.restsOn),
+  const read = async (store: Brain, reader: Reader) => {
+    try {
+      return await store.readCard({
+        entity,
+        reader,
+        ...(asOf === undefined ? {} : { asOf }),
+        ...(after === undefined
+          ? {}
+          : { after: cursorOfText(memoriesCursorSchema, after) }),
+      });
+    } catch (error) {
+      throw refusedAs(error);
+    }
   };
+  if (reach === "company") {
+    const card = await read(brain(env), await readerOf(env, personId, reach));
+    return card === null ? null : codeCardOf(card, "shared");
+  }
+  const reader = await personReaderOf(env, personId);
+  // Their own part may go missing, never the shared part (`ownOr`).
+  const own = await ownOr(
+    async () => await read(ownBrain(env, reader.person), reader),
+    null
+  );
+  if (own !== null) {
+    return codeCardOf(own, "own");
+  }
+  const shared = await read(brain(env), reader);
+  return shared === null ? null : codeCardOf(shared, "shared");
 };
 
-/** Entities code asks to find (`companyEntitiesAs`): a kind, a name or an identifier, at least one. */
+/** Entities code asks to find (`codeEntitiesAs`): a kind, a name or an identifier, at least one. */
 const codeFindSchema = z
   .strictObject({
     kind: z.enum(entityKinds).optional(),
@@ -4645,44 +4698,76 @@ const codeFindSchema = z
       kind !== undefined || name !== undefined || identifier !== undefined
   );
 
-/** A page of entities as code reads it, with every version it rests on (`restsOn`, core's alone). */
-interface CompanyEntities {
-  entities: CompanyEntity[];
+/** A page of entities as code reads it, with everything it rests on (`restsOn`, core's alone). */
+interface CodeEntities {
+  entities: CodeEntity[];
   next: string | null;
-  restsOn: SourceVersionRef[];
+  restsOn: CodeRestsOn;
 }
 
 /**
- * A page of the entities the company may see that match `request`'s kind,
+ * A page of the entities `reach` may see that match `request`'s kind,
  * name (whole, folded) or exact identifier, for the member `personId`,
- * after `after` (a page's `next`), in the order of the first memory the
- * company may read that mentions each. Refused once `personId` is no
- * longer a member, and as `brain.request_invalid` for a request or cursor
- * that isn't one.
+ * after `after` (a page's `next`), each store in the order of the first
+ * memory the reader may read that mentions each. As the company, of the
+ * shared store alone; as the person, their own store's first, then the
+ * shared one's with their teams (`acrossStores`), their own part left out
+ * while it fails. Refused once `personId` is no longer a member, and as
+ * `brain.request_invalid` for a request or cursor that isn't one.
  */
-export const companyEntitiesAs = async (
+export const codeEntitiesAs = async (
   env: BrainEnv & Pick<Env, "DB">,
   personId: string,
+  reach: CodeReach,
   request: unknown
-): Promise<CompanyEntities> => {
+): Promise<CodeEntities> => {
   const { after, ...asked } = checked(codeFindSchema, request);
-  const reader = await readerOf(env, personId, "company");
-  let page: Awaited<ReturnType<Brain["findEntities"]>>;
-  try {
-    page = await brain(env).findEntities({
-      reader,
-      ...asked,
-      ...(after === undefined
-        ? {}
-        : { after: cursorOfText(entitiesCursorSchema, after) }),
-    });
-  } catch (error) {
-    throw refusedAs(error);
+  const find = async (
+    store: Brain,
+    reader: Reader,
+    from: EntitiesCursor | undefined
+  ) => {
+    try {
+      return await store.findEntities({
+        reader,
+        ...asked,
+        ...(from === undefined ? {} : { after: from }),
+      });
+    } catch (error) {
+      throw refusedAs(error);
+    }
+  };
+  if (reach === "company") {
+    const page = await find(
+      brain(env),
+      await readerOf(env, personId, reach),
+      after === undefined
+        ? undefined
+        : cursorOfText(entitiesCursorSchema, after)
+    );
+    return {
+      entities: page.entities,
+      next: cursorTextOf(page.next),
+      restsOn: codeRestsOnOf(page, "shared"),
+    };
   }
+  const reader = await personReaderOf(env, personId);
+  const restsOn: CodeRestsOn = { versions: [], words: [] };
+  const page = await acrossStores(
+    after === undefined ? undefined : cursorOfText(entitiesFromSchema, after),
+    async (store, from) => {
+      const found = await find(storeNamed(env, reader, store), reader, from);
+      // Kept only once the store answered: a page left out rests on nothing.
+      const resting = codeRestsOnOf(found, store);
+      restsOn.versions.push(...resting.versions);
+      restsOn.words.push(...resting.words);
+      return { items: found.entities, more: found.more, next: found.next };
+    }
+  );
   return {
-    entities: page.entities,
-    next: cursorTextOf(page.next),
-    restsOn: restsOnOf(page.restsOn),
+    entities: page.items,
+    next: page.next === null ? null : cursorTextOf(page.next),
+    restsOn,
   };
 };
 

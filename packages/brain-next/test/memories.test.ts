@@ -604,6 +604,45 @@ describe("who may read a memory", () => {
     });
   });
 
+  // Threat 1 again, for what has no version: a memory in a writer's own
+  // word is said by id wherever a version would be, so a host can keep it.
+  it("says every memory in a writer's word a find's page and a card rest on: the name, what made it match, its memories and a rival", async () => {
+    const group = unique("group");
+    const reader = readerOf(unique("reader"), group);
+    const name = unique("Acme");
+    const said = (value: string) =>
+      fact(
+        { kind: "writer", writer: unique("w") },
+        { attribute: "status", value, statement: `${name} is ${value}` }
+      );
+    const named = await remember(
+      audience(group),
+      [customer({ names: [name] })],
+      [said("Active")]
+    );
+    const entity = named.entities.c ?? "";
+    const rival = await remember(
+      audience(group),
+      [customer({ id: entity })],
+      [said("Paused")]
+    );
+    const both = [...named.memories, ...rival.memories].toSorted();
+
+    const page = await shared().findEntities({ reader, name });
+    const card = await shared().readCard({ entity, reader, limit: 1 });
+    expect({
+      found: page.entities.map(({ id }) => id),
+      page: { restsOn: page.restsOn, words: page.restsOnWords },
+      card: { restsOn: card?.restsOn, words: card?.restsOnWords.toSorted() },
+    }).toStrictEqual({
+      found: [entity],
+      // Named, matched and seen by the first memory alone.
+      page: { restsOn: [], words: named.memories },
+      // Its page of one, the rival that makes it contested, past the page.
+      card: { restsOn: [], words: both },
+    });
+  });
+
   // Threat 3: a newer memory ends an older one only for those who may read it.
   it("stays current for a reader who can't read the memory that ended it", async () => {
     const left = unique("left");
@@ -685,17 +724,28 @@ describe("who may read a memory", () => {
       entities: [{ id: first.entities.p, kind: "person", name: "Anna" }],
       more: false,
       restsOn: [],
+      restsOnWords: first.memories,
     });
     await expect(
       shared().findEntities({ reader: leftReader, name: secret })
-    ).resolves.toStrictEqual({ entities: [], more: false, restsOn: [] });
+    ).resolves.toStrictEqual({
+      entities: [],
+      more: false,
+      restsOn: [],
+      restsOnWords: [],
+    });
     await expect(
       shared().findEntities({
         reader: readerOf(unique("x")),
         kind: "person",
         identifier: { type: "email", value: email },
       })
-    ).resolves.toStrictEqual({ entities: [], more: false, restsOn: [] });
+    ).resolves.toStrictEqual({
+      entities: [],
+      more: false,
+      restsOn: [],
+      restsOnWords: [],
+    });
     await expect(
       shared().readEntity({
         entity: first.entities.p ?? "",
@@ -1011,7 +1061,12 @@ describe("erasure", () => {
     await restore(shared(), backup);
     await expect(
       shared().findEntities({ reader, name: secret })
-    ).resolves.toStrictEqual({ entities: [], more: false, restsOn: [] });
+    ).resolves.toStrictEqual({
+      entities: [],
+      more: false,
+      restsOn: [],
+      restsOnWords: [],
+    });
     await tick();
     await expect(left()).resolves.toBe(0);
   });
@@ -1531,7 +1586,7 @@ describe("what a reader sees of a retire and of an extraction", () => {
 
     expect({ empty, others }).toStrictEqual({
       empty: [
-        { entities: [], more: false, restsOn: [] },
+        { entities: [], more: false, restsOn: [], restsOnWords: [] },
         { facts: [], more: false },
         "nothing",
       ],

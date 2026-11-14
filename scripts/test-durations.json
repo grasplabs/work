@@ -131,7 +131,7 @@
   "@grasp-os/core test/admin-snapshot.test.ts": 5,
   "@grasp-os/core test/agent-apis.test.ts": 0.2,
   "@grasp-os/core test/agent-blueprints.test.ts": 6.1,
-  "@grasp-os/core test/agent-brain-relations.test.ts": 8.7,
+  "@grasp-os/core test/agent-brain-entities.test.ts": 4.5,
   "@grasp-os/core test/agent-brain.test.ts": 3.6,
   "@grasp-os/core test/agent-code-output-revocations.test.ts": 21.6,
   "@grasp-os/core test/agent-code-output.test.ts": 16.9,

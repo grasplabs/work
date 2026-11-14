@@ -9,8 +9,8 @@ import type {
   Memory,
   Reader,
 } from "./contract.ts";
-import { eachVersionOnce, heldBy, mentionedSql, namedOf } from "./entities.ts";
-import { entityRowOf, readMemoriesHeld } from "./memories.ts";
+import { heldBy, mentionedSql, namedOf } from "./entities.ts";
+import { entityRowOf, readMemoriesHeld, restingOn } from "./memories.ts";
 import { readableSql } from "./reader-sets.ts";
 
 // An entity's card (contract.ts `Card`): a view, built when a reader asks
@@ -99,7 +99,7 @@ export const readCard = (
   if (card === undefined) {
     return null;
   }
-  const { read: page, restsOn: pageRestsOn } = readMemoriesHeld(sql, {
+  const { read: page, held: pageHeld } = readMemoriesHeld(sql, {
     entity: card.id,
     reader,
     at,
@@ -170,11 +170,11 @@ export const readCard = (
     ...(page.next === undefined ? {} : { next: page.next }),
     // What makes the entity seen, as of what the store had learned; the
     // names; and what the page's memories say rests on.
-    restsOn: eachVersionOnce([
+    ...restingOn([
       ...heldBy(sql, [found.row], reader, learned),
-      ...seen.restsOn,
-      ...named.restsOn,
-      ...pageRestsOn,
+      ...seen.held,
+      ...named.held,
+      ...pageHeld,
     ]),
   };
 };

@@ -21,21 +21,21 @@ import { z } from "zod";
 import { appendAuditEvent } from "./audit-outbox.ts";
 import { storedTeamsOf } from "./brain-grant-teams.ts";
 import {
+  codeCardAs,
+  codeEntitiesAs,
   codeRecallOf,
-  companyCardAs,
-  companyEntitiesAs,
   isCodeEntitiesRequest,
   recallPassagesAs,
   skillVersionRefOf,
 } from "./brain-next.ts";
 import type {
   CardMemory,
+  CodeCard,
   CodeEntitiesOperation,
-  CompanyCard,
-  CompanyEntity,
+  CodeEntity,
+  CodeRestsOn,
   SkillAt,
   SkillVersionRef,
-  SourceVersionRef,
 } from "./brain-next.ts";
 import { skillReadSchema, skillsSelectSchema } from "./brain-pack.ts";
 import { readSkillFor, selectSkillsFor } from "./brain-skills.ts";
@@ -379,36 +379,49 @@ export const skillsCallFor = async (
   }
 };
 
-// The Brain's entities for code (GRA-1837, threat model on the issue): an
-// App's action (resource-brain.ts) and a workflow's step
-// (workflows/brain-calls.ts) read an entity's card and find entities, as
-// the company alone (brain-next.ts), whatever teams their grant names. In
-// order, as a recall's:
+// The Brain's entities for code (GRA-1837 and GRA-1894, threat models on
+// the issues): an App's action (resource-brain.ts), a workflow's step
+// (workflows/brain-calls.ts) and a chat's code (agent-brain.ts) read an
+// entity's card and find entities. In order, as a recall's:
 //
 // - The request first, strictly (`isCodeEntitiesRequest`): it can't name
 //   a reader.
 // - The caller's grant to read the Brain, now (`authorize`).
+// - Whom it reads as (brain-next.ts `CodeReach`): an App and a workflow as
+//   the company alone, whatever teams their grant names; a chat's code as
+//   its person, their own store and teams too, only in their own chat in
+//   Grasp in a turn they started (`EntitiesCaller.reach`), and as the
+//   company alone anywhere else, as its recall reads (`RecallCaller.reach`).
 // - Audited once, before it answers, with ids and counts alone: never a
-//   name, a statement or a cursor. An entity the company may not see is
+//   name, a statement or a cursor. An entity the reader may not see is
 //   answered as one nobody holds.
-// - What it hands over rests on source versions: a card's memories, and
-//   every entity's name, the card's own, each related one's and each one
-//   found. The caller keeps them all before it gets the answer (a run's
-//   pins), and code never sees them.
+// - What it hands over rests on memories: a card's, and those that make
+//   every entity it names seen, named and found. The caller keeps each
+//   version of a source they rest on, and each memory in a writer's own
+//   word, before it gets the answer (a run's pins, a chat's reads), and
+//   code never sees them.
 
 // What a workflow's test run checks a request with before it answers from
 // its fixtures (workflows/brain-calls.ts), which reaches brain-next.ts
 // only through this module.
 export { isCodeEntitiesRequest } from "./brain-next.ts";
+export type { CodeEntitiesOperation } from "./brain-next.ts";
 
 /** Who reads the Brain's entities: a recall's caller, keeping what it is handed rests on. */
 export interface EntitiesCaller extends Omit<RecallCaller, "keep" | "reach"> {
   /**
-   * What the caller keeps of the versions what it is handed rests on (a
-   * card's memories, every entity's name), before it gets them: a run's
-   * pins, as a recall's.
+   * For a chat's code alone: `person` reads as its person, their own store
+   * and their teams too, only in their own chat in Grasp in a turn they
+   * started (agent-brain.ts); absent, as the company alone. Set by core
+   * from where the call is made, never by the code; an App's or a
+   * workflow's reach is the company's, whatever this says.
    */
-  readonly keep?: (versions: readonly SourceVersionRef[]) => Promise<void>;
+  readonly reach?: "person";
+  /**
+   * What the caller keeps of what it is handed rests on (`CodeRestsOn`),
+   * before it gets it: a run's pins, a chat's reads, as a recall's.
+   */
+  readonly keep?: (restsOn: CodeRestsOn) => Promise<void>;
 }
 
 /** An id as the audit log may name it: a well-formed one, never what code sent instead. */
@@ -444,11 +457,11 @@ const codeMemoryOf = (memory: CardMemory) =>
   }) satisfies BrainMemory;
 
 /** An entity as code is handed it (`BrainEntity`): never what its name rests on. */
-const codeEntityOf = ({ id, kind, name }: CompanyEntity) =>
+const codeEntityOf = ({ id, kind, name }: CodeEntity) =>
   ({ id, kind, name }) satisfies BrainEntity;
 
 /** A card as code is handed it (`BrainCard`), as JSON. */
-const codeCardOf = (card: CompanyCard) =>
+const codeCardOf = (card: CodeCard) =>
   ({
     entity: codeEntityOf(card.entity),
     attributes: card.attributes.map(({ attribute, memories, contested }) => ({
@@ -467,7 +480,7 @@ const codeCardOf = (card: CompanyCard) =>
   }) satisfies BrainCard;
 
 /** The memories on `card`, counted. */
-const memoriesOn = (card: CompanyCard): number =>
+const memoriesOn = (card: CodeCard): number =>
   card.attributes.reduce(
     (count, { memories }) => count + memories.length,
     card.relations.length + card.notes.length
@@ -484,21 +497,27 @@ const readFor = async (
   detail: Record<string, string | number | boolean | null>;
 }> => {
   const person = caller.authority.onBehalfOf;
+  // Its person only for a chat's agent that asks it of core; the company
+  // alone for anything else. Nothing code sends can change it.
+  const reach =
+    caller.authority.subject.type === "agent" && caller.reach === "person"
+      ? "person"
+      : "company";
   if (operation === "entities.get") {
-    const card = await companyCardAs(env, person, input);
+    const card = await codeCardAs(env, person, reach, input);
     if (card === null) {
       return { answer: null, detail: { found: false, memories: 0 } };
     }
-    // Pinned with the run before it gets them, as a recall's pack is:
-    // every version what the card says rests on (contract `restsOn`).
+    // Kept by the caller before it gets them, as a recall's pack is:
+    // everything what the card says rests on (contract `restsOn`).
     await caller.keep?.(card.restsOn);
     return {
       answer: codeCardOf(card),
       detail: { found: true, memories: memoriesOn(card) },
     };
   }
-  const page = await companyEntitiesAs(env, person, input);
-  // What the page says rests on, pinned with the run as a card's is.
+  const page = await codeEntitiesAs(env, person, reach, input);
+  // What the page says rests on, kept as a card's is.
   await caller.keep?.(page.restsOn);
   return {
     answer: {
@@ -510,9 +529,10 @@ const readFor = async (
 };
 
 /**
- * The Brain's entities for an App's action or a workflow's step (above):
- * `entities.get` a page of an entity's card and `entities.find` a page of
- * entities, as the company may read them. Refused as
+ * The Brain's entities for an App's action, a workflow's step or a chat's
+ * code (above): `entities.get` a page of an entity's card and
+ * `entities.find` a page of entities, as the caller's reach may read
+ * them. Refused as
  * `permission.invalid_args` for input that isn't a request,
  * `permission.denied` without the grant to read the Brain, and
  * `permission.unavailable` once the person is no longer a member.

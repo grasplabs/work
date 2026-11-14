@@ -609,28 +609,65 @@ export const readMemories = (
   asked: MemoriesAsked
 ): MemoriesRead => readMemoryRows(sql, asked).read;
 
-/** The version `row` rests on, or none for one in a writer's word. */
-const versionOfRow = ({ source, version }: MemoryRow): SourceVersionRef[] =>
-  source === null || version === null ? [] : [{ source, version }];
-
-/** `?1` the confirmations' rows (JSON): the versions the memories each was made over rest on. */
-const overruledSql = `
-SELECT DISTINCT m.source AS source, m.version AS version
-FROM json_each(?1) AS asked
-CROSS JOIN memory_confirmed_over AS over ON over.confirmation = asked.value
-CROSS JOIN memories AS m ON m.row = over.memory
-WHERE m.source IS NOT NULL`;
+/**
+ * A memory an answer rests on, as a statement finds it: the version of a
+ * source it rests on, or, in a writer's word (`source` null), itself.
+ */
+export interface HeldMemory {
+  source: string | null;
+  version: number | null;
+  memory: string;
+}
 
 /**
- * `readMemories`, with every version of a source what the page says rests
- * on (contract.ts `Card.restsOn`): its memories'; each contested one's
- * current rivals, judged as the page was; the memories each counted
- * confirmation was made over; and the memory past the page (`more`).
+ * What an answer rests on (contract.ts `Card.restsOn`, `restsOnWords`):
+ * of `held`, each version of a source once, and each memory in a writer's
+ * word once, by id.
+ */
+export const restingOn = (
+  held: readonly HeldMemory[]
+): { restsOn: SourceVersionRef[]; restsOnWords: MemoryId[] } => ({
+  restsOn: [
+    ...new Map(
+      held.flatMap(({ source, version }) =>
+        source === null || version === null
+          ? []
+          : [[JSON.stringify([source, version]), { source, version }] as const]
+      )
+    ).values(),
+  ],
+  restsOnWords: [
+    ...new Set(
+      held.flatMap(({ source, memory }) => (source === null ? [memory] : []))
+    ),
+  ],
+});
+
+/** `row`, as what an answer rests on. */
+const heldOfRow = ({ source, version, id }: MemoryRow): HeldMemory => ({
+  source,
+  version,
+  memory: id,
+});
+
+/** `?1` the confirmations' rows (JSON): the memories each was made over. */
+const overruledSql = `
+SELECT DISTINCT m.source AS source, m.version AS version, m.id AS memory
+FROM json_each(?1) AS asked
+CROSS JOIN memory_confirmed_over AS over ON over.confirmation = asked.value
+CROSS JOIN memories AS m ON m.row = over.memory`;
+
+/**
+ * `readMemories`, with every memory what the page says rests on
+ * (contract.ts `Card.restsOn`, `restsOnWords`): its memories; each
+ * contested one's current rivals, judged as the page was; the memories
+ * each counted confirmation was made over; and the memory past the page
+ * (`more`).
  */
 export const readMemoriesHeld = (
   sql: SqlStorage,
   asked: MemoriesAsked
-): { read: MemoriesRead; restsOn: SourceVersionRef[] } => {
+): { read: MemoriesRead; held: HeldMemory[] } => {
   const { read, rows, limit, reader, at, learned } = readMemoryRows(sql, asked);
   const page = rows.slice(0, limit);
   // The current memories of each entity (the memory's own: a relation's
@@ -668,18 +705,19 @@ export const readMemoriesHeld = (
     confirmations.length === 0
       ? []
       : sql
-          .exec<{ source: string; version: number }>(
-            overruledSql,
-            JSON.stringify(confirmations)
-          )
+          .exec<{
+            source: string | null;
+            version: number | null;
+            memory: string;
+          }>(overruledSql, JSON.stringify(confirmations))
           .toArray()
-          .map(({ source, version }) => ({ source, version }));
+          .map(({ source, version, memory }) => ({ source, version, memory }));
   return {
     read,
-    restsOn: [
+    held: [
       // The page's memories, and the one past it.
-      ...rows.flatMap((row) => versionOfRow(row)),
-      ...rivals.flatMap((row) => versionOfRow(row)),
+      ...rows.map((row) => heldOfRow(row)),
+      ...rivals.map((row) => heldOfRow(row)),
       ...overruled,
     ],
   };

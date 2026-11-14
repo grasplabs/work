@@ -2243,6 +2243,12 @@ export interface EntityPage {
    * to keep with what it hands on (a run's pins); never shown to anyone.
    */
   restsOn: SourceVersionRef[];
+  /**
+   * Every memory in a writer's own word (no source) what the page says
+   * rests on, by id, each once: of the same memories as `restsOn`, those
+   * it has no version for. For the host to keep as `restsOn`.
+   */
+  restsOnWords: MemoryId[];
 }
 
 /** An entity to read, for a reader. */
@@ -2411,6 +2417,12 @@ export interface Card {
    * anyone.
    */
   restsOn: SourceVersionRef[];
+  /**
+   * Every memory in a writer's own word (no source) what the card says
+   * rests on, by id, each once: of the same memories as `restsOn`, those
+   * it has no version for. For the host to keep as `restsOn`.
+   */
+  restsOnWords: MemoryId[];
 }
 
 // Memories in a recall's pack (recall-memories.ts, pack.ts).
