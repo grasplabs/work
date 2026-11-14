@@ -1,6 +1,8 @@
 import type { Connection } from "@grasp-os/shared/brain";
 import type {
   BrainFoundBy,
+  BrainMemoryFoundBy,
+  BrainSearchMemory,
   BrainSearchPack,
   BrainSourceListed,
   BrainSourcePage,
@@ -26,6 +28,11 @@ import {
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import { Card, CardContent } from "@grasp-os/ui/components/card";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@grasp-os/ui/components/collapsible";
 import {
   Empty,
   EmptyDescription,
@@ -64,15 +71,17 @@ import { OwnExportSection } from "./own-export.tsx";
 // The Brain's sources, from the new Brain (GRA-1734): what the person may
 // read, a page at a time, newest first; one source's versions and text;
 // search, which is recall as that person, shown as recall packs it (no
-// ranking of the page's own); and how each of their connections feeds the
-// Brain today. Core answers each from what they may read alone. Texts are
-// shown as text, never markup. A file uploaded here goes straight into the
-// Brain, for who the person chooses: only them, a team of theirs, or
-// everyone (GRA-1824); its uploader adds its next version. Its uploader
-// deletes one for only them; one shared with a team or everyone only an
-// admin erases, from the shared uploads listed for admins. What each
-// may do to an upload is core's to say (`uploadOf`). At its foot, the
-// person's own export of what only they may read (own-export.tsx).
+// ranking of the page's own), its memories each with where it came from,
+// and everything the pack holds shown, as its budget was spent on it; and
+// how each of their connections feeds the Brain today. Core answers each
+// from what they may read alone. Texts are shown as text, never markup.
+// A file uploaded here goes straight into the Brain, for who the person
+// chooses: only them, a team of theirs, or everyone (GRA-1824); its
+// uploader adds its next version. Its uploader deletes one for only them;
+// one shared with a team or everyone only an admin erases, from the
+// shared uploads listed for admins. What each may do to an upload is
+// core's to say (`uploadOf`). At its foot, the person's own export of
+// what only they may read (own-export.tsx).
 
 /** A team the person is in. */
 interface Team {
@@ -208,7 +217,113 @@ const FoundBadge = ({ found }: { found: BrainFoundBy }) => {
   return <Badge variant="secondary">{label}</Badge>;
 };
 
-/** The pack, as recall gave it: its passages in its order, what it didn't find, and whether it was cut short. */
+const MemoryFoundBadge = ({ found }: { found: BrainMemoryFoundBy }) => {
+  const { t } = useLingui();
+  const label = {
+    words: t({
+      message: "By its words",
+      context: "how search found a memory",
+    }),
+    entities: t({
+      message: "Through what you asked about",
+      context: "how search found a memory",
+    }),
+    contested: t({
+      message: "Another side of a disputed fact",
+      context: "how search found a memory",
+    }),
+  }[found];
+  return <Badge variant="secondary">{label}</Badge>;
+};
+
+/** Whose word a memory is, as its producer said it. */
+const SaidBadge = ({ said }: { said: BrainSearchMemory["said"] }) => {
+  const { t } = useLingui();
+  const label = {
+    you: t`Your own word`,
+    person: t`Someone's word`,
+    outside: t`An outside party's word`,
+    agent: t`An agent's word`,
+    system: t`A system's word`,
+  }[said];
+  return <Badge variant="outline">{label}</Badge>;
+};
+
+/**
+ * A memory of the pack: what it says, the words of its source it rests on
+ * and the passage around them when the pack holds them, and where it came
+ * from: a source's version, which opens it, or someone's word.
+ */
+const MemoryResult = ({
+  memory,
+  onOpen,
+}: {
+  memory: BrainSearchMemory;
+  onOpen: (source: BrainSourceRef, version: number) => void;
+}) => {
+  const { source, context } = memory;
+  const version = source?.version;
+  return (
+    <Item size="sm" variant="outline">
+      <ItemContent>
+        <span className="text-sm">{memory.statement}</span>
+        {memory.quote === null ? null : (
+          <blockquote className="text-muted-foreground border-l-2 pl-3 text-sm whitespace-pre-wrap">
+            {memory.quote}
+          </blockquote>
+        )}
+        {context === null ? null : (
+          <Collapsible>
+            <CollapsibleTrigger render={<Button size="xs" variant="ghost" />}>
+              <Trans>The passage around it</Trans>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <p className="text-muted-foreground text-sm whitespace-pre-wrap">
+                {context.text}
+              </p>
+            </CollapsibleContent>
+          </Collapsible>
+        )}
+        <span className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
+          <SaidBadge said={memory.said} />
+          {source === null ? null : (
+            <>
+              <ProducerBadge producer={source.source.producer} />
+              <Button
+                onClick={() => {
+                  onOpen(source.source, source.version);
+                }}
+                size="xs"
+                type="button"
+                variant="link"
+              >
+                <Trans>Open version {version}</Trans>
+              </Button>
+            </>
+          )}
+          {memory.store === "own" ? (
+            <Badge variant="outline">
+              <Trans context="a memory nobody else may read">Only you</Trans>
+            </Badge>
+          ) : null}
+          {memory.confirmed ? (
+            <Badge variant="passed">
+              <Trans context="a memory a person confirmed">Confirmed</Trans>
+            </Badge>
+          ) : null}
+          {memory.contested ? (
+            <Badge variant="attention">
+              <Trans>Sources disagree</Trans>
+            </Badge>
+          ) : null}
+          <MemoryFoundBadge found={memory.found} />
+        </span>
+      </ItemContent>
+    </Item>
+  );
+};
+
+/** The pack, as recall gave it: its memories and passages in its order, what it didn't find, and whether it was cut short. */
 const SearchResults = ({
   pack,
   onOpen,
@@ -218,57 +333,80 @@ const SearchResults = ({
 }) => {
   const missing = formatList(pack.notFound);
   const heading = useId();
+  const nothing = pack.items.length === 0 && pack.memories.length === 0;
   return (
     <section aria-labelledby={heading} className="flex flex-col gap-3">
       <h2 className="text-sm font-medium" id={heading}>
         <Trans>Results</Trans>
       </h2>
-      {pack.items.length === 0 ? (
+      {nothing ? (
         <p className="text-muted-foreground text-sm">
           <Trans>Nothing you may read matched.</Trans>
         </p>
-      ) : (
-        <ItemGroup render={<ol />} spacing="tight">
-          {pack.items.map((item) => {
-            const { version } = item;
-            return (
-              <li key={`${keyOf(item.source)}@${version}#${item.position}`}>
-                <Item
-                  onClick={() => {
-                    onOpen(item.source, version);
-                  }}
-                  render={
-                    // oxlint-disable-next-line jsx-a11y/control-has-associated-label -- the passage and its labels are its words, as the Item's children
-                    <button type="button" />
-                  }
-                  size="sm"
-                >
-                  <ItemContent>
-                    <span className="text-sm whitespace-pre-wrap">
-                      {item.text}
-                    </span>
-                    <span className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
-                      <ProducerBadge producer={item.source.producer} />
-                      <FoundBadge found={item.found} />
-                      <span>
-                        <Trans>Version {version}</Trans>
-                      </span>
-                      {item.whole ? null : (
-                        <span>
-                          <Trans>The best part of its passage</Trans>
-                        </span>
-                      )}
-                    </span>
-                  </ItemContent>
-                </Item>
+      ) : null}
+      {pack.memories.length === 0 ? null : (
+        <div className="flex flex-col gap-2">
+          <h3 className="text-muted-foreground text-xs font-medium">
+            <Trans>What the Brain remembers</Trans>
+          </h3>
+          <ItemGroup render={<ol />} spacing="tight">
+            {pack.memories.map((memory) => (
+              <li key={`${memory.store}:${memory.id}`}>
+                <MemoryResult memory={memory} onOpen={onOpen} />
               </li>
-            );
-          })}
-        </ItemGroup>
+            ))}
+          </ItemGroup>
+        </div>
+      )}
+      {pack.items.length === 0 ? null : (
+        <div className="flex flex-col gap-2">
+          {pack.memories.length === 0 ? null : (
+            <h3 className="text-muted-foreground text-xs font-medium">
+              <Trans>Passages</Trans>
+            </h3>
+          )}
+          <ItemGroup render={<ol />} spacing="tight">
+            {pack.items.map((item) => {
+              const { version } = item;
+              return (
+                <li key={`${keyOf(item.source)}@${version}#${item.position}`}>
+                  <Item
+                    onClick={() => {
+                      onOpen(item.source, version);
+                    }}
+                    render={
+                      // oxlint-disable-next-line jsx-a11y/control-has-associated-label -- the passage and its labels are its words, as the Item's children
+                      <button type="button" />
+                    }
+                    size="sm"
+                  >
+                    <ItemContent>
+                      <span className="text-sm whitespace-pre-wrap">
+                        {item.text}
+                      </span>
+                      <span className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
+                        <ProducerBadge producer={item.source.producer} />
+                        <FoundBadge found={item.found} />
+                        <span>
+                          <Trans>Version {version}</Trans>
+                        </span>
+                        {item.whole ? null : (
+                          <span>
+                            <Trans>The best part of its passage</Trans>
+                          </span>
+                        )}
+                      </span>
+                    </ItemContent>
+                  </Item>
+                </li>
+              );
+            })}
+          </ItemGroup>
+        </div>
       )}
       {/* What wasn't found only beside what was: a search that found
           nothing says so once, above. */}
-      {pack.items.length === 0 || pack.notFound.length === 0 ? null : (
+      {nothing || pack.notFound.length === 0 ? null : (
         <p className="text-muted-foreground text-sm">
           <Trans>Nothing you may read holds {missing}.</Trans>
         </p>

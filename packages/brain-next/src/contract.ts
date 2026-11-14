@@ -2149,6 +2149,19 @@ export interface ContestedFact {
 }
 
 /**
+ * Memories to check a reader may still read, by id, and who reads them:
+ * what a host checks before it sends again a memory it once recalled (a
+ * chat's earlier recall).
+ */
+export const readableMemoriesRequestSchema = z.strictObject({
+  memories: z.array(memoryIdSchema).max(readableCheckMax),
+  reader: readerSchema,
+});
+export type ReadableMemoriesRequest = z.infer<
+  typeof readableMemoriesRequestSchema
+>;
+
+/**
  * One of the reader's own memories to retire: its lineage is the reader's
  * person, as writer, as `confirmMemory` takes its person from the reader.
  */
@@ -2788,6 +2801,17 @@ export interface Brain {
    * Dedupe pages by id. Nothing the reader may not read is ever returned.
    */
   listContested: (request: ContestedRequest) => Promise<ContestedPage>;
+  /**
+   * Of the memories asked for, by id, those the reader may read now (as
+   * `readMemories` decides who may read one) and their writer has not
+   * retired, in the order asked and each once: what a host checks before
+   * it sends again a memory it once recalled (a chat's earlier recall).
+   * Each left out alike, whether it doesn't exist, was erased, rests on a
+   * version the reader may no longer read, or was retired. One ended by a
+   * newer memory of its lineage, or whose time is over, stays: as a
+   * source's older version stays readable once a newer one is added.
+   */
+  readableMemories: (request: ReadableMemoriesRequest) => Promise<MemoryId[]>;
   /**
    * Retires one of the reader's own memories (its lineage is the reader's
    * person, as writer) that they may read and that is not retired: current,

@@ -1075,6 +1075,7 @@ interface MemoryFixture {
   drawn: string;
   seen: string;
   hiddenMemory: string;
+  drawnMemory: string;
   hiddenRef: string;
   seenMemory: string;
 }
@@ -1168,6 +1169,7 @@ const memoryFixture = async ({
     drawn: drawn.entities.c ?? "",
     seen: seenId,
     hiddenMemory: hidden.memories[0] ?? "",
+    drawnMemory: drawn.memories[0] ?? "",
     hiddenRef,
     seenMemory: seen.memories[0] ?? "",
   };
@@ -1217,9 +1219,13 @@ const othersOwnMemory = async (
  * the reader, from their own entity ("Plain") to a person only hidden
  * memories name, so a recall stepping along it, or naming the person,
  * would show a marker. Asking "Plain" must find the reader's own alone.
- * And a marked memory in someone else's own store.
+ * And a marked memory in someone else's own store (`othersOwnMemory`).
  */
-const plantRecallFixture = async (probing: Probing): Promise<MemoryFixture> => {
+interface RecallFixture extends MemoryFixture {
+  othersOwnMemory: string;
+}
+
+const plantRecallFixture = async (probing: Probing): Promise<RecallFixture> => {
   const fixture = await memoryFixture(probing);
   const text = markedText(probing.markers);
   const group = stranger();
@@ -1277,12 +1283,12 @@ const plantRecallFixture = async (probing: Probing): Promise<MemoryFixture> => {
   });
   // Someone else's own store, every marker in it: a recall that reads
   // the reader's own store (their own source is there) reads theirs alone.
-  await othersOwnMemory(probing.markers);
-  return fixture;
+  const others = await othersOwnMemory(probing.markers);
+  return { ...fixture, othersOwnMemory: others.memory };
 };
 
 /** The recall fixtures planted, by reader and markers. */
-const recallFixtures = new Map<string, Promise<MemoryFixture>>();
+const recallFixtures = new Map<string, Promise<RecallFixture>>();
 
 /**
  * The recall fixture (`plantRecallFixture`) for `probing`'s reader and
@@ -1290,7 +1296,7 @@ const recallFixtures = new Map<string, Promise<MemoryFixture>>();
  * probe planting its own would add hidden sources between what the gate
  * counts before and after a pass.
  */
-const recallFixture = async (probing: Probing): Promise<MemoryFixture> => {
+const recallFixture = async (probing: Probing): Promise<RecallFixture> => {
   const key = JSON.stringify([
     probing.personId,
     probing.reader,
@@ -1839,22 +1845,24 @@ export const coreProbes = {
       ),
     ];
   },
-  mergeRecalled: async ({ personId, personal, markers, sharedWord }) => {
-    const whole = { tokens: recallBudgetMax };
-    // The markers' pack joined by a pack of what the reader may read must
-    // be their twins' pack joined by the same.
+  mergeRecalled: async (probing) => {
+    const { personId, personal, markers, sharedWord } = probing;
+    await recallFixture(probing);
+    // The markers' pack joined by a pack of what the reader may read,
+    // within what the first left of the budget as the chat's second pass
+    // is, must be their twins' pack joined by the same.
     const merged = async (words: readonly string[]) => {
-      const asked = await coreBrain.recallPassagesAs(env, personId, {
+      const asked = await coreBrain.recallAs(env, personId, {
         question: words.join(" "),
-        budget: whole,
+        budget: { tokens: recallBudgetMax },
         personal,
       });
-      const shared = await coreBrain.recallPassagesAs(env, personId, {
+      const shared = await coreBrain.recallAs(env, personId, {
         question: sharedWord,
-        budget: whole,
+        budget: { tokens: recallBudgetMax - coreBrain.recalledTokens(asked) },
         personal,
       });
-      return coreBrain.mergeRecalled(asked, shared, whole);
+      return coreBrain.mergeRecalled(asked, shared);
     };
     return [
       await answer("the markers", async () => await merged(markers), "hidden"),
@@ -1863,6 +1871,91 @@ export const coreProbes = {
         async () => await merged(markers.map((marker) => twinOf(marker))),
         "nothing"
       ),
+    ];
+  },
+  // The tokens of a pack: of the markers' pack as of their twins'.
+  recalledTokens: async (probing) => {
+    await recallFixture(probing);
+    const tokens = async (words: readonly string[]) =>
+      coreBrain.recalledTokens(
+        await coreBrain.recallAs(env, probing.personId, {
+          question: words.join(" "),
+          budget: { tokens: recallBudgetMax },
+          personal: probing.personal,
+        })
+      );
+    return [
+      await answer(
+        "the markers",
+        async () => await tokens(probing.markers),
+        "hidden"
+      ),
+      await answer(
+        "their twins",
+        async () =>
+          await tokens(probing.markers.map((marker) => twinOf(marker))),
+        "nothing"
+      ),
+    ];
+  },
+  // Which memories a chat once handed over may be sent again: each hidden
+  // one (another group's, one resting on a source the reader may not
+  // read, someone else's own, named in either store) as one no one holds.
+  readableMemoriesAs: async (probing) => {
+    const { personId, markers } = probing;
+    const fixture = await recallFixture(probing);
+    const check = async (
+      name: string,
+      memories: readonly coreBrain.StoredMemoryPlace[],
+      as = personId,
+      about?: Answer["about"]
+    ) =>
+      await answer(
+        name,
+        async () => await coreBrain.readableMemoriesAs(env, as, memories),
+        about
+      );
+    const hidden: coreBrain.StoredMemoryPlace[] = [
+      { store: "shared", memory: fixture.hiddenMemory },
+      { store: "shared", memory: fixture.drawnMemory },
+      { store: "own", memory: fixture.othersOwnMemory },
+      { store: "shared", memory: fixture.othersOwnMemory },
+    ];
+    return [
+      await check(
+        "memories no one holds",
+        hidden.map(({ store: kind }) => ({
+          store: kind,
+          memory: crypto.randomUUID(),
+        })),
+        personId,
+        "nothing"
+      ),
+      await check("the hidden memories", hidden, personId, "hidden"),
+      // As a recall as the company pinned them (a turn outside the
+      // person's own chat): the company alone, never their own store.
+      await answer(
+        "the hidden memories, as the company",
+        async () =>
+          await coreBrain.readableMemoriesAs(env, personId, hidden, {
+            reach: "company",
+          }),
+        "hidden"
+      ),
+      await check("the reader's own memory", [
+        { store: "shared", memory: fixture.seenMemory },
+      ]),
+      await check(
+        "as someone who isn't a member",
+        [{ store: "shared", memory: fixture.hiddenMemory }],
+        stranger()
+      ),
+      await check("an id of the markers", [
+        { store: "shared", memory: markers.join("") },
+      ]),
+      await check("a store named by the markers", [
+        unchecked({ store: markers.join(""), memory: crypto.randomUUID() }),
+      ]),
     ];
   },
   recallAs: recallProbe(coreBrain.recallAs),
@@ -5612,6 +5705,50 @@ export const storeProbes = {
       ),
     ];
   },
+  // Which memories the reader may still read: each hidden one (another
+  // group's, one resting on a source they may not read, one of someone
+  // else's own store) as one no one holds.
+  readableMemories: async (probing) => {
+    const { reader, markers } = probing;
+    const fixture = await recallFixture(probing);
+    const check = async (
+      name: string,
+      memories: readonly string[],
+      about?: Answer["about"]
+    ) =>
+      await answer(
+        name,
+        async () =>
+          await store().readableMemories({ memories: [...memories], reader }),
+        about
+      );
+    const hidden = [
+      fixture.hiddenMemory,
+      fixture.drawnMemory,
+      fixture.othersOwnMemory,
+    ];
+    return [
+      await check(
+        "memories no one holds",
+        hidden.map(() => crypto.randomUUID()),
+        "nothing"
+      ),
+      await check("the hidden memories", hidden, "hidden"),
+      await check("the reader's own memory", [fixture.seenMemory]),
+      await check(
+        "too many memories",
+        Array.from({ length: readableCheckMax + 1 }, () => fixture.hiddenMemory)
+      ),
+      await check("an id of the markers", [markers.join("")]),
+      await answer(
+        "a request with an unknown field",
+        async () =>
+          await store().readableMemories(
+            unchecked({ memories: [], reader, extra: markers.join(" ") })
+          )
+      ),
+    ];
+  },
   // What recall finds of passages alone: no memory, the same questions.
   findPassages: async (probing) => {
     await recallFixture(probing);
@@ -7753,27 +7890,37 @@ export const sourcesProbes = {
     return asked;
   },
   // The page's search is recall with its own budget, never as of a
-  // moment: every question of the markers and of their twins, as is.
-  search: async (probing) => [
-    ...(await askedOfMarkers(
-      probing,
-      [],
-      async ({ question }) => await sourcesAs(probing.personId).search(question)
-    )),
-    await answer(
-      "too long a question",
-      async () =>
-        await sourcesAs(probing.personId).search(
-          `${probing.markers.join(" ")} `
-            .repeat(questionMaxLength)
-            .slice(0, questionMaxLength + 1)
-        )
-    ),
-    await answer(
-      "as someone who isn't a member",
-      async () => await sourcesAs(stranger()).search(probing.markers.join(" "))
-    ),
-  ],
+  // moment: every question of the markers and of their twins, as is, its
+  // memories among it (the recall fixture's).
+  search: async (probing) => {
+    await recallFixture(probing);
+    return [
+      await answer(
+        "the reader's own entity, which hidden relations name",
+        async () => await sourcesAs(probing.personId).search("Plain")
+      ),
+      ...(await askedOfMarkers(
+        probing,
+        [],
+        async ({ question }) =>
+          await sourcesAs(probing.personId).search(question)
+      )),
+      await answer(
+        "too long a question",
+        async () =>
+          await sourcesAs(probing.personId).search(
+            `${probing.markers.join(" ")} `
+              .repeat(questionMaxLength)
+              .slice(0, questionMaxLength + 1)
+          )
+      ),
+      await answer(
+        "as someone who isn't a member",
+        async () =>
+          await sourcesAs(stranger()).search(probing.markers.join(" "))
+      ),
+    ];
+  },
   // Uploads (brain-uploads.ts): every way to name one the reader may not
   // read answers as one no one made, and acts on nothing; an upload for
   // readers they may not choose is refused before anything is kept.

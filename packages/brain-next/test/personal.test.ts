@@ -569,6 +569,47 @@ describe("a person's own store", () => {
     ).resolves.toStrictEqual([kept]);
   });
 
+  it("tells which memories are current and readable to its person alone: refused for anyone else, and for a reader that names no person", async () => {
+    const who = `person-${crypto.randomUUID()}`;
+    const {
+      memories: [memory = ""],
+    } = await own(who).addMemories({
+      change: crypto.randomUUID(),
+      access: theirs(who),
+      entities: [{ key: "c", kind: "customer", names: ["Acme"] }],
+      memories: [
+        {
+          about: "c",
+          type: "fact",
+          statement: "Marker of their own",
+          speaker: { kind: "internal", person: who },
+          basis: { kind: "writer", writer: who },
+        },
+      ],
+    });
+    const refused = /answers only the person whose it is/u;
+
+    await expect(
+      called(
+        own(who).readableMemories({
+          memories: [memory],
+          reader: readerOf(`other-${crypto.randomUUID()}`),
+        })
+      )
+    ).rejects.toThrow(refused);
+    await expect(
+      called(
+        own(who).readableMemories({
+          memories: [memory],
+          reader: { person: null, groups: [] },
+        })
+      )
+    ).rejects.toThrow(refused);
+    await expect(
+      own(who).readableMemories({ memories: [memory], reader: readerOf(who) })
+    ).resolves.toStrictEqual([memory]);
+  });
+
   // Threat 1: content anyone else may read never goes in.
   // A key lives in one store: the host asks the shared one before it
   // keeps a source in a person's own.
@@ -1469,7 +1510,9 @@ const leavingNone = [
   "readEntityNames",
   "readMemories",
   "readVersion",
-  // One statement of which versions the reader may still read.
+  // One statement each of which memories and versions the reader may
+  // still read.
+  "readableMemories",
   "readableVersions",
   "repackVectors",
   "restoreStatus",
