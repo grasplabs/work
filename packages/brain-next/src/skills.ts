@@ -49,12 +49,15 @@ export interface SkillCard {
 const frontmatterBlock = /^---\r?\n(?<yaml>[\s\S]*?)\r?\n---(?:\r?\n|$)/u;
 
 /**
- * The card `text` declares in its frontmatter (YAML, read by a YAML
- * parser, never by hand), or null when it holds none, the YAML doesn't
- * parse or expands past the parser's bound on aliases, or its name or
- * description isn't the format's.
+ * The frontmatter `text` declares (YAML, read by a YAML parser, never by
+ * hand), whole, when it holds a card: null when it holds none, the YAML
+ * doesn't parse or expands past the parser's bound on aliases, or its name
+ * or description isn't the format's. What else it holds is the host's to
+ * read (a host's own fields, such as what a skill needs).
  */
-export const skillCardOf = (text: string): SkillCard | null => {
+export const skillFrontmatterOf = (
+  text: string
+): (SkillCard & Readonly<Record<string, unknown>>) | null => {
   const yaml = frontmatterBlock.exec(text)?.groups?.yaml;
   if (yaml === undefined) {
     return null;
@@ -72,9 +75,15 @@ export const skillCardOf = (text: string): SkillCard | null => {
     return null;
   }
   const parsed = frontmatterSchema.safeParse(value);
-  return parsed.success
-    ? { name: parsed.data.name, description: parsed.data.description }
-    : null;
+  return parsed.success ? parsed.data : null;
+};
+
+/** The card `text` declares in its frontmatter (`skillFrontmatterOf`), or null. */
+export const skillCardOf = (text: string): SkillCard | null => {
+  const frontmatter = skillFrontmatterOf(text);
+  return frontmatter === null
+    ? null
+    : { name: frontmatter.name, description: frontmatter.description };
 };
 
 /** Most skills a selection answers. */

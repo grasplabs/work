@@ -3361,4 +3361,42 @@ describe("which memories a reader may still read", () => {
       after: [active],
     });
   });
+
+  it("keeps a memory readable by id after its time is over, as an older version stays readable", async () => {
+    const group = unique("group");
+    const until = new Date(Date.now() + 200);
+    const {
+      memories: [leave = ""],
+    } = await remember(
+      audience(group),
+      [{ key: "c", kind: "person", names: ["Anna"] }],
+      [
+        fact(
+          { kind: "writer", writer: unique("w") },
+          {
+            attribute: "availability",
+            value: "on leave",
+            statement: "Anna is on leave",
+            validUntil: until,
+          }
+        ),
+      ]
+    );
+    const reader = readerOf(unique("reader"), group);
+    const before = await shared().readableMemories({
+      memories: [leave],
+      reader,
+    });
+    await vi.waitFor(
+      () => {
+        expect(Date.now()).toBeGreaterThan(until.getTime());
+      },
+      { timeout: 2000, interval: 50 }
+    );
+
+    expect({
+      before,
+      after: await shared().readableMemories({ memories: [leave], reader }),
+    }).toStrictEqual({ before: [leave], after: [leave] });
+  });
 });

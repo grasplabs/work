@@ -66,7 +66,7 @@ const drained = async (): Promise<void> => {
     runInDurableObject(
       onboardingStore(env),
       async (_instance, state) =>
-        await drainObjectOutbox(env, state.storage.sql)
+        await drainObjectOutbox(env, state.storage.sql, 0)
     ),
   ]);
 };

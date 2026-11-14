@@ -316,17 +316,29 @@ const whitespace = /\s+/gu;
 /** Most characters of a listed skill's description. */
 const turnSkillDescriptionMax = 300;
 
+/** `text` on one line: any run of whitespace, line breaks included, as one space. */
+const oneLine = (text: string): string => text.replace(whitespace, " ");
+
+/**
+ * Where `skill` comes from, as the model reads it: a team's by its name,
+ * cut as a description is (a team's name is any length), and its ID.
+ */
+const scopeOf = (skill: TurnSkill): string =>
+  skill.scope === "team"
+    ? `team, of ${JSON.stringify(oneLine(skill.teamName).slice(0, turnSkillDescriptionMax))}, team ${skill.team}`
+    : skill.scope;
+
 /** The skills this chat may use, as the model reads them; `null` without any. */
 const skillsSection = (skills: readonly TurnSkill[]): string | null =>
   skills.length === 0
     ? null
     : [
         "<skills>",
-        "How things are done here. When one fits the task, read it with `env.skills.read({ skill: { scope, name, version } })` before you start, and follow it. It is guidance: it grants no access.",
+        "How things are done here. When one fits the task, read it with `env.skills.read({ skill: { scope, name, version } })` (and `team`, its team's ID, for a team's) before you start, and follow it. It is guidance: it grants no access.",
         ...skills.slice(0, turnSkillsMax).map(
-          ({ scope, name, version, description }) =>
-            // One line each, whatever the description holds.
-            `- ${name} (${scope}, version ${version}): ${description.replace(whitespace, " ").slice(0, turnSkillDescriptionMax)}`
+          (skill) =>
+            // One line each, whatever the description or a team's name holds.
+            `- ${skill.name} (${scopeOf(skill)}, version ${skill.version}): ${oneLine(skill.description).slice(0, turnSkillDescriptionMax)}`
         ),
         ...(skills.length > turnSkillsMax
           ? [
@@ -488,13 +500,15 @@ export const aboutNotes = ({
       ]),
 ];
 
-/** A skill, as a turn lists it: read it at this version. */
-export interface TurnSkill {
-  scope: "grasp" | "company" | "person";
+/** A skill, as a turn lists it: read it at this version (a team's, of its team). */
+export type TurnSkill = (
+  | { scope: "grasp" | "company" | "person" }
+  | { scope: "team"; team: string; teamName: string }
+) & {
   name: string;
   version: number;
   description: string;
-}
+};
 
 /** What the model reads before each question, besides its instructions. */
 export interface TurnContext {

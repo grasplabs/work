@@ -105,6 +105,7 @@ import type {
   CodeRunAdmission,
   CodeRunCall,
 } from "./agent-scope.ts";
+import { heldIn } from "./agent-skills.ts";
 import { builtNoteText, inOwnWords } from "./agent.ts";
 import type { QuestionBuilt, TurnContext, TurnResult } from "./agent.ts";
 import { turnAgent } from "./agents.ts";
@@ -118,6 +119,7 @@ import {
   turnSource,
 } from "./brain-capture.ts";
 import type { CaptureStore, TurnFacts } from "./brain-capture.ts";
+import { loneNotesPerDrain } from "./brain-hand-overs.ts";
 import { chatTurnSource, eraseChat } from "./brain-next-origins.ts";
 import { skillsFor, skillsReachOf } from "./brain-skills.ts";
 import {
@@ -1540,11 +1542,22 @@ export class Workspace extends DurableObject<Env> {
    * waiting longer each time.
    */
   #deliverAudit(): void {
-    this.ctx.waitUntil(this.#drainAudit());
+    // Beside every other change of the request: no note tried alone.
+    this.ctx.waitUntil(this.#drainAudit(0));
   }
 
-  async #drainAudit(): Promise<void> {
-    const left = await drainObjectOutbox(this.env, this.ctx.storage.sql);
+  /**
+   * Drains the outbox, trying at most `loneNotes` notes alone
+   * (brain-hand-overs.ts `handOverNotes`): none after a change, which may
+   * be one of many in a request; a drain's share from the alarm, which
+   * runs alone.
+   */
+  async #drainAudit(loneNotes: number): Promise<void> {
+    const left = await drainObjectOutbox(
+      this.env,
+      this.ctx.storage.sql,
+      loneNotes
+    );
     if (left === 0) {
       this.#auditRetryMs = auditRetryMs.first;
       return;
@@ -2388,7 +2401,7 @@ export class Workspace extends DurableObject<Env> {
    */
   override async alarm(): Promise<void> {
     // Audit events the log didn't take yet go first: a turn may run long.
-    await this.#drainAudit();
+    await this.#drainAudit(loneNotesPerDrain);
     await this.#deliverCaptures();
     while (this.#sent.size > 0) {
       // oxlint-disable-next-line no-await-in-loop -- until none is left, as more may start
@@ -2433,16 +2446,24 @@ export class Workspace extends DurableObject<Env> {
       shared ? { type: "channel" } : { type: "own" }
     );
     this.#keepSources(work.chatId, memory.provenance.collectionIds);
-    // The skills the chat may use, from the Brain: guidance every member
-    // may read, as the company's instruction file, never a grant
-    // (brain-skills.ts). Their own skills only where the scope says so
-    // (`skillsReachOf`): a turn they asked for in their own chat. Recorded as the code's calls are, by count. A
-    // Brain that can't answer leaves the turn without them, not without
-    // an answer: missing guidance is no question of access.
+    // The skills the chat may use, from the Brain: guidance, never a grant
+    // (brain-skills.ts). Their own skills only where the scope says so, a
+    // turn they asked for in their own chat, and their teams' only where
+    // nobody else reads the answer (`skillsReachOf`); only those whose
+    // needs the chat's agent meets now (`heldIn`). Recorded as the code's
+    // calls are, by count. A Brain that can't answer leaves the turn
+    // without them, not without an answer: missing guidance is no
+    // question of access.
     let skills: Awaited<ReturnType<typeof skillsFor>> = [];
     let unavailable = false;
     try {
-      skills = await skillsFor(this.env, authority, skillsReachOf(scope));
+      const reach = skillsReachOf(scope, shared);
+      skills = await skillsFor(
+        this.env,
+        authority,
+        reach,
+        heldIn(this.env, scope, reach)
+      );
     } catch (error) {
       unavailable = true;
       log.warn("skills.turn_unavailable", {
@@ -4267,7 +4288,13 @@ export class Workspace extends DurableObject<Env> {
       );
     }
     // Every event of what it did is in the log before its outbox goes.
-    if ((await drainObjectOutbox(this.env, this.ctx.storage.sql)) > 0) {
+    if (
+      (await drainObjectOutbox(
+        this.env,
+        this.ctx.storage.sql,
+        loneNotesPerDrain
+      )) > 0
+    ) {
       throw internalErrors.create("internal.unexpected");
     }
     for (const watchers of this.#watchers.values()) {
