@@ -424,6 +424,10 @@ msgstr "{count, plural, one {Te hizo una pregunta} other {Te hizo # preguntas}}"
 msgid "{count, plural, one {Back to the question} other {Back to the # questions}}"
 msgstr "{count, plural, one {Volver a la pregunta} other {Volver a las # preguntas}}"
 
+#: src/activity/pending.tsx
+msgid "{count, plural, one {Company Brain, read only. This App can recall what everyone in the company may read and what the team {teamNames} may read, as far as the person it works for is in that team. Only people in that team can use it, its owner and admins too. It can never write to the Brain. Every recall is recorded} other {Company Brain, read only. This App can recall what everyone in the company may read and what the teams {teamNames} may read, as far as the person it works for is in them. Only people in all of them can use it, its owner and admins too. It can never write to the Brain. Every recall is recorded}}"
+msgstr "{count, plural, one {Company Brain, solo lectura. Esta App puede recuperar lo que todos en la empresa pueden leer y lo que el equipo {teamNames} puede leer, en la medida en que la persona para la que trabaja esté en ese equipo. Solo las personas de ese equipo pueden usarla, también su propietario y los administradores. Nunca puede escribir en el Brain. Cada recuperación queda registrada} other {Company Brain, solo lectura. Esta App puede recuperar lo que todos en la empresa pueden leer y lo que los equipos {teamNames} pueden leer, en la medida en que la persona para la que trabaja esté en ellos. Solo las personas que estén en todos ellos pueden usarla, también su propietario y los administradores. Nunca puede escribir en el Brain. Cada recuperación queda registrada}}"
+
 #: src/apps/publish.tsx
 msgid "{count, plural, one {It can't be shared yet: # problem} other {It can't be shared yet: # problems}}"
 msgstr "{count, plural, one {Aún no se puede compartir: # problema} other {Aún no se puede compartir: # problemas}}"
@@ -4128,8 +4132,8 @@ msgid "Company"
 msgstr "Empresa"
 
 #: src/activity/pending.tsx
-msgid "Company Brain, read only. This can read company Brain evidence and its open questions, from the collections it was granted and only what the person it works for may read too. It can never write to the Brain. Every read is recorded"
-msgstr "Company Brain, solo lectura. Puede leer evidencias y preguntas abiertas del Company Brain, de las colecciones que se le concedieron y solo lo que también puede leer la persona para la que trabaja. Nunca puede escribir en el Brain. Cada lectura queda registrada"
+msgid "Company Brain, read only. This can recall what everyone in the company may read, never a team's or anyone's own content. It can never write to the Brain. Every recall is recorded"
+msgstr "Company Brain, solo lectura. Esto puede recuperar lo que todos en la empresa pueden leer, nunca el contenido de un equipo ni el de una sola persona. Nunca puede escribir en el Brain. Cada recuperación queda registrada"
 
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
