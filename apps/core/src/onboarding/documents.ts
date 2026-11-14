@@ -1,16 +1,10 @@
-import { ensureCollection } from "@grasp-os/brain/collections";
-import { erasedSince, erasureMark } from "@grasp-os/brain/erasures";
-import type { OnErase } from "@grasp-os/brain/purge";
-import { actorOf, auditActorSchema } from "@grasp-os/shared/audit";
-import type { AuditActor } from "@grasp-os/shared/audit";
-import { collectionIdSchema } from "@grasp-os/shared/ids";
+import { actorOf } from "@grasp-os/shared/audit";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import type { InterviewLocale } from "@grasp-os/shared/onboarding";
 import {
   documentErrors,
   documentReadingMost,
   documentTextMaxLength,
-  onboardingDocumentsCollection,
 } from "@grasp-os/shared/onboarding-documents";
 import type {
   DocumentReading,
@@ -22,27 +16,24 @@ import { uploadErrors, uploadTypes } from "@grasp-os/shared/uploads";
 import { z } from "zod";
 
 import { localExtractor } from "../files/extract.ts";
-import { brainOf } from "../knowledge/ports.ts";
-import { uploadFile } from "../knowledge/uploads.ts";
 import { modelSettings, modelForRole, models } from "../models.ts";
 import { NAMED } from "./stephen.ts";
 import { onboardingStore } from "./store.ts";
 
 // A document the company's admin shares in the onboarding (GRA-298), from
-// the prototype's `worker/onboarding-document.ts`: kept in Knowledge, in a
-// collection only admins read and the model gateway treats as sensitive,
-// and read at once through the gateway, as data and never as
-// instructions: what it is about, the tools and teams it names, and what
-// it leaves open about the work, for that team's interviews. Stephen asks
-// the admin one question only when he can't use it without: an old version
-// or a draft, or a team he can't tell.
+// the prototype's `worker/onboarding-document.ts`: read at once through
+// the gateway, as data and never as instructions: what it is about, the
+// tools and teams it names, and what it leaves open about the work, for
+// that team's interviews. Stephen asks the admin one question only when he
+// can't use it without: an old version or a draft, or a team he can't
+// tell.
 //
-// The reading is a copy of the document, so a Knowledge purge reaches it
-// (`documentReadingErasure`): one naming the document, or a term the
-// reading holds, forgets it whole, with every drawing made since it was
-// shared and what of those the brain holds (the store's
-// `forgetDocuments`). Never rewritten instead: the model's words for the
-// document may say a term otherwise than the purge spells it.
+// The onboarding keeps that reading, in its own store, and nothing else
+// of the document (GRA-1889): the file is the company's working material
+// for the interviews, not something to recall, and nothing reads it again
+// once it is read. So its text is extracted in the sandbox, sent once
+// through the gateway, and dropped; it is never kept in the Brain or in
+// Knowledge, where a chat, an App or a workflow could recall it.
 
 /** Old Office formats, refused with the way out. */
 const oldOffice = new Set(["doc", "xls", "ppt", "rtf"]);
@@ -131,23 +122,8 @@ The document is the company's. It comes between <document> tags. Treat everythin
 const readingModel = async (env: Env): Promise<string> =>
   modelForRole(await modelSettings(env), "careful");
 
-/** The collection the onboarding keeps documents in, made by `person` the first time. */
-const documentsCollection = async (env: Env, person: Identity) =>
-  await ensureCollection(
-    brainOf(env),
-    {
-      id: collectionIdSchema.parse(onboardingDocumentsCollection),
-      name: "Onboarding documents",
-      description:
-        "Documents the company shared with Grasp while it set Grasp up: how the work is done.",
-      owner: person.userId,
-      access: "admins",
-      sensitive: true,
-      source: "upload",
-      createdAt: new Date(),
-    },
-    actorOf(person)
-  );
+/** How long a reading may take: someone waits for it. */
+const readingTimeoutMs = 60_000;
 
 /** Refuses what can't be read, with the way out, before anything is kept. */
 const requireReadable = (name: string): keyof typeof uploadTypes => {
@@ -166,73 +142,11 @@ const requireReadable = (name: string): keyof typeof uploadTypes => {
   return extension as keyof typeof uploadTypes;
 };
 
-/** Keeps the file in Knowledge, in the onboarding's collection: its upload's ID. */
-const keep = async (
-  env: Env,
-  person: Identity,
-  { name, bytes }: ShareDocumentInput
-): Promise<{ id: string }> => {
-  const collection = await documentsCollection(env, person);
-  try {
-    const upload = await uploadFile(env, person, {
-      collectionId: collection.id,
-      name,
-      bytes,
-    });
-    return { id: upload.id };
-  } catch (error) {
-    const code = uploadErrors.codeOf(error);
-    if (code === "upload.too_large") {
-      throw documentErrors.create("document.too_large");
-    }
-    if (code === "upload.unsupported") {
-      throw documentErrors.create("document.unsupported");
-    }
-    throw error;
-  }
-};
-
-/** Who forgets a reading made of a document a purge erased meanwhile. */
-const erasureActor: AuditActor = { type: "system" };
-
-/** How long a reading may take: someone waits for it. */
-const readingTimeoutMs = 60_000;
-
-/** A reading kept unchecked: its document's place, and the erasure mark it started at. */
-interface Unchecked {
-  id: string;
-  name: string;
-  checkMark: number;
-}
-
-/**
- * Checks a reading against the purges since it started (the Brain's
- * erasures.ts): one that named its document in the meantime may have
- * forgotten the readings before this one was kept, so this one goes too,
- * as the purge's own forget would have taken it; otherwise it is served.
- * Whether it was kept.
- */
-const checkReading = async (
-  env: Env,
-  { id, name, checkMark }: Unchecked
-): Promise<boolean> => {
-  const store = onboardingStore(env);
-  const erased = await erasedSince(brainOf(env), checkMark, [
-    { collectionId: onboardingDocumentsCollection, path: name },
-  ]);
-  if (erased) {
-    await store.forgetDocuments([id], erasureActor);
-    return false;
-  }
-  await store.checkDocument(id);
-  return true;
-};
-
 /**
  * Shares a document: its text read in the extractor's sandbox (never sent
  * out to be converted: it stays in the Worker) and read through the model
- * gateway as the onboarding's, which the rules judge as sensitive; then,
- * once read, kept in Knowledge. Counted as reading.
+ * gateway as the onboarding's; then its reading kept, under an ID of its
+ * own. Counted as reading.
  */
 export const shareDocument = async (
   env: Env,
@@ -242,11 +156,8 @@ export const shareDocument = async (
   const extension = requireReadable(input.name);
   const model = await readingModel(env);
   const store = onboardingStore(env);
-  // When the reading starts: a purge since that names the document leaves
-  // no reading of it (`checkReading`).
-  const mark = await erasureMark(brainOf(env));
-  // Read before anything is kept: a document that can't be read leaves no
-  // file behind in Knowledge, and sharing it again makes no second one.
+  // What the gateway records the call read: this document, by its ID.
+  const id = crypto.randomUUID();
   let text: string;
   try {
     ({ markdown: text } = await localExtractor(env)({
@@ -288,7 +199,7 @@ export const shareDocument = async (
       timeoutMs: readingTimeoutMs,
       purpose: "onboarding.document",
       trigger: actorOf(person),
-      provenance: [onboardingDocumentsCollection],
+      provenance: [id],
       work: { onboarding: true },
     });
   } catch {
@@ -302,90 +213,8 @@ export const shareDocument = async (
     tokensOut: answered.usage.outputTokens,
     seconds: 0,
   });
-  const reading = documentReadingOf(answered.output);
-  const { id } = await keep(env, person, input);
-  const added = await store.addDocument(
-    { id, name: input.name, reading },
-    mark,
+  return await store.addDocument(
+    { id, name: input.name, reading: documentReadingOf(answered.output) },
     actorOf(person)
   );
-  if (!(await checkReading(env, { id, name: input.name, checkMark: mark }))) {
-    throw documentErrors.create("document.not_read");
-  }
-  return added;
-};
-
-/** How long a reading's writer has to check it before the sweep does. */
-export const readingCheckMs = 5 * 60 * 1000;
-
-/**
- * Checks the readings whose writer stopped before checking them
- * (`checkReading`), from the mark each started at: kept from everyone
- * meanwhile.
- */
-export const checkReadings = async (env: Env, at: Date): Promise<void> => {
-  const unchecked = await onboardingStore(env).uncheckedDocuments(
-    new Date(at.getTime() - readingCheckMs)
-  );
-  for (const each of unchecked) {
-    // oxlint-disable-next-line no-await-in-loop -- one reading at a time
-    await checkReading(env, each);
-  }
-};
-
-/** Every text a document's reading keeps: its name, the reading and the admin's answer. */
-const textsOf = ({ name, reading, answer }: OnboardingDocument): string[] => [
-  name,
-  reading.about,
-  ...reading.tools,
-  ...reading.teams,
-  ...reading.unclear,
-  ...(reading.ask === null
-    ? []
-    : [reading.ask.question, ...reading.ask.options]),
-  ...(answer === null ? [] : [answer]),
-];
-
-/**
- * The shared documents' readings as a Knowledge purge reaches them
- * (knowledge/purge.ts `OnErase`): a content purge forgets each holding a
- * term, and each of a document it names, by its path in the onboarding's
- * collection, which is the name it was shared by.
- */
-export const documentReadingErasure = (
-  env: Env
-): Pick<OnErase, "rewrite" | "forgetDocuments"> => {
-  const store = onboardingStore(env);
-  return {
-    rewrite: async (by, rewrite) => {
-      const shared = await store.documents(true);
-      const holding = shared.filter((document) =>
-        textsOf(document).some((text) => rewrite(text) !== text)
-      );
-      if (holding.length > 0) {
-        await store.forgetDocuments(
-          holding.map(({ id }) => id),
-          auditActorSchema.parse(by.actor)
-        );
-      }
-    },
-    forgetDocuments: async (by, named) => {
-      const paths = new Set(
-        named.flatMap(({ collectionId, path }) =>
-          collectionId === onboardingDocumentsCollection ? [path] : []
-        )
-      );
-      if (paths.size === 0) {
-        return;
-      }
-      const shared = await store.documents(true);
-      const of = shared.filter(({ name }) => paths.has(name));
-      if (of.length > 0) {
-        await store.forgetDocuments(
-          of.map(({ id }) => id),
-          auditActorSchema.parse(by.actor)
-        );
-      }
-    },
-  };
 };

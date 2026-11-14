@@ -1,25 +1,27 @@
-import { onboardingDocumentsCollection } from "@grasp-os/shared/onboarding-documents";
-import type { SessionApi } from "@grasp-os/shared/rpc";
-import type { Upload } from "@grasp-os/shared/uploads";
+import { recallBudgetMax } from "@grasp-os/brain-next/contract";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 
+import { recallAs } from "../src/brain-next.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { d1ColumnsWith, onboardingTablesWith } from "./kept-where.ts";
 import { fakeProvider, testModel } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 import { wordFile } from "./word-file.ts";
 
-// A document the company's admin shares in the onboarding (GRA-298): kept
-// in Knowledge, in a collection only admins read, and read at once through
-// the model gateway; the model provider behind connect is a fake here
-// (test/model-provider.ts). The ways it can fail, tried here:
+// A document the company's admin shares in the onboarding (GRA-298): read
+// at once through the model gateway, and kept only as that reading, in the
+// onboarding's own store (GRA-1889); the model provider behind connect is
+// a fake here (test/model-provider.ts). The ways it can fail, tried here:
 //
 // - The document read as instructions, or its question asked when there's
 //   no answer to pick.
-// - Anyone but an admin sharing or reading it, in the onboarding or in
-//   Knowledge.
+// - Anyone but an admin sharing it, or reading it or its reading.
+// - The file or its text kept anywhere (Knowledge, the Brain, the files
+//   bucket, a database, the audit log), where someone could recall it.
 // - An old Office file taken, or failing without a way out.
 
 const idp = mockIdp();
@@ -68,24 +70,43 @@ const answering = async <T>(
   return { requests: provider.requests, result: await run() };
 };
 
-/** The onboarding's documents collection, as `api` lists it, if it does. */
-const listedBy = async (api: SessionApi) => {
-  const listed = await api.knowledge.listCollections();
-  return listed.find(({ id }) => id === onboardingDocumentsCollection);
+/** Whether the admin's list holds a document named `name`. */
+const listed = async (
+  admin: Awaited<ReturnType<typeof signedInApi>>["api"],
+  name: string
+): Promise<boolean> => {
+  const shared = await admin.onboarding.documents();
+  return shared.some((each) => each.name === name);
 };
 
-/** The upload once its extraction in Knowledge has ended. */
-const ended = async (api: SessionApi, uploadId: string): Promise<Upload> =>
-  await vi.waitFor(
-    async () => {
-      const upload = await api.uploads.get(uploadId);
-      if (upload.status !== "ready" && upload.status !== "failed") {
-        throw new Error(`Upload ${uploadId} is ${upload.status}`);
-      }
-      return upload;
-    },
-    { timeout: 20_000, interval: 100 }
-  );
+/** The keys the files bucket holds now. */
+const fileKeys = async (): Promise<Set<string>> => {
+  const keys = new Set<string>();
+  let cursor: string | undefined;
+  do {
+    // oxlint-disable-next-line no-await-in-loop -- one page after another
+    const page = await env.FILES.list(cursor === undefined ? {} : { cursor });
+    for (const { key } of page.objects) {
+      keys.add(key);
+    }
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor !== undefined);
+  return keys;
+};
+
+/** Whether what `personId` recalls from the Brain for `question` names `word`. */
+const recalls = async (
+  personId: string,
+  question: string,
+  word: string
+): Promise<boolean> => {
+  const recalled = await recallAs(env, personId, {
+    question,
+    budget: { tokens: recallBudgetMax },
+    personal: true,
+  });
+  return JSON.stringify(recalled.items).toLowerCase().includes(word);
+};
 
 describe("documents shared in the onboarding", { timeout: 60_000 }, () => {
   // First in the file: no test has connected a provider yet.
@@ -95,14 +116,9 @@ describe("documents shared in the onboarding", { timeout: 60_000 }, () => {
     const refused = await outcome(
       admin.onboarding.shareDocument({ locale: "en", name, bytes: draft })
     );
-    const { results: kept } = await env.DB.prepare(
-      "SELECT id FROM uploads WHERE path = ?"
-    )
-      .bind(name)
-      .all();
-    expect({ refused, kept: kept.length }).toStrictEqual({
+    expect({ refused, kept: await listed(admin, name) }).toStrictEqual({
       refused: "model.no_provider",
-      kept: 0,
+      kept: false,
     });
   });
 
@@ -118,7 +134,6 @@ describe("documents shared in the onboarding", { timeout: 60_000 }, () => {
           bytes: draft,
         })
     );
-    const kept = await ended(admin, shared.id);
     const answered = await admin.onboarding.answerDocument(
       shared.id,
       "No, it changed"
@@ -130,7 +145,6 @@ describe("documents shared in the onboarding", { timeout: 60_000 }, () => {
     const documents = await admin.onboarding.documents();
     expect({
       reading: shared.reading,
-      knowledge: kept.status,
       answer: answered.answer,
       listed: documents.some(({ id }) => id === shared.id),
       asData:
@@ -149,7 +163,6 @@ describe("documents shared in the onboarding", { timeout: 60_000 }, () => {
         unclear: reading.unclear,
         ask: { question: reading.question, options: reading.options },
       },
-      knowledge: "ready",
       answer: "No, it changed",
       listed: true,
       asData: true,
@@ -162,7 +175,7 @@ describe("documents shared in the onboarding", { timeout: 60_000 }, () => {
   it("count what was read from the provider's prompt cache", async () => {
     const { api: admin } = await signedInApi(idp, "admin");
     const cachedBefore = await cachedOf();
-    const { result } = await answering(
+    await answering(
       [{ ...answer(reading), cache: { read: 900, write: 300 } }],
       async () =>
         await admin.onboarding.shareDocument({
@@ -171,7 +184,6 @@ describe("documents shared in the onboarding", { timeout: 60_000 }, () => {
           bytes: draft,
         })
     );
-    await ended(admin, result.id);
     expect((await cachedOf()) - cachedBefore).toBe(900);
   });
 
@@ -186,7 +198,6 @@ describe("documents shared in the onboarding", { timeout: 60_000 }, () => {
           bytes: draft,
         })
     );
-    await ended(admin, result.id);
     expect(result.reading.ask).toBeNull();
   });
 
@@ -247,29 +258,33 @@ describe("documents shared in the onboarding", { timeout: 60_000 }, () => {
         ),
       ]
     );
-    const { results: kept } = await env.DB.prepare(
-      "SELECT id FROM uploads WHERE path = ?"
-    )
-      .bind(name)
-      .all();
-    expect({ result, kept: kept.length }).toStrictEqual({
+    expect({ result, kept: await listed(admin, name) }).toStrictEqual({
       result: ["document.not_read", "document.invalid", "document.too_large"],
-      kept: 0,
+      kept: false,
     });
   });
 
-  it("are for admins alone, in the onboarding and in Knowledge", async () => {
-    const { api: user } = await signedInApi(idp, "user");
-    const { api: admin } = await signedInApi(idp, "admin");
-    await answering([answer(reading)], async () => {
-      const { id } = await admin.onboarding.shareDocument({
-        locale: "en",
-        name: `access-${crypto.randomUUID()}.docx`,
-        bytes: draft,
-      });
-      await ended(admin, id);
-    });
-    const forAdmin = await listedBy(admin);
+  it("are for admins alone, and kept nowhere but as their reading in the onboarding", async () => {
+    const { api: user, userId: memberId } = await signedInApi(idp, "user");
+    const { api: admin, userId: adminId } = await signedInApi(idp, "admin");
+    // Said only in the file: the reading never repeats it.
+    const marker = `ledgercode${crypto.randomUUID().replaceAll("-", "")}`;
+    const name = `access-${crypto.randomUUID()}.docx`;
+    const filesBefore = await fileKeys();
+    const { result: shared } = await answering(
+      [answer(reading)],
+      async () =>
+        await admin.onboarding.shareDocument({
+          locale: "en",
+          name,
+          bytes: wordFile([
+            "Claims procedure, March 2026",
+            `Every claim is booked under ledger code ${marker}.`,
+          ]),
+        })
+    );
+    const filesAfter = await fileKeys();
+    const events = await allEvents();
     expect({
       share: await outcome(
         user.onboarding.shareDocument({
@@ -279,17 +294,37 @@ describe("documents shared in the onboarding", { timeout: 60_000 }, () => {
         })
       ),
       list: await outcome(user.onboarding.documents()),
-      admin: [forAdmin?.access, forAdmin?.sensitive],
-      user: await listedBy(user),
-      read: await outcome(
-        user.knowledge.listDocuments(onboardingDocumentsCollection)
+      answer: await outcome(
+        user.onboarding.answerDocument(shared.id, "Yes, still current")
       ),
+      brain: {
+        admin: JSON.stringify(await admin.brain.read()).includes(shared.id),
+        member: JSON.stringify(await user.brain.read()).includes(shared.id),
+      },
+      kept: {
+        store: await onboardingTablesWith(marker),
+        core: await d1ColumnsWith(env.DB, marker),
+        knowledge: await d1ColumnsWith(env.KNOWLEDGE, marker),
+        files: [...filesAfter].filter((key) => !filesBefore.has(key)),
+        audit: JSON.stringify(events).includes(marker),
+        recall: {
+          admin: await recalls(adminId, `ledger code ${marker}`, marker),
+          member: await recalls(memberId, `ledger code ${marker}`, marker),
+        },
+      },
     }).toStrictEqual({
       share: "role.forbidden",
       list: "role.forbidden",
-      admin: ["admins", true],
-      user: undefined,
-      read: "knowledge.not_found",
+      answer: "role.forbidden",
+      brain: { admin: true, member: false },
+      kept: {
+        store: [],
+        core: [],
+        knowledge: [],
+        files: [],
+        audit: false,
+        recall: { admin: false, member: false },
+      },
     });
   });
 });

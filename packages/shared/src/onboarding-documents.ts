@@ -5,15 +5,11 @@ import { interviewLocaleSchema } from "./onboarding.ts";
 import { uploadMaxBytes, uploadNameSchema } from "./uploads.ts";
 
 // Documents the company's admin shares in the onboarding (core's
-// onboarding/documents.ts): each is kept in Knowledge, in a collection
-// only admins read, and read at once for what it is about, the tools and
-// teams it names, and what it leaves open about the work, which Stephen
-// asks the people who do it. He asks the admin only what nobody else can
-// say, with answers to pick from. From the prototype's
-// `lib/document-reading.ts`.
-
-/** The Knowledge collection the onboarding keeps shared documents in. */
-export const onboardingDocumentsCollection = "onboarding-documents";
+// onboarding/documents.ts): each is read at once for what it is about, the
+// tools and teams it names, and what it leaves open about the work, which
+// Stephen asks the people who do it, and only that reading is kept. He
+// asks the admin only what nobody else can say, with answers to pick from.
+// From the prototype's `lib/document-reading.ts`.
 
 /** The longest text of one document that is read, in characters. */
 export const documentTextMaxLength = 120_000;
@@ -54,7 +50,7 @@ export interface DocumentReading {
 
 /** A document shared in the onboarding. */
 export interface OnboardingDocument {
-  /** Its upload in Knowledge. */
+  /** Its ID, the onboarding's own. */
   id: string;
   name: string;
   /** ISO 8601. */
@@ -67,7 +63,7 @@ export interface OnboardingDocument {
 /** A document shared: its file, and the language it is read in. */
 export const shareDocumentSchema = z.strictObject({
   locale: interviewLocaleSchema,
-  // Knowledge's own rule for a file name, checked before any reading.
+  // An upload's rule for a file name, checked before any reading.
   name: uploadNameSchema,
   bytes: z
     .instanceof(Uint8Array)
@@ -83,7 +79,7 @@ export const documentAnswerMaxLength = 200;
 /** What the company's admin does with documents in the onboarding. */
 export interface OnboardingDocumentsApi {
   documents: () => Promise<OnboardingDocument[]>;
-  /** Keeps the file in Knowledge and reads it at once. */
+  /** Reads the file at once and keeps its reading, never the file. */
   shareDocument: (input: ShareDocumentInput) => Promise<OnboardingDocument>;
   /** Keeps the admin's answer to a document's question. */
   answerDocument: (id: string, answer: string) => Promise<OnboardingDocument>;

@@ -7,7 +7,6 @@ import {
 import type { OnExport } from "@grasp-os/brain/exports";
 import { authErrors, requestErrors } from "@grasp-os/shared/errors";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
-import { onboardingDocumentsCollection } from "@grasp-os/shared/onboarding-documents";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import { and, asc, eq, gt, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -33,10 +32,10 @@ const teamKeySchema = z.tuple([z.string(), z.string()]);
 
 /** What core adds to an export (`OnExport`). */
 export const coreExport = (env: Env): OnExport => ({
-  // What the onboarding's documents are read into is the interviews', not
-  // company content (onboarding/documents.ts); interview records are
-  // core's own (brain_records), never in the Brain.
-  excluded: [onboardingDocumentsCollection],
+  // Interview records are core's own (brain_records), never in the Brain,
+  // and the onboarding keeps no shared document's file
+  // (onboarding/documents.ts): no collection is the onboarding's.
+  excluded: [],
   // Each a page at a time, keyed by its own key: neither is ever read
   // whole (the Brain's `pagedFile`). The IDs bound as one parameter
   // (`inList`): a company may have more collections than D1 binds to one

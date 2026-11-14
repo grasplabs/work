@@ -1,6 +1,5 @@
 import { ensureCollection } from "@grasp-os/brain/collections";
 import { collectionIdSchema } from "@grasp-os/shared/ids";
-import { onboardingDocumentsCollection } from "@grasp-os/shared/onboarding-documents";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
@@ -17,6 +16,7 @@ import { newChat } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import { newAgent, purged, saveOver } from "./knowledge-purge.ts";
 import { newTeam, ownCollectionOf } from "./knowledge.ts";
+import { fakeProvider } from "./model-provider.ts";
 import {
   openRpc,
   outcome,
@@ -26,6 +26,7 @@ import {
   staffPerson,
   unique,
 } from "./sign-in.ts";
+import { wordFile } from "./word-file.ts";
 
 // Exporting the company's Brain (GRA-1192, GRA-335's E1; the threat model
 // is on GRA-335). It starts from the ways it can fail:
@@ -337,28 +338,25 @@ describe("exporting the company's Brain", setUpTime, () => {
     const admin = await signedInApi(idp, "admin");
     const other = await signedInApi(idp, "admin");
     const word = `onboardingword${unique().replaceAll("-", "")}`;
-    // As the onboarding keeps a shared document: in a collection of its
-    // own, which the export leaves out (core's `OnExport.excluded`).
-    const brain = brainOf(env);
-    await ensureCollection(
-      brain,
-      {
-        id: collectionIdSchema.parse(onboardingDocumentsCollection),
-        name: "Onboarding documents",
-        description: "",
-        owner: admin.userId,
-        access: "admins",
-        sensitive: true,
-        source: "upload",
-        createdAt: new Date(),
-      },
-      { type: "system" }
-    );
-    await admin.api.knowledge.saveDocument({
-      collectionId: onboardingDocumentsCollection,
-      path: `claims-${unique()}.md`,
-      text: `# Claims\nTyped into ${word}.`,
-      ifVersion: 0,
+    // A document shared in the onboarding: only its reading is kept, by
+    // the onboarding (onboarding/documents.ts), so nothing of it is the
+    // Brain's to export.
+    await fakeProvider({
+      text: JSON.stringify({
+        about: `How claims are typed into ${word}.`,
+        tools: [word],
+        teams: [],
+        unclear: [],
+        question: "",
+        options: [],
+      }),
+      inputTokens: 1200,
+      outputTokens: 150,
+    });
+    await admin.api.onboarding.shareDocument({
+      locale: "en",
+      name: `claims-${unique()}.docx`,
+      bytes: wordFile(["Claims procedure", `Claims are typed into ${word}.`]),
     });
     const first = await admin.api.knowledge.prepareBrainExport();
     const { exportId } = await admin.api.knowledge.startBrainExport(
