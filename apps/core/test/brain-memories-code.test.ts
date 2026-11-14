@@ -16,6 +16,7 @@ import { callAppFunction } from "../src/app-functions.ts";
 import { publishVersion } from "../src/app-publish.ts";
 import type { Release } from "../src/app-releases.ts";
 import { appFor } from "../src/apps.ts";
+import { teamsOf } from "../src/auth/identity.ts";
 import {
   correctForCompanyAs,
   rememberForCompanyAs,
@@ -482,13 +483,16 @@ describe("memories and entities, as an App reaches them", setUpTime, () => {
 
   it("writes nothing without its own grant to write, once that is revoked, from an App whose sources not every member may read, or from one whose grant names teams; and still reads", async () => {
     const admin = await person("admin");
-    const ada = await person("builder");
+    const signedIn = await person("builder");
+    // In a team of hers, as a request of hers signed in now names it.
+    const team = await teamOf(signedIn);
+    const ada = { ...signedIn, teams: await teamsOf(env.DB, signedIn.userId) };
     const readOnly = await appOf(ada, admin, { write: false });
     const revoked = await appOf(ada, admin);
     const unplaced = await appOf(ada, admin);
     // Its grant to read the Brain names a team of Ada's: what it reads of
     // that team's may not reach the company.
-    const teamScoped = await appOf(ada, admin, { teams: [await teamOf(ada)] });
+    const teamScoped = await appOf(ada, admin, { teams: [team] });
     // A connection it was granted that nobody can be placed for: connect
     // doesn't know it.
     await env.DB.prepare(
