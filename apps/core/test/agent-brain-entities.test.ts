@@ -161,6 +161,16 @@ const returnedSchema = z
   .string()
   .transform((text): unknown => JSON.parse(text.replace(/^Returned:\n/u, "")));
 
+/** Code that returns the names `env.brain.findEntities` finds by the reference `ref`. */
+const namesByRefCode = (ref: string) =>
+  codeStep(
+    `export default async (self, env) => { const { entities } = await env.brain.findEntities({ identifier: { type: "ref", value: ${JSON.stringify(ref)} } }); return entities.map(({ name }) => "named " + name); };`
+  );
+
+/** How many times `text` holds `part`. */
+const timesIn = (text: string, part: string): number =>
+  text.split(part).length - 1;
+
 /** A chat of `personId`'s own in Grasp, whose agent holds the grant to read the Brain. */
 const ownChatOf = async (
   admin: Awaited<ReturnType<typeof signedInApi>>,
@@ -790,6 +800,133 @@ describe("a chat's code reading the Brain's entities", setUpTime, () => {
         "failed An answer not as code is handed one reached the Brain's entities",
       ])}`,
       audited: [{ found: undefined, refused: "internal.unexpected" }],
+    });
+  });
+
+  it("keeps what its code read once the memory that first named the entity is retired while another is current, and withholds it once every one is", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = await signedInWithRole(idp, "user");
+    /**
+     * A company customer two writers named, each by a memory in their own
+     * word, the first of them retired before its chat's code reads it
+     * (`read`: its card, or a find by its reference); then the second
+     * retired too, and the code reads it again.
+     */
+    const forgotten = async (read: "card" | "find") => {
+      const name = `Customer ${word()}`;
+      const ref = `crm:${word()}`;
+      const statements = [`Renews ${word()}`, `Pays ${word()}`];
+      const remembered = async (by: string, statement: string, id?: string) =>
+        await shared().addMemories({
+          change: crypto.randomUUID(),
+          access: { kind: "audience", group: "company" },
+          ...(id === undefined
+            ? {}
+            : { reader: { person: by, groups: ["company"] } }),
+          entities: [
+            {
+              key: "c",
+              kind: "customer",
+              ...(id === undefined ? {} : { id }),
+              names: [name],
+              identifiers: [{ type: "ref", value: ref }],
+            },
+          ],
+          memories: [
+            {
+              about: "c",
+              type: "fact",
+              statement,
+              speaker: { kind: "system" },
+              basis: { kind: "writer", writer: by },
+            },
+          ],
+        });
+      const [firstWriter, secondWriter] = [`w-${word()}`, `w-${word()}`];
+      const first = await remembered(firstWriter, statements[0] ?? "");
+      const entity = first.entities.c ?? "";
+      const second = await remembered(
+        secondWriter,
+        statements[1] ?? "",
+        entity
+      );
+      const retire = async (by: string, memory: string | undefined) => {
+        await shared().retireMemory({
+          memory: memory ?? "",
+          reader: { person: by, groups: ["company"] },
+        });
+      };
+      await retire(firstWriter, first.memories[0]);
+      const code = () =>
+        read === "card" ? cardsCode([entity]) : namesByRefCode(ref);
+      const chat = await ownChatOf(
+        admin,
+        person.userId,
+        code(),
+        says("Read."),
+        says("Again."),
+        code(),
+        says("Read again."),
+        says("Last.")
+      );
+      const shown = read === "card" ? (statements[1] ?? "") : `named ${name}`;
+      await chat.ask(word());
+      const [handed] = await codeResults(chat.stub, chat.chat.id);
+      let at = chat.provider.requests.length;
+      await chat.ask(word());
+      const next = JSON.stringify(chat.provider.requests[at]?.body);
+      await retire(secondWriter, second.memories[0]);
+      // The fresh read rests on a forgotten memory alone: its own turn
+      // stops before the model is sent it.
+      const stopped = await chat.ask(word()).then(
+        () => "answered",
+        (error: unknown) =>
+          error instanceof Error && error.message.includes("no longer read")
+            ? "stopped"
+            : String(error)
+      );
+      const [, fresh] = await codeResults(chat.stub, chat.chat.id);
+      at = chat.provider.requests.length;
+      await chat.ask(word());
+      // The next turn: both reads' results in its history.
+      const later = JSON.stringify(chat.provider.requests[at]?.body);
+      return {
+        handed: handed?.text.includes(shown),
+        next: {
+          sent: next.includes(shown),
+          withheld: timesIn(next, withheldResult),
+        },
+        fresh: fresh?.text.includes(name),
+        stopped,
+        later: {
+          sent: later.includes(shown) || later.includes(name),
+          withheld: timesIn(later, withheldResult),
+        },
+      };
+    };
+
+    expect({
+      card: await forgotten("card"),
+      find: await forgotten("find"),
+    }).toStrictEqual({
+      // Named and held by the current memory: handed over, and kept.
+      card: {
+        handed: true,
+        next: { sent: true, withheld: 0 },
+        // History alone names it now: the fresh read still finds it, and
+        // nothing that rests on a forgotten memory stays: its turn stops,
+        // and both reads are withheld from then on.
+        fresh: true,
+        stopped: "stopped",
+        later: { sent: false, withheld: 2 },
+      },
+      find: {
+        handed: true,
+        next: { sent: true, withheld: 0 },
+        fresh: true,
+        stopped: "stopped",
+        later: { sent: false, withheld: 2 },
+      },
     });
   });
 });

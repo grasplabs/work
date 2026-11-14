@@ -88,6 +88,18 @@ export const visibleSql = (alias: string): string => `(
 )`;
 
 /**
+ * Whether the memory `alias` was retired by its writer by the moment `at`
+ * (an expression, milliseconds): 1 or 0. A retired memory stays history:
+ * it still names its entity and makes it seen for those who may read it,
+ * but never ahead of one that isn't retired (entities.ts), so what an
+ * answer rests on is current whenever it can be, and a forgotten memory,
+ * which every pin check withholds (`readableMemories`), backs only what
+ * nothing current backs.
+ */
+export const retiredSql = (alias: string, at: string): string =>
+  `(${alias}.retired_at IS NOT NULL AND ${alias}.retired_at <= ${at})`;
+
+/**
  * The moment the dates a fact is true are judged at: `?20`, a read as of a
  * moment ahead of what the store learned; else `?4`, the moment what the
  * store learned is read at. A statement that binds no `?20` judges both

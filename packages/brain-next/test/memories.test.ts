@@ -643,6 +643,72 @@ describe("who may read a memory", () => {
     });
   });
 
+  // Threat 1 again: a retired memory stays history, so it still names its
+  // entity and makes it seen, but never ahead of a current one: what a
+  // page or a card says rests on a memory the host can still check
+  // (`readableMemories`) whenever one is current.
+  it("names, finds and holds an entity by a memory its writer retired only once no current one does", async () => {
+    const group = unique("group");
+    const reader = readerOf(unique("reader"), group);
+    const name = unique("Acme");
+    const [first, second] = [unique("w"), unique("w")];
+    const said = (writer: string, statement: string) =>
+      fact({ kind: "writer", writer }, { statement });
+    const named = await remember(
+      audience(group),
+      [customer({ names: [name] })],
+      [said(first, `${name} is a customer`)]
+    );
+    const entity = named.entities.c ?? "";
+    const again = await remember(
+      audience(group),
+      [customer({ id: entity, names: [name] })],
+      [said(second, `${name} renews in May`)],
+      shared(),
+      crypto.randomUUID(),
+      reader
+    );
+    const retire = async (writer: string, memory: string | undefined) => {
+      await shared().retireMemory({
+        memory: memory ?? "",
+        reader: readerOf(writer, group),
+      });
+    };
+    const read = async () => {
+      const page = await shared().findEntities({ reader, name });
+      const card = await shared().readCard({ entity, reader });
+      return {
+        found: page.entities,
+        page: page.restsOnWords,
+        card: {
+          name: card?.entity.name,
+          notes: card?.notes.map(({ id }) => id),
+          words: card?.restsOnWords,
+        },
+      };
+    };
+
+    await retire(first, named.memories[0]);
+    const firstRetired = await read();
+    await retire(second, again.memories[0]);
+    const bothRetired = await read();
+
+    expect({ firstRetired, bothRetired }).toStrictEqual({
+      // The current memory names it, holds it and is the card's.
+      firstRetired: {
+        found: [{ id: entity, kind: "customer", name }],
+        page: again.memories,
+        card: { name, notes: again.memories, words: again.memories },
+      },
+      // History alone: the earliest retired memory, which no host keeps.
+      bothRetired: {
+        found: [{ id: entity, kind: "customer", name }],
+        page: named.memories,
+        card: { name, notes: [], words: named.memories },
+      },
+    });
+  });
+
   // Threat 3: a newer memory ends an older one only for those who may read it.
   it("stays current for a reader who can't read the memory that ended it", async () => {
     const left = unique("left");

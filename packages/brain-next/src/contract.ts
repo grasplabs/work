@@ -2226,8 +2226,8 @@ export type EntitiesRequest = z.input<typeof entitiesRequestSchema>;
 
 /**
  * A page of entities, by when the first memory the reader may read that
- * mentions each was learned, then id; whether more follow, and where to
- * go on from.
+ * mentions each was learned (one its writer hasn't retired, while there
+ * is one), then id; whether more follow, and where to go on from.
  */
 export interface EntityPage {
   entities: Entity[];
@@ -2260,9 +2260,10 @@ export type EntityRequest = z.infer<typeof entityRequestSchema>;
 
 /**
  * An entity as a reader sees it: its kind, and its earliest name a memory
- * the reader may read gave (by when that memory was learned, then its
- * id), or null. Every name and identifier they may see is read a page at
- * a time (`readEntityNames`).
+ * the reader may read gave (of the memories their writer hasn't retired,
+ * while one gives a name, else of the retired ones, which stay history;
+ * by when that memory was learned, then its id), or null. Every name and
+ * identifier they may see is read a page at a time (`readEntityNames`).
  */
 export interface Entity {
   id: EntityId;
