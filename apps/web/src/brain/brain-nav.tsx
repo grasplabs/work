@@ -16,7 +16,6 @@ import {
   InboxIcon,
   LibraryIcon,
   LightbulbIcon,
-  NotebookPenIcon,
   BookOpenIcon,
   TargetIcon,
   UsersIcon,
@@ -341,7 +340,6 @@ export const BrainNav = ({
   // panel's links mark themselves, a rail button is told.
   const matchRoute = useMatchRoute();
   const onActivity = Boolean(matchRoute({ to: "/brain/activity" }));
-  const onMemory = Boolean(matchRoute({ to: "/brain/memory" }));
   const onSources = Boolean(matchRoute({ to: "/brain/sources" }));
   const onMemories = Boolean(matchRoute({ to: "/brain/memories" }));
   const memoriesLabel = t({
@@ -432,13 +430,6 @@ export const BrainNav = ({
           <ActivityIcon />
         </PageSidebarRailButton>
         <PageSidebarRailButton
-          active={onMemory}
-          label={t`Memory`}
-          render={<Link to="/brain/memory" />}
-        >
-          <NotebookPenIcon />
-        </PageSidebarRailButton>
-        <PageSidebarRailButton
           active={onSources}
           label={sourcesLabel}
           render={<Link to="/brain/sources" />}
@@ -495,9 +486,6 @@ export const BrainNav = ({
         {company ? <TopLink icon={BrainIcon} label={t`Brain`} /> : null}
         <Link className={topLinkClass} to="/brain/activity">
           <TopLinkContent icon={ActivityIcon} label={activityLabel} />
-        </Link>
-        <Link className={topLinkClass} to="/brain/memory">
-          <TopLinkContent icon={NotebookPenIcon} label={t`Memory`} />
         </Link>
         <Link className={topLinkClass} to="/brain/sources">
           <TopLinkContent icon={LibraryIcon} label={sourcesLabel} />

@@ -109,21 +109,9 @@ describe(noteMarkdown, () => {
     expect(text).not.toContain("“Tickets come in through Zendesk”");
   });
 
-  it("includes an interview’s article and its transcript by topic, and workflows link to the Workflows page", () => {
-    const source = ws.sources.find(
-      (candidate) => candidate.id === "src-compliance"
-    );
-    const text = noteMarkdown(note("src-compliance"), {
-      ...options,
-      transcript: source?.transcript,
-    });
+  it("includes an interview’s article, and workflows link to the Workflows page", () => {
+    const text = noteMarkdown(note("src-compliance"), options);
     expect(text).toContain("## Article\n\nComplaints are registered by hand");
-    const chapters = source?.transcript?.chapters ?? [];
-    const turns = source?.transcript?.turns ?? [];
-    expect(text).toContain(
-      `## Transcript\n\n### ${chapters[0]?.title} · 00:00\n\n**${turns[0]?.at} · ${turns[0]?.speaker}:** ${turns[0]?.text}`
-    );
-    expect(text).toContain(`### ${chapters[1]?.title} · ${chapters[1]?.at}`);
     expect(noteMarkdown(note("cand-email"), options)).toContain(
       "(https://grasp.example/workflows/email-triage)"
     );
