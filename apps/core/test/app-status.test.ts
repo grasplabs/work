@@ -3,16 +3,16 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { addMember } from "../src/app-members.ts";
-import { publishVersion } from "../src/app-publish.ts";
 import { setArchived } from "../src/app-status.ts";
-import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
+import { appKind } from "../src/apps.ts";
 import { deleteStore } from "../src/data-stores.ts";
+import { rollback } from "../src/publish.ts";
 import {
   repairResourceStarts,
   stopRunsStartedBy,
 } from "../src/workflows/resource-runs.ts";
-import { commitApp, withFiles } from "./app-definitions.ts";
-import { commitDefined, racingDb } from "./apps.ts";
+import { publishApp, withFiles, writeApp } from "./app-definitions.ts";
+import { publishDefined, racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -50,24 +50,22 @@ const idp = mockIdp();
 
 type Person = Awaited<ReturnType<typeof signedInApi>>;
 
+/** The page every App here has. */
+const pageFiles = withFiles(notesFiles, {
+  "src/routes/index.tsx":
+    'import { createFileRoute } from "@tanstack/react-router";\n\nexport const Route = createFileRoute("/")({ component: () => null });\n',
+});
+
 /**
- * A builder's App with a page, its first version committed but not yet
- * live; shared with `user` to use.
+ * A builder's App with a page in its draft, nothing of it published yet;
+ * shared with `user` to use. `publish` makes its draft its live version.
  */
 const unpublishedApp = async (
   builder: Person,
   user?: Person
-): Promise<{ app: string; version: number }> => {
+): Promise<{ app: string; publish: () => Promise<number> }> => {
   const { id } = await builder.api.apps.create({ name: "Invoices" });
-  const { version } = await commitApp(
-    builder.api.apps.files,
-    id,
-    withFiles(notesFiles, {
-      "src/routes/index.tsx":
-        'import { createFileRoute } from "@tanstack/react-router"; export const Route = createFileRoute("/")({ component: () => null });\n',
-    }),
-    "First version"
-  );
+  const revision = await writeApp(builder.api, id, pageFiles);
   if (user !== undefined) {
     await builder.api.apps.members.add(id, {
       type: "person",
@@ -75,13 +73,22 @@ const unpublishedApp = async (
       role: "user",
     });
   }
-  return { app: id, version };
+  return {
+    app: id,
+    publish: async () => {
+      const { version } = await builder.api.drafts.publish(
+        { kind: "app", id },
+        revision
+      );
+      return version;
+    },
+  };
 };
 
 /** A builder's App with a page, its first version live; shared with `user`. */
 const liveApp = async (builder: Person, user?: Person): Promise<string> => {
-  const { app, version } = await unpublishedApp(builder, user);
-  await builder.api.apps.versions.publish(app, version);
+  const { app, publish } = await unpublishedApp(builder, user);
+  await publish();
   return app;
 };
 
@@ -185,12 +192,12 @@ describe("an App's archive", () => {
       signedInApi(idp, "builder"),
       signedInApi(idp, "user"),
     ]);
-    const { app, version } = await unpublishedApp(builder, user);
+    const { app, publish } = await unpublishedApp(builder, user);
     const missing = crypto.randomUUID();
 
     const notLive = await waysIn(user, app);
     const nothing = await waysIn(user, missing);
-    await builder.api.apps.versions.publish(app, version);
+    await publish();
     const live = await waysIn(user, app);
     await builder.api.apps.archive(app);
     const archived = await waysIn(user, app);
@@ -307,7 +314,7 @@ describe("an App's archive", () => {
       signedInApi(idp, "builder"),
       signedInApi(idp, "user"),
     ]);
-    const { app, version } = await unpublishedApp(builder, user);
+    const { app, publish } = await unpublishedApp(builder, user);
     await builder.api.apps.members.add(app, {
       type: "person",
       id: other.userId,
@@ -315,7 +322,7 @@ describe("an App's archive", () => {
     });
 
     const byUserNotLive = await outcome(user.api.apps.archive(app));
-    await builder.api.apps.versions.publish(app, version);
+    const version = await publish();
     const byUser = await outcome(user.api.apps.archive(app));
     // A builder no longer: their role is read for the call.
     await builder.api.apps.members.remove(app, {
@@ -491,12 +498,10 @@ describe("an App's archive", () => {
     const builder = await signedInApi(idp, "builder");
     const user = await acting("user");
     const app = await liveApp(builder);
-    const { version } = await commitApp(
-      builder.api.apps.files,
-      app,
-      { "notes.md": "Next" },
-      "Next"
-    );
+    const { version } = await publishApp(builder.api, app, {
+      "notes.md": "Next",
+    });
+    const { revision } = await builder.api.drafts.get({ kind: "app", id: app });
     await builder.api.apps.archive(app);
     const defaultStore = await env.DB.prepare(
       "SELECT store_id AS store FROM app_default_stores WHERE app_id = ?"
@@ -511,7 +516,9 @@ describe("an App's archive", () => {
       .run();
 
     expect({
-      current: await outcome(builder.api.apps.versions.publish(app, version)),
+      current: await outcome(
+        builder.api.versions.rollback({ kind: "app", id: app }, version)
+      ),
       share: await outcome(
         builder.api.apps.members.add(app, {
           type: "person",
@@ -520,14 +527,14 @@ describe("an App's archive", () => {
         })
       ),
       bind: await outcome(
-        bindWorkflowToApp(env, other, crypto.randomUUID(), {
-          app,
+        builder.api.apps.define(app, revision, {
+          op: "bindWorkflow",
           alias: "followUp",
-          version: 1,
+          workflow: crypto.randomUUID(),
         })
       ),
       commit: await outcome(
-        commitApp(builder.api.apps.files, app, { "notes.md": "Later" }, "Later")
+        publishApp(builder.api, app, { "notes.md": "Later" })
       ),
       store: await outcome(deleteStore(env, other, defaultStore?.store ?? "")),
       // Taking access away is never blocked.
@@ -551,42 +558,45 @@ describe("an App's archive", () => {
     const builder = await signedInApi(idp, "builder");
     const app = await liveApp(builder);
     const by = await builder.api.whoami();
-    const { version } = await commitApp(
-      builder.api.apps.files,
-      app,
-      { "notes.md": "Next" },
-      "Next"
-    );
+    const { version } = await publishApp(builder.api, app, {
+      "notes.md": "Next",
+    });
     const archive = async (): Promise<void> => {
       await archivedRaw(app);
     };
 
     // Archived just before each write's batch lands, after its check.
     const committed = await outcome(
-      commitDefined(
+      publishDefined(
         { ...env, DB: racingDb(archive, /insert into "app_versions"/iu) },
         by,
         app,
-        { "notes.md": "Raced" },
-        "Raced"
+        { "notes.md": "Raced" }
       )
     );
-    const versions = await builder.api.apps.versions.list(app);
+    const versions = await builder.api.versions.list({ kind: "app", id: app });
     await restoredRaw(app);
+    // Back to version 1, over the draft the refused publish left.
+    const { revision } = await builder.api.drafts.get({ kind: "app", id: app });
     const published = await outcome(
-      publishVersion(
+      rollback(
         {
           ...env,
           DB: racingDb(archive, /update "apps" set "current_version"/iu),
         },
+        appKind,
         by,
         app,
-        version
+        1,
+        revision
       )
     );
     await restoredRaw(app);
     const after = await builder.api.apps.get(app);
-    const versionsAfter = await builder.api.apps.versions.list(app);
+    const versionsAfter = await builder.api.versions.list({
+      kind: "app",
+      id: app,
+    });
 
     expect({
       committed,
@@ -598,7 +608,7 @@ describe("an App's archive", () => {
       committed: "app.archived",
       versions: [version, 1],
       published: "app.archived",
-      currentVersion: 1,
+      currentVersion: version,
       versionsAfter: [version, 1],
     });
   });

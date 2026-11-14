@@ -1,6 +1,5 @@
 import { v } from "@grasp-os/runtime/app";
 import { declaredWorkflows } from "@grasp-os/runtime/host";
-import type { WorkflowEventContract } from "@grasp-os/runtime/host";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import {
@@ -15,12 +14,10 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { publishVersion } from "../src/app-publish.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { applyVersionSchema } from "../src/app-schema.ts";
-import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
-import { appFor } from "../src/apps.ts";
+import { appKind, appFor } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { appHost } from "../src/durable-objects.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
@@ -29,16 +26,14 @@ import {
   requestPermission,
   revokePermission,
 } from "../src/permissions.ts";
+import { rollback } from "../src/publish.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
-import { changesOf, testApp } from "./app-definitions.ts";
+import { boundIn, testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
-import { commitDefined } from "./apps.ts";
+import { standInBinding } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -60,6 +55,7 @@ import {
   signedInApi,
   unique,
 } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // A page's typed `send` (spec 10.4.6; page-workflows.ts, and the run
 // inbox it admits to, workflows/run-events.ts) through the real host, from
@@ -272,24 +268,25 @@ const invoicesApp = async (
     builder.acting,
     `review-${unique()}`
   );
-  await publishWorkflowVersion(env, builder.acting, workflow.id, {
-    definition: definitionOf(contract),
-    basedOn: null,
-  });
+  await publishDefinition(
+    env,
+    builder.acting,
+    workflow.id,
+    definitionOf(contract)
+  );
   await approveWorkflowBinding(env, admin.acting, workflow.id, {
     alias: "jobEvents",
     target: { kind: "event" },
     reviewed: { version: 1 },
   });
-  const fixture = await appWith(files(declares), "Invoices", builder.acting);
-  await bindWorkflowToApp(env, builder.acting, workflow.id, {
-    app: fixture.app,
-    alias: "review",
-    version: 1,
-  });
+  const fixture = await appWith(
+    boundIn(files(declares), { review: workflow.id }),
+    "Invoices",
+    builder.acting
+  );
   await seal(fixture);
   const switched = await outcome(
-    publishVersion(env, builder.acting, fixture.app, 1)
+    rollback(env, appKind, builder.acting, fixture.app, 1)
   );
   if (switched !== "ok") {
     if (!forcedCurrent) {
@@ -306,6 +303,8 @@ const invoicesApp = async (
     await env.DB.prepare("UPDATE apps SET current_version = 1 WHERE id = ?")
       .bind(fixture.app)
       .run();
+    // And bound, as the refused switch would have bound it.
+    await standInBinding(fixture.app, "review", workflow.id, builder.acting);
   }
   const grants: string[] = [];
   for (const each of actions) {
@@ -767,129 +766,6 @@ describe("a page's typed send", { timeout: 180_000 }, () => {
       unrestrictedRun: "permission.restricted",
       restrictedRun: true,
       shown: { unrestrictedRun: false, restrictedRun: true },
-    });
-  });
-
-  it("shows a run's event wait only for an event its release declares, and a page follows a run another App version started only when that version declared the same workflow", async () => {
-    const {
-      admin,
-      builder,
-      fixture,
-      app,
-      workflow,
-      contract,
-      grants,
-      reference,
-    } = await invoicesApp([["start"], ["send"]]);
-    // Version 2 of the workflow waits through another event binding,
-    // `laterEvents`, of the same events.
-    await publishWorkflowVersion(env, builder.acting, workflow, {
-      definition: definitionOf(contract, "laterEvents"),
-      basedOn: 1,
-    });
-    await approveWorkflowBinding(env, admin.acting, workflow, {
-      alias: "laterEvents",
-      target: { kind: "event" },
-      reviewed: { version: 2 },
-    });
-    const laterDeclared = contractOf({
-      events: {
-        laterEvents: {
-          type: completed,
-          data: v.object({ jobId: v.string() }).descriptor,
-        },
-      },
-      listens: { job: ["laterEvents"] },
-    });
-    /**
-     * Makes version `version` of the App, declaring `declares` of `review`,
-     * the one that runs, its grants, asked for again, granted for it: a
-     * page opened now is of it.
-     */
-    const current = async (
-      version: number,
-      declares: WorkflowEventContract,
-      bound: number
-    ) => {
-      // Its files over the last version's: the mutation sending the
-      // event goes with the event's declaration.
-      const made = files(declares, { workflowId: workflow, version: bound });
-      await commitDefined(
-        env,
-        builder.acting,
-        app,
-        changesOf(made, {
-          "server/jobs.ts": made.files["server/jobs.ts"] ?? null,
-        }),
-        `Version ${version}`
-      );
-      await seal(fixture, version);
-      await publishVersion(env, builder.acting, app, version);
-      for (const grant of grants) {
-        // oxlint-disable-next-line no-await-in-loop -- one grant after the other
-        await grantPermission(env, admin.acting, grant, { version });
-      }
-      return await pageOf(builder, app);
-    };
-    /** What a page's `run` query shows of run `runId`'s waits, or its refusal. */
-    const waitsOn = async (lease: string, runId: string): Promise<unknown> => {
-      const snapshot = await snapshotOf(builder, app, lease, reference, runId);
-      const read = z
-        .object({
-          waits: z.array(
-            z.looseObject({ kind: z.string(), event: z.unknown().optional() })
-          ),
-        })
-        .safeParse(snapshot);
-      return read.success
-        ? read.data.waits.map(({ kind, event }) => ({ kind, event }))
-        : snapshot;
-    };
-    const firstLease = await pageOf(builder, app);
-    const firstRun = await startedRun(builder, app, firstLease, reference);
-    const first = await waitsOn(firstLease, firstRun);
-
-    // Version 2 binds version 2 of the workflow, declaring its other
-    // event: its pages follow no run version 1 started, and show their
-    // own runs' wait on it.
-    const secondLease = await current(2, laterDeclared, 2);
-    const secondRun = await startedRun(
-      builder,
-      app,
-      secondLease,
-      reference,
-      "job-2"
-    );
-    const second = {
-      ownRun: await waitsOn(secondLease, secondRun),
-      firstVersionsRun: await waitsOn(secondLease, firstRun),
-    };
-
-    // Version 3 binds and declares it as version 1 did: it follows
-    // version 1's run.
-    const thirdLease = await current(3, jobEventsDeclared, 1);
-    const third = {
-      firstVersionsRun: await waitsOn(thirdLease, firstRun),
-      secondVersionsRun: await waitsOn(thirdLease, secondRun),
-    };
-
-    const eventWait = {
-      kind: "event",
-      event: { kind: "workflowEvent", alias: "jobEvents" },
-    };
-    expect({ first, second, third }).toStrictEqual({
-      first: [eventWait],
-      // A run of another contract: not shown, as a run that doesn't exist.
-      second: {
-        ownRun: [
-          {
-            kind: "event",
-            event: { kind: "workflowEvent", alias: "laterEvents" },
-          },
-        ],
-        firstVersionsRun: null,
-      },
-      third: { firstVersionsRun: [eventWait], secondVersionsRun: null },
     });
   });
 

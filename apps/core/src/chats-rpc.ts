@@ -3,7 +3,6 @@ import { actorOf } from "@grasp-os/shared/audit";
 import {
   chatMakeSchema,
   chatMentionsSchema,
-  chatSubjectSchema,
   chatTitleSchema,
   unmetNeeds,
 } from "@grasp-os/shared/chat";
@@ -20,7 +19,6 @@ import type {
   ChatSearchHit,
   ChatsApi,
   ChatAgent,
-  ChatSubject,
   ChatSummary,
   ChatUpdate,
   ChatWork,
@@ -28,22 +26,24 @@ import type {
 } from "@grasp-os/shared/chat";
 import type { DependencyRequest } from "@grasp-os/shared/dependencies";
 import { chatIdSchema } from "@grasp-os/shared/ids";
-import type { AppId, ChatId } from "@grasp-os/shared/ids";
+import type { ChatId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { ModelEfforts } from "@grasp-os/shared/models";
 import { requireBuilder } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { subjectSchema } from "@grasp-os/shared/subject";
+import type { Subject, SubjectKind } from "@grasp-os/shared/subject";
 import { z } from "zod";
 
-import { firstAgentId, turnAgent } from "./agents.ts";
+import { turnAgent } from "./agents.ts";
 import { createFromBlueprint } from "./app-blueprints.ts";
-import { chatWork, chatsWorkedOn } from "./app-drafts.ts";
-import { createApp, editableApp } from "./apps.ts";
+import { appKind, createApp, editableApp } from "./apps.ts";
 import { chatAgentOf, chatAgentsFor } from "./chat-agents.ts";
 import { chatRequests, decideInChat } from "./chat-connections.ts";
 import { readChatFile } from "./chat-files.ts";
 import { mentionablePeople, mentionsOf } from "./chat-mentions.ts";
 import { personOf } from "./connections.ts";
+import { chatWork, chatsWorkedOn, keepMadeInChat } from "./drafts.ts";
 import { workspace } from "./durable-objects.ts";
 import { modelSettings, modelEffortsOf } from "./models.ts";
 import { chatPackageRequests } from "./packages/requests.ts";
@@ -58,6 +58,7 @@ import type { SessionCheck } from "./session-check.ts";
 import { requireNotStaff } from "./sharing.ts";
 import { Subscription } from "./subscription.ts";
 import {
+  workflowKind,
   createWorkflowResource,
   requireWorkflowRole,
 } from "./workflow-resources.ts";
@@ -70,7 +71,7 @@ import type { Chat } from "./workspace.ts";
  * (`build`), never the page's.
  */
 const askedSchema = questionSchema.omit({ built: true }).extend({
-  subject: chatSubjectSchema.optional(),
+  subject: subjectSchema.optional(),
   mentions: chatMentionsSchema.optional(),
 });
 
@@ -127,7 +128,7 @@ const workflowNameOf = (planned: string): string => {
 // Where it is: the leaf module, which what this module imports can import.
 export { personalWorkspaceId } from "./personal-workspace.ts";
 
-export const chatAgentId = firstAgentId;
+export { firstAgentId as chatAgentId } from "./agents.ts";
 
 /**
  * Most chats one connection follows at once: a page shows one, and a page
@@ -168,10 +169,31 @@ const summaryOfMade = (chat: Chat): ChatSummary => ({
   createdAt: chat.createdAt.toISOString(),
   lastAt: chat.lastAt.toISOString(),
   running: false,
-  appId: chat.appId,
   via: chat.via,
   make: makeOf(chat),
 });
+
+/**
+ * Keeps what Build it made as the chat's work (drafts.ts,
+ * `keepMadeInChat`): where it was made, so the chat lists it at once. A
+ * failure is logged for Grasp and never fails the build, which made it
+ * all the same; the chat's agent's first write keeps it as the chat's
+ * work then.
+ */
+const keptInChat = async (
+  ...kept: Parameters<typeof keepMadeInChat>
+): Promise<void> => {
+  try {
+    await keepMadeInChat(...kept);
+  } catch (error) {
+    const [, kind, subject] = kept;
+    log.error("chat.made_unkept", {
+      kind: kind.kind,
+      id: subject,
+      ...errorFields(error),
+    });
+  }
+};
 
 export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   readonly #env: Env;
@@ -295,28 +317,28 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         actorOf(person),
         "web",
         undefined,
-        undefined,
         making?.data
       );
       return summaryOfMade(chat);
     });
   }
 
-  async forApp(app: string): Promise<ChatSummary> {
+  /**
+   * The person's chat for an App or a workflow they may change (`ChatsApi.forSubject`):
+   * the one that last worked on it, or null while none did.
+   */
+  async forSubject(subject: Subject): Promise<ChatSummary | null> {
     return await withPerson(this.#check, async (person) => {
-      // A builder's, of an App that isn't archived: the chat changes it.
-      const { id, name } = await editableApp(this.#env, person, app);
-      const kept = await this.#chatsOf(person.userId).appChat(
-        person.userId,
-        id,
-        await chatsWorkedOn(this.#env, id, person.userId)
-      );
-      if (kept !== null) {
-        return kept;
+      const parsed = subjectSchema.safeParse(subject);
+      if (!parsed.success) {
+        throw agentErrors.create("agent.invalid_request");
       }
-      // No new chat with a paused agent: it couldn't answer in it.
-      await turnAgent(this.#env, chatAgentId);
-      return await this.#appChat(person, id, name);
+      const { kind, id } = await this.#subjectOf(person, parsed.data);
+      return await this.#chatsOf(person.userId).subjectChat(
+        person.userId,
+        { kind, id },
+        await chatsWorkedOn(this.#env, { kind, id }, person.userId)
+      );
     });
   }
 
@@ -325,26 +347,6 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       this.#check,
       async (person) => await mentionablePeople(this.#env, person)
     );
-  }
-
-  /** A new chat of `person`'s for App `id`, named after it. */
-  async #appChat(
-    person: Identity,
-    id: AppId,
-    name: string
-  ): Promise<ChatSummary> {
-    // An App's name always fits a chat's title.
-    const title = chatTitleSchema.parse(name);
-    const chat = await this.#chatsOf(person.userId).createChat(
-      title,
-      person.userId,
-      chatAgentId,
-      actorOf(person),
-      "web",
-      undefined,
-      id
-    );
-    return summaryOfMade(chat);
   }
 
   async rename(chatId: string, title: string): Promise<void> {
@@ -422,9 +424,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       }
       const { subject: named, mentions: picked, ...asked } = parsed.data;
       const [subject, mentions] = await Promise.all([
-        named === undefined
-          ? this.#chatSubjectOf(person, id)
-          : this.#subjectOf(person, named),
+        named === undefined ? undefined : this.#subjectOf(person, named),
         picked === undefined || picked.length === 0
           ? undefined
           : mentionsOf(this.#env, person, picked),
@@ -443,7 +443,9 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
    * `createFromBlueprint` for an App part that names one,
    * `createWorkflowResource`, in the project the chat was started with),
    * then asks the chat's agent to build them, in the person's words, about
-   * the App (or the workflow, without one), told what was made. A plan
+   * the App (or the workflow, without one), told what was made. Each is
+   * kept as the chat's work the moment it is made (`keepMadeInChat`), so
+   * its page finds this chat (`forSubject`) whatever happens next. A plan
    * whose connections aren't all there yet makes nothing and stays to
    * build once they are: nothing is promised and then left out. What the
    * first make refuses (the person's role, the project's) leaves the plan
@@ -496,6 +498,11 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
               const { app } = started;
               // Known as made at once: a filing that fails leaves it made.
               made.app = { id: app.id, name: app.name };
+              await keptInChat(this.#env, appKind, app.id, person.userId, {
+                chatId: id,
+                turnId: null,
+                callId,
+              });
               return app;
             },
             ({ id: appId }) => appId
@@ -514,6 +521,13 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
                 workflowNameOf(workflowPart.name)
               );
               made.workflow = { id: workflow.id, name: workflowPart.name };
+              await keptInChat(
+                this.#env,
+                workflowKind,
+                workflow.id,
+                person.userId,
+                { chatId: id, turnId: null, callId }
+              );
               return workflow;
             },
             ({ id: workflowId }) => workflowId
@@ -574,37 +588,14 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   }
 
   /**
-   * What a question names nothing else for is about, in a chat made for an
-   * App (`forApp`): that App, while the person still builds it;
-   * nothing otherwise.
-   */
-  async #chatSubjectOf(
-    person: Identity,
-    chatId: ChatId
-  ): Promise<
-    { kind: ChatSubject["kind"]; id: string; name: string } | undefined
-  > {
-    const app = await this.#chatsOf(person.userId).chatApp(chatId);
-    if (app === null) {
-      return undefined;
-    }
-    try {
-      return await this.#subjectOf(person, { kind: "app", id: app });
-    } catch {
-      // No longer theirs to build, or archived: asked about nothing.
-      return undefined;
-    }
-  }
-
-  /**
    * What a question is about, as core finds it: an App or a workflow the
    * person builds, by its name; refused, as anywhere, for one they don't,
    * or an archived App, which nothing changes.
    */
   async #subjectOf(
     person: Identity,
-    { kind, id }: ChatSubject
-  ): Promise<{ kind: ChatSubject["kind"]; id: string; name: string }> {
+    { kind, id }: Subject
+  ): Promise<{ kind: SubjectKind; id: string; name: string }> {
     const found =
       kind === "app"
         ? await editableApp(this.#env, person, id)

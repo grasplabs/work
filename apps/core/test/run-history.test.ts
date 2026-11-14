@@ -122,7 +122,7 @@ describe("a JSON workflow run's history", () => {
     const shared = await signedIn("builder");
     const admin = await signedIn("admin");
     const workflow = await publishedWorkflow(owner, greetingTasks());
-    await owner.api.workflowResources.share(workflow.id, {
+    await owner.api.workflowResources.members.add(workflow.id, {
       type: "person",
       id: shared.userId,
       role: "builder",
@@ -133,7 +133,7 @@ describe("a JSON workflow run's history", () => {
     const byOwner = told(await traceOf(owner, workflow.id, runId));
     const byAdmin = told(await traceOf(admin, workflow.id, runId));
     const byShared = told(await traceOf(shared, workflow.id, runId));
-    await owner.api.workflowResources.unshare(workflow.id, {
+    await owner.api.workflowResources.members.remove(workflow.id, {
       type: "person",
       id: shared.userId,
     });

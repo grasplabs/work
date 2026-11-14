@@ -17,7 +17,7 @@ import { requireMemberAdmin } from "./permissions.ts";
 import type { AppliedSchema, SchemaApply } from "./store-host.ts";
 
 // A version's schema applied to its App's store as the version is made
-// current, by a publish or a rollback alike (apps.ts, `makeCurrent`): the
+// current, by a publish or a rollback alike (apps.ts, `activateVersion`): the
 // one step that changes what the store holds. Its migrations, those from
 // the schema the store holds, run first, once, their output staged in the
 // store (migration-run.ts); then the store diffs the version's schema
@@ -136,7 +136,7 @@ const recordUnfinished = async (
 
 /**
  * After core's batch failed to make version `version` of App `app`
- * current (`makeCurrent`: its batch failed or changed nothing), once its
+ * current (`activateVersion`: its batch failed or changed nothing), once its
  * schema was applied: puts the schema of the version current in D1 back
  * on the store, over `version` (see the header), so the current version
  * goes on as it did. Where the store can't take it back (`version`

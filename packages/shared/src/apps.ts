@@ -1,19 +1,21 @@
 import { z } from "zod";
 
 import type { AppDataApi } from "./app-data.ts";
-import type { AppDraftsApi } from "./app-drafts.ts";
 import { appLimits, appPathSegmentPattern } from "./app-limits.ts";
+import type { AppReview, AppPreviewApi } from "./app-review.ts";
 import type { AppVisitorEntry, AppVisitorGrants } from "./app-visitors.ts";
 import type { AppWebhooksApi } from "./app-webhooks.ts";
 import { businessProcessSchema } from "./business-processes.ts";
 import type { BusinessProcess } from "./business-processes.ts";
 import type { CatalogEntryRef } from "./connect.ts";
+import type { DataModelChange, DraftDataModel } from "./data-model.ts";
 import type { DefinitionPackage } from "./definition-packages.ts";
 import type { DiagnosticCategory } from "./diagnostics.ts";
 import { defineErrorFamily } from "./errors.ts";
 import { identifierSchema } from "./ids.ts";
 import type { AppId, BlueprintId } from "./ids.ts";
 import type { DeclaredPermission, Permission } from "./permissions.ts";
+import type { MemberRole, SubjectMembersApi } from "./subject-members.ts";
 
 // An App's code is a tree of text files, versioned as a whole. Builders
 // and their chats' agents write into the App's one shared draft; a builder
@@ -79,13 +81,6 @@ export const fileChangesSchema = z
     message: `At most ${appLimits.files} files at once`,
   });
 export type FileChanges = z.input<typeof fileChangesSchema>;
-
-/** A commit message: what changed and why, for people. */
-export const commitMessageSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .max(appLimits.messageLength);
 
 /** An App in the registry. Times are ISO 8601. */
 export interface App {
@@ -232,6 +227,8 @@ export interface AppIntegrationsApi {
 
 /** One committed version of an App. */
 export interface AppVersion {
+  /** What it is a version of, as drafts and versions name it. */
+  kind: "app";
   app: AppId;
   /** Its ID within the App, counting up from 1. */
   version: number;
@@ -245,10 +242,8 @@ export interface AppVersion {
   /** SHA-256 of the version's files, which identifies them exactly. */
   tree: string;
   files: number;
-  /** The user who published it, or committed it. */
+  /** The user who published it. */
   author: string;
-  /** What changed and why, in its author's words. */
-  message: string;
   createdAt: string;
 }
 
@@ -294,7 +289,7 @@ export type FileDiff =
 /** How something differs from the current version. */
 export type ReviewChange = "added" | "modified" | "removed";
 
-/** One row rule, as a draft's changes show it (`AppDraftChanges.rowRules`). */
+/** One row rule, as a draft's changes show it (`AppReview.rowRules`). */
 export type ReviewedRowRule =
   | { kind: "owner" }
   | { kind: "person"; field: string }
@@ -360,53 +355,17 @@ export interface SavedBuild {
   standIn?: true;
 }
 
-/** A committed version, with how its builds went (`AppFilesApi.commit`). */
-export interface CommittedVersion extends AppVersion {
-  builds: {
-    pages: SavedBuild;
-  };
-}
-
-/** An App's files. */
-export interface AppFilesApi {
-  /**
-   * The App's files at `version`; without one, at its latest version
-   * (none while it has no version).
-   */
-  read: (app: string, version?: number) => Promise<AppFiles>;
-  /**
-   * Commits `changes` over the App's latest version as its next version,
-   * with `definition` (@grasp-os/runtime's `AppDefinition`, checked whole:
-   * `app.definition_invalid` otherwise) if given, else the latest
-   * version's, and builds its pages, so the version opens without
-   * building. Its `grasp.config.ts` and `server/schema.ts` are always
-   * what its definition generates, whatever `changes` hold of them.
-   * Answers once they are done with how they went (`builds`).
-   * A build never fails the commit.
-   * Changes that leave the files and the definition as they are:
-   * `app.nothing_to_commit`.
-   * Of two commits at once, one is refused with `app.conflict`: read the
-   * latest version and commit over it again.
-   */
-  commit: (
-    app: string,
-    changes: FileChanges,
-    message: string,
-    definition?: unknown
-  ) => Promise<CommittedVersion>;
-}
-
 /** Why an admin revokes a release or holds it: kept in the audit log. */
 const releaseReasonSchema = z.string().trim().min(1).max(500);
 
-/** Revoking an App's release (`AppVersionsApi.revoke`): why. */
+/** Revoking an App's release (`AppReleasesApi.revoke`): why. */
 export const releaseRevocationSchema = z.strictObject({
   reason: releaseReasonSchema,
 });
 export type ReleaseRevocation = z.input<typeof releaseRevocationSchema>;
 
 /**
- * A legal hold on an App's release (`AppVersionsApi.placeHold`): its name,
+ * A legal hold on an App's release (`AppReleasesApi.placeHold`): its name,
  * such as a case reference, which lifting it names again, and why.
  */
 export const releaseHoldSchema = z.strictObject({
@@ -438,41 +397,16 @@ export interface AppRelease {
   holds: AppReleaseHold[];
 }
 
-/** An App's versions and which of them runs. */
-export interface AppVersionsApi {
-  /** The App's versions, newest first, at most 100 from before `before`. */
-  list: (app: string, before?: number) => Promise<AppVersion[]>;
-  get: (app: string, version: number) => Promise<AppVersion>;
-  /** How the files of `to` differ from those of `from`, by path. */
-  diff: (app: string, from: number, to: number) => Promise<FileDiff[]>;
-  /**
-   * Publishes one of the App's versions again, to roll back to it (or a
-   * version that never was live, such as the first of an App created
-   * from a blueprint): published if it isn't yet (built, sealed and its
-   * tests run) and made live in one step, as `AppDraftsApi.publish`
-   * does. With `revision`, the draft's revision the person read, the
-   * draft is reset to it, its unpublished changes discarded
-   * (`app.conflict` once the draft moved since): what they confirm as
-   * they roll back. Without, the draft keeps its changes, which its next
-   * publish commits over the version live then. Given `expected`, the
-   * live version the person saw (null for none), only over it: once
-   * someone published another since,
-   * `app.conflict`, and that one stays live. Published by anyone but one
-   * of the organization's admins, the App's permissions that change
-   * things are asked for again (`AppDraftsApi.publish`).
-   */
-  publish: (
-    app: string,
-    version: number,
-    revision?: number,
-    expected?: number | null
-  ) => Promise<App>;
+/**
+ * An App's sealed releases (`apps.releases`): for the organization's own
+ * admins, never Grasp staff, as is each call below.
+ */
+export interface AppReleasesApi {
   /**
    * The App's sealed releases, newest first, at most 100 from before
-   * `before`, with whether each was revoked and its legal holds. For the
-   * organization's own admins, never Grasp staff, as is each call below.
+   * `before`, with whether each was revoked and its legal holds.
    */
-  releases: (app: string, before?: number) => Promise<AppRelease[]>;
+  list: (app: string, before?: number) => Promise<AppRelease[]>;
   /**
    * Revokes a sealed release (`releaseRevocationSchema`): it runs no more,
    * calls already running included, and is kept for good. Audited, with
@@ -497,38 +431,12 @@ export interface AppVersionsApi {
   ) => Promise<AppRelease>;
 }
 
-/**
- * A role in one App: a `user` works in its pages; a `builder` also
- * changes its code, its settings and whom it is shared with. The person's
- * role in the organization is a ceiling: someone whose role there is
- * `user` never builds, whatever an App's members say.
- */
-export const appRoleSchema = z.enum(["user", "builder"]);
-export type AppRole = z.infer<typeof appRoleSchema>;
-
-/**
- * Whom an App is shared with: a person or a team of the organization, or
- * everyone in a project (@grasp-os/shared/projects).
- */
-export const appMemberRefSchema = z.strictObject({
-  type: z.enum(["person", "team", "project"]),
-  id: identifierSchema,
-});
-export type AppMemberRef = z.infer<typeof appMemberRefSchema>;
-
 /** Whom an App is made for: a person or a team of the organization. */
 export const appAudienceSchema = z.strictObject({
   type: z.enum(["person", "team"]),
   id: identifierSchema,
 });
 export type AppAudience = z.infer<typeof appAudienceSchema>;
-
-/** Sharing an App with someone, or changing their role in it. */
-export const newAppMemberSchema = z.strictObject({
-  ...appMemberRefSchema.shape,
-  role: appRoleSchema,
-});
-export type NewAppMember = z.input<typeof newAppMemberSchema>;
 
 /**
  * What a builder changes of an App's settings (`AppsApi.update`): any of
@@ -549,63 +457,10 @@ export const appChangesSchema = z
   });
 export type AppChanges = z.input<typeof appChangesSchema>;
 
-/** Someone an App is shared with. Times are ISO 8601. */
-export interface AppMember extends AppMemberRef {
-  /**
-   * The person's, team's or project's name; null once they are gone, and
-   * for a project the person isn't in, whose name is its members' alone.
-   */
-  name: string | null;
-  role: AppRole;
-  /** Who shared it with them, or last changed their role. */
-  addedBy: string;
-  addedAt: string;
-}
-
 /** Someone who may answer for an App (`AppsApi.answerers`). */
 export interface AppAnswerer {
   id: string;
   name: string;
-}
-
-/**
- * Whom an App is shared with. Apps are private: open to their owner
- * (always a builder, and not listed here), to the organization's admins,
- * who manage every App, and to the people and teams they are shared
- * with. Anyone with a role in the App lists them; its builders change
- * them.
- */
-export interface AppMembersApi {
-  list: (app: string) => Promise<AppMember[]>;
-  /**
-   * Shares the App, or changes the role of someone it is shared with.
-   * Refused with `app.share_unreadable`, naming the `sources` and `people`
-   * in its details, when the App has read data (from someone's personal
-   * connection, or a collection they can't read) that anyone it would reach
-   * can't read where it comes from.
-   */
-  add: (app: string, member: NewAppMember) => Promise<AppMember>;
-  /**
-   * Stops sharing the App with them. Their open pages of it stop at
-   * once, or within a few seconds, as every push checks their role again.
-   */
-  remove: (app: string, member: AppMemberRef) => Promise<void>;
-  /**
-   * Whom its builders may share the App with: the organization's people
-   * and teams, by name and ID alone (no address, no role, no team's
-   * members). For whoever may share it (`add`).
-   */
-  candidates: (app: string) => Promise<ShareCandidates>;
-}
-
-/**
- * The organization's people and teams, by name, to share an App with, and
- * the projects the person builds, whose everyone it may be shared with.
- */
-export interface ShareCandidates {
-  people: { id: string; name: string }[];
-  teams: { id: string; name: string }[];
-  projects: { id: string; name: string }[];
 }
 
 /**
@@ -716,7 +571,7 @@ export interface AppBlueprintsApi {
   update: (app: string) => Promise<BlueprintUpdate | null>;
   /**
    * Commits the update the builder saw as the App's next version, which
-   * a builder then publishes (`AppVersionsApi.publish`). Its builders.
+   * a builder then makes live (`VersionsApi.rollback`). Its builders.
    */
   acceptUpdate: (app: string, accepted: AcceptedUpdate) => Promise<AppVersion>;
 }
@@ -735,7 +590,7 @@ export interface AppBlueprintsApi {
  * App here, as admins are, yet their sessions change none.
  */
 export interface ViewedApp extends App {
-  role: AppRole;
+  role: MemberRole;
 }
 
 export interface AppsApi {
@@ -845,14 +700,43 @@ export interface AppsApi {
    * builders, never Grasp staff.
    */
   answerers: (app: string) => Promise<AppAnswerer[]>;
-  readonly files: AppFilesApi;
-  readonly versions: AppVersionsApi;
-  readonly members: AppMembersApi;
+  /**
+   * What publishing the App's draft would change against its live
+   * version, and whether its checks pass (`AppReview`), to review
+   * before publishing it at the revision this names (`DraftsApi.publish`).
+   */
+  review: (app: string) => Promise<AppReview>;
+  /**
+   * The data model of the App's draft, from its definition, and what
+   * publishing the draft does to the App's records.
+   */
+  dataModel: (app: string) => Promise<DraftDataModel>;
+  /**
+   * Changes the definition in the App's draft by `operation` (an
+   * operation of `@grasp-os/sdk/definition`, or a few made as one), or
+   * writes it whole (`{ op: "setDefinition", definition }`, an
+   * `AppDefinition` of `@grasp-os/runtime`), over `revision`, the one the
+   * person read (`draft.conflict` once the draft moved past it, as
+   * `drafts.write`): the model after it, the plan, and what this change
+   * alone does (`change`), or the problem, which changed nothing. Its
+   * `grasp.config.ts` and `server/schema.ts` are always what it
+   * generates; its other files are written with `drafts.write`. With
+   * `preview`, nothing is saved: what it would do, to show first. Not for
+   * an archived App.
+   */
+  define: (
+    app: string,
+    revision: number,
+    operation: unknown,
+    preview?: boolean
+  ) => Promise<DataModelChange>;
+  readonly releases: AppReleasesApi;
+  readonly members: SubjectMembersApi;
   readonly blueprints: AppBlueprintsApi;
   readonly integrations: AppIntegrationsApi;
   readonly webhooks: AppWebhooksApi;
   readonly data: AppDataApi;
-  readonly drafts: AppDraftsApi;
+  readonly preview: AppPreviewApi;
 }
 
 /** Why a call to the App registry was refused. */
@@ -872,8 +756,6 @@ export const appErrors = defineErrorFamily({
   "app.blueprint_not_found": "There's no such blueprint.",
   "app.version_not_found": "The App has no such version.",
   "app.too_large": "The App's files would be over its limits.",
-  "app.nothing_to_commit": "The changes leave the latest version as it is.",
-  "app.draft_empty": "The draft has no changes to publish.",
   "app.conflict": "Someone else changed this App at the same time. Try again.",
   "app.not_running": "The App has no current version to run yet.",
   "app.link_taken": "Another App has that link. Choose another.",
@@ -893,11 +775,13 @@ export const appErrors = defineErrorFamily({
   "app.answer_invalid":
     "The App's server code answered with something other than plain data.",
   "app.no_workflows":
-    "An App holds no workflows of its own, nor code under workflows/. Build an independent workflow with env.workflowBuild, add it to the App's permissions with addPermission (permission.workflow) and bind it to the App under that alias.",
+    "An App holds no workflows of its own, nor code under workflows/. Build an independent workflow with env.workflowBuild, add it to the App's permissions with addPermission (permission.workflow) and bind it under that alias with bindWorkflow.",
   "app.generated_file":
     "grasp.config.ts and server/schema.ts are the code Grasp generates from the App's definition, which is no file: change it with the definition tools (addTable, addField, changeField, renameField, renameTable, setAccess, addIndex, addPermission, renameFunction and their remove counterparts), never by writing them.",
   "app.definition_invalid":
     "The App's definition, from which its grasp.config.ts and server/schema.ts are generated, isn't valid.",
+  "app.definition_outdated":
+    "This App version's definition was stored in a format Grasp no longer reads, from before an update: it pinned each workflow it binds to a version. Publish the App again: its draft starts a new definition.",
   "app.draft_failed":
     "The changes don't pass their checks yet. Ask Grasp in the chat to fix them, then publish.",
   "app.preview_outdated":

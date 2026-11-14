@@ -3,7 +3,8 @@ import { chatIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { chatWork, readDraft, saveDraft } from "../src/app-drafts.ts";
+import { appKind } from "../src/apps.ts";
+import { chatWork, readDraft, saveDraft } from "../src/drafts.ts";
 import {
   appName,
   findApp,
@@ -24,7 +25,8 @@ import {
   transcript,
   turnChecks,
 } from "./agent-chat.ts";
-import { commitApp, withFiles } from "./app-definitions.ts";
+import { withFiles } from "./app-definitions.ts";
+import { commitApp } from "./apps.ts";
 import { agentWriting } from "./draft-writers.ts";
 import { mockIdpWith } from "./idp.ts";
 import { defineNotes, notesCode, notesFiles } from "./notes-client-app.ts";
@@ -69,12 +71,10 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
 
     await chat.ask("Add notes to the Ledger");
     // A builder commits meanwhile, the same file too.
-    await commitApp(
-      builder.api.apps.files,
-      existing,
-      { "notes.md": "the builder's", "builder.md": "mine" },
-      "Mine"
-    );
+    const { version } = await commitApp(builder.api, existing, {
+      "notes.md": "the builder's",
+      "builder.md": "mine",
+    });
     await chat.ask("Are your notes still there?");
 
     const [draft, after] = await codeResults(chat.stub, chat.chat.id);
@@ -91,14 +91,16 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       notes: "the agent's",
       builder: null,
     });
-    await expect(builder.api.apps.files.read(existing)).resolves.toStrictEqual(
+    await expect(
+      builder.api.versions.files({ kind: "app", id: existing }, version)
+    ).resolves.toStrictEqual(
       withFiles(ledgerDefinition, {
         "AGENTS.md": "# Ledger\n",
         "notes.md": "the builder's",
         "builder.md": "mine",
       }).files
     );
-    // The chat's page lists what its agent worked on (app-drafts.test.ts
+    // The chat's page lists what its agent worked on (drafts.test.ts
     // has who reads it).
     const listed = await chatWork(env, chat.chat.id);
     // The draft names the code step that wrote it, where the thread shows
@@ -359,8 +361,10 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     });
     await saveDraft(
       env,
+      appKind,
+
       app,
-      await readDraft(env, app),
+      await readDraft(env, { kind: "app", id: app }),
       {
         changes: files.files,
         unchanged: [],
@@ -416,7 +420,9 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         server: "failed",
       },
     });
-    await expect(person.api.apps.versions.list(app)).resolves.toStrictEqual([]);
+    await expect(
+      person.api.versions.list({ kind: "app", id: app })
+    ).resolves.toStrictEqual([]);
   });
 
   it("says a write's build couldn't run, passes nothing then, and checks it at the next write once it can", async () => {

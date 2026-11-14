@@ -36,7 +36,8 @@ import type { ChannelLocale, LineName } from "./words.ts";
 // - The agent starting something on its own: it only offers. Nothing
 //   starts until the person it acts for presses Start, and the start is
 //   theirs, admitted as any start of theirs is (workflow-starts.ts): their
-//   role in the workflow, read then, the version's contract, its bindings.
+//   role in the workflow, read then, the live version's contract, its
+//   bindings.
 // - Someone else pressing the card (it was forwarded, or a group saw it):
 //   the press is the offer's person's only; anyone else gets a line and
 //   starts nothing. The door names who pressed by the platform's verified
@@ -44,8 +45,10 @@ import type { ChannelLocale, LineName } from "./words.ts";
 // - A press twice, or a resend: the offer is claimed once, and the start's
 //   key is the offer's, so a second start of it is the same start.
 // - Values changed between card and press: the press names only the
-//   offer; what starts is the version and input kept with it, as the card
-//   showed them whole.
+//   offer; what starts is the input kept with it, as the card showed it
+//   whole, on the workflow's version live as it is pressed, as for every
+//   start: an offer names the workflow, never a version, and one published
+//   since checks the input again (refused if it no longer takes it).
 // - Data from a restricted chat carried into a run: a restricted chat
 //   offers nothing (`permission.restricted`), and a chat others share has
 //   no workflows API at all (workspace.ts).
@@ -94,9 +97,9 @@ export const shownValues = (
  * Offers workflow `workflowId` with `input` to the person the chat's
  * agent acts for, as `scope` says, for the chat's answer to put on a card.
  * Only in a chat app's chat, never a restricted one; only a workflow they
- * could start themselves whose owner lets people ask for it, at its
- * current version, with input its contract takes, few and short enough to
- * show whole. Starts nothing.
+ * could start themselves whose owner lets people ask for it, with input
+ * its live version's contract takes, few and short enough to show whole.
+ * Starts nothing.
  */
 export const offerStart = async (
   env: Env,
@@ -104,7 +107,7 @@ export const offerStart = async (
   person: Member,
   workflowId: unknown,
   input: unknown
-): Promise<{ offer: string; workflow: string; version: number }> => {
+): Promise<{ offer: string; workflow: string }> => {
   if (scope.via === undefined || scope.via === "web") {
     throw permissionErrors.create("permission.context_invalid");
   }
@@ -119,8 +122,11 @@ export const offerStart = async (
   if (open?.askable !== true || workflow.currentVersion === null) {
     throw workflowResourceErrors.create("workflow.start_denied");
   }
-  const version = workflow.currentVersion;
-  const { inputDescriptor } = await pinned(env, workflow.id, version);
+  const { inputDescriptor } = await pinned(
+    env,
+    workflow.id,
+    workflow.currentVersion
+  );
   const text = acceptedInput(inputDescriptor, input);
   const values = shownValues(JSON.parse(text));
   const chars = values.reduce(
@@ -148,7 +154,6 @@ export const offerStart = async (
         chatId: scope.chatId,
         workflowId: workflow.id,
         workflowName: workflow.name,
-        version,
         input: text,
         createdAt: new Date(now),
         expiresAt: new Date(now + offerMs),
@@ -159,7 +164,7 @@ export const offerStart = async (
     }
     throw error;
   }
-  return { offer: id, workflow: workflow.id, version };
+  return { offer: id, workflow: workflow.id };
 };
 
 /**
@@ -228,8 +233,9 @@ export type PressLine = Extract<
 
 /**
  * Starts what offer `offerId` showed, as the person who pressed, if it is
- * theirs, unpressed and not expired: once, under the offer's own key,
- * only while its workflow is still open to asking. Says how it went.
+ * theirs, unpressed and not expired, on the workflow's version live now:
+ * once, under the offer's own key, only while its workflow is still open
+ * to asking. Says how it went.
  */
 export const pressOffer = async (
   env: Env,
@@ -274,12 +280,13 @@ export const pressOffer = async (
     return { line: "startRefused", workflow };
   }
   try {
+    // The version live as it is admitted, which the start checks the
+    // input against.
     const start = await startWorkflow(
       env,
       { type: "person", person: actingIn(person, press.platform) },
       offer.workflowId,
       {
-        version: offer.version,
         args: z.json().parse(JSON.parse(offer.input)),
         key: `chat-offer-${offer.id}`,
       },

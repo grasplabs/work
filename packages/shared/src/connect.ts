@@ -1701,7 +1701,7 @@ export const eventListenersMax = 5000;
  * Who listens for events of `type` on a connection: an App whose current
  * version has an event trigger for `type` and holds an active
  * permission on the connection that allows the type's read action
- * (`connectorEventActions`), from a version an admin approved. The
+ * (`connectorEventActions`). The
  * permission is on the whole connection (`resource` null) or on one
  * resource of it (a mailbox, a drive). `owner` is the App's owner, whom
  * its triggered runs act for. On a personal connection connect listens

@@ -29,7 +29,10 @@ import type { Authority } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { maxLiveRunsPerPrincipal } from "@grasp-os/shared/workflow-resources";
-import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
+import type {
+  WorkflowResourceRun,
+  WorkflowStart,
+} from "@grasp-os/shared/workflow-resources";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -38,10 +41,6 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { invocationFor } from "../src/app-functions.ts";
 import type { Release } from "../src/app-releases.ts";
 import { cancelArchivedRuns, setArchived } from "../src/app-status.ts";
-import {
-  bindWorkflowToApp,
-  unbindWorkflowFromApp,
-} from "../src/app-workflow-bindings.ts";
 import { appFor } from "../src/apps.ts";
 import { personOf } from "../src/connections.ts";
 import { openStore } from "../src/data-stores.ts";
@@ -60,10 +59,7 @@ import {
 } from "../src/permissions.ts";
 import { StoreHost } from "../src/store-host.ts";
 import { setWorkflowParams } from "../src/workflow-params.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import {
   appWorkflowStarts,
   dispatchStartIntent,
@@ -77,12 +73,13 @@ import {
   stopRetryMs,
 } from "../src/workflows/resource-runs.ts";
 import { storeOfNewApp } from "./app-stores.ts";
-import { racingDb, standInLive } from "./apps.ts";
+import { racingDb, standInBinding, standInLive } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
 import { sleeping, woken } from "./runs.ts";
 import { outcome, unique } from "./sign-in.ts";
 import { applied } from "./store-schemas.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // Starting independent workflows from an App's server functions
 // (function-host.ts, workflow-start-intents.ts): an action's
@@ -358,10 +355,7 @@ const workflowOf = async (owner: Identity, waits = false) => {
     owner,
     `follow-up-${unique()}`
   );
-  await publishWorkflowVersion(env, owner, workflow.id, {
-    definition: definitionOf(waits),
-    basedOn: null,
-  });
+  await publishDefinition(env, owner, workflow.id, definitionOf(waits));
   return workflow;
 };
 
@@ -463,11 +457,7 @@ const fixture = async (
   const store = await openStore(env, storeId);
   await store.applySchema(applied(manifestText(manifest.schema)));
   const workflow = await workflowOf(ada, waits);
-  const binding = await bindWorkflowToApp(env, ada, workflow.id, {
-    app,
-    alias: "followUp",
-    version: 1,
-  });
+  const binding = await standInBinding(app, "followUp", workflow.id, ada);
   const asked = await requestPermission(
     env,
     ada,
@@ -489,7 +479,7 @@ const fixture = async (
     app,
     workflowId: workflow.id,
     permissionId: asked.id,
-    bindingId: binding.id,
+    bindingId: binding,
     store,
     release: {
       manifest: sealed.parsed,
@@ -773,6 +763,46 @@ describe("an action starting a workflow", () => {
     });
   });
 
+  it("starts the workflow's live version through its binding, whichever it was bound at, and leaves a run on the version it started on", async () => {
+    let earlier: WorkflowStart | undefined;
+    // Version 2 goes live once the binding, made at version 1, is: the
+    // binding follows it. A run of version 1 started before stays on it.
+    const fx = await fixture(true, async ({ ada, app }) => {
+      const bound = await env.DB.prepare(
+        "SELECT workflow_resource_id AS id FROM app_workflow_bindings WHERE app_id = ?"
+      )
+        .bind(app)
+        .first<{ id: string }>();
+      const id = bound?.id ?? "";
+      earlier = await startWorkflow(env, { type: "person", person: ada }, id, {
+        expected: 1,
+        args: { who: "Ada" },
+        key: `key-${unique()}`,
+      });
+      await publishDefinition(
+        env,
+        ada,
+        id,
+        definitionOf(true).replace('"1 hour"', '"2 hours"')
+      );
+    });
+    const started = await call(fx, fx.bob, "requests.kickOff", { who: "Bob" });
+    expect(started.ok).toBeTruthy();
+    if (!started.ok) {
+      return;
+    }
+    const handle = handleSchema["~standard"].validate(started.value);
+    const [before, after] = await Promise.all([
+      runOf(fx, earlier?.id ?? null),
+      runOf(fx, "value" in handle ? handle.value.runId : null),
+    ]);
+    expect({
+      version: field(started.value, "version"),
+      runs: [before.version, after.version],
+      stillRunning: before.endedAt === null,
+    }).toStrictEqual({ version: 2, runs: [1, 2], stillRunning: true });
+  });
+
   it("stops the runs the App started once a builder archives it", async () => {
     const fx = await fixture(true);
     const started = await call(fx, fx.bob, "requests.kickOff", { who: "Bob" });
@@ -942,7 +972,12 @@ describe("an action starting a workflow", () => {
     );
     // Granted on the version live, as the admin reviewed it.
     await grantPermission(env, fx.admin, regranted.id, { version: 1 });
-    await unbindWorkflowFromApp(env, fx.ada, fx.bindingId);
+    // Ended, as a version that binds nothing there ends it.
+    await env.DB.prepare(
+      "UPDATE app_workflow_bindings SET status = 'removed' WHERE id = ?"
+    )
+      .bind(fx.bindingId)
+      .run();
     const unbound = await call(fx, fx.bob, "requests.kickOff", { who: "Bob" });
     expect({
       outsider: answerOf(outsider),
@@ -973,11 +1008,7 @@ describe("App code starting a workflow it didn't declare", () => {
     // Another workflow Ada binds to the App, which the App never declared.
     const fx = await fixture(false, async ({ admin, ada, app }) => {
       const other = await workflowOf(ada);
-      await bindWorkflowToApp(env, ada, other.id, {
-        app,
-        alias: "other",
-        version: 1,
-      });
+      await standInBinding(app, "other", other.id, ada);
       const asked = await requestPermission(
         env,
         ada,
@@ -2218,7 +2249,7 @@ describe("what a start rechecks, and records", () => {
     const fx = await fixture();
     const taken = await outcome(
       startWorkflow(env, { type: "person", person: fx.ada }, fx.workflowId, {
-        version: 1,
+        expected: 1,
         args: { who: "Ada" },
         key: `grasp:after-commit:${unique()}`,
       })

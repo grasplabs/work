@@ -14,16 +14,13 @@ import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
 
-import {
-  bindWorkflowToApp,
-  startAppBinding,
-  unbindWorkflowFromApp,
-} from "../src/app-workflow-bindings.ts";
+import { startAppBinding } from "../src/app-workflow-bindings.ts";
 import { appFor } from "../src/apps.ts";
 import { boundEventsOf } from "../src/bound-workflow-events.ts";
 import { policyOf } from "../src/data-policy.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
+import { rollback } from "../src/publish.ts";
 import {
   listWorkflowBindings,
   pendingWorkflowBindings,
@@ -37,13 +34,12 @@ import {
   publishCatalogContract,
   resolveCatalogKeys,
 } from "../src/workflow-catalog.ts";
-import { decideGoLive, requestGoLive } from "../src/workflow-lifecycle.ts";
+import { shareWorkflowResource } from "../src/workflow-members.ts";
 import { setWorkflowParams, workflowParams } from "../src/workflow-params.ts";
 import {
+  workflowKind,
   createWorkflowResource,
   deleteWorkflowResource,
-  publishWorkflowVersion,
-  shareWorkflowResource,
   versionContract,
   workflowVersions,
 } from "../src/workflow-resources.ts";
@@ -59,11 +55,12 @@ import type {
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { sweepRunDetails } from "../src/workflows/retention.ts";
 import { storeOfNewApp } from "./app-stores.ts";
-import { racingDb } from "./apps.ts";
+import { racingDb, standInBinding } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
 import { connectModels } from "./model-provider.ts";
 import { outcome, refusal, unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // Catalog bindings, App bindings and parameters of independent workflows
 // (workflow-catalog.ts, workflow-bindings.ts, app-workflow-bindings.ts,
@@ -262,13 +259,15 @@ const workflowOf = async (
     owner,
     `greet-${unique()}`
   );
-  await publishWorkflowVersion(env, owner, workflow.id, {
-    definition: definitionOf({
+  await publishDefinition(
+    env,
+    owner,
+    workflow.id,
+    definitionOf({
       ...(model === undefined ? {} : { model }),
       ...(token === undefined ? {} : { token }),
-    }),
-    basedOn: null,
-  });
+    })
+  );
   return workflow;
 };
 
@@ -281,7 +280,7 @@ const modelContract = async (admin: Person): Promise<string> => {
 
 const start = async (who: Person, id: string, version = 1) =>
   await startWorkflow(env, { type: "person", person: who }, id, {
-    version,
+    expected: version,
     args: { who: "Ada" },
     key: `key-${unique()}`,
   });
@@ -324,7 +323,7 @@ const granted = async (
   return asked.id;
 };
 
-/** An App `owner` owns, with an approved version 1. */
+/** An App `owner` owns, with a version 1, written as a stand-in. */
 const appOf = async (owner: Person): Promise<string> => {
   const app = crypto.randomUUID();
   await env.DB.batch([
@@ -348,7 +347,7 @@ const decide = async (
   version: number
 ): Promise<StartAuthorization> => {
   const decision = await decideWorkflowStart(env, invoker, id, {
-    version,
+    expected: version,
     args: { who: "Ada" },
     key: `key-${unique()}`,
   });
@@ -419,13 +418,15 @@ describe("the host catalog", () => {
     const workflow = await workflowOf(ada, key);
     const [version] = await workflowVersions(env, ada, workflow.id);
     const missing = await outcome(
-      publishWorkflowVersion(env, ada, workflow.id, {
-        definition: definitionOf({
+      publishDefinition(
+        env,
+        ada,
+        workflow.id,
+        definitionOf({
           status: "2.0.0",
           model: `missing-${unique()}`,
-        }),
-        basedOn: 1,
-      })
+        })
+      )
     );
     expect({
       bindings: version?.bindings.map(({ alias, kind, contractId }) => ({
@@ -530,21 +531,20 @@ describe("event contracts", () => {
       ada,
       `listen-${unique()}`
     );
-    await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: definitionOf({ events }),
-      basedOn: null,
-    });
+    await publishDefinition(env, ada, workflow.id, definitionOf({ events }));
     const [version] = await workflowVersions(env, ada, workflow.id);
     const contract = await versionContract(env, workflow.id, 1);
     const unadmitted = await outcome(
-      publishWorkflowVersion(env, ada, workflow.id, {
-        definition: definitionOf({
+      publishDefinition(
+        env,
+        ada,
+        workflow.id,
+        definitionOf({
           status: "2.0.0",
           events,
           listensFor: "grasp.job.started",
-        }),
-        basedOn: 1,
-      })
+        })
+      )
     );
     expect({
       bindings: version?.bindings.map(({ alias, kind, contractId }) => ({
@@ -572,20 +572,19 @@ describe("event contracts", () => {
       ada,
       `listen-${unique()}`
     );
-    await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: definitionOf({ events }),
-      basedOn: null,
-    });
+    await publishDefinition(env, ada, workflow.id, definitionOf({ events }));
     // The same binding, waiting on the contract's other type, which no
     // page sends.
-    await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: definitionOf({
+    await publishDefinition(
+      env,
+      ada,
+      workflow.id,
+      definitionOf({
         status: "2.0.0",
         events,
         listensFor: "grasp.job.timeout",
-      }),
-      basedOn: 1,
-    });
+      })
+    );
     const catalog = await resolveCatalogKeys(env, [events]);
     const contractEvents = catalog.get(events)?.contract.events ?? {};
     const boundAt = async (version: number) => {
@@ -617,10 +616,7 @@ describe("event contracts", () => {
       ada,
       `listen-${unique()}`
     );
-    await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: definitionOf({ events }),
-      basedOn: null,
-    });
+    await publishDefinition(env, ada, workflow.id, definitionOf({ events }));
     const approve = async (by: Person, target: unknown) =>
       await outcome(
         approveWorkflowBinding(env, by, workflow.id, {
@@ -639,51 +635,6 @@ describe("event contracts", () => {
       wrongKind: "workflow.binding_invalid",
       extra: "workflow.binding_invalid",
       approved: "ok",
-    });
-  });
-
-  // Which contract a client's workflow binds is the client's decision:
-  // staff may publish only the current version's bindings exactly, never
-  // the same alias on another contract or of another kind.
-  it("never lets Grasp staff bind another contract, or another kind, under the same alias", async () => {
-    const admin = await person("admin");
-    const ada = await person("builder");
-    const staff = await person("admin", true);
-    const [first, second, events] = await Promise.all([
-      modelContract(admin),
-      modelContract(admin),
-      eventContract(admin),
-    ]);
-    const swapped = await workflowOf(ada, first);
-    const kinds = await createWorkflowResource(env, ada, `greet-${unique()}`);
-    await publishWorkflowVersion(env, ada, kinds.id, {
-      definition: definitionOf({ events }),
-      basedOn: null,
-    });
-    const asStaff = async (id: string, definition: string) =>
-      await outcome(
-        publishWorkflowVersion(env, staff, id, { definition, basedOn: 1 })
-      );
-
-    expect({
-      contract: await asStaff(
-        swapped.id,
-        definitionOf({ status: "2.0.0", model: second })
-      ),
-      // A model in place of the events: no alias holds two kinds (`ai`
-      // is only ever the model), so another kind is another alias.
-      kind: await asStaff(
-        kinds.id,
-        definitionOf({ status: "2.0.0", model: first })
-      ),
-      same: await asStaff(
-        swapped.id,
-        definitionOf({ status: "2.0.0", model: first })
-      ),
-    }).toStrictEqual({
-      contract: "role.forbidden",
-      kind: "role.forbidden",
-      same: "ok",
     });
   });
 });
@@ -747,8 +698,11 @@ describe("approving a workflow's binding", () => {
       },
     });
     const workflow = await createWorkflowResource(env, ada, `mail-${unique()}`);
-    await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: documentOf({
+    await publishDefinition(
+      env,
+      ada,
+      workflow.id,
+      documentOf({
         permissions: { connections: { mail: { contract: key } } },
         steps: [
           {
@@ -759,9 +713,8 @@ describe("approving a workflow's binding", () => {
             args: {},
           },
         ],
-      }),
-      basedOn: null,
-    });
+      })
+    );
     // A permission an App holds on a connection: not the workflow's.
     const app = crypto.randomUUID();
     await env.DB.prepare(
@@ -836,7 +789,7 @@ describe("approving a workflow's binding", () => {
     const approved = await outcome(approve(workflowsOwn.id));
     const startsNow = await outcome(
       startWorkflow(connecting, { type: "person", person: ada }, workflow.id, {
-        version: 1,
+        expected: 1,
         args: { who: "Ada" },
         key: `key-${unique()}`,
       })
@@ -848,7 +801,7 @@ describe("approving a workflow's binding", () => {
     };
     const afterDrift = await outcome(
       startWorkflow(connecting, { type: "person", person: ada }, workflow.id, {
-        version: 1,
+        expected: 1,
         args: { who: "Ada" },
         key: `key-${unique()}`,
       })
@@ -874,31 +827,11 @@ describe("approving a workflow's binding", () => {
 describe("bindings waiting on an admin", () => {
   beforeAll(chooseModel);
 
-  it("list a live version's and a go-live version's unapproved bindings for admins, with the targets that would serve, until one is approved and lets a start through", async () => {
+  it("list a live version's unapproved bindings for admins, with the targets that would serve, until one is approved; a version made live after keeps the approvals of what it declares alike, and waits for what it declares anew", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const key = await modelContract(admin);
     const workflow = await workflowOf(ada, key);
-    await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: definitionOf({
-        status: "1.1.0",
-        model: key,
-      }),
-      basedOn: 1,
-    });
-    const asked = await requestGoLive(env, ada, workflow.id, {
-      version: 1,
-      revision: 0,
-    });
-    await decideGoLive(env, admin, workflow.id, {
-      version: 1,
-      verdict: "approve",
-      revision: asked.revision,
-    });
-    const live = await requestGoLive(env, ada, workflow.id, {
-      version: 2,
-      revision: asked.revision + 1,
-    });
     const pendingOf = async () => {
       const pending = await pendingWorkflowBindings(env, admin);
       return pending.filter((each) => each.workflow.id === workflow.id);
@@ -916,16 +849,38 @@ describe("bindings waiting on an admin", () => {
     });
     const after = await pendingOf();
     const started = await outcome(start(ada, workflow.id));
+    // Version 2 declares the model alike: it reaches nothing new.
+    await publishDefinition(
+      env,
+      ada,
+      workflow.id,
+      definitionOf({ status: "1.1.0", model: key })
+    );
+    const alike = {
+      pending: await pendingOf(),
+      started: await outcome(start(ada, workflow.id, 2)),
+    };
+    // Version 3 declares another model's contract: new access.
+    const other = await modelContract(admin);
+    await publishDefinition(
+      env,
+      ada,
+      workflow.id,
+      definitionOf({ status: "1.2.0", model: other })
+    );
+    const anew = {
+      pending: await pendingOf(),
+      started: await outcome(start(ada, workflow.id, 3)),
+    };
 
-    const waiting = (version: number, isLive: boolean) => ({
+    const waiting = (version: number, contractId: string) => ({
       workflow: { id: workflow.id, name: workflow.name },
       version,
-      live: isLive,
       bindings: [
         {
           alias: "ai",
           kind: "model",
-          contractId: key,
+          contractId,
           offered: [
             {
               target: { kind: "model", model: allowedModel },
@@ -935,23 +890,20 @@ describe("bindings waiting on an admin", () => {
         },
       ],
     });
-    expect({
-      goLiveAsked: live.goLive?.version,
-      before,
-      refused,
-      after,
-      started,
-    }).toStrictEqual({
-      goLiveAsked: 2,
-      before: [waiting(1, true), waiting(2, false)],
+    expect({ before, refused, after, started, alike, anew }).toStrictEqual({
+      before: [waiting(1, key)],
       refused: "workflow.binding_unapproved",
-      // Version 2 still waits: an approval serves the version reviewed alone.
-      after: [waiting(2, false)],
+      after: [],
       started: "ok",
+      alike: { pending: [], started: "ok" },
+      anew: {
+        pending: [waiting(3, other)],
+        started: "workflow.binding_unapproved",
+      },
     });
   });
 
-  it("offer, on the workflow's own page before it goes live, a connector each contract its own connection grant serves, which approves its start", async () => {
+  it("offer, on the workflow's own page, a connector each contract its own connection grant serves, which approves its start", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const mailKey = `mail-${unique()}`;
@@ -966,8 +918,11 @@ describe("bindings waiting on an admin", () => {
       },
     });
     const workflow = await createWorkflowResource(env, ada, `mail-${unique()}`);
-    await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: documentOf({
+    await publishDefinition(
+      env,
+      ada,
+      workflow.id,
+      documentOf({
         permissions: { connections: { mail: { contract: mailKey } } },
         steps: [
           {
@@ -978,9 +933,8 @@ describe("bindings waiting on an admin", () => {
             args: {},
           },
         ],
-      }),
-      basedOn: null,
-    });
+      })
+    );
     const binding = `MAIL_${unique().toUpperCase().replaceAll("-", "_")}`;
     const permissionId = await granted(ada, admin, {
       subject: { type: "workflow", workflowId: workflow.id },
@@ -1028,13 +982,12 @@ describe("bindings waiting on an admin", () => {
           connecting,
           { type: "person", person: ada },
           workflow.id,
-          { version: 1, args: { who: "Ada" }, key: `key-${unique()}` }
+          { expected: 1, args: { who: "Ada" }, key: `key-${unique()}` }
         )
       );
 
-    // Asked to go live, it waits in the admins' inbox too, where a
-    // connector, slow to read, is offered nothing.
-    await requestGoLive(env, ada, workflow.id, { version: 1, revision: 0 });
+    // Live, it waits in the admins' inbox too, where a connector, slow to
+    // read, is offered nothing.
     const inbox = await pendingWorkflowBindings(connecting, admin);
     const before = await offeredOf();
     const refused = await startOf();
@@ -1065,7 +1018,6 @@ describe("bindings waiting on an admin", () => {
         {
           workflow: { id: workflow.id, name: workflow.name },
           version: 1,
-          live: true,
           bindings: [
             {
               alias: "mail",
@@ -1092,50 +1044,6 @@ describe("bindings waiting on an admin", () => {
     });
   });
 
-  it("list on the workflow's own read its newest version, which a test run starts, beside the live one it approved", async () => {
-    const admin = await person("admin");
-    const ada = await person("builder");
-    const key = await modelContract(admin);
-    const workflow = await workflowOf(ada, key);
-    const asked = await requestGoLive(env, ada, workflow.id, {
-      version: 1,
-      revision: 0,
-    });
-    await decideGoLive(env, admin, workflow.id, {
-      version: 1,
-      verdict: "approve",
-      revision: asked.revision,
-    });
-    await approveWorkflowBinding(env, admin, workflow.id, {
-      alias: "ai",
-      target: { kind: "model", model: allowedModel },
-      reviewed: { version: 1 },
-    });
-    await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: definitionOf({
-        status: "1.1.0",
-        model: key,
-      }),
-      basedOn: 1,
-    });
-
-    const own = await workflowPendingBindings(env, admin, workflow.id);
-    const inbox = await pendingWorkflowBindings(env, admin);
-
-    expect({
-      own: own.map(({ version, live, bindings }) => ({
-        version,
-        live,
-        aliases: bindings.map(({ alias }) => alias),
-      })),
-      inbox: inbox.filter((each) => each.workflow.id === workflow.id),
-    }).toStrictEqual({
-      own: [{ version: 2, live: false, aliases: ["ai"] }],
-      // Neither live nor asked to go live: not the inbox's.
-      inbox: [],
-    });
-  });
-
   it("list a binding again once an admin revokes its approval, which refuses its starts until one approves it again", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
@@ -1150,9 +1058,8 @@ describe("bindings waiting on an admin", () => {
       });
     const waiting = async () => {
       const pending = await workflowPendingBindings(env, admin, workflow.id);
-      return pending.map(({ version, live, bindings }) => ({
+      return pending.map(({ version, bindings }) => ({
         version,
-        live,
         aliases: bindings.map(({ alias }) => alias),
       }));
     };
@@ -1201,7 +1108,7 @@ describe("bindings waiting on an admin", () => {
       refusedTo: { builder: "role.forbidden", staff: "role.forbidden" },
       stillApproved: "ok",
       revoked: {
-        waiting: [{ version: 1, live: true, aliases: ["ai"] }],
+        waiting: [{ version: 1, aliases: ["ai"] }],
         start: "workflow.binding_unapproved",
       },
       approvedAgain: { waiting: [], start: "ok" },
@@ -1273,48 +1180,88 @@ describe("approving a store's operation", () => {
 describe("what a start freezes", () => {
   beforeAll(chooseModel);
 
-  it("serves an approval to the exact version an admin reviewed, never a later or an earlier one", async () => {
+  it("serves an approval to every version declaring its binding alike, so a publish of only approved bindings asks for none, and one declaring a binding anew asks for its own", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const key = await modelContract(admin);
+    const other = await modelContract(admin);
+    const workflow = await workflowOf(ada, key);
+    await approveWorkflowBinding(env, admin, workflow.id, {
+      alias: "ai",
+      target: { kind: "model", model: allowedModel },
+      reviewed: { version: 1 },
+    });
+    const pendingOf = async () => {
+      const pending = await workflowPendingBindings(env, admin, workflow.id);
+      return pending.flatMap(({ version, bindings }) =>
+        bindings.map(({ alias }) => ({ version, alias }))
+      );
+    };
+    // Version 2 declares the alias the same: the approval serves it.
+    await publishDefinition(
+      env,
+      ada,
+      workflow.id,
+      definitionOf({ status: "2.0.0", model: key })
+    );
+    const alike = {
+      pending: await pendingOf(),
+      start: await outcome(start(ada, workflow.id, 2)),
+    };
+    // Version 3 binds the alias to another contract: a binding of its own.
+    await publishDefinition(
+      env,
+      ada,
+      workflow.id,
+      definitionOf({ status: "3.0.0", model: other })
+    );
+    expect({
+      alike,
+      anew: {
+        pending: await pendingOf(),
+        start: await outcome(start(ada, workflow.id, 3)),
+      },
+      earlier: await outcome(start(ada, workflow.id, 1)),
+    }).toStrictEqual({
+      alike: { pending: [], start: "ok" },
+      anew: {
+        pending: [{ version: 3, alias: "ai" }],
+        start: "workflow.binding_unapproved",
+      },
+      // Approved, but no longer live: only the live version starts.
+      earlier: "workflow.version_not_live",
+    });
+  });
+
+  it("keeps a revoked approval revoked for every version declaring its binding, a roll back to one included", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const key = await modelContract(admin);
     const workflow = await workflowOf(ada, key);
-    const publish = async (version: string, basedOn: number) =>
-      await publishWorkflowVersion(env, ada, workflow.id, {
-        definition: definitionOf({ status: version, model: key }),
-        basedOn,
-      });
-    const approve = async (version: number) =>
-      await approveWorkflowBinding(env, admin, workflow.id, {
-        alias: "ai",
-        target: { kind: "model", model: allowedModel },
-        reviewed: { version },
-      });
-    await approve(1);
-    // A builder publishes versions 2 and 3, declaring the alias the same:
-    // code no admin reviewed with that model, until one reviews version 3.
-    await publish("2.0.0", 1);
-    const unreviewed = await outcome(start(ada, workflow.id, 2));
-    await publish("3.0.0", 2);
-    const decided = await decide(
-      { type: "person", person: ada },
+    const approval = await approveWorkflowBinding(env, admin, workflow.id, {
+      alias: "ai",
+      target: { kind: "model", model: allowedModel },
+      reviewed: { version: 1 },
+    });
+    await publishDefinition(
+      env,
+      ada,
       workflow.id,
-      1
+      definitionOf({ status: "2.0.0", model: key })
     );
-    await approve(3);
+    await revokeWorkflowBinding(env, admin, workflow.id, approval.id);
+    const revoked = await outcome(start(ada, workflow.id, 2));
+    await rollback(env, workflowKind, ada, workflow.id, 1);
+
+    const pending = await workflowPendingBindings(env, admin, workflow.id);
     expect({
-      unreviewed,
-      reviewed: await outcome(start(ada, workflow.id, 1)),
-      earlierThanReview: await outcome(start(ada, workflow.id, 2)),
-      newlyReviewed: await outcome(start(ada, workflow.id, 3)),
-      // Approving version 3 left version 1's approval as it was.
-      decidedBefore: await outcome(admitWorkflowStart(env, decided)),
+      revoked,
+      rolledBack: await outcome(start(ada, workflow.id, 1)),
+      pending: pending.map(({ version }) => version),
     }).toStrictEqual({
-      unreviewed: "workflow.binding_unapproved",
-      reviewed: "ok",
-      earlierThanReview: "workflow.binding_unapproved",
-      newlyReviewed: "ok",
-      // The approval moved the policy generation: decided again.
-      decidedBefore: "workflow.start_denied",
+      revoked: "workflow.binding_unapproved",
+      rolledBack: "workflow.binding_unapproved",
+      pending: [1],
     });
   });
 
@@ -1330,7 +1277,7 @@ describe("what a start freezes", () => {
       reviewed: { version: 1 },
     });
     const request = {
-      version: 1,
+      expected: 1,
       args: { who: "Ada" },
       key: `key-${unique()}`,
     };
@@ -1398,8 +1345,11 @@ describe("what a start freezes", () => {
     // permissions is event permissions, each waited on once.
     const aliases = Array.from({ length: 40 }, (_, index) => `events${index}`);
     const workflow = await createWorkflowResource(env, ada, `many-${unique()}`);
-    await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: documentOf({
+    await publishDefinition(
+      env,
+      ada,
+      workflow.id,
+      documentOf({
         permissions: {
           events: Object.fromEntries(
             aliases.map((alias) => [alias, { contract: key }])
@@ -1412,9 +1362,8 @@ describe("what a start freezes", () => {
           eventType: "grasp.job.completed",
           timeout: "1 hour",
         })),
-      }),
-      basedOn: null,
-    });
+      })
+    );
     for (const alias of aliases) {
       // oxlint-disable-next-line no-await-in-loop -- one approval at a time, as an admin gives them
       await approveWorkflowBinding(env, admin, workflow.id, {
@@ -1540,10 +1489,12 @@ describe("parameter configuration", () => {
     // A new version is published between the check and the write.
     const db = racingDb(
       async () =>
-        await publishWorkflowVersion(env, ada, workflow.id, {
-          definition: definitionOf({ status: "2.0.0" }),
-          basedOn: 1,
-        }),
+        await publishDefinition(
+          env,
+          ada,
+          workflow.id,
+          definitionOf({ status: "2.0.0" })
+        ),
       /insert into "workflow_resource_params"/iu
     );
     const raced = await outcome(
@@ -1576,8 +1527,11 @@ describe("parameter configuration", () => {
       ada,
       `reset-${unique()}`
     );
-    await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: documentOf({
+    await publishDefinition(
+      env,
+      ada,
+      workflow.id,
+      documentOf({
         params: {
           // Sensitive, with no default: required.
           token: { label: "Token", type: { kind: "string" } },
@@ -1587,9 +1541,8 @@ describe("parameter configuration", () => {
             sensitive: false,
           },
         },
-      }),
-      basedOn: null,
-    });
+      })
+    );
     const set = async (input: unknown) =>
       await setWorkflowParams(env, ada, workflow.id, input);
     const unset = await outcome(start(ada, workflow.id));
@@ -1632,8 +1585,11 @@ describe("parameter configuration", () => {
       ada,
       `kinds-${unique()}`
     );
-    await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: documentOf({
+    await publishDefinition(
+      env,
+      ada,
+      workflow.id,
+      documentOf({
         params: {
           fee: {
             label: "Fee",
@@ -1652,9 +1608,8 @@ describe("parameter configuration", () => {
             sensitive: false,
           },
         },
-      }),
-      basedOn: null,
-    });
+      })
+    );
     const { params } = await workflowParams(env, ada, workflow.id);
     expect(
       params.map(({ name, schema }) => [
@@ -1670,8 +1625,11 @@ describe("parameter configuration", () => {
   it("refuses values too large together to fit a start's receipt, before saving anything", async () => {
     const ada = await person("builder");
     const workflow = await createWorkflowResource(env, ada, `big-${unique()}`);
-    await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: documentOf({
+    await publishDefinition(
+      env,
+      ada,
+      workflow.id,
+      documentOf({
         params: Object.fromEntries(
           ["first", "second"].map((name) => [
             name,
@@ -1682,9 +1640,8 @@ describe("parameter configuration", () => {
             },
           ])
         ),
-      }),
-      basedOn: null,
-    });
+      })
+    );
     // Each fits its own schema; together they are over the bound.
     const large = "x".repeat(300_000);
     const together = await outcome(
@@ -1773,13 +1730,15 @@ describe("a sensitive parameter", () => {
       values: { token: secret },
     });
     // A builder declares it not sensitive in a new version.
-    await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: definitionOf({
+    await publishDefinition(
+      env,
+      ada,
+      workflow.id,
+      definitionOf({
         status: "2.0.0",
         token: "plain",
-      }),
-      basedOn: 1,
-    });
+      })
+    );
     const listed = await workflowParams(env, reader, workflow.id);
     const later = `later-${unique()}`;
     const edited = await setWorkflowParams(env, ada, workflow.id, {
@@ -1805,46 +1764,21 @@ describe("a sensitive parameter", () => {
   });
 });
 
-describe("an App binding a workflow", () => {
+describe("an App's binding of a workflow, written as a stand-in", () => {
   beforeAll(chooseModel);
 
-  it("pins an exact version, grants nothing, and while its App may start it keeps the workflow from being deleted", async () => {
+  it("starts the live version, grants nothing, and while its App may start it keeps the workflow from being deleted", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
-    const bob = await person("builder");
-    const cy = await person("builder");
-    const eve = await person("builder");
-    const staff = await person("admin", true);
     const workflow = await workflowOf(ada);
     const app = await appOf(ada);
-    await env.DB.prepare(
-      "INSERT INTO app_members (app_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'builder', ?, ?)"
-    )
-      .bind(app, bob.userId, ada.userId, Date.now())
-      .run();
-    // Cy builds the workflow, not the App.
-    await shareWorkflowResource(env, ada, workflow.id, {
-      type: "person",
-      id: cy.userId,
-      role: "builder",
-    });
     const authority: Authority = {
       subject: { type: "app", appId: appIdSchema.parse(app) },
       onBehalfOf: ada.userId,
       mode: "interactive",
       appVersion: 1,
     };
-    const bind = async (by: Person, version: number) =>
-      await bindWorkflowToApp(env, by, workflow.id, {
-        app,
-        alias: "greet",
-        version,
-      });
-    // Bob builds the App but has no role in the workflow.
-    const byBob = await outcome(bind(bob, 1));
-    const byStaff = await outcome(bind(staff, 1));
-    const missingVersion = await outcome(bind(ada, 9));
-    const binding = await bind(ada, 1);
+    const binding = await standInBinding(app, "greet", workflow.id, ada);
     const ungranted = await outcome(
       startAppBinding(env, authority, "greet", {
         args: { who: "Ada" },
@@ -1867,15 +1801,15 @@ describe("an App binding a workflow", () => {
       ({ action, target }) =>
         action === "workflow.delete_refused" && target?.id === workflow.id
     );
-    const unbinds = {
-      staff: await outcome(unbindWorkflowFromApp(env, staff, binding.id)),
-      eve: await outcome(unbindWorkflowFromApp(env, eve, binding.id)),
-      // A builder of the workflow removes what holds it up.
-      cy: await outcome(unbindWorkflowFromApp(env, cy, binding.id)),
-    };
+    // Ended, as the App's next version binding nothing there ends it.
+    await env.DB.prepare(
+      "UPDATE app_workflow_bindings SET status = 'removed' WHERE id = ?"
+    )
+      .bind(binding)
+      .run();
     // The run the start admitted holds the workflow too, until it ends:
-    // the delete after the unbind waits for it, so only the binding is
-    // what the unbind removed.
+    // the delete after the binding ended waits for it, so only the
+    // binding is what held it up.
     await vi.waitFor(
       async () => {
         const run = await resourceRunFor(env, ada, workflow.id, started.runId);
@@ -1884,31 +1818,19 @@ describe("an App binding a workflow", () => {
       { timeout: 30_000, interval: 100 }
     );
     expect({
-      byBob,
-      byStaff,
-      missingVersion,
       ungranted,
       started: started.version,
       bound,
       audited: refused?.detail,
-      unbinds,
       afterUnbind: await outcome(deleteWorkflowResource(env, ada, workflow.id)),
     }).toMatchObject({
-      byBob: "workflow.resource_unavailable",
-      byStaff: "role.forbidden",
-      missingVersion: "workflow.app_binding_invalid",
       ungranted: "workflow.start_denied",
       started: 1,
       bound: {
         code: "workflow.resource_bound",
-        details: { appBindings: [{ id: binding.id, app }] },
+        details: { appBindings: [{ id: binding, app }] },
       },
-      audited: { appBindings: 1, appBinding1: binding.id, app1: app },
-      unbinds: {
-        staff: "role.forbidden",
-        eve: "workflow.app_binding_unavailable",
-        cy: "ok",
-      },
+      audited: { appBindings: 1, appBinding1: binding, app1: app },
       afterUnbind: "ok",
     });
   });
@@ -1924,11 +1846,7 @@ describe("an App binding a workflow", () => {
       role: "user",
     });
     const app = await appOf(bob);
-    await bindWorkflowToApp(env, bob, workflow.id, {
-      app,
-      alias: "greet",
-      version: 1,
-    });
+    await standInBinding(app, "greet", workflow.id, bob);
     await expect(
       outcome(deleteWorkflowResource(env, ada, workflow.id))
     ).resolves.toBe("ok");
@@ -2019,7 +1937,7 @@ describe("retention", () => {
       values: { limit: 4 },
     });
     const key = `key-${unique()}`;
-    const request = { version: 1, args: { who: "Ada" }, key };
+    const request = { expected: 1, args: { who: "Ada" }, key };
     const first = await startWorkflow(
       env,
       { type: "person", person: ada },
@@ -2085,10 +2003,12 @@ describe("deleting a workflow", () => {
       ada,
       `greet-${unique()}`
     );
-    await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: definitionOf({ waits: true }),
-      basedOn: null,
-    });
+    await publishDefinition(
+      env,
+      ada,
+      workflow.id,
+      definitionOf({ waits: true })
+    );
     // Its run waits an hour: it hasn't ended as the deletion is asked.
     await start(ada, workflow.id);
     const error = await refusal(deleteWorkflowResource(env, ada, workflow.id));

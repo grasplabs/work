@@ -9,7 +9,7 @@ import { loadRelease } from "../src/app-releases.ts";
 import { appResourceBindings } from "../src/db/core/schema.ts";
 import { confirmPendingAction } from "../src/pending-actions.ts";
 import { approveResourceBinding } from "../src/resource-bindings.ts";
-import { commitApp } from "./app-definitions.ts";
+import { commitApp } from "./apps.ts";
 import { mockIdpWith } from "./idp.ts";
 import { planOf, recordedQueries } from "./query-plans.ts";
 import {
@@ -154,18 +154,14 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
     ]);
   });
 
-  it("refuse side effects of a version made current without an admin, until one grants it again", async () => {
+  it("hold a side effect of the builder's next version as the last one's, on the access already granted", async () => {
     const mailer = await mailerApp();
-    // The builder's next version changes nothing the binding approved,
-    // but makes the connection permission asked for again.
-    await commitApp(
-      mailer.builder.api.apps.files,
-      mailer.release.manifest.resourceId,
-      { "README.md": "Mailer." },
-      "Docs"
-    );
-    await mailer.builder.api.apps.versions.publish(
-      mailer.release.manifest.resourceId,
+    // The builder's next version changes nothing the binding approved.
+    await commitApp(mailer.builder.api, mailer.release.manifest.resourceId, {
+      "README.md": "Mailer.",
+    });
+    await mailer.builder.api.versions.rollback(
+      { kind: "app", id: mailer.release.manifest.resourceId },
       2
     );
     const next = {
@@ -176,20 +172,14 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
         2
       ),
     };
-    const input = { to: "ada@acme.test", subject: "Unapproved" };
-    const unapproved = await call(next, "mail.send", input, "next-1");
-    await mailer.admin.api.permissions.grant(mailer.permission, {
-      version: 2,
-    });
-    // The binding carries over to the identical declaration.
-    const granted = await call(next, "mail.send", input, "next-2");
+    const input = { to: "ada@acme.test", subject: "Next" };
+    // The grant and the binding carry over: no admin is asked again.
+    const held = await call(next, "mail.send", input, "next-1");
     expect({
-      unapproved: outcomeOf(unapproved),
-      granted: outcomeOf(granted),
-      sent: await sentCount("Unapproved"),
+      held: outcomeOf(held),
+      sent: await sentCount("Next"),
     }).toStrictEqual({
-      unapproved: { failed: "permission.unavailable" },
-      granted: { failed: "permission.awaiting_confirmation" },
+      held: { failed: "permission.awaiting_confirmation" },
       sent: 0,
     });
   });

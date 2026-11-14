@@ -66,7 +66,7 @@ export const appWith = async (
   const { id } = await createApp(env, owner, { name });
   // Published, for the people it is shared with: a draft is its builders'
   // alone (app-status.ts), and these tests aren't about its status.
-  await commitDefined(env, owner, id, files, "First version");
+  await commitDefined(env, owner, id, files);
   return { owner, app: id, store: await appStoreFor(env, owner, id) };
 };
 

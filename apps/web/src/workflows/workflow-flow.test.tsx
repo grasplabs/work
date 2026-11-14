@@ -65,10 +65,17 @@ const draftOf = (
   return {
     revision,
     source,
-    problems: [],
-    checkpoint: passes ? { revision, source, diagram } : null,
-    editedBy: null,
-    editedAt: null,
+    problems: passes
+      ? []
+      : [
+          {
+            code: "definition.invalid",
+            message: "A step is missing its type.",
+            pointer: "/steps/0",
+            remedy: "Give the step a type.",
+          },
+        ],
+    diagram: passes ? diagram : null,
   };
 };
 
@@ -94,9 +101,9 @@ const Page = ({ first, asked }: { first: WorkflowDraft; asked: unknown[] }) => {
 const shown = async (first: WorkflowDraft): Promise<unknown[]> => {
   const asked: unknown[] = [];
   const workflowResources = {
-    editStep: async (id: string, input: unknown) => {
+    define: async (id: string, input: unknown) => {
       await Promise.resolve();
-      asked.push({ editStep: id, input });
+      asked.push({ define: id, input });
       return draftOf(first.revision + 1, ["greet", "finished", "added"]);
     },
   };
@@ -201,9 +208,9 @@ describe("a workflow's Flow", () => {
       opened: { type: "wait", for: "1 minute" },
       asked: [
         {
-          editStep: "workflow-1",
+          define: "workflow-1",
           input: {
-            expectedRevision: 2,
+            revision: 2,
             edit: {
               kind: "change",
               pointer: "/steps/0",
@@ -217,16 +224,12 @@ describe("a workflow's Flow", () => {
     });
   });
 
-  it("offers no step to change while the latest revision doesn't pass", async () => {
-    const passed = draftOf(1, ["greet"]);
-    await shown({
-      ...draftOf(2, ["greet"], false),
-      checkpoint: passed.checkpoint,
-    });
+  it("offers no step to change while the draft doesn't pass", async () => {
+    await shown(draftOf(2, ["greet"], false));
 
     expect({
       drawn: drawn(),
       change: button("Change step greet"),
-    }).toStrictEqual({ drawn: ["greet"], change: undefined });
+    }).toStrictEqual({ drawn: [], change: undefined });
   });
 });

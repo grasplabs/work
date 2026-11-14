@@ -3,13 +3,13 @@ import type {
   App,
   AppAnswerer,
   AppChanges,
-  AppMember,
   ViewedApp,
 } from "@grasp-os/shared/apps";
 import type { OfferedCatalog } from "@grasp-os/shared/connect";
 import type { SurfaceSummary } from "@grasp-os/shared/pages";
 import { canBuild, isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import type { SubjectMember } from "@grasp-os/shared/subject-members";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
 import { Input } from "@grasp-os/ui/components/input";
 import {
@@ -40,6 +40,9 @@ import { timeoutMs, withTimeout } from "../core.ts";
 import type { Session } from "../core.ts";
 import { decidesRequests } from "../dashboard/waiting.ts";
 import { readPeople } from "../directory.ts";
+import { DraftHistory } from "../drafts/draft-history.tsx";
+import { Sharing } from "../drafts/sharing.tsx";
+import { StatusBadge } from "../drafts/status-badge.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
@@ -54,20 +57,13 @@ import {
 import { useCoreAction } from "../use-core-action.ts";
 import { AppAccessRequests } from "./app-access-requests.tsx";
 import { ExportDefinition } from "./app-definition.tsx";
-import { AppHistory } from "./app-history.tsx";
 import { AppIntegrations } from "./app-integrations.tsx";
 import { AppLinkDialog, linkAddress } from "./app-own-link.tsx";
 import { AppOwner } from "./app-owner.tsx";
 import { RemoveApp } from "./app-remove.tsx";
 import { ResetAppData } from "./app-reset.tsx";
-import { buildsApp } from "./app-role.ts";
-import { AppMembers, readMembers } from "./app-sharing.tsx";
-import {
-  ArchiveDialog,
-  StatusBadge,
-  StatusNote,
-  useStatusMove,
-} from "./app-status.tsx";
+import { buildsApp, sharesApp } from "./app-role.ts";
+import { ArchiveDialog, StatusNote, useStatusMove } from "./app-status.tsx";
 import { AppWebhooks, WebhookList } from "./app-webhooks.tsx";
 import { AppWorkflows } from "./app-workflows.tsx";
 import { SaveAsBlueprint } from "./blueprints.tsx";
@@ -326,7 +322,7 @@ const PuttingAway = ({ app }: { app: App }) => {
 
 /** What General reads: whom it is shared with, names, and who may answer for it. */
 interface GeneralRead {
-  members: AppMember[];
+  members: SubjectMember[];
   people: ReadonlyMap<string, string>;
   /**
    * Who may answer for it, as core decides (`apps.answerers`); null when
@@ -479,7 +475,7 @@ const GeneralForm = ({
     names.set(id, name);
   }
   const personName = (userId: string): string => names.get(userId) ?? userId;
-  const nameOf = (member: AppMember): string =>
+  const nameOf = (member: SubjectMember): string =>
     member.name ??
     (member.type === "person" ? personName(member.id) : member.id);
   // Whom it may be made for: a person or team it is shared with, never a
@@ -559,7 +555,7 @@ const GeneralForm = ({
         </SettingsRow>
         <SettingsRow label={t`Status`}>
           <div className="flex flex-col items-start gap-1">
-            <StatusBadge app={app} />
+            <StatusBadge archived={app.archived} live={app.currentVersion} />
             <StatusNote app={app} />
           </div>
         </SettingsRow>
@@ -676,16 +672,20 @@ const General = ({
 
 // --- Sharing -------------------------------------------------------------
 
-const Sharing = ({ app, identity }: { app: ViewedApp; identity: Identity }) => {
-  const read = useAppRead(app.id, readMembers);
-  return (
-    <Read read={read}>
-      {(members) => (
-        <AppMembers app={app} identity={identity} members={members} />
-      )}
-    </Read>
-  );
-};
+const AppSharing = ({
+  app,
+  identity,
+}: {
+  app: ViewedApp;
+  identity: Identity;
+}) => (
+  <Sharing
+    editable={sharesApp(app, identity)}
+    identity={identity}
+    owner={app.owner}
+    subject={{ kind: "app", id: app.id }}
+  />
+);
 
 // --- Connections ---------------------------------------------------------
 
@@ -961,10 +961,17 @@ const SectionBody = ({
     return <General app={app} builds={builds} identity={identity} />;
   }
   if (section === "sharing") {
-    return <Sharing app={app} identity={identity} />;
+    return <AppSharing app={app} identity={identity} />;
   }
   if (section === "history") {
-    return <AppHistory app={app} identity={identity} />;
+    return (
+      <DraftHistory
+        builds={builds && !app.archived}
+        identity={identity}
+        live={app.currentVersion}
+        subject={{ kind: "app", id: app.id }}
+      />
+    );
   }
   if (section === "connections") {
     return <Connections app={app} builds={builds} identity={identity} />;

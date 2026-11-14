@@ -20,10 +20,11 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { AppWorkflows } from "./app-workflows.tsx";
 
-// The workflows an App's App starts, on its Resources tab, against
-// core's `workflowResources` as the page reaches it over RPC (the boundary
-// from the web app), faked: it keeps the App's active bindings, replaces
-// an alias's binding when it is bound again, and forgets one unbound.
+// The workflows an App starts, on its Resources tab, against core's
+// `workflowResources`, `drafts` and `apps.define` as the page reaches them
+// over RPC (the boundary from the web app), faked: it keeps the App's
+// active bindings and its draft's revision, and answers a change of the
+// draft as core does, refusing one whose workflow the draft can't bind.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -58,19 +59,19 @@ const workflow = (
   currentVersion,
   role: "builder",
   process: null,
+  paused: false,
   createdAt: "2026-10-01T09:00:00.000Z",
 });
 
 /** Core's workflows and the App's bindings, and each change asked. */
 const fakeWorkflows = () => {
   const asked: unknown[][] = [];
-  let bindings: AppWorkflowBinding[] = [
+  const bindings: AppWorkflowBinding[] = [
     {
       id: "binding-1",
       app: appId,
       alias: "summary",
       workflowId: "flow-summary",
-      version: 1,
       boundBy: "user-owner",
       boundAt: "2026-10-20T09:00:00.000Z",
     },
@@ -89,41 +90,41 @@ const fakeWorkflows = () => {
         workflow("flow-draft", "Never published", null),
       ];
     },
-    versions: async (id: string) => {
+  };
+  const drafts = {
+    get: async (subject: { kind: "app"; id: string }) => {
       await Promise.resolve();
-      const count = id === "flow-invoice" ? 3 : 2;
-      return Array.from({ length: count }, (_, index) => ({
-        version: index + 1,
-      }));
-    },
-    bindToApp: async (
-      id: string,
-      input: { app: string; alias: string; version: number }
-    ): Promise<AppWorkflowBinding> => {
-      await Promise.resolve();
-      asked.push(["bindToApp", id, input]);
-      const bound = {
-        id: `binding-${bindings.length + 2}`,
-        app: input.app,
-        alias: input.alias,
-        workflowId: id,
-        version: input.version,
-        boundBy: "user-owner",
-        boundAt: "2026-10-30T09:00:00.000Z",
+      return {
+        subject,
+        base: 1,
+        changed: [],
+        deleted: [],
+        definitionChanged: false,
+        revision: 4,
+        updatedAt: null,
+        updatedBy: null,
       };
-      bindings = [
-        ...bindings.filter((each) => each.alias !== input.alias),
-        bound,
-      ];
-      return bound;
     },
-    unbindFromApp: async (binding: string): Promise<void> => {
+    // Not followed here: the page reads the draft once.
+    watch: async (): Promise<never> => {
       await Promise.resolve();
-      asked.push(["unbindFromApp", binding]);
-      bindings = bindings.filter((each) => each.id !== binding);
+      throw new Error("Not followed");
     },
   };
-  return { session: { workflowResources }, asked };
+  const apps = {
+    define: async (
+      app: string,
+      revision: number,
+      operation: { op: string; alias: string; workflow: string }
+    ): Promise<{ ok: false; problem: string } | { ok: true }> => {
+      await Promise.resolve();
+      asked.push(["define", app, revision, operation]);
+      return operation.workflow === "flow-summary"
+        ? { ok: false, problem: "The draft binds this workflow already." }
+        : { ok: true };
+    },
+  };
+  return { session: { workflowResources, drafts, apps }, asked };
 };
 
 let root: Root | undefined;
@@ -213,27 +214,11 @@ const choose = async (label: string, option: string): Promise<void> => {
   );
 };
 
-/** Types `text` into the field labelled `label`. */
-const type = async (label: string, text: string): Promise<void> => {
-  const box = field(label);
-  if (!(box instanceof HTMLInputElement)) {
-    throw new TypeError(`No field ${label}`);
-  }
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(
-      HTMLInputElement.prototype,
-      "value"
-    )?.set?.call(box, text);
-    box.dispatchEvent(new Event("input", { bubbles: true }));
-    await Promise.resolve();
-  });
-};
-
-/** Each binding listed: its alias, workflow and version. */
+/** Each binding listed: its alias and workflow. */
 const listed = (): string[][] =>
   [...document.querySelectorAll("tbody tr")].map((row) =>
     [...row.querySelectorAll("td")]
-      .slice(0, 3)
+      .slice(0, 2)
       .map((cell) => cell.textContent?.trim() ?? "")
   );
 
@@ -242,68 +227,50 @@ describe("The workflows an App starts, for its builders", () => {
     unmount();
   });
 
-  it("binds a new name to a published workflow's exact version", async () => {
+  it("changes what a name starts in the App's draft, which publishing makes live", async () => {
     const { session, asked } = fakeWorkflows();
     await shown(session);
-    expect(listed()).toStrictEqual([["summary", "Summarise the week", "1"]]);
 
-    await press(button("Bind a workflow"));
-    await type("Name in the App's code", "invoice");
+    await press(button("Change"));
     await choose("Workflow", "Send an invoice");
-    await choose("Version", "Version 3");
-    await press(button("Bind"));
+    await press(button("Change in the draft"));
 
-    expect({ asked, listed: listed() }).toStrictEqual({
+    expect({
+      asked,
+      listed: listed(),
+      told: document.body.textContent?.includes(
+        "Changed in the draft: publish the App"
+      ),
+    }).toStrictEqual({
       asked: [
         ["appBindings", "app-1"],
         [
-          "bindToApp",
-          "flow-invoice",
-          { app: "app-1", alias: "invoice", version: 3 },
+          "define",
+          "app-1",
+          // Over the revision the page read.
+          4,
+          { op: "bindWorkflow", alias: "summary", workflow: "flow-invoice" },
         ],
-        ["appBindings", "app-1"],
       ],
-      listed: [
-        ["invoice", "Send an invoice", "3"],
-        ["summary", "Summarise the week", "1"],
-      ],
+      // What runs is what's published: the binding is the live version's.
+      listed: [["summary", "Summarise the week"]],
+      told: true,
     });
   });
 
-  it("moves a name to another version, and unbinds one only once confirmed", async () => {
-    const { session, asked } = fakeWorkflows();
-    await shown(session);
-
-    await press(button("Change version"));
-    await choose("Version", "Version 2");
-    await press(button("Bind"));
-    const moved = listed();
-    await press(button("Unbind"));
-    await press(button("Cancel"));
-    const afterCancel = asked.filter(([call]) => call === "unbindFromApp");
-    await press(button("Unbind"));
-    await press(button("Unbind"));
-
-    expect({ moved, afterCancel, listed: listed() }).toStrictEqual({
-      moved: [["summary", "Summarise the week", "2"]],
-      afterCancel: [],
-      listed: [],
-    });
-  });
-
-  it("refuses a name the App's code couldn't use", async () => {
+  it("says why the draft took no change", async () => {
     const { session } = fakeWorkflows();
     await shown(session);
 
-    await press(button("Bind a workflow"));
-    await type("Name in the App's code", "2nd-flow");
-    await choose("Workflow", "Send an invoice");
-    await choose("Version", "Version 1");
+    await press(button("Change"));
+    await press(button("Change in the draft"));
 
     expect({
-      told: document.body.textContent?.includes("Start with a letter"),
-      bindable: button("Bind")?.disabled,
-    }).toStrictEqual({ told: true, bindable: true });
+      told: document.body.textContent?.includes(
+        "The draft binds this workflow already."
+      ),
+      drafted: document.body.textContent?.includes("Changed in the draft"),
+    }).toStrictEqual({ told: true, drafted: false });
   });
 
   it("shows an archived App's bindings without changing them, and none to who doesn't build it", async () => {
@@ -311,7 +278,7 @@ describe("The workflows an App starts, for its builders", () => {
     await shown(archived.session, { app: { ...ledger, archived: true } });
     const kept = {
       listed: listed(),
-      changes: button("Bind a workflow") !== undefined,
+      changes: button("Change") !== undefined,
     };
     unmount();
     const user = fakeWorkflows();
@@ -323,7 +290,7 @@ describe("The workflows an App starts, for its builders", () => {
 
     expect({ kept, userAsked, staffAsked: staff.asked }).toStrictEqual({
       kept: {
-        listed: [["summary", "Summarise the week", "1"]],
+        listed: [["summary", "Summarise the week"]],
         changes: false,
       },
       userAsked: [],

@@ -37,7 +37,6 @@ import { z } from "zod";
 
 import { invocationFor } from "../src/app-functions.ts";
 import type { Release } from "../src/app-releases.ts";
-import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { appFor } from "../src/apps.ts";
 import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
@@ -54,10 +53,7 @@ import { StoreHost } from "../src/store-host.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { dispatchSendEventIntent } from "../src/workflow-event-sends.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { appWorkflowStarts } from "../src/workflow-start-intents.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import {
@@ -65,12 +61,13 @@ import {
   terminateResourceRun,
 } from "../src/workflows/resource-runs.ts";
 import { storeOfNewApp } from "./app-stores.ts";
-import { standInLive } from "./apps.ts";
+import { standInBinding, standInLive } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
 import { liveStatus } from "./runs.ts";
 import { unique } from "./sign-in.ts";
 import { applied } from "./store-schemas.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // The events a mutation sends workflow runs (spec 10.7.4; function-host.ts stages
 // them, workflow-event-sends.ts admits and delivers them), from their
@@ -399,20 +396,13 @@ const fixture = async (
     },
   });
   const workflow = await createWorkflowResource(env, ada, `review-${unique()}`);
-  await publishWorkflowVersion(env, ada, workflow.id, {
-    definition: definitionOf(contract),
-    basedOn: null,
-  });
+  await publishDefinition(env, ada, workflow.id, definitionOf(contract));
   await approveWorkflowBinding(env, admin, workflow.id, {
     alias: "jobEvents",
     target: { kind: "event" },
     reviewed: { version: 1 },
   });
-  await bindWorkflowToApp(env, ada, workflow.id, {
-    app,
-    alias: "review",
-    version: 1,
-  });
+  await standInBinding(app, "review", workflow.id, ada);
   await granted(admin, ada, app, workflow.id, ["start"]);
   const send = await granted(admin, ada, app, workflow.id, ["send"]);
   await before?.({ admin, ada, app, workflowId: workflow.id });
@@ -434,7 +424,7 @@ const fixture = async (
     workflows: [
       {
         alias: "review",
-        pinned: { workflowId: workflow.id, version: 1 },
+        workflowId: workflow.id,
       },
     ],
   };
@@ -546,6 +536,17 @@ const outboxOf = async (store: OpenStore) =>
         settled: settled_at !== null,
         undeliverable,
       }))
+  );
+
+/** The workflow version each sent event staged in `store`'s outbox names. */
+const stagedVersions = async (store: OpenStore) =>
+  await runInDurableObject(objectOf(store), (_instance, state) =>
+    state.storage.sql
+      .exec<{ version: number }>(
+        "SELECT json_extract(intent, '$.data.version') AS version FROM sdk_change_outbox ORDER BY rowid"
+      )
+      .toArray()
+      .map(({ version }) => version)
   );
 
 /** Drains the store's outbox with `consumer` taking its sent events, at `at`. */
@@ -663,7 +664,7 @@ describe(
         env,
         { type: "person", person: fx.ada },
         fx.workflowId,
-        { version: 1, args: { jobId: "job-9" }, key: unique() }
+        { expected: 1, args: { jobId: "job-9" }, key: unique() }
       );
       const raw = async (
         path: "jobs.rawSendEvent" | "jobs.undeclared",
@@ -749,12 +750,12 @@ describe(
       });
     });
 
-    it("sends only the events its sealed version names, whatever the workflow is rebound to, and keeps a refused one as evidence", async () => {
+    it("sends only the events its sealed version names, whichever version of the workflow is live, and keeps a refused one as evidence", async () => {
       let runId = "";
       const fx = await fixture(async ({ admin, ada, app, workflowId }) => {
         runId = await startedRun({ app }, ada);
-        // A later version of the workflow with an event of its own, bound
-        // to the App in place of the one its version was sealed with.
+        // A later version of the workflow live, with an event of its own:
+        // the App's binding follows it.
         const contract = `later-events-${unique()}`;
         await publishCatalogContract(env, admin, {
           key: contract,
@@ -766,12 +767,14 @@ describe(
             },
           },
         });
-        await publishWorkflowVersion(env, ada, workflowId, {
-          definition: definitionOf(contract, {
+        await publishDefinition(
+          env,
+          ada,
+          workflowId,
+          definitionOf(contract, {
             laterEvents: { contract },
-          }),
-          basedOn: 1,
-        });
+          })
+        );
         for (const alias of ["jobEvents", "laterEvents"]) {
           // oxlint-disable-next-line no-await-in-loop -- one approval after the other
           await approveWorkflowBinding(env, admin, workflowId, {
@@ -780,11 +783,6 @@ describe(
             reviewed: { version: 2 },
           });
         }
-        await bindWorkflowToApp(env, ada, workflowId, {
-          app,
-          alias: "review",
-          version: 2,
-        });
       });
       const raw = async (event: string) =>
         answerOf(
@@ -812,13 +810,15 @@ describe(
       expect({
         // The new event: the version was sealed without it.
         later: await raw("laterEvents"),
-        // The sealed one: its workflow is bound to another version now.
+        // The sealed one: the live version names it too.
         sealed: await raw("jobEvents"),
         refusals: await refusals(),
         outbox: await outboxOf(fx.store),
+        // The run's own version, audited as it is sent: not the one live.
+        version: await stagedVersions(fx.store),
       }).toStrictEqual({
         later: "permission.not_allowed",
-        sealed: "permission.unavailable",
+        sealed: "staged",
         refusals: [
           {
             function: "jobs.rawSendEvent",
@@ -828,7 +828,10 @@ describe(
             errorCode: "permission.not_allowed",
           },
         ],
-        outbox: [],
+        outbox: [
+          { kind: "workflow.send_event", settled: false, undeliverable: null },
+        ],
+        version: [1],
       });
     });
 

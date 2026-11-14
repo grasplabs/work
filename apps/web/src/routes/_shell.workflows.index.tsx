@@ -3,7 +3,6 @@ import type { BusinessProcess } from "@grasp-os/shared/business-processes";
 import { canBuild } from "@grasp-os/shared/roles";
 import { runFilterStatuses } from "@grasp-os/shared/run-filter";
 import type { RunFilterStatus } from "@grasp-os/shared/run-filter";
-import type { WorkflowGoLiveWaiting } from "@grasp-os/shared/workflow-lifecycle";
 import type { WorkflowResource } from "@grasp-os/shared/workflow-resources";
 import type {
   RunActivity,
@@ -60,7 +59,6 @@ import {
   processNames,
 } from "../workflows/business-process.tsx";
 import { RunFiguresView } from "../workflows/figures.tsx";
-import { GoLivesWaiting } from "../workflows/go-lives-waiting.tsx";
 import { needsAttention, processesIn, showsUnder } from "../workflows/lists.ts";
 import { listRuns, listWorkflows, readActivity } from "../workflows/reads.ts";
 import { runFiguresOf } from "../workflows/run-figures.ts";
@@ -75,8 +73,7 @@ import type { WorkflowProcesses } from "../workflows/workflows-table.tsx";
 
 // Everything that runs on its own, in one place: every workflow of every
 // App the person can open, at work and on the way; those that need a
-// person now, with the independent workflows waiting for the reader to
-// let them go live; and, on the Runs tab, today's runs in time, the
+// person now; and, on the Runs tab, today's runs in time, the
 // figures core counted over the last days and their runs, waiting ones
 // first, filtered by status. The lists filter by the
 // business process their workflows serve, once they serve more than one.
@@ -227,25 +224,18 @@ const ListedWorkflows = ({
 
 /**
  * What needs a person: the workflows whose runs wait or failed lately,
- * and those waiting for the reader to let them go live, each serving
- * `process`.
+ * each serving `process`.
  */
 const NeedsAttention = ({
   workflows,
   independent,
-  goLives,
   processes,
   process,
-  me,
-  people,
 }: {
   workflows: Loaded<WorkflowSummary[]>;
   independent: Loaded<WorkflowResource[]>;
-  goLives: Loaded<WorkflowGoLiveWaiting[]>;
   processes: WorkflowProcesses;
   process: BusinessProcess | undefined;
-  me: string;
-  people: ReadonlyMap<string, string>;
 }) => {
   const rows =
     workflows.state === "ready"
@@ -255,33 +245,18 @@ const NeedsAttention = ({
             showsUnder(process, processOf(processes, row))
         )
       : [];
-  const served = new Map(
-    independent.state === "ready"
-      ? independent.data.map((workflow) => [workflow.id, workflow.process])
-      : []
-  );
-  const waiting =
-    goLives.state === "ready"
-      ? goLives.data.filter((each) =>
-          showsUnder(process, served.get(each.workflowId) ?? null)
-        )
-      : [];
   // Under a process, a list whose processes couldn't be read says so
   // rather than showing fewer.
   const independentGone = domainsUnchecked(independent, process);
   const nothing =
-    workflows.state === "ready" &&
-    goLives.state === "ready" &&
-    !independentGone &&
-    rows.length === 0 &&
-    waiting.length === 0;
+    workflows.state === "ready" && !independentGone && rows.length === 0;
   return (
     <div className="mt-4 flex flex-col gap-8">
       {nothing ? (
         <EmptyCard>
           <Trans>
-            No workflow needs attention: nothing waits for a decision or to go
-            live, nothing failed lately.
+            No workflow needs attention: nothing waits for a decision, nothing
+            failed lately.
           </Trans>
         </EmptyCard>
       ) : null}
@@ -289,14 +264,10 @@ const NeedsAttention = ({
       <IndependentUnread
         gone={independentGone}
         independent={independent}
-        listed={workflows.state === "ready" || goLives.state === "ready"}
+        listed={workflows.state === "ready"}
       />
       {independentGone || rows.length === 0 ? null : (
         <WorkflowLists processes={processes} rows={rows} />
-      )}
-      {goLives.state === "ready" ? null : <NotLoadedState page={goLives} />}
-      {goLives.state !== "ready" || independentGone ? null : (
-        <GoLivesWaiting names={{ people, me }} waiting={waiting} />
       )}
     </div>
   );
@@ -414,8 +385,8 @@ const WorkflowCount = ({ count }: { count: number | undefined }) => {
  * while a process is chosen: then which serve it can't be told.
  */
 /**
- * The independent workflows' processes place rows and go-lives alike:
- * unread under a process, neither list shows, and this says why.
+ * The independent workflows' processes place rows: unread under a
+ * process, the list doesn't show, and this says why.
  */
 const IndependentUnread = ({
   gone,
@@ -451,15 +422,12 @@ const countAll = (
       ).length
     : undefined;
 
-/**
- * What needs a person under `process`: the Apps' workflows that do,
- * and the go-lives waiting.
- */
+/** What needs a person under `process`: the workflows that do. */
 const countNeeds = (
   lists: Lists,
   process: BusinessProcess | undefined
 ): number | undefined => {
-  if (lists.workflows.state !== "ready" || lists.goLives.state !== "ready") {
+  if (lists.workflows.state !== "ready") {
     return undefined;
   }
   // Under a process, which workflow serves it is read off the workflows'
@@ -468,24 +436,11 @@ const countNeeds = (
   if (domainsUnchecked(lists.independent, process)) {
     return undefined;
   }
-  const served = new Map(
-    lists.independent.state === "ready"
-      ? lists.independent.data.map((workflow) => [
-          workflow.id,
-          workflow.process,
-        ])
-      : []
-  );
-  return (
-    lists.workflows.data.filter(
-      (row) =>
-        needsAttention(row) &&
-        showsUnder(process, processOf(lists.processes, row))
-    ).length +
-    lists.goLives.data.filter((each) =>
-      showsUnder(process, served.get(each.workflowId) ?? null)
-    ).length
-  );
+  return lists.workflows.data.filter(
+    (row) =>
+      needsAttention(row) &&
+      showsUnder(process, processOf(lists.processes, row))
+  ).length;
 };
 
 /** What the Runs tab's log shows: its runs. */
@@ -655,10 +610,7 @@ const Workflows = () => {
           <TabsContent value="needs">
             {page.tab === "needs" ? (
               <NeedsAttention
-                goLives={lists.goLives}
                 independent={lists.independent}
-                me={identity.userId}
-                people={page.people}
                 process={process}
                 processes={lists.processes}
                 workflows={lists.workflows}
@@ -702,33 +654,26 @@ const processesOf = (
 
 /**
  * What the lists show, read on every tab, as the tabs count them: the
- * Apps' workflows, the independent ones, the processes the Apps
- * serve, and the go-lives waiting for the reader.
+ * Apps' workflows, the independent ones, and the processes they serve.
  */
 interface Lists {
   workflows: Loaded<WorkflowSummary[]>;
   independent: Loaded<WorkflowResource[]>;
   processes: WorkflowProcesses;
-  goLives: Loaded<WorkflowGoLiveWaiting[]>;
 }
 
 const readLists = async (core: CoreConnection): Promise<Lists> => {
-  const [workflows, independent, goLives] = await Promise.all([
+  const [workflows, independent] = await Promise.all([
     loadFromCore(core, listWorkflows),
     loadFromCore(
       core,
       async (session) => await session.workflowResources.list()
-    ),
-    loadFromCore(
-      core,
-      async (session) => await session.workflowResources.lifecycle.waiting()
     ),
   ]);
   return {
     workflows,
     independent,
     processes: processesOf(independent),
-    goLives,
   };
 };
 

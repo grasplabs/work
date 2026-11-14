@@ -5,8 +5,8 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { createFromBlueprint } from "../src/app-blueprints.ts";
-import { commitApp, testApp, withFiles } from "./app-definitions.ts";
-import { outlook, release, requestGranted } from "./apps.ts";
+import { testApp, withFiles } from "./app-definitions.ts";
+import { commitApp, outlook, release, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import {
   collectionWithNote,
@@ -107,12 +107,7 @@ export const Route = createFileRoute("/")({ component: Notes });
 const notesApp = async (owner: Person): Promise<string> => {
   const { id } = await owner.api.apps.create({ name: `Notes ${unique()}` });
   await release(owner, id, v1);
-  await commitApp(
-    owner.api.apps.files,
-    id,
-    { "AGENTS.md": "# Notes, v2\n" },
-    "Version 2"
-  );
+  await commitApp(owner.api, id, { "AGENTS.md": "# Notes, v2\n" });
   return id;
 };
 
@@ -397,11 +392,16 @@ describe("blueprints", { timeout: 60_000 }, () => {
     // The same code and none of the data: the new App starts empty, and
     // shared with nobody.
     const theirs = await maker.api.apps.list();
-    await maker.api.apps.versions.publish(app.id, 1);
+    await maker.api.versions.rollback({ kind: "app", id: app.id }, 1);
     const { name: sourceName } = await owner.api.apps.get(source);
+    // The source's version 1, as its draft saved it.
+    const sourceFiles = await owner.api.versions.files(
+      { kind: "app", id: source },
+      1
+    );
     expect({
       listed: theirs.some(({ id }) => id === app.id),
-      files: await maker.api.apps.files.read(app.id, 1),
+      files: await maker.api.versions.files({ kind: "app", id: app.id }, 1),
       // The maker has a role in the source, so its notes would show to
       // them had any come along.
       sourceNotes: await notesOf(maker, source),
@@ -412,9 +412,10 @@ describe("blueprints", { timeout: 60_000 }, () => {
       listed: true,
       // The same code, but for AGENTS.md: the source's agents wrote it
       // from what the source read, which the copy has no sources for.
-      files: withFiles(v1, {
+      files: {
+        ...sourceFiles,
         "AGENTS.md": `Created from the blueprint ${sourceName}. Write what this App does here.\n`,
-      }).files,
+      },
       sourceNotes: { ok: true, value: ["Only the source's"] },
       notes: { ok: true, value: [] },
       members: [],

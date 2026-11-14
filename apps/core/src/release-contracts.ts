@@ -14,7 +14,8 @@ import type { CatalogContractDefinition } from "@grasp-os/shared/workflow-resour
 // instructions and output schema, an approval's prompt and input).
 //
 // A contract grants nothing. What serves a binding to one is still an
-// admin's approval of that workflow's version: the model it reads with,
+// admin's approval of that workflow's binding, for every version that
+// declares it the same: the model it reads with,
 // through the model gateway and the workspace's own provider key, or who
 // answers its decision.
 

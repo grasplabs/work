@@ -1,13 +1,13 @@
 // @vitest-environment happy-dom
-import type {
-  AppMember,
-  AppMemberRef,
-  NewAppMember,
-  ShareCandidates,
-  ViewedApp,
-} from "@grasp-os/shared/apps";
+import type { ViewedApp } from "@grasp-os/shared/apps";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
+import type {
+  NewSubjectMember,
+  ShareCandidates,
+  SubjectMember,
+  SubjectMemberRef,
+} from "@grasp-os/shared/subject-members";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -21,13 +21,14 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { AppMembers } from "./app-sharing.tsx";
+import { sharesApp } from "../apps/app-role.ts";
+import { Sharing } from "./sharing.tsx";
 
-// Sharing an App's App on its Members tab, against core's App members
+// Sharing, in an App's or a workflow's settings, against core's members
 // API as the page reaches it over RPC (the boundary from the web app),
-// faked: it keeps whom the App is shared with and in which role, answers
-// the tab's next read with it, and offers the organization's people and
-// teams to share with.
+// faked alike for both kinds: it keeps whom it is shared with and in
+// which role, answers the next read with it, and offers the
+// organization's people and teams to share with.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -70,17 +71,17 @@ const candidates: ShareCandidates = {
 
 /** Core's App members, kept as builders change them, and each change asked. */
 const fakeMembers = (
-  initial: AppMember[] = [],
+  initial: SubjectMember[] = [],
   offering: ShareCandidates = candidates
 ) => {
   const asked: unknown[][] = [];
   let kept = initial;
-  const nameOf = ({ type, id }: AppMemberRef): string =>
+  const nameOf = ({ type, id }: SubjectMemberRef): string =>
     (type === "team" ? offering.teams : offering.people).find(
       (each) => each.id === id
     )?.name ?? id;
   const members = {
-    list: async (): Promise<AppMember[]> => {
+    list: async (): Promise<SubjectMember[]> => {
       await Promise.resolve();
       return kept;
     },
@@ -88,10 +89,13 @@ const fakeMembers = (
       await Promise.resolve();
       return offering;
     },
-    add: async (_app: string, member: NewAppMember): Promise<AppMember> => {
+    add: async (
+      _app: string,
+      member: NewSubjectMember
+    ): Promise<SubjectMember> => {
       await Promise.resolve();
       asked.push(["add", member.type, member.id, member.role]);
-      const added: AppMember = {
+      const added: SubjectMember = {
         type: member.type,
         id: member.id,
         name: nameOf(member),
@@ -107,7 +111,7 @@ const fakeMembers = (
       ];
       return added;
     },
-    remove: async (_app: string, member: AppMemberRef): Promise<void> => {
+    remove: async (_app: string, member: SubjectMemberRef): Promise<void> => {
       await Promise.resolve();
       asked.push(["remove", member.type, member.id]);
       kept = kept.filter(
@@ -115,7 +119,10 @@ const fakeMembers = (
       );
     },
   };
-  return { session: { apps: { members } }, asked };
+  return {
+    session: { apps: { members }, workflowResources: { members } },
+    asked,
+  };
 };
 
 let root: Root | undefined;
@@ -130,10 +137,11 @@ const settled = async (): Promise<void> => {
   });
 };
 
-/** The Members tab on what `session` holds, for `viewed`. */
+/** Sharing on what `session` holds, for `viewed`, as an App or a workflow. */
 const shown = async (
   session: ReturnType<typeof fakeMembers>["session"],
-  viewed: ViewedApp
+  viewed: ViewedApp,
+  kind: "app" | "workflow" = "app"
 ): Promise<void> => {
   const core = {
     withSession: async <T,>(
@@ -141,12 +149,12 @@ const shown = async (
     ): Promise<T> => await run(session),
   };
   const rootRoute = createRootRoute({
-    loader: async () => await session.apps.members.list(),
     component: () => (
-      <AppMembers
-        app={viewed}
+      <Sharing
+        editable={sharesApp(viewed, viewer)}
         identity={viewer}
-        members={rootRoute.useLoaderData()}
+        owner={viewed.owner}
+        subject={{ kind, id: viewed.id }}
       />
     ),
   });
@@ -214,7 +222,7 @@ const listed = (): string[] =>
     (cell) => cell.textContent?.trim() ?? ""
   );
 
-describe("Sharing an App's App", () => {
+describe("Sharing an App or a workflow", () => {
   afterEach(() => {
     act(() => {
       root?.unmount();
@@ -252,6 +260,23 @@ describe("Sharing an App's App", () => {
         ["add", "team", "team-sales", "user"],
       ],
       listed: ["Ann", "Sales (team)"],
+    });
+  });
+
+  it("shares a workflow alike, through its own members", async () => {
+    const { session, asked } = fakeMembers();
+    await shown(session, app("builder"), "workflow");
+
+    await press(button("Share"));
+    await press(
+      [...document.querySelectorAll("[cmdk-item]")].find((each) =>
+        each.textContent?.includes("Bo")
+      )
+    );
+
+    expect({ asked, listed: listed() }).toStrictEqual({
+      asked: [["add", "person", "user-bo", "user"]],
+      listed: ["Bo"],
     });
   });
 

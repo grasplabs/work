@@ -226,7 +226,7 @@ export const copyOf = async (
     // oxlint-disable-next-line no-await-in-loop -- one grant at a time
     await grantReviewed(admin.api, id);
   }
-  await admin.api.apps.versions.publish(made.app.id, 1);
+  await admin.api.versions.rollback({ kind: "app", id: made.app.id }, 1);
   // The model the workflow reads with, approved by an admin on the
   // workflow's page, for the version the copy got.
   if (model) {

@@ -6,7 +6,8 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { draftSummary, readDraft, saveDraft } from "../src/app-drafts.ts";
+import { appKind } from "../src/apps.ts";
+import { draftSummary, readDraft, saveDraft } from "../src/drafts.ts";
 import {
   draftDefinitionOf,
   idp,
@@ -17,8 +18,8 @@ import {
   findApp,
 } from "./agent-builds-harness.ts";
 import { codeResults, codeStep, says } from "./agent-chat.ts";
-import { commitApp, definedWith, redefined } from "./app-definitions.ts";
-import { published, release } from "./apps.ts";
+import { definedWith, redefined } from "./app-definitions.ts";
+import { commitApp, published, release } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdpWith } from "./idp.ts";
 import { notesFiles } from "./notes-client-app.ts";
@@ -48,8 +49,9 @@ const draftOver = async (
 ): Promise<void> => {
   await saveDraft(
     env,
+    appKind,
     appIdSchema.parse(app),
-    { ...(await readDraft(env, app)), base },
+    { ...(await readDraft(env, { kind: "app", id: app })), base },
     { changes: { "notes.md": "Notes\n" }, unchanged: [] },
     {
       by: {
@@ -263,7 +265,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     // and isn't current yet.
     await release(builder, app, notesFiles);
     await commitApp(
-      builder.api.apps.files,
+      builder.api,
       app,
       definedWith(notesFiles, {
         op: "addField",
@@ -271,8 +273,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         name: "category",
         type: "v.string()",
         answer: "general",
-      }),
-      "Categories"
+      })
     );
     // A builder's draft over version 2: the agent changes what they
     // began.
@@ -318,7 +319,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         type: "v.string().optional()",
       })
     );
-    await builder.api.apps.versions.publish(app, 1);
+    await builder.api.versions.rollback({ kind: "app", id: app }, 1);
     // A builder's draft over version 2 still: the agent changes what they
     // began.
     await draftOver(builder, app, 2);
@@ -397,9 +398,9 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       })),
     }));
 
-    await expect(
-      commitApp(builder.api.apps.files, app, renamed, "Rename")
-    ).resolves.toMatchObject({ version: 2 });
+    await expect(commitApp(builder.api, app, renamed)).resolves.toMatchObject({
+      version: 2,
+    });
   });
 
   it("keeps no change that leaves a file as the base has it", async () => {
@@ -421,12 +422,14 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
 
     const [result] = await codeResults(chat.stub, chat.chat.id);
     expect(returned(result?.text)).toStrictEqual([["notes.md"], []]);
-    await expect(readDraft(env, existing)).resolves.toMatchObject({
+    await expect(
+      readDraft(env, { kind: "app", id: existing })
+    ).resolves.toMatchObject({
       changes: {},
       revision: 2,
     });
     // Its builders see it as changing nothing.
-    await expect(draftSummary(env, existing)).resolves.toMatchObject({
+    await expect(draftSummary(env, appKind, existing)).resolves.toMatchObject({
       changed: [],
       revision: 2,
     });

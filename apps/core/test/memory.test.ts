@@ -7,8 +7,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { forContext, saveUserMemory } from "../src/knowledge/memory.ts";
 import { restrict } from "../src/restricted.ts";
 import type { WorkContext } from "../src/restricted.ts";
-import { commitApp } from "./app-definitions.ts";
-import { release } from "./apps.ts";
+import { commitApp, release } from "./apps.ts";
 import { actingFor, newChat } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import { withLoweredLimit } from "./memory-limits.ts";
@@ -530,24 +529,14 @@ describe("memory limits", setUpTime, () => {
       ),
       user: await outcome(saveOver(admin, personal, "USER.md", sized(8001))),
       appCode: await outcome(
-        commitApp(
-          builder.api.apps.files,
-          appId,
-          { "AGENTS.md": sized(8001) },
-          "Over"
-        )
+        commitApp(builder.api, appId, { "AGENTS.md": sized(8001) })
       ),
       atLimit: await outcome(saveOver(admin, memory, "MEMORY.md", sized(8000))),
       userAtLimit: await outcome(
         saveOver(admin, personal, "USER.md", sized(8000))
       ),
       appCodeAtLimit: await outcome(
-        commitApp(
-          builder.api.apps.files,
-          appId,
-          { "AGENTS.md": sized(8000) },
-          "At the limit"
-        )
+        commitApp(builder.api, appId, { "AGENTS.md": sized(8000) })
       ),
       // Not memory files: another collection's, another path in the App.
       elsewhere: await outcome(saveOver(admin, notes, "USER.md", sized(9000))),
@@ -555,12 +544,7 @@ describe("memory limits", setUpTime, () => {
         saveOver(admin, memory, "notes.md", sized(9000))
       ),
       appOtherFile: await outcome(
-        commitApp(
-          builder.api.apps.files,
-          appId,
-          { "docs/AGENTS.md": sized(9000) },
-          "Another file"
-        )
+        commitApp(builder.api, appId, { "docs/AGENTS.md": sized(9000) })
       ),
     };
     const refused = await admin.api.knowledge
