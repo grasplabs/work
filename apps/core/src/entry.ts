@@ -6,6 +6,7 @@ import { appVisitorApiPath } from "@grasp-os/shared/app-visitors";
 import { auditExportPath } from "@grasp-os/shared/audit-log";
 import {
   brainActionPath,
+  brainErasurePath,
   brainReportPath,
 } from "@grasp-os/shared/brain-report";
 import { channelPlatformOf } from "@grasp-os/shared/channels";
@@ -52,7 +53,11 @@ import {
   brainRestorePath,
   brainRestoreResponse,
 } from "./brain-next-exports.ts";
-import { brainActionResponse, brainReportResponse } from "./brain-report.ts";
+import {
+  brainActionResponse,
+  brainErasureResponse,
+  brainReportResponse,
+} from "./brain-report.ts";
 import { installBuiltinsOnce } from "./builtins.ts";
 import { ensureClockOnce } from "./clock.ts";
 import {
@@ -355,6 +360,7 @@ const pathHandlers: ReadonlyMap<
   [aiStatusReportPath, aiStatusReportResponse],
   [brainReportPath, brainReportResponse],
   [brainActionPath, brainActionResponse],
+  [brainErasurePath, brainErasureResponse],
   [brainExportsPath, brainExportsResponse],
   [brainOwnExportPath, brainOwnExportResponse],
   [brainRestorePath, brainRestoreResponse],

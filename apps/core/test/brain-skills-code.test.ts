@@ -30,6 +30,11 @@ import {
   revokePermission,
 } from "../src/permissions.ts";
 import { approveResourceBinding } from "../src/resource-bindings.ts";
+import {
+  approveShare,
+  saveOwnSkill,
+  shareOwnSkill,
+} from "../src/skill-shares.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import {
@@ -45,6 +50,8 @@ import { allEvents } from "./audit-events.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
+import { holdsNothing } from "./stored-skills.ts";
+import { newTeam } from "./teams.ts";
 
 // The Brain's skills for code (GRA-1830; the threat model is on the
 // issue): an App's action (`ctx.brain.skills.select` / `.read`) and a
@@ -658,7 +665,8 @@ describe("skills, as an App and a workflow reach them", setUpTime, () => {
         onBehalfOf: ada.userId,
         mode: "interactive",
       }),
-      { personal: true },
+      "person",
+      holdsNothing,
       asked
     );
     expect(inOwnChat.map(({ scope, name }) => [scope, name])).toStrictEqual([
@@ -679,6 +687,101 @@ describe("skills, as an App and a workflow reach them", setUpTime, () => {
       said: false,
     });
     expect(forUma).toStrictEqual(forAda);
+  });
+
+  it("never hands an App or a workflow a team's skill, even for someone in the team, nor one that declares what it needs: the same answer as for one that doesn't exist", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const word = `team${unique().replaceAll(/\W/gu, "").toLowerCase()}`;
+    const team = await newTeam(ada.userId);
+    const teamName = `${word}-team`;
+    // Ada's team's skill, shared and approved, whose words are the task's.
+    const saved = await saveOwnSkill(
+      env,
+      ada,
+      `---\nname: ${teamName}\ndescription: Filing ${word} receipts.\n---\n\nFile ${word} receipts by Friday.\n`
+    );
+    const share = await shareOwnSkill(env, ada, teamName, saved.version, {
+      team,
+    });
+    await approveShare(env, admin, share.id);
+    // The company's: one that needs a tool, one that needs nothing.
+    const needing = `${word}-needs`;
+    const plain = `${word}-plain`;
+    const store = brainOf(inJurisdiction(env, env.BRAIN_STORE));
+    for (const [name, requires] of [
+      [needing, "requires:\n  tools: [mail.send]\n"],
+      [plain, ""],
+    ] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one skill at a time
+      await store.addInstructions({
+        source: `skill:company:${name}`,
+        change: crypto.randomUUID(),
+        text: `---\nname: ${name}\ndescription: Filing ${word} receipts.\n${requires}---\n\nFile ${word} receipts.\n`,
+        access: { kind: "audience", group: "company" },
+      });
+    }
+    const app = await boundAppOf(ada, admin);
+    const { workflow } = await skillsWorkflow(ada, admin);
+    const asked = { task: `${word} receipts` };
+    const read = async (skill: unknown) =>
+      await calledOf(app, ada, "skills.ask", reading({ skill }));
+    const selected = await calledOf(app, ada, "skills.ask", selecting(asked));
+    // Her own chat, as far as her teams go, does find the team's skill.
+    const inChat = await selectSkillsFor(
+      env,
+      authoritySchema.parse({
+        subject: { type: "agent", agentId: crypto.randomUUID() },
+        onBehalfOf: ada.userId,
+        mode: "interactive",
+      }),
+      "teams",
+      holdsNothing,
+      asked
+    );
+
+    expect({
+      inChat: inChat
+        .filter((skill) => skill.name.startsWith(word))
+        .map(({ scope, name }) => `${scope} ${name}`)
+        .toSorted(),
+      selected: z
+        .object({ skills: z.array(z.object({ name: z.string() })) })
+        .parse(selected)
+        .skills.map(({ name }) => name)
+        .filter((name) => name.startsWith(word)),
+      readTeam: [
+        await read({ scope: "team", team, name: teamName, version: 1 }),
+        await read({
+          scope: "team",
+          team: crypto.randomUUID(),
+          name: teamName,
+          version: 1,
+        }),
+      ],
+      readNeeding: [
+        await read({ scope: "company", name: needing, version: 1 }),
+        await read({ scope: "company", name: `${word}-none`, version: 1 }),
+      ],
+      run: z
+        .object({ name: z.string() })
+        .parse(await ranOf(ada, workflow.id, asked)).name,
+    }).toStrictEqual({
+      inChat: [`company ${plain}`, `team ${teamName}`],
+      // Only the company's skill that needs nothing.
+      selected: [plain],
+      // As a skill of a team no one wrote: no input code may give.
+      readTeam: [
+        { failed: "permission.invalid_args" },
+        { failed: "permission.invalid_args" },
+      ],
+      // As a skill of the company no one wrote.
+      readNeeding: [
+        { failed: "permission.item_not_found" },
+        { failed: "permission.item_not_found" },
+      ],
+      run: plain,
+    });
   });
 
   it("withholds what a run read of a skill once its grant is revoked or the skill erased while it waits, and lets it through when nothing changed", async () => {

@@ -451,6 +451,7 @@ describe("erasing a source", { timeout: 120_000 }, () => {
           return { kind: "nothing" };
         },
       },
+      contextTokens: null,
     });
     const hashes = await Promise.all(texts.map(hashOf));
     const kept = async () => {

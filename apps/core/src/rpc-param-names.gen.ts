@@ -442,9 +442,9 @@ export const rpcParamNames: ParamNames = {
     "overview": [],
     "read": ["scope","name"],
     "remove": ["name"],
-    "retire": ["name"],
+    "retire": ["name","audience"],
     "save": ["text"],
-    "share": ["name","version"],
+    "share": ["name","version","audience"],
     "waiting": [],
   },
   "StephenRequestsRpc": {

@@ -8,8 +8,9 @@ import { identifierMaxLength } from "./identifier.ts";
 // progress, its erasure ledger, the steps of its tick that failed, and
 // how its recall does by each way (counts), and what its model calls
 // spent this month by purpose, as the model gateway recorded them;
-// and the three things staff may do to it: put a parked item back in the
-// queue, rebuild the word indexes, and re-embed. The admin asks as it asks for the snapshot: through the
+// the three things staff may do to it: put a parked item back in the
+// queue, rebuild the word indexes, and re-embed; and whether one source
+// or one person, named as the client gave it, was erased. The admin asks as it asks for the snapshot: through the
 // router's route with the router secret, signed with a key both derive
 // from the client's auth secret for each purpose alone (a read's, an
 // action's), naming the staff member Cloudflare Access let in, whom
@@ -22,7 +23,10 @@ import { identifierMaxLength } from "./identifier.ts";
 // text, no title, no source or work key, no payload, no person's id or
 // name, and no erasure singled out: not which, not when, not the SHA-256
 // the ledger names one by. Core builds the report field by field and this schema names nothing
-// else.
+// else. The one exception is asked for by name: staff give a source's key
+// or a person's id, as the client gave it to them, and get whether it was
+// erased and when, nothing more, with the lookup in the client's audit
+// log before it is answered.
 
 /** Where the admin reads a client's Brain. Behind the router-secret check. */
 export const brainReportPath = "/platform/brain";
@@ -90,6 +94,71 @@ export const brainActionAnswerSchema = z.object({
   outcome: z.enum(brainActionOutcomes),
 });
 export type BrainActionAnswer = z.infer<typeof brainActionAnswerSchema>;
+
+/** Where the admin asks whether something was erased from a client's Brain. Behind the router-secret check. */
+export const brainErasurePath = "/platform/brain/erasure";
+
+/** The purpose an erasure lookup's signing key is derived for: never a read's or an action's. */
+export const brainErasurePurpose = "grasp-os brain erasure key";
+
+/** The most bytes an erasure lookup's body may have: a key of 256 characters, each escaped. */
+export const brainErasureMaxBytes = 2048;
+
+/** A source's key or a person's id, as the client gave it to staff. */
+const erasedNameSchema = z
+  .string()
+  .min(1)
+  .max(256)
+  .refine((name) => name.isWellFormed(), {
+    message: "Holds an unpaired surrogate",
+  });
+
+/**
+ * What staff look up: a source, by the Brain's key for it (its producer,
+ * ":", and the producer's id, as `upload:…`), or a person, by their id.
+ */
+export const brainErasureLookupSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("source"), key: erasedNameSchema }),
+  z.strictObject({ kind: z.literal("person"), id: erasedNameSchema }),
+]);
+export type BrainErasureLookup = z.infer<typeof brainErasureLookupSchema>;
+
+/** A lookup, signed as a read is, with what it names. */
+export const brainErasureRequestSchema = z.strictObject({
+  sentAt: z.iso.datetime(),
+  staff: staffSchema,
+  lookup: brainErasureLookupSchema,
+});
+export type BrainErasureRequest = z.input<typeof brainErasureRequestSchema>;
+
+/**
+ * What a lookup answers besides `erased`: `erasing` while it is recorded
+ * but not done; `not_erased` when the ledger holds no erasure of it, alike
+ * whether it ever existed; `skipped` when core recorded its erasure of a
+ * person from the Brain as skipped, so it is not done and not tried again;
+ * `unavailable` while the Brain can't read its ledger, or applies it after
+ * a restore.
+ */
+export const brainErasureStates = [
+  "erasing",
+  "not_erased",
+  "skipped",
+  "unavailable",
+] as const;
+
+/**
+ * Whether it was erased, and nothing else: `erased`, with when the ledger
+ * recorded it, once it is hidden for good (nothing can read it, and a
+ * restore can't bring it back) and recorded in the ledger; what the Brain
+ * kept of it is deleted in the background, its files after a 15-minute
+ * grace. Or one of `brainErasureStates`. What core answers, and what the
+ * admin reads: a state it doesn't name is a malformed answer.
+ */
+export const brainErasureAnswerSchema = z.discriminatedUnion("state", [
+  z.object({ state: z.literal("erased"), at: z.iso.datetime() }),
+  z.object({ state: z.enum(brainErasureStates) }),
+]);
+export type BrainErasureAnswer = z.infer<typeof brainErasureAnswerSchema>;
 
 const isoTime = z.iso.datetime();
 const count = z.int().min(0);
@@ -242,6 +311,9 @@ export const brainReportSchema = z.object({
     erasing: count,
     /** Sources that keep versions but have none current, which nobody can read. */
     sourcesWithoutCurrent: count,
+    /**
+     * The shared ledger's source erasures, which count one per chat deleted and one per connection disconnected, keys the shared store never held.
+     */
     source: erasureCountSchema,
     person: erasureCountSchema,
     /** How many erasures there are of each reason, in all. */

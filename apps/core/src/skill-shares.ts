@@ -8,59 +8,89 @@ import { isMemberAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { skillErrors } from "@grasp-os/shared/skills";
 import type {
+  CompanySkill,
+  DecidedTeamSkill,
   ListedSkill,
+  ListedTeamSkill,
   OwnSkillShare,
   SkillShare,
   SkillShareRequest,
+  SkillInUse,
   SkillsOverview,
   SkillText,
 } from "@grasp-os/shared/skills";
-import { and, asc, desc, eq, isNull, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  isNotNull,
+  isNull,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
-import { activeMember } from "./auth/membership-sql.ts";
+import { activeMember, organizationId } from "./auth/membership-sql.ts";
 import {
   addOwnSkill,
-  companyChangeVersion,
-  companySkillVersion,
+  audienceKeyOf,
+  audienceOf,
   eraseOwnSkill,
   listSkillsAs,
   readCurrentSkillAs,
   readSkillAs,
-  writeCompanySkill,
+  sharedChangeVersion,
+  sharedSkillVersion,
+  writeSharedSkill,
 } from "./brain-next.ts";
-import type { SkillCardAt } from "./brain-next.ts";
+import type { SkillAudience, SkillCardAt } from "./brain-next.ts";
 import {
   personErasures,
   skillDecisions,
   skillDeletions,
   skillShares,
+  teamMembers,
+  teams,
   users,
 } from "./db/core/schema.ts";
 import { shippedSkills } from "./shipped-skills.ts";
 
-// Writing skills, and sharing one with the company (GRA-1754). Threat
-// model on GRA-1754; what could go wrong, and what stops it:
+// Writing skills, and sharing one with the company (GRA-1754) or one of
+// the asker's teams (GRA-1844). Threat models on both; what could go
+// wrong, and what stops it:
 //
 // - Someone else's own skill read, listed or used: a person's own skills
 //   are in their own store (brain-next.ts), and every call here names the
 //   person from their session (`Identity`), never from what they send.
-// - Instructions planted company-wide (a company skill steers every
-//   member's agents): a company skill is written only as an admin's
+// - Instructions planted company-wide or in a team (a shared skill steers
+//   its audience's agents): a shared skill is written only as an admin's
 //   decision says, and a decision is written only by one of the
 //   organization's own admins (never Grasp staff), checked in the very
-//   statement that writes it. An approval decides the share's exact text,
+//   statement that writes it. A share with a team is asked only by one of
+//   its members and decided only while its asker is still one, each
+//   checked in the statement that writes it (`inAudience`): a team they
+//   aren't in, one that doesn't exist and another organization's are
+//   refused alike. An approval decides the share's exact text,
 //   taken from the person's own stored skill at the version they named
 //   (never from what anyone sends), and only while that share still waits:
 //   a share asked again, deleted with its skill or of a person removed is
 //   gone, so a click on an older card is refused, never applied to text
 //   nobody reviewed or that is gone. Agents have no call here.
+// - A missing audience read as the company's: every share and decision
+//   names its audience (`company`, or `team:<id>`), and a row without one,
+//   or with one that isn't either, is never decided, listed or
+//   reconciled.
 // - The Brain saying something other than what was decided: core's
 //   database is the one record of what should be live (`skill_decisions`,
-//   numbered per name; the latest is the name's desired state). One
-//   reconciler per name makes the Brain follow it, idempotently: it reads
+//   numbered per audience and name; the latest is that skill's desired
+//   state). One reconciler per audience and name makes the Brain follow
+//   it, idempotently: it reads
 //   the Brain's current version, then the decisions, and writes the latest
 //   under its own change key over that version, or nothing when it has
 //   landed. A lost reply, a failed write or record, two runs at once: each
@@ -75,8 +105,9 @@ import { shippedSkills } from "./shipped-skills.ts";
 //   it could), never from whether a reply arrived.
 // - A skill granting access: none does. Writing, sharing, deciding or
 //   retiring one creates no permission, binding or grant.
-// - Audit: asks and decisions by the share's ID, a retirement by the
-//   skill's name, its only identifier; never a skill's text. A person's own
+// - Audit: asks and decisions by the share's ID (the share says its
+//   audience), a retirement by the skill's name (a team's, by its team's
+//   ID and its name), its only identifiers; never a skill's text. A person's own
 //   skills, which affect no one else, are not audited, as their own
 //   instruction file isn't.
 
@@ -113,6 +144,45 @@ const stillHere = (personId: string) => sql`${activeMember(personId)}
 /** That `by` is one of the organization's admins as the statement runs. */
 const deciding = (by: Identity) => activeMember(by.userId, ["admin"]);
 
+/** The company, as an audience is stored (`audienceKeyOf`). */
+const companyKey = audienceKeyOf({ kind: "company" });
+
+/**
+ * That `personId` (an ID, or the column holding one) may share with, or
+ * be decided for, `audience` (a stored audience, or the column holding
+ * one), as the statement runs: the company, for anyone; a team, only for
+ * its members, of a team of the organization. Never for a missing or
+ * malformed audience: neither the company nor any team's.
+ */
+const inAudience = (
+  personId: string | SQLiteColumn,
+  audience: string | SQLiteColumn
+): SQL => sql`(${audience} = ${companyKey} OR EXISTS (
+  SELECT 1 FROM ${teamMembers}
+    INNER JOIN ${teams} ON ${teams.id} = ${teamMembers.teamId}
+  WHERE ${teamMembers.userId} = ${personId}
+    AND ${teams.organizationId} = ${organizationId}
+    AND 'team:' || ${teamMembers.teamId} = ${audience}
+))`;
+
+/** Whom a share is asked for, as the page sends it: the company, or a team by its ID. */
+const audienceAskedSchema = z.union([
+  z.literal("company"),
+  z.strictObject({ team: identifierSchema }),
+]);
+
+/** `asked` as the audience it names; `skills.invalid` for anything else. */
+const audienceAskedOf = (asked: unknown): SkillAudience => {
+  const parsed = skillErrors.parse(
+    "skills.invalid",
+    audienceAskedSchema,
+    asked
+  );
+  return parsed === "company"
+    ? { kind: "company" }
+    : { kind: "team", team: parsed.team };
+};
+
 const listedOf = ({
   name,
   version,
@@ -127,6 +197,8 @@ const listedOf = ({
 const shareColumns = {
   id: skillShares.id,
   name: skillShares.name,
+  audience: skillShares.audience,
+  teamName: teams.name,
   text: skillShares.text,
   status: skillShares.status,
   requestedAt: skillShares.requestedAt,
@@ -140,6 +212,8 @@ const shareColumns = {
 interface ShareRow {
   id: string;
   name: string;
+  audience: string | null;
+  teamName: string | null;
   text: string | null;
   status: SkillShare["status"];
   requestedAt: Date;
@@ -150,34 +224,77 @@ interface ShareRow {
   version: number | null;
 }
 
-/** Shares with their asker and their decision, if any. */
+/** Shares with their asker, their team's name and their decision, if any. */
 const sharesQuery = (db: ReturnType<typeof drizzle>) =>
   db
     .select(shareColumns)
     .from(skillShares)
     .leftJoin(users, eq(users.id, skillShares.requestedBy))
+    .leftJoin(teams, sql`'team:' || ${teams.id} = ${skillShares.audience}`)
     .leftJoin(skillDecisions, eq(skillDecisions.shareId, skillShares.id));
 
-const shareOf = (row: ShareRow): SkillShare => ({
-  id: row.id,
-  name: row.name,
-  status: row.status,
-  requestedAt: row.requestedAt.toISOString(),
-  requestedBy: { userId: row.userId, name: row.userName },
-  decidedAt: row.decidedAt?.toISOString() ?? null,
-  version: row.outcome === "landed" ? row.version : null,
-  superseded: row.outcome === "superseded",
-});
+/**
+ * The shares a person sees: decided ones, and those that wait while their
+ * asker may still be decided for (a team's only while they are in it).
+ * Never one without an audience.
+ */
+const shown = (): SQL | undefined =>
+  and(
+    isNotNull(skillShares.audience),
+    or(
+      ne(skillShares.status, "pending"),
+      inAudience(skillShares.requestedBy, skillShares.audience)
+    )
+  );
 
-/** The share `id`, or `skills.not_found`. */
-const shareById = async (env: Env, id: string): Promise<ShareRow> => {
+/** The shares that wait and may be decided now (`approveShare`'s own conditions). */
+const decidable = (): SQL | undefined =>
+  and(
+    eq(skillShares.status, "pending"),
+    isNotNull(skillShares.audience),
+    inAudience(skillShares.requestedBy, skillShares.audience)
+  );
+
+/**
+ * `row` as a share, or none when its audience isn't one (a row without
+ * one is never shown, never as the company's).
+ */
+const shareOf = (row: ShareRow): SkillShare[] => {
+  const audience = audienceOf(row.audience);
+  if (audience === null) {
+    return [];
+  }
+  return [
+    {
+      id: row.id,
+      name: row.name,
+      audience:
+        audience.kind === "company"
+          ? audience
+          : {
+              kind: "team",
+              team: { id: audience.team, name: row.teamName },
+            },
+      status: row.status,
+      requestedAt: row.requestedAt.toISOString(),
+      requestedBy: { userId: row.userId, name: row.userName },
+      decidedAt: row.decidedAt?.toISOString() ?? null,
+      version: row.outcome === "landed" ? row.version : null,
+      superseded: row.outcome === "superseded",
+    },
+  ];
+};
+
+/** The share `id`, or `skills.not_found` (one without an audience too). */
+const shareById = async (env: Env, id: string): Promise<SkillShare> => {
   const [row] = await sharesQuery(drizzle(env.DB)).where(
     eq(skillShares.id, id)
   );
-  if (row === undefined) {
+  const [share] = row === undefined ? [] : shareOf(row);
+  if (share === undefined) {
     throw skillErrors.create("skills.not_found");
   }
-  return row;
+  return share;
 };
 
 /** `id`, checked as a share's: `skills.not_found` for anything else. */
@@ -202,22 +319,172 @@ const shareEntry = (
   detail,
 });
 
-/** The audit entry of something that happened to the company's skill `name`. */
+/**
+ * The audit entry of something that happened to `audience`'s skill
+ * `name`: the company's by its name, a team's by its team's ID and its
+ * name.
+ */
 const skillEntry = (
   actor: AuditActor,
   action: string,
+  audience: SkillAudience,
   name: string,
   detail: Record<string, number> = {}
 ): AuditEntry => ({
   actor,
   action,
-  target: { type: "company_skill", id: name },
+  target:
+    audience.kind === "company"
+      ? { type: "company_skill", id: name }
+      : { type: "team_skill", id: `${audience.team}:${name}` },
   detail,
 });
 
+/** Where the decisions on one audience's skill of one name stand. */
+interface DecisionState {
+  /** Its audience, as stored. */
+  audience: string;
+  name: string;
+  /** Its team's name while the team exists; null for the company's. */
+  teamName: string | null;
+  /** Whether its latest decision is an approval: in use, or about to be. */
+  approved: boolean;
+  /** The version in use now: the latest that landed, if an approval's. */
+  inUse: number | null;
+  /** What its latest decision brings while not added yet: a new version, or its retirement. */
+  onItsWay: SkillInUse["onItsWay"];
+}
+
+/** What a latest decision brings while it has no outcome: a new version, or a retirement. */
+const onItsWayOf = (
+  shareId: string | null,
+  outcome: string | null
+): SkillInUse["onItsWay"] => {
+  if (outcome !== null) {
+    return null;
+  }
+  return shareId === null ? "retirement" : "version";
+};
+
+/** The latest decision, or the latest that landed (`landed`), of each audience and name. */
+const latestDecisions = async (env: Env, landed: boolean) =>
+  await drizzle(env.DB)
+    .select({
+      audience: skillDecisions.audience,
+      name: skillDecisions.name,
+      shareId: skillDecisions.shareId,
+      outcome: skillDecisions.outcome,
+      version: skillDecisions.version,
+      teamName: teams.name,
+    })
+    .from(skillDecisions)
+    .leftJoin(teams, sql`'team:' || ${teams.id} = ${skillDecisions.audience}`)
+    .where(
+      and(
+        isNotNull(skillDecisions.audience),
+        landed ? eq(skillDecisions.outcome, "landed") : undefined,
+        sql`${skillDecisions.seq} = (SELECT MAX(latest.seq) FROM ${skillDecisions} AS latest
+          WHERE latest.audience = ${skillDecisions.audience}
+            AND latest.name = ${skillDecisions.name}
+            ${landed ? sql`AND latest.outcome = 'landed'` : sql``})`
+      )
+    )
+    .orderBy(asc(skillDecisions.audience), asc(skillDecisions.name));
+
+/**
+ * Where every audience's skill of every name stands, by `audience name`,
+ * from core's own records, never the Brain: what is in use (the version
+ * the latest landed approval made), and what an approval not added yet is
+ * bringing. For admins, who decide every audience's skills, in a team or
+ * not, and for a person's own approved shares.
+ */
+const decisionStates = async (
+  env: Env
+): Promise<Map<string, DecisionState>> => {
+  const [latest, landed] = await Promise.all([
+    latestDecisions(env, false),
+    latestDecisions(env, true),
+  ]);
+  const inUse = new Map<string, number>();
+  for (const { audience, name, shareId, version } of landed) {
+    if (shareId !== null && version !== null) {
+      inUse.set(`${audience} ${name}`, version);
+    }
+  }
+  return new Map(
+    latest.map(({ audience, name, shareId, outcome, teamName }) => {
+      const key = `${audience} ${name}`;
+      const state: DecisionState = {
+        audience: audience ?? "",
+        name,
+        teamName,
+        approved: shareId !== null,
+        inUse: inUse.get(key) ?? null,
+        onItsWay: onItsWayOf(shareId, outcome),
+      };
+      return [key, state];
+    })
+  );
+};
+
+/**
+ * Where `state`'s skill stands, for a list of what is in use: the one
+ * answer both the company's list and every team's give. Listed while a
+ * version is in use, a retirement on its way included (its members' agents
+ * still use it until the retirement lands), or while its first version is
+ * on its way; not once nothing is in use and nothing comes.
+ */
+const inUseOf = (state: DecisionState): SkillInUse | null =>
+  state.inUse === null && state.onItsWay !== "version"
+    ? null
+    : { version: state.inUse, onItsWay: state.onItsWay };
+
+/** Of `states`, every team's skill in use or on its way: for admins, to retire. */
+const teamSkillsOf = (
+  states: ReadonlyMap<string, DecisionState>
+): DecidedTeamSkill[] =>
+  [...states.values()].flatMap((state) => {
+    const of = audienceOf(state.audience);
+    const inUse = inUseOf(state);
+    return of?.kind === "team" && inUse !== null
+      ? [
+          {
+            team: { id: of.team, name: state.teamName },
+            name: state.name,
+            ...inUse,
+          },
+        ]
+      : [];
+  });
+
+/**
+ * Of `states`, the company's skills in use or on its way, each with when
+ * to use it as the Brain gives it (`described`, by name) while one of its
+ * versions is.
+ */
+const companySkillsOf = (
+  states: ReadonlyMap<string, DecisionState>,
+  described: ReadonlyMap<string, string>
+): CompanySkill[] =>
+  [...states.values()].flatMap((state) => {
+    const inUse = inUseOf(state);
+    return state.audience === companyKey && inUse !== null
+      ? [
+          {
+            name: state.name,
+            description: described.get(state.name) ?? null,
+            ...inUse,
+          },
+        ]
+      : [];
+  });
+
 /**
  * What the skills page shows `by`: their own skills, the company's, their
- * own shares, and, for admins, every share that waits, with its text.
+ * teams' (as the Brain gives them, by the teams core counts them in now),
+ * the teams they may share with, their own shares, and, for admins,
+ * every share that waits and may be decided, with its text and its team,
+ * and every team's skill in use, to retire.
  */
 export const skillsOverview = async (
   env: Env,
@@ -225,55 +492,99 @@ export const skillsOverview = async (
 ): Promise<SkillsOverview> => {
   const db = drizzle(env.DB);
   const [listed, shares] = await Promise.all([
-    listSkillsAs(env, by.userId, noShipped, { personal: true }),
+    listSkillsAs(env, by.userId, noShipped, { reach: "person" }),
     sharesQuery(db)
-      .where(eq(skillShares.requestedBy, by.userId))
+      .where(and(eq(skillShares.requestedBy, by.userId), shown()))
       .orderBy(desc(skillShares.requestedAt), desc(skillShares.id)),
   ]);
   const company = listed.filter(({ scope }) => scope === "company");
-  const companyNames = new Set(company.map(({ name }) => name));
-  /** What approving a share of `name` replaces for everyone, if anything. */
-  const replacedBy = (name: string): SkillShareRequest["replaces"] => {
-    if (companyNames.has(name)) {
+  const teamNames = new Map(by.teams.map(({ id, name }) => [id, name]));
+  const team = listed.flatMap((skill): ListedTeamSkill[] =>
+    skill.scope === "team"
+      ? [
+          {
+            ...listedOf(skill),
+            team: {
+              id: skill.team,
+              name: teamNames.get(skill.team) ?? skill.team,
+            },
+          },
+        ]
+      : []
+  );
+  const requests = isMemberAdmin(by)
+    ? await sharesQuery(db)
+        .where(decidable())
+        .orderBy(asc(skillShares.requestedAt), asc(skillShares.id))
+    : null;
+  const states = await decisionStates(env);
+  /** Whether `audience name`'s latest decision is an approval. */
+  const live = {
+    has: (key: string) => states.get(key)?.approved === true,
+  };
+  /** What approving `share` replaces for its audience, if anything. */
+  const replacedBy = (share: SkillShare): SkillShareRequest["replaces"] => {
+    const { audience, name } = share;
+    if (
+      audience.kind === "team" &&
+      live.has(
+        `${audienceKeyOf({ kind: "team", team: audience.team.id })} ${name}`
+      )
+    ) {
+      return "team";
+    }
+    if (live.has(`${companyKey} ${name}`)) {
       return "company";
     }
     return shippedNames.has(name) ? "grasp" : null;
   };
-  const requests = isMemberAdmin(by)
-    ? await sharesQuery(db)
-        .where(eq(skillShares.status, "pending"))
-        .orderBy(asc(skillShares.requestedAt), asc(skillShares.id))
-    : null;
   /** Whether a waiting share's text is no longer the person's current one. */
-  const ownOf = async (row: ShareRow): Promise<OwnSkillShare> => {
+  const ownOf = async (row: ShareRow): Promise<OwnSkillShare[]> => {
+    const [share] = shareOf(row);
+    if (share === undefined) {
+      return [];
+    }
+    // Only of a share of theirs that was approved: one declined or still
+    // waiting says nothing of what others' later skills of its name are.
+    const state = states.get(`${row.audience} ${row.name}`);
+    const inUse =
+      row.status === "approved" && state !== undefined && state.inUse !== null;
     if (row.status !== "pending" || row.text === null) {
-      return { ...shareOf(row), outdated: false };
+      return [{ ...share, outdated: false, inUse }];
     }
     const current = await readCurrentSkillAs(env, by.userId, {
       scope: "person",
       name: row.name,
     });
-    return {
-      ...shareOf(row),
-      outdated: current !== null && current.text !== row.text,
-    };
+    return [
+      {
+        ...share,
+        outdated: current !== null && current.text !== row.text,
+        inUse,
+      },
+    ];
   };
+  const asked = await Promise.all(shares.map(ownOf));
   return {
     own: listed.filter(({ scope }) => scope === "person").map(listedOf),
-    company: company.map(listedOf),
-    shares: await Promise.all(shares.map(ownOf)),
+    company: companySkillsOf(
+      states,
+      new Map(company.map(({ name, description }) => [name, description]))
+    ),
+    team,
+    teams: by.teams.map(({ id, name }) => ({ id, name })),
+    shares: asked.flat(),
     requests:
-      requests?.flatMap((row): SkillShareRequest[] =>
-        row.text === null
+      requests?.flatMap(({ text, ...row }): SkillShareRequest[] =>
+        text === null
           ? []
-          : [
-              {
-                ...shareOf(row),
-                text: row.text,
-                replaces: replacedBy(row.name),
-              },
-            ]
+          : shareOf({ ...row, text }).map((share) => ({
+              ...share,
+              text,
+              replaces: replacedBy(share),
+            }))
       ) ?? null,
+    teamSkills: requests === null ? null : teamSkillsOf(states),
   };
 };
 
@@ -360,27 +671,34 @@ export const removeOwnSkill = async (
 
 /**
  * Asks to share `by`'s own skill `name`, exactly as it is at `version`,
- * with the company: it waits for an admin, in place of the share of it
- * that waited, which goes. Written only while they are a member, no
- * erasure of them has begun and they haven't deleted the skill, checked in
- * the write itself: `permission.person_inactive` or `skills.not_found`
- * otherwise, and nothing written.
+ * with `audience` (the company, or one of their teams): it waits for an
+ * admin, in place of the share of it for that audience that waited, which
+ * goes, only when the new one is written: a refused ask changes nothing. Written only while they are a member, no erasure of them has
+ * begun, they haven't deleted the skill and, for a team, they are in it,
+ * all checked in the write itself: `permission.person_inactive`,
+ * `skills.not_found` or `skills.not_in_team` otherwise (a team they
+ * aren't in, one that doesn't exist and another organization's alike),
+ * and nothing written.
  */
 export const shareOwnSkill = async (
   env: Env,
   by: Identity,
   name: unknown,
-  version: unknown
+  version: unknown,
+  audience: unknown
 ): Promise<SkillShare> => {
   const wanted = skillErrors.parse(
     "skills.invalid",
     z.strictObject({ name: nameSchema, version: versionSchema }),
     { name, version }
   );
-  const read = await readSkillAs(env, by.userId, {
-    scope: "person",
-    ...wanted,
-  });
+  const key = audienceKeyOf(audienceAskedOf(audience));
+  const read = await readSkillAs(
+    env,
+    by.userId,
+    { scope: "person", ...wanted },
+    { reach: "person" }
+  );
   if (read === null) {
     throw skillErrors.create("skills.not_found");
   }
@@ -389,7 +707,11 @@ export const shareOwnSkill = async (
   const deleted = sql`EXISTS (SELECT 1 FROM ${skillDeletions}
     WHERE ${skillDeletions.personId} = ${by.userId}
       AND ${skillDeletions.name} = ${read.name})`;
-  const askable = sql`${stillHere(by.userId)} AND NOT ${deleted}`;
+  const askable = sql`${stillHere(by.userId)} AND NOT ${deleted}
+    AND ${inAudience(by.userId, key)}`;
+  // One decision for both: the share that waited goes only when the new
+  // one is written, under the same conditions in the same batch, so a
+  // refused ask leaves everything as it was.
   await auditedBatch(env, db, [
     db
       .delete(skillShares)
@@ -397,31 +719,32 @@ export const shareOwnSkill = async (
         and(
           eq(skillShares.requestedBy, by.userId),
           eq(skillShares.name, read.name),
-          eq(skillShares.status, "pending")
+          eq(skillShares.audience, key),
+          eq(skillShares.status, "pending"),
+          askable
         )
       ),
     db.insert(skillShares).select(
-      sql`SELECT ${id}, ${read.name}, ${read.text}, ${by.userId}, ${Date.now()}, 'pending', NULL, NULL
+      sql`SELECT ${id}, ${read.name}, ${read.text}, ${by.userId}, ${Date.now()}, 'pending', NULL, NULL, ${key}
           WHERE ${askable}`
     ),
     outboxedIfChanged(db, shareEntry(actorOf(by), "requested", id)),
   ]);
   const [written] = await sharesQuery(db).where(eq(skillShares.id, id));
-  if (written !== undefined) {
-    return shareOf(written);
+  const [share] = written === undefined ? [] : shareOf(written);
+  if (share !== undefined) {
+    return share;
   }
-  const [deletion] = await db
-    .select({ name: skillDeletions.name })
-    .from(skillDeletions)
-    .where(
-      and(
-        eq(skillDeletions.personId, by.userId),
-        eq(skillDeletions.name, read.name)
-      )
-    );
-  throw deletion === undefined
-    ? permissionErrors.create("permission.person_inactive")
-    : skillErrors.create("skills.not_found");
+  // Why not, read after: the write itself checked it all at once.
+  const [why] = await db.all<{ here: number; deleted: number }>(
+    sql`SELECT ${stillHere(by.userId)} AS here, ${deleted} AS deleted`
+  );
+  if (why?.deleted === 1) {
+    throw skillErrors.create("skills.not_found");
+  }
+  throw why?.here === 1
+    ? skillErrors.create("skills.not_in_team")
+    : permissionErrors.create("permission.person_inactive");
 };
 
 /** The change key a decision writes the Brain under: its own. */
@@ -433,31 +756,50 @@ type Decision = typeof skillDecisions.$inferSelect;
 /** The core's actor for what the reconciler records. */
 const reconciler: AuditActor = { type: "system" };
 
-/** The outcome event of `decision`: what became of it in the Brain. */
+/** The outcome event of `decision`, of `audience`: what became of it in the Brain. */
 const outcomeEntry = (
+  audience: SkillAudience,
   decision: Decision,
   outcome: { version: number } | "superseded"
 ): AuditEntry => {
   if (decision.shareId === null) {
     return outcome === "superseded"
-      ? skillEntry(reconciler, "skill.retire_superseded", decision.name)
-      : skillEntry(reconciler, "skill.retire_done", decision.name, outcome);
+      ? skillEntry(
+          reconciler,
+          "skill.retire_superseded",
+          audience,
+          decision.name
+        )
+      : skillEntry(
+          reconciler,
+          "skill.retire_done",
+          audience,
+          decision.name,
+          outcome
+        );
   }
   return outcome === "superseded"
     ? shareEntry(reconciler, "superseded", decision.shareId)
     : shareEntry(reconciler, "added", decision.shareId, outcome);
 };
 
+/** A shared skill: its audience and its name, as the reconciler takes it. */
+export interface SharedSkill {
+  audience: SkillAudience;
+  name: string;
+}
+
 /**
- * Records the outcomes of `decisions` once `latest` landed at `version`:
- * its own, and each earlier one's not recorded yet, from the store (the
- * version its change made, or none: then the later decision came first,
- * and it never will, as every write is over a version read before the
- * decisions). One event per outcome, written only by the update that
- * records it.
+ * Records the outcomes of `decisions` of `skill` once `latest` landed at
+ * `version`: its own, and each earlier one's not recorded yet, from the
+ * store (the version its change made, or none: then the later decision
+ * came first, and it never will, as every write is over a version read
+ * before the decisions). One event per outcome, written only by the
+ * update that records it.
  */
 const recordOutcomes = async (
   env: Env,
+  skill: SharedSkill,
   decisions: readonly Decision[],
   latest: Decision,
   version: number
@@ -473,8 +815,8 @@ const recordOutcomes = async (
       continue;
     }
     // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
-    const landed = await companyChangeVersion(env, {
-      name: decision.name,
+    const landed = await sharedChangeVersion(env, {
+      ...skill,
       change: changeOf(decision),
     });
     outcomes.push([
@@ -493,7 +835,7 @@ const recordOutcomes = async (
       .where(
         and(eq(skillDecisions.id, decision.id), isNull(skillDecisions.outcome))
       ),
-    outboxedIfChanged(db, outcomeEntry(decision, outcome)),
+    outboxedIfChanged(db, outcomeEntry(skill.audience, decision, outcome)),
   ]);
   if (first !== undefined) {
     await auditedBatch(env, db, [first, ...rest]);
@@ -506,21 +848,24 @@ const recordOutcomes = async (
  */
 const reconcileOnce = async (
   env: Env,
-  name: string
+  skill: SharedSkill
 ): Promise<"done" | "stale"> => {
-  const current = await companySkillVersion(env, name);
+  const { audience, name } = skill;
+  const key = audienceKeyOf(audience);
+  const current = await sharedSkillVersion(env, skill);
   // Only what it may act on: the decisions without an outcome, and the
-  // latest, never every one a name ever had.
+  // latest, never every one a skill ever had.
   const decisions = await drizzle(env.DB)
     .select()
     .from(skillDecisions)
     .where(
       and(
+        eq(skillDecisions.audience, key),
         eq(skillDecisions.name, name),
         or(
           isNull(skillDecisions.outcome),
           sql`${skillDecisions.seq} = (SELECT MAX(${skillDecisions.seq}) FROM ${skillDecisions}
-            WHERE ${skillDecisions.name} = ${name})`
+            WHERE ${skillDecisions.audience} = ${key} AND ${skillDecisions.name} = ${name})`
         )
       )
     )
@@ -532,14 +877,14 @@ const reconcileOnce = async (
   ) {
     return "done";
   }
-  const landed = await companyChangeVersion(env, {
-    name,
+  const landed = await sharedChangeVersion(env, {
+    ...skill,
     change: changeOf(latest),
   });
   const version =
     landed ??
-    (await writeCompanySkill(env, {
-      name,
+    (await writeSharedSkill(env, {
+      ...skill,
       change: changeOf(latest),
       text: latest.text,
       retired: latest.shareId === null,
@@ -548,22 +893,27 @@ const reconcileOnce = async (
   if (version === "stale") {
     return "stale";
   }
-  await recordOutcomes(env, decisions, latest, version);
+  await recordOutcomes(env, skill, decisions, latest, version);
   return "done";
 };
 
 /**
- * Makes the Brain follow the latest decision on the company's skill `name`
- * (see the threat model above), and records each decision's outcome once.
- * Idempotent: run it as often as you like, from anywhere. Reads the
- * Brain's current version before the decisions, so whatever it writes is
- * over a version older than every decision it didn't see: one of those
- * lands first and its write is refused as stale, then read again.
+ * Makes the Brain follow the latest decision on `skill` (an audience's
+ * skill of a name; see the threat model above), and records each
+ * decision's outcome once. Idempotent: run it as often as you like, from
+ * anywhere. Reads the Brain's current version before the decisions, so
+ * whatever it writes is over a version older than every decision it
+ * didn't see: one of those lands first and its write is refused as stale,
+ * then read again. Each audience's skill of a name is its own: a team's
+ * and the company's of one name never touch each other.
  */
-export const reconcileSkill = async (env: Env, name: string): Promise<void> => {
+export const reconcileSkill = async (
+  env: Env,
+  skill: SharedSkill
+): Promise<void> => {
   for (let attempt = 0; attempt < reconcileAttempts; attempt += 1) {
     // oxlint-disable-next-line no-await-in-loop -- again only once refused
-    if ((await reconcileOnce(env, name)) === "done") {
+    if ((await reconcileOnce(env, skill)) === "done") {
       return;
     }
   }
@@ -574,36 +924,51 @@ export const reconcileSkill = async (env: Env, name: string): Promise<void> => {
 };
 
 /** `reconcileSkill`, its failure logged: the clock runs it again. */
-const reconcileNow = async (env: Env, name: string): Promise<void> => {
+const reconcileNow = async (env: Env, skill: SharedSkill): Promise<void> => {
   try {
-    await reconcileSkill(env, name);
+    await reconcileSkill(env, skill);
   } catch (error) {
     log.error("skills.reconcile_failed", errorFields(error));
   }
 };
 
 /**
- * Reconciles every name with a decision whose outcome isn't recorded
- * (`reconcileSkill`): core's clock runs it each minute, so a decision
- * whose write or record failed is finished without anyone asking.
+ * Reconciles every audience's skill with a decision whose outcome isn't
+ * recorded (`reconcileSkill`): core's clock runs it each minute, so a
+ * decision whose write or record failed is finished without anyone
+ * asking. A decision without an audience it can read is never
+ * reconciled, never as the company's: it is said once a run, by count.
  */
 export const reconcileSkills = async (env: Env): Promise<void> => {
-  const names = await drizzle(env.DB)
-    .selectDistinct({ name: skillDecisions.name })
+  const open = await drizzle(env.DB)
+    .selectDistinct({
+      audience: skillDecisions.audience,
+      name: skillDecisions.name,
+    })
     .from(skillDecisions)
     .where(isNull(skillDecisions.outcome));
-  for (const { name } of names) {
-    // oxlint-disable-next-line no-await-in-loop -- a name at a time
-    await reconcileNow(env, name);
+  let unread = 0;
+  for (const { audience: stored, name } of open) {
+    const audience = audienceOf(stored);
+    if (audience === null) {
+      unread += 1;
+      continue;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- a skill at a time
+    await reconcileNow(env, { audience, name });
+  }
+  if (unread > 0) {
+    log.warn("skills.reconcile_no_audience", { skills: unread });
   }
 };
 
 /**
- * Approves the share `id` as the admin `by`: decides its exact text as the
- * company's skill of its name, in one batch with its event, only while the
- * share still waits and `by` is still an admin (`skills.not_found`
- * otherwise, nothing written), then reconciles the name. A failure after
- * the decision is the clock's to finish: the decision stands.
+ * Approves the share `id` as the admin `by`: decides its exact text as
+ * its audience's skill of its name, in one batch with its event, only
+ * while the share still waits, its asker may still be decided for (in its
+ * team, for a team's) and `by` is still an admin (`skills.not_found`
+ * otherwise, nothing written), then reconciles that skill. A failure
+ * after the decision is the clock's to finish: the decision stands.
  */
 export const approveShare = async (
   env: Env,
@@ -619,11 +984,13 @@ export const approveShare = async (
     db.insert(skillDecisions).select(
       sql`SELECT ${decisionId}, ${skillShares.name},
           (SELECT COALESCE(MAX(${skillDecisions.seq}), 0) + 1 FROM ${skillDecisions}
-            WHERE ${skillDecisions.name} = ${skillShares.name}),
-          ${skillShares.id}, ${skillShares.text}, ${by.userId}, ${now}, NULL, NULL
+            WHERE ${skillDecisions.audience} = ${skillShares.audience}
+              AND ${skillDecisions.name} = ${skillShares.name}),
+          ${skillShares.id}, ${skillShares.text}, ${by.userId}, ${now}, NULL, NULL,
+          ${skillShares.audience}
         FROM ${skillShares}
         WHERE ${skillShares.id} = ${shareId}
-          AND ${skillShares.status} = 'pending'
+          AND ${decidable()}
           AND ${deciding(by)}`
     ),
     db
@@ -644,19 +1011,21 @@ export const approveShare = async (
     outboxedIfChanged(db, shareEntry(actorOf(by), "approved", shareId)),
   ]);
   const [decided] = await db
-    .select({ name: skillDecisions.name })
+    .select({ audience: skillDecisions.audience, name: skillDecisions.name })
     .from(skillDecisions)
     .where(eq(skillDecisions.id, decisionId));
-  if (decided === undefined) {
+  const audience = audienceOf(decided?.audience);
+  if (decided === undefined || audience === null) {
     throw skillErrors.create("skills.not_found");
   }
-  await reconcileNow(env, decided.name);
-  return shareOf(await shareById(env, shareId));
+  await reconcileNow(env, { audience, name: decided.name });
+  return await shareById(env, shareId);
 };
 
 /**
  * Declines the share `id` as the admin `by`, dropping its text, only while
- * it still waits and `by` is still an admin; `skills.not_found` otherwise.
+ * it still waits and may be decided, and `by` is still an admin;
+ * `skills.not_found` otherwise.
  */
 export const declineShare = async (
   env: Env,
@@ -675,52 +1044,53 @@ export const declineShare = async (
         decidedAt: new Date(),
         text: null,
       })
-      .where(
-        and(
-          eq(skillShares.id, shareId),
-          eq(skillShares.status, "pending"),
-          deciding(by)
-        )
-      ),
+      .where(and(eq(skillShares.id, shareId), decidable(), deciding(by))),
     outboxedIfChanged(db, shareEntry(actorOf(by), "declined", shareId)),
   ]);
   const decided = await shareById(env, shareId);
   if (decided.status !== "declined") {
     throw skillErrors.create("skills.not_found");
   }
-  return shareOf(decided);
+  return decided;
 };
 
 /**
- * Retires the company's skill `name` as the admin `by`: decides, in one
- * batch with its event (`skill.retired`), that nobody lists, selects or
- * reads it from then on (its versions stay as history), only while its
- * latest decision is an approval and `by` is still an admin;
- * `skills.not_found` otherwise. Then reconciles the name. A new approved
- * share of the name brings it back.
+ * Retires `audience`'s skill `name` (the company's, or a team's) as the
+ * admin `by`: decides, in one batch with its event (`skill.retired`),
+ * that nobody lists, selects or reads it from then on (its versions stay
+ * as history), only while its latest decision is an approval and `by` is
+ * still an admin; `skills.not_found` otherwise. Then reconciles it. A new
+ * approved share of the name for that audience brings it back.
  */
 export const retireSkill = async (
   env: Env,
   by: Identity,
-  name: unknown
+  name: unknown,
+  audience: unknown
 ): Promise<void> => {
   requireAdmin(by);
   const named = skillErrors.parse("skills.invalid", nameSchema, name);
+  const retired = audienceAskedOf(audience);
+  const key = audienceKeyOf(retired);
   const decisionId = crypto.randomUUID();
   const db = drizzle(env.DB);
   const latest = sql`(SELECT MAX(${skillDecisions.seq}) FROM ${skillDecisions}
-    WHERE ${skillDecisions.name} = ${named})`;
+    WHERE ${skillDecisions.audience} = ${key} AND ${skillDecisions.name} = ${named})`;
   await auditedBatch(env, db, [
     db.insert(skillDecisions).select(
       sql`SELECT ${decisionId}, ${named}, ${skillDecisions.seq} + 1, NULL,
-          ${skillDecisions.text}, ${by.userId}, ${Date.now()}, NULL, NULL
+          ${skillDecisions.text}, ${by.userId}, ${Date.now()}, NULL, NULL, ${key}
         FROM ${skillDecisions}
-        WHERE ${skillDecisions.name} = ${named}
+        WHERE ${skillDecisions.audience} = ${key}
+          AND ${skillDecisions.name} = ${named}
           AND ${skillDecisions.seq} = ${latest}
           AND ${skillDecisions.shareId} IS NOT NULL
           AND ${deciding(by)}`
     ),
-    outboxedIfChanged(db, skillEntry(actorOf(by), "skill.retired", named)),
+    outboxedIfChanged(
+      db,
+      skillEntry(actorOf(by), "skill.retired", retired, named)
+    ),
   ]);
   const [decided] = await db
     .select({ id: skillDecisions.id })
@@ -729,12 +1099,13 @@ export const retireSkill = async (
   if (decided === undefined) {
     throw skillErrors.create("skills.not_found");
   }
-  await reconcileNow(env, named);
+  await reconcileNow(env, { audience: retired, name: named });
 };
 
 /**
- * The shares that wait for an admin: what the waiting feed lists for the
- * organization's own admins, by ID, name and when, never their text.
+ * The shares that wait for an admin and may be decided now: what the
+ * waiting feed lists for the organization's own admins, by ID, name,
+ * audience and when, never their text.
  */
 export const waitingShares = async (
   env: Env,
@@ -744,7 +1115,7 @@ export const waitingShares = async (
     return [];
   }
   const rows = await sharesQuery(drizzle(env.DB))
-    .where(eq(skillShares.status, "pending"))
+    .where(decidable())
     .orderBy(asc(skillShares.requestedAt), asc(skillShares.id));
-  return rows.map(shareOf);
+  return rows.flatMap(shareOf);
 };

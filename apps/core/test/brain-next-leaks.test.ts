@@ -33,6 +33,7 @@ import {
 } from "../src/brain-next.ts";
 import type {
   InstructionFile,
+  Said,
   SourceReaders,
   SourceRef,
 } from "../src/brain-next.ts";
@@ -59,6 +60,7 @@ import { noProducers } from "./no-producers.ts";
 import { carrying } from "./platform-providers.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { routed, signedInApi, signedInWithRole, unique } from "./sign-in.ts";
+import { holdsNothing } from "./stored-skills.ts";
 import {
   member as teamsMember,
   memberAnsweredBy,
@@ -102,7 +104,25 @@ import {
 
 const idp = mockIdp();
 
+/** The Brain's one store, as the test reads what extraction drew. */
+const brainStore = () =>
+  inJurisdiction(env, env.BRAIN_STORE).getByName("brain");
+
+/** Words said now by `by`, to draw memories from first. */
+const saidNow = (by: Said["by"]): Said => ({
+  by,
+  at: new Date(),
+  priority: "asked",
+});
 teamsWatched();
+
+/** A chat's agent acting for `personId`. */
+const agentFor = (personId: string) =>
+  authoritySchema.parse({
+    subject: { type: "agent", agentId: `agent-${unique()}` },
+    onBehalfOf: personId,
+    mode: "interactive",
+  });
 
 let chatAgentGrant: Promise<unknown> | undefined;
 
@@ -514,6 +534,7 @@ describe(
         "an App's instruction file the outsider uses": markerWord(),
         "what the holder's agent fetched through a connection": markerWord(),
         "the holder's own skill": markerWord(),
+        "a team's skill the outsider isn't in": markerWord(),
       };
       const {
         "the holder's own source": ownerMarker,
@@ -527,6 +548,7 @@ describe(
         "an App's instruction file the outsider uses": usedAppFileMarker,
         "what the holder's agent fetched through a connection": captureMarker,
         "the holder's own skill": holderSkillMarker,
+        "a team's skill the outsider isn't in": teamSkillMarker,
       } = markers;
       // Instruction files the outsider may not get: the holder's own,
       // another agent's than theirs, and an App's they don't build (one no
@@ -589,20 +611,52 @@ describe(
       const holderSkill = await holderApi.api.skills.save(
         `---\nname: ${holderSkillMarker}\ndescription: How to ${sharedWord} ${holderSkillMarker}\n---\nSteps ${sharedWord} ${holderSkillMarker}`
       );
-      await holderApi.api.skills.share(holderSkill.name, holderSkill.version);
+      await holderApi.api.skills.share(
+        holderSkill.name,
+        holderSkill.version,
+        "company"
+      );
       // The holder's own chat lists it, and selects it for a task of it.
       await expect(
-        selectSkillsFor(
-          env,
-          authoritySchema.parse({
-            subject: { type: "agent", agentId: `agent-${unique()}` },
-            onBehalfOf: holder,
-            mode: "interactive",
-          }),
-          { personal: true },
-          { task: holderSkillMarker }
-        )
+        selectSkillsFor(env, agentFor(holder), "person", holdsNothing, {
+          task: holderSkillMarker,
+        })
       ).resolves.toMatchObject([{ scope: "person", name: holderSkillMarker }]);
+      // A skill of the holder's team, named by its marker: shared with the
+      // team on the holder's session and approved by an admin, so the
+      // team's members alone are given it.
+      const deciderApi = await signedInApi(idp, "admin");
+      const teamSkill = await holderApi.api.skills.save(
+        `---\nname: ${teamSkillMarker}\ndescription: How to ${sharedWord} ${teamSkillMarker}\n---\nSteps ${sharedWord} ${teamSkillMarker}`
+      );
+      const teamShare = await holderApi.api.skills.share(
+        teamSkill.name,
+        teamSkill.version,
+        { team: secretTeam }
+      );
+      await deciderApi.api.skills.approve(teamShare.id);
+      /** The team skills `personId`'s agent selects for the team skill's task. */
+      const teamSkillsOf = async (personId: string): Promise<string[]> => {
+        const selected = await selectSkillsFor(
+          env,
+          agentFor(personId),
+          "teams",
+          holdsNothing,
+          { task: teamSkillMarker }
+        );
+        return selected.flatMap((skill) =>
+          skill.scope === "team" ? [`${skill.team}:${skill.name}`] : []
+        );
+      };
+      const teamSkillSelected: Record<
+        "byTheHolder" | "byTheOutsider" | "joined" | "left",
+        string[]
+      > = {
+        byTheHolder: await teamSkillsOf(holder),
+        byTheOutsider: await teamSkillsOf(outsider),
+        joined: [],
+        left: [],
+      };
       // No recall ever finds an instruction file, a reader's own included.
       const inRecall = {
         "the holder's instruction file": holderFileMarker,
@@ -822,6 +876,7 @@ describe(
           toHolderMarker,
           ...instructionMarkers,
           holderSkillMarker,
+          teamSkillMarker,
         ],
         hiddenVersions: everyVersionOf(
           ...ownerIds,
@@ -832,6 +887,7 @@ describe(
         ),
         hiddenInstructionFiles: [holderFile, agentFile, appFile, usedAppFile],
         hiddenSkills: [holderSkillMarker],
+        hiddenTeamSkills: [{ team: secretTeam, name: teamSkillMarker }],
         usedApps,
         instructionGroups,
         moments: [whileDraft],
@@ -850,8 +906,12 @@ describe(
       // theirs to read, and nothing else is.
       await join(secretTeam, outsider);
       const joinedFinds = await textsFor(outsider, teamMarker);
-      const { "a team's source the outsider isn't in": _joined, ...notJoined } =
-        markers;
+      teamSkillSelected.joined = await teamSkillsOf(outsider);
+      const {
+        "a team's source the outsider isn't in": _joined,
+        "a team's skill the outsider isn't in": _joinedSkill,
+        ...notJoined
+      } = markers;
       const inTheTeam = await watched(
         "the outsider, in the team",
         {
@@ -870,6 +930,7 @@ describe(
             narrowedId,
             captureId
           ),
+          hiddenTeamSkills: [],
         },
         notJoined,
         { inRecall }
@@ -878,6 +939,7 @@ describe(
       // Leaving counts from the very next recall too.
       await leave(secretTeam, outsider);
       const leftFinds = await textsFor(outsider, teamMarker);
+      teamSkillSelected.left = await teamSkillsOf(outsider);
       const outAgain = await watched(
         "the outsider, out of the team again",
         asOutsider([ownTeam]),
@@ -1010,8 +1072,11 @@ describe(
       ]);
       await join(secretTeam, teamMate);
       const reading = surfaces.filter(([name]) => readingSurfaces.has(name));
-      const { "a team's source the outsider isn't in": _team, ...notTeams } =
-        markers;
+      const {
+        "a team's source the outsider isn't in": _team,
+        "a team's skill the outsider isn't in": _teamSkill,
+        ...notTeams
+      } = markers;
       const asTeamMate = await watched(
         "a team-mate of the holder's",
         {
@@ -1123,6 +1188,7 @@ describe(
         cappedFinds,
         joinedFinds,
         leftFinds,
+        teamSkillSelected,
         holderAppFile: holderAppFiles.some(({ text }) => text === usedAppText),
         outsiderOpens,
       }).toStrictEqual({
@@ -1135,8 +1201,167 @@ describe(
         cappedFinds: [{ text: capped, found: "exact" }],
         joinedFinds: [teamSource],
         leftFinds: [],
+        // From the very next call after joining, and leaving.
+        teamSkillSelected: {
+          byTheHolder: [`${secretTeam}:${teamSkillMarker}`],
+          byTheOutsider: [],
+          joined: [`${secretTeam}:${teamSkillMarker}`],
+          left: [],
+        },
         holderAppFile: true,
         outsiderOpens: "opens it",
+      });
+    });
+
+    it("gives a reader nothing a model drew from what they may not read, and prompts a model with one version's text at a time", async () => {
+      // Extraction sends restricted text to a model on purpose, so the
+      // rule for prompts is: no marker in a prompt made for a reader who
+      // may not read it. An extraction prompt is made for its version's
+      // readers alone, so it may hold that version's marker and no other.
+      // The model tells everything it is shown, and more: every marker it
+      // saw as names, statements, quotes and values, and every other
+      // marker as names it never saw.
+      const [{ userId: holder }, { userId: outsider }] = await Promise.all([
+        signedInWithRole(idp, "user"),
+        signedInWithRole(idp, "user"),
+      ]);
+      const secretTeam = await newTeam(holder);
+      const ownTeam = await newTeam(outsider);
+      const sharedWord = `s${unique()}`;
+      const markers = {
+        "the holder's own words": markerWord(),
+        "a team's source the outsider isn't in": markerWord(),
+        "a source nobody is known to read": markerWord(),
+      };
+      const all = Object.values(markers);
+      const provider = await answeringProvider((requests) => {
+        const body = JSON.stringify(requests.at(-1)?.body);
+        if (body.includes("You check statements")) {
+          return {
+            text: JSON.stringify({
+              supported: Array.from({ length: 10 }, (_, index) => index),
+            }),
+            inputTokens: 10,
+            outputTokens: 10,
+          };
+        }
+        const shown = all.filter((marker) => body.includes(marker));
+        return {
+          text: JSON.stringify({
+            entities: [
+              { key: "c", kind: "customer", names: [...shown, ...all] },
+              { key: "p", kind: "person", names: shown },
+            ],
+            memories: shown.flatMap((marker) => [
+              {
+                about: "c",
+                attribute: "status",
+                value: marker,
+                type: "fact",
+                statement: `Customer ${marker} is active`,
+                quote: `Customer ${marker} is active`,
+              },
+              {
+                about: "p",
+                type: "instruction",
+                statement: `Always ask ${marker}`,
+                quote: `Always ask ${marker}`,
+              },
+            ]),
+          }),
+          inputTokens: 10,
+          outputTokens: 10,
+        };
+      });
+      const textOfMarker = (marker: string) =>
+        `${sharedWord}: Customer ${marker} is active. Always ask ${marker}.`;
+      const addSaid = async (
+        marker: string,
+        readers: SourceReaders,
+        by: Said["by"]
+      ): Promise<SourceRef> => {
+        const source = newSource();
+        await addSource(env, {
+          source,
+          change: crypto.randomUUID(),
+          text: textOfMarker(marker),
+          readers,
+          said: saidNow(by),
+        });
+        return source;
+      };
+      const own = await addSaid(
+        markers["the holder's own words"],
+        { kind: "owner", personId: holder },
+        { kind: "person", personId: holder }
+      );
+      const team = await addSaid(
+        markers["a team's source the outsider isn't in"],
+        { kind: "team", teamId: secretTeam },
+        { kind: "outside" }
+      );
+      const none = await addSaid(
+        markers["a source nobody is known to read"],
+        { kind: "none" },
+        { kind: "outside" }
+      );
+      // The outsider's own, drawn from too.
+      await addSaid(
+        `own${unique()}`,
+        { kind: "team", teamId: ownTeam },
+        { kind: "outside" }
+      );
+      await workBrain(env, new Date(), noProducers);
+
+      // Drawn for those who may read them: the test holds only if the
+      // model's memories exist.
+      const holderReads: number[] = [];
+      for (const name of [
+        markers["the holder's own words"],
+        markers["a team's source the outsider isn't in"],
+      ]) {
+        // oxlint-disable-next-line no-await-in-loop -- one name at a time
+        const found = await brainStore().findEntities({
+          reader: { person: holder, groups: [`team:${secretTeam}`] },
+          name,
+        });
+        holderReads.push(found.entities.length);
+      }
+      const prompts = provider.requests.map(({ body }) =>
+        all.filter((marker) => JSON.stringify(body).includes(marker))
+      );
+      const findings = await findingsOf(
+        "the outsider, after extraction",
+        {
+          personId: outsider,
+          reader: { person: outsider, groups: [`team:${ownTeam}`] },
+          personal: true,
+          sharedWord,
+          markers: all,
+          hiddenVersions: everyVersionOf(own, team, none),
+          hiddenInstructionFiles: [],
+          instructionGroups: ["company"],
+        },
+        markers
+      );
+
+      expect({
+        holderReads,
+        // Two calls for the team's version; one for the outsider's own,
+        // where the model proposed nothing to check; none for the one
+        // nobody may read, nor for the holder's own: it is kept in the
+        // holder's own store, which draws from it on its own tick.
+        promptCount: prompts.length,
+        mixed: prompts.filter((held) => held.length > 1),
+        findings,
+      }).toStrictEqual({
+        // In the shared store: nothing of the holder's own source; of the
+        // team's, the customer alone, as the instruction the model proposed
+        // about a person is never drawn from a source.
+        holderReads: [0, 1],
+        promptCount: 3,
+        mixed: [],
+        findings: [],
       });
     });
 

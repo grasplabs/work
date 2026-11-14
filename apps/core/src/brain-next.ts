@@ -36,12 +36,14 @@ import {
   storeErased,
   wellFormedString,
   modelWaitMaxSeconds,
+  modelRoles as brainModelRoles,
   packItemTokens,
   refusalPrefix,
   restoringNow,
   personalBrainOf,
   stillDeletingAtMostMs,
   storeBytesMax,
+  workPriorities,
   storeKindOf,
 } from "@grasp-os/brain-next/contract";
 import type {
@@ -77,7 +79,9 @@ import type {
   Reader,
   RecallRequest,
   RestoreStatus,
+  SourceErasure,
   SourceId,
+  Speaker,
   StepFailure,
   WayCounts,
   WorkOverview,
@@ -99,6 +103,8 @@ import {
 import type {
   BrainAction,
   BrainActionOutcome,
+  BrainErasureAnswer,
+  BrainErasureLookup,
   BrainReport,
   BrainSearchWay,
   BrainStep,
@@ -127,11 +133,15 @@ import type { OwnStoreHealth } from "./brain-own-stores.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { embedInBulk, embedderModel, questionVectorOf } from "./embedder.ts";
 import { promptTextOf } from "./instructions-text.ts";
+import { parseModelRef } from "./model-catalog.ts";
 import { brainSpendByPurpose, spendMonth } from "./model-spend.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
+import { organizationTimeZone } from "./organization.ts";
 import { shippedSkills } from "./shipped-skills.ts";
 import { skillCards, skillCardsKept } from "./skill-cards.ts";
 import type { SkillCardText } from "./skill-cards.ts";
+import { skillNeedsOf } from "./skill-needs.ts";
+import type { SkillNeeds } from "./skill-needs.ts";
 
 // The Brain, as core reaches it (@grasp-os/brain-next). The Brain knows no
 // people or teams: core names them as principals, a person by their user
@@ -303,11 +313,69 @@ const sourceRefOf = (key: SourceId): SourceRef => {
 /** A change's key, from its producer: see `addSource`. */
 const changeSchema = producerIdSchema(sourceIdMaxLength);
 
+/**
+ * Whose words a source's text is, as core names them: a person of the
+ * company speaking for themselves (or an admin), an outside party (a
+ * customer's mail, a supplier's document), an agent, or the system. A
+ * producer that can't say for sure says the least trusted one. Each
+ * memory drawn records it; none drawn from a source is ever a preference
+ * or an instruction, whoever's words they were.
+ */
+const saidBySchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("person"), personId: idSchema }),
+  z.strictObject({ kind: z.literal("outside") }),
+  z.strictObject({ kind: z.literal("agent"), agentId: idSchema }),
+  z.strictObject({ kind: z.literal("system") }),
+]);
+
+/**
+ * To draw memories from a version as it is added: whose words it is, when
+ * they were said (what "next Friday" counts from, in the organization's
+ * time zone), and which class of the Brain's work it takes.
+ *
+ * It describes ONE message's own words: one speaker, one moment. A thread
+ * (a mail thread, a chat) is one source version per message, each with its
+ * own `said`, and the producer strips the history a message quotes or
+ * forwards before adding it: otherwise a customer's "we pay next Friday",
+ * quoted in a colleague's reply, would become the colleague's word and
+ * count from the reply's date. A document is one author's words at the
+ * moment it was saved.
+ */
+const saidSchema = z.strictObject({
+  by: saidBySchema,
+  // From 1970 on, as the Brain takes it (`extractSchema`).
+  at: z.date().min(new Date(0)),
+  priority: z.enum(workPriorities),
+});
+export type Said = z.infer<typeof saidSchema>;
+
+/** `by` as the Brain names whose word something is. */
+const speakerOf = (by: Said["by"]): Speaker => {
+  switch (by.kind) {
+    case "person": {
+      return { kind: "internal", person: by.personId };
+    }
+    case "agent": {
+      return { kind: "agent", agent: by.agentId };
+    }
+    case "outside": {
+      return { kind: "outside" };
+    }
+    case "system": {
+      return { kind: "system" };
+    }
+    default: {
+      throw new Error("Unknown speaker");
+    }
+  }
+};
+
 const newSourceSchema = z.strictObject({
   source: sourceRefSchema,
   change: changeSchema,
   text: wellFormedString(),
   readers: sourceReadersSchema,
+  said: saidSchema.optional(),
   group: sourceRefSchema.optional(),
   readAt: z.date().optional(),
 });
@@ -670,14 +738,21 @@ const readerOf = async (
  * a producer checks that whoever asks for the change may change that
  * source before it calls this; the Brain can't tell. An add an erasure
  * closed is refused with `brain.source_erased`: final, never retried.
+ *
+ * With `said`, the Brain also draws memories from the version on its work
+ * queue, in `said.priority`'s class: whose words it is (`said.by`, the
+ * producer's to know, recorded on every memory drawn) and when they were
+ * said. Without it, the
+ * version is kept and found, and nothing is drawn from it.
  */
 export const addSource = async (
-  env: BrainEnv,
+  env: BrainEnv & Pick<Env, "DB">,
   added: {
     source: SourceRef;
     change: string;
     text: string;
     readers: SourceReaders;
+    said?: Said;
     group?: SourceRef;
     /**
      * When the producer read `text` where it lives: a text read before the
@@ -687,7 +762,7 @@ export const addSource = async (
     readAt?: Date;
   }
 ): Promise<SourceVersionRef & { newer?: true }> => {
-  const { source, change, text, readers, group, readAt } = checked(
+  const { source, change, text, readers, said, group, readAt } = checked(
     newSourceSchema,
     added
   );
@@ -707,6 +782,17 @@ export const addSource = async (
   }
   const access = accessOf(readers);
   const key = sourceKeyOf(source);
+  const extract =
+    said === undefined
+      ? {}
+      : {
+          extract: {
+            speaker: speakerOf(said.by),
+            saidAt: said.at,
+            timeZone: await organizationTimeZone(env.DB),
+            priority: said.priority,
+          },
+        };
   let version: number;
   let newer: true | undefined;
   try {
@@ -722,6 +808,7 @@ export const addSource = async (
               change,
               text,
               access,
+              ...extract,
               ...(group === undefined ? {} : { group: sourceKeyOf(group) }),
               ...(readAt === undefined ? {} : { readAt: readAt.getTime() }),
             })
@@ -1176,6 +1263,32 @@ const personErasureSchema = z.strictObject({
 });
 
 /**
+ * Erases `request` from `personId`'s own store, then closes its key in the
+ * shared store: the one way anything kept in a person's own store is
+ * erased (`eraseSource`, `eraseOwnGroup`), so every such erasure is in
+ * the shared ledger, which staff's erasure lookup reads (brain-report.ts),
+ * and none is answered "not erased" there. The shared entry is the key's
+ * hash and a time, never content; the shared store holds nothing under
+ * the key, and holds no group (it ignores `asGroup`). Only once the own
+ * store returned: the shared ledger never says erased while a copy can
+ * be read or come back after a restore. A failure of either throws, and
+ * the caller's retry does both, in order; both are safe to repeat.
+ * Answers what the own store answered.
+ */
+const erasedFromOwnStore = async (
+  env: BrainEnv,
+  personId: string,
+  request: SourceErasure
+): Promise<Awaited<ReturnType<Brain["eraseSource"]>>> => {
+  const answered = await ownBrain(env, personId).eraseSource(request);
+  await brain(env).eraseSource({
+    source: request.source,
+    reason: request.reason,
+  });
+  return answered;
+};
+
+/**
  * Erases `source` for good: every version, with everything kept of it,
  * and every source added in it as their group (`addSource`), all in one
  * call to the store. Its key is closed: a later add of it, or in it as a
@@ -1208,16 +1321,12 @@ export const eraseSource = async (
     erased
   );
   const request = { source: sourceKeyOf(source), reason };
-  // In its person's own store first, when it is theirs, and only once
-  // that returned closed in the shared store, whatever its readers: the
-  // shared ledger, which staff read, never says erased while a copy is
-  // left. A failure of the first leaves the shared store as it was, and
-  // the retry does both, in order.
   if (readers.kind === "owner") {
-    await ownBrain(env, readers.personId).eraseSource({
+    await erasedFromOwnStore(env, readers.personId, {
       ...request,
       ...(asGroup === undefined ? {} : { asGroup }),
     });
+    return;
   }
   await brain(env).eraseSource(request);
 };
@@ -1230,22 +1339,24 @@ const ownGroupErasureSchema = z.strictObject({
 
 /**
  * Erases the group `group` (`addSource`'s `group`) from `personId`'s own
- * store alone, as `eraseSource` with `asGroup` does there: every source
- * added in it, in one call, and the group closed, so a later add in it is
+ * store, as `eraseSource` with `asGroup` does there: every source added
+ * in it, in one call, and the group closed, so a later add in it is
  * refused, also after a restore of the store. For a group only their own
- * store can hold, so the shared store has no key of it to close: what an
- * agent read through their own connection (core's `addSource` refuses a
- * capture any other readers). Answers how many sources it erased, the
- * same each time it is repeated (none once their store was erased
- * whole). Safe to repeat; one that throws must be repeated until it
- * answers.
+ * store can hold content of: what an agent read through their own
+ * connection (core's `addSource` refuses a capture any other readers).
+ * Its key is then closed in the shared ledger too, as every erasure from
+ * an own store is (`erasedFromOwnStore`): a record, not content, so
+ * staff's lookup answers erased for it. Answers how many sources it
+ * erased, the same each time it is repeated (none once their store was
+ * erased whole). Safe to repeat; one that throws, in either store, must
+ * be repeated until it answers.
  */
 export const eraseOwnGroup = async (
   env: BrainEnv,
   erased: { personId: string; group: SourceRef; reason: ErasureReason }
 ): Promise<number> => {
   const { personId, group, reason } = checked(ownGroupErasureSchema, erased);
-  const answered = await ownBrain(env, personId).eraseSource({
+  const answered = await erasedFromOwnStore(env, personId, {
     source: sourceKeyOf(group),
     reason,
     asGroup: true,
@@ -1712,14 +1823,19 @@ export const readInstructionFilesAs = async (
   });
 };
 
-// Skills (GRA-1826, GRA-1754): how things are done, as `SKILL.md`
-// documents, kept whole like instruction files (never indexed, so recall
-// never returns one), each a source under `skillsKind`:
+// Skills (GRA-1826, GRA-1754, GRA-1844): how things are done, as
+// `SKILL.md` documents, kept whole like instruction files (never indexed,
+// so recall never returns one), each a source under `skillsKind`:
 //
-// - Grasp's own (`scope` "grasp"), which each release ships, and the
-//   company's (`company`), added only by an admin's approval of a share
-//   (`writeCompanySkill`, from skill-shares.ts): both in the shared store,
-//   readable by every current member, as the company's instruction file.
+// - Grasp's own (`scope` "grasp"), which each release ships, readable by
+//   every current member, as the company's instruction file.
+// - Shared ones, each for an audience (`SkillAudience`), added only as an
+//   admin's decision on a share says (`writeSharedSkill`, from
+//   skill-shares.ts), in the shared store: the company's (`company`),
+//   readable by every current member, and a team's (`team`), readable by
+//   that team's members alone, as core counts them at each read. Which
+//   of them a reader gets is the store's to filter, by the reader's
+//   groups, in its own statement.
 // - A person's own (`person`), which they write for themselves
 //   (`addOwnSkill`): in their own store (`ownBrain`), readable by them
 //   alone (`owner`), never in the shared one. Its key names no person
@@ -1727,45 +1843,88 @@ export const readInstructionFilesAs = async (
 //   the reader core has just verified ever names that store.
 //
 // A skill is guidance and grants no access. Which skills a chat gets is
-// brain-skills.ts's rule, and who may share or decide one is
+// brain-skills.ts's rule (a skill's needs, and which of one name takes
+// the place of another), and who may share or decide one is
 // skill-shares.ts's; each writer here checks who calls it too. No producer
 // can name a skill's key (`kindsWithoutColon`).
 
-/** Where a skill comes from: Grasp's release, the company, or one person. */
-const skillScopes = ["grasp", "company", "person"] as const;
+/** Where a skill comes from: Grasp's release, the company, a team, or one person. */
+const skillScopes = ["grasp", "company", "team", "person"] as const;
 
 /** Where a skill comes from. */
 export type SkillScope = (typeof skillScopes)[number];
 
-const skillSchema = z.strictObject({
-  scope: z.enum(skillScopes),
-  name: skillNameSchema,
-});
+const skillSchema = z.union([
+  z.strictObject({
+    scope: z.enum(["grasp", "company", "person"]),
+    name: skillNameSchema,
+  }),
+  z.strictObject({
+    scope: z.literal("team"),
+    team: idSchema,
+    name: skillNameSchema,
+  }),
+]);
 
-/** A skill, by where it comes from and its name. */
+/** A skill, by where it comes from (a team's, by its team) and its name. */
 export type Skill = z.infer<typeof skillSchema>;
 
-const skillAtSchema = skillSchema.extend({ version: z.int().positive() });
+const versionSchema = z.int().positive();
+
+const skillAtSchema = z.union([
+  z.strictObject({
+    scope: z.enum(["grasp", "company", "person"]),
+    name: skillNameSchema,
+    version: versionSchema,
+  }),
+  z.strictObject({
+    scope: z.literal("team"),
+    team: idSchema,
+    name: skillNameSchema,
+    version: versionSchema,
+  }),
+]);
 
 /** A skill at one version: what a selection pins, and a read takes. */
 export type SkillAt = z.infer<typeof skillAtSchema>;
 
 /** A skill at its current version, and when to use it. */
-export interface SkillCardAt extends SkillAt {
-  description: string;
-}
+export type SkillCardAt = SkillAt & { description: string };
+
+/**
+ * A skill at its current version, when to use it, and what it needs to be
+ * of use; a team's, with its team's name too.
+ */
+export type SkillListed = SkillCardAt & {
+  needs: SkillNeeds;
+  teamName?: string;
+};
 
 /** A skill at one version, whole. */
-export interface SkillVersion extends SkillAt {
-  text: string;
-}
+export type SkillVersion = SkillAt & { text: string };
 
-/** The Brain's key for `skill`: its scope is part of it. */
-const skillKeyOf = ({ scope, name }: Skill): SourceId =>
-  `${skillsKind}:${scope}:${name}`;
+/** The keys of the teams' skills start with this; then the team's ID, ":", and the name. */
+const teamSkillPrefix = `${skillsKind}:team:`;
+
+/** The Brain's key for `skill`: its scope is part of it, and a team's skill its team. */
+const skillKeyOf = (skill: Skill): SourceId =>
+  skill.scope === "team"
+    ? `${teamSkillPrefix}${skill.team}:${skill.name}`
+    : `${skillsKind}:${skill.scope}:${skill.name}`;
 
 /** `key` as the skill it names, or null for one that isn't a skill's. */
 const skillOfKey = (key: SourceId): Skill | null => {
+  if (key.startsWith(teamSkillPrefix)) {
+    // A name holds no ":": the last one ends the team's ID.
+    const rest = key.slice(teamSkillPrefix.length);
+    const at = rest.lastIndexOf(":");
+    const parsed = skillSchema.safeParse({
+      scope: "team",
+      team: rest.slice(0, at),
+      name: rest.slice(at + 1),
+    });
+    return at > 0 && parsed.success ? parsed.data : null;
+  }
   const [kind, scope, name, ...rest] = key.split(":");
   const parsed = skillSchema.safeParse({ scope, name });
   return kind === skillsKind && rest.length === 0 && parsed.success
@@ -1788,22 +1947,24 @@ export interface SkillVersionRef {
  * `skill` at its version as a run keeps it (`SkillVersionRef`), whatever
  * else it carries (a selection's description).
  */
-export const skillVersionRefOf = ({
-  scope: givenScope,
-  name: givenName,
-  version: givenVersion,
-}: SkillAt): SkillVersionRef => {
-  const { scope, name, version } = checked(skillAtSchema, {
-    scope: givenScope,
-    name: givenName,
-    version: givenVersion,
-  });
+export const skillVersionRefOf = (given: SkillAt): SkillVersionRef => {
+  const at = checked(
+    skillAtSchema,
+    given.scope === "team"
+      ? {
+          scope: given.scope,
+          team: given.team,
+          name: given.name,
+          version: given.version,
+        }
+      : { scope: given.scope, name: given.name, version: given.version }
+  );
   return {
     source: {
       producer: skillsKind,
-      id: skillKeyOf({ scope, name }).slice(skillsKind.length + 1),
+      id: skillKeyOf(at).slice(skillsKind.length + 1),
     },
-    version,
+    version: at.version,
   };
 };
 
@@ -1888,14 +2049,14 @@ export const readableVersionsAs = async <Ref extends PinnedVersionRef>(
   });
 };
 
-/** Who may read Grasp's and the company's skills: every current member. */
+/** Who may read Grasp's skills: every current member. */
 const skillAccess: Access = { kind: "audience", group: companyGroup };
 
 /**
- * The group a retired company skill's last version is readable by: core
+ * The group a retired shared skill's last version is readable by: core
  * counts no reader in it (`skillReaderOf`, `readerOf`), so nobody lists,
  * selects or reads a retired skill, and its versions stay in the store as
- * history. Only core's reconciler reads with it (`decisionsReader`),
+ * history. Only core's reconciler reads with it (`decisionsReaderOf`),
  * answering versions, never text.
  */
 const retiredGroup = "retired-skills";
@@ -1919,38 +2080,58 @@ const shippedNames: ReadonlySet<string> = new Set(
   shippedSkills.map(({ name }) => name)
 );
 
+/** `text` checked as a skill named `name`: `skills.invalid` when it isn't. */
+const skillTextOf = (name: string, text: unknown): string => {
+  const checkedText = skillErrors.parse(
+    "skills.invalid",
+    instructionsTextSchema,
+    text
+  );
+  // Its card names it, and what it says it needs is the format's
+  // (skill-needs.ts): a declaration that can't be read is refused here,
+  // never read later as needing nothing.
+  if (
+    skillCardOf(checkedText)?.name !== name ||
+    skillNeedsOf(checkedText) === null
+  ) {
+    throw skillErrors.create("skills.invalid");
+  }
+  return checkedText;
+};
+
 /**
  * Adds `text` as the next version of the Grasp skill `name`, one this
  * release ships, readable by every member, unless it is the skill's
  * current text already (`changed` false, and nothing written); the one
  * before stays as history. `change` is as `addSource`'s. Refused
  * (`skills.invalid`) for a name the release doesn't ship, and when the
- * text isn't a skill named `name` in the Agent Skills format or is over
- * `instructionsMaxLength` UTF-16 units, an instruction file's limit: both
- * fail the same way every time, until another release. Two adds at once
- * may both say `changed`; the store still keeps one version per text in
- * a row.
+ * text isn't a skill named `name` in the Agent Skills format (what it
+ * needs, if it says, included) or is over `instructionsMaxLength` UTF-16
+ * units, an instruction file's limit: both fail the same way every time,
+ * until another release. Two adds at once may both say `changed`; the
+ * store still keeps one version per text in a row.
  *
  * Grasp's own skills only: the release's install (brain-skills.ts) is its
- * one caller. Nothing here adds a company skill: that write needs its own
- * authorization and audit (the approved publish, GRA-1754).
+ * one caller. Nothing here adds a shared skill: that write needs its own
+ * authorization and audit (`writeSharedSkill`).
  */
 export const addShippedSkill = async (
   env: BrainEnv,
   added: { name: string; change: string; text: string }
 ): Promise<SkillAt & { changed: boolean }> => {
-  const { name, change, text } = skillErrors.parse(
+  const { name, change } = skillErrors.parse(
     "skills.invalid",
     z.strictObject({
       name: skillNameSchema,
       change: changeSchema,
-      text: instructionsTextSchema,
+      text: z.string(),
     }),
     added
   );
-  if (!shippedNames.has(name) || skillCardOf(text)?.name !== name) {
+  if (!shippedNames.has(name)) {
     throw skillErrors.create("skills.invalid");
   }
+  const text = skillTextOf(name, added.text);
   const skill: Skill = { scope: "grasp", name };
   const source = skillKeyOf(skill);
   const [current] = await brain(env).readCurrent({
@@ -1973,11 +2154,11 @@ export const addShippedSkill = async (
 };
 
 /**
- * Most of the company's skills a listing answers: past them, the ones
- * whose current version is oldest are left out. Far more than a company
- * writes.
+ * Most of the company's skills, and of the teams' a reader is in, a
+ * listing answers of each: past them, the ones whose current version is
+ * oldest are left out. Far more than a company writes.
  */
-const companySkillsMax = 10 * listPageMax;
+const sharedSkillsMax = 10 * listPageMax;
 
 /** The isolate's skill cards (skill-cards.ts). */
 const cards = skillCards;
@@ -2001,28 +2182,75 @@ const keepCard = (
   cards.set(cardKeyOf(source, version), card);
 };
 
-/** The card `text` declares, if it is the one `source` names. */
+/**
+ * The card `text` declares, with what it needs, if it is the one `source`
+ * names and its needs are the format's: otherwise none, and the skill is
+ * listed nowhere.
+ */
 const declaredCard = (source: SourceId, text: string): SkillCardText | null => {
   const card = skillCardOf(text);
-  return card !== null && card.name === skillOfKey(source)?.name
-    ? { description: card.description }
+  const needs = skillNeedsOf(text);
+  return card !== null &&
+    needs !== null &&
+    card.name === skillOfKey(source)?.name
+    ? { description: card.description, needs }
     : null;
 };
 
+/** `source` at `version` as a listing gives it, with its card, if it has one. */
+const listedOf = (
+  source: SourceId,
+  version: number,
+  card: SkillCardText | null | undefined
+): SkillListed[] => {
+  const skill = skillOfKey(source);
+  return skill === null || card === undefined || card === null
+    ? []
+    : [{ ...skill, version, description: card.description, needs: card.needs }];
+};
+
 /**
- * `personId` as a reader of skills: the person, and the company, which
- * every current member is in. Refused once they have no current
- * membership.
+ * `personId` as a reader of skills (`skillReaderOf`), and the names of the
+ * teams it reads as, by their IDs: what a listing names each team's skill
+ * by.
  */
-const skillReaderOf = async (
+const skillReaderWithTeamsOf = async (
   env: Pick<Env, "DB">,
-  personId: string
-): Promise<PersonReader> => {
+  personId: string,
+  reach: Reach
+): Promise<{
+  reader: PersonReader;
+  teamNames: ReadonlyMap<string, string>;
+}> => {
   const member = await memberOf(env.DB, checked(idSchema, personId));
   if (member === undefined) {
     throw permissionErrors.create("permission.person_inactive");
   }
-  return { person: member.userId, groups: [companyGroup] };
+  const teams = reach === "company" ? [] : member.teams;
+  return {
+    reader: {
+      person: member.userId,
+      groups: [...teams.map(({ id }) => teamGroup(id)), companyGroup],
+    },
+    teamNames: new Map(teams.map(({ id, name }) => [id, name])),
+  };
+};
+
+/**
+ * `personId` as a reader of skills, as far as `reach` goes (`Reach`): the
+ * person, with their teams as core counts them now and the company; or,
+ * at the company's reach, the person and the company alone, so no team's
+ * skill is ever read. The person is named either way, for their own
+ * store, which is addressed only at the person's reach. Refused once they
+ * have no current membership.
+ */
+const skillReaderOf = async (
+  env: Pick<Env, "DB">,
+  personId: string,
+  reach: Reach
+): Promise<PersonReader> => {
+  const { reader } = await skillReaderWithTeamsOf(env, personId, reach);
+  return reader;
 };
 
 /** The current versions of `sources`, whole, a batch at a time, in order. */
@@ -2044,22 +2272,24 @@ const readEachCurrent = async (
 };
 
 /**
- * The company's skills `reader` may read, newest first, at most
- * `companySkillsMax`, with their cards: those read before, the rest read
- * now. A version replaced between the listing and the read is left out,
- * as if listed a moment later.
+ * The shared skills under `prefix` (the company's, or the teams') that
+ * `reader` may read, as the store filters them by the reader's groups in
+ * its own statement, newest first, at most `sharedSkillsMax`, with their
+ * cards: those read before, the rest read now. A version replaced between
+ * the listing and the read is left out, as if listed a moment later.
  */
-const companySkillsAs = async (
+const sharedSkillsAs = async (
   env: BrainEnv,
-  reader: Reader
-): Promise<SkillCardAt[]> => {
+  reader: Reader,
+  prefix: string
+): Promise<SkillListed[]> => {
   const listed: { source: SourceId; version: number }[] = [];
   let after: { addedAt: Date; source: SourceId } | undefined;
   do {
     // oxlint-disable-next-line no-await-in-loop -- a page at a time, in order
     const page = await brain(env).listSources({
       reader,
-      prefixes: [`${skillsKind}:company:`],
+      prefixes: [prefix],
       after,
       limit: listPageMax,
     });
@@ -2069,8 +2299,8 @@ const companySkillsAs = async (
       page.more && last !== undefined
         ? { addedAt: last.addedAt, source: last.source }
         : undefined;
-  } while (after !== undefined && listed.length < companySkillsMax);
-  const kept = listed.slice(0, companySkillsMax);
+  } while (after !== undefined && listed.length < sharedSkillsMax);
+  const kept = listed.slice(0, sharedSkillsMax);
   // This response's cards, held here: those cached now, then those read.
   // The shared cache may be emptied as they are kept (`keepCard`), so the
   // response never reads from it after this.
@@ -2094,13 +2324,9 @@ const companySkillsAs = async (
     known.set(cardKeyOf(source, version), card);
     keepCard(source, version, card);
   }
-  return kept.flatMap(({ source, version }) => {
-    const card = known.get(cardKeyOf(source, version));
-    const skill = skillOfKey(source);
-    return skill === null || card === undefined || card === null
-      ? []
-      : [{ ...skill, version, description: card.description }];
-  });
+  return kept.flatMap(({ source, version }) =>
+    listedOf(source, version, known.get(cardKeyOf(source, version)))
+  );
 };
 
 /**
@@ -2111,7 +2337,7 @@ const companySkillsAs = async (
 const ownSkillsAs = async (
   env: BrainEnv,
   reader: PersonReader
-): Promise<SkillCardAt[]> => {
+): Promise<SkillListed[]> => {
   const store = ownBrain(env, reader.person);
   const listed: SourceId[] = [];
   let after: { addedAt: Date; source: SourceId } | undefined;
@@ -2131,59 +2357,67 @@ const ownSkillsAs = async (
         : undefined;
   } while (after !== undefined);
   const read = await readEachCurrent(store, reader, listed);
-  return read.flatMap(({ source, version, text }) => {
-    const card = declaredCard(source, text);
-    const skill = skillOfKey(source);
-    return skill === null || card === null
-      ? []
-      : [{ ...skill, version, description: card.description }];
-  });
+  return read.flatMap(({ source, version, text }) =>
+    listedOf(source, version, declaredCard(source, text))
+  );
 };
 
 /**
- * The skills `personId` may use, at their current versions, with their
- * descriptions: Grasp's by the names in `shipped` (this release's), read
- * by name, so however long ago they were installed; and the company's,
- * listed on their own, newest first, at most `companySkillsMax`. A
- * company skill takes the place of Grasp's of the same name. Those that
- * declare their own name only. With `personal`, their own skills too,
- * from their own store: only where what the skills shape reaches the
- * person alone (their own chat, their own page); otherwise their own store
- * is never addressed. Refused with `permission.person_inactive` once they
- * are no longer a member.
+ * Every skill `personId` may read, as far as `reach` goes (`Reach`), at
+ * its current version, with its description and what it needs: Grasp's
+ * by the names in `shipped` (this release's), read by name, so however
+ * long ago they were installed; the company's, and, beyond the company's
+ * reach, their teams' (as the store filters them by the teams core counts
+ * them in now), each listed on its own, newest first, at most
+ * `sharedSkillsMax`; and, at the person's reach alone, their own, from
+ * their own store, which is otherwise never addressed (only where what
+ * the skills shape reaches the person alone: their own chat, their own
+ * page). Those that declare their own name only. Every one, whatever
+ * else has its name: which of one name takes the place of another, and
+ * whose needs are met, is brain-skills.ts's to decide. Refused with
+ * `permission.person_inactive` once they are no longer a member.
  */
 export const listSkillsAs = async (
   env: BrainEnv & Pick<Env, "DB">,
   personId: string,
   shipped: ReadonlySet<string>,
-  { personal }: { personal: boolean }
-): Promise<SkillCardAt[]> => {
-  const reader = await skillReaderOf(env, personId);
-  const company = await companySkillsAs(env, reader);
-  const replaced = new Set(company.map(({ name }) => name));
-  const graspSources = [...shipped]
-    .filter((name) => !replaced.has(name))
-    .flatMap((name) => {
-      const skill = skillSchema.safeParse({ scope: "grasp", name });
-      return skill.success ? [skillKeyOf(skill.data)] : [];
-    });
+  { reach }: { reach: Reach }
+): Promise<SkillListed[]> => {
+  const { reader, teamNames } = await skillReaderWithTeamsOf(
+    env,
+    personId,
+    reach
+  );
+  const company = await sharedSkillsAs(env, reader, `${skillsKind}:company:`);
+  const listedTeams =
+    reach === "company"
+      ? []
+      : await sharedSkillsAs(env, reader, teamSkillPrefix);
+  // Each named as the reader's team: only theirs are listed.
+  const teams = listedTeams.map((skill) =>
+    skill.scope === "team"
+      ? { ...skill, teamName: teamNames.get(skill.team) ?? skill.team }
+      : skill
+  );
+  const graspSources = [...shipped].flatMap((name) => {
+    const skill = skillSchema.safeParse({ scope: "grasp", name });
+    return skill.success ? [skillKeyOf(skill.data)] : [];
+  });
   const graspRead = await readEachCurrent(brain(env), reader, graspSources);
   const grasp = graspRead.flatMap(({ source, version, text }) => {
     // Read now, so its card is held here before the cache is touched.
     const card =
       cards.get(cardKeyOf(source, version)) ?? declaredCard(source, text);
     keepCard(source, version, card);
-    const skill = skillOfKey(source);
-    return skill === null || card === null
-      ? []
-      : [{ ...skill, version, description: card.description }];
+    return listedOf(source, version, card);
   });
   // Their own part may go missing when their store fails, never the
   // shared part (`ownOr`).
-  const own = personal
-    ? await ownOr(async () => await ownSkillsAs(env, reader), [])
-    : [];
-  return [...grasp, ...company, ...own];
+  const own =
+    reach === "person"
+      ? await ownOr(async () => await ownSkillsAs(env, reader), [])
+      : [];
+  return [...grasp, ...company, ...teams, ...own];
 };
 
 /** The store `skill` is in for `reader`: their own for their own skills. */
@@ -2194,36 +2428,43 @@ const skillStoreOf = (
 ): Brain => (scope === "person" ? ownBrain(env, reader.person) : brain(env));
 
 /**
- * `skill` at its version, whole, for `personId`, current or history while
- * they may read its current version (as `readSourceVersionAs`): `null`
- * when there is none, alike. A `person` skill is only ever theirs: their
- * own store is the only one asked, so another person's answers as one
- * that doesn't exist. Refused with `skills.invalid` for something that
- * isn't a skill at a version, and `permission.person_inactive` once they
- * are no longer a member.
+ * `skill` at its version, whole, for `personId`, as far as `reach` goes,
+ * current or history while they may read its current version (as
+ * `readSourceVersionAs`): `null` when there is none, alike. A `person`
+ * skill is only ever theirs, and only at the person's reach: their own
+ * store is the only one asked, so another person's answers as one that
+ * doesn't exist. A team's skill only for its members, beyond the
+ * company's reach. Refused with `skills.invalid` for something that isn't
+ * a skill at a version, and `permission.person_inactive` once they are no
+ * longer a member, whatever is asked.
  */
 export const readSkillAs = async (
   env: BrainEnv & Pick<Env, "DB">,
   personId: string,
-  wanted: SkillAt
+  wanted: SkillAt,
+  { reach }: { reach: Reach }
 ): Promise<SkillVersion | null> => {
-  const { scope, name, version } = skillErrors.parse(
+  const { version, ...skill } = skillErrors.parse(
     "skills.invalid",
     skillAtSchema,
     wanted
   );
-  const reader = await skillReaderOf(env, personId);
-  const read = await skillStoreOf(env, reader, { scope, name }).readVersion({
-    source: skillKeyOf({ scope, name }),
+  const reader = await skillReaderOf(env, personId, reach);
+  if (skill.scope === "person" && reach !== "person") {
+    // Their own store is never addressed short of the person's reach.
+    return null;
+  }
+  const read = await skillStoreOf(env, reader, skill).readVersion({
+    source: skillKeyOf(skill),
     version,
     reader,
   });
-  return read === null ? null : { scope, name, version, text: read.text };
+  return read === null ? null : { ...skill, version, text: read.text };
 };
 
 /**
  * `skill` at its current version, whole, for `personId`, as `readSkillAs`
- * reads it: `null` when there is none they may read.
+ * reads it at the person's reach: `null` when there is none they may read.
  */
 export const readCurrentSkillAs = async (
   env: BrainEnv & Pick<Env, "DB">,
@@ -2231,7 +2472,7 @@ export const readCurrentSkillAs = async (
   wanted: Skill
 ): Promise<SkillVersion | null> => {
   const skill = skillErrors.parse("skills.invalid", skillSchema, wanted);
-  const reader = await skillReaderOf(env, personId);
+  const reader = await skillReaderOf(env, personId, "person");
   const [current] = await skillStoreOf(env, reader, skill).readCurrent({
     sources: [skillKeyOf(skill)],
     reader,
@@ -2241,89 +2482,123 @@ export const readCurrentSkillAs = async (
     : { ...skill, version: current.version, text: current.text };
 };
 
-/** `text` checked as a skill named `name`: `skills.invalid` when it isn't. */
-const skillTextOf = (name: string, text: unknown): string => {
-  const checkedText = skillErrors.parse(
+/**
+ * Whom a shared skill is for: every member (`company`), or one team's
+ * members (`team`). Stored by core (skill-shares.ts) as the Brain's own
+ * name of that group (`audienceKeyOf`), and read back only through
+ * `audienceOf`, which never takes a missing or malformed one for the
+ * company.
+ */
+export type SkillAudience =
+  | { kind: "company" }
+  | { kind: "team"; team: string };
+
+const audienceSchema = z.union([
+  z.strictObject({ kind: z.literal("company") }),
+  z.strictObject({ kind: z.literal("team"), team: idSchema }),
+]);
+
+/** The group `audience` reads as, which is also how core stores it. */
+export const audienceKeyOf = (audience: SkillAudience): string => {
+  const checkedAudience = skillErrors.parse(
     "skills.invalid",
-    instructionsTextSchema,
-    text
+    audienceSchema,
+    audience
   );
-  if (skillCardOf(checkedText)?.name !== name) {
-    throw skillErrors.create("skills.invalid");
-  }
-  return checkedText;
+  return checkedAudience.kind === "company"
+    ? companyGroup
+    : teamGroup(checkedAudience.team);
 };
 
-/** The company's skill `name` as its source in the shared store. */
-const companySkillKey = (name: string): SourceId =>
-  skillKeyOf(
-    skillErrors.parse("skills.invalid", skillSchema, {
-      scope: "company",
-      name,
-    })
+/**
+ * `stored` (`audienceKeyOf`) as the audience it names, or null for
+ * anything else, a missing one among them: never the company unless it
+ * says so.
+ */
+export const audienceOf = (stored: unknown): SkillAudience | null => {
+  if (stored === companyGroup) {
+    return { kind: "company" };
+  }
+  if (typeof stored !== "string" || !stored.startsWith(teamPrefix)) {
+    return null;
+  }
+  const team = idSchema.safeParse(stored.slice(teamPrefix.length));
+  return team.success ? { kind: "team", team: team.data } : null;
+};
+
+/** The shared skill `name` for `audience`, as the skill a reader names. */
+const sharedSkillOf = (audience: SkillAudience, name: string): Skill =>
+  skillErrors.parse(
+    "skills.invalid",
+    skillSchema,
+    audience.kind === "company"
+      ? { scope: "company", name }
+      : { scope: "team", team: audience.team, name }
   );
 
 /**
- * Core's own reader of the company's skills, live and retired, for the
+ * Core's own reader of `audience`'s skills, live and retired, for the
  * reconciler (skill-shares.ts): the release's person, which no member is,
  * so it acts for nobody; it reads versions alone, never answering text.
  */
-const decisionsReader: Reader = {
+const decisionsReaderOf = (audience: SkillAudience): Reader => ({
   person: releaseReader.person,
-  groups: [companyGroup, retiredGroup],
-};
+  groups: [audienceKeyOf(audience), retiredGroup],
+});
 
 /**
- * The current version of the company's skill `name`, live or retired;
- * null while it has none. What the reconciler writes over (`after`).
+ * The current version of `audience`'s skill `name`, live or retired; null
+ * while it has none. What the reconciler writes over (`after`).
  */
-export const companySkillVersion = async (
+export const sharedSkillVersion = async (
   env: BrainEnv,
-  name: string
+  { audience, name }: { audience: SkillAudience; name: string }
 ): Promise<number | null> => {
   // The newest version listed, live or retired, is the current one: read
   // without its text, which nothing here needs.
   const { versions } = await brain(env).listVersions({
-    source: companySkillKey(name),
-    reader: decisionsReader,
+    source: skillKeyOf(sharedSkillOf(audience, name)),
+    reader: decisionsReaderOf(audience),
     limit: 1,
   });
   return versions[0]?.version ?? null;
 };
 
 /**
- * The version of the company's skill `name` its change `change` made, live
+ * The version of `audience`'s skill `name` its change `change` made, live
  * or retired, if it made one: a number alone, never text. How the
  * reconciler learns what a decision did in the Brain, whether or not a
  * reply ever came back.
  */
-export const companyChangeVersion = async (
+export const sharedChangeVersion = async (
   env: BrainEnv,
-  asked: { name: string; change: string }
+  asked: { audience: SkillAudience; name: string; change: string }
 ): Promise<number | null> =>
   await brain(env).changeVersion({
-    source: companySkillKey(asked.name),
+    source: skillKeyOf(sharedSkillOf(asked.audience, asked.name)),
     change: skillErrors.parse("skills.invalid", changeSchema, asked.change),
-    reader: decisionsReader,
+    reader: decisionsReaderOf(asked.audience),
   });
 
 /**
- * Writes the company's skill `name` as a decision says (skill-shares.ts):
- * `text` as its next version, readable by every member, or `retired`,
- * readable by no one (its versions stay as history). Under `change`, the
- * decision's own, so a retry writes nothing twice (the store answers a
- * change it has with the version it made, first); and only while the
- * current version is still `after` (`companySkillVersion`, null for
- * none), checked in the store's own transaction: otherwise `stale`, and
- * nothing written. Answers the version it made.
+ * Writes `audience`'s skill `name` as a decision says (skill-shares.ts):
+ * `text` as its next version, readable by the audience's members (every
+ * member, or the team's), or `retired`, readable by no one (its versions
+ * stay as history). Under `change`, the decision's own, so a retry writes
+ * nothing twice (the store answers a change it has with the version it
+ * made, first); and only while the current version is still `after`
+ * (`sharedSkillVersion`, null for none), checked in the store's own
+ * transaction: otherwise `stale`, and nothing written. Answers the
+ * version it made.
  *
  * Who may decide is checked where the decision is written, in core's
  * database; this only writes what a recorded decision says. The one way
- * a company skill is written.
+ * a shared skill is written.
  */
-export const writeCompanySkill = async (
+export const writeSharedSkill = async (
   env: BrainEnv,
   written: {
+    audience: SkillAudience;
     name: string;
     change: string;
     text: string;
@@ -2331,7 +2606,7 @@ export const writeCompanySkill = async (
     after: number | null;
   }
 ): Promise<number | "stale"> => {
-  const source = companySkillKey(written.name);
+  const source = skillKeyOf(sharedSkillOf(written.audience, written.name));
   try {
     const { version } = await brain(env).addInstructions({
       source,
@@ -2339,7 +2614,7 @@ export const writeCompanySkill = async (
       text: skillTextOf(written.name, written.text),
       access: {
         kind: "audience",
-        group: written.retired ? retiredGroup : companyGroup,
+        group: written.retired ? retiredGroup : audienceKeyOf(written.audience),
       },
       after: written.after,
     });
@@ -2356,17 +2631,17 @@ export const writeCompanySkill = async (
  * Adds `text` as the next version of the member `personId`'s own skill of
  * the name its frontmatter gives, in their own store (`keptIn`, with
  * `owner` access), readable by them alone; the one before stays as
- * history. `change` as `writeCompanySkill`'s. Refused (`skills.invalid`)
- * for text that isn't a skill, (`skills.name_erased`) for a name of
- * theirs they erased, and `permission.person_inactive` once they are no
- * longer a member.
+ * history. `change` as `writeSharedSkill`'s. Refused (`skills.invalid`)
+ * for text that isn't a skill (what it needs, if it says, included),
+ * (`skills.name_erased`) for a name of theirs they erased, and
+ * `permission.person_inactive` once they are no longer a member.
  */
 export const addOwnSkill = async (
   env: BrainEnv & Pick<Env, "DB">,
   personId: string,
   added: { change: string; text: string }
 ): Promise<SkillAt> => {
-  const reader = await skillReaderOf(env, personId);
+  const reader = await skillReaderOf(env, personId, "person");
   const change = skillErrors.parse(
     "skills.invalid",
     changeSchema,
@@ -2404,13 +2679,21 @@ export const addOwnSkill = async (
  * failed must be repeated until it returns, as `eraseSource`'s. Refused
  * once they are no longer a member (an erasure of the person erases their
  * whole store: `erasePerson`).
+ *
+ * The one erasure from an own store not closed in the shared ledger
+ * (`erasedFromOwnStore`): a person's skill's key (`skill:person:<name>`)
+ * names no person, so every member's skill of that name has the same key,
+ * and closing it there would make staff's lookup of that key answer
+ * erased for anyone's, once one member deleted theirs, and tell staff
+ * that someone had a skill of that name. Staff's lookup answers "not
+ * erased" for it, with its hedge.
  */
 export const eraseOwnSkill = async (
   env: BrainEnv & Pick<Env, "DB">,
   personId: string,
   name: string
 ): Promise<void> => {
-  const { person } = await skillReaderOf(env, personId);
+  const { person } = await skillReaderOf(env, personId, "person");
   const skill = skillErrors.parse("skills.invalid", skillSchema, {
     scope: "person",
     name,
@@ -2493,11 +2776,13 @@ const waitOf = (error: unknown): ModelReply => {
  */
 const askModel =
   (env: Env): AskModel =>
-  async ({ purpose, system, input, timeoutMs }) => {
+  async ({ purpose, role, system, input, timeoutMs }) => {
     const signal = AbortSignal.timeout(timeoutMs);
     try {
       const { text } = await models(env).call({
-        model: modelForRole(await modelSettings(env), "careful"),
+        model: modelForRole(await modelSettings(env), role),
+        // A check asks the quick model to think little: the cheaper call.
+        ...(role === "quick" ? { effort: "low" as const } : {}),
         system,
         input,
         purpose,
@@ -2520,6 +2805,39 @@ const askModel =
       return waitOf(error);
     }
   };
+
+/**
+ * The context window of the models the Brain's work asks, in tokens: the
+ * smaller of the careful and the quick one's, from the gateway's catalog;
+ * null when either is an OpenAI-compatible endpoint's (the catalog gives
+ * such a model a window it doesn't know), or no model is set up (the
+ * calls then fail as the account's trouble). Null means a version is read
+ * as one piece: a model whose window it overflows refuses the call, and
+ * the item parks.
+ */
+const contextTokensOf = async (env: Env): Promise<number | null> => {
+  let settings: Awaited<ReturnType<typeof modelSettings>>;
+  try {
+    settings = await modelSettings(env);
+  } catch {
+    return null;
+  }
+  const windows = brainModelRoles.map((role) => {
+    try {
+      const ref = parseModelRef(modelForRole(settings, role));
+      if (ref === undefined || ref.provider === "openai-compatible") {
+        return null;
+      }
+      const window = ref.catalog.contextWindow;
+      return window > 0 ? window : null;
+    } catch {
+      return null;
+    }
+  });
+  return windows.every((window) => window !== null)
+    ? Math.min(...windows)
+    : null;
+};
 
 /**
  * Core's embedders, as the Brain's background work uses them: the bulk
@@ -2808,6 +3126,7 @@ export const workBrain = async (
     at,
     embedders: await embeddersOf(env),
     handOvers: handOversOf(env, producers),
+    contextTokens: await contextTokensOf(env),
   });
 };
 
@@ -2858,6 +3177,7 @@ export const alarmHostOf = async (
 ): Promise<{
   ask: AskModel;
   embedders: Embedders;
+  contextTokens: number | null;
   report: (overview: WorkOverview) => Promise<void>;
 }> => {
   const kind = storeKindOf(name);
@@ -2867,6 +3187,9 @@ export const alarmHostOf = async (
   return {
     ask: askModel(env),
     embedders: await embeddersOf(env),
+    // What extraction cuts the person's own sources to, as the shared
+    // store's tick does (`workBrain`).
+    contextTokens: await contextTokensOf(env),
     report: async (overview) => {
       const at = new Date();
       try {
@@ -3058,6 +3381,37 @@ export const actOnBrainForStaff = async (
       throw new Error(`No such action (${typeof unhandled})`);
     }
   }
+};
+
+/**
+ * Whether what Grasp's staff named (brain-report.ts) is erased, as the
+ * Brain's shared store's record of its ledger says: a source, by the
+ * Brain's key for it, or a person, by their id, each hashed by the store
+ * as its ledger names it. The answer is the store's alone, field by field:
+ * a state, and for `erased` when. Never a person's own store: a staff path
+ * addresses no personal object (GRA-1762), so a person's erasure is read
+ * with core's own record of it (brain-report.ts). A source's answer is the
+ * shared ledger's alone: that its key was closed there. `eraseSource`
+ * closes a source its owner keeps in their own store there first, hidden
+ * and recorded in that store's ledger, and in the shared store only once
+ * that returned, so the shared ledger never says erased while a copy can
+ * still be read or come back after a restore. That store's hidden rows
+ * are deleted by its own next tick, which this answer doesn't wait for:
+ * staff name a source by its key alone, and no staff path addresses a
+ * person's own store to ask.
+ */
+export const brainErasureForStaff = async (
+  env: BrainEnv,
+  lookup: BrainErasureLookup
+): Promise<BrainErasureAnswer> => {
+  const status = await brain(env).erasureStatus(
+    lookup.kind === "source"
+      ? { kind: "source", source: lookup.key }
+      : { kind: "person", person: lookup.id }
+  );
+  return status.state === "erased"
+    ? { state: "erased", at: status.at.toISOString() }
+    : { state: status.state };
 };
 
 // Memories, for a person core verified (GRA-1743): what a person's own
