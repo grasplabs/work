@@ -349,32 +349,32 @@ const ackSchema = z
     { message: `At most ${auditOutboxTakeMax} events` }
   );
 
-/** The position a take starts after: 0, the start, by default. */
-const afterSchema = z.int().nonnegative().default(0);
+/** The events a take passes over, by their IDs: none by default. */
+const heldSchema = z.array(z.uuid()).default([]);
 
 /**
- * The oldest events in the outbox stored after `after` (a row's
- * `position`, SQLite's rowid, which an insert sets past every row in the
- * table, also for events stored in one batch, which share their
- * `created_at`), in the order they were stored, at most
- * {@link auditOutboxTakeMax}: core takes them, appends them to the audit
- * log, and only then acknowledges them (`ackAuditEvents`). Taking removes
- * nothing, so events core took but didn't acknowledge are taken again.
- * Within one drain core takes after the last row it took, so the rows it
- * holds (an erasure it could not finish yet) are left behind exactly.
+ * The oldest events in the outbox but those `held` names, in the order
+ * they were stored (SQLite's rowid, which an insert sets past every row
+ * in the table, also for events stored in one batch, which share their
+ * `created_at`), at most {@link auditOutboxTakeMax}: core takes them,
+ * appends them to the audit log, and only then acknowledges them
+ * (`ackAuditEvents`). Taking removes nothing, so events core took but
+ * didn't acknowledge are taken again. Within one drain core names the
+ * ones it holds (an erasure it could not finish yet), so those are passed
+ * over and keep no newer one from the log.
  */
 export const takeAuditEvents = async (
   env: Env,
-  after: unknown = 0
+  held: unknown = []
 ): Promise<OutboxedAuditEvent[]> => {
-  const parsed = afterSchema.safeParse(after);
+  const parsed = heldSchema.safeParse(held);
   if (!parsed.success) {
     throw connectErrors.create("connect.invalid");
   }
   const { results } = await env.DB.prepare(
-    "SELECT rowid AS position, id, event, created_at AS createdAt FROM audit_outbox WHERE rowid > ? ORDER BY rowid LIMIT ?"
+    "SELECT id, event, created_at AS createdAt FROM audit_outbox WHERE id NOT IN (SELECT value FROM json_each(?)) ORDER BY rowid LIMIT ?"
   )
-    .bind(parsed.data, auditOutboxTakeMax)
+    .bind(JSON.stringify(parsed.data), auditOutboxTakeMax)
     .all<OutboxedAuditEvent>();
   return results;
 };

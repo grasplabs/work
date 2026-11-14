@@ -388,19 +388,22 @@ describe("the audit log", () => {
     expect(left.map(({ id }) => id)).toStrictEqual(ids.slice(1));
   });
 
-  it("takes the events stored after a position, in order, and refuses one that is none", async () => {
+  it("takes the events but those core holds, in order, and refuses held ones that are no event IDs", async () => {
     const connectionId = await addConnection();
     await callAs(anna, write(connectionId, "mail.list"));
     await callAs(anna, write(connectionId, "mail.list"));
     await callAs(anna, write(connectionId, "mail.list"));
     const all = await exports.default.takeAuditEvents();
-    const after = await exports.default.takeAuditEvents(all[0]?.position);
+    const [first, middle, last] = all;
+    const passed = await exports.default.takeAuditEvents([
+      middle?.id ?? crypto.randomUUID(),
+    ]);
 
     expect({
-      after: after.map(({ id }) => id),
-      refused: await outcome(exports.default.takeAuditEvents(-1)),
+      passed: passed.map(({ id }) => id),
+      refused: await outcome(exports.default.takeAuditEvents(["rowid"])),
     }).toStrictEqual({
-      after: all.slice(1).map(({ id }) => id),
+      passed: [first?.id, last?.id],
       refused: "connect.invalid",
     });
   });
