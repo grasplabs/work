@@ -96,8 +96,11 @@ const credentialFormats: readonly RegExp[] = [
   /\bxox[abpr]-[0-9A-Za-z-]{10,}/gu,
   /\bAIza[0-9A-Za-z_-]{35}/gu,
   // Not a word boundary: between "-" and "e" one holds at every step of a
-  // flood like "eyJ-eyJ-…", which made the match quadratic.
-  /(?<![\w-])eyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]{8,}/gu,
+  // flood like "eyJ-eyJ-…", which made the match quadratic. Any segments
+  // after the third are taken too, so a JSON Web Encryption's five go
+  // whole (and a sentence's closing period with them); one run, not a
+  // repeated group, which overflowed on a run of megabytes.
+  /(?<![\w-])eyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]{8,}[\w.-]*/gu,
   /\bAKIA[0-9A-Z]{16}\b/gu,
 ];
 
@@ -127,7 +130,7 @@ const credentials: readonly (readonly [
   // only how it starts.
   [
     new RegExp(
-      String.raw`\b(?<name>\w*?(?:session|cookie))${between}(?=(?:\\?["'\x60])?(?:${tokenChar}+=|${sessionChar}{16}))(?:${tokenChar}+=[^"'\\\n]*|${namedValue})`,
+      String.raw`\b(?<name>\w*?(?:session|cookie))${between}(?=(?:\\?["'\x60])?(?:${tokenChar}+=|${sessionChar}{16}))(?:\x60?${tokenChar}+=[^"'\\\n]*|${namedValue})`,
       "giu"
     ),
     redactedAssignment,
@@ -165,15 +168,13 @@ const credentials: readonly (readonly [
 // (`session=9f8e7d`); a value whose first 16 characters hold one that is
 // not a session character, `:`, `|` or a space among them (express's
 // decoded `s:<id>.<sig>`, `user:42:…`, Bottle's `!<sig>?<data>`), as `:`
-// would let a link (`Session: https://…`) start as one; a JSON Web
-// Encryption's last two segments, its ciphertext and tag, of no use
-// without its key (the JWT format takes its first three first); and, in a
-// cookie string, the pairs after a quoted value (`c="d"; sid=…`), as the
-// string ends at a quote so it never runs past the end of a JSON string
-// holding it (never caught). The other way, after them: a word of 16 or
-// more session characters reads as a value
-// ("Session: internationalisation", "Sessie: kwartaalplanning", a Dutch or
-// German compound often is), and any `name=value` blanks the rest of its
+// would let a link (`Session: https://…`) start as one; and, in a cookie
+// string, the pairs after a quoted value (`c="d"; sid=…`), as the string
+// ends at a quote so it never runs past the end of a JSON string holding
+// it (never caught). The other way, after them: a word of 16 or more
+// session characters reads as a value ("Session: internationalisation",
+// "Session: kwartaalplanning": after the loanwords, a Dutch or German
+// compound often is), and any `name=value` blanks the rest of its
 // line ("cookie: flavour=vanilla, then we walked" → "cookie: [redacted]").
 // Prose after the other names loses its first word ("The secret: practice
 // daily", "Authorization: approved"): what follows them is a credential by

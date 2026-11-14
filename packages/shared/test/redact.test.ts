@@ -40,15 +40,27 @@ const leftOf = (text: string, value: string): string | undefined => {
   return undefined;
 };
 
-/** `length` characters of `alphabet`, the same each run (a fixed seed). */
-const drawn = (() => {
-  let seed = 2242;
-  return (alphabet: string, length: number): string =>
-    Array.from({ length }, () => {
-      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
-      return alphabet[seed % alphabet.length];
-    }).join("");
-})();
+/**
+ * Numbers from 0 to 2^32 - 1, the same each run from `seed`: a 64-bit
+ * linear congruential generator (Knuth's MMIX constants) in BigInt, so no
+ * bit is lost, giving its high 32 bits, the well-mixed ones.
+ */
+const seeded = (seed: number): (() => number) => {
+  let state = BigInt(seed);
+  return () => {
+    state = BigInt.asUintN(
+      64,
+      state * 6_364_136_223_846_793_005n + 1_442_695_040_888_963_407n
+    );
+    return Number(state / 4_294_967_296n);
+  };
+};
+
+const draw = seeded(2242);
+
+/** `length` characters of `alphabet`, the same each run. */
+const drawn = (alphabet: string, length: number): string =>
+  Array.from({ length }, () => alphabet[draw() % alphabet.length]).join("");
 
 const hexDigits = "0123456789abcdef";
 const base64Url =
@@ -56,7 +68,8 @@ const base64Url =
 
 /**
  * Session values as each framework issues them, drawn at run time so the
- * source holds none; the last five are the classes "Not caught" names.
+ * source holds none; `short` to `bottle` are the classes "Not caught"
+ * names.
  */
 const sessionValues: Record<string, string> = {
   hex: drawn(hexDigits, 32),
@@ -71,6 +84,7 @@ const sessionValues: Record<string, string> = {
   express: `s%3A${drawn(base64Url, 32)}.${drawn(base64Url, 20)}%2B${drawn(base64Url, 10)}`,
   cookieSession: `eyJ${drawn(base64Url, 40)}==`,
   jwt: `eyJ${drawn(base64Url, 20)}.eyJ${drawn(base64Url, 30)}.${drawn(base64Url, 43)}`,
+  jwe: `eyJ${drawn(base64Url, 20)}.${drawn(base64Url, 30)}.${drawn(base64Url, 16)}.${drawn(base64Url, 40)}.${drawn(base64Url, 22)}`,
   flask: `.eJw${drawn(base64Url, 40)}.${drawn(base64Url, 6)}.${drawn(base64Url, 27)}`,
   phoenix: `SFMyNTY.${drawn(base64Url, 44)}.${drawn(base64Url, 43)}`,
   gorilla: `MTcw${drawn(base64Url, 60)}`,
@@ -81,7 +95,6 @@ const sessionValues: Record<string, string> = {
   expressDecoded: `s:${drawn(base64Url, 32)}.${drawn(base64Url, 27)}`,
   userColon: `user:42:${drawn(hexDigits, 32)}`,
   bottle: `!${drawn(base64Url, 24)}?${drawn(base64Url, 40)}`,
-  jwe: `eyJ${drawn(base64Url, 20)}.${drawn(base64Url, 30)}.${drawn(base64Url, 16)}.${drawn(base64Url, 40)}.${drawn(base64Url, 22)}`,
 };
 
 const sessionNames = [
@@ -133,6 +146,7 @@ const contexts: readonly ((name: string, value: string) => string)[] = [
   (name, value) => `Set-Cookie: ${name}=${value}; Path=/; HttpOnly`,
   (name, value) => `curl -H 'Cookie: ${name}=${value}' https://x.test`,
   (name, value) => `curl -b "${name}=${value}" https://x.test`,
+  (name, value) => `sent \`Cookie: theme=dark; ${name}=${value}\` twice`,
   (name, value) => `<c ${name}="${value}"/>`,
 ];
 
@@ -140,8 +154,6 @@ const contexts: readonly ((name: string, value: string) => string)[] = [
 const proseWords = [
   "session",
   "Session",
-  "sessie",
-  "Sessie",
   "cookie",
   "Cookie",
   "possession",
@@ -344,11 +356,7 @@ describe("redacting credentials", () => {
       '"',
     ];
     // A fixed seed: the same texts each run.
-    let seed = 1730;
-    const next = (): number => {
-      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
-      return seed;
-    };
+    const next = seeded(1730);
     const texts = Array.from({ length: 5000 }, () =>
       Array.from(
         { length: 1 + (next() % 24) },
@@ -475,6 +483,7 @@ describe("redacting credentials", () => {
         `{\\"cookie\\":\\"sid=${sessionToken}\\",\\"n\\":1}`,
         `laravel_session=${sessionToken}`,
         `authCookie: '${sessionToken}'`,
+        `cookie: \`theme=dark; sid=${sessionToken}\``,
       ].map(redact)
     ).toStrictEqual([
       "Cookie: [redacted]",
@@ -484,20 +493,21 @@ describe("redacting credentials", () => {
       String.raw`{\"cookie\":\"[redacted]\",\"n\":1}`,
       "laravel_session=[redacted]",
       "authCookie: '[redacted]'",
+      "cookie: [redacted]",
     ]);
   });
 
   it("never leaves what was redacted after session and cookie, but for the classes it names, and leaves prose as it was", () => {
     const leaking = new Set<string>();
+    const referenceLeft: string[] = [];
     for (const [label, value] of Object.entries(sessionValues)) {
       for (const name of sessionNames) {
         for (const context of contexts) {
           const text = context(name, value);
-          if (
-            leftOf(redactedBefore(text), value) === undefined &&
-            leftOf(redact(text), value) !== undefined
-          ) {
-            leaking.add(label);
+          if (leftOf(redactedBefore(text), value) !== undefined) {
+            referenceLeft.push(text);
+          } else if (leftOf(redact(text), value) !== undefined) {
+            leaking.add(`${label} ${name}`);
           }
         }
       }
@@ -513,9 +523,26 @@ describe("redacting credentials", () => {
         }
       }
     }
-    expect({ leaking: [...leaking], changed: [...changed] }).toStrictEqual({
-      // "Not caught" in src/redact.ts, each class by one value.
-      leaking: ["short", "expressDecoded", "userColon", "bottle", "jwe"],
+    // A session id's name (`JSESSIONID`) redacts whatever follows it.
+    const everydayNames = sessionNames.filter((name) => name !== "JSESSIONID");
+    expect({
+      // Values of many characters, not runs of one.
+      uniform: Object.entries(sessionValues)
+        .filter(([, value]) => new Set(value).size <= 5)
+        .map(([label]) => label),
+      // The reference redacts every value in every context, so a leak
+      // below is one it never had.
+      referenceLeft,
+      leaking: [...leaking],
+      changed: [...changed],
+    }).toStrictEqual({
+      uniform: [],
+      referenceLeft: [],
+      // "Not caught" in src/redact.ts, each class by one value, after
+      // each everyday name.
+      leaking: ["short", "expressDecoded", "userColon", "bottle"].flatMap(
+        (label) => everydayNames.map((name) => `${label} ${name}`)
+      ),
       changed: [
         "internationalisation workshop",
         "kwartaalplanning in zaal 3",
