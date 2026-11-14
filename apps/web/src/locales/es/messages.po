@@ -11073,6 +11073,10 @@ msgstr "Leyó registros de una tabla sensible"
 msgid "Read restricted sources, and is held to them"
 msgstr "Leyó fuentes restringidas y queda sujeto a ellas"
 
+#: src/activity/audit-words.ts
+msgid "Read skills from the Brain"
+msgstr "Leyó skills del Cerebro"
+
 #: src/settings/stephen-settings.tsx
 msgid "Read the company's"
 msgstr "Leer lo de la empresa"

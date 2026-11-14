@@ -18,6 +18,8 @@ export type {
   BrainPack,
   BrainPackItem,
   BrainRecall,
+  BrainSkill,
+  BrainSkillText,
   CallMember,
   CallOptions,
   CaughtError,
