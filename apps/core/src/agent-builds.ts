@@ -3,11 +3,13 @@ import {
   definitionText,
   emptyDefinition,
   tryOperation,
+  tryReadDefinition,
 } from "@grasp-os/runtime/definition";
 import type {
   AppDefinition,
   DefinitionOperation,
 } from "@grasp-os/runtime/definition";
+import type { WorkflowEventContract } from "@grasp-os/runtime/host";
 import { appErrors, fileChangesSchema } from "@grasp-os/shared/apps";
 import type {
   App,
@@ -20,6 +22,7 @@ import type { AuditDetailValue } from "@grasp-os/shared/audit";
 import type { PreviewProblem } from "@grasp-os/shared/chat";
 import type { DefinitionPlan } from "@grasp-os/shared/data-model";
 import type { DependencyRequest } from "@grasp-os/shared/dependencies";
+import { draftErrors } from "@grasp-os/shared/drafts";
 import { functionErrors } from "@grasp-os/shared/functions";
 import { httpContract } from "@grasp-os/shared/http-contract";
 import { appIdSchema } from "@grasp-os/shared/ids";
@@ -40,28 +43,26 @@ import { listBlueprints } from "./app-blueprints.ts";
 import {
   definitionRefusal,
   definitionOperationsSchema,
+  personDefinitionOperationsSchema,
   changePlan,
   definitionPlan,
   generatedPaths,
   operationDetail,
   refuseGeneratedFiles,
 } from "./app-definition.ts";
-import { draftOf, saveDraft, turnApps } from "./app-drafts.ts";
-import type { Draft, DraftWriter } from "./app-drafts.ts";
 import type { FunctionAnswer } from "./app-functions.ts";
 import { refuseAppWorkflows } from "./app-no-workflows.ts";
 import {
   bindableContract,
-  carriedOverBinding,
+  requireRecordableBindings,
 } from "./app-workflow-bindings.ts";
 import {
   appFor,
+  appKind,
   applyChanges,
-  changesAnything,
+  definitionToBuildOn,
   draftDefinition,
-  draftFiles,
   editableApp,
-  findVersion,
   readStored,
 } from "./apps.ts";
 import { memberOf } from "./auth/identity.ts";
@@ -71,6 +72,14 @@ import { inspectDraft } from "./draft-references.ts";
 import type { DraftInspection } from "./draft-references.ts";
 import { callDraft, draftRunOf } from "./draft-runs.ts";
 import type { DraftRun } from "./draft-runs.ts";
+import {
+  changesAnything,
+  draftOf,
+  filesOf,
+  saveDraft,
+  turnSubjects,
+} from "./drafts.ts";
+import type { DraftState, DraftWriter } from "./drafts.ts";
 import { appPreview, workspace } from "./durable-objects.ts";
 import { resolveDependencies } from "./packages/resolve.ts";
 import { admitPreviewCall } from "./pages-rpc.ts";
@@ -90,9 +99,9 @@ import {
 // Building Apps from a chat: `await env.build.write(app, { ... })`. The
 // chat's agent creates Apps (new, or from a blueprint the person may
 // create from, by the rules people follow: app-blueprints.ts), and
-// changes one in the App's draft (app-drafts.ts): one per App, shared by
-// every builder of it and their chats' agents, over the App's latest
-// version when it began. Each write lands only over the revision it read,
+// changes one in the App's draft (drafts.ts): one per App, shared by
+// every builder of it and their chats' agents, over the App's live
+// version. Each write lands only over the revision it read,
 // so two agents', or an agent's and a person's, never overwrite each
 // other: the second is refused, and its agent reads the draft again. A
 // draft reaches the App only as a version, committed over its base.
@@ -101,8 +110,8 @@ import {
 // under `workflows/`. What runs on its own is an independent workflow,
 // built with `env.workflowBuild` (agent-workflow-build.ts) and bound to the
 // App under an alias; each call it makes outside itself is a binding of
-// its validated definition, which an admin approves for that exact
-// version. So nothing the agent writes reaches a binding that no review
+// its validated definition, which an admin approves once, for every
+// version that declares it. So nothing the agent writes reaches a binding that no review
 // lists.
 //
 // Every write answers with what its pages compile to, as the App's preview
@@ -121,7 +130,7 @@ import {
 // sealed into a draft release, on the preview's one store of test data,
 // never the App's live data (draft-runs.ts). Tests run in isolates with an empty
 // env: nothing they do leaves them. The agent never publishes: a builder
-// of the App does, in Grasp, as themselves (app-publish.ts, `publishDraft`), and what
+// of the App does, in Grasp, as themselves (publish.ts, `publish`), and what
 // the App asks for waits for an admin to grant it.
 //
 // The repair loop is the agent loop itself: a write answers with what
@@ -551,7 +560,7 @@ const writtenDiagnostics = (builds: Partial<DraftBuilds>): DraftFailures => {
 export const checkFiles = async (
   env: Env,
   app: AppId,
-  { base, revision }: Pick<Draft, "base" | "revision">,
+  { base, revision }: Pick<DraftState, "base" | "revision">,
   files: Record<string, string>
 ): Promise<DraftCheck> => {
   const builds = await draftBuilds(env, app, base, files);
@@ -680,7 +689,7 @@ export const buildingAs = async (
  * draft's definition as `definition` if given (the definition tools'),
  * refused as a whole as the changes of a commit would be, or when it
  * writes a file under `workflows/`, which nobody does (a draft may delete
- * one), and with `app.conflict` when another write landed since `draft`
+ * one), and with `draft.conflict` when another write landed since `draft`
  * was read. The draft's config and schema are always its definition's. A
  * draft of an App with no version gets an empty definition with its
  * first write. `admit`, if given, admits the write right before it is
@@ -696,20 +705,32 @@ export const saveDraftChanges = async (
     changes,
     definition,
   }: {
-    draft: Draft;
+    draft: DraftState;
     files: Map<string, string>;
     changes: Record<string, string | null>;
     definition?: AppDefinition;
   },
   admit?: () => Promise<void>
 ): Promise<string[]> => {
-  const base = await draftFiles(env, id, { base: draft.base, changes: {} });
+  const definitionAt = async (version: number | null) =>
+    await definitionToBuildOn(env, id, version);
+  const filesAt = async (version: number | null) =>
+    await filesOf(env, appKind, id, { base: version, changes: {} });
+  // A draft left over an older version (a write that landed while a
+  // publish went live, a roll back) reads as its base while it changes
+  // anything, and as the live version once it changes nothing. So only
+  // what both have is no change: either way the draft reads the same.
+  const liveVersion = await appKind.liveBase(env, id);
+  const overLive = liveVersion === draft.base;
+  const base = await filesAt(draft.base);
+  const live = overLive ? base : await filesAt(liveVersion);
   // The base's definition, read once: what the draft's own falls back to,
-  // and what it is no copy of once it is the same again.
-  const baseDefinition =
-    draft.base === null
-      ? null
-      : await readStored(await findVersion(env, id, draft.base));
+  // and what it is no copy of once it is the same again (and the live
+  // version's, as the files are).
+  const baseDefinition = await definitionAt(draft.base);
+  const liveDefinition = overLive
+    ? baseDefinition
+    : await definitionAt(liveVersion);
   let own: AppDefinition;
   if (definition !== undefined) {
     own = definition;
@@ -742,26 +763,31 @@ export const saveDraftChanges = async (
   refuseAppWorkflows(
     written.flatMap(([path, content]) => (content === null ? [] : [path]))
   );
-  // Only what differs from the base is kept: a path written back as the
-  // base has it (a deleted file that isn't there, too) is a change no
-  // more. A draft holds at most the base's paths and the files it adds,
-  // which the App's limits bound. So with its definition: the base's
+  // Only what differs is kept: a path written back as the base and the
+  // live version have it (a deleted file that isn't there, too) is a
+  // change no more. A draft holds at most the base's paths and the files
+  // it adds, which the App's limits bound. So with its definition: theirs
   // again is none of its own.
-  const kept = written.filter(
-    ([path, content]) => (content ?? undefined) !== base.get(path)
-  );
-  const unchanged = written.flatMap(([path, content]) =>
-    (content ?? undefined) === base.get(path) ? [path] : []
+  const noChange = ([path, content]: [string, string | null]) =>
+    (content ?? undefined) === base.get(path) &&
+    (content ?? undefined) === live.get(path);
+  const kept = written.filter((change) => !noChange(change));
+  const unchanged = written.flatMap((change) =>
+    noChange(change) ? [change[0]] : []
   );
   const ownText = definitionText(own);
   await saveDraft(
     env,
+    appKind,
     id,
     draft,
     {
       changes: Object.fromEntries(kept),
       unchanged,
-      definition: baseDefinition?.text === ownText ? null : ownText,
+      definition:
+        baseDefinition?.text === ownText && liveDefinition?.text === ownText
+          ? null
+          : ownText,
     },
     writer,
     admit
@@ -782,31 +808,33 @@ export const saveDraftChanges = async (
  * people use (`before`, null for none), which a release of the draft
  * starts from: never the draft's base, a later commit that may not be
  * current. The plan is the move from it. The problem, for a definition
- * that doesn't read.
+ * that doesn't read. With `revision`, the one its reader read:
+ * `draft.conflict` once the draft moved past it.
  */
 export const draftDefinitions = async (
   env: Env,
-  { id, name, currentVersion }: Pick<App, "id" | "name" | "currentVersion">
+  { id, name, currentVersion }: Pick<App, "id" | "name" | "currentVersion">,
+  revision?: number
 ): Promise<
   | { problem: string }
   | {
-      draft: Draft;
+      draft: DraftState;
       files: Map<string, string>;
       own: AppDefinition;
       before: AppDefinition | null;
     }
 > => {
-  const draft = await draftOf(env, id);
-  const files = await draftFiles(env, id, draft);
+  const draft = await draftOf(env, appKind, id);
+  if (revision !== undefined && draft.revision !== revision) {
+    throw draftErrors.create("draft.conflict");
+  }
+  const files = await filesOf(env, appKind, id, draft);
   let current: AppDefinition;
   let before: AppDefinition | null;
   try {
     const held = await draftDefinition(env, id, draft);
     current = held?.definition ?? emptyDefinition(name);
-    const released =
-      currentVersion === null
-        ? null
-        : await readStored(await findVersion(env, id, currentVersion));
+    const released = await definitionToBuildOn(env, id, currentVersion);
     before = released?.definition ?? null;
   } catch (error) {
     const refusal = definitionRefusal(error);
@@ -825,6 +853,64 @@ export const draftDefinitions = async (
 };
 
 /**
+ * What `all` has of `names`, all of it without them; or the problem, for
+ * a name of a `kind` it doesn't have.
+ */
+const picked = <Value>(
+  kind: string,
+  all: Readonly<Record<string, Value>>,
+  names: readonly string[] | undefined
+): Record<string, Value> | string => {
+  const missing = names?.find((name) => !Object.hasOwn(all, name));
+  if (missing !== undefined) {
+    return `The workflow's live version has no ${kind} \`${missing}\`.`;
+  }
+  return Object.fromEntries(
+    Object.entries(all).filter(
+      ([name]) => names === undefined || names.includes(name)
+    )
+  );
+};
+
+/**
+ * What of `live`, the contract of a workflow's live version, a draft's
+ * `bindWorkflow` declares: all of it, or only the events, listen tasks
+ * and decisions it names, each listen task with only the declared events
+ * it waits on. So an App stops relying on what a workflow is about to
+ * drop. A name the live version doesn't have is the problem.
+ */
+const chosenContract = (
+  live: WorkflowEventContract,
+  chosen: {
+    readonly events?: readonly string[];
+    readonly listens?: readonly string[];
+    readonly decisions?: readonly string[];
+  }
+): WorkflowEventContract | string => {
+  const events = picked("event", live.events, chosen.events);
+  if (typeof events === "string") {
+    return events;
+  }
+  const decisions = picked("decision", live.decisions, chosen.decisions);
+  if (typeof decisions === "string") {
+    return decisions;
+  }
+  const listens = picked("listen task", live.listens, chosen.listens);
+  if (typeof listens === "string") {
+    return listens;
+  }
+  const waiting: Record<string, string[]> = {};
+  for (const [task, waits] of Object.entries(listens)) {
+    const declared = waits.filter((event) => Object.hasOwn(events, event));
+    if (declared.length === 0) {
+      return `Listen task \`${task}\` waits on none of the events declared.`;
+    }
+    waiting[task] = declared;
+  }
+  return { events, decisions, listens: waiting };
+};
+
+/**
  * Changes the App's definition in its draft
  * (app-definition.ts): applies `operation` to it, checked whole, and
  * saves it with `save` (`saveDraftChanges`, by whoever writes) with the
@@ -832,8 +918,11 @@ export const draftDefinitions = async (
  * asks what it would do. Answers the problem, saving nothing, for an operation the
  * definition can't take; otherwise the definition after it, what it does
  * to the App's records (`plan`), and what `save` answered. The chat's
- * agent's definition tools (`BuildApi.define`) and the workspace's Data
- * view (`AppDraftsApi.define`) both change it here.
+ * agent's definition tools (`BuildApi.define`) and a person's
+ * `apps.define` both change it here; only a person's (`person`) writes it
+ * whole (`setDefinition`, app-definition.ts), and only over the revision
+ * they read (`draft.conflict` once the draft moved past it), as
+ * `drafts.write` does.
  */
 export const defineInDraft = async <Saved>(
   env: Env,
@@ -841,11 +930,12 @@ export const defineInDraft = async <Saved>(
   app: Pick<App, "id" | "name" | "currentVersion">,
   operation: unknown,
   save: (
-    draft: Draft,
+    draft: DraftState,
     files: Map<string, string>,
     changes: Record<string, string | null>,
     definition: AppDefinition
-  ) => Promise<Saved>
+  ) => Promise<Saved>,
+  person?: { revision: number }
 ): Promise<
   | { ok: false; problem: string }
   | {
@@ -858,42 +948,49 @@ export const defineInDraft = async <Saved>(
 > => {
   const parsed = appErrors.parse(
     "app.invalid",
-    definitionOperationsSchema,
+    person === undefined
+      ? definitionOperationsSchema
+      : personDefinitionOperationsSchema,
     operation
   );
-  const held = await draftDefinitions(env, app);
+  const held = await draftDefinitions(env, app, person?.revision);
   if ("problem" in held) {
     return { ok: false, problem: held.problem };
   }
+  let result: { definition: AppDefinition } = { definition: held.own };
+  if (!Array.isArray(parsed) && parsed.op === "setDefinition") {
+    const given = tryReadDefinition(parsed.definition);
+    if ("problem" in given) {
+      return { ok: false, problem: given.problem };
+    }
+    // As `bindWorkflow` asks of each workflow it binds.
+    await requireRecordableBindings(env, by, given.definition, held.own);
+    result = { definition: given.definition };
+  }
   // A few operations are one change: each after the one before, the
   // definition checked after each, and saved once or not at all.
-  let result: { definition: AppDefinition } = { definition: held.own };
-  for (const each of Array.isArray(parsed) ? parsed : [parsed]) {
-    // A workflow's contract is what the version bound has, read for the
-    // person binding it, and the version is recorded with it: the tools
+  const operations = Array.isArray(parsed) ? parsed : [parsed];
+  for (const each of operations.flatMap((one) =>
+    one.op === "setDefinition" ? [] : [one]
+  )) {
+    // A workflow's contract is what its live version has, read for the
+    // person binding it, and that version is recorded with it: the tools
     // never take either written by hand.
     let applied: DefinitionOperation;
     if (each.op === "bindWorkflow") {
       // One after the other: each operation applies to the last.
       // oxlint-disable-next-line no-await-in-loop -- see above
-      const bindable = await bindableContract(
-        env,
-        by,
-        each.workflow,
-        each.version
-      );
-      // oxlint-disable-next-line no-await-in-loop -- as above
-      const carried = await carriedOverBinding(
-        env,
-        app.id,
-        held.before,
-        each.alias,
-        bindable.bound
-      );
-      if (carried !== undefined) {
-        return { ok: false, problem: carried };
+      const bindable = await bindableContract(env, by, each.workflow);
+      const contract = chosenContract(bindable.contract, each);
+      if (typeof contract === "string") {
+        return { ok: false, problem: contract };
       }
-      applied = { op: "setWorkflowContract", alias: each.alias, ...bindable };
+      applied = {
+        op: "setWorkflowContract",
+        alias: each.alias,
+        contract,
+        bound: bindable.bound,
+      };
     } else {
       applied = each;
     }
@@ -961,8 +1058,8 @@ export interface TurnCheck {
 }
 
 /**
- * Checks the drafts the chat's agent wrote this turn (app-drafts.ts,
- * `turnApps`) as the turn would answer (chat-harness.ts): each as
+ * Checks the drafts the chat's agent wrote this turn (drafts.ts,
+ * `turnSubjects`) as the turn would answer (chat-harness.ts): each as
  * publishing checks it (`checkFiles`), so the agent fixes what fails in
  * the same turn rather than when a builder publishes. Nothing when the turn wrote
  * none, its person may no longer build them, or they are where they were
@@ -981,7 +1078,10 @@ export const turnCheck = async (
   const chats = workspace(env, scope.workspaceId);
   let shown = false;
   try {
-    const written = await turnApps(env, scope.chatId, turnId);
+    const subjects = await turnSubjects(env, scope.chatId, turnId);
+    const written = subjects.flatMap(({ kind, id }) =>
+      kind === "app" ? [id] : []
+    );
     const person =
       written.length === 0 ? undefined : await memberOf(env.DB, scope.personId);
     if (person === undefined) {
@@ -991,7 +1091,7 @@ export const turnCheck = async (
     const drafts = await Promise.all(
       written.toSorted().map(async (named) => {
         const { id } = await appFor(env, by, named, "builder");
-        return { id, draft: await draftOf(env, id) };
+        return { id, draft: await draftOf(env, appKind, id) };
       })
     );
     const at = JSON.stringify(
@@ -1009,7 +1109,7 @@ export const turnCheck = async (
         if (!changesAnything(draft)) {
           return [];
         }
-        const files = await draftFiles(env, id, draft);
+        const files = await filesOf(env, appKind, id, draft);
         const check = await checkFiles(
           env,
           id,
@@ -1134,12 +1234,14 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
       "build.files",
       async (by) => {
         const id = await this.#readable(by, app);
-        const draft = await draftOf(this.env, id);
+        const draft = await draftOf(this.env, appKind, id);
         return {
           base: draft.base,
           revision: draft.revision,
           changed: Object.keys(draft.changes).toSorted(),
-          files: Object.fromEntries(await draftFiles(this.env, id, draft)),
+          files: Object.fromEntries(
+            await filesOf(this.env, appKind, id, draft)
+          ),
         };
       },
       (found) => ({
@@ -1156,7 +1258,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
    * the agent never does (it may delete one). The version it is over,
    * what it changed and the revision it made. Only over `over`, the
    * revision of the draft its writer read (`files`, or its last write):
-   * refused with `app.conflict` if it moved since, so a write made from
+   * refused with `draft.conflict` if it moved since, so a write made from
    * what was read never lands over another's write, a discard or a
    * restore after the read.
    *
@@ -1178,11 +1280,11 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
           changes
         );
         refuseGeneratedFiles(Object.keys(written));
-        const draft = await draftOf(this.env, found.id);
+        const draft = await draftOf(this.env, appKind, found.id);
         if (expected.revision !== draft.revision) {
-          throw appErrors.create("app.conflict");
+          throw draftErrors.create("draft.conflict");
         }
-        const files = await draftFiles(this.env, found.id, draft);
+        const files = await filesOf(this.env, appKind, found.id, draft);
         return await this.#save(by, found, draft, files, written);
       },
       (written) => ({
@@ -1239,7 +1341,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
   async #save(
     by: Acting,
     found: Pick<App, "id" | "name" | "currentVersion">,
-    draft: Draft,
+    draft: DraftState,
     files: Map<string, string>,
     changes: Record<string, string | null>,
     definition?: AppDefinition
@@ -1297,8 +1399,8 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
       "build.check",
       async (by) => {
         const id = await this.#readable(by, app);
-        const draft = await draftOf(this.env, id);
-        const files = await draftFiles(this.env, id, draft);
+        const draft = await draftOf(this.env, appKind, id);
+        const files = await filesOf(this.env, appKind, id, draft);
         return await checkFiles(this.env, id, draft, Object.fromEntries(files));
       },
       (checked) => ({
@@ -1506,7 +1608,7 @@ const buildDeclaration = `/**
  * Building Apps for the person: create one, or change one they build, in
  * the App's draft (the App's users never see it until a builder publishes it), which
  * every builder of the App and their agents share: a write over a
- * revision another moved past is refused (\`app.conflict\`): read the
+ * revision another moved past is refused (\`draft.conflict\`): read the
  * files again and write anew. Each
  * write answers with what doesn't compile, and as you answer you are told
  * what else fails (types, lint, the preview): fix it and write again.
@@ -1583,8 +1685,8 @@ const buildDeclaration = `/**
  * its own or takes steps, build an independent workflow with
  * \`env.workflowBuild\`, add it to the App's permissions
  * (\`define\` with \`addPermission\`, \`permission.workflow("alias", { args, returns })\`,
- * started with \`ctx.workflows.alias.start(args)\`) and bind it to the App
- * under that alias.
+ * started with \`ctx.workflows.alias.start(args)\`) and bind it in the
+ * App's draft under that alias (\`define\` with \`bindWorkflow\`).
  *
  * Reading the App's data (\`ctx.db\` in queries and mutations) is bounded
  * by what one read examines (10,000 index entries, \`data.scan_limit\`
@@ -1681,7 +1783,7 @@ build: {
   /**
    * Writes files into the draft: new content by path, or null to delete one.
    * Only over \`over\`: the \`revision\` you read with \`files\`, or the one
-   * your last write answered. Refused with \`app.conflict\` if the draft
+   * your last write answered. Refused with \`draft.conflict\` if the draft
    * moved since (another builder or agent wrote it): read \`files\` again,
    * redo your change on what it has now, and write over its revision.
    * TypeScript is saved fixed and formatted (oxfmt, and what Ultracite's

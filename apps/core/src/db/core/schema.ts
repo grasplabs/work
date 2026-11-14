@@ -12,6 +12,7 @@ import type {
   DeclaredPermission,
 } from "@grasp-os/shared/permissions";
 import { signalKinds } from "@grasp-os/shared/signals";
+import { subjectKinds } from "@grasp-os/shared/subject";
 import type { RunFailure } from "@grasp-os/shared/workflows";
 /**
  * Core D1 database: identity (Better Auth), permissions and the App registry.
@@ -361,7 +362,7 @@ export const channelConversations = sqliteTable(
 );
 /**
  * A workflow Stephen offered to start, on a card in a person's chat app:
- * the workflow, the exact version and input the card shows, and, once the
+ * the workflow and the input the card shows, and, once the
  * person pressed Start, where they pressed it and the start it made, so
  * the run's end is told there once (`toldAt`). Good for a day unpressed
  * (`expiresAt`). Kept by channels/workflow-offers.ts.
@@ -380,8 +381,16 @@ export const chatWorkflowOffers = sqliteTable(
     workflowId: text("workflow_id").notNull(),
     /** Its name when offered, as the card shows it. */
     workflowName: text("workflow_name").notNull(),
-    version: integer().notNull(),
-    /** Its input, as the version's contract took it: canonical JSON. */
+    /**
+     * Unused since a press starts the version live as it is pressed:
+     * written and read by nothing. Dropped in a later release (expand,
+     * then contract).
+     */
+    version: integer(),
+    /**
+     * Its input, as the live version's contract took it as it was
+     * offered: canonical JSON, checked again by the start.
+     */
     input: text().notNull(),
     createdAt: timestamp("created_at").notNull(),
     expiresAt: timestamp("expires_at").notNull(),
@@ -963,8 +972,9 @@ export const blueprints = sqliteTable(
     appId: text("app_id").references(() => apps.id),
     version: integer(),
     /**
-     * Whether an admin approved its code: a copy's first version is
-     * approved only then (`madeCurrent`).
+     * Unused since an admin approves access, never a version: nothing
+     * reads it, and it is written false. Dropped in a later release
+     * (expand, then contract).
      */
     approved: integer({ mode: "boolean" }).notNull(),
     /**
@@ -1056,15 +1066,17 @@ export const appVersions = sqliteTable(
     definitionHash: text("definition_hash"),
     files: integer().notNull(),
     authorId: text("author_id").notNull(),
+    /**
+     * Unused since every version is a published draft, which says nothing
+     * of its own: written empty. Dropped in a later release (expand, then
+     * contract).
+     */
     message: text().notNull(),
     createdAt: timestamp("created_at").notNull(),
     /**
-     * Whether an admin approved this version's code for the App's
-     * permissions to change things with (permissions.ts, `authorize`): 1
-     * once an admin made it current or granted a permission while it was,
-     * or it is an App's first version copied from a blueprint; 0 once
-     * someone who couldn't grant made it current, until then. Null for one
-     * never made current, which never runs.
+     * Unused since an admin approves access, never a version: nothing
+     * reads it, and it is written null. Dropped in a later release
+     * (expand, then contract).
      */
     approved: integer(),
     /**
@@ -1094,7 +1106,7 @@ export const appVersions = sqliteTable(
     /**
      * What people call it, `YY.MM.N` as the platform's releases are
      * (@grasp-os/shared/release-id): given in the statement that first
-     * makes it live (apps.ts, `makeCurrent`), so only a version that went
+     * makes it live (apps.ts, `activateVersion`), so only a version that went
      * live has one and the count has no gaps; kept when a roll back makes
      * it live again. Null for a version never live. The integer `version`
      * stays its ID.
@@ -1122,7 +1134,13 @@ export const appVersions = sqliteTable(
 );
 
 /**
- * Each App's draft (src/app-drafts.ts): the one every builder of the App
+ * Unused since every subject's draft is in `drafts` (src/drafts.ts),
+ * which started empty (migration 0250): nothing reads or writes
+ * it. Kept while a release that writes it may serve or be rolled back to
+ * (expand, then contract); dropped in a later release, as are the four
+ * tables after it.
+ *
+ * Each App's draft: the one every builder of the App
  * and their chats' agents write, over the version it began from (`base`,
  * null for an App with none). Each write is the next `revision`, and
  * lands only over the revision it read, so of two writes made from the
@@ -1147,8 +1165,8 @@ export const appDrafts = sqliteTable("app_drafts", {
 });
 
 /**
- * A draft's changes (`appDrafts`): a file's new content by path, or null
- * to delete it, a row each, so no row holds more than one file.
+ * Unused (as `appDrafts`): a draft's changes, a file's new content by
+ * path, or null to delete it, a row each. Dropped in a later release.
  */
 export const appDraftFiles = sqliteTable(
   "app_draft_files",
@@ -1163,7 +1181,8 @@ export const appDraftFiles = sqliteTable(
 );
 
 /**
- * The undo points of each App's draft: one per agent turn that wrote it,
+ * Unused (as `appDrafts`), dropped in a later release: the undo points of
+ * each App's draft, now `draft_checkpoints`. One per agent turn that wrote it,
  * kept as the turn left the draft, one per person's own edit, and one per
  * restore. `number` counts up from 1 per App in the order they landed;
  * `revision` is the draft's revision it made, `base` the version it is
@@ -1202,7 +1221,8 @@ export const appDraftPoints = sqliteTable(
 );
 
 /**
- * What an undo point (`appDraftPoints`) changes over its base: each
+ * Unused (as `appDrafts`), dropped in a later release, now
+ * `draft_checkpoint_files`: what an undo point (`appDraftPoints`) changes over its base: each
  * path's content by its SHA-256 (`appDraftContents`), or null to delete
  * the file, a row each.
  */
@@ -1221,8 +1241,8 @@ export const appDraftPointFiles = sqliteTable(
 );
 
 /**
- * The contents an App's undo points name, each once, by its SHA-256: most
- * writes change a file or two, so the points share the rest.
+ * Unused (as `appDrafts`), dropped in a later release, now `draft_blobs`:
+ * the contents an App's undo points name, each once, by its SHA-256.
  */
 export const appDraftContents = sqliteTable(
   "app_draft_contents",
@@ -1234,6 +1254,140 @@ export const appDraftContents = sqliteTable(
     content: text().notNull(),
   },
   (table) => [primaryKey({ columns: [table.appId, table.sha256] })]
+);
+
+/**
+ * The draft of each App and workflow (src/drafts.ts), keyed by its
+ * subject (`subject_kind`, `subject_id`): the one every builder of it and
+ * their chats' agents write, over the version it began from (`base`, null
+ * for one with none). Each write is the next `revision`, and lands only
+ * over the revision it read, so of two writes made from the same read the
+ * second is refused. A draft whose changes are all gone (published or
+ * discarded) keeps its row and its revision. A workflow's draft is one
+ * file, `workflow.json`.
+ */
+export const drafts = sqliteTable(
+  "drafts",
+  {
+    subjectKind: text("subject_kind", { enum: subjectKinds }).notNull(),
+    subjectId: text("subject_id").notNull(),
+    base: integer(),
+    revision: integer().notNull(),
+    /**
+     * An App draft's own definition, as its text (`definitionText`), next
+     * to its changed files: what the definition tools change. Null while
+     * it is its base's, and always for a workflow.
+     */
+    definition: text(),
+    updatedAt: timestamp("updated_at").notNull(),
+    /** Who wrote it last: the person, themselves or through their chat's agent. */
+    updatedBy: text("updated_by").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.subjectKind, table.subjectId] })]
+);
+
+/**
+ * A draft's changes (`drafts`): a file's new content by path, or null to
+ * delete it, a row each, so no row holds more than one file.
+ */
+export const draftFiles = sqliteTable(
+  "draft_files",
+  {
+    subjectKind: text("subject_kind", { enum: subjectKinds }).notNull(),
+    subjectId: text("subject_id").notNull(),
+    path: text().notNull(),
+    content: text(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.subjectKind, table.subjectId, table.path],
+    }),
+  ]
+);
+
+/**
+ * The checkpoints of each draft: one per agent turn that wrote it, kept
+ * as the turn left the draft, one per person's own edit, and one per
+ * restore, discard, publish and roll back. `number` counts up from 1 per
+ * subject in the order they landed; `revision` is the draft's revision
+ * it made, `base` the version it is over, `definition` its own definition
+ * (as `drafts.definition`), and `content_hash` the SHA-256 of what it
+ * holds (the canonical JSON of `base`, each path's content hash and its
+ * definition). Who wrote it: `person_id`, through the agent of chat
+ * `chat_id` in turn `turn_id` (its last write in the code step
+ * `call_id`), or themselves, restoring checkpoint `restored_from`. The
+ * draft's own rows hold only the latest; these hold every one, to list,
+ * preview and restore, and to say what a chat worked on.
+ */
+export const draftCheckpoints = sqliteTable(
+  "draft_checkpoints",
+  {
+    subjectKind: text("subject_kind", { enum: subjectKinds }).notNull(),
+    subjectId: text("subject_id").notNull(),
+    number: integer().notNull(),
+    revision: integer().notNull(),
+    base: integer(),
+    definition: text(),
+    contentHash: text("content_hash").notNull(),
+    personId: text("person_id").notNull(),
+    chatId: text("chat_id"),
+    turnId: text("turn_id"),
+    callId: text("call_id"),
+    restoredFrom: integer("restored_from"),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.subjectKind, table.subjectId, table.number],
+    }),
+    // What a chat worked on, and what its turn wrote, without a scan.
+    index("draft_checkpoints_chat").on(table.chatId, table.turnId),
+  ]
+);
+
+/**
+ * What a checkpoint (`draftCheckpoints`) changes over its base: each
+ * path's content by its SHA-256 (`draftBlobs`), or null to delete the
+ * file, a row each.
+ */
+export const draftCheckpointFiles = sqliteTable(
+  "draft_checkpoint_files",
+  {
+    subjectKind: text("subject_kind", { enum: subjectKinds }).notNull(),
+    subjectId: text("subject_id").notNull(),
+    number: integer().notNull(),
+    path: text().notNull(),
+    sha256: text(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.subjectKind, table.subjectId, table.number, table.path],
+    }),
+    index("draft_checkpoint_files_content").on(
+      table.subjectKind,
+      table.subjectId,
+      table.sha256
+    ),
+  ]
+);
+
+/**
+ * The contents a subject's checkpoints name, each once, by its SHA-256:
+ * most writes change a file or two, so the checkpoints share the rest.
+ */
+export const draftBlobs = sqliteTable(
+  "draft_blobs",
+  {
+    subjectKind: text("subject_kind", { enum: subjectKinds }).notNull(),
+    subjectId: text("subject_id").notNull(),
+    sha256: text().notNull(),
+    content: text().notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.subjectKind, table.subjectId, table.sha256],
+    }),
+  ]
 );
 
 /**
@@ -3702,7 +3856,9 @@ export const platformVersions = sqliteTable("platform_versions", {
  * What core tells a person in the product (src/notifications.ts): that an
  * admin asked them one of the brain's open questions (`gap_asked`,
  * src/brain-gaps.ts), that a schedule trigger of theirs stopped
- * (`trigger_stopped`), that connect stopped hearing a source their
+ * (`trigger_stopped`), that someone else made another version of a
+ * workflow their triggers start live (`trigger_workflow_changed`), that
+ * connect stopped hearing a source their
  * triggers listen to (`events_stopped`), that packages of an App they
  * build were revoked as malware
  * (`package_revoked`), or what an App told them (`app_message`). A
@@ -3719,6 +3875,7 @@ export const notifications = sqliteTable(
       enum: [
         "gap_asked",
         "trigger_stopped",
+        "trigger_workflow_changed",
         "package_revoked",
         "package_advisory",
         "events_stopped",
@@ -3735,8 +3892,9 @@ export const notifications = sqliteTable(
     readAt: timestamp("read_at"),
     /**
      * The schedule trigger a `trigger_stopped` row says stopped
-     * (workflows/schedule-triggers.ts); its `workflow_id` is the workflow
-     * resource the trigger starts.
+     * (workflows/schedule-triggers.ts), or a trigger of the person's whose
+     * workflow a `trigger_workflow_changed` row says changed; its
+     * `workflow_id` is the workflow resource the trigger starts.
      */
     triggerId: text("trigger_id"),
     /**
@@ -4128,7 +4286,12 @@ export const workflowResourceVersions = sqliteTable(
       .notNull()
       .references(() => workflowResources.id),
     version: integer().notNull(),
-    definitionVersion: text("definition_version").notNull(),
+    /**
+     * The semantic version publication gives the version's contract (its
+     * catalog key's), unique per workflow: the column keeps its first
+     * name, which the release before writes too.
+     */
+    contractVersion: text("definition_version").notNull(),
     definition: text().notNull(),
     definitionJsonHash: text("definition_json_hash").notNull(),
     profileVersion: text("profile_version").notNull(),
@@ -4150,12 +4313,23 @@ export const workflowResourceVersions = sqliteTable(
      * before seals, which this release refuses, to publish again.
      */
     sealId: text("seal_id"),
+    /**
+     * What people call it, `YY.MM.N`, as an App's version
+     * (`app_versions.label`): given in the batch that first makes it live
+     * (src/workflow-publish.ts) and kept when a roll back makes it live
+     * again. Null for a version never live.
+     */
+    label: text(),
   },
   (table) => [
     primaryKey({ columns: [table.workflowResourceId, table.version] }),
     uniqueIndex("workflow_resource_versions_definition_version").on(
       table.workflowResourceId,
-      table.definitionVersion
+      table.contractVersion
+    ),
+    uniqueIndex("workflow_resource_versions_label").on(
+      table.workflowResourceId,
+      table.label
     ),
   ]
 );
@@ -4194,43 +4368,103 @@ export const workflowResourceMembers = sqliteTable(
 
 /**
  * Independent triggers (spec 15, 24; src/trigger-resources.ts): what
- * starts one exact workflow version on its own (a system event, a
- * connector event, a webhook, a schedule, mail to its address), owned by
- * whoever created it, never by the workflow's owner or an App. `current_version` names the
- * version (`trigger_resource_versions`) future starts use; `enabled` false,
- * or `deleted_at`, stops future starts, never runs already started. Its
- * starts need a permission of its own (`start` on the workflow) like any
- * other subject's.
+ * starts one workflow on its own, at the version live as each run starts
+ * (a system event, a connector event, a webhook, a schedule, mail to its
+ * address), owned by whoever created it, never by the workflow's owner or
+ * an App, and configured once, as it is created: a trigger has no
+ * versions. `enabled` false, or `deleted_at`, stops future starts, never
+ * runs already started. Its starts need a permission of its own (`start`
+ * on the workflow) like any other subject's.
  */
-export const triggerResources = sqliteTable("trigger_resources", {
-  id: text().primaryKey(),
-  ownerId: text("owner_id").notNull(),
-  kind: text({
-    enum: ["connector", "webhook", "schedule", "email"],
-  }).notNull(),
-  currentVersion: integer("current_version").notNull(),
-  enabled: integer({ mode: "boolean" }).notNull(),
-  createdAt: timestamp("created_at").notNull(),
-  deletedAt: timestamp("deleted_at"),
-  /**
-   * For an email trigger: the part before the `@` of the address it
-   * receives mail at, the name its builder chose or `trigger-<token>`
-   * (128 random bits), set as it is created and never changed, and set to
-   * null as it is deleted, which frees it (workflows/email-addresses.ts);
-   * null for any other kind. Unlike its ID, shown only to whoever may see
-   * the trigger; a chosen name is audited as it is created, a random one
-   * never logged or audited.
-   */
-  emailAddress: text("email_address").unique(),
-  /**
-   * Never written or read since webhook triggers start on event sources
-   * (GRA-1560, `event_sources`). Kept, with the token's index, until
-   * GRA-1659 drops them (expand, then contract).
-   */
-  webhookToken: text("webhook_token").unique(),
-  webhookSecretGeneration: integer("webhook_secret_generation"),
-  webhookSecretRevokedAt: timestamp("webhook_secret_revoked_at"),
-});
+export const triggerResources = sqliteTable(
+  "trigger_resources",
+  {
+    id: text().primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    kind: text({
+      enum: ["connector", "webhook", "schedule", "email"],
+    }).notNull(),
+    /**
+     * Unused since a trigger has no versions: written 1, as it is NOT
+     * NULL, and read by nothing. Dropped in a later release (expand, then
+     * contract).
+     */
+    currentVersion: integer("current_version").notNull(),
+    enabled: integer({ mode: "boolean" }).notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    deletedAt: timestamp("deleted_at"),
+    /**
+     * For an email trigger: the part before the `@` of the address it
+     * receives mail at, the name its builder chose or `trigger-<token>`
+     * (128 random bits), set as it is created and never changed, and set to
+     * null as it is deleted, which frees it (workflows/email-addresses.ts);
+     * null for any other kind. Unlike its ID, shown only to whoever may see
+     * the trigger; a chosen name is audited as it is created, a random one
+     * never logged or audited.
+     */
+    emailAddress: text("email_address").unique(),
+    /**
+     * Never written or read since webhook triggers start on event sources
+     * (GRA-1560, `event_sources`). Kept, with the token's index, until
+     * GRA-1659 drops them (expand, then contract).
+     */
+    webhookToken: text("webhook_token").unique(),
+    webhookSecretGeneration: integer("webhook_secret_generation"),
+    webhookSecretRevokedAt: timestamp("webhook_secret_revoked_at"),
+    /**
+     * The workflow it starts, the SHA-256 of its configuration, and the
+     * person its starts act for (`principal_binding`, a user ID the host
+     * bound at creation: who created it, never the workflow's owner). Every
+     * trigger is created with all three (trigger-resources.ts); the empty
+     * default is only there because SQLite adds a NOT NULL column only with
+     * one, and migration 0251 copied each existing trigger's from the
+     * version it ran (`trigger_resource_versions`).
+     */
+    workflowResourceId: text("workflow_resource_id").notNull().default(""),
+    configHash: text("config_hash").notNull().default(""),
+    principalBinding: text("principal_binding").notNull().default(""),
+    /** A connector trigger's event type, or a webhook trigger's. */
+    eventType: text("event_type"),
+    /**
+     * For a schedule trigger: its five-field cron expression, the IANA time
+     * zone it is read in, and the input each of its runs starts with
+     * (canonical JSON, accepted by the workflow's live version as the
+     * trigger was created, and checked again by every start), all checked as
+     * it was created (trigger-resources.ts). Null for any other kind.
+     */
+    scheduleCron: text("schedule_cron"),
+    scheduleTimeZone: text("schedule_time_zone"),
+    scheduleInput: text("schedule_input"),
+    /**
+     * For a connector trigger: the connection whose events start it, the
+     * part of it (a mailbox, a drive) or null for the account's own, and
+     * how each event becomes its run's input (canonical JSON: input fields
+     * to JSON Pointers into the event, and literal defaults), checked as it
+     * was created (trigger-resources.ts). An email trigger keeps its
+     * mapping of each message here too, with no connection. Null for any
+     * other kind.
+     */
+    connectionId: text("connection_id"),
+    connectionResource: text("connection_resource"),
+    inputMapping: text("input_mapping"),
+    /**
+     * For a webhook trigger (GRA-1560): the event source whose events
+     * start it (`event_sources`), of type `event_type`; each event's data
+     * is its run's input. Null for any other kind.
+     */
+    eventSourceId: text("event_source_id"),
+  },
+  (table) => [
+    // The webhook triggers that take a source's events.
+    index("trigger_resources_source")
+      .on(table.eventSourceId, table.eventType)
+      .where(sql`${table.eventSourceId} IS NOT NULL`),
+    // The connector triggers that take a connection's events.
+    index("trigger_resources_connection")
+      .on(table.connectionId, table.eventType)
+      .where(sql`${table.connectionId} IS NOT NULL`),
+  ]
+);
 
 /**
  * The deployment's event sources (GRA-1560, event-sources.ts): where an
@@ -4345,12 +4579,10 @@ export const keptEventKeys = sqliteTable(
 );
 
 /**
- * Each version of a trigger, written once: the exact workflow version it
- * starts (never "the latest": a new workflow version changes no trigger
- * until one is explicitly updated to it), the SHA-256 of its
- * configuration, and the person its starts act for (`principal_binding`,
- * a user ID the host bound at creation: who created it, never the
- * workflow's owner).
+ * Unused since a trigger has no versions and keeps its configuration on
+ * its own row (`trigger_resources`, where migration 0251 copied each
+ * trigger's): written and read by nothing. Dropped in a later release
+ * (expand, then contract).
  */
 export const triggerResourceVersions = sqliteTable(
   "trigger_resource_versions",
@@ -4422,11 +4654,10 @@ export const triggerResourceVersions = sqliteTable(
 
 /**
  * When each schedule trigger next starts its run (workflows/schedule-
- * triggers.ts): the occurrence due next for the trigger version it was
- * worked out for (`version`), none once it stopped. Only a live, enabled
- * trigger whose current version is `version` starts anything; the rest
- * wait here untouched until enabling or moving the trigger works out its
- * next occurrence again, from then. `failed_starts` counts the starts in a
+ * triggers.ts): the occurrence due next, none once it stopped. Only a
+ * live, enabled trigger starts anything; a disabled one's waits here
+ * untouched until enabling it works out its next occurrence again, from
+ * then. `failed_starts` counts the starts in a
  * row that were refused or failed in the workflow's own terms, toward
  * stopping it; `attempts` counts every failed try of the occurrence due,
  * core's own failures too, each try waiting twice as long as the one
@@ -4438,7 +4669,11 @@ export const triggerSchedules = sqliteTable(
     triggerId: text("trigger_id")
       .primaryKey()
       .references(() => triggerResources.id),
-    version: integer().notNull(),
+    /**
+     * Unused since a trigger has no versions: written and read by
+     * nothing. Dropped in a later release (expand, then contract).
+     */
+    version: integer(),
     nextAt: timestamp("next_at"),
     failedStarts: integer("failed_starts").notNull().default(0),
     attempts: integer().notNull().default(0),
@@ -4459,7 +4694,8 @@ export const triggerSchedules = sqliteTable(
 /**
  * The starts of independent workflows a chat's agent asked for, held
  * until the person it acts for confirms them in Grasp (src/held-starts.ts):
- * the workflow and version, the input exactly as it would start (canonical
+ * the workflow, whose version live as it is confirmed starts, the input
+ * exactly as it would start (canonical
  * JSON, with its SHA-256), the agent, its person and its chat, and the
  * agent's key, scoped to the chat. One per chat and key: the agent asking
  * again is the same start. Decided once: confirmed (with the start it
@@ -4480,7 +4716,12 @@ export const agentHeldStarts = sqliteTable(
     workflowResourceId: text("workflow_resource_id")
       .notNull()
       .references(() => workflowResources.id),
-    workflowResourceVersion: integer("workflow_resource_version").notNull(),
+    /**
+     * Unused since a held start starts the version live as it is
+     * confirmed: written and read by nothing. Dropped in a later release
+     * (expand, then contract).
+     */
+    workflowResourceVersion: integer("workflow_resource_version"),
     /** Null once the start is no longer open (held-starts.ts). */
     input: text(),
     inputHash: text("input_hash").notNull(),
@@ -4571,7 +4812,7 @@ export const triggerHourSlots = sqliteTable(
  * same start sent again is the same start, and one person's key never
  * reaches another's start. It pins the exact workflow version and manifest, who
  * invoked it (a person, an App, an agent or a trigger, with the App
- * version or trigger version), the person it acts for, the workflow's
+ * version for an App), the person it acts for, the workflow's
  * policy generation it was admitted under and its validated input
  * (canonical JSON, with its SHA-256). Never changed after, but for its
  * input and frozen parameter values, which run retention removes
@@ -4594,7 +4835,10 @@ export const workflowStartReceipts = sqliteTable(
     manifestHash: text("manifest_hash").notNull(),
     /** The App version, for an App's start; null otherwise. */
     originAppVersion: integer("origin_app_version"),
-    /** The trigger version, for a trigger's start; null otherwise. */
+    /**
+     * Unused since a trigger has no versions: written null, and read by
+     * nothing. Dropped in a later release (expand, then contract).
+     */
     triggerVersion: integer("trigger_version"),
     principalId: text("principal_id").notNull(),
     authorityGeneration: integer("authority_generation").notNull(),
@@ -5121,12 +5365,12 @@ export const workflowCatalogContracts = sqliteTable(
 /**
  * Which concrete resource serves each catalog binding of an independent
  * workflow (src/workflow-bindings.ts): approved by an admin for the
- * declaration they reviewed (its kind, contract key and fingerprint) in
- * the exact version they reviewed (`reviewed_version`), and serving that
- * version alone: another version, newer or older, is code nobody reviewed
- * for it. `target` is the resource (JSON, `WorkflowBindingTarget`). At
- * most one active approval per version and alias; approving another
- * revokes it in the same batch. Revoked rows stay.
+ * declaration they reviewed (its alias, kind, contract key and
+ * fingerprint), in the version they reviewed it in (`reviewed_version`),
+ * and serving every version that declares it so. `target` is the resource
+ * (JSON, `WorkflowBindingTarget`). At most one active approval per
+ * binding; approving another revokes it in the same batch, and revoking
+ * one holds for every version. Revoked rows stay.
  */
 export const workflowBindingApprovals = sqliteTable(
   "workflow_binding_approvals",
@@ -5152,8 +5396,23 @@ export const workflowBindingApprovals = sqliteTable(
     revokedAt: timestamp("revoked_at"),
   },
   (table) => [
+    /**
+     * Unused since an approval serves every version declaring its binding
+     * (src/workflow-bindings.ts): kept while a release that relies on it
+     * may serve or be rolled back to, dropped in a later one.
+     */
     uniqueIndex("workflow_binding_approvals_active_idx")
       .on(table.workflowResourceId, table.reviewedVersion, table.alias)
+      .where(sql`${table.status} = 'active'`),
+    // One active approval per binding: its alias's declaration.
+    uniqueIndex("workflow_binding_approvals_binding_idx")
+      .on(
+        table.workflowResourceId,
+        table.alias,
+        table.kind,
+        table.contractId,
+        table.fingerprint
+      )
       .where(sql`${table.status} = 'active'`),
   ]
 );
@@ -5251,8 +5510,12 @@ export const workflowStateSnapshots = sqliteTable("workflow_state_snapshots", {
 });
 
 /**
+ * Unused since a workflow's draft is in `drafts` (src/drafts.ts): nothing
+ * reads or writes it. Kept while a release that writes it may serve or be
+ * rolled back to (expand, then contract); dropped in a later release.
+ *
  * The draft of each independent workflow's next definition, as its
- * builders edit it (src/workflow-drafts.ts): one row per accepted edit,
+ * builders edited it: one row per accepted edit,
  * `revision` counting them from 1. An edit names the revision it read and
  * inserts the next one, so of two concurrent edits the second is refused
  * and the first stays. `source` is the text as edited, JSON or not;
@@ -5323,13 +5586,14 @@ export const workflowResourceDraftInspections = sqliteTable(
 );
 
 /**
- * Where each independent workflow is in its life (src/workflow-lifecycle.ts):
- * one row, once something about it was set, moved on by every write
- * (`revision`), each write only over the revision it read. `stage` is the
- * stage a builder set; null follows the workflow (drafted, published,
- * live). `live_version` is the version that went live last, through an
- * approval of `go_live_version` by someone other than who asked for it.
- * While `paused_at` is set it starts no runs (workflow-starts.ts).
+ * Whether each independent workflow is paused (src/workflow-pause.ts):
+ * one row, once it was paused, moved on by every write (`revision`), each
+ * write only over the revision it read. While `paused_at` is set it
+ * starts no runs (workflow-starts.ts). Its stage and go-live columns are
+ * unused since a workflow's live version is its current one, made live
+ * by a publish (src/workflow-publish.ts): nothing reads or writes them;
+ * kept while a release that writes them may serve or be rolled back to
+ * (expand, then contract), and dropped in a later release.
  */
 export const workflowResourceLifecycles = sqliteTable(
   "workflow_resource_lifecycles",
@@ -5361,11 +5625,11 @@ export const workflowResourceLifecycles = sqliteTable(
 );
 
 /**
- * Which exact version of an independent workflow each App binds, by an
- * alias of the App's (src/app-workflow-bindings.ts). A binding pins the
- * version and grants nothing: starting it still takes the App's own
+ * Which independent workflow each App binds, by an alias of the App's
+ * (src/app-workflow-bindings.ts), whose live version its starts run. A
+ * binding grants nothing: starting it still takes the App's own
  * `start` permission. At most one active binding per App and alias;
- * moving to another version is a new binding. Removed ones stay.
+ * binding another workflow is a new binding. Removed ones stay.
  */
 export const appWorkflowBindings = sqliteTable(
   "app_workflow_bindings",
@@ -5378,12 +5642,28 @@ export const appWorkflowBindings = sqliteTable(
     workflowResourceId: text("workflow_resource_id")
       .notNull()
       .references(() => workflowResources.id),
+    /**
+     * The version it was made at, whose contract was checked against the
+     * App's declaration. A binding follows its workflow's live version
+     * (src/app-workflow-bindings.ts): starts never run this one for it.
+     */
     workflowResourceVersion: integer("workflow_resource_version").notNull(),
     status: text({ enum: ["active", "removed"] }).notNull(),
     boundBy: text("bound_by").notNull(),
     boundAt: timestamp("bound_at").notNull(),
     removedBy: text("removed_by"),
     removedAt: timestamp("removed_at"),
+    /**
+     * What the App's live version declares of the workflow under the
+     * alias (its events, listen tasks and decisions), as canonical JSON,
+     * set each time an App version is made live (apps.ts,
+     * `activateVersion`); null while it declares nothing, none is live,
+     * or the App was restored and made none live since (app-status.ts).
+     * What a workflow's publish checks its version against
+     * (src/app-workflow-bindings.ts, `requireBoundAppsDeclare`), so it
+     * never loads an App's release.
+     */
+    contract: text(),
   },
   (table) => [
     uniqueIndex("app_workflow_bindings_active_idx")
@@ -5466,7 +5746,7 @@ export const workflowCandidateRuns = sqliteTable(
 );
 
 /**
- * Tests of a draft's checkpoint over recent real items (GRA-513,
+ * Tests of a draft at one revision over recent real items (GRA-513,
  * workflows/item-tests.ts): one row per item, the run whose input it took,
  * and the test run that ran it, or why none did. A started item's row is
  * written with its test run's, and none changes; swept with the test runs,

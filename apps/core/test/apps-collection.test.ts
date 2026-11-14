@@ -6,8 +6,7 @@ import { z } from "zod";
 
 import { anyTeamGrant } from "../src/app-provenance.ts";
 import { indexApps } from "../src/knowledge/apps-collection.ts";
-import { commitApp } from "./app-definitions.ts";
-import { grantReviewed, release, requestGranted } from "./apps.ts";
+import { commitApp, grantReviewed, release, requestGranted } from "./apps.ts";
 import { actingFor, envOf, knowledgeIn } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -214,7 +213,7 @@ describe("indexing", setUpTime, () => {
     );
 
     // Back to the first version: its text is the entry's again.
-    await owner.api.apps.versions.publish(app.id, 1);
+    await owner.api.versions.rollback({ kind: "app", id: app.id }, 1);
     await expect(
       foundFor(owner.knowledge, first, second)
     ).resolves.toStrictEqual({ [first]: [path], [second]: [] });
@@ -321,12 +320,7 @@ describe("indexing", setUpTime, () => {
     // Version 2 made current unindexed, version 3 committed.
     await withIndexingFailing(owner, async (api) => {
       await release({ api }, app.id, { "AGENTS.md": agentsMd(second) });
-      await commitApp(
-        api.apps.files,
-        app.id,
-        { "AGENTS.md": agentsMd(third) },
-        "Third"
-      );
+      await commitApp(api, app.id, { "AGENTS.md": agentsMd(third) });
     });
 
     // The clock indexes version 2; just before its write lands, version 3
@@ -335,7 +329,7 @@ describe("indexing", setUpTime, () => {
       await indexApps({
         ...env,
         KNOWLEDGE: knowledgeRacing(async () => {
-          await owner.api.apps.versions.publish(app.id, 3);
+          await owner.api.versions.rollback({ kind: "app", id: app.id }, 3);
         }),
       });
     });
@@ -366,7 +360,7 @@ describe("indexing", setUpTime, () => {
     await indexApps({
       ...env,
       KNOWLEDGE: knowledgeRacing(async () => {
-        await owner.api.apps.versions.publish(app.id, 1);
+        await owner.api.versions.rollback({ kind: "app", id: app.id }, 1);
       }),
     });
     await expect(

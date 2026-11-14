@@ -123,7 +123,7 @@ const mapOf = async (admin: Person): Promise<AppId> => {
   const made = await admin.api.apps.blueprints.create(workflowMap, {
     name: `Our map ${unique()}`,
   });
-  await admin.api.apps.versions.publish(made.app.id, 1);
+  await admin.api.versions.rollback({ kind: "app", id: made.app.id }, 1);
   return appIdSchema.parse(made.app.id);
 };
 

@@ -867,7 +867,7 @@ const filesCallDetail = (
 /**
  * What `call` of a test run answers: the answer its start gave the call's
  * binding, checked as a real call checks what it sends and what comes back
- * (against the catalog contract the checkpoint was checked against, still
+ * (against the catalog contract the draft was checked against, still
  * as it was, or the task's own output schema), so a test run passes only
  * what a run of the published version would. Nothing of it leaves core.
  */
@@ -1099,7 +1099,7 @@ export const makeCall = async (
   if (call.name === "grasp.connector") {
     requireNoSensitiveKept(call);
   }
-  // A test run of a draft's checkpoint calls nothing: whatever the call,
+  // A test run of a draft at one revision calls nothing: whatever the call,
   // its answer is the one the run's start gave its binding, before any
   // binding, authority or receipt is looked at, so nothing of it can
   // reach connect, a model, an App, a store or Knowledge.

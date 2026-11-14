@@ -101,7 +101,7 @@ export interface PinnedCandidateRun {
 
 /**
  * What a run executes: an independent workflow's sealed version, a test
- * run of its draft's checkpoint, or one of core's own.
+ * run of its draft at one revision, or one of core's own.
  */
 export type RunPin =
   | ({ type: "resource" } & PinnedResourceRun)

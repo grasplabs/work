@@ -29,7 +29,7 @@ import {
 // - A version that removes a function a workflow calls, or changes what
 //   it takes or answers so the workflow's calls no longer fit, made
 //   current by a publish, a rollback or any older version made current:
-//   all go through `makeCurrent` (apps.ts), which checks every bound
+//   all go through `activateVersion` (apps.ts), which checks every bound
 //   function of the version against the one current now
 //   (`requireBoundFunctionsServed`), by ID, and is refused, naming each
 //   workflow and function, before anything changes. A rename keeps the
@@ -79,19 +79,14 @@ interface BoundFunction {
 
 /**
  * That a permission row `held` (its alias) binds a live workflow to one
- * of App `app`'s functions, as SQL: an active grant, or one asked for
- * again (requested, granted before) as another version was made current
- * by someone who couldn't grant (permissions.ts, `madeCurrent`), which
- * the workflow still counts on.
+ * of App `app`'s functions, as SQL: an active grant.
  */
 const boundSql = (app: AppId, held: string): SQL =>
   sql`${sql.identifier(held)}.object_type = 'app'
     AND ${sql.identifier(held)}.object_id = ${app}
     AND ${sql.identifier(held)}.resource IS NOT NULL
     AND ${sql.identifier(held)}.subject_type = 'workflow'
-    AND (${sql.identifier(held)}.status = 'active'
-      OR (${sql.identifier(held)}.status = 'requested'
-        AND ${sql.identifier(held)}.granted_by IS NOT NULL))
+    AND ${sql.identifier(held)}.status = 'active'
     AND EXISTS (SELECT 1 FROM workflow_resources AS live
       WHERE live.id = ${sql.identifier(held)}.subject_id
         AND live.deleted_at IS NULL)`;

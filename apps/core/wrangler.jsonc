@@ -111,6 +111,9 @@
       // for everyone who builds it, on one store of test data
       // (src/app-preview.ts).
       { "name": "APP_PREVIEWS", "class_name": "AppPreview" },
+      // One object per App's or workflow's draft, named by its subject:
+      // the pages that follow it, told of each write (src/draft-watch.ts).
+      { "name": "DRAFT_WATCHES", "class_name": "DraftWatch" },
       { "name": "AUDIT_LOG", "class_name": "AuditLog" },
       // The one object that installs what ships with each release
       // (src/builtins.ts).
@@ -162,6 +165,7 @@
     { "tag": "v12", "new_sqlite_classes": ["BrainStore"] },
     { "tag": "v13", "new_sqlite_classes": ["Embedder"] },
     { "tag": "v14", "new_sqlite_classes": ["AppPreview"] },
+    { "tag": "v15", "new_sqlite_classes": ["DraftWatch"] },
   ],
   // Runs App sandboxes and the App compiler.
   "worker_loaders": [{ "binding": "LOADER" }],

@@ -156,7 +156,7 @@ const acceptedValue = (
 
 /**
 /**
- * The parameter values a test run of a draft's checkpoint runs with
+ * The parameter values a test run of a draft at one revision runs with
  * (workflows/candidate-runs.ts), frozen as a start freezes them, against
  * the checkpoint's own contract: each one `given` names, else its default.
  * Never the workflow's set values: a draft's code is its builder's, and a

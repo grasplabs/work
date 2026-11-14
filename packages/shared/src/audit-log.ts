@@ -382,6 +382,11 @@ const typeRules: readonly {
   { action: "workflow.state", type: "action" },
   // A schedule stopped after its run kept failing to start.
   { action: "workflow.schedule", type: "action" },
+  // The draft of an App or a workflow saved, restored or discarded, and a
+  // version of one published or rolled back to (core's drafts.ts and
+  // publish.ts), each naming its App or workflow as the target.
+  { action: "draft", type: "config" },
+  { action: "version", type: "config" },
   { action: "platform", type: "platform_update" },
   // Improvement signals: the daily computation, and reading them.
   { action: "improvement.signals.computed", type: "action" },

@@ -422,7 +422,9 @@ export const StartIndependentRun = ({
         await core.withSession(
           async (session) =>
             await session.workflowResources.start(workflow, {
-              version,
+              // The version the form was filled in for: core says so if
+              // another went live meanwhile.
+              expected: version,
               args: input,
               key,
             })

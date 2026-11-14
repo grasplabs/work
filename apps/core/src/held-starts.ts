@@ -57,7 +57,10 @@ import { startResourceRun } from "./workflows/resource-runs.ts";
 //   decides it.
 // - A confirmation of something other than what was shown: the person
 //   confirms the input's SHA-256 as they saw it; the held input never
-//   changes after it is held.
+//   changes after it is held. What starts is the workflow's version live
+//   as it is confirmed, as for every start: a hold names the workflow,
+//   never a version, and the version published since checks the input
+//   again (`workflow.start_invalid` if it no longer takes it).
 // - Authority lost between asking and confirming: holding checks the
 //   agent's grant, the person's role and the input as a start would
 //   (`decideWorkflowStart`), so a start that couldn't run is refused at
@@ -113,21 +116,18 @@ export type AgentStart =
       status: "waiting";
       held: string;
       workflow: string;
-      version: number;
       expiresAt: string;
     }
   | {
       status: "started";
       held: string;
       workflow: string;
-      version: number;
       start: string;
     }
   | {
       status: "refused";
       held: string;
       workflow: string;
-      version: number;
       /** Why it was refused as it started: the agent's grant or the person's role gone, say. */
       code: string;
     }
@@ -135,7 +135,6 @@ export type AgentStart =
       status: "declined" | "lapsed";
       held: string;
       workflow: string;
-      version: number;
     };
 
 type Row = typeof agentHeldStarts.$inferSelect;
@@ -186,11 +185,7 @@ const openSql = () =>
 
 /** Where held start `row` stands, as of `now`. */
 const standingOf = (row: Row, now: number): AgentStart => {
-  const base = {
-    held: row.id,
-    workflow: row.workflowResourceId,
-    version: row.workflowResourceVersion,
-  };
+  const base = { held: row.id, workflow: row.workflowResourceId };
   if (row.decision === "confirmed" && row.startId !== null) {
     return { status: "started", ...base, start: row.startId };
   }
@@ -212,10 +207,10 @@ const standingOf = (row: Row, now: number): AgentStart => {
 
 /**
  * Holds a start of workflow `workflowId` with `input` that the agent of
- * `scope` asks for under `key`, for `person` (its person) to confirm, at
- * the workflow's current version: checked first as the start would be,
- * so one that couldn't run is refused now. The same key in the chat
- * answers where that start stands.
+ * `scope` asks for under `key`, for `person` (its person) to confirm:
+ * checked first as a start of the version live now would be, so one that
+ * couldn't run is refused now. The same key in the chat answers where
+ * that start stands.
  */
 export const holdStart = async (
   env: Env,
@@ -248,10 +243,6 @@ export const holdStart = async (
   // What the person sees, as they'd see it: a workflow they have no role
   // in is one that doesn't exist.
   const workflow = await requireWorkflowRole(env, person, workflowId, "user");
-  if (workflow.currentVersion === null) {
-    throw workflowResourceErrors.create("workflow.version_not_found");
-  }
-  const version = workflow.currentVersion;
   const invoker = invokerOf({
     agentId: scope.agentId,
     personId: scope.personId,
@@ -261,7 +252,6 @@ export const holdStart = async (
   // As the start would be decided, admitting nothing: its grant, its
   // person's role, its input as the version takes it.
   const decided = await decideWorkflowStart(env, invoker, workflow.id, {
-    version,
     args: input,
     key: startKeyOf(scope.chatId, key),
   });
@@ -273,7 +263,7 @@ export const holdStart = async (
     actor: delegateActorOf(chatAuthority(scope)),
     action: "workflow.start.held",
     target: { type: "workflow_resource", id: workflow.id },
-    detail: { held: id, version, chat: scope.chatId },
+    detail: { held: id, chat: scope.chatId },
   };
   await auditedBatch(env, db, [
     db
@@ -285,7 +275,6 @@ export const holdStart = async (
         agentId: scope.agentId,
         personId: scope.personId,
         workflowResourceId: workflow.id,
-        workflowResourceVersion: version,
         input: text,
         inputHash: await sha256Hex(text),
         key,
@@ -340,7 +329,6 @@ export const heldStartsOf = async (
     id: row.id,
     workflow: row.workflowResourceId,
     workflowName,
-    version: row.workflowResourceVersion,
     args: inputOf(row),
     argsHash: row.inputHash,
     chatId: row.chatId,
@@ -384,8 +372,9 @@ const stillOpen = (id: string) => and(eq(agentHeldStarts.id, id), openSql());
 
 /**
  * Starts `by`'s held start `id`, with exactly the args of `argsHash`, as
- * its agent acting for them: decided once, then started through
- * `startWorkflow`, everything read again as it is admitted. A start
+ * its agent acting for them, on the workflow's version live now: decided
+ * once, then started through `startWorkflow`, everything read again as it
+ * is admitted, the input checked against that version. A start
  * refused for good then is noted with why (`refusal`), which its agent is
  * told; one that stopped on the way (a failure of core's) stays open, and
  * confirming it again starts it under the same key: the same start if it
@@ -413,7 +402,7 @@ export const confirmHeldStart = async (
         actor: actorOf(by),
         action: "workflow.start.confirmed",
         target: { type: "workflow_resource", id: row.workflowResourceId },
-        detail: { held: row.id, version: row.workflowResourceVersion },
+        detail: { held: row.id },
       }),
     ]);
     if (decided.length === 0) {
@@ -426,12 +415,14 @@ export const confirmHeldStart = async (
   const stillConfirmed = sql`EXISTS (SELECT 1 FROM ${agentHeldStarts} WHERE ${agentHeldStarts.id} = ${row.id} AND ${agentHeldStarts.decision} = 'confirmed')`;
   let started: Awaited<ReturnType<typeof startWorkflow>>;
   try {
+    // The version live as it is admitted: a publish since the start was
+    // held starts the new one, and one landing between its decision and
+    // its admission refuses it as stale, left open to confirm again.
     started = await startWorkflow(
       env,
       invokerOf(row),
       row.workflowResourceId,
       {
-        version: row.workflowResourceVersion,
         args: inputOf(row),
         key: startKeyOf(row.chatId, row.key),
       },
@@ -505,7 +496,7 @@ export const declineHeldStart = async (
       actor: actorOf(by),
       action: "workflow.start.declined",
       target: { type: "workflow_resource", id: row.workflowResourceId },
-      detail: { held: row.id, version: row.workflowResourceVersion },
+      detail: { held: row.id },
     }),
   ]);
   if (decided.length === 0) {

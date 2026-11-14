@@ -20,9 +20,8 @@ import { z } from "zod";
 import type { AgentScope } from "../src/agent-scope.ts";
 import { callAppFunction } from "../src/app-functions.ts";
 import { addMember, removeMember } from "../src/app-members.ts";
-import { publishVersion } from "../src/app-publish.ts";
 import type { Release } from "../src/app-releases.ts";
-import { appFor } from "../src/apps.ts";
+import { appFor, appKind } from "../src/apps.ts";
 import { memberOf, teamsOf } from "../src/auth/identity.ts";
 import { memoriesAs, recallAs } from "../src/brain-next.ts";
 import {
@@ -37,14 +36,12 @@ import {
   requestPermission,
   revokePermission,
 } from "../src/permissions.ts";
+import { rollback } from "../src/publish.ts";
 import { approveResourceBinding } from "../src/resource-bindings.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-  shareWorkflowResource,
-} from "../src/workflow-resources.ts";
+import { shareWorkflowResource } from "../src/workflow-members.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { callingRunOf } from "../src/workflows/resource-authority.ts";
 import { makeCall } from "../src/workflows/resource-calls.ts";
@@ -57,6 +54,7 @@ import { mockIdp } from "./idp.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 import { signedInApi, unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // The Brain's memories and entities for code (GRA-1837; the threat model
 // is on the issue): an App's action (`ctx.brain.remember`, `.forget`,
@@ -291,7 +289,7 @@ const appOf = async (
 ) => {
   const fixture: Fixture = await appWith(memoriesApp(read), "Accounts", owner);
   const release: Release = await seal(fixture);
-  await publishVersion(env, fixture.owner, fixture.app, 1);
+  await rollback(env, appKind, fixture.owner, fixture.app, 1);
   const subject = { type: "app" as const, appId: fixture.app };
   const version = release.manifest.resourceVersion;
   const permissionId = await granted(
@@ -847,8 +845,11 @@ const memoriesWorkflow = async (
       args: { memory: { $expr: "remembered.memory" } },
     },
   ];
-  await publishWorkflowVersion(env, by, workflow.id, {
-    definition: JSON.stringify({
+  await publishDefinition(
+    env,
+    by,
+    workflow.id,
+    JSON.stringify({
       $schema: workflowSchemaUrl,
       args: {
         kind: "object",
@@ -868,9 +869,8 @@ const memoriesWorkflow = async (
           : { decisions: { go: { contract: decision } } }),
       },
       steps: [...held, ...steps],
-    }),
-    basedOn: null,
-  });
+    })
+  );
   const subject = { type: "workflow" as const, workflowId: workflow.id };
   const permissionId = await granted(
     by,
@@ -1136,8 +1136,11 @@ describe("memories and entities, as a workflow reaches them", setUpTime, () => {
     const key = `brain-${unique()}`;
     await publishCatalogContract(env, admin, { key, kind: "brain" });
     const workflow = await createWorkflowResource(env, by, `mem-${unique()}`);
-    await publishWorkflowVersion(env, by, workflow.id, {
-      definition: JSON.stringify({
+    await publishDefinition(
+      env,
+      by,
+      workflow.id,
+      JSON.stringify({
         $schema: workflowSchemaUrl,
         args: { kind: "object", fields: { text: { kind: "string" } } },
         returns: { kind: "object", fields: { memory: { kind: "string" } } },
@@ -1155,9 +1158,8 @@ describe("memories and entities, as a workflow reaches them", setUpTime, () => {
             },
           },
         ],
-      }),
-      basedOn: null,
-    });
+      })
+    );
     const subject = { type: "workflow" as const, workflowId: workflow.id };
     const permissionId = await requestGranted(
       idp,

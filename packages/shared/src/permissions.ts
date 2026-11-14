@@ -297,6 +297,8 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "DATA_STORES",
   "DB",
   "DEV_SKIP_ROUTER_SECRET",
+  // Who follows an App's or workflow's draft (core's src/draft-watch.ts).
+  "DRAFT_WATCHES",
   "DURABLE_OBJECT_JURISDICTION",
   "EMAIL",
   // Our own embedding model's objects (core's src/embedder.ts).
@@ -536,7 +538,7 @@ export type BlueprintWorkflow = z.infer<typeof blueprintWorkflowSchema>;
  * An App's active permission on a connection or to start a workflow goes
  * back to requested when someone who couldn't grant
  * it (Grasp staff included) makes another version of the App current
- * (`AppVersionsApi.publish`, `AppDraftsApi.publish`), until an admin
+ * (`drafts.publish`, `versions.rollback`), until an admin
  * grants it again.
  */
 export const permissionStatusSchema = z.enum([
@@ -569,11 +571,7 @@ export interface Permission {
   /** User IDs, and when (ISO 8601). */
   requestedBy: string;
   requestedAt: string;
-  /**
-   * Who granted it last, and when. On a requested permission, it was
-   * granted before and is asked for again (`AppVersionsApi.publish`);
-   * only `status` says what it allows.
-   */
+  /** Who granted it, and when: only `status` says what it allows. */
   grantedBy: string | null;
   grantedAt: string | null;
   revokedBy: string | null;

@@ -16,14 +16,14 @@ const drawn = { timeout: 60_000 };
 const chartPage = `import { createFileRoute } from "@tanstack/react-router";
 import { PieChart } from "react-minimal-pie-chart";
 
-function Totals() {
+const Totals = () => {
   return (
     <main className="p-4">
       <h1 className="text-lg font-medium">Totals</h1>
       <PieChart data={[{ title: "Paid", value: 3, color: "currentColor" }]} />
     </main>
   );
-}
+};
 export const Route = createFileRoute("/")({ component: Totals });
 `;
 
@@ -67,7 +67,7 @@ test("a builder approves a chart library the agent asked for, a page draws with 
       .click(drawn);
     await expect(card).toHaveCount(0, drawn);
 
-    await release(api, app, { "src/routes/index.tsx": chartPage }, "Totals");
+    await release(api, app, { "src/routes/index.tsx": chartPage });
     await page.goto(`/apps/${app}/full`);
     const frame = page.frameLocator('iframe[title="App"]');
     await expect(frame.getByRole("heading", { name: "Totals" })).toBeVisible(

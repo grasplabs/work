@@ -13,7 +13,13 @@ import { RpcSession, WebSocketTransport } from "capnweb";
 import type { RpcTransport } from "capnweb";
 import { z } from "zod";
 
-import { commitApp } from "../apps/core/test/app-definitions.ts";
+import {
+  appOf,
+  changesOf,
+  publishApp,
+  sourceParts,
+  writeApp,
+} from "../apps/core/test/app-definitions.ts";
 import type { TestSource } from "../apps/core/test/app-definitions.ts";
 /**
  * Signed-in people for end-to-end tests. They sign in through the product,
@@ -827,11 +833,11 @@ export const revokeNewestRelease = async (app: string): Promise<void> => {
   }
   const { core, api } = apiOf({ cookie });
   try {
-    const [newest] = await api.apps.versions.releases(app);
+    const [newest] = await api.apps.releases.list(app);
     if (newest === undefined) {
       throw new Error(`The App ${app} has no release to revoke`);
     }
-    await api.apps.versions.revoke(app, newest.version, {
+    await api.apps.releases.revoke(app, newest.version, {
       reason: "An end-to-end test revokes it",
     });
   } finally {
@@ -860,17 +866,75 @@ export const ordinaryData = async (app: string): Promise<void> => {
 };
 
 /**
- * Writes `files` to the App (null deletes one), commits them and publishes
- * that version.
+ * The App lint's rules test Apps break, for brevity or on purpose (an
+ * attack's page), which a publish checks: named in a disable comment, as
+ * the lint takes one only with its rules, and a builder's own code may.
+ */
+const fixtureRules = [
+  "arrow-body-style",
+  "func-names",
+  "jsx-a11y/prefer-tag-over-role",
+  "no-await-in-loop",
+  "no-eval",
+  "no-extend-native",
+  "no-nested-ternary",
+  "no-new-func",
+  "no-plusplus",
+  "no-promise-executor-return",
+  "no-useless-concat",
+  "no-void",
+  "prefer-template",
+  "promise/avoid-new",
+  "promise/prefer-await-to-callbacks",
+  "promise/prefer-await-to-then",
+  "promise/prefer-catch",
+  "react-hooks/exhaustive-deps",
+  "react/exhaustive-effect-dependencies",
+  "react/set-state-in-effect",
+  "unicorn/consistent-function-scoping",
+  "unicorn/no-await-expression-member",
+  "unicorn/no-useless-undefined",
+  "unicorn/prefer-dom-node-append",
+];
+
+const typeScript = /\.tsx?$/u;
+
+/** `source` with each of its TypeScript files past `fixtureRules`. */
+const pastFixtureRules = (source: TestSource): TestSource => {
+  const { files, definition } = sourceParts(source);
+  const marked = Object.fromEntries(
+    Object.entries(files).map(([path, content]) => [
+      path,
+      content !== null && typeScript.test(path)
+        ? `/* oxlint-disable ${fixtureRules.join(", ")} -- a test's App */\n${content}`
+        : content,
+    ])
+  );
+  return definition === undefined
+    ? marked
+    : changesOf(appOf(definition), marked);
+};
+
+/**
+ * Writes `files` into the App's draft (null deletes one) and publishes it:
+ * live, for the people it is shared with (until then, its builders'
+ * alone).
  */
 export const release = async (
   api: ReturnType<typeof apiOf>["api"],
   app: string,
-  files: TestSource,
-  message: string
+  files: TestSource
+): Promise<{ version: number }> =>
+  await publishApp(api, app, pastFixtureRules(files));
+
+/**
+ * Writes `files` into the App's draft and leaves it unpublished: only its
+ * builders see it.
+ */
+export const drafted = async (
+  api: ReturnType<typeof apiOf>["api"],
+  app: string,
+  files: TestSource
 ): Promise<void> => {
-  const { version } = await commitApp(api.apps.files, app, files, message);
-  // Live, for the people it is shared with (until then, its
-  // builders' alone).
-  await api.apps.versions.publish(app, version);
+  await writeApp(api, app, files);
 };

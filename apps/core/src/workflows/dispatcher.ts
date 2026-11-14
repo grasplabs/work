@@ -20,7 +20,7 @@ import type { RunModelCalls, SentCalls } from "./sealed-run.ts";
 // What every run executes (run-object.ts): each time the engine activates
 // a run, at its start and on every wake or recovery, the dispatcher loads
 // it afresh by what it is pinned to (engine.ts): an independent
-// workflow's sealed version, a test run of its draft's checkpoint, a run
+// workflow's sealed version, a test run of its draft at one revision, a run
 // an App's test started, or one of core's own workflows, which runs
 // core's code with core's env.
 //
