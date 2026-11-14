@@ -5,6 +5,7 @@
 // store is hidden from it.
 import type {
   Access,
+  EntitiesRequest,
   EntityName,
   EntityNamesCursor,
   MemoriesCursor,
@@ -643,68 +644,106 @@ describe("who may read a memory", () => {
     });
   });
 
-  // Threat 1 again: a retired memory stays history, so it still names its
-  // entity and makes it seen, but never ahead of a current one: what a
-  // page or a card says rests on a memory the host can still check
-  // (`readableMemories`) whenever one is current.
-  it("names, finds and holds an entity by a memory its writer retired only once no current one does", async () => {
+  // Threat 1 again: a memory its writer retired stays history, read where
+  // history is asked for, and gives nothing to any other read: no name, no
+  // match, no mention. So nothing a page or a card says rests on a memory
+  // the host's check withholds (`readableMemories`).
+  it("gives a memory its writer retired to no find or card: no name, no match, no mention, and nothing they rest on", async () => {
     const group = unique("group");
     const reader = readerOf(unique("reader"), group);
-    const name = unique("Acme");
     const [first, second] = [unique("w"), unique("w")];
-    const said = (writer: string, statement: string) =>
-      fact({ kind: "writer", writer }, { statement });
-    const named = await remember(
-      audience(group),
-      [customer({ names: [name] })],
-      [said(first, `${name} is a customer`)]
-    );
-    const entity = named.entities.c ?? "";
-    const again = await remember(
-      audience(group),
-      [customer({ id: entity, names: [name] })],
-      [said(second, `${name} renews in May`)],
-      shared(),
-      crypto.randomUUID(),
-      reader
-    );
-    const retire = async (writer: string, memory: string | undefined) => {
-      await shared().retireMemory({
-        memory: memory ?? "",
-        reader: readerOf(writer, group),
-      });
-    };
-    const read = async () => {
-      const page = await shared().findEntities({ reader, name });
-      const card = await shared().readCard({ entity, reader });
+    /** A customer's memory in `writer`'s word, naming and identifying it as given. */
+    const said = async (
+      writer: string,
+      entity: Partial<NewEntity>,
+      statement: string
+    ) => {
+      const added = await remember(
+        audience(group),
+        [customer({ names: [], ...entity })],
+        [fact({ kind: "writer", writer }, { statement })],
+        shared(),
+        crypto.randomUUID(),
+        reader
+      );
       return {
-        found: page.entities,
-        page: page.restsOnWords,
-        card: {
-          name: card?.entity.name,
-          notes: card?.notes.map(({ id }) => id),
-          words: card?.restsOnWords,
-        },
+        entity: added.entities.c ?? "",
+        memory: added.memories[0] ?? "",
       };
     };
+    const retire = async (writer: string, memory: string) => {
+      await shared().retireMemory({ memory, reader: readerOf(writer, group) });
+    };
+    const name = unique("Acme");
+    const ref = `ref:${unique("r")}`;
 
-    await retire(first, named.memories[0]);
-    const firstRetired = await read();
-    await retire(second, again.memories[0]);
-    const bothRetired = await read();
+    // Named twice, the first retired: the current memory names it.
+    const named = await said(first, { names: [name] }, "First");
+    const renamed = await said(
+      second,
+      { id: named.entity, names: [name] },
+      "Second"
+    );
+    await retire(first, named.memory);
+    // Named and identified only by a retired memory, otherwise current.
+    const nameless = unique("Initech");
+    const unnamed = await said(
+      first,
+      { names: [nameless], identifiers: [{ type: "ref", value: ref }] },
+      "Named"
+    );
+    const kept = await said(second, { id: unnamed.entity }, "Kept");
+    await retire(first, unnamed.memory);
+    // Only ever mentioned by memories since retired.
+    const gone = unique("Globex");
+    const forgotten = await said(first, { names: [gone] }, "Gone");
+    await retire(first, forgotten.memory);
 
-    expect({ firstRetired, bothRetired }).toStrictEqual({
-      // The current memory names it, holds it and is the card's.
-      firstRetired: {
-        found: [{ id: entity, kind: "customer", name }],
-        page: again.memories,
-        card: { name, notes: again.memories, words: again.memories },
-      },
-      // History alone: the earliest retired memory, which no host keeps.
-      bothRetired: {
-        found: [{ id: entity, kind: "customer", name }],
-        page: named.memories,
-        card: { name, notes: [], words: named.memories },
+    const find = async (asked: Omit<EntitiesRequest, "reader">) => {
+      const page = await shared().findEntities({ reader, ...asked });
+      return {
+        found: page.entities.map(({ id, name: given }) => [id, given]),
+        words: page.restsOnWords.toSorted(),
+      };
+    };
+    const card = async (entity: string) => {
+      const read = await shared().readCard({ entity, reader });
+      return read === null
+        ? null
+        : {
+            name: read.entity.name,
+            notes: read.notes.map(({ statement }) => statement),
+            words: read.restsOnWords,
+          };
+    };
+
+    expect({
+      byName: await find({ name }),
+      card: await card(named.entity),
+      retiredName: await find({ name: nameless }),
+      retiredRef: await find({ identifier: { type: "ref", value: ref } }),
+      namelessCard: await card(unnamed.entity),
+      goneByName: await find({ name: gone }),
+      goneCard: await card(forgotten.entity),
+      byKind: await find({ kind: "customer" }),
+    }).toStrictEqual({
+      byName: { found: [[named.entity, name]], words: [renamed.memory] },
+      card: { name, notes: ["Second"], words: [renamed.memory] },
+      // A name or identifier only a retired memory gave matches nothing,
+      retiredName: { found: [], words: [] },
+      retiredRef: { found: [], words: [] },
+      // and its entity, current otherwise, has no name.
+      namelessCard: { name: null, notes: ["Kept"], words: [kept.memory] },
+      // An entity only retired memories mention is not seen.
+      goneByName: { found: [], words: [] },
+      goneCard: null,
+      // A page of every kind: the others intact, resting on current ones.
+      byKind: {
+        found: [
+          [named.entity, name],
+          [unnamed.entity, null],
+        ],
+        words: [renamed.memory, kept.memory].toSorted(),
       },
     });
   });

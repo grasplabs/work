@@ -803,7 +803,7 @@ describe("a chat's code reading the Brain's entities", setUpTime, () => {
     });
   });
 
-  it("keeps what its code read once the memory that first named the entity is retired while another is current, and withholds it once every one is", async () => {
+  it("keeps what its code read once the memory that first named the entity is retired while another is current, and finds nothing of it once every one is", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInWithRole(idp, "user");
     /**
@@ -876,19 +876,14 @@ describe("a chat's code reading the Brain's entities", setUpTime, () => {
       await chat.ask(word());
       const next = JSON.stringify(chat.provider.requests[at]?.body);
       await retire(secondWriter, second.memories[0]);
-      // The fresh read rests on a forgotten memory alone: its own turn
-      // stops before the model is sent it.
-      const stopped = await chat.ask(word()).then(
-        () => "answered",
-        (error: unknown) =>
-          error instanceof Error && error.message.includes("no longer read")
-            ? "stopped"
-            : String(error)
-      );
+      // Every memory of it forgotten: a fresh read finds nothing of it,
+      // and its turn goes on.
+      const turn = await chat.ask(word()).then(() => "answered", String);
       const [, fresh] = await codeResults(chat.stub, chat.chat.id);
       at = chat.provider.requests.length;
       await chat.ask(word());
-      // The next turn: both reads' results in its history.
+      // The next turn: the first read, which rested on the memory now
+      // forgotten, withheld; the fresh one still sent.
       const later = JSON.stringify(chat.provider.requests[at]?.body);
       return {
         handed: handed?.text.includes(shown),
@@ -896,8 +891,8 @@ describe("a chat's code reading the Brain's entities", setUpTime, () => {
           sent: next.includes(shown),
           withheld: timesIn(next, withheldResult),
         },
-        fresh: fresh?.text.includes(name),
-        stopped,
+        fresh: returnedSchema.parse(fresh?.text),
+        turn,
         later: {
           sent: later.includes(shown) || later.includes(name),
           withheld: timesIn(later, withheldResult),
@@ -913,19 +908,17 @@ describe("a chat's code reading the Brain's entities", setUpTime, () => {
       card: {
         handed: true,
         next: { sent: true, withheld: 0 },
-        // History alone names it now: the fresh read still finds it, and
-        // nothing that rests on a forgotten memory stays: its turn stops,
-        // and both reads are withheld from then on.
-        fresh: true,
-        stopped: "stopped",
-        later: { sent: false, withheld: 2 },
+        // Not seen once only forgotten memories mention it.
+        fresh: [null],
+        turn: "answered",
+        later: { sent: false, withheld: 1 },
       },
       find: {
         handed: true,
         next: { sent: true, withheld: 0 },
-        fresh: true,
-        stopped: "stopped",
-        later: { sent: false, withheld: 2 },
+        fresh: [],
+        turn: "answered",
+        later: { sent: false, withheld: 1 },
       },
     });
   });
