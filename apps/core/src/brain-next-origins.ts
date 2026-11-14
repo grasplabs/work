@@ -47,6 +47,18 @@ export const chatSource = (personId: string, chatId: string): SourceRef => {
 };
 
 /**
+ * What the id of every source of `personId`'s chats starts with: each
+ * chat's group and each of its turns. Throws for an id holding "/", as
+ * `chatSource` does.
+ */
+export const chatsOf = (personId: string): string => {
+  if (!isKeyPart(personId)) {
+    throw new Error("A chat's key is made of ids without /");
+  }
+  return `${personId}/`;
+};
+
+/**
  * The source of a turn of `personId`'s chat `chatId`: the turn its
  * answer, the chat's message `answerId`, ends.
  */
