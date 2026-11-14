@@ -1,9 +1,13 @@
 import {
+  brainOf,
   exactCandidatesMax,
   packItemTokens,
+  packMemoryTokens,
+  personalBrainOf,
   recallBudgetMax,
   recallLimit,
 } from "@grasp-os/brain-next/contract";
+import type { Access, Brain, NewMemory } from "@grasp-os/brain-next/contract";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -16,6 +20,7 @@ import type {
   SourceRef,
 } from "../src/brain-next.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
+import { inJurisdiction } from "../src/durable-objects.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInWithRole } from "./sign-in.ts";
 
@@ -534,6 +539,8 @@ describe("the cited pack", () => {
           found: "words",
         },
       ],
+      memories: [],
+      contested: [],
       // A date is words: found apart, or not, as any word.
       notFound: [
         `${hidden} plan`,
@@ -564,5 +571,121 @@ describe("the cited pack", () => {
       found: "stop words",
     });
     expect(pack.notFound).toStrictEqual([absent]);
+  });
+});
+
+// A contested fact is packed with every side or none, from each store a
+// recall reads (the shared store and the person's own, `packAcross`):
+// never some of its sides listed as the whole fact, at any budget, with
+// the person's own passage competing for the room.
+/** Adds a three-sided fact about a customer named `name` to `store`. */
+const contested = async (store: Brain, access: Access, name: string) => {
+  for (const [writer, month] of [
+    ["crm", "March"],
+    ["ledger", "June"],
+    ["sheet", "September"],
+  ] as const) {
+    const memory: NewMemory = {
+      about: "c",
+      attribute: "renewal_date",
+      value: month,
+      type: "fact",
+      statement: `${name} renews in ${month}`,
+      speaker: { kind: "system" },
+      basis: { kind: "writer", writer },
+    };
+    // oxlint-disable-next-line no-await-in-loop -- one lineage each
+    await store.addMemories({
+      change: crypto.randomUUID(),
+      access,
+      entities: [{ key: "c", kind: "customer", names: [name] }],
+      memories: [memory],
+    });
+  }
+};
+
+/** The tokens all of `pack` takes, as the Brain counts them. */
+const tokensOf = (pack: RecalledPack): number =>
+  pack.items.reduce(
+    (sum, item) =>
+      sum +
+      packItemTokens({
+        ...item,
+        source: `${item.source.producer}:${item.source.id}`,
+      }),
+    0
+  ) +
+  pack.memories.reduce(
+    (sum, memory) => sum + packMemoryTokens({ ...memory, source: null }),
+    0
+  );
+
+describe("contested facts in a pack across stores", () => {
+  it("packs every side of each store's contested fact or none, at every budget", async () => {
+    const reader = await person();
+    const teamId = await teamOf(reader);
+    const name = `${word()} ${word()}`;
+    const stores = inJurisdiction(env, env.BRAIN_STORE);
+    await contested(
+      brainOf(stores),
+      { kind: "audience", group: `team:${teamId}` },
+      name
+    );
+    await contested(
+      personalBrainOf(stores, reader),
+      { kind: "owner", person: reader },
+      name
+    );
+    await addSource(env, {
+      source: newSource(),
+      change: crypto.randomUUID(),
+      text: `${name} renews its contract with care, says the account team`,
+      readers: { kind: "owner", personId: reader },
+    });
+    const question = `${name} renews`;
+    const recall = async (tokens: number) =>
+      await recallAs(env, reader, {
+        question,
+        budget: { tokens },
+        personal: true,
+      });
+    const whole = await recall(recallBudgetMax);
+    const counts = new Set<string>();
+    const broken: string[] = [];
+    for (let tokens = 1; tokens <= tokensOf(whole); tokens += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one budget at a time
+      const pack = await recall(tokens);
+      const sidesByFact = new Map<string, number>();
+      for (const { about, attribute } of pack.memories) {
+        if (attribute === "renewal_date") {
+          sidesByFact.set(about, (sidesByFact.get(about) ?? 0) + 1);
+        }
+      }
+      const held = [...sidesByFact.values()];
+      const listed = pack.contested.map(({ memories }) => memories.length);
+      counts.add(JSON.stringify(held.toSorted((x, y) => x - y)));
+      if (
+        held.some((sides) => sides !== 3) ||
+        JSON.stringify(listed.toSorted((x, y) => x - y)) !==
+          JSON.stringify(held.toSorted((x, y) => x - y)) ||
+        tokensOf(pack) > tokens
+      ) {
+        broken.push(
+          `${tokens}: sides ${held.join("+")}, listed ${listed.join("+")}`
+        );
+      }
+    }
+
+    expect(
+      whole.contested.map(({ memories }) => memories.length)
+    ).toStrictEqual([3, 3]);
+    expect({
+      broken,
+      reached: counts,
+    }).toStrictEqual({
+      broken: [],
+      // Both facts packed, one, and none: every case is reached.
+      reached: new Set(["[3,3]", "[3]", "[]"]),
+    });
   });
 });

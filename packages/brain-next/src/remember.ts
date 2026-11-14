@@ -17,6 +17,7 @@ import {
 } from "./entities.ts";
 import { subjectOf } from "./erasure.ts";
 import { hashOf } from "./files.ts";
+import { linkedByName } from "./linking.ts";
 import {
   entityRowOf,
   lineageOfSource,
@@ -137,7 +138,9 @@ const otherMemories =
 /**
  * The entities of an add as rows: each known `id` (of its kind), else
  * the first holding one of its identifiers, or another entity of the add
- * with one of them, else a new one.
+ * with one of them, else, given no identifier, the one entity of its kind
+ * holding one of its names by memories of exactly the add's readers
+ * (linking.ts `linkedByName`), else a new one.
  */
 const entityRowsOf = (
   sql: SqlStorage,
@@ -155,7 +158,10 @@ const entityRowsOf = (
         keys
           .map((key) => linked.get(key))
           .find((found) => found !== undefined) ??
-        linkedBy(sql, entity.kind, entity.identifiers, readers);
+        linkedBy(sql, entity.kind, entity.identifiers, readers) ??
+        (entity.identifiers.length === 0
+          ? linkedByName(sql, entity.kind, entity.names, readers)
+          : undefined);
     } else {
       const known = entityRowOf(sql, entity.id);
       // An id the add may not name is refused in the words of an unknown
