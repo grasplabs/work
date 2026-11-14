@@ -41,7 +41,7 @@ import { uploadSource } from "./brain-next-origins.ts";
 import {
   addSource,
   eraseSource,
-  readSourceVersionAs,
+  listVersionsAs,
   sourceTextProblem,
 } from "./brain-next.ts";
 import type { SourceReaders, SourceVersionRef } from "./brain-next.ts";
@@ -454,13 +454,19 @@ const addVersion = async (
   // uploader is the only one who adds (`mayAddVersion`), so its actor is
   // the same too; so is its detail, but for a retry with another file
   // whose text is the same (its type and size; see the PR's Known). The
-  // version's time is read as its uploader reads it, whom its readers
-  // were checked to include just before the add: should they have left
-  // since (or it been erased), the event takes the time now, and only a
-  // retry they can no longer make would conflict. The name moves only
-  // forward, to an add past the row's version: a retry the Brain answers
-  // with an older version (its answer lost) leaves it.
-  const kept = await readSourceVersionAs(env, person.userId, added);
+  // version's time is listed as its uploader reads it (no text, the
+  // versions' own record), whom its readers were checked to include just
+  // before the add: should they have left since (or it been erased), the
+  // event takes the time now, and only a retry they can no longer make
+  // would conflict. A listing that fails leaves the version unaudited
+  // until the add is sent again, which the Brain answers with it. The
+  // name moves only forward, to an add past the row's version: a retry
+  // the Brain answers with an older version (its answer lost) leaves it.
+  const { versions } = await listVersionsAs(env, person.userId, {
+    source: added.source,
+    before: added.version + 1,
+  });
+  const kept = versions.find(({ version }) => version === added.version);
   const addedEvent = {
     ...createAuditEvent(
       entry("brain.upload.added", { version: added.version }),
