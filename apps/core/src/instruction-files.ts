@@ -221,8 +221,9 @@ const requireWriter = async (
  * acts for; `permission.person_inactive` for someone no longer a member;
  * `role.forbidden` (or the App's own refusals) for a file not theirs to
  * write; `instructions.too_large` over `instructionsMaxLength` UTF-16
- * units; `permission.invalid` for an `Identity` or file that isn't one.
- * `change` names this save, minted before its first try, so a retry saves
+ * units; `permission.invalid` for an `Identity` or file that isn't one;
+ * `brain.restoring` while the Brain restores an export, to be saved again
+ * later. `change` names this save, minted before its first try, so a retry saves
  * it once.
  *
  * A person's route passes the session's `Identity` as the RPC layer built

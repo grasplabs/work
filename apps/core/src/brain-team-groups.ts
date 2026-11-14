@@ -10,6 +10,7 @@ import { z } from "zod";
 
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import { brainTeamGroupSaves, brainTeamGroups } from "./db/core/schema.ts";
+import { statementsWithin } from "./db/d1.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
 
 // The company's own groups of teams (GRA-1273): the brain's regions, the
@@ -78,19 +79,11 @@ const rowsOf = (
   }));
 };
 
-/** Rows one insert writes: six columns each, within D1's 100 bound parameters. */
-const rowsPerInsert = 15;
-
-/** Inserts of `rows`, bounded. */
+/** Inserts of `rows`, as many rows each as D1 binds. */
 const insertsOf = (
   db: ReturnType<typeof drizzle>,
   rows: ReturnType<typeof rowsOf>
-) =>
-  Array.from({ length: Math.ceil(rows.length / rowsPerInsert) }, (_, at) =>
-    db
-      .insert(brainTeamGroups)
-      .values(rows.slice(at * rowsPerInsert, (at + 1) * rowsPerInsert))
-  );
+) => statementsWithin(rows, (part) => db.insert(brainTeamGroups).values(part));
 
 /**
  * Confirms `input` as the company's groups of teams, all of them, in its
