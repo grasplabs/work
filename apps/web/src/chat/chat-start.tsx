@@ -64,8 +64,12 @@ const styles = stylex.create({
     paddingBlock: grasp.space12,
   },
   // On a scene, which is night, what stands on it turns light.
+  // The text colour is set again here: inherited, it would stay the one
+  // worked out for the page's own scheme, and what is typed would be dark
+  // on the night.
   onNight: {
     colorScheme: "dark",
+    color: grasp.text,
   },
   // The box to ask in is glass: the card's colour, most of the way, over
   // a blur of what stands behind the page, so a backdrop runs on under it
@@ -217,6 +221,10 @@ export const ChatStart = ({
   return (
     <section aria-labelledby="new-chat" {...stylex.props(styles.page)}>
       <div
+        // On a scene the kit's parts turn dark too (the box to ask in, the
+        // tour's offer, the ideas), whatever the person's theme, so what
+        // is typed reads on the night.
+        data-theme={scheme}
         {...stylex.props(styles.centre, scheme === "dark" && styles.onNight)}
       >
         <BackdropField clear={page} look={look} />

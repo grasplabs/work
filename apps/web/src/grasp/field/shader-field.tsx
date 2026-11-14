@@ -33,7 +33,7 @@ import waveUrl from "./scenes/wave.jpg";
 //   on the page's own ground; a mask thins it towards what stands on the
 //   page, so it blends in rather than covering it.
 //
-// Drawn about thirty times a second, and only while the page is seen.
+// Drawn fifteen to twenty times a second, and only while the page is seen.
 // With less motion it is one still picture. Where WebGL can't run,
 // nothing is drawn. Decorative only.
 
@@ -427,8 +427,14 @@ const programOf = (
   return program;
 };
 
-/** How long a frame is, at most thirty a second. */
-const frameMs = 1000 / 30;
+/**
+ * How long a frame is. A scene is a ninth of the field's pixels and cheap,
+ * at twenty a second; a dither is every pixel of it through the silk, and
+ * its clock runs slow, so fifteen a second shows all of its motion at half
+ * the cost of thirty.
+ */
+const sceneFrameMs = 1000 / 20;
+const ditherFrameMs = 1000 / 15;
 
 /** How large a scene's cell is, in CSS pixels, as Capy's dither's is. */
 const sceneCell = 3;
@@ -549,6 +555,7 @@ export const ShaderField = (
     // the clock's own pace.
     const ratio = scene ? 1 / sceneCell : 1;
     const pace = scene ? 1 : ditherPace;
+    const frameMs = scene ? sceneFrameMs : ditherFrameMs;
     const lamp = { x: 0.5, y: 0.5, tx: 0.5, ty: 0.5 };
     const begun = performance.now();
     let last = begun;
