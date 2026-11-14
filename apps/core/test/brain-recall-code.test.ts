@@ -1481,8 +1481,11 @@ const callingWorkflow = async (
   name: string
 ) => {
   const workflow = await createWorkflowResource(env, by, `calls-${unique()}`);
-  await publishWorkflowVersion(env, by, workflow.id, {
-    definition: JSON.stringify({
+  await publishDefinition(
+    env,
+    by,
+    workflow.id,
+    JSON.stringify({
       $schema: workflowSchemaUrl,
       args: { kind: "object", fields: { question: { kind: "string" } } },
       permissions: {
@@ -1491,9 +1494,8 @@ const callingWorkflow = async (
       steps: [
         { id: "read", type: "call", app: "keep", function: fn, args: {} },
       ],
-    }),
-    basedOn: null,
-  });
+    })
+  );
   const asked = await outcomeOf(
     async () =>
       await granted(
@@ -1517,7 +1519,7 @@ const ranOfCalls = async (by: Member, id: string): Promise<unknown> => {
     env,
     { type: "person", person: by },
     id,
-    { version: 1, args: { question: "any" }, key: unique() }
+    { expected: 1, args: { question: "any" }, key: unique() }
   );
   if (runId === null) {
     throw new Error("The start admitted no run");

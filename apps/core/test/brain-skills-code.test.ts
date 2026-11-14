@@ -12,9 +12,8 @@ import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
 import { addMember } from "../src/app-members.ts";
-import { publishVersion } from "../src/app-publish.ts";
 import type { Release } from "../src/app-releases.ts";
-import { appFor } from "../src/apps.ts";
+import { appKind, appFor } from "../src/apps.ts";
 import { addOwnSkill } from "../src/brain-next.ts";
 import { installShippedSkills, selectSkillsFor } from "../src/brain-skills.ts";
 import {
@@ -29,6 +28,7 @@ import {
   requestPermission,
   revokePermission,
 } from "../src/permissions.ts";
+import { rollback } from "../src/publish.ts";
 import { approveResourceBinding } from "../src/resource-bindings.ts";
 import {
   approveShare,
@@ -37,11 +37,8 @@ import {
 } from "../src/skill-shares.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-  shareWorkflowResource,
-} from "../src/workflow-resources.ts";
+import { shareWorkflowResource } from "../src/workflow-members.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
@@ -52,6 +49,7 @@ import type { Fixture } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
 import { holdsNothing } from "./stored-skills.ts";
 import { newTeam } from "./teams.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // The Brain's skills for code (GRA-1830; the threat model is on the
 // issue): an App's action (`ctx.brain.skills.select` / `.read`) and a
@@ -169,7 +167,7 @@ export const ask = action({
 const appOf = async (owner: Member) => {
   const fixture: Fixture = await appWith(skillsApp(), "How to", owner);
   const release: Release = await seal(fixture);
-  await publishVersion(env, fixture.owner, fixture.app, 1);
+  await rollback(env, appKind, fixture.owner, fixture.app, 1);
   return { ...fixture, release };
 };
 
@@ -260,8 +258,11 @@ const skillsWorkflow = async (
     });
   }
   const workflow = await createWorkflowResource(env, by, `skills-${unique()}`);
-  await publishWorkflowVersion(env, by, workflow.id, {
-    definition: JSON.stringify({
+  await publishDefinition(
+    env,
+    by,
+    workflow.id,
+    JSON.stringify({
       $schema: workflowSchemaUrl,
       args: { kind: "object", fields: { task: { kind: "string" } } },
       returns: skillDescriptor,
@@ -300,9 +301,8 @@ const skillsWorkflow = async (
               },
             ]),
       ],
-    }),
-    basedOn: null,
-  });
+    })
+  );
   const permissionId = await granted(
     by,
     admin,
@@ -335,7 +335,7 @@ const startedRun = async (
     env,
     { type: "person", person: by },
     id,
-    { version: 1, args, key: unique() }
+    { expected: 1, args, key: unique() }
   );
   if (runId === null) {
     throw new Error("The start admitted no run");
