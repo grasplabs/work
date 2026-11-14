@@ -153,6 +153,11 @@ export type FailureReason =
   | "not-sealed"
   /** The version running was revoked, and no longer runs. */
   | "version-revoked"
+  /**
+   * The version running was sealed in a release format this platform no
+   * longer reads, before a Grasp update: a new version replaces it.
+   */
+  | "outdated"
   /** The browser doesn't enforce what keeps a page in its frame. */
   | "unsupported"
   | "unknown";
@@ -183,6 +188,7 @@ const failures: Readonly<Record<string, FailureReason>> = {
   "version.manifest_corrupt": "corrupt",
   "version.not_sealed": "not-sealed",
   "version.revoked": "version-revoked",
+  "version.format_unsupported": "outdated",
 };
 
 /** Why opening a page failed, as the page says it. */

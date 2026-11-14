@@ -279,6 +279,7 @@ describe("a page core refuses to open", () => {
     ["version.manifest_corrupt", "corrupt"],
     ["version.not_sealed", "not-sealed"],
     ["version.revoked", "version-revoked"],
+    ["version.format_unsupported", "outdated"],
     ["version.nothing_like_this", "unknown"],
   ])("on %s, says it failed as %s", (code, reason) => {
     expect(

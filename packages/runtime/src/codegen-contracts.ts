@@ -53,13 +53,15 @@ export const ownFiles = <Content>(
   );
 
 /**
- * The format of `contracts.json`: 6 since its manifest names the App's
- * functions `functions`, and it names no release and seals only the
- * workflow each workflow binding names, the App's declaration being the
- * workflow's contract. A release whose contracts are of another format
- * doesn't load: a new version replaces it.
+ * The format of `contracts.json`: 7 since it seals the workflow each
+ * workflow binding names, no longer a version it pinned, the App's
+ * declaration being the workflow's contract. It names no release. A
+ * release whose contracts are of another format doesn't load: the
+ * release format (`releaseFormatVersion`) changes with this one, so its
+ * manifest is refused as of another format (`version.format_unsupported`)
+ * before its contracts are read, and a new version replaces it.
  */
-export const contractsFormatVersion = 6;
+export const contractsFormatVersion = 7;
 
 /**
  * The fingerprint of `fn`'s exact contract: the SHA-256, in hex, of

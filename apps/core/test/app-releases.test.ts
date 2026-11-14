@@ -39,6 +39,7 @@ import {
   tablelessFiles,
   withFunction,
 } from "./app-releases-harness.ts";
+import type { Rewrite } from "./app-releases-harness.ts";
 import { storeOfNewApp } from "./app-stores.ts";
 import { commitDefined } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
@@ -309,21 +310,35 @@ describe("a sealed release that changed", { timeout: 120_000 }, () => {
     ).resolves.toBe("version.manifest_corrupt");
   });
 
-  it.each([
+  it.each<[string, Rewrite]>([
     [
-      // Its runner lacks what the host's isolate module imports of it now.
+      // Its contracts sealed the version each workflow binding pinned,
+      // which this format's reader would call corrupt.
       "the format before this one",
-      (manifest: Record<string, Json>) => {
-        manifest.formatVersion = releaseFormatVersion - 1;
+      {
+        contracts: (contracts) => {
+          contracts.formatVersion = 6;
+          contracts.workflows = {
+            review: {
+              alias: "review",
+              pinned: { workflowId: "wf_review", version: 3 },
+            },
+          };
+        },
+        manifest: (manifest) => {
+          manifest.formatVersion = releaseFormatVersion - 1;
+        },
       },
     ],
     [
       // It still named an SDK protocol, which this format's strict reader
       // would call corrupt.
       "a format that named an SDK protocol",
-      (manifest: Record<string, Json>) => {
-        manifest.formatVersion = releaseFormatVersion - 2;
-        manifest.sdkProtocolVersion = 3;
+      {
+        manifest: (manifest) => {
+          manifest.formatVersion = releaseFormatVersion - 3;
+          manifest.sdkProtocolVersion = 3;
+        },
       },
     ],
   ])(
@@ -331,7 +346,7 @@ describe("a sealed release that changed", { timeout: 120_000 }, () => {
     async (_format, sealedIn) => {
       const fixture = await appWith(notesFiles());
       const release = await seal(fixture);
-      await rewrite(fixture.app, release, { manifest: sealedIn });
+      await rewrite(fixture.app, release, sealedIn);
       // Sealed for good: sealing the version again is refused the same way,
       // so a new version is what replaces it.
       await expect(

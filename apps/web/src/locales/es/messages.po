@@ -15131,6 +15131,10 @@ msgid "This version of the App hasn't been sealed, so it can't be opened. A buil
 msgstr "Esta versión de la aplicación no se ha sellado, así que no se puede abrir. Un creador puede publicarla de nuevo."
 
 #: src/pages/frame-failure.tsx
+msgid "This version of the App was published before a Grasp update and no longer runs. A builder can publish the App again."
+msgstr "Esta versión de la aplicación se publicó antes de una actualización de Grasp y ya no funciona. Un creador puede publicar la aplicación de nuevo."
+
+#: src/pages/frame-failure.tsx
 msgid "This version of the App was revoked and no longer runs. A builder can publish another version from History."
 msgstr "Esta versión de la App se revocó y ya no se ejecuta. Quien construye la App puede publicar otra versión desde Historial."
 
