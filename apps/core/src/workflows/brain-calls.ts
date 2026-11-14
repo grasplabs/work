@@ -5,13 +5,21 @@ import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import type { BrainAction } from "@grasp-os/workflow-schema/format";
 
 import {
+  brainCardSchema,
+  brainEntitiesSchema,
   brainPackSchema,
   brainSkillsSelectedSchema,
   brainSkillTextSchema,
   skillReadSchema,
   skillsSelectSchema,
 } from "../brain-pack.ts";
-import { isBrainRecall, recallFor, skillsCallFor } from "../brain-recall.ts";
+import {
+  entitiesCallFor,
+  isBrainRecall,
+  isEntitiesRequest,
+  recallFor,
+  skillsCallFor,
+} from "../brain-recall.ts";
 import { runAuthority, runContext } from "./resource-authority.ts";
 import type { CallingRun, FrozenCatalogBinding } from "./resource-authority.ts";
 import { recordRunVersions } from "./run-evidence.ts";
@@ -26,7 +34,9 @@ import { recordRunVersions } from "./run-evidence.ts";
 // trigger's or a schedule's run), still a member, and of only what
 // everyone in the company may read: the same request, checks and pack as
 // an App's action (threat model on GRA-1731). What it hands the run is pinned with the run
-// (run-evidence.ts).
+// (run-evidence.ts). Its entities (`entities.get`, `entities.find`) are an
+// App's too (threat model on GRA-1837): read as the company alone, a
+// card's versions pinned with the run as a pack's are.
 
 /** A brain call, as a run's step asks it. */
 export interface BrainCall {
@@ -52,6 +62,16 @@ const requests: Readonly<
     issue:
       "arguments: Give a skill as a selection gave it: its scope, name and version.",
   },
+  "entities.get": {
+    valid: (input) => isEntitiesRequest("entities.get", input),
+    issue:
+      "arguments: Give the entity's id, and asOf (an ISO 8601 date-time with its offset) and after (a page's next) if any.",
+  },
+  "entities.find": {
+    valid: (input) => isEntitiesRequest("entities.find", input),
+    issue:
+      "arguments: Give a kind, a name or an identifier, and after (a page's next) if any.",
+  },
 };
 
 /** What each action answers, and what a test run says when it doesn't. */
@@ -71,6 +91,15 @@ const answers: Readonly<
   "skills.read": {
     valid: (answer) => brainSkillTextSchema.safeParse(answer).success,
     issue: "output: Answer a skill: its scope, name, version and text.",
+  },
+  "entities.get": {
+    valid: (answer) => brainCardSchema.nullable().safeParse(answer).success,
+    issue:
+      "output: Answer a card (its entity, attributes, relations, notes and next), or null.",
+  },
+  "entities.find": {
+    valid: (answer) => brainEntitiesSchema.safeParse(answer).success,
+    issue: "output: Answer entities (each its id, kind and name) and next.",
   },
 };
 
@@ -104,8 +133,8 @@ export const requireBrainAnswer = (call: BrainCall, answer: unknown): void => {
 };
 
 /**
- * Recalls for call `call` of `run` through `binding`, its authority already
- * decided again (`makeCall`): the pack.
+ * Makes call `call` of `run` through `binding`, its authority already
+ * decided again (`makeCall`): what the Brain answers, as JSON.
  */
 export const callBrain = async (
   env: Env,
@@ -119,6 +148,24 @@ export const callBrain = async (
   }
   const authority = runAuthority(run);
   const permissionId = permissionIdSchema.parse(target.permissionId);
+  if (call.operation === "entities.get" || call.operation === "entities.find") {
+    return await entitiesCallFor(
+      env,
+      {
+        authority,
+        context: runContext(run),
+        permissionId,
+        actor: delegateActorOf(authority),
+        target: { type: "workflow_run", id: run.runId },
+        // Pinned with the run before it gets them, as a recall's pack.
+        keep: async (versions) => {
+          await recordRunVersions(env, run.runId, permissionId, versions);
+        },
+      },
+      call.operation,
+      call.arguments
+    );
+  }
   if (call.operation !== "recall") {
     const answered = await skillsCallFor(
       env,

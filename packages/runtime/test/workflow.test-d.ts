@@ -5,6 +5,7 @@ import { expectTypeOf } from "vite-plus/test";
 
 import { defineWorkflow, v } from "../src/workflow.ts";
 import type {
+  BrainCard,
   BrainSkill,
   ConnectionMembers,
   WorkflowCtx,
@@ -19,7 +20,7 @@ const permissions = {
   },
   decisions: ["finance"],
   events: { stripe: ["invoice.paid", "invoice.failed"] },
-  brain: { handbook: ["recall", "skills.select"] },
+  brain: { handbook: ["recall", "skills.select", "entities.get"] },
 } as const satisfies WorkflowPermissions;
 
 const params = {
@@ -42,6 +43,12 @@ expectTypeOf(
 ).resolves.toEqualTypeOf<{ readonly skills: readonly BrainSkill[] }>();
 // @ts-expect-error -- no step reads a skill
 expectTypeOf(ctx.brain.handbook.skills.read).toBeFunction();
+// Its entities under `entities`, as an App's.
+expectTypeOf(
+  ctx.brain.handbook.entities.get({ entity: "e" }, { step: "card" })
+).resolves.toEqualTypeOf<BrainCard | null>();
+// @ts-expect-error -- no step finds entities
+expectTypeOf(ctx.brain.handbook.entities.find).toBeFunction();
 
 // A name nobody declared is no member.
 // @ts-expect-error -- no such connection

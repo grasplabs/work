@@ -216,6 +216,14 @@ const filesTypes: Readonly<Record<FilesAction, string>> = {
   delete: "null",
 };
 
+/** An entity, as a Brain call answers one. */
+const brainEntityType =
+  '{ readonly id: string; readonly kind: "person" | "team" | "customer" | "supplier" | "project" | "product" | "tool" | "routine" | "app" | "workflow" | "connection" | "term"; readonly name: string | null }';
+
+/** A memory on a card, as a Brain call answers one. */
+const brainMemoryType =
+  "{ readonly id: string; readonly attribute: string | null; readonly value: string | null; readonly statement: string; readonly learnedAt: string; readonly confirmed: boolean; readonly contested: boolean }";
+
 /** What each action on the Brain answers (the SDK's `BrainActions`). */
 const brainTypes: Readonly<Record<BrainAction, string>> = {
   recall:
@@ -224,6 +232,8 @@ const brainTypes: Readonly<Record<BrainAction, string>> = {
     '{ readonly skills: readonly { readonly scope: "grasp" | "company"; readonly name: string; readonly version: number; readonly description: string }[] }',
   "skills.read":
     '{ readonly scope: "grasp" | "company"; readonly name: string; readonly version: number; readonly text: string }',
+  "entities.get": `{ readonly entity: ${brainEntityType}; readonly attributes: readonly { readonly attribute: string; readonly memories: readonly ${brainMemoryType}[]; readonly contested: boolean }[]; readonly relations: readonly { readonly attribute: string | null; readonly side: "about" | "object"; readonly other: ${brainEntityType}; readonly memory: ${brainMemoryType} }[]; readonly notes: readonly ${brainMemoryType}[]; readonly next: string | null } | null`,
+  "entities.find": `{ readonly entities: readonly ${brainEntityType}[]; readonly next: string | null }`,
 };
 
 /**

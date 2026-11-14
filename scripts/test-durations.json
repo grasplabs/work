@@ -590,6 +590,7 @@
   "@grasp-os/core:pages test/app-test-live-unread.test.ts": 21.1,
   "@grasp-os/core:pages test/app-test-live.test.ts": 17.6,
   "@grasp-os/core:pages test/app-tests.test.ts": 27.8,
+  "@grasp-os/core:pages test/brain-entities-code.test.ts": 8,
   "@grasp-os/core:pages test/brain-recall-code.test.ts": 9.8,
   "@grasp-os/core:pages test/brain-skills-code.test.ts": 7.9,
   "@grasp-os/core:pages test/build-on-save.test.ts": 5.6,

@@ -1,4 +1,7 @@
 import type {
+  BrainCard,
+  BrainEntity,
+  BrainMemory,
   BrainPack,
   BrainSkill,
   BrainSkillText,
@@ -7,20 +10,32 @@ import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { functionErrors } from "@grasp-os/shared/functions";
 import type { PermissionId } from "@grasp-os/shared/ids";
+import type { Json } from "@grasp-os/shared/json";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
 import { skillErrors } from "@grasp-os/shared/skills";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
 
 import { appendAuditEvent } from "./audit-outbox.ts";
 import { storedTeamsOf } from "./brain-grant-teams.ts";
 import {
   codeRecallOf,
+  companyCardAs,
+  companyEntitiesAs,
+  isCodeEntitiesRequest,
   recallPassagesAs,
   skillVersionRefOf,
 } from "./brain-next.ts";
-import type { SkillAt, SkillVersionRef } from "./brain-next.ts";
+import type {
+  CardMemory,
+  CodeEntitiesOperation,
+  CompanyCard,
+  SkillAt,
+  SkillVersionRef,
+  SourceVersionRef,
+} from "./brain-next.ts";
 import { skillReadSchema, skillsSelectSchema } from "./brain-pack.ts";
 import { readSkillFor, selectSkillsFor } from "./brain-skills.ts";
 import type { HeldNow, SkillsReach } from "./brain-skills.ts";
@@ -361,4 +376,205 @@ export const skillsCallFor = async (
     });
     throw refused;
   }
+};
+
+// The Brain's entities for code (GRA-1837, threat model on the issue): an
+// App's action (resource-brain.ts) and a workflow's step
+// (workflows/brain-calls.ts) read an entity's card and find entities, as
+// the company alone (brain-next.ts), whatever teams their grant names. In
+// order, as a recall's:
+//
+// - The request first, strictly (`isCodeEntitiesRequest`): it can't name
+//   a reader.
+// - The caller's grant to read the Brain, now (`authorize`).
+// - Audited once, before it answers, with ids and counts alone: never a
+//   name, a statement or a cursor. An entity the company may not see is
+//   answered as one nobody holds.
+
+/** What code asks of the Brain's entities: `ctx.brain.entities.<name>`. */
+export type EntitiesOperation = CodeEntitiesOperation;
+
+/**
+ * Whether `input` is a request code may make of `operation`, as
+ * `entitiesCallFor` takes it: what a workflow's test run checks before it
+ * answers from its fixtures.
+ */
+export const isEntitiesRequest = (
+  operation: EntitiesOperation,
+  input: unknown
+): boolean => isCodeEntitiesRequest(operation, input);
+
+/** Who reads the Brain's entities: a recall's caller, keeping what a card rests on. */
+export interface EntitiesCaller extends Omit<RecallCaller, "keep" | "reach"> {
+  /**
+   * What the caller keeps of the versions a card's memories rest on,
+   * before it gets them: a run's pins, as a recall's.
+   */
+  readonly keep?: (versions: readonly SourceVersionRef[]) => Promise<void>;
+}
+
+/** An id as the audit log may name it: a well-formed one, never what code sent instead. */
+const idOf = (value: unknown): string | null => {
+  const id = z.uuid().safeParse(value);
+  return id.success ? id.data : null;
+};
+
+/** The entity `input` asks for, as the audit log may name it. */
+const askedEntityOf = (input: unknown): string | null =>
+  idOf(
+    typeof input === "object" && input !== null
+      ? Reflect.get(input, "entity")
+      : undefined
+  );
+
+/** `error` in the function host's words: a request the Brain refused as one it isn't. */
+const inHostEntityWords = (error: unknown): unknown =>
+  isExpectedError(error) && error.code === "brain.request_invalid"
+    ? functionErrors.create("permission.invalid_args")
+    : inHostWords(error);
+
+/** A memory as code is handed it (`BrainMemory`): what it says, never who wrote or confirmed it. */
+const codeMemoryOf = (memory: CardMemory) =>
+  ({
+    id: memory.id,
+    attribute: memory.attribute,
+    value: memory.value,
+    statement: memory.statement,
+    learnedAt: memory.learnedAt.toISOString(),
+    confirmed: memory.confirmed !== null,
+    contested: memory.contested,
+  }) satisfies BrainMemory;
+
+/** A card as code is handed it (`BrainCard`), as JSON. */
+const codeCardOf = (card: CompanyCard) =>
+  ({
+    entity: card.entity,
+    attributes: card.attributes.map(({ attribute, memories, contested }) => ({
+      attribute,
+      memories: memories.map((memory) => codeMemoryOf(memory)),
+      contested,
+    })),
+    relations: card.relations.map(({ attribute, side, other, memory }) => ({
+      attribute,
+      side,
+      other,
+      memory: codeMemoryOf(memory),
+    })),
+    notes: card.notes.map((memory) => codeMemoryOf(memory)),
+    next: card.next,
+  }) satisfies BrainCard;
+
+/** The versions the memories of `card` rest on, each once. */
+const versionsOf = (card: CompanyCard): SourceVersionRef[] => {
+  const all = [
+    ...card.attributes.flatMap(({ memories }) => memories),
+    ...card.relations.map(({ memory }) => memory),
+    ...card.notes,
+  ];
+  const seen = new Map<string, SourceVersionRef>();
+  for (const { source } of all) {
+    if (source !== null) {
+      seen.set(JSON.stringify([source.source, source.version]), source);
+    }
+  }
+  return [...seen.values()];
+};
+
+/** The memories on `card`, counted. */
+const memoriesOn = (card: CompanyCard): number =>
+  card.attributes.reduce(
+    (count, { memories }) => count + memories.length,
+    card.relations.length + card.notes.length
+  );
+
+/** Reads `operation` for `caller`, checked already: what it answers code, and what its audit says. */
+const readFor = async (
+  env: Env,
+  caller: EntitiesCaller,
+  operation: EntitiesOperation,
+  input: unknown
+): Promise<{
+  answer: Json;
+  detail: Record<string, string | number | boolean | null>;
+}> => {
+  const person = caller.authority.onBehalfOf;
+  if (operation === "entities.get") {
+    const card = await companyCardAs(env, person, input);
+    if (card === null) {
+      return { answer: null, detail: { found: false, memories: 0 } };
+    }
+    // Pinned with the run before it gets them, as a recall's pack is.
+    await caller.keep?.(versionsOf(card));
+    return {
+      answer: codeCardOf(card),
+      detail: { found: true, memories: memoriesOn(card) },
+    };
+  }
+  const page = await companyEntitiesAs(env, person, input);
+  return {
+    answer: {
+      entities: page.entities.map(
+        ({ id, kind, name }) => ({ id, kind, name }) satisfies BrainEntity
+      ),
+      next: page.next,
+    },
+    detail: { entities: page.entities.length },
+  };
+};
+
+/**
+ * The Brain's entities for an App's action or a workflow's step (above):
+ * `entities.get` a page of an entity's card and `entities.find` a page of
+ * entities, as the company may read them. Refused as
+ * `permission.invalid_args` for input that isn't a request,
+ * `permission.denied` without the grant to read the Brain, and
+ * `permission.unavailable` once the person is no longer a member.
+ * Audited once, before it answers.
+ */
+export const entitiesCallFor = async (
+  env: Env,
+  caller: EntitiesCaller,
+  operation: EntitiesOperation,
+  input: unknown
+): Promise<Json> => {
+  const asked: Record<string, string | null> =
+    operation === "entities.get" ? { entity: askedEntityOf(input) } : {};
+  const audit = async (
+    detail: Record<string, string | number | boolean | null>
+  ): Promise<void> => {
+    await appendAuditEvent(env, {
+      actor: caller.actor,
+      action: `brain.${operation}`,
+      ...(caller.target === undefined ? {} : { target: caller.target }),
+      detail: { onBehalfOf: caller.authority.onBehalfOf, ...asked, ...detail },
+    });
+  };
+  let read: Awaited<ReturnType<typeof readFor>>;
+  try {
+    // The input first, as a recall's: a caller with no grant and bad
+    // input is refused alike by both.
+    if (!isCodeEntitiesRequest(operation, input)) {
+      throw functionErrors.create("permission.invalid_args");
+    }
+    if (caller.permissionId === null) {
+      throw permissionErrors.create("permission.denied", { action: "brain" });
+    }
+    await authorize(
+      env,
+      caller.authority,
+      { type: "platform" },
+      "brain",
+      caller.permissionId,
+      caller.context
+    );
+    read = await readFor(env, caller, operation, input);
+  } catch (error) {
+    const refused = inHostEntityWords(error);
+    await audit({
+      refused: isExpectedError(refused) ? refused.code : "internal.unexpected",
+    });
+    throw refused;
+  }
+  await audit(read.detail);
+  return read.answer;
 };

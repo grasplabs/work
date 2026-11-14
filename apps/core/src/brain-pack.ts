@@ -1,4 +1,8 @@
 import type {
+  BrainCard,
+  BrainEntity,
+  BrainEntityKind,
+  BrainMemory,
   BrainPack,
   BrainSkill,
   BrainSkillText,
@@ -77,4 +81,70 @@ export const brainSkillTextSchema: z.ZodType<BrainSkillText> = z.strictObject({
   name: z.string().min(1),
   version: z.int().positive(),
   text: z.string(),
+});
+
+/** Every kind of entity, each once: the SDK's own (`BrainEntityKind`). */
+const brainEntityKinds = {
+  person: "person",
+  team: "team",
+  customer: "customer",
+  supplier: "supplier",
+  project: "project",
+  product: "product",
+  tool: "tool",
+  routine: "routine",
+  app: "app",
+  workflow: "workflow",
+  connection: "connection",
+  term: "term",
+} as const satisfies { readonly [Kind in BrainEntityKind]: Kind };
+
+/** An entity, as code is handed one (`BrainEntity`), and nothing more. */
+const brainEntitySchema: z.ZodType<BrainEntity> = z.strictObject({
+  id: z.uuid(),
+  kind: z.enum(brainEntityKinds),
+  name: z.string().nullable(),
+});
+
+/** A memory on a card, as code is handed one (`BrainMemory`), and nothing more. */
+const brainMemorySchema: z.ZodType<BrainMemory> = z.strictObject({
+  id: z.uuid(),
+  attribute: z.string().nullable(),
+  value: z.string().nullable(),
+  statement: z.string(),
+  learnedAt: z.iso.datetime(),
+  confirmed: z.boolean(),
+  contested: z.boolean(),
+});
+
+/**
+ * A page of an entity's card, as code is handed it (`BrainCard`), and
+ * nothing more: what the function host lets an App's `entities.get` hand
+ * back, and what a test run's fixture may answer a workflow's.
+ */
+export const brainCardSchema: z.ZodType<BrainCard> = z.strictObject({
+  entity: brainEntitySchema,
+  attributes: z.array(
+    z.strictObject({
+      attribute: z.string(),
+      memories: z.array(brainMemorySchema),
+      contested: z.boolean(),
+    })
+  ),
+  relations: z.array(
+    z.strictObject({
+      attribute: z.string().nullable(),
+      side: z.enum(["about", "object"]),
+      other: brainEntitySchema,
+      memory: brainMemorySchema,
+    })
+  ),
+  notes: z.array(brainMemorySchema),
+  next: z.string().nullable(),
+});
+
+/** A page of entities, as code is handed it, and nothing more. */
+export const brainEntitiesSchema = z.strictObject({
+  entities: z.array(brainEntitySchema),
+  next: z.string().nullable(),
 });

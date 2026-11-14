@@ -146,6 +146,12 @@ const typeRules: readonly {
   // (`brain.skills.installed`) is no read.
   { action: "brain.skills.select", type: "read" },
   { action: "brain.skills.read", type: "read" },
+  // An App or a workflow's run reading the Brain's entities for a person
+  // (core's src/brain-recall.ts): an entity's card, or a page of entities,
+  // by ids and counts, or why it was refused; never a name, a statement
+  // or a cursor. Each named exactly.
+  { action: "brain.entities.get", type: "read" },
+  { action: "brain.entities.find", type: "read" },
   // A Grasp staff member reaching a namespace, method or route of the
   // client's deployment (core's staff-audit.ts): what they looked at or
   // did there, by its surface and identifiers, never its content.

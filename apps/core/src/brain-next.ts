@@ -4436,3 +4436,225 @@ export const correctAs = async (
   }
   return saved;
 };
+
+// Entities for code (GRA-1837, threat model on the issue): the entities
+// an App's action or a workflow's step reads, and their cards. All of it
+// in the shared store, read as the company alone (`company`): code never
+// reads a person's own store or a team's. Whether code may read at all
+// (its grant) is its caller's to decide first (brain-recall.ts).
+
+/**
+ * `error` as core gives it: an erased store's or key's as
+ * `brain.source_erased` (`erasedAs`); a refusal of the Brain's rules
+ * (an id it doesn't name, a cursor it didn't give) as
+ * `brain.request_invalid`, the same whatever the rule, so
+ * an id the reader may not read is refused as one nobody holds. A store
+ * restoring an export, or any other error, as it is: not the caller's to
+ * mend.
+ */
+const refusedAs = (error: unknown): unknown => {
+  const erased = erasedAs(error);
+  if (erased !== error) {
+    return erased;
+  }
+  return error instanceof Error &&
+    error.message.startsWith(refusalPrefix) &&
+    error.message !== restoringNow
+    ? brainSourceErrors.create("brain.request_invalid")
+    : error;
+};
+
+/** Most characters of a page's cursor as code holds it: well past any the store gives. */
+const cursorTextMax = 2000;
+
+/**
+ * Where a page ended, as code holds it: the store's cursor as JSON, in
+ * base64, which code passes back untouched and the store checks again.
+ */
+const cursorTextOf = (cursor: object | undefined): string | null =>
+  cursor === undefined ? null : btoa(JSON.stringify(cursor));
+
+/** The moments a store's cursor holds, which JSON wrote as text. */
+const cursorMoments = ["at", "learned", "learnedAt"] as const;
+
+/**
+ * A cursor `cursorTextOf` wrote, read back as `schema` (the store's own,
+ * which the store checks again): refused as `brain.request_invalid` when
+ * it isn't one.
+ */
+const cursorOfText = <T>(schema: z.ZodType<T>, text: string): T => {
+  let read: unknown;
+  try {
+    read = JSON.parse(atob(checked(z.string().max(cursorTextMax), text)));
+  } catch {
+    throw brainSourceErrors.create("brain.request_invalid");
+  }
+  if (typeof read !== "object" || read === null || Array.isArray(read)) {
+    throw brainSourceErrors.create("brain.request_invalid");
+  }
+  const cursor: Record<string, unknown> = { ...read };
+  for (const moment of cursorMoments) {
+    const value = cursor[moment];
+    if (typeof value === "string") {
+      cursor[moment] = new Date(value);
+    }
+  }
+  return checked(schema, cursor);
+};
+
+/** A moment code reads as of: ISO 8601, with its offset. */
+const codeMomentSchema = z.iso
+  .datetime({ offset: true })
+  .transform((at) => new Date(at));
+
+/** A card code asks for (`companyCardAs`). */
+const codeCardSchema = z.strictObject({
+  entity: entityIdSchema,
+  asOf: codeMomentSchema.optional(),
+  after: z.string().optional(),
+});
+
+/** A memory on a card, its source as core names it. */
+export interface CardMemory extends Omit<Memory, "source"> {
+  source: SourceVersionRef | null;
+}
+
+/** A page of an entity's card as code reads it: the store's, memories cited as core names sources. */
+export interface CompanyCard {
+  entity: { id: EntityId; kind: EntityKind; name: string | null };
+  attributes: {
+    attribute: string;
+    memories: CardMemory[];
+    contested: boolean;
+  }[];
+  relations: {
+    attribute: string | null;
+    side: "about" | "object";
+    other: { id: EntityId; kind: EntityKind; name: string | null };
+    memory: CardMemory;
+  }[];
+  notes: CardMemory[];
+  next: string | null;
+}
+
+/** `memory` with its source as core names it. */
+const cardMemoryOf = ({ source, ...memory }: Memory): CardMemory => ({
+  ...memory,
+  source: versionRefOf(source),
+});
+
+/**
+ * A page of entity `entity`'s card as the company may read it, for the
+ * member `personId` (code's reach: never a team's or a person's own), as
+ * now or as of `asOf`, after `after` (a page's `next`): null alike when the
+ * company may see no such entity and when nobody holds one. Refused once
+ * `personId` is no longer a member, and as `brain.request_invalid` for a
+ * request or cursor that isn't one.
+ */
+export const companyCardAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  request: unknown
+): Promise<CompanyCard | null> => {
+  const { entity, asOf, after } = checked(codeCardSchema, request);
+  const reader = await readerOf(env, personId, "company");
+  let card: Awaited<ReturnType<Brain["readCard"]>>;
+  try {
+    card = await brain(env).readCard({
+      entity,
+      reader,
+      ...(asOf === undefined ? {} : { asOf }),
+      ...(after === undefined
+        ? {}
+        : { after: cursorOfText(memoriesCursorSchema, after) }),
+    });
+  } catch (error) {
+    throw refusedAs(error);
+  }
+  if (card === null) {
+    return null;
+  }
+  return {
+    entity: card.entity,
+    attributes: card.attributes.map(({ memories, ...attribute }) => ({
+      ...attribute,
+      memories: memories.map((memory) => cardMemoryOf(memory)),
+    })),
+    relations: card.relations.map(({ memory, ...relation }) => ({
+      ...relation,
+      memory: cardMemoryOf(memory),
+    })),
+    notes: card.notes.map((memory) => cardMemoryOf(memory)),
+    next: cursorTextOf(card.next),
+  };
+};
+
+/** Entities code asks to find (`companyEntitiesAs`): a kind, a name or an identifier, at least one. */
+const codeFindSchema = z
+  .strictObject({
+    kind: z.enum(entityKinds).optional(),
+    name: memoryText(valueMaxLength).optional(),
+    identifier: identifierSchema.optional(),
+    after: z.string().optional(),
+  })
+  .refine(
+    ({ kind, name, identifier }) =>
+      kind !== undefined || name !== undefined || identifier !== undefined
+  );
+
+/** A page of entities as code reads it. */
+interface CompanyEntities {
+  entities: { id: EntityId; kind: EntityKind; name: string | null }[];
+  next: string | null;
+}
+
+/**
+ * A page of the entities the company may see that match `request`'s kind,
+ * name (whole, folded) or exact identifier, for the member `personId`,
+ * after `after` (a page's `next`), in the order of the first memory the
+ * company may read that mentions each. Refused once `personId` is no
+ * longer a member, and as `brain.request_invalid` for a request or cursor
+ * that isn't one.
+ */
+export const companyEntitiesAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  request: unknown
+): Promise<CompanyEntities> => {
+  const { after, ...asked } = checked(codeFindSchema, request);
+  const reader = await readerOf(env, personId, "company");
+  let page: Awaited<ReturnType<Brain["findEntities"]>>;
+  try {
+    page = await brain(env).findEntities({
+      reader,
+      ...asked,
+      ...(after === undefined
+        ? {}
+        : { after: cursorOfText(entitiesCursorSchema, after) }),
+    });
+  } catch (error) {
+    throw refusedAs(error);
+  }
+  return { entities: page.entities, next: cursorTextOf(page.next) };
+};
+
+/** What code asks of the Brain's entities, beside recall, by operation. */
+const codeEntitiesRequests = {
+  "entities.get": codeCardSchema,
+  "entities.find": codeFindSchema,
+} as const;
+
+/** What code asks of the Brain's entities: `ctx.brain.entities.<name>`. */
+export type CodeEntitiesOperation = keyof typeof codeEntitiesRequests;
+
+/**
+ * Whether `input` is a request code may make of `operation`, as the
+ * functions above take it: for core to refuse it before anything else
+ * is looked at, as a recall's (`codeRecallOf`).
+ */
+export const isCodeEntitiesRequest = (
+  operation: CodeEntitiesOperation,
+  input: unknown
+): boolean =>
+  Object.hasOwn(codeEntitiesRequests, operation) &&
+  codeEntitiesRequests[operation].safeParse(input).success;

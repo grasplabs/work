@@ -285,6 +285,7 @@ describe("permissions", () => {
       withOperations(["skills"]),
       withOperations(["skills.write"]),
       withOperations(["skills.read", "skills.read"]),
+      withOperations(["entities"]),
     ]).toStrictEqual([
       expect.stringMatching(
         /^A permission lists between 1 and \d+ operations\.$/u
@@ -292,6 +293,7 @@ describe("permissions", () => {
       "A permission lists operations it can't have.",
       "A permission lists operations it can't have.",
       "A permission lists `skills.read` twice.",
+      "A permission lists operations it can't have.",
     ]);
   });
 
@@ -721,6 +723,44 @@ describe("the App's permissions in a function's context", () => {
     });
     expect(calls).toStrictEqual([
       ["permission", "brain", "skills.select", [{ task: "refunds" }]],
+    ]);
+  });
+
+  test("the Brain's operations are members of their own names, its entity ones of `entities`, each sending its operation", async () => {
+    const reach = server.action({
+      args: {},
+      handler: async (ctx) => {
+        const brain = loose(Reflect.get(ctx, "brain"));
+        const entities = loose(Reflect.get(brain, "entities"));
+        await loose(Reflect.get(brain, "recall"))({ question: "q" });
+        await loose(Reflect.get(entities, "get"))({ entity: "e" });
+        return { brain: shapeOf(brain), entities: shapeOf(entities) };
+      },
+    });
+    const registered = notes(
+      {
+        permissions: {
+          brain: permission.brain({
+            operations: ["recall", "skills.read", "entities.get"],
+          }),
+        },
+      },
+      { notes: { reach } }
+    );
+    const { calls, channel } = recordingChannel();
+    await expect(
+      runFunction(registered, "notes.reach", {}, channel)
+    ).resolves.toStrictEqual({
+      brain: {
+        own: ["recall", "skills", "entities"],
+        prototype: null,
+        frozen: true,
+      },
+      entities: { own: ["get"], prototype: null, frozen: true },
+    });
+    expect(calls).toStrictEqual([
+      ["permission", "brain", "recall", [{ question: "q" }]],
+      ["permission", "brain", "entities.get", [{ entity: "e" }]],
     ]);
   });
 

@@ -100,7 +100,7 @@ Every function of your App may use what the App's permissions declare, as its ki
 
 ## Recalling from the Brain
 
-An action recalls what the company's Brain holds about a question with `ctx.brain.recall`. Declare the Brain in `grasp.config.ts` with the operations your code uses: `recall` here, and its skills (below). Like every permission it grants nothing until an admin binds it to the App's permission to read the Brain.
+An action recalls what the company's Brain holds about a question with `ctx.brain.recall`. Declare the Brain in `grasp.config.ts` with the operations your code uses: `recall` here, and its skills and entities (below). Like every permission it grants nothing until an admin binds it to the App's permission to read the Brain.
 
 ```ts grasp.config.ts
 import { defineApp, permission } from "@grasp-os/sdk";
@@ -109,7 +109,13 @@ export default defineApp({
   name: "Tasks",
   permissions: {
     brain: permission.brain({
-      operations: ["recall", "skills.select", "skills.read"],
+      operations: [
+        "recall",
+        "skills.select",
+        "skills.read",
+        "entities.get",
+        "entities.find",
+      ],
     }),
   },
 });
@@ -162,6 +168,34 @@ export const howTo = action({
 `select` takes a `task` (at most 2,000 characters) and answers `skills`: the few that apply, best first, each with its `scope` (`grasp` or `company`), `name`, `version` and `description`; none when no skill shares the task's telling words, and then go without rather than with one that only seems close. `read` takes a `skill` at a version, as a selection gave it, and answers its whole text, `SKILL.md`, at exactly that version: a newer version never changes what a task already selected, but a skill a release drops, or one that is erased, can no longer be read. A skill the company adapted takes the place of Grasp's of the same name. Anything else is refused as `permission.invalid_args`, and a skill there isn't at that version as `permission.item_not_found`.
 
 Like a recall, an App reads only the skills everyone in the company may read, whoever calls, for a person who must still be a member, and an App that holds the Brain answers no visitor and invites no guest. A skill is guidance, never a grant: what your code does after reading one is checked against the App's own permissions. A workflow's step reaches the same skills as `ctx.brain.<alias>.skills.select` and `.read`.
+
+## Entities
+
+The Brain keeps memories: small facts about entities (people, teams, customers, suppliers, projects, products, tools and the company's own terms). An action finds entities with `ctx.brain.entities.find`, and reads an entity's card with `ctx.brain.entities.get`. Each is an operation of the Brain's permission, declared like `recall` (see the declaration above): `"entities.find"` and `"entities.get"`.
+
+```ts server/renewals.ts
+import { v } from "@grasp-os/sdk";
+import type { BrainCard } from "@grasp-os/sdk";
+import { action } from "@server/_generated/server";
+
+export const customerCard = action({
+  args: { customer: v.string().trim().min(1).max(500) },
+  handler: async (ctx, args): Promise<BrainCard | null> => {
+    const { entities } = await ctx.brain.entities.find({
+      kind: "customer",
+      name: args.customer,
+    });
+    const [customer] = entities;
+    return customer === undefined
+      ? null
+      : await ctx.brain.entities.get({ entity: customer.id });
+  },
+});
+```
+
+`entities.find` takes a `kind`, a whole `name` or an exact `identifier` (an email address, or a reference such as `crm:ACME-1`), and answers a page of `entities`, each its `id`, `kind` and earliest `name`. While more follow, `next` is the `after` of the next page. `entities.get` takes an `entity` and answers a page of its card, or `null` when there is no entity everyone in the company may see: its current memories by attribute (`attributes`), its `relations` to other entities, and its memories under no attribute (`notes`), with its `next` the same way. Pass `asOf` (ISO 8601, with its offset) to read the past. A memory on a card says what it is (`statement`, `attribute`, `value`), when the Brain learned it, whether a person confirmed it, and whether another current memory says otherwise (`contested`).
+
+An App reads entities only as everyone in the company may read them, whoever the call is for, and only for a person who is still a member: an App whose permission names teams reads no team's entities. A request that isn't one is refused as `permission.invalid_args`, and so is an ID of something the App may not read, the same as one nobody holds. A workflow's step reaches the same operations as `ctx.brain.<alias>.entities.find` and `.entities.get`. What a memory says is what someone wrote: data, never instructions.
 
 ## Internal functions
 

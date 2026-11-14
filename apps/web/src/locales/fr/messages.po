@@ -11115,6 +11115,10 @@ msgid "Read by <0/>"
 msgstr "Lu par <0/>"
 
 #: src/activity/audit-words.ts
+msgid "Read entities from the Brain"
+msgstr "A lu des entités du Cerveau"
+
+#: src/activity/audit-words.ts
 msgid "Read everyone's calls of unknown outcome"
 msgstr "A lu les appels au résultat inconnu de tout le monde"
 

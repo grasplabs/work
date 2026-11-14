@@ -57,11 +57,17 @@ export interface ConnectionConfig<
 }
 
 /**
- * What an action may ask the Brain (`brain-recall.ts`): `recall`, and
+ * What an action may ask the Brain (`brain-recall.ts`): `recall`;
  * `skills.select` and `skills.read`, as `ctx.brain.skills.select` and
- * `ctx.brain.skills.read`.
+ * `ctx.brain.skills.read`; and `entities.get` and `entities.find`, as `ctx.brain.entities.get` and
+ * `ctx.brain.entities.find`.
  */
-export type BrainOperation = "recall" | "skills.select" | "skills.read";
+export type BrainOperation =
+  | "recall"
+  | "skills.select"
+  | "skills.read"
+  | "entities.get"
+  | "entities.find";
 
 /** What a `brain` permission may say. */
 export interface BrainConfig<Operations extends readonly BrainOperation[]> {
