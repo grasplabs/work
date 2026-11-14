@@ -58,6 +58,7 @@ import type {
   MemoryChangeOutcome,
   MemoryId,
   ExportStatus,
+  Finding,
   KeyState,
   HandOverPriority,
   HandOverResult,
@@ -65,6 +66,7 @@ import type {
   ModelReply,
   Pack,
   PackItem,
+  PackMemory,
   PersonReader,
   Reader,
   RecallRequest,
@@ -450,10 +452,35 @@ export interface RecalledItem extends Omit<PackItem, "source"> {
   source: SourceRef;
 }
 
-/** A pack, as recall answers (`recallAs`). */
-export interface RecalledPack extends Omit<Pack, "items"> {
-  items: RecalledItem[];
+/** A memory of a pack, citing its source as its producer named it. */
+export interface RecalledMemory extends Omit<PackMemory, "source"> {
+  source: SourceVersionRef | null;
 }
+
+/** A pack, as recall answers (`recallAs`): passages and memories. */
+export interface RecalledPack extends Omit<Pack, "items" | "memories"> {
+  items: RecalledItem[];
+  memories: RecalledMemory[];
+}
+
+/**
+ * A pack of passages alone (`recallPassagesAs`): what the chat hands its
+ * model and the Brain page shows, until each carries memories with their
+ * own checks when history is read again.
+ */
+export interface RecalledPassages {
+  items: RecalledItem[];
+  notFound: string[];
+  truncated: boolean;
+}
+
+/** `source` of the Brain as its producer named it, or none. */
+const versionRefOf = (
+  source: { source: SourceId; version: number } | null
+): SourceVersionRef | null =>
+  source === null
+    ? null
+    : { source: sourceRefOf(source.source), version: source.version };
 
 /** A version of a source, whole. */
 export interface SourceVersion extends SourceVersionRef {
@@ -807,26 +834,18 @@ const meaningOf = async (
 };
 
 /**
- * A pack of what the member `personId` may read for `question`, as core
- * counts them now, within `budget.tokens` (the Brain's estimate,
- * `tokensOf`), and, with `asOf`, of each source as it was then: the
- * Brain's `recall`, by words, exact parts and, once a model ships, by
- * meaning: the question is embedded while its reader is read. Every item
- * cites its source, version and place; the pack says what was not found
- * and whether the budget cut it short, all from what they may read alone.
- * With `personal`, from the shared store and their own together, packed
- * as one store holding both would pack them (`packAcross`); without, from
- * the shared store alone, as their teams may read it (a reader with no
- * person: no `owner` source matches), or with `company` as the company
- * alone. Refused once they are no longer a member, or when `personId`
- * isn't an ID.
+ * The Brain's request of a recall by the member `personId`, as core counts
+ * them now: the question checked as the Brain checks it before the
+ * embedder sees any of it, and embedded while their reader is read. With
+ * `personal`, as the person (`person`: their own store too); without, as
+ * their teams (a reader with no person: no `owner` source matches); with
+ * `company`, as the company alone.
  */
-export const recallAs = async (
+const recallRequestAs = async (
   env: BrainEnv & Pick<Env, "DB" | "EMBEDDER">,
   personId: string,
   { question: asked, budget, asOf, personal, company = false }: Recall
-): Promise<RecalledPack> => {
-  // As the Brain checks it, before the embedder sees any of it.
+): Promise<RecallRequest> => {
   const question = checked(questionSchema, asked);
   let reach: Reach = personal ? "person" : "teams";
   if (company) {
@@ -837,36 +856,106 @@ export const recallAs = async (
     // As of a moment the Brain never searches by meaning: nothing to embed.
     asOf === undefined ? meaningOf(env, question) : {},
   ]);
-  const request: RecallRequest = {
+  return {
     question,
     reader,
     budget,
     ...(asOf === undefined ? {} : { asOf }),
     ...meaning,
   };
-  const own = ownBrainOf(env, reader);
-  const { items, notFound, truncated } =
-    own === undefined
-      ? await brain(env).recall(request)
-      : packAcross(
-          question,
-          budget.tokens,
-          // The same request of both, the shared store first, as ties go
-          // to the store given first.
-          await Promise.all([brain(env).find(request), own.find(request)])
-        );
+};
+
+/**
+ * What every store `request`'s reader may read from finds for it, by
+ * `finding` (`find`, or `findPassages` for passages alone): the shared
+ * store, and their own when the reader names them (`ownBrainOf`), the
+ * shared store first, as ties go to the store given first.
+ */
+const findingsOf = async (
+  env: BrainEnv,
+  request: RecallRequest,
+  finding: "find" | "findPassages"
+): Promise<Finding[]> => {
+  const own = ownBrainOf(env, request.reader);
+  return await Promise.all([
+    brain(env)[finding](request),
+    ...(own === undefined ? [] : [own[finding](request)]),
+  ]);
+};
+
+/** `items` of a pack, each citing its source as its producer named it. */
+const recalledItems = (items: Pack["items"]): RecalledItem[] =>
+  items.map(({ source, version, position, text, whole, found }) => ({
+    source: sourceRefOf(source),
+    version,
+    position,
+    text,
+    whole,
+    found,
+  }));
+
+/**
+ * A pack of what the member `personId` may read for `question`, as core
+ * counts them now, within `budget.tokens` (the Brain's estimate,
+ * `tokensOf`), and, with `asOf`, of each source as it was then: the
+ * Brain's `recall`, by words, exact parts, the entities the question
+ * names and, once a model ships, by meaning: passages and memories, each
+ * citing its source, version and place, and the contested facts among
+ * them; what was not found and whether the budget cut it short, all from
+ * what they may read alone. With `personal`, from the shared store and
+ * their own together, packed as one store holding both would pack them
+ * (`packAcross`); without, from the shared store alone, as their teams
+ * may read it, or with `company` as the company alone. Refused once they
+ * are no longer a member, or when `personId` isn't an ID. For a caller
+ * that hands memories on with their own checks: none yet. The chat, the
+ * Brain page and code (`recallFor`) take passages alone
+ * (`recallPassagesAs`).
+ */
+export const recallAs = async (
+  env: BrainEnv & Pick<Env, "DB" | "EMBEDDER">,
+  personId: string,
+  recall: Recall
+): Promise<RecalledPack> => {
+  const request = await recallRequestAs(env, personId, recall);
+  const { items, memories, contested, notFound, truncated } = packAcross(
+    request.question,
+    request.budget.tokens,
+    await findingsOf(env, request, "find")
+  );
   return {
-    items: items.map(({ source, version, position, text, whole, found }) => ({
-      source: sourceRefOf(source),
-      version,
-      position,
-      text,
-      whole,
-      found,
+    items: recalledItems(items),
+    memories: memories.map((memory) => ({
+      ...memory,
+      source: versionRefOf(memory.source),
     })),
+    contested,
     notFound,
     truncated,
   };
+};
+
+/**
+ * A pack of the passages alone that the member `personId` may read for
+ * `question`, as `recallAs` finds them, the whole budget theirs: the
+ * stores find passages alone (`findPassages`), so no memory is read,
+ * takes room, reaches the caller, or counts as found in `notFound`, and
+ * no memory way can fail the recall. What the
+ * chat hands its model and the Brain page shows (GRA-1742: memories reach
+ * them in their own pull request, re-checked when history is read again),
+ * and what code recalls (`recallFor`, the SDK's `BrainPack`).
+ */
+export const recallPassagesAs = async (
+  env: BrainEnv & Pick<Env, "DB" | "EMBEDDER">,
+  personId: string,
+  recall: Recall
+): Promise<RecalledPassages> => {
+  const request = await recallRequestAs(env, personId, recall);
+  const { items, notFound, truncated } = packAcross(
+    request.question,
+    request.budget.tokens,
+    await findingsOf(env, request, "findPassages")
+  );
+  return { items: recalledItems(items), notFound, truncated };
 };
 
 /** Where an item of a pack is: its source, version and place. */
@@ -874,31 +963,33 @@ const placeOf = ({ source, version, position }: RecalledItem): string =>
   JSON.stringify([sourceKeyOf(source), version, position]);
 
 /**
- * Two recalls for one reader as one pack within `budget.tokens`: the
- * first's items in their order, then the second's that the first doesn't
- * hold (the same passage of the same version), best first, each while it
- * fits as the Brain counts it (`packItemTokens`); cut short when either
- * was or one of the second's didn't fit. What was not found is the
- * second's: it was asked for what the first meant. Both must be packs of
- * the same reader's, as `recallAs` gave them.
+ * Two recalls of passages for one reader as one pack within
+ * `budget.tokens`, as one pass over both would fit them: the first's
+ * items in their order, then the second's that the first doesn't hold
+ * (the same passage of the same version), best first, each while it fits
+ * in what is left, as the Brain counts it (`packItemTokens`). Cut short
+ * when either was or anything was left out for room. What was not found
+ * is the second's: it was asked for what the first meant. Both must be
+ * packs of the same reader's, as `recallPassagesAs` gave them.
  */
 export const mergeRecalled = (
-  first: RecalledPack,
-  second: RecalledPack,
+  first: RecalledPassages,
+  second: RecalledPassages,
   budget: { tokens: number }
-): RecalledPack => {
-  const tokensOf = (item: RecalledItem): number =>
-    packItemTokens({ ...item, source: sourceKeyOf(item.source) });
-  const held = new Set(first.items.map((item) => placeOf(item)));
-  const items = [...first.items];
-  let used = items.reduce((sum, item) => sum + tokensOf(item), 0);
+): RecalledPassages => {
+  let used = 0;
   let truncated = first.truncated || second.truncated;
-  for (const item of second.items) {
+  const held = new Set<string>();
+  const items: RecalledItem[] = [];
+  for (const item of [...first.items, ...second.items]) {
     const place = placeOf(item);
     if (held.has(place)) {
       continue;
     }
-    const tokens = tokensOf(item);
+    const tokens = packItemTokens({
+      ...item,
+      source: sourceKeyOf(item.source),
+    });
     if (used + tokens > budget.tokens) {
       truncated = true;
       continue;

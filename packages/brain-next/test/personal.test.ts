@@ -343,6 +343,7 @@ const nothingFound = {
   exact: [],
   capped: [],
   meaning: [],
+  memories: { words: [], entities: [], rivals: [] },
 };
 
 /** When `store`'s alarm is set for, if it is. */
@@ -1416,6 +1417,9 @@ const leavingWork: Record<string, (who: string) => Promise<void>> = {
   find: async (who) => {
     await own(who).find(byMeaningOf(splitModel, who));
   },
+  findPassages: async (who) => {
+    await own(who).findPassages(byMeaningOf(splitModel, who));
+  },
   recall: async (who) => {
     await own(who).recall(byMeaningOf(splitModel, who));
   },
@@ -1444,6 +1448,7 @@ const leavingNone = [
   // One statement of which version a change made, if the reader may read it.
   "changeVersion",
   "confirmMemory",
+  // Cards likewise: read whole in their call (cards.ts).
   "erasePerson",
   "exportFile",
   "exportStatus",
@@ -1455,6 +1460,7 @@ const leavingNone = [
   "listVersions",
   "ownExport",
   "ownExportFile",
+  "readCard",
   "readCurrent",
   "readEntity",
   "readEntityNames",

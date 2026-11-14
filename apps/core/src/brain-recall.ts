@@ -7,7 +7,7 @@ import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
 
 import { appendAuditEvent } from "./audit-outbox.ts";
-import { codeRecallOf, recallAs } from "./brain-next.ts";
+import { codeRecallOf, recallPassagesAs } from "./brain-next.ts";
 import { authorize } from "./permissions.ts";
 
 // The Brain's recall for code: an App's action (resource-brain.ts), a
@@ -122,7 +122,10 @@ export const recallFor = async (
     // An App's or a workflow's as the company alone; a chat's code as
     // its person's teams alone; never what only a person may read.
     // Nothing code sends can change it.
-    const recalled = await recallAs(env, caller.authority.onBehalfOf, {
+    // Passages alone (GRA-1742): the pack code gets is the SDK's
+    // `BrainPack`, which holds no memory, so none takes its budget or a
+    // word from `notFound`, and no entity reaches code.
+    const recalled = await recallPassagesAs(env, caller.authority.onBehalfOf, {
       ...recall,
       personal: false,
       company: caller.authority.subject.type !== "agent",
