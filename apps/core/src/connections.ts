@@ -47,6 +47,7 @@ import { permissionErrors } from "@grasp-os/shared/permissions";
 import { isAdmin, requireAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { StephenReach } from "@grasp-os/shared/stephen-reach";
+import { waitUntil } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -190,11 +191,13 @@ export const connectionOwnersOf = async (
 
 /**
  * Erases what the Brain kept through `connectionId` (connection-
- * capture.ts) once `person` disconnected it, straight away, when it is
- * their own native connection (`mayHoldCapturesOf`). The
- * disconnect never waits on it: should it fail, it is logged, and the
- * drain of connect's audit outbox erases them before the disconnect's
- * event leaves it (capture-erasures.ts), which also records the erasure.
+ * capture.ts) once `person` disconnected it, in the background
+ * (`waitUntil`), when it is their own native connection
+ * (`mayHoldCapturesOf`). The disconnect never waits on it: should it
+ * fail, it is logged, and the drain of connect's audit outbox erases them
+ * before the disconnect's event leaves it (capture-erasures.ts), which
+ * also records the erasure. Until it ran, a read under way may still land
+ * in the connection's group, and goes with it.
  */
 const eraseCapturesSoon = async (
   env: Env,
@@ -626,13 +629,14 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
 
   async disconnect(connectionId: string): Promise<{ revoked: boolean }> {
     const person = await this.#person();
-    // A revocation never waits on the Brain: connect stops it first, then
-    // what the Brain kept through it goes (`eraseCapturesSoon`).
+    // A revocation never waits on the Brain: connect stops it first, and
+    // what the Brain kept through it goes in the background
+    // (`eraseCapturesSoon`), so a slow store never holds the answer up.
     const disconnected = await this.#env.CONNECT.disconnect({
       person,
       connectionId,
     });
-    await eraseCapturesSoon(this.#env, person, connectionId);
+    waitUntil(eraseCapturesSoon(this.#env, person, connectionId));
     return disconnected;
   }
 

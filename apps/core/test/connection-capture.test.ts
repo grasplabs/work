@@ -907,6 +907,24 @@ const ownKeyStates = async (
   return await Promise.all(keys.map(async (key) => await store.keyState(key)));
 };
 
+/**
+ * Once the erasure core runs in the background after a disconnect has
+ * closed every one of `keys` in `personId`'s own store, within a bound.
+ */
+const erasedSoon = async (
+  personId: string,
+  keys: readonly string[]
+): Promise<void> => {
+  await vi.waitFor(
+    async () => {
+      await expect(ownKeyStates(personId, keys)).resolves.toStrictEqual(
+        keys.map(() => "erased")
+      );
+    },
+    { timeout: 10_000, interval: 50 }
+  );
+};
+
 /** The events of `action` about `connectionId` in `events`. */
 const about = (
   events: readonly AuditEvent[],
@@ -974,13 +992,13 @@ const ownEraseFailing = (personId: string): Env =>
   });
 
 /**
- * Core's env with `personId`'s own store holding each add until
- * `release`, and `reached` once one waits.
+ * Core's env with `personId`'s own store holding each call of `method`
+ * until `release`, and `reached` once one waits.
  */
-const ownAddHeld = (personId: string) => {
+const ownHeld = (personId: string, method: "addSource" | "eraseSource") => {
   const gate = Promise.withResolvers<true>();
   const reached = Promise.withResolvers<true>();
-  const withEnv = ownStoreWith(personId, "addSource", async (real, args) => {
+  const withEnv = ownStoreWith(personId, method, async (real, args) => {
     reached.resolve(true);
     await gate.promise;
     return await real(...args);
@@ -1099,7 +1117,7 @@ describe("a disconnected connection", setUpTime, () => {
     const before = await recalledKeys(person.userId, marker);
     // A read connect answered before the disconnect, its add held until
     // after it.
-    const held = ownAddHeld(person.userId);
+    const held = ownHeld(person.userId, "addSource");
     const late = capturedRead(
       person.userId,
       connectionId,
@@ -1111,7 +1129,8 @@ describe("a disconnected connection", setUpTime, () => {
     await held.reached;
 
     await person.api.connections.disconnect(connectionId);
-    // At once, before any drain of connect's outbox.
+    // At once, in the background, before any drain of connect's outbox.
+    await erasedSoon(person.userId, kept);
     const atOnce = await recalledKeys(person.userId, marker);
     held.release();
     const lateKey = await late;
@@ -1150,6 +1169,49 @@ describe("a disconnected connection", setUpTime, () => {
     expect(
       JSON.stringify(about(events, "brain.capture.erased", connectionId))
     ).not.toContain(marker);
+  });
+
+  it("answers the disconnect before its erasure runs, and a read landing meanwhile goes with the connection's captures", async () => {
+    const person = await signedInApi(idp, "user");
+    const marker = markerOf();
+    const { connectionId, mailbox } = await ownGmail(person);
+    const first = await capturedRead(
+      person.userId,
+      connectionId,
+      mailbox,
+      `quote-${marker}`,
+      `Quote ${marker}`
+    );
+    const held = ownHeld(person.userId, "eraseSource");
+    const { core } = await openRpc(person.session, { coreEnv: held.withEnv });
+
+    // Answered while the erasure waits.
+    const disconnected = await outcome(
+      core.authenticate().connections.disconnect(connectionId)
+    );
+    await held.reached;
+    // Read before the disconnect, captured before its erasure ran.
+    const second = await capturedRead(
+      person.userId,
+      connectionId,
+      mailbox,
+      `order-${marker}`,
+      `Order ${marker}`
+    );
+    const meanwhile = await recalledKeys(person.userId, marker);
+    held.release();
+    await erasedSoon(person.userId, [first, second]);
+    const after = await recalledKeys(person.userId, marker);
+
+    expect({
+      disconnected,
+      meanwhile: [first, second].map((key) => meanwhile.has(key)),
+      after: [first, second].map((key) => after.has(key)),
+    }).toStrictEqual({
+      disconnected: "ok",
+      meanwhile: [true, true],
+      after: [false, false],
+    });
   });
 
   it("disconnects whatever the Brain does, and erases what was kept, also what landed meanwhile, once connect's outbox drains", async () => {
@@ -1495,6 +1557,7 @@ describe("a disconnected connection", setUpTime, () => {
     const copy = await copyOfStore(`person:${person.userId}`);
 
     await person.api.connections.disconnect(connectionId);
+    await erasedSoon(person.userId, [kept]);
     const stale = await ownExportOf(person.session);
     await restoreStore(copy, `person:${person.userId}`);
     // The restored copy held the capture and knew no erasure of it.
@@ -1607,6 +1670,7 @@ describe("a disconnected connection", setUpTime, () => {
       `Quote ${marker}`
     );
     await person.api.connections.disconnect(old.connectionId);
+    await erasedSoon(person.userId, [erased]);
 
     const again = await ownGmail(person);
     const fresh = await capturedRead(
