@@ -342,8 +342,9 @@ export const kickoff = sqliteTable(
 
 /**
  * Documents the company's admin shared (onboarding/documents.ts), by their
- * upload in Knowledge: Stephen's reading of each (JSON, `DocumentReading`),
- * and the admin's answer to its question. The file itself is Knowledge's.
+ * file's upload in the Brain (brain-uploads.ts): Stephen's reading of each
+ * (JSON, `DocumentReading`), and the admin's answer to its question. The
+ * file itself is the Brain's.
  */
 export const documents = sqliteTable("documents", {
   id: text().primaryKey(),
@@ -353,10 +354,9 @@ export const documents = sqliteTable("documents", {
   reading: text().notNull(),
   answer: text(),
   /**
-   * How far the Brain's erasure records reached as its reading started
-   * (the Brain's erasures.ts `erasureMark`), while it waits to be checked
-   * against the purges since (documents.ts `checkReading`): kept from
-   * everyone until then. Null once checked.
+   * No longer written or read since GRA-1889 (a reading waited here to be
+   * checked against Knowledge's erasures while the file was Knowledge's).
+   * Dropped in a later release: expand, then contract.
    */
   checkMark: integer("check_mark"),
 });

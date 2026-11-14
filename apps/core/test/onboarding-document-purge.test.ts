@@ -1,4 +1,3 @@
-import { erasureMark } from "@grasp-os/brain/erasures";
 import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import type {
   InterviewFact,
@@ -14,8 +13,6 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { brainOf } from "../src/knowledge/ports.ts";
-import { checkReadings, readingCheckMs } from "../src/onboarding/documents.ts";
 import {
   drawingErasure,
   interviewErasure,
@@ -32,8 +29,10 @@ import {
   approveAgreed,
   holdAlarm,
 } from "./interview-link.ts";
+import { d1ColumnsWith, onboardingTablesWith } from "./kept-where.ts";
+import { ownCollectionOf } from "./knowledge.ts";
 import type { Answer, ProviderReply } from "./model-provider.ts";
-import { intakeAlike } from "./onboarding-team.ts";
+import { alikeReply, intakeAlike } from "./onboarding-team.ts";
 import {
   carrying,
   plan as planReplies,
@@ -42,28 +41,23 @@ import {
 import { routed, signedInApi, unique } from "./sign-in.ts";
 import { wordFile } from "./word-file.ts";
 
-// A document shared in the onboarding, purged from Knowledge (GRA-970,
-// onboarding/documents.ts `documentReadingErasure`, the store's
-// `forgetDocuments`). Each document here holds a word nobody else says (a
+// A document shared in the onboarding, whose reading a content purge
+// reaches (GRA-970, knowledge/rpc.ts `documentReadingErasure`, the
+// store's `forgetDocuments`). The onboarding keeps only the reading, never
+// the file (GRA-1889). Each document here holds a word nobody else says (a
 // sentinel), which its reading, the admin's answer and a drawing take up,
 // and the tests look for it everywhere it could be left: the store's
 // tables, both D1 databases, the audit log, and what an interview turn
 // knows. The model provider is the outside system, faked behind connect.
 // The ways it can fail, tried here:
 //
-// - The reading living on after its document is purged, in Stephen's
+// - The reading living on after a purge of a term it holds, in Stephen's
 //   context, the admin's list or the brain's sources and tools.
 // - A drawing made with the reading for context left in the store or in
 //   the brain, or not drawn again.
 // - The purge in the audit log with any of the document's words.
-// - A reading holding a purged term of a document the purge doesn't name.
+// - A reading holding no purged term forgotten all the same.
 // - A drawing under way as the document goes, kept as it ends.
-// - A reading made while a purge names its document, kept after the
-//   purge forgot the readings there (GRA-1121): checked after it is kept,
-//   and forgotten then.
-// - Its writer stopping between keeping it and checking it: the reading
-//   is served unchecked, or never checked at all.
-// - A reading started after a purge, forgotten as if the purge reached it.
 
 /** The speech model lines are said in: the platform's default. */
 const speechModel = `${platformAi.speech.provider}/${platformAi.speech.model}`;
@@ -100,12 +94,12 @@ const readingWith = (word: string): ProviderReply => ({
   outputTokens: 150,
 });
 
-/** Shares a document named `name` holding `word`, as `admin`, answers its question, and waits for Knowledge to hold it. */
+/** Shares a document named `name` holding `word`, as `admin`, and answers its question: its ID. */
 const share = async (
   admin: SessionApi,
   name: string,
   word: string
-): Promise<{ upload: string; document: string }> => {
+): Promise<string> => {
   const { result: shared } = await answering(
     [readingWith(word)],
     async () =>
@@ -116,33 +110,32 @@ const share = async (
       })
   );
   await admin.onboarding.answerDocument(shared.id, `Only in ${word} now.`);
-  const document = await vi.waitFor(
-    async () => {
-      const upload = await admin.uploads.get(shared.id);
-      if (upload.documentId === null) {
-        throw new Error(`Upload ${shared.id} is ${upload.status}`);
-      }
-      return upload.documentId;
-    },
-    { timeout: 20_000, interval: 100 }
-  );
-  return { upload: shared.id, document };
+  return shared.id;
 };
 
-/** Purges `terms` from `documentIds`, as `admin`. */
-const purge = async (
-  admin: SessionApi,
-  documentIds: string[],
-  terms: string[]
-) => {
+/** An admin signed in, with their API. */
+type Admin = Awaited<ReturnType<typeof signedInApi>>;
+
+/**
+ * Purges `terms`, as `admin`: a content purge names a document in
+ * Knowledge, so it names a note of theirs that holds them, and reaches
+ * every copy core keeps of anyone's words.
+ */
+const purge = async (admin: Admin, terms: string[]) => {
+  const note = await admin.api.knowledge.saveDocument({
+    collectionId: await ownCollectionOf(admin),
+    path: `notes/${unique()}.md`,
+    text: `# Handover\n${terms.join(" ")} goes.`,
+    ifVersion: 0,
+  });
   const input = {
     type: "content" as const,
-    documentIds,
+    documentIds: [note.id],
     terms,
     reason: "erasure_request" as const,
   };
-  const plan = await admin.knowledge.preparePurge(input);
-  return await admin.knowledge.purge(input, plan.token);
+  const plan = await admin.api.knowledge.preparePurge(input);
+  return await admin.api.knowledge.purge(input, plan.token);
 };
 
 /** The people of a team, by key. */
@@ -385,66 +378,6 @@ const drawAll = async (ids: Ids, tool: string, word: string) => {
     .includes(word);
 };
 
-/** The store's tables that hold `word`. */
-const storeTablesWith = async (word: string): Promise<string[]> =>
-  await runInDurableObject(onboardingStore(env), (_instance, state) =>
-    state.storage.sql
-      .exec<{ name: string }>(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE '\\_%' ESCAPE '\\'"
-      )
-      .toArray()
-      .map(({ name }) => name)
-      .filter((table) =>
-        JSON.stringify(
-          state.storage.sql.exec(`SELECT * FROM "${table}"`).toArray()
-        )
-          .toLowerCase()
-          .includes(word)
-      )
-  );
-
-/** `text`'s UTF-8 bytes in hex, as SQLite's `hex()` writes them. */
-const hexOf = (text: string): string =>
-  [...new TextEncoder().encode(text)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("")
-    .toUpperCase();
-
-/** Every `table.column` of `db` that holds `word`, as text or among a row's bytes. */
-const d1ColumnsWith = async (
-  db: D1Database,
-  word: string
-): Promise<string[]> => {
-  const { results: tables } = await db
-    .prepare(
-      "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'"
-    )
-    .all<{ name: string }>();
-  const found: string[] = [];
-  for (const { name: table } of tables) {
-    // oxlint-disable-next-line no-await-in-loop -- one table at a time
-    const { results: columns } = await db
-      .prepare("SELECT name FROM pragma_table_info(?)")
-      .bind(table)
-      .all<{ name: string }>();
-    for (const { name: column } of columns) {
-      // oxlint-disable-next-line no-await-in-loop -- one column at a time
-      const row = await db
-        .prepare(
-          `SELECT count(*) AS n FROM "${table}"
-           WHERE instr(lower(CAST("${column}" AS TEXT)), ?) > 0
-             OR instr(hex("${column}"), ?) > 0`
-        )
-        .bind(word, hexOf(word))
-        .first<{ n: number }>();
-      if ((row?.n ?? 0) > 0) {
-        found.push(`${table}.${column}`);
-      }
-    }
-  }
-  return found;
-};
-
 /** Whether Knowledge's words index still finds `word` as a token: its pages don't keep it in one piece. */
 const indexFinds = async (word: string): Promise<boolean> =>
   (await env.KNOWLEDGE.prepare(
@@ -462,7 +395,7 @@ const leftOf = async (admin: SessionApi, ids: Ids, word: string) => {
     [ids.lea, ids.max].map(async (person) => await store.contextOf(person))
   );
   return {
-    store: await storeTablesWith(word),
+    store: await onboardingTablesWith(word),
     core: await d1ColumnsWith(env.DB, word),
     knowledge: [
       ...(await d1ColumnsWith(env.KNOWLEDGE, word)),
@@ -527,25 +460,6 @@ const withHook = (
     },
   });
 };
-
-/** The documents the admin is shown. */
-const listedOf = async (admin: SessionApi) =>
-  await admin.onboarding.documents();
-
-/** The IDs of the documents the admin is shown. */
-const listedIds = async (admin: SessionApi): Promise<Set<string>> => {
-  const listed = await listedOf(admin);
-  return new Set(listed.map(({ id }) => id));
-};
-
-/** A reading that says `text`, as a writer keeps it. */
-const readingOf = (text: string) => ({
-  about: `How claims are typed into ${text}.`,
-  tools: [text],
-  teams: [],
-  unclear: [],
-  ask: null,
-});
 
 /** The tickets of `team` as the store holds them now. */
 const ticketsOf = async (teamId: string) => {
@@ -622,7 +536,7 @@ const inStore = async (sql: string, ...values: SqlStorageValue[]) => {
 };
 
 describe(
-  "a document shared in the onboarding, purged from Knowledge",
+  "a document shared in the onboarding, as a purge reaches its reading",
   { timeout: 180_000 },
   () => {
     // Each test draws step by step, as the alarm would: the store's own
@@ -631,15 +545,16 @@ describe(
     beforeEach(holdAlarm);
 
     it("takes its reading, the answer and every drawing made with it out of the store, both databases, the audit log and the turns, and draws the work again", async () => {
-      const { api: admin } = await signedInApi(idp, "admin");
+      const signed = await signedInApi(idp, "admin");
+      const { api: admin } = signed;
       const word = sentinelOf();
-      const shared = await share(admin, `claims-${unique()}.docx`, word);
+      await share(admin, `claims-${unique()}.docx`, word);
       const ids = await team();
       await toldAll(ids);
       const drewWith = await drawAll(ids, word, word);
       await intakeAlike();
       const before = await leftOf(admin, ids, word);
-      const purged = await purge(admin, [shared.document], [word]);
+      const purged = await purge(signed, [word]);
       const purgedDetail = await detailOf("onboarding.document.purged");
       const recordsDetail = await detailOf("brain.records.purged");
       const drewAgainWith = await drawAll(ids, "Zendesk", word);
@@ -687,23 +602,130 @@ describe(
       });
     });
 
-    it("forgets a reading holding a purged term of a document it doesn't name, and keeps one holding none", async () => {
-      const { api: admin } = await signedInApi(idp, "admin");
+    it.each([
+      {
+        how: "an admin removes it",
+        go: async (admin: SessionApi, id: string) => {
+          await admin.onboarding.removeDocument(id);
+        },
+      },
+      {
+        how: "the admin who shared it deletes its file from Brain › Sources",
+        go: async (admin: SessionApi, id: string) => {
+          await admin.brainSources.deleteUpload(id);
+        },
+      },
+    ])(
+      "takes its reading, the answer and every drawing made with it out of the store, both databases, the audit log and the turns when $how, and draws the work again",
+      async ({ go }) => {
+        const { api: admin } = await signedInApi(idp, "admin");
+        const word = sentinelOf();
+        const id = await share(admin, `removed-${unique()}.docx`, word);
+        const ids = await team();
+        await toldAll(ids);
+        const drewWith = await drawAll(ids, word, word);
+        await intakeAlike();
+        const before = await leftOf(admin, ids, word);
+        await go(admin, id);
+        const removedDetail = await detailOf("onboarding.document.purged");
+        const drewAgainWith = await drawAll(ids, "Zendesk", word);
+        await intakeAlike();
+        const after = await leftOf(admin, ids, word);
+        const tickets = await ticketsOf(ids.team);
+        expect({
+          drewWith,
+          before: before.shown,
+          removed: removedDetail?.documents,
+          drewAgainWith,
+          after,
+          drawnAgain: tickets?.drawn?.steps.map(({ tool }) => tool),
+        }).toStrictEqual({
+          drewWith: true,
+          before: { documents: true, brief: true, brain: true },
+          removed: 1,
+          drewAgainWith: false,
+          after: {
+            store: [],
+            core: [],
+            knowledge: [],
+            audit: false,
+            turns: false,
+            shown: { documents: false, brief: false, brain: false },
+          },
+          drawnAgain: ["Zendesk", "Zendesk"],
+        });
+      }
+    );
+
+    it("lets a member delete an upload of their own while an intake holds the brain, without waiting for it", async () => {
+      const member = await signedInApi(idp, "user");
+      const upload = crypto.randomUUID();
+      await member.api.brainSources.upload(
+        { name: "Diary.docx", bytes: wordFile(["My own diary."]) },
+        { kind: "me" },
+        upload
+      );
+      const ids = await team();
+      await toldAll(ids);
+      await drawAll(ids, "Zendesk", sentinelOf());
+      // An intake that holds the brain until the test lets its model answer.
+      const intakeAsked = Promise.withResolvers<boolean>();
+      const modelAnswers = Promise.withResolvers<boolean>();
+      const intaking = answeringWithRequests(
+        async (requests) => {
+          intakeAsked.resolve(true);
+          await modelAnswers.promise;
+          return alikeReply(requests);
+        },
+        async () => await onboardingStore(env).intakeNext()
+      );
+      const state = { holding: false, deleted: false };
+      void intakeAsked.promise.then(() => {
+        state.holding = true;
+      });
+      try {
+        await vi.waitFor(
+          () => {
+            expect(
+              state.holding,
+              "the intake never asked its model"
+            ).toBeTruthy();
+          },
+          { timeout: 15_000, interval: 50 }
+        );
+        void member.api.brainSources.deleteUpload(upload).then(() => {
+          state.deleted = true;
+        });
+        await vi.waitFor(
+          () => {
+            expect(
+              state.deleted,
+              "the delete waited for the intake"
+            ).toBeTruthy();
+          },
+          { timeout: 5000, interval: 50 }
+        );
+      } finally {
+        modelAnswers.resolve(true);
+        await intaking;
+      }
+      expect(state).toStrictEqual({ holding: true, deleted: true });
+    });
+
+    it("forgets a reading holding a purged term, and keeps one holding none", async () => {
+      const signed = await signedInApi(idp, "admin");
+      const { api: admin } = signed;
       const word = sentinelOf();
-      const other = sentinelOf();
-      const named = await share(admin, `named-${unique()}.docx`, other);
       const holding = await share(admin, `holding-${unique()}.docx`, word);
       const kept = await share(admin, `kept-${unique()}.docx`, sentinelOf());
-      await purge(admin, [named.document], [word]);
+      await purge(signed, [word]);
       const documents = await admin.onboarding.documents();
       const listed = new Set(documents.map(({ id }) => id));
       expect({
-        named: listed.has(named.upload),
-        holding: listed.has(holding.upload),
-        kept: listed.has(kept.upload),
-        left: await storeTablesWith(word),
+        holding: listed.has(holding),
+        kept: listed.has(kept),
+        left: await onboardingTablesWith(word),
       }).toStrictEqual({
-        named: false,
         holding: false,
         kept: true,
         left: [],
@@ -757,7 +779,7 @@ describe(
             purged,
             // The drawing made from what Max said before: thrown away.
             thrown: JSON.stringify(tickets?.drawn ?? null).includes(word),
-            left: await storeTablesWith(word),
+            left: await onboardingTablesWith(word),
             drewAgainWith: await drawAll(ids, "Zendesk", word),
           };
         } finally {
@@ -795,16 +817,15 @@ describe(
       const drew = await answeringWith(
         async () => {
           // A stub of its own: the store's call is another I/O context.
-          forgotten ??= await onboardingStore(env).forgetDocuments(
-            [shared.upload],
-            { type: "system" }
-          );
+          forgotten ??= await onboardingStore(env).forgetDocuments([shared], {
+            type: "system",
+          });
           return reply();
         },
         async () => await store.drawNext()
       );
       const tickets = await ticketsOf(ids.team);
-      const left = await storeTablesWith(word);
+      const left = await onboardingTablesWith(word);
       const drewAgainWith = await drawAll(ids, "Zendesk", word);
       expect({
         drew: drew?.startsWith("work:"),
@@ -818,106 +839,6 @@ describe(
         thrown: null,
         left: [],
         drewAgainWith: false,
-      });
-    });
-
-    it("forgets a reading made while a purge names its document, and keeps the next", async () => {
-      const { api: admin } = await signedInApi(idp, "admin");
-      const name = `again-${unique()}.docx`;
-      const word = sentinelOf();
-      const first = await share(admin, name, word);
-      const late = sentinelOf();
-      // Shared again while the purge runs: as the reading's request reaches
-      // the provider, after the reading started and before it is kept.
-      let purged = false;
-      let refused: unknown;
-      try {
-        await answeringWith(
-          async () => {
-            if (!purged) {
-              purged = true;
-              await purge(admin, [first.document], [word]);
-            }
-            return readingWith(late);
-          },
-          async () =>
-            await admin.onboarding.shareDocument({
-              locale: "en",
-              name,
-              bytes: documentWith(late),
-            })
-        );
-      } catch (error) {
-        refused = error;
-      }
-      const left = await storeTablesWith(late);
-      const shown = await listedOf(admin);
-      const listed = shown.filter((document) => document.name === name);
-      const next = sentinelOf();
-      const kept = await share(admin, name, next);
-      const after = await admin.onboarding.documents();
-      expect({
-        purged,
-        refused: String(refused).includes("couldn't be read"),
-        left,
-        listed,
-        kept: after.some(({ id }) => id === kept.upload),
-      }).toStrictEqual({
-        purged: true,
-        refused: true,
-        left: [],
-        listed: [],
-        kept: true,
-      });
-    });
-
-    it("keeps a reading its writer never checked from everyone, and checks it later: forgotten when a purge named its document since it started, served when not", async () => {
-      const { api: admin } = await signedInApi(idp, "admin");
-      const store = onboardingStore(env);
-      const name = `crashed-${unique()}.docx`;
-      const word = sentinelOf();
-      const shared = await share(admin, name, word);
-      const before = await erasureMark(brainOf(env));
-      await purge(admin, [shared.document], [word]);
-      const after = await erasureMark(brainOf(env));
-      const late = sentinelOf();
-      const fresh = sentinelOf();
-      const lateId = `late-${unique()}`;
-      const freshId = `fresh-${unique()}`;
-      // Kept after the purge by writers that stopped before their check:
-      // one whose reading started before the purge, one after it.
-      await store.addDocument(
-        { id: lateId, name, reading: readingOf(late) },
-        before,
-        { type: "system" }
-      );
-      await store.addDocument(
-        { id: freshId, name, reading: readingOf(fresh) },
-        after,
-        { type: "system" }
-      );
-      const unchecked = await listedIds(admin);
-      const brief = await store.documentsBrief("Ops");
-      const answered = await admin.onboarding
-        .answerDocument(freshId, "Yes")
-        .then(
-          () => true,
-          () => false
-        );
-      await checkReadings(env, new Date(Date.now() + readingCheckMs + 1000));
-      const checked = await listedIds(admin);
-      expect({
-        served: [lateId, freshId].filter((id) => unchecked.has(id)),
-        brief: [late, fresh].filter((text) => brief.includes(text)),
-        answered,
-        checked: [lateId, freshId].filter((id) => checked.has(id)),
-        left: await storeTablesWith(late),
-      }).toStrictEqual({
-        served: [],
-        brief: [],
-        answered: false,
-        checked: [freshId],
-        left: [],
       });
     });
   }
@@ -980,7 +901,7 @@ const writers: Writer[] = [
         },
         async () => await onboardingStore(env).drawNext()
       );
-      return await storeTablesWith(word);
+      return await onboardingTablesWith(word);
     },
   },
   {
@@ -1006,7 +927,7 @@ const writers: Writer[] = [
         },
         async () => await store.drawNext()
       );
-      return await storeTablesWith(word);
+      return await onboardingTablesWith(word);
     },
   },
   {
@@ -1086,11 +1007,11 @@ describe(
         "It arrives by mail.",
         new Date().toISOString()
       );
-      const before = await storeTablesWith(word);
+      const before = await onboardingTablesWith(word);
 
       await onboardingStore(env).drawWorkAgain(tickets.id, { type: "system" });
       await drawAll(ids, "Zendesk", word);
-      const after = await storeTablesWith(word);
+      const after = await onboardingTablesWith(word);
 
       expect({
         before: before.includes("checked_differences"),
