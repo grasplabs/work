@@ -82,7 +82,8 @@ const owner = (personId: string): SourceReaders => ({
 
 /**
  * Adds `text` as a source everyone in the company may read, to the shared
- * store as a producer would: core's producers add none yet.
+ * store as a producer would: core's producers add none yet. Every test's
+ * person reads it, so its text holds only words no other test asks for.
  */
 const forEveryone = async (text: string): Promise<SourceRef> => {
   const source = newSource();
@@ -879,7 +880,7 @@ describe("what the recall before a question may reach", setUpTime, () => {
       kind: "team",
       teamId,
     });
-    await forEveryone(`Depot ${depot} is open to everyone at ${companyMarker}`);
+    await forEveryone(`${depot} ${companyMarker}`);
     const question = `What about depot ${depot}?`;
     /** What of each source reached the model, in `bodies`. */
     const of = (bodies: string) => ({
@@ -1033,7 +1034,7 @@ describe("what the recall before a question may reach", setUpTime, () => {
         kind: "team",
         teamId,
       });
-      await forEveryone(`Depot ${depot} company ${markers.company}`);
+      await forEveryone(`${depot} ${markers.company}`);
       const asked = { question: `depot ${depot}`, budget: { tokens: 800 } };
       const step =
         way === "code"
@@ -1150,7 +1151,7 @@ describe("what the recall before a question may reach", setUpTime, () => {
       kind: "team",
       teamId,
     });
-    await forEveryone(`Depot ${depot} is open to everyone at ${companyMarker}`);
+    await forEveryone(`${depot} ${companyMarker}`);
     const agentId = crypto.randomUUID();
     await requestGranted(idp, admin, {
       subject: { type: "agent", agentId },
@@ -1258,7 +1259,7 @@ describe("what the recall before a question may reach", setUpTime, () => {
     ) => {
       const depot = word();
       const marker = word();
-      const source = await forEveryone(`Depot ${depot} opens at ${marker}`);
+      const source = await forEveryone(`${depot} ${marker}`);
       const provider = await fakeProvider(says("Noted."), says("Noted."));
       const thread = `19:${unique()}@thread.tacv2;messageid=${unique()}`;
       const ask = async (text: string) =>
