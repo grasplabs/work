@@ -1504,6 +1504,10 @@ msgstr "Eine Verbindung braucht eine neue Anmeldung"
 msgid "A connection refused to say what changed"
 msgstr "Eine Verbindung hat verweigert zu sagen, was sich geändert hat"
 
+#: src/brain/own-export.tsx
+msgid "A copy of everything the Brain keeps for you alone: your own sources and what it remembers from them. Only you can make it and download it, and it is deleted when your data is erased."
+msgstr "Eine Kopie von allem, was das Brain nur für Sie aufbewahrt: Ihre eigenen Quellen und was es daraus behält. Nur Sie können sie erstellen und herunterladen, und sie wird mit Ihren Daten gelöscht."
+
 #: src/apps/publish-errors.ts
 msgid "A data migration moved this App's records on since this version, so it can't be shared again. Share a new version instead."
 msgstr "Eine Datenmigration hat die Datensätze dieser App seit dieser Version weiterentwickelt, daher kann sie nicht erneut geteilt werden. Teilen Sie stattdessen eine neue Version."
@@ -3867,6 +3871,10 @@ msgstr "Wird mit Ihren Zahlen abgeglichen …"
 msgid "Checking it…"
 msgstr "Wird geprüft…"
 
+#: src/brain/own-export.tsx
+msgid "Checking on your export…"
+msgstr "Stand Ihres Exports wird geladen…"
+
 #. Grasp checks the App it changed (its types, lint and preview) before its turn ends.
 #: src/chat/thread.tsx
 msgid "Checking the App…"
@@ -5724,9 +5732,14 @@ msgctxt "what the Brain remembers about something"
 msgid "Expertise"
 msgstr "Fachwissen"
 
+#: src/brain/own-export.tsx
 #: src/export/export-menu.tsx
 msgid "Export"
 msgstr "Exportieren"
+
+#: src/brain/own-export.tsx
+msgid "Export again"
+msgstr "Erneut exportieren"
 
 #: src/apps/app-data.tsx
 msgid "Export as CSV"
@@ -5753,6 +5766,10 @@ msgstr "Bericht exportieren"
 #: src/activity/audit-log.tsx
 msgid "Export the audit trail"
 msgstr "Audit-Trail exportieren"
+
+#: src/brain/own-export.tsx
+msgid "Export what only you may read"
+msgstr "Exportieren, was nur Sie lesen dürfen"
 
 #: src/settings/audit-archive.tsx
 msgid "Export with archive"
@@ -6501,6 +6518,10 @@ msgstr "Grasp arbeitet noch daran…"
 #: src/workflows/requests/request-needs.tsx
 msgid "Grasp is still working out a proposal."
 msgstr "Grasp arbeitet noch an einem Vorschlag."
+
+#: src/brain/own-export.tsx
+msgid "Grasp is writing your export. It takes a minute or two; it shows here as soon as it is ready, and you can leave this page meanwhile."
+msgstr "Grasp schreibt Ihren Export. Das dauert ein, zwei Minuten; er erscheint hier, sobald er fertig ist, und Sie können die Seite inzwischen verlassen."
 
 #: src/apps/draft-changes.tsx
 msgid "Grasp itself"
@@ -11125,6 +11146,10 @@ msgstr "Datensätze einer sensiblen Tabelle gelesen"
 msgid "Read restricted sources, and is held to them"
 msgstr "Eingeschränkte Quellen gelesen und ist jetzt an sie gebunden"
 
+#: src/activity/audit-words.ts
+msgid "Read skills from the Brain"
+msgstr "Skills aus dem Gehirn gelesen"
+
 #: src/settings/stephen-settings.tsx
 msgid "Read the company's"
 msgstr "Das des Unternehmens lesen"
@@ -13232,6 +13257,10 @@ msgstr "etwas ohne Namen"
 msgid "Something you corrected, which you can no longer read"
 msgstr "Etwas, das Sie korrigiert haben und nicht mehr lesen dürfen"
 
+#: src/brain/own-export.tsx
+msgid "Something your export held was erased since, so the export was deleted with it. Make a new one."
+msgstr "Etwas, das Ihr Export enthielt, wurde inzwischen gelöscht, daher wurde der Export mitgelöscht. Erstellen Sie einen neuen."
+
 #: src/chat/composer-menu.tsx
 msgctxt "a feature still to come"
 msgid "Soon"
@@ -14212,6 +14241,10 @@ msgstr "Das Brain"
 #: src/routes/_shell.settings.brain.tsx
 msgid "The brain has no teams to group yet."
 msgstr "Das Brain hat noch keine Teams zum Gruppieren."
+
+#: src/brain/own-export.tsx
+msgid "The Brain keeps nothing that only you may read yet, so your export holds nothing."
+msgstr "Das Brain bewahrt noch nichts auf, was nur Sie lesen dürfen, daher enthält Ihr Export nichts."
 
 #: src/brain/sources-page.tsx
 msgid "The Brain keeps one Gmail message or attachment, or one OneNote page, when an agent reads it for you through an account you connected yourself, and keeps it for you alone. Everything else agents search live when you ask, and the Brain keeps nothing of it."
@@ -15404,6 +15437,7 @@ msgstr "Versuchen"
 #: src/apps/app-data.tsx
 #: src/apps/app-owner.tsx
 #: src/apps/app-settings.tsx
+#: src/brain/own-export.tsx
 #: src/brain/skills-page.tsx
 #: src/chat/builds.tsx
 #: src/chat/chat-panel.tsx
@@ -17516,6 +17550,18 @@ msgstr "Ihre Korrektur wird als Ihre eigene Aussage gespeichert, nur für Sie, u
 #: src/settings/ai-providers.tsx
 msgid "Your endpoint's public HTTPS address, such as https://models.example.com/v1."
 msgstr "Die öffentliche HTTPS-Adresse Ihres Endpunkts, etwa https://models.example.com/v1."
+
+#: src/brain/own-export.tsx
+msgid "Your export couldn’t be finished. Try making it again."
+msgstr "Ihr Export konnte nicht fertiggestellt werden. Versuchen Sie es erneut."
+
+#: src/brain/own-export.tsx
+msgid "Your export is ready. Download each of its files:"
+msgstr "Ihr Export ist fertig. Laden Sie jede seiner Dateien herunter:"
+
+#: src/brain/own-export.tsx
+msgid "Your export's files"
+msgstr "Die Dateien Ihres Exports"
 
 #: src/routes/guest.tsx
 msgid "Your message"

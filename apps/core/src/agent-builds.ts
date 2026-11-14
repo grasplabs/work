@@ -1784,7 +1784,9 @@ build: {
    * grants it or not, and it allows nothing until then. \`binding\` is the
    * name the App's code reaches it by, such as \`MAIL\`. To recall the
    * Brain (\`ctx.brain.recall\`, declared as \`permission.brain({ operations:
-   * ["recall"] })\`), it asks for \`{ type: "platform" }\` with actions
+   * ["recall"] })\`), or to select and read its skills
+   * (\`ctx.brain.skills.select\` and \`.read\`, operations \`"skills.select"\`
+   * and \`"skills.read"\`), it asks for \`{ type: "platform" }\` with actions
    * \`["brain"]\`. A recall answers only what everyone in the company may
    * read, whoever calls, never a team's content; and an App that recalls
    * answers no visitor and invites no guest. Today nothing readable by the

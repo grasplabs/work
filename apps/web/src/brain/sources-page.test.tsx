@@ -21,7 +21,14 @@ import {
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
 
 import { SourcesPage } from "./sources-page.tsx";
 
@@ -419,6 +426,15 @@ const section = (heading: string): string =>
   )?.textContent ?? "";
 
 describe(SourcesPage, () => {
+  beforeEach(() => {
+    // Core's route of the person's own export, at the page's foot
+    // (own-export.tsx, its own tests): none started.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => await Promise.resolve(Response.json({ export: null })))
+    );
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
     act(() => {
@@ -426,6 +442,7 @@ describe(SourcesPage, () => {
     });
     root = undefined;
     document.body.replaceChildren();
+    vi.unstubAllGlobals();
   });
 
   it("lists the sources core gives a page at a time, and opens one at its newest version, then an older one", async () => {

@@ -423,6 +423,21 @@ export const fileSteps = () => [
     args: { question: { $expr: "notes.text" }, budget: { tokens: 800 } },
   },
   {
+    id: "chosen",
+    type: "call",
+    brain: "handbook",
+    action: "skills.select",
+    args: { task: { $expr: "notes.text" } },
+  },
+  {
+    id: "howTo",
+    type: "call",
+    brain: "handbook",
+    action: "skills.read",
+    // The skill a selection gave, at its version, as it gave it.
+    args: { skill: { $expr: "chosen.skills[0]" } },
+  },
+  {
     id: "summary",
     type: "call",
     files: "runFiles",
@@ -432,7 +447,7 @@ export const fileSteps = () => [
       type: "text/markdown",
       text: {
         $expr:
-          'recalled.items.map((item) => item.text).join("\\n") + " (" + recalled.items.length + ")"',
+          'recalled.items.map((item) => item.text).join("\\n") + " (" + recalled.items.length + ")\\n" + howTo.text',
       },
     },
   },

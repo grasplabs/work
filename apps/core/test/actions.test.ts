@@ -1264,7 +1264,41 @@ describe("resources", () => {
         }
       )
     );
+    // A Brain declared for `recall` alone, asked for its skills past the
+    // client, which has no member for them: refused before the binding
+    // hears of it.
+    let recalled = false;
+    const skillsOf = async (operation: string, request: unknown) =>
+      codeOf(
+        await call(
+          fixture,
+          "action",
+          "actions.recallHelp",
+          { text: "leave" },
+          {
+            resources: bindingsOf({
+              brain: bound("brain", null, async () => {
+                recalled = true;
+                return await Promise.resolve(null);
+              }),
+            }),
+            run: misusing(
+              "actions.recallHelp",
+              async (channel) =>
+                await channel.permission("brain", operation, [request])
+            ),
+          }
+        )
+      );
+    const skills = {
+      select: await skillsOf("skills.select", { task: "leave" }),
+      read: await skillsOf("skills.read", {
+        skill: { scope: "grasp", name: "draw-a-workflow", version: 1 },
+      }),
+      recalled,
+    };
     expect({
+      skills,
       undeclaredAction: await attempt(
         async (channel) =>
           await channel.permission("mail", "call", ["delete", {}])
@@ -1288,6 +1322,11 @@ describe("resources", () => {
       invite,
       invited,
     }).toStrictEqual({
+      skills: {
+        select: "permission.not_allowed",
+        read: "permission.not_allowed",
+        recalled: false,
+      },
       undeclaredAction: "permission.not_allowed",
       undeclaredAlias: "permission.not_allowed",
       workflowAsResource: "permission.not_allowed",

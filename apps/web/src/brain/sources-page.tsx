@@ -59,6 +59,7 @@ import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatBytes, formatDateTime, formatList } from "../format.ts";
 import { useCore } from "../use-core.ts";
+import { OwnExportSection } from "./own-export.tsx";
 
 // The Brain's sources, from the new Brain (GRA-1734): what the person may
 // read, a page at a time, newest first; one source's versions and text;
@@ -67,9 +68,11 @@ import { useCore } from "../use-core.ts";
 // Brain today. Core answers each from what they may read alone. Texts are
 // shown as text, never markup. A file uploaded here goes straight into the
 // Brain, for who the person chooses: only them, a team of theirs, or
-// everyone (GRA-1824); its uploader adds its next version, and its
-// uploader (or an admin, for a shared one) deletes it for good. What each
-// may do to an upload is core's to say (`uploadOf`).
+// everyone (GRA-1824); its uploader adds its next version. Its uploader
+// deletes one for only them; one shared with a team or everyone only an
+// admin erases, from the shared uploads listed for admins. What each
+// may do to an upload is core's to say (`uploadOf`). At its foot, the
+// person's own export of what only they may read (own-export.tsx).
 
 /** A team the person is in. */
 interface Team {
@@ -1302,6 +1305,7 @@ export const SourcesPage = ({
             )}
           </div>
         </section>
+        <OwnExportSection />
       </div>
     </div>
   );

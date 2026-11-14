@@ -6,7 +6,12 @@ import type {
 } from "@grasp-os/shared/guests";
 import type { HttpContract } from "@grasp-os/shared/http-contract";
 
-import type { BrainPack, BrainRecall } from "./brain-recall.ts";
+import type {
+  BrainPack,
+  BrainRecall,
+  BrainSkill,
+  BrainSkillText,
+} from "./brain-recall.ts";
 import type { ContractAction, HttpRequestInit } from "./connector-contracts.ts";
 import type { GraspFunctions } from "./grasp-functions.ts";
 import type { MemberName } from "./member-names.ts";
@@ -86,9 +91,33 @@ export interface HttpClient<Actions extends readonly string[]> {
       ) => Promise<Response>;
 }
 
+/** What `ctx.brain.skills` is, by the Brain's operations. */
+type BrainSkillsClient<Operations extends readonly BrainOperation[]> =
+  ("skills.select" extends Operations[number]
+    ? {
+        /**
+         * The skills that apply to `request.task`, best first, a few at
+         * most, each at its version: the same a chat's code selects.
+         */
+        readonly select: (request: {
+          /** The task, in your words: at most 2,000 characters. */
+          readonly task: string;
+        }) => Promise<{ readonly skills: readonly BrainSkill[] }>;
+      }
+    : unknown) &
+    ("skills.read" extends Operations[number]
+      ? {
+          /** A skill at exactly the version a selection gave, whole. */
+          readonly read: (request: {
+            /** As a selection gave it: its scope, name and version. */
+            readonly skill: Pick<BrainSkill, "scope" | "name" | "version">;
+          }) => Promise<BrainSkillText>;
+        }
+      : unknown);
+
 /** What `ctx.brain` is, by its operations. */
 export type BrainClient<Operations extends readonly BrainOperation[]> =
-  "recall" extends Operations[number]
+  ("recall" extends Operations[number]
     ? {
         /**
          * What the person the call acts for may read that answers
@@ -97,7 +126,13 @@ export type BrainClient<Operations extends readonly BrainOperation[]> =
          */
         readonly recall: (request: BrainRecall) => Promise<BrainPack>;
       }
-    : unknown;
+    : unknown) &
+    (Extract<Operations[number], `skills.${string}`> extends never
+      ? unknown
+      : {
+          /** How things are done here: Grasp's skills and the company's. */
+          readonly skills: BrainSkillsClient<Operations>;
+        });
 
 /** What `ctx.guests` is, by its operations. */
 export type GuestsClient<Operations extends readonly GuestsOperation[]> =

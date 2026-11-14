@@ -50,4 +50,16 @@ describe("an audit entry's words", () => {
       distinct: uploadActions.length - 1,
     });
   });
+
+  it("say code read the Brain's skills, and nothing of a release installing them", () => {
+    expect({
+      select: said("brain.skills.select"),
+      read: said("brain.skills.read"),
+      installed: said("brain.skills.installed"),
+    }).toStrictEqual({
+      select: "Read skills from the Brain",
+      read: "Read skills from the Brain",
+      installed: undefined,
+    });
+  });
 });
