@@ -101,9 +101,9 @@ const Page = ({ first, asked }: { first: WorkflowDraft; asked: unknown[] }) => {
 const shown = async (first: WorkflowDraft): Promise<unknown[]> => {
   const asked: unknown[] = [];
   const workflowResources = {
-    editStep: async (id: string, input: unknown) => {
+    define: async (id: string, input: unknown) => {
       await Promise.resolve();
-      asked.push({ editStep: id, input });
+      asked.push({ define: id, input });
       return draftOf(first.revision + 1, ["greet", "finished", "added"]);
     },
   };
@@ -208,7 +208,7 @@ describe("a workflow's Flow", () => {
       opened: { type: "wait", for: "1 minute" },
       asked: [
         {
-          editStep: "workflow-1",
+          define: "workflow-1",
           input: {
             revision: 2,
             edit: {

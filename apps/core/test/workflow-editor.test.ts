@@ -12,6 +12,7 @@ import {
   editWorkflowDraft,
   editWorkflowStep,
   workflowDraft,
+  writeWorkflowDraft,
 } from "../src/workflow-editor.ts";
 import { shareWorkflowResource } from "../src/workflow-members.ts";
 import {
@@ -491,6 +492,47 @@ describe("a workflow's draft", () => {
       kept: true,
       problems: ["definition.problems_too_large /"],
       answered: read.problems,
+    });
+  });
+
+  it("is written as one file, `workflow.json`, whole: any other path, or deleting it, is refused", async () => {
+    const ada = await person("builder");
+    const workflow = await workflowOf(ada);
+    const source = definitionOf();
+    const refused = {
+      other: await outcome(
+        writeWorkflowDraft(env, ada, workflow.id, 0, { "other.json": source })
+      ),
+      deleted: await outcome(
+        writeWorkflowDraft(env, ada, workflow.id, 0, { "workflow.json": null })
+      ),
+      both: await outcome(
+        writeWorkflowDraft(env, ada, workflow.id, 0, {
+          "workflow.json": source,
+          "other.json": source,
+        })
+      ),
+    };
+    await writeWorkflowDraft(env, ada, workflow.id, 0, {
+      "workflow.json": source,
+    });
+    const stale = await outcome(
+      writeWorkflowDraft(env, ada, workflow.id, 0, { "workflow.json": source })
+    );
+    const draft = await workflowDraft(env, ada, workflow.id);
+
+    expect({
+      refused,
+      stale,
+      draft: { revision: draft.revision, source: draft.source },
+    }).toStrictEqual({
+      refused: {
+        other: "draft.invalid",
+        deleted: "draft.invalid",
+        both: "draft.invalid",
+      },
+      stale: "draft.conflict",
+      draft: { revision: 1, source },
     });
   });
 

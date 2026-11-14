@@ -39,7 +39,7 @@ import type { Layout } from "./workflow-diagram.tsx";
 // fit, zoom and layout at its top left, it reads from where it starts,
 // through its steps (the diagram core drew from the draft, while it has
 // no problems, `workflow-diagram.tsx`), to where it ends. Its builders open a step to
-// change it (core's `editStep`, GRA-514), saved as the draft's next
+// change it (core's `define`, GRA-514), saved as the draft's next
 // revision and checked like any edit; the JSON behind it stays one click
 // away, in its Settings' Definition.
 
@@ -163,7 +163,7 @@ const StepForm = ({
     try {
       saved = await core.withSession(
         async (session) =>
-          await session.workflowResources.editStep(workflow, {
+          await session.workflowResources.define(workflow, {
             revision: draft.revision,
             edit: { kind: "change", pointer: task.pointer, step: changed },
           })

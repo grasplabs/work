@@ -14,14 +14,16 @@ import { workflowKind, workflowVersion } from "../src/workflow-resources.ts";
  * revision read, then the draft published (`drafts.publish`).
  */
 export const publishOverRpc = async (
-  api: Pick<SessionApi, "drafts" | "workflowResources">,
+  api: Pick<SessionApi, "drafts">,
   id: string,
   definition: string
 ): Promise<LiveVersion> => {
   const subject = { kind: "workflow", id } as const;
   const { revision } = await api.drafts.get(subject);
-  await api.workflowResources.editDraft(id, { revision, source: definition });
-  return await api.drafts.publish(subject, revision + 1);
+  const written = await api.drafts.write(subject, revision, {
+    "workflow.json": definition,
+  });
+  return await api.drafts.publish(subject, written.revision);
 };
 
 /**

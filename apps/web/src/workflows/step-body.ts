@@ -1,6 +1,6 @@
 import { isRecord } from "@grasp-os/shared/json";
 // A step's fields as the definition text holds them, for changing that one
-// step from the canvas: core's `editStep` replaces the fields of the step
+// step from the canvas: core's `define` replaces the fields of the step
 // at a diagram's pointer (`DiagramTask.pointer`), keeping its ID, and this
 // reads the fields it replaces from the same text the diagram was drawn
 // from. Only own keys and array indexes are walked, as core walks them.

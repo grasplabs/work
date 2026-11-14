@@ -255,9 +255,8 @@ const boundApp = async (
       `greet-${crypto.randomUUID().slice(0, 8)}`
     );
     // A new workflow's draft is at revision 0: written, then published.
-    await builds.api.workflowResources.editDraft(workflow.id, {
-      revision: 0,
-      source: definitionOf(key),
+    await builds.api.drafts.write({ kind: "workflow", id: workflow.id }, 0, {
+      "workflow.json": definitionOf(key),
     });
     await builds.api.drafts.publish({ kind: "workflow", id: workflow.id }, 1);
     await decides.api.workflowResources.approveBinding(workflow.id, {

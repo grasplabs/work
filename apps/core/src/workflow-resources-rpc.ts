@@ -44,11 +44,7 @@ import {
   catalogContracts,
   publishCatalogContract,
 } from "./workflow-catalog.ts";
-import {
-  editWorkflowDraft,
-  editWorkflowStep,
-  workflowDraft,
-} from "./workflow-editor.ts";
+import { editWorkflowStep, workflowDraft } from "./workflow-editor.ts";
 import { WorkflowMembersRpc } from "./workflow-members.ts";
 import { workflowActivity, workflowFiles } from "./workflow-own.ts";
 import { setWorkflowParams, workflowParams } from "./workflow-params.ts";
@@ -168,14 +164,7 @@ export class WorkflowResourcesRpc
     );
   }
 
-  async editDraft(id: string, input: unknown): Promise<WorkflowDraft> {
-    return await withPerson(
-      this.#check,
-      async (person) => await editWorkflowDraft(this.#env, person, id, input)
-    );
-  }
-
-  async editStep(id: string, input: unknown): Promise<WorkflowDraft> {
+  async define(id: string, input: unknown): Promise<WorkflowDraft> {
     return await withPerson(
       this.#check,
       async (person) => await editWorkflowStep(this.#env, person, id, input)

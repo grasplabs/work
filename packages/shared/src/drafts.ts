@@ -1,4 +1,4 @@
-import type { AppVersion, FileDiff } from "./apps.ts";
+import type { AppVersion, FileChanges, FileDiff } from "./apps.ts";
 import { defineErrorFamily } from "./errors.ts";
 import type { SubscriptionApi } from "./pages.ts";
 import type { Subject } from "./subject.ts";
@@ -127,6 +127,19 @@ export interface DraftsApi {
     subject: Subject,
     before?: number
   ) => Promise<DraftCheckpoint[]>;
+  /**
+   * Writes `changes` (new content by path, or null to delete a file)
+   * into the draft over `revision`, the one the person read, as their own
+   * checkpoint; refused with `draft.conflict` once anyone wrote since. An
+   * App's TypeScript is fixed and formatted as the lint does safely, and
+   * its definition changes only through `apps.define`; a workflow's draft
+   * is its one file, `workflow.json`, written whole. For builders.
+   */
+  write: (
+    subject: Subject,
+    revision: number,
+    changes: FileChanges
+  ) => Promise<Draft>;
   /**
    * Makes checkpoint `checkpoint` the draft again, as a new checkpoint;
    * refused with `draft.conflict` when the draft moved since `revision`,

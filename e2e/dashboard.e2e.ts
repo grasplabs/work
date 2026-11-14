@@ -50,9 +50,8 @@ test("a builder sees their workflows on the board, and opens them in full", asyn
       [`tally-${tag}`, `later-${tag}`].map(async (name) => {
         const workflow = await api.workflowResources.create(name);
         // A new workflow's draft is at revision 0: written, then published.
-        await api.workflowResources.editDraft(workflow.id, {
-          revision: 0,
-          source: countingDefinition(),
+        await api.drafts.write({ kind: "workflow", id: workflow.id }, 0, {
+          "workflow.json": countingDefinition(),
         });
         await api.drafts.publish({ kind: "workflow", id: workflow.id }, 1);
         return { id: workflow.id, name: workflow.name };

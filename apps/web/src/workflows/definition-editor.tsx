@@ -21,7 +21,7 @@ import { useCore } from "../use-core.ts";
 // it found at its JSON Pointer and task. The page never decides what
 // passes: core's answer does, and the editor keeps the person's text
 // whatever it answers. What passes is drawn on the page's Flow, where a
-// step changed (`editStep`) comes back here as the draft's newer
+// step changed (`define`) comes back here as the draft's newer
 // revision. Sharing it with the team is the bar's (Share with your team).
 
 /** What the editor last heard of a save. */
@@ -133,13 +133,15 @@ export const DefinitionEditor = ({
     setBusy(true);
     setOutcome(undefined);
     try {
-      const saved = await core.withSession(
-        async (session) =>
-          await session.workflowResources.editDraft(workflow, {
-            revision: draft.revision,
-            source: text,
-          })
-      );
+      const saved = await core.withSession(async (session) => {
+        await session.drafts.write(
+          { kind: "workflow", id: workflow },
+          draft.revision,
+          { "workflow.json": text }
+        );
+        // What core found in it, at the revision saved or a later one.
+        return await session.workflowResources.draft(workflow);
+      });
       took(saved);
       setOutcome({ kind: "saved" });
     } catch (error) {

@@ -9,6 +9,7 @@ import type {
   WorkflowDraft,
 } from "@grasp-os/shared/workflow-resources";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
+import { z } from "zod";
 
 import type { Acting } from "./auth/identity.ts";
 import { draftOf, filesOf, saveDraft } from "./drafts.ts";
@@ -204,6 +205,33 @@ export const editWorkflowDraft = async (
     admit
   );
   return after;
+};
+
+/** What `drafts.write` takes for a workflow: its one file, whole. */
+const workflowChangesSchema = z.strictObject({ [workflowFile]: z.string() });
+
+/**
+ * Writes `changes` into workflow `input`'s draft for `by` over
+ * `revision`, the one they read (`drafts.write`): its one file,
+ * `workflow.json`, given whole, saved as `editWorkflowDraft` saves it;
+ * any other path, or deleting it, is `draft.invalid`. Answers the
+ * workflow's ID.
+ */
+export const writeWorkflowDraft = async (
+  env: Env,
+  by: Acting,
+  input: unknown,
+  revision: number,
+  changes: unknown
+): Promise<string> => {
+  const id = await workflowKind.editable(env, by, input);
+  const { [workflowFile]: source } = draftErrors.parse(
+    "draft.invalid",
+    workflowChangesSchema,
+    changes
+  );
+  await editWorkflowDraft(env, by, id, { revision, source });
+  return id;
 };
 
 /**

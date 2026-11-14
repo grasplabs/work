@@ -11,12 +11,7 @@ import {
   repairResourceStarts,
   stopRunsStartedBy,
 } from "../src/workflows/resource-runs.ts";
-import {
-  definitionInput,
-  publishApp,
-  sourceParts,
-  withFiles,
-} from "./app-definitions.ts";
+import { publishApp, withFiles, writeApp } from "./app-definitions.ts";
 import { publishDefined, racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -70,14 +65,7 @@ const unpublishedApp = async (
   user?: Person
 ): Promise<{ app: string; publish: () => Promise<number> }> => {
   const { id } = await builder.api.apps.create({ name: "Invoices" });
-  const { files, definition } = sourceParts(pageFiles);
-  const { revision } = await builder.api.apps.editDraft(id, {
-    revision: 0,
-    changes: { ...files },
-    ...(definition === undefined
-      ? {}
-      : { definition: definitionInput(definition) }),
-  });
+  const revision = await writeApp(builder.api, id, pageFiles);
   if (user !== undefined) {
     await builder.api.apps.members.add(id, {
       type: "person",

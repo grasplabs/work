@@ -414,9 +414,8 @@ test("a builder makes something that runs on its own by saying what they want do
   // the builder's own session saves it.
   const { core, api } = apiOf(builder);
   try {
-    await api.workflowResources.editDraft(workflow, {
-      revision: 0,
-      source: definition("received"),
+    await api.drafts.write({ kind: "workflow", id: workflow }, 0, {
+      "workflow.json": definition("received"),
     });
     // Once a draft passes, it is set up: its Flow draws it.
     await page.reload();

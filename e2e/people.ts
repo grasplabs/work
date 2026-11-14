@@ -16,9 +16,9 @@ import { z } from "zod";
 import {
   appOf,
   changesOf,
-  definitionInput,
   publishApp,
   sourceParts,
+  writeApp,
 } from "../apps/core/test/app-definitions.ts";
 import type { TestSource } from "../apps/core/test/app-definitions.ts";
 /**
@@ -936,13 +936,5 @@ export const drafted = async (
   app: string,
   files: TestSource
 ): Promise<void> => {
-  const { revision } = await api.drafts.get({ kind: "app", id: app });
-  const { files: changes, definition } = sourceParts(files);
-  await api.apps.editDraft(app, {
-    revision,
-    changes: { ...changes },
-    ...(definition === undefined
-      ? {}
-      : { definition: definitionInput(definition) }),
-  });
+  await writeApp(api, app, files);
 };

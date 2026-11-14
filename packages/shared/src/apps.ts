@@ -11,7 +11,6 @@ import type { CatalogEntryRef } from "./connect.ts";
 import type { DataModelChange, DraftDataModel } from "./data-model.ts";
 import type { DefinitionPackage } from "./definition-packages.ts";
 import type { DiagnosticCategory } from "./diagnostics.ts";
-import type { Draft } from "./drafts.ts";
 import { defineErrorFamily } from "./errors.ts";
 import { identifierSchema } from "./ids.ts";
 import type { AppId, BlueprintId } from "./ids.ts";
@@ -702,21 +701,6 @@ export interface AppsApi {
    */
   answerers: (app: string) => Promise<AppAnswerer[]>;
   /**
-   * Writes the App's draft, for its builders, over `revision`, the one the
-   * person read (`draft.conflict` once anyone wrote since), as their own
-   * checkpoint, as a chat's agent writes it: `changes` (new content by
-   * path, or null to delete a file), its TypeScript fixed and formatted
-   * as the lint does safely, and, if given, `definition`
-   * (@grasp-os/runtime's `AppDefinition`, whole: `app.definition_invalid`
-   * otherwise). Its `grasp.config.ts` and `server/schema.ts` are always
-   * what its definition generates. Publish it with `drafts.publish`. Not
-   * for an archived App.
-   */
-  editDraft: (
-    app: string,
-    edit: { revision: number; changes: FileChanges; definition?: unknown }
-  ) => Promise<Draft>;
-  /**
    * What publishing the App's draft would change against its live
    * version, and whether its checks pass (`AppReview`), to review
    * before publishing it at the revision this names (`DraftsApi.publish`).
@@ -729,11 +713,14 @@ export interface AppsApi {
   dataModel: (app: string) => Promise<DraftDataModel>;
   /**
    * Changes the definition in the App's draft by `operation` (an
-   * operation of `@grasp-os/sdk/definition`, or a few made as one): the
-   * model after it, the plan, and what this change alone does
-   * (`change`), or the problem, which changed nothing. With `preview`,
-   * nothing is saved: what it would do, to show first. Not for an
-   * archived App.
+   * operation of `@grasp-os/sdk/definition`, or a few made as one), or
+   * writes it whole (`{ op: "setDefinition", definition }`, an
+   * `AppDefinition` of `@grasp-os/runtime`): the model after it, the plan,
+   * and what this change alone does (`change`), or the problem, which
+   * changed nothing. Its `grasp.config.ts` and `server/schema.ts` are
+   * always what it generates; its other files are written with
+   * `drafts.write`. With `preview`, nothing is saved: what it would do,
+   * to show first. Not for an archived App.
    */
   define: (
     app: string,

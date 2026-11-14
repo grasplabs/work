@@ -634,13 +634,27 @@ export const definitionOperationsSchema = z.union([
 ]);
 
 /**
+ * What a person's `apps.define` takes besides the tools' operations: the
+ * definition written whole (`setDefinition`), checked whole, each
+ * workflow it binds anew held to whoever may bind it. Never the agent's,
+ * which changes a definition an operation at a time.
+ */
+export const personDefinitionOperationsSchema = z.union([
+  definitionOperationsSchema,
+  z.strictObject({ op: z.literal("setDefinition"), definition: z.json() }),
+]);
+
+/**
  * An audit's detail of one operation: its op, table and alias, and for a
  * workflow bound from the draft, the workflow it named.
  */
 const singleDetail = (operation: unknown): Record<string, string | null> => {
   const parsed = definitionOperationSchema.safeParse(operation);
   if (!parsed.success) {
-    return { op: null };
+    const whole = personDefinitionOperationsSchema.safeParse(operation);
+    return {
+      op: whole.success && !Array.isArray(whole.data) ? whole.data.op : null,
+    };
   }
   const { data } = parsed;
   let table: string | null = null;

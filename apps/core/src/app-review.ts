@@ -18,7 +18,6 @@ import type {
   DraftDataModel,
   IndexUse,
 } from "@grasp-os/shared/data-model";
-import type { Draft } from "@grasp-os/shared/drafts";
 import { draftErrors } from "@grasp-os/shared/drafts";
 import { canonicalText } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -47,7 +46,6 @@ import {
   draftDefinition,
   editableApp,
   findVersion,
-  givenDefinition,
   readStored,
   versionFiles,
 } from "./apps.ts";
@@ -58,7 +56,7 @@ import {
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { draftRelease } from "./draft-runs.ts";
-import { draftOf, draftSummary, filesOf, nextLabel } from "./drafts.ts";
+import { draftOf, filesOf, nextLabel } from "./drafts.ts";
 import type { DraftState } from "./drafts.ts";
 import { buildAppCode, buildPages } from "./pages.ts";
 import { permissionsOpenTo } from "./permissions-open.ts";
@@ -544,34 +542,24 @@ export const draftDataModel = async (
   };
 };
 
-/** A person's write of an App's draft (`AppsApi.editDraft`). */
-const appDraftEditSchema = z.strictObject({
-  revision: z.int().min(0),
-  changes: fileChangesSchema,
-  definition: z.json().optional(),
-});
-
 /**
- * Writes `input` (`appDraftEditSchema`) into App `app`'s draft for `by`,
- * one of its builders, over the revision they read (`draft.conflict`
- * otherwise), as their own checkpoint, refused as a chat's agent's write
- * is (agent-builds.ts, `saveDraftChanges`): its changes, TypeScript fixed
- * and formatted as the lint does safely, with its definition whole when
- * given (`givenDefinition`).
- * Answers the draft as saved.
+ * Writes `changes` (new content by path, or null to delete a file) into
+ * App `app`'s draft for `by`, one of its builders, over `revision`, the
+ * one they read (`draft.conflict` otherwise), as their own checkpoint,
+ * refused as a chat's agent's write is (agent-builds.ts,
+ * `saveDraftChanges`): TypeScript fixed and formatted as the lint does
+ * safely (`drafts.write`). Its definition changes only through
+ * `defineDraft`. Answers the App's ID.
  */
-export const editAppDraft = async (
+export const writeAppDraft = async (
   env: Env,
   by: Identity,
   app: unknown,
+  revision: number,
   input: unknown
-): Promise<Draft> => {
+): Promise<string> => {
   const found = await editableApp(env, by, app);
-  const { revision, changes, definition } = appErrors.parse(
-    "app.invalid",
-    appDraftEditSchema,
-    input
-  );
+  const changes = appErrors.parse("app.invalid", fileChangesSchema, input);
   const draft = await draftOf(env, appKind, found.id);
   if (draft.revision !== revision) {
     throw draftErrors.create("draft.conflict");
@@ -580,24 +568,18 @@ export const editAppDraft = async (
     env,
     { by, detail: { files: Object.keys(changes).length } },
     found,
-    {
-      draft,
-      files: await filesOf(env, appKind, found.id, draft),
-      changes,
-      ...(definition === undefined
-        ? {}
-        : { definition: givenDefinition(definition) }),
-    }
+    { draft, files: await filesOf(env, appKind, found.id, draft), changes }
   );
-  return await draftSummary(env, appKind, found.id);
+  return found.id;
 };
 
 /**
  * Changes the definition in App `app`'s draft by `operation`, by `by`
  * themselves, as a chat's agent's definition tools do (agent-builds.ts,
- * `defineInDraft`), audited as theirs: only while they build the App and
- * it isn't archived. With `preview`, saves nothing: what it would make of
- * the model, and the plan, to show before it is made.
+ * `defineInDraft`), or writes it whole (`setDefinition`), audited as
+ * theirs: only while they build the App and it isn't archived. With
+ * `preview`, saves nothing: what it would make of the model, and the
+ * plan, to show before it is made.
  */
 export const defineDraft = async (
   env: Env,
@@ -621,7 +603,8 @@ export const defineDraft = async (
           { draft, files, changes, definition }
         );
       }
-    }
+    },
+    true
   );
   return defined.ok
     ? {

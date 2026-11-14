@@ -1,4 +1,4 @@
-import { emptyDefinition } from "@grasp-os/runtime/definition";
+import { emptyDefinition, readDefinition } from "@grasp-os/runtime/definition";
 import type { AppVersion } from "@grasp-os/shared/apps";
 import type { LiveVersion, Version } from "@grasp-os/shared/drafts";
 import { appIdSchema } from "@grasp-os/shared/ids";
@@ -11,14 +11,13 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 import { vi } from "vite-plus/test";
 
-import { editAppDraft } from "../src/app-review.ts";
+import { defineDraft, writeAppDraft } from "../src/app-review.ts";
 import {
   appKind,
   applyChanges,
   commitDraft,
   draftDefinition,
   editableApp,
-  givenDefinition,
   latestVersion,
 } from "../src/apps.ts";
 import { draftOf, filesOf } from "../src/drafts.ts";
@@ -31,10 +30,10 @@ import { signedInApi } from "./sign-in.ts";
 
 /**
  * A test's publish of `source` by `by`, in core, as `publishApp` does it
- * over RPC: written into App `app`'s draft over the revision read
- * (`editAppDraft`), its files with its definition when it is a test's
- * App, then the draft published (publish.ts). Answers the version made
- * live.
+ * over RPC: its definition, when it is a test's App, written whole into
+ * App `app`'s draft (`defineDraft`), then its files over the revision
+ * read (`writeAppDraft`), then the draft published (publish.ts). Answers
+ * the version made live.
  */
 export const publishDefined = async (
   on: Env,
@@ -42,16 +41,23 @@ export const publishDefined = async (
   app: string,
   source: TestSource
 ): Promise<LiveVersion> => {
-  const { revision } = await draftOf(on, appKind, app);
+  let { revision } = await draftOf(on, appKind, app);
   const { files, definition } = sourceParts(source);
-  const drafted = await editAppDraft(on, by, app, {
-    revision,
-    changes: { ...files },
-    ...(definition === undefined
-      ? {}
-      : { definition: definitionInput(definition) }),
-  });
-  return await publish(on, appKind, by, app, drafted.revision);
+  if (definition !== undefined) {
+    const defined = await defineDraft(on, by, app, {
+      op: "setDefinition",
+      definition: definitionInput(definition),
+    });
+    if (!defined.ok) {
+      throw new Error(defined.problem);
+    }
+    revision += 1;
+  }
+  if (Object.keys(files).length > 0) {
+    await writeAppDraft(on, by, app, revision, { ...files });
+    revision += 1;
+  }
+  return await publish(on, appKind, by, app, revision);
 };
 
 /**
@@ -79,7 +85,7 @@ export const commitDefined = async (
   const defined =
     definition === undefined
       ? (latest?.definition ?? emptyDefinition(name))
-      : givenDefinition(definitionInput(definition));
+      : readDefinition(definitionInput(definition));
   const files = await filesOf(on, appKind, id, { base: parent, changes: {} });
   applyChanges(files, changes, defined);
   const { version } = await commitDraft(on, by, id, {

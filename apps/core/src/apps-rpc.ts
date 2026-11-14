@@ -18,7 +18,6 @@ import type {
   DraftDataModel,
 } from "@grasp-os/shared/data-model";
 import type { DefinitionPackage } from "@grasp-os/shared/definition-packages";
-import type { Draft } from "@grasp-os/shared/drafts";
 import type { AppId } from "@grasp-os/shared/ids";
 
 import { AppBlueprintsRpc } from "./app-blueprints.ts";
@@ -29,12 +28,7 @@ import { openAppLink, setAppLink } from "./app-own-links.ts";
 import { AppPreviewRpc } from "./app-preview-rpc.ts";
 import { AppReleasesRpc } from "./app-releases-rpc.ts";
 import { removeApp } from "./app-removal.ts";
-import {
-  defineDraft,
-  draftDataModel,
-  editAppDraft,
-  reviewChanges,
-} from "./app-review.ts";
+import { defineDraft, draftDataModel, reviewChanges } from "./app-review.ts";
 import { resetAppData } from "./app-schema.ts";
 import { appAnswerers, updateApp } from "./app-settings.ts";
 import { setArchived } from "./app-status.ts";
@@ -127,13 +121,6 @@ export class AppsRpc extends CoreRpcTarget implements AppsApi {
     return await withPerson(
       this.#check,
       async (by) => await draftDataModel(this.#env, by, app)
-    );
-  }
-
-  async editDraft(app: string, edit: unknown): Promise<Draft> {
-    return await withPerson(
-      this.#check,
-      async (by) => await editAppDraft(this.#env, by, app, edit)
     );
   }
 

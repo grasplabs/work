@@ -16,13 +16,7 @@ import { withPageReferences } from "../src/page-references.ts";
 import { buildPages } from "../src/pages.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { StoreHost } from "../src/store-host.ts";
-import {
-  definitionInput,
-  publishApp,
-  sourceParts,
-  testApp,
-  withFiles,
-} from "./app-definitions.ts";
+import { publishApp, testApp, withFiles, writeApp } from "./app-definitions.ts";
 import type { TestSource } from "./app-definitions.ts";
 import { commitApp } from "./apps.ts";
 import { apiOf, notesFiles as files } from "./notes-client-app.ts";
@@ -659,14 +653,7 @@ const inspections = async (): Promise<number> => {
 const diagnosticsOf = async (appFiles: TestSource): Promise<string[]> => {
   const builder = await personApi("builder");
   const { id } = await builder.api.apps.create({ name: "Notes" });
-  const { files: changes, definition } = sourceParts(appFiles);
-  await builder.api.apps.editDraft(id, {
-    revision: 0,
-    changes: { ...changes },
-    ...(definition === undefined
-      ? {}
-      : { definition: definitionInput(definition) }),
-  });
+  await writeApp(builder.api, id, appFiles);
   const drafted = await withDraftReferences(
     env,
     appIdSchema.parse(id),

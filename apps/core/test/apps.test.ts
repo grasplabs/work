@@ -73,8 +73,9 @@ const newApp = async (apps: Apps) =>
   await apps.create({ name: "Invoice desk", description: "Invoices@" });
 
 /**
- * Writes `changes` into App `app`'s draft over the revision read, with
- * `definition` whole when given (`apps.editDraft`): the draft as saved.
+ * Writes `changes` into App `app`'s draft over the revision read
+ * (`drafts.write`), after `definition` whole when given (`apps.define`):
+ * the draft as saved.
  */
 const drafted = async (
   api: Api,
@@ -82,12 +83,18 @@ const drafted = async (
   changes: Record<string, string | null>,
   definition?: unknown
 ) => {
-  const { revision } = await api.drafts.get({ kind: "app", id: app });
-  return await api.apps.editDraft(app, {
-    revision,
-    changes,
-    ...(definition === undefined ? {} : { definition }),
-  });
+  if (definition !== undefined) {
+    const defined = await api.apps.define(app, {
+      op: "setDefinition",
+      definition,
+    });
+    if (!defined.ok) {
+      throw new Error(defined.problem);
+    }
+  }
+  const subject = { kind: "app", id: app } as const;
+  const { revision } = await api.drafts.get(subject);
+  return await api.drafts.write(subject, revision, changes);
 };
 
 /** App `app`'s subject, as drafts and versions name it. */
@@ -257,20 +264,21 @@ export const Route = createFileRoute("/")({ component: Page });
       "AGENTS.md": "# Mine\n",
     });
     const handwritten = await api.drafts.files(subject);
-    // A definition that isn't one: refused, nothing of the write kept.
-    const invalid = await outcome(
-      drafted(api, app.id, { "AGENTS.md": "# Again\n" }, { name: 1 })
-    );
+    // A definition that isn't one: refused, nothing of it kept.
+    const invalid = await api.apps.define(app.id, {
+      op: "setDefinition",
+      definition: { name: 1 },
+    });
     const listed = await versions.list(subject);
     expect({
       pagesOnly,
       config: handwritten["grasp.config.ts"],
-      invalid,
+      invalid: invalid.ok,
       versions: listed.map(({ version }) => version),
     }).toStrictEqual({
       pagesOnly: withFiles(defined, { "src/routes/index.tsx": page }).files,
       config: defined.files["grasp.config.ts"],
-      invalid: "app.definition_invalid",
+      invalid: false,
       versions: [2, 1],
     });
   });
@@ -776,12 +784,7 @@ export const Route = createFileRoute("/archive")({ component: Page });
       outcome(user.get(app.id)),
       outcome(user.contents(app.id)),
       outcome(userVersions.files(subject, 1)),
-      outcome(
-        user.editDraft(app.id, {
-          revision: 0,
-          changes: { "AGENTS.md": "# Mine\n" },
-        })
-      ),
+      outcome(userApi.drafts.write(subject, 0, { "AGENTS.md": "# Mine\n" })),
       outcome(userApi.drafts.files(subject)),
       outcome(userVersions.list(subject)),
       outcome(userVersions.diff(subject, 1, 1)),

@@ -3,6 +3,7 @@ import {
   definitionText,
   emptyDefinition,
   tryOperation,
+  tryReadDefinition,
 } from "@grasp-os/runtime/definition";
 import type {
   AppDefinition,
@@ -42,6 +43,7 @@ import { listBlueprints } from "./app-blueprints.ts";
 import {
   definitionRefusal,
   definitionOperationsSchema,
+  personDefinitionOperationsSchema,
   changePlan,
   definitionPlan,
   generatedPaths,
@@ -50,7 +52,10 @@ import {
 } from "./app-definition.ts";
 import type { FunctionAnswer } from "./app-functions.ts";
 import { refuseAppWorkflows } from "./app-no-workflows.ts";
-import { bindableContract } from "./app-workflow-bindings.ts";
+import {
+  bindableContract,
+  requireRecordableBindings,
+} from "./app-workflow-bindings.ts";
 import {
   appFor,
   appKind,
@@ -898,8 +903,9 @@ const chosenContract = (
  * asks what it would do. Answers the problem, saving nothing, for an operation the
  * definition can't take; otherwise the definition after it, what it does
  * to the App's records (`plan`), and what `save` answered. The chat's
- * agent's definition tools (`BuildApi.define`) and the workspace's Data
- * view (`apps.define`) both change it here.
+ * agent's definition tools (`BuildApi.define`) and a person's
+ * `apps.define` both change it here; only a person's (`whole`) writes it
+ * whole (`setDefinition`, app-definition.ts).
  */
 export const defineInDraft = async <Saved>(
   env: Env,
@@ -911,7 +917,8 @@ export const defineInDraft = async <Saved>(
     files: Map<string, string>,
     changes: Record<string, string | null>,
     definition: AppDefinition
-  ) => Promise<Saved>
+  ) => Promise<Saved>,
+  whole = false
 ): Promise<
   | { ok: false; problem: string }
   | {
@@ -924,17 +931,29 @@ export const defineInDraft = async <Saved>(
 > => {
   const parsed = appErrors.parse(
     "app.invalid",
-    definitionOperationsSchema,
+    whole ? personDefinitionOperationsSchema : definitionOperationsSchema,
     operation
   );
   const held = await draftDefinitions(env, app);
   if ("problem" in held) {
     return { ok: false, problem: held.problem };
   }
+  let result: { definition: AppDefinition } = { definition: held.own };
+  if (!Array.isArray(parsed) && parsed.op === "setDefinition") {
+    const given = tryReadDefinition(parsed.definition);
+    if ("problem" in given) {
+      return { ok: false, problem: given.problem };
+    }
+    // As `bindWorkflow` asks of each workflow it binds.
+    await requireRecordableBindings(env, by, given.definition, held.own);
+    result = { definition: given.definition };
+  }
   // A few operations are one change: each after the one before, the
   // definition checked after each, and saved once or not at all.
-  let result: { definition: AppDefinition } = { definition: held.own };
-  for (const each of Array.isArray(parsed) ? parsed : [parsed]) {
+  const operations = Array.isArray(parsed) ? parsed : [parsed];
+  for (const each of operations.flatMap((one) =>
+    one.op === "setDefinition" ? [] : [one]
+  )) {
     // A workflow's contract is what its live version has, read for the
     // person binding it, and that version is recorded with it: the tools
     // never take either written by hand.

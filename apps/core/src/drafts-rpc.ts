@@ -1,4 +1,5 @@
 import { agentErrors } from "@grasp-os/shared/agent";
+import type { FileChanges } from "@grasp-os/shared/apps";
 import { draftErrors } from "@grasp-os/shared/drafts";
 import type {
   Draft,
@@ -12,9 +13,10 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import { pageErrors } from "@grasp-os/shared/pages";
 import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import type { Subject } from "@grasp-os/shared/subject";
+import type { Subject, SubjectKind } from "@grasp-os/shared/subject";
 import { z } from "zod";
 
+import { writeAppDraft } from "./app-review.ts";
 import {
   draftCheckpointsOf,
   draftOf,
@@ -31,6 +33,7 @@ import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { Subscription } from "./subscription.ts";
+import { writeWorkflowDraft } from "./workflow-editor.ts";
 
 // A signed-in person's `drafts` (GRA-1665): each App's and workflow's one
 // draft (drafts.ts), which every builder of it and their chats' agents
@@ -58,6 +61,24 @@ const revisionSchema = z.int().min(0);
 
 /** A checkpoint's number as the page sends it, to list those before it. */
 const checkpointSchema = z.int().min(1);
+
+/**
+ * How each kind writes a person's file changes into its draft, over the
+ * revision they read: the subject's ID. An App's definition changes only
+ * through `apps.define`.
+ */
+const writers: Readonly<
+  Record<
+    SubjectKind,
+    (
+      env: Env,
+      by: Identity,
+      subject: unknown,
+      revision: number,
+      changes: unknown
+    ) => Promise<string>
+  >
+> = { app: writeAppDraft, workflow: writeWorkflowDraft };
 
 export class DraftsRpc extends CoreRpcTarget implements DraftsApi {
   readonly #env: Env;
@@ -139,6 +160,29 @@ export class DraftsRpc extends CoreRpcTarget implements DraftsApi {
           ? undefined
           : draftErrors.parse("draft.invalid", checkpointSchema, before)
       );
+    });
+  }
+
+  /**
+   * Writes `changes` into the draft over `revision`, the one the person
+   * read, as their own checkpoint (`writers`): only while they may write
+   * it. Every page that follows the draft takes it.
+   */
+  async write(
+    subject: Subject,
+    revision: number,
+    changes: FileChanges
+  ): Promise<Draft> {
+    return await withPerson(this.#check, async (by) => {
+      const { kind, id } = subjectOf(subject);
+      const written = await writers[kind](
+        this.#env,
+        by,
+        id,
+        draftErrors.parse("draft.invalid", revisionSchema, revision),
+        changes
+      );
+      return await draftSummary(this.#env, kinds[kind], written);
     });
   }
 

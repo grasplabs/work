@@ -248,7 +248,7 @@ const seedCollection = async (
 };
 
 /**
- * Writes `changes` and `definition` into App `app`'s draft over
+ * Writes `definition` and `changes` into App `app`'s draft over
  * `revision`, the one read, and publishes it as its owner: live, the
  * people it is shared with use it.
  */
@@ -259,12 +259,18 @@ const publishSeeded = async (
   changes: Record<string, string>,
   definition: AppDefinition
 ): Promise<void> => {
-  const drafted = await owner.api.apps.editDraft(app, {
-    revision,
-    changes,
-    definition: JSON.parse(appDefinitionText(definition)),
+  const subject = { kind: "app", id: app } as const;
+  const whole: unknown = JSON.parse(appDefinitionText(definition));
+  const defined = await owner.api.apps.define(app, {
+    op: "setDefinition",
+    definition: whole,
   });
-  await owner.api.drafts.publish({ kind: "app", id: app }, drafted.revision);
+  if (!defined.ok) {
+    throw new Error(defined.problem);
+  }
+  // The definition was the write after `revision`.
+  const drafted = await owner.api.drafts.write(subject, revision + 1, changes);
+  await owner.api.drafts.publish(subject, drafted.revision);
 };
 
 /**
@@ -399,14 +405,11 @@ const seedWorkflow = async (
   }
   // Its draft as the seed defines it, published as its first version.
   const draft = await resources.draft(created.id);
-  const drafted = await resources.editDraft(created.id, {
-    revision: draft.revision,
-    source: definitionText(workflow.parts),
+  const subject = { kind: "workflow", id: created.id } as const;
+  const drafted = await owner.api.drafts.write(subject, draft.revision, {
+    "workflow.json": definitionText(workflow.parts),
   });
-  await owner.api.drafts.publish(
-    { kind: "workflow", id: created.id },
-    drafted.revision
-  );
+  await owner.api.drafts.publish(subject, drafted.revision);
   if (decision !== undefined) {
     const teamId = teams.get(decision.team);
     if (teamId === undefined) {

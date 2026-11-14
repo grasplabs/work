@@ -4,7 +4,6 @@ import {
   definitionText,
   emptyDefinition,
   readDefinition,
-  tryReadDefinition,
   isFunctionPath,
   withExportedFunctions,
 } from "@grasp-os/runtime/definition";
@@ -578,20 +577,6 @@ export const readStored = async (stored: {
     throw new Error("A stored definition doesn't match its hash");
   }
   return { definition: readDefinition(JSON.parse(text)), text, hash };
-};
-
-/**
- * The definition a caller gives (`AppsApi.editDraft`), checked whole:
- * `app.definition_invalid` naming the problem otherwise.
- */
-export const givenDefinition = (input: unknown): AppDefinition => {
-  const read = tryReadDefinition(input);
-  if ("problem" in read) {
-    throw appErrors.create("app.definition_invalid", {
-      issues: [read.problem],
-    });
-  }
-  return read.definition;
 };
 
 /**

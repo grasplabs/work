@@ -279,51 +279,76 @@ export const sourceParts = (
 export const definitionInput = (definition: AppDefinition): unknown =>
   JSON.parse(definitionText(definition));
 
+/** What `writeApp` and `publishApp` call of a person's session. */
+interface DraftSession {
+  readonly apps: {
+    readonly define: (
+      app: string,
+      operation: unknown
+    ) => Promise<{ ok: true } | { ok: false; problem: string }>;
+  };
+  readonly drafts: {
+    readonly get: (subject: {
+      kind: "app";
+      id: string;
+    }) => Promise<{ revision: number }>;
+    readonly write: (
+      subject: { kind: "app"; id: string },
+      revision: number,
+      changes: Record<string, string | null>
+    ) => Promise<{ revision: number }>;
+    readonly publish: (
+      subject: { kind: "app"; id: string },
+      revision: number
+    ) => Promise<{ version: number; label: string }>;
+  };
+}
+
+/**
+ * Writes `source` into App `app`'s draft as `api`'s person, as a builder
+ * does in Grasp: its definition, when it is a test's App, written whole
+ * (`apps.define`), then its files over the revision read
+ * (`drafts.write`). Answers the draft's revision after.
+ */
+export const writeApp = async (
+  api: DraftSession,
+  app: string,
+  source: TestSource
+): Promise<number> => {
+  const subject = { kind: "app", id: app } as const;
+  let { revision } = await api.drafts.get(subject);
+  const { files, definition } = sourceParts(source);
+  if (definition !== undefined) {
+    const answer = await api.apps.define(app, {
+      op: "setDefinition",
+      definition: definitionInput(definition),
+    });
+    if (!answer.ok) {
+      throw new Error(answer.problem);
+    }
+    // The define was the write after the revision read.
+    revision += 1;
+  }
+  if (Object.keys(files).length > 0) {
+    ({ revision } = await api.drafts.write(subject, revision, { ...files }));
+  }
+  return revision;
+};
+
 /**
  * A test's publish of `source` as `api`'s person: written into App
- * `app`'s draft over the revision read (`apps.editDraft`), its files with
- * its definition when it is a test's App, then the draft published
+ * `app`'s draft (`writeApp`), then the draft published
  * (`drafts.publish`). Answers the version made live.
  */
 export const publishApp = async (
-  api: {
-    readonly apps: {
-      readonly editDraft: (
-        app: string,
-        edit: {
-          revision: number;
-          changes: Record<string, string | null>;
-          definition?: unknown;
-        }
-      ) => Promise<{ revision: number }>;
-    };
-    readonly drafts: {
-      readonly get: (subject: {
-        kind: "app";
-        id: string;
-      }) => Promise<{ revision: number }>;
-      readonly publish: (
-        subject: { kind: "app"; id: string },
-        revision: number
-      ) => Promise<{ version: number; label: string }>;
-    };
-  },
+  api: DraftSession,
   app: string,
   source: TestSource
 ): Promise<{ version: number; label: string }> => {
-  const subject = { kind: "app", id: app } as const;
-  const { revision } = await api.drafts.get(subject);
-  const { files, definition } = sourceParts(source);
-  const drafted = await api.apps.editDraft(app, {
-    revision,
-    changes: { ...files },
-    ...(definition === undefined
-      ? {}
-      : { definition: definitionInput(definition) }),
-  });
+  const revision = await writeApp(api, app, source);
   const { version, label } = await api.drafts.publish(
-    subject,
-    drafted.revision
+    { kind: "app", id: app },
+    revision
   );
   return { version, label };
 };

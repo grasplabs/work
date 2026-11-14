@@ -993,12 +993,15 @@ describe("the built-in blueprints", () => {
     const created = await builder.api.drafts.files({ kind: "app", id: app.id });
     const subject = { kind: "app", id: app.id } as const;
     const { revision } = await builder.api.drafts.get(subject);
-    await builder.api.apps.editDraft(app.id, {
-      revision,
-      changes: { "AGENTS.md": created["AGENTS.md"] ?? "" },
-      definition: JSON.parse(helloReIded("id7")),
+    const reIded: unknown = JSON.parse(helloReIded("id7"));
+    await builder.api.apps.define(app.id, {
+      op: "setDefinition",
+      definition: reIded,
     });
-    const { version } = await builder.api.drafts.publish(subject, revision + 1);
+    await builder.api.drafts.write(subject, revision + 1, {
+      "AGENTS.md": created["AGENTS.md"] ?? "",
+    });
+    const { version } = await builder.api.drafts.publish(subject, revision + 2);
     await install(releaseWith({ definition: helloReIded("id8") }));
     const offered = await builder.api.apps.blueprints.update(app.id);
     const taken =

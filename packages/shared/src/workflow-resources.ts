@@ -864,7 +864,7 @@ const stepPointerSchema = z.string().startsWith("/").max(4096);
 const stepFieldsSchema = z.record(z.string(), z.json());
 
 /**
- * One step of a draft edited on the canvas or by the agent (`editStep`),
+ * One step of a draft edited on the canvas (`define`) or by the agent,
  * as the next revision over `revision`, the one read: `change` replaces the
  * fields of the step at `pointer`, keeping its ID (a rename is a new
  * `title`); `insert` puts step `id` with `step`'s fields at `index` of the
@@ -1133,16 +1133,13 @@ export interface WorkflowResourcesApi {
   /** Its draft, for its builders (`WorkflowDraft`). */
   draft: (id: string) => Promise<WorkflowDraft>;
   /**
-   * Saves an edit of its draft (`workflowDraftEditSchema`), checked, as
-   * the person's own checkpoint; `draft.conflict` once the draft moved
-   * past the revision read. Publishing it is `drafts.publish`.
-   */
-  editDraft: (id: string, input: unknown) => Promise<WorkflowDraft>;
-  /**
    * Inserts or changes one step of its draft (`workflowStepEditSchema`),
-   * saved as the draft's next revision, checked; for builders.
+   * saved as the draft's next revision, checked, as the person's own
+   * checkpoint; `draft.conflict` once the draft moved past the revision
+   * read. For builders. Its whole `workflow.json` is written with
+   * `drafts.write`; publishing it is `drafts.publish`.
    */
-  editStep: (id: string, input: unknown) => Promise<WorkflowDraft>;
+  define: (id: string, input: unknown) => Promise<WorkflowDraft>;
   /**
    * One version's portable source: its definition and the code generated
    * from it, read back from what was sealed; for builders.
