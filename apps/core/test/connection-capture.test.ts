@@ -573,17 +573,23 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
     });
   });
 
-  it("keeps an item in the person's own store, credentials redacted: found by their own recall, never by an App's as them, and gone once they are erased", async () => {
+  it("keeps an item in the person's own store, credentials redacted and ordinary words as they were: found by their own recall, never by an App's as them, and gone once they are erased", async () => {
     const person = await signedInApi(idp, "user");
     const marker = markerOf();
     const secret = `hunter2-${crypto.randomUUID()}`;
+    // A session id as a server issues one: 128 bits, as hex.
+    const sessionId = crypto.randomUUID().replaceAll("-", "");
     const { connectionId, mailbox } = await ownGmail(person);
     const id = `login-${marker}`;
     await worldHolds(stephenGoogleUrl, {
       mailbox,
       events: [],
       messages: [
-        gmailMessage(id, `Login ${marker}`, `Your password: ${secret}`),
+        gmailMessage(
+          id,
+          `Login ${marker}`,
+          `Session: Q3 planning\nCookie: sid=${sessionId}; theme=dark\nYour password: ${secret}`
+        ),
       ],
     });
     const chat = await chatOf(
@@ -608,11 +614,13 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
       own: own.texts.map(({ text }) => ({
         redacted: text.includes("password: [redacted]"),
         secret: text.includes(secret),
+        session: text.includes("Session: Q3 planning"),
+        cookie: text.includes(sessionId),
       })),
       asApp,
       erased,
     }).toStrictEqual({
-      own: [{ redacted: true, secret: false }],
+      own: [{ redacted: true, secret: false, session: true, cookie: false }],
       asApp: { texts: [] },
       erased: { texts: [] },
     });

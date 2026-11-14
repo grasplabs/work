@@ -13,10 +13,13 @@ import { decodeHTMLAttribute } from "entities/decode";
  * unfinished block to the end of the text; AWS access key IDs; and the
  * whole value of an `api_key`, `apikey`, `token`, `secret`, `password`,
  * `passwd`, `authorization`, `session` (`sessionId`, `JSESSIONID`) or
- * `cookie`, or of a name ending in one (`access_token`, `client_secret`), written as `name=value` or
+ * `cookie`, or of a name ending in one (`access_token`, `client_secret`),
+ * written as `name=value` or
  * `name: value`: quoted, to its closing quote (or the end of the line),
  * spaces included; unquoted, to the next space or separator, with a
- * `Bearer` or `Basic` scheme of any length taken with it. JSON quoted
+ * `Bearer` or `Basic` scheme of any length taken with it; after `session`
+ * or `cookie` themselves, everyday words too, only a value that looks like
+ * a credential ({@link credentialLike}). JSON quoted
  * once more, as a string inside JSON (`{\"password\":\"…\"}`), is
  * caught the same way, to the escaped closing quote. And in every link,
  * its parameters that sign or grant it (`redactLinks`, below). Anything else
@@ -46,13 +49,78 @@ const redactedAssignment = (...args: unknown[]): string => {
   return `${part("name")}${part("between")}${quote}[redacted]${close}`;
 };
 
+/** A character of a token: what a `Bearer` value is written in (RFC 6750). */
+const tokenChar = String.raw`[\w\-.~+/]`;
+
+/**
+ * A token: 16 or more token characters, then any `=` padding. Sixteen and
+ * then any more, not `{16,}`: V8 keeps each step of a counted repeat on
+ * its backtrack stack, which a run of megabytes overflowed.
+ */
+const token = String.raw`${tokenChar}{16}${tokenChar}*=*`;
+
+/**
+ * A character of a session's value as servers write it: a token's, `%`, as
+ * frameworks URL-encode their cookies (Laravel's `eyJ…%3D`, Rails'
+ * `…%3D%3D--…`, express's `s%3A…`), and `*`, as an iron seal's
+ * (`Fe26.2**…`, hapi's and Nuxt's) separates its parts.
+ */
+const sessionChar = String.raw`[\w\-.~+/%*]`;
+
+/**
+ * A name that is also an everyday word: `session` or `cookie`, alone or
+ * ending a longer name (`laravel_session`, `authCookie`, "Possession"),
+ * not a session id's (`sessionId`, `JSESSIONID`, `PHPSESSID`).
+ */
+const everydayName = /(?:session|cookie)$/iu;
+
+/**
+ * Whether a value after an {@link everydayName} looks like a credential,
+ * not a word ("Session: 45 minutes"): an earlier rule already redacted
+ * part of it; or, after an opening quote or backtick, it starts with
+ * `name=` (a cookie string, a cookie's name being a token's characters,
+ * RFC 6265) or with 16 session characters (16 hex characters are 64 bits,
+ * the least a session id carries, OWASP). A JSON escape (`\/`, `\n`, `\t`,
+ * `\"`, …) counts as one of them, as what is redacted is often JSON text
+ * (`"Session:\n<id>"`, `Ab3dE6\/hIj…`); so a word of 16 or more such
+ * characters reads as a credential inside escaped JSON too.
+ */
+const credentialLike = new RegExp(
+  String.raw`\[redacted\]|^(?:\\?["'\x60])?(?:${tokenChar}+=|(?:${sessionChar}|\\[\\/"bfnrtu]){16})`,
+  "u"
+);
+
+/**
+ * A named value as {@link redactedAssignment} redacts it, but a value
+ * after an {@link everydayName} only when it is {@link credentialLike}:
+ * otherwise the match comes back as it was. The pattern matches and takes
+ * exactly what it always did; only this decides, after it.
+ */
+const redactedUnlessWord = (...args: unknown[]): string => {
+  const [match] = args;
+  const groups: unknown = args.at(-1);
+  const part = (name: string): string => {
+    const value: unknown =
+      typeof groups === "object" && groups !== null
+        ? Reflect.get(groups, name)
+        : undefined;
+    return typeof value === "string" ? value : "";
+  };
+  const name = part("name");
+  const text = typeof match === "string" ? match : "";
+  const value = text.slice(name.length + part("between").length);
+  return everydayName.test(name) && !credentialLike.test(value)
+    ? text
+    : redactedAssignment(...args);
+};
+
 /**
  * Known credential formats, each recognisable by its shape alone: the
  * entries of {@link credentials} that don't depend on a name before them.
  */
 const credentialFormats: readonly RegExp[] = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/gu,
-  /\b(?:bearer|basic)\s+[\w\-.~+/]{16,}=*/giu,
+  new RegExp(String.raw`\b(?:bearer|basic)\s+${token}`, "giu"),
   /\b(?:sk|pk|rk)_(?:live|test)_[0-9A-Za-z]{10,}/gu,
   /\b(?:sk|pk|rk)-[\w-]{16,}/gu,
   /\b(?:ghp|gho|ghs|ghu|ghr)_[0-9A-Za-z]{20,}/gu,
@@ -60,8 +128,10 @@ const credentialFormats: readonly RegExp[] = [
   /\bxox[abpr]-[0-9A-Za-z-]{10,}/gu,
   /\bAIza[0-9A-Za-z_-]{35}/gu,
   // Not a word boundary: between "-" and "e" one holds at every step of a
-  // flood like "eyJ-eyJ-…", which made the match quadratic.
-  /(?<![\w-])eyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]{8,}/gu,
+  // flood like "eyJ-eyJ-…", which made the match quadratic. Eight then any
+  // more, not `{8,}`: V8 keeps each step of a counted repeat on its
+  // backtrack stack, which a run of megabytes overflowed.
+  /(?<![\w-])eyJ[\w-]{8}[\w-]*\.[\w-]{8}[\w-]*\.[\w-]{8}[\w-]*/gu,
   /\bAKIA[0-9A-Z]{16}\b/gu,
 ];
 
@@ -77,7 +147,7 @@ const credentials: readonly (readonly [
   // match starts once per word, not at every "-" of a flood.
   [
     /\b(?<name>\w*?(?:api[_-]?key|apikey|token|secret|passwd|password|authorization|session(?:[_-]?id)?|sessid|cookie))(?<between>\\?["']?\s*[:=]\s*)(?:(?<escapedQuote>\\["'])(?:(?!\k<escapedQuote>)[^\n])*(?<escapedClose>\k<escapedQuote>)?|(?<quote>["'])(?:\\.|(?!\k<quote>)[^\\\n])*(?<close>\k<quote>)?|(?:(?:bearer|basic)\s+)?[^\s"'&,;]+)/giu,
-    redactedAssignment,
+    redactedUnlessWord,
   ],
 ];
 
@@ -106,7 +176,26 @@ const credentials: readonly (readonly [
 // `#code=…` are not); a link `URL` can't parse; a link with no scheme
 // (`www.…`, `//host/…`); and an AWS secret key written as
 // `aws_secret_access_key = …` or bare (only its key ID, `AKIA…`, has a
-// shape of its own). What is left is bounded: such text
+// shape of its own). After `session` or `cookie`, a value the named
+// rule takes is kept, as it was written, when it doesn't look like a
+// credential ({@link credentialLike}), and those values are the ones left
+// that were redacted before: a value under 16 characters
+// (`session=9f8e7d`); and one whose first 16 characters hold one that is
+// neither a session character nor part of a JSON escape, when no format
+// above redacted part of it and it is not a `name=value`: express's
+// decoded `s:<id>.<sig>`, `user:<token>`, Tornado's `<time>|<hmac>`,
+// Bottle's `!<sig>?<data>`, a `Bearer <token>` the Bearer format above
+// doesn't take (under 16 characters, or with `%`), a value after a curly
+// quote or a parenthesis (`session: “…”`, `session: (…)`). `:` stays
+// out, as it would let a link (`Session: https://…`) count. As for every
+// name, a value ends at a separator, so a `Cookie:` header keeps its
+// pairs after the first (`Cookie: theme=dark; sid=…`). The other way: a
+// word of 16 or more session characters after them reads as a credential
+// ("Session: internationalisation", "Session: kwartaalplanning": after the
+// loanwords, a Dutch or German compound often is), in escaped JSON too.
+// Prose after the other names loses its first word ("The secret: practice
+// daily", "Authorization: approved"): what follows them is a credential by
+// name, a short or word-like one too. What is left is bounded: such text
 // reaches only the person who read it (the Brain keeps a connection's
 // reads for their reader alone), and connectors select the fields they
 // return.
