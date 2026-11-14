@@ -4,7 +4,8 @@ import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { grantReviewed, release, reviewedOf } from "./apps.ts";
+import { publishApp } from "./app-definitions.ts";
+import { grantReviewed, reviewedOf } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
 
@@ -65,13 +66,13 @@ const mailFor = (app: AppId, binding: string): PermissionRequest => ({
 });
 
 /**
- * An App `builder` released, which `admin` granted guests, and
+ * An App `builder` published, which `admin` granted guests, and
  * the collection to read.
  */
 const builtBy = async (builder: Person, admin: Person): Promise<AppId> => {
   const { id } = await builder.api.apps.create({ name: `Map ${unique()}` });
   const app = appIdSchema.parse(id);
-  await release(builder, id, { "src/routes/index.tsx": deskPage });
+  await publishApp(builder.api, id, { "src/routes/index.tsx": deskPage });
   for (const request of [guestsFor(app), collectionFor(app)]) {
     // oxlint-disable-next-line no-await-in-loop -- one at a time, in order
     const { id: permission } = await builder.api.permissions.request(request);
@@ -81,13 +82,13 @@ const builtBy = async (builder: Person, admin: Person): Promise<AppId> => {
   return app;
 };
 
-/** `by` releases another version of `app`. */
+/** `by` publishes another version of `app` from its draft. */
 const changedBy = async (
   by: Pick<Person, "api">,
   app: AppId,
   change: string
 ): Promise<void> => {
-  await release(by, app, {
+  await publishApp(by.api, app, {
     "src/routes/index.tsx": `${deskPage}\n// ${change}\n`,
   });
 };

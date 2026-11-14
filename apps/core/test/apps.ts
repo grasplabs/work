@@ -246,9 +246,12 @@ export const standInLive = async (app: string): Promise<void> => {
 };
 
 /**
- * Commits `files` as the App's next version (`commitApp`) and makes it
- * live, with its data classified as ordinary (`ordinaryData`), so a call
- * without a page's lease reaches it too.
+ * A fixture that seeds a live version directly, never a publish: commits
+ * `files` as the App's next version (`commitApp`: no draft, no check)
+ * and makes it live as a roll back does, with its data classified as
+ * ordinary (`ordinaryData`), so a call without a page's lease reaches it
+ * too. For tests about anything but publishing, versions, bindings or
+ * approvals, which publish from the draft (`publishApp`).
  */
 export const release = async (
   builder: Builder,

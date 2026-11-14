@@ -323,7 +323,7 @@ const granted = async (
   return asked.id;
 };
 
-/** An App `owner` owns, with an approved version 1. */
+/** An App `owner` owns, with a version 1, written as a stand-in. */
 const appOf = async (owner: Person): Promise<string> => {
   const app = crypto.randomUUID();
   await env.DB.batch([
@@ -1764,10 +1764,10 @@ describe("a sensitive parameter", () => {
   });
 });
 
-describe("an App binding a workflow", () => {
+describe("an App's binding of a workflow, written as a stand-in", () => {
   beforeAll(chooseModel);
 
-  it("binds the live version, grants nothing, and while its App may start it keeps the workflow from being deleted", async () => {
+  it("starts the live version, grants nothing, and while its App may start it keeps the workflow from being deleted", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const workflow = await workflowOf(ada);

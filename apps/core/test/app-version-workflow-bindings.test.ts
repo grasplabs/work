@@ -3,8 +3,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { loadRelease } from "../src/app-releases.ts";
-import { boundIn } from "./app-definitions.ts";
-import { release } from "./apps.ts";
+import { boundIn, publishApp } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -107,8 +106,8 @@ describe(
       const first = await declaredWorkflow(builder, events);
       const then = await declaredWorkflow(builder, events);
       const { id: app } = await builder.api.apps.create({ name: "Requests" });
-      const current = await release(
-        builder,
+      const { version: current } = await publishApp(
+        builder.api,
         app,
         boundIn(requestsApp("review", jobEventsDeclared), { review: first })
       );
@@ -160,8 +159,8 @@ describe(
         id: author.userId,
         role: "builder",
       });
-      const older = await release(
-        owner,
+      const { version: older } = await publishApp(
+        owner.api,
         app,
         boundIn(requestsApp("review", jobEventsDeclared), { review: first })
       );
@@ -192,8 +191,8 @@ describe(
       const first = await declaredWorkflow(builder, events);
       const then = await declaredWorkflow(builder, events);
       const { id: app } = await builder.api.apps.create({ name: "Requests" });
-      const older = await release(
-        builder,
+      const { version: older } = await publishApp(
+        builder.api,
         app,
         boundIn(requestsApp("review", jobEventsDeclared), { review: first })
       );
