@@ -118,7 +118,7 @@ const shown = async (
   const rootRoute = createRootRoute({
     component: () => (
       <AuditArchive
-        directory={{ people: new Map(), apps: new Map() }}
+        directory={{ people: new Map(), teams: new Map(), apps: new Map() }}
         search={action === undefined ? {} : { action }}
       />
     ),
