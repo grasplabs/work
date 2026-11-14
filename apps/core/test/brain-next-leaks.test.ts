@@ -246,11 +246,9 @@ const readingSurfaces = new Set([
   "sources read",
   "sources search",
   "core entitiesAs",
-  "core entityAs",
   "core memoriesAs",
   "core contestedAs",
   "memoriesRpc entities",
-  "memoriesRpc entity",
   "memoriesRpc memories",
   "memoriesRpc contested",
   "store listSources",
@@ -261,6 +259,9 @@ const readingSurfaces = new Set([
   "store readCurrent",
   "store searchVectors",
 ]);
+
+/** The reading surfaces' probes: every reader's pass goes through them. */
+const reading = surfaces.filter(([name]) => readingSurfaces.has(name));
 
 /** The surfaces that recall, where no instruction file may ever show. */
 const recallSurfaces = new Set([
@@ -340,6 +341,39 @@ const addressedBy = async <T>(
     idsByName.mockRestore();
     byId.mockRestore();
   }
+};
+
+/**
+ * What `findingsOf` found, and every store core addressed while it ran
+ * (`addressedBy`).
+ */
+const watched = async (
+  ...args: Parameters<typeof findingsOf>
+): Promise<{ findings: Finding[]; addressed: string[] }> => {
+  const { value: findings, names } = await addressedBy(
+    async () => await findingsOf(...args)
+  );
+  return { findings, addressed: names };
+};
+
+/**
+ * The markers of `markers` that any request any model provider has got so
+ * far carried, whoever's key it carried: as found by `pass`, the pass that
+ * ran last.
+ */
+const promptedWith = async (
+  pass: string,
+  markers: Readonly<Record<string, string>>
+): Promise<Finding[]> => {
+  const prompted: Finding[] = [];
+  for (const [name, marker] of Object.entries(markers)) {
+    // oxlint-disable-next-line no-await-in-loop -- one marker at a time
+    const carried = await carrying(marker);
+    if (carried.length > 0) {
+      prompted.push({ pass, in: "model prompts", found: name });
+    }
+  }
+  return prompted;
 };
 
 /** Reports `overview` as `person`'s own store's alarm does when its tick ends. */
@@ -502,16 +536,29 @@ describe(
           membersOf(module).toSorted(),
         ]),
         unprobed: reaching.filter(([, name]) => !names.has(name)),
+        // A member the passes below single out is one: a name of none
+        // would leave it out of a reader's pass without a word.
+        singledOut: [...readingSurfaces, ...recallSurfaces].filter(
+          (name) => !surfaces.some(([member]) => member === name)
+        ),
       }).toStrictEqual({
         members: brainSurfaces.map(({ name, probes }) => [
           name,
           Object.keys(probes).toSorted(),
         ]),
         unprobed: [],
+        singledOut: [],
       });
     });
 
-    it("gives away no marker or hidden match in any answer, log line or prompt, across membership changes and to a reader of everything else", async () => {
+    /**
+     * The world the reader passes below read: markers planted where the
+     * outsider (and some where the holder) may not read them. Planted once
+     * for the file, by whichever of the passes runs first
+     * (`plantedWorld`), so each pass is a test of its own, with its own
+     * time, and a failure names the reader whose pass found something.
+     */
+    const plantWorld = async () => {
       // A provider is connected, so anything that prompts a model reaches
       // the providers stub, which keeps every request it gets.
       await answeringProvider(() => {});
@@ -654,14 +701,9 @@ describe(
           skill.scope === "team" ? [`${skill.team}:${skill.name}`] : []
         );
       };
-      const teamSkillSelected: Record<
-        "byTheHolder" | "byTheOutsider" | "joined" | "left",
-        string[]
-      > = {
+      const teamSkillSelected = {
         byTheHolder: await teamSkillsOf(holder),
         byTheOutsider: await teamSkillsOf(outsider),
-        joined: [],
-        left: [],
       };
       // No recall ever finds an instruction file, a reader's own included.
       const inRecall = {
@@ -881,19 +923,6 @@ describe(
         found,
       }));
 
-      // Every store core addresses while anyone but the holder reads, or
-      // while the holder recalls as an App does: never the holder's own.
-      const addressed: string[] = [];
-      const watched = async (
-        ...args: Parameters<typeof findingsOf>
-      ): Promise<Finding[]> => {
-        const { value, names } = await addressedBy(
-          async () => await findingsOf(...args)
-        );
-        addressed.push(...names);
-        return value;
-      };
-
       const asOutsider = (groups: string[]): Probing => ({
         personId: outsider,
         reader: { person: outsider, groups: groups.map((id) => `team:${id}`) },
@@ -932,259 +961,6 @@ describe(
         // the team they aren't in: the second's source stays hidden.
         codeTeams: [ownTeam, secretTeam],
       });
-      const first = await watched(
-        "the outsider",
-        asOutsider([ownTeam]),
-        markers,
-        { inRecall }
-      );
-
-      // Joining the team counts from the very next recall: its source is
-      // theirs to read, and nothing else is.
-      await join(secretTeam, outsider);
-      const joinedFinds = await textsFor(outsider, teamMarker);
-      teamSkillSelected.joined = await teamSkillsOf(outsider);
-      const {
-        "a team's source the outsider isn't in": _joined,
-        "an upload for a team the outsider isn't in": _joinedUpload,
-        "a team's skill the outsider isn't in": _joinedSkill,
-        ...notJoined
-      } = markers;
-      const inTheTeam = await watched(
-        "the outsider, in the team",
-        {
-          ...asOutsider([ownTeam, secretTeam]),
-          markers: [
-            ownerMarker,
-            noneMarker,
-            narrowedMarker,
-            captureMarker,
-            toHolderMarker,
-            ...instructionMarkers,
-            ownUploadMarker,
-          ],
-          hiddenVersions: everyVersionOf(
-            ...ownerIds,
-            noneId,
-            narrowedId,
-            ownUpload,
-            captureId
-          ),
-          hiddenUploads: [ownUpload.id],
-          hiddenTeamSkills: [],
-        },
-        notJoined,
-        { inRecall }
-      );
-
-      // Leaving counts from the very next recall too.
-      await leave(secretTeam, outsider);
-      const leftFinds = await textsFor(outsider, teamMarker);
-      teamSkillSelected.left = await teamSkillsOf(outsider);
-      const outAgain = await watched(
-        "the outsider, out of the team again",
-        asOutsider([ownTeam]),
-        markers,
-        { inRecall }
-      );
-
-      // Someone who may read everything else still never gets the source
-      // nobody is known to read, nor the first version of the source widened
-      // to them, which was never theirs.
-      const asHolder = await findingsOf(
-        "the holder",
-        {
-          personId: holder,
-          reader: {
-            person: holder,
-            groups: [`team:${secretTeam}`, `team:${holdersTeam}`],
-          },
-          personal: true,
-          sharedWord,
-          markers: [noneMarker, narrowedMarker, agentFileMarker, appFileMarker],
-          hiddenVersions: [
-            ...everyVersionOf(noneId),
-            { source: narrowedId, version: 1 },
-          ],
-          // Their own instruction file is theirs, and so are the Apps'
-          // they build.
-          hiddenInstructionFiles: [agentFile, appFile],
-          instructionGroups,
-          moments: [whileDraft],
-        },
-        {
-          "a source nobody is known to read": noneMarker,
-          "a source narrowed away from the outsider": narrowedMarker,
-          "another agent's instruction file": agentFileMarker,
-          "an App's instruction file the outsider doesn't build": appFileMarker,
-        },
-        { inRecall }
-      );
-      // Code's recall from a workflow, or an App whose grant names no
-      // team, reads only what everyone in the company may: no person, no
-      // team. So nothing team-only reaches it even for someone in that team, nothing of the
-      // holder's own, and their own store is never addressed.
-      const holderThroughCode = await watched(
-        "the holder, through code's recall",
-        {
-          personId: holder,
-          reader: { person: holder, groups: [`team:${secretTeam}`] },
-          personal: false,
-          sharedWord,
-          markers: [ownerMarker, teamMarker, noneMarker, narrowedMarker],
-          hiddenVersions: everyVersionOf(...ownerIds, teamId, noneId),
-          hiddenInstructionFiles: [agentFile, appFile],
-          instructionGroups,
-          moments: [whileDraft],
-        },
-        {
-          "the holder's own source": ownerMarker,
-          "a team's source, though the holder is in the team": teamMarker,
-          "a source nobody is known to read": noneMarker,
-          "a source narrowed away from the outsider": narrowedMarker,
-        },
-        {
-          among: surfaces.filter(([name]) => name.startsWith("recall ")),
-          inRecall,
-        }
-      );
-
-      // An App's grant naming another team of the holder's: the team's
-      // source the grant doesn't name stays hidden though the holder is
-      // in that team, and so does everything else that isn't theirs.
-      const holderThroughTeamGrant = await watched(
-        "the holder, through an App's recall under a grant naming another team of theirs",
-        {
-          personId: holder,
-          reader: {
-            person: holder,
-            groups: [`team:${secretTeam}`, `team:${holdersTeam}`],
-          },
-          personal: false,
-          sharedWord,
-          markers: [ownerMarker, teamMarker, noneMarker, narrowedMarker],
-          hiddenVersions: everyVersionOf(...ownerIds, teamId, noneId),
-          hiddenInstructionFiles: [agentFile, appFile],
-          instructionGroups,
-          moments: [whileDraft],
-          codeTeams: [holdersTeam],
-        },
-        {
-          "the holder's own source": ownerMarker,
-          "a team's source the grant doesn't name, though the holder is in the team":
-            teamMarker,
-          "a source nobody is known to read": noneMarker,
-          "a source narrowed away from the outsider": narrowedMarker,
-        },
-        {
-          among: surfaces.filter(([name]) => name === "recall recallFor"),
-          inRecall,
-        }
-      );
-
-      // Recalling as an App does (`personal: false`), the holder finds
-      // nothing of what is theirs alone: it is in their own store, which
-      // that recall never addresses.
-      const asApp = await watched(
-        "the holder, recalling as an App does",
-        {
-          personId: holder,
-          reader: {
-            person: holder,
-            groups: [`team:${secretTeam}`, `team:${holdersTeam}`],
-          },
-          personal: false,
-          sharedWord,
-          markers: [ownerMarker, ownUploadMarker],
-          hiddenVersions: [],
-          hiddenInstructionFiles: [],
-          instructionGroups,
-          moments: [whileDraft],
-        },
-        {
-          "the holder's own source": ownerMarker,
-          "the holder's upload for only them": ownUploadMarker,
-        },
-        { among: surfaces.filter(([name]) => name === "core recallAs") }
-      );
-
-      // A team-mate of the holder's, and an admin, through every surface
-      // that reads: nothing of the holder's own reaches them.
-      const [{ userId: teamMate }, { userId: admin }] = await Promise.all([
-        signedInWithRole(idp, "user"),
-        signedInWithRole(idp, "admin"),
-      ]);
-      await join(secretTeam, teamMate);
-      const reading = surfaces.filter(([name]) => readingSurfaces.has(name));
-      const {
-        "a team's source the outsider isn't in": _team,
-        "an upload for a team the outsider isn't in": _teamUpload,
-        "a team's skill the outsider isn't in": _teamSkill,
-        ...notTeams
-      } = markers;
-      const asTeamMate = await watched(
-        "a team-mate of the holder's",
-        {
-          personId: teamMate,
-          reader: { person: teamMate, groups: [`team:${secretTeam}`] },
-          personal: true,
-          sharedWord,
-          markers: [
-            ownerMarker,
-            noneMarker,
-            narrowedMarker,
-            toHolderMarker,
-            ...instructionMarkers,
-            ownUploadMarker,
-          ],
-          hiddenVersions: everyVersionOf(
-            ...ownerIds,
-            noneId,
-            narrowedId,
-            ownUpload
-          ),
-          hiddenUploads: [ownUpload.id],
-          hiddenInstructionFiles: [holderFile, agentFile, appFile, usedAppFile],
-          instructionGroups,
-          moments: [whileDraft],
-        },
-        notTeams,
-        { among: reading, inRecall }
-      );
-      const asAdmin = await watched(
-        "an admin",
-        {
-          personId: admin,
-          reader: { person: admin, groups: [] },
-          personal: true,
-          sharedWord,
-          markers: [
-            ownerMarker,
-            teamMarker,
-            noneMarker,
-            narrowedMarker,
-            toHolderMarker,
-            ...instructionMarkers,
-            ownUploadMarker,
-            teamUploadMarker,
-          ],
-          hiddenVersions: everyVersionOf(
-            ...ownerIds,
-            teamId,
-            noneId,
-            narrowedId,
-            ownUpload,
-            teamUpload
-          ),
-          hiddenUploads: [ownUpload.id, teamUpload.id],
-          hiddenInstructionFiles: [holderFile, agentFile, appFile, usedAppFile],
-          instructionGroups,
-          moments: [whileDraft],
-        },
-        markers,
-        { among: reading, inRecall }
-      );
-
       // The holder builds the App, so its file is theirs to get.
       const holderAppFiles = await instructionFilesFor(
         env,
@@ -1205,34 +981,107 @@ describe(
               String
             );
 
-      // Any request any provider got, whoever's key it carried.
-      const prompted: Finding[] = [];
-      for (const [name, marker] of Object.entries(markers)) {
-        // oxlint-disable-next-line no-await-in-loop -- one marker at a time
-        const carried = await carrying(marker);
-        if (carried.length > 0) {
-          prompted.push({
-            pass: "every pass",
-            in: "model prompts",
-            found: name,
-          });
-        }
-      }
+      return {
+        holder,
+        outsider,
+        secretTeam,
+        ownTeam,
+        holdersTeam,
+        sharedWord,
+        markers,
+        ownerMarker,
+        teamMarker,
+        noneMarker,
+        narrowedMarker,
+        captureMarker,
+        captureId,
+        toHolderMarker,
+        agentFileMarker,
+        appFileMarker,
+        ownUploadMarker,
+        teamUploadMarker,
+        teamSkillMarker,
+        instructionMarkers,
+        inRecall,
+        instructionGroups,
+        ownerIds,
+        teamId,
+        noneId,
+        narrowedId,
+        ownUpload,
+        teamUpload,
+        holderFile,
+        agentFile,
+        appFile,
+        usedAppFile,
+        whileDraft,
+        teamSource,
+        asOutsider,
+        teamSkillsOf,
+        // What whoever may read the markers finds of them, and what the
+        // outsider finds of their own, past them.
+        found: {
+          narrowedToHolder,
+          outsiderFinds,
+          holderFindsCapture,
+          cappedFinds,
+          teamSkillSelected,
+          holderAppFile: holderAppFiles.some(
+            ({ text }) => text === usedAppText
+          ),
+          outsiderOpens,
+        },
+        handbook,
+        capped,
+      };
+    };
+
+    let planting: ReturnType<typeof plantWorld> | undefined;
+
+    /** The world, planted by the first pass that asks for it. */
+    const plantedWorld = async () => {
+      planting ??= plantWorld();
+      return await planting;
+    };
+
+    // A pass that finds nothing, in any answer, log line or prompt, and
+    // never addresses the holder's own store.
+    const nothingGivenAway = { findings: [], holdersStoreAddressed: false };
+
+    it("finds each planted marker for whoever may read it, and the outsider's own past them", async () => {
+      const { found, handbook, capped, secretTeam, teamSkillMarker } =
+        await plantedWorld();
+
+      expect(found).toStrictEqual({
+        narrowedToHolder: "refused",
+        outsiderFinds: [handbook],
+        holderFindsCapture: true,
+        cappedFinds: [{ text: capped, found: "exact" }],
+        teamSkillSelected: {
+          byTheHolder: [`${secretTeam}:${teamSkillMarker}`],
+          byTheOutsider: [],
+        },
+        holderAppFile: true,
+        outsiderOpens: "opens it",
+      });
+    });
+
+    it("gives the outsider no marker or hidden match through any surface, in an answer, a log line or a prompt", async () => {
+      const { holder, outsider, ownTeam, markers, inRecall, asOutsider } =
+        await plantedWorld();
+
+      const { findings, addressed } = await watched(
+        "the outsider",
+        asOutsider([ownTeam]),
+        markers,
+        { inRecall }
+      );
 
       expect({
         findings: [
-          ...first,
-          ...inTheTeam,
-          ...outAgain,
-          ...asHolder,
-          ...holderThroughCode,
-          ...holderThroughTeamGrant,
-          ...asApp,
-          ...asTeamMate,
-          ...asAdmin,
-          ...prompted,
+          ...findings,
+          ...(await promptedWith("the outsider", markers)),
         ],
-        narrowedToHolder,
         holdersStoreAddressed: addressed.includes(`person:${holder}`),
         // The binding was watched: the shared store and the outsider's own
         // were addressed through it.
@@ -1240,34 +1089,417 @@ describe(
           addressed.includes("brain"),
           addressed.includes(`person:${outsider}`),
         ],
-        outsiderFinds,
-        holderFindsCapture,
-        cappedFinds,
-        joinedFinds,
-        leftFinds,
-        teamSkillSelected,
-        holderAppFile: holderAppFiles.some(({ text }) => text === usedAppText),
-        outsiderOpens,
-      }).toStrictEqual({
-        findings: [],
-        narrowedToHolder: "refused",
-        holdersStoreAddressed: false,
-        othersAddressed: [true, true],
-        outsiderFinds: [handbook],
-        holderFindsCapture: true,
-        cappedFinds: [{ text: capped, found: "exact" }],
-        joinedFinds: [teamSource],
-        leftFinds: [],
-        // From the very next call after joining, and leaving.
-        teamSkillSelected: {
-          byTheHolder: [`${secretTeam}:${teamSkillMarker}`],
-          byTheOutsider: [],
-          joined: [`${secretTeam}:${teamSkillMarker}`],
-          left: [],
+      }).toStrictEqual({ ...nothingGivenAway, othersAddressed: [true, true] });
+    });
+
+    it("gives the outsider, from the very next recall once they join the team, its source and nothing else", async () => {
+      const world = await plantedWorld();
+      const {
+        holder,
+        outsider,
+        secretTeam,
+        ownTeam,
+        markers,
+        inRecall,
+        asOutsider,
+        teamSkillsOf,
+      } = world;
+
+      // Joining the team counts from the very next recall: its source is
+      // theirs to read, and nothing else is.
+      await join(secretTeam, outsider);
+      const joinedFinds = await textsFor(outsider, world.teamMarker);
+      const joinedSkills = await teamSkillsOf(outsider);
+      const {
+        "a team's source the outsider isn't in": _joined,
+        "an upload for a team the outsider isn't in": _joinedUpload,
+        "a team's skill the outsider isn't in": _joinedSkill,
+        ...notJoined
+      } = markers;
+      const { findings, addressed } = await watched(
+        "the outsider, in the team",
+        {
+          ...asOutsider([ownTeam, secretTeam]),
+          markers: [
+            world.ownerMarker,
+            world.noneMarker,
+            world.narrowedMarker,
+            world.captureMarker,
+            world.toHolderMarker,
+            ...world.instructionMarkers,
+            world.ownUploadMarker,
+          ],
+          hiddenVersions: everyVersionOf(
+            ...world.ownerIds,
+            world.noneId,
+            world.narrowedId,
+            world.ownUpload,
+            world.captureId
+          ),
+          hiddenUploads: [world.ownUpload.id],
+          hiddenTeamSkills: [],
         },
-        holderAppFile: true,
-        outsiderOpens: "opens it",
+        notJoined,
+        { inRecall }
+      );
+
+      expect({
+        findings: [
+          ...findings,
+          ...(await promptedWith("the outsider, in the team", markers)),
+        ],
+        holdersStoreAddressed: addressed.includes(`person:${holder}`),
+        joinedFinds,
+        joinedSkills,
+      }).toStrictEqual({
+        ...nothingGivenAway,
+        joinedFinds: [world.teamSource],
+        joinedSkills: [`${secretTeam}:${world.teamSkillMarker}`],
       });
+    });
+
+    it("gives the outsider nothing of the team again from the very next recall once they leave it", async () => {
+      const {
+        holder,
+        outsider,
+        secretTeam,
+        ownTeam,
+        markers,
+        inRecall,
+        asOutsider,
+        teamSkillsOf,
+        teamMarker,
+      } = await plantedWorld();
+
+      // Leaving counts from the very next recall too.
+      await leave(secretTeam, outsider);
+      const leftFinds = await textsFor(outsider, teamMarker);
+      const leftSkills = await teamSkillsOf(outsider);
+      const { findings, addressed } = await watched(
+        "the outsider, out of the team again",
+        asOutsider([ownTeam]),
+        markers,
+        { inRecall }
+      );
+
+      expect({
+        findings: [
+          ...findings,
+          ...(await promptedWith(
+            "the outsider, out of the team again",
+            markers
+          )),
+        ],
+        holdersStoreAddressed: addressed.includes(`person:${holder}`),
+        leftFinds,
+        leftSkills,
+      }).toStrictEqual({ ...nothingGivenAway, leftFinds: [], leftSkills: [] });
+    });
+
+    it("gives the holder, who may read everything else, nothing of the source nobody may read or of a version never theirs", async () => {
+      const world = await plantedWorld();
+      const { holder, secretTeam, holdersTeam, markers } = world;
+
+      // Someone who may read everything else still never gets the source
+      // nobody is known to read, nor the first version of the source widened
+      // to them, which was never theirs.
+      const findings = await findingsOf(
+        "the holder",
+        {
+          personId: holder,
+          reader: {
+            person: holder,
+            groups: [`team:${secretTeam}`, `team:${holdersTeam}`],
+          },
+          personal: true,
+          sharedWord: world.sharedWord,
+          markers: [
+            world.noneMarker,
+            world.narrowedMarker,
+            world.agentFileMarker,
+            world.appFileMarker,
+          ],
+          hiddenVersions: [
+            ...everyVersionOf(world.noneId),
+            { source: world.narrowedId, version: 1 },
+          ],
+          // Their own instruction file is theirs, and so are the Apps'
+          // they build.
+          hiddenInstructionFiles: [world.agentFile, world.appFile],
+          instructionGroups: world.instructionGroups,
+          moments: [world.whileDraft],
+        },
+        {
+          "a source nobody is known to read": world.noneMarker,
+          "a source narrowed away from the outsider": world.narrowedMarker,
+          "another agent's instruction file": world.agentFileMarker,
+          "an App's instruction file the outsider doesn't build":
+            world.appFileMarker,
+        },
+        { inRecall: world.inRecall }
+      );
+
+      expect([
+        ...findings,
+        ...(await promptedWith("the holder", markers)),
+      ]).toStrictEqual([]);
+    });
+
+    it("gives the holder, through code's recall, only what the whole company may read, and never addresses their own store", async () => {
+      const world = await plantedWorld();
+      const { holder, secretTeam, markers } = world;
+
+      // Code's recall from a workflow, or an App whose grant names no
+      // team, reads only what everyone in the company may: no person, no
+      // team. So nothing team-only reaches it even for someone in that team, nothing of the
+      // holder's own, and their own store is never addressed.
+      const { findings, addressed } = await watched(
+        "the holder, through code's recall",
+        {
+          personId: holder,
+          reader: { person: holder, groups: [`team:${secretTeam}`] },
+          personal: false,
+          sharedWord: world.sharedWord,
+          markers: [
+            world.ownerMarker,
+            world.teamMarker,
+            world.noneMarker,
+            world.narrowedMarker,
+          ],
+          hiddenVersions: everyVersionOf(
+            ...world.ownerIds,
+            world.teamId,
+            world.noneId
+          ),
+          hiddenInstructionFiles: [world.agentFile, world.appFile],
+          instructionGroups: world.instructionGroups,
+          moments: [world.whileDraft],
+        },
+        {
+          "the holder's own source": world.ownerMarker,
+          "a team's source, though the holder is in the team": world.teamMarker,
+          "a source nobody is known to read": world.noneMarker,
+          "a source narrowed away from the outsider": world.narrowedMarker,
+        },
+        {
+          among: surfaces.filter(([name]) => name.startsWith("recall ")),
+          inRecall: world.inRecall,
+        }
+      );
+
+      expect({
+        findings: [
+          ...findings,
+          ...(await promptedWith("the holder, through code's recall", markers)),
+        ],
+        holdersStoreAddressed: addressed.includes(`person:${holder}`),
+      }).toStrictEqual(nothingGivenAway);
+    });
+
+    it("gives the holder, through an App's recall under a grant naming another team of theirs, nothing of the team it doesn't name", async () => {
+      const world = await plantedWorld();
+      const { holder, secretTeam, holdersTeam, markers } = world;
+      const pass =
+        "the holder, through an App's recall under a grant naming another team of theirs";
+
+      // An App's grant naming another team of the holder's: the team's
+      // source the grant doesn't name stays hidden though the holder is
+      // in that team, and so does everything else that isn't theirs.
+      const { findings, addressed } = await watched(
+        pass,
+        {
+          personId: holder,
+          reader: {
+            person: holder,
+            groups: [`team:${secretTeam}`, `team:${holdersTeam}`],
+          },
+          personal: false,
+          sharedWord: world.sharedWord,
+          markers: [
+            world.ownerMarker,
+            world.teamMarker,
+            world.noneMarker,
+            world.narrowedMarker,
+          ],
+          hiddenVersions: everyVersionOf(
+            ...world.ownerIds,
+            world.teamId,
+            world.noneId
+          ),
+          hiddenInstructionFiles: [world.agentFile, world.appFile],
+          instructionGroups: world.instructionGroups,
+          moments: [world.whileDraft],
+          codeTeams: [holdersTeam],
+        },
+        {
+          "the holder's own source": world.ownerMarker,
+          "a team's source the grant doesn't name, though the holder is in the team":
+            world.teamMarker,
+          "a source nobody is known to read": world.noneMarker,
+          "a source narrowed away from the outsider": world.narrowedMarker,
+        },
+        {
+          among: surfaces.filter(([name]) => name === "recall recallFor"),
+          inRecall: world.inRecall,
+        }
+      );
+
+      expect({
+        findings: [...findings, ...(await promptedWith(pass, markers))],
+        holdersStoreAddressed: addressed.includes(`person:${holder}`),
+      }).toStrictEqual(nothingGivenAway);
+    });
+
+    it("gives the holder, recalling as an App does, nothing of what is theirs alone", async () => {
+      const world = await plantedWorld();
+      const { holder, secretTeam, holdersTeam, markers } = world;
+
+      // Recalling as an App does (`personal: false`), the holder finds
+      // nothing of what is theirs alone: it is in their own store, which
+      // that recall never addresses.
+      const { findings, addressed } = await watched(
+        "the holder, recalling as an App does",
+        {
+          personId: holder,
+          reader: {
+            person: holder,
+            groups: [`team:${secretTeam}`, `team:${holdersTeam}`],
+          },
+          personal: false,
+          sharedWord: world.sharedWord,
+          markers: [world.ownerMarker, world.ownUploadMarker],
+          hiddenVersions: [],
+          hiddenInstructionFiles: [],
+          instructionGroups: world.instructionGroups,
+          moments: [world.whileDraft],
+        },
+        {
+          "the holder's own source": world.ownerMarker,
+          "the holder's upload for only them": world.ownUploadMarker,
+        },
+        { among: surfaces.filter(([name]) => name === "core recallAs") }
+      );
+
+      expect({
+        findings: [
+          ...findings,
+          ...(await promptedWith(
+            "the holder, recalling as an App does",
+            markers
+          )),
+        ],
+        holdersStoreAddressed: addressed.includes(`person:${holder}`),
+      }).toStrictEqual(nothingGivenAway);
+    });
+
+    it("gives a team-mate of the holder's nothing of the holder's own through any surface that reads", async () => {
+      const world = await plantedWorld();
+      const { holder, secretTeam, markers } = world;
+
+      // A team-mate of the holder's, through every surface that reads:
+      // nothing of the holder's own reaches them.
+      const { userId: teamMate } = await signedInWithRole(idp, "user");
+      await join(secretTeam, teamMate);
+      const {
+        "a team's source the outsider isn't in": _team,
+        "an upload for a team the outsider isn't in": _teamUpload,
+        "a team's skill the outsider isn't in": _teamSkill,
+        ...notTeams
+      } = markers;
+      const { findings, addressed } = await watched(
+        "a team-mate of the holder's",
+        {
+          personId: teamMate,
+          reader: { person: teamMate, groups: [`team:${secretTeam}`] },
+          personal: true,
+          sharedWord: world.sharedWord,
+          markers: [
+            world.ownerMarker,
+            world.noneMarker,
+            world.narrowedMarker,
+            world.toHolderMarker,
+            ...world.instructionMarkers,
+            world.ownUploadMarker,
+          ],
+          hiddenVersions: everyVersionOf(
+            ...world.ownerIds,
+            world.noneId,
+            world.narrowedId,
+            world.ownUpload
+          ),
+          hiddenUploads: [world.ownUpload.id],
+          hiddenInstructionFiles: [
+            world.holderFile,
+            world.agentFile,
+            world.appFile,
+            world.usedAppFile,
+          ],
+          instructionGroups: world.instructionGroups,
+          moments: [world.whileDraft],
+        },
+        notTeams,
+        { among: reading, inRecall: world.inRecall }
+      );
+
+      expect({
+        findings: [
+          ...findings,
+          ...(await promptedWith("a team-mate of the holder's", markers)),
+        ],
+        holdersStoreAddressed: addressed.includes(`person:${holder}`),
+      }).toStrictEqual(nothingGivenAway);
+    });
+
+    it("gives an admin nothing they may not read through any surface that reads", async () => {
+      const world = await plantedWorld();
+      const { holder, markers } = world;
+
+      // An admin, through every surface that reads: nothing of the
+      // holder's own, nor of a team they aren't in, reaches them.
+      const { userId: admin } = await signedInWithRole(idp, "admin");
+      const { findings, addressed } = await watched(
+        "an admin",
+        {
+          personId: admin,
+          reader: { person: admin, groups: [] },
+          personal: true,
+          sharedWord: world.sharedWord,
+          markers: [
+            world.ownerMarker,
+            world.teamMarker,
+            world.noneMarker,
+            world.narrowedMarker,
+            world.toHolderMarker,
+            ...world.instructionMarkers,
+            world.ownUploadMarker,
+            world.teamUploadMarker,
+          ],
+          hiddenVersions: everyVersionOf(
+            ...world.ownerIds,
+            world.teamId,
+            world.noneId,
+            world.narrowedId,
+            world.ownUpload,
+            world.teamUpload
+          ),
+          hiddenUploads: [world.ownUpload.id, world.teamUpload.id],
+          hiddenInstructionFiles: [
+            world.holderFile,
+            world.agentFile,
+            world.appFile,
+            world.usedAppFile,
+          ],
+          instructionGroups: world.instructionGroups,
+          moments: [world.whileDraft],
+        },
+        markers,
+        { among: reading, inRecall: world.inRecall }
+      );
+
+      expect({
+        findings: [...findings, ...(await promptedWith("an admin", markers))],
+        holdersStoreAddressed: addressed.includes(`person:${holder}`),
+      }).toStrictEqual(nothingGivenAway);
     });
 
     it("gives a reader nothing a model drew from what they may not read, and prompts a model with one version's text at a time", async () => {
