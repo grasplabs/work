@@ -655,4 +655,53 @@ describe("what reading memories costs", () => {
     },
     120_000
   );
+
+  // What a card rests on (cards.ts `restsOn`): a contested memory's rivals
+  // are read once for its entity and attribute, however many of them the
+  // page holds, never once each.
+  it("reads a card's rivals once for its attribute, however many memories on the page are contested", async () => {
+    const { stub, rowsReadBy } = await countedStore();
+    const group = `seen-${crypto.randomUUID()}`;
+    const reader = readerOf("reader", group);
+    const extra: { contested: number; page: number; card: number }[] = [];
+    for (const contested of [10, 50, 99]) {
+      // Each its own writer's word on the one-value status, each another
+      // value: every one contested by all the others.
+      // oxlint-disable-next-line no-await-in-loop -- one entity at a time
+      const { entities } = await add(
+        stub,
+        group,
+        [{ key: "c", kind: "customer", names: [`${word()} ${word()}`] }],
+        Array.from({ length: contested }, (_, at) =>
+          fact(
+            "c",
+            `Status ${at}`,
+            { attribute: "status", value: `Status ${at}` },
+            `writer-${at}`
+          )
+        )
+      );
+      const entity = entities.c ?? "";
+      // oxlint-disable-next-line no-await-in-loop -- one read at a time
+      const page = await rowsReadBy(
+        async () => await stub.readMemories({ entity, reader })
+      );
+      // oxlint-disable-next-line no-await-in-loop -- one read at a time
+      const card = await rowsReadBy(
+        async () => await stub.readCard({ entity, reader })
+      );
+      extra.push({ contested, page, card });
+    }
+
+    // Beyond its page, a card reads about one more read of the same
+    // memories (their rivals), and its names: never one read a memory.
+    expect(
+      extra.map(({ contested, page, card }) => ({
+        contested,
+        withinOneMoreRead: card - page <= 2 * page,
+      }))
+    ).toStrictEqual(
+      [10, 50, 99].map((contested) => ({ contested, withinOneMoreRead: true }))
+    );
+  });
 });

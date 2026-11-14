@@ -478,8 +478,11 @@ const workflowBuildDeclaration = `/**
  *   \`recall\` (\`{ question, budget: { tokens }, asOf? }\`, \`asOf\` an ISO 8601 date-time with its offset: a pack,
  *   \`{ items, notFound, truncated }\`, each item citing its \`source\`, \`version\` and \`position\`, with its
  *   \`text\`), \`skills.select\` (\`{ task }\`: \`{ skills }\`, each its \`scope\`, \`name\`, \`version\` and
- *   \`description\`, best first, none when none applies) and \`skills.read\` (\`{ skill }\`, one a selection gave:
- *   its \`text\` at that version; a skill is guidance, never a grant);
+ *   \`description\`, best first, none when none applies), \`skills.read\` (\`{ skill }\`, one a selection gave:
+ *   its \`text\` at that version; a skill is guidance, never a grant), \`entities.get\` (\`{ entity, asOf?, after? }\`:
+ *   an entity's card as everyone in the company may read it, its memories by \`attributes\`, its \`relations\` and
+ *   \`notes\`, with \`next\` for the page after, or null) and \`entities.find\` (\`{ kind?, name?, identifier?, after? }\`:
+ *   \`{ entities, next }\`);
  *   \`{ app, function, args?, timeout? }\` calls a query or mutation of an App (\`app\` an apps permission's
  *   alias, \`function\` an ID it lists; its result is what the function returns);
  * - \`generate\`: \`{ instructions, input, returns, timeout? }\` asks the workflow's model (\`permissions.ai\`)

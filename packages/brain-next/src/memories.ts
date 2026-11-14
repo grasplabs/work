@@ -18,6 +18,7 @@ import type {
   MemoryId,
   PersonReader,
   Reader,
+  SourceVersionRef,
 } from "./contract.ts";
 import { readableSql } from "./reader-sets.ts";
 import { termsOf } from "./words.ts";
@@ -174,13 +175,13 @@ const rivalSql = `
       AND rival.attribute = m.attribute AND rival.value_key IS NOT m.value_key`;
 
 /**
- * The latest confirmation of `m` that counts for the reader, as JSON, or
- * null: one made over memories they may all read, and over every current
- * rival they may read, so one made without seeing a rival never ranks
- * first for a reader who sees it.
+ * The latest confirmation of `m` that counts for the reader, as JSON (its
+ * row too, for what it rests on), or null: one made over memories they
+ * may all read, and over every current rival they may read, so one made
+ * without seeing a rival never ranks first for a reader who sees it.
  */
 const confirmationSql = `(
-  SELECT json_object('by', confirmed.person, 'at', confirmed.at)
+  SELECT json_object('by', confirmed.person, 'at', confirmed.at, 'row', confirmed.row)
   FROM memory_confirmations AS confirmed
   WHERE confirmed.memory = m.row AND confirmed.at <= ?4
     AND NOT EXISTS (
@@ -367,7 +368,11 @@ const dateOf = (at: number | null): Date | null =>
   at === null ? null : new Date(at);
 
 /** A confirmation as `confirmationSql` builds it. */
-const confirmationSchema = z.strictObject({ by: z.string(), at: z.number() });
+const confirmationSchema = z.strictObject({
+  by: z.string(),
+  at: z.number(),
+  row: z.number(),
+});
 
 /** A memory's type as stored. */
 const memoryTypeSchema = z.enum(memoryTypes);
@@ -375,7 +380,7 @@ const memoryTypeSchema = z.enum(memoryTypes);
 /** A confirmation as `confirmationSql` gives it, or none. */
 const confirmationOf = (
   json: string | null
-): { by: string; at: number } | null => {
+): { by: string; at: number; row: number } | null => {
   if (json === null) {
     return null;
   }
@@ -498,6 +503,17 @@ const aboutSql = memoriesSql({
   order: aboutOrder,
 });
 
+/**
+ * `?1` the entity's row, `?6` the attribute: its current memories the
+ * reader may read.
+ */
+const currentOfAttributeSql = memoriesSql({
+  base: `SELECT row FROM memories
+    WHERE entity = ?1 AND attribute = ?6`,
+  filter: "judged.is_current = 1",
+  order: "m.row",
+});
+
 /** What reads of memories are asked with. */
 export interface MemoriesAsked {
   entity: EntityId;
@@ -518,7 +534,7 @@ export interface MemoriesAsked {
  * `readMemories`): one more is read than asked, to tell whether more
  * follow.
  */
-export const readMemories = (
+const readMemoryRows = (
   sql: SqlStorage,
   {
     entity,
@@ -531,10 +547,24 @@ export const readMemories = (
     after,
     limit,
   }: MemoriesAsked
-): MemoriesRead => {
+): {
+  read: MemoriesRead;
+  rows: MemoryRow[];
+  limit: number;
+  reader: Reader;
+  at: number;
+  learned: number;
+} => {
   const found = entityRowOf(sql, entity);
   if (found === undefined) {
-    return { memories: [], more: false };
+    return {
+      read: { memories: [], more: false },
+      rows: [],
+      limit,
+      reader,
+      at,
+      learned,
+    };
   }
   const rows = memoryRowsAt(
     sql,
@@ -555,20 +585,103 @@ export const readMemories = (
   );
   const memories = rows.slice(0, limit).map(memoryOf);
   const last = memories.at(-1);
-  if (rows.length <= limit || last === undefined) {
-    return { memories, more: false };
-  }
+  const read: MemoriesRead =
+    rows.length <= limit || last === undefined
+      ? { memories, more: false }
+      : {
+          memories,
+          more: true,
+          next: {
+            at: new Date(cursorAt),
+            learned: new Date(learned),
+            attribute: last.attribute,
+            confirmed: last.confirmed !== null,
+            learnedAt: last.learnedAt,
+            memory: last.id,
+          },
+        };
+  return { read, rows, limit, reader, at, learned };
+};
+
+/** `readMemories`, as the contract answers it. */
+export const readMemories = (
+  sql: SqlStorage,
+  asked: MemoriesAsked
+): MemoriesRead => readMemoryRows(sql, asked).read;
+
+/** The version `row` rests on, or none for one in a writer's word. */
+const versionOfRow = ({ source, version }: MemoryRow): SourceVersionRef[] =>
+  source === null || version === null ? [] : [{ source, version }];
+
+/** `?1` the confirmations' rows (JSON): the versions the memories each was made over rest on. */
+const overruledSql = `
+SELECT DISTINCT m.source AS source, m.version AS version
+FROM json_each(?1) AS asked
+CROSS JOIN memory_confirmed_over AS over ON over.confirmation = asked.value
+CROSS JOIN memories AS m ON m.row = over.memory
+WHERE m.source IS NOT NULL`;
+
+/**
+ * `readMemories`, with every version of a source what the page says rests
+ * on (contract.ts `Card.restsOn`): its memories'; each contested one's
+ * current rivals, judged as the page was; the memories each counted
+ * confirmation was made over; and the memory past the page (`more`).
+ */
+export const readMemoriesHeld = (
+  sql: SqlStorage,
+  asked: MemoriesAsked
+): { read: MemoriesRead; restsOn: SourceVersionRef[] } => {
+  const { read, rows, limit, reader, at, learned } = readMemoryRows(sql, asked);
+  const page = rows.slice(0, limit);
+  // The current memories of each entity (the memory's own: a relation's
+  // subject, whichever side the card is on) and attribute a contested
+  // memory of the page has, read once however many of them it holds.
+  const current = new Map<string, MemoryRow[]>();
+  const currentOf = (entityRow: number, attribute: string): MemoryRow[] => {
+    const key = JSON.stringify([entityRow, attribute]);
+    const memories =
+      current.get(key) ??
+      memoryRowsAt(
+        sql,
+        currentOfAttributeSql,
+        at,
+        entityRow,
+        reader,
+        learned,
+        -1,
+        attribute
+      );
+    current.set(key, memories);
+    return memories;
+  };
+  const rivals = page.flatMap((row) =>
+    row.contested === 1 && row.attribute !== null
+      ? currentOf(row.entity_row, row.attribute).filter(
+          ({ value_key: key }) => key !== row.value_key
+        )
+      : []
+  );
+  const confirmations = page.flatMap(
+    (row) => confirmationOf(row.confirmation)?.row ?? []
+  );
+  const overruled =
+    confirmations.length === 0
+      ? []
+      : sql
+          .exec<{ source: string; version: number }>(
+            overruledSql,
+            JSON.stringify(confirmations)
+          )
+          .toArray()
+          .map(({ source, version }) => ({ source, version }));
   return {
-    memories,
-    more: true,
-    next: {
-      at: new Date(cursorAt),
-      learned: new Date(learned),
-      attribute: last.attribute,
-      confirmed: last.confirmed !== null,
-      learnedAt: last.learnedAt,
-      memory: last.id,
-    },
+    read,
+    restsOn: [
+      // The page's memories, and the one past it.
+      ...rows.flatMap((row) => versionOfRow(row)),
+      ...rivals.flatMap((row) => versionOfRow(row)),
+      ...overruled,
+    ],
   };
 };
 
@@ -753,17 +866,6 @@ export const listContested = (
 /** `?1` the memory's id: that memory, if current for the reader. */
 const currentOneSql = memoriesSql({
   base: "SELECT row FROM memories WHERE id = ?1",
-  filter: "judged.is_current = 1",
-  order: "m.row",
-});
-
-/**
- * `?1` the entity's row, `?6` the attribute: its current memories the
- * reader may read.
- */
-const currentOfAttributeSql = memoriesSql({
-  base: `SELECT row FROM memories
-    WHERE entity = ?1 AND attribute = ?6`,
   filter: "judged.is_current = 1",
   order: "m.row",
 });
