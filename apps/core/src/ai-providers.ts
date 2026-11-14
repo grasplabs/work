@@ -47,9 +47,9 @@ import {
   readModelChoice,
   readStoredChoice,
 } from "./ai-model-choice.ts";
+import { drainConnectOutboxSoon } from "./audit-drains.ts";
 import {
   auditedBatch,
-  drainConnectOutboxSoon,
   keepAuditEvent,
   outboxedIfChanged,
 } from "./audit-outbox.ts";

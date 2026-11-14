@@ -22,7 +22,7 @@ import { addMember } from "../src/app-members.ts";
 import { publishVersion } from "../src/app-publish.ts";
 import type { Release } from "../src/app-releases.ts";
 import { appFor } from "../src/apps.ts";
-import { drainAuditOutboxes } from "../src/audit-outbox.ts";
+import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import {
   addSource,
   eraseSource,

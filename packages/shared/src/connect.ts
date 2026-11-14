@@ -488,6 +488,11 @@ export interface OrganizationConnection {
 export interface ListedConnection extends ConnectionSummary {
   /** `connectedBy`'s name, while core knows them. */
   connectedByName: string | null;
+  /**
+   * The Brain keeps what agents read for the person through it (core's
+   * connection-capture.ts), and erases it when it is disconnected.
+   */
+  keepsReads?: true;
 }
 
 /**
@@ -2090,11 +2095,13 @@ export interface ConnectApi
   refuseConfirmation: (request: RefuseConfirmation) => Promise<void>;
   /**
    * The oldest audit events connect recorded that core hasn't acknowledged,
-   * in the order they were stored, at most `auditOutboxTakeMax`. Taking
-   * removes nothing: events core took but didn't acknowledge are taken
-   * again, so core appends each at least once, and the log keeps it once.
+   * but those `held` names by ID (those core holds within a drain: an
+   * erasure it could not finish yet; none by default), in the order they
+   * were stored, at most `auditOutboxTakeMax`. Taking removes nothing:
+   * events core took but didn't acknowledge are taken again, so core
+   * appends each at least once, and the log keeps it once.
    */
-  takeAuditEvents: () => Promise<OutboxedAuditEvent[]>;
+  takeAuditEvents: (held?: readonly string[]) => Promise<OutboxedAuditEvent[]>;
   /**
    * Settles taken events by ID: removes those core appended to the audit
    * log, and moves those the log can't take to `audit_outbox_rejected`,
