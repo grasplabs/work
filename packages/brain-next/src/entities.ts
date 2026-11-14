@@ -247,20 +247,30 @@ LIMIT ?5`;
 
 /**
  * `?1` the entities asked (JSON rows), `?4` the moment read at: each
- * one's earliest name a memory the reader may read, learned by then, gave (by when that memory was learned, then its
- * id), or null.
+ * one's earliest name a memory the reader may read, learned by then, gave
+ * (by when that memory was learned, then its id), with the source and
+ * version that memory rests on (`[name, source, version]`, both null for
+ * a writer's word), or null.
  */
 const firstNameSql = `
 WITH ${readableSql}
 SELECT asked.value AS entity, (
-  SELECT entity_names.value FROM entity_names
+  SELECT json_array(entity_names.value, m.source, m.version)
+  FROM entity_names
   CROSS JOIN memories AS m ON m.row = entity_names.memory
   WHERE entity_names.entity = asked.value AND entity_names.type = 'name'
     AND m.learned_at <= ?4 AND ${visibleSql("m")}
   ORDER BY m.learned_at, m.id, entity_names.folded
   LIMIT 1
-) AS name
+) AS named
 FROM json_each(?1) AS asked`;
+
+/** A name `firstNameSql` gave: the name, and the source and version it rests on. */
+const namedSchema = z.tuple([
+  z.string(),
+  z.string().nullable(),
+  z.number().nullable(),
+]);
 
 /** Entities found, as the reader sees them: with the earliest name they may see. */
 export const asSeen = (
@@ -274,7 +284,7 @@ export const asSeen = (
   }
   const names = new Map(
     sql
-      .exec<{ entity: number; name: string | null }>(
+      .exec<{ entity: number; named: string | null }>(
         firstNameSql,
         JSON.stringify(found.map(({ row }) => row)),
         reader.person,
@@ -282,13 +292,21 @@ export const asSeen = (
         at
       )
       .toArray()
-      .map(({ entity, name }) => [entity, name])
+      .map(({ entity, named }) => [
+        entity,
+        named === null ? null : namedSchema.parse(JSON.parse(named)),
+      ])
   );
-  return found.map(({ row, id, kind }) => ({
-    id,
-    kind: kindSchema.parse(kind),
-    name: names.get(row) ?? null,
-  }));
+  return found.map(({ row, id, kind }) => {
+    const [name = null, source = null, version = null] = names.get(row) ?? [];
+    return {
+      id,
+      kind: kindSchema.parse(kind),
+      name,
+      nameFrom:
+        source === null || version === null ? null : { source, version },
+    };
+  });
 };
 
 /**

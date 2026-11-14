@@ -98,7 +98,7 @@ export interface HttpClient<Actions extends readonly string[]> {
 /** Each of the Brain's operations, as a member of `ctx.brain` calls it. */
 interface BrainCalls {
   /**
-   * What everyone in the company may read that answers
+   * What the person the call acts for may read that answers
    * `request.question`, within its budget: the same pack a workflow's
    * step and a chat's code get.
    */

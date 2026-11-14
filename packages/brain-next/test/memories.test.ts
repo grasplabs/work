@@ -503,6 +503,35 @@ describe("who may read a memory", () => {
     ).resolves.toBeNull();
   });
 
+  // Threat 1, for names: what an entity's name rests on is said, so a host
+  // that hands the name on can keep it as it keeps a memory's version.
+  it("says which version of a source an entity's name rests on, and none for a writer's word", async () => {
+    const group = unique("group");
+    const reader = readerOf(unique("reader"), group);
+    const version = await addSource("Acme is in Rotterdam", audience(group));
+    const drawn = await remember(
+      audience(group),
+      [customer({ names: [unique("Acme")] })],
+      [fact({ kind: "source", ...version, quote: "Acme is in Rotterdam" })]
+    );
+    const written = await remember(
+      audience(group),
+      [customer({ names: [unique("Globex")] })],
+      [fact({ kind: "writer", writer: unique("w") })]
+    );
+
+    const [fromSource, fromWriter] = await Promise.all(
+      [drawn, written].map(
+        async ({ entities }) =>
+          await shared().readEntity({ entity: entities.c ?? "", reader })
+      )
+    );
+    expect({
+      fromSource: fromSource?.nameFrom,
+      fromWriter: fromWriter?.nameFrom,
+    }).toStrictEqual({ fromSource: version, fromWriter: null });
+  });
+
   // Threat 3: a newer memory ends an older one only for those who may read it.
   it("stays current for a reader who can't read the memory that ended it", async () => {
     const left = unique("left");
@@ -581,7 +610,9 @@ describe("who may read a memory", () => {
         identifier: { type: "email", value: email.toUpperCase() },
       })
     ).resolves.toStrictEqual({
-      entities: [{ id: first.entities.p, kind: "person", name: "Anna" }],
+      entities: [
+        { id: first.entities.p, kind: "person", name: "Anna", nameFrom: null },
+      ],
       more: false,
     });
     await expect(

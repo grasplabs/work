@@ -3,7 +3,10 @@ import type { FunctionResult } from "@grasp-os/shared/functions";
 import { teamIdSchema } from "@grasp-os/shared/ids";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
-import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
+import type {
+  WorkflowCandidateRun,
+  WorkflowResourceRun,
+} from "@grasp-os/shared/workflow-resources";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -22,8 +25,13 @@ import { rollback } from "../src/publish.ts";
 import { approveResourceBinding } from "../src/resource-bindings.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
+import { editWorkflowDraft, workflowDraft } from "../src/workflow-editor.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
+import {
+  candidateRunFor,
+  startCandidateRun,
+} from "../src/workflows/candidate-runs.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { testApp } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
@@ -421,12 +429,18 @@ const entitiesWorkflow = async (by: Member, admin: Member) => {
       },
       returns: {
         kind: "object",
-        fields: { name: { kind: "string" }, found: { kind: "number" } },
+        fields: {
+          name: { kind: "string" },
+          found: { kind: "number" },
+          handed: { kind: "string" },
+        },
       },
       result: {
         // The card it read: none for an entity it may not see.
         name: { $expr: 'card?.entity.name ?? ""' },
         found: { $expr: "found.entities.length" },
+        // All it was handed, names included, passed on whole.
+        handed: { $expr: "JSON.stringify([card, found])" },
       },
       permissions: { brain: { docs: { contract: key } } },
       steps: [
@@ -500,6 +514,65 @@ const recordOf = async (by: Member, id: string, runId: string) => {
   };
 };
 
+/**
+ * An entity of `kind` named `name` by one memory alone: one resting on
+ * `source`'s first version, or in `writer`'s own word. Its id and memory's.
+ */
+const namedBy = async (
+  kind: "customer" | "project" | "supplier",
+  name: string,
+  basis: { source: SourceRef } | { writer: string }
+): Promise<{ entity: string; memory: string }> => {
+  const statement = `${name} is known here`;
+  const added = await store().addMemories({
+    change: crypto.randomUUID(),
+    access: { kind: "audience", group: "company" },
+    entities: [{ key: "e", kind, names: [name] }],
+    memories: [
+      {
+        about: "e",
+        type: "fact",
+        statement,
+        speaker: { kind: "system" },
+        basis:
+          "writer" in basis
+            ? { kind: "writer", writer: basis.writer }
+            : {
+                kind: "source",
+                source: `${basis.source.producer}:${basis.source.id}`,
+                version: 1,
+                quote: statement,
+              },
+      },
+    ],
+  });
+  return { entity: added.entities.e ?? "", memory: added.memories[0] ?? "" };
+};
+
+/** What `by` sees of run `runId` of `id`: its status, its error's code, and which of `names` its result shows. */
+const showsOf = async (
+  by: Member,
+  id: string,
+  runId: string,
+  names: readonly string[]
+) => {
+  const { status, result, error } = await recordOf(by, id, runId);
+  return {
+    status,
+    error,
+    shows: names.filter((name) => JSON.stringify(result).includes(name)),
+  };
+};
+
+/** A card of `entity` and nothing else, as a test run's fixture answers one. */
+const cardOf = (entity: Record<string, unknown>) => ({
+  entity,
+  attributes: [],
+  relations: [],
+  notes: [],
+  next: null,
+});
+
 describe("entities, as a workflow reads them", setUpTime, () => {
   it("reads a card and finds entities in a run as the company may, and withholds its result once a source the card rests on is erased", async () => {
     const admin = await person("admin");
@@ -534,12 +607,12 @@ describe("entities, as a workflow reads them", setUpTime, () => {
     }).toStrictEqual({
       before: {
         status: "completed",
-        result: { name, found: 1 },
+        result: { name, found: 1, handed: someText },
         error: null,
       },
       unseen: {
         status: "completed",
-        result: { name: "", found: 0 },
+        result: { name: "", found: 0, handed: someText },
         error: null,
       },
       afterErasure: {
@@ -547,6 +620,188 @@ describe("entities, as a workflow reads them", setUpTime, () => {
         result: null,
         error: "brain.revoked",
       },
+    });
+  });
+
+  it("keeps every name a run is handed with the run: a related entity's and one found, each withheld once the source that named it is erased; a name in a person's own word stands once its memory is retired", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const workflow = await entitiesWorkflow(ada, admin);
+    const [related, found, card] = [
+      `Falcon ${unique()}`,
+      `Supplyco ${unique()}`,
+      `Acme ${unique()}`,
+    ];
+    // A project named only by a memory of its own source, which a
+    // customer's relation, from another source, points to.
+    const projectSource = await sourceForEveryone(`${related} is a project.`);
+    const project = await namedBy("project", related, {
+      source: projectSource,
+    });
+    const relationSource = await sourceForEveryone(`${card} works on it.`);
+    await store().addMemories({
+      change: crypto.randomUUID(),
+      access: { kind: "audience", group: "company" },
+      entities: [
+        { key: "c", kind: "customer", names: [card] },
+        { key: "p", id: project.entity, kind: "project" },
+      ],
+      memories: [
+        {
+          about: "c",
+          object: "p",
+          type: "fact",
+          statement: `${card} works on it`,
+          speaker: { kind: "system" },
+          basis: {
+            kind: "source",
+            source: `upload:${relationSource.id}`,
+            version: 1,
+            quote: `${card} works on it`,
+          },
+        },
+      ],
+    });
+    const customer = z
+      .object({ entities: z.array(z.object({ id: z.string() })) })
+      .parse(
+        await store().findEntities({
+          reader: { person: null, groups: ["company"] },
+          name: card,
+        })
+      ).entities[0]?.id;
+    // A supplier named only by its own source, which a run finds.
+    const foundSource = await sourceForEveryone(`${found} supplies us.`);
+    await namedBy("supplier", found, { source: foundSource });
+    // A customer named only in Ada's own word.
+    const said = `Initech ${unique()}`;
+    const inHerWord = await namedBy("customer", said, { writer: ada.userId });
+
+    const runs = {
+      relation: await endedRun(ada, workflow.id, {
+        entity: customer ?? "",
+        name: card,
+      }),
+      found: await endedRun(ada, workflow.id, {
+        entity: crypto.randomUUID(),
+        name: found,
+      }),
+      said: await endedRun(ada, workflow.id, {
+        entity: inHerWord.entity,
+        name: said,
+      }),
+    };
+    const names = [related, found, said];
+    const before = {
+      relation: await showsOf(ada, workflow.id, runs.relation, names),
+      found: await showsOf(ada, workflow.id, runs.found, names),
+      said: await showsOf(ada, workflow.id, runs.said, names),
+    };
+    await eraseSource(env, {
+      source: projectSource,
+      readers: { kind: "none" },
+      reason: "deleted",
+    });
+    await eraseSource(env, {
+      source: foundSource,
+      readers: { kind: "none" },
+      reason: "deleted",
+    });
+    const retired = await store().retireMemory({
+      memory: inHerWord.memory,
+      reader: { person: ada.userId, groups: ["company"] },
+    });
+
+    expect({
+      before,
+      retired,
+      after: {
+        relation: await showsOf(admin, workflow.id, runs.relation, names),
+        found: await showsOf(admin, workflow.id, runs.found, names),
+        said: await showsOf(admin, workflow.id, runs.said, names),
+      },
+    }).toStrictEqual({
+      before: {
+        relation: { status: "completed", error: null, shows: [related] },
+        found: { status: "completed", error: null, shows: [found] },
+        said: { status: "completed", error: null, shows: [said] },
+      },
+      retired: "done",
+      after: {
+        relation: { status: "completed", error: "brain.revoked", shows: [] },
+        found: { status: "completed", error: "brain.revoked", shows: [] },
+        // A retired memory stays as history and still names its entity
+        // for everyone who may read it: nothing a run passed on is now
+        // hidden from them.
+        said: { status: "completed", error: null, shows: [said] },
+      },
+    });
+  });
+
+  it("refuses a test run's card that carries what a name rests on, as a real answer that did would be", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const key = `brain-${unique()}`;
+    await publishCatalogContract(env, admin, { key, kind: "brain" });
+    const workflow = await createWorkflowResource(env, ada, `card-${unique()}`);
+    const { revision: base } = await workflowDraft(env, ada, workflow.id);
+    const saved = await editWorkflowDraft(env, ada, workflow.id, {
+      revision: base,
+      source: JSON.stringify({
+        $schema: workflowSchemaUrl,
+        args: { kind: "object", fields: {} },
+        returns: { kind: "object", fields: { name: { kind: "string" } } },
+        result: { name: { $expr: 'card?.entity.name ?? ""' } },
+        permissions: { brain: { docs: { contract: key } } },
+        steps: [
+          {
+            id: "card",
+            type: "call",
+            brain: "docs",
+            action: "entities.get",
+            args: { entity: crypto.randomUUID() },
+          },
+        ],
+      }),
+    });
+    expect(saved.problems).toStrictEqual([]);
+    const entity = {
+      id: crypto.randomUUID(),
+      kind: "customer",
+      name: "Acme",
+    } as const;
+    const ran = async (answer: unknown) => {
+      const { runId } = await startCandidateRun(env, ada, workflow.id, {
+        revision: saved.revision,
+        args: {},
+        fixtures: { docs: { result: answer } },
+      });
+      const run: WorkflowCandidateRun = await vi.waitFor(
+        async () => {
+          const read = await candidateRunFor(env, ada, workflow.id, runId);
+          if (read.status === "starting" || read.status === "running") {
+            throw new Error(`Test run ${runId} is ${read.status}`);
+          }
+          return read;
+        },
+        { timeout: 20_000, interval: 100 }
+      );
+      return run.status === "completed"
+        ? { status: run.status, result: run.result }
+        : { status: run.status, code: run.error?.code };
+    };
+
+    expect({
+      plain: await ran(cardOf(entity)),
+      carrying: await ran(
+        cardOf({
+          ...entity,
+          nameFrom: { source: { producer: "upload", id: "u" }, version: 1 },
+        })
+      ),
+    }).toStrictEqual({
+      plain: { status: "completed", result: { name: "Acme" } },
+      carrying: { status: "failed", code: "workflow.call_invalid" },
     });
   });
 });

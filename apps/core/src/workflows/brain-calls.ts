@@ -16,7 +16,7 @@ import {
 import {
   entitiesCallFor,
   isBrainRecall,
-  isEntitiesRequest,
+  isCodeEntitiesRequest,
   recallFor,
   skillsCallFor,
 } from "../brain-recall.ts";
@@ -35,8 +35,9 @@ import { recordRunVersions } from "./run-evidence.ts";
 // everyone in the company may read: the same request, checks and pack as
 // an App's action (threat model on GRA-1731). What it hands the run is pinned with the run
 // (run-evidence.ts). Its entities (`entities.get`, `entities.find`) are an
-// App's too (threat model on GRA-1837): read as the company alone, a
-// card's versions pinned with the run as a pack's are.
+// App's too (threat model on GRA-1837): read as the company alone, the
+// versions a card's memories and every name handed on rest on pinned with
+// the run as a pack's are.
 
 /** A brain call, as a run's step asks it. */
 export interface BrainCall {
@@ -63,12 +64,12 @@ const requests: Readonly<
       "arguments: Give a skill as a selection gave it: its scope, name and version.",
   },
   "entities.get": {
-    valid: (input) => isEntitiesRequest("entities.get", input),
+    valid: (input) => isCodeEntitiesRequest("entities.get", input),
     issue:
       "arguments: Give the entity's id, and asOf (an ISO 8601 date-time with its offset) and after (a page's next) if any.",
   },
   "entities.find": {
-    valid: (input) => isEntitiesRequest("entities.find", input),
+    valid: (input) => isCodeEntitiesRequest("entities.find", input),
     issue:
       "arguments: Give a kind, a name or an identifier, and after (a page's next) if any.",
   },

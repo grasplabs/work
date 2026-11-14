@@ -60,6 +60,7 @@ expectTypeOf<Exclude<keyof BrainRecall, "asOf">>().toEqualTypeOf<
 expectTypeOf<Request["asOf"]>().toEqualTypeOf<Date | undefined>();
 
 // Entities, as code reads them: the Brain's kinds, and an entity as the
-// Brain gives one, its ID, kind and earliest name.
+// Brain gives one, its ID, kind and earliest name; what that name rests on
+// (`nameFrom`) stays the host's.
 expectTypeOf<BrainEntityKind>().toEqualTypeOf<EntityKind>();
-expectTypeOf<Mutable<BrainEntity>>().toEqualTypeOf<Entity>();
+expectTypeOf<Mutable<BrainEntity>>().toEqualTypeOf<Omit<Entity, "nameFrom">>();

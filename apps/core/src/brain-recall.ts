@@ -32,6 +32,7 @@ import type {
   CardMemory,
   CodeEntitiesOperation,
   CompanyCard,
+  CompanyEntity,
   SkillAt,
   SkillVersionRef,
   SourceVersionRef,
@@ -390,25 +391,22 @@ export const skillsCallFor = async (
 // - Audited once, before it answers, with ids and counts alone: never a
 //   name, a statement or a cursor. An entity the company may not see is
 //   answered as one nobody holds.
+// - What it hands over rests on source versions: a card's memories, and
+//   every entity's name, the card's own, each related one's and each one
+//   found. The caller keeps them all before it gets the answer (a run's
+//   pins), and code never sees them.
 
-/** What code asks of the Brain's entities: `ctx.brain.entities.<name>`. */
-export type EntitiesOperation = CodeEntitiesOperation;
+// What a workflow's test run checks a request with before it answers from
+// its fixtures (workflows/brain-calls.ts), which reaches brain-next.ts
+// only through this module.
+export { isCodeEntitiesRequest } from "./brain-next.ts";
 
-/**
- * Whether `input` is a request code may make of `operation`, as
- * `entitiesCallFor` takes it: what a workflow's test run checks before it
- * answers from its fixtures.
- */
-export const isEntitiesRequest = (
-  operation: EntitiesOperation,
-  input: unknown
-): boolean => isCodeEntitiesRequest(operation, input);
-
-/** Who reads the Brain's entities: a recall's caller, keeping what a card rests on. */
+/** Who reads the Brain's entities: a recall's caller, keeping what it is handed rests on. */
 export interface EntitiesCaller extends Omit<RecallCaller, "keep" | "reach"> {
   /**
-   * What the caller keeps of the versions a card's memories rest on,
-   * before it gets them: a run's pins, as a recall's.
+   * What the caller keeps of the versions what it is handed rests on (a
+   * card's memories, every entity's name), before it gets them: a run's
+   * pins, as a recall's.
    */
   readonly keep?: (versions: readonly SourceVersionRef[]) => Promise<void>;
 }
@@ -445,10 +443,14 @@ const codeMemoryOf = (memory: CardMemory) =>
     contested: memory.contested,
   }) satisfies BrainMemory;
 
+/** An entity as code is handed it (`BrainEntity`): never what its name rests on. */
+const codeEntityOf = ({ id, kind, name }: CompanyEntity) =>
+  ({ id, kind, name }) satisfies BrainEntity;
+
 /** A card as code is handed it (`BrainCard`), as JSON. */
 const codeCardOf = (card: CompanyCard) =>
   ({
-    entity: card.entity,
+    entity: codeEntityOf(card.entity),
     attributes: card.attributes.map(({ attribute, memories, contested }) => ({
       attribute,
       memories: memories.map((memory) => codeMemoryOf(memory)),
@@ -457,28 +459,39 @@ const codeCardOf = (card: CompanyCard) =>
     relations: card.relations.map(({ attribute, side, other, memory }) => ({
       attribute,
       side,
-      other,
+      other: codeEntityOf(other),
       memory: codeMemoryOf(memory),
     })),
     notes: card.notes.map((memory) => codeMemoryOf(memory)),
     next: card.next,
   }) satisfies BrainCard;
 
-/** The versions the memories of `card` rest on, each once. */
-const versionsOf = (card: CompanyCard): SourceVersionRef[] => {
-  const all = [
-    ...card.attributes.flatMap(({ memories }) => memories),
-    ...card.relations.map(({ memory }) => memory),
-    ...card.notes,
-  ];
+/** `versions`, each once, none for what rests on a writer's word. */
+const eachOnce = (
+  versions: readonly (SourceVersionRef | null)[]
+): SourceVersionRef[] => {
   const seen = new Map<string, SourceVersionRef>();
-  for (const { source } of all) {
-    if (source !== null) {
-      seen.set(JSON.stringify([source.source, source.version]), source);
+  for (const version of versions) {
+    if (version !== null) {
+      seen.set(JSON.stringify([version.source, version.version]), version);
     }
   }
   return [...seen.values()];
 };
+
+/** The versions `card` rests on: its memories', and every entity's name's on it. */
+const versionsOf = (card: CompanyCard): SourceVersionRef[] =>
+  eachOnce([
+    ...card.attributes.flatMap(({ memories }) =>
+      memories.map(({ source }) => source)
+    ),
+    ...card.relations.flatMap(({ memory, other }) => [
+      memory.source,
+      other.nameFrom,
+    ]),
+    ...card.notes.map(({ source }) => source),
+    card.entity.nameFrom,
+  ]);
 
 /** The memories on `card`, counted. */
 const memoriesOn = (card: CompanyCard): number =>
@@ -491,7 +504,7 @@ const memoriesOn = (card: CompanyCard): number =>
 const readFor = async (
   env: Env,
   caller: EntitiesCaller,
-  operation: EntitiesOperation,
+  operation: CodeEntitiesOperation,
   input: unknown
 ): Promise<{
   answer: Json;
@@ -511,11 +524,11 @@ const readFor = async (
     };
   }
   const page = await companyEntitiesAs(env, person, input);
+  // The names it hands on, pinned with the run as a card's are.
+  await caller.keep?.(eachOnce(page.entities.map(({ nameFrom }) => nameFrom)));
   return {
     answer: {
-      entities: page.entities.map(
-        ({ id, kind, name }) => ({ id, kind, name }) satisfies BrainEntity
-      ),
+      entities: page.entities.map((entity) => codeEntityOf(entity)),
       next: page.next,
     },
     detail: { entities: page.entities.length },
@@ -534,7 +547,7 @@ const readFor = async (
 export const entitiesCallFor = async (
   env: Env,
   caller: EntitiesCaller,
-  operation: EntitiesOperation,
+  operation: CodeEntitiesOperation,
   input: unknown
 ): Promise<Json> => {
   const asked: Record<string, string | null> =

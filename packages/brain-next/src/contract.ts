@@ -2241,6 +2241,13 @@ export interface Entity {
   id: EntityId;
   kind: EntityKind;
   name: string | null;
+  /**
+   * The source version the memory that gave `name` rests on: null for a
+   * name in a writer's own word, and for none. For the host to keep with
+   * what it hands on, as it keeps the versions memories rest on (a run's
+   * pins); the host never shows it to anyone who reads the entity.
+   */
+  nameFrom: SourceVersionRef | null;
 }
 
 /** A name or an exact identifier of an entity, as a memory gave it. */

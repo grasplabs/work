@@ -4079,8 +4079,9 @@ const liveNamed = async (
   env: BrainEnv,
   reader: PersonReader,
   store: MemoryStoreName,
-  entity: Entity
+  { nameFrom: _nameFrom, ...entity }: Entity
 ): Promise<StoredEntity> => {
+  // What the name rests on is the host's to keep, never the page's.
   const plain = { store, ...entity, unreadable: false };
   if (store !== "own" || entity.name !== null) {
     return plain;
@@ -4464,9 +4465,6 @@ const refusedAs = (error: unknown): unknown => {
     : error;
 };
 
-/** Most characters of a page's cursor as code holds it: well past any the store gives. */
-const cursorTextMax = 2000;
-
 /**
  * Where a page ended, as code holds it: the store's cursor as JSON, in
  * base64, which code passes back untouched and the store checks again.
@@ -4485,7 +4483,7 @@ const cursorMoments = ["at", "learned", "learnedAt"] as const;
 const cursorOfText = <T>(schema: z.ZodType<T>, text: string): T => {
   let read: unknown;
   try {
-    read = JSON.parse(atob(checked(z.string().max(cursorTextMax), text)));
+    read = JSON.parse(atob(text));
   } catch {
     throw brainSourceErrors.create("brain.request_invalid");
   }
@@ -4519,9 +4517,27 @@ export interface CardMemory extends Omit<Memory, "source"> {
   source: SourceVersionRef | null;
 }
 
+/**
+ * An entity as code reads it, with the source version its name rests on
+ * as core names sources (`nameFrom`): core's to keep with a run, never
+ * code's to see.
+ */
+export interface CompanyEntity {
+  id: EntityId;
+  kind: EntityKind;
+  name: string | null;
+  nameFrom: SourceVersionRef | null;
+}
+
+/** `entity` with what its name rests on as core names it. */
+const companyEntityOf = ({ nameFrom, ...entity }: Entity): CompanyEntity => ({
+  ...entity,
+  nameFrom: versionRefOf(nameFrom),
+});
+
 /** A page of an entity's card as code reads it: the store's, memories cited as core names sources. */
 export interface CompanyCard {
-  entity: { id: EntityId; kind: EntityKind; name: string | null };
+  entity: CompanyEntity;
   attributes: {
     attribute: string;
     memories: CardMemory[];
@@ -4530,7 +4546,7 @@ export interface CompanyCard {
   relations: {
     attribute: string | null;
     side: "about" | "object";
-    other: { id: EntityId; kind: EntityKind; name: string | null };
+    other: CompanyEntity;
     memory: CardMemory;
   }[];
   notes: CardMemory[];
@@ -4575,13 +4591,14 @@ export const companyCardAs = async (
     return null;
   }
   return {
-    entity: card.entity,
+    entity: companyEntityOf(card.entity),
     attributes: card.attributes.map(({ memories, ...attribute }) => ({
       ...attribute,
       memories: memories.map((memory) => cardMemoryOf(memory)),
     })),
-    relations: card.relations.map(({ memory, ...relation }) => ({
+    relations: card.relations.map(({ memory, other, ...relation }) => ({
       ...relation,
+      other: companyEntityOf(other),
       memory: cardMemoryOf(memory),
     })),
     notes: card.notes.map((memory) => cardMemoryOf(memory)),
@@ -4604,7 +4621,7 @@ const codeFindSchema = z
 
 /** A page of entities as code reads it. */
 interface CompanyEntities {
-  entities: { id: EntityId; kind: EntityKind; name: string | null }[];
+  entities: CompanyEntity[];
   next: string | null;
 }
 
@@ -4635,7 +4652,10 @@ export const companyEntitiesAs = async (
   } catch (error) {
     throw refusedAs(error);
   }
-  return { entities: page.entities, next: cursorTextOf(page.next) };
+  return {
+    entities: page.entities.map((each) => companyEntityOf(each)),
+    next: cursorTextOf(page.next),
+  };
 };
 
 /** What code asks of the Brain's entities, beside recall, by operation. */
