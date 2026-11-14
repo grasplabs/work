@@ -226,6 +226,14 @@ const onList = async (sql: string, ...values: unknown[]) =>
     state.storage.sql.exec(sql, ...values).toArray()
   );
 
+/**
+ * The events someone's action wrote, leaving out the background work the
+ * system does meanwhile on the one shared log (an earlier test's onboarding
+ * drawing, say): what a refusal must not have recorded.
+ */
+const byPeople = (events: readonly AuditEvent[]): AuditEvent[] =>
+  events.filter(({ actor }) => actor.type !== "system");
+
 /** What a link's page gets opening it with `secret`: open, or the refusal. */
 const sessionWith = async (secret: string): Promise<string> => {
   const response = await routed(interviewApiPath, {
@@ -697,7 +705,7 @@ describe("erasing a person", () => {
         "role.forbidden",
       ]);
     });
-    expect(audited).toStrictEqual([]);
+    expect(byPeople(audited)).toStrictEqual([]);
     await expect(emailOf(person.userId)).resolves.toBe(
       String(person.person.email)
     );
@@ -734,7 +742,7 @@ describe("erasing a person", () => {
         "member.erase_name_mismatch",
       ]);
     });
-    expect(audited).toStrictEqual([]);
+    expect(byPeople(audited)).toStrictEqual([]);
     await expect(emailOf(person.userId)).resolves.toBe(
       String(person.person.email)
     );
@@ -1287,6 +1295,14 @@ describe("erasing a person", () => {
   });
 
   it("deletes their interview, found on the list by the address that was theirs, closes their link, and leaves their entry and everyone else's", async () => {
+    // A referral is due as soon as it is made: the store's own alarm, armed
+    // half a second on by the list and the erasure, would draw the ones
+    // below and drop them, as neither names work to put right. The test
+    // reads them before any drawing (holdAlarm).
+    await holdAlarm();
+    onTestFinished(() => {
+      vi.restoreAllMocks();
+    });
     const { admin, person } = await removedPerson();
     const { theirs, others, theirSecret, otherSecret } = await onTheList(
       String(person.person.email)
@@ -1308,14 +1324,15 @@ describe("erasing a person", () => {
     };
     await queue(theirs);
     await queue(others);
-    // A referral each, still to be made: who does what put right from what
-    // they agreed to. A referral row names only the person who made it.
+    // A referral each, still to be drawn: who does what put right from what
+    // they agreed to. A referral row names only the person who made it, and
+    // when.
     for (const id of [theirs, others]) {
       // oxlint-disable-next-line no-await-in-loop -- one entry at a time
       await onList(
         "INSERT INTO referrals (person, at) VALUES (?, ?)",
         id,
-        new Date(Date.now() + 86_400_000).toISOString()
+        new Date().toISOString()
       );
     }
 
