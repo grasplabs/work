@@ -134,7 +134,10 @@ const filesOf = async (
   { agent, person }: { agent: InstructionFile; person: InstructionFile }
 ): Promise<InstructionFileVersion[]> => {
   if (context.conversation === "channel") {
-    return await readInstructionFilesAs(env, member, [...companyFiles, agent]);
+    return await readInstructionFilesAs(env, member.userId, [
+      ...companyFiles,
+      agent,
+    ]);
   }
   // Theirs only where the answer reaches them alone (above).
   const own = context.personal ? [person] : [];
@@ -144,7 +147,7 @@ const filesOf = async (
   // goes on without it, as with an App that has none: refusing would end
   // the chat over a file, and tell them it exists.
   if (appId === undefined || !(await buildsApp(env, member, appId))) {
-    return await readInstructionFilesAs(env, member, [
+    return await readInstructionFilesAs(env, member.userId, [
       ...companyFiles,
       agent,
       ...own,
@@ -152,7 +155,7 @@ const filesOf = async (
   }
   return await readInstructionFilesAs(
     env,
-    member,
+    member.userId,
     [...companyFiles, agent, { scope: "app", appId }, ...own],
     appId
   );
@@ -403,7 +406,7 @@ export const instructionFileToEdit = async (
   // has just checked.
   const [found] = await readInstructionFilesAs(
     env,
-    member,
+    member.userId,
     [file],
     file.scope === "app" ? file.appId : undefined
   );

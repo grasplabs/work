@@ -1520,17 +1520,11 @@ describe(
       // Core's surfaces that read refuse the removed member as no longer
       // one before anything is read: each call is refused so, or refused
       // for its input, which is checked first. Not staff's report, which
-      // reads as no one, nor `readInstructionFilesAs`, which reads as a
-      // member its caller has checked (instruction-files.ts, whose
-      // `instructionFilesFor` is in the pass above).
+      // reads as no one.
       const answeredOrOtherwise: string[] = [];
       const neverInactive: string[] = [];
       for (const [name, probe] of reading) {
-        if (
-          !name.startsWith("core ") ||
-          name === "core brainStaffReport" ||
-          name === "core readInstructionFilesAs"
-        ) {
+        if (!name.startsWith("core ") || name === "core brainStaffReport") {
           continue;
         }
         // oxlint-disable-next-line no-await-in-loop -- one surface at a time
@@ -2252,7 +2246,11 @@ describe(
       ];
       for (const file of companyFiles) {
         // oxlint-disable-next-line no-await-in-loop -- one file at a time
-        await addedSharedFile(file, `Company instructions ${marker}`);
+        await addedSharedFile(
+          file,
+          `Company instructions ${marker}`,
+          admin.userId
+        );
       }
       const forbidden = { "the company's instruction files": marker };
       const findings: Finding[] = [];

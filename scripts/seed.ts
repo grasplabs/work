@@ -281,44 +281,6 @@ const publishSeeded = async (
 };
 
 /**
- * Brings an App seeded before it had its board, or with an older one, to
- * the seed's, published from its draft with the definition that holds
- * its table. Only the seed's own change is published: a draft with
- * anyone's changes is left alone, and so is the App, as publishing it
- * would release them.
- */
-const upgradeBoard = async (
-  owner: Session,
-  app: { id: string; name: string; currentVersion: number },
-  seed: AppSeed,
-  workflows: ReadonlyMap<string, string>
-): Promise<void> => {
-  const subject = { kind: "app", id: app.id } as const;
-  const files = await owner.api.versions.files(subject, app.currentVersion);
-  const wanted = appFiles(seed);
-  const changed = Object.fromEntries(
-    Object.entries(wanted).filter(([path, code]) => files[path] !== code)
-  );
-  if (Object.keys(changed).length === 0) {
-    return;
-  }
-  const draft = await owner.api.drafts.get(subject);
-  if (draft.changed.length > 0 || draft.definitionChanged) {
-    console.warn(
-      `${app.name} has unpublished changes in its draft: its board is left as it is.`
-    );
-    return;
-  }
-  await publishSeeded(
-    owner,
-    app.id,
-    draft.revision,
-    changed,
-    appDefinition(seed, workflows)
-  );
-};
-
-/**
  * The records of an App's board, imported by its owner while its table
  * has none.
  */
@@ -531,7 +493,12 @@ const seedApp = async (
       await seedWorkflow(workflow, seed, sessions, teams)
     );
   }
-  if (app.currentVersion === null) {
+  // Published only in the run that made it: an App there already, from
+  // an earlier run or made by someone since, keeps its code and
+  // definition (a definition built again gives its tables new IDs, which
+  // its records' store refuses), and one a stopped run left unpublished
+  // stays so. For the whole demo again, start over (see the header).
+  if (existing === undefined) {
     // Its workflows bound with it, its board's table and page, published
     // from its draft once its checks and workflow tests pass.
     const { revision } = await owner.api.drafts.get({
@@ -545,26 +512,6 @@ const seedApp = async (
       appFiles(seed),
       appDefinition(seed, workflowIds)
     );
-  } else {
-    // Its board needs the App's own files and workflow bindings: one
-    // seeded before them keeps what it has (nothing has shipped, so no
-    // seed migrates it; reset local data to seed it anew).
-    const files = await owner.api.versions.files(
-      { kind: "app", id: app.id },
-      app.currentVersion
-    );
-    if (files["grasp.config.ts"] === appFiles(seed)["grasp.config.ts"]) {
-      await upgradeBoard(
-        owner,
-        { ...app, currentVersion: app.currentVersion },
-        seed,
-        workflowIds
-      );
-    } else {
-      console.warn(
-        `${app.name} was seeded before its independent workflows: its board is left as it is. Reset local data to seed it again.`
-      );
-    }
   }
   const board = boards[seed.name];
   if (board !== undefined) {
