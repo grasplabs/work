@@ -588,7 +588,7 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
         gmailMessage(
           id,
           `Login ${marker}`,
-          `Session: Q3 planning\nCookie: theme=dark; sid=${sessionId}\nYour password: ${secret}`
+          `Session: Q3 planning\nCookie: sid=${sessionId}; theme=dark\nYour password: ${secret}`
         ),
       ],
     });

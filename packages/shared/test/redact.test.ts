@@ -18,15 +18,21 @@ const withLogin = (host: string, rest: string): string =>
 const sessionToken = "9f8e7d6c5b4a3f2e".repeat(2);
 
 /**
- * How the names `session` and `cookie` (and session ids) were redacted
- * before values after them had to start as a credential does: whatever
- * followed them, quoted or not. Frozen here as the reference the start
- * rule is held to.
+ * The named rule as it was before an ordinary word after `session` or
+ * `cookie` was kept: its pattern and its replacement, frozen here as the
+ * reference.
  */
 const redactedBefore = (text: string): string =>
   text.replaceAll(
-    /\b\w*?(?:session(?:[_-]?id)?|sessid|cookie)\\?["']?\s*[:=]\s*(?:(?<escapedQuote>\\["'])(?:(?!\k<escapedQuote>)[^\n])*\k<escapedQuote>?|(?<quote>["'])(?:\\.|(?!\k<quote>)[^\\\n])*\k<quote>?|[^\s"'&,;]+)/giu,
-    "[redacted]"
+    /\b(?<name>\w*?(?:api[_-]?key|apikey|token|secret|passwd|password|authorization|session(?:[_-]?id)?|sessid|cookie))(?<between>\\?["']?\s*[:=]\s*)(?:(?<escapedQuote>\\["'])(?:(?!\k<escapedQuote>)[^\n])*(?<escapedClose>\k<escapedQuote>)?|(?<quote>["'])(?:\\.|(?!\k<quote>)[^\\\n])*(?<close>\k<quote>)?|(?:(?:bearer|basic)\s+)?[^\s"'&,;]+)/giu,
+    (...args: unknown[]) => {
+      const groups = z
+        .record(z.string(), z.string().optional())
+        .parse(args.at(-1));
+      const quote = groups.quote ?? groups.escapedQuote ?? "";
+      const close = groups.close ?? groups.escapedClose ?? "";
+      return `${groups.name ?? ""}${groups.between ?? ""}${quote}[redacted]${close}`;
+    }
   );
 
 /** Any 8 characters of `value` still in `text`: what of it is left. */
@@ -468,7 +474,7 @@ describe("redacting credentials", () => {
     expect(texts.map(redact)).toStrictEqual(texts);
   });
 
-  it("redacts a session token, or a cookie string to its end, after session and cookie", () => {
+  it("redacts a session value after session and cookie however it is written, and a cookie's first pair", () => {
     const jwt = [
       "eyJhbGciOiJIUzI1NiJ9",
       "eyJzdWIiOiJiZW4ifQ",
@@ -476,44 +482,54 @@ describe("redacting credentials", () => {
     ].join(".");
     expect(
       [
-        `Cookie: theme=dark; sid=${sessionToken}; _ga=GA1.2.3`,
-        `Set-Cookie: sid=${sessionToken}; Path=/; Expires=Wed, 21 Oct 2026 07:28:00 GMT; HttpOnly`,
+        `Cookie: sid=${sessionToken}; theme=dark`,
+        `Set-Cookie: sid=${sessionToken}; Path=/; HttpOnly`,
         `session=${sessionToken}&next=/home`,
         `session: ${jwt}`,
         `{\\"cookie\\":\\"sid=${sessionToken}\\",\\"n\\":1}`,
         `laravel_session=${sessionToken}`,
         `authCookie: '${sessionToken}'`,
-        `cookie: \`theme=dark; sid=${sessionToken}\``,
-        // A known format that matches only the start of the value.
+        `session: \`${sessionToken}\``,
+        // A known format that redacted the start of the value, or a part.
         `session=${jwt}%3D%3D--abcdef0123456789`,
         `session=${jwt}+rest/of==`,
         `cookie: ${jwt}*sealpart`,
+        `session=v1.${jwt}%3D%3D--${sessionToken}`,
+        // In JSON text, a `/` written `\/`.
+        `{"header":"Cookie: sid=${sessionToken}\\/${sessionToken}"}`,
       ].map(redact)
     ).toStrictEqual([
-      "Cookie: [redacted]",
-      "Set-Cookie: [redacted]",
+      "Cookie: [redacted]; theme=dark",
+      "Set-Cookie: [redacted]; Path=/; HttpOnly",
       "session=[redacted]&next=/home",
       "session: [redacted]",
       String.raw`{\"cookie\":\"[redacted]\",\"n\":1}`,
       "laravel_session=[redacted]",
       "authCookie: '[redacted]'",
-      "cookie: [redacted]",
+      "session: [redacted]",
       "session=[redacted]",
       "session=[redacted]",
       "cookie: [redacted]",
+      "session=[redacted]",
+      '{"header":"Cookie: [redacted]"}',
     ]);
   });
 
   it("never leaves what was redacted after session and cookie, but for the classes it names, and leaves prose as it was", () => {
     const leaking = new Set<string>();
     const referenceLeft: string[] = [];
+    const partly: string[] = [];
     for (const [label, value] of Object.entries(sessionValues)) {
       for (const name of sessionNames) {
         for (const context of contexts) {
           const text = context(name, value);
-          if (leftOf(redactedBefore(text), value) !== undefined) {
+          const before = redactedBefore(text);
+          const after = redact(text);
+          if (leftOf(before, value) !== undefined) {
             referenceLeft.push(text);
-          } else if (leftOf(redact(text), value) !== undefined) {
+          } else if (after !== before && !after.includes(value)) {
+            partly.push(text);
+          } else if (leftOf(after, value) !== undefined) {
             leaking.add(`${label} ${name}`);
           }
         }
@@ -540,11 +556,15 @@ describe("redacting credentials", () => {
       // The reference redacts every value in every context, so a leak
       // below is one it never had.
       referenceLeft,
+      // Where the output is not the reference's, the value is kept whole,
+      // as it was written: never redacted in part.
+      partly,
       leaking: [...leaking],
       changed: [...changed],
     }).toStrictEqual({
       uniform: [],
       referenceLeft: [],
+      partly: [],
       // "Not caught" in src/redact.ts, each class by one value, after
       // each everyday name.
       leaking: ["short", "expressDecoded", "userColon", "bottle"].flatMap(
