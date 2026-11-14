@@ -3962,19 +3962,22 @@ export class Onboarding extends DurableObject<Env> {
    * given again once drawn again. The brain first: when that fails,
    * nothing here has changed, and running the purge again finds the
    * readings still here. In the audit log by counts alone. Within
-   * `#withBrain`, so no intake lands between. Returns how many readings
-   * it forgot.
+   * `#withBrain`, so no intake lands between; answered 0 at once, without
+   * waiting for one, when none of `ids` is a shared document's. With
+   * `sharedBy`, only the documents that person shared: their file's
+   * upload deleted (brain-uploads.ts). Returns how many readings it
+   * forgot.
    */
   async forgetDocuments(
     ids: readonly string[],
-    by: AuditActor
+    by: AuditActor,
+    sharedBy?: string
   ): Promise<number> {
+    if (this.#documentsAmong(ids, sharedBy).length === 0) {
+      return 0;
+    }
     return await this.#withBrain(async () => {
-      const rows = this.#db
-        .select({ id: documents.id, at: documents.at })
-        .from(documents)
-        .where(inList(documents.id, ids))
-        .all();
+      const rows = this.#documentsAmong(ids, sharedBy);
       const [first] = rows.map(({ at }) => at).toSorted();
       if (first === undefined) {
         return 0;
@@ -4038,6 +4041,28 @@ export class Onboarding extends DurableObject<Env> {
       await this.#armDrawing();
       return rows.length;
     });
+  }
+
+  /** Which of `ids` are shared documents, of `sharedBy` when given, and when each was shared. */
+  #documentsAmong(
+    ids: readonly string[],
+    sharedBy: string | undefined
+  ): { id: string; at: string }[] {
+    return this.#db
+      .select({ id: documents.id, at: documents.at })
+      .from(documents)
+      .where(
+        and(
+          inList(documents.id, ids),
+          sharedBy === undefined
+            ? undefined
+            : inList(documents.by, [
+                whoIs({ type: "person", userId: sharedBy }),
+                whoIs({ type: "staff", userId: sharedBy }),
+              ])
+        )
+      )
+      .all();
   }
 
   /** The shared documents' ids: what a drawing has for context as it starts. */

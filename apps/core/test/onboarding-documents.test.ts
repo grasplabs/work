@@ -649,12 +649,85 @@ describe(
         between,
         listed: await listed(admin.api, shared.name),
         named: await uploadNamed(shared.id),
+        events: await uploadEvents(shared.id),
       }).toStrictEqual({
         first: "Error: forgetDocuments refused by the test",
         between: { listed: true, named: true },
         listed: false,
         named: false,
+        events: [
+          "brain.upload.added",
+          "brain.upload.delete_failed",
+          "brain.upload.deleted",
+        ],
       });
+    });
+
+    it("fails recorded for any upload of one person's own while the onboarding is out of reach, and a second delete finishes", async () => {
+      const member = await signedInApi(idp, "user");
+      const id = crypto.randomUUID();
+      await member.api.brainSources.upload(
+        { name: "Diary.docx", bytes: fileWith(markerOf("diary")) },
+        { kind: "me" },
+        id
+      );
+      const first = await outcome(
+        deleteBrainUpload(
+          envWith("ONBOARDING", refusing(env.ONBOARDING, "forgetDocuments")),
+          await member.api.whoami(),
+          id
+        )
+      );
+      const between = {
+        named: await uploadNamed(id),
+        events: await uploadEvents(id),
+      };
+      await member.api.brainSources.deleteUpload(id);
+      expect({
+        first,
+        between,
+        named: await uploadNamed(id),
+        events: await uploadEvents(id),
+      }).toStrictEqual({
+        first: "Error: forgetDocuments refused by the test",
+        between: {
+          named: true,
+          events: ["brain.upload.added", "brain.upload.delete_failed"],
+        },
+        named: false,
+        events: [
+          "brain.upload.added",
+          "brain.upload.delete_failed",
+          "brain.upload.deleted",
+        ],
+      });
+    });
+
+    it("forgets a reading only for the admin who shared it", async () => {
+      const [sharer, other] = await Promise.all([
+        signedInApi(idp, "admin"),
+        signedInApi(idp, "admin"),
+      ]);
+      const shared = await shareAs(sharer, markerOf("whose"));
+      const store = onboardingStore(env);
+      const system = { type: "system" } as const;
+      const notTheirs = await store.forgetDocuments(
+        [shared.id],
+        system,
+        other.userId
+      );
+      const kept = await listed(sharer.api, shared.name);
+      const theirs = await store.forgetDocuments(
+        [shared.id],
+        system,
+        sharer.userId
+      );
+      expect({
+        notTheirs,
+        kept,
+        theirs,
+        listed: await listed(sharer.api, shared.name),
+      }).toStrictEqual({ notTheirs: 0, kept: true, theirs: 1, listed: false });
     });
   }
 );

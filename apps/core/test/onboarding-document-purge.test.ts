@@ -32,7 +32,7 @@ import {
 import { d1ColumnsWith, onboardingTablesWith } from "./kept-where.ts";
 import { ownCollectionOf } from "./knowledge.ts";
 import type { Answer, ProviderReply } from "./model-provider.ts";
-import { intakeAlike } from "./onboarding-team.ts";
+import { alikeReply, intakeAlike } from "./onboarding-team.ts";
 import {
   carrying,
   plan as planReplies,
@@ -656,6 +656,61 @@ describe(
         });
       }
     );
+
+    it("lets a member delete an upload of their own while an intake holds the brain, without waiting for it", async () => {
+      const member = await signedInApi(idp, "user");
+      const upload = crypto.randomUUID();
+      await member.api.brainSources.upload(
+        { name: "Diary.docx", bytes: wordFile(["My own diary."]) },
+        { kind: "me" },
+        upload
+      );
+      const ids = await team();
+      await toldAll(ids);
+      await drawAll(ids, "Zendesk", sentinelOf());
+      // An intake that holds the brain until the test lets its model answer.
+      const intakeAsked = Promise.withResolvers<boolean>();
+      const modelAnswers = Promise.withResolvers<boolean>();
+      const intaking = answeringWithRequests(
+        async (requests) => {
+          intakeAsked.resolve(true);
+          await modelAnswers.promise;
+          return alikeReply(requests);
+        },
+        async () => await onboardingStore(env).intakeNext()
+      );
+      const state = { holding: false, deleted: false };
+      void intakeAsked.promise.then(() => {
+        state.holding = true;
+      });
+      try {
+        await vi.waitFor(
+          () => {
+            expect(
+              state.holding,
+              "the intake never asked its model"
+            ).toBeTruthy();
+          },
+          { timeout: 15_000, interval: 50 }
+        );
+        void member.api.brainSources.deleteUpload(upload).then(() => {
+          state.deleted = true;
+        });
+        await vi.waitFor(
+          () => {
+            expect(
+              state.deleted,
+              "the delete waited for the intake"
+            ).toBeTruthy();
+          },
+          { timeout: 5000, interval: 50 }
+        );
+      } finally {
+        modelAnswers.resolve(true);
+        await intaking;
+      }
+      expect(state).toStrictEqual({ holding: true, deleted: true });
+    });
 
     it("forgets a reading holding a purged term, and keeps one holding none", async () => {
       const signed = await signedInApi(idp, "admin");

@@ -678,13 +678,15 @@ export const brainUploadOf = async (
  * leaves the upload as it was, to delete again: the erasure is safe to
  * repeat.
  *
- * An upload for its uploader alone may be the file of a document an admin
+ * An upload for its uploader alone may be the file of a document they
  * shared in the onboarding (onboarding/documents.ts), whose ID it shares:
  * deleting it is that admin's hard delete, so what was read from it goes
  * too, the reading and every drawing made with it (the store's
- * `forgetDocuments`, which answers 0 and writes nothing for any other ID).
- * Before the row goes, so a forget that failed is tried again by the next
- * delete.
+ * `forgetDocuments`). So every such delete asks the onboarding's store,
+ * which answers 0 at once, writing nothing and waiting for nothing, for
+ * any upload that isn't a document its uploader shared. A forget that
+ * fails is recorded as a failed erasure is, and leaves the row for the
+ * next delete to finish.
  */
 export const deleteBrainUpload = async (
   env: Env,
@@ -716,6 +718,13 @@ export const deleteBrainUpload = async (
       readers: sourceReadersOf(row),
       reason: "deleted",
     });
+    if (row.readers === "me") {
+      await onboardingStore(env).forgetDocuments(
+        [row.id],
+        actor,
+        row.uploadedBy
+      );
+    }
   } catch (error) {
     await auditedBatch(env, db, [
       outboxed(db, {
@@ -726,9 +735,6 @@ export const deleteBrainUpload = async (
       }),
     ]);
     throw error;
-  }
-  if (row.readers === "me") {
-    await onboardingStore(env).forgetDocuments([row.id], actor);
   }
   await auditedBatch(env, db, [
     db.delete(brainUploads).where(eq(brainUploads.id, row.id)),
