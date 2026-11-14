@@ -1322,7 +1322,7 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
     });
   });
 
-  it("fails an item whose model request can't be sent as its own, never as the host gone", async () => {
+  it("parks at once an item whose model request can't be sent, as its own failure, never as the host gone", async () => {
     reset();
     const tooLong = keyOf("too-long");
     behaviours.set(tooLong, async ({ ask }) => {
@@ -1332,17 +1332,15 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
       });
     });
     await enqueue({ key: tooLong, priority: "asked" });
-    for (let tickNumber = 0; tickNumber < workAttemptsMax; tickNumber += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- tick after tick
-      await tick(2 * 60 * 60_000);
-    }
+    // One tick: the same request fails the same way every time.
+    await tick(2 * 60 * 60_000);
     const { parked, paused } = await queue([tooLong]);
     expect({
       paused,
       parked: parked.map(({ attempts, error }) => ({ attempts, error })),
     }).toStrictEqual({
       paused: null,
-      parked: [{ attempts: workAttemptsMax, error: "invalid_request" }],
+      parked: [{ attempts: 1, error: "invalid_request" }],
     });
   });
 
