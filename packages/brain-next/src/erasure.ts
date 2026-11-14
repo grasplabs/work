@@ -2,7 +2,11 @@ import { z } from "zod";
 
 import type { BrainBucket } from "./bucket.ts";
 import { erasureReasons } from "./contract.ts";
-import type { ErasureReason, ErasuresOverview } from "./contract.ts";
+import type {
+  ErasureReason,
+  ErasureStatus,
+  ErasuresOverview,
+} from "./contract.ts";
 import { hashOf, releaseVectors } from "./files.ts";
 import {
   eraseMemoriesHiddenBy,
@@ -833,6 +837,45 @@ export const erasureDue = (sql: SqlStorage): boolean =>
         OR EXISTS (SELECT 1 FROM erasures WHERE ${unconfirmed})`
     )
     .toArray().length > 0;
+/**
+ * Whether the source or person whose subject is `subject` was erased, as
+ * this store's record of the ledger holds it (contract.ts
+ * `ErasureStatus`), in one statement: `erased` once every erasure of it
+ * is confirmed in the ledger and none still hides versions this store's
+ * tick has to delete, with when the latest was recorded; `erasing` until
+ * then; `not_erased` when the record holds none. It reads the record
+ * alone, never what is kept, so what was never erased answers as what
+ * never existed. Not counted here: an erased version's file, which the
+ * sweep deletes past its 15-minute grace once no version holds it
+ * (files.ts), and anything another store (a person's own) still has to
+ * delete of what it hid.
+ */
+export const erasureStatusOf = (
+  sql: SqlStorage,
+  kind: ErasureKind,
+  subject: string
+): Exclude<ErasureStatus, { state: "unavailable" }> => {
+  const { erasures, unfinished, at } = sql
+    .exec<{ erasures: number; unfinished: number; at: number | null }>(
+      `SELECT count(*) AS erasures,
+        coalesce(sum(
+          confirmed = 0 OR EXISTS (
+            SELECT 1 FROM erasing_versions WHERE erasure = erasures.key
+          )
+        ), 0) AS unfinished,
+        max(erased_at) AS at
+      FROM erasures WHERE kind = ? AND subject = ?`,
+      kind,
+      subject
+    )
+    .one();
+  if (erasures === 0 || at === null) {
+    return { state: "not_erased" };
+  }
+  return unfinished > 0
+    ? { state: "erasing" }
+    : { state: "erased", at: new Date(at) };
+};
 
 /** How many erasures still hide versions the tick has to delete. */
 export const erasuresUnfinished = (sql: SqlStorage): number =>

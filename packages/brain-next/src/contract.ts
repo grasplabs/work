@@ -1283,6 +1283,32 @@ export const personErasureSchema = z.strictObject({
 export type PersonErasure = z.infer<typeof personErasureSchema>;
 
 /**
+ * What staff look up in the store's record of its erasure ledger: a
+ * source, by its key, or a person, by their id, as they were erased.
+ */
+export const erasureLookupSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("source"), source: sourceIdSchema }),
+  z.strictObject({ kind: z.literal("person"), person: principalSchema }),
+]);
+export type ErasureLookup = z.infer<typeof erasureLookupSchema>;
+
+/**
+ * Whether what staff looked up was erased, and nothing else (no reason,
+ * no count, no hash): `erased`, with when the ledger recorded the latest
+ * erasure of it, once every erasure of it is written to the ledger and
+ * this store's tick has deleted the versions it hid: hidden for good,
+ * nothing can read it and a restore can't bring it back. Its files leave
+ * the bucket in the background, after a 15-minute grace (files.ts), and
+ * a person's own store deletes what it hid on its own tick: neither is
+ * waited for. `erasing` until then; `not_erased` when the record holds no
+ * erasure of it, alike whether it ever existed; `unavailable` while the
+ * store reads its erasure ledger.
+ */
+export type ErasureStatus =
+  | { state: "erased"; at: Date }
+  | { state: "erasing" | "not_erased" | "unavailable" };
+
+/**
  * What every refusal of the store starts with: a call refused for what it
  * asked, never a fault. A host answers one as such (a conflict), not as an
  * error of its own.
@@ -2632,6 +2658,15 @@ export interface Brain {
    * Answers alike whatever they held, and is safe to repeat.
    */
   erasePerson: (request: PersonErasure) => Promise<void>;
+  /**
+   * Whether a source or a person was erased, from the store's record of
+   * its ledger alone (`ErasureStatus`). For staff, who name what a client
+   * gave them: it reads nothing but that record, so what was never erased
+   * answers as what never existed. The shared store's alone: a person's
+   * own store refuses, as it does `handOver` (staff's lookup reads a
+   * person's own erasure from core's record of it, never from their store).
+   */
+  erasureStatus: (request: ErasureLookup) => Promise<ErasureStatus>;
   /**
    * Starts an export of the company's Brain for `deployment`, written by
    * the queue a part a run as files in the store's part of the bucket
