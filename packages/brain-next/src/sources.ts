@@ -4,7 +4,12 @@ import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 
 import type { BrainBucket } from "./bucket.ts";
 import { chunksOf } from "./chunks.ts";
-import { erasedSource, restoringNow, staleVersion } from "./contract.ts";
+import {
+  changeTaken,
+  erasedSource,
+  restoringNow,
+  staleVersion,
+} from "./contract.ts";
 import type {
   AddedVersion,
   ChangeRequest,
@@ -177,9 +182,7 @@ const madeBefore = (
     .get();
   if (byChange !== undefined) {
     if (byChange.file !== hash || byChange.readers !== readers) {
-      throw new Error(
-        "The Brain refused it: this change was added before with other text or readers"
-      );
+      throw new Error(changeTaken);
     }
     return { source: added.source, version: byChange.version };
   }

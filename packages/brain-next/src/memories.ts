@@ -15,6 +15,7 @@ import type {
   EntityId,
   Memory,
   MemoryChangeOutcome,
+  MemoryId,
   PersonReader,
   Reader,
 } from "./contract.ts";
@@ -617,6 +618,49 @@ SELECT * FROM (
 WHERE side <= ?11
 ORDER BY fact_first, about, attribute, side`,
 });
+
+/**
+ * `?1` the memory ids asked about (JSON), `?2` and `?3` the reader
+ * (`readableSql`), `?4` the moment: the ids of those learned by then that
+ * the reader may read (`visibleSql`, as every read decides it) and that
+ * their writer had not retired by then, a seek by id each. Whether a
+ * newer memory ended one, or its time is over, is not asked: a memory
+ * once recalled stays as readable as a passage of an older version does.
+ */
+const readableMemoriesSql = `
+WITH ${readableSql}
+SELECT m.id AS id FROM json_each(?1) AS asked
+CROSS JOIN memories AS m ON m.id = asked.value
+WHERE m.learned_at <= ?4
+  AND (m.retired_at IS NULL OR m.retired_at > ?4)
+  AND ${visibleSql("m")}`;
+
+/**
+ * Of `memories`, those the reader may read now and their writer has not
+ * retired (contract.ts `readableMemories`), in the order asked, each once.
+ */
+export const readableMemories = (
+  sql: SqlStorage,
+  { memories, reader }: { memories: readonly MemoryId[]; reader: Reader }
+): MemoryId[] => {
+  const asked = [...new Set(memories)];
+  if (asked.length === 0) {
+    return [];
+  }
+  const readable = new Set(
+    sql
+      .exec<{ id: string }>(
+        readableMemoriesSql,
+        JSON.stringify(asked),
+        reader.person,
+        JSON.stringify(reader.groups),
+        readMoment(sql)
+      )
+      .toArray()
+      .map(({ id }) => id)
+  );
+  return asked.filter((id) => readable.has(id));
+};
 
 /**
  * A page of the contested facts the reader may read (contract.ts

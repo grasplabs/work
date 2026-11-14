@@ -40,6 +40,7 @@ import {
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { recallFor } from "../src/brain-recall.ts";
 import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
+import { uploadToBrain } from "../src/brain-uploads.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { permissionsOpenTo } from "../src/permissions-open.ts";
@@ -168,6 +169,14 @@ const forEveryone = async (text: string): Promise<SourceRef> => {
   });
   return source;
 };
+
+/** A WebVTT file saying `text`, as a person uploads one. */
+const vttFile = (text: string) => ({
+  name: "Notes.vtt",
+  bytes: new TextEncoder().encode(
+    `WEBVTT\n\n00:00:00.000 --> 00:00:05.000\n${text}\n`
+  ),
+});
 
 /** Runs core's hand-overs to the Brain now, as its clock would. */
 const handOver = async (): Promise<void> => {
@@ -550,6 +559,79 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
     // Each audited for her, with what it found counted, never said.
     const events = await recallEvents(ada.userId, 3);
     expect(JSON.stringify(events)).not.toContain(word);
+  });
+
+  it("finds an upload for everyone at an App's recall, and never one for a team or for its uploader alone", async () => {
+    const [admin, ada] = await Promise.all([
+      person("admin"),
+      person("builder"),
+    ]);
+    const team = await teamOf(ada);
+    const word = `upload${unique().replaceAll(/\W/gu, "")}`;
+    const [everyoneUpload, teamUpload, herUpload] = [
+      crypto.randomUUID(),
+      crypto.randomUUID(),
+      crypto.randomUUID(),
+    ];
+    // Uploaded as the Sources page uploads, through the producer itself.
+    await uploadToBrain(
+      env,
+      ada,
+      vttFile(`For everyone: ${word} is in the handbook.`),
+      { kind: "everyone" },
+      everyoneUpload
+    );
+    await uploadToBrain(
+      env,
+      ada,
+      vttFile(`For her team: ${word} is planned in March.`),
+      { kind: "team", teamId: team },
+      teamUpload
+    );
+    await uploadToBrain(
+      env,
+      ada,
+      vttFile(`For her alone: ${word} is booked for May.`),
+      { kind: "me" },
+      herUpload
+    );
+    const app = await askOf(ada, []);
+    const permissionId = await granted(
+      ada,
+      admin,
+      brainGrant({ type: "app", appId: app.app }),
+      app.release.manifest.resourceVersion
+    );
+    await approveResourceBinding(env, admin, {
+      app: app.app,
+      alias: "brain",
+      target: { kind: "brain", permissionId },
+      reviewed: { version: 1 },
+    });
+
+    const pack = z
+      .object({
+        items: z.array(
+          z.object({ source: z.object({ id: z.string() }), found: z.string() })
+        ),
+      })
+      .parse(await askedOf(app, ada, { question: word, tokens: 800 }));
+    // By its words or exactly: recall also adds passages by meaning alone.
+    const found = new Set(
+      pack.items.flatMap(({ source, found: how }) =>
+        how === "meaning" ? [] : [source.id]
+      )
+    );
+
+    expect({
+      everyoneUpload: found.has(everyoneUpload),
+      teamUpload: found.has(teamUpload),
+      herUpload: found.has(herUpload),
+    }).toStrictEqual({
+      everyoneUpload: true,
+      teamUpload: false,
+      herUpload: false,
+    });
   });
 
   it("answers everyone an App is shared with the same pack of what the whole company may read, admins included", async () => {

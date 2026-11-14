@@ -1,5 +1,6 @@
 import { brainSearchBudget } from "@grasp-os/shared/brain-sources";
 import type {
+  BrainSearchMemory,
   BrainSearchPack,
   BrainSourceListed,
   BrainSourcePage,
@@ -8,15 +9,27 @@ import type {
   BrainSourcesApi,
   BrainSourceText,
   BrainSourceVersionPage,
+  BrainSharedUploadPage,
+  BrainSharedUploadsAfter,
+  BrainUpload,
+  BrainUploadFile,
+  BrainUploadReaders,
 } from "@grasp-os/shared/brain-sources";
 
 import {
   listSourcesAs,
   listVersionsAs,
   readSourceVersionAs,
-  recallPassagesAs,
+  recallAs,
 } from "./brain-next.ts";
-import type { ListedSource, SourceRef } from "./brain-next.ts";
+import type { ListedSource, RecalledMemory, SourceRef } from "./brain-next.ts";
+import {
+  brainUploadOf,
+  deleteBrainUpload,
+  sharedUploadsFor,
+  uploadToBrain,
+  uploadVersionToBrain,
+} from "./brain-uploads.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -24,14 +37,16 @@ import type { SessionCheck } from "./session-check.ts";
 // The Brain's sources over `/rpc` (`session.brainSources`), for anyone
 // signed in who is a member: each call is the Brain's own as that person
 // (brain-next.ts), which reads them with the teams core counts them in
-// now and answers only from what they may read. Search is
-// `recallPassagesAs` with a fixed budget, its pack of passages handed on
-// as it is: the page ranks nothing of its own, and shows no memory, so
-// none is sent. Like the rest of the workspace it refuses a Grasp
-// staff session (session-check.ts `fullAccess`). Nothing here is audited
-// per read, as `recallPassagesAs` isn't: what a source is and who may read it
-// are the Brain's, and brain-next.ts checks every source and version it
-// is given with its own rules.
+// now and answers only from what they may read. Search is `recallAs`
+// with a fixed budget, its pack of passages and memories handed on as it
+// is, and shown whole (sources-page.tsx): the page ranks nothing of its
+// own, and nothing the budget was spent on is left out. Like the rest of
+// the workspace it refuses a Grasp staff session (session-check.ts
+// `fullAccess`). Nothing here is audited per read, as `recallAs` isn't:
+// what a source is and who may read it are the Brain's, and brain-next.ts
+// checks every source and version it is given with its own rules. Uploads
+// are brain-uploads.ts's, which checks the file, who may act on an upload
+// and its readers, and audits each.
 
 /**
  * `source` as core's Brain takes it: its own rules check the producer and
@@ -58,6 +73,31 @@ const listedOf = ({
   firstLine,
   personal,
   versions,
+});
+
+/** `memory` of a pack as the page shows it. */
+const shownOf = ({
+  store,
+  memory,
+  statement,
+  quote,
+  context,
+  source,
+  said,
+  confirmed,
+  contested,
+  found,
+}: RecalledMemory): BrainSearchMemory => ({
+  store,
+  id: memory,
+  statement,
+  quote,
+  context,
+  source,
+  said,
+  confirmed,
+  contested,
+  found,
 });
 
 export class BrainSourcesRpc extends CoreRpcTarget implements BrainSourcesApi {
@@ -137,15 +177,69 @@ export class BrainSourcesRpc extends CoreRpcTarget implements BrainSourcesApi {
   }
 
   async search(question: string): Promise<BrainSearchPack> {
-    return await withPerson(
-      this.#check,
-      async (person) =>
-        await recallPassagesAs(this.#env, person.userId, {
+    return await withPerson(this.#check, async (person) => {
+      const { items, memories, notFound, truncated } = await recallAs(
+        this.#env,
+        person.userId,
+        {
           question,
           budget: { tokens: brainSearchBudget },
           // Their own Brain page: what is theirs alone is theirs to find.
           personal: true,
-        })
+        }
+      );
+      return {
+        items,
+        memories: memories.map((memory) => shownOf(memory)),
+        notFound,
+        truncated,
+      };
+    });
+  }
+
+  async upload(
+    file: BrainUploadFile,
+    readers: BrainUploadReaders,
+    uploadId: string
+  ): Promise<{ source: BrainSourceRef; version: number }> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await uploadToBrain(this.#env, person, file, readers, uploadId)
+    );
+  }
+
+  async uploadVersion(
+    uploadId: string,
+    file: BrainUploadFile,
+    versionId: string
+  ): Promise<{ source: BrainSourceRef; version: number }> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await uploadVersionToBrain(this.#env, person, uploadId, file, versionId)
+    );
+  }
+
+  async uploadOf(uploadId: string): Promise<BrainUpload | null> {
+    return await withPerson(
+      this.#check,
+      async (person) => await brainUploadOf(this.#env, person, uploadId)
+    );
+  }
+
+  async deleteUpload(uploadId: string): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      await deleteBrainUpload(this.#env, person, uploadId);
+    });
+  }
+
+  async sharedUploads(
+    after?: BrainSharedUploadsAfter | null
+  ): Promise<BrainSharedUploadPage> {
+    return await withPerson(
+      this.#check,
+      async (person) => await sharedUploadsFor(this.#env, person, after)
     );
   }
 }

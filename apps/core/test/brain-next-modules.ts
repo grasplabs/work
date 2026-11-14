@@ -45,6 +45,9 @@ export const brainModules = {
   // and answers nothing of it: `brainErasureStateOf` says only where core's
   // own record of that erasure stands, nothing the Brain answered.
   "apps/core/src/person-erasure.ts": "core",
+  // Uploads straight into the Brain, reached only through the Sources
+  // page's methods (brain-sources-rpc.ts), whose probes call each of them.
+  "apps/core/src/brain-uploads.ts": "sources",
   // Adds what a chat's agent read through a connection with core's
   // addSource, for the chat's person alone, and hands nothing on.
   "apps/core/src/connection-capture.ts": "core",
@@ -57,12 +60,14 @@ export const brainModules = {
   // it recalled, and hands on only a refusal.
   "apps/core/src/workflows/resource-reads.ts": "core",
   // A chat's recall before its question: hands the model what core's
-  // recallAs gave the chat's own person, two of its packs merged at most
-  // (mergeRecalled, which only drops and orders what both hold), as data;
-  // what an analysis says only ever becomes that same person's question.
+  // recallAs gave the chat's own person, passages and memories, two of its
+  // packs merged at most (mergeRecalled, which only drops what both hold
+  // and orders them), as data; what an analysis says only ever becomes
+  // that same person's question.
   "apps/core/src/turn-recall.ts": "core",
-  // Checks what a chat once handed over with core's readableVersionsAs, and
-  // hands on only which of those it may still send, never what they say.
+  // Checks what a chat once handed over with core's readableVersionsAs and
+  // readableMemoriesAs, and hands on only which of those it may still
+  // send, never what they say.
   "apps/core/src/history-access.ts": "core",
   // Remembers, forgets and corrects for a person, and reads entities for
   // them: its own surface, each export probed as the person.

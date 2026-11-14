@@ -31,6 +31,14 @@ export type KeyState = "free" | "held" | "erased";
 export const erasedSource = "The Brain refused it: what this adds was erased";
 
 /**
+ * What an add says whose change was added before with other text or
+ * readers: nothing changed, and the version that change made stays. Said
+ * only to the producer that adds it, which compares it whole.
+ */
+export const changeTaken =
+  "The Brain refused it: this change was added before with other text or readers";
+
+/**
  * What `addMemories` answers a change added before with other memories:
  * the message alone, so a caller tells it from any other failure by
  * comparing it whole (a host that lets a person retry by a change key
@@ -235,6 +243,19 @@ export const fitsSourceText = (text: string): boolean =>
   byteLengthOf(text) <= sourceTextMaxBytes &&
   byteLengthOf(foldForSearch(text)) <= sourceTextMaxBytes;
 
+/** Something other than whitespace. */
+const notBlank = /\S/u;
+
+/**
+ * Whether `text` is one a source can be: well-formed, and something other
+ * than whitespace, which has no passage to keep or find. With
+ * `fitsSourceText`, the store's whole rule for a source's text, which an
+ * add checks and a host checks before it adds, so what fails it is
+ * refused as what it is, never tried again.
+ */
+export const isSourceText = (text: unknown): text is string =>
+  wellFormedString().safeParse(text).success && notBlank.test(String(text));
+
 /**
  * A version of a source to add: which source, the change it is, its text,
  * who may read this version; in a person's own store alone, the group it
@@ -247,8 +268,10 @@ export const newSourceSchema = z.strictObject({
   change: changeKeySchema,
   group: sourceIdSchema.optional(),
   text: wellFormedString()
-    // A text of whitespace alone has no passage to keep or find.
-    .regex(/\S/u, { message: "Holds no text" })
+    .refine((text) => isSourceText(text), {
+      message: "Holds no text",
+      abort: true,
+    })
     .refine((text) => byteLengthOf(text) <= sourceTextMaxBytes, {
       message: `At most ${sourceTextMaxBytes} bytes`,
       abort: true,
@@ -2126,6 +2149,19 @@ export interface ContestedFact {
 }
 
 /**
+ * Memories to check a reader may still read, by id, and who reads them:
+ * what a host checks before it sends again a memory it once recalled (a
+ * chat's earlier recall).
+ */
+export const readableMemoriesRequestSchema = z.strictObject({
+  memories: z.array(memoryIdSchema).max(readableCheckMax),
+  reader: readerSchema,
+});
+export type ReadableMemoriesRequest = z.infer<
+  typeof readableMemoriesRequestSchema
+>;
+
+/**
  * A memory of `writer`'s own to retire (its lineage is that writer's) that
  * the reader may read: the host's own code writes as the App or workflow
  * it runs (`app:<id>`), with a reader of no person. Left out, the writer
@@ -2800,6 +2836,17 @@ export interface Brain {
    * Dedupe pages by id. Nothing the reader may not read is ever returned.
    */
   listContested: (request: ContestedRequest) => Promise<ContestedPage>;
+  /**
+   * Of the memories asked for, by id, those the reader may read now (as
+   * `readMemories` decides who may read one) and their writer has not
+   * retired, in the order asked and each once: what a host checks before
+   * it sends again a memory it once recalled (a chat's earlier recall).
+   * Each left out alike, whether it doesn't exist, was erased, rests on a
+   * version the reader may no longer read, or was retired. One ended by a
+   * newer memory of its lineage, or whose time is over, stays: as a
+   * source's older version stays readable once a newer one is added.
+   */
+  readableMemories: (request: ReadableMemoriesRequest) => Promise<MemoryId[]>;
   /**
    * Retires one of the writer's own memories (its lineage is the writer's:
    * the reader's person unless the host names another, `RetireRequest`)

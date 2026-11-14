@@ -4,6 +4,7 @@ import {
   recallBudgetMax,
 } from "@grasp-os/brain-next/contract";
 import type { WorkOverview } from "@grasp-os/brain-next/contract";
+import type { BrainUploadReaders } from "@grasp-os/shared/brain-sources";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import { authoritySchema } from "@grasp-os/shared/permissions";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
@@ -29,6 +30,7 @@ import {
   eraseSource,
   erasePerson,
   recallAs,
+  rememberAs,
   workBrain,
 } from "../src/brain-next.ts";
 import type {
@@ -533,6 +535,8 @@ describe(
         "another agent's instruction file": markerWord(),
         "an App's instruction file the outsider doesn't build": markerWord(),
         "an App's instruction file the outsider uses": markerWord(),
+        "the holder's upload for only them": markerWord(),
+        "an upload for a team the outsider isn't in": markerWord(),
         "what the holder's agent fetched through a connection": markerWord(),
         "the holder's own skill": markerWord(),
         "a team's skill the outsider isn't in": markerWord(),
@@ -547,6 +551,8 @@ describe(
         "another agent's instruction file": agentFileMarker,
         "an App's instruction file the outsider doesn't build": appFileMarker,
         "an App's instruction file the outsider uses": usedAppFileMarker,
+        "the holder's upload for only them": ownUploadMarker,
+        "an upload for a team the outsider isn't in": teamUploadMarker,
         "what the holder's agent fetched through a connection": captureMarker,
         "the holder's own skill": holderSkillMarker,
         "a team's skill the outsider isn't in": teamSkillMarker,
@@ -823,10 +829,36 @@ describe(
         () => "refused"
       );
 
+      // Through the upload producer too (brain-uploads.ts): the holder's
+      // file for only them, and one for a team the outsider isn't in,
+      // each with its marker in its file's name as well as its text, as a
+      // name is its readers' alone too (an admin's shared uploads).
+      const uploaded = async (marker: string, readers: BrainUploadReaders) => {
+        const { source } = await holderApi.api.brainSources.upload(
+          {
+            name: `Captions ${marker}.vtt`,
+            bytes: new TextEncoder().encode(
+              `WEBVTT\n\n00:00:00.000 --> 00:00:05.000\nUploaded ${sharedWord} ${marker}\n`
+            ),
+          },
+          readers,
+          crypto.randomUUID()
+        );
+        return source;
+      };
+      const ownUpload = await uploaded(ownUploadMarker, { kind: "me" });
+      const teamUpload = await uploaded(teamUploadMarker, {
+        kind: "team",
+        teamId: secretTeam,
+      });
+
       // The markers are there to find for those who may read them.
       await expect(textsFor(holder, teamMarker)).resolves.toStrictEqual([
         teamSource,
       ]);
+      await expect(textsFor(holder, teamUploadMarker)).resolves.toContainEqual(
+        expect.stringContaining(teamUploadMarker)
+      );
       await expect(
         textsFor(holder, `salary ${ownerMarker}`)
       ).resolves.toContain(`Salary review ${sharedWord} ${ownerMarker}`);
@@ -875,6 +907,8 @@ describe(
           captureMarker,
           toHolderMarker,
           ...instructionMarkers,
+          ownUploadMarker,
+          teamUploadMarker,
           holderSkillMarker,
           teamSkillMarker,
         ],
@@ -883,8 +917,11 @@ describe(
           teamId,
           noneId,
           narrowedId,
+          ownUpload,
+          teamUpload,
           captureId
         ),
+        hiddenUploads: [ownUpload.id, teamUpload.id],
         hiddenInstructionFiles: [holderFile, agentFile, appFile, usedAppFile],
         hiddenSkills: [holderSkillMarker],
         hiddenTeamSkills: [{ team: secretTeam, name: teamSkillMarker }],
@@ -909,6 +946,7 @@ describe(
       teamSkillSelected.joined = await teamSkillsOf(outsider);
       const {
         "a team's source the outsider isn't in": _joined,
+        "an upload for a team the outsider isn't in": _joinedUpload,
         "a team's skill the outsider isn't in": _joinedSkill,
         ...notJoined
       } = markers;
@@ -923,13 +961,16 @@ describe(
             captureMarker,
             toHolderMarker,
             ...instructionMarkers,
+            ownUploadMarker,
           ],
           hiddenVersions: everyVersionOf(
             ...ownerIds,
             noneId,
             narrowedId,
+            ownUpload,
             captureId
           ),
+          hiddenUploads: [ownUpload.id],
           hiddenTeamSkills: [],
         },
         notJoined,
@@ -1054,13 +1095,16 @@ describe(
           },
           personal: false,
           sharedWord,
-          markers: [ownerMarker],
+          markers: [ownerMarker, ownUploadMarker],
           hiddenVersions: [],
           hiddenInstructionFiles: [],
           instructionGroups,
           moments: [whileDraft],
         },
-        { "the holder's own source": ownerMarker },
+        {
+          "the holder's own source": ownerMarker,
+          "the holder's upload for only them": ownUploadMarker,
+        },
         { among: surfaces.filter(([name]) => name === "core recallAs") }
       );
 
@@ -1074,6 +1118,7 @@ describe(
       const reading = surfaces.filter(([name]) => readingSurfaces.has(name));
       const {
         "a team's source the outsider isn't in": _team,
+        "an upload for a team the outsider isn't in": _teamUpload,
         "a team's skill the outsider isn't in": _teamSkill,
         ...notTeams
       } = markers;
@@ -1090,8 +1135,15 @@ describe(
             narrowedMarker,
             toHolderMarker,
             ...instructionMarkers,
+            ownUploadMarker,
           ],
-          hiddenVersions: everyVersionOf(...ownerIds, noneId, narrowedId),
+          hiddenVersions: everyVersionOf(
+            ...ownerIds,
+            noneId,
+            narrowedId,
+            ownUpload
+          ),
+          hiddenUploads: [ownUpload.id],
           hiddenInstructionFiles: [holderFile, agentFile, appFile, usedAppFile],
           instructionGroups,
           moments: [whileDraft],
@@ -1113,13 +1165,18 @@ describe(
             narrowedMarker,
             toHolderMarker,
             ...instructionMarkers,
+            ownUploadMarker,
+            teamUploadMarker,
           ],
           hiddenVersions: everyVersionOf(
             ...ownerIds,
             teamId,
             noneId,
-            narrowedId
+            narrowedId,
+            ownUpload,
+            teamUpload
           ),
+          hiddenUploads: [ownUpload.id, teamUpload.id],
           hiddenInstructionFiles: [holderFile, agentFile, appFile, usedAppFile],
           instructionGroups,
           moments: [whileDraft],
@@ -1716,7 +1773,7 @@ describe(
     it("puts a person's own content in no chat-app conversation, their direct message included, and answers that one to them alone", async () => {
       // Through Teams' door as Teams posts (channels/door.ts), each turn
       // answered by the fake provider behind connect, which keeps what
-      // reached it. A person's own source reaches a model only in their
+      // reached it. A person's own source or memory reaches a model only in their
       // own chat in Grasp: not in a thread others read, nor, while
       // GRA-1821's decision is open, in their direct message, which the
       // chat app keeps too (workspace.ts, `answersAlone`). A thread others
@@ -1754,6 +1811,14 @@ describe(
         text: `Depot ${depot} keeps Ann's own note ${marker}`,
         readers: { kind: "owner", personId: ann.userId },
       });
+      const ownMemory = `Depot ${depot} keeps Ann's own memory ${marker}`;
+      await rememberAs(env, ann.userId, {
+        change: crypto.randomUUID(),
+        about: { kind: "customer", names: [`Depot ${depot}`] },
+        type: "fact",
+        statement: ownMemory,
+        quote: ownMemory,
+      });
       const agent = { type: "agent" as const, agentId: chatAgentId };
       await saveUserMemory(
         env,
@@ -1771,7 +1836,8 @@ describe(
           ann.provider.requests.slice(before).map(({ body }) => body)
         );
         return {
-          own: sent.includes(`Depot ${depot} keeps`),
+          own: sent.includes(`Depot ${depot} keeps Ann's own note`),
+          ownMemory: sent.includes(ownMemory),
           userMd: sent.includes(userMarker),
           connections: sent.includes(`held:${marker}`),
           ran: sent.includes(`:${marker}`),
@@ -1832,13 +1898,20 @@ describe(
         found: 1,
         inThreads: threads.map(() => ({
           own: false,
+          ownMemory: false,
           userMd: false,
           connections: false,
           ran: true,
         })),
         // Her own chat on Teams: its tools and her USER.md, as on main
         // (knowledge/memory.ts); her own store, not while GRA-1821 is open.
-        inDirect: { own: false, userMd: true, connections: true, ran: true },
+        inDirect: {
+          own: false,
+          ownMemory: false,
+          userMd: true,
+          connections: true,
+          ran: true,
+        },
         postedInThreads: [false, false, false],
         postedInDirect: true,
         postedToBen: false,
@@ -1992,6 +2065,149 @@ describe(
         inMeeting: nothing,
         inMeetingById: nothing,
         inDirect: companyOnly,
+      });
+    });
+
+    it("hands no memory of a person's own or of a team to a Teams direct message or a shared chat, on the first turn or when history is read again, and checks a company memory again as the company reads it", async () => {
+      // Through Teams' door as Teams posts (channels/door.ts), as the test
+      // above does for sources (GRA-1820), with memories (GRA-1864): her
+      // own, her team's, and one the whole company may read, resting on a
+      // company source whose own words no question here holds, so only the
+      // memory can carry its marker. Then that source is narrowed to her
+      // team: Ann may still read it, the company no longer may, and the
+      // next turn in her direct message must no longer carry it.
+      await chatAgentReadsBrain();
+      const ann = await teamsMember(
+        idp,
+        ...Array.from({ length: 4 }, () => says("Noted."))
+      );
+      const ben = await memberAnsweredBy(idp, ann.provider);
+      const depot = `d${unique()}`;
+      const [own, team, company] = [markerWord(), markerWord(), markerWord()];
+      const annTeam = await newTeam(ann.userId);
+      const ownStatement = `Depot ${depot} Ann's own memory ${own}`;
+      await rememberAs(env, ann.userId, {
+        change: crypto.randomUUID(),
+        about: { kind: "customer", names: [`Depot ${depot}`] },
+        type: "fact",
+        statement: ownStatement,
+        quote: ownStatement,
+      });
+      const store = brainOf(inJurisdiction(env, env.BRAIN_STORE));
+      const companySource = `upload:${crypto.randomUUID()}`;
+      const companyText = "Opening hours are weekdays only.";
+      await store.addSource({
+        source: companySource,
+        change: crypto.randomUUID(),
+        text: companyText,
+        access: { kind: "audience", group: "company" },
+      });
+      const remembered = async (
+        group: string,
+        statement: string,
+        basis: Parameters<
+          typeof store.addMemories
+        >[0]["memories"][number]["basis"]
+      ) =>
+        await store.addMemories({
+          change: crypto.randomUUID(),
+          access: { kind: "audience", group },
+          entities: [{ key: "c", kind: "customer", names: [`Depot ${depot}`] }],
+          memories: [
+            {
+              about: "c",
+              type: "fact",
+              statement,
+              speaker: { kind: "system" },
+              basis,
+            },
+          ],
+        });
+      await remembered(
+        `team:${annTeam}`,
+        `Depot ${depot} for Ann's team ${team}`,
+        {
+          kind: "writer",
+          writer: "crm",
+        }
+      );
+      await remembered("company", `Depot ${depot} for everyone ${company}`, {
+        kind: "source",
+        source: companySource,
+        version: 1,
+        quote: companyText,
+      });
+      /** What reached the model for what Ann posted. */
+      const sentFor = async (activity: unknown) => {
+        const before = ann.provider.requests.length;
+        await post(activity);
+        const sent = JSON.stringify(
+          ann.provider.requests.slice(before).map(({ body }) => body)
+        );
+        return {
+          answered: ann.provider.requests.length > before,
+          own: sent.includes(own),
+          team: sent.includes(team),
+          company: sent.includes(company),
+        };
+      };
+      const withBen = newGroup();
+      await onGroupRoster(withBen, [
+        { person: ann.teams },
+        { person: ben.teams },
+      ]);
+      const question = `What about depot ${depot}?`;
+
+      const sharedFirst = await sentFor(
+        mentionIn(ann.teams, withBen, question)
+      );
+      const directFirst = await sentFor(
+        messageFrom(ann.teams, { text: question })
+      );
+      // Her team's alone now: she may still read it, the company may not.
+      await store.addSource({
+        source: companySource,
+        change: crypto.randomUUID(),
+        text: companyText,
+        access: { kind: "audience", group: `team:${annTeam}` },
+      });
+      const directAgain = await sentFor(
+        messageFrom(ann.teams, { text: "Thanks!" })
+      );
+      const sharedAgain = await sentFor(
+        mentionIn(ann.teams, withBen, "Thanks!")
+      );
+      // Her own recall finds all three: what the model got is no empty Brain.
+      const { memories } = await recallAs(env, ann.userId, {
+        personal: true,
+        question: `depot ${depot}`,
+        budget: { tokens: recallBudgetMax },
+      });
+      const found = JSON.stringify(memories);
+
+      expect({
+        found: [own, team].map((marker) => found.includes(marker)),
+        sharedFirst,
+        directFirst,
+        directAgain,
+        sharedAgain,
+      }).toStrictEqual({
+        found: [true, true],
+        sharedFirst: { answered: true, own: false, team: false, company: true },
+        directFirst: { answered: true, own: false, team: false, company: true },
+        // Withheld: the company no longer may read what it rests on.
+        directAgain: {
+          answered: true,
+          own: false,
+          team: false,
+          company: false,
+        },
+        sharedAgain: {
+          answered: true,
+          own: false,
+          team: false,
+          company: false,
+        },
       });
     });
 
