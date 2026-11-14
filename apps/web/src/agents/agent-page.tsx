@@ -501,6 +501,7 @@ export const AgentPage = ({
             ) : null}
           </div>
         }
+        clamp
         description={agent.job === "" ? t`No job written yet` : agent.job}
         meta={
           <>

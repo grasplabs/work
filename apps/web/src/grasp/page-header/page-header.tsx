@@ -44,6 +44,13 @@ export interface PageHeaderProps {
   title: ReactNode;
   /** One line under the title: what the page holds. */
   description?: ReactNode;
+  /**
+   * How many lines the description may take before it is cut short with an ellipsis: 1 or 2 for one
+   * someone wrote, which may run long. Cut short, a text description is whole in its title (a
+   * pointer's tooltip) and to a screen reader, which reads the whole text.
+   * @default "all"
+   */
+  descriptionLines?: 1 | 2 | "all";
   /** Above the title: where the page sits, a Breadcrumb, for a page without an App shell (whose page bar holds the crumbs). */
   breadcrumb?: ReactNode;
   /** Beside the title: a badge that says its status. */
@@ -126,12 +133,21 @@ const styles = stylex.create({
     marginTop: grasp.space3,
   },
   titleWait: { width: grasp.pageTitleWait, height: grasp.titleLgLine },
+  // A description cut short at its line, with an ellipsis. Its height never changes.
+  clamp: {
+    display: "-webkit-box",
+    WebkitBoxOrient: "vertical",
+    overflow: "hidden",
+  },
+  clampOne: { WebkitLineClamp: 1 },
+  clampTwo: { WebkitLineClamp: 2 },
   descriptionWait: { width: grasp.sectionDescriptionWait },
 });
 
 export const PageHeader = ({
   title,
   description,
+  descriptionLines = "all",
   breadcrumb,
   aside,
   actions,
@@ -168,7 +184,21 @@ export const PageHeader = ({
                 {aside}
               </div>
               {description !== undefined && (
-                <p {...stylex.props(styles.description, arrived && arrive.in)}>
+                <p
+                  title={
+                    descriptionLines !== "all" &&
+                    typeof description === "string"
+                      ? description
+                      : undefined
+                  }
+                  {...stylex.props(
+                    styles.description,
+                    descriptionLines !== "all" && styles.clamp,
+                    descriptionLines === 1 && styles.clampOne,
+                    descriptionLines === 2 && styles.clampTwo,
+                    arrived && arrive.in
+                  )}
+                >
                   {description}
                 </p>
               )}

@@ -1206,6 +1206,8 @@
   --grasp-shell-menu-corner: 8px;
   /* The product's mark at the top of the sidebar. */
   --grasp-shell-mark: 20px;
+  /* The layer a folded sidebar's reopen button and its peek stand on, above the page's card. */
+  --grasp-shell-layer: 40;
   /* The least height of the page bar across the top of the page's card. */
   --grasp-shell-bar: 48px;
   /* The room under the last thing on a page. */

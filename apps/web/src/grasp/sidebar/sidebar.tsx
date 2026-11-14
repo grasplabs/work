@@ -34,7 +34,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { MouseEvent, ReactElement, ReactNode } from "react";
+import type { MouseEvent, ReactElement, ReactNode, RefObject } from "react";
 
 import { focus } from "../focus/focus";
 import { Icon, Search, SidebarToggle } from "../icons";
@@ -105,7 +105,11 @@ export type SidebarLayoutStyle = stylex.StyleXStyles<{
 export interface SidebarProps {
   /** The rows, in runs, top to bottom. */
   groups: readonly SidebarGroup[];
-  /** What stands at the top start: the product's mark, 20px tall. It is not a control. */
+  /**
+   * What stands at the top start: the product's mark. It is not a control. The head gives it a
+   * 20px box (shell-mark), and an svg or img passed here fills that box, even one with no width or
+   * height of its own.
+   */
   head?: ReactNode;
   /** Shows a search button at the top, and runs when it is pressed (to open the search). */
   onSearch?: () => void;
@@ -139,6 +143,24 @@ export interface SidebarProps {
    * @default "Main"
    */
   navLabel?: string;
+  /**
+   * Fills its container's width, for a sheet or a panel it stands alone in, so its rows and its
+   * foot run to the edge. Beside a page, leave it off: it is 240px wide.
+   * @default false
+   */
+  fill?: boolean;
+  /**
+   * Folded, a button at the top start corner opens it again, floating above the page's card. Pass
+   * `false` for a host that draws its own button to open it.
+   * @default true
+   */
+  reopen?: boolean;
+  /**
+   * How the reopen button looks: `raised`, a white control of its own that reads over any page or
+   * backdrop; `quiet`, a bare icon, for a white bar it stands in (App shell's page bar).
+   * @default "raised"
+   */
+  reopenLook?: "raised" | "quiet";
   /** Layout only: where it sits and how tall it is. */
   style?: SidebarLayoutStyle;
 }
@@ -159,26 +181,23 @@ const styles = stylex.create({
     display: "flex",
     flexShrink: 0,
     alignSelf: "stretch",
-    // In App shell's phone sheet it fills the sheet, so its rows and its foot run to the edge.
-    width: {
-      default: grasp.shellSidebar,
-      [stylex.when.ancestor('[data-slot="app-shell-sheet"]')]: "100%",
-    },
+    width: grasp.shellSidebar,
     height: "100%",
     minHeight: 0,
     transitionProperty: "width",
     transitionDuration: simply.ui,
     transitionTimingFunction: grasp.ease,
   },
-  asideFolded: { width: 0 },
+  // Folded, it is a layer of its own above the page's card, so its reopen button and its peek
+  // stand over the card in any host.
+  // In a sheet, or any container it should fill (`fill`): its rows and its foot run to the edge.
+  filled: { width: "100%" },
+  asideFolded: { width: 0, zIndex: grasp.shellLayer },
   // What the sidebar holds, standing in its place while it is open.
   panel: {
     display: "flex",
     boxSizing: "border-box",
-    width: {
-      default: grasp.shellSidebar,
-      [stylex.when.ancestor('[data-slot="app-shell-sheet"]')]: "100%",
-    },
+    width: grasp.shellSidebar,
     height: "100%",
     overflow: "hidden",
     backgroundColor: grasp.shellGround,
@@ -251,6 +270,21 @@ const styles = stylex.create({
     paddingInlineStart: grasp.shellRowInline,
     color: grasp.shellText,
   },
+  // The mark's own 20px box.
+  markBox: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: grasp.shellMark,
+    height: grasp.shellMark,
+  },
+  // The caller's svg or img fills the box, whatever size it has of its own.
+  markFill: {
+    display: "block",
+    width: "100%",
+    height: "100%",
+    objectFit: "contain",
+  },
   tools: {
     display: "flex",
     flexShrink: 0,
@@ -290,6 +324,16 @@ const styles = stylex.create({
     position: "absolute",
     insetBlockStart: grasp.shellHead,
     insetInlineStart: grasp.shellGutter,
+  },
+  // Raised: a white control of its own, the card's fill with the soft edge and low lift, so it
+  // reads over anything, a busy backdrop too. Hover and press change its icon's ink only, on the
+  // same surface, so nothing moves. In forced colours a real border draws it.
+  raised: {
+    backgroundColor: grasp.shellCard,
+    boxShadow: grasp.liftLow,
+    borderWidth: { default: 0, [FORCED]: grasp.hairline },
+    borderStyle: "solid",
+    borderColor: "CanvasText",
   },
   body: {
     display: "flex",
@@ -552,6 +596,101 @@ const watchPeek = (
   };
 };
 
+/** The caller's mark, made to fill its box: an svg or img with no size of its own fills it too. */
+const Mark = ({ head }: { head: ReactElement<{ className?: string }> }) => {
+  const look = stylex.props(styles.markFill);
+  const className = [head.props.className, look.className]
+    .filter((part) => part !== undefined && part !== "")
+    .join(" ");
+  return createElement(head.type, { ...head.props, className });
+};
+
+/** The head's mark, in its 20px box; nothing when there is none. */
+const HeadMark = ({ head }: { head: ReactNode }) =>
+  head === undefined ? null : (
+    <div {...stylex.props(styles.mark)}>
+      <span {...stylex.props(styles.markBox)}>
+        {isValidElement<{ className?: string }>(head) ? (
+          <Mark head={head} />
+        ) : (
+          head
+        )}
+      </span>
+    </div>
+  );
+
+/** Search, at the head's end, with the keys that open it elsewhere in its title. */
+const SearchButton = ({
+  onSearch,
+  label,
+  shortcut,
+}: {
+  onSearch?: () => void;
+  label: string;
+  shortcut?: string;
+}) => {
+  if (onSearch === undefined) {
+    return null;
+  }
+  const title =
+    shortcut !== undefined && shortcut !== ""
+      ? `${label} (${shortcut})`
+      : label;
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={title}
+      onClick={() => {
+        onSearch();
+      }}
+      {...stylex.props(styles.iconButton, focus.ring)}
+    >
+      <Icon icon={Search} />
+    </button>
+  );
+};
+
+/** Folded, the button at the top start corner that opens it again; none while it peeks, or when the host draws its own. */
+const Reopen = ({
+  ref,
+  reopen,
+  peeking,
+  look,
+  label,
+  controls,
+  onOpen,
+}: {
+  ref: RefObject<HTMLButtonElement | null>;
+  reopen: boolean;
+  peeking: boolean;
+  look: "raised" | "quiet";
+  label: string;
+  controls: string;
+  onOpen: (byKeys: boolean) => void;
+}) =>
+  reopen && !peeking ? (
+    <button
+      ref={ref}
+      type="button"
+      aria-label={label}
+      title={label}
+      aria-expanded={false}
+      aria-controls={controls}
+      onClick={(event) => {
+        onOpen(event.detail === 0);
+      }}
+      {...stylex.props(
+        styles.iconButton,
+        styles.reveal,
+        look === "raised" && styles.raised,
+        focus.ring
+      )}
+    >
+      <Icon icon={SidebarToggle} />
+    </button>
+  ) : null;
+
 /** A product's main navigation down the start, that folds away and peeks back in. */
 export const Sidebar = ({
   groups,
@@ -566,6 +705,9 @@ export const Sidebar = ({
   foldLabel = "Show or hide the sidebar",
   label = "Sidebar",
   navLabel = "Main",
+  reopen = true,
+  reopenLook = "raised",
+  fill = false,
   style,
 }: SidebarProps) => {
   const [own, setOwn] = useState(defaultOpen);
@@ -647,17 +789,18 @@ export const Sidebar = ({
   };
 
   const shown = open || peeking;
-  const title =
-    searchShortcut !== undefined && searchShortcut !== ""
-      ? `${searchLabel} (${searchShortcut})`
-      : searchLabel;
 
   return (
     <aside
       aria-label={label}
       data-slot="sidebar"
       data-folded={open ? undefined : ""}
-      {...stylex.props(styles.aside, !open && styles.asideFolded, style)}
+      {...stylex.props(
+        styles.aside,
+        fill && styles.filled,
+        !open && styles.asideFolded,
+        style
+      )}
     >
       {!open && (
         <>
@@ -675,22 +818,17 @@ export const Sidebar = ({
             }}
             {...stylex.props(styles.edge)}
           />
-          {!peeking && (
-            <button
-              ref={revealButton}
-              type="button"
-              aria-label={foldLabel}
-              title={foldLabel}
-              aria-expanded={false}
-              aria-controls={`${id}-panel`}
-              onClick={(event) => {
-                change(true, event.detail === 0);
-              }}
-              {...stylex.props(styles.iconButton, styles.reveal, focus.ring)}
-            >
-              <Icon icon={SidebarToggle} />
-            </button>
-          )}
+          <Reopen
+            ref={revealButton}
+            reopen={reopen}
+            peeking={peeking}
+            look={reopenLook}
+            label={foldLabel}
+            controls={`${id}-panel`}
+            onOpen={(byKeys) => {
+              change(true, byKeys);
+            }}
+          />
         </>
       )}
       <div
@@ -701,29 +839,20 @@ export const Sidebar = ({
         inert={!shown}
         {...stylex.props(
           styles.panel,
+          fill && styles.filled,
           !open && styles.panelFolded,
           !open && peeking && styles.panelPeeking
         )}
       >
         <div {...stylex.props(styles.inner)}>
           <div {...stylex.props(styles.head)}>
-            {head !== undefined && (
-              <div {...stylex.props(styles.mark)}>{head}</div>
-            )}
+            <HeadMark head={head} />
             <div {...stylex.props(styles.tools)}>
-              {onSearch !== undefined && (
-                <button
-                  type="button"
-                  aria-label={searchLabel}
-                  title={title}
-                  onClick={() => {
-                    onSearch();
-                  }}
-                  {...stylex.props(styles.iconButton, focus.ring)}
-                >
-                  <Icon icon={Search} />
-                </button>
-              )}
+              <SearchButton
+                onSearch={onSearch}
+                label={searchLabel}
+                shortcut={searchShortcut}
+              />
               <button
                 ref={foldButton}
                 type="button"

@@ -37,16 +37,19 @@ export const Page = ({
 /**
  * Every page's heading, the one way to head a page: Grasp UI's PageHeader
  * (grasp/page-header), with the page's title, one quiet line under it, and
- * the page's actions at the end of the title row.
+ * the page's actions at the end of the title row; `clamp` keeps a description someone wrote to two lines.
  */
 export const PageHeading = ({
   title,
   description,
+  clamp = false,
   meta,
   action,
 }: {
   title: ReactNode;
   description?: ReactNode;
+  /** At most two lines of `description`, for a description someone wrote. */
+  clamp?: boolean;
   /** Beside the title: a mark that says where its subject stands, such as a status. */
   meta?: ReactNode;
   action?: ReactNode;
@@ -54,6 +57,7 @@ export const PageHeading = ({
   <PageHeader
     title={title}
     {...(description === undefined ? {} : { description })}
+    descriptionLines={clamp ? 2 : "all"}
     {...(meta === undefined ? {} : { aside: meta })}
     {...(action === undefined ? {} : { actions: action })}
   />

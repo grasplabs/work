@@ -63,20 +63,6 @@ import { grasp } from "../tokens/tokens.stylex.ts";
 // frame keeps); on a phone it is a sheet over the page.
 
 const styles = stylex.create({
-  // Beside the page: above the page's card, so that folded, its edge (where
-  // the pointer peeks it in) and its button to open it again are not under
-  // the card, and a peek slides in over the page.
-  beside: {
-    position: "relative",
-    zIndex: 40,
-    display: "flex",
-    flexShrink: 0,
-  },
-  // The product's mark in the sidebar's head: 20px, as the head asks.
-  mark: {
-    width: "20px",
-    height: "20px",
-  },
   // The phone's sheet: the sidebar fills it.
   sheet: {
     display: "flex",
@@ -345,9 +331,11 @@ export const GraspSidebar = ({
   const searching = identity.onboardingOnly !== true;
   const sidebar = (
     <Sidebar
+      // In the phone's sheet it fills the sheet.
+      fill={isMobile}
       foldLabel={t`Show or hide the sidebar`}
       groups={groups}
-      head={<GraspMark aria-hidden {...stylex.props(styles.mark)} />}
+      head={<GraspMark aria-hidden />}
       label={t`Sidebar`}
       navLabel={t`Main`}
       onOpenChange={(next) => {
@@ -377,16 +365,10 @@ export const GraspSidebar = ({
           <span {...stylex.props(styles.unseen)}>
             <SheetTitle>{t`Sidebar`}</SheetTitle>
           </span>
-          {/* The library shell's own sheet marker: in it, the Sidebar fills the sheet's width. */}
-          <div
-            data-slot="app-shell-sheet"
-            {...stylex.props(styles.sheet, stylex.defaultMarker())}
-          >
-            {sidebar}
-          </div>
+          <div {...stylex.props(styles.sheet)}>{sidebar}</div>
         </SheetContent>
       </Sheet>
     );
   }
-  return <div {...stylex.props(styles.beside)}>{sidebar}</div>;
+  return sidebar;
 };

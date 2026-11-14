@@ -8,15 +8,24 @@
 //   <Skeleton shape="block" style={size.chart} />  a block, sized by the layout
 //   <Skeleton shape="circle" />                    an avatar
 //
+// `look` picks how it waits. `grey`, the default for now: the soft fill that breathes. `field`: a
+// fine dot field, almost still, with a wave of our light (mint into pine) crossing it, one wave for
+// the whole page (light.ts). `resolve`: the same, but the field gathers denser over the first passes,
+// so a long wait reads as progress. `lines`: for text, a hairline per line and the light running
+// along the lines one after another, as if being written. With reduced motion every look is still.
+//
 // It is hidden from screen readers; the region it stands in carries `aria-busy` and a status
 // that says what is loading. Every value is a token (src/tokens). A caller may set size and
 // layout (the `style` prop): the content it stands for decides how large it is.
 import * as stylex from "@stylexjs/stylex";
+import { useEffect, useRef } from "react";
 
 import { grasp, media } from "../tokens/tokens.stylex";
+import { lightUp, noop } from "./light";
 
 export type SkeletonShape = "line" | "block" | "circle";
 export type SkeletonText = "sm" | "md" | "lg";
+export type SkeletonLook = "grey" | "field" | "resolve" | "lines";
 
 type Layout = string | number | null;
 
@@ -64,6 +73,13 @@ export interface SkeletonProps {
    * @default true
    */
   pulse?: boolean;
+  /**
+   * How it waits: `grey` the soft fill that breathes; `field` a dot field our light crosses;
+   * `resolve` the field gathering denser as the wait goes on; `lines` light written along lines of
+   * text (a block or circle takes the field).
+   * @default "grey"
+   */
+  look?: SkeletonLook;
   /** Its size and where it sits: the content it stands for decides. Never its fill or corner. */
   style?: SkeletonLayoutStyle;
   /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
@@ -74,6 +90,24 @@ const breathe = stylex.keyframes({
   "0%, 100%": { opacity: 1 },
   "50%": { opacity: grasp.skeletonLow },
 });
+
+const gather = stylex.keyframes({
+  "0%": { opacity: 0 },
+  "100%": { opacity: 1 },
+});
+
+/** The band of light's width; light.ts reads it from the band itself. */
+const BAND = 420;
+/** The resolving field gathers over about four passes of the light. */
+const GATHER = "14s";
+
+/** The dots: 1px on a 4px pitch, in a quiet ink. */
+const DOTS = `radial-gradient(circle at center, color-mix(in oklab, ${grasp.ink} 20%, transparent) 0.7px, transparent 1px)`;
+/** Where the light shows: the same pitch, a little larger, so a lit dot grows. */
+const LIT = `radial-gradient(circle at center, ${grasp.ink} 1px, transparent 1.4px)`;
+/** A hairline through the middle of a line of text. */
+const TRACK = `linear-gradient(to bottom, transparent calc(50% - 0.5px), color-mix(in oklab, ${grasp.ink} 22%, transparent) calc(50% - 0.5px), color-mix(in oklab, ${grasp.ink} 22%, transparent) calc(50% + 0.5px), transparent calc(50% + 0.5px))`;
+const LIT_TRACK = `linear-gradient(to bottom, transparent calc(50% - 1px), ${grasp.ink} calc(50% - 1px), ${grasp.ink} calc(50% + 1px), transparent calc(50% + 1px))`;
 
 const styles = stylex.create({
   skeleton: {
@@ -131,25 +165,137 @@ const styles = stylex.create({
     height: grasp.controlMd,
     borderRadius: grasp.cornerCircle,
   },
+  // ---- The dot-field looks ----
+  // No fill of its own: the field inside it draws, in the content box (a line's letters' height).
+  bare: {
+    backgroundColor: "transparent",
+  },
+  field: {
+    position: "relative",
+    display: "block",
+    height: "100%",
+    overflow: "hidden",
+    borderRadius: "inherit",
+    backgroundImage: { default: DOTS, [media.forced]: "none" },
+    backgroundSize: "4px 4px",
+    outlineWidth: { default: 0, [media.forced]: 1 },
+    outlineStyle: "solid",
+    outlineColor: "GrayText",
+    outlineOffset: -1,
+  },
+  // A picture or an avatar stands on the soft ground; text does not.
+  ground: {
+    backgroundColor: grasp.soft,
+  },
+  track: {
+    backgroundImage: { default: TRACK, [media.forced]: "none" },
+    backgroundSize: "auto",
+  },
+  // The resolving look: a second grid between the first, gathering over the first passes.
+  dense: {
+    position: "absolute",
+    inset: 0,
+    backgroundImage: DOTS,
+    backgroundSize: "4px 4px",
+    backgroundPosition: "2px 2px",
+    opacity: { default: 1, [media.reduced]: 0 },
+    animationName: { default: gather, [media.reduced]: "none" },
+    animationDuration: GATHER,
+    animationTimingFunction: "steps(4, jump-end)",
+    animationFillMode: "both",
+  },
+  // Where the light can show: the dots, a little larger.
+  lit: {
+    position: "absolute",
+    inset: 0,
+    display: {
+      default: "block",
+      [media.forced]: "none",
+      [media.reduced]: "none",
+    },
+    maskImage: LIT,
+    maskSize: "4px 4px",
+  },
+  litTrack: {
+    maskImage: LIT_TRACK,
+    maskSize: "auto",
+  },
+  // The light: a soft band of mint into pine, slanted, moved by light.ts.
+  band: {
+    position: "absolute",
+    insetBlock: 0,
+    // Physical: light.ts moves it in pixels from the left edge, either way round.
+    left: 0,
+    width: BAND,
+    backgroundImage: `linear-gradient(105deg, transparent 0%, color-mix(in oklab, ${grasp.mint} 70%, transparent) 30%, ${grasp.mint} 48%, color-mix(in oklab, ${grasp.pine} 80%, transparent) 66%, transparent 100%)`,
+    transform: `translateX(-${BAND}px)`,
+    willChange: "transform",
+  },
 });
 
 export const Skeleton = ({
   shape = "line",
   text = "sm",
   pulse = true,
+  look = "grey",
   style,
   layout,
-}: SkeletonProps) => (
-  <span
-    aria-hidden="true"
-    data-slot="skeleton"
-    data-shape={shape}
-    {...stylex.props(
-      styles.skeleton,
-      styles[shape],
-      shape === "line" && styles[text],
-      pulse && styles.pulse,
-      layout ?? style
-    )}
-  />
-);
+}: SkeletonProps) => {
+  const field = useRef<HTMLSpanElement>(null);
+  const band = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    const element = field.current;
+    const light = band.current;
+    if (look === "grey" || element === null || light === null) {
+      return noop;
+    }
+    return lightUp(element, light, look);
+  }, [look]);
+
+  if (look === "grey") {
+    return (
+      <span
+        aria-hidden="true"
+        data-slot="skeleton"
+        data-shape={shape}
+        {...stylex.props(
+          styles.skeleton,
+          styles[shape],
+          shape === "line" && styles[text],
+          pulse && styles.pulse,
+          layout ?? style
+        )}
+      />
+    );
+  }
+  const lines = look === "lines" && shape === "line";
+  return (
+    <span
+      aria-hidden="true"
+      data-slot="skeleton"
+      data-shape={shape}
+      data-look={look}
+      {...stylex.props(
+        styles.skeleton,
+        styles[shape],
+        shape === "line" && styles[text],
+        styles.bare,
+        layout ?? style
+      )}
+    >
+      <span
+        ref={field}
+        {...stylex.props(
+          styles.field,
+          shape !== "line" && styles.ground,
+          lines && styles.track
+        )}
+      >
+        {look === "resolve" ? <span {...stylex.props(styles.dense)} /> : null}
+        <span {...stylex.props(styles.lit, lines && styles.litTrack)}>
+          <span ref={band} {...stylex.props(styles.band)} />
+        </span>
+      </span>
+    </span>
+  );
+};

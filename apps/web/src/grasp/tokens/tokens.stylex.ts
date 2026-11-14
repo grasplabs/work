@@ -508,6 +508,7 @@ export const grasp = stylex.defineConsts({
   shellCountInline: "var(--grasp-shell-count-inline)",
   shellMenuCorner: "var(--grasp-shell-menu-corner)",
   shellMark: "var(--grasp-shell-mark)",
+  shellLayer: "var(--grasp-shell-layer)",
   shellBar: "var(--grasp-shell-bar)",
   shellPageRoomBelow: "var(--grasp-shell-page-room-below)",
   shellPageRoomChat: "var(--grasp-shell-page-room-chat)",
