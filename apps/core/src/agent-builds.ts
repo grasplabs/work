@@ -712,16 +712,27 @@ export const saveDraftChanges = async (
   },
   admit?: () => Promise<void>
 ): Promise<string[]> => {
-  const base = await filesOf(env, appKind, id, {
-    base: draft.base,
-    changes: {},
-  });
-  // The base's definition, read once: what the draft's own falls back to,
-  // and what it is no copy of once it is the same again.
-  const baseDefinition =
-    draft.base === null
+  const definitionAt = async (version: number | null) =>
+    version === null
       ? null
-      : await readStored(await findVersion(env, id, draft.base));
+      : await readStored(await findVersion(env, id, version));
+  const filesAt = async (version: number | null) =>
+    await filesOf(env, appKind, id, { base: version, changes: {} });
+  // A draft left over an older version (a write that landed while a
+  // publish went live, a roll back) reads as its base while it changes
+  // anything, and as the live version once it changes nothing. So only
+  // what both have is no change: either way the draft reads the same.
+  const liveVersion = await appKind.liveBase(env, id);
+  const overLive = liveVersion === draft.base;
+  const base = await filesAt(draft.base);
+  const live = overLive ? base : await filesAt(liveVersion);
+  // The base's definition, read once: what the draft's own falls back to,
+  // and what it is no copy of once it is the same again (and the live
+  // version's, as the files are).
+  const baseDefinition = await definitionAt(draft.base);
+  const liveDefinition = overLive
+    ? baseDefinition
+    : await definitionAt(liveVersion);
   let own: AppDefinition;
   if (definition !== undefined) {
     own = definition;
@@ -754,16 +765,17 @@ export const saveDraftChanges = async (
   refuseAppWorkflows(
     written.flatMap(([path, content]) => (content === null ? [] : [path]))
   );
-  // Only what differs from the base is kept: a path written back as the
-  // base has it (a deleted file that isn't there, too) is a change no
-  // more. A draft holds at most the base's paths and the files it adds,
-  // which the App's limits bound. So with its definition: the base's
+  // Only what differs is kept: a path written back as the base and the
+  // live version have it (a deleted file that isn't there, too) is a
+  // change no more. A draft holds at most the base's paths and the files
+  // it adds, which the App's limits bound. So with its definition: theirs
   // again is none of its own.
-  const kept = written.filter(
-    ([path, content]) => (content ?? undefined) !== base.get(path)
-  );
-  const unchanged = written.flatMap(([path, content]) =>
-    (content ?? undefined) === base.get(path) ? [path] : []
+  const noChange = ([path, content]: [string, string | null]) =>
+    (content ?? undefined) === base.get(path) &&
+    (content ?? undefined) === live.get(path);
+  const kept = written.filter((change) => !noChange(change));
+  const unchanged = written.flatMap((change) =>
+    noChange(change) ? [change[0]] : []
   );
   const ownText = definitionText(own);
   await saveDraft(
@@ -774,7 +786,10 @@ export const saveDraftChanges = async (
     {
       changes: Object.fromEntries(kept),
       unchanged,
-      definition: baseDefinition?.text === ownText ? null : ownText,
+      definition:
+        baseDefinition?.text === ownText && liveDefinition?.text === ownText
+          ? null
+          : ownText,
     },
     writer,
     admit

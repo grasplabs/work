@@ -762,6 +762,35 @@ describe("publishing an App's draft", { timeout: 180_000 }, () => {
       desk: deskSaying("Approve")["src/routes/index.tsx"],
     });
   });
+
+  it("keeps a draft left over an older version, written back to that version, as a change over the live one", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await appOf(builder);
+    const subject = { kind: "app", id: app } as const;
+    await publishing(builder, app, {
+      ...deskSaying("Approve"),
+      "notes.md": "Old\n",
+    });
+    await publishing(builder, app, { "notes.md": "New\n" });
+    // Left over version 1, as a write that landed while version 2 went
+    // live leaves it.
+    await writeDraft(builder, app, { "notes.md": "Mine\n" });
+    await env.DB.prepare(
+      "UPDATE drafts SET base = 1 WHERE subject_kind = 'app' AND subject_id = ?"
+    )
+      .bind(app)
+      .run();
+    const { revision } = await builder.api.drafts.get(subject);
+
+    await builder.api.drafts.write(subject, revision, { "notes.md": "Old\n" });
+    const draft = await builder.api.drafts.get(subject);
+    const files = await builder.api.drafts.files(subject);
+
+    expect({ changed: draft.changed, notes: files["notes.md"] }).toStrictEqual({
+      changed: ["notes.md"],
+      notes: "Old\n",
+    });
+  });
 });
 
 // What a builder reviews before publishing (`apps.review`): the
