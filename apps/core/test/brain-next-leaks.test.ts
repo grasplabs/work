@@ -1190,27 +1190,57 @@ describe(
         }),
         { conversation: "own", appId: withFile, personal: true }
       );
-      // Each producer (`producerNames`) and the marker planted through it
-      // above, by its name in `markers` or `companyMarkers`.
-      const plantedThrough: Readonly<Record<string, string>> = {
-        "upload for me": "the holder's upload for only them",
-        "upload for team": "an upload for a team the outsider isn't in",
-        "upload for everyone": "an upload for everyone",
-        capture: "what the holder's agent fetched through a connection",
-        run: "the holder's run",
-        chat: "a question in the holder's chat",
+      // Each producer (`producerNames`) and what was planted through it
+      // above: the source, its marker by its name in `markers` or
+      // `companyMarkers`, and someone who may read it.
+      const plantedThrough: Readonly<
+        Record<string, { marker: string; source: SourceRef; reader: string }>
+      > = {
+        "upload for me": {
+          marker: "the holder's upload for only them",
+          source: ownUpload,
+          reader: holder,
+        },
+        "upload for team": {
+          marker: "an upload for a team the outsider isn't in",
+          source: teamUpload,
+          reader: holder,
+        },
+        "upload for everyone": {
+          marker: "an upload for everyone",
+          source: everyoneUpload,
+          reader: outsider,
+        },
+        capture: {
+          marker: "what the holder's agent fetched through a connection",
+          source: captureId,
+          reader: holder,
+        },
+        run: { marker: "the holder's run", source: runSource, reader: holder },
+        chat: {
+          marker: "a question in the holder's chat",
+          source: turnSource,
+          reader: holder,
+        },
       };
-      // The model prompts carried so far: the holder's own chat sent its
-      // question to a model, for them. A pass fails on any prompt after.
-      const promptedBefore = Object.fromEntries(
+      // The model prompts that carried each marker while the world was
+      // planted, by the marker's name: the first test holds them to the
+      // holder's own chat, and each pass fails on any prompt after.
+      const promptedAtPlanting = Object.fromEntries(
         await Promise.all(
           Object.entries({ ...markers, ...companyMarkers }).map(
             async ([name, marker]) => {
               const carried = await carrying(marker);
-              return [name, carried.length] as const;
+              return [name, carried.map(({ body }) => body)] as const;
             }
           )
         )
+      );
+      const promptedBefore = Object.fromEntries(
+        Object.entries(promptedAtPlanting).map(([name, bodies]) => [
+          name,
+          bodies.length,
+        ])
       );
       // And the outsider does use it: it is theirs to open.
       const outsiderMember = await memberOf(env.DB, outsider);
@@ -1231,6 +1261,7 @@ describe(
         sharedWord,
         markers,
         companyMarkers,
+        promptedAtPlanting,
         promptedBefore,
         plantedThrough,
         ownerMarker,
@@ -1320,12 +1351,26 @@ describe(
         secretTeam,
         teamSkillMarker,
         findsEveryone,
+        promptedAtPlanting,
       } = await plantedWorld();
       // Every member finds the upload for everyone: one who joined after
       // it was made, and an admin, too.
       const [{ userId: member }, { userId: admin }] = await Promise.all([
         signedInWithRole(idp, "user"),
         signedInWithRole(idp, "admin"),
+      ]);
+
+      // What was sent to a model while planting: only the holder's own
+      // chat turn, which carries their question and what their chat is
+      // given (their instruction file, their skill, their team's skill).
+      // The passes count prompts from there, so this is where any other
+      // marker in a prompt then must fail.
+      const chat = promptedAtPlanting["a question in the holder's chat"] ?? [];
+      const ownChat = new Set([
+        "a question in the holder's chat",
+        "the holder's instruction file",
+        "the holder's own skill",
+        "a team's skill the outsider isn't in",
       ]);
 
       expect({
@@ -1335,7 +1380,28 @@ describe(
           member: await findsEveryone(member),
           admin: await findsEveryone(admin),
         },
+        chatPrompts: chat.length,
+        prompted: Object.fromEntries(
+          Object.entries(promptedAtPlanting).map(([name, bodies]) => {
+            if (bodies.length === 0) {
+              return [name, 0];
+            }
+            return [
+              name,
+              textOf(bodies) === textOf(chat)
+                ? "in the holder's own chat"
+                : bodies.length,
+            ];
+          })
+        ),
       }).toStrictEqual({
+        chatPrompts: 1,
+        prompted: Object.fromEntries(
+          Object.keys(promptedAtPlanting).map((name) => [
+            name,
+            ownChat.has(name) ? "in the holder's own chat" : 0,
+          ])
+        ),
         narrowedToHolder: "refused",
         outsiderFinds: [handbook],
         holderFindsCapture: true,
@@ -1357,18 +1423,46 @@ describe(
 
     it("plants a marker through every producer core hands sources over through, and every choice of an upload's readers", async () => {
       const { plantedThrough, markers, companyMarkers } = await plantedWorld();
-      // Planted, and forbidden in the passes below: to all but the holder
-      // (`markers`), or to anyone outside the company (`companyMarkers`).
-      const planted = new Set([
-        ...Object.keys(markers),
-        ...Object.keys(companyMarkers),
-      ]);
+      // Forbidden in the passes below: to all but the holder (`markers`),
+      // or to anyone outside the company (`companyMarkers`).
+      const forbidden = new Map(
+        Object.entries({ ...markers, ...companyMarkers })
+      );
+      /**
+       * Whether `producer` planted its source, of its kind, whose marker
+       * the passes forbid, and which someone who may read it recalls by
+       * that marker: that source, holding it.
+       */
+      const isPlanted = async (producer: string): Promise<boolean> => {
+        const planted = plantedThrough[producer];
+        const marker = forbidden.get(planted?.marker ?? "");
+        const kind = producer.startsWith("upload for ") ? "upload" : producer;
+        if (
+          planted === undefined ||
+          marker === undefined ||
+          planted.source.producer !== kind
+        ) {
+          return false;
+        }
+        const { items } = await recallAs(env, planted.reader, {
+          personal: true,
+          question: marker,
+          budget: { tokens: recallBudgetMax },
+        });
+        return items.some(
+          ({ source, text }) =>
+            textOf(source) === textOf(planted.source) && text.includes(marker)
+        );
+      };
+      const unplanted: string[] = [];
+      for (const producer of producerNames()) {
+        // oxlint-disable-next-line no-await-in-loop -- one producer at a time
+        if (!(await isPlanted(producer))) {
+          unplanted.push(producer);
+        }
+      }
 
-      expect(
-        producerNames().filter(
-          (producer) => !planted.has(plantedThrough[producer] ?? "")
-        )
-      ).toStrictEqual([]);
+      expect(unplanted).toStrictEqual([]);
     });
 
     it("gives someone who isn't a member, or was one, nothing of the upload for everyone, nor anything else", async () => {
@@ -1423,14 +1517,64 @@ describe(
         );
       }
 
-      expect([
-        ...findings,
-        ...(await promptedWith(
-          "someone who isn't a member",
-          forbidden,
-          world.promptedBefore
-        )),
-      ]).toStrictEqual([]);
+      // Core's surfaces that read refuse the removed member as no longer
+      // one before anything is read: each call is refused so, or refused
+      // for its input, which is checked first. Not staff's report, which
+      // reads as no one, nor `readInstructionFilesAs`, which reads as a
+      // member its caller has checked (instruction-files.ts, whose
+      // `instructionFilesFor` is in the pass above).
+      const answeredOrOtherwise: string[] = [];
+      const neverInactive: string[] = [];
+      for (const [name, probe] of reading) {
+        if (
+          !name.startsWith("core ") ||
+          name === "core brainStaffReport" ||
+          name === "core readInstructionFilesAs"
+        ) {
+          continue;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- one surface at a time
+        const answers = await probe({
+          ...asOutsider,
+          personId: former.userId,
+          reader: { person: former.userId, groups: [] },
+        });
+        const inactive = answers.filter(
+          ({ got }) =>
+            "error" in got && textOf(got).includes("permission.person_inactive")
+        );
+        if (inactive.length === 0) {
+          neverInactive.push(name);
+        }
+        answeredOrOtherwise.push(
+          ...answers
+            .filter(
+              ({ got }) =>
+                !("error" in got) ||
+                !/permission\.person_inactive|brain\.request_invalid/u.test(
+                  textOf(got)
+                )
+            )
+            .map(({ call }) => `${name}: ${call}`)
+        );
+      }
+
+      expect({
+        findings: [
+          ...findings,
+          ...(await promptedWith(
+            "someone who isn't a member",
+            forbidden,
+            world.promptedBefore
+          )),
+        ],
+        answeredOrOtherwise,
+        neverInactive,
+      }).toStrictEqual({
+        findings: [],
+        answeredOrOtherwise: [],
+        neverInactive: [],
+      });
     });
 
     it("gives the outsider no marker or hidden match through any surface, in an answer, a log line or a prompt", async () => {
