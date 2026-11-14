@@ -117,21 +117,20 @@ const payloadSchema = z.strictObject({
   timeZone: extractSchema.shape.timeZone,
   priority: extractSchema.shape.priority,
   /**
-   * What a run of this piece kept, in its adds, recorded before its first
-   * add (`WorkContext.keep`): a rerun writes these and asks the model
-   * nothing. Each memory as JSON, its end as milliseconds. Its size is
-   * what the piece kept: each memory within the contract's bounds, as
-   * many as the model's answer held (at most a quarter of its window).
-   * A record past the size the platform takes for one stored value
-   * fails the attempt, and the item parks as any failure does.
+   * What a run of this piece kept, as its one add, recorded before it is
+   * written (`WorkContext.keep`): a rerun writes it and asks the model
+   * nothing. None, with `cut`, when the piece writes nothing. Each memory
+   * as JSON, its end as milliseconds. Its size is what the piece kept:
+   * each memory within the contract's bounds, as many as the model's
+   * answer held (at most a quarter of its window). A record past the
+   * size the platform takes for one stored value fails the attempt, and
+   * the item parks as any failure does.
    */
   kept: z
-    .array(
-      z.strictObject({
-        entities: z.array(newEntitySchema),
-        memories: z.array(z.record(z.string(), z.unknown())),
-      })
-    )
+    .strictObject({
+      entities: z.array(newEntitySchema),
+      memories: z.array(z.record(z.string(), z.unknown())),
+    })
     .optional(),
   /** Where the piece of `kept` ended, and whether it was the version's last. */
   cut: z
@@ -658,17 +657,14 @@ const keptJsonOf = ({ entities, memories }: Candidates) => ({
 /** `checking` as the item keeps it. */
 const checkingJsonOf = (
   checking: Checking
-): NonNullable<Payload["checking"]> => {
-  const [candidates] = [checking.candidates].map(keptJsonOf);
-  return {
-    next: checking.next,
-    last: checking.last,
-    proposed: checking.proposed,
-    candidates: candidates ?? { entities: [], memories: [] },
-    checked: [...checking.checked],
-    supported: [...checking.supported],
-  };
-};
+): NonNullable<Payload["checking"]> => ({
+  next: checking.next,
+  last: checking.last,
+  proposed: checking.proposed,
+  candidates: keptJsonOf(checking.candidates),
+  checked: [...checking.checked],
+  supported: [...checking.supported],
+});
 
 /** A piece part-way through its checks (`Payload["checking"]`), as a run works with it. */
 interface Checking {
@@ -940,6 +936,20 @@ const pieceTokensOf = (contextTokens: number | null): number | null => {
  * writes inside the store, a piece at most what one answer of the model
  * held. A restore under way refuses it (`restoringNow`): the item fails as
  * `restoring`, and the queue tries it again.
+ *
+ * What a written piece says stays current until a version that is itself
+ * extracted ends it (its `extracted` mark, on its last piece: the
+ * contract's rule for memories). A newer version that doesn't ask for
+ * extraction ends nothing. So a long source whose first piece was written
+ * while its version was current, followed by a newer version that
+ * doesn't ask, keeps that piece's memories current: just as a version
+ * extracted whole, followed by one that doesn't ask, keeps all of its.
+ * Who may read them is still the current version's readers (every memory
+ * cites its version, and the store holds it to the source's current
+ * readers), and an attempt whose version is no longer current writes
+ * nothing. No producer asks for extraction today (capture and hand-overs
+ * add without `said`), so none sends a version that asks followed by one
+ * that doesn't.
  */
 const writePiece = async (
   { storage, owner }: WorkContext,
@@ -997,27 +1007,32 @@ const withoutKept = ({
   ...payload
 }: Payload): Payload => payload;
 
-/** The adds an item kept (`keptJsonOf`), as an add takes them again. */
-const keptOf = (kept: NonNullable<Payload["kept"]>): Candidates[] =>
-  kept.map(({ entities, memories }) => ({
-    entities,
-    memories: memories.map((memory) =>
-      newMemorySchema.parse({
-        ...memory,
-        ...(typeof memory.validUntil === "number"
-          ? { validUntil: new Date(memory.validUntil) }
-          : {}),
-      })
-    ),
-  }));
+/** An add as the item kept it (`keptJsonOf`), as an add takes it again. */
+const keptOf = ({
+  entities,
+  memories,
+}: NonNullable<Payload["kept"]>): Candidates => ({
+  entities,
+  memories: memories.map((memory) =>
+    newMemorySchema.parse({
+      ...memory,
+      ...(typeof memory.validUntil === "number"
+        ? { validUntil: new Date(memory.validUntil) }
+        : {}),
+    })
+  ),
+});
 
-/** What a run of the item's piece kept, and where the piece ended; none before one did. */
+/**
+ * What a run of the item's piece kept, as its one add (none when it
+ * writes nothing), and where the piece ended; neither before a run did.
+ */
 const keptRecordOf = (
   payload: Payload
-): { kept: Candidates[] | undefined; cut: Payload["cut"] } =>
-  payload.cut === undefined
-    ? { kept: undefined, cut: undefined }
-    : { kept: keptOf(payload.kept ?? []), cut: payload.cut };
+): { kept: Candidates | undefined; cut: Payload["cut"] } => ({
+  kept: payload.kept === undefined ? undefined : keptOf(payload.kept),
+  cut: payload.cut,
+});
 
 /** What the item knows of whose words its piece is, and when, as checks read it. */
 const drawingOf = (payload: Payload): Drawing => ({
@@ -1062,22 +1077,24 @@ const checkingOf = (payload: Payload): Checking | undefined => {
     return undefined;
   }
   const { candidates, checked, supported, ...rest } = payload.checking;
-  const [revived] = keptOf([candidates]);
   return {
     ...rest,
-    candidates: revived ?? { entities: [], memories: [] },
+    candidates: keptOf(candidates),
     checked: new Set(checked),
     supported: new Set(supported),
   };
 };
 
 /**
- * What a checked piece writes: the supported memories in as many adds as
- * the contract's bounds take; none when nothing was kept, but on the last
- * piece, whose add says the version is extracted. One event for the
- * piece: counts alone, nothing of the text.
+ * What a checked piece writes: its supported memories as one add; none
+ * when nothing was kept, but on the last piece, whose add says the
+ * version is extracted. One event for the piece: counts alone, nothing
+ * of the text.
  */
-const addsOfChecked = (payload: Payload, checking: Checking): Candidates[] => {
+const addOfChecked = (
+  payload: Payload,
+  checking: Checking
+): Candidates | undefined => {
   const { entities, memories } = checking.candidates;
   const kept = keeping(
     entities,
@@ -1090,7 +1107,7 @@ const addsOfChecked = (payload: Payload, checking: Checking): Candidates[] => {
     quoted: memories.length,
     supported: kept.memories.length,
   });
-  return kept.memories.length > 0 || checking.last ? [kept] : [];
+  return kept.memories.length > 0 || checking.last ? kept : undefined;
 };
 
 const extractWork: WorkDefinition<Payload> = defineWork({
@@ -1128,10 +1145,10 @@ const extractWork: WorkDefinition<Payload> = defineWork({
       throw new WorkError("restoring");
     }
     const change = await changeOf(source, version, from);
-    // A rerun of a piece whose adds began: what the first run kept, and
-    // where its piece ended, as it kept them, whatever window applies now;
-    // else the piece as the window cuts it now.
-    let { kept: adds, cut } = keptRecordOf(payload);
+    // A rerun of a piece whose checks were done: what the first run kept,
+    // and where its piece ended, as it kept them, whatever window applies
+    // now; else the piece as the window cuts it now.
+    let { kept: adding, cut } = keptRecordOf(payload);
     if (cut === undefined) {
       const whole = await textOf(context, found.file);
       if (whole === null) {
@@ -1170,15 +1187,15 @@ const extractWork: WorkDefinition<Payload> = defineWork({
           return;
         }
         cut = { next: checking.next, last: checking.last };
-        adds = addsOfChecked(payload, checking);
+        adding = addOfChecked(payload, checking);
         // What is to be written, and where the piece ended, are kept with
-        // the item first: a store that stops before the last add writes
-        // the rest on the rerun, never a second wording of the same facts,
-        // and every rerun goes on from the same place, whatever window
-        // applies by then.
+        // the item first: a store that stops before the write writes it on
+        // the rerun, never a second wording of the same facts, and every
+        // rerun goes on from the same place, whatever window applies by
+        // then.
         context.keep({
           ...withoutKept(payload),
-          kept: adds.map(keptJsonOf),
+          ...(adding === undefined ? {} : { kept: keptJsonOf(adding) }),
           cut,
         });
       }
@@ -1187,7 +1204,6 @@ const extractWork: WorkDefinition<Payload> = defineWork({
     if (cut === undefined) {
       return;
     }
-    const [adding] = adds ?? [];
     // Written in one transaction that asks again whether the version is
     // current (a newer one or an erasure may have landed during any await
     // before): superseded, the attempt ends, writing nothing.

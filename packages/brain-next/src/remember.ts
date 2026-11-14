@@ -213,7 +213,15 @@ const holdVersion = (
   if (found === undefined) {
     throw refused(why);
   }
-  if (shared && accessOfKey(found.readers)?.kind === "owner") {
+  if (!shared) {
+    return;
+  }
+  // Closed for a key the store can't read: it may be one person's.
+  const access = accessOfKey(found.readers);
+  if (access === undefined) {
+    throw refused("who may read what it is drawn from can't be read");
+  }
+  if (access.kind === "owner") {
     throw refused(
       "what one person alone may read is kept in that person's own store"
     );

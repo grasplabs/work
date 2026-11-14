@@ -1181,7 +1181,7 @@ describe("extracting memories", () => {
     ]);
   });
 
-  it("keeps every valid memory a model proposes, however many, in as many adds as it takes", async () => {
+  it("keeps every valid memory a model proposes, however many, past what one add through the store takes", async () => {
     const token = unique("t");
     const group = unique("g");
     const prefix = unique("Cust");
@@ -1694,7 +1694,7 @@ describe("extracting memories", () => {
     });
   });
 
-  it("keeps one entity for one proposed entity when a piece takes more than one add", async () => {
+  it("keeps one entity for one proposed entity of more memories than one add through the store takes", async () => {
     const token = unique("t");
     const group = unique("g");
     const name = unique("Acme");

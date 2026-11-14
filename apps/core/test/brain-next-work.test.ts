@@ -662,7 +662,7 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
     });
   });
 
-  it("refuses at once, and sends nothing, a call whose purpose is past what the gateway takes", async () => {
+  it("refuses at once, sends nothing and parks a call whose purpose is past what the gateway takes", async () => {
     const provider = await answeringProvider(() => answer);
     const key = keyOf("long-purpose");
     const step = "s".repeat(32);
@@ -678,12 +678,29 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
     });
     await enqueue({ key, priority: "asked" }, longWork);
     await tick();
+    // The same request fails the same way every time: parked after this
+    // one attempt.
+    const [item] = await runInDurableObject(store(), (_store, state) =>
+      state.storage.sql
+        .exec<{ attempts: number; parked: number }>(
+          "SELECT attempts, parked_at IS NOT NULL AS parked FROM work_items WHERE kind = ? AND key = ?",
+          longWork.kind,
+          key
+        )
+        .toArray()
+    );
 
     expect({
       purpose: `brain.${longWork.kind}.${step}`.length,
       codes,
       sent: provider.requests.length,
-    }).toStrictEqual({ purpose: 87, codes: ["invalid_request"], sent: 0 });
+      item,
+    }).toStrictEqual({
+      purpose: 87,
+      codes: ["invalid_request"],
+      sent: 0,
+      item: { attempts: 1, parked: 1 },
+    });
   });
 
   it("runs items in priority order, never more than the set number at once", async () => {

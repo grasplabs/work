@@ -864,13 +864,16 @@ export const workErrors = {
 export type WorkErrorCode = keyof typeof workErrors;
 
 /**
- * Errors an item meets the same way on every attempt while the host's
- * models stay as they are (`window_too_small`: the window is the host's
- * models'): parked at the first, never tried again within minutes. It
- * comes back a day later, as any parked item, when the models may have
- * changed.
+ * Errors an item meets the same way on every attempt while the release
+ * and the host's models stay as they are: a call the queue won't send
+ * (`invalid_request`: its purpose, step, role or size, fixed by the code
+ * and the item's payload), or a window too small for the work
+ * (`window_too_small`: the window is the host's models'). Parked at the
+ * first, never tried again within minutes; it comes back a day later, as
+ * any parked item, when a release or the models may have changed.
  */
 export const workErrorsParkedAtOnce: readonly WorkErrorCode[] = [
+  "invalid_request",
   "window_too_small",
 ];
 
@@ -1140,7 +1143,7 @@ export interface Embedders {
 // that fails is retried and, after too many failures, parked where staff
 // see it.
 
-/** The classes of work a hand-over may take (work.ts `workPriorities`). */
+/** The classes of work a hand-over may take (`workPriorities`). */
 export const handOverPriorities = ["conversation"] as const;
 export type HandOverPriority = (typeof handOverPriorities)[number];
 
@@ -1885,7 +1888,7 @@ export type NewMemory = z.infer<typeof newMemorySchema>;
  *
  * The change key is unique per change within the store, and comes from
  * the change's intent, never minted per attempt: for extraction, the
- * source and version (one add per version); for `remember`, the writer
+ * source, version and piece (one add per piece); for `remember`, the writer
  * and what they said. So a retry, from any caller, is the same change.
  *
  * `extracted` says a version of a source is fully extracted: every memory

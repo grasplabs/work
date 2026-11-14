@@ -2936,6 +2936,47 @@ describe("what the shared store keeps", () => {
   });
 });
 
+describe("what the shared store keeps, when it can't read a version's readers", () => {
+  it("refuses a memory drawn from a version whose readers' key it can't read", async () => {
+    const group = unique("g");
+    const version = await addSource("Unreadable readers", audience(group));
+    // A key no add writes, as a damaged row would hold: one person's
+    // principal without an id. Reader sets are never updated (a trigger),
+    // so the damage lifts it for this one row and puts it back as it was.
+    await runInDurableObject(shared(), (_instance, state) => {
+      const { sql } = state.storage;
+      state.storage.transactionSync(() => {
+        const [trigger] = sql
+          .exec<{ sql: string }>(
+            "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'reader_sets_no_update'"
+          )
+          .toArray();
+        sql.exec("DROP TRIGGER reader_sets_no_update");
+        sql.exec(
+          "UPDATE reader_sets SET key = ? WHERE key = ?",
+          '[["person"]]',
+          JSON.stringify([["group", group]])
+        );
+        sql.exec(trigger?.sql ?? "");
+      });
+    });
+    const outcome = await shared()
+      .addMemories({
+        change: crypto.randomUUID(),
+        access: audience(group),
+        entities: [customer()],
+        memories: [
+          fact({ kind: "source", ...version, quote: "Unreadable readers" }),
+        ],
+      })
+      .then(() => "added", String);
+
+    expect(outcome).toContain(
+      "The Brain refused it: who may read what it is drawn from can't be read"
+    );
+  });
+});
+
 describe("pages while who may read a source changes (contract v11)", () => {
   // (d), for a read as of a moment ahead of what the store learned.
   it("puts on none of the later pages a write made after the first page of a read as of a later moment", async () => {
