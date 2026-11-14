@@ -1,5 +1,6 @@
 import { brainOf, personalBrainOf } from "@grasp-os/brain-next/contract";
 import type { AuditEvent } from "@grasp-os/shared/audit";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -1573,6 +1574,72 @@ describe("what the recall before a question may reach", setUpTime, () => {
         `brain-version:${JSON.stringify(["upload", erased.source.id, 1])}`,
       ],
       recordedBefore: true,
+    });
+  });
+
+  it("withholds the result whose pin it can't check, audited, and sends the rest of the chat's history", async () => {
+    const kept = `Depot ${word()} opens at seven`;
+    const unchecked = `Depot ${word()} opens at nine`;
+    const chat = await recallingChat(
+      says("Noted."),
+      says("Noted too."),
+      says("And again.")
+    );
+    await added(kept, owner(chat.personId));
+    await chat.ask(
+      `${kept.replace(" opens at seven", "")}: when does it open?`
+    );
+    await added(unchecked, owner(chat.personId));
+    const second = chat.provider.requests.length;
+    await chat.ask(
+      `${unchecked.replace(" opens at nine", "")}: when does it open?`
+    );
+    const run = recallRunIn(chat.provider.requests[second]?.body) ?? "";
+    // Beside what the second recall read, a pin of its run as no release
+    // writes one: of a kind of source no producer has.
+    const pin = `brain-version:${JSON.stringify(["gone", crypto.randomUUID(), 1])}`;
+    await runInDurableObject(chat.stub, (_instance, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO chat_run_sources (chat_id, run_id, source_id) VALUES (?, ?, ?)",
+        chat.chat.id,
+        run,
+        pin
+      );
+    });
+
+    const third = chat.provider.requests.length;
+    await chat.ask("Thanks!");
+    const body = JSON.stringify(chat.provider.requests[third]?.body);
+    const marked = await runInDurableObject(chat.stub, (_instance, state) =>
+      state.storage.sql
+        .exec<{ withheld: number }>(
+          "SELECT withheld_at IS NOT NULL AS withheld FROM chat_run_sources WHERE chat_id = ? AND run_id = ? AND source_id = ?",
+          chat.chat.id,
+          run,
+          pin
+        )
+        .toArray()
+    );
+    const events = await eventsOf(chat.agent.agentId, (all) =>
+      all.some(({ action }) => action === "chat.history_withheld")
+    );
+    expect({
+      recalled: run !== "",
+      kept: body.includes(kept),
+      unchecked: body.includes(unchecked),
+      withheld: body.includes(withheldResult),
+      marked,
+      audited: events.some(
+        ({ action, target }) =>
+          action === "chat.history_withheld" && target?.id === chat.chat.id
+      ),
+    }).toStrictEqual({
+      recalled: true,
+      kept: true,
+      unchecked: false,
+      withheld: true,
+      marked: [{ withheld: 1 }],
+      audited: true,
     });
   });
 });
