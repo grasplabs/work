@@ -2,14 +2,10 @@ import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { expect } from "@playwright/test";
 import type { FrameLocator, Page, Route } from "@playwright/test";
 
-import {
-  boundIn,
-  publishApp,
-  testApp,
-} from "../apps/core/test/app-definitions.ts";
+import { boundIn, testApp } from "../apps/core/test/app-definitions.ts";
 import type { TestApp } from "../apps/core/test/app-definitions.ts";
 import { test } from "./csp.ts";
-import { apiOf, peopleIn } from "./people.ts";
+import { apiOf, peopleIn, release } from "./people.ts";
 import type { Person } from "./people.ts";
 
 // A page's typed `useWorkflow` on a workflow its App binds (spec 10.4),
@@ -64,8 +60,7 @@ const appFiles = (): TestApp =>
       ],
     },
     {
-      "server/requests.ts": `import { v } from "@grasp-os/sdk";
-import { permissions } from "../grasp.config.ts";
+      "server/requests.ts": `import { permissions } from "../grasp.config.ts";
 
 export const followUp = permissions.followUp;
 `,
@@ -140,7 +135,7 @@ const boundApp = async (
     });
     await builds.api.drafts.publish({ kind: "workflow", id: workflow.id }, 1);
     // Published from its draft, binding the workflow as it goes live.
-    await publishApp(
+    await release(
       builds.api,
       app,
       boundIn(appFiles(), { followUp: workflow.id })

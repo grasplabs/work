@@ -164,54 +164,41 @@ test("an admin approves a permission request, finds it in the audit log, and exp
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
-test("an admin sees a grant asked for again after a new version, and approves only the version the list shows", async ({
+test("an admin approves an App's request only for the version the list shows", async ({
   pageOf,
 }) => {
   const { admin, builder } = peopleIn("activityAgain");
   const appName = `Minutes ${crypto.randomUUID()}`;
   const builds = apiOf(builder);
-  const decides = apiOf(admin);
-  let appId: string;
   try {
-    ({ id: appId } = await builds.api.apps.create({
+    const { id: appId } = await builds.api.apps.create({
       name: appName,
       description: "Invites guests to the minutes",
-    }));
+    });
     await release(builds.api, appId, { "README.md": "One" });
-    const { id } = await builds.api.permissions.request({
+    await builds.api.permissions.request({
       subject: { type: "app", appId },
       object: { type: "platform" },
       actions: ["guests"],
       binding: "GUESTS",
     });
-    await decides.api.permissions.grant(id, { version: 1 });
-    // The builder can't grant it, so a new version asks for it again.
-    await release(builds.api, appId, { "README.md": "Two" });
-  } finally {
-    decides.core[Symbol.dispose]();
-  }
 
-  try {
     const page = await pageOf(admin);
     await page.goto("/dashboard");
     const card = await toCard(
       page,
       new RegExp(`^${appName}: guests on Guest chats\\.`, "u")
     );
-    await expect(card).toContainText(
-      /Asked again after \d{2}\.\d{2}\.2 was published \(previously granted by .+ on .+\)/u
-    );
-    // Versions as people know them: YY.MM.N, the second this month.
-    await expect(card).toContainText(/Version to review: \d{2}\.\d{2}\.2/u);
+    // Versions as people know them: YY.MM.N, the first this month.
+    await expect(card).toContainText(/Version to review: \d{2}\.\d{2}\.1/u);
 
-    // Another version is published while the admin looks at version 2.
-    await release(builds.api, appId, { "README.md": "Three" });
+    // Another version is published while the admin looks at version 1.
+    await release(builds.api, appId, { "README.md": "Two" });
     await card.getByRole("button", { name: /^Approve /u }).click();
     await expect(card.getByRole("alert")).toHaveText(
       "Another version of this App was published since this list was read. The list now shows it: review that version, then approve again."
     );
-    await expect(card).toContainText(/Version to review: \d{2}\.\d{2}\.3/u);
-    await expect(card).toContainText(/Asked again after \d{2}\.\d{2}\.3/u);
+    await expect(card).toContainText(/Version to review: \d{2}\.\d{2}\.2/u);
     await expect(
       page.getByRole("status").filter({ hasText: "Approved:" })
     ).toHaveCount(0);

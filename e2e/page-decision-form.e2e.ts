@@ -3,14 +3,10 @@ import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { expect } from "@playwright/test";
 import type { FrameLocator, Page } from "@playwright/test";
 
-import {
-  boundIn,
-  publishApp,
-  testApp,
-} from "../apps/core/test/app-definitions.ts";
+import { boundIn, testApp } from "../apps/core/test/app-definitions.ts";
 import type { TestApp } from "../apps/core/test/app-definitions.ts";
 import { test } from "./csp.ts";
-import { apiOf, peopleIn } from "./people.ts";
+import { apiOf, peopleIn, release } from "./people.ts";
 import type { Person } from "./people.ts";
 
 // A decision of an independent workflow, answered from an App's page
@@ -104,8 +100,7 @@ const appFiles = (admin: string, colleague: string): TestApp =>
       },
     },
     {
-      "server/requests.ts": `import { v } from "@grasp-os/sdk";
-import { permissions } from "../grasp.config.ts";
+      "server/requests.ts": `import { permissions } from "../grasp.config.ts";
 
 export const followUp = permissions.followUp;
 `,
@@ -201,7 +196,7 @@ const Desk = () => {
           void followUp.start({ who: "Grace", reviewer: "${colleague}" })
         }
       >
-        Start colleague's follow-up
+        Start colleague&apos;s follow-up
       </Button>
       <label>
         Run to watch
@@ -274,7 +269,7 @@ const boundApp = async (
       reviewed: { version: 1 },
     });
     // Published from its draft, binding the workflow as it goes live.
-    await publishApp(
+    await release(
       builds.api,
       app,
       boundIn(appFiles(admin.userId, colleague.userId), {

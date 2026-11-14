@@ -1,10 +1,10 @@
 import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
-import { publishApp, testApp } from "../apps/core/test/app-definitions.ts";
+import { testApp } from "../apps/core/test/app-definitions.ts";
 import type { TestApp, TestSource } from "../apps/core/test/app-definitions.ts";
 import { test } from "./csp.ts";
-import { apiOf, peopleIn } from "./people.ts";
+import { apiOf, peopleIn, release } from "./people.ts";
 
 // An App's declared permissions and their bindings, end to end in a
 // real browser: a builder's App declares `ai`, which its action asks;
@@ -53,7 +53,7 @@ const appOf = async (
   const { core, api } = apiOf(builder);
   try {
     const { id } = await api.apps.create({ name });
-    await publishApp(api, id, files);
+    await release(api, id, files);
     return id;
   } finally {
     core[Symbol.dispose]();

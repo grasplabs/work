@@ -3,14 +3,13 @@ import type { Page } from "@playwright/test";
 
 import {
   changesOf,
-  publishApp,
   testApp,
   withFiles,
 } from "../apps/core/test/app-definitions.ts";
 import type { TestApp, TestSource } from "../apps/core/test/app-definitions.ts";
 import { fileCast } from "./contexts.ts";
 import { test } from "./csp.ts";
-import { apiOf, peopleIn, release } from "./people.ts";
+import { apiOf, drafted, peopleIn, release } from "./people.ts";
 import type { Person } from "./people.ts";
 import { origin } from "./stack.ts";
 
@@ -161,10 +160,10 @@ test("a builder finds an App in the list, opens it and uses its page with live d
         await release(api, id, each === "books" ? twoPages() : counterApp());
         return [each, id] as const;
       }),
-      // Committed, never published: no version live yet.
+      // Drafted, never published: no version live yet.
       ...drafts.map(async (each) => {
         const { id } = await api.apps.create({ name: `${each} ${run}` });
-        await publishApp(api, id, counterApp());
+        await drafted(api, id, counterApp());
         return [each, id] as const;
       }),
     ]);
