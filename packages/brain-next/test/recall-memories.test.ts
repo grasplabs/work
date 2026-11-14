@@ -532,8 +532,18 @@ describe("recall through memories, hidden versus absent", () => {
           kind: "supplier" as const,
           names: [one],
         })),
+        // Names the question holds whole, as written and bare, and one
+        // beginning with all its words: sought, never found.
+        {
+          key: "q",
+          kind: "customer",
+          names: [`does ${person} buy`, `${person} buy,`, topic],
+        },
+        { key: "r", kind: "customer", names: [`${question} too`] },
       ],
       [
+        fact("q", `${person} buy is a secret customer`),
+        fact("r", "The whole question is a secret customer"),
         fact(
           "p",
           `${person} buys ${topic} in secret`,

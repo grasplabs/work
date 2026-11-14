@@ -81,13 +81,6 @@ const seekMargin = 8;
 /** How many names alike the named-entity tests add, in all. */
 const namedSizes = [100, 5000, 20_000];
 
-/**
- * Rows read for each name that begins with two words next to each other
- * in the question: its index entry, the memory that gave it, and its
- * reader check (measured: 2 rows a name).
- */
-const rowsPerPairName = 3;
-
 /** Whether `rows` is within `seekMargin` of `alone`, and never fewer. */
 const flat = (alone: number, rows: number): boolean =>
   rows >= alone && rows - alone <= seekMargin;
@@ -334,23 +327,24 @@ describe("what reading memories costs", () => {
     }
   );
 
-  // What finding the entities a question names reads: a seek a word of
-  // the question and a seek a pair of its words. Names that begin with
-  // one of its words cost nothing; names that begin with two of its words
-  // next to each other are read (at most `rowsPerPairName` each): the
-  // remaining cost, as a common first and last name shared by many.
+  // What finding the entities a question names reads: a seek of each run
+  // of the question's words that some name begins with, and of the next
+  // run only while one does. Names that begin with the question's first
+  // word, two or three of its words cost nothing: as a common first name,
+  // or first and last name, shared by many, readable or hidden.
   it.each([
-    ["the question's first word", 1, true],
-    ["the question's first two words", 2, false],
+    ["the question's first word", 1],
+    ["the question's first two words", 2],
+    ["the question's first three words", 3],
   ] as const)(
     "finds the named entities among names beginning with %s",
-    async (_shape, shared, flatExpected) => {
+    async (_shape, shared) => {
       const { stub, rowsReadBy } = await countedStore();
       const group = `seen-${crypto.randomUUID()}`;
       const hidden = `hidden-${crypto.randomUUID()}`;
       const reader = readerOf("reader", group);
-      const [first, second, own] = [word(), word(), word()];
-      const name = `${first} ${second} ${own}`;
+      const [first, second, third, own] = [word(), word(), word(), word()];
+      const name = `${first} ${second} ${third} ${own}`;
       await add(
         stub,
         group,
@@ -358,7 +352,7 @@ describe("what reading memories costs", () => {
         [fact("a", `${name} keeps a note`)]
       );
       const alike = () =>
-        shared === 1 ? `${first} ${word()}` : `${first} ${second} ${word()}`;
+        [...[first, second, third].slice(0, shared), word()].join(" ");
       const ask = async () => await finding(stub, reader, name);
       const rows = [await rowsReadBy(ask)];
       let have = 0;
@@ -383,13 +377,11 @@ describe("what reading memories costs", () => {
       }
       const [alone = 0, ...grown] = rows;
 
-      expect(
-        grown.map((read, index) =>
-          flatExpected
-            ? flat(alone, read)
-            : read - alone <= rowsPerPairName * (namedSizes[index] ?? 0)
-        )
-      ).toStrictEqual([true, true, true]);
+      expect(grown.map((read) => flat(alone, read))).toStrictEqual([
+        true,
+        true,
+        true,
+      ]);
     },
     300_000
   );
