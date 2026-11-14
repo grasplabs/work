@@ -396,6 +396,7 @@ export const askInChat = async (
     objectType: "connection",
     objectId: object.connectionId,
     resource: object.resource ?? null,
+    teams: null,
     // Sorted, so the same actions asked for again read the same.
     actions: JSON.stringify(actions.toSorted()),
     binding,

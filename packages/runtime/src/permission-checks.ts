@@ -66,7 +66,11 @@ export const isBrowserPermission = (
   typeof value === "object" && value !== null && browserDeclarations.has(value);
 
 /** Every Brain operation, as a declaration names it. */
-export const brainOperations: readonly BrainOperation[] = ["recall"];
+export const brainOperations: readonly BrainOperation[] = [
+  "recall",
+  "skills.select",
+  "skills.read",
+];
 
 /** The operations a guests permission may declare. */
 export const guestsOperations: readonly GuestsOperation[] = [
@@ -156,11 +160,12 @@ export const checkedList = (
   const items: readonly unknown[] = list;
   const names: string[] = [];
   for (const name of items) {
-    if (
-      typeof name !== "string" ||
-      !namePattern.test(name) ||
-      (allowed !== undefined && !allowed.includes(name))
-    ) {
+    // A fixed list is the platform's own names (the Brain's
+    // `skills.select`), which it alone decides; any other is a name.
+    const known =
+      typeof name === "string" &&
+      (allowed === undefined ? namePattern.test(name) : allowed.includes(name));
+    if (!known) {
       return refuse(`A permission lists ${what} it can't have.`);
     }
     if (names.includes(name)) {

@@ -123,6 +123,16 @@ describe("audit event types", () => {
     ]).toStrictEqual(["read", "action", "action", "read", "action", "config"]);
   });
 
+  it("files code selecting and reading the Brain's skills as reads, and leaves a release's install of skills unfiled", () => {
+    expect(
+      [
+        "brain.skills.select",
+        "brain.skills.read",
+        "brain.skills.installed",
+      ].map((action) => typeOf(action))
+    ).toStrictEqual(["read", "read", null]);
+  });
+
   it("files computing improvement signals as an action, and reading them as a read", () => {
     expect(
       ["improvement.signals.computed", "improvement.signals.read"].map(

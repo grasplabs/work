@@ -424,6 +424,10 @@ msgstr "{count, plural, one {Stelde je een vraag} other {Stelde je # vragen}}"
 msgid "{count, plural, one {Back to the question} other {Back to the # questions}}"
 msgstr "{count, plural, one {Terug naar de vraag} other {Terug naar de # vragen}}"
 
+#: src/activity/pending.tsx
+msgid "{count, plural, one {Company Brain, read only. This App can recall what everyone in the company may read and what the team {teamNames} may read, as far as the person it works for is in that team. Only people in that team can use it, its owner and admins too. It can never write to the Brain. Every recall is recorded} other {Company Brain, read only. This App can recall what everyone in the company may read and what the teams {teamNames} may read, as far as the person it works for is in them. Only people in all of them can use it, its owner and admins too. It can never write to the Brain. Every recall is recorded}}"
+msgstr "{count, plural, one {Company Brain, alleen lezen. Deze App kan oproepen wat iedereen in het bedrijf mag lezen en wat het team {teamNames} mag lezen, voor zover de persoon voor wie hij werkt in dat team zit. Alleen mensen in dat team kunnen hem gebruiken, ook de eigenaar en admins. Hij kan nooit naar het Brain schrijven. Elke oproep wordt vastgelegd} other {Company Brain, alleen lezen. Deze App kan oproepen wat iedereen in het bedrijf mag lezen en wat de teams {teamNames} mogen lezen, voor zover de persoon voor wie hij werkt erin zit. Alleen mensen in al die teams kunnen hem gebruiken, ook de eigenaar en admins. Hij kan nooit naar het Brain schrijven. Elke oproep wordt vastgelegd}}"
+
 #: src/apps/publish.tsx
 msgid "{count, plural, one {It can't be shared yet: # problem} other {It can't be shared yet: # problems}}"
 msgstr "{count, plural, one {Het kan nog niet gedeeld worden: # probleem} other {Het kan nog niet gedeeld worden: # problemen}}"
@@ -1503,6 +1507,10 @@ msgstr "Een verbinding moet opnieuw worden aangemeld"
 #: src/activity/audit-words.ts
 msgid "A connection refused to say what changed"
 msgstr "Een verbinding weigerde te zeggen wat er veranderd is"
+
+#: src/brain/own-export.tsx
+msgid "A copy of everything the Brain keeps for you alone: your own sources and what it remembers from them. Only you can make it and download it, and it is deleted when your data is erased."
+msgstr "Een kopie van alles wat het Brain alleen voor jou bewaart: je eigen bronnen en wat het daaruit onthoudt. Alleen jij kunt hem maken en downloaden, en hij wordt verwijderd als je gegevens worden gewist."
 
 #: src/apps/publish-errors.ts
 msgid "A data migration moved this App's records on since this version, so it can't be shared again. Share a new version instead."
@@ -3859,6 +3867,10 @@ msgstr "Wordt gecontroleerd tegen je cijfers…"
 msgid "Checking it…"
 msgstr "Bezig met controleren…"
 
+#: src/brain/own-export.tsx
+msgid "Checking on your export…"
+msgstr "Je export wordt opgehaald…"
+
 #. Grasp checks the App it changed (its types, lint and preview) before its turn ends.
 #: src/chat/thread.tsx
 msgid "Checking the App…"
@@ -4112,8 +4124,8 @@ msgid "Company"
 msgstr "Bedrijf"
 
 #: src/activity/pending.tsx
-msgid "Company Brain, read only. This can read company Brain evidence and its open questions, from the collections it was granted and only what the person it works for may read too. It can never write to the Brain. Every read is recorded"
-msgstr "Company Brain, alleen lezen. Het kan bewijs en open vragen van het Company Brain lezen, uit de collecties die het kreeg en alleen wat de persoon voor wie het werkt ook mag lezen. Het kan nooit naar het Brain schrijven. Elke leesactie wordt vastgelegd"
+msgid "Company Brain, read only. This can recall what everyone in the company may read, never a team's or anyone's own content. It can never write to the Brain. Every recall is recorded"
+msgstr "Company Brain, alleen lezen. Dit kan oproepen wat iedereen in het bedrijf mag lezen, nooit wat van een team of van iemand zelf is. Het kan nooit naar het Brain schrijven. Elke oproep wordt vastgelegd"
 
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
@@ -5677,9 +5689,14 @@ msgctxt "what the Brain remembers about something"
 msgid "Expertise"
 msgstr "Expertise"
 
+#: src/brain/own-export.tsx
 #: src/export/export-menu.tsx
 msgid "Export"
 msgstr "Exporteren"
+
+#: src/brain/own-export.tsx
+msgid "Export again"
+msgstr "Opnieuw exporteren"
 
 #: src/apps/app-data.tsx
 msgid "Export as CSV"
@@ -5706,6 +5723,10 @@ msgstr "Rapport exporteren"
 #: src/activity/audit-log.tsx
 msgid "Export the audit trail"
 msgstr "Audittrail exporteren"
+
+#: src/brain/own-export.tsx
+msgid "Export what only you may read"
+msgstr "Exporteren wat alleen jij mag lezen"
 
 #: src/settings/audit-archive.tsx
 msgid "Export with archive"
@@ -6453,6 +6474,10 @@ msgstr "Grasp is er nog mee bezig…"
 #: src/workflows/requests/request-needs.tsx
 msgid "Grasp is still working out a proposal."
 msgstr "Grasp werkt nog aan een voorstel."
+
+#: src/brain/own-export.tsx
+msgid "Grasp is writing your export. It takes a minute or two; it shows here as soon as it is ready, and you can leave this page meanwhile."
+msgstr "Grasp schrijft je export. Dat duurt een minuut of twee; hij verschijnt hier zodra hij klaar is, en je kunt deze pagina intussen verlaten."
 
 #: src/apps/draft-changes.tsx
 msgid "Grasp itself"
@@ -11052,6 +11077,10 @@ msgstr "Records van een gevoelige tabel gelezen"
 msgid "Read restricted sources, and is held to them"
 msgstr "Beperkte bronnen gelezen en is daar nu aan gebonden"
 
+#: src/activity/audit-words.ts
+msgid "Read skills from the Brain"
+msgstr "Skills uit het Brein gelezen"
+
 #: src/settings/stephen-settings.tsx
 msgid "Read the company's"
 msgstr "Wat van het bedrijf is lezen"
@@ -13155,6 +13184,10 @@ msgstr "iets zonder naam"
 msgid "Something you corrected, which you can no longer read"
 msgstr "Iets wat je hebt gecorrigeerd en niet meer mag lezen"
 
+#: src/brain/own-export.tsx
+msgid "Something your export held was erased since, so the export was deleted with it. Make a new one."
+msgstr "Iets wat je export bevatte is sindsdien gewist, dus de export is mee verwijderd. Maak een nieuwe."
+
 #: src/chat/composer-menu.tsx
 msgctxt "a feature still to come"
 msgid "Soon"
@@ -14123,6 +14156,10 @@ msgstr "Brain"
 #: src/routes/_shell.settings.brain.tsx
 msgid "The brain has no teams to group yet."
 msgstr "Het Brain heeft nog geen teams om te groeperen."
+
+#: src/brain/own-export.tsx
+msgid "The Brain keeps nothing that only you may read yet, so your export holds nothing."
+msgstr "Het Brain bewaart nog niets wat alleen jij mag lezen, dus je export bevat niets."
 
 #: src/brain/sources-page.tsx
 msgid "The Brain keeps one Gmail message or attachment, or one OneNote page, when an agent reads it for you through an account you connected yourself, and keeps it for you alone. Everything else agents search live when you ask, and the Brain keeps nothing of it."
@@ -15307,6 +15344,7 @@ msgstr "Proberen"
 #: src/apps/app-data.tsx
 #: src/apps/app-owner.tsx
 #: src/apps/app-settings.tsx
+#: src/brain/own-export.tsx
 #: src/brain/skills-page.tsx
 #: src/chat/builds.tsx
 #: src/chat/chat-panel.tsx
@@ -17388,6 +17426,18 @@ msgstr "Je correctie wordt bewaard als je eigen woord, alleen voor jou, en naast
 #: src/settings/ai-providers.tsx
 msgid "Your endpoint's public HTTPS address, such as https://models.example.com/v1."
 msgstr "Het openbare HTTPS-adres van je endpoint, bijvoorbeeld https://models.example.com/v1."
+
+#: src/brain/own-export.tsx
+msgid "Your export couldn’t be finished. Try making it again."
+msgstr "Je export kon niet worden afgemaakt. Probeer hem opnieuw te maken."
+
+#: src/brain/own-export.tsx
+msgid "Your export is ready. Download each of its files:"
+msgstr "Je export is klaar. Download elk van de bestanden:"
+
+#: src/brain/own-export.tsx
+msgid "Your export's files"
+msgstr "De bestanden van je export"
 
 #: src/routes/guest.tsx
 msgid "Your message"

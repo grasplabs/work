@@ -291,6 +291,8 @@ describe("generating calls on the run's files and the Brain", () => {
       listed: { member: "ctx.files.runFiles.list" },
       notes: { member: "ctx.files.runFiles.read" },
       recalled: { member: "ctx.brain.handbook.recall" },
+      chosen: { member: "ctx.brain.handbook.skills.select" },
+      howTo: { member: "ctx.brain.handbook.skills.read" },
       summary: { member: "ctx.files.runFiles.write" },
       attachment: {
         member: "ctx.connections.mail.readAttachment",
@@ -311,7 +313,7 @@ describe("generating calls on the run's files and the Brain", () => {
       some: { files: { runFiles: ["list"] }, brain: { handbook: ["recall"] } },
       every: {
         files: { runFiles: ["list", "read", "write", "delete"] },
-        brain: { handbook: ["recall"] },
+        brain: { handbook: ["recall", "skills.select", "skills.read"] },
       },
     });
   });
@@ -328,6 +330,7 @@ describe("generating calls on the run's files and the Brain", () => {
       listed: task("listed"),
       notes: task("notes"),
       recalled: task("recalled"),
+      howTo: task("howTo"),
       files: {
         attachment: filesOf("attachment"),
         forwarded: filesOf("forwarded"),
@@ -352,6 +355,13 @@ describe("generating calls on the run's files and the Brain", () => {
       },
       recalled: {
         call: { name: "grasp.brain", binding: "handbook", operation: "recall" },
+      },
+      howTo: {
+        call: {
+          name: "grasp.brain",
+          binding: "handbook",
+          operation: "skills.read",
+        },
       },
       files: {
         attachment: { into: "runFiles", from: null },

@@ -9,11 +9,12 @@ import { useCore } from "../use-core.ts";
  * `useCoreRead`, whether what it gives is the read for `key` itself
  * (`current`) rather than an earlier one of the same `scope` held while
  * `key` is read, and which read it is (`id`, minted as each read lands,
- * so a key read again is a new read).
+ * so a key read again is a new read). `read` gets the read's signal,
+ * which ends when the read is no longer wanted (`loadFromCore`).
  */
 export const useHeldCoreRead = <T>(
   key: string,
-  read: (session: Session) => Promise<T>,
+  read: (session: Session, signal: AbortSignal) => Promise<T>,
   scope?: string
 ): {
   loaded: Loaded<T> | undefined;
@@ -59,6 +60,6 @@ export const useHeldCoreRead = <T>(
  */
 export const useCoreRead = <T>(
   key: string,
-  read: (session: Session) => Promise<T>,
+  read: (session: Session, signal: AbortSignal) => Promise<T>,
   scope?: string
 ): Loaded<T> | undefined => useHeldCoreRead(key, read, scope).loaded;
