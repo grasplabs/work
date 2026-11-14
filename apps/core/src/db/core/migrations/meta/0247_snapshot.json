@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "6b4735cd-1d5a-40ac-a71a-adc70a37759d",
+  "id": "7b2388c7-a8bd-4977-a00a-06f3fb9a2e41",
   "prevId": "fce325ba-6266-4153-b168-859e0ac3e28f",
   "tables": {
     "access_revocations": {
@@ -8136,6 +8136,13 @@
           "notNull": true,
           "autoincrement": false,
           "default": false
+        },
+        "teams": {
+          "name": "teams",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -10524,20 +10531,12 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
-        },
-        "audience": {
-          "name": "audience",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         }
       },
       "indexes": {
-        "skill_decisions_sequence_idx": {
-          "name": "skill_decisions_sequence_idx",
+        "skill_decisions_seq_idx": {
+          "name": "skill_decisions_seq_idx",
           "columns": [
-            "audience",
             "name",
             "seq"
           ],
@@ -10553,7 +10552,6 @@
         "skill_decisions_open_idx": {
           "name": "skill_decisions_open_idx",
           "columns": [
-            "audience",
             "name"
           ],
           "isUnique": false,
@@ -10655,22 +10653,14 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
-        },
-        "audience": {
-          "name": "audience",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         }
       },
       "indexes": {
-        "skill_shares_waiting_idx": {
-          "name": "skill_shares_waiting_idx",
+        "skill_shares_pending_idx": {
+          "name": "skill_shares_pending_idx",
           "columns": [
             "requested_by",
-            "name",
-            "audience"
+            "name"
           ],
           "isUnique": true,
           "where": "status = 'pending'"
