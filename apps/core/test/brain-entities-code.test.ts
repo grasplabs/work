@@ -272,6 +272,7 @@ describe("entities, as an App reads them", setUpTime, () => {
     const hiddenName = `Hidden ${unique()}`;
     const hidden = await written(hiddenName, { group: `team:${unique()}` });
 
+    const nobodys = crypto.randomUUID();
     const card = await askedOf(app, ada, "get", { entity: seen.entity });
     const found = await askedOf(app, ada, "find", { name });
     // One it may not see, and one nobody holds, alike, as one call site
@@ -279,7 +280,7 @@ describe("entities, as an App reads them", setUpTime, () => {
     const alike: Record<string, unknown> = {};
     for (const [as, entity, named] of [
       ["hidden", hidden.entity, hiddenName],
-      ["unknown", crypto.randomUUID(), `Nobody ${unique()}`],
+      ["unknown", nobodys, `Nobody ${unique()}`],
     ] as const) {
       alike[as] = [
         // oxlint-disable-next-line no-await-in-loop -- one call site, one at a time
@@ -353,14 +354,14 @@ describe("entities, as an App reads them", setUpTime, () => {
         {
           action: "brain.entities.get",
           onBehalfOf: ada.userId,
-          entity: someText,
+          entity: hidden.entity,
           found: false,
           memories: 0,
         },
         {
           action: "brain.entities.get",
           onBehalfOf: ada.userId,
-          entity: someText,
+          entity: nobodys,
           found: false,
           memories: 0,
         },
