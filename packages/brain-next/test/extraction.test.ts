@@ -1781,7 +1781,7 @@ describe("extracting memories", () => {
     });
   });
 
-  it("fails a piece that can't hold even one character, asking nothing and never going round", async () => {
+  it("parks a piece that can't hold even one character, asking nothing and never going round", async () => {
     const token = unique("t");
     const name = unique("Emoji");
     const group = unique("g");
@@ -1808,8 +1808,8 @@ describe("extracting memories", () => {
       2 * (tokensOf(proposeInstructions) + tokensOf(checkInstructions) + 3);
     await tick(1, window);
     const asked = callsOf(token).length;
-    // Past the failure's wait, with a window that holds the text.
-    await tick(2, null);
+    // Back from parked, with a window that holds the text.
+    await tick(workParkedMs / 60_000 + 1, null);
     const read = await readAs({ person: unique("p"), groups: [group] }, name);
 
     expect({ asked, read: read.map(({ value }) => value) }).toStrictEqual({
