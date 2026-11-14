@@ -38,7 +38,12 @@ import {
 import { memberOf } from "./auth/identity.ts";
 import type { Member } from "./auth/identity.ts";
 import { uploadSource } from "./brain-next-origins.ts";
-import { addSource, eraseSource, sourceTextProblem } from "./brain-next.ts";
+import {
+  addSource,
+  eraseSource,
+  readSourceVersionAs,
+  sourceTextProblem,
+} from "./brain-next.ts";
 import type { SourceReaders, SourceVersionRef } from "./brain-next.ts";
 import { brainUploads, teams, users } from "./db/core/schema.ts";
 import { ExtractorUnavailableError, localExtractor } from "./files/extract.ts";
@@ -440,12 +445,22 @@ const addVersion = async (
       : auditedBatch(env, db, [refused]));
     throw refusal.error(first);
   }
-  // Every answered add records its version, once: the event's ID is the
-  // upload's and the version's, which the outbox and the log keep once
-  // (`outboxedEvent`), so each version is audited exactly once whatever
-  // the order its adds land in or how often one is retried. The name
-  // moves only forward, to an add past the row's version: a retry the
-  // Brain answers with an older version (its answer lost) leaves it.
+  // Every answered add records its version, once: the same event each
+  // time, its ID the upload's and the version's and its time the
+  // version's, so the outbox and the log keep it once (`outboxedEvent`),
+  // even one sent again after the first was logged: a duplicate the log
+  // drops, never a conflict. Each version is audited exactly once
+  // whatever order its adds land in or however often one is retried. Its
+  // uploader is the only one who adds (`mayAddVersion`), so its actor is
+  // the same too; so is its detail, but for a retry with another file
+  // whose text is the same (its type and size; see the PR's Known). The
+  // version's time is read as its uploader reads it, whom its readers
+  // were checked to include just before the add: should they have left
+  // since (or it been erased), the event takes the time now, and only a
+  // retry they can no longer make would conflict. The name moves only
+  // forward, to an add past the row's version: a retry the Brain answers
+  // with an older version (its answer lost) leaves it.
+  const kept = await readSourceVersionAs(env, person.userId, added);
   const addedEvent = {
     ...createAuditEvent(
       entry("brain.upload.added", { version: added.version }),
@@ -456,6 +471,7 @@ const addVersion = async (
         JSON.stringify(["brain.upload.added", row.id, added.version])
       )
     ),
+    at: (kept?.addedAt ?? new Date()).toISOString(),
   };
   await auditedBatch(env, db, [
     db
@@ -475,7 +491,7 @@ const addVersion = async (
       ),
     outboxedEvent(db, addedEvent),
   ]);
-  return added;
+  return { source: added.source, version: added.version };
 };
 
 /**

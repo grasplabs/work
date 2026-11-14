@@ -15,7 +15,12 @@ import { organizationId } from "../src/auth/auth.ts";
 import { brainExportsPath } from "../src/brain-next-exports.ts";
 import { uploadSource } from "../src/brain-next-origins.ts";
 import { addSource, eraseSource, workBrain } from "../src/brain-next.ts";
-import { brainUploads, teamMembers, teams } from "../src/db/core/schema.ts";
+import {
+  auditOutboxRejected,
+  brainUploads,
+  teamMembers,
+  teams,
+} from "../src/db/core/schema.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { allEvents } from "./audit-events.ts";
 import { copyOfStore, restoreStore } from "./brain-next-store-copy.ts";
@@ -162,6 +167,12 @@ const actionsOf = async (uploadId: string): Promise<string[]> => {
 
 /** The store that holds what more than one person may read. */
 const sharedStore = () => env.BRAIN_STORE.getByName("brain");
+
+/** How many events the drain has set aside as rejected (a conflict, say). */
+const rejectedCount = async (): Promise<number> => {
+  const rows = await drizzle(env.DB).select().from(auditOutboxRejected);
+  return rows.length;
+};
 
 /** The rows core keeps of the upload `uploadId`. */
 const rowsWith = async (uploadId: string) =>
@@ -901,6 +912,11 @@ describe("uploading a file straight into the Brain", () => {
     slow,
     async () => {
       const uploader = await signedInApi(idp, "user");
+      // What the log and the drain held before: a retry sent after its
+      // version's event was logged must be a duplicate the log drops,
+      // never a conflict (a gap, a rejected row).
+      const loggedBefore = await allEvents();
+      const rejectedBefore = await rejectedCount();
       const { source } = await uploader.api.brainSources.upload(
         fileOf(`First ${word()}`, "First.vtt"),
         everyone,
@@ -936,14 +952,20 @@ describe("uploading a file straight into the Brain", () => {
         readers: { kind: "everyone" },
       });
       // A later version, then the lost one sent again, then the later
-      // one sent twice more.
+      // one sent twice more: each after the log took what came before.
       const laterId = crypto.randomUUID();
       const later = fileOf(`Delta ${word()}`, "Delta.vtt");
       const last = await version(later, laterId);
+      await allEvents();
       const retried = await version(lost, lostId);
+      await allEvents();
       await version(later, laterId);
+      await allEvents();
       await version(later, laterId);
       const events = await eventsOf(source.id);
+      const loggedAfter = await allEvents();
+      const sinceStart = loggedAfter.slice(loggedBefore.length);
+      const rejectedAfter = await rejectedCount();
       const [row] = await rowsWith(source.id);
 
       expect({
@@ -956,6 +978,8 @@ describe("uploading a file straight into the Brain", () => {
           .toSorted((a, b) => a - b),
         name: row?.name,
         version: row?.version,
+        gaps: sinceStart.filter(({ action }) => action === "audit.gap").length,
+        rejected: rejectedAfter - rejectedBefore,
       }).toStrictEqual({
         landed: 4,
         last: 5,
@@ -963,6 +987,8 @@ describe("uploading a file straight into the Brain", () => {
         added: [1, 2, 3, 4, 5],
         name: "Delta.vtt",
         version: 5,
+        gaps: 0,
+        rejected: 0,
       });
     }
   );
