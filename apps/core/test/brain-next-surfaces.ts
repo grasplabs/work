@@ -2128,11 +2128,11 @@ export const coreProbes = {
       }),
     ];
   },
-  // Reads as the member it is given and with the App it is told they
-  // build, both on its caller's word (instruction-files.ts); which agent's
-  // file is the caller's to pick too. So it is held here to what that
-  // reader may read: never another person's file, nor an App's it wasn't
-  // told they build.
+  // Reads as the member it is given, refused once they no longer are one,
+  // and with the App it is told they build, on its caller's word
+  // (instruction-files.ts); which agent's file is the caller's to pick
+  // too. So it is held here to what that reader may read: never another
+  // person's file, nor an App's it wasn't told they build.
   readInstructionFilesAs: async ({ personId, hiddenInstructionFiles }) => {
     const read = async (
       name: string,
@@ -2142,11 +2142,7 @@ export const coreProbes = {
       await answer(
         name,
         async () =>
-          await coreBrain.readInstructionFilesAs(
-            env,
-            { userId: personId },
-            files
-          ),
+          await coreBrain.readInstructionFilesAs(env, personId, files),
         about
       );
     const hidden = hiddenInstructionFiles.filter(

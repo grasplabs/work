@@ -366,24 +366,17 @@ describe("what one person alone may read, in their own store", () => {
       text: "Call me by my first name",
       after: 0,
     });
-    await addedSharedFile(company, "We sell bicycles");
+    await addedSharedFile(company, "We sell bicycles", person);
     const theirStore = `person:${person}`;
     const wanted = { source, version: 1 };
 
     const read = await readSourceVersionAs(env, person, wanted);
-    const files = await readInstructionFilesAs(env, { userId: person }, [
-      company,
-      file,
-    ]);
+    const files = await readInstructionFilesAs(env, person, [company, file]);
     const othersRead = await addressedBy(
       async () => await readSourceVersionAs(env, colleague, wanted)
     );
     const othersFiles = await addressedBy(
-      async () =>
-        await readInstructionFilesAs(env, { userId: colleague }, [
-          company,
-          file,
-        ])
+      async () => await readInstructionFilesAs(env, colleague, [company, file])
     );
 
     expect({
@@ -772,7 +765,7 @@ describe("a person's own store failing", () => {
     });
     const company: InstructionFile = { scope: "company", name: "facts" };
     const theirFile: InstructionFile = { scope: "person", personId: person };
-    await addedSharedFile(company, "We sell bicycles");
+    await addedSharedFile(company, "We sell bicycles", person);
     await addInstructionFile(env, {
       file: theirFile,
       change: crypto.randomUUID(),
@@ -783,7 +776,7 @@ describe("a person's own store failing", () => {
     try {
       const listed = await listSourcesAs(env, person, {});
       const versions = await listVersionsAs(env, person, { source: teamNote });
-      const files = await readInstructionFilesAs(env, { userId: person }, [
+      const files = await readInstructionFilesAs(env, person, [
         company,
         theirFile,
       ]);
@@ -853,9 +846,7 @@ describe("erasing a person", () => {
       });
     }
     const theirFile = async () => {
-      const files = await readInstructionFilesAs(env, { userId: person }, [
-        file,
-      ]);
+      const files = await readInstructionFilesAs(env, person, [file]);
       return files.map(({ version, text }) => [version, text]);
     };
     const erasing = { personId: person, reason: "person_erased" } as const;

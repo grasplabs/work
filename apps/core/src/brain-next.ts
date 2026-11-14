@@ -125,7 +125,6 @@ import { skillErrors } from "@grasp-os/shared/skills";
 import { z } from "zod";
 
 import { memberOf } from "./auth/identity.ts";
-import type { Member } from "./auth/identity.ts";
 import { erasureBegun } from "./brain-hand-overs.ts";
 import {
   forgetOwnStoreHealth,
@@ -1956,31 +1955,34 @@ const instructionFilesSchema = z
   .max(currentReadMax);
 
 /**
- * The current version of each of `wanted` that `member` may read, whole,
- * in the order given: their own file, the company's and agents', and the
- * App `builtApp`'s, never another person's or another App's. A file never
- * written is left out.
+ * The current version of each of `wanted` that the member `personId` may
+ * read, as core counts them now, whole, in the order given: their own
+ * file, the company's and agents', and the App `builtApp`'s, never
+ * another person's or another App's. A file never written is left out.
+ * Refused once they are no longer a member.
  *
- * For instruction-files.ts only, which picks the files a context gets,
- * reads `member` from core's records, and passes `builtApp` only once
- * they passed its builder check: both are taken here on the caller's
- * word, so no other code may call it. (Exported only because core's
- * Brain contract is reachable from this file alone.)
+ * For instruction-files.ts only, which picks the files a context gets and
+ * passes `builtApp` only once they passed its builder check: that is
+ * taken here on the caller's word, so no other code may call it.
+ * (Exported only because core's Brain contract is reachable from this
+ * file alone.)
  */
 export const readInstructionFilesAs = async (
-  env: BrainEnv,
-  member: Pick<Member, "userId">,
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
   wanted: InstructionFile[],
   builtApp?: string
 ): Promise<InstructionFileVersion[]> => {
   const files = checked(instructionFilesSchema, wanted);
+  const app =
+    builtApp === undefined ? undefined : checked(instructionIdSchema, builtApp);
   // An instruction file is never a team's, so its reader is the person,
-  // the company and the App they build, if any.
+  // the company and the App they build, if any: not the teams core counts
+  // them in.
+  const { person } = await personReaderOf(env, personId);
   const groups =
-    builtApp === undefined
-      ? [companyGroup]
-      : [companyGroup, appGroup(checked(instructionIdSchema, builtApp))];
-  const reader = { person: checked(idSchema, member.userId), groups };
+    app === undefined ? [companyGroup] : [companyGroup, appGroup(app)];
+  const reader = { person, groups };
   // A person's file is in their own store (`keptIn`): only the reader's
   // own is asked of, there, and their store only when it is wanted.
   // Another person's is left out as a file never written is, and their
