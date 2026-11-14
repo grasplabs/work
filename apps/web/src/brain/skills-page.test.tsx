@@ -5,6 +5,7 @@ import type {
   ListedTeamSkill,
   OwnSkillShare,
   SkillAudienceAsked,
+  SkillProposal,
   SkillShare,
   SkillShareRequest,
   SkillsOverview,
@@ -74,6 +75,22 @@ const request: SkillShareRequest = {
   replaces: "grasp",
 };
 
+const proposalText =
+  "---\nname: send-report\ndescription: Start the workflow send-report\n---\n\nWhen I ask for send report, start it.\n";
+
+const proposal: SkillProposal = {
+  name: "send-report",
+  text: proposalText,
+  basis: {
+    workflow: { id: "wf-1", name: "send-report" },
+    version: 3,
+    runs: [1, 2, 3, 4, 5].map((day) => ({
+      id: `run-${day}`,
+      endedAt: `2026-11-0${day}T09:00:00.000Z`,
+    })),
+  },
+};
+
 /** The company, as a share is for it. */
 const forCompany: OwnSkillShare["audience"] = { kind: "company" };
 
@@ -109,6 +126,7 @@ const shown = async ({
   teams = [],
   team = [],
   teamSkills = [],
+  proposals = [],
 }: {
   admin: boolean;
   refusal?: string;
@@ -134,7 +152,10 @@ const shown = async ({
   team?: ListedTeamSkill[];
   /** Every team's skill in use, as an admin is shown them. */
   teamSkills?: DecidedTeamSkill[];
+  /** The skills proposed to the person. */
+  proposals?: SkillProposal[];
 }) => {
+  let proposed = [...proposals];
   const calls: string[] = [];
   const owned = [own, other];
   const onItsWayOf = (name: string) => {
@@ -167,6 +188,7 @@ const shown = async ({
         team,
         teams,
         shares: [...shares],
+        proposals: [...proposed],
         requests: admin ? requests : null,
         teamSkills: admin ? teamSkills : null,
       };
@@ -239,6 +261,19 @@ const shown = async ({
         version: 1,
         text: `---\nname: ${name}\ndescription: Read\n---\n`,
       };
+    },
+    acceptProposal: async (workflow: string, version: number) => {
+      await Promise.resolve();
+      calls.push(`accept ${workflow}@${version}`);
+      proposed = proposed.filter(({ basis }) => basis.workflow.id !== workflow);
+      const added = { name: "send-report", version: 1, description: "Send" };
+      owned.push(added);
+      return added;
+    },
+    dismissProposal: async (workflow: string, version: number) => {
+      await Promise.resolve();
+      calls.push(`dismiss ${workflow}@${version}`);
+      proposed = proposed.filter(({ basis }) => basis.workflow.id !== workflow);
     },
     decline: async (id: string) => {
       await Promise.resolve();
@@ -788,5 +823,39 @@ describe("the skills page", () => {
       team: text.includes("Legal, version 3; being taken out of use"),
       retire: buttons("Retire").length,
     }).toStrictEqual({ company: true, team: true, retire: 0 });
+  });
+
+  it("shows a skill proposed from the person's runs with what it rests on, and adds it to their skills", async () => {
+    const { calls } = await shown({ admin: false, proposals: [proposal] });
+    const before = document.body.textContent ?? "";
+    await click("Add to your skills");
+    const after = document.body.textContent ?? "";
+    expect({
+      calls,
+      basis: before.includes(
+        "Your last 5 runs of the workflow send-report, version 3, all succeeded."
+      ),
+      text: before.includes("When I ask for send report, start it."),
+      proposedAfter: after.includes("Proposed for you"),
+      own: buttons("Edit").length,
+    }).toStrictEqual({
+      calls: ["overview", "accept wf-1@3", "overview"],
+      basis: true,
+      text: true,
+      proposedAfter: false,
+      own: 3,
+    });
+  });
+
+  it("dismisses a proposed skill", async () => {
+    const { calls } = await shown({ admin: false, proposals: [proposal] });
+    await click("Dismiss");
+    expect({
+      calls,
+      proposed: (document.body.textContent ?? "").includes("Proposed for you"),
+    }).toStrictEqual({
+      calls: ["overview", "dismiss wf-1@3", "overview"],
+      proposed: false,
+    });
   });
 });

@@ -456,6 +456,10 @@ msgstr "{count, plural, one {Écriture de # fichier} other {Écriture de # fichi
 msgid "{count, plural, one {Wrote # file} other {Wrote # files}}"
 msgstr "{count, plural, one {# fichier écrit} other {# fichiers écrits}}"
 
+#: src/brain/skills-page.tsx
+msgid "{count, plural, one {Your last run of the workflow {workflow}, version {version}, succeeded.} other {Your last # runs of the workflow {workflow}, version {version}, all succeeded.}}"
+msgstr "{count, plural, one {Votre dernière exécution du workflow {workflow}, version {version}, a réussi.} other {Vos # dernières exécutions du workflow {workflow}, version {version}, ont toutes réussi.}}"
+
 #: src/brain/thinking/use-thinking.ts
 msgid "{count, plural, other {# not counted yet}}"
 msgstr "{count, plural, other {# pas encore comptés}}"
@@ -2121,6 +2125,10 @@ msgstr "Ajouter le déclencheur"
 #: src/projects/file-item-dialog.tsx
 msgid "Add to {projectName}"
 msgstr "Ajouter à {projectName}"
+
+#: src/brain/skills-page.tsx
+msgid "Add to your skills"
+msgstr "Ajouter à vos skills"
 
 #: src/apps/app-webhooks.tsx
 msgid "Add webhook"
@@ -5130,6 +5138,11 @@ msgstr "Déconnecté le {since}."
 msgid "Dismiss"
 msgstr "Fermer"
 
+#: src/brain/skills-page.tsx
+msgctxt "a proposed skill"
+msgid "Dismiss"
+msgstr "Écarter"
+
 #: src/dashboard/signals.tsx
 msgctxt "put a signal away until something new"
 msgid "Dismiss"
@@ -5491,6 +5504,10 @@ msgstr "Terminer la visite"
 #: src/workflows/run-detail.tsx
 msgid "Ended"
 msgstr "Terminé"
+
+#: src/brain/skills-page.tsx
+msgid "Ended on {dates}."
+msgstr "Terminées le {dates}."
 
 #: src/workflows/workflow-diagram.tsx
 msgid "Ends the workflow"
@@ -6351,6 +6368,10 @@ msgstr "De vos applications"
 #: src/onboarding/setup-steps.tsx
 msgid "From your HR or payroll system. Microsoft 365 or Google can be connected later, with us."
 msgstr "Depuis votre outil RH ou de paie. Microsoft 365 ou Google pourront être connectés plus tard, avec nous."
+
+#: src/brain/skills-page.tsx
+msgid "From your own runs that keep succeeding. Only you see these, and none is used until you add it to your skills."
+msgstr "Tirées de vos propres exécutions qui réussissent à chaque fois. Vous seul les voyez, et aucune n'est utilisée tant que vous ne l'avez pas ajoutée à vos skills."
 
 #: src/settings/staff-access.tsx
 msgid "Full access"
@@ -11032,6 +11053,10 @@ msgstr "Proposé"
 msgctxt "memory record state"
 msgid "Proposed"
 msgstr "Proposé"
+
+#: src/brain/skills-page.tsx
+msgid "Proposed for you"
+msgstr "Proposées pour vous"
 
 #: src/activity/audit-words.ts
 msgid "Proposed packages"

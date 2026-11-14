@@ -9,6 +9,7 @@ import type {
   SkillShare,
   SkillShareAudience,
   SkillInUse,
+  SkillProposal,
   SkillShareRequest,
   SkillsOverview,
   SkillTeam,
@@ -50,17 +51,20 @@ import {
   PageHeaderTitle,
 } from "@grasp-os/ui/components/page-header";
 import { Textarea } from "@grasp-os/ui/components/textarea";
+import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useEffect, useId, useRef, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
-import { formatDateTime } from "../format.ts";
+import { formatDateTime, formatList } from "../format.ts";
 import { useCore } from "../use-core.ts";
 
-// Skills (GRA-1754, GRA-1844): the person's own, which they write, edit
-// and delete, for their own chats alone; asking to share one with the
+// Skills (GRA-1754, GRA-1844, GRA-1756): the person's own, which they
+// write, edit and delete, for their own chats alone; those proposed to
+// them from their own runs that keep succeeding, which they add or
+// dismiss; asking to share one with the
 // company or one of their teams, which waits for an admin; the company's
 // skills and their teams'; and, for the organization's admins, the shares
 // waiting for them, each with the exact text an approval adds and whom
@@ -763,6 +767,108 @@ const AskedShares = ({ data }: { data: SkillsOverview | undefined }) => {
   );
 };
 
+/**
+ * A skill proposed from the person's own runs of a workflow that keep
+ * succeeding, with what it rests on and the exact text adding it saves.
+ */
+const ProposedSkill = ({
+  proposal,
+  busy,
+  onAccept,
+  onDismiss,
+}: {
+  proposal: SkillProposal;
+  busy: boolean;
+  onAccept: () => void;
+  onDismiss: () => void;
+}) => {
+  const { t } = useLingui();
+  const { name, basis } = proposal;
+  const workflow = basis.workflow.name;
+  const { version } = basis;
+  const count = basis.runs.length;
+  const dates = formatList(
+    basis.runs.map(({ endedAt }) => formatDateTime(endedAt))
+  );
+  return (
+    <Card render={<li />} size="sm">
+      <CardContent>
+        <span className="text-sm font-medium">{name}</span>
+        <p className="text-sm">
+          {t`${plural(count, {
+            one: `Your last run of the workflow ${workflow}, version ${version}, succeeded.`,
+            other: `Your last # runs of the workflow ${workflow}, version ${version}, all succeeded.`,
+          })}`}
+        </p>
+        <p className="text-muted-foreground text-xs">
+          <Trans>Ended on {dates}.</Trans>
+        </p>
+        <p className="text-sm whitespace-pre-wrap">{proposal.text}</p>
+        <div className="flex gap-2">
+          <Button disabled={busy} onClick={onAccept} size="sm" type="button">
+            <Trans>Add to your skills</Trans>
+          </Button>
+          <Button
+            disabled={busy}
+            onClick={onDismiss}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            <Trans context="a proposed skill">Dismiss</Trans>
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
+
+/** The skills proposed to the person from their own runs, while there are any. */
+const ProposedSkills = ({
+  data,
+  busy,
+  onAccept,
+  onDismiss,
+}: {
+  data: SkillsOverview | undefined;
+  busy: boolean;
+  onAccept: (proposal: SkillProposal) => void;
+  onDismiss: (proposal: SkillProposal) => void;
+}) => {
+  const heading = useId();
+  if (data === undefined || data.proposals.length === 0) {
+    return null;
+  }
+  return (
+    <section aria-labelledby={heading} className="flex flex-col gap-3">
+      <h2 className="text-sm font-medium" id={heading}>
+        <Trans>Proposed for you</Trans>
+      </h2>
+      <p className="text-muted-foreground text-sm">
+        <Trans>
+          From your own runs that keep succeeding. Only you see these, and none
+          is used until you add it to your skills.
+        </Trans>
+      </p>
+      <ul className="flex flex-col gap-3">
+        {data.proposals.map((proposal) => (
+          <ProposedSkill
+            busy={busy}
+            key={`${proposal.basis.workflow.id} ${proposal.basis.version}`}
+            onAccept={() => {
+              onAccept(proposal);
+            }}
+            onDismiss={() => {
+              onDismiss(proposal);
+            }}
+            proposal={proposal}
+          />
+        ))}
+      </ul>
+    </section>
+  );
+};
+
 /** The person's teams' skills, while they are in a team. */
 const TeamSkills = ({ data }: { data: SkillsOverview | undefined }) => {
   const heading = useId();
@@ -1042,6 +1148,22 @@ export const SkillsPage = () => {
             ))}
           </ItemGroup>
         </section>
+
+        <ProposedSkills
+          busy={busy}
+          data={data}
+          onAccept={({ basis }) => {
+            act(
+              async (skills) =>
+                await skills.acceptProposal(basis.workflow.id, basis.version)
+            );
+          }}
+          onDismiss={({ basis }) => {
+            act(async (skills) => {
+              await skills.dismissProposal(basis.workflow.id, basis.version);
+            });
+          }}
+        />
 
         <AskedShares data={data} />
 

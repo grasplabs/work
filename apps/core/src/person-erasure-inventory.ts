@@ -152,6 +152,8 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   },
   // The names of the skills they deleted for good: theirs alone.
   "core.skill_deletions": { erased: "brain" },
+  // The skill proposals they dismissed: theirs alone.
+  "core.skill_proposal_dismissals": { erased: "brain" },
   "core.improvement_signals": { kept: "IDs and counts only" },
   "core.notifications": { erased: "channels" },
   // What they asked Stephen, with where their weekly summary stood.
@@ -584,6 +586,7 @@ export const reviewedPersonColumns: Readonly<
   "core.skill_shares": ["decided_by", "requested_by"],
   "core.skill_decisions": ["decided_by"],
   "core.skill_deletions": ["person_id"],
+  "core.skill_proposal_dismissals": ["person_id"],
   "core.app_resource_bindings": ["approved_by", "revoked_by"],
   "core.app_test_decisions": ["decided_by", "recipients"],
   "core.app_test_runs": ["deciders", "principal"],

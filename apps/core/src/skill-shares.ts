@@ -60,6 +60,7 @@ import {
   users,
 } from "./db/core/schema.ts";
 import { shippedSkills } from "./shipped-skills.ts";
+import { skillProposalsFor } from "./skill-proposals.ts";
 
 // Writing skills, and sharing one with the company (GRA-1754) or one of
 // the asker's teams (GRA-1844). Threat models on both; what could go
@@ -564,9 +565,13 @@ export const skillsOverview = async (
       },
     ];
   };
-  const asked = await Promise.all(shares.map(ownOf));
+  const own = listed.filter(({ scope }) => scope === "person").map(listedOf);
+  const [asked, proposals] = await Promise.all([
+    Promise.all(shares.map(ownOf)),
+    skillProposalsFor(env, by, new Set(own.map(({ name }) => name))),
+  ]);
   return {
-    own: listed.filter(({ scope }) => scope === "person").map(listedOf),
+    own,
     company: companySkillsOf(
       states,
       new Map(company.map(({ name, description }) => [name, description]))
@@ -574,6 +579,7 @@ export const skillsOverview = async (
     team,
     teams: by.teams.map(({ id, name }) => ({ id, name })),
     shares: asked.flat(),
+    proposals,
     requests:
       requests?.flatMap(({ text, ...row }): SkillShareRequest[] =>
         text === null

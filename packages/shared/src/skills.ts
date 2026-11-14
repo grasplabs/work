@@ -134,6 +134,31 @@ export interface CompanySkill extends SkillInUse {
   description: string | null;
 }
 
+/** One of the runs a skill proposal rests on. */
+export interface SkillProposalRun {
+  id: string;
+  /** When it ended (ISO 8601). */
+  endedAt: string;
+}
+
+/**
+ * A skill Grasp proposes to a person from their own runs of a workflow
+ * that keep succeeding: a draft of their own skill, used nowhere until
+ * they add it.
+ */
+export interface SkillProposal {
+  /** The skill's name: the workflow's. */
+  name: string;
+  /** The `SKILL.md` that adding it saves as their own skill. */
+  text: string;
+  /** What it rests on: the workflow, its version, and their runs of it, newest first. */
+  basis: {
+    workflow: { id: string; name: string };
+    version: number;
+    runs: SkillProposalRun[];
+  };
+}
+
 /** What the skills page shows the signed-in person. */
 export interface SkillsOverview {
   /** Their own skills, for them alone. */
@@ -146,6 +171,8 @@ export interface SkillsOverview {
   teams: SkillTeam[];
   /** Their own asks to share, newest first. */
   shares: OwnSkillShare[];
+  /** Skills proposed to them from their own runs, for them alone, by name. */
+  proposals: SkillProposal[];
   /**
    * For the organization's own admins: every share that waits for a
    * decision, oldest first, and approved ones still to finish. Null for
@@ -180,6 +207,13 @@ export interface SkillsApi {
   save: (text: string) => Promise<ListedSkill>;
   /** Erases their own skill `name` for good, with every version, and their waiting share of it. */
   remove: (name: string) => Promise<void>;
+  /**
+   * Adds the skill proposed from their runs of workflow `workflow` at
+   * `version` as their own, while that proposal still holds.
+   */
+  acceptProposal: (workflow: string, version: number) => Promise<ListedSkill>;
+  /** Dismisses that proposal: it isn't proposed again for that version. */
+  dismissProposal: (workflow: string, version: number) => Promise<void>;
   /**
    * Asks to share their own skill `name`, exactly as it is at `version`,
    * with the company or one of their teams: it waits for an admin,

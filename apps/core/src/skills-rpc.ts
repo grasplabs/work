@@ -11,6 +11,10 @@ import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import {
+  acceptSkillProposal,
+  dismissSkillProposal,
+} from "./skill-proposals.ts";
+import {
   approveShare,
   declineShare,
   readSkill,
@@ -63,6 +67,23 @@ export class SkillsRpc extends CoreRpcTarget implements SkillsApi {
   async remove(name: string): Promise<void> {
     await withPerson(this.#check, async (person) => {
       await removeOwnSkill(this.#env, person, name);
+    });
+  }
+
+  async acceptProposal(
+    workflow: string,
+    version: number
+  ): Promise<ListedSkill> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await acceptSkillProposal(this.#env, person, workflow, version)
+    );
+  }
+
+  async dismissProposal(workflow: string, version: number): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      await dismissSkillProposal(this.#env, person, workflow, version);
     });
   }
 

@@ -62,6 +62,7 @@ import {
   stephenRequests,
   skillDecisions,
   skillDeletions,
+  skillProposalDismissals,
   skillShares,
   stephenSummaries,
   stephenSummaryReaders,
@@ -282,13 +283,17 @@ const brain: ErasureStep = {
       reason: "erasure_request" as const,
     };
     // Their asks to share a skill, with the text a waiting one holds, and
-    // the names of the skills they deleted. A decision on an ask of theirs
+    // the names of the skills they deleted and the proposals they
+    // dismissed. A decision on an ask of theirs
     // is the company's (or its team's), and keeps its text: the Brain follows it all the
     // same (skill-shares.ts). Who decided anything goes too, if it was
     // them: the decision stays, unnamed.
     await db.batch([
       db.delete(skillShares).where(eq(skillShares.requestedBy, userId)),
       db.delete(skillDeletions).where(eq(skillDeletions.personId, userId)),
+      db
+        .delete(skillProposalDismissals)
+        .where(eq(skillProposalDismissals.personId, userId)),
       db
         .update(skillShares)
         .set({ decidedBy: null })

@@ -441,8 +441,10 @@ export const rpcParamNames: ParamNames = {
     "list": ["filter"],
   },
   "SkillsRpc": {
+    "acceptProposal": ["workflow","version"],
     "approve": ["id"],
     "decline": ["id"],
+    "dismissProposal": ["workflow","version"],
     "overview": [],
     "read": ["scope","name"],
     "remove": ["name"],

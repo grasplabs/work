@@ -3556,6 +3556,27 @@ export const skillDeletions = sqliteTable(
 );
 
 /**
+ * The skill proposals people dismissed (skill-proposals.ts): one per
+ * person, workflow and the version whose runs it rested on. A new version
+ * that keeps succeeding proposes again. Theirs alone: it goes with its
+ * person's erasure.
+ */
+export const skillProposalDismissals = sqliteTable(
+  "skill_proposal_dismissals",
+  {
+    personId: text("person_id").notNull(),
+    workflowResourceId: text("workflow_resource_id").notNull(),
+    version: integer().notNull(),
+    dismissedAt: timestamp("dismissed_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.personId, table.workflowResourceId, table.version],
+    }),
+  ]
+);
+
+/**
  * Each computation of the improvement signals (src/signals.ts), one a UTC
  * day: `started_at` claims it, `finished_at` is set once all its signals
  * are written. The signals people read are those of the finished one
