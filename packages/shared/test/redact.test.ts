@@ -14,6 +14,9 @@ import { redact } from "../src/redact.ts";
 const withLogin = (host: string, rest: string): string =>
   `https://${["user", "secret"].join(":")}@${host}${rest}`;
 
+/** A session id as a server issues one: 128 bits, as hex. */
+const sessionToken = "9f8e7d6c5b4a3f2e".repeat(2);
+
 describe("redacting credentials", () => {
   it("redacts a signed URL's signature, and nothing else of the URL", () => {
     expect(
@@ -264,7 +267,7 @@ describe("redacting credentials", () => {
   it("redacts session and cookie values, quoted or not", () => {
     expect(
       [
-        '{"session": "s3ss10n-value", "sessionId": "abc123"}',
+        `{"session": "${sessionToken}", "sessionId": "abc123"}`,
         "JSESSIONID=0F1E2D3C4B5A; Path=/",
         'cookie: "theme=dark; sid=9f8e7d"',
       ].map(redact)
@@ -273,6 +276,66 @@ describe("redacting credentials", () => {
       "JSESSIONID=[redacted]; Path=/",
       'cookie: "[redacted]"',
     ]);
+  });
+
+  it("leaves ordinary words after session and cookie, or a word ending in one, as they were", () => {
+    const texts = [
+      "Session: 45 minutes",
+      "cookie: chocolate chip",
+      "The session=Tuesday morning",
+      "Session: Q3 planning",
+      '{"summary": "Workshop", "session": "Q3 planning", "cookie": "oatmeal raisin"}',
+      "Session: https://meet.acme.test/abc-defg-hij",
+      "Possession: 61%, Obsession: coffee",
+    ];
+    expect(texts.map(redact)).toStrictEqual(texts);
+  });
+
+  it("redacts a session token, or a cookie string to its end, after session and cookie", () => {
+    const jwt = [
+      "eyJhbGciOiJIUzI1NiJ9",
+      "eyJzdWIiOiJiZW4ifQ",
+      "c2lnbmVkLWJ5LWFjbWU",
+    ].join(".");
+    expect(
+      [
+        `Cookie: theme=dark; sid=${sessionToken}; _ga=GA1.2.3`,
+        `Set-Cookie: sid=${sessionToken}; Path=/; Expires=Wed, 21 Oct 2026 07:28:00 GMT; HttpOnly`,
+        `session=${sessionToken}&next=/home`,
+        `session: ${jwt}`,
+        `{\\"cookie\\":\\"sid=${sessionToken}\\",\\"n\\":1}`,
+        `laravel_session=${sessionToken}`,
+        `authCookie: '${sessionToken}'`,
+      ].map(redact)
+    ).toStrictEqual([
+      "Cookie: [redacted]",
+      "Set-Cookie: [redacted]",
+      "session=[redacted]&next=/home",
+      "session: [redacted]",
+      String.raw`{\"cookie\":\"[redacted]\",\"n\":1}`,
+      "laravel_session=[redacted]",
+      "authCookie: '[redacted]'",
+    ]);
+  });
+
+  it("reads a megabyte of session and cookie names before long runs in one pass", () => {
+    // Runs that read as a token or a cookie string up to their last
+    // character, and then don't.
+    const run = "a".repeat(5000);
+    const lines = `session: ${run}: cookie: ${run}!\nCookie: a=${run}\n`;
+    const flood = "session:".repeat(125_000);
+    // Compared whole, so a failure doesn't print a megabyte.
+    expect({
+      lines:
+        redact(lines.repeat(66)) ===
+        `session: ${run}: cookie: ${run}!\nCookie: [redacted]\n`.repeat(66),
+      flood: redact(flood) === flood,
+      cookies: redact(`cookie=${"cookie=".repeat(150_000)}`),
+    }).toStrictEqual({
+      lines: true,
+      flood: true,
+      cookies: "cookie=[redacted]",
+    });
   });
 
   it("still redacts what it did before: named values and known formats", () => {

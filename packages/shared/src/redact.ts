@@ -12,11 +12,14 @@ import { decodeHTMLAttribute } from "entities/decode";
  * Google API keys (`AIza`); JSON Web Tokens; PEM private keys, an
  * unfinished block to the end of the text; AWS access key IDs; and the
  * whole value of an `api_key`, `apikey`, `token`, `secret`, `password`,
- * `passwd`, `authorization`, `session` (`sessionId`, `JSESSIONID`) or
- * `cookie`, or of a name ending in one (`access_token`, `client_secret`), written as `name=value` or
+ * `passwd`, `authorization` or session id (`sessionId`, `JSESSIONID`,
+ * `PHPSESSID`), or of a name ending in one (`access_token`,
+ * `client_secret`), written as `name=value` or
  * `name: value`: quoted, to its closing quote (or the end of the line),
  * spaces included; unquoted, to the next space or separator, with a
- * `Bearer` or `Basic` scheme of any length taken with it. JSON quoted
+ * `Bearer` or `Basic` scheme of any length taken with it. After `session`
+ * or `cookie`, the same, but only a value shaped like a credential (a
+ * token, or a cookie string to its end: see its entry). JSON quoted
  * once more, as a string inside JSON (`{\"password\":\"…\"}`), is
  * caught the same way, to the escaped closing quote. And in every link,
  * its parameters that sign or grant it (`redactLinks`, below). Anything else
@@ -46,13 +49,22 @@ const redactedAssignment = (...args: unknown[]): string => {
   return `${part("name")}${part("between")}${quote}[redacted]${close}`;
 };
 
+/** A character of a token: what a `Bearer` value is written in (RFC 6750). */
+const tokenChar = String.raw`[\w\-.~+/]`;
+
+/**
+ * A token: 16 or more token characters, then any `=` padding. Sixteen hex
+ * characters are 64 bits, the least a session id carries (OWASP).
+ */
+const token = String.raw`${tokenChar}{16,}=*`;
+
 /**
  * Known credential formats, each recognisable by its shape alone: the
  * entries of {@link credentials} that don't depend on a name before them.
  */
 const credentialFormats: readonly RegExp[] = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/gu,
-  /\b(?:bearer|basic)\s+[\w\-.~+/]{16,}=*/giu,
+  new RegExp(String.raw`\b(?:bearer|basic)\s+${token}`, "giu"),
   /\b(?:sk|pk|rk)_(?:live|test)_[0-9A-Za-z]{10,}/gu,
   /\b(?:sk|pk|rk)-[\w-]{16,}/gu,
   /\b(?:ghp|gho|ghs|ghu|ghr)_[0-9A-Za-z]{20,}/gu,
@@ -76,7 +88,21 @@ const credentials: readonly (readonly [
   // linear. A name's prefix (`access_`) is word characters only, so a
   // match starts once per word, not at every "-" of a flood.
   [
-    /\b(?<name>\w*?(?:api[_-]?key|apikey|token|secret|passwd|password|authorization|session(?:[_-]?id)?|sessid|cookie))(?<between>\\?["']?\s*[:=]\s*)(?:(?<escapedQuote>\\["'])(?:(?!\k<escapedQuote>)[^\n])*(?<escapedClose>\k<escapedQuote>)?|(?<quote>["'])(?:\\.|(?!\k<quote>)[^\\\n])*(?<close>\k<quote>)?|(?:(?:bearer|basic)\s+)?[^\s"'&,;]+)/giu,
+    /\b(?<name>\w*?(?:api[_-]?key|apikey|token|secret|passwd|password|authorization|session[_-]?id|sessid))(?<between>\\?["']?\s*[:=]\s*)(?:(?<escapedQuote>\\["'])(?:(?!\k<escapedQuote>)[^\n])*(?<escapedClose>\k<escapedQuote>)?|(?<quote>["'])(?:\\.|(?!\k<quote>)[^\\\n])*(?<close>\k<quote>)?|(?:(?:bearer|basic)\s+)?[^\s"'&,;]+)/giu,
+    redactedAssignment,
+  ],
+  // `session` and `cookie`, alone or ending a name (`laravel_session`,
+  // `authCookie`), are everyday words too ("Session: 45 minutes",
+  // "Possession: 61%"), so their value is redacted only when it is shaped
+  // like a credential: a token, whole, or a cookie string (`name=value`,
+  // a cookie's name being a token's characters, RFC 6265), with every pair
+  // after it to a quote or the end of the line. Quoted or not. Each part
+  // backs off at most over the run it read, once per name: linear.
+  [
+    new RegExp(
+      String.raw`\b(?<name>\w*?(?:session|cookie))(?<between>\\?["']?\s*[:=]\s*)(?<quote>\\?["'])?(?:${tokenChar}+=[^"'\\\n]*|${token}(?![^\s"'\\&,;]))(?<close>\k<quote>)?`,
+      "giu"
+    ),
     redactedAssignment,
   ],
 ];
@@ -106,7 +132,13 @@ const credentials: readonly (readonly [
 // `#code=…` are not); a link `URL` can't parse; a link with no scheme
 // (`www.…`, `//host/…`); and an AWS secret key written as
 // `aws_secret_access_key = …` or bare (only its key ID, `AKIA…`, has a
-// shape of its own). What is left is bounded: such text
+// shape of its own). After `session` or `cookie`: a session value shorter
+// than a token (`session=9f8e7d`), and a cookie value in quotes past the
+// first quote; and a word of 16 or more token characters
+// (`Session: onboarding-workshop`) reads as a token and is redacted. Prose
+// after the other names loses its first word ("The secret: practice
+// daily", "Authorization: approved"): what follows them is a credential by
+// name, a short or word-like one too. What is left is bounded: such text
 // reaches only the person who read it (the Brain keeps a connection's
 // reads for their reader alone), and connectors select the fields they
 // return.
