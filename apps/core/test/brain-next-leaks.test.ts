@@ -4,6 +4,7 @@ import {
   recallBudgetMax,
 } from "@grasp-os/brain-next/contract";
 import type { WorkOverview } from "@grasp-os/brain-next/contract";
+import type { BrainUploadReaders } from "@grasp-os/shared/brain-sources";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import { authoritySchema } from "@grasp-os/shared/permissions";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
@@ -533,6 +534,8 @@ describe(
         "another agent's instruction file": markerWord(),
         "an App's instruction file the outsider doesn't build": markerWord(),
         "an App's instruction file the outsider uses": markerWord(),
+        "the holder's upload for only them": markerWord(),
+        "an upload for a team the outsider isn't in": markerWord(),
         "what the holder's agent fetched through a connection": markerWord(),
         "the holder's own skill": markerWord(),
         "a team's skill the outsider isn't in": markerWord(),
@@ -547,6 +550,8 @@ describe(
         "another agent's instruction file": agentFileMarker,
         "an App's instruction file the outsider doesn't build": appFileMarker,
         "an App's instruction file the outsider uses": usedAppFileMarker,
+        "the holder's upload for only them": ownUploadMarker,
+        "an upload for a team the outsider isn't in": teamUploadMarker,
         "what the holder's agent fetched through a connection": captureMarker,
         "the holder's own skill": holderSkillMarker,
         "a team's skill the outsider isn't in": teamSkillMarker,
@@ -824,10 +829,36 @@ describe(
         () => "refused"
       );
 
+      // Through the upload producer too (brain-uploads.ts): the holder's
+      // file for only them, and one for a team the outsider isn't in,
+      // each with its marker in its file's name as well as its text, as a
+      // name is its readers' alone too (an admin's shared uploads).
+      const uploaded = async (marker: string, readers: BrainUploadReaders) => {
+        const { source } = await holderApi.api.brainSources.upload(
+          {
+            name: `Captions ${marker}.vtt`,
+            bytes: new TextEncoder().encode(
+              `WEBVTT\n\n00:00:00.000 --> 00:00:05.000\nUploaded ${sharedWord} ${marker}\n`
+            ),
+          },
+          readers,
+          crypto.randomUUID()
+        );
+        return source;
+      };
+      const ownUpload = await uploaded(ownUploadMarker, { kind: "me" });
+      const teamUpload = await uploaded(teamUploadMarker, {
+        kind: "team",
+        teamId: secretTeam,
+      });
+
       // The markers are there to find for those who may read them.
       await expect(textsFor(holder, teamMarker)).resolves.toStrictEqual([
         teamSource,
       ]);
+      await expect(textsFor(holder, teamUploadMarker)).resolves.toContainEqual(
+        expect.stringContaining(teamUploadMarker)
+      );
       await expect(
         textsFor(holder, `salary ${ownerMarker}`)
       ).resolves.toContain(`Salary review ${sharedWord} ${ownerMarker}`);
@@ -876,6 +907,8 @@ describe(
           captureMarker,
           toHolderMarker,
           ...instructionMarkers,
+          ownUploadMarker,
+          teamUploadMarker,
           holderSkillMarker,
           teamSkillMarker,
         ],
@@ -884,8 +917,11 @@ describe(
           teamId,
           noneId,
           narrowedId,
+          ownUpload,
+          teamUpload,
           captureId
         ),
+        hiddenUploads: [ownUpload.id, teamUpload.id],
         hiddenInstructionFiles: [holderFile, agentFile, appFile, usedAppFile],
         hiddenSkills: [holderSkillMarker],
         hiddenTeamSkills: [{ team: secretTeam, name: teamSkillMarker }],
@@ -910,6 +946,7 @@ describe(
       teamSkillSelected.joined = await teamSkillsOf(outsider);
       const {
         "a team's source the outsider isn't in": _joined,
+        "an upload for a team the outsider isn't in": _joinedUpload,
         "a team's skill the outsider isn't in": _joinedSkill,
         ...notJoined
       } = markers;
@@ -924,13 +961,16 @@ describe(
             captureMarker,
             toHolderMarker,
             ...instructionMarkers,
+            ownUploadMarker,
           ],
           hiddenVersions: everyVersionOf(
             ...ownerIds,
             noneId,
             narrowedId,
+            ownUpload,
             captureId
           ),
+          hiddenUploads: [ownUpload.id],
           hiddenTeamSkills: [],
         },
         notJoined,
@@ -1055,13 +1095,16 @@ describe(
           },
           personal: false,
           sharedWord,
-          markers: [ownerMarker],
+          markers: [ownerMarker, ownUploadMarker],
           hiddenVersions: [],
           hiddenInstructionFiles: [],
           instructionGroups,
           moments: [whileDraft],
         },
-        { "the holder's own source": ownerMarker },
+        {
+          "the holder's own source": ownerMarker,
+          "the holder's upload for only them": ownUploadMarker,
+        },
         { among: surfaces.filter(([name]) => name === "core recallAs") }
       );
 
@@ -1075,6 +1118,7 @@ describe(
       const reading = surfaces.filter(([name]) => readingSurfaces.has(name));
       const {
         "a team's source the outsider isn't in": _team,
+        "an upload for a team the outsider isn't in": _teamUpload,
         "a team's skill the outsider isn't in": _teamSkill,
         ...notTeams
       } = markers;
@@ -1091,8 +1135,15 @@ describe(
             narrowedMarker,
             toHolderMarker,
             ...instructionMarkers,
+            ownUploadMarker,
           ],
-          hiddenVersions: everyVersionOf(...ownerIds, noneId, narrowedId),
+          hiddenVersions: everyVersionOf(
+            ...ownerIds,
+            noneId,
+            narrowedId,
+            ownUpload
+          ),
+          hiddenUploads: [ownUpload.id],
           hiddenInstructionFiles: [holderFile, agentFile, appFile, usedAppFile],
           instructionGroups,
           moments: [whileDraft],
@@ -1114,13 +1165,18 @@ describe(
             narrowedMarker,
             toHolderMarker,
             ...instructionMarkers,
+            ownUploadMarker,
+            teamUploadMarker,
           ],
           hiddenVersions: everyVersionOf(
             ...ownerIds,
             teamId,
             noneId,
-            narrowedId
+            narrowedId,
+            ownUpload,
+            teamUpload
           ),
+          hiddenUploads: [ownUpload.id, teamUpload.id],
           hiddenInstructionFiles: [holderFile, agentFile, appFile, usedAppFile],
           instructionGroups,
           moments: [whileDraft],

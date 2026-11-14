@@ -137,9 +137,14 @@ export const rpcParamNames: ParamNames = {
     "work": ["id"],
   },
   "BrainSourcesRpc": {
+    "deleteUpload": ["uploadId"],
     "list": ["after"],
     "read": ["source","version"],
     "search": ["question"],
+    "sharedUploads": ["after"],
+    "upload": ["file","readers","uploadId"],
+    "uploadOf": ["uploadId"],
+    "uploadVersion": ["uploadId","file","versionId"],
     "versions": ["source","before"],
   },
   "ChannelAccountsRpc": {

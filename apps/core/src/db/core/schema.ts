@@ -6126,6 +6126,45 @@ export const providerHealth = sqliteTable(
 );
 
 /**
+ * Files people uploaded straight into the Brain (brain-uploads.ts), each
+ * a source `upload:<id>` there: who uploaded it and who may read it,
+ * fixed for its life, and, for one shared with a team or everyone, the
+ * name of the file its current version came from, for an admin's listing
+ * of shared uploads to erase (no content: the text is the Brain's alone,
+ * and an upload for one person keeps even its name in their own store).
+ * A row is written before the Brain is given anything under its key, and
+ * goes only once that key was erased, so every upload the Brain holds is
+ * named here for its deletion.
+ */
+export const brainUploads = sqliteTable(
+  "brain_uploads",
+  {
+    id: text().primaryKey(),
+    uploadedBy: text("uploaded_by").notNull(),
+    /** The file's name, as its uploader gave it: null for `me`. */
+    name: text(),
+    /** Who may read it: its uploader alone, a team, or everyone. */
+    readers: text({ enum: ["me", "team", "everyone"] }).notNull(),
+    /** The team, for `team`. */
+    teamId: text("team_id"),
+    /**
+     * Its current version, as the Brain answered the add that made it: 0
+     * until the first lands. A retried add the Brain answers with an older
+     * version changes nothing here.
+     */
+    version: integer().notNull().default(0),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (table) => [
+    check(
+      "brain_uploads_team_named",
+      sql`${table.readers} <> 'team' OR ${table.teamId} IS NOT NULL`
+    ),
+  ]
+);
+
+/**
  * What core has still to hand over to the new Brain (src/brain-hand-overs.ts):
  * a source by its producer's kind and that producer's id for it, noted from
  * the audit event of the change that touched it, until its hand-over ended:

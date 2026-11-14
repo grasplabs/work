@@ -10,12 +10,21 @@ import type {
   BrainSourceRef,
   BrainSourceText,
   BrainSourceVersionPage,
+  BrainSharedUploadPage,
+  BrainUpload,
+  BrainUploadReaders,
 } from "@grasp-os/shared/brain-sources";
 import {
   brainQuestionMaxLength,
+  brainUploadErrors,
   firstLineOf,
 } from "@grasp-os/shared/brain-sources";
 import { failureText } from "@grasp-os/shared/errors";
+import {
+  uploadErrors,
+  uploadMaxBytes,
+  uploadTypes,
+} from "@grasp-os/shared/uploads";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import { Card, CardContent } from "@grasp-os/ui/components/card";
@@ -30,20 +39,32 @@ import {
   EmptyHeader,
   EmptyTitle,
 } from "@grasp-os/ui/components/empty";
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@grasp-os/ui/components/field";
 import { Input } from "@grasp-os/ui/components/input";
 import { Item, ItemContent, ItemGroup } from "@grasp-os/ui/components/item";
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@grasp-os/ui/components/native-select";
 import {
   PageHeader,
   PageHeaderDescription,
   PageHeaderTitle,
 } from "@grasp-os/ui/components/page-header";
+import { Spinner } from "@grasp-os/ui/components/spinner";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { useEffect, useId, useState } from "react";
 
+import { Confirmed } from "../confirmed.tsx";
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
-import { formatDateTime, formatList } from "../format.ts";
+import { formatBytes, formatDateTime, formatList } from "../format.ts";
 import { useCore } from "../use-core.ts";
 import { OwnExportSection } from "./own-export.tsx";
 
@@ -54,15 +75,26 @@ import { OwnExportSection } from "./own-export.tsx";
 // and everything the pack holds shown, as its budget was spent on it; and
 // how each of their connections feeds the Brain today. Core answers each
 // from what they may read alone. Texts are shown as text, never markup.
-// At its foot, the person's own export of what only they may read
-// (own-export.tsx).
+// A file uploaded here goes straight into the Brain, for who the person
+// chooses: only them, a team of theirs, or everyone (GRA-1824); its
+// uploader adds its next version. Its uploader deletes one for only them;
+// one shared with a team or everyone only an admin erases, from the
+// shared uploads listed for admins. What each may do to an upload is
+// core's to say (`uploadOf`). At its foot, the person's own export of
+// what only they may read (own-export.tsx).
+
+/** A team the person is in. */
+interface Team {
+  id: string;
+  name: string;
+}
 
 type Sources = Session["brainSources"];
 
 /** What a read from core came to. */
 type Read<T> =
   | { state: "loading" }
-  | { state: "refused"; message: string }
+  | { state: "refused"; message: string; code?: string }
   | { state: "ready"; data: T };
 
 /**
@@ -79,8 +111,69 @@ const readFrom = async <T,>(
     );
     return { state: "ready", data };
   } catch (error) {
-    return { state: "refused", message: failureText(error) };
+    const code = brainUploadErrors.codeOf(error);
+    return {
+      state: "refused",
+      message: failureText(error),
+      ...(code === undefined ? {} : { code }),
+    };
   }
+};
+
+/**
+ * Why an upload was refused, as the person reads it.
+ */
+const UploadRefusal = ({
+  refused,
+}: {
+  refused: { message: string; code?: string };
+}) => {
+  const { t } = useLingui();
+  // Core's refusals the page says in the person's own language; every
+  // other is core's own words.
+  const said: Record<string, string> = {
+    "brain.upload_text_too_long": t`This file's text is too long for the Brain to keep. Split it into smaller files and upload those.`,
+    "brain.upload_other_file": t`This upload was already made with another file, which is kept as it was. Choose the file again to upload it as a new upload, or add it as a new version.`,
+  };
+  return (
+    <ErrorText>
+      {(refused.code === undefined ? undefined : said[refused.code]) ??
+        refused.message}
+    </ErrorText>
+  );
+};
+
+/**
+ * A file as core takes it: its name and its bytes. Refused here, as core
+ * would, before reading and sending it all: the size the browser reports
+ * only saves the trip. Core checks the bytes that arrive.
+ */
+const fileOf = async (file: File) => {
+  if (file.size > uploadMaxBytes) {
+    throw uploadErrors.create("upload.too_large");
+  }
+  return { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) };
+};
+
+/**
+ * Whether `answer` is a delete refused as not found: one done before, its
+ * answer lost, or one they may no longer make (an admin no longer one).
+ * The page reads again what is there, rather than say which.
+ */
+const notFound = (answer: Read<unknown>): boolean =>
+  answer.state === "refused" && answer.code === "brain.upload_not_found";
+
+/** The file types an upload may be, for the file picker: core's own list. */
+const uploadAccept = Object.keys(uploadTypes)
+  .map((extension) => `.${extension}`)
+  .join(",");
+
+/** Who may read an upload, as the form's choice names it: `me`, `everyone` or a team's id. */
+const readersOf = (choice: string): BrainUploadReaders => {
+  if (choice === "me" || choice === "everyone") {
+    return { kind: choice };
+  }
+  return { kind: "team", teamId: choice };
 };
 
 /** The same source, by its producer and id. */
@@ -324,6 +417,307 @@ const SearchResults = ({
         </p>
       ) : null}
     </section>
+  );
+};
+
+/** Uploading a file into the Brain: the file, and who may read it. */
+const UploadForm = ({
+  teams,
+  onUploaded,
+}: {
+  teams: Team[];
+  onUploaded: (source: BrainSourceRef) => void;
+}) => {
+  const { t } = useLingui();
+  const core = useCore();
+  const fileId = useId();
+  const readersId = useId();
+  // The upload's id, minted for the file chosen and sent again when it is
+  // retried, so a retry after a lost answer is the same upload.
+  const [file, setFile] = useState<{ chosen: File; uploadId: string }>();
+  const [choice, setChoice] = useState("me");
+  const [sent, setSent] = useState<Read<{ source: BrainSourceRef }>>();
+  const busy = sent?.state === "loading";
+  // What an upload takes, from core's own limits.
+  const types = formatList(Object.keys(uploadTypes).map((type) => `.${type}`));
+  const size = formatBytes(uploadMaxBytes);
+  return (
+    <form
+      className="flex flex-col gap-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (file === undefined || busy) {
+          return;
+        }
+        const form = event.currentTarget;
+        setSent({ state: "loading" });
+        void (async () => {
+          const answer = await readFrom(
+            core,
+            async (sources) =>
+              await sources.upload(
+                await fileOf(file.chosen),
+                readersOf(choice),
+                file.uploadId
+              )
+          );
+          setSent(answer);
+          if (answer.state === "ready") {
+            form.reset();
+            setFile(undefined);
+            onUploaded(answer.data.source);
+          }
+        })();
+      }}
+    >
+      <FieldGroup className="sm:flex-row sm:items-end">
+        <Field>
+          <FieldLabel htmlFor={fileId}>
+            <Trans>File</Trans>
+          </FieldLabel>
+          <Input
+            accept={uploadAccept}
+            // Out of reach while a file uploads: the form is reset when it
+            // is done, which would drop a file chosen meanwhile.
+            disabled={busy}
+            id={fileId}
+            onChange={(event) => {
+              const chosen = event.target.files?.[0];
+              setFile(
+                chosen === undefined
+                  ? undefined
+                  : { chosen, uploadId: crypto.randomUUID() }
+              );
+            }}
+            type="file"
+          />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor={readersId}>
+            <Trans context="a file uploaded into the Brain">
+              Who may read it
+            </Trans>
+          </FieldLabel>
+          <NativeSelect
+            id={readersId}
+            onChange={(event) => {
+              setChoice(event.target.value);
+            }}
+            value={choice}
+          >
+            <NativeSelectOption value="me">{t`Only me`}</NativeSelectOption>
+            {teams.map(({ id, name }) => (
+              <NativeSelectOption key={id} value={id}>
+                {t`Team ${name}`}
+              </NativeSelectOption>
+            ))}
+            <NativeSelectOption value="everyone">
+              {t`Everyone`}
+            </NativeSelectOption>
+          </NativeSelect>
+        </Field>
+        <Button disabled={file === undefined || busy} type="submit">
+          {busy ? (
+            <>
+              <Spinner aria-hidden="true" />
+              <Trans>Uploading…</Trans>
+            </>
+          ) : (
+            <Trans>Upload</Trans>
+          )}
+        </Button>
+      </FieldGroup>
+      <FieldDescription>
+        <Trans>
+          It takes {types} files of up to {size}. Who may read it stays as you
+          choose: to share it with others, upload it again for them.
+        </Trans>
+      </FieldDescription>
+      {sent?.state === "refused" ? <UploadRefusal refused={sent} /> : null}
+    </form>
+  );
+};
+
+/** Who may read an upload, in words. */
+const ReadersLine = ({
+  readers,
+  teams,
+}: {
+  readers: BrainUploadReaders;
+  teams: Team[];
+}) => {
+  if (readers.kind === "me") {
+    return <Trans>Only you can read this upload.</Trans>;
+  }
+  if (readers.kind === "everyone") {
+    return <Trans>Everyone can read this upload.</Trans>;
+  }
+  const team = teams.find(({ id }) => id === readers.teamId)?.name;
+  return team === undefined ? (
+    <Trans>A team can read this upload.</Trans>
+  ) : (
+    <Trans>Team {team} can read this upload.</Trans>
+  );
+};
+
+/**
+ * What the person may do to an upload, as core says: upload its next
+ * version, and delete it for good.
+ */
+const UploadActions = ({
+  source,
+  teams,
+  onChanged,
+  onDeleted,
+}: {
+  source: BrainSourceRef;
+  teams: Team[];
+  onChanged: (source: BrainSourceRef) => void;
+  onDeleted: (source: BrainSourceRef) => void;
+}) => {
+  const { t } = useLingui();
+  const core = useCore();
+  const fileId = useId();
+  const [upload, setUpload] = useState<Read<BrainUpload | null>>({
+    state: "loading",
+  });
+  // The new version's id, minted for the file chosen and sent again when
+  // it is retried, so a retry after a lost answer is the same version.
+  const [file, setFile] = useState<{ chosen: File; versionId: string }>();
+  const [acting, setActing] = useState<Read<unknown>>();
+  // Which action is under way: a new version shows it uploads.
+  const [uploading, setUploading] = useState(false);
+  useEffect(() => {
+    let left = false;
+    const read = async (): Promise<void> => {
+      const answer = await readFrom(
+        core,
+        async (sources) => await sources.uploadOf(source.id)
+      );
+      if (!left) {
+        setUpload(answer);
+      }
+    };
+    void read();
+    return () => {
+      left = true;
+    };
+  }, [core, source]);
+  if (upload.state === "refused") {
+    return <ErrorText>{upload.message}</ErrorText>;
+  }
+  if (upload.state !== "ready" || upload.data === null) {
+    return null;
+  }
+  const { readers, mayAddVersion, mayDelete } = upload.data;
+  const busy = acting?.state === "loading";
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-muted-foreground text-sm">
+        <ReadersLine readers={readers} teams={teams} />
+      </p>
+      {!mayDelete && readers.kind !== "me" ? (
+        <p className="text-muted-foreground text-sm">
+          <Trans>
+            Only an admin can remove an upload shared with a team or everyone.
+            Ask an admin to remove it.
+          </Trans>
+        </p>
+      ) : null}
+      {mayAddVersion ? (
+        <form
+          className="flex flex-col gap-2 sm:flex-row sm:items-end"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (file === undefined || busy) {
+              return;
+            }
+            setActing({ state: "loading" });
+            setUploading(true);
+            void (async () => {
+              const answer = await readFrom(
+                core,
+                async (sources) =>
+                  await sources.uploadVersion(
+                    source.id,
+                    await fileOf(file.chosen),
+                    file.versionId
+                  )
+              );
+              setUploading(false);
+              setActing(answer);
+              if (answer.state === "ready") {
+                onChanged(source);
+              }
+            })();
+          }}
+        >
+          <Field>
+            <FieldLabel htmlFor={fileId}>
+              <Trans>New version</Trans>
+            </FieldLabel>
+            <Input
+              accept={uploadAccept}
+              id={fileId}
+              onChange={(event) => {
+                const chosen = event.target.files?.[0];
+                setFile(
+                  chosen === undefined
+                    ? undefined
+                    : { chosen, versionId: crypto.randomUUID() }
+                );
+              }}
+              type="file"
+            />
+          </Field>
+          <Button
+            disabled={file === undefined || busy}
+            type="submit"
+            variant="outline"
+          >
+            {uploading ? (
+              <>
+                <Spinner aria-hidden="true" />
+                <Trans>Uploading…</Trans>
+              </>
+            ) : (
+              <Trans>Upload new version</Trans>
+            )}
+          </Button>
+        </form>
+      ) : null}
+      {mayDelete ? (
+        <Confirmed
+          busy={busy}
+          button={t`Delete`}
+          confirm={t`Delete for good`}
+          description={t`Every version of it is erased from the Brain for everyone who could read it. This can't be undone.`}
+          label={t`Delete this upload`}
+          onConfirm={() => {
+            setActing({ state: "loading" });
+            void (async () => {
+              const answer = await readFrom(core, async (sources) => {
+                await sources.deleteUpload(source.id);
+              });
+              if (answer.state === "ready") {
+                setActing(undefined);
+                onDeleted(source);
+                return;
+              }
+              if (notFound(answer)) {
+                // Read again: gone, or still there without Delete.
+                setActing(undefined);
+                onChanged(source);
+                return;
+              }
+              setActing(answer);
+            })();
+          }}
+          title={t`Delete this upload?`}
+        />
+      ) : null}
+      {acting?.state === "refused" ? <UploadRefusal refused={acting} /> : null}
+    </div>
   );
 };
 
@@ -673,10 +1067,18 @@ const VersionList = ({
 const SourcePanel = ({
   source,
   version: asked,
+  teams,
+  onChanged,
+  onDeleted,
 }: {
   source: BrainSourceRef;
   /** The version to show first: the newest they may read when left out. */
   version: number | undefined;
+  teams: Team[];
+  /** A new version of it was added. */
+  onChanged: (source: BrainSourceRef) => void;
+  /** It was deleted. */
+  onDeleted: (source: BrainSourceRef) => void;
 }) => {
   const core = useCore();
   const [versions, setVersions] = useState<Read<BrainSourceVersionPage>>({
@@ -776,17 +1178,180 @@ const SourcePanel = ({
             }}
           />
         ) : null}
+        {source.producer === "upload" ? (
+          <UploadActions
+            onChanged={onChanged}
+            onDeleted={onDeleted}
+            source={source}
+            teams={teams}
+          />
+        ) : null}
       </CardContent>
     </Card>
+  );
+};
+
+/**
+ * For an admin: the uploads shared with a team or everyone, newest first,
+ * each by its file's name, who may read it, who uploaded it and when, never
+ * its text, with Erase for good: a shared upload only an admin erases,
+ * also one of a team they aren't in.
+ */
+const SharedUploads = ({ onErased }: { onErased: () => void }) => {
+  const { t } = useLingui();
+  const core = useCore();
+  const heading = useId();
+  const [listed, setListed] = useState<Read<BrainSharedUploadPage>>({
+    state: "loading",
+  });
+  const [acting, setActing] = useState<Read<unknown>>();
+  const [more, setMore] = useState<Read<BrainSharedUploadPage>>();
+  useEffect(() => {
+    let left = false;
+    const read = async (): Promise<void> => {
+      const answer = await readFrom(
+        core,
+        async (sources) => await sources.sharedUploads()
+      );
+      if (!left) {
+        setListed(answer);
+      }
+    };
+    void read();
+    return () => {
+      left = true;
+    };
+  }, [core]);
+  const busy = acting?.state === "loading";
+  return (
+    <section aria-labelledby={heading} className="flex flex-col gap-3">
+      <h2 className="text-sm font-medium" id={heading}>
+        <Trans>Shared uploads</Trans>
+      </h2>
+      <p className="text-muted-foreground text-sm">
+        <Trans>
+          Uploads shared with a team or everyone. Only an admin can erase one,
+          for everyone and for good. Its text isn&apos;t shown here.
+        </Trans>
+      </p>
+      {listed.state === "refused" ? (
+        <ErrorText>{listed.message}</ErrorText>
+      ) : null}
+      {listed.state === "ready" && listed.data.uploads.length === 0 ? (
+        <p className="text-muted-foreground text-sm">
+          <Trans>No uploads are shared with a team or everyone.</Trans>
+        </p>
+      ) : null}
+      {listed.state === "ready" && listed.data.uploads.length > 0 ? (
+        <ItemGroup render={<ul />} spacing="tight">
+          {listed.data.uploads.map((upload) => {
+            const { uploaderName, teamName, readers } = upload;
+            // Named only for an admin who may read it; else told apart by
+            // its team, uploader and the minute it was uploaded.
+            const { name } = upload;
+            const uploaded = formatDateTime(upload.uploadedAt);
+            let readBy = t`Everyone`;
+            if (readers.kind === "team") {
+              readBy =
+                teamName === null ? t`A deleted team` : t`Team ${teamName}`;
+            }
+            return (
+              <li key={upload.source.id}>
+                <Item size="sm">
+                  <ItemContent>
+                    <span className="min-w-0 text-sm">
+                      {name ?? t`An upload`}
+                    </span>
+                    <span className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
+                      <Badge variant="outline">{readBy}</Badge>
+                      <span>
+                        <Trans>
+                          Uploaded by {uploaderName}, {uploaded}
+                        </Trans>
+                      </span>
+                    </span>
+                  </ItemContent>
+                  <Confirmed
+                    busy={busy}
+                    button={t`Erase for good`}
+                    confirm={t`Erase for good`}
+                    description={t`Every version of it is erased from the Brain for everyone who could read it. This can't be undone.`}
+                    label={
+                      name === null
+                        ? t`Erase this upload for good`
+                        : t`Erase ${name} for good`
+                    }
+                    onConfirm={() => {
+                      setActing({ state: "loading" });
+                      void (async () => {
+                        const answer = await readFrom(core, async (sources) => {
+                          await sources.deleteUpload(upload.source.id);
+                        });
+                        // Not found: read the lists again, which show what
+                        // is there (or that they may no longer list it).
+                        if (answer.state !== "ready" && !notFound(answer)) {
+                          setActing(answer);
+                          return;
+                        }
+                        onErased();
+                      })();
+                    }}
+                    title={t`Erase this upload for good?`}
+                  />
+                </Item>
+              </li>
+            );
+          })}
+        </ItemGroup>
+      ) : null}
+      {acting?.state === "refused" ? <UploadRefusal refused={acting} /> : null}
+      {more?.state === "refused" ? <ErrorText>{more.message}</ErrorText> : null}
+      {listed.state === "ready" && listed.data.next !== null ? (
+        <Button
+          className="self-start"
+          disabled={more?.state === "loading"}
+          onClick={() => {
+            const { next, uploads } = listed.data;
+            setMore({ state: "loading" });
+            void (async () => {
+              const answer = await readFrom(
+                core,
+                async (sources) => await sources.sharedUploads(next)
+              );
+              setMore(answer.state === "refused" ? answer : undefined);
+              if (answer.state === "ready") {
+                setListed({
+                  state: "ready",
+                  data: {
+                    uploads: [...uploads, ...answer.data.uploads],
+                    next: answer.data.next,
+                  },
+                });
+              }
+            })();
+          }}
+          type="button"
+          variant="outline"
+        >
+          <Trans>Show more</Trans>
+        </Button>
+      ) : null}
+    </section>
   );
 };
 
 /** The Brain's sources page: search, how connections feed it, and the sources. */
 export const SourcesPage = ({
   connections,
+  teams,
+  admin,
 }: {
   /** The person's connections, each one they have connected. */
   connections: Connection[];
+  /** The teams the person is in, whom they may upload for. */
+  teams: Team[];
+  /** Whether they are an admin, who erases shared uploads. */
+  admin: boolean;
 }) => {
   // Each opening counts, so opening a source again (a search result
   // citing a version, after another was picked in its panel) starts its
@@ -797,10 +1362,32 @@ export const SourcesPage = ({
     opening: number;
   }>();
   const heading = useId();
+  const uploadHeading = useId();
+  // Each change to the sources counts, so the list reads them again.
+  const [listing, setListing] = useState(0);
   const open = (source: BrainSourceRef, version?: number) => {
     const opening = (opened?.opening ?? 0) + 1;
     setOpened(
       version === undefined ? { source, opening } : { source, version, opening }
+    );
+  };
+  // What an action on `source` changed, once it finished: read from the
+  // state as it is then, as the person may have opened another source
+  // meanwhile, which stays open.
+  const changed = (source: BrainSourceRef) => {
+    setListing((before) => before + 1);
+    setOpened((current) =>
+      current !== undefined && sameSource(current.source, source)
+        ? { source, opening: current.opening + 1 }
+        : current
+    );
+  };
+  const deleted = (source: BrainSourceRef) => {
+    setListing((before) => before + 1);
+    setOpened((current) =>
+      current !== undefined && sameSource(current.source, source)
+        ? undefined
+        : current
     );
   };
   return (
@@ -820,6 +1407,31 @@ export const SourcesPage = ({
           </PageHeaderDescription>
         </PageHeader>
         <Search onOpen={open} />
+        <section
+          aria-labelledby={uploadHeading}
+          className="flex flex-col gap-3"
+        >
+          <h2 className="text-sm font-medium" id={uploadHeading}>
+            <Trans>Upload a file</Trans>
+          </h2>
+          <UploadForm
+            onUploaded={(source) => {
+              setListing((before) => before + 1);
+              open(source);
+            }}
+            teams={teams}
+          />
+        </section>
+        {admin ? (
+          <SharedUploads
+            // Read again from the start whenever the sources are (an
+            // upload, a new version, a delete), as the list below is.
+            key={`shared-${listing}`}
+            onErased={() => {
+              setListing((before) => before + 1);
+            }}
+          />
+        ) : null}
         <ConnectionFeeds connections={connections} />
         <section aria-labelledby={heading} className="flex flex-col gap-3">
           <h2 className="text-sm font-medium" id={heading}>
@@ -827,6 +1439,7 @@ export const SourcesPage = ({
           </h2>
           <div className="grid min-h-0 gap-6 lg:grid-cols-2">
             <SourceList
+              key={`list-${listing}`}
               onPick={(source) => {
                 open(source);
               }}
@@ -834,8 +1447,11 @@ export const SourcesPage = ({
             />
             {opened === undefined ? null : (
               <SourcePanel
-                key={opened.opening}
+                key={`panel-${opened.opening}`}
+                onChanged={changed}
+                onDeleted={deleted}
                 source={opened.source}
+                teams={teams}
                 version={opened.version}
               />
             )}
