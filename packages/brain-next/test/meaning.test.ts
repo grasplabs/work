@@ -370,6 +370,7 @@ describe("recall by meaning", () => {
       at: new Date(),
       embedders: noEmbedders,
       handOvers: noHandOvers,
+      contextTokens: null,
     });
     const ticked = await found();
 

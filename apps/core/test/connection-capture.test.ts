@@ -1,4 +1,4 @@
-import { personalBrainOf } from "@grasp-os/brain-next/contract";
+import { brainOf, personalBrainOf } from "@grasp-os/brain-next/contract";
 import { provenanceMetaKey } from "@grasp-os/connector-kit/manifest";
 import { auditOutboxTakeMax, createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditEvent } from "@grasp-os/shared/audit";
@@ -950,11 +950,11 @@ const eventsOf = async (
 ): Promise<AuditEvent[]> => about(await allEvents(), action, connectionId);
 
 /**
- * Core's env with `personId`'s own Brain store's `method` replaced by
+ * Core's env with the Brain store named `storeName`'s `method` replaced by
  * `instead`, given the store's own; every other call reaches the store.
  */
-const ownStoreWith = (
-  personId: string,
+const storeWith = (
+  storeName: string,
   method: string,
   instead: (
     real: (...args: unknown[]) => Promise<unknown>,
@@ -964,7 +964,7 @@ const ownStoreWith = (
   const binding = env.BRAIN_STORE;
   const getByName = (name: string) => {
     const stub = binding.getByName(name);
-    if (name !== `person:${personId}`) {
+    if (name !== storeName) {
       return stub;
     }
     return new Proxy(stub, {
@@ -992,12 +992,30 @@ const ownStoreWith = (
   };
 };
 
+/** As `storeWith`, for `personId`'s own store. */
+const ownStoreWith = (
+  personId: string,
+  method: string,
+  instead: Parameters<typeof storeWith>[2]
+): Env => storeWith(`person:${personId}`, method, instead);
+
+/** Fails, as a store out of reach does. */
+const outOfReach = async (): Promise<never> => {
+  await Promise.resolve();
+  throw new Error("Out of reach, for the test");
+};
+
 /** Core's env with `personId`'s own store failing every erasure. */
 const ownEraseFailing = (personId: string): Env =>
-  ownStoreWith(personId, "eraseSource", async () => {
-    await Promise.resolve();
-    throw new Error("Out of reach, for the test");
-  });
+  ownStoreWith(personId, "eraseSource", outOfReach);
+
+/** Core's env with the shared store failing every erasure. */
+const sharedEraseFailing = (): Env =>
+  storeWith("brain", "eraseSource", outOfReach);
+
+/** What the shared store says of `key`. */
+const sharedKeyState = async (key: string): Promise<string> =>
+  await brainOf(inJurisdiction(env, env.BRAIN_STORE)).keyState(key);
 
 /**
  * Core's env with `personId`'s own store holding each call of `method`
@@ -1420,6 +1438,111 @@ describe("a disconnected connection", setUpTime, () => {
       ],
       left: [],
       states: ["erased", "erased"],
+    });
+  });
+
+  it("holds a disconnect while the shared store can't record its erasure, and records it with the same count once it can", async () => {
+    const person = await signedInApi(idp, "user");
+    const marker = markerOf();
+    const connection = await ownGmail(person);
+    const key = await capturedRead(
+      person.userId,
+      connection.connectionId,
+      connection.mailbox,
+      `invoice-${marker}`,
+      `Invoice ${marker}`
+    );
+    const group = `capture:${connection.connectionId}`;
+    const failing = sharedEraseFailing();
+    const { core } = await openRpc(person.session, { coreEnv: failing });
+
+    await core.authenticate().connections.disconnect(connection.connectionId);
+    await drainAuditOutboxes(failing);
+    const stop = about(
+      await loggedEvents(),
+      "connection.disconnect",
+      connection.connectionId
+    );
+    const whileHeld = {
+      erased: about(
+        await loggedEvents(),
+        "brain.capture.erased",
+        connection.connectionId
+      ).length,
+      left: await inConnectOutbox(stop.map(({ id }) => id)),
+      own: await ownKeyStates(person.userId, [key]),
+      shared: await sharedKeyState(group),
+    };
+    // The shared store back: the next drain erases it again, with the
+    // count of the first.
+    const after = await eventsOf(
+      "brain.capture.erased",
+      connection.connectionId
+    );
+
+    expect({
+      whileHeld,
+      after: after.map(erasure),
+      left: await inConnectOutbox(stop.map(({ id }) => id)),
+      shared: await sharedKeyState(group),
+    }).toStrictEqual({
+      whileHeld: {
+        erased: 0,
+        left: stop.map(({ id }) => id),
+        own: ["erased"],
+        shared: "free",
+      },
+      after: [
+        {
+          actor: { type: "person", userId: person.userId },
+          detail: { sources: 1 },
+        },
+      ],
+      left: [],
+      shared: "erased",
+    });
+  });
+
+  it("holds a disconnect whose shared erasure was recorded but its reply lost, and records it once on a later drain", async () => {
+    const person = await signedInApi(idp, "user");
+    const connection = await ownGmail(person);
+    const marker = markerOf();
+    await capturedRead(
+      person.userId,
+      connection.connectionId,
+      connection.mailbox,
+      `memo-${marker}`,
+      `Memo ${marker}`
+    );
+    const lost = storeWith("brain", "eraseSource", async (real, args) => {
+      await real(...args);
+      throw new Error("The reply was lost, for the test");
+    });
+    const { core } = await openRpc(person.session, { coreEnv: lost });
+    await core.authenticate().connections.disconnect(connection.connectionId);
+    await drainAuditOutboxes(lost);
+    const stop = about(
+      await loggedEvents(),
+      "connection.disconnect",
+      connection.connectionId
+    );
+    const whileHeld = {
+      left: await inConnectOutbox(stop.map(({ id }) => id)),
+      shared: await sharedKeyState(`capture:${connection.connectionId}`),
+    };
+    const after = await eventsOf(
+      "brain.capture.erased",
+      connection.connectionId
+    );
+
+    expect({ whileHeld, after: after.map(erasure) }).toStrictEqual({
+      whileHeld: { left: stop.map(({ id }) => id), shared: "erased" },
+      after: [
+        {
+          actor: { type: "person", userId: person.userId },
+          detail: { sources: 1 },
+        },
+      ],
     });
   });
 
