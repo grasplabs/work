@@ -17,9 +17,10 @@ import { requireHeldBinding } from "./resource-bindings.ts";
 // confirming a held action (pending-actions.ts) or resolving a call of
 // unknown outcome (unknown-outcomes.ts). Either can send the call, so
 // each is signed only as the call itself would be allowed now: the same
-// App or agent, its approved App version, the resource binding it came
-// through still serving it, and its permission and context checked again
-// (`signedCall`). One path for both, so neither checks less.
+// App or agent, the App version whose code made it, the resource binding
+// it came through still serving it, and its permission and context
+// checked again (`signedCall`). One path for both, so neither checks
+// less.
 
 /** A call waiting for its person, as connect recorded where it came from. */
 export interface DecidedCall {
@@ -61,8 +62,8 @@ export const reauthorizedCapability = async (
   decision: CapabilityDecision
 ): Promise<string> => {
   const { subject, binding } = call;
-  // An App's call names the version whose code made it, or no version was
-  // approved for it: refused, as `authorize` would.
+  // An App's call names the version whose code made it: one naming none
+  // is refused, as `authorize` would refuse it.
   if (subject.type === "app" && call.appVersion === null) {
     throw permissionErrors.create("permission.denied", {
       action: call.action,

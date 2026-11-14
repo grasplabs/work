@@ -49,12 +49,13 @@ import {
 // draft of a JSON workflow its person builds (Build it made it, or they
 // did: the agent creates none, chats-rpc.ts `build`), each edit a
 // checkpoint of its turn's in the draft every builder shares (drafts.ts),
-// test-runs the draft, binds the workflow to an App by an alias, and asks
-// for the permissions it needs, each step exactly the function a
-// person's session calls
+// test-runs the draft and asks for the permissions it needs, each step
+// exactly the function a person's session calls
 // (workflow-resources-rpc.ts), as the chat's person, read again on every
-// call. Nothing here grants, approves, publishes or starts anything: only
-// a person publishes the draft (publish.ts).
+// call. Binding the workflow to an App is a change to the App's draft
+// (`bindWorkflow`, agent-builds.ts), which takes effect only when a
+// person publishes the App. Nothing here grants, approves, publishes or
+// starts anything: only a person publishes a draft (publish.ts).
 //
 // Threat model (failure modes and attacks first), and how each is closed:
 //
@@ -67,8 +68,8 @@ import {
 //   a person's own act in Grasp, as for an App.
 // - The agent doing more than its person may. Each call is the person's
 //   own function, with the person's role read now: only the workflow's
-//   builders read or edit its draft or test it; only someone who builds the App and has a role in the
-//   workflow binds it; only its builders ask for its permissions. A
+//   builders read or edit its draft or test it; only its builders ask for
+//   its permissions. A
 //   workflow the person has no role in is "unavailable", as one that
 //   doesn't exist. Grasp staff never act through a chat.
 // - The agent granting itself, or anything, authority. No call here
@@ -82,12 +83,11 @@ import {
 //   names, never for the agent (`subject` is set here, whatever the code
 //   passes).
 // - Code nobody reviewed going live. The agent publishes nothing: only a
-//   person makes a version live. An App's binding starts the workflow's
-//   live version (app-workflow-bindings.ts), so binding an alias whose App
-//   already holds `start` moves those starts to that workflow at once, as
-//   it does when the person binds it themselves; anything it calls outside
-//   itself still waits for an admin's approval. Allowed and audited, as
-//   for the person: the audit log names the agent acting for them.
+//   person makes a version live, a workflow's or an App's, and with an
+//   App's the workflows its draft binds (app-workflow-bindings.ts);
+//   anything a workflow calls outside itself still waits for an admin's
+//   approval. What the agent changes is audited as it acting for the
+//   person.
 // - A test run with an effect, or reading a secret. A test run calls
 //   nothing (each call answered from the fixtures the code gives) and runs
 //   with the start's parameters or the defaults, never the values set on
@@ -104,7 +104,7 @@ import {
 //   refused if anyone, the person in Grasp included, saved since
 //   (`draft.conflict`): nobody's edit is overwritten.
 // - Its record. Every call is audited as `agent.call`, and what it changes
-//   (a draft saved, an App binding, a permission requested) as the agent
+//   (a draft saved, a permission requested) as the agent
 //   acting for the person (`buildingAs` sets the actor); each edit is a
 //   checkpoint naming the chat, its turn and code step, so the chat shows
 //   what it worked on (drafts.ts, `chatWork`).
