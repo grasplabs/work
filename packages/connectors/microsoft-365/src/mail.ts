@@ -10,10 +10,9 @@ import {
   checkReadable,
   contentAs,
   fromBase64,
-  readAsSchema,
   toBase64,
 } from "@grasp-os/connector-kit/content";
-import { stampHeader } from "@grasp-os/connector-kit/manifest";
+import { readAsSchema, stampHeader } from "@grasp-os/connector-kit/manifest";
 import { jsonBody, segment } from "@grasp-os/connector-kit/provider";
 import { z } from "zod";
 

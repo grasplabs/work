@@ -20,6 +20,12 @@ import { endpointHost, signInSchema } from "./sign-in.ts";
  * Tool `_meta` key: the name of the one input property that selects the
  * resource (a mailbox, a calendar) a call of the tool acts on.
  */
+/**
+ * How a caller wants a file's content, in a tool that answers a file
+ * (`answersFile`): as text, or base64 for extraction.
+ */
+export const readAsSchema = z.enum(["text", "base64"]);
+
 export const resourceMetaKey = "grasp-os/resource";
 
 /** Result `_meta` key: the IDs of the resources the call read. */
