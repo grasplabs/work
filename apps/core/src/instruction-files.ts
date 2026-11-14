@@ -37,8 +37,9 @@ import type { InstructionFile, InstructionFileVersion } from "./brain-next.ts";
 // Which files, by where the agent works:
 //
 // - a chat of the person's own: the company's, the acting agent's, the
-//   App's when they work on one they build, and, only in a turn whose
-//   answer reaches them alone (`personal`), their own;
+//   App's when the App the chat worked on last is one they build now
+//   (never several Apps', nor a workflow's: none has a file), and, only
+//   in a turn whose answer reaches them alone (`personal`), their own;
 // - an agent in a shared channel: the company's and the agent's, never a
 //   person's, which others there would read through the agent;
 // - an AI step of a workflow: none, so a run does the same whoever's

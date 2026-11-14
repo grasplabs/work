@@ -982,6 +982,66 @@ describe("instruction files, edited from a page", setUpTime, () => {
     });
   });
 
+  it("records a save once at the time it was answered when its version's own time can't be read just then", async () => {
+    const person = await member("user");
+    const file: InstructionFile = { scope: "person", personId: person.userId };
+    // The Brain, which takes the save but can't list its versions.
+    const stores = inJurisdiction(env, env.BRAIN_STORE);
+    const unlisted = {
+      getByName: (name: string) =>
+        new Proxy(stores.getByName(name), {
+          get: (stub, method): unknown => {
+            if (method === "listVersions") {
+              return async () => {
+                await Promise.resolve();
+                throw new Error("The Brain is out of reach");
+              };
+            }
+            const found: unknown = Reflect.get(stub, method);
+            return found;
+          },
+        }),
+      jurisdiction: () => unlisted,
+    };
+    // SAFETY: core reaches the Brain only through `getByName` (and
+    // `jurisdiction`), each store's methods passed on but the listing.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    const brainDown: Env = { ...env, BRAIN_STORE: unlisted as never };
+    const from = Date.now();
+
+    let answered = "";
+    const events = await auditedDuring(async () => {
+      answered = await outcome(
+        saveInstructionFile(brainDown, person, {
+          file,
+          change: crypto.randomUUID(),
+          text: "Call me Sam.",
+          after: 0,
+        })
+      );
+      await drainAuditOutboxes(env);
+    });
+    const recorded = events.filter(
+      ({ action, target }) =>
+        action === "instructions.saved" &&
+        target?.id === `person:${person.userId}`
+    );
+
+    expect({
+      answered,
+      recorded: recorded.length,
+      atAnswer: recorded.every(
+        ({ at }) => Date.parse(at) >= from && Date.parse(at) <= Date.now()
+      ),
+      now: await instructionFileToEdit(env, person, file),
+    }).toStrictEqual({
+      answered: "ok",
+      recorded: 1,
+      atAnswer: true,
+      now: { version: 1, text: "Call me Sam." },
+    });
+  });
+
   it("refuses a save made from a version someone has saved over since, and keeps theirs", async () => {
     const [ada, ben] = await Promise.all([
       signedInApi(idp, "admin"),

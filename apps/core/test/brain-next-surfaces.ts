@@ -3269,7 +3269,10 @@ export const instructionProbes = {
         personal: false,
       })
     );
-    // An App they use but don't build: its file is for its builders.
+    // An App they use but don't build: its file is for its builders. What
+    // a chat whose work names that App last gives (workspace.ts
+    // `lastAppOf`, its id as the context's `appId`), however its work came
+    // to name it.
     if (usedApps !== undefined) {
       const like = "an App they use";
       asked.push(

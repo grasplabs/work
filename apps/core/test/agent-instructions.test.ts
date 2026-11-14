@@ -3,10 +3,13 @@ import type { InstructionFileRef } from "@grasp-os/shared/instruction-files";
 import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
 
+import { appKind } from "../src/apps.ts";
 import { installShippedSkills } from "../src/brain-skills.ts";
+import { keepMadeInChat } from "../src/drafts.ts";
 import { noteListedSkills } from "../src/knowledge/catalog.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
 import { shippedSkills } from "../src/shipped-skills.ts";
+import { workflowKind } from "../src/workflow-resources.ts";
 import { chatOf, codeResults, codeStep, model, says } from "./agent-chat.ts";
 import { allEvents } from "./audit-events.ts";
 import { actingFor } from "./contexts.ts";
@@ -77,6 +80,25 @@ const saveFile = async (
   file: InstructionFileRef,
   text: string
 ) => await saveInstructions(by.api, file, text);
+
+/**
+ * Keeps chat `chatId` of `personId`'s as having worked on `subject` last,
+ * as Build it does for what it made there (`keepMadeInChat`): the chat's
+ * work, as its turns read it (`chatWork`).
+ */
+const workedOn = async (
+  chatId: string,
+  personId: string,
+  subject: { kind: "app" | "workflow"; id: string }
+) => {
+  await keepMadeInChat(
+    env,
+    subject.kind === "app" ? appKind : workflowKind,
+    subject.id,
+    personId,
+    { chatId, turnId: null, callId: null }
+  );
+};
 
 describe("a chat's instructions", setUpTime, () => {
   // Each file starts with empty storage (builtins-first.ts): the
@@ -160,16 +182,16 @@ describe("a chat's instructions", setUpTime, () => {
     await saveFile(ada, { scope: "app", appId }, `App ${u}`);
     const askIn = async (personId: string, onApp: boolean) => {
       const { stub, provider } = await chatOf(personId, says("Hi."));
-      const id = crypto.randomUUID();
       const chat = await stub.createChat(
         "About the App",
         personId,
-        id,
-        undefined,
-        "web",
-        undefined,
-        onApp ? appId : undefined
+        crypto.randomUUID()
       );
+      if (onApp) {
+        // Ben's too, though no write of his could name it: the turn checks
+        // who builds it whatever the chat's work says.
+        await workedOn(chat.id, personId, { kind: "app", id: appId });
+      }
       await stub.ask(chat.id, { text: "Hi.", model });
       const system = systemOf(provider.requests.at(-1)?.body);
       return [`Ada ${u}`, `Ben ${u}`, `App ${u}`].filter((marker) =>
@@ -209,12 +231,9 @@ describe("a chat's instructions", setUpTime, () => {
     const chat = await stub.createChat(
       "About the App",
       ada.userId,
-      crypto.randomUUID(),
-      undefined,
-      "web",
-      undefined,
-      appId
+      crypto.randomUUID()
     );
+    await workedOn(chat.id, ada.userId, { kind: "app", id: appId });
     const held = () => {
       const system = systemOf(provider.requests.at(-1)?.body);
       return [rule, `App ${u}`, `Ada ${u}`].filter((marker) =>
@@ -230,6 +249,105 @@ describe("a chat's instructions", setUpTime, () => {
       // What woke it steers it: none of her own content.
       woken: [rule, `App ${u}`],
       asked: [rule, `App ${u}`, `Ada ${u}`],
+    });
+  });
+
+  it("give the file of the one App the chat worked on last, to someone who builds it at that turn, and none for a workflow worked on last", async () => {
+    const owner = await signedInApi(idp, "builder");
+    const ada = await signedInApi(idp, "builder");
+    const u = unique();
+    const apps = await Promise.all(
+      ["Desk", "Ledger"].map(async (name) => {
+        const { id } = await owner.api.apps.create({ name: `${name} ${u}` });
+        await owner.api.apps.members.add(id, {
+          type: "person",
+          id: ada.userId,
+          role: "builder",
+        });
+        await saveFile(owner, { scope: "app", appId: id }, `${name} ${u}`);
+        return id;
+      })
+    );
+    const [desk, ledger] = apps;
+    if (desk === undefined || ledger === undefined) {
+      throw new TypeError("Expected two Apps");
+    }
+    const workflow = await owner.api.workflowResources.create(`quotes-${u}`);
+    const { stub, provider } = await chatOf(
+      ada.userId,
+      ...Array.from({ length: 6 }, () => says("Noted."))
+    );
+    const chat = await stub.createChat("Work", ada.userId, crypto.randomUUID());
+    const held = async () => {
+      await stub.ask(chat.id, { text: "Hi.", model });
+      const system = systemOf(provider.requests.at(-1)?.body);
+      return [`Desk ${u}`, `Ledger ${u}`].filter((marker) =>
+        system.includes(marker)
+      );
+    };
+
+    const none = await held();
+    await workedOn(chat.id, ada.userId, { kind: "app", id: desk });
+    const onDesk = await held();
+    await workedOn(chat.id, ada.userId, { kind: "app", id: ledger });
+    const onLedger = await held();
+    await workedOn(chat.id, ada.userId, { kind: "workflow", id: workflow.id });
+    const onWorkflow = await held();
+    await workedOn(chat.id, ada.userId, { kind: "app", id: desk });
+    const backOnDesk = await held();
+    // No longer one of its builders: from the next turn, no file.
+    await owner.api.apps.members.remove(desk, {
+      type: "person",
+      id: ada.userId,
+    });
+    const leftDesk = await held();
+
+    expect({
+      none,
+      onDesk,
+      onLedger,
+      onWorkflow,
+      backOnDesk,
+      leftDesk,
+    }).toStrictEqual({
+      none: [],
+      onDesk: [`Desk ${u}`],
+      // Never two Apps' files: the one it worked on last.
+      onLedger: [`Ledger ${u}`],
+      onWorkflow: [],
+      backOnDesk: [`Desk ${u}`],
+      leftDesk: [],
+    });
+  });
+
+  it("loads no file of an App removed since the chat worked on it", async () => {
+    const owner = await signedInApi(idp, "builder");
+    const u = unique();
+    const { id: appId } = await owner.api.apps.create({ name: `Desk ${u}` });
+    await saveFile(owner, { scope: "app", appId }, `Desk ${u}`);
+    const { stub, provider } = await chatOf(
+      owner.userId,
+      says("Noted."),
+      says("Noted.")
+    );
+    const chat = await stub.createChat(
+      "Work",
+      owner.userId,
+      crypto.randomUUID()
+    );
+    await workedOn(chat.id, owner.userId, { kind: "app", id: appId });
+    const asked = async () => {
+      await stub.ask(chat.id, { text: "Hi.", model });
+      return systemOf(provider.requests.at(-1)?.body).includes(`Desk ${u}`);
+    };
+
+    const before = await asked();
+    await owner.api.apps.archive(appId);
+    await owner.api.apps.remove(appId);
+
+    expect({ before, removed: await asked() }).toStrictEqual({
+      before: true,
+      removed: false,
     });
   });
 

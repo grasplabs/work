@@ -196,6 +196,7 @@ import {
   dashboardWidgets,
   dashboards,
 } from "./db/workspace/schema.ts";
+import { chatWork } from "./drafts.ts";
 import { callObject, chatSession } from "./durable-objects.ts";
 import { dropHeldStarts } from "./held-starts.ts";
 import { readableSources, withheldSourceDetail } from "./history-access.ts";
@@ -325,11 +326,23 @@ const chatPlaceSchema = z.union([
 export type ChatPlace = z.infer<typeof chatPlaceSchema>;
 
 /**
+ * The App chat `chatId` worked on last, as its work names it (`chatWork`
+ * in drafts.ts: the latest of the subjects its agent wrote or its Build it
+ * made); null when that is a workflow, or it worked on nothing. Only its
+ * App's builders get its file, checked at each turn (instruction-files.ts).
+ */
+const lastAppOf = async (env: Env, chatId: string): Promise<string | null> => {
+  const [last] = await chatWork(env, chatId);
+  return last?.kind === "app" ? last.id : null;
+};
+
+/**
  * Where a chat's agent works, for its instruction files: never a person's
- * own file where others read the answer (a chat others share); in a chat
- * of theirs, the App it was made for, if any, and their own file only in
- * a turn whose answer reaches them alone (`personal`, `answersAlone`):
- * the one gate their own recall and skills take too.
+ * own file, nor an App's, where others read the answer (a chat others
+ * share); in a chat of theirs, the App it worked on last (`lastAppOf`),
+ * and their own file only in a turn whose answer reaches them alone
+ * (`personal`, `answersAlone`): the one gate their own recall and skills
+ * take too.
  */
 const instructionContextOf = (
   shared: boolean,
@@ -2454,7 +2467,7 @@ export class Workspace extends DurableObject<Env> {
     { shared, personal }: { shared: boolean; personal: boolean },
     agent: Awaited<ReturnType<typeof turnAgent>>
   ): Promise<TurnContext> {
-    const { via, appId } = this.#chat(work.chatId);
+    const { via } = this.#chat(work.chatId);
     // A Brain that can't give the files leaves the turn without them, as
     // it does without skills (below) and without the person's own file
     // when their store fails (brain-next.ts): missing guidance is no
@@ -2463,6 +2476,7 @@ export class Workspace extends DurableObject<Env> {
     // skills' call records it (`unavailable`, below).
     let instructions: Awaited<ReturnType<typeof instructionFilesFor>> = [];
     try {
+      const appId = shared ? null : await lastAppOf(this.env, work.chatId);
       instructions = await instructionFilesFor(
         this.env,
         authority,
