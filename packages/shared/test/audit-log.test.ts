@@ -76,6 +76,18 @@ describe("audit event types", () => {
     ).toStrictEqual(["decision", "decision", "action", "config", "config"]);
   });
 
+  it("files an App's or workflow's draft saved, restored or discarded, and a version published or rolled back to, as configuration", () => {
+    expect(
+      [
+        "draft.saved",
+        "draft.restored",
+        "draft.discarded",
+        "version.published",
+        "version.rolled_back",
+      ].map((action) => typeOf(action))
+    ).toStrictEqual(["config", "config", "config", "config", "config"]);
+  });
+
   it("files past template reads as reads, and template publications as configuration", () => {
     expect(
       ["resource.template.read", "resource.template.published"].map((action) =>

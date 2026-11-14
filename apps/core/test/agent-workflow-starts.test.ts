@@ -10,17 +10,15 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import type { AgentScope } from "../src/agent-scope.ts";
 import { memberOf } from "../src/auth/identity.ts";
 import { confirmHeldStart, sweepHeldStartInputs } from "../src/held-starts.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-  shareWorkflowResource,
-} from "../src/workflow-resources.ts";
+import { shareWorkflowResource } from "../src/workflow-members.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { openTestRun, personalChatsOf } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { greetingOf } from "./json-workflow-apps.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // A chat's agent asking to start an independent workflow
 // (agent-workflows.ts, `start`; held-starts.ts), from its threat model:
@@ -49,10 +47,7 @@ const workflowFor = async (userId: string, shared = true) => {
     throw new Error("Expected the builder to be a member");
   }
   const workflow = await createWorkflowResource(env, by, `greet-${unique()}`);
-  await publishWorkflowVersion(env, by, workflow.id, {
-    definition: greetingOf(),
-    basedOn: null,
-  });
+  await publishDefinition(env, by, workflow.id, greetingOf());
   if (shared) {
     await shareWorkflowResource(env, by, workflow.id, {
       type: "person",
@@ -254,6 +249,53 @@ describe("a chat's agent asking to start a workflow", setUpTime, () => {
           chat: chatId,
         },
       ],
+    });
+  });
+
+  it("starts the version live as its person confirms it, one published since it was held too", async () => {
+    const person = await signedInApi(idp, "user");
+    const { workflow, builder } = await workflowFor(person.userId);
+    const chats = await personalChatsOf(person.userId);
+    await grantStart(builder, chats.agent.agentId, workflow.id);
+    const { workflows } = await chatOf(chats, person);
+    const held = await workflows.start(workflow.id, { who: "Ada" }, "greet");
+    const by = await memberOf(env.DB, builder.userId);
+    if (by === undefined) {
+      throw new Error("Expected the builder to be a member");
+    }
+
+    await publishDefinition(
+      env,
+      by,
+      workflow.id,
+      greetingOf(undefined, "Version 2")
+    );
+    const [listed] = await person.api.heldStarts.list();
+    const confirmed = await person.api.heldStarts.confirm(
+      listed?.id ?? "",
+      listed?.argsHash ?? ""
+    );
+    const run = await env.DB.prepare(
+      "SELECT version FROM workflow_resource_runs WHERE id = ?"
+    )
+      .bind(confirmed.run)
+      .first<{ version: number }>();
+    const standing = await workflows.start(
+      workflow.id,
+      { who: "Ada" },
+      "greet"
+    );
+
+    expect({
+      held: held.status,
+      version: run?.version,
+      ended: await endOf(confirmed.run ?? ""),
+      standing: standing.status,
+    }).toStrictEqual({
+      held: "waiting",
+      version: 2,
+      ended: { status: "completed", code: null },
+      standing: "started",
     });
   });
 

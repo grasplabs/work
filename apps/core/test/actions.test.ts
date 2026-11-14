@@ -30,9 +30,8 @@ import { describe, expect, it } from "vite-plus/test";
 import { keepsReceipt } from "../src/action-invocation.ts";
 import { functionRoles } from "../src/app-access.ts";
 import { invocationFor } from "../src/app-functions.ts";
-import { publishVersion } from "../src/app-publish.ts";
 import { loadRelease } from "../src/app-releases.ts";
-import { createApp } from "../src/apps.ts";
+import { appKind, createApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { callMaxNested } from "../src/call-limits.ts";
 import { openStore } from "../src/data-stores.ts";
@@ -52,6 +51,7 @@ import type {
   Runner,
   UseRefusal,
 } from "../src/function-host.ts";
+import { rollback } from "../src/publish.ts";
 import { hostedRelease } from "../src/release-runner.ts";
 import { testApp } from "./app-definitions.ts";
 import { storeOfNewApp } from "./app-stores.ts";
@@ -2745,7 +2745,7 @@ export const both = action({
         }
       )
     );
-    await publishVersion(env, fixture.owner, fixture.app, 1);
+    await rollback(env, appKind, fixture.owner, fixture.app, 1);
     const release = await loadRelease(env, fixture.app, 1);
     const appId = appIdSchema.parse(fixture.app);
     // A member of the App in no team, who isn't one of its builders.

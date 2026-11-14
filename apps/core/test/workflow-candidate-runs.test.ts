@@ -18,13 +18,12 @@ import { z } from "zod";
 
 import { sweepReleases } from "../src/release-retention.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
-import { editWorkflowDraft, workflowDraft } from "../src/workflow-drafts.ts";
+import { editWorkflowDraft, workflowDraft } from "../src/workflow-editor.ts";
+import { shareWorkflowResource } from "../src/workflow-members.ts";
 import { setWorkflowParams } from "../src/workflow-params.ts";
 import {
   createWorkflowResource,
   deleteWorkflowResource,
-  publishWorkflowVersion,
-  shareWorkflowResource,
 } from "../src/workflow-resources.ts";
 import { workflowStateOf, writeWorkflowState } from "../src/workflow-state.ts";
 import {
@@ -39,12 +38,13 @@ import { withCpuKills } from "./cpu-kills.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
 import { whileEngineRefuses } from "./runs.ts";
 import { outcome, unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
-// Test runs of a workflow's draft checkpoint (workflows/candidate-runs.ts),
+// Test runs of a workflow's draft (workflows/candidate-runs.ts),
 // from their threat model: a test run makes no call of any kind, a call
 // with no answer fails it, its parameters are never the values stored on
-// the workflow (a sensitive one above all), it runs only the checkpoint it
-// names, verified, starts nothing else, and only builders start or read
+// the workflow (a sensitive one above all), it runs only the draft at the
+// revision it names, once it passes, verified, starts nothing else, and only builders start or read
 // one.
 
 const identityOf = (userId: string, role: Role, staff = false): Identity => ({
@@ -115,14 +115,11 @@ const draftedSource = async (
   const workflow = await createWorkflowResource(env, by, `test-${unique()}`);
   const source = sourceOf(workflow.name);
   if (publish) {
-    await publishWorkflowVersion(env, by, workflow.id, {
-      definition: source,
-      basedOn: null,
-    });
+    await publishDefinition(env, by, workflow.id, source);
   }
   const { revision: base } = await workflowDraft(env, by, workflow.id);
   const saved = await editWorkflowDraft(env, by, workflow.id, {
-    expectedRevision: base,
+    revision: base,
     source,
   });
   expect(saved.problems).toStrictEqual([]);
@@ -479,11 +476,11 @@ describe("test runs of a workflow's draft", () => {
         workflow.id
       );
     // A draft whose step would start another run names a step no workflow
-    // has: it never becomes a checkpoint.
+    // has: it doesn't pass, so it never runs.
     const starting = await createWorkflowResource(env, ada, `test-${unique()}`);
     const { revision: base } = await workflowDraft(env, ada, starting.id);
     const saved = await editWorkflowDraft(env, ada, starting.id, {
-      expectedRevision: base,
+      revision: base,
       source: definitionOf({
         steps: [
           {
@@ -501,7 +498,7 @@ describe("test runs of a workflow's draft", () => {
       receipts: await count("workflow_start_receipts", "workflow_resource_id"),
       // Admitted in its workflow's test runs' own queue, never its runs'.
       admitted: admitted.map(({ resource }) => resource),
-      startingChecked: saved.checkpoint?.revision === saved.revision,
+      startingChecked: saved.problems.length === 0,
       startingRun: await outcome(
         startCandidateRun(env, ada, starting.id, {
           revision: saved.revision,
@@ -515,20 +512,20 @@ describe("test runs of a workflow's draft", () => {
       receipts: 0,
       admitted: [`candidate:${workflow.id}`],
       startingChecked: false,
-      startingRun: "workflow.draft_unchecked",
+      startingRun: "workflow.definition_invalid",
     });
   });
 
-  it("runs only the latest checked revision, as it named it, and refuses a build changed since it started", async () => {
+  it("runs only the draft's revision now, as it named it, once it passes, and refuses a build changed since it started", async () => {
     const ada = await person("builder");
     const { workflow, revision } = await drafted(ada, {
       steps: [hold("1 second")],
     });
-    // A later revision that doesn't pass: the checkpoint stays, but is no
-    // longer the latest, so neither revision runs.
+    // A later revision that doesn't pass: the earlier one is no longer the
+    // draft's, and the later doesn't pass, so neither runs.
     const draft = await workflowDraft(env, ada, workflow.id);
     await editWorkflowDraft(env, ada, workflow.id, {
-      expectedRevision: draft.revision,
+      revision: draft.revision,
       source: "{",
     });
     const stale = await outcome(
@@ -549,7 +546,7 @@ describe("test runs of a workflow's draft", () => {
     // changed under it, which its next activation refuses.
     const passing = await workflowDraft(env, ada, workflow.id);
     const saved = await editWorkflowDraft(env, ada, workflow.id, {
-      expectedRevision: passing.revision,
+      revision: passing.revision,
       source: draft.source,
     });
     const { runId } = await startCandidateRun(env, ada, workflow.id, {
@@ -596,8 +593,8 @@ describe("test runs of a workflow's draft", () => {
       ),
       changed: endOf(changed),
     }).toStrictEqual({
-      stale: "workflow.draft_conflict",
-      unchecked: "workflow.draft_unchecked",
+      stale: "draft.conflict",
+      unchecked: "workflow.definition_invalid",
       wrongInput: "workflow.start_invalid",
       unknownParam: "workflow.params_invalid",
       inheritedParam: "workflow.params_invalid",

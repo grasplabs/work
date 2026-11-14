@@ -19,7 +19,7 @@ import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
 // What the organization's own admins do to an App's sealed releases, on
-// its History (`apps.versions.releases`, `revoke`, `placeHold`,
+// its History (`apps.releases.list`, `revoke`, `placeHold`,
 // `releaseHold`, which core refuses anyone else, Grasp staff included):
 // revoke one, so it runs no more, calls already running included; or
 // place a legal hold that keeps it, however old, until it is lifted. Each
@@ -205,15 +205,15 @@ export const ReleaseDialog = ({
     const { version } = action;
     const changed = await run(async (session) => {
       if (action.kind === "revoke") {
-        return await session.apps.versions.revoke(app, version, { reason });
+        return await session.apps.releases.revoke(app, version, { reason });
       }
       if (action.kind === "hold") {
-        return await session.apps.versions.placeHold(app, version, {
+        return await session.apps.releases.placeHold(app, version, {
           hold: hold.trim(),
           reason,
         });
       }
-      return await session.apps.versions.releaseHold(app, version, action.hold);
+      return await session.apps.releases.releaseHold(app, version, action.hold);
     });
     if (changed !== undefined) {
       onChanged(changed);

@@ -95,7 +95,7 @@ const RunningStatus = ({ state }: { state: PageState }) => {
 interface FrameSource {
   app: string;
   preview?: true;
-  /** With `preview`: the draft's undo point to preview, read-only. */
+  /** With `preview`: the draft's checkpoint to preview, read-only. */
   point?: number;
   /** With `preview`: the App's version to preview, read-only. */
   version?: number;
@@ -720,7 +720,7 @@ export const PageFrame = ({
 /**
  * The pages of the draft of `app`, running in a sandboxed frame as a
  * preview: its server code changes nothing and reads no real data, and
- * what goes wrong goes to the agent. With `point`, of that undo point of
+ * what goes wrong goes to the agent. With `point`, of that checkpoint of
  * the draft, or with `version`, of that version of the App, read-only.
  * `onEnded` is told once it failed (`FrameProps`). Without either, `revision`, the draft's
  * newest, comes into the open frame as it changes: each write shows

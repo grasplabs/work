@@ -676,7 +676,7 @@ const RecordNotes = ({
 /**
  * Where a table's records are read: the live App's, under the version
  * whose tables the page read; or the test data of the preview of the
- * App's draft (`apps.drafts.testRecords`), which nothing records,
+ * App's draft (`apps.preview.records`), which nothing records,
  * exports or imports.
  */
 export type RecordSource = { kind: "live"; version: number } | { kind: "test" };
@@ -710,7 +710,7 @@ const useRecordPages = (
     const page = await run(
       async (session) =>
         await (source.kind === "test"
-          ? session.apps.drafts.testRecords(app, table.name, from)
+          ? session.apps.preview.records(app, table.name, from)
           : unlessStale(
               async () =>
                 await session.apps.data.records(

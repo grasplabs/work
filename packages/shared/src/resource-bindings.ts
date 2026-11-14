@@ -245,7 +245,7 @@ export interface ResourceBindingsApi {
    * What is approved is the declaration as the reviewed version seals it,
    * and it carries over to later versions that declare it identically,
    * approved or not: a binding grants reads as a permission to read does.
-   * A connector's side effects still need a version an admin approved. For
+   * For
    * a model, the declaration's `maxOutputTokens` is a hard ceiling on each
    * request of the App as a whole: an answer that must fit a structured
    * output may be asked for twice, and then each attempt gets half.

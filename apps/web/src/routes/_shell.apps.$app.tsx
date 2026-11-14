@@ -74,7 +74,7 @@ const viewOf = (
     ? value
     : undefined;
 
-/** A whole number from an address: an undo point's or a version's. */
+/** A whole number from an address: a checkpoint's or a version's. */
 const whole = (value: unknown): number | undefined =>
   typeof value === "number" && Number.isSafeInteger(value) && value > 0
     ? value
@@ -104,7 +104,7 @@ const validateSearch = (
   chat: typeof search.chat === "string" ? search.chat : undefined,
   // The live App rather than the draft, in Preview, Code and Data.
   env: search.env === "live" ? "live" : undefined,
-  // An undo point of the draft, or a version, the preview shows read-only
+  // A checkpoint of the draft, or a version, the preview shows read-only
   // (History's Preview).
   point: whole(search.point),
   version: whole(search.version),

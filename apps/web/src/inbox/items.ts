@@ -5,12 +5,12 @@ import type {
   AppMessageNotification,
   GapAskedNotification,
   TriggerStoppedNotification,
+  TriggerWorkflowChangedNotification,
 } from "@grasp-os/shared/notifications";
 import type { Permission } from "@grasp-os/shared/permissions";
 import type {
   BindingApprovalItem,
   SkillShareItem,
-  WorkflowGoLiveItem,
 } from "@grasp-os/shared/waiting";
 import { plural, t } from "@lingui/core/macro";
 
@@ -30,14 +30,12 @@ import type { Loaded } from "../load-from-core.tsx";
 // lists today fills those it has (a connection to sign in to again) and
 // kinds of its own: a change an agent wants to make, a change sent for
 // the person whose answer was lost, a permission an App
-// or agent asked for, a version of a
-// workflow asked to go live. Core keeps nothing the inbox adds (put away until a date, given
+// or agent asked for, a workflow's bindings to approve. Core keeps nothing the inbox adds (put away until a date, given
 // to someone, dismissed with why), so none of that is here. Pure.
 
 export type InboxKind =
   | "checkDrawing"
   | "checkProposal"
-  | "goLive"
   | "approveChange"
   | "confirmResult"
   | "conflict"
@@ -50,6 +48,7 @@ export type InboxKind =
   | "unknownOutcome"
   | "permissionRequest"
   | "stoppedSchedule"
+  | "workflowChanged"
   | "packageNotice"
   | "stoppedEvents"
   | "appMessage"
@@ -81,12 +80,15 @@ export type InboxSource =
   | { type: "heldStart"; start: HeldStart }
   | { type: "outcome"; outcome: UnknownOutcome }
   | { type: "request"; request: Permission; pending: PendingRequests }
-  | { type: "workflowGoLive"; item: WorkflowGoLiveItem }
   | { type: "bindings"; item: BindingApprovalItem }
   | { type: "skillShare"; item: SkillShareItem }
   | { type: "reconnect"; integration: string }
   | { type: "asked"; notification: GapAskedNotification }
   | { type: "stopped"; notification: TriggerStoppedNotification }
+  | {
+      type: "workflowChanged";
+      notification: TriggerWorkflowChangedNotification;
+    }
   | { type: "packageNotice"; notification: PackageNotification }
   | { type: "stoppedEvents"; notification: EventsStoppedNotification }
   | { type: "appMessage"; notification: AppMessageNotification }
@@ -122,7 +124,6 @@ export type Group = "all" | "workflows" | "brain" | "apps";
 export const groupOf: Record<InboxKind, Exclude<Group, "all">> = {
   checkDrawing: "workflows",
   checkProposal: "workflows",
-  goLive: "workflows",
   approveChange: "workflows",
   confirmResult: "workflows",
   conflict: "brain",
@@ -135,6 +136,7 @@ export const groupOf: Record<InboxKind, Exclude<Group, "all">> = {
   unknownOutcome: "apps",
   permissionRequest: "apps",
   stoppedSchedule: "workflows",
+  workflowChanged: "workflows",
   packageNotice: "apps",
   stoppedEvents: "workflows",
   appMessage: "apps",
@@ -318,46 +320,6 @@ const requestItems = (pending: PendingRequests): InboxItem[] =>
   });
 
 /**
- * A version of a workflow a builder asked to go live, which the person
- * approves or sends back here: as its owner, or as an admin.
- */
-const workflowGoLiveItems = (
-  goLives: readonly WorkflowGoLiveItem[],
-  me: string
-): InboxItem[] =>
-  goLives.map((item) => {
-    const { workflow, version } = item;
-    const { name } = workflow;
-    return {
-      id: item.id,
-      kind: "goLive",
-      title: t`Let version ${version} of ${name} go live?`,
-      context: name,
-      body: [
-        t`A builder asked for this version of ${name} to go live: approved, it is the version the company runs. Send it back to keep the version that runs now.`,
-        // Their own request, as nobody else may decide it (GRA-1227).
-        ...(item.selfApproval
-          ? [
-              t`You asked for this yourself, and nobody else may approve it, so you decide it. It is recorded as self-approved.`,
-            ]
-          : []),
-      ],
-      facts: [
-        { label: t`Version`, value: String(version) },
-        ...(item.selfApproval
-          ? [{ label: t`Approval`, value: t`Self-approved` }]
-          : []),
-      ],
-      about: { kind: "independentWorkflow", workflow: workflow.id },
-      // As the workflow's owner, or else as an admin.
-      ...(item.waitsOn.type === "person" ? { forWhom: { person: me } } : {}),
-      date: item.at ?? "",
-      urgent: false,
-      source: { type: "workflowGoLive", item },
-    };
-  });
-
-/**
  * A version of a workflow whose bindings no admin approved, so its starts
  * are refused: approved here, binding by binding, by an admin.
  */
@@ -366,7 +328,7 @@ const bindingItems = (
   readAt: string
 ): InboxItem[] =>
   pending.map((item) => {
-    const { workflow, version, live, bindings } = item.pending;
+    const { workflow, version, bindings } = item.pending;
     const { name } = workflow;
     const count = bindings.length;
     return {
@@ -375,9 +337,7 @@ const bindingItems = (
       title: t`Approve what ${name} reaches`,
       context: name,
       body: [
-        live
-          ? t`Version ${version} of ${name} is live, but nothing starts it until an admin approves what it reaches: each model, connection, store or collection it calls.`
-          : t`Version ${version} of ${name} is asked to go live. Once it is, nothing starts it until an admin approves what it reaches: each model, connection, store or collection it calls.`,
+        t`Version ${version} of ${name} is live, but nothing starts it until an admin approves what it reaches: each model, connection, store or collection it calls.`,
       ],
       facts: [
         { label: t`Version`, value: String(version) },
@@ -617,6 +577,39 @@ const stoppedItems = (
     ];
   });
 
+/** A workflow the person's triggers start, of which someone else made another version live: their triggers start it, acting as them. */
+const workflowChangedItems = (
+  notifications: NotificationsPage,
+  me: string
+): InboxItem[] =>
+  notifications.page.notifications.flatMap((notification): InboxItem[] => {
+    if (notification.type !== "trigger_workflow_changed") {
+      return [];
+    }
+    const { workflowName, at } = notification;
+    return [
+      {
+        id: `workflowChanged:${notification.id}`,
+        kind: "workflowChanged",
+        title: t`Your triggers start a new version of ${workflowName}`,
+        context: workflowName,
+        body: [
+          t`Someone else made another version of this workflow live. Your triggers start it from now on, acting as you. Its History shows who changed what; turn a trigger off in its Triggers if you don't want that.`,
+        ],
+        facts: [{ label: t`Changed`, value: formatDateTime(at) }],
+        about: {
+          kind: "independentWorkflow",
+          workflow: notification.workflow,
+          section: "triggers",
+        },
+        forWhom: { person: me },
+        date: at,
+        urgent: false,
+        source: { type: "workflowChanged", notification },
+      },
+    ];
+  });
+
 /** What an App the person can open told them, opened on the App's page. */
 const appMessageItems = (
   notifications: NotificationsPage,
@@ -703,7 +696,6 @@ export const inboxItems = (
   const notifications = readyOf(waiting.notifications);
   const decisions = readyOf(waiting.decisions) ?? [];
   const heldStarts = readyOf(waiting.heldStarts) ?? [];
-  const workflowGoLives = readyOf(waiting.workflowGoLives) ?? [];
   const bindings = decidesRequests(viewer)
     ? (readyOf(waiting.bindings) ?? [])
     : [];
@@ -746,11 +738,13 @@ export const inboxItems = (
     ...heldStartItems(heldStarts, me),
     ...outcomeItems(outcomes, me),
     ...(requests === undefined ? [] : requestItems(requests)),
-    ...workflowGoLiveItems(workflowGoLives, me),
     ...bindingItems(bindings, readAt),
     ...skillShareItems(skillShares),
     ...(notifications === undefined ? [] : askedItems(notifications, me)),
     ...(notifications === undefined ? [] : stoppedItems(notifications, me)),
+    ...(notifications === undefined
+      ? []
+      : workflowChangedItems(notifications, me)),
     ...(notifications === undefined
       ? []
       : packageNoticeItems(notifications, me)),
@@ -771,7 +765,6 @@ export const unread = (waiting: Waiting): Loaded<unknown>[] => {
     waiting.notifications,
     waiting.reconnect,
     waiting.decisions,
-    waiting.workflowGoLives,
     waiting.heldStarts,
     waiting.bindings,
     waiting.skillShares,

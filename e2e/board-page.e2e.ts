@@ -85,7 +85,7 @@ test("an admin takes a snapshot on the board page, writes its narrative and prin
       const created = await api.apps.blueprints.create(builtin, { name });
       // Live, for the people it is shared with (until then, its
       // builders' alone).
-      await api.apps.versions.publish(created.app.id, 1);
+      await api.versions.rollback({ kind: "app", id: created.app.id }, 1);
       return created.app.id;
     };
     // Its statistics stay unbound: nothing here runs.

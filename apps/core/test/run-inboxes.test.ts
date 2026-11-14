@@ -22,10 +22,7 @@ import {
   ensureReleaseContract,
   publishCatalogContract,
 } from "../src/workflow-catalog.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { RunHost } from "../src/workflows/host.ts";
 import type { HostHooks } from "../src/workflows/host.ts";
@@ -51,6 +48,7 @@ import { admittedFreely, liveStatus, runObject } from "./runs.ts";
 import { moduleOf } from "./sealed-run-harness.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // A run's inboxes (run-inboxes.ts), from their threat model: a reply
 // address of the run's own for each event binding whose pinned contract
@@ -155,8 +153,11 @@ const inboxWorkflow = async () => {
     admin,
     `inboxes-${unique()}`
   );
-  await publishWorkflowVersion(env, admin, workflow.id, {
-    definition: JSON.stringify({
+  await publishDefinition(
+    env,
+    admin,
+    workflow.id,
+    JSON.stringify({
       $schema: workflowSchemaUrl,
       args: objectSchema({}),
       returns: objectSchema({}),
@@ -172,9 +173,8 @@ const inboxWorkflow = async () => {
         listen("awaitReply", emailReplyType, "replies"),
         listen("awaitJob", completed, "jobs"),
       ],
-    }),
-    basedOn: null,
-  });
+    })
+  );
   const pending = await workflowPendingBindings(env, admin, workflow.id);
   for (const alias of ["replies", "jobs"]) {
     // oxlint-disable-next-line no-await-in-loop -- two approvals, in turn
@@ -195,7 +195,7 @@ const waitingRun = async ({ admin, workflow }: InboxWorkflow) => {
     env,
     { type: "person", person: admin },
     workflow.id,
-    { version: 1, args: {}, key: unique() }
+    { expected: 1, args: {}, key: unique() }
   );
   if (runId === null) {
     throw new Error("The start admitted no run");
@@ -469,7 +469,6 @@ describe("a run's inboxes", { timeout: 120_000 }, () => {
       createTriggerResource(env, admin, {
         kind: "email",
         workflowId: workflow.id,
-        version: 1,
         config: { input: {}, address: `reply-${"a1".repeat(16)}` },
       })
     ).rejects.toMatchObject({ code: "workflow.email_taken" });

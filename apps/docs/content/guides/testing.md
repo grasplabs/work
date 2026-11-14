@@ -26,7 +26,9 @@ export default appTest(schema, {
     expect(open).toMatchObject([{ _id: id, title: "Call the bank" }]);
 
     await ada.mutation(api.tasks.complete, { id });
-    expect(await ada.query(api.tasks.list, { done: false })).toEqual([]);
+    await expect(
+      ada.query(api.tasks.list, { done: false })
+    ).resolves.toStrictEqual([]);
   },
   "a task needs a title": async (t) => {
     const ada = t.withIdentity({ name: "Ada" });
@@ -58,7 +60,9 @@ export default appTest(schema, {
       await ctx.db.insert("tasks", { title: "Filed", done: true });
     });
     const ada = t.withIdentity({ name: "Ada" });
-    expect(await ada.query(api.tasks.list, { done: false })).toEqual([]);
+    await expect(
+      ada.query(api.tasks.list, { done: false })
+    ).resolves.toStrictEqual([]);
 
     const all = await t.run(
       async (ctx) => await ctx.db.query("tasks").take(10)
@@ -72,7 +76,7 @@ What `t.run` inserts belongs to the test itself, nobody in the App; `ada.run(...
 
 ## Workflow runs
 
-An identity starts the workflows the App binds as a Page does, with `start`: a real run of the bound version, on Grasp's workflow engine, with nothing of your organization's around it. What it would ask outside, the test answers in the start's options:
+An identity starts the workflows the App binds as a Page does, with `start`: a real run of the bound workflow's live version, on Grasp's workflow engine, with nothing of your organization's around it. What it would ask outside, the test answers in the start's options:
 
 - `models`: what each of its model bindings answers, by alias. No model is ever asked, and a model call the test gives no answer fails the run (`workflow.test_unfixtured`).
 - `params`: its parameter values. Any other takes its declared default, never the value your organization set.
@@ -106,12 +110,12 @@ export default appTest(schema, {
     // Past its day's wait before the reminder, then to its end.
     await t.runs.untilWaiting(run);
     await t.clock.advance(24 * 60 * 60 * 1000);
-    expect(await t.runs.untilTerminal(run)).toEqual({
+    await expect(t.runs.untilTerminal(run)).resolves.toStrictEqual({
       status: "completed",
       result: { approved: true },
     });
-    expect(await t.effects.completedCount(run, "assess")).toBe(1);
-    expect(await t.effects.modelRequestCount(run, "assess")).toBe(1);
+    await expect(t.effects.completedCount(run, "assess")).resolves.toBe(1);
+    await expect(t.effects.modelRequestCount(run, "assess")).resolves.toBe(1);
   },
   "a review waits a day before it reminds": async (t) => {
     const ada = t.withIdentity({ name: "Ada" });
@@ -125,7 +129,7 @@ export default appTest(schema, {
     );
     await t.runs.untilWaiting(run);
     await t.clock.advance(24 * 60 * 60 * 1000);
-    expect(await t.runs.untilTerminal(run)).toMatchObject({
+    await expect(t.runs.untilTerminal(run)).resolves.toMatchObject({
       status: "completed",
     });
   },

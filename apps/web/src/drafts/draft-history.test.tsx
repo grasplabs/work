@@ -1,9 +1,6 @@
 // @vitest-environment happy-dom
-import type {
-  AppDraft,
-  AppDraftHistoryPoint,
-} from "@grasp-os/shared/app-drafts";
 import type { AppVersion, FileDiff, ViewedApp } from "@grasp-os/shared/apps";
+import type { Draft, DraftCheckpoint } from "@grasp-os/shared/drafts";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { i18n } from "@lingui/core";
@@ -21,20 +18,23 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { AppHistory } from "./app-history.tsx";
-import { RemoveApp } from "./app-remove.tsx";
+import { RemoveApp } from "../apps/app-remove.tsx";
+import { buildsApp } from "../apps/app-role.ts";
+import { DraftHistory } from "./draft-history.tsx";
 
-// An App's History and deleting an archived App, against core's Apps API
-// as the page reaches it over RPC (the boundary from the web app), faked:
-// it keeps which version is live, the App's draft and its undo points,
-// and whether the App is still there, and answers the page's next read
-// with that.
+// An App's History and deleting an archived App, against core's Apps,
+// drafts and versions APIs as the page reaches them over RPC (the
+// boundary from the web app), faked: they keep which version is live,
+// the App's draft and its checkpoints, and whether the App is still
+// there, and answer the page's next read with that. A workflow's
+// History is the same component, on its own subject.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
 const appId = appIdSchema.parse("app-1");
 
 const versionOf = (number: number): AppVersion => ({
+  kind: "app",
   app: appId,
   version: number,
   label: `26.10.${number}`,
@@ -42,15 +42,14 @@ const versionOf = (number: number): AppVersion => ({
   tree: `tree-${number}`,
   files: 3,
   author: "user-owner",
-  message: `Change ${number}`,
   createdAt: `2026-10-0${number}T09:00:00.000Z`,
 });
 
-/** An undo point of the draft over version 2. */
+/** A checkpoint of the draft over version 2. */
 const point = (
   number: number,
-  of: Partial<AppDraftHistoryPoint>
-): AppDraftHistoryPoint => ({
+  of: Partial<DraftCheckpoint>
+): DraftCheckpoint => ({
   number,
   revision: number + 2,
   base: 2,
@@ -66,11 +65,11 @@ const point = (
 });
 
 /**
- * The draft's undo points, newest first: Grasp's in Ann's chat, Ben's own
+ * The draft's checkpoints, newest first: Grasp's in Ann's chat, Ben's own
  * edit, the one publishing version 2 left (changing nothing), and one of
  * work published before.
  */
-const points: AppDraftHistoryPoint[] = [
+const points: DraftCheckpoint[] = [
   point(4, {
     chatId: "chat-ann",
     touched: ["src/routes/index.tsx", "server/notes.ts"],
@@ -105,7 +104,7 @@ const fakeApps = ({
   current = 2,
   changed = [],
   refusal,
-  versions = [versionOf(3), versionOf(2), versionOf(1)],
+  versions: listed = [versionOf(3), versionOf(2), versionOf(1)],
   history = points,
 }: {
   role: ViewedApp["role"];
@@ -116,8 +115,8 @@ const fakeApps = ({
   refusal?: Error;
   /** The App's versions, newest first. */
   versions?: AppVersion[];
-  /** The draft's undo points, newest first. */
-  history?: AppDraftHistoryPoint[];
+  /** The draft's checkpoints, newest first. */
+  history?: DraftCheckpoint[];
 }) => {
   const asked: unknown[][] = [];
   let app: ViewedApp = {
@@ -136,8 +135,8 @@ const fakeApps = ({
     role,
     link: null,
   };
-  let draft: AppDraft = {
-    app: appId,
+  let draft: Draft = {
+    subject: { kind: "app", id: appId },
     base: current,
     changed,
     deleted: [],
@@ -157,66 +156,79 @@ const fakeApps = ({
       asked.push(["remove", id]);
       removed = true;
     },
-    versions: {
-      list: async (): Promise<AppVersion[]> => {
-        await Promise.resolve();
-        return versions;
-      },
-      diff: async (
-        id: string,
-        from: number,
-        to: number
-      ): Promise<FileDiff[]> => {
-        await Promise.resolve();
-        asked.push(["diff", id, from, to]);
-        return [{ path: "src/routes/index.tsx", change: "added", after: "" }];
-      },
+    releases: {
       // No version sealed: nothing revoked or held.
-      releases: async (): Promise<[]> => {
+      list: async (): Promise<[]> => {
         await Promise.resolve();
         return [];
       },
-      publish: async (
-        id: string,
-        to: number,
-        revision?: number,
-        expected?: number | null
-      ): Promise<ViewedApp> => {
-        await Promise.resolve();
-        asked.push(["publish", id, to, revision, expected]);
-        if (refusal !== undefined) {
-          throw refusal;
-        }
-        app = { ...app, currentVersion: to, liveLabel: `26.10.${to}` };
-        return app;
-      },
     },
-    drafts: {
-      get: async (): Promise<AppDraft> => {
-        await Promise.resolve();
-        return draft;
-      },
-      // Followed, and never written meanwhile.
-      watch: async () =>
-        await Promise.resolve({
-          release: async () => {
-            await Promise.resolve();
-          },
-          [Symbol.dispose]: () => {},
-        }),
-      points: async (): Promise<AppDraftHistoryPoint[]> =>
-        await Promise.resolve(history),
-      restorePoint: async (id: string, number: number, revision: number) => {
-        await Promise.resolve();
-        asked.push(["restore", id, number, revision]);
-        draft = { ...draft, revision: revision + 1 };
-        return points[0];
-      },
-      discard: async (id: string, revision: number) => {
-        await Promise.resolve();
-        asked.push(["discard", id, revision]);
-        draft = { ...draft, changed: [], revision: revision + 1 };
-      },
+  };
+  const versions = {
+    list: async (
+      _subject: { kind: string; id: string },
+      _before?: number
+    ): Promise<AppVersion[]> => {
+      await Promise.resolve();
+      return listed;
+    },
+    diff: async (
+      { id }: { kind: string; id: string },
+      from: number,
+      to: number
+    ): Promise<FileDiff[]> => {
+      await Promise.resolve();
+      asked.push(["diff", id, from, to]);
+      return [{ path: "src/routes/index.tsx", change: "added", after: "" }];
+    },
+    rollback: async (
+      { id }: { kind: string; id: string },
+      to: number,
+      revision?: number,
+      expected?: number | null
+    ) => {
+      await Promise.resolve();
+      asked.push(["rollback", id, to, revision, expected]);
+      if (refusal !== undefined) {
+        throw refusal;
+      }
+      app = { ...app, currentVersion: to, liveLabel: `26.10.${to}` };
+      return {
+        subject: { kind: "app", id },
+        version: to,
+        label: `26.10.${to}`,
+      };
+    },
+  };
+  const drafts = {
+    get: async (): Promise<Draft> => {
+      await Promise.resolve();
+      return draft;
+    },
+    // Followed, and never written meanwhile.
+    watch: async () =>
+      await Promise.resolve({
+        release: async () => {
+          await Promise.resolve();
+        },
+        [Symbol.dispose]: () => {},
+      }),
+    checkpoints: async (): Promise<DraftCheckpoint[]> =>
+      await Promise.resolve(history),
+    restore: async (
+      { id }: { kind: string; id: string },
+      number: number,
+      revision: number
+    ) => {
+      await Promise.resolve();
+      asked.push(["restore", id, number, revision]);
+      draft = { ...draft, revision: revision + 1 };
+      return points[0];
+    },
+    discard: async ({ id }: { kind: string; id: string }, revision: number) => {
+      await Promise.resolve();
+      asked.push(["discard", id, revision]);
+      draft = { ...draft, changed: [], revision: revision + 1 };
     },
   };
   const members = {
@@ -227,7 +239,7 @@ const fakeApps = ({
       ]),
   };
   return {
-    session: { apps, members },
+    session: { apps, versions, drafts, members },
     asked,
     removed: () => removed,
   };
@@ -261,11 +273,16 @@ const shown = async (
     path: "/",
     loader: async () => await session.apps.get(),
     component: () => {
-      const app = page.useLoaderData();
+      const app: ViewedApp = page.useLoaderData();
       return (
         <>
           <RemoveApp app={app} identity={viewer} />
-          <AppHistory app={app} identity={viewer} />
+          <DraftHistory
+            builds={buildsApp(app, viewer) && !app.archived}
+            identity={viewer}
+            live={app.currentVersion}
+            subject={{ kind: "app", id: app.id }}
+          />
         </>
       );
     },
@@ -319,11 +336,11 @@ const menuItem = (name: string) =>
   );
 
 /** The section titled `title`. */
-const section = (id: "app-unpublished" | "app-published") =>
+const section = (id: "draft-unpublished" | "draft-published") =>
   document.querySelector(`section[aria-labelledby="${id}"]`);
 
 /** What each line of a section says first: its title. */
-const titles = (id: "app-unpublished" | "app-published"): string[] =>
+const titles = (id: "draft-unpublished" | "draft-published"): string[] =>
   [...(section(id)?.querySelectorAll('[data-slot="item-title"]') ?? [])].map(
     (title) => title.textContent?.trim() ?? ""
   );
@@ -348,8 +365,8 @@ describe("An App's History", () => {
     await shown(session, person("user-owner", "builder"));
 
     expect({
-      lines: titles("app-unpublished"),
-      touched: section("app-unpublished")?.textContent.includes(
+      lines: titles("draft-unpublished"),
+      touched: section("draft-unpublished")?.textContent.includes(
         "src/routes/index.tsx and server/notes.ts"
       ),
     }).toStrictEqual({
@@ -364,19 +381,19 @@ describe("An App's History", () => {
     await shown(session, person("user-owner", "builder"));
 
     expect({
-      unpublished: section("app-unpublished"),
-      published: titles("app-published"),
+      unpublished: section("draft-unpublished"),
+      published: titles("draft-published"),
     }).toStrictEqual({
       unpublished: null,
       published: ["26.10.3", "26.10.2Your team has this one", "26.10.1"],
     });
   });
 
-  it("keeps the undo points of changes undone, each to see and restore, as Undo changes promised", async () => {
+  it("keeps the checkpoints of changes undone, each to see and restore, as Undo changes promised", async () => {
     // Undone: the draft changes nothing, its points since version 2 stay.
     const { session, asked } = fakeApps({ role: "builder" });
     await shown(session, person("user-owner", "builder"));
-    const unpublished = section("app-unpublished") ?? document;
+    const unpublished = section("draft-unpublished") ?? document;
     const seeIt = [...unpublished.querySelectorAll("a")].filter(
       (link) => link.textContent.trim() === "See it"
     ).length;
@@ -391,7 +408,7 @@ describe("An App's History", () => {
 
     expect({
       heading: unpublished.querySelector("h3")?.textContent,
-      lines: titles("app-unpublished"),
+      lines: titles("draft-unpublished"),
       seeIt,
       undo: button("Undo changes", unpublished),
       asked,
@@ -411,7 +428,7 @@ describe("An App's History", () => {
       changed: ["src/routes/index.tsx"],
     });
     await shown(session, person("user-owner", "builder"));
-    const unpublished = section("app-unpublished") ?? document;
+    const unpublished = section("draft-unpublished") ?? document;
 
     await press(button("Restore", unpublished));
     await press(button("Cancel"));
@@ -447,7 +464,7 @@ describe("An App's History", () => {
     });
     await shown(session, person("user-owner", "builder"));
     const preview = [
-      ...(section("app-unpublished")?.querySelectorAll("a") ?? []),
+      ...(section("draft-unpublished")?.querySelectorAll("a") ?? []),
     ].find((link) => link.textContent.trim() === "See it");
     await press(button("Actions for 26.10.1"));
     const version = menuItem("See this version");
@@ -492,14 +509,12 @@ describe("An App's History", () => {
     expect({
       afterCancel,
       titled: said.includes("Go back to 26.10.1?"),
-      warned: said.includes("wait for an admin to grant them again"),
       asked,
-      listed: titles("app-published"),
+      listed: titles("draft-published"),
     }).toStrictEqual({
       afterCancel: [],
       titled: true,
-      warned: true,
-      asked: [["publish", appId, 1, 7, 2]],
+      asked: [["rollback", appId, 1, 7, 2]],
       listed: ["26.10.3", "26.10.2", "26.10.1Your team has this one"],
     });
   });
@@ -510,7 +525,7 @@ describe("An App's History", () => {
       versions: [versionOf(2), { ...versionOf(1), label: null }],
     });
     await shown(session, person("user-owner", "builder"));
-    const listed = titles("app-published");
+    const listed = titles("draft-published");
     const created = document.body.textContent.includes("You created it");
 
     await press(button("Actions for the version not shared yet"));
@@ -543,7 +558,7 @@ describe("An App's History", () => {
 
     expect({ said, asked }).toStrictEqual({
       said: true,
-      asked: [["publish", appId, 1, 7, 2]],
+      asked: [["rollback", appId, 1, 7, 2]],
     });
   });
 
@@ -568,7 +583,7 @@ describe("An App's History", () => {
       said: document.body.textContent.includes(
         "Versions that still fit them: 26.10.2."
       ),
-      listed: titles("app-published"),
+      listed: titles("draft-published"),
     }).toStrictEqual({
       said: true,
       listed: ["26.10.3", "26.10.2Your team has this one", "26.10.1"],
@@ -583,14 +598,13 @@ describe("An App's History", () => {
       label: `26.10.${number}`,
       parent: number === 1 ? null : number - 1,
       tree: `tree-${number}`,
-      message: `Change ${number}`,
       createdAt: new Date(Date.UTC(2026, 9, 1) + number * 60_000).toISOString(),
     });
     const { session } = fakeApps({ role: "builder", current: total });
     // The third page waits until the test lets it answer.
     const third = Promise.withResolvers<boolean>();
-    session.apps.versions.list = async (
-      _app?: string,
+    session.versions.list = async (
+      _subject: { kind: string; id: string },
       before?: number
     ): Promise<AppVersion[]> => {
       if (before === 51) {
@@ -615,7 +629,7 @@ describe("An App's History", () => {
       await Promise.resolve();
     });
     await settled();
-    const numbers = titles("app-published").map((title) =>
+    const numbers = titles("draft-published").map((title) =>
       Number(labelled.exec(title)?.groups?.number)
     );
 
@@ -625,6 +639,75 @@ describe("An App's History", () => {
       last: numbers.at(-1),
       older: button("Show older versions") !== undefined,
     }).toStrictEqual({ count: 100, first: 250, last: 151, older: true });
+  });
+});
+
+describe("A workflow's History", () => {
+  afterEach(() => {
+    act(() => {
+      root?.unmount();
+    });
+    root = undefined;
+    document.body.innerHTML = "";
+  });
+
+  it("is an App's, on its own subject: no preview, its triggers named, rolled back through the same versions", async () => {
+    const { session, asked } = fakeApps({ role: "builder" });
+    const core = {
+      withSession: async <T,>(
+        run: (reached: typeof session) => Promise<T>
+      ): Promise<T> => await run(session),
+    };
+    const rootRoute = createRootRoute({
+      component: () => (
+        <DraftHistory
+          builds
+          identity={person("user-owner", "builder")}
+          live={2}
+          subject={{ kind: "workflow", id: "workflow-1" }}
+        />
+      ),
+    });
+    const router = createRouter({
+      routeTree: rootRoute,
+      history: createMemoryHistory(),
+      context: { core },
+    });
+    const host = document.createElement("div");
+    document.body.append(host);
+    await act(async () => {
+      root = createRoot(host);
+      root.render(
+        <I18nProvider i18n={i18n}>
+          <RouterProvider router={router} />
+        </I18nProvider>
+      );
+      await router.load();
+    });
+    await settled();
+    const seeIt = [
+      ...(section("draft-unpublished")?.querySelectorAll("a") ?? []),
+    ].length;
+
+    await press(button("Actions for 26.10.1"));
+    const offered = [...document.querySelectorAll('[role="menuitem"]')].map(
+      (each) => each.textContent.trim()
+    );
+    await press(menuItem("Go back to this version"));
+    const said = document.body.textContent;
+    await press(button("Go back"));
+
+    expect({
+      seeIt,
+      offered,
+      triggers: said.includes("Its triggers start it from now on"),
+      asked,
+    }).toStrictEqual({
+      seeIt: 0,
+      offered: ["Go back to this version"],
+      triggers: true,
+      asked: [["rollback", "workflow-1", 1, 7, 2]],
+    });
   });
 });
 

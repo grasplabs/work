@@ -3556,10 +3556,9 @@ const runMutation = async (
     if (refusedWrite !== undefined) {
       throw sealed(hostError(refusedWrite));
     }
-    // The gate, then the commit: a revocation, a membership ended or a
-    // grant made between the two (an admin granting for a later version,
-    // which leaves this one unapproved, `allowingPermissionSql`) doesn't
-    // stop this commit; the next protected step is refused. It can't be
+    // The gate, then the commit: a revocation or a membership ended
+    // between the two doesn't stop this commit; the next protected step
+    // is refused. It can't be
     // atomic with it: what the gate reads lives in core's D1 and the write
     // in the store's own Durable Object, with no transaction across the
     // two. The window is bounded to a call already admitted (accepted on

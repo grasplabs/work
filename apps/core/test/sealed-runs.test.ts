@@ -17,7 +17,6 @@ import { revokeWorkflowBinding } from "../src/workflow-bindings.ts";
 import { generatedModule } from "../src/workflow-builds.ts";
 import {
   exportedWorkflowVersion,
-  publishWorkflowVersion,
   versionContract,
   workflowVersions,
 } from "../src/workflow-resources.ts";
@@ -82,6 +81,7 @@ import type {
 } from "./sealed-run-harness.ts";
 import { failingStep, taskStep } from "./sealed-runs.ts";
 import { unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // A run of a sealed build of a generated JSON workflow on the run host
 // (sealed-run.ts), from its threat model. The isolate runs the build's
@@ -139,7 +139,8 @@ const publishedBefore = async (
       old.workflow.id
     ),
     env.DB.prepare(
-      "CREATE TRIGGER workflow_resource_versions_immutable_update BEFORE UPDATE ON workflow_resource_versions BEGIN SELECT RAISE(ABORT, 'workflow_resource_versions are immutable'); END"
+      // Back as migration 0250 left it: only a version's label changes.
+      "CREATE TRIGGER workflow_resource_versions_immutable_update BEFORE UPDATE OF workflow_resource_id, version, definition_version, definition, definition_json_hash, profile_version, evaluator_hash, contract, contract_hash, manifest, manifest_hash, author_id, created_at, seal_id ON workflow_resource_versions BEGIN SELECT RAISE(ABORT, 'workflow_resource_versions are immutable'); END"
     ),
   ]);
   return old;
@@ -153,7 +154,7 @@ const startOfFirst = async (old: Sealed): Promise<unknown> =>
         serving,
         { type: "person", person: old.by },
         old.workflow.id,
-        { version: 1, args: { who: "Ada" }, key: unique() }
+        { expected: 1, args: { who: "Ada" }, key: unique() }
       )
   );
 
@@ -827,7 +828,7 @@ return { before, after: await late };
       serving,
       { type: "person", person: tampered.by },
       tampered.workflow.id,
-      { version: 1, args: { who: "Ada" }, key: unique() }
+      { expected: 1, args: { who: "Ada" }, key: unique() }
     );
     await expect(sealedRunOf(runId ?? "")).rejects.toMatchObject({
       code: "workflow.version_corrupt",
@@ -871,6 +872,7 @@ return { before, after: await late };
     // As a version published before format 2, its contract as it stored it.
     const format1 = await publishedBefore(ofFormat1, contractOfFormat1);
     const { workflow, by } = format1;
+    const start = await startOfFirst(format1);
     // A new version beside it, published as any is.
     const first = await env.DB.prepare(
       "SELECT definition FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
@@ -880,16 +882,18 @@ return { before, after: await late };
     const definition = z
       .looseObject({ result: z.json() })
       .parse(JSON.parse(first?.definition ?? "{}"));
-    await publishWorkflowVersion(env, by, workflow.id, {
-      definition: JSON.stringify({
+    await publishDefinition(
+      env,
+      by,
+      workflow.id,
+      JSON.stringify({
         ...definition,
         result: { status: "done again" },
-      }),
-      basedOn: 1,
-    });
+      })
+    );
     const listed = await workflowVersions(env, by, workflow.id);
     expect({
-      start: await startOfFirst(format1),
+      start,
       exported: await codeOf(
         async () => await exportedWorkflowVersion(env, by, workflow.id, 1)
       ),

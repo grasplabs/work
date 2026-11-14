@@ -24,7 +24,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import type { Release } from "./app-releases.ts";
-import { bindingPinnedSql } from "./app-workflow-bindings.ts";
+import { bindingNamesSql } from "./app-workflow-bindings.ts";
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import { appHost } from "./durable-objects.ts";
 import { defaultMaxAttempts } from "./outbox-delivery.ts";
@@ -140,7 +140,7 @@ const senderOf = (intent: Pick<SendEventIntent, "app" | "principal">): string =>
 
 /**
  * That run `runId` is one App `app` started through its binding of
- * `alias`, of exactly the version it names now, and hasn't ended; and that
+ * `alias`, of the workflow it binds now, and hasn't ended; and that
  * the App may send it events for `principal` now, as SQL.
  */
 const maySendSql = (
@@ -148,10 +148,10 @@ const maySendSql = (
   appVersion: number,
   principal: string,
   alias: string,
-  pin: { workflowId: string; version: number },
+  workflowId: string,
   runId: string
 ): SQL => {
-  const workflow = workflowResourceIdSchema.safeParse(pin.workflowId);
+  const workflow = workflowResourceIdSchema.safeParse(workflowId);
   if (!workflow.success) {
     return sql`0`;
   }
@@ -159,12 +159,11 @@ const maySendSql = (
   return sql`(EXISTS (SELECT 1 FROM workflow_resource_runs AS run
       JOIN workflow_start_receipts AS receipt ON receipt.id = run.id
       WHERE run.id = ${runId}
-        AND run.workflow_resource_id = ${pin.workflowId}
-        AND run.version = ${pin.version}
+        AND run.workflow_resource_id = ${workflowId}
         AND run.status IN ('starting', 'running', 'paused')
         AND receipt.invoker_type = 'app' AND receipt.invoker_id = ${app})
     AND ${appSendHoldsSql(app, appVersion, principal, workflow.data)}
-    AND ${bindingPinnedSql(app, alias, pin)})`;
+    AND ${bindingNamesSql(app, alias, workflowId)})`;
 };
 
 /** Whether `condition` holds now. */
@@ -175,19 +174,24 @@ const holds = async (env: Env, condition: SQL): Promise<boolean> => {
   return row.holds === 1;
 };
 
-/** Whether App `app`, restricted, would carry what it read into run `runId`. */
-const restrictsRun = async (
+/** Run `runId`'s own version and whether it is restricted, if it exists. */
+const runOf = async (
   env: Env,
-  app: AppId,
   runId: string
-): Promise<boolean> => {
-  const row = await env.DB.prepare(
-    "SELECT restricted FROM workflow_resource_runs WHERE id = ?"
+): Promise<{ version: number; restricted: number } | null> =>
+  await env.DB.prepare(
+    "SELECT version, restricted FROM workflow_resource_runs WHERE id = ?"
   )
     .bind(runId)
-    .first<{ restricted: number }>();
-  return row?.restricted !== 1 && (await appHost(env, app).isRestricted());
-};
+    .first<{ version: number; restricted: number }>();
+
+/** Whether App `app`, restricted, would carry what it read into `run`. */
+const restricts = async (
+  env: Env,
+  app: AppId,
+  run: { restricted: number } | null
+): Promise<boolean> =>
+  run?.restricted !== 1 && (await appHost(env, app).isRestricted());
 
 /** A sent event the App may not make now: never saying why. */
 const unavailable = () => functionErrors.create("permission.unavailable");
@@ -243,22 +247,24 @@ export const appWorkflowEventSends = (
         maxBytes: functionArgsMaxBytes,
       });
     }
-    const pin = declared.pinned;
+    const bound = declared.workflowId;
     if (
       typeof runId !== "string" ||
       runId.length === 0 ||
       runId.length > 128 ||
-      pin === undefined
+      bound === undefined
     ) {
       throw unavailable();
     }
     const app = subject.appId;
+    const run = await runOf(env, runId);
     if (
+      run === null ||
       !(await holds(
         env,
-        maySendSql(app, appVersion, onBehalfOf, workflow, pin, runId)
+        maySendSql(app, appVersion, onBehalfOf, workflow, bound, runId)
       )) ||
-      (await restrictsRun(env, app, runId))
+      (await restricts(env, app, run))
     ) {
       throw unavailable();
     }
@@ -267,8 +273,9 @@ export const appWorkflowEventSends = (
       appVersion,
       principal: onBehalfOf,
       workflow,
-      workflowId: workflowResourceIdSchema.parse(pin.workflowId),
-      version: pin.version,
+      workflowId: workflowResourceIdSchema.parse(bound),
+      // The run's own: a binding follows the live version, a run keeps its.
+      version: run.version,
       event,
       type: resolved.type,
       runId,
@@ -381,12 +388,12 @@ export const dispatchSendEventIntent = async (
       if (
         !(await holds(
           env,
-          sql`(${appSendHoldsSql(intent.app, intent.appVersion, intent.principal, intent.workflowId)} AND ${bindingPinnedSql(intent.app, intent.workflow, { workflowId: intent.workflowId, version: intent.version })})`
+          sql`(${appSendHoldsSql(intent.app, intent.appVersion, intent.principal, intent.workflowId)} AND ${bindingNamesSql(intent.app, intent.workflow, intent.workflowId)})`
         ))
       ) {
         throw workflowResourceErrors.create("workflow.event_denied");
       }
-      if (await restrictsRun(env, intent.app, intent.runId)) {
+      if (await restricts(env, intent.app, await runOf(env, intent.runId))) {
         throw permissionErrors.create("permission.restricted");
       }
     } catch (error) {

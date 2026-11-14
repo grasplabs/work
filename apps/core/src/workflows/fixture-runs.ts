@@ -11,9 +11,9 @@ import { z } from "zod";
 import type { Release } from "../app-releases.ts";
 import { appTestRuns } from "../db/core/schema.ts";
 import {
+  boundWorkflowOf,
   failureOf,
   resultAsDeclared,
-  pinOf,
   startCallIn,
 } from "../page-workflows.ts";
 import { loadWorkflowBuild } from "../workflow-builds.ts";
@@ -172,11 +172,12 @@ export const startFixtureRun = async (
   test: FixtureStart
 ): Promise<FixtureRunStarted> => {
   const { resolved, args: declared } = await startCallIn(release, request);
-  const pin = pinOf(resolved);
-  const workflow = workflowResourceIdSchema.parse(pin.workflowId);
-  const found = await pinned(env, workflow, pin.version);
+  const workflow = workflowResourceIdSchema.parse(boundWorkflowOf(resolved));
+  // The workflow's live version, as a page's start runs.
+  const found = await pinned(env, workflow);
+  const { version } = found;
   const input = acceptedInput(found.inputDescriptor, declared);
-  const params = await fixtureParams(env, workflow, pin.version, test.params);
+  const params = await fixtureParams(env, workflow, version, test.params);
   // A fault after a task the version doesn't have, or that no test run
   // gets past (only its model calls are answered: fixture-calls.ts), or
   // whose step journals no result (a sleep's, a wait's), would never fire,
@@ -185,7 +186,7 @@ export const startFixtureRun = async (
     const build = await loadWorkflowBuild(
       env,
       workflow,
-      pin.version,
+      version,
       found.manifestHash
     );
     if (
@@ -209,7 +210,7 @@ export const startFixtureRun = async (
       appId: release.manifest.resourceId,
       appVersion: release.manifest.resourceVersion,
       workflowResourceId: workflow,
-      version: pin.version,
+      version,
       manifestHash: found.manifestHash,
       buildHash: found.buildHash,
       principal,
@@ -226,7 +227,7 @@ export const startFixtureRun = async (
   try {
     await runEngine(env).createFixture({
       id: runId,
-      pinned: { workflow, version: pin.version, manifest: found.manifestHash },
+      pinned: { workflow, version, manifest: found.manifestHash },
       input: z.json().parse(JSON.parse(input)),
       clockMs: test.clockMs,
     });

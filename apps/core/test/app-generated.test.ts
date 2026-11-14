@@ -107,7 +107,7 @@ describe("an App's server/_generated/", { timeout: 120_000 }, () => {
     const owner = await person("builder");
     const { id } = await createApp(env, owner, { name: "Notes" });
     const app = notesFiles();
-    await commitDefined(env, owner, id, app, "First");
+    await commitDefined(env, owner, id, app);
     // A function added, and a links permission declared.
     const next = redefined(
       withFiles(app, {
@@ -127,7 +127,7 @@ export const hello = query({ args: {}, returns: v.string(), handler: () => "hell
         }).permissions,
       })
     );
-    await commitDefined(env, owner, id, next, "Second");
+    await commitDefined(env, owner, id, next);
     const [first, second] = await Promise.all([filesOf(id, 1), filesOf(id, 2)]);
     expect({
       before: [
@@ -157,13 +157,10 @@ export const hello = query({ args: {}, returns: v.string(), handler: () => "hell
       expect({
         refused: await failure(
           async () =>
-            await commitDefined(
-              env,
-              owner,
-              app,
-              { ...changes, "server/other.ts": "export const one = 1;\n" },
-              "Forged references"
-            )
+            await commitDefined(env, owner, app, {
+              ...changes,
+              "server/other.ts": "export const one = 1;\n",
+            })
         ),
         // Nothing of it committed.
         next: await failure(async () => await findVersion(env, app, 2)),
