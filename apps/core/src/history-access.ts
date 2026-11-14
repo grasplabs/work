@@ -15,8 +15,8 @@ import { chatAuthority, chatContext, connectionReadOf } from "./agent-scope.ts";
 import type { AgentScope } from "./agent-scope.ts";
 import { appFor } from "./apps.ts";
 import { memberOf } from "./auth/identity.ts";
-import { readableVersionsAs } from "./brain-next.ts";
-import type { SourceVersionRef } from "./brain-next.ts";
+import { readableMemoriesAs, readableVersionsAs } from "./brain-next.ts";
+import type { StoredMemoryPlace, SourceVersionRef } from "./brain-next.ts";
 import { audienceOf } from "./chat-audiences.ts";
 import { connectionOwnersOf } from "./connections.ts";
 import { inList } from "./db/d1.ts";
@@ -217,6 +217,20 @@ const readableAt = async (
 };
 
 /**
+ * Whether what a recall as the company handed over may still be sent in
+ * this chat: not while anyone Grasp can't name as a member is in a chat
+ * others share, as last kept from the platform's roster
+ * (`chat_audiences`).
+ */
+const companyStillReads = async (
+  env: Env,
+  scope: Omit<AgentScope, "runId">
+): Promise<boolean> => {
+  const audience = await audienceOf(env, chatContext(scope));
+  return audience?.outsiders !== true;
+};
+
+/**
  * Of the versions a recall as the company handed over in `sources`, those
  * everyone in the company may still read: none while anyone Grasp can't
  * name as a member is in a chat others share, as last kept from the
@@ -231,16 +245,131 @@ const readableBrainCompanyVersions = async (
   if (!sources.some((source) => source.startsWith(brainCompanyVersionPrefix))) {
     return [];
   }
-  const audience = await audienceOf(env, chatContext(scope));
-  return audience?.outsiders === true
-    ? []
-    : await readableAt(
+  return (await companyStillReads(env, scope))
+    ? await readableAt(
         env,
         scope,
         sources,
         brainCompanyVersionPrefix,
         "company"
-      );
+      )
+    : [];
+};
+
+// Each memory a chat's recall before a question handed over is pinned too,
+// by the store it is in and that store's id for it, under the prefix of
+// the reach the recall read at, as its versions are: `brain-memory:` for
+// the person's own chat, `brain-company-memory:` for a recall as the
+// company. An id is never used again, so a pin means the same memory for
+// as long as it is kept, and it is asked of that store alone, at that
+// reach. It is withheld, as a passage is, once that reach may no longer
+// read it (erased, its source narrowed, the person out of the team, or,
+// as the company, anyone unnamed in the chat), or its writer retired it
+// (`readableMemoriesAs`), and with the agent's `brain` grant. A newer
+// memory that replaced it withholds nothing: the next recall brings that.
+
+const brainMemoryPrefix = "brain-memory:";
+const brainCompanyMemoryPrefix = "brain-company-memory:";
+
+/** The source a memory the new Brain handed a run is recorded as. */
+export const brainMemoryRead = ({ store, memory }: StoredMemoryPlace): string =>
+  `${brainMemoryPrefix}${JSON.stringify([store, memory])}`;
+
+/** The source a memory a recall as the company handed a run is recorded as. */
+export const brainCompanyMemoryRead = (place: StoredMemoryPlace): string =>
+  `${brainCompanyMemoryPrefix}${brainMemoryRead(place).slice(brainMemoryPrefix.length)}`;
+
+const brainMemorySchema = z.tuple([
+  z.enum(["own", "shared"]),
+  z.string().min(1),
+]);
+
+/** The memory `source`, pinned under `prefix`, names, if it is one. */
+const brainMemoryOf = (
+  source: string,
+  prefix: string
+): StoredMemoryPlace | undefined => {
+  if (!source.startsWith(prefix)) {
+    return undefined;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(source.slice(prefix.length));
+  } catch {
+    return undefined;
+  }
+  const pin = brainMemorySchema.safeParse(parsed);
+  if (!pin.success) {
+    return undefined;
+  }
+  const [store, memory] = pin.data;
+  return { store, memory };
+};
+
+/**
+ * Of the memories in `sources` pinned under `prefix`, those `reach` may
+ * still read (`readableMemoriesAs`), in one read of each store per 500. A
+ * pin whose id isn't one is refused there, and the check withholds all.
+ */
+const readableMemoriesAt = async (
+  env: Env,
+  scope: Omit<AgentScope, "runId">,
+  sources: readonly string[],
+  prefix: string,
+  reach: "person" | "company"
+): Promise<string[]> => {
+  const pins = sources.flatMap((source) => {
+    const pin = brainMemoryOf(source, prefix);
+    return pin === undefined ? [] : [{ source, pin }];
+  });
+  if (pins.length === 0) {
+    return [];
+  }
+  const memories = await readableMemoriesAs(
+    env,
+    scope.personId,
+    pins.map(({ pin }) => pin),
+    { reach }
+  );
+  const readable = new Set(
+    memories.map(
+      (place) =>
+        `${prefix}${brainMemoryRead(place).slice(brainMemoryPrefix.length)}`
+    )
+  );
+  return pins.flatMap(({ source }) => (readable.has(source) ? [source] : []));
+};
+
+/** Of the memories the person's own chat pinned in `sources`, those they may still read. */
+const readableBrainMemories = async (
+  env: Env,
+  scope: Omit<AgentScope, "runId">,
+  sources: readonly string[]
+): Promise<string[]> =>
+  await readableMemoriesAt(env, scope, sources, brainMemoryPrefix, "person");
+
+/**
+ * Of the memories a recall as the company handed over in `sources`, those
+ * everyone in the company may still read: none while anyone Grasp can't
+ * name as a member is in a chat others share (`companyStillReads`).
+ */
+const readableBrainCompanyMemories = async (
+  env: Env,
+  scope: Omit<AgentScope, "runId">,
+  sources: readonly string[]
+): Promise<string[]> => {
+  if (!sources.some((source) => source.startsWith(brainCompanyMemoryPrefix))) {
+    return [];
+  }
+  return (await companyStillReads(env, scope))
+    ? await readableMemoriesAt(
+        env,
+        scope,
+        sources,
+        brainCompanyMemoryPrefix,
+        "company"
+      )
+    : [];
 };
 
 /** Whether `error` refuses the Brain's read, rather than failing it. */
@@ -492,10 +621,12 @@ const readableApps = async (
  * read, while the Brain's recall admits the agent and each document it
  * was handed is still in its collection for it to read, unpurged; a
  * version of the new Brain, while the person may read it (their teams and
- * the company, for what code's recall handed over). Anything
- * else, an unknown source or a bare connection included, is not. Throws
- * what the reads throw (a person who left, a database away): the caller
- * withholds everything then.
+ * the company, for what code's recall handed over); a memory of the new
+ * Brain, while the person (or, as the company read it, the company) may
+ * read it and its writer has not retired it, replaced or expired or not.
+ * Anything else, an unknown source or a bare connection included, is
+ * not. Throws what the reads throw (a person who left, a database away):
+ * the caller withholds everything then.
  */
 export const readableSources = async (
   env: Env,
@@ -519,15 +650,25 @@ export const readableSources = async (
     .from(collections)
     .where(inList(collections.id, sourceIds));
   // `readableBrain` reads today's Brain, and goes with it (GRA-1735).
-  const [apps, connections, brain, versions, teamVersions, companyVersions] =
-    await Promise.all([
-      readableApps(env, scope, sourceIds),
-      readableConnections(env, scope, sourceIds),
-      readableBrain(env, scope, sourceIds),
-      readableBrainVersions(env, scope, sourceIds),
-      readableAt(env, scope, sourceIds, brainTeamVersionPrefix, "teams"),
-      readableBrainCompanyVersions(env, scope, sourceIds),
-    ]);
+  const [
+    apps,
+    connections,
+    brain,
+    versions,
+    teamVersions,
+    companyVersions,
+    memories,
+    companyMemories,
+  ] = await Promise.all([
+    readableApps(env, scope, sourceIds),
+    readableConnections(env, scope, sourceIds),
+    readableBrain(env, scope, sourceIds),
+    readableBrainVersions(env, scope, sourceIds),
+    readableAt(env, scope, sourceIds, brainTeamVersionPrefix, "teams"),
+    readableBrainCompanyVersions(env, scope, sourceIds),
+    readableBrainMemories(env, scope, sourceIds),
+    readableBrainCompanyMemories(env, scope, sourceIds),
+  ]);
   return new Set([
     ...known.flatMap(({ id, readable }) => (readable === 1 ? [id] : [])),
     ...apps,
@@ -536,5 +677,7 @@ export const readableSources = async (
     ...versions,
     ...teamVersions,
     ...companyVersions,
+    ...memories,
+    ...companyMemories,
   ]);
 };

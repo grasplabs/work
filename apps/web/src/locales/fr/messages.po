@@ -1768,6 +1768,10 @@ msgstr "Une liste du personnel est le moyen le plus rapide : noms, adresses e-
 msgid "A step is a JSON object."
 msgstr "Une étape est un objet JSON."
 
+#: src/brain/sources-page.tsx
+msgid "A system's word"
+msgstr "La parole d’un système"
+
 #: src/workflows/requests/request-needs.tsx
 #: src/workflows/requests/request-parts.tsx
 msgid "A team"
@@ -2445,6 +2449,10 @@ msgstr "Un agent à vous, pour une tâche que vous faites souvent. Vous seul le 
 msgid "An agent you can no longer ask"
 msgstr "Un agent que vous ne pouvez plus interroger"
 
+#: src/brain/sources-page.tsx
+msgid "An agent's word"
+msgstr "La parole d’un agent"
+
 #: src/apps/field-kinds.tsx
 msgid "An amount in a currency"
 msgstr "Un montant dans une devise"
@@ -2526,6 +2534,10 @@ msgstr "Un ancien format : enregistrez-le en PDF ou en fichier plus récent"
 msgid "An outside API that Apps and workflows can call through Grasp, once you allow them to: only this origin, with these methods, under these paths."
 msgstr "Une API externe que les applications et les workflows peuvent appeler via Grasp, une fois que vous les y autorisez : uniquement cette origine, avec ces méthodes, sous ces chemins."
 
+#: src/brain/sources-page.tsx
+msgid "An outside party's word"
+msgstr "La parole d’un tiers"
+
 #: src/workflows/requests/request-who.tsx
 msgid "An owner can turn this on."
 msgstr "Un propriétaire peut l’activer."
@@ -2565,6 +2577,11 @@ msgstr "Autre plateforme"
 #: src/knowledge/purge.tsx
 msgid "Another reason"
 msgstr "Une autre raison"
+
+#: src/brain/sources-page.tsx
+msgctxt "how search found a memory"
+msgid "Another side of a disputed fact"
+msgstr "Une autre version d’un fait contesté"
 
 #: src/activity/pending.tsx
 msgid "Another version of this App was published since this list was read. The list now shows it: review that version, then approve again."
@@ -3430,6 +3447,11 @@ msgid "by hand, a month"
 msgstr "à la main, par mois"
 
 #: src/brain/sources-page.tsx
+msgctxt "how search found a memory"
+msgid "By its words"
+msgstr "Par ses mots"
+
+#: src/brain/sources-page.tsx
 msgctxt "how search found a passage"
 msgid "By its words"
 msgstr "Par ses mots"
@@ -4240,6 +4262,11 @@ msgid "Confirm your rejection"
 msgstr "Confirmez votre refus"
 
 #: src/brain/memories-page.tsx
+msgid "Confirmed"
+msgstr "Confirmé"
+
+#: src/brain/sources-page.tsx
+msgctxt "a memory a person confirmed"
 msgid "Confirmed"
 msgstr "Confirmé"
 
@@ -10063,6 +10090,7 @@ msgid "Only you"
 msgstr "Vous seul"
 
 #: src/brain/memories-page.tsx
+#: src/brain/sources-page.tsx
 msgctxt "a memory nobody else may read"
 msgid "Only you"
 msgstr "Vous seul"
@@ -10251,6 +10279,10 @@ msgstr "Rouvrez ce lien quand vous voulez, et reprenez là où vous vous êtes a
 msgctxt "until when a decision can be answered"
 msgid "Open until"
 msgstr "Ouverte jusqu’au"
+
+#: src/brain/sources-page.tsx
+msgid "Open version {version}"
+msgstr "Ouvrir la version {version}"
 
 #: src/inbox/item-detail.tsx
 msgid "Open where it lives"
@@ -10511,6 +10543,10 @@ msgstr "Une partie de ce qui a été envoyé est tronquée ci-dessus. Affichez t
 #: src/chat/held-writes.tsx
 msgid "Part of what will be sent is cut short above. Show it all, or exactly what will be sent, to confirm."
 msgstr "Une partie de ce qui sera envoyé est tronquée ci-dessus. Affichez tout, ou exactement ce qui sera envoyé, pour confirmer."
+
+#: src/brain/sources-page.tsx
+msgid "Passages"
+msgstr "Passages"
 
 #: src/interview/words.ts
 msgid "Passing it on"
@@ -13247,6 +13283,10 @@ msgstr "Quelqu’un a enregistré ce fichier depuis que vous avez commencé. Met
 msgid "Someone's own word"
 msgstr "La parole de quelqu’un"
 
+#: src/brain/sources-page.tsx
+msgid "Someone's word"
+msgstr "La parole de quelqu’un"
+
 #: src/onboarding/connect-steps.tsx
 msgid "Something else"
 msgstr "Autre chose"
@@ -13313,6 +13353,7 @@ msgid "Sources"
 msgstr "Sources"
 
 #: src/brain/memories-page.tsx
+#: src/brain/sources-page.tsx
 msgid "Sources disagree"
 msgstr "Les sources divergent"
 
@@ -14541,6 +14582,10 @@ msgstr "L'origine est https:// et un nom d'hôte public, sans rien après : http
 msgid "The packages are approved. Carry on."
 msgstr "Les paquets sont approuvés. Continue."
 
+#: src/brain/sources-page.tsx
+msgid "The passage around it"
+msgstr "Le passage qui l’entoure"
+
 #: src/apps/access-view.tsx
 #: src/apps/draft-changes.tsx
 msgid "the person in {field}"
@@ -15228,6 +15273,11 @@ msgstr "Via Composio, qui conserve l’accès dans son propre cloud. Vos workflo
 #: src/connections/connect-dialog.tsx
 msgid "Through Grasp's own connector, which keeps the access in your deployment. Your workflows can use it once it is connected, only for what you allow."
 msgstr "Via le connecteur de Grasp, qui conserve l’accès dans votre déploiement. Vos workflows peuvent l’utiliser une fois connecté, uniquement pour ce que vous autorisez."
+
+#: src/brain/sources-page.tsx
+msgctxt "how search found a memory"
+msgid "Through what you asked about"
+msgstr "Par ce que vous avez demandé"
 
 #: src/brain/forget.tsx
 msgid "Time left to undo"
@@ -16529,6 +16579,7 @@ msgid "What the Brain learns from sources and from what you tell it shows here."
 msgstr "Ce que le Brain apprend des sources et de ce que vous lui dites s’affiche ici."
 
 #: src/brain/memories-page.tsx
+#: src/brain/sources-page.tsx
 msgid "What the Brain remembers"
 msgstr "Ce que retient le Brain"
 
@@ -17604,6 +17655,7 @@ msgid "Your own contract with Anthropic, OpenAI, Mistral or another provider. Yo
 msgstr "Votre propre contrat avec Anthropic, OpenAI, Mistral ou un autre fournisseur. Vous les payez directement."
 
 #: src/brain/memories-page.tsx
+#: src/brain/sources-page.tsx
 msgid "Your own word"
 msgstr "Votre propre parole"
 

@@ -15,7 +15,6 @@ import {
   addSource,
   eraseSource,
   recallAs,
-  recallPassagesAs,
   rememberAs,
 } from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
@@ -240,11 +239,12 @@ describe("the Brain's sources, as a person reads them", () => {
     });
   });
 
-  it("searches with recall of passages itself: the same pack it gives that person, cut short or not, and no memory", async () => {
+  it("searches with recall itself: the same pack it gives that person, cut short or not, its memories each with where it came from", async () => {
     const [reader, other] = await Promise.all([
       signedInApi(idp, "user"),
       signedInApi(idp, "user"),
     ]);
+    const teamId = await teamOf(reader.userId);
     const asked = word();
     const missing = word();
     // More of what the reader may read than the budget holds (dates and
@@ -256,15 +256,47 @@ describe("the Brain's sources, as a person reads them", () => {
       await add(newSource(), long, owner(reader.userId));
     }
     await add(newSource(), `${asked} hidden`, owner(other.userId));
-    // A memory of theirs the question's word finds: the page shows none,
-    // so none is sent.
-    const remembered = `${asked} remembered note`;
-    await rememberAs(env, reader.userId, {
+    // A memory of theirs, one of their team's resting on a source, and
+    // another person's own, each holding the question's word.
+    const theirs = `${asked} remembered note`;
+    const { memory: theirMemory } = await rememberAs(env, reader.userId, {
       change: crypto.randomUUID(),
       about: { kind: "customer", names: [`Depot ${word()}`] },
       type: "fact",
-      statement: remembered,
-      quote: remembered,
+      statement: theirs,
+      quote: theirs,
+    });
+    const teamStatement = `${asked} ships on Fridays`;
+    const teamSource = newSource();
+    await add(teamSource, teamStatement, { kind: "team", teamId });
+    const {
+      memories: [teamMemory = ""],
+    } = await brainOf(inJurisdiction(env, env.BRAIN_STORE)).addMemories({
+      change: crypto.randomUUID(),
+      access: { kind: "audience", group: `team:${teamId}` },
+      entities: [{ key: "c", kind: "customer", names: [`Depot ${word()}`] }],
+      memories: [
+        {
+          about: "c",
+          type: "fact",
+          statement: teamStatement,
+          speaker: { kind: "system" },
+          basis: {
+            kind: "source",
+            source: `upload:${teamSource.id}`,
+            version: 1,
+            quote: teamStatement,
+          },
+        },
+      ],
+    });
+    const hidden = `${asked} another person's own ${word()}`;
+    await rememberAs(env, other.userId, {
+      change: crypto.randomUUID(),
+      about: { kind: "customer", names: [`Depot ${word()}`] },
+      type: "fact",
+      statement: hidden,
+      quote: hidden,
     });
 
     const questions = [asked, `${asked} ${missing}`, `"${missing}"`];
@@ -276,7 +308,7 @@ describe("the Brain's sources, as a person reads them", () => {
     const recalled = await Promise.all(
       questions.map(
         async (question) =>
-          await recallPassagesAs(env, reader.userId, {
+          await recallAs(env, reader.userId, {
             question,
             budget: { tokens: brainSearchBudget },
             personal: true,
@@ -284,13 +316,47 @@ describe("the Brain's sources, as a person reads them", () => {
       )
     );
 
-    expect(searched).toStrictEqual(recalled);
+    // The same pack, whole: every passage and memory recall packed, in
+    // its order, nothing the budget was spent on left out.
+    expect(
+      searched.map(({ items, memories, notFound, truncated }) => ({
+        items,
+        memories: memories.map(({ store, id }) => [store, id]),
+        notFound,
+        truncated,
+      }))
+    ).toStrictEqual(
+      recalled.map(({ items, memories, notFound, truncated }) => ({
+        items,
+        memories: memories.map(({ store, memory }) => [store, memory]),
+        notFound,
+        truncated,
+      }))
+    );
+    const shown = (id: string) => {
+      const memory = searched[0]?.memories.find((each) => each.id === id);
+      return memory === undefined
+        ? undefined
+        : {
+            store: memory.store,
+            statement: memory.statement,
+            source: memory.source,
+            said: memory.said,
+          };
+    };
     expect({
-      fields: searched.map((pack) => Object.keys(pack).toSorted()),
-      memory: JSON.stringify(searched).includes(remembered),
+      theirs: shown(theirMemory),
+      team: shown(teamMemory),
+      hidden: JSON.stringify(searched).includes(hidden),
     }).toStrictEqual({
-      fields: questions.map(() => ["items", "notFound", "truncated"]),
-      memory: false,
+      theirs: { store: "own", statement: theirs, source: null, said: "you" },
+      team: {
+        store: "shared",
+        statement: teamStatement,
+        source: { source: teamSource, version: 1 },
+        said: "system",
+      },
+      hidden: false,
     });
     expect(
       searched.map(({ items, notFound, truncated }) => ({
