@@ -2181,18 +2181,19 @@ const fieldOf = (request: SentRequest, field: string): unknown =>
     : null;
 
 /**
- * The person's memory and the listed skills: theirs and this run's own.
- * Memory is a section of one block per file (`<memory source=… file=…>`):
- * each goes, whichever files there are.
+ * The person's memory, the instruction files and the listed skills:
+ * theirs and this run's own. The instruction files are a section of one
+ * block per file (`<instructions>` holding `<file of=…>`), its person's
+ * own among them: it goes whole, whichever files there are.
  */
 const ownSections =
-  /<(?<section>memory|skills)(?: [^>]*)?>[\s\S]*?<\/\k<section>>/gu;
+  /<(?<section>memory|instructions|skills)(?: [^>]*)?>[\s\S]*?<\/\k<section>>/gu;
 
 /**
  * What each request told the model before the chat: the agent's
  * instructions and the API declarations, as the system prompt carries
- * them, without the memory and skills sections, which differ by person
- * and run and are pinned apart (sources and skills).
+ * them, without the memory, instruction-file and skills sections, which
+ * differ by person and run and are pinned apart (sources and skills).
  */
 const promptOf = (request: SentRequest): string =>
   systemTextOf(request.body).replaceAll(ownSections, "<$<section>/>");
