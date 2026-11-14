@@ -5380,8 +5380,9 @@ export const workflowBindingApprovals = sqliteTable(
       .notNull()
       .references(() => workflowResources.id),
     alias: text().notNull(),
-    // An older row may still say `template` or `knowledge`: read as not there, as every
-    // read filters by the kinds still served.
+    // Migration 0252 removed the rows of kinds there are no more
+    // (`template`, `knowledge`, `operation`); every read still filters by
+    // the kinds served, for a row an older core writes after a roll back.
     kind: text({
       enum: ["connector", "model", "decision", "event", "brain", "files"],
     }).notNull(),

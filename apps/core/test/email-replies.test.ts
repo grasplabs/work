@@ -3,6 +3,8 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { decode } from "@grasp-os/workerflow/codec";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
+import { sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
@@ -20,8 +22,9 @@ import { ensureReleaseContract } from "../src/workflow-catalog.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { trustedAuthservId } from "../src/workflows/authentication-results.ts";
+import { frozenBindingsOf } from "../src/workflows/resource-authority.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
-import { inboxOf } from "../src/workflows/run-inboxes.ts";
+import { inboxesAdmitted, inboxOf } from "../src/workflows/run-inboxes.ts";
 import { allEvents } from "./audit-events.ts";
 import { deliver } from "./email-triggers.ts";
 import { endLiveResourceRuns } from "./json-workflow-apps.ts";
@@ -612,6 +615,76 @@ describe("replies to a run's mail", { timeout: 120_000 }, () => {
       reasons: ["run_ended"],
       oncePerDay: true,
       received: 1,
+    });
+  });
+
+  it("drops a reply to a run an earlier release started, audited, as one to a run that ended", async () => {
+    // A run's frozen bindings, as this release froze them: an earlier
+    // release's run holds a Knowledge collection's binding beside them,
+    // which this release doesn't read.
+    const { runId } = await holdingRun(shared);
+    const receipt = await env.DB.prepare(
+      "SELECT bindings FROM workflow_start_receipts WHERE id = ?"
+    )
+      .bind(runId)
+      .first<{ bindings: string }>();
+    const bindings = receipt?.bindings ?? "[]";
+    const old = crypto.randomUUID();
+    const { userId } = shared.admin;
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO workflow_start_receipts (id, invoker_type, invoker_id, idempotency_key, workflow_resource_id, workflow_resource_version, manifest_hash, principal_id, authority_generation, input_hash, bindings, created_at) VALUES (?, 'person', ?, ?, ?, 1, 'm', ?, 1, 'h', ?, ?)"
+      ).bind(
+        old,
+        userId,
+        `key-${old}`,
+        shared.workflow.id,
+        userId,
+        JSON.stringify([
+          ...z.array(z.json()).parse(JSON.parse(bindings)),
+          {
+            alias: "notes",
+            kind: "knowledge",
+            contractId: "old/notes@1",
+            fingerprint: "f",
+            approval: "approval-notes",
+            target: { kind: "knowledge", permissionId: "perm-old" },
+          },
+        ]),
+        Date.now()
+      ),
+      env.DB.prepare(
+        "INSERT INTO workflow_resource_runs (id, workflow_resource_id, version, manifest_hash, build_hash, principal_id, status, created_at) VALUES (?, ?, 1, 'm', 'b', ?, 'running', ?)"
+      ).bind(old, shared.workflow.id, userId, Date.now()),
+    ]);
+    // Its inbox, as its start made it.
+    const inboxes = await inboxesAdmitted(env, {
+      runId: old,
+      workflowId: shared.workflow.id,
+      bindings: frozenBindingsOf(bindings).values(),
+    });
+    const [inbox, ...more] = inboxes(sql`1`);
+    if (inbox === undefined) {
+      throw new Error(`Run ${old} has no inbox to make`);
+    }
+    await drizzle(env.DB).batch([inbox, ...more]);
+    const [address] = Object.values(
+      await inboxOf(env, { runId: old, calling: { candidate: undefined } })
+    );
+    if (address === undefined) {
+      throw new Error(`Run ${old} has no reply address`);
+    }
+
+    const delivery = await deliver(address, replyMail());
+
+    expect({
+      delivery,
+      reasons: await dropReasons(old),
+      received: await audited("workflow.email.reply.received", old),
+    }).toStrictEqual({
+      delivery: { rejected: undefined },
+      reasons: ["run_ended"],
+      received: [],
     });
   });
 

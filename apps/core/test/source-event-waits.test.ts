@@ -752,6 +752,84 @@ describe(
       });
     });
 
+    it("hands an event to the runs that can take it past the wait of a run an earlier release started, which it ends, audited", async () => {
+      const paying = await paymentWorkflow();
+      const runId = await waitingRun(paying, "INV-1");
+      // A run an earlier release started, waiting on the same match: its
+      // receipt froze a Knowledge collection's binding beside its event
+      // binding, which this release doesn't read. It sorts first, so the
+      // delivery reaches its wait before the healthy run's.
+      const old = `00000000-0000-4000-8000-${crypto.randomUUID().slice(-12)}`;
+      const frozen = [
+        {
+          alias: "payments",
+          kind: "event",
+          contractId: paying.contract,
+          fingerprint: "f",
+          approval: paying.approval,
+          target: { kind: "event", source: paying.source.id },
+        },
+        {
+          alias: "notes",
+          kind: "knowledge",
+          contractId: "old/notes@1",
+          fingerprint: "f",
+          approval: "approval-notes",
+          target: { kind: "knowledge", permissionId: "perm-old" },
+        },
+      ];
+      const statuses: number[] = [];
+      const ran = await ranAs(
+        runId,
+        waiting(),
+        inboxEngine(runId, keptOfTest(), async () => {
+          await env.DB.batch([
+            env.DB.prepare(
+              "INSERT INTO workflow_start_receipts (id, invoker_type, invoker_id, idempotency_key, workflow_resource_id, workflow_resource_version, manifest_hash, principal_id, authority_generation, input_hash, bindings, created_at) VALUES (?, 'person', ?, ?, ?, 1, 'm', ?, 1, 'h', ?, ?)"
+            ).bind(
+              old,
+              paying.admin.userId,
+              `key-${old}`,
+              paying.workflow.id,
+              paying.admin.userId,
+              JSON.stringify(frozen),
+              Date.now()
+            ),
+            env.DB.prepare(
+              "INSERT INTO workflow_resource_runs (id, workflow_resource_id, version, manifest_hash, build_hash, principal_id, status, created_at) VALUES (?, ?, 1, 'm', 'b', ?, 'running', ?)"
+            ).bind(old, paying.workflow.id, paying.admin.userId, Date.now()),
+            env.DB.prepare(
+              "INSERT INTO event_waits (run_id, step, event_type, workflow_id, binding, source_id, match_hash, expires_at) SELECT ?, step, event_type, workflow_id, binding, source_id, match_hash, expires_at FROM event_waits WHERE run_id = ?"
+            ).bind(old, runId),
+          ]);
+          statuses.push(await send(paying.source, invoice("INV-1")));
+        })
+      );
+      const oldWaits = await env.DB.prepare(
+        "SELECT COUNT(*) AS waits FROM event_waits WHERE run_id = ?"
+      )
+        .bind(old)
+        .first<{ waits: number }>();
+
+      expect({
+        statuses,
+        ran,
+        inbox: await inboxOf(runId),
+        oldWaits: oldWaits?.waits,
+        refused: await auditedOf(
+          "workflow.webhook.wait_refused",
+          old,
+          "reason"
+        ),
+      }).toStrictEqual({
+        statuses: [202],
+        ran: { ended: "INV-1", tampered: [] },
+        inbox: ["INV-1"],
+        oldWaits: 0,
+        refused: ["run_ended"],
+      });
+    });
+
     it("hands a kept event to each run that waits on its match, each once, another workflow's too, and a replay takes nothing more", async () => {
       const paying = await paymentWorkflow();
       // Another workflow, on the same source, waiting on the same invoice.

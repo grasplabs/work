@@ -437,9 +437,9 @@ export const listWorkflowBindings = async (
         and(
           eq(workflowBindingApprovals.workflowResourceId, workflow.id),
           eq(workflowBindingApprovals.status, "active"),
-          // Of a kind still served: an `operation` approval left from
-          // before each App's store was its own serves nothing, and a
-          // later release removes it with its audit event.
+          // Of a kind still served: migration 0252 removed the rows of
+          // kinds there are no more, and this holds for a row an older
+          // core writes after a roll back.
           inArray(workflowBindingApprovals.kind, [...catalogBindingKinds])
         )
       )
