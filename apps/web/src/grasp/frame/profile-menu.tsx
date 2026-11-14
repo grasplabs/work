@@ -19,11 +19,12 @@ import { Link, useLocation } from "@tanstack/react-router";
 import { useEffect } from "react";
 
 import type { CoreConnection } from "../../core-connection.ts";
-import { initials, ThemeMenu, useSignOut } from "../../frame/person-menu.tsx";
+import { ThemeMenu, useSignOut } from "../../frame/person-menu.tsx";
 import { organizationOf, useShownName } from "../../frame/sidebar-brand.tsx";
 import { applyTheme, readTheme } from "../../frame/theme.ts";
 import { tourStops } from "../../tour/tour-script.ts";
 import { startTour } from "../../tour/tour-state.ts";
+import { Avatar } from "../avatar/index.ts";
 import { focus } from "../focus/focus.ts";
 import { iconVars } from "../icons/icon.stylex.ts";
 import {
@@ -73,21 +74,6 @@ const styles = stylex.create({
   },
   // The person's initials on lime, a chip: two letters at the smallest
   // size Grasp UI allows.
-  initials: {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    flexShrink: 0,
-    width: frame.iconButton,
-    height: frame.iconButton,
-    borderRadius: frame.corner,
-    backgroundColor: grasp.lime,
-    // Words on lime are always the deep ink, in either theme.
-    color: grasp.lightInk,
-    fontSize: grasp.textXs,
-    lineHeight: grasp.textXsLine,
-    fontWeight: grasp.weightMedium,
-  },
   who: {
     display: "flex",
     flexDirection: "column",
@@ -146,9 +132,7 @@ export const ProfileMenu = ({
           <button type="button" {...stylex.props(styles.button, focus.ring)} />
         }
       >
-        <span aria-hidden="true" {...stylex.props(styles.initials)}>
-          {initials(identity.name)}
-        </span>
+        <Avatar decorative name={identity.name} size="sm" />
         <span {...stylex.props(styles.who)}>
           <span {...stylex.props(styles.name)}>{identity.name}</span>
           {organization === undefined ? null : (

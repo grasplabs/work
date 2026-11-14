@@ -6,6 +6,13 @@ packages:
 # Supply-chain defaults: new versions wait 3 days, exotic sub-dependencies are
 # blocked, and only the packages listed here may run install scripts.
 minimumReleaseAge: 4320
+# Grasp UI's components are built on UI SDK 0.1.0-beta.1 (published 12 Nov
+# 2026, 17:09 UTC). Let in before its three days so work can adopt the
+# composer now (Ruben, 14 Nov: this doesn't go live within days anyway).
+# Remove this exclusion from 15 Nov 2026, 17:09 UTC, when it clears.
+minimumReleaseAgeExclude:
+  - "@ui-sdk/core@0.1.0-beta.1"
+  - "@ui-sdk/react@0.1.0-beta.1"
 blockExoticSubdeps: true
 strictDepBuilds: true
 allowBuilds:
@@ -206,6 +213,8 @@ catalog:
   "@hugeicons/react": 1.1.10
   "@stylexjs/stylex": 0.19.1
   "@stylexjs/unplugin": 0.19.1
+  "@ui-sdk/core": 0.1.0-beta.1
+  "@ui-sdk/react": 0.1.0-beta.1
   "@tailwindcss/vite": 4.3.3
   # The state, subscriptions and lifecycle under the SDK's forms (useForm,
   # @grasp-os/sdk/react) and their fields (@grasp-os/ui/form).
