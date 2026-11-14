@@ -348,6 +348,19 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
   // Each named exactly: a release installing skills is no read.
   { action: "brain.skills.select", text: msg`Read skills from the Brain` },
   { action: "brain.skills.read", text: msg`Read skills from the Brain` },
+  // An App or a workflow reading entities, and anyone's memory written,
+  // forgotten or corrected: each named exactly.
+  { action: "brain.entities.get", text: msg`Read entities from the Brain` },
+  { action: "brain.entities.find", text: msg`Read entities from the Brain` },
+  {
+    action: "brain.memory.remembered",
+    text: msg`Remembered something in the Brain`,
+  },
+  { action: "brain.memory.forgotten", text: msg`Forgot a memory in the Brain` },
+  {
+    action: "brain.memory.corrected",
+    text: msg`Corrected a memory in the Brain`,
+  },
   { action: "guest.invited", text: msg`Invited a guest` },
   { action: "guest.revoked", text: msg`Took back a guest's link` },
   { action: "guest.read", text: msg`Read what a guest wrote` },

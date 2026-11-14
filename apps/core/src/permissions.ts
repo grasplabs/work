@@ -681,11 +681,19 @@ const requireObjectFits = (
   actions: readonly string[]
 ): void => {
   // The Brain is the one platform offer an agent or an independent
-  // workflow may hold too: Apps, runs and agents share its permission.
+  // workflow may hold too: Apps, runs and agents share its permission to
+  // read it; writing to it is an App's or a workflow's alone.
   const brainReader =
     actions.includes("brain") &&
     (subject.type === "agent" || subject.type === "workflow");
-  if (object.type === "platform" && subject.type !== "app" && !brainReader) {
+  const brainWriter =
+    actions.includes("brain.write") && subject.type === "workflow";
+  if (
+    object.type === "platform" &&
+    subject.type !== "app" &&
+    !brainReader &&
+    !brainWriter
+  ) {
     refuseRequest("subject: Only an App uses what the platform offers.");
   }
   requireAppCallerFits(subject, object);

@@ -4123,6 +4123,10 @@ msgstr "Company"
 msgid "Company Brain, read only. This can read company Brain evidence and its open questions, from the collections it was granted and only what the person it works for may read too. It can never write to the Brain. Every read is recorded"
 msgstr "Company Brain, read only. This can read company Brain evidence and its open questions, from the collections it was granted and only what the person it works for may read too. It can never write to the Brain. Every read is recorded"
 
+#: src/activity/pending.tsx
+msgid "Company Brain, write. This can remember facts in its own name that everyone in the company can read, and forget or correct them. It writes only while everyone in the company may read everything it can read. Every write is recorded"
+msgstr "Company Brain, write. This can remember facts in its own name that everyone in the company can read, and forget or correct them. It writes only while everyone in the company may read everything it can read. Every write is recorded"
+
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Complaint"
@@ -4529,6 +4533,10 @@ msgstr "Copying didn't work"
 #: src/brain/memory-page.tsx
 msgid "Correct it"
 msgstr "Correct it"
+
+#: src/activity/audit-words.ts
+msgid "Corrected a memory in the Brain"
+msgstr "Corrected a memory in the Brain"
 
 #: src/brain/memory-page.tsx
 msgid "Corrected by"
@@ -6119,6 +6127,10 @@ msgstr "For the company"
 #: src/agents/agent-wakes.tsx
 msgid "For whom"
 msgstr "For whom"
+
+#: src/activity/audit-words.ts
+msgid "Forgot a memory in the Brain"
+msgstr "Forgot a memory in the Brain"
 
 #: src/connections/groups.ts
 msgctxt "kind of app"
@@ -11050,6 +11062,10 @@ msgid "Read by <0/>"
 msgstr "Read by <0/>"
 
 #: src/activity/audit-words.ts
+msgid "Read entities from the Brain"
+msgstr "Read entities from the Brain"
+
+#: src/activity/audit-words.ts
 msgid "Read everyone's calls of unknown outcome"
 msgstr "Read everyone's calls of unknown outcome"
 
@@ -11327,6 +11343,10 @@ msgstr "Remember it"
 #: src/brain/remember-dialog.tsx
 msgid "Remember something"
 msgstr "Remember something"
+
+#: src/activity/audit-words.ts
+msgid "Remembered something in the Brain"
+msgstr "Remembered something in the Brain"
 
 #: src/agents/agent-documents.tsx
 #: src/agents/agent-wakes.tsx

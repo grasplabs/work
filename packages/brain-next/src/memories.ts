@@ -369,7 +369,7 @@ const dateOf = (at: number | null): Date | null =>
 const confirmationSchema = z.strictObject({ by: z.string(), at: z.number() });
 
 /** A memory's type as stored. */
-const memoryTypeSchema = z.enum(memoryTypes);
+export const memoryTypeSchema = z.enum(memoryTypes);
 
 /** A confirmation as `confirmationSql` gives it, or none. */
 const confirmationOf = (
@@ -707,7 +707,7 @@ export const listContested = (
 };
 
 /** `?1` the memory's id: that memory, if current for the reader. */
-const currentOneSql = memoriesSql({
+export const currentOneSql = memoriesSql({
   base: "SELECT row FROM memories WHERE id = ?1",
   filter: "judged.is_current = 1",
   order: "m.row",
@@ -717,12 +717,58 @@ const currentOneSql = memoriesSql({
  * `?1` the entity's row, `?6` the attribute: its current memories the
  * reader may read.
  */
-const currentOfAttributeSql = memoriesSql({
+export const currentOfAttributeSql = memoriesSql({
   base: `SELECT row FROM memories
     WHERE entity = ?1 AND attribute = ?6`,
   filter: "judged.is_current = 1",
   order: "m.row",
 });
+
+/**
+ * Records `by`'s confirmation of the memory at `row` over the memories
+ * `over`, unless the same one over the same memories is already recorded.
+ * In the caller's transaction.
+ */
+export const confirmOver = (
+  sql: SqlStorage,
+  row: number,
+  by: string,
+  over: readonly { row: number }[]
+): void => {
+  const overRows = JSON.stringify(over.map((memory) => memory.row));
+  // The same person over the same rivals again: already recorded.
+  const [again] = sql
+    .exec(
+      `SELECT 1 FROM memory_confirmations AS confirmed
+      WHERE confirmed.memory = ?1 AND confirmed.person = ?2
+        AND (SELECT count(*) FROM memory_confirmed_over AS overruled
+          WHERE overruled.confirmation = confirmed.row) = json_array_length(?3)
+        AND NOT EXISTS (SELECT 1 FROM memory_confirmed_over AS overruled
+          WHERE overruled.confirmation = confirmed.row
+            AND overruled.memory NOT IN (SELECT value FROM json_each(?3)))`,
+      row,
+      by,
+      overRows
+    )
+    .toArray();
+  if (again !== undefined) {
+    return;
+  }
+  const confirmation = sql
+    .exec<{ row: number }>(
+      "INSERT INTO memory_confirmations (memory, person, at) VALUES (?, ?, ?) RETURNING row",
+      row,
+      by,
+      stampWrite(sql)
+    )
+    .one().row;
+  sql.exec(
+    `INSERT INTO memory_confirmed_over (confirmation, memory)
+    SELECT ?, value FROM json_each(?)`,
+    confirmation,
+    overRows
+  );
+};
 
 /**
  * The reader confirms the memory `id`, current and readable to them, over
@@ -751,45 +797,13 @@ export const confirmMemory = (
           -1,
           target.attribute
         ).filter(({ value_key: key }) => key !== target.value_key);
-  const overRows = JSON.stringify(over.map((memory) => memory.row));
-  // The same person over the same rivals again: already recorded.
-  const [again] = sql
-    .exec(
-      `SELECT 1 FROM memory_confirmations AS confirmed
-      WHERE confirmed.memory = ?1 AND confirmed.person = ?2
-        AND (SELECT count(*) FROM memory_confirmed_over AS overruled
-          WHERE overruled.confirmation = confirmed.row) = json_array_length(?3)
-        AND NOT EXISTS (SELECT 1 FROM memory_confirmed_over AS overruled
-          WHERE overruled.confirmation = confirmed.row
-            AND overruled.memory NOT IN (SELECT value FROM json_each(?3)))`,
-      target.row,
-      reader.person,
-      overRows
-    )
-    .toArray();
-  if (again !== undefined) {
-    return "done";
-  }
-  const { row } = sql
-    .exec<{ row: number }>(
-      "INSERT INTO memory_confirmations (memory, person, at) VALUES (?, ?, ?) RETURNING row",
-      target.row,
-      reader.person,
-      stampWrite(sql)
-    )
-    .one();
-  sql.exec(
-    `INSERT INTO memory_confirmed_over (confirmation, memory)
-    SELECT ?, value FROM json_each(?)`,
-    row,
-    overRows
-  );
+  confirmOver(sql, target.row, reader.person, over);
   return "done";
 };
 
 /**
- * Retires the memory `id` if its lineage is the reader's person's own (as
- * writer), the reader may read it, it is not retired, and it is in its
+ * Retires the memory `id` if its lineage is `writer`'s own, the reader may
+ * read it, it is not retired, and it is in its
  * world time now: current, or ended by a newer memory of its lineage,
  * which a person forgets as well, so it never becomes current again when
  * the newer one is retired too. One they already retired answers `done`
@@ -797,13 +811,13 @@ export const confirmMemory = (
  */
 export const retireMemory = (
   sql: SqlStorage,
-  { id, reader }: { id: string; reader: PersonReader }
+  { id, reader, writer }: { id: string; reader: Reader; writer: string }
 ): MemoryChangeOutcome => {
   const asked = [
     id,
     reader.person,
     JSON.stringify(reader.groups),
-    lineageOfWriter(reader.person),
+    lineageOfWriter(writer),
     readMoment(sql),
   ];
   const stamp = nextStamp(sql);

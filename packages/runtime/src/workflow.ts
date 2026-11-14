@@ -111,6 +111,9 @@ export type {
   BrainRecall,
   BrainSkill,
   BrainSkillText,
+  BrainCard,
+  BrainEntity,
+  BrainMemory,
 } from "./brain-recall.ts";
 export type { Param, ParamMetadata } from "./workflow-params.ts";
 export type {

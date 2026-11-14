@@ -4123,6 +4123,10 @@ msgstr "Entreprise"
 msgid "Company Brain, read only. This can read company Brain evidence and its open questions, from the collections it was granted and only what the person it works for may read too. It can never write to the Brain. Every read is recorded"
 msgstr "Company Brain, en lecture seule. Il peut lire les éléments et les questions ouvertes du Company Brain, dans les collections qui lui ont été accordées et seulement ce que la personne pour qui il travaille peut aussi lire. Il ne peut jamais écrire dans le Brain. Chaque lecture est enregistrée"
 
+#: src/activity/pending.tsx
+msgid "Company Brain, write. This can remember facts in its own name that everyone in the company can read, and forget or correct them. It writes only while everyone in the company may read everything it can read. Every write is recorded"
+msgstr "Company Brain, en écriture. Il peut retenir en son propre nom des faits que tout le monde dans l'entreprise peut lire, et les oublier ou les corriger. Il n'écrit que tant que tout le monde dans l'entreprise peut lire tout ce qu'il peut lire. Chaque écriture est enregistrée"
+
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Complaint"
@@ -4529,6 +4533,10 @@ msgstr "La copie n’a pas fonctionné"
 #: src/brain/memory-page.tsx
 msgid "Correct it"
 msgstr "Corriger"
+
+#: src/activity/audit-words.ts
+msgid "Corrected a memory in the Brain"
+msgstr "A corrigé un souvenir du Cerveau"
 
 #: src/brain/memory-page.tsx
 msgid "Corrected by"
@@ -6119,6 +6127,10 @@ msgstr "Pour l'entreprise"
 #: src/agents/agent-wakes.tsx
 msgid "For whom"
 msgstr "Pour qui"
+
+#: src/activity/audit-words.ts
+msgid "Forgot a memory in the Brain"
+msgstr "A oublié un souvenir du Cerveau"
 
 #: src/connections/groups.ts
 msgctxt "kind of app"
@@ -11050,6 +11062,10 @@ msgid "Read by <0/>"
 msgstr "Lu par <0/>"
 
 #: src/activity/audit-words.ts
+msgid "Read entities from the Brain"
+msgstr "A lu des entités du Cerveau"
+
+#: src/activity/audit-words.ts
 msgid "Read everyone's calls of unknown outcome"
 msgstr "A lu les appels au résultat inconnu de tout le monde"
 
@@ -11327,6 +11343,10 @@ msgstr "Le retenir"
 #: src/brain/remember-dialog.tsx
 msgid "Remember something"
 msgstr "Retenir quelque chose"
+
+#: src/activity/audit-words.ts
+msgid "Remembered something in the Brain"
+msgstr "A retenu quelque chose dans le Cerveau"
 
 #: src/agents/agent-documents.tsx
 #: src/agents/agent-wakes.tsx

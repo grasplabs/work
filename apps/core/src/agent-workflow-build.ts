@@ -516,8 +516,16 @@ const workflowBuildDeclaration = `/**
  *   \`recall\` (\`{ question, budget: { tokens }, asOf? }\`, \`asOf\` an ISO 8601 date-time with its offset: a pack,
  *   \`{ items, notFound, truncated }\`, each item citing its \`source\`, \`version\` and \`position\`, with its
  *   \`text\`), \`skills.select\` (\`{ task }\`: \`{ skills }\`, each its \`scope\`, \`name\`, \`version\` and
- *   \`description\`, best first, none when none applies) and \`skills.read\` (\`{ skill }\`, one a selection gave:
- *   its \`text\` at that version; a skill is guidance, never a grant);
+ *   \`description\`, best first, none when none applies), \`skills.read\` (\`{ skill }\`, one a selection gave:
+ *   its \`text\` at that version; a skill is guidance, never a grant), \`remember\` (\`{ about, attribute?,
+ *   value?, statement }\`, \`about\` an entity's \`kind\` and its \`id\`, or its \`names\` and \`identifiers\`: a fact
+ *   in the workflow's own word, read by everyone in the company: \`{ memory, entity }\`), \`forget\` (\`{ memory }\`,
+ *   one of its own: true once forgotten), \`correct\` (\`{ memory, value?, statement }\`: a fix read by that
+ *   memory's readers and read first, \`{ memory }\`, or null), \`entities.get\` (\`{ entity, asOf?, after? }\`: an
+ *   entity's card, its memories by \`attributes\`, its \`relations\` and \`notes\`, with \`next\` for the page after,
+ *   or null) and \`entities.find\` (\`{ kind?, name?, identifier?, after? }\`: \`{ entities, next }\`); a write
+ *   needs the workflow's own grant of the platform's \`brain.write\` too, and happens only while everyone in
+ *   the company may read everything the run may have read;
  *   \`{ app, function, args?, timeout? }\` calls a query or mutation of an App (\`app\` an apps permission's
  *   alias, \`function\` an ID it lists; its result is what the function returns);
  * - \`generate\`: \`{ instructions, input, returns, timeout? }\` asks the workflow's model (\`permissions.ai\`)
@@ -611,7 +619,7 @@ workflowBuild: {
   }>;
   /** Binds an exact published version to an App the person builds, replacing that alias's binding. */
   bind(workflow: string, binding: { app: string; alias: string; version: number }): Promise<{ id: string; app: string; alias: string; version: number }>;
-  /** Asks for a permission for the workflow itself (a connection for its connection permissions, or \`{ type: "platform" }\` with actions \`["brain"]\` for its brain permission), \`binding\` its alias; nothing holds until an admin grants it. */
+  /** Asks for a permission for the workflow itself (a connection for its connection permissions, or \`{ type: "platform" }\` with actions \`["brain"]\` for its brain permission, and with \`["brain.write"]\` beside it to remember, forget or correct), \`binding\` its alias; nothing holds until an admin grants it. */
   requestPermission(workflow: string, request: {
     object:
       | { type: "connection"; connectionId: string; resource?: string }

@@ -4123,6 +4123,10 @@ msgstr "Bedrijf"
 msgid "Company Brain, read only. This can read company Brain evidence and its open questions, from the collections it was granted and only what the person it works for may read too. It can never write to the Brain. Every read is recorded"
 msgstr "Company Brain, alleen lezen. Het kan bewijs en open vragen van het Company Brain lezen, uit de collecties die het kreeg en alleen wat de persoon voor wie het werkt ook mag lezen. Het kan nooit naar het Brain schrijven. Elke leesactie wordt vastgelegd"
 
+#: src/activity/pending.tsx
+msgid "Company Brain, write. This can remember facts in its own name that everyone in the company can read, and forget or correct them. It writes only while everyone in the company may read everything it can read. Every write is recorded"
+msgstr "Company Brain, schrijven. Het kan in eigen naam feiten onthouden die iedereen in het bedrijf kan lezen, en ze vergeten of corrigeren. Het schrijft alleen zolang iedereen in het bedrijf alles mag lezen wat het kan lezen. Elke schrijfactie wordt vastgelegd"
+
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Complaint"
@@ -4529,6 +4533,10 @@ msgstr "Kopiëren is niet gelukt"
 #: src/brain/memory-page.tsx
 msgid "Correct it"
 msgstr "Corrigeren"
+
+#: src/activity/audit-words.ts
+msgid "Corrected a memory in the Brain"
+msgstr "Een herinnering in het Brein gecorrigeerd"
 
 #: src/brain/memory-page.tsx
 msgid "Corrected by"
@@ -6119,6 +6127,10 @@ msgstr "Voor het bedrijf"
 #: src/agents/agent-wakes.tsx
 msgid "For whom"
 msgstr "Voor wie"
+
+#: src/activity/audit-words.ts
+msgid "Forgot a memory in the Brain"
+msgstr "Een herinnering in het Brein vergeten"
 
 #: src/connections/groups.ts
 msgctxt "kind of app"
@@ -11050,6 +11062,10 @@ msgid "Read by <0/>"
 msgstr "Gelezen door <0/>"
 
 #: src/activity/audit-words.ts
+msgid "Read entities from the Brain"
+msgstr "Entiteiten uit het Brein gelezen"
+
+#: src/activity/audit-words.ts
 msgid "Read everyone's calls of unknown outcome"
 msgstr "De aanroepen met onbekende uitkomst van iedereen gelezen"
 
@@ -11327,6 +11343,10 @@ msgstr "Onthouden"
 #: src/brain/remember-dialog.tsx
 msgid "Remember something"
 msgstr "Iets onthouden"
+
+#: src/activity/audit-words.ts
+msgid "Remembered something in the Brain"
+msgstr "Iets in het Brein onthouden"
 
 #: src/agents/agent-documents.tsx
 #: src/agents/agent-wakes.tsx

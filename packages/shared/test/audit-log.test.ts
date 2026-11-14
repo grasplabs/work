@@ -133,6 +133,16 @@ describe("audit event types", () => {
     ).toStrictEqual(["read", "read", null]);
   });
 
+  it("files code reading the Brain's entities as reads, and correcting a memory as an action", () => {
+    expect(
+      [
+        "brain.entities.get",
+        "brain.entities.find",
+        "brain.memory.corrected",
+      ].map((action) => typeOf(action))
+    ).toStrictEqual(["read", "read", "action"]);
+  });
+
   it("files computing improvement signals as an action, and reading them as a read", () => {
     expect(
       ["improvement.signals.computed", "improvement.signals.read"].map(

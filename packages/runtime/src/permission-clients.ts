@@ -7,8 +7,14 @@ import type {
 import type { HttpContract } from "@grasp-os/shared/http-contract";
 
 import type {
+  BrainCard,
+  BrainCorrect,
+  BrainEntitiesFind,
+  BrainEntity,
+  BrainMembersOf,
   BrainPack,
   BrainRecall,
+  BrainRemember,
   BrainSkill,
   BrainSkillText,
 } from "./brain-recall.ts";
@@ -91,48 +97,69 @@ export interface HttpClient<Actions extends readonly string[]> {
       ) => Promise<Response>;
 }
 
-/** What `ctx.brain.skills` is, by the Brain's operations. */
-type BrainSkillsClient<Operations extends readonly BrainOperation[]> =
-  ("skills.select" extends Operations[number]
-    ? {
-        /**
-         * The skills that apply to `request.task`, best first, a few at
-         * most, each at its version: the same a chat's code selects.
-         */
-        readonly select: (request: {
-          /** The task, in your words: at most 2,000 characters. */
-          readonly task: string;
-        }) => Promise<{ readonly skills: readonly BrainSkill[] }>;
-      }
-    : unknown) &
-    ("skills.read" extends Operations[number]
-      ? {
-          /** A skill at exactly the version a selection gave, whole. */
-          readonly read: (request: {
-            /** As a selection gave it: its scope, name and version. */
-            readonly skill: Pick<BrainSkill, "scope" | "name" | "version">;
-          }) => Promise<BrainSkillText>;
-        }
-      : unknown);
+/** Each of the Brain's operations, as a member of `ctx.brain` calls it. */
+interface BrainCalls {
+  /**
+   * What everyone in the company may read that answers
+   * `request.question`, within its budget: the same pack a workflow's
+   * step and a chat's code get.
+   */
+  readonly recall: (request: BrainRecall) => Promise<BrainPack>;
+  /**
+   * The skills that apply to `request.task`, best first, a few at most,
+   * each at its version: the same a chat's code selects.
+   */
+  readonly "skills.select": (request: {
+    /** The task, in your words: at most 2,000 characters. */
+    readonly task: string;
+  }) => Promise<{ readonly skills: readonly BrainSkill[] }>;
+  /** A skill at exactly the version a selection gave, whole. */
+  readonly "skills.read": (request: {
+    /** As a selection gave it: its scope, name and version. */
+    readonly skill: Pick<BrainSkill, "scope" | "name" | "version">;
+  }) => Promise<BrainSkillText>;
+  /**
+   * Remembers a fact in the App's own word, read by everyone in the
+   * company: its new word on the same entity and attribute replaces its
+   * earlier one. The memory and the entity it is about.
+   */
+  readonly remember: (
+    memory: BrainRemember
+  ) => Promise<{ readonly memory: string; readonly entity: string }>;
+  /**
+   * Forgets one of the App's own memories: true once it is forgotten
+   * (again for one forgotten before), false for none of the App's.
+   */
+  readonly forget: (request: { readonly memory: string }) => Promise<boolean>;
+  /**
+   * Corrects a memory everyone in the company may read, with a fix in the
+   * App's word, read by exactly that memory's readers and read first: the
+   * fix, or null for no memory it may correct.
+   */
+  readonly correct: (
+    correction: BrainCorrect
+  ) => Promise<{ readonly memory: string } | null>;
+  /**
+   * A page of an entity's card, as everyone in the company may read it,
+   * now or as of `asOf` (ISO 8601, with its offset): null for no entity
+   * they may see.
+   */
+  readonly "entities.get": (request: {
+    readonly entity: string;
+    readonly asOf?: string;
+    /** A page's `next`, for the page after it. */
+    readonly after?: string;
+  }) => Promise<BrainCard | null>;
+  /** A page of the entities everyone in the company may see that match. */
+  readonly "entities.find": (request: BrainEntitiesFind) => Promise<{
+    readonly entities: readonly BrainEntity[];
+    readonly next: string | null;
+  }>;
+}
 
-/** What `ctx.brain` is, by its operations. */
+/** What `ctx.brain` is, by its operations: `entities.get` as `ctx.brain.entities.get`. */
 export type BrainClient<Operations extends readonly BrainOperation[]> =
-  ("recall" extends Operations[number]
-    ? {
-        /**
-         * What the person the call acts for may read that answers
-         * `request.question`, within its budget: the same pack a
-         * workflow's step and a chat's code get.
-         */
-        readonly recall: (request: BrainRecall) => Promise<BrainPack>;
-      }
-    : unknown) &
-    (Extract<Operations[number], `skills.${string}`> extends never
-      ? unknown
-      : {
-          /** How things are done here: Grasp's skills and the company's. */
-          readonly skills: BrainSkillsClient<Operations>;
-        });
+  BrainMembersOf<BrainCalls, Operations[number]>;
 
 /** What `ctx.guests` is, by its operations. */
 export type GuestsClient<Operations extends readonly GuestsOperation[]> =

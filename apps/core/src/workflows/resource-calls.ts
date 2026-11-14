@@ -34,6 +34,7 @@ import { resolveCatalogKeys } from "../workflow-catalog.ts";
 import { writeJson } from "./bounded-json.ts";
 import {
   callBrain,
+  isBrainWrite,
   requireBrainAnswer,
   requireBrainRequest,
 } from "./brain-calls.ts";
@@ -846,7 +847,9 @@ const handsOut = (call: BuiltCall): boolean =>
   // Its arguments are the App's to keep.
   call.name === "grasp.app" ||
   call.name === "grasp.model" ||
-  (call.name === "grasp.files" && call.operation === "write");
+  (call.name === "grasp.files" && call.operation === "write") ||
+  // What it writes is read by the company (brain-calls.ts).
+  (call.name === "grasp.brain" && isBrainWrite(call.operation));
 
 /**
  * What every receipt of a files call says before its answer: the
@@ -1165,7 +1168,7 @@ export const makeCall = async (
         break;
       }
       case "grasp.brain": {
-        output = await callBrain(env, run, binding, call);
+        output = await callBrain(env, run, binding, call, effect.key);
         break;
       }
       case "grasp.files": {

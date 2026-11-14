@@ -1447,6 +1447,8 @@ const leavingNone = [
   // One statement of which version a change made, if the reader may read it.
   "changeVersion",
   "confirmMemory",
+  // A correction is written whole in its call, as an add's memories.
+  "correctMemory",
   // Cards likewise: read whole in their call (cards.ts).
   "erasePerson",
   "exportFile",

@@ -146,6 +146,13 @@ export const objectOf = (
       msg`Guest chats. This App can invite people who aren't members to a short chat with a model through a link, and read back what they write. Guests reach nothing else; their chats spend the model budget of whoever invites them`
     );
   }
+  if (object.type === "platform" && actions.includes("brain.write")) {
+    // Consent in plain words: what it writes, who reads it, and the rule
+    // that holds it to what everyone may read (core's brain-recall.ts).
+    return i18n._(
+      msg`Company Brain, write. This can remember facts in its own name that everyone in the company can read, and forget or correct them. It writes only while everyone in the company may read everything it can read. Every write is recorded`
+    );
+  }
   if (object.type === "platform" && actions.includes("brain")) {
     // Consent in plain words: what it reads, and whose access bounds it.
     return i18n._(

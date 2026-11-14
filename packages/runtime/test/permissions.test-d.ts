@@ -15,6 +15,7 @@ import { expectTypeOf } from "vite-plus/test";
 
 import { defineApp, permission } from "../src/index.ts";
 import type {
+  BrainCard,
   BrainPack,
   BrainSkill,
   BrainSkillText,
@@ -320,6 +321,32 @@ expectTypeOf(brainCtx.brain).not.toHaveProperty("skills");
 const selectOnly = permission.brain({ operations: ["skills.select"] });
 declare const selectCtx: ActionCtx<typeof selectOnly>;
 expectTypeOf(selectCtx.brain.skills).not.toHaveProperty("read");
+// Memories and entities: each its own shapes, under the operations declared.
+const memoriesBrain = permission.brain({
+  operations: ["remember", "correct", "entities.get"],
+});
+declare const memoriesCtx: ActionCtx<typeof memoriesBrain>;
+expectTypeOf(
+  memoriesCtx.brain.remember({
+    about: { kind: "customer", names: ["Acme"] },
+    statement: "Acme renews on 1 March",
+  })
+).resolves.toEqualTypeOf<{
+  readonly memory: string;
+  readonly entity: string;
+}>();
+expectTypeOf(
+  memoriesCtx.brain.entities.get({ entity: "e" })
+).resolves.toEqualTypeOf<BrainCard | null>();
+await memoriesCtx.brain.remember({
+  // @ts-expect-error -- an entity is one of the Brain's kinds
+  about: { kind: "planet" },
+  statement: "A fact",
+});
+// @ts-expect-error -- what code writes names no readers
+await memoriesCtx.brain.correct({ memory: "m", statement: "x", readers: [] });
+expectTypeOf(memoriesCtx.brain).not.toHaveProperty("forget");
+expectTypeOf(memoriesCtx.brain.entities).not.toHaveProperty("find");
 // Only the operations each declares.
 await brainCtx.guests.revoke("chat");
 expectTypeOf(brainCtx.guests).not.toHaveProperty("invite");

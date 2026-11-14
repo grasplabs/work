@@ -87,7 +87,11 @@ import type { PeopleNotifications } from "./app-notifications.ts";
 import { answerPeople } from "./app-people.ts";
 import type { PeopleAccess } from "./app-people.ts";
 import {
+  brainCardSchema,
+  brainCorrectedSchema,
+  brainEntitiesSchema,
   brainPackSchema,
+  brainRememberedSchema,
   brainSkillsSelectedSchema,
   brainSkillTextSchema,
 } from "./brain-pack.ts";
@@ -1870,6 +1874,11 @@ const brainResults: Readonly<Record<string, z.ZodType>> = {
   recall: brainPackSchema,
   "skills.select": brainSkillsSelectedSchema,
   "skills.read": brainSkillTextSchema,
+  remember: brainRememberedSchema,
+  forget: z.boolean(),
+  correct: brainCorrectedSchema,
+  "entities.get": brainCardSchema.nullable(),
+  "entities.find": brainEntitiesSchema,
 };
 
 /**

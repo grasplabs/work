@@ -344,9 +344,9 @@ interface Budget {
 const walk = async (
   env: Env,
   walked: Walked,
-  apps: readonly AppId[],
+  apps: readonly string[],
   budget: Budget
-): Promise<{ reach: Map<AppId, Reach>; capped: boolean }> => {
+): Promise<{ reach: Map<string, Reach>; capped: boolean }> => {
   const holds = new Map<string, Set<string>>();
   const explored = new Set<string>();
   let frontier = [...new Set<string>(apps)];
@@ -401,7 +401,7 @@ const walk = async (
       walked.known.set(id, found.has(id));
     }
   }
-  const reach = new Map<AppId, Reach>(
+  const reach = new Map<string, Reach>(
     apps.map((app) => {
       const reached = new Set<string>([app]);
       const queue: string[] = [app];
@@ -443,8 +443,8 @@ const walk = async (
  */
 const reachedThroughCalls = async (
   env: Env,
-  apps: readonly AppId[]
-): Promise<Map<AppId, Reach>> => {
+  apps: readonly string[]
+): Promise<Map<string, Reach>> => {
   const walked: Walked = { edges: new Map(), known: new Map() };
   const { reach, capped } = await walk(env, walked, apps, {
     levels: Infinity,
@@ -475,20 +475,16 @@ const reachedThroughCalls = async (
 };
 
 /**
- * The sources each of the Apps `apps` may have read, as they are now, and
- * those of the Apps whose data they may hold through calls between Apps
- * (`reachedThroughCalls`), in a few queries whatever their number: those
- * that follow the calls, one for all their permissions, one series of
- * pages to connect for all their connections, and one Knowledge batch for
- * all their collections.
+ * `sourcesOfApps` for nodes of the graph: Apps, by their IDs, and
+ * workflows (`workflowNode`), each walked as an App is, from itself.
  */
-export const sourcesOfApps = async (
+const sourcesOfNodes = async (
   env: Env,
-  apps: readonly AppId[]
-): Promise<Map<AppId, AppSources>> => {
+  apps: readonly string[]
+): Promise<Map<string, AppSources>> => {
   const reach =
     apps.length === 0
-      ? new Map<AppId, Reach>()
+      ? new Map<string, Reach>()
       : await reachedThroughCalls(env, apps);
   const all = [...new Set([...reach.values()].flatMap((of) => [...of.nodes]))];
   const allApps = all.filter((id) => !id.startsWith(workflowPrefix));
@@ -604,6 +600,43 @@ export const sourcesOfApps = async (
   );
 };
 
+/**
+ * The sources each of the Apps `apps` may have read, as they are now, and
+ * those of the Apps whose data they may hold through calls between Apps
+ * (`reachedThroughCalls`), in a few queries whatever their number: those
+ * that follow the calls, one for all their permissions, one series of
+ * pages to connect for all their connections, and one Knowledge batch for
+ * all their collections.
+ */
+export const sourcesOfApps = async (
+  env: Env,
+  apps: readonly AppId[]
+): Promise<Map<AppId, AppSources>> => {
+  const sources = await sourcesOfNodes(env, apps);
+  return new Map(
+    apps.map((app) => [
+      app,
+      sources.get(app) ?? { connections: [], collections: [], unresolved: [] },
+    ])
+  );
+};
+
+/**
+ * The sources independent workflow `workflow` may have read, as they are
+ * now: its own grants and what it reaches through them, walked as an
+ * App's are (`sourcesOfApps`).
+ */
+export const sourcesOfWorkflow = async (
+  env: Env,
+  workflow: string
+): Promise<AppSources> => {
+  const node = workflowNode(workflow);
+  const sources = await sourcesOfNodes(env, [node]);
+  return (
+    sources.get(node) ?? { connections: [], collections: [], unresolved: [] }
+  );
+};
+
 /** The sources `app` may have read, as they are now. */
 export const sourcesOf = async (env: Env, app: AppId): Promise<AppSources> => {
   const sources = await sourcesOfApps(env, [app]);
@@ -710,3 +743,11 @@ export const unreadableBy = (sources: AppSources, reader: Reader): string[] => [
   ),
   ...sources.unresolved,
 ];
+
+/**
+ * Whether every member of the organization may read every one of
+ * `sources`: one with no team and no admin role may (`unreadableBy`). What
+ * code writes for the whole company is held to it (brain-recall.ts).
+ */
+export const readableByEveryMember = (sources: AppSources): boolean =>
+  unreadableBy(sources, { userId: "", teamIds: [], admin: false }).length === 0;

@@ -85,3 +85,132 @@ export interface BrainSkillText {
   readonly version: number;
   readonly text: string;
 }
+
+// Memories and entities, beside recall: an App's action (`ctx.brain`) and
+// a workflow's step (`ctx.brain.<alias>`) remember, forget and correct in
+// their own word, and read the entities and memories everyone in the
+// company may read (`ctx.brain.entities`). What they write is read by
+// everyone in the company, as the App's or the workflow's own word.
+
+/** What kind of thing an entity is. */
+export type BrainEntityKind =
+  | "person"
+  | "team"
+  | "customer"
+  | "supplier"
+  | "project"
+  | "product"
+  | "tool"
+  | "routine"
+  | "app"
+  | "workflow"
+  | "connection"
+  | "term";
+
+/** An entity, as everyone in the company may see it: its ID, kind and earliest name. */
+export interface BrainEntity {
+  readonly id: string;
+  readonly kind: BrainEntityKind;
+  readonly name: string | null;
+}
+
+/** An exact identifier of an entity: an email address, or a reference such as `crm:ACME-1`. */
+export interface BrainIdentifier {
+  readonly type: "email" | "ref";
+  readonly value: string;
+}
+
+/**
+ * A memory on a card: what it says (`statement`), the attribute it is
+ * filed under and its value, when the Brain learned it (ISO 8601), whether
+ * a person or a correction confirmed it, and whether another current
+ * memory says otherwise (`contested`).
+ */
+export interface BrainMemory {
+  readonly id: string;
+  readonly attribute: string | null;
+  readonly value: string | null;
+  readonly statement: string;
+  readonly learnedAt: string;
+  readonly confirmed: boolean;
+  readonly contested: boolean;
+}
+
+/**
+ * A page of an entity's card: its current memories by attribute, its
+ * relations to other entities, and its memories under no attribute
+ * (`notes`). `next`, while more follow, is the `after` of the next page.
+ */
+export interface BrainCard {
+  readonly entity: BrainEntity;
+  readonly attributes: readonly {
+    readonly attribute: string;
+    readonly memories: readonly BrainMemory[];
+    readonly contested: boolean;
+  }[];
+  readonly relations: readonly {
+    readonly attribute: string | null;
+    readonly side: "about" | "object";
+    readonly other: BrainEntity;
+    readonly memory: BrainMemory;
+  }[];
+  readonly notes: readonly BrainMemory[];
+  readonly next: string | null;
+}
+
+/** A fact to remember (`remember`). */
+export interface BrainRemember {
+  /**
+   * The entity it is about: one read from the Brain, by its `id` and
+   * `kind`; or by its `kind`, `names` and exact `identifiers`, the one an
+   * identifier finds, or a new one.
+   */
+  readonly about: {
+    readonly kind: BrainEntityKind;
+    readonly id?: string;
+    readonly names?: readonly string[];
+    readonly identifiers?: readonly BrainIdentifier[];
+  };
+  /** The attribute it is filed under, such as `renewal_date`, and its value. */
+  readonly attribute?: string;
+  readonly value?: string;
+  /** What it says: at most 1,000 characters. */
+  readonly statement: string;
+}
+
+/** A correction of a memory (`correct`): its new value, if its attribute holds one, and what it says. */
+export interface BrainCorrect {
+  readonly memory: string;
+  readonly value?: string;
+  readonly statement: string;
+}
+
+/** Entities to find (`entities.find`): of a kind, by a whole name, or by an exact identifier. */
+export interface BrainEntitiesFind {
+  readonly kind?: BrainEntityKind;
+  readonly name?: string;
+  readonly identifier?: BrainIdentifier;
+  /** A page's `next`, for the page after it. */
+  readonly after?: string;
+}
+
+/**
+ * `Calls` (each operation's member, by its name) for the operations
+ * `Listed`, a dotted one under its group: `entities.get` as
+ * `entities.get`, `recall` as itself. None for an operation not listed.
+ */
+export type BrainMembersOf<Calls, Listed extends keyof Calls & string> = Pick<
+  Calls,
+  Exclude<Listed, `${string}.${string}`>
+> & {
+  readonly [
+    Group in Listed extends `${infer Prefix}.${string}` ? Prefix : never
+  ]: {
+    readonly [
+      Operation in Extract<
+        Listed,
+        `${Group}.${string}`
+      > as Operation extends `${Group}.${infer Name}` ? Name : never
+    ]: Calls[Operation];
+  };
+};

@@ -1786,8 +1786,13 @@ build: {
    * Brain (\`ctx.brain.recall\`, declared as \`permission.brain({ operations:
    * ["recall"] })\`), or to select and read its skills
    * (\`ctx.brain.skills.select\` and \`.read\`, operations \`"skills.select"\`
-   * and \`"skills.read"\`), it asks for \`{ type: "platform" }\` with actions
-   * \`["brain"]\`. A recall answers only what everyone in the company may
+   * and \`"skills.read"\`), or to read its entities (\`ctx.brain.entities.get\`
+   * and \`.find\`, operations \`"entities.get"\` and \`"entities.find"\`), it
+   * asks for \`{ type: "platform" }\` with actions \`["brain"]\`; to remember,
+   * forget or correct in the App's own word (\`ctx.brain.remember\`,
+   * \`.forget\`, \`.correct\`, read by everyone in the company), a second one
+   * with \`["brain.write"]\` too, which writes only while everyone in the
+   * company may read everything the App may read. A recall answers only what everyone in the company may
    * read, whoever calls, never a team's content; and an App that recalls
    * answers no visitor and invites no guest. Today nothing readable by the
    * whole company is in the Brain, so a recall returns an empty pack: say

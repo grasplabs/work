@@ -135,9 +135,12 @@ const collectionObjectSchema = z.strictObject({
  *   its evidence and of its open questions (gaps). Apps, runs and agents
  *   share this one permission, and start without it. A grant never
  *   reaches past the person it acts for: every read is that person's
- *   access intersected with the grant's, and is audited. Writing
- *   (remember, proposals) will be an action of its own, with its own
- *   consent, so an approved read grant never gains writes.
+ *   access intersected with the grant's, and is audited.
+ * - `brain.write`: writing to the company Brain in the App's or the
+ *   workflow's own word, read by everyone in the company: remembering,
+ *   forgetting its own and correcting (core's brain-recall.ts). An action
+ *   of its own, with its own consent, held beside `brain`, so an approved
+ *   read grant never gains writes.
  */
 const platformObjectSchema = z.strictObject({ type: z.literal("platform") });
 
@@ -190,7 +193,7 @@ const connectionActionPattern = /^[A-Za-z][\w.-]{0,63}$/u;
 const platformActions = {
   collection: ["read", "write"],
   workflow: ["read", "start", "send"],
-  platform: ["statistics", "guests", "brain"],
+  platform: ["statistics", "guests", "brain", "brain.write"],
 } as const;
 
 /**

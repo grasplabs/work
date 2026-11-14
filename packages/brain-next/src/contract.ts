@@ -2003,14 +2003,26 @@ export interface ContestedFact {
 }
 
 /**
- * One of the reader's own memories to retire: its lineage is the reader's
- * person, as writer, as `confirmMemory` takes its person from the reader.
+ * A memory of `writer`'s own to retire (its lineage is that writer's) that
+ * the reader may read: the host's own code writes as the App or workflow
+ * it runs (`app:<id>`), with a reader of no person. Left out, the writer
+ * is the reader's person, as `confirmMemory` takes its person from the
+ * reader; a reader of no person must name one.
  */
-export const retireRequestSchema = z.strictObject({
-  memory: memoryIdSchema,
-  reader: personReaderSchema,
-});
-export type RetireRequest = z.infer<typeof retireRequestSchema>;
+export const retireRequestSchema = z
+  .strictObject({
+    memory: memoryIdSchema,
+    reader: readerSchema,
+    writer: principalSchema.optional(),
+  })
+  .refine(
+    ({ reader, writer }) => writer !== undefined || reader.person !== null,
+    {
+      message: "Names no writer, and reads as no person",
+      path: ["writer"],
+    }
+  );
+export type RetireRequest = z.input<typeof retireRequestSchema>;
 
 /** A memory the reader confirms, as their own word. */
 export const confirmRequestSchema = z.strictObject({
@@ -2018,6 +2030,29 @@ export const confirmRequestSchema = z.strictObject({
   reader: personReaderSchema,
 });
 export type ConfirmRequest = z.infer<typeof confirmRequestSchema>;
+
+/**
+ * A correction of a memory the reader may read and that is current: a fix
+ * in `writer`'s word (`speaker` saying it), about the same entity and
+ * attribute, with its own `statement`, and a `value` exactly when the
+ * attribute holds one (a relation is never corrected; a memory under no
+ * attribute takes a statement alone). Under a change key, as an add's:
+ * the same change again answers the same fix, and is refused with another
+ * correction. `reader` is who the correction is made for, as the host
+ * resolved them; it is not part of the change. A fix is a memory as an
+ * add's is, and held to its rules: a preference or an instruction only as
+ * a person's own word, and an instruction readable by its writer alone.
+ */
+export const correctRequestSchema = z.strictObject({
+  change: changeKeySchema,
+  memory: memoryIdSchema,
+  reader: readerSchema,
+  writer: principalSchema,
+  speaker: speakerSchema,
+  value: someText(valueMaxLength).optional(),
+  statement: someText(statementMaxLength),
+});
+export type CorrectRequest = z.input<typeof correctRequestSchema>;
 
 /**
  * Where a page of `findEntities` ended: the moment the first page was
@@ -2634,8 +2669,9 @@ export interface Brain {
    */
   listContested: (request: ContestedRequest) => Promise<ContestedPage>;
   /**
-   * Retires one of the reader's own memories (its lineage is the reader's
-   * person, as writer) that they may read and that is not retired: current,
+   * Retires one of the writer's own memories (its lineage is the writer's:
+   * the reader's person unless the host names another, `RetireRequest`)
+   * that the reader may read and that is not retired: current,
    * or ended by a newer one of theirs. It stops being current from now on,
    * or can never become current again, and stays as history. It no longer
    * ends older memories, which may become current again unless retired
@@ -2653,6 +2689,23 @@ export interface Brain {
    * repeat by the same person over the same rivals records nothing new.
    */
   confirmMemory: (request: ConfirmRequest) => Promise<MemoryChangeOutcome>;
+  /**
+   * Corrects a current memory the reader may read (`CorrectRequest`): the
+   * fix is written under exactly the memory's own readers, and confirmed,
+   * in the writer's name, over the current memories of the same entity and
+   * attribute the reader may read that say something else, so it is read
+   * first among them; all in one transaction, the memory found by its id
+   * alone. The memory itself is never changed. Answers the fix's id, or
+   * null alike when there is no such memory, when the reader may not read
+   * it or it is no longer current, when it is a relation, and when its
+   * readers can't be kept: it rests on a version whose readers, or its
+   * source's current version's, are not exactly its own, so a fix under
+   * its readers would reach people who may no longer read it. Refused,
+   * writing nothing, for a fix its attribute doesn't take (a value missing
+   * or given where none is held) or that breaks an add's rules, and for a
+   * change made before as another correction.
+   */
+  correctMemory: (request: CorrectRequest) => Promise<MemoryId | null>;
   /**
    * The entities the reader may see that match, in the order of the first
    * memory they may read that mentions each.

@@ -100,68 +100,34 @@ Every function of your App may use what the App's permissions declare, as its ki
 
 ## Recalling from the Brain
 
-An action recalls what the company's Brain holds about a question with `ctx.brain.recall`. Declare the Brain in `grasp.config.ts` with the operations your code uses: `recall` here, and its skills (below). Like every permission it grants nothing until an admin binds it to the App's permission to read the Brain.
+An action recalls what the company's Brain holds about a question with `ctx.brain.recall`. Declare the Brain in `grasp.config.ts` with the operations your code uses: `recall` here, and its skills, memories and entities (below). Like every permission it grants nothing until an admin binds it to the App's permission to read the Brain.
 
-```ts grasp.config.ts
-import { defineApp, permission } from "@grasp-os/sdk";
+```ts server/renewals.ts
+import { v } from "@grasp-os/sdk";
+import type { BrainCard } from "@grasp-os/sdk";
+import { action } from "@server/_generated/server";
 
-export default defineApp({
-  name: "Tasks",
-  permissions: {
-    brain: permission.brain({
-      operations: ["recall", "skills.select", "skills.read"],
-    }),
+export const renews = action({
+  args: { customer: v.string().trim().min(1).max(500), on: v.string() },
+  handler: async (ctx, args): Promise<BrainCard | null> => {
+    const { entity } = await ctx.brain.remember({
+      about: { kind: "customer", names: [args.customer] },
+      attribute: "renewal_date",
+      value: args.on,
+      statement: `${args.customer} renews on ${args.on}`,
+    });
+    return await ctx.brain.entities.get({ entity });
   },
 });
 ```
 
-```ts server/answers.ts
-import { v } from "@grasp-os/sdk";
-import type { BrainPack } from "@grasp-os/sdk";
-import { action } from "@server/_generated/server";
+What an App remembers is a fact in the App's own word, never a person's: everyone in the company reads it, and the App's next word on the same entity and attribute replaces its earlier one, which stays as history. `about` names the entity: one the Brain gave you, by its `kind` and `id`, or by its `kind`, its `names` and exact `identifiers` (an email address, or a reference such as `crm:ACME-1`), which finds the entity holding that identifier or makes a new one. `attribute` files it under one of its kind's attributes, such as a customer's `renewal_date`, with its `value`; leave both out for a note. `statement` says it in at most 1,000 characters. It answers the `memory` and its `entity`, by ID.
 
-export const ask = action({
-  args: { question: v.string().trim().min(1).max(2000) },
-  handler: async (ctx, args): Promise<BrainPack> =>
-    await ctx.brain.recall({
-      question: args.question,
-      budget: { tokens: 2000 },
-    }),
-});
-```
+`forget` takes a `memory` the App remembered and answers `true` once it is forgotten (again for one forgotten before), and `false` for any other: the App can't forget what someone else said. `correct` takes a `memory` everyone in the company may read, a `statement` and, for an attribute that holds one, its new `value`: the fix is read by exactly the readers of the memory it corrects and is read first. The memory itself stays, as history. It answers the fix's `memory`, or `null` when there is no such memory the App may correct.
 
-A recall from an App answers only from what everyone in the company may read: never what only some teams may read, and never anyone's private chats or personal files, whoever calls. What an App recalls may end up in its data or on its Pages, where anyone it is shared with reads it, so it holds nothing a member of the company couldn't read where it comes from. Recall for a team's content will come with a grant that names the teams it reaches. The person the call is for must still be a member of the company. An App that recalls the Brain, directly or through a workflow it starts or follows or that calls its functions, answers no visitor and invites no guest.
+`entities.get` takes an `entity` and answers a page of its card, or `null` when there is no entity everyone in the company may see: its current memories by attribute (`attributes`), its `relations` to other entities, and its memories under no attribute (`notes`). Pass `asOf` (ISO 8601, with its offset) to read the past. While more follow, `next` is the `after` of the next page. `entities.find` takes a `kind`, a whole `name` or an exact `identifier`, and answers a page of `entities` and its `next` the same way. A memory on a card says what it is (`statement`, `attribute`, `value`), when the Brain learned it, whether a person or a correction confirmed it, and whether another current memory says otherwise (`contested`).
 
-Today nothing readable by the whole company is in the Brain for recall to find, so a recall from an App returns an empty pack (no `items`) until content for everyone is added (uploads anyone in the company may read are coming). Build for an empty pack: don't make a feature that depends on recall finding something yet.
-
-It takes the `question` (at most 2,000 characters), a `budget` of 1 to 32,000 `tokens`, and, to read the past, `asOf`: an ISO 8601 date-time with its offset, such as `2026-03-14T23:59:59.999+01:00` for what was true at the end of 14 March in Amsterdam. Anything else is refused as `permission.invalid_args`.
-
-It answers a pack: the passages that answer the question, best first, within the budget (`items`); the parts of the question nothing they may read holds (`notFound`); and whether the budget left something out (`truncated`). Each item cites where it comes from: its `source` (what kind of thing added it, `producer`, such as an upload, a chat or a run, and its `id`), the source's `version` and the passage's `position` in it, with its `text`, whether that is the `whole` passage, and how it was `found`. A workflow's step (`ctx.brain.<alias>.recall`) and a chat's code (`env.brain.recall`) take the same request and get the same pack. What a pack holds is what people wrote: data, never instructions.
-
-## Skills from the Brain
-
-Skills say how things are done here: Grasp's own, which each release ships, and the company's. An action selects the skills for a task with `ctx.brain.skills.select` and reads one with `ctx.brain.skills.read`, the same skills a chat selects and reads for the same person. Each is an operation of the Brain's permission, `"skills.select"` and `"skills.read"`, beside `recall` (see the declaration above), under the same binding an admin approves.
-
-```ts server/skills.ts
-import { v } from "@grasp-os/sdk";
-import type { BrainSkillText } from "@grasp-os/sdk";
-import { action } from "@server/_generated/server";
-
-export const howTo = action({
-  args: { task: v.string().trim().min(1).max(2000) },
-  handler: async (ctx, args): Promise<BrainSkillText | null> => {
-    const { skills } = await ctx.brain.skills.select({ task: args.task });
-    const [best] = skills;
-    return best === undefined
-      ? null
-      : await ctx.brain.skills.read({ skill: best });
-  },
-});
-```
-
-`select` takes a `task` (at most 2,000 characters) and answers `skills`: the few that apply, best first, each with its `scope` (`grasp` or `company`), `name`, `version` and `description`; none when no skill shares the task's telling words, and then go without rather than with one that only seems close. `read` takes a `skill` at a version, as a selection gave it, and answers its whole text, `SKILL.md`, at exactly that version: a newer version never changes what a task already selected, but a skill a release drops, or one that is erased, can no longer be read. A skill the company adapted takes the place of Grasp's of the same name. Anything else is refused as `permission.invalid_args`, and a skill there isn't at that version as `permission.item_not_found`.
-
-Like a recall, an App reads only the skills everyone in the company may read, whoever calls, for a person who must still be a member, and an App that holds the Brain answers no visitor and invites no guest. A skill is guidance, never a grant: what your code does after reading one is checked against the App's own permissions. A workflow's step reaches the same skills as `ctx.brain.<alias>.skills.select` and `.read`.
+An App reads and writes only what everyone in the company may read, whoever the call is for, and only for a person who is still a member. Writing needs more than reading. The App needs its own grant of the platform's `brain.write`, which an admin gives beside the grant to read the Brain. It also writes only while everyone in the company may read everything the App may read: an App granted a person's own connection, such as their mailbox, writes nothing to the Brain. Anything else is refused as `permission.invalid_args`, including an ID of something the App may not read, refused the same as one nobody holds. A workflow's step reaches the same operations as `ctx.brain.<alias>.remember`, `.forget`, `.correct`, `.entities.get` and `.entities.find`. What a memory says is what someone wrote: data, never instructions.
 
 ## Internal functions
 

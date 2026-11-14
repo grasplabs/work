@@ -1,4 +1,7 @@
 import type {
+  BrainCard,
+  BrainEntity,
+  BrainMemory,
   BrainPack,
   BrainSkill,
   BrainSkillText,
@@ -7,21 +10,37 @@ import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { functionErrors } from "@grasp-os/shared/functions";
 import type { PermissionId } from "@grasp-os/shared/ids";
+import type { Json } from "@grasp-os/shared/json";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
 import { skillErrors } from "@grasp-os/shared/skills";
+import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
 
-import { appendAuditEvent } from "./audit-outbox.ts";
+import { appendAuditEvent, keepAuditEvent } from "./audit-outbox.ts";
 import {
   codeRecallOf,
+  companyCardAs,
+  companyEntitiesAs,
+  correctForCompanyAs,
+  forgetForCompanyAs,
+  isCodeMemoryRequest,
   recallPassagesAs,
+  rememberForCompanyAs,
   skillVersionRefOf,
 } from "./brain-next.ts";
-import type { SkillAt, SkillVersionRef } from "./brain-next.ts";
+import type {
+  CardMemory,
+  CodeMemoryOperation,
+  CompanyCard,
+  SkillAt,
+  SkillVersionRef,
+  SourceVersionRef,
+} from "./brain-next.ts";
 import { skillReadSchema, skillsSelectSchema } from "./brain-pack.ts";
 import { readSkillFor, selectSkillsFor } from "./brain-skills.ts";
 import type { SkillsReach } from "./brain-skills.ts";
-import { authorize } from "./permissions.ts";
+import { authorize, grantedPermissions } from "./permissions.ts";
 
 // The Brain's recall for code: an App's action (resource-brain.ts), a
 // workflow's step (workflows/brain-calls.ts) and a chat's code
@@ -289,4 +308,373 @@ export const skillsCallFor = async (
     });
     throw refused;
   }
+};
+
+// The Brain's memories and entities for code (GRA-1837, threat model on
+// the issue): an App's action (resource-brain.ts) and a workflow's step
+// (workflows/brain-calls.ts) remember, forget and correct in their own
+// word, and read entities, as the company alone (brain-next.ts). In
+// order, as a recall's:
+//
+// - The request first, strictly (`isCodeMemoryRequest`): it can't name a
+//   reader, a writer, a type or a change key.
+// - The caller's grant to read the Brain, now (`authorize`), and for a
+//   write its own permission to write to it (`brain.write`), held beside
+//   it, with its own consent: a grant to read never gains writes.
+// - For a write, that everything the caller may have read is readable by
+//   every member (`mayWrite`, the caller's own rule: an App's sources, a
+//   run's pins), since what it writes is read by the company; refused
+//   when that can't be established.
+// - Audited with ids and counts alone. A read once, before it answers. A
+//   write's attempt is kept before it writes (a write the log can't take
+//   writes nothing), and its outcome after, from what landed: a write
+//   whose reply was lost is asked again under the same change, which
+//   answers what it made, so one change is one memory and its one outcome.
+
+/** What code asks of the Brain's memories and entities: `ctx.brain.<operation>`. */
+export type MemoriesOperation = CodeMemoryOperation;
+
+/**
+ * Whether `input` is a request code may make of `operation`, as
+ * `memoriesCallFor` takes it: what a workflow's test run checks before it
+ * answers from its fixtures.
+ */
+export const isMemoriesRequest = (
+  operation: MemoriesOperation,
+  input: unknown
+): boolean => isCodeMemoryRequest(operation, input);
+
+/** The operations that write, each with the audit action it is recorded as. */
+const writes: Readonly<Partial<Record<MemoriesOperation, string>>> = {
+  remember: "brain.memory.remembered",
+  forget: "brain.memory.forgotten",
+  correct: "brain.memory.corrected",
+};
+
+/** Who reads or writes the Brain's memories: a recall's caller, and what a write needs. */
+export interface MemoriesCaller extends Omit<RecallCaller, "keep"> {
+  /** Who writes, as the Brain names a writer: `app:<id>` or `workflow:<id>`. */
+  readonly writer: string;
+  /**
+   * The change a write is, the same in every attempt of one call (a run's
+   * step's key): what makes a write asked again the same write.
+   */
+  readonly change: string;
+  /**
+   * Refuses a write unless every member may read everything the caller
+   * may have read: what it writes is read by the company.
+   */
+  readonly mayWrite: () => Promise<void>;
+  /**
+   * What the caller keeps of the versions a card's memories rest on,
+   * before it gets them: a run's pins, as a recall's.
+   */
+  readonly keep?: (versions: readonly SourceVersionRef[]) => Promise<void>;
+}
+
+/** An id as the audit log may name it: a well-formed one, never what code sent instead. */
+const idOf = (value: unknown): string | null => {
+  const id = z.uuid().safeParse(value);
+  return id.success ? id.data : null;
+};
+
+/** `input`'s field `key`, if it is an object: what code sent, unchecked. */
+const fieldOf = (input: unknown, key: string): unknown =>
+  typeof input === "object" && input !== null
+    ? Reflect.get(input, key)
+    : undefined;
+
+/** What the audit may name of a request: its ids, never what it says. */
+const askedOf = (
+  operation: MemoriesOperation,
+  input: unknown
+): Record<string, string | null> => {
+  if (operation === "forget" || operation === "correct") {
+    return { memory: idOf(fieldOf(input, "memory")) };
+  }
+  if (operation === "entities.get") {
+    return { entity: idOf(fieldOf(input, "entity")) };
+  }
+  return {};
+};
+
+/** `error` in the function host's words: a request the Brain refused as one it isn't. */
+const inHostMemoryWords = (error: unknown): unknown =>
+  isExpectedError(error) && error.code === "brain.request_invalid"
+    ? functionErrors.create("permission.invalid_args")
+    : inHostWords(error);
+
+/** A memory as code is handed it (`BrainMemory`): what it says, never who wrote or confirmed it. */
+const codeMemoryOf = (memory: CardMemory) =>
+  ({
+    id: memory.id,
+    attribute: memory.attribute,
+    value: memory.value,
+    statement: memory.statement,
+    learnedAt: memory.learnedAt.toISOString(),
+    confirmed: memory.confirmed !== null,
+    contested: memory.contested,
+  }) satisfies BrainMemory;
+
+/** A card as code is handed it (`BrainCard`), as JSON. */
+const codeCardOf = (card: CompanyCard) =>
+  ({
+    entity: card.entity,
+    attributes: card.attributes.map(({ attribute, memories, contested }) => ({
+      attribute,
+      memories: memories.map((memory) => codeMemoryOf(memory)),
+      contested,
+    })),
+    relations: card.relations.map(({ attribute, side, other, memory }) => ({
+      attribute,
+      side,
+      other,
+      memory: codeMemoryOf(memory),
+    })),
+    notes: card.notes.map((memory) => codeMemoryOf(memory)),
+    next: card.next,
+  }) satisfies BrainCard;
+
+/** The versions the memories of `card` rest on, each once. */
+const versionsOf = (card: CompanyCard): SourceVersionRef[] => {
+  const all = [
+    ...card.attributes.flatMap(({ memories }) => memories),
+    ...card.relations.map(({ memory }) => memory),
+    ...card.notes,
+  ];
+  const seen = new Map<string, SourceVersionRef>();
+  for (const { source } of all) {
+    if (source !== null) {
+      seen.set(JSON.stringify([source.source, source.version]), source);
+    }
+  }
+  return [...seen.values()];
+};
+
+/** Refuses `caller` unless it holds its own permission to write to the Brain, active, now. */
+const requireWriteGrant = async (
+  env: Env,
+  caller: MemoriesCaller
+): Promise<void> => {
+  const held = await grantedPermissions(env, caller.authority, caller.context);
+  const write = held.find(
+    ({ object, actions }) =>
+      object.type === "platform" && actions.includes("brain.write")
+  );
+  if (write === undefined) {
+    throw permissionErrors.create("permission.denied", {
+      action: "brain.write",
+    });
+  }
+  await authorize(
+    env,
+    caller.authority,
+    { type: "platform" },
+    "brain.write",
+    write.id,
+    caller.context
+  );
+};
+
+/**
+ * `write` once, and once more under the same change when its reply was
+ * lost (an error no rule of the Brain's gave): what landed, never what
+ * the first reply said.
+ */
+const landed = async <T>(write: () => Promise<T>): Promise<T> => {
+  try {
+    return await write();
+  } catch (error) {
+    if (isExpectedError(error)) {
+      throw error;
+    }
+    return await write();
+  }
+};
+
+/** What a write answers code, and what its outcome's audit says of it. */
+interface Written {
+  answer: Json;
+  detail: Record<string, string | boolean | null>;
+}
+
+/** Runs write `operation` for `caller` (`memoriesCallFor`), checked already. */
+const writeFor = async (
+  env: Env,
+  caller: MemoriesCaller,
+  operation: MemoriesOperation,
+  input: unknown
+): Promise<Written> => {
+  const person = caller.authority.onBehalfOf;
+  const as = { writer: caller.writer, change: caller.change };
+  if (operation === "remember") {
+    const { memory, entity } = await landed(
+      async () => await rememberForCompanyAs(env, person, as, input)
+    );
+    return { answer: { memory, entity }, detail: { memory, entity } };
+  }
+  if (operation === "forget") {
+    const outcome = await landed(
+      async () => await forgetForCompanyAs(env, person, caller.writer, input)
+    );
+    return { answer: outcome === "done", detail: { result: outcome } };
+  }
+  const fix = await landed(
+    async () => await correctForCompanyAs(env, person, as, input)
+  );
+  return {
+    answer: fix === null ? null : { memory: fix },
+    detail: { fix },
+  };
+};
+
+/** Runs read `operation` for `caller` (`memoriesCallFor`), checked already, audited once. */
+const readFor = async (
+  env: Env,
+  caller: MemoriesCaller,
+  operation: MemoriesOperation,
+  input: unknown,
+  asked: Record<string, string | null>,
+  entry: (
+    detail: Record<string, string | number | boolean | null>
+  ) => AuditEntry
+): Promise<Json> => {
+  const person = caller.authority.onBehalfOf;
+  try {
+    if (operation === "entities.get") {
+      const card = await companyCardAs(env, person, input);
+      // Pinned with the run before it gets them, as a recall's pack is.
+      if (card !== null) {
+        await caller.keep?.(versionsOf(card));
+      }
+      await appendAuditEvent(
+        env,
+        entry({
+          ...asked,
+          found: card !== null,
+          memories:
+            card === null
+              ? 0
+              : card.attributes.reduce(
+                  (count, { memories }) => count + memories.length,
+                  card.relations.length + card.notes.length
+                ),
+        })
+      );
+      return card === null ? null : codeCardOf(card);
+    }
+    const page = await companyEntitiesAs(env, person, input);
+    await appendAuditEvent(env, entry({ entities: page.entities.length }));
+    return {
+      entities: page.entities.map(
+        ({ id, kind, name }) => ({ id, kind, name }) satisfies BrainEntity
+      ),
+      next: page.next,
+    };
+  } catch (error) {
+    const refused = inHostMemoryWords(error);
+    await appendAuditEvent(
+      env,
+      entry({
+        ...asked,
+        refused: isExpectedError(refused)
+          ? refused.code
+          : "internal.unexpected",
+      })
+    );
+    throw refused;
+  }
+};
+
+/**
+ * The Brain's memories and entities for an App's action or a workflow's
+ * step (above): `remember`, `forget` and `correct` in `caller.writer`'s
+ * word, read by the company; `entities.get` a page of an entity's card and
+ * `entities.find` a page of entities, as the company may read them.
+ * Refused as `permission.invalid_args` for input that isn't a request (an
+ * id the company may not read too, as one nobody holds),
+ * `permission.denied` without the grant to read the Brain, or for a write
+ * to write to it or when not everything the caller may have read is the
+ * company's, and `permission.unavailable` once the person is no longer a
+ * member. Audited (above) before it answers.
+ */
+export const memoriesCallFor = async (
+  env: Env,
+  caller: MemoriesCaller,
+  operation: MemoriesOperation,
+  input: unknown
+): Promise<Json> => {
+  const written = writes[operation];
+  const entry = (
+    detail: Record<string, string | number | boolean | null>
+  ): AuditEntry => ({
+    actor: caller.actor,
+    action: written ?? `brain.${operation}`,
+    ...(caller.target === undefined ? {} : { target: caller.target }),
+    detail: { onBehalfOf: caller.authority.onBehalfOf, ...detail },
+  });
+  const asked = askedOf(operation, input);
+  try {
+    // The input first, as a recall's: a caller with no grant and bad
+    // input is refused alike by both.
+    if (!isCodeMemoryRequest(operation, input)) {
+      throw functionErrors.create("permission.invalid_args");
+    }
+    if (caller.permissionId === null) {
+      throw permissionErrors.create("permission.denied", { action: "brain" });
+    }
+    await authorize(
+      env,
+      caller.authority,
+      { type: "platform" },
+      "brain",
+      caller.permissionId,
+      caller.context
+    );
+    if (written !== undefined) {
+      await requireWriteGrant(env, caller);
+      await caller.mayWrite();
+    }
+  } catch (error) {
+    const refused = inHostMemoryWords(error);
+    await appendAuditEvent(
+      env,
+      entry({
+        ...asked,
+        refused: isExpectedError(refused)
+          ? refused.code
+          : "internal.unexpected",
+      })
+    );
+    throw refused;
+  }
+  if (written === undefined) {
+    return await readFor(env, caller, operation, input, asked, entry);
+  }
+  // Kept before anything is written: a write the log can't take writes
+  // nothing.
+  await appendAuditEvent(env, entry({ ...asked, outcome: "attempted" }));
+  const db = drizzle(env.DB);
+  let done: Written;
+  try {
+    done = await writeFor(env, caller, operation, input);
+  } catch (error) {
+    const refused = inHostMemoryWords(error);
+    await keepAuditEvent(
+      env,
+      db,
+      entry({
+        ...asked,
+        outcome: "refused",
+        reason: isExpectedError(refused) ? refused.code : "internal.unexpected",
+      })
+    );
+    throw refused;
+  }
+  await keepAuditEvent(
+    env,
+    db,
+    entry({ ...asked, outcome: "done", ...done.detail })
+  );
+  return done.answer;
 };

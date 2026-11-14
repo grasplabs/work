@@ -4123,6 +4123,10 @@ msgstr "Unternehmen"
 msgid "Company Brain, read only. This can read company Brain evidence and its open questions, from the collections it was granted and only what the person it works for may read too. It can never write to the Brain. Every read is recorded"
 msgstr "Company Brain, nur lesend. Es kann Belege und offene Fragen des Company Brain lesen, aus den freigegebenen Sammlungen und nur das, was auch die Person lesen darf, für die es arbeitet. Es kann nie in das Brain schreiben. Jeder Lesezugriff wird protokolliert"
 
+#: src/activity/pending.tsx
+msgid "Company Brain, write. This can remember facts in its own name that everyone in the company can read, and forget or correct them. It writes only while everyone in the company may read everything it can read. Every write is recorded"
+msgstr "Company Brain, schreibend. Es kann sich in eigenem Namen Fakten merken, die alle im Unternehmen lesen können, und sie vergessen oder korrigieren. Es schreibt nur, solange alle im Unternehmen alles lesen dürfen, was es lesen kann. Jeder Schreibzugriff wird protokolliert"
+
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Complaint"
@@ -4529,6 +4533,10 @@ msgstr "Kopieren hat nicht geklappt"
 #: src/brain/memory-page.tsx
 msgid "Correct it"
 msgstr "Korrigieren"
+
+#: src/activity/audit-words.ts
+msgid "Corrected a memory in the Brain"
+msgstr "Eine Erinnerung im Gehirn korrigiert"
 
 #: src/brain/memory-page.tsx
 msgid "Corrected by"
@@ -6119,6 +6127,10 @@ msgstr "Für das Unternehmen"
 #: src/agents/agent-wakes.tsx
 msgid "For whom"
 msgstr "Für wen"
+
+#: src/activity/audit-words.ts
+msgid "Forgot a memory in the Brain"
+msgstr "Eine Erinnerung im Gehirn vergessen"
 
 #: src/connections/groups.ts
 msgctxt "kind of app"
@@ -11050,6 +11062,10 @@ msgid "Read by <0/>"
 msgstr "Gelesen von <0/>"
 
 #: src/activity/audit-words.ts
+msgid "Read entities from the Brain"
+msgstr "Entitäten aus dem Gehirn gelesen"
+
+#: src/activity/audit-words.ts
 msgid "Read everyone's calls of unknown outcome"
 msgstr "Die Aufrufe mit unbekanntem Ergebnis aller gelesen"
 
@@ -11327,6 +11343,10 @@ msgstr "Merken"
 #: src/brain/remember-dialog.tsx
 msgid "Remember something"
 msgstr "Etwas merken"
+
+#: src/activity/audit-words.ts
+msgid "Remembered something in the Brain"
+msgstr "Etwas im Gehirn gemerkt"
 
 #: src/agents/agent-documents.tsx
 #: src/agents/agent-wakes.tsx
