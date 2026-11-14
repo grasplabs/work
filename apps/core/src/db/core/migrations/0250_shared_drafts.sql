@@ -54,7 +54,6 @@ CREATE TABLE `drafts` (
 );
 --> statement-breakpoint
 ALTER TABLE `workflow_resource_versions` ADD `label` text;--> statement-breakpoint
-ALTER TABLE `workflow_resource_versions` ADD `status` text;--> statement-breakpoint
 CREATE UNIQUE INDEX `workflow_resource_versions_label` ON `workflow_resource_versions` (`workflow_resource_id`,`label`);--> statement-breakpoint
 -- An approval serves every version declaring its binding
 -- (src/workflow-bindings.ts): of the active approvals of one binding,
@@ -79,7 +78,7 @@ CREATE UNIQUE INDEX `workflow_binding_approvals_binding_idx` ON `workflow_bindin
 -- first time it goes live (src/workflow-publish.ts): the trigger that
 -- refused every update refuses an update of any other column.
 DROP TRIGGER `workflow_resource_versions_immutable_update`;--> statement-breakpoint
-CREATE TRIGGER `workflow_resource_versions_immutable_update` BEFORE UPDATE OF `workflow_resource_id`, `version`, `definition_version`, `definition`, `definition_json_hash`, `profile_version`, `evaluator_hash`, `contract`, `contract_hash`, `manifest`, `manifest_hash`, `author_id`, `created_at`, `seal_id`, `status` ON `workflow_resource_versions`
+CREATE TRIGGER `workflow_resource_versions_immutable_update` BEFORE UPDATE OF `workflow_resource_id`, `version`, `definition_version`, `definition`, `definition_json_hash`, `profile_version`, `evaluator_hash`, `contract`, `contract_hash`, `manifest`, `manifest_hash`, `author_id`, `created_at`, `seal_id` ON `workflow_resource_versions`
 BEGIN
 	SELECT RAISE(ABORT, 'workflow_resource_versions are immutable');
 END;

@@ -4320,13 +4320,6 @@ export const workflowResourceVersions = sqliteTable(
      * again. Null for a version never live.
      */
     label: text(),
-    /**
-     * Where publishing left the version: `published` once it was checked,
-     * built and stored, which is when its row is written; `failed` is an
-     * App's alone for now (`app_versions.status`). Null for a version an
-     * earlier release wrote.
-     */
-    status: text({ enum: ["published", "failed"] }),
   },
   (table) => [
     primaryKey({ columns: [table.workflowResourceId, table.version] }),

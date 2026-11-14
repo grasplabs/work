@@ -1701,7 +1701,6 @@ const buildVersion = async (
         WHERE id = ${workflow.id} AND deleted_at IS NULL)`,
         version,
         contractVersion,
-        status: "published",
         definition,
         definitionJsonHash: definitionHash,
         profileVersion: definitionFormat,
