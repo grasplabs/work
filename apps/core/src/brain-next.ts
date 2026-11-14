@@ -4120,7 +4120,7 @@ const codeFindSchema = z
   );
 
 /** A page of entities as code reads it. */
-export interface CompanyEntities {
+interface CompanyEntities {
   entities: { id: EntityId; kind: EntityKind; name: string | null }[];
   next: string | null;
 }
