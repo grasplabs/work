@@ -67,6 +67,12 @@ export interface AgentScope {
    * without it gets none of them.
    */
   ownChat?: boolean;
+  /**
+   * The chat is one others share: a group chat or channel on a chat
+   * platform (its `thread`), which reads only what everyone in it may, as
+   * its roster was last kept (`chat_audiences`), and nothing without one.
+   */
+  shared?: boolean;
   /** The code run the stub was made for: it answers only while that runs. */
   runId: string;
 }

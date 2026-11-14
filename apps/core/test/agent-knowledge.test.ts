@@ -11,7 +11,6 @@ import {
 } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
-import { z } from "zod";
 
 import { withheldResponse, withheldResult } from "../src/agent.ts";
 import { addSource } from "../src/brain-next.ts";
@@ -63,24 +62,6 @@ const newAdmin = async () => {
 const newPerson = async () => await signedInWithRole(idp, "user");
 
 type Admin = Awaited<ReturnType<typeof newAdmin>>;
-
-const pinnedPrefix = "brain-document:";
-
-/**
- * A withheld source as its IDs name it: a pinned document version's
- * (`brainDocumentRead`) as `brain-document:<collection>/<document>`, so a
- * test needn't know the pin; any other as it is.
- */
-const sourceNamed = (source: unknown): string => {
-  const text = String(source);
-  if (!text.startsWith(pinnedPrefix)) {
-    return text;
-  }
-  const [collectionId, documentId] = z
-    .tuple([z.string(), z.string(), z.int(), z.string()])
-    .parse(JSON.parse(text.slice(pinnedPrefix.length)));
-  return `${pinnedPrefix}${collectionId}/${documentId}`;
-};
 
 /** Grants `agent` reading `collectionId`, under `binding`. */
 const grantRead = async (
@@ -861,7 +842,7 @@ describe("a chat's Knowledge", setUpTime, () => {
         return { collectionId, documentId };
       })
     );
-    const { stub, chat, provider, ask, agent } = await chatOf(
+    const { id, stub, chat, provider, ask, agent } = await chatOf(
       person.userId,
       codeStep(readCode(handbook?.documentId ?? "")),
       says(`Leave lasts ${kept}.`),
@@ -920,39 +901,35 @@ describe("a chat's Knowledge", setUpTime, () => {
       secret
     );
 
-    // Audited once, by the agent for its person: the run and each source
-    // (its collection, and the document it read there), never what it read.
-    const events = await eventsOf(
-      agent.agentId,
-      (all) =>
-        all.filter(({ action }) => action === "chat.history_withheld").length >=
-        2
+    // Audited once, by the agent for its person, as one event: the run
+    // and each source (its collection, and the document it read there),
+    // counted by kind, never which or what it read.
+    const events = await eventsOf(agent.agentId, (all) =>
+      all.some(({ action }) => action === "chat.history_withheld")
     );
-    const withheld = events
-      .filter(({ action }) => action === "chat.history_withheld")
-      .toSorted((a, b) =>
-        sourceNamed(a.detail.source).localeCompare(sourceNamed(b.detail.source))
-      );
     expect(
-      withheld.map((event) => ({
-        target: event.target,
-        source: sourceNamed(event.detail.source),
-        run: typeof event.detail.run,
-        holdsSecret: JSON.stringify(event).includes(secret),
-      }))
-    ).toStrictEqual(
-      [
-        plans?.collectionId ?? "",
-        `brain-document:${plans?.collectionId}/${plans?.documentId}`,
-      ]
-        .toSorted((a, b) => a.localeCompare(b))
-        .map((source) => ({
-          target: { type: "chat", id: chat.id },
-          source,
-          run: "string",
-          holdsSecret: false,
+      events
+        .filter(({ action }) => action === "chat.history_withheld")
+        .map((event) => ({
+          target: event.target,
+          detail: event.detail,
+          namesSource: JSON.stringify(event).includes(plans?.documentId ?? "-"),
+          holdsSecret: JSON.stringify(event).includes(secret),
         }))
-    );
+    ).toStrictEqual([
+      {
+        target: { type: "chat", id: chat.id },
+        detail: {
+          workspace: id,
+          runs: 1,
+          sources: 2,
+          collections: 1,
+          documents: 1,
+        },
+        namesSource: false,
+        holdsSecret: false,
+      },
+    ]);
   });
 
   it("ends a turn a restart cut short once what it read was revoked, sends what it read in no later request, and rebases before the next question", async () => {
@@ -1094,20 +1071,21 @@ describe("a chat's Knowledge", setUpTime, () => {
         read: after.includes(readSecret),
         searched: after.includes(foundSecret),
       },
-      sources: events
+      withheld: events
         .filter(
           ({ action, target }) =>
             action === "chat.history_withheld" && target?.id === chat.id
         )
-        .map(({ detail }) => sourceNamed(detail.source))
-        .toSorted((a, b) => a.localeCompare(b)),
+        .map(({ detail }) => ({
+          runs: detail.runs,
+          sources: detail.sources,
+          documents: detail.documents,
+        })),
     }).toStrictEqual({
       before: { read: true, searched: true },
       after: { read: false, searched: false },
-      sources: [
-        `brain-document:${collectionId}/${readDoc?.id}`,
-        `brain-document:${collectionId}/${searchedDoc?.id}`,
-      ].toSorted((a, b) => a.localeCompare(b)),
+      // Both documents, of two runs, in one event.
+      withheld: [{ runs: 2, sources: 2, documents: 2 }],
     });
   });
 
