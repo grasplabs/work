@@ -387,11 +387,13 @@ export const skillsCallFor = async (
 // - The request first, strictly (`isCodeEntitiesRequest`): it can't name
 //   a reader.
 // - The caller's grant to read the Brain, now (`authorize`).
-// - Whom it reads as (brain-next.ts `CodeReach`): an App and a workflow as
-//   the company alone, whatever teams their grant names; a chat's code as
-//   its person, their own store and teams too, only in their own chat in
-//   Grasp in a turn they started (`EntitiesCaller.reach`), and as the
-//   company alone anywhere else, as its recall reads (`RecallCaller.reach`).
+// - Whom it reads as (brain-next.ts `CodeReach`), as a recall's: an App
+//   and a workflow as the company alone, whatever teams their grant names;
+//   a chat's code as its person's teams too, only in their own chat in
+//   Grasp in a turn they started (`RecallCaller.reach`), and as the
+//   company alone anywhere else. Never what only a person may read: code
+//   can pass what it read on to an App, a workflow or a connection, where
+//   no pin of the chat's follows it (GRA-1762).
 // - Audited once, before it answers, with ids and counts alone: never a
 //   name, a statement or a cursor. An entity the reader may not see is
 //   answered as one nobody holds.
@@ -407,16 +409,12 @@ export const skillsCallFor = async (
 export { isCodeEntitiesRequest } from "./brain-next.ts";
 export type { CodeEntitiesOperation } from "./brain-next.ts";
 
-/** Who reads the Brain's entities: a recall's caller, keeping what it is handed rests on. */
-export interface EntitiesCaller extends Omit<RecallCaller, "keep" | "reach"> {
-  /**
-   * For a chat's code alone: `person` reads as its person, their own store
-   * and their teams too, only in their own chat in Grasp in a turn they
-   * started (agent-brain.ts); absent, as the company alone. Set by core
-   * from where the call is made, never by the code; an App's or a
-   * workflow's reach is the company's, whatever this says.
-   */
-  readonly reach?: "person";
+/**
+ * Who reads the Brain's entities: a recall's caller, at its reach
+ * (`RecallCaller.reach`, a chat's code alone), keeping what it is handed
+ * rests on.
+ */
+export interface EntitiesCaller extends Omit<RecallCaller, "keep"> {
   /**
    * What the caller keeps of what it is handed rests on (`CodeRestsOn`),
    * before it gets it: a run's pins, a chat's reads, as a recall's.
@@ -497,11 +495,12 @@ const readFor = async (
   detail: Record<string, string | number | boolean | null>;
 }> => {
   const person = caller.authority.onBehalfOf;
-  // Its person only for a chat's agent that asks it of core; the company
-  // alone for anything else. Nothing code sends can change it.
+  // Its person's teams only for a chat's agent that core asks it for, as
+  // a recall's; the company alone for anything else. Nothing code sends
+  // can change it.
   const reach =
-    caller.authority.subject.type === "agent" && caller.reach === "person"
-      ? "person"
+    caller.authority.subject.type === "agent" && caller.reach === "teams"
+      ? "teams"
       : "company";
   if (operation === "entities.get") {
     const card = await codeCardAs(env, person, reach, input);

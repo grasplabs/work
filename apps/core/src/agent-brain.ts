@@ -5,7 +5,6 @@ import { permissionIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import type { Permission } from "@grasp-os/shared/permissions";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
-import { z } from "zod";
 
 import { asPerson } from "./agent-person.ts";
 import {
@@ -17,6 +16,7 @@ import {
   requireOpenRun,
 } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
+import { brainCardSchema, brainEntitiesSchema } from "./brain-pack.ts";
 import { entitiesCallFor, recallFor } from "./brain-recall.ts";
 import type { CodeEntitiesOperation, RecallCaller } from "./brain-recall.ts";
 import { brainGaps } from "./brain-rpc.ts";
@@ -26,7 +26,6 @@ import {
   brainGrantRead,
   brainMemoryRead,
   brainTeamVersionRead,
-  brainVersionRead,
 } from "./history-access.ts";
 import { grantedPermissions } from "./permissions.ts";
 
@@ -128,29 +127,43 @@ const brainCallerOf = async (
   };
 };
 
-/** A page of entities, as far as the chat's line of the call counts it. */
-const foundSchema = z.object({ entities: z.array(z.unknown()) });
-
-/** How many things an entities answer hands over, for the chat's line of the call. */
+/**
+ * `answer` to `operation`, as code may be handed it: the same strict
+ * shapes the function host holds an App's answers to (brain-pack.ts), so
+ * a field the code mustn't see (what the answer rests on, among them)
+ * fails the call, never passed on. And how many things it hands over, for
+ * the chat's line of the call.
+ */
 const handedOf = (
   operation: CodeEntitiesOperation,
   answer: Json
 ): Record<string, number> => {
   if (operation === "entities.get") {
-    return { found: answer === null ? 0 : 1 };
+    const card = brainCardSchema.nullable().safeParse(answer);
+    if (!card.success) {
+      throw new Error("A card not as code is handed one reached a chat");
+    }
+    return { found: card.data === null ? 0 : 1 };
   }
-  const page = foundSchema.safeParse(answer);
-  return { entities: page.success ? page.data.entities.length : 0 };
+  const page = brainEntitiesSchema.safeParse(answer);
+  if (!page.success) {
+    throw new Error("A page not as code is handed one reached a chat");
+  }
+  return { entities: page.data.entities.length };
 };
 
 /**
  * A Brain entities read of a chat's code (`entitiesCallFor`): at the
- * reach of the turn, as its person in their own chat and as the company
- * alone anywhere else, with everything the answer rests on pinned with
- * the run before the code gets it, under the pin of that reach: in their
- * own chat each version as `brain-version` and each memory in a writer's
- * own word as `brain-memory`, both checked as the person; elsewhere as
- * `brain-company-version` and `brain-company-memory`, checked as the
+ * reach of its recall, its person's teams and the company in their own
+ * chat and the company alone anywhere else, never what only they may
+ * read (GRA-1762: code passes what it read on to Apps, workflows and
+ * connections, where no pin of the chat's follows it). Everything the
+ * answer rests on is pinned with the run before the code gets it, as
+ * recall's are at that reach: in their own chat each version as
+ * `brain-team-version` (checked as their teams), and each memory in a
+ * writer's own word as `brain-memory` (checked as the person, which for
+ * the shared store it names is their teams and the company); elsewhere
+ * as `brain-company-version` and `brain-company-memory`, checked as the
  * company, and cut while the chat has anyone Grasp can't name
  * (history-access.ts). Recorded as every call of its code is, refused or
  * not; `entitiesCallFor` keeps its own audit event.
@@ -164,18 +177,19 @@ const entitiesRead = async (
   const method = `brain.${operation}`;
   await requireOpenRun(env, scope, method);
   let answer: Json;
+  let handed: Record<string, number>;
   try {
     const { caller, ownChat } = await brainCallerOf(env, scope);
     answer = await entitiesCallFor(
       env,
       {
         ...caller,
-        ...(ownChat ? { reach: "person" as const } : {}),
+        ...(ownChat ? { reach: "teams" as const } : {}),
         keep: async ({ versions, words }) => {
           await recordRunReads(env, scope, [
             ...versions.map((version) =>
               ownChat
-                ? brainVersionRead(version)
+                ? brainTeamVersionRead(version)
                 : brainCompanyVersionRead(version)
             ),
             ...words.map((memory) =>
@@ -187,14 +201,12 @@ const entitiesRead = async (
       operation,
       input
     );
+    handed = handedOf(operation, answer);
   } catch (error) {
     await recordToolCall(env, scope, { method }, endedBy(error));
     throw error;
   }
-  await recordToolCall(env, scope, {
-    method,
-    detail: handedOf(operation, answer),
-  });
+  await recordToolCall(env, scope, { method, detail: handed });
   return answer;
 };
 
@@ -316,7 +328,7 @@ interface BrainPack {
 /** What kind of thing an entity is. */
 type BrainEntityKind = ${brainEntityKinds.map((kind) => JSON.stringify(kind)).join(" | ")};
 
-/** An entity the brain remembers things about: its ID, kind and earliest name the chat may see (null when none). */
+/** An entity the brain remembers things about: its ID, kind and earliest name you may see (null when none). */
 interface BrainEntity {
   id: string;
   kind: BrainEntityKind;
@@ -364,7 +376,7 @@ const brainDeclaration = `/** The company's brain: the organization's own knowle
 brain: {
   /** What your person may read that answers \`question\` (at most 2,000 characters), within \`budget.tokens\` (1 to 32,000), cited by source, version and place: needs the brain permission. \`asOf\`, an ISO 8601 date-time with its offset, reads each source as it was then (for "on a day", that day's last millisecond). Quote the passages you answer from, with their sources. */
   recall(input: { question: string; budget: { tokens: number }; asOf?: string }): Promise<BrainPack>;
-  /** The entities it remembers things about (people, customers, projects and other things) that match: of a \`kind\`, by a whole \`name\` (case and accents aside), or an exact \`identifier\` (an email, or a reference such as \`crm:ACME-1\`); at least one. \`next\`, while more follow, is the \`after\` of the next page. Needs the brain permission. In your person's own chat in Grasp, what they may read (their own memories, their teams' and the whole company's); anywhere else (a direct message on a chat app, a turn nobody started), what the whole company may read alone. */
+  /** The entities it remembers things about (people, customers, projects and other things) that match: of a \`kind\`, by a whole \`name\` (case and accents aside), or an exact \`identifier\` (an email, or a reference such as \`crm:ACME-1\`); at least one. \`next\`, while more follow, is the \`after\` of the next page. Needs the brain permission. In your person's own chat in Grasp, what their teams and the whole company may read, never what only they may; anywhere else (a direct message on a chat app, a turn nobody started), what the whole company may read alone. */
   findEntities(input: { kind?: BrainEntityKind; name?: string; identifier?: { type: "email" | "ref"; value: string }; after?: string }): Promise<{ entities: BrainEntity[]; next: string | null }>;
   /** A page of what it remembers about one entity (its card), as now or as of \`asOf\` (ISO 8601 with its offset), after a page's \`next\`, read as \`findEntities\` reads: null for an entity there isn't or you may not see, alike. */
   getEntity(input: { entity: string; asOf?: string; after?: string }): Promise<BrainCard | null>;

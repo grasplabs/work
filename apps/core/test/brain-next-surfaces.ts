@@ -571,7 +571,8 @@ const contestedSupplier = async (): Promise<void> => {
 
 /**
  * `probe`, of a surface that shows entities to people or to code: what a
- * page rests on (`restsOn`: the versions behind its names, matches and
+ * page rests on (`restsOn`, `restsOnWords`: the versions and the memories
+ * in a writer's own word behind its names, matches and
  * memories) is the host's to keep, so an answer carrying it hands the
  * harness the markers, and is found as a leak.
  */
@@ -579,7 +580,7 @@ const showingEntities =
   (probe: Probe): Probe =>
   async (probing) => {
     const answers = await probe(probing);
-    return answers.some(({ got }) => textOf(got).includes('"restsOn"'))
+    return answers.some(({ got }) => textOf(got).includes('"restsOn'))
       ? [
           ...answers,
           {
@@ -4661,7 +4662,7 @@ export const recallProbes = {
         as = authority,
         grant = permissionId,
         reach,
-      }: { as?: Authority; grant?: string; reach?: "person" } = {},
+      }: { as?: Authority; grant?: string; reach?: "teams" } = {},
       like?: string
     ) =>
       await answer(
@@ -4681,12 +4682,12 @@ export const recallProbes = {
       );
     const text = markedText(markers);
     const named = await plainSupplier();
-    // A chat's code in its person's own chat: the reader's own store and
-    // teams too, never anyone else's own nor a team they aren't in.
+    // A chat's code in its person's own chat: the reader's teams too,
+    // never anyone's own store, theirs included, nor a team they aren't in.
     const ownChat = {
       as: agent.authority,
       grant: agent.permissionId,
-      reach: "person" as const,
+      reach: "teams" as const,
     };
     // One call site for every case: a refusal's stack is then the same,
     // hidden or not.
@@ -4695,12 +4696,10 @@ export const recallProbes = {
       coreBrain.CodeEntitiesOperation,
       unknown,
       Answer["about"],
-      { as?: Authority; grant?: string; reach?: "person" },
+      { as?: Authority; grant?: string; reach?: "teams" },
       string | undefined,
     ];
-    // Its person's own chat reads their own store, so only in a pass that
-    // reads as the reader does there (`personal`).
-    const inOwnChat: Case[] = [
+    const cases: Case[] = [
       [
         "a card no one has, in the person's own chat",
         "entities.get",
@@ -4749,9 +4748,6 @@ export const recallProbes = {
         ownChat,
         undefined,
       ],
-    ];
-    const cases: Case[] = [
-      ...(probing.personal ? inOwnChat : []),
       [
         "the agent's code, anywhere but its person's own chat",
         "entities.get",
@@ -4760,13 +4756,13 @@ export const recallProbes = {
         { as: agent.authority, grant: agent.permissionId },
         "card",
       ],
-      // Only a chat's agent reads as its person, whatever a caller says.
+      // Only a chat's agent reads its person's teams, whatever a caller says.
       [
-        "the reader's team's card, an App asking as its person",
+        "the reader's team's card, an App asking for its person's teams",
         "entities.get",
         { entity: fixture.seen },
         "hidden",
-        { reach: "person" },
+        { reach: "teams" },
         "card",
       ],
       [
@@ -5847,12 +5843,10 @@ const corePersonMemories = {
 
 // Code's entities (GRA-1837, GRA-1894): as the company alone, everything
 // a team or a person may read is hidden, the reader's own team's among it
-// (the fixture's `seen`); as the person (a chat's code in their own chat),
-// their own store and teams too, never anyone else's own nor a team's
-// they aren't in. Each reach compared on its own (`like`).
-/** The reaches code reads entities at in a pass: the person's only where it reads as them (`personal`). */
-const reachesOf = ({ personal }: Probing): coreBrain.CodeReach[] =>
-  personal ? ["company", "person"] : ["company"];
+// (the fixture's `seen`); as the person's teams (a chat's code in their
+// own chat), their teams too, never anyone's own store nor a team's they
+// aren't in. Each reach compared on its own (`like`).
+const codeReaches: readonly coreBrain.CodeReach[] = ["company", "teams"];
 
 const coreCodeEntities = {
   codeCardAs: async (probing) => {
@@ -5875,7 +5869,7 @@ const coreCodeEntities = {
         reach
       );
     const perReach = await Promise.all(
-      reachesOf(probing).map(async (reach) => [
+      codeReaches.map(async (reach) => [
         await read(
           `an entity no one added, as the ${reach}`,
           reach,
@@ -5925,13 +5919,9 @@ const coreCodeEntities = {
         { entity: fixture.seen },
         "hidden"
       ),
-      ...(probing.personal
-        ? [
-            await read("one the reader's team reads, as the person", "person", {
-              entity: fixture.seen,
-            }),
-          ]
-        : []),
+      await read("one the reader's team reads, as their teams", "teams", {
+        entity: fixture.seen,
+      }),
     ];
   },
   codeEntitiesAs: async (probing) => {
@@ -5953,7 +5943,7 @@ const coreCodeEntities = {
         like === undefined ? undefined : `${like} as the ${reach}`
       );
     const perReach = await Promise.all(
-      reachesOf(probing).map(async (reach) => [
+      codeReaches.map(async (reach) => [
         await find(
           `a name only hidden memories give, as the ${reach}`,
           reach,
@@ -5990,9 +5980,7 @@ const coreCodeEntities = {
         }),
         await find(`a cursor of the markers, as the ${reach}`, reach, {
           kind: "customer",
-          after: btoa(
-            JSON.stringify({ store: "own", after: { at: markers.join("") } })
-          ),
+          after: btoa(JSON.stringify({ at: markers.join("") })),
         }),
       ])
     );
