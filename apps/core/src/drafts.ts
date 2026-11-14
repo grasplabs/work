@@ -911,7 +911,8 @@ export const emptyDraft = async (
  *
  * Each statement holds again for the write it made itself, at `at` by
  * `by`, so a batch tried again after its answer was lost
- * (`retriedBatch`) does nothing twice and fails on nothing.
+ * (`retriedBatch`) does nothing twice and fails on nothing; a write that
+ * landed between the two tries stays, as after any roll back.
  */
 export const emptyDraftStatements = async (
   db: CoreDb,
@@ -937,7 +938,8 @@ export const emptyDraftStatements = async (
   // leaves the draft over `base`, by `by`, at `at`.
   const ours = sql`EXISTS (SELECT 1 FROM drafts WHERE ${ofDraft} AND base = ${base} AND updated_by = ${by.userId} AND updated_at = ${at.getTime()})`;
   const emptied = sql`${live} AND ${ours}`;
-  // Its checkpoint isn't kept yet: false in a try after the one that kept it.
+  // Its checkpoint isn't kept yet: false in a try after the one that kept
+  // it, which every try that empties the draft does.
   const unkept = sql`NOT EXISTS (SELECT 1 FROM draft_checkpoints WHERE ${ofDraft} AND base = ${base} AND person_id = ${by.userId} AND created_at = ${at.getTime()})`;
   const holdsChanges = sql`(EXISTS (SELECT 1 FROM draft_files WHERE ${ofDraft}) OR EXISTS (SELECT 1 FROM drafts WHERE ${ofDraft} AND definition IS NOT NULL))`;
   const contentHash = await contentHashOf(base, {}, null);
@@ -948,7 +950,7 @@ export const emptyDraftStatements = async (
           outboxedWhere(
             db,
             subjectEntry(by, "draft.discarded", subject, { version: base }),
-            sql`${live} AND ${holdsChanges} AND NOT ${ours}`
+            sql`${live} AND ${holdsChanges} AND NOT ${ours} AND ${unkept}`
           ),
         ]
       : []),
@@ -968,7 +970,13 @@ export const emptyDraftStatements = async (
           updatedAt: at,
           updatedBy: by.userId,
         },
-        setWhere: rollsBack ? sql`NOT ${ours}` : eq(drafts.revision, revision),
+        // A roll back empties it whatever landed since, but only on the
+        // try that lands: once an earlier try did (its checkpoint kept), a
+        // write after it moved the draft past the revision it set, and
+        // stays.
+        setWhere: rollsBack
+          ? sql`NOT ${ours} AND ${unkept}`
+          : eq(drafts.revision, revision),
       }),
     db.delete(draftFiles).where(and(ofSubject(draftFiles, subject), emptied)),
     // Numbered in the statement, after whichever checkpoint landed last,

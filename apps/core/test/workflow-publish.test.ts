@@ -386,4 +386,63 @@ describe("publishing a workflow", { timeout: 60_000 }, () => {
       discarded: 1,
     });
   });
+
+  it("keeps a write that lands between a roll back's lost answer and its retry", async () => {
+    const admin = await person("admin");
+    const workflow = await publishedWorkflow(
+      admin,
+      greetingOf(undefined, "Version 1")
+    );
+    await saved(admin, workflow.id, greetingOf(undefined, "Version 2"));
+    await published(admin, workflow.id);
+    await saved(admin, workflow.id, greetingOf(undefined, "Unpublished"));
+    const { revision } = await workflowDraft(env, admin, workflow.id);
+    // D1 commits the roll back's batch and loses its answer; a builder
+    // writes the draft before the batch is tried again.
+    let lost = false;
+    const lossy: Env = {
+      ...env,
+      DB: new Proxy(env.DB, {
+        get: (target, name): unknown => {
+          if (name !== "batch") {
+            return Reflect.get(target, name);
+          }
+          return async (statements: D1PreparedStatement[]) => {
+            const result = await target.batch(statements);
+            if (!lost && statements.length > 4) {
+              lost = true;
+              await saved(
+                admin,
+                workflow.id,
+                greetingOf(undefined, "Written meanwhile")
+              );
+              throw new Error("Network connection lost.");
+            }
+            return result;
+          };
+        },
+      }),
+    };
+    const back = await outcome(
+      rollback(lossy, workflowKind, admin, workflow.id, 1, revision)
+    );
+    const draft = await workflowDraft(env, admin, workflow.id);
+    const events = await allEvents();
+    const discarded = events.filter(
+      ({ action, target }) =>
+        action === "draft.discarded" && target?.id === workflow.id
+    );
+
+    expect({
+      lost,
+      back,
+      draft: draft.source,
+      discarded: discarded.length,
+    }).toStrictEqual({
+      lost: true,
+      back: "ok",
+      draft: greetingOf(undefined, "Written meanwhile"),
+      discarded: 1,
+    });
+  });
 });
