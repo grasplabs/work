@@ -3146,6 +3146,28 @@ export const coreProbes = {
       );
     }),
   ],
+  versionRefSchema: async () => [
+    await answer(
+      "a version",
+      async () =>
+        await Promise.resolve(
+          coreBrain.versionRefSchema.safeParse({
+            source: { producer: "upload", id: "probe-upload" },
+            version: 1,
+          }).success
+        )
+    ),
+    await answer(
+      "a kind no producer has",
+      async () =>
+        await Promise.resolve(
+          coreBrain.versionRefSchema.safeParse({
+            source: { producer: "gone", id: "probe-upload" },
+            version: 1,
+          }).success
+        )
+    ),
+  ],
 } satisfies Record<Exclude<CoreMember, CorePersonMember>, Probe>;
 
 /** Each export of core's instruction-files.ts. */

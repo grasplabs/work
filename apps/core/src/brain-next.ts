@@ -394,7 +394,8 @@ export { questionMaxLength as recallQuestionMaxLength } from "@grasp-os/brain-ne
 /** A question as the Brain takes one (`recallRequestSchema`). */
 const questionSchema = wellFormedString().max(questionMaxLength);
 
-const versionRefSchema = z.strictObject({
+/** A version of a source, as its producer names the source. */
+export const versionRefSchema = z.strictObject({
   source: sourceRefSchema,
   version: z.int().positive(),
 });

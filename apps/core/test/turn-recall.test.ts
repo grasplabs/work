@@ -1,5 +1,6 @@
 import { brainOf, personalBrainOf } from "@grasp-os/brain-next/contract";
 import type { AuditEvent } from "@grasp-os/shared/audit";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -1574,6 +1575,32 @@ describe("what the recall before a question may reach", setUpTime, () => {
       ],
       recordedBefore: true,
     });
+  });
+
+  it("withholds only the pin it can't check: one of a kind of source the Brain doesn't know leaves the rest of the chat's history sent", async () => {
+    const depot = word();
+    const fact = `Depot ${depot} opens at seven`;
+    const chat = await recallingChat(says("Noted."), says("And again."));
+    await added(fact, owner(chat.personId));
+    await chat.ask(`When does depot ${depot} open?`);
+    // Beside it, a pin of another run as no release writes one: of a kind
+    // of source no producer has.
+    await runInDurableObject(chat.stub, (_instance, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO chat_run_sources (chat_id, run_id, source_id) VALUES (?, ?, ?)",
+        chat.chat.id,
+        crypto.randomUUID(),
+        `brain-version:${JSON.stringify(["gone", crypto.randomUUID(), 1])}`
+      );
+    });
+
+    const before = chat.provider.requests.length;
+    await chat.ask("Thanks!");
+    const body = JSON.stringify(chat.provider.requests[before]?.body);
+    expect({
+      fact: body.includes(fact),
+      withheld: body.includes(withheldResult),
+    }).toStrictEqual({ fact: true, withheld: false });
   });
 });
 
