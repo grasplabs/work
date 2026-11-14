@@ -5,10 +5,10 @@ import type { Authority } from "@grasp-os/shared/permissions";
 import { drizzle } from "drizzle-orm/d1";
 
 import { teamsOf } from "../auth/identity.ts";
+import { audienceMaxMembers, audienceOf } from "../chat-audiences.ts";
 import { users } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
 import type { WorkContext } from "../restricted.ts";
-import { audienceMaxMembers, audienceOf } from "./access.ts";
 import type { Reader } from "./access.ts";
 import { citedCollectionIds, readableByAll } from "./memory-publish.ts";
 

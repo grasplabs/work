@@ -3687,6 +3687,9 @@ const callerOf = (as: Authority, grant: string): codeRecall.RecallCaller => ({
           chatId: chatIdSchema.parse(crypto.randomUUID()),
         },
   permissionId: permissionIdSchema.parse(grant),
+  // An App's as the company; a chat's code as its person's teams, as in
+  // their own chat in Grasp.
+  ...(as.subject.type === "app" ? {} : { reach: "teams" as const }),
   actor: { type: "system" },
 });
 
