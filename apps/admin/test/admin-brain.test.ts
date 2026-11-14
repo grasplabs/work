@@ -4,8 +4,11 @@ import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { loadBrainRead } from "../src/admin/brain-loads.ts";
+import { answerKept, answerShown } from "../src/admin/erasure-answer.ts";
+import type { LookupAnswer } from "../src/admin/erasure-answer.ts";
 import {
   brainActionFn,
+  brainErasureFn,
   fetchBrainReport,
 } from "../src/clients/brain-functions.ts";
 import { readBrainReport } from "../src/clients/brain.ts";
@@ -650,6 +653,130 @@ describe("how an organization's Brain is doing", () => {
       amber: true,
       notYet: true,
       calm: false,
+    });
+  });
+
+  it("asks its core whether a source or a person was erased as the staff member, says what it answered, and sends nothing for a caller Access doesn't vouch for", async () => {
+    const acme = await liveClient();
+    acme.core.brain = brainReport(1_000_000);
+    const source = {
+      clientId: acme.clientId,
+      lookup: { kind: "source", key: "upload:0193-report" },
+    } as const;
+
+    const refused = await callServerFn(brainErasureFn, source, {
+      email: null,
+    }).then(
+      () => "answered",
+      () => "refused"
+    );
+    const asksBefore = acme.core.brainAsks.length;
+    acme.core.brainErasure = {
+      state: "erased",
+      at: "2026-11-10T09:30:00.000Z",
+    };
+    const erased = await callServerFn(brainErasureFn, source, {
+      email: "grace@grasp.test",
+    });
+    acme.core.brainErasure = { state: "not_erased" };
+    const someone = await callServerFn(
+      brainErasureFn,
+      { clientId: acme.clientId, lookup: { kind: "person", id: "user-17" } },
+      { email: "grace@grasp.test" }
+    );
+    const { html } = await page(`/organizations/${acme.clientId}/brain`);
+
+    expect({
+      refused,
+      asksBefore,
+      erased,
+      someone,
+      asked: acme.core.brainAsks.flatMap((asked) =>
+        "lookup" in asked ? [[asked.staff.email, asked.lookup]] : []
+      ),
+      offered: textOf(html).includes("Was it erased?"),
+    }).toStrictEqual({
+      refused: "refused",
+      asksBefore: 0,
+      erased: { state: "erased", at: "2026-11-10T09:30:00.000Z" },
+      someone: { state: "not_erased" },
+      asked: [
+        ["grace@grasp.test", { kind: "source", key: "upload:0193-report" }],
+        ["grace@grasp.test", { kind: "person", id: "user-17" }],
+      ],
+      offered: true,
+    });
+  });
+
+  it("reads a skipped erasure as such, and an erasure state it doesn't name, or one without what it needs, as not answered", async () => {
+    const acme = await liveClient();
+    acme.core.brain = brainReport(1_000_000);
+    const asked = async (answered: { state: string; at?: string }) => {
+      acme.core.brainErasure = answered;
+      return await callServerFn(
+        brainErasureFn,
+        { clientId: acme.clientId, lookup: { kind: "person", id: "user-17" } },
+        { email: "grace@grasp.test" }
+      );
+    };
+
+    expect({
+      skipped: await asked({ state: "skipped" }),
+      unnamed: await asked({ state: "withheld_by_policy" }),
+      erasedWithoutWhen: await asked({ state: "erased" }),
+    }).toStrictEqual({
+      skipped: { state: "skipped" },
+      unnamed: { state: "not_answered" },
+      erasedWithoutWhen: { state: "not_answered" },
+    });
+  });
+
+  it("shows an erasure lookup's answer only for the lookup submitted last, while it is still what is typed", () => {
+    const yesForA: LookupAnswer = {
+      kind: "source",
+      name: "upload:a",
+      asked: 1,
+      text: "Yes",
+      wrong: false,
+    };
+    // Looked up A, answered yes; then B typed, not yet submitted.
+    const forA = answerShown(yesForA, "source", "upload:a", 1);
+    const afterTypingB = answerShown(yesForA, "source", "upload:b", 1);
+    const afterKindChanged = answerShown(yesForA, "person", "upload:a", 1);
+    // A slow answer for A arriving once B was typed and submitted (2): kept
+    // apart from B's, never shown for B.
+    const slowA = answerShown(
+      answerKept(null, yesForA),
+      "source",
+      "upload:b",
+      2
+    );
+    // B's answer came first; A's slow one doesn't replace it.
+    const noForB: LookupAnswer = {
+      ...yesForA,
+      name: "upload:b",
+      asked: 2,
+      text: "No",
+    };
+    const keptB = answerShown(
+      answerKept(noForB, yesForA),
+      "source",
+      "upload:b",
+      2
+    );
+
+    expect({
+      forA: forA?.text,
+      afterTypingB,
+      afterKindChanged,
+      slowA,
+      keptB: keptB?.text,
+    }).toStrictEqual({
+      forA: "Yes",
+      afterTypingB: null,
+      afterKindChanged: null,
+      slowA: null,
+      keptB: "No",
     });
   });
 
