@@ -80,10 +80,13 @@ const everydayName = /(?:session|cookie)$/iu;
  * part of it; or, after an opening quote or backtick, it starts with
  * `name=` (a cookie string, a cookie's name being a token's characters,
  * RFC 6265) or with 16 session characters (16 hex characters are 64 bits,
- * the least a session id carries, OWASP).
+ * the least a session id carries, OWASP). A JSON escape (`\/`, `\n`, `\t`,
+ * `\"`, …) counts as one of them, as what is redacted is often JSON text
+ * (`"Session:\n<id>"`, `Ab3dE6\/hIj…`); so a word of 16 or more such
+ * characters reads as a credential inside escaped JSON too.
  */
 const credentialLike = new RegExp(
-  String.raw`\[redacted\]|^(?:\\?["'\x60])?(?:${tokenChar}+=|${sessionChar}{16})`,
+  String.raw`\[redacted\]|^(?:\\?["'\x60])?(?:${tokenChar}+=|(?:${sessionChar}|\\[\\/"bfnrtu]){16})`,
   "u"
 );
 
@@ -125,12 +128,10 @@ const credentialFormats: readonly RegExp[] = [
   /\bxox[abpr]-[0-9A-Za-z-]{10,}/gu,
   /\bAIza[0-9A-Za-z_-]{35}/gu,
   // Not a word boundary: between "-" and "e" one holds at every step of a
-  // flood like "eyJ-eyJ-…", which made the match quadratic. Any segments
-  // after the third are taken too, so a JSON Web Encryption's five go
-  // whole (and a sentence's closing period with them); one run, not a
-  // repeated group, and eight then any more, not `{8,}`: both overflowed
-  // on a run of megabytes.
-  /(?<![\w-])eyJ[\w-]{8}[\w-]*\.[\w-]{8}[\w-]*\.[\w-]{8}[\w-]*[\w.-]*/gu,
+  // flood like "eyJ-eyJ-…", which made the match quadratic. Eight then any
+  // more, not `{8,}`: V8 keeps each step of a counted repeat on its
+  // backtrack stack, which a run of megabytes overflowed.
+  /(?<![\w-])eyJ[\w-]{8}[\w-]*\.[\w-]{8}[\w-]*\.[\w-]{8}[\w-]*/gu,
   /\bAKIA[0-9A-Z]{16}\b/gu,
 ];
 
@@ -179,13 +180,14 @@ const credentials: readonly (readonly [
 // rule takes is kept, as it was written, when it doesn't look like a
 // credential ({@link credentialLike}), and those values are the ones left
 // that were redacted before: a value under 16 characters
-// (`session=9f8e7d`), and one whose first 16 characters hold one that is
-// not a session character (`:`, `|`, a space, an opening curly quote or
-// parenthesis among them: express's decoded `s:<id>.<sig>`, `user:42:…`,
-// Bottle's `!<sig>?<data>`, `session: (…)`), as `:` would let a link
-// (`Session: https://…`) count, unless a format above redacted part of it
-// or it is a `name=value`. As for every name, a value ends at a separator,
-// so a `Cookie:` header keeps its pairs after the first
+// (`session=9f8e7d`); and one whose first 16 characters hold one that is
+// neither a session character nor part of a JSON escape, when no format
+// above redacted part of it and it is not a `name=value`: express's
+// decoded `s:<id>.<sig>`, `user:<token>`, Tornado's `<time>|<hmac>`,
+// Bottle's `!<sig>?<data>`, a value after a curly quote or a parenthesis
+// (`session: “…”`, `session: (…)`). `:` stays out, as it would let a link
+// (`Session: https://…`) count. As for every name, a value ends at a
+// separator, so a `Cookie:` header keeps its pairs after the first
 // (`Cookie: theme=dark; sid=…`). The other way: a word of 16 or more
 // session characters after them reads as a credential ("Session:
 // internationalisation", "Session: kwartaalplanning": after the loanwords,

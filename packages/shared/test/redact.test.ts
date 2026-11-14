@@ -97,6 +97,8 @@ const sessionValues: Record<string, string> = {
   ironSeal: `Fe26.2**${drawn(hexDigits, 64)}*${drawn(base64Url, 22)}*${drawn(base64Url, 40)}**${drawn(hexDigits, 64)}*${drawn(base64Url, 43)}`,
   loadBalancer: `${drawn(base64Url, 14)}==${drawn(base64Url, 40)}`,
   uuid: [8, 4, 4, 4, 12].map((length) => drawn(hexDigits, length)).join("-"),
+  // As JSON writes a `/` in a value: `\/`.
+  escapedSlash: `${drawn(base64Url, 6)}\\/${drawn(base64Url, 30)}`,
   short: drawn(hexDigits, 12),
   expressDecoded: `s:${drawn(base64Url, 32)}.${drawn(base64Url, 27)}`,
   userColon: `user:42:${drawn(hexDigits, 32)}`,
@@ -497,6 +499,12 @@ describe("redacting credentials", () => {
         `session=v1.${jwt}%3D%3D--${sessionToken}`,
         // In JSON text, a `/` written `\/`.
         `{"header":"Cookie: sid=${sessionToken}\\/${sessionToken}"}`,
+        // And a JSON escape in a value's first 16 characters, or before it.
+        String.raw`session: Ab3dE6\/hIjKlMnOpQrStUv`,
+        `{"text":"Session:\\n${sessionToken}"}`,
+        `{"h":"Cookie:\\t${sessionToken}"}`,
+        // A JWT ends at its third part, so a name after it is its own.
+        `${jwt}.password=hunter2`,
       ].map(redact)
     ).toStrictEqual([
       "Cookie: [redacted]; theme=dark",
@@ -512,6 +520,10 @@ describe("redacting credentials", () => {
       "cookie: [redacted]",
       "session=[redacted]",
       '{"header":"Cookie: [redacted]"}',
+      "session: [redacted]",
+      '{"text":"Session:[redacted]"}',
+      '{"h":"Cookie:[redacted]"}',
+      "[redacted].password=[redacted]",
     ]);
   });
 
