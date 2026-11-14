@@ -862,70 +862,200 @@ describe("entities, as a workflow reads them", setUpTime, () => {
     });
   });
 
-  it("refuses a test run's card that carries what a name rests on, as a real answer that did would be", async () => {
+  it("keeps what made a found entity match with the run: a name another source gave, erased or narrowed to a team, withholds the run", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const team = await teamOf(ada);
+    const workflow = await entitiesWorkflow(ada, admin);
+    // A customer named first by one source, and by a second name from
+    // another: a find for the second name hands on the first.
+    const ofSecond = async (first: string, second: string) => {
+      const naming = await sourceForEveryone(`${first} is a customer.`);
+      const customer = await namedBy("customer", first, { source: naming });
+      const matching = await sourceForEveryone(`${first} is ${second}.`);
+      await store().addMemories({
+        change: crypto.randomUUID(),
+        access: { kind: "audience", group: "company" },
+        entities: [
+          { key: "e", id: customer.entity, kind: "customer", names: [second] },
+        ],
+        memories: [memoryFrom("e", matching, `${first} is ${second}`)],
+      });
+      return { matching, customer: customer.entity };
+    };
+    const [erasedFirst, erasedSecond, narrowedFirst, narrowedSecond] = [
+      `Acme ${unique()}`,
+      `Initrode ${unique()}`,
+      `Globex ${unique()}`,
+      `Hooli ${unique()}`,
+    ];
+    const erased = await ofSecond(erasedFirst, erasedSecond);
+    const narrowed = await ofSecond(narrowedFirst, narrowedSecond);
+    const runs = {
+      erased: await endedRun(ada, workflow.id, {
+        entity: crypto.randomUUID(),
+        name: erasedSecond,
+      }),
+      narrowed: await endedRun(ada, workflow.id, {
+        entity: crypto.randomUUID(),
+        name: narrowedSecond,
+      }),
+    };
+    const names = [erasedFirst, narrowedFirst];
+    const before = {
+      erased: await showsOf(ada, workflow.id, runs.erased, names),
+      narrowed: await showsOf(ada, workflow.id, runs.narrowed, names),
+    };
+    await eraseSource(env, {
+      source: erased.matching,
+      readers: { kind: "none" },
+      reason: "deleted",
+    });
+    await store().addSource({
+      source: `upload:${narrowed.matching.id}`,
+      change: crypto.randomUUID(),
+      text: `${narrowedFirst} is ${narrowedSecond}, for the team.`,
+      access: { kind: "audience", group: `team:${team}` },
+    });
+
+    expect({
+      before,
+      after: {
+        erased: await showsOf(admin, workflow.id, runs.erased, names),
+        narrowed: await showsOf(admin, workflow.id, runs.narrowed, names),
+      },
+    }).toStrictEqual({
+      before: {
+        erased: { status: "completed", error: null, shows: [erasedFirst] },
+        narrowed: {
+          status: "completed",
+          error: null,
+          shows: [narrowedFirst],
+        },
+      },
+      after: {
+        erased: { status: "completed", error: "brain.revoked", shows: [] },
+        narrowed: { status: "completed", error: "brain.revoked", shows: [] },
+      },
+    });
+  });
+
+  it("keeps what makes a card's entity seen: an entity with no name and no current memory, seen through an ended one, withholds the run once that one's source is erased", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const workflow = await entitiesWorkflow(ada, admin);
+    const statement = `It ran until 2020 ${unique()}`;
+    const source = await sourceForEveryone(`${statement}.`);
+    const added = await store().addMemories({
+      change: crypto.randomUUID(),
+      access: { kind: "audience", group: "company" },
+      entities: [{ key: "e", kind: "project" }],
+      memories: [
+        memoryFrom("e", source, statement, {
+          validFrom: new Date("2019-01-01T00:00:00Z"),
+          validUntil: new Date("2020-01-01T00:00:00Z"),
+        }),
+      ],
+    });
+    const entity = added.entities.e ?? "";
+    const runId = await endedRun(ada, workflow.id, {
+      entity,
+      name: `Nobody ${unique()}`,
+    });
+    const before = await showsOf(ada, workflow.id, runId, [entity, statement]);
+    await eraseSource(env, {
+      source,
+      readers: { kind: "none" },
+      reason: "deleted",
+    });
+
+    expect({
+      // Its card says only that it is there: its id, and no memory.
+      before,
+      after: await showsOf(admin, workflow.id, runId, [entity]),
+    }).toStrictEqual({
+      before: { status: "completed", error: null, shows: [entity] },
+      after: { status: "completed", error: "brain.revoked", shows: [] },
+    });
+  });
+
+  it("refuses a test run's card or page of entities that carries what it rests on, as a real answer that did would be", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const key = `brain-${unique()}`;
     await publishCatalogContract(env, admin, { key, kind: "brain" });
-    const workflow = await createWorkflowResource(env, ada, `card-${unique()}`);
-    const { revision: base } = await workflowDraft(env, ada, workflow.id);
-    const saved = await editWorkflowDraft(env, ada, workflow.id, {
-      revision: base,
-      source: JSON.stringify({
-        $schema: workflowSchemaUrl,
-        args: { kind: "object", fields: {} },
-        returns: { kind: "object", fields: { name: { kind: "string" } } },
-        result: { name: { $expr: 'card?.entity.name ?? ""' } },
-        permissions: { brain: { docs: { contract: key } } },
-        steps: [
-          {
-            id: "card",
-            type: "call",
-            brain: "docs",
-            action: "entities.get",
-            args: { entity: crypto.randomUUID() },
+    /** A draft of Ada's whose one step is `action` on the Brain, answering `result`: its test runs. */
+    const drafted = async (
+      action: "entities.get" | "entities.find",
+      args: Record<string, unknown>,
+      result: string
+    ) => {
+      const workflow = await createWorkflowResource(
+        env,
+        ada,
+        `card-${unique()}`
+      );
+      const { revision: base } = await workflowDraft(env, ada, workflow.id);
+      const saved = await editWorkflowDraft(env, ada, workflow.id, {
+        revision: base,
+        source: JSON.stringify({
+          $schema: workflowSchemaUrl,
+          args: { kind: "object", fields: {} },
+          returns: { kind: "object", fields: { name: { kind: "string" } } },
+          result: { name: { $expr: result } },
+          permissions: { brain: { docs: { contract: key } } },
+          steps: [{ id: "read", type: "call", brain: "docs", action, args }],
+        }),
+      });
+      expect(saved.problems).toStrictEqual([]);
+      return async (answer: unknown) => {
+        const { runId } = await startCandidateRun(env, ada, workflow.id, {
+          revision: saved.revision,
+          args: {},
+          fixtures: { docs: { result: answer } },
+        });
+        const run: WorkflowCandidateRun = await vi.waitFor(
+          async () => {
+            const read = await candidateRunFor(env, ada, workflow.id, runId);
+            if (read.status === "starting" || read.status === "running") {
+              throw new Error(`Test run ${runId} is ${read.status}`);
+            }
+            return read;
           },
-        ],
-      }),
-    });
-    expect(saved.problems).toStrictEqual([]);
+          { timeout: 20_000, interval: 100 }
+        );
+        return run.status === "completed"
+          ? { status: run.status, result: run.result }
+          : { status: run.status, code: run.error?.code };
+      };
+    };
+    const card = await drafted(
+      "entities.get",
+      { entity: crypto.randomUUID() },
+      'read?.entity.name ?? ""'
+    );
+    const find = await drafted(
+      "entities.find",
+      { kind: "customer" },
+      'read.entities.length > 0 ? "found" : ""'
+    );
     const entity = {
       id: crypto.randomUUID(),
       kind: "customer",
       name: "Acme",
     } as const;
-    const ran = async (answer: unknown) => {
-      const { runId } = await startCandidateRun(env, ada, workflow.id, {
-        revision: saved.revision,
-        args: {},
-        fixtures: { docs: { result: answer } },
-      });
-      const run: WorkflowCandidateRun = await vi.waitFor(
-        async () => {
-          const read = await candidateRunFor(env, ada, workflow.id, runId);
-          if (read.status === "starting" || read.status === "running") {
-            throw new Error(`Test run ${runId} is ${read.status}`);
-          }
-          return read;
-        },
-        { timeout: 20_000, interval: 100 }
-      );
-      return run.status === "completed"
-        ? { status: run.status, result: run.result }
-        : { status: run.status, code: run.error?.code };
-    };
+    const restsOn = [{ source: { producer: "upload", id: "u" }, version: 1 }];
 
     expect({
-      plain: await ran(cardOf(entity)),
-      carrying: await ran(
-        cardOf({
-          ...entity,
-          nameFrom: { source: { producer: "upload", id: "u" }, version: 1 },
-        })
-      ),
+      card: await card(cardOf(entity)),
+      cardCarrying: await card({ ...cardOf(entity), restsOn }),
+      page: await find({ entities: [entity], next: null }),
+      pageCarrying: await find({ entities: [entity], next: null, restsOn }),
     }).toStrictEqual({
-      plain: { status: "completed", result: { name: "Acme" } },
-      carrying: { status: "failed", code: "workflow.call_invalid" },
+      card: { status: "completed", result: { name: "Acme" } },
+      cardCarrying: { status: "failed", code: "workflow.call_invalid" },
+      page: { status: "completed", result: { name: "found" } },
+      pageCarrying: { status: "failed", code: "workflow.call_invalid" },
     });
   });
 });

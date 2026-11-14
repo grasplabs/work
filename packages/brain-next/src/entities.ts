@@ -11,6 +11,7 @@ import type {
   EntityKind,
   Identifier,
   Reader,
+  SourceVersionRef,
 } from "./contract.ts";
 import { readMoment, visibleSql } from "./memories.ts";
 import { readableSql } from "./reader-sets.ts";
@@ -272,15 +273,18 @@ const namedSchema = z.tuple([
   z.number().nullable(),
 ]);
 
-/** Entities found, as the reader sees them: with the earliest name they may see. */
-export const asSeen = (
+/**
+ * Entities found, as the reader sees them: with the earliest name they
+ * may see, and the versions those names rest on (`restsOn`).
+ */
+export const namedOf = (
   sql: SqlStorage,
   found: readonly { row: number; id: string; kind: string }[],
   reader: Reader,
   at: number
-): Entity[] => {
+): { entities: Entity[]; restsOn: SourceVersionRef[] } => {
   if (found.length === 0) {
-    return [];
+    return { entities: [], restsOn: [] };
   }
   const names = new Map(
     sql
@@ -297,17 +301,97 @@ export const asSeen = (
         named === null ? null : namedSchema.parse(JSON.parse(named)),
       ])
   );
-  return found.map(({ row, id, kind }) => {
+  const restsOn: SourceVersionRef[] = [];
+  const entities = found.map(({ row, id, kind }) => {
     const [name = null, source = null, version = null] = names.get(row) ?? [];
-    return {
-      id,
-      kind: kindSchema.parse(kind),
-      name,
-      nameFrom:
-        source === null || version === null ? null : { source, version },
-    };
+    if (source !== null && version !== null) {
+      restsOn.push({ source, version });
+    }
+    return { id, kind: kindSchema.parse(kind), name };
   });
+  return { entities, restsOn };
 };
+
+/** Entities found, as the reader sees them: with the earliest name they may see. */
+export const asSeen = (
+  sql: SqlStorage,
+  found: readonly { row: number; id: string; kind: string }[],
+  reader: Reader,
+  at: number
+): Entity[] => namedOf(sql, found, reader, at).entities;
+
+/**
+ * `?1` the entities' rows (JSON), `?4` the moment read at, `?5` the names
+ * and identifiers asked (JSON, each `[type, folded]`): the versions what
+ * makes each one seen and found rests on. The first memory the reader may
+ * read, learned by then, that mentions it (by when it was learned, then
+ * its id: the one `firstMentionSql` stands it by), and of each asked, the
+ * earliest such memory that gave it (the rows `findSql` holds it by).
+ * None for a memory in a writer's word.
+ */
+const heldBySql = `
+WITH ${readableSql},
+held AS (
+  SELECT (SELECT mention.row FROM (
+      SELECT m.row AS row, m.learned_at AS learned, m.id AS id
+      FROM memories AS m
+      WHERE m.entity = asked.value AND m.learned_at <= ?4 AND ${visibleSql("m")}
+      UNION ALL
+      SELECT m.row, m.learned_at, m.id FROM memories AS m
+      WHERE m.object = asked.value AND m.learned_at <= ?4 AND ${visibleSql("m")}
+    ) AS mention
+    ORDER BY mention.learned, mention.id
+    LIMIT 1) AS row
+  FROM json_each(?1) AS asked
+  UNION ALL
+  SELECT (SELECT m.row FROM entity_names
+      CROSS JOIN memories AS m ON m.row = entity_names.memory
+      WHERE entity_names.entity = asked.value
+        AND entity_names.type = named.value ->> 0
+        AND entity_names.folded = named.value ->> 1
+        AND m.learned_at <= ?4 AND ${visibleSql("m")}
+      ORDER BY m.learned_at, m.id
+      LIMIT 1)
+  FROM json_each(?1) AS asked CROSS JOIN json_each(?5) AS named
+)
+SELECT DISTINCT m.source AS source, m.version AS version
+FROM held CROSS JOIN memories AS m ON m.row = held.row
+WHERE m.source IS NOT NULL`;
+
+/**
+ * The versions what makes the entities at `rows` seen by the reader as of
+ * `at`, and found by each of `asked` (`[type, folded]`), rests on
+ * (`heldBySql`).
+ */
+export const heldBy = (
+  sql: SqlStorage,
+  rows: readonly number[],
+  reader: Reader,
+  at: number,
+  asked: readonly (readonly [string, string])[] = []
+): SourceVersionRef[] =>
+  rows.length === 0
+    ? []
+    : sql
+        .exec<{ source: string; version: number }>(
+          heldBySql,
+          JSON.stringify(rows),
+          reader.person,
+          JSON.stringify(reader.groups),
+          at,
+          JSON.stringify(asked)
+        )
+        .toArray()
+        .map(({ source, version }) => ({ source, version }));
+
+/** `versions`, each once. */
+export const eachVersionOnce = (
+  versions: readonly SourceVersionRef[]
+): SourceVersionRef[] => [
+  ...new Map(
+    versions.map((held) => [JSON.stringify([held.source, held.version]), held])
+  ).values(),
+];
 
 /**
  * `?1` the entity's row, `?4` the moment read at, `?5` 1 to go on after
@@ -427,11 +511,11 @@ export const findEntities = (
   sql: SqlStorage,
   { reader, at, cursorAt, kind, identifier, name, after, limit }: EntitiesAsked
 ): EntityPage => {
-  const asked = [
+  const asked: (readonly [string, string])[] = [
     ...(identifier === undefined
       ? []
-      : [[identifier.type, foldIdentifier(identifier)]]),
-    ...(name === undefined ? [] : [["name", foldName(name)]]),
+      : [[identifier.type, foldIdentifier(identifier)] as const]),
+    ...(name === undefined ? [] : [["name", foldName(name)] as const]),
   ];
   const found = sql
     .exec<{ row: number; id: string; kind: string; first: number }>(
@@ -447,14 +531,31 @@ export const findEntities = (
       at
     )
     .toArray();
-  const entities = asSeen(sql, found.slice(0, limit), reader, at);
+  const { entities, restsOn: names } = namedOf(
+    sql,
+    found.slice(0, limit),
+    reader,
+    at
+  );
+  // What makes each found, the one past the page too (`more`).
+  const restsOn = eachVersionOnce([
+    ...names,
+    ...heldBy(
+      sql,
+      found.map(({ row }) => row),
+      reader,
+      at,
+      asked
+    ),
+  ]);
   const last = found.at(limit - 1);
   if (found.length <= limit || last === undefined) {
-    return { entities, more: false };
+    return { entities, more: false, restsOn };
   }
   return {
     entities,
     more: true,
+    restsOn,
     next: {
       at: new Date(cursorAt),
       learnedAt: new Date(last.first),

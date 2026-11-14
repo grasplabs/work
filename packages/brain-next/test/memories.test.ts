@@ -503,33 +503,105 @@ describe("who may read a memory", () => {
     ).resolves.toBeNull();
   });
 
-  // Threat 1, for names: what an entity's name rests on is said, so a host
-  // that hands the name on can keep it as it keeps a memory's version.
-  it("says which version of a source an entity's name rests on, and none for a writer's word", async () => {
+  // Threat 1, for what a host hands on: every version what a page says
+  // rests on is said, so a host can keep each as it keeps a memory's.
+  it("says every version a find's page rests on: each entity's name, what made it match and be seen, and the entity past the page", async () => {
     const group = unique("group");
     const reader = readerOf(unique("reader"), group);
-    const version = await addSource("Acme is in Rotterdam", audience(group));
-    const drawn = await remember(
+    const name = unique("Acme");
+    const second = unique("Initrode");
+    const naming = await addSource(`${name} is a customer`, audience(group));
+    const matching = await addSource(`${name} is ${second}`, audience(group));
+    const past = await addSource(`Another is ${second}`, audience(group));
+    const drawn = (version: { source: string; version: number }) =>
+      fact({ kind: "source", ...version, quote: "Acme" });
+    const { entities } = await remember(
       audience(group),
-      [customer({ names: [unique("Acme")] })],
-      [fact({ kind: "source", ...version, quote: "Acme is in Rotterdam" })]
+      [customer({ names: [name] })],
+      [drawn(naming)]
     );
-    const written = await remember(
+    await remember(
       audience(group),
-      [customer({ names: [unique("Globex")] })],
+      [customer({ id: entities.c ?? "", names: [second] })],
+      [drawn(matching)]
+    );
+    // Another entity of the second name, learned later: past a page of one.
+    await remember(
+      audience(group),
+      [customer({ names: [second] })],
+      [drawn(past)]
+    );
+    // One in a writer's word, which rests on no version.
+    await remember(
+      audience(group),
+      [customer({ names: [second] })],
       [fact({ kind: "writer", writer: unique("w") })]
     );
 
-    const [fromSource, fromWriter] = await Promise.all(
-      [drawn, written].map(
-        async ({ entities }) =>
-          await shared().readEntity({ entity: entities.c ?? "", reader })
-      )
-    );
+    const page = await shared().findEntities({
+      reader,
+      name: second,
+      limit: 1,
+    });
     expect({
-      fromSource: fromSource?.nameFrom,
-      fromWriter: fromWriter?.nameFrom,
-    }).toStrictEqual({ fromSource: version, fromWriter: null });
+      entities: page.entities.map(({ id }) => id),
+      more: page.more,
+      restsOn: page.restsOn.toSorted((a, b) =>
+        a.source.localeCompare(b.source)
+      ),
+    }).toStrictEqual({
+      entities: [entities.c],
+      more: true,
+      restsOn: [naming, matching, past].toSorted((a, b) =>
+        a.source.localeCompare(b.source)
+      ),
+    });
+  });
+
+  it("says every version a card rests on: its memories, a rival past the page that makes one contested, and what makes its entity seen", async () => {
+    const group = unique("group");
+    const reader = readerOf(unique("reader"), group);
+    const first = await addSource("Acme is active", audience(group));
+    const rival = await addSource("Acme is paused", audience(group));
+    const status = (
+      version: { source: string; version: number },
+      value: string
+    ) =>
+      fact(
+        { kind: "source", ...version, quote: "Acme" },
+        { attribute: "status", value, statement: `Acme is ${value}` }
+      );
+    const { entities } = await remember(
+      audience(group),
+      [customer({ names: [unique("Acme")] })],
+      [status(first, "Active")]
+    );
+    await remember(
+      audience(group),
+      [customer({ id: entities.c ?? "" })],
+      [status(rival, "Paused")]
+    );
+
+    const card = await shared().readCard({
+      entity: entities.c ?? "",
+      reader,
+      limit: 1,
+    });
+    expect({
+      shown: card?.attributes.flatMap(({ memories }) =>
+        memories.map(({ contested }) => contested)
+      ),
+      more: card?.more,
+      restsOn: card?.restsOn.toSorted((a, b) =>
+        a.source.localeCompare(b.source)
+      ),
+    }).toStrictEqual({
+      shown: [true],
+      more: true,
+      restsOn: [first, rival].toSorted((a, b) =>
+        a.source.localeCompare(b.source)
+      ),
+    });
   });
 
   // Threat 3: a newer memory ends an older one only for those who may read it.
@@ -610,21 +682,20 @@ describe("who may read a memory", () => {
         identifier: { type: "email", value: email.toUpperCase() },
       })
     ).resolves.toStrictEqual({
-      entities: [
-        { id: first.entities.p, kind: "person", name: "Anna", nameFrom: null },
-      ],
+      entities: [{ id: first.entities.p, kind: "person", name: "Anna" }],
       more: false,
+      restsOn: [],
     });
     await expect(
       shared().findEntities({ reader: leftReader, name: secret })
-    ).resolves.toStrictEqual({ entities: [], more: false });
+    ).resolves.toStrictEqual({ entities: [], more: false, restsOn: [] });
     await expect(
       shared().findEntities({
         reader: readerOf(unique("x")),
         kind: "person",
         identifier: { type: "email", value: email },
       })
-    ).resolves.toStrictEqual({ entities: [], more: false });
+    ).resolves.toStrictEqual({ entities: [], more: false, restsOn: [] });
     await expect(
       shared().readEntity({
         entity: first.entities.p ?? "",
@@ -940,7 +1011,7 @@ describe("erasure", () => {
     await restore(shared(), backup);
     await expect(
       shared().findEntities({ reader, name: secret })
-    ).resolves.toStrictEqual({ entities: [], more: false });
+    ).resolves.toStrictEqual({ entities: [], more: false, restsOn: [] });
     await tick();
     await expect(left()).resolves.toBe(0);
   });
@@ -1460,7 +1531,7 @@ describe("what a reader sees of a retire and of an extraction", () => {
 
     expect({ empty, others }).toStrictEqual({
       empty: [
-        { entities: [], more: false },
+        { entities: [], more: false, restsOn: [] },
         { facts: [], more: false },
         "nothing",
       ],

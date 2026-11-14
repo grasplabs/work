@@ -9,8 +9,8 @@ import type {
   Memory,
   Reader,
 } from "./contract.ts";
-import { asSeen, mentionedSql } from "./entities.ts";
-import { entityRowOf, readMemories } from "./memories.ts";
+import { eachVersionOnce, heldBy, mentionedSql, namedOf } from "./entities.ts";
+import { entityRowOf, readMemoriesHeld } from "./memories.ts";
 import { readableSql } from "./reader-sets.ts";
 
 // An entity's card (contract.ts `Card`): a view, built when a reader asks
@@ -89,16 +89,17 @@ export const readCard = (
   // Seen and named as of what the store had learned at the first page
   // (`learned`), as its memories are read: one snapshot across pages,
   // however far ahead `at` judges when facts are true.
-  const [card] = asSeen(
+  const seen = namedOf(
     sql,
     seenOf(sql, reader, [found.row], learned),
     reader,
     learned
   );
+  const [card] = seen.entities;
   if (card === undefined) {
     return null;
   }
-  const page = readMemories(sql, {
+  const { read: page, restsOn: pageRestsOn } = readMemoriesHeld(sql, {
     entity: card.id,
     reader,
     at,
@@ -139,19 +140,18 @@ export const readCard = (
   }
   // Each related entity as the reader sees it: a memory they may read,
   // the relation, mentions it, so only its names are checked.
-  const others = new Map(
-    asSeen(
-      sql,
-      sql
-        .exec<{ row: number; id: string; kind: string }>(
-          "SELECT row, id, kind FROM entities WHERE id IN (SELECT value FROM json_each(?))",
-          JSON.stringify([...new Set(relations.map(({ other }) => other))])
-        )
-        .toArray(),
-      reader,
-      learned
-    ).map((other) => [other.id, other])
+  const named = namedOf(
+    sql,
+    sql
+      .exec<{ row: number; id: string; kind: string }>(
+        "SELECT row, id, kind FROM entities WHERE id IN (SELECT value FROM json_each(?))",
+        JSON.stringify([...new Set(relations.map(({ other }) => other))])
+      )
+      .toArray(),
+    reader,
+    learned
   );
+  const others = new Map(named.entities.map((other) => [other.id, other]));
   return {
     entity: card,
     attributes: [...attributes.values()].toSorted(
@@ -168,5 +168,13 @@ export const readCard = (
     notes,
     more: page.more,
     ...(page.next === undefined ? {} : { next: page.next }),
+    // What makes the entity seen, as of what the store had learned; the
+    // names; and what the page's memories say rests on.
+    restsOn: eachVersionOnce([
+      ...heldBy(sql, [found.row], reader, learned),
+      ...seen.restsOn,
+      ...named.restsOn,
+      ...pageRestsOn,
+    ]),
   };
 };

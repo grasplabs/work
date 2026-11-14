@@ -571,18 +571,19 @@ const contestedSupplier = async (): Promise<void> => {
 
 /**
  * `probe`, of a surface that shows entities to people or to code: what a
- * name rests on (`nameFrom`) is the host's to keep, so an answer carrying
- * it hands the harness the markers, and is found as a leak.
+ * page rests on (`restsOn`: the versions behind its names, matches and
+ * memories) is the host's to keep, so an answer carrying it hands the
+ * harness the markers, and is found as a leak.
  */
 const showingEntities =
   (probe: Probe): Probe =>
   async (probing) => {
     const answers = await probe(probing);
-    return answers.some(({ got }) => textOf(got).includes('"nameFrom"'))
+    return answers.some(({ got }) => textOf(got).includes('"restsOn"'))
       ? [
           ...answers,
           {
-            call: "an answer carrying what a name rests on",
+            call: "an answer carrying what it rests on",
             got: { value: probing.markers },
           },
         ]

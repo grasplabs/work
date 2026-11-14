@@ -466,33 +466,6 @@ const codeCardOf = (card: CompanyCard) =>
     next: card.next,
   }) satisfies BrainCard;
 
-/** `versions`, each once, none for what rests on a writer's word. */
-const eachOnce = (
-  versions: readonly (SourceVersionRef | null)[]
-): SourceVersionRef[] => {
-  const seen = new Map<string, SourceVersionRef>();
-  for (const version of versions) {
-    if (version !== null) {
-      seen.set(JSON.stringify([version.source, version.version]), version);
-    }
-  }
-  return [...seen.values()];
-};
-
-/** The versions `card` rests on: its memories', and every entity's name's on it. */
-const versionsOf = (card: CompanyCard): SourceVersionRef[] =>
-  eachOnce([
-    ...card.attributes.flatMap(({ memories }) =>
-      memories.map(({ source }) => source)
-    ),
-    ...card.relations.flatMap(({ memory, other }) => [
-      memory.source,
-      other.nameFrom,
-    ]),
-    ...card.notes.map(({ source }) => source),
-    card.entity.nameFrom,
-  ]);
-
 /** The memories on `card`, counted. */
 const memoriesOn = (card: CompanyCard): number =>
   card.attributes.reduce(
@@ -516,16 +489,17 @@ const readFor = async (
     if (card === null) {
       return { answer: null, detail: { found: false, memories: 0 } };
     }
-    // Pinned with the run before it gets them, as a recall's pack is.
-    await caller.keep?.(versionsOf(card));
+    // Pinned with the run before it gets them, as a recall's pack is:
+    // every version what the card says rests on (contract `restsOn`).
+    await caller.keep?.(card.restsOn);
     return {
       answer: codeCardOf(card),
       detail: { found: true, memories: memoriesOn(card) },
     };
   }
   const page = await companyEntitiesAs(env, person, input);
-  // The names it hands on, pinned with the run as a card's are.
-  await caller.keep?.(eachOnce(page.entities.map(({ nameFrom }) => nameFrom)));
+  // What the page says rests on, pinned with the run as a card's is.
+  await caller.keep?.(page.restsOn);
   return {
     answer: {
       entities: page.entities.map((entity) => codeEntityOf(entity)),

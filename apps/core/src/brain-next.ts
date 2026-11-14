@@ -4107,9 +4107,8 @@ const liveNamed = async (
   env: BrainEnv,
   reader: PersonReader,
   store: MemoryStoreName,
-  { nameFrom: _nameFrom, ...entity }: Entity
+  entity: Entity
 ): Promise<StoredEntity> => {
-  // What the name rests on is the host's to keep, never the page's.
   const plain = { store, ...entity, unreadable: false };
   if (store !== "own" || entity.name !== null) {
     return plain;
@@ -4545,25 +4544,23 @@ export interface CardMemory extends Omit<Memory, "source"> {
   source: SourceVersionRef | null;
 }
 
-/**
- * An entity as code reads it, with the source version its name rests on
- * as core names sources (`nameFrom`): core's to keep with a run, never
- * code's to see.
- */
+/** An entity as code reads it. */
 export interface CompanyEntity {
   id: EntityId;
   kind: EntityKind;
   name: string | null;
-  nameFrom: SourceVersionRef | null;
 }
 
-/** `entity` with what its name rests on as core names it. */
-const companyEntityOf = ({ nameFrom, ...entity }: Entity): CompanyEntity => ({
-  ...entity,
-  nameFrom: versionRefOf(nameFrom),
-});
+/** The versions a page rests on (contract `restsOn`), as core names sources. */
+const restsOnOf = (
+  held: readonly { source: SourceId; version: number }[]
+): SourceVersionRef[] => held.flatMap((each) => versionRefOf(each) ?? []);
 
-/** A page of an entity's card as code reads it: the store's, memories cited as core names sources. */
+/**
+ * A page of an entity's card as code reads it: the store's, memories cited
+ * as core names sources, with every version what it says rests on
+ * (`restsOn`): core's to keep with a run, never code's to see.
+ */
 export interface CompanyCard {
   entity: CompanyEntity;
   attributes: {
@@ -4579,6 +4576,7 @@ export interface CompanyCard {
   }[];
   notes: CardMemory[];
   next: string | null;
+  restsOn: SourceVersionRef[];
 }
 
 /** `memory` with its source as core names it. */
@@ -4619,18 +4617,18 @@ export const companyCardAs = async (
     return null;
   }
   return {
-    entity: companyEntityOf(card.entity),
+    entity: card.entity,
     attributes: card.attributes.map(({ memories, ...attribute }) => ({
       ...attribute,
       memories: memories.map((memory) => cardMemoryOf(memory)),
     })),
-    relations: card.relations.map(({ memory, other, ...relation }) => ({
+    relations: card.relations.map(({ memory, ...relation }) => ({
       ...relation,
-      other: companyEntityOf(other),
       memory: cardMemoryOf(memory),
     })),
     notes: card.notes.map((memory) => cardMemoryOf(memory)),
     next: cursorTextOf(card.next),
+    restsOn: restsOnOf(card.restsOn),
   };
 };
 
@@ -4647,10 +4645,11 @@ const codeFindSchema = z
       kind !== undefined || name !== undefined || identifier !== undefined
   );
 
-/** A page of entities as code reads it. */
+/** A page of entities as code reads it, with every version it rests on (`restsOn`, core's alone). */
 interface CompanyEntities {
   entities: CompanyEntity[];
   next: string | null;
+  restsOn: SourceVersionRef[];
 }
 
 /**
@@ -4681,8 +4680,9 @@ export const companyEntitiesAs = async (
     throw refusedAs(error);
   }
   return {
-    entities: page.entities.map((each) => companyEntityOf(each)),
+    entities: page.entities,
     next: cursorTextOf(page.next),
+    restsOn: restsOnOf(page.restsOn),
   };
 };
 
