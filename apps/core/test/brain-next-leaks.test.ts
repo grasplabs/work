@@ -223,7 +223,9 @@ const readingSurfaces = new Set([
 /** The surfaces that recall, where no instruction file may ever show. */
 const recallSurfaces = new Set([
   "core recallAs",
+  "core recallPassagesAs",
   "store recall",
+  "store findPassages",
   "recall recallFor",
 ]);
 
