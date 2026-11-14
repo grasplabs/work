@@ -242,6 +242,16 @@ describe(AnswerMarkdown, () => {
     ]);
   });
 
+  it("shows a link to a note or to an unsafe address as its words alone", async () => {
+    await shown(
+      'Leave is [sixteen weeks](grasp:note/doc-1 "Sixteen weeks") and [this](javascript:alert(1)) runs nothing.'
+    );
+    expect(document.querySelector("a, button")).toBeNull();
+    expect(document.body.textContent).toContain(
+      "Leave is sixteen weeks and this runs nothing."
+    );
+  });
+
   it("renders nothing of raw HTML, and no image that would load", async () => {
     await shown(
       'Before <script>alert(1)</script><img src="https://example.com/t.png"> after\n\n![A chart](https://example.com/chart.png)\n\n<iframe src="https://example.com"></iframe>'
