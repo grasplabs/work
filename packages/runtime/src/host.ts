@@ -164,7 +164,3 @@ export {
   runMigration,
 } from "./runner.ts";
 export type { FunctionChannel, MigrationRow, MutationStart } from "./runner.ts";
-
-// The Brain's client over the binding a host hands a run (brain.ts).
-export { brain, brainErrors } from "./brain.ts";
-export type * from "./brain.ts";

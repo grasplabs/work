@@ -559,11 +559,6 @@ export const AiUse = () => {
           <Figure
             attention={over}
             label={formatMonth(shown)}
-            ring={
-              covered === null
-                ? undefined
-                : { value: Math.min(inMonth.spend, covered), of: covered }
-            }
             sub={coveredLine}
             value={euro(inMonth.spend)}
           />

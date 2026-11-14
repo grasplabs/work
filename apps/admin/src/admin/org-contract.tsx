@@ -170,7 +170,9 @@ const Agreements = ({
       <div className="border-t">
         <Collapsible>
           <CollapsibleTrigger
-            render={<Button className="mx-3 my-2" size="sm" variant="ghost" />}
+            render={
+              <Button className="mx-3 my-2" size="sm" variant="outline" />
+            }
           >
             Who else handles the data
             <ChevronDownIcon

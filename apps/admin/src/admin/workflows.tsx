@@ -77,6 +77,7 @@ import { useId, useState } from "react";
 
 import { CommandMenu } from "./command-menu.tsx";
 import { CommandFailure, useCommand } from "./commands.tsx";
+import { Attention } from "./parts.tsx";
 import { EmptySection } from "./section.tsx";
 
 const all = "all";
@@ -345,8 +346,8 @@ const Rules = ({
             </FieldDescription>
           </Field>
           {parsed.success ? null : (
-            <p className="text-status-attention">
-              One of these is out of its bounds.
+            <p>
+              <Attention>One of these is out of its bounds.</Attention>
             </p>
           )}
           <CommandFailure failure={failure} />
@@ -358,7 +359,7 @@ const Rules = ({
                   void save(null);
                 }}
                 type="button"
-                variant="ghost"
+                variant="outline"
               >
                 Back to where every organization starts
               </Button>
@@ -432,7 +433,9 @@ const WorkRow = ({
             <span className="truncate" title={work.work.name}>
               {work.work.name}
             </span>
-            <span className="text-muted-foreground truncate">{team}</span>
+            <span className="text-muted-foreground truncate text-xs">
+              {team}
+            </span>
             <span className="mt-1 @xl:hidden">
               <StageLine label={stage} standing={standing} />
             </span>
@@ -577,7 +580,7 @@ export const OrgWorkflows = ({
               setRulesOpen(true);
             }}
             size="sm"
-            variant="ghost"
+            variant="outline"
           >
             <SlidersHorizontalIcon data-icon="inline-start" />
             When one counts as known

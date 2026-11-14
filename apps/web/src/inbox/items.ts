@@ -9,6 +9,7 @@ import type {
 import type { Permission } from "@grasp-os/shared/permissions";
 import type {
   BindingApprovalItem,
+  SkillShareItem,
   WorkflowGoLiveItem,
 } from "@grasp-os/shared/waiting";
 import { plural, t } from "@lingui/core/macro";
@@ -53,6 +54,7 @@ export type InboxKind =
   | "stoppedEvents"
   | "appMessage"
   | "bindingApproval"
+  | "skillShare"
   | "decision";
 
 /** Where an item can be opened: the page of what it is about. */
@@ -70,6 +72,7 @@ export type Target =
   | { kind: "integration"; integration: string }
   | { kind: "chat"; chat: string }
   | { kind: "brain" }
+  | { kind: "skills" }
   | { kind: "decision"; decision: string };
 
 /** What an item was made from: what its page shows of it and acts on. */
@@ -80,6 +83,7 @@ export type InboxSource =
   | { type: "request"; request: Permission; pending: PendingRequests }
   | { type: "workflowGoLive"; item: WorkflowGoLiveItem }
   | { type: "bindings"; item: BindingApprovalItem }
+  | { type: "skillShare"; item: SkillShareItem }
   | { type: "reconnect"; integration: string }
   | { type: "asked"; notification: GapAskedNotification }
   | { type: "stopped"; notification: TriggerStoppedNotification }
@@ -135,6 +139,7 @@ export const groupOf: Record<InboxKind, Exclude<Group, "all">> = {
   stoppedEvents: "workflows",
   appMessage: "apps",
   bindingApproval: "workflows",
+  skillShare: "brain",
   decision: "workflows",
 };
 
@@ -388,6 +393,30 @@ const bindingItems = (
       date: readAt,
       urgent: item.urgent,
       source: { type: "bindings", item },
+    };
+  });
+
+/**
+ * A person's ask to share one of their skills with the company: read and
+ * decided by an admin on the skills page, where its text is.
+ */
+const skillShareItems = (shares: readonly SkillShareItem[]): InboxItem[] =>
+  shares.map((item) => {
+    const { name, requestedBy, requestedAt } = item.share;
+    const asker = requestedBy.name ?? requestedBy.userId;
+    return {
+      id: item.id,
+      kind: "skillShare",
+      title: t`Share ${name} with the company?`,
+      context: name,
+      body: [
+        t`${asker} asked to share their skill ${name} with the company. Approved, every member's agents use it. Read it on the skills page before you decide.`,
+      ],
+      facts: [{ label: t`Asked`, value: formatDateTime(requestedAt) }],
+      about: { kind: "skills" },
+      date: requestedAt,
+      urgent: false,
+      source: { type: "skillShare", item },
     };
   });
 
@@ -660,6 +689,9 @@ export const inboxItems = (
   const bindings = decidesRequests(viewer)
     ? (readyOf(waiting.bindings) ?? [])
     : [];
+  const skillShares = decidesRequests(viewer)
+    ? (readyOf(waiting.skillShares) ?? [])
+    : [];
   const reconnect = (readyOf(waiting.reconnect) ?? []).map(
     ({ integration, connection }): InboxItem => {
       const app =
@@ -698,6 +730,7 @@ export const inboxItems = (
     ...(requests === undefined ? [] : requestItems(requests)),
     ...workflowGoLiveItems(workflowGoLives, me),
     ...bindingItems(bindings, readAt),
+    ...skillShareItems(skillShares),
     ...(notifications === undefined ? [] : askedItems(notifications, me)),
     ...(notifications === undefined ? [] : stoppedItems(notifications, me)),
     ...(notifications === undefined
@@ -723,6 +756,7 @@ export const unread = (waiting: Waiting): Loaded<unknown>[] => {
     waiting.workflowGoLives,
     waiting.heldStarts,
     waiting.bindings,
+    waiting.skillShares,
   ];
   return parts.filter(
     (part): part is Loaded<unknown> =>

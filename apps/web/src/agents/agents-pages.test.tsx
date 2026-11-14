@@ -46,6 +46,7 @@ const agentOf = (id: string, name: string, change: Partial<Agent>): Agent => ({
   face: "stephen",
   job: `${name}'s job.`,
   instructions: `${name}'s instructions.`,
+  ownerId: null,
   modelRole: null,
   model: null,
   state: "on",
@@ -129,12 +130,13 @@ const firstAccess: FirstAgentAccess = {
   workflows: null,
 };
 
-const chatAgent = ({ id, name, face, job }: Agent): ChatAgent => ({
+const chatAgent = ({ id, name, face, job, ownerId }: Agent): ChatAgent => ({
   id,
   name,
   face,
   job,
   model: null,
+  own: ownerId !== null,
 });
 
 let root: Root | undefined;
@@ -159,10 +161,20 @@ const mounted = async (shown: ReactNode): Promise<Asked> => {
       asked.push(["deleted", id]);
     },
   };
+  const orgSettings = {
+    updateOwnAgents: async (settings: { on: boolean }) => {
+      await Promise.resolve();
+      asked.push(["own agents", settings]);
+      return settings;
+    },
+  };
   const core = {
     withSession: async <T,>(
-      action: (session: { connections: typeof connections }) => Promise<T>
-    ): Promise<T> => await action({ connections }),
+      action: (session: {
+        connections: typeof connections;
+        orgSettings: typeof orgSettings;
+      }) => Promise<T>
+    ): Promise<T> => await action({ connections, orgSettings }),
   };
   const rootRoute = createRootRoute({ component: () => <main>{shown}</main> });
   const router = createRouter({
@@ -208,7 +220,11 @@ const press = async (element: Element | null | undefined) => {
 
 /** Each card as its name, where its name leads, and whether it offers a chat. */
 const cards = () =>
-  [...document.querySelectorAll("ul[aria-label='Agents'] > li")].map((card) => {
+  [
+    ...document.querySelectorAll(
+      "ul[aria-label='Your agents'] > li, ul[aria-label='Agents'] > li"
+    ),
+  ].map((card) => {
     const [name, ...others] = [...card.querySelectorAll("a")];
     return {
       name: name?.textContent,
@@ -259,6 +275,8 @@ describe("the company's agents, on pages of their own", () => {
     it("shows someone who isn't an admin only their agents, each opening a chat with it and nothing to change", async () => {
       await mounted(
         <AgentsOverview
+          makesOwn={false}
+          own={[]}
           makes={false}
           managed={undefined}
           usable={[chatAgent(stephen), chatAgent(claire)]}
@@ -284,9 +302,189 @@ describe("the company's agents, on pages of their own", () => {
       }).toStrictEqual({ newAgent: false, says: false });
     });
 
+    it("shows a person their own agents apart from the company's, each opening its page, and offers to make one", async () => {
+      const scribe = agentOf("agent-scribe", "Scribe", { ownerId: "user-me" });
+      const idle = agentOf("agent-idle", "Idle", {
+        ownerId: "user-me",
+        state: "paused",
+      });
+      await mounted(
+        <AgentsOverview
+          makes={false}
+          makesOwn
+          managed={undefined}
+          own={[scribe, idle]}
+          // Core lists their own that are on among the ones they may ask.
+          usable={[chatAgent(stephen), chatAgent(scribe)]}
+        />
+      );
+      expect({
+        cards: cards().map(({ name, to, chat }) => ({ name, to, chat })),
+        groups: [...document.querySelectorAll("h2")].map(
+          (each) => each.textContent
+        ),
+        newAgent: document.querySelector("a[href='/agents/new']") !== null,
+        alone: document.body.textContent?.includes("Only you"),
+      }).toStrictEqual({
+        cards: [
+          // Theirs first, each opening its page; a chat only with one on.
+          {
+            name: "Scribe",
+            to: "/agents/agent-scribe",
+            chat: ["/?agent=agent-scribe"],
+          },
+          // Not listed as theirs to ask: paused, or turned off.
+          { name: "Idle", to: "/agents/agent-idle", chat: [] },
+          // Then the company's, once: never their own again.
+          {
+            name: "Stephen",
+            to: "/?agent=organization",
+            chat: ["/?agent=organization"],
+          },
+        ],
+        groups: ["Yours", "Your company's"],
+        newAgent: true,
+        alone: true,
+      });
+    });
+
+    it("shows an admin how many agents of their own each person has and what they cost, never their names, and turns them off", async () => {
+      const people = [
+        {
+          userId: "user-anna",
+          name: "Anna de Vries",
+          email: "anna@acme.test",
+          role: "user" as const,
+          joinedAt: "2026-01-05T09:00:00.000Z",
+        },
+      ];
+      const asked = await mounted(
+        <AgentsOverview
+          makes
+          makesOwn
+          managed={managed}
+          own={[]}
+          ownAdmin={{
+            on: true,
+            people,
+            usage: [
+              {
+                personId: "user-anna",
+                agents: 2,
+                month: "2026-11",
+                spent: 1.5,
+                spentBefore: 0,
+                requests: 4,
+              },
+              {
+                personId: "user-gone",
+                agents: 1,
+                month: "2026-11",
+                spent: 0,
+                spentBefore: 0,
+                requests: 0,
+              },
+            ],
+          }}
+          usable={[chatAgent(stephen)]}
+        />
+      );
+      const text = document.body.textContent ?? "";
+      const toggle = document.querySelector(
+        "[role='switch'][aria-label='Let people make agents of their own']"
+      );
+      await press(toggle);
+      expect({
+        anna: text.includes("Anna de Vries") && text.includes("2 agents"),
+        spent: text.includes("$1.50 this month"),
+        gone: text.includes("Someone no longer in the company"),
+        asked,
+      }).toStrictEqual({
+        anna: true,
+        spent: true,
+        gone: true,
+        asked: [["own agents", { on: false }]],
+      });
+    });
+
+    it("names nobody as gone where the company's people couldn't be read", async () => {
+      await mounted(
+        <AgentsOverview
+          makes
+          makesOwn
+          managed={managed}
+          own={[]}
+          ownAdmin={{
+            on: true,
+            people: undefined,
+            usage: [
+              {
+                personId: "user-anna",
+                agents: 1,
+                month: "2026-11",
+                spent: 0,
+                spentBefore: 0,
+                requests: 0,
+              },
+            ],
+          }}
+          usable={[]}
+        />
+      );
+      const text = document.body.textContent ?? "";
+      expect({
+        unnamed: text.includes("Name not shown"),
+        gone: text.includes("Someone no longer in the company"),
+      }).toStrictEqual({ unnamed: true, gone: false });
+    });
+
+    it("offers no chat with one of a person's own the company turned off, and still opens its page", async () => {
+      const scribe = agentOf("agent-scribe", "Scribe", { ownerId: "user-me" });
+      await mounted(
+        <AgentsOverview
+          makes={false}
+          makesOwn={false}
+          managed={undefined}
+          own={[scribe]}
+          // Off: core lists none of their own as theirs to ask.
+          usable={[chatAgent(stephen)]}
+        />
+      );
+      expect(cards().find(({ name }) => name === "Scribe")).toMatchObject({
+        to: "/agents/agent-scribe",
+        chat: [],
+      });
+    });
+
+    it("gives an admin among Grasp's staff no way to turn people's own agents off", async () => {
+      const asked = await mounted(
+        <AgentsOverview
+          makes={false}
+          makesOwn={false}
+          managed={managed}
+          own={[]}
+          ownAdmin={{ on: true, people: [], usage: [] }}
+          usable={[]}
+        />
+      );
+      const toggle = document.querySelector(
+        "[role='switch'][aria-label='Let people make agents of their own']"
+      );
+      await press(toggle);
+      expect({
+        disabled:
+          toggle instanceof HTMLElement &&
+          (Object.hasOwn(toggle.dataset, "disabled") ||
+            toggle.getAttribute("aria-disabled") === "true"),
+        asked,
+      }).toStrictEqual({ disabled: true, asked: [] });
+    });
+
     it("shows an admin every agent, and offers a chat only with one that is on and answers them", async () => {
       await mounted(
         <AgentsOverview
+          makesOwn={false}
+          own={[]}
           makes
           managed={managed}
           // The admin isn't in Claire's teams; Milan is paused.
@@ -331,7 +529,13 @@ describe("the company's agents, on pages of their own", () => {
 
     it("narrows an admin's list to the paused ones", async () => {
       await mounted(
-        <AgentsOverview makes managed={managed} usable={[chatAgent(stephen)]} />
+        <AgentsOverview
+          makesOwn={false}
+          own={[]}
+          makes
+          managed={managed}
+          usable={[chatAgent(stephen)]}
+        />
       );
       await press(buttonNamed("Paused"));
       expect(cards().map(({ name }) => name)).toStrictEqual(["Milan"]);
@@ -485,6 +689,8 @@ describe("the company's agents, on pages of their own", () => {
       const unread: ManagedAgents = { ...managed, settings: {} };
       await mounted(
         <AgentsOverview
+          makesOwn={false}
+          own={[]}
           makes={false}
           managed={unread}
           usable={[chatAgent(stephen)]}

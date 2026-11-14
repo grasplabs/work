@@ -57,6 +57,8 @@ describe("the company's agents", () => {
       modelRole: "careful",
       model: null,
       state: "paused",
+      // One of the company's: nobody's own.
+      ownerId: null,
       changedBy: "admin-2",
       changedAt: "2026-11-02T00:00:00.000Z",
     });

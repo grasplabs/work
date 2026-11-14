@@ -1,11 +1,16 @@
+import { randomBytes } from "node:crypto";
+import { once } from "node:events";
 import { readFileSync } from "node:fs";
+import { request as httpRequest } from "node:http";
+import { text } from "node:stream/consumers";
 
 import { mapConcurrently } from "@grasp-os/shared/release";
 import type { Role } from "@grasp-os/shared/roles";
 import type { CoreApi } from "@grasp-os/shared/rpc";
 import { test } from "@playwright/test";
 import type { BrowserContext } from "@playwright/test";
-import { newWebSocketRpcSession } from "capnweb";
+import { RpcSession, WebSocketTransport } from "capnweb";
+import type { RpcTransport } from "capnweb";
 import { z } from "zod";
 
 import { commitApp } from "../apps/core/test/app-definitions.ts";
@@ -72,8 +77,11 @@ const locationOf = (response: Response, step: string): string => {
  */
 const droppedByDevServer = /Network[ +]connection[ +]lost/u;
 
-/** How many times a sign-in the dev server dropped is tried in all. */
-const signInAttempts = 3;
+/**
+ * How many times a sign-in, or a connection to `/rpc`, the dev server
+ * dropped is tried in all.
+ */
+const attemptsWhenDropped = 3;
 
 /**
  * `response`, unless the dev server dropped the request it answers: then
@@ -169,7 +177,8 @@ const signInTrying = async (
 export const signInAs = async (
   email: string,
   providerId: "microsoft" | "grasp-staff" = "microsoft"
-): Promise<string> => await signInTrying(email, providerId, signInAttempts);
+): Promise<string> =>
+  await signInTrying(email, providerId, attemptsWhenDropped);
 
 export interface Person {
   userId: string;
@@ -247,9 +256,132 @@ export const teamMemberAddedBy = async (
   }
 };
 
+/**
+ * What `/rpc` answers an upgrade with, asked again by hand after a socket
+ * failed before it opened: Node's WebSocket (undici) tells nothing of why,
+ * the same empty error and close 1006 for a refused upgrade (403), an
+ * error page, a dropped connection or nobody listening. A 101 means the
+ * failure has passed; the upgrade it made is closed at once.
+ */
+const upgradeAnswer = async (
+  person: Pick<Person, "cookie">
+): Promise<{ status: number; said: string }> => {
+  const asked = httpRequest(new URL("/rpc", origin), {
+    headers: {
+      origin,
+      cookie: `${sessionCookie}=${encodeURIComponent(person.cookie)}`,
+      connection: "Upgrade",
+      upgrade: "websocket",
+      "sec-websocket-version": "13",
+      "sec-websocket-key": randomBytes(16).toString("base64"),
+    },
+  });
+  const answer = Promise.withResolvers<{ status: number; said: string }>();
+  asked.on("upgrade", (_response, socket) => {
+    socket.destroy();
+    answer.resolve({ status: 101, said: "" });
+  });
+  asked.on("response", (response) => {
+    const status = response.statusCode ?? 0;
+    answer.resolve(
+      (async () => {
+        const said = await text(response);
+        return { status, said };
+      })()
+    );
+  });
+  asked.on("error", answer.reject);
+  asked.end();
+  return await answer.promise;
+};
+
+/**
+ * A connection to `/rpc` that has opened. One that fails before it opens is
+ * tried again, `attemptsLeft` times in all, while that's the dev server
+ * dropping it or nobody answering for a moment: nothing has been sent on
+ * it yet. An upgrade core refuses (403) fails at once, with core's answer;
+ * the last attempt fails with what it met.
+ */
+const openRpcSocket = async (
+  person: Pick<Person, "cookie">,
+  attemptsLeft: number = attemptsWhenDropped
+): Promise<WebSocket> => {
+  const socket = rpcSocket(person);
+  const settled = async (event: string, opened: boolean) => {
+    await once(socket, event);
+    return opened;
+  };
+  const opened = await Promise.race([
+    settled("open", true),
+    settled("error", false),
+    settled("close", false),
+  ]);
+  if (opened) {
+    return socket;
+  }
+  const failed = "The connection to /rpc failed before it opened";
+  let answer: { status: number; said: string };
+  try {
+    answer = await upgradeAnswer(person);
+  } catch (error) {
+    // Nobody listening, or the connection reset: core down, or the
+    // moment it restarts. Tried again; the last attempt says which.
+    if (attemptsLeft <= 1) {
+      // Node tries each of localhost's addresses: one error for each.
+      const why =
+        error instanceof AggregateError
+          ? error.errors.map(String).join("; ")
+          : String(error);
+      throw new Error(`${failed}: ${why}`, { cause: error });
+    }
+    return await openRpcSocket(person, attemptsLeft - 1);
+  }
+  const passed = answer.status === 101;
+  const dropped = droppedByDevServer.test(answer.said);
+  if ((!passed && !dropped) || attemptsLeft <= 1) {
+    throw new Error(
+      `${failed}; asked again, it answers ${answer.status}: ${answer.said.trim()}`
+    );
+  }
+  return await openRpcSocket(person, attemptsLeft - 1);
+};
+
+/**
+ * Cap'n Web's WebSocket transport over a socket still opening
+ * (`openRpcSocket`): calls wait for it, and fail with why it never opened.
+ */
+const openingTransport = (opening: Promise<WebSocket>): RpcTransport => {
+  const transport = (async () => new WebSocketTransport(await opening))();
+  /** Aborts the session's socket, once there is one. */
+  const aborted = async (reason: unknown): Promise<void> => {
+    let opened: WebSocketTransport;
+    try {
+      opened = await transport;
+    } catch {
+      return;
+    }
+    opened.abort(reason);
+  };
+  return {
+    send: async (message) => {
+      const opened = await transport;
+      opened.send(message);
+    },
+    receive: async () => {
+      const opened = await transport;
+      return await opened.receive();
+    },
+    abort: (reason: unknown) => {
+      void aborted(reason);
+    },
+  };
+};
+
 /** The person's API over `/rpc`, from Node, as their browser would open it. */
 export const apiOf = (person: Pick<Person, "cookie">) => {
-  const core = newWebSocketRpcSession<CoreApi>(rpcSocket(person));
+  const core = new RpcSession<CoreApi>(
+    openingTransport(openRpcSocket(person))
+  ).getRemoteMain();
   return { core, api: core.authenticate() };
 };
 

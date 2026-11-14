@@ -3,7 +3,7 @@ import { citedSnippetMax } from "@grasp-os/shared/chat";
 import type { ChatMessage } from "@grasp-os/shared/chat";
 import { chatIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
-import type { CollectionInput, PurgeInput } from "@grasp-os/shared/knowledge";
+import type { CollectionInput } from "@grasp-os/shared/knowledge";
 import {
   evictDurableObject,
   runDurableObjectAlarm,
@@ -14,19 +14,19 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { withheldResponse, withheldResult } from "../src/agent.ts";
+import { addSource } from "../src/brain-next.ts";
+import type { SourceReaders } from "../src/brain-next.ts";
 import { refreshDailySignals } from "../src/daily-signals.ts";
 import { chatSession, workspace } from "../src/durable-objects.ts";
 import {
   chatOf,
   personalChatsOf,
   codeResults,
-  codeStatuses,
   codeStep,
   readApiStep,
   model,
   pausedReply,
   says,
-  setObjectEnv,
 } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
@@ -93,6 +93,30 @@ const grantRead = async (
     admin,
     readCollection(agent, collectionId, `C${unique()}`.toUpperCase())
   );
+};
+
+/** Grants `agent` the Brain permission, as an admin would. */
+const grantBrain = async (
+  admin: Admin,
+  agent: { type: "agent"; agentId: string }
+) =>
+  await requestGranted(idp, admin, {
+    subject: agent,
+    object: { type: "platform" },
+    actions: ["brain"],
+    binding: "BRAIN",
+  });
+
+/** A source in the new Brain that `readers` may read. */
+const inBrain = async (text: string, readers: SourceReaders) => {
+  const source = { producer: "upload" as const, id: crypto.randomUUID() };
+  await addSource(env, {
+    source,
+    change: crypto.randomUUID(),
+    text,
+    readers,
+  });
+  return source;
 };
 
 /** The audit events of the chat's agent, once `done` holds for them. */
@@ -1172,49 +1196,21 @@ describe("a chat's Knowledge", setUpTime, () => {
     ).toStrictEqual([[]]);
   });
 
-  it("recalls for a chat only under the Brain permission, only from what its person may read, and labels the chat with every collection it read, found or not", async () => {
+  it("recalls for a chat only under the Brain permission, and only what its person may read", async () => {
     const admin = await newAdmin();
     const person = await newPerson();
     const word = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
-    // Granted and readable by the person, but without the word.
-    const { id: handbook } = await admin.knowledge.createCollection({
-      name: `Handbook ${unique()}`,
-      access: "everyone",
-    });
-    await admin.knowledge.saveDocument({
-      collectionId: handbook,
-      path: "other.md",
-      text: "# Other\nNothing of it here.",
-      ifVersion: 0,
-    });
-    // Granted, holding the word, but a team's the person isn't in.
+    // A team's, holding the word, and the person isn't in it.
     const team = await newTeam(admin, [admin]);
-    const { id: teamOnly } = await admin.knowledge.createCollection({
-      name: `Team ${unique()}`,
-      access: "teams",
-      teams: [team],
+    await inBrain(`The plan: ${word}.`, { kind: "team", teamId: team });
+    // One of a team of the person's, holding it too: the agent's code
+    // reads as their teams, never what only they may read (GRA-1762).
+    await inBrain(`Our plan: ${word}.`, {
+      kind: "team",
+      teamId: await newTeam(admin, [person]),
     });
-    await admin.knowledge.saveDocument({
-      collectionId: teamOnly,
-      path: "plan.md",
-      text: `# Plan\n${word}`,
-      ifVersion: 0,
-    });
-    // Readable by the person, holding the word, but never granted.
-    const { id: ungranted } = await admin.knowledge.createCollection({
-      name: `Ungranted ${unique()}`,
-      access: "everyone",
-    });
-    await admin.knowledge.saveDocument({
-      collectionId: ungranted,
-      path: "plan.md",
-      text: `# Plan\n${word}`,
-      ifVersion: 0,
-    });
-    const asked = (collectionIds?: string[]) =>
-      `outcome(env.brain.recall(${JSON.stringify({ query: word, ...(collectionIds === undefined ? {} : { filters: { collectionIds } }) })}))`;
     const recallStep = codeStep(
-      `export default async (self, env) => { const outcome = async (pending) => { try { const pack = await pending; return pack.items.length; } catch (error) { return error.code ?? String(error); } }; return [await ${asked()}, await ${asked([handbook])}, await ${asked([ungranted])}, await ${asked([teamOnly])}]; };`
+      `export default async (self, env) => { try { const pack = await env.brain.recall(${JSON.stringify({ question: word, budget: { tokens: 800 } })}); return pack.items.map(({ text }) => text); } catch (error) { return error.code ?? String(error); } };`
     );
     const { stub, chat, ask, agent } = await chatOf(
       person.userId,
@@ -1225,384 +1221,19 @@ describe("a chat's Knowledge", setUpTime, () => {
       recallStep,
       says("Refused.")
     );
-    await grantRead(admin, agent, handbook);
-    await grantRead(admin, agent, teamOnly);
     // Without the Brain permission: no `env.brain` to call at all.
-    const before = await ask("What is the plan?");
-    const brainGrant = await requestGranted(idp, admin, {
-      subject: agent,
-      object: { type: "platform" },
-      actions: ["brain"],
-      binding: "BRAIN",
-    });
-    const after = await ask("What is the plan, now?");
+    await ask("What is the plan?");
+    const brainGrant = await grantBrain(admin, agent);
+    await ask("What is the plan, now?");
     // Revoked: gone again, from the next turn.
     await admin.api.permissions.revoke(brainGrant);
     await ask("And now?");
     const results = await codeResults(stub, chat.id);
-    expect({
-      results: results.map(({ text }) => text),
-      before: before.provenance,
-      after: after.provenance,
-    }).toStrictEqual({
-      results: [
-        expect.stringContaining("This chat has no API named env.brain"),
-        // Once granted, the turn recalls for the question first: never
-        // from the plan its person can't read.
-        expect.not.stringContaining(word),
-        // Never wider than its grants, nor than what its person may read:
-        // naming either is refused as not found.
-        'Returned:\n[0,0,"brain.not_found","brain.not_found"]',
-        expect.stringContaining("This chat has no API named env.brain"),
-      ],
-      before: { sources: [], restricted: false },
-      // The word is only in a collection the person can't read; the
-      // collection it was told to read is the chat's source even though
-      // nothing was found there.
-      after: { sources: [handbook], restricted: false },
-    });
-  });
-});
-
-/** Grants `agent` the Brain permission, as an admin would. */
-const grantBrain = async (
-  admin: Admin,
-  agent: { type: "agent"; agentId: string }
-) =>
-  await requestGranted(idp, admin, {
-    subject: agent,
-    object: { type: "platform" },
-    actions: ["brain"],
-    binding: "BRAIN",
-  });
-
-/** A message of an Anthropic request, as the provider was sent it. */
-const requestMessagesSchema = z.object({
-  messages: z.array(
-    z.object({
-      role: z.string(),
-      content: z.union([z.string(), z.array(z.unknown())]),
-    })
-  ),
-});
-
-/**
- * What a request handed the model as code results (tool results), and
- * everything else it sent: the system prompt, the question, the calls.
- */
-const splitRequest = (body: unknown) => {
-  const parsed = requestMessagesSchema.parse(body);
-  const results: unknown[] = [];
-  const rest: unknown[] = [];
-  for (const { content } of parsed.messages) {
-    for (const block of typeof content === "string" ? [content] : content) {
-      const isResult =
-        typeof block === "object" &&
-        block !== null &&
-        "type" in block &&
-        block.type === "tool_result";
-      (isResult ? results : rest).push(block);
-    }
-  }
-  const { messages: _messages, ...envelope } = z
-    .looseObject({ messages: z.unknown() })
-    .parse(body);
-  return {
-    results: JSON.stringify(results),
-    rest: JSON.stringify([envelope, rest]),
-  };
-};
-
-describe("a chat's recall before a question", setUpTime, () => {
-  it("hands the model what the Brain recalls for the question, as a part of the question it reads as data, before its first request", async () => {
-    const admin = await newAdmin();
-    const person = await newPerson();
-    const word = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
-    const fact = "The depot opens at seven";
-    const { id: collectionId } = await admin.knowledge.createCollection({
-      name: `Handbook ${unique()}`,
-      access: "everyone",
-    });
-    const { id: documentId } = await admin.knowledge.saveDocument({
-      collectionId,
-      path: "depot.md",
-      text: `# Depot ${word}\n\n${fact}.`,
-      ifVersion: 0,
-    });
-    const { stub, chat, provider, ask, agent } = await chatOf(
-      person.userId,
-      says("Seven.")
-    );
-    await grantRead(admin, agent, collectionId);
-    await grantBrain(admin, agent);
-
-    const reply = await ask(word);
-
-    const [request] = provider.requests.map(({ body }) => splitRequest(body));
-    const [result] = await codeResults(stub, chat.id);
-    expect({
-      answer: reply.answer,
-      requests: provider.requests.length,
-      // With the question, headed by the recall's run, never as a result.
-      withQuestion:
-        request?.rest.includes("[Recall ") === true &&
-        request.rest.includes(fact),
-      inResult: request?.results.includes(fact),
-      cites: result?.text.includes(documentId),
-      provenance: reply.provenance,
-    }).toStrictEqual({
-      answer: "Seven.",
-      // Answered from the evidence, without a search of its own.
-      requests: 1,
-      withQuestion: true,
-      inResult: false,
-      cites: true,
-      provenance: { sources: [collectionId], restricted: false },
-    });
-    // Audited as the agent's recall: a read of what it returned.
-    const events = await eventsOf(agent.agentId, (all) =>
-      all.some(({ action }) => action === "knowledge.search")
-    );
-    expect(
-      events
-        .filter(({ action }) => action === "knowledge.search")
-        .map(({ detail }) => detail)
-    ).toStrictEqual([expect.objectContaining({ via: "recall", hits: 1 })]);
-  });
-
-  it("never hands the model what the person or the agent may not read", async () => {
-    const admin = await newAdmin();
-    const person = await newPerson();
-    const word = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
-    const teamCanary = `team canary ${unique()}`;
-    const ungrantedCanary = `ungranted canary ${unique()}`;
-    // Granted to the agent, but a team's the person isn't in.
-    const team = await newTeam(admin, [admin]);
-    const { id: teamOnly } = await admin.knowledge.createCollection({
-      name: `Team ${unique()}`,
-      access: "teams",
-      teams: [team],
-    });
-    await admin.knowledge.saveDocument({
-      collectionId: teamOnly,
-      path: "plan.md",
-      text: `# Plan ${word}\n\n${teamCanary}`,
-      ifVersion: 0,
-    });
-    // Readable by the person, but not granted to the agent.
-    const { id: ungranted } = await admin.knowledge.createCollection({
-      name: `Open ${unique()}`,
-      access: "everyone",
-    });
-    await admin.knowledge.saveDocument({
-      collectionId: ungranted,
-      path: "plan.md",
-      text: `# Plan ${word}\n\n${ungrantedCanary}`,
-      ifVersion: 0,
-    });
-    const { stub, chat, provider, ask, agent } = await chatOf(
-      person.userId,
-      says("I can't find it.")
-    );
-    await grantRead(admin, agent, teamOnly);
-    await grantBrain(admin, agent);
-
-    const reply = await ask(word);
-
-    const sent = JSON.stringify(provider.requests.map(({ body }) => body));
-    const [result] = await codeResults(stub, chat.id);
-    expect({
-      team: sent.includes(teamCanary),
-      ungranted: sent.includes(ungrantedCanary),
-      recalled: result?.text.includes('"evidence":[]'),
-      provenance: reply.provenance,
-    }).toStrictEqual({
-      team: false,
-      ungranted: false,
-      recalled: true,
-      provenance: { sources: [], restricted: false },
-    });
-  });
-
-  it("recalls nothing without the Brain permission", async () => {
-    const admin = await newAdmin();
-    const person = await newPerson();
-    const word = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
-    const fact = `The code is ${unique()}`;
-    const { id: collectionId } = await admin.knowledge.createCollection({
-      name: `Handbook ${unique()}`,
-      access: "everyone",
-    });
-    await admin.knowledge.saveDocument({
-      collectionId,
-      path: "code.md",
-      text: `# Code ${word}\n\n${fact}.`,
-      ifVersion: 0,
-    });
-    const { stub, chat, provider, ask, agent } = await chatOf(
-      person.userId,
-      says("Let me look.")
-    );
-    await grantRead(admin, agent, collectionId);
-
-    const reply = await ask(word);
-
-    expect({
-      steps: await codeResults(stub, chat.id),
-      sent: JSON.stringify(provider.requests.map(({ body }) => body)).includes(
-        fact
-      ),
-      provenance: reply.provenance,
-    }).toStrictEqual({
-      steps: [],
-      sent: false,
-      provenance: { sources: [], restricted: false },
-    });
-  });
-
-  it("answers without evidence, told why, when the recall runs out of time", async () => {
-    const admin = await newAdmin();
-    const person = await newPerson();
-    const word = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
-    const fact = `The code is ${unique()}`;
-    const { id: collectionId } = await admin.knowledge.createCollection({
-      name: `Handbook ${unique()}`,
-      access: "everyone",
-    });
-    await admin.knowledge.saveDocument({
-      collectionId,
-      path: "code.md",
-      text: `# Code ${word}\n\n${fact}.`,
-      ifVersion: 0,
-    });
-    const { stub, chat, provider, ask, agent } = await chatOf(
-      person.userId,
-      says("I couldn't read Knowledge in time.")
-    );
-    await grantRead(admin, agent, collectionId);
-    await grantBrain(admin, agent);
-    // Too short for any run to finish: only for this test's turn.
-    const restore = await setObjectEnv(stub, { CODE_RUN_TIMEOUT_MS: "1" });
-    let reply: Awaited<ReturnType<typeof ask>>;
-    try {
-      reply = await ask(word);
-    } finally {
-      await restore();
-    }
-
-    const [request] = provider.requests.map(({ body }) => splitRequest(body));
-    expect({
-      outcome: reply.outcome,
-      statuses: await codeStatuses(stub, chat.id),
-      told: request?.rest.includes("wall_expired"),
-      sent: JSON.stringify(provider.requests.map(({ body }) => body)).includes(
-        fact
-      ),
-    }).toStrictEqual({
-      outcome: "answered",
-      statuses: ["wall_expired"],
-      told: true,
-      sent: false,
-    });
-  });
-
-  it("withholds what a recall handed over once its document is gone or purged, or the Brain permission is revoked, though its collection may still be read, and audits it", async () => {
-    const admin = await newAdmin();
-    const person = await newPerson();
-    /** A chat whose first turn recalled `fact`, from a collection it keeps. */
-    const recalled = async () => {
-      const word = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
-      const code = `depot${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
-      const fact = `The depot code is ${code}`;
-      const { id: collectionId } = await admin.knowledge.createCollection({
-        name: `Handbook ${unique()}`,
-        access: "everyone",
-      });
-      const { id: documentId } = await admin.knowledge.saveDocument({
-        collectionId,
-        path: "depot.md",
-        text: `# Depot ${word}\n\n${fact}.`,
-        ifVersion: 0,
-      });
-      const chat = await chatOf(
-        person.userId,
-        says("Noted."),
-        says("And again.")
-      );
-      await grantRead(admin, chat.agent, collectionId);
-      const brainGrant = await grantBrain(admin, chat.agent);
-      await chat.ask(word);
-      /** Whether the next turn's first request still sent the fact. */
-      const next = async () => {
-        const before = chat.provider.requests.length;
-        await chat.ask("And the code?");
-        const body = JSON.stringify(chat.provider.requests[before]?.body);
-        return {
-          fact: body.includes(fact),
-          withheld: body.includes(withheldResult),
-        };
-      };
-      return { ...chat, code, collectionId, documentId, brainGrant, next };
-    };
-    /** The sources of the chat's `chat.history_withheld` events. */
-    const withheldOf = async (agentId: string, chatId: string) => {
-      const events = await eventsOf(agentId, (all) =>
-        all.some(({ action }) => action === "chat.history_withheld")
-      );
-      return events
-        .filter(
-          ({ action, target }) =>
-            action === "chat.history_withheld" && target?.id === chatId
-        )
-        .map(({ detail }) => sourceNamed(detail.source));
-    };
-
-    const kept = await recalled();
-    const unchanged = await kept.next();
-    const erased = await recalled();
-    // Erased from the Brain, as a purge erases it: its collection stays.
-    await env.KNOWLEDGE.prepare("DELETE FROM documents WHERE id = ?")
-      .bind(erased.documentId)
-      .run();
-    const afterErase = await erased.next();
-    const purged = await recalled();
-    // Purged from it: the document stays, in its collection, at a new
-    // version, without the code.
-    const purge: PurgeInput = {
-      type: "content",
-      documentIds: [purged.documentId],
-      terms: [purged.code],
-      reason: "erasure_request",
-    };
-    const plan = await admin.knowledge.preparePurge(purge);
-    await admin.knowledge.purge(purge, plan.token);
-    const afterPurge = await purged.next();
-    const revoked = await recalled();
-    await admin.api.permissions.revoke(revoked.brainGrant);
-    const afterRevoke = await revoked.next();
-
-    expect({
-      unchanged,
-      afterErase,
-      afterPurge,
-      afterRevoke,
-      erasedSources: await withheldOf(erased.agent.agentId, erased.chat.id),
-      purgedSources: await withheldOf(purged.agent.agentId, purged.chat.id),
-      revokedSources: await withheldOf(revoked.agent.agentId, revoked.chat.id),
-    }).toStrictEqual({
-      // Still readable: the next turn sends what the first recalled.
-      unchanged: { fact: true, withheld: false },
-      afterErase: { fact: false, withheld: true },
-      afterPurge: { fact: false, withheld: true },
-      afterRevoke: { fact: false, withheld: true },
-      // Named by its IDs, never by what it said.
-      erasedSources: [
-        `brain-document:${erased.collectionId}/${erased.documentId}`,
-      ],
-      purgedSources: [
-        `brain-document:${purged.collectionId}/${purged.documentId}`,
-      ],
-      revokedSources: ["brain-grant"],
-    });
+    expect(results.map(({ text }) => text)).toStrictEqual([
+      expect.stringContaining("This chat has no API named env.brain"),
+      // Once granted, the code's own: their own plan, never the team's.
+      `Returned:\n["Our plan: ${word}."]`,
+      expect.stringContaining("This chat has no API named env.brain"),
+    ]);
   });
 });

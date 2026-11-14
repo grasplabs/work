@@ -46,6 +46,14 @@ import { authBasePath } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
 import { handleAuthRequest } from "./auth/routes.ts";
 import {
+  brainExportsPath,
+  brainExportsResponse,
+  brainOwnExportPath,
+  brainOwnExportResponse,
+  brainRestorePath,
+  brainRestoreResponse,
+} from "./brain-next-exports.ts";
+import {
   brainActionResponse,
   brainErasureResponse,
   brainReportResponse,
@@ -353,6 +361,9 @@ const pathHandlers: ReadonlyMap<
   [brainReportPath, brainReportResponse],
   [brainActionPath, brainActionResponse],
   [brainErasurePath, brainErasureResponse],
+  [brainExportsPath, brainExportsResponse],
+  [brainOwnExportPath, brainOwnExportResponse],
+  [brainRestorePath, brainRestoreResponse],
   [adminSnapshotPath, adminSnapshotResponse],
   [adminKickoffPath, adminKickoffResponse],
   [adminCommandPath, adminCommandResponse],

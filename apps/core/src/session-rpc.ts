@@ -3,6 +3,7 @@ import type { Identity, SessionApi } from "@grasp-os/shared/rpc";
 import { AiProvidersRpc } from "./ai-providers.ts";
 import { AppsRpc } from "./apps-rpc.ts";
 import { AuditRpc } from "./audit-rpc.ts";
+import { BrainMemoriesRpc } from "./brain-memories-rpc.ts";
 import { BrainRpc } from "./brain-rpc.ts";
 import { BrainSourcesRpc } from "./brain-sources-rpc.ts";
 import { ChannelAccountsRpc } from "./channels/accounts.ts";
@@ -34,6 +35,7 @@ import { CoreRpcTarget } from "./rpc-target.ts";
 import { fullAccess, withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { SignalsRpc } from "./signals-rpc.ts";
+import { SkillsRpc } from "./skills-rpc.ts";
 import { staffAudited } from "./staff-audit.ts";
 import { StephenRequestsRpc } from "./stephen-requests.ts";
 import { UnknownOutcomesRpc } from "./unknown-outcomes.ts";
@@ -58,6 +60,8 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #knowledge: KnowledgeRpc;
   readonly #brain: BrainRpc;
   readonly #brainSources: BrainSourcesRpc;
+  readonly #skills: SkillsRpc;
+  readonly #brainMemories: BrainMemoriesRpc;
   readonly #knowledgeSignals: KnowledgeSignalsRpc;
   readonly #memory: MemoryRpc;
   readonly #uploads: UploadsRpc;
@@ -104,6 +108,8 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#knowledge = new KnowledgeRpc(env, full);
     this.#brain = new BrainRpc(env, full);
     this.#brainSources = new BrainSourcesRpc(env, full);
+    this.#skills = new SkillsRpc(env, full);
+    this.#brainMemories = new BrainMemoriesRpc(env, full);
     this.#knowledgeSignals = new KnowledgeSignalsRpc(env, full);
     this.#memory = new MemoryRpc(env, full);
     this.#uploads = new UploadsRpc(env, full);
@@ -144,6 +150,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
       heldStarts: this.#heldStarts,
       lifecycles: this.#workflowResources.lifecycle,
       bindings: this.#workflowResources,
+      skills: this.#skills,
     });
     this.#onboarding = new OnboardingRpc(env, check);
     this.#onboardingGate = new OnboardingGateRpc(env, check);
@@ -207,6 +214,14 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
 
   get brainSources(): BrainSourcesRpc {
     return this.#brainSources;
+  }
+
+  get skills(): SkillsRpc {
+    return this.#skills;
+  }
+
+  get brainMemories(): BrainMemoriesRpc {
+    return this.#brainMemories;
   }
 
   get knowledgeSignals(): KnowledgeSignalsRpc {

@@ -4,6 +4,8 @@ import type {
   ToolResultMessage,
   Usage,
 } from "@earendil-works/pi-ai";
+import { chatSavedMemorySchema } from "@grasp-os/shared/brain-memories";
+import type { ChatSavedMemory } from "@grasp-os/shared/brain-memories";
 import {
   chatAskSchema,
   chatPlanSchema,
@@ -27,7 +29,11 @@ import { thinkingStepSchema } from "@grasp-os/shared/thinking";
 import type { ThinkingStep } from "@grasp-os/shared/thinking";
 import { z } from "zod";
 
-import { isDedicatedTool, showThinkingName } from "./agent-messages.ts";
+import {
+  isDedicatedTool,
+  rememberName,
+  showThinkingName,
+} from "./agent-messages.ts";
 import { contextWindowOf, modelFailureOf } from "./models.ts";
 
 // A chat's transcript as pi keeps it (workspace.ts), shown as the person
@@ -53,6 +59,18 @@ const thinkingOf = (message: ToolResultMessage): ThinkingStep | undefined => {
   }
   const step = thinkingStepSchema.safeParse(message.details);
   return step.success ? step.data : undefined;
+};
+
+/**
+ * The memory a call of `remember` saved (agent-remember.ts), for the
+ * chat's notice; none for any other result, or one that failed.
+ */
+const savedOf = (message: ToolResultMessage): ChatSavedMemory | undefined => {
+  if (message.toolName !== rememberName || message.isError) {
+    return undefined;
+  }
+  const saved = chatSavedMemorySchema.safeParse(message.details);
+  return saved.success ? saved.data : undefined;
 };
 
 /** The text parts of a message's content, joined. */
@@ -528,7 +546,7 @@ export const noteLinksOf = (
  * plan (`proposePlan`) only there too: one a chat app's
  * model calls anyway was never offered, so it shows as the failed call it
  * is, never as questions. The person's Build it shows what it built
- * (`built`).
+ * (`built`). An answer names the agent that gave it (`agentId`).
  */
 export const chatMessageOf = (
   id: number,
@@ -537,7 +555,8 @@ export const chatMessageOf = (
   given: (documentId: string) => boolean = givenNothing,
   thinkingMs: number | null = null,
   asking = false,
-  built?: ShownBuilt
+  built?: ShownBuilt,
+  agentId?: string
 ): ChatMessage | undefined => {
   const at = createdAt.toISOString();
   if (message.role === "user") {
@@ -558,6 +577,7 @@ export const chatMessageOf = (
     return {
       id,
       role: "assistant",
+      ...(agentId === undefined ? {} : { agentId }),
       text,
       citations,
       code: codeOf(message),
@@ -575,6 +595,7 @@ export const chatMessageOf = (
   }
   if (message.role === "toolResult") {
     const thinking = thinkingOf(message);
+    const saved = savedOf(message);
     return {
       id,
       role: "result",
@@ -583,6 +604,7 @@ export const chatMessageOf = (
       failed: message.isError,
       at,
       ...(thinking === undefined ? {} : { thinking }),
+      ...(saved === undefined ? {} : { saved }),
     };
   }
   return undefined;

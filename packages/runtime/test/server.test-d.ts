@@ -6,6 +6,7 @@
 // must stay an error.
 import { expectTypeOf } from "vite-plus/test";
 
+import type { BrainPack } from "../src/brain-recall.ts";
 import type { Callable } from "../src/function-references.ts";
 import { AppError, defineApp, permission } from "../src/index.ts";
 import { serverModule } from "../src/server.ts";
@@ -54,10 +55,7 @@ const mail = permission.connection("mail", {
   contract: "microsoft-365.mail@1",
   actions: ["send"],
 });
-const brain = permission.brain({
-  operations: ["search"],
-  collections: ["handbook"],
-});
+const brain = permission.brain({ operations: ["recall"] });
 const ai = permission.ai({ maxOutputTokens: 500 });
 const followUp = permission.workflow("followUp", {
   args: v.object({
@@ -342,11 +340,10 @@ granted.action({
     });
     // An action the declaration doesn't list isn't a member.
     expectTypeOf(ctx.connections.mail).not.toHaveProperty("delete");
-    expectTypeOf(ctx.brain.search({ text: "a" })).resolves.toEqualTypeOf<
-      { title: string; excerpt: string }[]
-    >();
-    // Only the App's declared operations and permissions.
-    expectTypeOf(ctx.brain).not.toHaveProperty("read");
+    expectTypeOf(
+      ctx.brain.recall({ question: "a", budget: { tokens: 500 } })
+    ).resolves.toEqualTypeOf<BrainPack>();
+    // Only the App's declared permissions.
     expectTypeOf(ctx.connections).not.toHaveProperty("calendar");
     expectTypeOf(ctx).not.toHaveProperty("guests");
     return await ctx.ai.generate({

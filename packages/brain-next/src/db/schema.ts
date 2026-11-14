@@ -138,8 +138,23 @@ export const sourceChanges = sqliteTable(
     versionRow: integer("version_row")
       .notNull()
       .references(() => sourceVersions.row),
+    /**
+     * When its producer read the text it added, if it said
+     * (`NewSource.readAt`). A version's latest is when its text was last
+     * read: no add of an earlier read replaces it (sources.ts
+     * `newerThan`). Each change keeps its own, so a later read of the same
+     * text, kept as a change of the version it matches, moves it on
+     * without anything being overwritten.
+     */
+    readAt: integer("read_at", { mode: "timestamp_ms" }),
   },
-  (table) => [primaryKey({ columns: [table.source, table.change] })]
+  (table) => [
+    primaryKey({ columns: [table.source, table.change] }),
+    // A version's changes, and the latest read of them, without a scan:
+    // `newerThan` inside the store's write, and the export's latest read
+    // and change keys of each version.
+    index("source_changes_version_idx").on(table.versionRow, table.readAt),
+  ]
 );
 
 /**
@@ -394,6 +409,11 @@ export const wordIndex = sqliteTable(
     target: integer().notNull(),
     /** The last chunk (`chunks.row`) the rebuild rewrote: 0 before the first. */
     cursor: integer().notNull(),
+    /**
+     * The last memory (`memories.row`) the rebuild rewrote, once past the
+     * last chunk: 0 before the first. Added by migration 0008.
+     */
+    memoryCursor: integer("memory_cursor").notNull().default(0),
   },
   () => [check("word_index_one", sql.raw("id = 1"))]
 );
@@ -519,15 +539,33 @@ export const erasingVersions = sqliteTable(
  * A source's key as the erasure ledger names it: its SHA-256, written
  * with the source's first version, so a replay finds the source the
  * ledger names in SQL, and a person's erasure names the sources it hid.
+ * With it, the SHA-256 of the group it was added in (`NewSource.group`),
+ * for good: null for a source in none. A group's erasure finds its
+ * sources by it.
  */
 export const sourceSubjects = sqliteTable(
   "source_subjects",
   {
     source: text().primaryKey(),
     subject: text().notNull(),
+    group: text("group_subject"),
   },
-  (table) => [index("source_subjects_subject_idx").on(table.subject)]
+  (table) => [
+    index("source_subjects_subject_idx").on(table.subject),
+    index("source_subjects_group_idx").on(table.group),
+  ]
 );
+
+/**
+ * The SHA-256 of every key an add named as its group (`NewSource.group`),
+ * kept for good, as the erasure ledger names keys: so once such a key is
+ * erased, every key under it (`<group>/…`) stays refused, whether an add
+ * names the group or not (sources.ts). A key no add ever named as a group
+ * is none: erasing it closes it alone.
+ */
+export const knownGroups = sqliteTable("known_groups", {
+  subject: text().primaryKey(),
+});
 
 /**
  * What a person's erasure hid, a row a version: by number under the
@@ -568,4 +606,362 @@ export const unembeddable = sqliteTable(
     hash: text().notNull(),
   },
   (table) => [primaryKey({ columns: [table.model, table.hash] })]
+);
+
+// Exports and restores (exports.ts, restore.ts). An export writes what a
+// scope holds as files in the store's part of the bucket (`exports/<id>/`),
+// a part a run of the queue, and its manifest last; a restore reads a
+// company export's files back into an empty shared store.
+
+/**
+ * An export of the company's Brain, and how far it has come. It is stale once the erasure ledger names a
+ * version it holds (`export_sources`), and its files are deleted
+ * (exports.ts).
+ */
+export const exportsTable = sqliteTable(
+  "exports",
+  {
+    id: text().primaryKey(),
+    /** The deployment it is of, as the host names it: its manifest says so. */
+    deployment: text().notNull(),
+    /** The last version's row it takes: what was there when it started. */
+    upTo: integer("up_to").notNull(),
+    /**
+     * The last row written to a part, of the table its step reads
+     * (`phase`): a version's, then a memory's, a confirmation's, an
+     * extraction mark's, a change's (exports.ts `memoryPhases`).
+     */
+    cursor: integer().notNull(),
+    /** The step being written: null for versions, then each of `memoryPhases` by its number. */
+    phase: integer(),
+    /**
+     * The store's latest write stamp of memories as it started
+     * (`memory_stamps`): it takes only what was learned by then, and its
+     * manifest carries it, so a restore never lowers the store's.
+     */
+    stamp: integer(),
+    /** The last change of memories' row (`memory_changes.rowid`) it takes. */
+    changesUpTo: integer("changes_up_to"),
+    state: text({
+      enum: ["writing", "restoring", "done", "failed", "erased", "expired"],
+    }).notNull(),
+    /** Parts written, and the versions in them. */
+    parts: integer().notNull(),
+    versions: integer().notNull(),
+    startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
+    finishedAt: integer("finished_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [index("exports_state_idx").on(table.state, table.finishedAt)]
+);
+
+/**
+ * The versions an export holds, by their source's key as the erasure
+ * ledger names it (SHA-256) and their number: recorded with each part, so
+ * the ledger naming one of them makes exactly the exports that hold it
+ * stale. Kept until the export's files are deleted, so an erasure is
+ * known unfinished while a file still holds what it took.
+ */
+export const exportSources = sqliteTable(
+  "export_sources",
+  {
+    export: text()
+      .notNull()
+      .references(() => exportsTable.id),
+    subject: text().notNull(),
+    version: integer().notNull(),
+    /**
+     * Whether a part of the export as written holds this version (exports.ts
+     * `writePart`): recorded ahead of a part, a version is only held once
+     * the part is. What its memories may rest on.
+     */
+    written: integer({ mode: "boolean" }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.export, table.subject, table.version] }),
+    // An erasure finds the exports holding what it names.
+    index("export_sources_subject_idx").on(table.subject, table.version),
+  ]
+);
+
+/** A part of an export, as written: its SHA-256 and how many versions it holds. */
+export const exportParts = sqliteTable(
+  "export_parts",
+  {
+    export: text()
+      .notNull()
+      .references(() => exportsTable.id),
+    part: integer().notNull(),
+    hash: text().notNull(),
+    versions: integer().notNull(),
+    /** Lines of memories it holds (exports.ts `memoryPhases`): null for none. */
+    memories: integer(),
+    /** Its size in bytes, as written. */
+    bytes: integer().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.export, table.part] })]
+);
+
+/**
+ * A restore of a company export into the shared store: how far it has
+ * checked and written its export's parts (each part's hash, size and count
+ * are rows of `export_parts`, written as it started, so no value grows
+ * with how many parts there are), and how many versions it restored.
+ */
+export const restores = sqliteTable("restores", {
+  export: text().primaryKey(),
+  /** Parts checked so far, in a first pass before anything is written. */
+  checked: integer().notNull(),
+  /** Whether a part checked so far failed: the restore fails once all are checked. */
+  damaged: integer({ mode: "boolean" }).notNull().default(false),
+  /**
+   * When it failed: the last version's row the store held then. A restart
+   * is refused once anything was added past it.
+   */
+  heldTo: integer("held_to"),
+  /**
+   * When it failed: the store's latest write stamp of memories then. A
+   * restart is refused once any write of memories moved it.
+   */
+  heldStamp: integer("held_stamp"),
+  /** The next part to write, once every part is checked. */
+  part: integer().notNull(),
+  restored: integer().notNull(),
+  state: text({ enum: ["running", "done", "failed", "abandoned"] }).notNull(),
+  startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
+  finishedAt: integer("finished_at", { mode: "timestamp_ms" }),
+});
+
+/**
+ * The sweep of export files the store has no record of (exports.ts
+ * `sweepWork`): the last erasure (`erasures.rowid`) its pass was started
+ * for, and where its listing of `exports/` goes on (null once it is
+ * through), saved after each key; and the last erasure every export was
+ * checked against. One row at most. A store whose rows were lost, or
+ * rolled back, replays its ledger into `erasures` past both, so both are
+ * due again.
+ */
+export const exportSweep = sqliteTable(
+  "export_sweep",
+  {
+    id: integer().primaryKey(),
+    through: integer().notNull(),
+    /** The last erasure every export was checked against (`staleSql`). */
+    checked: integer().notNull().default(0),
+    cursor: text(),
+  },
+  () => [check("export_sweep_one", sql.raw("id = 1"))]
+);
+
+// Memories and entities (memories.ts, entities.ts). A memory is written
+// once and never changed but for the moment it is retired: what ends it
+// otherwise is a newer memory of its lineage, read as such per reader, so
+// nothing about an older memory is written over. Its readers are its set
+// (`reader_set`, as the caller gave it) and, when it rests on a source
+// version, that version's and the source's current version's: checked in
+// every statement that reads it.
+
+/** A thing memories are about, with the store's own id for it. */
+export const entities = sqliteTable(
+  "entities",
+  {
+    row: integer().primaryKey({ autoIncrement: true }),
+    /** Its id, as readers and callers name it. */
+    id: text().notNull().unique(),
+    kind: text().notNull(),
+  },
+  (table) => [index("entities_kind_idx").on(table.kind, table.row)]
+);
+
+/**
+ * A memory (contract.ts `Memory`). Its lineage is the source it rests on
+ * (`source:` and the source's key) or its writer (`writer:` and their
+ * id); `lineage_order` orders a lineage's memories, the version number
+ * for a source's, 0 for a writer's, then `row`. `value_key` is what
+ * one-value attributes compare: the value folded, or the related entity's
+ * id.
+ */
+export const memories = sqliteTable(
+  "memories",
+  {
+    row: integer().primaryKey({ autoIncrement: true }),
+    id: text().notNull().unique(),
+    entity: integer()
+      .notNull()
+      .references(() => entities.row),
+    attribute: text(),
+    object: integer().references(() => entities.row),
+    value: text(),
+    valueKey: text("value_key"),
+    oneValue: integer("one_value", { mode: "boolean" }).notNull(),
+    type: text().notNull(),
+    statement: text().notNull(),
+    quote: text(),
+    // The version it rests on, by its source's key and its number, and
+    // its readers, by their set's key (`reader_sets.key`): never by a
+    // row id, which a release before memories may delete (an admin's
+    // rollback) and SQLite then give to another version or group. A
+    // memory whose version or set is gone is read by no one and deleted
+    // when the store starts if an erasure covered it (erasure.ts
+    // `replayMemoryErasures`); a set an older release dropped is made
+    // again from its key.
+    source: text(),
+    version: integer(),
+    /**
+     * The SHA-256 of `source`, as the erasure ledger names it: how a
+     * replay of the store's erasures at start finds what they covered
+     * (erasure.ts `replayMemoryErasures`).
+     */
+    subject: text(),
+    writer: text(),
+    lineage: text().notNull(),
+    lineageOrder: integer("lineage_order").notNull(),
+    /** Whose word it is, as JSON (contract.ts `Speaker`). */
+    speaker: text().notNull(),
+    validFrom: integer("valid_from"),
+    validUntil: integer("valid_until"),
+    learnedAt: integer("learned_at").notNull(),
+    retiredAt: integer("retired_at"),
+    readers: text().notNull(),
+  },
+  (table) => [
+    index("memories_entity_idx").on(
+      table.entity,
+      table.attribute,
+      table.lineage
+    ),
+    index("memories_object_idx").on(table.object),
+    index("memories_version_idx").on(table.source, table.version),
+    index("memories_subject_idx").on(table.subject, table.version),
+    index("memories_readers_idx").on(table.readers),
+  ]
+);
+
+/**
+ * A name or an exact identifier of an entity, as one memory gave it:
+ * visible only to those who may read that memory, and gone with it.
+ * `folded` is what a find compares: the name folded as search folds
+ * words, an email lowercased, a reference as written.
+ */
+export const entityNames = sqliteTable(
+  "entity_names",
+  {
+    entity: integer()
+      .notNull()
+      .references(() => entities.row),
+    memory: integer()
+      .notNull()
+      .references(() => memories.row),
+    type: text({ enum: ["name", "email", "ref"] }).notNull(),
+    value: text().notNull(),
+    folded: text().notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.entity, table.memory, table.type, table.folded],
+    }),
+    index("entity_names_folded_idx").on(table.type, table.folded, table.entity),
+    index("entity_names_memory_idx").on(table.memory),
+  ]
+);
+
+/**
+ * A person's confirmation of a memory, as their own word, over the
+ * memories (`memory_confirmed_over`) that said something else then: seen
+ * only by readers who may read the memory and each of those.
+ */
+export const memoryConfirmations = sqliteTable(
+  "memory_confirmations",
+  {
+    row: integer().primaryKey({ autoIncrement: true }),
+    memory: integer()
+      .notNull()
+      .references(() => memories.row),
+    person: text().notNull(),
+    at: integer().notNull(),
+  },
+  (table) => [index("memory_confirmations_memory_idx").on(table.memory)]
+);
+
+/** A memory a confirmation was made over. */
+export const memoryConfirmedOver = sqliteTable(
+  "memory_confirmed_over",
+  {
+    confirmation: integer()
+      .notNull()
+      .references(() => memoryConfirmations.row),
+    memory: integer()
+      .notNull()
+      .references(() => memories.row),
+  },
+  (table) => [
+    primaryKey({ columns: [table.confirmation, table.memory] }),
+    index("memory_confirmed_over_memory_idx").on(table.memory),
+  ]
+);
+
+/**
+ * A version of a source fully extracted (contract.ts `extracted`): every
+ * memory of its source's lineage from an earlier version ends at `at`,
+ * for readers of both the add that marked it and this version. Deleted
+ * with the version.
+ */
+export const memoryExtractions = sqliteTable(
+  "memory_extractions",
+  {
+    source: text().notNull(),
+    version: integer().notNull(),
+    /** The SHA-256 of `source`, as `memories.subject`. */
+    subject: text().notNull(),
+    lineage: text().notNull(),
+    at: integer().notNull(),
+    /** The add's readers, by their set's key: only they, of the version's, see it end what came before. */
+    readers: text().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.source, table.version, table.readers] }),
+    index("memory_extractions_lineage_idx").on(table.lineage, table.version),
+    index("memory_extractions_readers_idx").on(table.readers),
+    index("memory_extractions_subject_idx").on(table.subject, table.version),
+  ]
+);
+
+/**
+ * An add of memories, by the SHA-256 of its change key (no plain key is
+ * kept), with the SHA-256 of what it added and what it answered (ids
+ * only): the same change again answers the same.
+ */
+export const memoryChanges = sqliteTable("memory_changes", {
+  key: text().primaryKey(),
+  hash: text().notNull(),
+  answer: text().notNull(),
+});
+
+/**
+ * How far the start-up replay of erasures on memories has come (erasure.ts
+ * `replayMemoryErasures`): the highest `erasures` rowid it applied. One
+ * row. A table older releases do not know, so an erasure one records
+ * after a rollback is above it, and replayed after the roll forward; a
+ * restore brings the mark back with its copy.
+ */
+export const memoryErasureReplay = sqliteTable(
+  "memory_erasure_replay",
+  {
+    id: integer().primaryKey(),
+    through: integer().notNull(),
+  },
+  () => [check("memory_erasure_replay_one", sql.raw("id = 1"))]
+);
+
+/**
+ * The latest moment the store stamped a write of memories with (memories.ts
+ * `stampWrite`): every later write is stamped after it, and a read is
+ * given no moment before it. One row; never lowered, a deletion included.
+ */
+export const memoryStamps = sqliteTable(
+  "memory_stamps",
+  {
+    id: integer().primaryKey(),
+    latest: integer().notNull(),
+  },
+  () => [check("memory_stamps_one", sql.raw("id = 1"))]
 );

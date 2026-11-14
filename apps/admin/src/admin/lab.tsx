@@ -51,12 +51,12 @@ import {
 } from "@grasp-os/ui/components/table";
 import { Link } from "@tanstack/react-router";
 
-import { Figure } from "./interview-parts.tsx";
 import { labResults, labScores } from "./lab-runs.ts";
+import { Figure } from "./parts.tsx";
 import { EmptySection, Section } from "./section.tsx";
 import { unreadWords } from "./views.ts";
 import type { Organization } from "./views.ts";
-import { formatList } from "./words.ts";
+import { formatDate, formatList } from "./words.ts";
 
 const percent = new Intl.NumberFormat("en", {
   style: "percent",
@@ -66,12 +66,6 @@ const percent = new Intl.NumberFormat("en", {
 const oneDecimal = new Intl.NumberFormat("en", {
   minimumFractionDigits: 1,
   maximumFractionDigits: 1,
-});
-
-const day = new Intl.DateTimeFormat("en", {
-  day: "numeric",
-  month: "short",
-  timeZone: "UTC",
 });
 
 /** One organization's figures, by its client. */
@@ -92,18 +86,34 @@ const EveryOrganization = ({ measured }: { measured: readonly Measured[] }) => (
         <TableHeader>
           <TableRow>
             <TableHead variant="card">Organization</TableHead>
-            <TableHead variant="card">Finished</TableHead>
-            <TableHead variant="card">Rating</TableHead>
-            <TableHead className="hidden @xl:table-cell" variant="card">
+            <TableHead className="text-right" variant="card">
+              Finished
+            </TableHead>
+            <TableHead className="text-right" variant="card">
+              Rating
+            </TableHead>
+            <TableHead
+              className="hidden text-right @xl:table-cell"
+              variant="card"
+            >
               Minutes
             </TableHead>
-            <TableHead className="hidden @xl:table-cell" variant="card">
+            <TableHead
+              className="hidden text-right @xl:table-cell"
+              variant="card"
+            >
               Left in
             </TableHead>
-            <TableHead className="hidden @2xl:table-cell" variant="card">
+            <TableHead
+              className="hidden text-right @2xl:table-cell"
+              variant="card"
+            >
               By voice
             </TableHead>
-            <TableHead className="hidden @2xl:table-cell" variant="card">
+            <TableHead
+              className="hidden text-right @2xl:table-cell"
+              variant="card"
+            >
               Stopped
             </TableHead>
           </TableRow>
@@ -121,32 +131,44 @@ const EveryOrganization = ({ measured }: { measured: readonly Measured[] }) => (
                   {name}
                 </Link>
               </TableCell>
-              <TableCell variant="card">
+              <TableCell className="text-right" variant="card">
                 <span className="tabular-nums">{`${stats.held} of ${stats.started}`}</span>
               </TableCell>
-              <TableCell variant="card">
+              <TableCell className="text-right" variant="card">
                 <span className="tabular-nums">
                   {stats.rating.count === 0
                     ? "–"
                     : `${oneDecimal.format(stats.rating.average)} (${stats.rating.count})`}
                 </span>
               </TableCell>
-              <TableCell className="hidden @xl:table-cell" variant="card">
+              <TableCell
+                className="hidden text-right @xl:table-cell"
+                variant="card"
+              >
                 <span className="tabular-nums">
                   {Math.round(stats.length.employee || stats.length.lead)}
                 </span>
               </TableCell>
-              <TableCell className="hidden @xl:table-cell" variant="card">
+              <TableCell
+                className="hidden text-right @xl:table-cell"
+                variant="card"
+              >
                 <span className="tabular-nums">
                   {stats.interviews > 0 ? percent.format(stats.approved) : "–"}
                 </span>
               </TableCell>
-              <TableCell className="hidden @2xl:table-cell" variant="card">
+              <TableCell
+                className="hidden text-right @2xl:table-cell"
+                variant="card"
+              >
                 <span className="tabular-nums">
                   {stats.held > 0 ? percent.format(stats.byVoice) : "–"}
                 </span>
               </TableCell>
-              <TableCell className="hidden @2xl:table-cell" variant="card">
+              <TableCell
+                className="hidden text-right @2xl:table-cell"
+                variant="card"
+              >
                 <span className="tabular-nums">{stats.stopped}</span>
               </TableCell>
             </TableRow>
@@ -260,7 +282,7 @@ const inUseWords = (lab: Lab): string => {
 const WhereHeStands = ({ lab }: { lab: Lab }) => (
   <section aria-label="Where he stands" className="flex flex-col gap-2">
     <p className="text-muted-foreground">{inUseWords(lab)}</p>
-    <div className="bg-border grid grid-cols-1 gap-px overflow-hidden rounded-xl border sm:grid-cols-2 lg:grid-cols-5">
+    <div className="bg-border grid grid-cols-1 gap-px overflow-hidden rounded-xl border sm:grid-cols-2 lg:auto-cols-fr lg:grid-flow-col lg:grid-cols-none">
       {lab.figures.length === 0 ? (
         <Figure
           label="In the lab"
@@ -282,10 +304,6 @@ const WhereHeStands = ({ lab }: { lab: Lab }) => (
           <Figure
             key={figure.id}
             label="Finished, with real people"
-            ring={{
-              value: Math.round((figure.value ?? 0) * figure.of),
-              of: figure.of,
-            }}
             sub={realSub(figure, lab)}
             value={`${Math.round((figure.value ?? 0) * figure.of)} of ${figure.of}`}
           />
@@ -305,7 +323,7 @@ const WhereHeStands = ({ lab }: { lab: Lab }) => (
 /** What needs one of us, or that nothing does, each opening where it is dealt with. */
 const NeedsUs = ({ needs }: { needs: readonly LabNeed[] }) =>
   needs.length === 0 ? (
-    <Section description="Nothing needs us." title="Needs us" />
+    <p className="text-muted-foreground">Nothing needs us.</p>
   ) : (
     <Section title="Needs us">
       <ul className="border-t">
@@ -349,18 +367,34 @@ const Versions = ({ versions }: { versions: readonly LabVersion[] }) => (
         <TableHeader>
           <TableRow>
             <TableHead variant="card">Version</TableHead>
-            <TableHead variant="card">Heard</TableHead>
-            <TableHead className="hidden @xl:table-cell" variant="card">
+            <TableHead className="text-right" variant="card">
+              Heard
+            </TableHead>
+            <TableHead
+              className="hidden text-right @xl:table-cell"
+              variant="card"
+            >
               Right line
             </TableHead>
-            <TableHead className="hidden @2xl:table-cell" variant="card">
+            <TableHead
+              className="hidden text-right @2xl:table-cell"
+              variant="card"
+            >
               Supported
             </TableHead>
-            <TableHead variant="card">Finished</TableHead>
-            <TableHead className="hidden @xl:table-cell" variant="card">
+            <TableHead className="text-right" variant="card">
+              Finished
+            </TableHead>
+            <TableHead
+              className="hidden text-right @xl:table-cell"
+              variant="card"
+            >
               Rating
             </TableHead>
-            <TableHead className="hidden @2xl:table-cell" variant="card">
+            <TableHead
+              className="hidden text-right @2xl:table-cell"
+              variant="card"
+            >
               Left in
             </TableHead>
           </TableRow>
@@ -371,36 +405,48 @@ const Versions = ({ versions }: { versions: readonly LabVersion[] }) => (
               <TableCell variant="card">
                 <VersionName version={version} />
               </TableCell>
-              <TableCell variant="card">
+              <TableCell className="text-right" variant="card">
                 <span className="tabular-nums">
                   {labCell(version, "heard")}
                 </span>
               </TableCell>
-              <TableCell className="hidden @xl:table-cell" variant="card">
+              <TableCell
+                className="hidden text-right @xl:table-cell"
+                variant="card"
+              >
                 <span className="tabular-nums">
                   {labCell(version, "right")}
                 </span>
               </TableCell>
-              <TableCell className="hidden @2xl:table-cell" variant="card">
+              <TableCell
+                className="hidden text-right @2xl:table-cell"
+                variant="card"
+              >
                 <span className="tabular-nums">
                   {labCell(version, "supported")}
                 </span>
               </TableCell>
-              <TableCell variant="card">
+              <TableCell className="text-right" variant="card">
                 <span className="tabular-nums">
                   {version.real === null
                     ? "–"
                     : `${version.real.finished} of ${version.real.started}`}
                 </span>
               </TableCell>
-              <TableCell className="hidden @xl:table-cell" variant="card">
+              <TableCell
+                className="hidden text-right @xl:table-cell"
+                variant="card"
+              >
                 <span className="tabular-nums">
                   {version.real === null || version.real.rating.count === 0
                     ? "–"
                     : `${oneDecimal.format(version.real.rating.average)} (${version.real.rating.count})`}
                 </span>
               </TableCell>
-              <TableCell className="hidden @2xl:table-cell" variant="card">
+              <TableCell
+                className="hidden text-right @2xl:table-cell"
+                variant="card"
+              >
                 <span className="tabular-nums">
                   {version.real?.leftIn === null || version.real === null
                     ? "–"
@@ -463,7 +509,7 @@ const Runs = ({ lab }: { lab: Lab }) => {
             {lab.runs.map((run) => (
               <TableRow key={run.id}>
                 <TableCell variant="card">
-                  {`${benchWords[run.bench]}, ${run.set === "open" ? "open" : "hidden"} · ${day.format(new Date(run.at))}`}
+                  {`${benchWords[run.bench]}, ${run.set === "open" ? "open" : "hidden"} · ${formatDate(new Date(run.at).toISOString())}`}
                 </TableCell>
                 <TableCell variant="card">{nameOf(run)}</TableCell>
                 <TableCell className="hidden @xl:table-cell" variant="card">
@@ -514,16 +560,16 @@ const LiveRow = ({ group }: { group: LiveGroup }) => (
         ) : null}
       </span>
     </TableCell>
-    <TableCell variant="card">
+    <TableCell className="text-right" variant="card">
       <span className="tabular-nums">{finishedWords(group.now)}</span>
     </TableCell>
-    <TableCell variant="card">
+    <TableCell className="text-right" variant="card">
       <span className="tabular-nums">{finishedWords(group.before)}</span>
     </TableCell>
-    <TableCell className="hidden @xl:table-cell" variant="card">
+    <TableCell className="hidden text-right @xl:table-cell" variant="card">
       <span className="tabular-nums">{ratingWords(group.now)}</span>
     </TableCell>
-    <TableCell className="hidden @xl:table-cell" variant="card">
+    <TableCell className="hidden text-right @xl:table-cell" variant="card">
       <span className="tabular-nums">{ratingWords(group.before)}</span>
     </TableCell>
   </TableRow>
@@ -546,12 +592,24 @@ const Live = ({ live }: { live: Lab["live"] }) => {
           <TableHeader>
             <TableRow>
               <TableHead variant="card">Group</TableHead>
-              <TableHead variant="card">{`Finished, ${live.now.name}`}</TableHead>
-              <TableHead variant="card">{`Finished, ${before}`}</TableHead>
-              <TableHead className="hidden @xl:table-cell" variant="card">
+              <TableHead
+                className="text-right"
+                variant="card"
+              >{`Finished, ${live.now.name}`}</TableHead>
+              <TableHead
+                className="text-right"
+                variant="card"
+              >{`Finished, ${before}`}</TableHead>
+              <TableHead
+                className="hidden text-right @xl:table-cell"
+                variant="card"
+              >
                 {`Rating, ${live.now.name}`}
               </TableHead>
-              <TableHead className="hidden @xl:table-cell" variant="card">
+              <TableHead
+                className="hidden text-right @xl:table-cell"
+                variant="card"
+              >
                 {`Rating, ${before}`}
               </TableHead>
             </TableRow>

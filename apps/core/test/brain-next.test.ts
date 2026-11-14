@@ -34,6 +34,9 @@ const word = () => `w${unique()}`;
 /** What core or the store says when it refuses an input. */
 const refused = /^(?:The Brain refused it|Refused)/u;
 
+/** What core answers an argument that isn't of the kind its call takes. */
+const invalid = { code: "brain.request_invalid" };
+
 /** A member of the organization, signed in. */
 const person = async (): Promise<string> => {
   const { userId } = await signedInWithRole(idp, "user");
@@ -371,7 +374,9 @@ describe("the new Brain, inside core", { timeout: 60_000 }, () => {
       { kind: "none", personId: reader },
     ]) {
       // oxlint-disable-next-line no-await-in-loop -- one source at a time
-      await expect(addUnchecked(secret, readers)).rejects.toThrow(refused);
+      await expect(addUnchecked(secret, readers)).rejects.toMatchObject(
+        invalid
+      );
     }
     await expect(
       addUnchecked("", { kind: "owner", personId: reader })
@@ -394,7 +399,7 @@ describe("the new Brain, inside core", { timeout: 60_000 }, () => {
           question: "anything",
           budget: { tokens: recallBudgetMax },
         })
-      ).rejects.toThrow(refused);
+      ).rejects.toMatchObject(invalid);
     }
   });
 
@@ -403,13 +408,14 @@ describe("the new Brain, inside core", { timeout: 60_000 }, () => {
     await newTeam("");
     await join("", reader);
 
-    await expect(recalledAs(reader, "anything")).rejects.toThrow(refused);
+    await expect(recalledAs(reader, "anything")).rejects.toMatchObject(invalid);
   });
 
-  it("holds to its bounds: as many teams as a reader may have, and no more", async () => {
+  it("holds to its bounds: as many teams as a reader's groups hold beside the company, and no more", async () => {
     const [atMost, overMost] = await Promise.all([person(), person()]);
-    await inTeams(atMost, readerGroupsMax);
-    await inTeams(overMost, readerGroupsMax + 1);
+    // A member's reader holds the company's group too.
+    await inTeams(atMost, readerGroupsMax - 1);
+    await inTeams(overMost, readerGroupsMax);
     const secret = word();
     const id = await add(secret, { kind: "owner", personId: atMost });
 
@@ -423,6 +429,6 @@ describe("the new Brain, inside core", { timeout: 60_000 }, () => {
     ).rejects.toThrow(refused);
     await expect(
       recalledAs(atMost, "a".repeat(questionMaxLength + 1))
-    ).rejects.toThrow(refused);
+    ).rejects.toMatchObject(invalid);
   });
 });

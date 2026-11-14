@@ -11,6 +11,7 @@ import { Checkbox } from "@grasp-os/ui/components/checkbox";
 import { Field, FieldLabel } from "@grasp-os/ui/components/field";
 import { rootRouteId, useNavigate, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
+import type { ReactNode } from "react";
 
 import { formatTime } from "../releases/format.ts";
 import { thenRefresh, useAction } from "../use-action.ts";
@@ -43,17 +44,21 @@ const destinationWords = ({ destinationId }: ClientHostingView): string =>
     ? "No destination: this admin's STAGE names no stage."
     : `Goes in ${destinationId}, Grasp's shared destination.`;
 
-/** Facts, as a list of terms. */
+/**
+ * Facts, as a list of terms: what each is in one column, the fact beside
+ * it, in the text's own face, so the list reads as the rest of the page
+ * and not as a log.
+ */
 const Facts = ({
   facts,
 }: {
-  facts: readonly (readonly [string, string])[];
+  facts: readonly (readonly [string, ReactNode])[];
 }) => (
-  <dl className="flex flex-col gap-1 text-sm">
+  <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[11rem_minmax(0,1fr)]">
     {facts.map(([term, value]) => (
-      <div className="flex flex-wrap gap-x-4" key={term}>
-        <dt className="text-muted-foreground w-48">{term}</dt>
-        <dd className="font-mono break-all">{value}</dd>
+      <div className="contents" key={term}>
+        <dt className="text-muted-foreground">{term}</dt>
+        <dd className="wrap-break-word">{value}</dd>
       </div>
     ))}
   </dl>
@@ -91,28 +96,18 @@ const StopReason = ({ code }: { code: string | null }) =>
     </p>
   );
 
-/** Where the client's provisioning operation is. */
-const Operation = ({
-  operation,
-  run,
-}: {
-  operation: NonNullable<ClientHostingView["operation"]>;
-  run: ClientHostingView["run"];
-}) => (
-  <div className="flex flex-col gap-2">
-    <Facts
-      facts={[
-        ["Release", operation.releaseId],
-        ["Status", statusWords[operation.status]],
-        ["Last step done", operation.step ?? "none yet"],
-        ["Attempt", run ?? "none"],
-        ["Started by", operation.startedBy],
-        ["Updated (UTC)", formatTime(operation.updatedAt)],
-      ]}
-    />
-    <StopReason code={stopCodeOf(operation, run)} />
-  </div>
-);
+/** Where the client's provisioning operation is, as facts. */
+const operationFacts = (
+  operation: NonNullable<ClientHostingView["operation"]>,
+  run: ClientHostingView["run"]
+): (readonly [string, ReactNode])[] => [
+  ["Release", operation.releaseId],
+  ["Status", statusWords[operation.status]],
+  ["Last step done", operation.step ?? "none yet"],
+  ["Attempt", run ?? "none"],
+  ["Started by", operation.startedBy],
+  ["Updated (UTC)", formatTime(operation.updatedAt)],
+];
 
 /**
  * Offboarding it: its address out of the router at once, nothing deleted
@@ -182,13 +177,10 @@ const Offboarding = ({ view }: { view: ClientHostingView }) => {
 };
 
 /** That its core sends no mail, where its hosting gives it none yet. */
-const MailNotice = ({ view }: { view: ClientHostingView }) =>
-  view.hosting.hosting === "grasp_cloud" ? (
-    <p className="text-sm">
-      Mail: not available on this hosting yet (GRA-965). Its core sends none, so
-      its people get their interview links by hand.
-    </p>
-  ) : null;
+const mailNotice = (view: ClientHostingView): string | null =>
+  view.hosting.hosting === "grasp_cloud"
+    ? "Not available on this hosting yet (GRA-965). Its core sends none, so its people get their interview links by hand."
+    : null;
 
 /**
  * Discarding it: only for a client never placed, with nothing anywhere
@@ -295,19 +287,26 @@ export const ClientHosting = ({ view }: { view: ClientHostingView }) => {
     view.hosting.hosting === "grasp_cloud" &&
     !view.going &&
     view.operation?.status !== "done";
+  const mail = mailNotice(view);
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-1 text-sm">
-        <p>{hostingWords(view.hosting)}</p>
-      </div>
-      <p className="text-sm">
-        {view.placement === null
-          ? destinationWords(view)
-          : `Placed in ${view.placement.destinationId} by ${view.placement.placedBy} on ${formatTime(view.placement.placedAt)} UTC. It stays there: moving it is a migration.`}
-      </p>
-      <MailNotice view={view} />
+    <div className="flex flex-col gap-5">
+      <Facts
+        facts={[
+          ["Where it runs", hostingWords(view.hosting)],
+          [
+            view.placement === null ? "Destination" : "Placed",
+            view.placement === null
+              ? destinationWords(view)
+              : `Placed in ${view.placement.destinationId} by ${view.placement.placedBy} on ${formatTime(view.placement.placedAt)} UTC. It stays there: moving it is a migration.`,
+          ],
+          ...(mail === null ? [] : [["Mail", mail] as const]),
+          ...(view.operation === null
+            ? []
+            : operationFacts(view.operation, view.run)),
+        ]}
+      />
       {view.operation === null ? null : (
-        <Operation operation={view.operation} run={view.run} />
+        <StopReason code={stopCodeOf(view.operation, view.run)} />
       )}
       {view.placement === null ? null : <Offboarding view={view} />}
       {discardable(view) ? <Discard view={view} /> : null}

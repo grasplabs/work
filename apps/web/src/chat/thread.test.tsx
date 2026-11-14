@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import type { ThinkingGround } from "@grasp-os/shared/brain";
 import type {
+  ChatAgent,
   ChatMessage,
   ChatPartial,
   ChatToolEvent,
@@ -18,7 +19,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { ChatThread } from "./thread.tsx";
+import { answerAgentsOf, ChatThread } from "./thread.tsx";
 
 // An answer's steps as one trace in the thread. What the model thought:
 // while it thinks, its words stream in, open under "Thinking"; once the
@@ -31,6 +32,12 @@ import { ChatThread } from "./thread.tsx";
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
 let root: Root | undefined;
+
+/** The memories the page undid, by id, in order. */
+const forgotten: string[] = [];
+
+/** What core answers the page's undo of a memory. */
+let forgetAnswer: "done" | "nothing" = "done";
 
 const asked: ChatMessage = {
   id: 1,
@@ -50,15 +57,27 @@ const thread = async (
   /** What core says a picture of thinking is drawn from; it can't be read without. */
   ground?: ThinkingGround,
   /** Whether the turn runs on past its answer, checking its drafts. */
-  checking?: boolean
+  checking?: boolean,
+  /** The agents the person may ask, which name the answers. */
+  agents?: readonly ChatAgent[]
 ): Promise<void> => {
   const core = {
     withSession: async <T,>(
       action: (session: {
         brain: { thinking: () => Promise<ThinkingGround> };
+        brainMemories: {
+          forget: (memory: string) => Promise<"done" | "nothing">;
+        };
       }) => Promise<T>
     ): Promise<T> =>
       await action({
+        brainMemories: {
+          forget: async (memory) => {
+            await Promise.resolve();
+            forgotten.push(memory);
+            return forgetAnswer;
+          },
+        },
         brain: {
           thinking: async () => {
             await Promise.resolve();
@@ -73,6 +92,7 @@ const thread = async (
   const page = createRootRoute({
     component: () => (
       <ChatThread
+        agents={agents}
         chatId="chat"
         loaded
         messages={messages}
@@ -149,6 +169,212 @@ describe(ChatThread, () => {
     });
     root = undefined;
     document.body.replaceChildren();
+    forgotten.length = 0;
+    forgetAnswer = "done";
+  });
+
+  it("says under a call of remember that it is an instruction, with the value it holds", async () => {
+    const at = "2026-10-27T09:00:05.000Z";
+    await thread([
+      asked,
+      {
+        id: 2,
+        role: "assistant",
+        text: "",
+        citations: [],
+        code: [],
+        tools: [
+          {
+            callId: "remember",
+            tool: "remember",
+            codeBefore: 0,
+            input: { statement: "Answer in Dutch" },
+          },
+        ],
+        end: "done",
+        at,
+      },
+      {
+        id: 3,
+        role: "result",
+        callId: "remember",
+        text: "Saved.",
+        failed: false,
+        at,
+        saved: {
+          memory: "3f1c4a8e-5d6b-4c2a-9e7f-1a2b3c4d5e6f",
+          type: "instruction",
+          statement: "Always answer in Dutch",
+          value: "Dutch",
+        },
+      },
+    ]);
+    const text = document.body.textContent;
+
+    expect({
+      kind: text.includes("Instruction"),
+      saved: text.includes(
+        "Grasp will remember: Always answer in Dutch (value: Dutch)"
+      ),
+    }).toStrictEqual({ kind: true, saved: true });
+  });
+
+  it("says under a call of remember who or what it is about, when it isn't the person", async () => {
+    const at = "2026-10-27T09:00:05.000Z";
+    await thread([
+      asked,
+      {
+        id: 2,
+        role: "assistant",
+        text: "",
+        citations: [],
+        code: [],
+        tools: [
+          {
+            callId: "remember",
+            tool: "remember",
+            codeBefore: 0,
+            input: { statement: "Prefers answers by mail" },
+          },
+        ],
+        end: "done",
+        at,
+      },
+      {
+        id: 3,
+        role: "result",
+        callId: "remember",
+        text: "Saved.",
+        failed: false,
+        at,
+        saved: {
+          memory: "3f1c4a8e-5d6b-4c2a-9e7f-1a2b3c4d5e6f",
+          type: "fact",
+          statement: "Prefers answers by mail",
+          about: "Bob",
+        },
+      },
+    ]);
+
+    expect(document.body.textContent).toContain(
+      "Grasp will remember about Bob: Prefers answers by mail"
+    );
+  });
+
+  it("says when an undo found nothing to undo, never that it was forgotten", async () => {
+    forgetAnswer = "nothing";
+    const at = "2026-10-27T09:00:05.000Z";
+    await thread([
+      asked,
+      {
+        id: 2,
+        role: "assistant",
+        text: "",
+        citations: [],
+        code: [],
+        tools: [
+          {
+            callId: "remember",
+            tool: "remember",
+            codeBefore: 0,
+            input: { statement: "Acme renews on 1 March" },
+          },
+        ],
+        end: "done",
+        at,
+      },
+      {
+        id: 3,
+        role: "result",
+        callId: "remember",
+        text: "Saved.",
+        failed: false,
+        at,
+        saved: {
+          memory: "3f1c4a8e-5d6b-4c2a-9e7f-1a2b3c4d5e6f",
+          type: "fact",
+          statement: "Acme renews on 1 March",
+        },
+      },
+    ]);
+    await act(async () => {
+      [...document.querySelectorAll("button")]
+        .find((button) => button.textContent === "Undo")
+        ?.click();
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      expect(forgotten).toHaveLength(1);
+    });
+    const text = document.body.textContent;
+
+    expect({
+      told: text.includes(
+        "There was nothing to undo: Grasp no longer uses this."
+      ),
+      claimedForgotten: text.includes("Grasp no longer remembers this."),
+    }).toStrictEqual({ told: true, claimedForgotten: false });
+  });
+
+  it("says under a call of remember what Grasp will remember, in the person's words, and undoes it there", async () => {
+    const at = "2026-10-27T09:00:05.000Z";
+    const memory = "3f1c4a8e-5d6b-4c2a-9e7f-1a2b3c4d5e6f";
+    await thread([
+      asked,
+      {
+        id: 2,
+        role: "assistant",
+        text: "",
+        citations: [],
+        code: [],
+        tools: [
+          {
+            callId: "remember",
+            tool: "remember",
+            codeBefore: 0,
+            input: { statement: "Acme renews on 1 March" },
+          },
+        ],
+        end: "done",
+        at,
+      },
+      {
+        id: 3,
+        role: "result",
+        callId: "remember",
+        text: "Saved.",
+        failed: false,
+        at,
+        saved: { memory, type: "fact", statement: "Acme renews on 1 March" },
+      },
+    ]);
+    const shown = document.body.textContent;
+    const undo = [...document.querySelectorAll("button")].find(
+      (button) => button.textContent === "Undo"
+    );
+    await act(async () => {
+      undo?.click();
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain(
+        "Grasp no longer remembers this."
+      );
+    });
+
+    expect({
+      line: shown.includes("Saved to your memory"),
+      notice: shown.includes("Grasp will remember: Acme renews on 1 March"),
+      forgotten,
+      undoLeft: [...document.querySelectorAll("button")].some(
+        (button) => button.textContent === "Undo"
+      ),
+    }).toStrictEqual({
+      line: true,
+      notice: true,
+      forgotten: [memory],
+      undoLeft: false,
+    });
   });
 
   it("streams what the model thinks, open under Thinking, before it says a word", async () => {
@@ -493,5 +719,109 @@ describe(ChatThread, () => {
         picture: true,
       },
     });
+  });
+});
+
+/** An answer, by the agent `agentId`. */
+const answerBy = (id: number, text: string, agentId?: string): ChatMessage => ({
+  id,
+  role: "assistant",
+  ...(agentId === undefined ? {} : { agentId }),
+  text,
+  citations: [],
+  code: [],
+  tools: [],
+  end: "done",
+  at: "2026-10-27T09:00:01.000Z",
+});
+/** A question. */
+const questionOf = (id: number, text: string): ChatMessage => ({
+  id,
+  role: "user",
+  text,
+  at: "2026-10-27T09:00:00.000Z",
+});
+/** An agent the person may ask. */
+const agentOf = (id: string, name: string): ChatAgent => ({
+  id,
+  name,
+  face: "pen",
+  job: "",
+  model: null,
+  own: false,
+});
+
+describe("answers given by the agents a question addressed", () => {
+  afterEach(() => {
+    act(() => {
+      root?.unmount();
+    });
+    root = undefined;
+    document.body.replaceChildren();
+  });
+
+  it("names an answer only where another agent gave it than the one before it, and none in a chat one agent answers", () => {
+    const one = [
+      questionOf(1, "Hi"),
+      answerBy(2, "Hello", "a"),
+      answerBy(3, "More", "a"),
+    ];
+    const several = [
+      questionOf(1, "@Claire @Pat hi"),
+      answerBy(2, "Claire here", "claire"),
+      answerBy(3, "Still Claire", "claire"),
+      answerBy(4, "Pat here", "pat"),
+      questionOf(5, "And?"),
+      answerBy(6, "Pat again", "pat"),
+      // Kept before answers named their agent: named by none.
+      answerBy(7, "Older"),
+    ];
+    expect({
+      one: [...answerAgentsOf(one)],
+      several: [...answerAgentsOf(several)],
+    }).toStrictEqual({
+      one: [],
+      several: [
+        [2, "claire"],
+        [4, "pat"],
+      ],
+    });
+  });
+
+  it("names the next agent over the answer it is writing, before it is kept", async () => {
+    await thread(
+      [questionOf(1, "@Claire @Pat hi"), answerBy(2, "Claire here", "claire")],
+      { agentId: "pat", text: "Pat wri", code: [], tools: [], reasoning: "" },
+      [],
+      undefined,
+      undefined,
+      [agentOf("claire", "Claire"), agentOf("pat", "Pat")]
+    );
+    // The names over answers: Claire's kept answer names none until
+    // another is kept, and Pat's being written is named.
+    const named = [...document.querySelectorAll("p")]
+      .map((each) => each.textContent?.trim())
+      .filter((each) => each === "Claire" || each === "Pat");
+    expect(named).toStrictEqual(["Pat"]);
+  });
+
+  it("shows the agent's name over its first answer, and says so of one the person can no longer ask", async () => {
+    await thread(
+      [
+        questionOf(1, "@Claire @Gone hi"),
+        answerBy(2, "Claire here", "claire"),
+        answerBy(3, "Gone here", "gone"),
+      ],
+      null,
+      [],
+      undefined,
+      undefined,
+      [agentOf("claire", "Claire")]
+    );
+    const text = document.body.textContent ?? "";
+    expect({
+      claire: text.indexOf("Claire") < text.indexOf("Claire here"),
+      gone: text.includes("An agent you can no longer ask"),
+    }).toStrictEqual({ claire: true, gone: true });
   });
 });

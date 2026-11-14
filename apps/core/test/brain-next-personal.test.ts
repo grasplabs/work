@@ -843,6 +843,22 @@ describe("erasing a person", () => {
       kind: "team",
       teamId: team,
     });
+    // Their instruction file, two versions, in their own store alone.
+    const file: InstructionFile = { scope: "person", personId: person };
+    for (const text of ["Call me Sam", "Call me by my first name"]) {
+      // oxlint-disable-next-line no-await-in-loop -- one version at a time
+      await addInstructionFile(env, {
+        file,
+        change: crypto.randomUUID(),
+        text,
+      });
+    }
+    const theirFile = async () => {
+      const files = await readInstructionFilesAs(env, { userId: person }, [
+        file,
+      ]);
+      return files.map(({ version, text }) => [version, text]);
+    };
     const erasing = { personId: person, reason: "person_erased" } as const;
 
     // The record of the erasure can't be written: nothing is erased.
@@ -852,6 +868,7 @@ describe("erasing a person", () => {
     );
     await unrecorded.heal();
     const beforeErasure = await textsFor(person, word, true);
+    const fileBefore = await theirFile();
 
     // Recorded, but its files can't be deleted yet: still pending.
     const undeletable = await breakBucketOf(person, ["delete"]);
@@ -869,6 +886,9 @@ describe("erasing a person", () => {
       beforeErasure,
       whileDeleting,
       afterwards: await textsFor(person, word, true),
+      fileBefore,
+      // It is gone with their store.
+      fileAfter: await theirFile(),
       read: await readSourceVersionAs(env, person, { source, version: 1 }),
       // A producer erasing their source after them isn't held pending.
       sourceErased: await eraseSource(env, {
@@ -885,6 +905,8 @@ describe("erasing a person", () => {
       beforeErasure: [`Their own ${word}`, `The team's ${word} and more`],
       whileDeleting: [`The team's ${word} and more`],
       afterwards: [`The team's ${word} and more`],
+      fileBefore: [[2, "Call me by my first name"]],
+      fileAfter: [],
       read: null,
       sourceErased: "erased",
       addRefused: true,

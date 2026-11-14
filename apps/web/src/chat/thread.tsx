@@ -1,5 +1,6 @@
 import { definitionToolNames } from "@grasp-os/shared/chat";
 import type {
+  ChatAgent,
   ChatCitation,
   ChatCode,
   ChatMessage,
@@ -51,6 +52,7 @@ import {
 import { createContext, Fragment, lazy, Suspense, use, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 
+import { AgentAvatar } from "../agents/agent-avatar.tsx";
 import type { ThinkingOf } from "../brain/thinking/play.ts";
 import { useCopy } from "../copy.ts";
 import { ConnectAiProvider } from "../frame/connect-ai-provider.tsx";
@@ -74,6 +76,7 @@ import {
 import { failureMessage } from "./failure.ts";
 import { GraspSign } from "./grasp-sign.tsx";
 import { recoveredSteps } from "./recovered.ts";
+import { SavedMemoryLine } from "./saved-memory.tsx";
 import { readingFileOf, signOf } from "./sign.ts";
 import type { WorkState } from "./sign.ts";
 import { AnswerCited, AnswerSources, useCitedDocuments } from "./sources.tsx";
@@ -260,6 +263,9 @@ const useToolSummary = (): ((call: ChatToolCall, done: boolean) => string) => {
       case "editWorkflow": {
         return done ? t`Edited a workflow` : t`Editing a workflow`;
       }
+      case "remember": {
+        return done ? t`Saved to your memory` : t`Saving to your memory`;
+      }
       default: {
         return done ? t`Used ${tool}` : t`Using ${tool}`;
       }
@@ -326,34 +332,39 @@ const ToolStep = ({
   const summary = useToolSummary()(call, status === "done");
   const label = useStatusLabel()(status);
   return (
-    <TraceCollapsible>
-      <TraceCollapsibleTrigger>
-        <TraceLine status={lineStatus[status]}>
-          <TraceIcon>{statusIcon[status]}</TraceIcon>
-          <TraceTitle>{summary}</TraceTitle>
-          {status === "done" ? null : (
-            <TraceDescription>{label}</TraceDescription>
-          )}
-        </TraceLine>
-      </TraceCollapsibleTrigger>
-      <TraceCollapsibleContent>
-        <div className="flex flex-col gap-4 py-1">
-          <StepPart
-            heading={<Trans>Input</Trans>}
-            text={JSON.stringify(call.input, null, 2)}
-          />
-          {result === undefined ? null : (
+    <>
+      <TraceCollapsible>
+        <TraceCollapsibleTrigger>
+          <TraceLine status={lineStatus[status]}>
+            <TraceIcon>{statusIcon[status]}</TraceIcon>
+            <TraceTitle>{summary}</TraceTitle>
+            {status === "done" ? null : (
+              <TraceDescription>{label}</TraceDescription>
+            )}
+          </TraceLine>
+        </TraceCollapsibleTrigger>
+        <TraceCollapsibleContent>
+          <div className="flex flex-col gap-4 py-1">
             <StepPart
-              failed={status === "failed"}
-              heading={
-                result.failed ? <Trans>Error</Trans> : <Trans>Result</Trans>
-              }
-              text={result.text}
+              heading={<Trans>Input</Trans>}
+              text={JSON.stringify(call.input, null, 2)}
             />
-          )}
-        </div>
-      </TraceCollapsibleContent>
-    </TraceCollapsible>
+            {result === undefined ? null : (
+              <StepPart
+                failed={status === "failed"}
+                heading={
+                  result.failed ? <Trans>Error</Trans> : <Trans>Result</Trans>
+                }
+                text={result.text}
+              />
+            )}
+          </div>
+        </TraceCollapsibleContent>
+      </TraceCollapsible>
+      {result?.saved === undefined ? null : (
+        <SavedMemoryLine saved={result.saved} />
+      )}
+    </>
   );
 };
 
@@ -1073,8 +1084,68 @@ const lastAnswerOf = (
 /** Where the page passes no calls of the chat's code. */
 const noTools: readonly ChatToolEvent[] = [];
 
+/** Where the page passes no agents. */
+const noAgents: readonly ChatAgent[] = [];
+
+/**
+ * The answers that name their agent, by ID: in a chat more than one agent
+ * answered in, each answer whose agent isn't the one before it. A chat one
+ * agent answers in names none, as it always did.
+ */
+export const answerAgentsOf = (
+  messages: readonly ChatMessage[]
+): ReadonlyMap<number, string> => {
+  const answers = messages.filter(
+    (message): message is Answer => message.role === "assistant"
+  );
+  const named = new Map<number, string>();
+  if (new Set(answers.flatMap(({ agentId }) => agentId ?? [])).size < 2) {
+    return named;
+  }
+  let before: string | undefined;
+  for (const { id, agentId } of answers) {
+    if (agentId !== undefined && agentId !== before) {
+      named.set(id, agentId);
+    }
+    before = agentId ?? before;
+  }
+  return named;
+};
+
+/** The agent that gave the answers under it: its picture and name. */
+const AnswerBy = ({ agent }: { agent: ChatAgent | undefined }) => {
+  const { t } = useLingui();
+  const name = agent?.name ?? t`An agent you can no longer ask`;
+  return (
+    <p className="text-muted-foreground flex items-center gap-2 text-sm font-medium">
+      <AgentAvatar face={agent?.face ?? "stephen"} size="default" />
+      {name}
+    </p>
+  );
+};
+
+/**
+ * The agent writing an answer now, named where it isn't the one that
+ * answered last: the next one a question addressed. Nothing otherwise.
+ */
+const WrittenBy = ({
+  agents,
+  writer,
+  last,
+}: {
+  agents: readonly ChatAgent[];
+  writer: string | undefined;
+  last: Answer | undefined;
+}) =>
+  writer === undefined ||
+  last?.agentId === undefined ||
+  writer === last.agentId ? null : (
+    <AnswerBy agent={agents.find(({ id }) => id === writer)} />
+  );
+
 /** The chat's messages, and the response being written, oldest first. */
 export const ChatThread = ({
+  agents = noAgents,
   chatId,
   loaded,
   messages,
@@ -1088,6 +1159,12 @@ export const ChatThread = ({
   build,
   children,
 }: {
+  /**
+   * The agents the person may ask, which name each answer that another
+   * agent gave than the one before it; none, and no names, where the page
+   * hasn't them.
+   */
+  agents?: readonly ChatAgent[] | undefined;
   /** The chat, whose answers' sources core is asked for. */
   chatId: string;
   /** Whether core has sent the chat yet: until then, it is loading. */
@@ -1180,26 +1257,29 @@ export const ChatThread = ({
   // replies its question already has, or stands as an answer of its own.
   const written =
     shown === null ? null : (
-      <Reply
-        compact={compact}
-        output={output}
-        reply={{
-          ...shown,
-          reasoning:
-            shown.reasoning === ""
-              ? undefined
-              : { text: shown.reasoning, ms: null },
-        }}
-        results={results}
-        running={running}
-        sign={doing}
-        top={
-          doing !== undefined && replies.length === 0 ? (
-            <Working doing={doing} file={file} />
-          ) : undefined
-        }
-        writing
-      />
+      <>
+        <WrittenBy agents={agents} last={lastAnswer} writer={shown.agentId} />
+        <Reply
+          compact={compact}
+          output={output}
+          reply={{
+            ...shown,
+            reasoning:
+              shown.reasoning === ""
+                ? undefined
+                : { text: shown.reasoning, ms: null },
+          }}
+          results={results}
+          running={running}
+          sign={doing}
+          top={
+            doing !== undefined && replies.length === 0 ? (
+              <Working doing={doing} file={file} />
+            ) : undefined
+          }
+          writing
+        />
+      </>
     );
   const writtenGoesOn = written !== null && items.at(-1)?.kind === "answer";
   const waiting = pendingPlan(messages, running);
@@ -1209,9 +1289,15 @@ export const ChatThread = ({
         <Reading />
       </div>
     ) : null;
+  const answerAgents = answerAgentsOf(messages);
   const renderReplies = (answers: readonly Answer[]): ReactNode =>
     answers.map((message) => (
       <Fragment key={message.id}>
+        {answerAgents.has(message.id) ? (
+          <AnswerBy
+            agent={agents.find(({ id }) => id === answerAgents.get(message.id))}
+          />
+        ) : null}
         <Reply
           compact={compact}
           onRetry={

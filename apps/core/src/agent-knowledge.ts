@@ -48,8 +48,8 @@ import { agentKnowledgeSignals } from "./knowledge/signals.ts";
 // sensitive collection, and are recorded as the chat's calls.
 
 /**
- * Knowledge, as a chat's code calls it. Its recall is the Brain's own, on
- * `env.brain` (agent-brain.ts), the SDK's Brain binding every caller uses.
+ * Knowledge, as a chat's code calls it. Recall is the Brain's, on
+ * `env.brain` (agent-brain.ts), as an App and a workflow recall.
  */
 export class KnowledgeApi
   extends WorkerEntrypoint<Env, AgentScope>

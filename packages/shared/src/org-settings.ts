@@ -93,8 +93,24 @@ export interface SignInSettings {
   staffWindow: { open: boolean; until: string } | null;
 }
 
+/**
+ * Whether people may have agents of their own (core's agents.ts): on
+ * until an admin turns it off. Off, nobody makes one, and those people
+ * have don't answer; they stay, for their owners to delete or for the
+ * company to turn back on.
+ */
+export interface OwnAgentsSettings {
+  on: boolean;
+}
+
+export const ownAgentsSettingsSchema = z.strictObject({ on: z.boolean() });
+
+/** Agents of people's own, until an admin says otherwise. */
+export const ownAgentsDefault: OwnAgentsSettings = { on: true };
+
 /** Why a change to the organization's settings was refused. */
 export const orgSettingsErrors = defineErrorFamily({
+  "org_settings.own_agents_invalid": "That isn't a yes or no.",
   "org_settings.billing_invalid":
     "Those aren't billing details: a valid email, one-line company, an address of up to 500 characters and an EU VAT number.",
 });
@@ -113,4 +129,14 @@ export interface OrgSettingsApi {
    * Admins, Grasp staff included; not a setting anyone changes here.
    */
   signIn: () => Promise<SignInSettings>;
+  /**
+   * Whether people may have agents of their own. Anyone of the company
+   * reads it, to know whether they may make one.
+   */
+  ownAgents: () => Promise<OwnAgentsSettings>;
+  /**
+   * Turns agents of people's own on or off. The organization's own admins
+   * only; audited when it changed.
+   */
+  updateOwnAgents: (settings: OwnAgentsSettings) => Promise<OwnAgentsSettings>;
 }

@@ -15,7 +15,10 @@ import { coreOrigin } from "./sign-in.ts";
 import {
   member,
   memberAnsweredBy,
+  mentionIn,
   messageFrom,
+  newGroup,
+  onGroupRoster,
   post,
   reached,
   watched,
@@ -175,6 +178,39 @@ describe("a member's own Microsoft 365, from Teams", setUpTime, () => {
     expect(after.activities).toHaveLength(before.activities.length);
     await expect(reached(mallory.teams.conversation)).resolves.toMatchObject({
       activities: [],
+    });
+  });
+
+  it("is offered and carried on only in their direct message, never in a group chat others read", async () => {
+    const ann = await member(idp, says("Lunch is at noon."), says("Never."));
+    const ben = await memberAnsweredBy(idp, ann.provider);
+    const group = newGroup();
+    await onGroupRoster(group, [{ person: ann.teams }, { person: ben.teams }]);
+    await post(mentionIn(ann.teams, group, "What's on my calendar?"));
+    const asked = ann.provider.requests.length;
+
+    await backFromProvider(
+      ann.session,
+      consented(await started(ann), oidOf(ann))
+    );
+
+    const { activities: groupActivities } = await reached(group);
+    const inGroup = JSON.stringify(groupActivities);
+    const { activities: direct } = await reached(ann.teams.conversation);
+    expect({
+      cards: await connectCards(group),
+      answeredThere: inGroup.includes("Lunch is at noon."),
+      carriedOn: inGroup.includes("Your Microsoft 365 is connected"),
+      direct,
+      askedAgain: ann.provider.requests.length - asked,
+    }).toStrictEqual({
+      cards: [],
+      answeredThere: true,
+      // Nothing kept from the group, so nothing carried on, there or in
+      // her direct message.
+      carriedOn: false,
+      direct: [],
+      askedAgain: 0,
     });
   });
 

@@ -24,6 +24,18 @@ describe("audit event types", () => {
     expect(typeOf("audit.purged")).toBe("action");
   });
 
+  it("files a chat's question noted for the Brain, and how its hand-over ended, as actions", () => {
+    expect(
+      [
+        "chat.turn_noted",
+        "brain.source.handover_started",
+        "brain.source.handed_over",
+        "brain.source.handover_refused",
+        "brain.source.handover_skipped",
+      ].map((action) => typeOf(action))
+    ).toStrictEqual(["action", "action", "action", "action", "action"]);
+  });
+
   it("gives an audit action no rule names no type, rather than filing it as a read", () => {
     expect(typeOf("audit.something_new")).toBeNull();
   });
@@ -238,5 +250,29 @@ describe("audit event types", () => {
           typeOf("admin.brain.erasure.looked_up", { kind: "person", outcome })
       )
     ).toStrictEqual(["read", "read", "read", "read", "read"]);
+  });
+
+  it("files a skill share's decisions as decisions and each outcome so a search finds it, and a retirement with its outcome", () => {
+    expect(
+      [
+        "skill.share.requested",
+        "skill.share.approved",
+        "skill.share.declined",
+        "skill.share.added",
+        "skill.share.superseded",
+        "skill.retired",
+        "skill.retire_done",
+        "skill.retire_superseded",
+      ].map((action) => typeOf(action))
+    ).toStrictEqual([
+      "action",
+      "decision",
+      "decision",
+      "action",
+      "action",
+      "config",
+      "config",
+      "action",
+    ]);
   });
 });

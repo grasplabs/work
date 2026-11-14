@@ -128,6 +128,15 @@ const typeRules: readonly {
   // An admin adding records the brain is built from, and a purge
   // rewriting a record's words.
   { action: "brain.records", type: "action" },
+  // A chat's agent's read through a connection kept as a source in the
+  // new Brain, skipped, or failed (core's connection-capture.ts): IDs and
+  // counts, never what was read.
+  { action: "brain.capture", type: "action" },
+  // An App, a workflow's run or a chat's code recalling from the Brain
+  // for a person (core's src/brain-recall.ts): for whom, how many
+  // passages and whether the budget cut it short, or why it was refused;
+  // never the question or what was found.
+  { action: "brain.recall", type: "read" },
   // A Grasp staff member reaching a namespace, method or route of the
   // client's deployment (core's staff-audit.ts): what they looked at or
   // did there, by its surface and identifiers, never its content.
@@ -145,8 +154,13 @@ const typeRules: readonly {
   // Two entities of different collections decided to be one, or not
   // (GRA-1080): their IDs and evidence, never a name.
   { action: "brain.entity_match", type: "decision" },
+  // The new Brain's memories (core's src/brain-memories.ts): one saved
+  // for a person, or retired by them, its attempt and then its outcome.
+  // Ids and codes only, never what a memory says.
+  { action: "brain.memory", type: "action" },
   // Core handing a source over to the new Brain (GRA-1727): started, handed
-  // over or refused, by ids alone.
+  // over, refused, or skipped with why (a chat's noted question it may no
+  // longer keep: restricted, deleted, not a member, no text), by ids alone.
   { action: "brain.source", type: "action" },
   // A Grasp staff member reading the client's Brain report, and asking for
   // an action on it and its outcome (core's brain-report.ts).
@@ -159,6 +173,20 @@ const typeRules: readonly {
   { action: "admin.snapshot.read", type: "read" },
   { action: "admin.kickoff.read", type: "read" },
   { action: "knowledge.search", type: "read" },
+  // Sharing a skill with the company (GRA-1754), by the share's ID or the
+  // skill's name, never its text. A person asking; an admin's decision
+  // (approving or declining a share, retiring a company skill); and each
+  // decision's one outcome, as core's reconciler recorded it from the
+  // Brain: added or retired (with the version), or superseded by a later
+  // decision before it could be. A decision without an outcome yet is on
+  // its way: the clock reconciles it.
+  { action: "skill.share.requested", type: "action" },
+  { action: "skill.share.added", type: "action" },
+  { action: "skill.share.superseded", type: "action" },
+  { action: "skill.share", type: "decision" },
+  { action: "skill.retired", type: "config" },
+  { action: "skill.retire_done", type: "config" },
+  { action: "skill.retire_superseded", type: "action" },
   // A skill selected for a task, or none (GRA-310): which, never its text.
   { action: "knowledge.skill", type: "read" },
   { action: "knowledge.read", type: "read" },
@@ -169,7 +197,10 @@ const typeRules: readonly {
   { action: "knowledge.signal.dismissed", type: "decision" },
   { action: "knowledge.collection", type: "config" },
   { action: "knowledge", type: "action" },
-  // A person making, renaming or deleting one of their chats.
+  // A person making, renaming or deleting one of their chats; and a
+  // question of their own chat noted to keep in their own Brain
+  // (`chat.turn_noted`, GRA-1805), whose hand-over records how it ended
+  // (`brain.source.*`).
   { action: "chat", type: "action" },
   // A call of the chat agent's code that nothing else records: a listing,
   // a catalog or a run's status, or a call refused before it did anything.
