@@ -311,6 +311,9 @@ export const brainReportSchema = z.object({
     erasing: count,
     /** Sources that keep versions but have none current, which nobody can read. */
     sourcesWithoutCurrent: count,
+    /**
+     * The shared ledger's source erasures, which count one per chat deleted and one per connection disconnected, keys the shared store never held.
+     */
     source: erasureCountSchema,
     person: erasureCountSchema,
     /** How many erasures there are of each reason, in all. */

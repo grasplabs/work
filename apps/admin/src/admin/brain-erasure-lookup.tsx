@@ -57,7 +57,7 @@ const wrongStates = new Set<BrainErasureResult["state"]>([
 /** What staff read when no erasure is recorded: a source may have gone with a person. */
 const notErasedWords: Readonly<Record<Kind, string>> = {
   source:
-    "No erasure of this source itself is recorded; erasing a person, or the chat or connection it came through, may have covered it.",
+    "No erasure of this source itself is in the ledger staff can read; erasing a person, or the chat or connection it came through, may have covered it.",
   person: "No: the ledger holds no erasure of this person.",
 };
 

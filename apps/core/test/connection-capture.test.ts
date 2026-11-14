@@ -1495,6 +1495,49 @@ describe("a disconnected connection", setUpTime, () => {
     });
   });
 
+  it("holds a disconnect whose shared erasure was recorded but its reply lost, and records it once on a later drain", async () => {
+    const person = await signedInApi(idp, "user");
+    const connection = await ownGmail(person);
+    const marker = markerOf();
+    await capturedRead(
+      person.userId,
+      connection.connectionId,
+      connection.mailbox,
+      `memo-${marker}`,
+      `Memo ${marker}`
+    );
+    const lost = storeWith("brain", "eraseSource", async (real, args) => {
+      await real(...args);
+      throw new Error("The reply was lost, for the test");
+    });
+    const { core } = await openRpc(person.session, { coreEnv: lost });
+    await core.authenticate().connections.disconnect(connection.connectionId);
+    await drainAuditOutboxes(lost);
+    const stop = about(
+      await loggedEvents(),
+      "connection.disconnect",
+      connection.connectionId
+    );
+    const whileHeld = {
+      left: await inConnectOutbox(stop.map(({ id }) => id)),
+      shared: await sharedKeyState(`capture:${connection.connectionId}`),
+    };
+    const after = await eventsOf(
+      "brain.capture.erased",
+      connection.connectionId
+    );
+
+    expect({ whileHeld, after: after.map(erasure) }).toStrictEqual({
+      whileHeld: { left: stop.map(({ id }) => id), shared: "erased" },
+      after: [
+        {
+          actor: { type: "person", userId: person.userId },
+          detail: { sources: 1 },
+        },
+      ],
+    });
+  });
+
   it("lets newer events through past more held disconnects than a drain takes at once", async () => {
     const [held, other] = await Promise.all([
       signedInApi(idp, "user"),
