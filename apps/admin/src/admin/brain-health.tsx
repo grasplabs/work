@@ -123,6 +123,7 @@ const stepWords: Record<BrainStep, string> = {
 const wayWords: Record<BrainSearchWay, string> = {
   words: "Words",
   exact: "Exact parts",
+  entities: "Entities",
   meaning: "Meaning",
 };
 
@@ -562,6 +563,21 @@ const Recall = ({ report }: { report: BrainReport }) => {
           <TableBody>
             {brainSearchWays.map((way) => {
               const counts = recall.ways[way];
+              if (counts === undefined) {
+                // A core of an older release, on a slower channel, doesn't send it.
+                return (
+                  <TableRow key={way}>
+                    <TableCell variant="card">{wayWords[way]}</TableCell>
+                    <TableCell
+                      className="text-right"
+                      colSpan={2}
+                      variant="card"
+                    >
+                      Not available yet
+                    </TableCell>
+                  </TableRow>
+                );
+              }
               return (
                 <TableRow key={way}>
                   <TableCell variant="card">{wayWords[way]}</TableCell>
