@@ -17,6 +17,12 @@ export interface ChatSeed {
   hoursAgo: number;
   /** Questions and answers, in turn. */
   turns: { question: string; answer: string }[];
+  /**
+   * The Brain upload, by its name, that recall answers the first question
+   * from (scripts/seed/brain.ts): the seed writes the chat only once
+   * recall, as its person, finds it.
+   */
+  answeredBy?: string;
 }
 
 export const chats: ChatSeed[] = [
