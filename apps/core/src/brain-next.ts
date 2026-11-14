@@ -2352,8 +2352,8 @@ const skillTextOf = (name: string, text: unknown): string => {
  * needs, if it says, included) or is over `instructionsMaxLength` UTF-16
  * units, an instruction file's limit: both fail the same way every time,
  * until another release. While the Brain restores an export, refused with
- * `brain.restoring`, to be made again later. Two adds at once may both say `changed`; the
- * store still keeps one version per text in a row.
+ * `brain.restoring`, to be made again later. Two adds at once may both
+ * say `changed`; the store still keeps one version per text in a row.
  *
  * Grasp's own skills only: the release's install (brain-skills.ts) is its
  * one caller. Nothing here adds a shared skill: that write needs its own
@@ -3797,7 +3797,7 @@ const keptMemory = async (
 export const rememberAs = async (
   env: BrainEnv & Pick<Env, "DB">,
   personId: string,
-  remembered: Remembered | Readonly<Record<string, unknown>>
+  remembered: Remembered
 ): Promise<RememberedMemory> => {
   const { change, about, quote, ...memory } = checked(
     rememberedSchema,
