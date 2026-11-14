@@ -81,6 +81,7 @@ import {
   gt,
   lt,
   inArray,
+  isNotNull,
   isNull,
   ne,
   or,
@@ -170,6 +171,7 @@ import {
 import type { CodeRunStatus } from "./code-run-statuses.ts";
 import { keptWidgetOf } from "./custom-widgets.ts";
 import type { KeptWidget } from "./custom-widgets.ts";
+import { inList } from "./db/d1.ts";
 import { migrateOnWake } from "./db/migrate.ts";
 import migrations from "./db/workspace/migrations/migrations.js";
 import {
@@ -197,7 +199,7 @@ import {
 } from "./db/workspace/schema.ts";
 import { callObject, chatSession } from "./durable-objects.ts";
 import { dropHeldStarts } from "./held-starts.ts";
-import { readableSources, withheldSourceDetail } from "./history-access.ts";
+import { readableSources, withheldDetail } from "./history-access.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
 import { cited } from "./knowledge/citations.ts";
 import { forContext } from "./knowledge/memory.ts";
@@ -2250,6 +2252,7 @@ export class Workspace extends DurableObject<Env> {
       via,
       ...(unattended ? { unattended: true } : {}),
       ...(ownChat ? { ownChat: true } : {}),
+      ...(chat.thread === null ? {} : { shared: true }),
     };
   }
 
@@ -3519,14 +3522,15 @@ export class Workspace extends DurableObject<Env> {
   /**
    * The code runs of the chat whose results may not reach the model now
    * (`withheld` in chat-agent.ts): its agent may no longer read, for its
-   * person, something one of them read (`readableSources`). A source
-   * newly found unreadable is marked and audited once, in one
-   * transaction, by the agent acting for the person, naming the run and
-   * the source, never what was read; one readable again is unmarked, so a
-   * later revocation is audited again. A check that fails withholds every
-   * run that read anything, unmarked: rather withheld than sent
-   * unchecked. Nothing is read from core for a chat whose runs read
-   * nothing.
+   * person, something one of them read (`readableSources`). The sources
+   * newly found unreadable are marked and audited in one transaction, as
+   * one event by the agent acting for the person, with how many runs and
+   * sources of each kind, never which or what was read (`withheldDetail`):
+   * one cause, a source narrowed that dozens of pinned memories rest on,
+   * is one event (GRA-1882). One readable again is unmarked, so a later
+   * revocation is audited again. A check that fails withholds every run
+   * that read anything, unmarked: rather withheld than sent unchecked.
+   * Nothing is read from core for a chat whose runs read nothing.
    */
   async #withheldRuns(scope: Omit<AgentScope, "runId">): Promise<Set<string>> {
     const { chatId } = scope;
@@ -3538,55 +3542,68 @@ export class Workspace extends DurableObject<Env> {
     if (rows.length === 0) {
       return new Set();
     }
+    const checked = [...new Set(rows.map(({ sourceId }) => sourceId))];
     let readable: Set<string>;
     try {
-      readable = await readableSources(this.env, scope, [
-        ...new Set(rows.map(({ sourceId }) => sourceId)),
-      ]);
+      readable = await readableSources(this.env, scope, checked);
     } catch (error) {
       log.warn("agent.history_check_failed", { chatId, ...errorFields(error) });
       return new Set(rows.map(({ runId }) => runId));
     }
-    const withheld = rows.filter(({ sourceId }) => !readable.has(sourceId));
-    const fresh = withheld.filter(({ withheldAt }) => withheldAt === null);
-    const back = rows.filter(
-      ({ sourceId, withheldAt }) =>
-        withheldAt !== null && readable.has(sourceId)
-    );
-    if (fresh.length > 0 || back.length > 0) {
-      const actor = delegateActorOf(chatAuthority(scope), scope.via);
-      this.ctx.storage.transactionSync(() => {
-        for (const { runId, sourceId, withheldAt } of [...fresh, ...back]) {
-          this.#db
-            .update(chatRunSources)
-            .set({ withheldAt: withheldAt === null ? new Date() : null })
-            .where(
-              and(
-                eq(chatRunSources.chatId, chatId),
-                eq(chatRunSources.runId, runId),
-                eq(chatRunSources.sourceId, sourceId)
-              )
-            )
-            .run();
-        }
-        for (const { runId, sourceId } of fresh) {
-          this.#outboxEntry({
-            actor,
-            action: "chat.history_withheld",
-            target: { type: "chat", id: chatId },
-            detail: {
-              workspace: this.ctx.id.name ?? null,
-              run: runId,
-              ...withheldSourceDetail(sourceId),
-            },
-          });
-        }
-      });
-      if (fresh.length > 0) {
-        this.#deliverAudit();
+    const unreadable = checked.filter((source) => !readable.has(source));
+    const actor = delegateActorOf(chatAuthority(scope), scope.via);
+    // Marked as the rows are now, in the same transaction as the event: a
+    // check that ran alongside this one marked, and audited, its own.
+    const audited = this.ctx.storage.transactionSync(() => {
+      this.#db
+        .update(chatRunSources)
+        .set({ withheldAt: null })
+        .where(
+          and(
+            eq(chatRunSources.chatId, chatId),
+            isNotNull(chatRunSources.withheldAt),
+            inList(chatRunSources.sourceId, [...readable])
+          )
+        )
+        .run();
+      const fresh = this.#db
+        .update(chatRunSources)
+        .set({ withheldAt: new Date() })
+        .where(
+          and(
+            eq(chatRunSources.chatId, chatId),
+            isNull(chatRunSources.withheldAt),
+            inList(chatRunSources.sourceId, unreadable)
+          )
+        )
+        .returning({
+          runId: chatRunSources.runId,
+          sourceId: chatRunSources.sourceId,
+        })
+        .all();
+      if (fresh.length === 0) {
+        return false;
       }
+      this.#outboxEntry({
+        actor,
+        action: "chat.history_withheld",
+        target: { type: "chat", id: chatId },
+        detail: {
+          workspace: this.ctx.id.name ?? null,
+          ...withheldDetail(fresh),
+        },
+      });
+      return true;
+    });
+    if (audited) {
+      this.#deliverAudit();
     }
-    return new Set(withheld.map(({ runId }) => runId));
+    const withheld = new Set(unreadable);
+    return new Set(
+      rows.flatMap(({ runId, sourceId }) =>
+        withheld.has(sourceId) ? [runId] : []
+      )
+    );
   }
 
   /**

@@ -25,13 +25,14 @@ import type {
   SourceRef,
 } from "../src/brain-next.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
-import { teamMembers, teams } from "../src/db/core/schema.ts";
+import { chatAudiences, teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
 import {
   analysisPurpose,
   recallTimeoutReason,
   turnRecallMethod,
 } from "../src/turn-recall.ts";
+import type { ChatPlace } from "../src/workspace.ts";
 import {
   chatOf,
   codeStep,
@@ -42,11 +43,16 @@ import {
   toolStep,
 } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
-import { allEvents, loggedEvents } from "./audit-events.ts";
+import {
+  allEvents,
+  eventsAfter,
+  logHead,
+  loggedEvents,
+} from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { answeringProvider, fakeProvider } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
-import { signedInApi, signedInWithRole, unique } from "./sign-in.ts";
+import { outcome, signedInApi, signedInWithRole, unique } from "./sign-in.ts";
 
 // The recall before a chat's question, from the Brain, with its analysis
 // alongside (GRA-1732), through a chat's turns as a person asks them: the
@@ -127,6 +133,16 @@ const erasedWhole = async (
     readers: { kind: "team", teamId },
     reason: "deleted",
   });
+};
+
+/**
+ * The roster kept for chat `chatId` gone while the chat keeps what it
+ * recalled: as core's database restored to before it was kept leaves it.
+ */
+const dropRoster = async (chatId: string) => {
+  await drizzle(env.DB)
+    .delete(chatAudiences)
+    .where(eq(chatAudiences.chatId, chatId));
 };
 
 /** Adds `text` to the Brain as a new source `readers` may read. */
@@ -1347,6 +1363,102 @@ describe("what the recall before a question may reach", setUpTime, () => {
     });
   });
 
+  it("withholds what a chat others share recalled once no roster is kept for it, mid-turn even, and keeps it in a direct message, which keeps none", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = await signedInWithRole(idp, "user");
+    const stub = workspace(env, personalWorkspaceId(person.userId));
+    /**
+     * A chat at `place` recalls a company source in its first turn; in its
+     * second, `between` happens once the model has the turn's first
+     * request, and the model runs code: how that turn ends, and whether
+     * the request after the code, if any, still carries what the first
+     * turn recalled.
+     */
+    const resentAfter = async (
+      place: ChatPlace,
+      between: (chatId: string) => Promise<unknown>
+    ) => {
+      const depot = word();
+      const marker = word();
+      await forEveryone(`${depot} ${marker}`);
+      const agentId = crypto.randomUUID();
+      await requestGranted(idp, admin, {
+        subject: { type: "agent", agentId },
+        object: { type: "platform" },
+        actions: ["brain"],
+        binding: "BRAIN",
+      });
+      let chatId = "";
+      const provider = await answeringProvider(async (requests) => {
+        if (requests.length === 1) {
+          return says("Noted.");
+        }
+        if (requests.length === 2) {
+          await between(chatId);
+          return codeStep("export default async () => 1;");
+        }
+        return requests.length === 3 ? says("Done.") : undefined;
+      });
+      const ask = async (text: string) =>
+        await stub.askThrough(
+          person.userId,
+          agentId,
+          "teams",
+          text,
+          undefined,
+          place
+        );
+      ({ chatId } = await ask(`What about depot ${depot}?`));
+      const turn = await outcome(ask("Thanks, and what else is new?"));
+      const [first = "", second = "", last] = provider.requests.map(
+        ({ body }) => JSON.stringify(body)
+      );
+      return {
+        recalled: first.includes(marker),
+        resentFirst: second.includes(marker),
+        turn,
+        afterCode:
+          last === undefined
+            ? null
+            : {
+                resent: last.includes(marker),
+                withheld: last.includes(withheldResult),
+              },
+      };
+    };
+    const group = (): ChatPlace => ({
+      thread: `19:${unique()}@thread.v2`,
+      kind: "group",
+      audience: { members: [person.userId], outsiders: false },
+    });
+    const kept = await resentAfter(group(), async () => {
+      // Nothing changes: the roster stays kept.
+    });
+    const dropped = await resentAfter(group(), dropRoster);
+    const direct = await resentAfter({ kind: "direct" }, dropRoster);
+
+    const sent = { resent: true, withheld: false };
+    expect({ kept, dropped, direct }).toStrictEqual({
+      kept: { recalled: true, resentFirst: true, turn: "ok", afterCode: sent },
+      // As a first turn refuses a roster it couldn't read: what this turn
+      // recalled too is withheld, and the provider has its latest request
+      // whole, so the turn stops and nothing more is sent.
+      dropped: {
+        recalled: true,
+        resentFirst: true,
+        turn: "agent.history_revoked",
+        afterCode: null,
+      },
+      // A chat nobody else shares keeps no roster: the company's own.
+      direct: {
+        recalled: true,
+        resentFirst: true,
+        turn: "ok",
+        afterCode: sent,
+      },
+    });
+  });
+
   it("withholds what a chat's code or search recalled in a direct message once the whole company may no longer read it", async () => {
     const admin = await signedInApi(idp, "admin");
     /**
@@ -1466,7 +1578,7 @@ describe("what the recall before a question may reach", setUpTime, () => {
     }).toStrictEqual({ steered: 1, marker: false });
   });
 
-  it("withholds what it handed over once the person may no longer read it or the agent lost its grant, and audits it by the version, never what it said", async () => {
+  it("withholds what it handed over once the person may no longer read it or the agent lost its grant, and audits how much, never which or what it said", async () => {
     /** A chat whose first turn recalled `fact` from a source `readers` may read. */
     const recalled = async (readers: (personId: string) => SourceReaders) => {
       const depot = word();
@@ -1561,7 +1673,8 @@ describe("what the recall before a question may reach", setUpTime, () => {
       ({ action }) => action === "chat.history_withheld"
     );
     expect({
-      sources: withheld.map(({ detail }) => detail.source),
+      details: withheld.map(({ detail }) => detail),
+      namesSource: JSON.stringify(withheld).includes(erased.source.id),
       // Each withheld after the recall that read it was in the log.
       recordedBefore: withheld.every(
         (event) =>
@@ -1569,9 +1682,8 @@ describe("what the recall before a question may reach", setUpTime, () => {
             .length > 0
       ),
     }).toStrictEqual({
-      sources: [
-        `brain-version:${JSON.stringify(["upload", erased.source.id, 1])}`,
-      ],
+      details: [{ workspace: erased.id, runs: 1, sources: 1, passages: 1 }],
+      namesSource: false,
       recordedBefore: true,
     });
   });
@@ -1899,7 +2011,7 @@ const recalledMemoryOf = async (
 // history; the check decides from what it reads now rather than the
 // store and memory pinned.
 describe("memories a recall handed over, read again", setUpTime, () => {
-  it("withholds a memory of the person's own once it is retired or its source erased, keeps one a correction replaced, and audits it by the memory, never what it said", async () => {
+  it("withholds a memory of the person's own once it is retired or its source erased, keeps one a correction replaced, and audits how many, never which or what it said", async () => {
     const person = await signedInWithRole(idp, "user");
     /** A memory of theirs about a depot of its own, recalled by a chat. */
     const recalledOwn = async () => {
@@ -2007,11 +2119,94 @@ describe("memories a recall handed over, read again", setUpTime, () => {
       ({ action }) => action === "chat.history_withheld"
     );
     expect({
-      sources: withheld.map(({ detail }) => detail.source),
+      details: withheld.map(({ detail }) => detail),
+      namesMemory: JSON.stringify(withheld).includes(retired.memory),
       saysWhat: JSON.stringify(withheld).includes("Depot"),
     }).toStrictEqual({
-      sources: [`brain-memory:${JSON.stringify(["own", retired.memory])}`],
+      details: [{ workspace: retired.id, runs: 1, sources: 1, memories: 1 }],
+      namesMemory: false,
       saysWhat: false,
+    });
+  });
+
+  it("audits narrowing one source that many recalled memories rest on as one event for the turn, with how many it withheld, and writes none again when the history is checked again after the log took it", async () => {
+    const person = await signedInWithRole(idp, "user");
+    const { readers, group } = await teamOf(person.userId);
+    const depot = word();
+    const statements = Array.from(
+      { length: 12 },
+      (_, at) => `Depot ${depot} bay ${at + 1} holds ${word()}`
+    );
+    const text = statements.join("\n");
+    const source = await added(text, readers);
+    const memories = await rememberedAbout(
+      group,
+      `Depot ${depot}`,
+      statements.map((statement) => ({ statement, source }))
+    );
+    const chat = await recallingChatOf(
+      person.userId,
+      says("Noted."),
+      says("Ok."),
+      says("Again.")
+    );
+    await chat.ask(`What does depot ${depot} hold?`);
+    const handed = handedIn(chat.provider.requests[0]?.body);
+    const handedMemories = handed.memories.filter(({ memory }) =>
+      memories.includes(memory)
+    );
+    const head = await logHead();
+    // Narrowed: a new version only another team may read.
+    const outsider = await signedInWithRole(idp, "user");
+    const { readers: elsewhere } = await teamOf(outsider.userId);
+    await addSource(env, {
+      source,
+      change: crypto.randomUUID(),
+      text,
+      readers: elsewhere,
+    });
+    await chat.ask("Thanks!");
+    const withheldIn = (events: readonly AuditEvent[]) =>
+      events.filter(
+        ({ action, target }) =>
+          action === "chat.history_withheld" && target?.id === chat.chat.id
+      );
+    // In the log: the outbox drained.
+    await eventsOf(
+      chat.agent.agentId,
+      (events) => withheldIn(events).length > 0
+    );
+    // Checked again, as the chat's object does before every request (a
+    // turn a restart cut short set up again among them), then a turn.
+    await chat.stub.turnGuard(chat.chat.id);
+    await chat.ask("And again?");
+    const after = await eventsAfter(head);
+    const withheld = withheldIn(after);
+    const [detail] = withheld.map((event) => event.detail);
+    const said = JSON.stringify(withheld);
+
+    expect({
+      handedMany: handedMemories.length > 1,
+      events: withheld.length,
+      runs: detail?.runs,
+      memories: detail?.memories,
+      // Every source it counts, by kind: the memories and the passages.
+      sources:
+        detail?.sources === Number(detail?.memories) + Number(detail?.passages),
+      gaps: after.filter(({ action }) => action === "audit.gap").length,
+      saysWhat: said.includes(depot),
+      namesMemory: memories.some((memory) => said.includes(memory)),
+      namesSource: said.includes(source.id),
+    }).toStrictEqual({
+      handedMany: true,
+      events: 1,
+      runs: 1,
+      memories: handedMemories.length,
+      sources: true,
+      gaps: 0,
+      saysWhat: false,
+      namesMemory: false,
+      namesSource: false,
     });
   });
 

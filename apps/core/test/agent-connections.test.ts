@@ -675,25 +675,24 @@ describe("a chat's connections", setUpTime, () => {
       { found: true, withheld: false },
       { found: false, withheld: true },
     ]);
-    // Audited by the agent for its person: the grant the read rested on.
+    // Audited by the agent for its person, as one event: the read the
+    // revoked grant held, counted, never what it found.
     const events = await eventsOf(chat.agent.agentId, (found) =>
       found.some(({ action }) => action === "chat.history_withheld")
     );
     expect(
       events
         .filter(({ action }) => action === "chat.history_withheld")
-        .map(({ target, detail }) => ({
-          target,
-          connection: detail.connection,
-          action: detail.action,
-          resource: detail.resource,
-        }))
+        .map(({ target, detail }) => ({ target, detail }))
     ).toStrictEqual([
       {
         target: { type: "chat", id: chat.chat.id },
-        connection: mail.id,
-        action: "mail.search",
-        resource: null,
+        detail: {
+          workspace: chat.id,
+          runs: 1,
+          sources: 1,
+          connections: 1,
+        },
       },
     ]);
   });

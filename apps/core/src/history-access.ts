@@ -3,7 +3,6 @@ import { d1BrainStore } from "@grasp-os/brain/recall-store";
 import type { BrainStore, PinnedVersion } from "@grasp-os/brain/recall-store";
 import { collections } from "@grasp-os/brain/schema";
 import type { AppRole } from "@grasp-os/shared/apps";
-import type { AuditDetailValue } from "@grasp-os/shared/audit";
 import type { Permission } from "@grasp-os/shared/permissions";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { sql } from "drizzle-orm";
@@ -220,14 +219,18 @@ const readableAt = async (
  * Whether what a recall as the company handed over may still be sent in
  * this chat: not while anyone Grasp can't name as a member is in a chat
  * others share, as last kept from the platform's roster
- * (`chat_audiences`).
+ * (`chat_audiences`), nor while no roster is kept for one (GRA-1882): as
+ * its first turn refuses a roster it couldn't read. The row can be gone
+ * while the chat keeps its pins (core's database restored to before it,
+ * a turn a restart cut short set up again without the turn's own check).
+ * A chat nobody else shares keeps none, and reads as the company may.
  */
 const companyStillReads = async (
   env: Env,
   scope: Omit<AgentScope, "runId">
 ): Promise<boolean> => {
   const audience = await audienceOf(env, chatContext(scope));
-  return audience?.outsiders !== true;
+  return audience === undefined ? scope.shared !== true : !audience.outsiders;
 };
 
 /**
@@ -492,22 +495,67 @@ const appReadNeeds = (
   };
 };
 
+/** Each kind of read a source is, as the withheld event counts them. */
+type WithheldKind =
+  | "memories"
+  | "passages"
+  | "documents"
+  | "grants"
+  | "connections"
+  | "apps"
+  | "collections";
+
+/** The kind of read `source` is: any it doesn't name, a collection, by its ID. */
+const withheldKindOf = (source: string): WithheldKind => {
+  if (
+    source.startsWith(brainMemoryPrefix) ||
+    source.startsWith(brainCompanyMemoryPrefix)
+  ) {
+    return "memories";
+  }
+  if (
+    [
+      brainVersionPrefix,
+      brainTeamVersionPrefix,
+      brainCompanyVersionPrefix,
+    ].some((prefix) => source.startsWith(prefix))
+  ) {
+    return "passages";
+  }
+  if (source.startsWith(brainDocumentPrefix)) {
+    return "documents";
+  }
+  if (source === brainGrantRead) {
+    return "grants";
+  }
+  if (connectionReadOf(source) !== undefined) {
+    return "connections";
+  }
+  return appReadOf(source) === undefined ? "collections" : "apps";
+};
+
 /**
- * What the audit names of a withheld source: a connection call's
- * connection, action and resource, each an identifier; any other source
- * by its ID.
+ * What the audit says of the reads a history check newly withheld
+ * (`chat.history_withheld`, one event a check, GRA-1882): how many runs,
+ * how many sources, and how many of each kind, never which. A source
+ * names what was read (a memory, a version of a producer's source, a
+ * document with its text): the cause (a narrowed source, a revoked grant,
+ * a person out of a team) is audited where it happened, and this records
+ * its effect on the chat, which the event's target names.
  */
-export const withheldSourceDetail = (
-  source: string
-): Record<string, AuditDetailValue> => {
-  const read = connectionReadOf(source);
-  return read === undefined
-    ? { source }
-    : {
-        connection: read.connectionId,
-        action: read.action,
-        resource: read.resource,
-      };
+export const withheldDetail = (
+  withheld: readonly { runId: string; sourceId: string }[]
+): Record<string, number> => {
+  const sources = [...new Set(withheld.map(({ sourceId }) => sourceId))];
+  const detail: Record<string, number> = {
+    runs: new Set(withheld.map(({ runId }) => runId)).size,
+    sources: sources.length,
+  };
+  for (const source of sources) {
+    const kind = withheldKindOf(source);
+    detail[kind] = (detail[kind] ?? 0) + 1;
+  }
+  return detail;
 };
 
 /**
