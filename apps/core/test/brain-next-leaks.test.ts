@@ -246,11 +246,9 @@ const readingSurfaces = new Set([
   "sources read",
   "sources search",
   "core entitiesAs",
-  "core entityAs",
   "core memoriesAs",
   "core contestedAs",
   "memoriesRpc entities",
-  "memoriesRpc entity",
   "memoriesRpc memories",
   "memoriesRpc contested",
   "store listSources",
@@ -538,12 +536,18 @@ describe(
           membersOf(module).toSorted(),
         ]),
         unprobed: reaching.filter(([, name]) => !names.has(name)),
+        // A member the passes below single out is one: a name of none
+        // would leave it out of a reader's pass without a word.
+        singledOut: [...readingSurfaces, ...recallSurfaces].filter(
+          (name) => !surfaces.some(([member]) => member === name)
+        ),
       }).toStrictEqual({
         members: brainSurfaces.map(({ name, probes }) => [
           name,
           Object.keys(probes).toSorted(),
         ]),
         unprobed: [],
+        singledOut: [],
       });
     });
 
