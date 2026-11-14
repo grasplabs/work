@@ -67,15 +67,11 @@ const spaces = /\s+/u;
 /** What the question may name an entity by (`namedBy`). */
 interface Named {
   /**
-   * The question's words as names are folded, as written and bare: what a
-   * name of one word must equal; and each two words next to each other in
-   * one of those forms: what a name of more words must begin with.
+   * The question's words as names are folded, in order: as written, and,
+   * when it differs, without the punctuation at either end of each word.
+   * A name the question holds is a run of one form's words.
    */
-  sought: { words: string[]; pairs: string[] };
-  /** The question's words as written, folded, between spaces. */
-  written: string;
-  /** The same without the punctuation at either end of each word. */
-  bare: string;
+  forms: string[][];
   /** Its identifiers, each `[type, folded]`. */
   identifiers: [string, string][];
 }
@@ -83,11 +79,10 @@ interface Named {
 /**
  * What the question may name an entity by, as names and identifiers are
  * compared (entities.ts): its words folded as names are, as written and
- * without the punctuation at either end of each word, each between spaces
- * so a name is found only as whole words; the words of those two forms,
- * which a name of one word must equal, and the two words next to each
- * other in one form, which a name of more must begin with; and each word
- * as an email and as a reference.
+ * without the punctuation at either end of each word, so a name is found
+ * only as whole words of one form; and each word as an email and as a
+ * reference. Folded whole, then split: a mark may fold into a space
+ * ("x´y" is "x y").
  * No recogniser of names: an entity is found only by a name or identifier
  * a memory gave it, exactly. Its size is the question's, which the
  * contract bounds (`questionMaxLength`).
@@ -95,8 +90,6 @@ interface Named {
 const namedBy = (question: string): Named => {
   const words = question.split(spaces).filter((word) => word.length > 0);
   const bareWords = words.map((word) => word.replaceAll(edges, ""));
-  const written = foldName(words.join(" "));
-  const bare = foldName(bareWords.join(" "));
   const identifiers = new Map<string, [string, string]>();
   for (const word of new Set([...words, ...bareWords])) {
     if (word.includes("@")) {
@@ -107,66 +100,69 @@ const namedBy = (question: string): Named => {
       identifiers.set(`ref ${word}`, ["ref", word]);
     }
   }
-  // A folded name's words are its spaces' pieces: a name the question
-  // holds whole, in one form, is one of its words or begins with two of
-  // them next to each other in that same form.
-  const forms = [written, bare].map((form) =>
-    form.split(" ").filter((word) => word.length > 0)
-  );
-  const pairs = forms.flatMap((form) =>
-    form.slice(1).map((word, index) => `${form[index]} ${word}`)
-  );
+  const forms = new Map<string, string[]>();
+  for (const form of [words, bareWords]) {
+    const folded = foldName(form.join(" "));
+    forms.set(
+      folded,
+      folded.split(" ").filter((word) => word.length > 0)
+    );
+  }
   return {
-    sought: {
-      words: [...new Set(forms.flat())],
-      pairs: [...new Set(pairs)],
-    },
-    written: ` ${written} `,
-    bare: ` ${bare} `,
+    forms: [...forms.values()].filter((form) => form.length > 0),
     identifiers: [...identifiers.values()],
   };
 };
 
 /**
- * `?1` what to seek (JSON: the question's `words` and `pairs`, `Named`),
- * `?4` the moment, `?5` its words as written, folded, between spaces,
- * `?6` the same bare, `?7` its identifiers (JSON, each `[type, folded]`):
- * the entities a memory the reader may read, learned by then, gives a
- * name the question holds as whole words, or one of its identifiers. A
- * name is sought in the index of names (`entity_names_folded_idx`): one
- * of one word equal to a word of the question, one of more beginning with
- * two words next to each other in it; each found is kept only if the
- * question holds it whole, then checked against the reader. What it reads
- * is a seek a word and a pair, and the names beginning with a pair the
- * question holds.
+ * `?1` the question's forms (JSON, `Named.forms`), `?4` the moment, `?5`
+ * its identifiers (JSON, each `[type, folded]`): the entities a memory the
+ * reader may read, learned by then, gives a name the question holds as
+ * whole words, or one of its identifiers.
+ *
+ * A name the question holds is a run of one form's words, so each run is
+ * sought in the index of names (`entity_names_folded_idx`) by equality:
+ * every word, and a run one word longer only while some name begins with
+ * the run and a space (one probe of the same index, at most one row). The
+ * question's words are a table of their own, read by position, so a step
+ * costs the same however far into the question it is. What it reads is a
+ * few rows a step, and its steps are at most each word of the question
+ * times the words of the longest name a run of it begins, and one: never
+ * more for the names the store holds, alike or not. (At the contract's
+ * limits a question folds into 6,001 words, and a name into 250.)
+ *
+ * The probe asks only whether to seek further, of any name: what is found
+ * is a name equal to a run, checked against the reader, so a name the
+ * reader may not read never changes the answer; it costs the steps a
+ * readable one does, and nothing for the names that share its first words.
  */
 const namedSql = `
-WITH ${readableSql},
-words AS MATERIALIZED (SELECT DISTINCT value AS word FROM json_each(?1, '$.words')),
-pairs AS MATERIALIZED (SELECT DISTINCT value AS pair FROM json_each(?1, '$.pairs')),
-named AS MATERIALIZED (
-  SELECT entity_names.entity AS entity, entity_names.memory AS memory,
-    entity_names.folded AS folded
-  FROM words CROSS JOIN entity_names
-    ON entity_names.type = 'name' AND entity_names.folded = words.word
-  UNION ALL
-  SELECT entity_names.entity, entity_names.memory, entity_names.folded
-  FROM pairs CROSS JOIN entity_names
-    ON entity_names.type = 'name' AND entity_names.folded = pairs.pair
-  UNION ALL
-  SELECT entity_names.entity, entity_names.memory, entity_names.folded
-  FROM pairs CROSS JOIN entity_names
-    ON entity_names.type = 'name'
-    AND entity_names.folded > pairs.pair || ' '
-    AND entity_names.folded < pairs.pair || ' ' || char(1114111)
+WITH RECURSIVE ${readableSql},
+words (form, position, word) AS MATERIALIZED (
+  SELECT form.key, word.key, word.value
+  FROM json_each(?1) AS form, json_each(form.value) AS word
 ),
+runs (form, next, run) AS (
+  SELECT form, position + 1, word FROM words
+  UNION ALL
+  SELECT runs.form, runs.next + 1, runs.run || ' ' || words.word
+  FROM runs CROSS JOIN words
+    ON words.form = runs.form AND words.position = runs.next
+  WHERE EXISTS (
+    SELECT 1 FROM entity_names
+    WHERE entity_names.type = 'name'
+      AND entity_names.folded >= runs.run || ' '
+      AND entity_names.folded < runs.run || '!'
+  )
+),
+sought AS MATERIALIZED (SELECT DISTINCT run FROM runs),
 held AS MATERIALIZED (
-  SELECT entity, memory FROM named
-  WHERE instr(?5, ' ' || folded || ' ') > 0
-    OR instr(?6, ' ' || folded || ' ') > 0
+  SELECT entity_names.entity AS entity, entity_names.memory AS memory
+  FROM sought CROSS JOIN entity_names
+    ON entity_names.type = 'name' AND entity_names.folded = sought.run
   UNION ALL
   SELECT entity_names.entity, entity_names.memory
-  FROM json_each(?7) AS identifier
+  FROM json_each(?5) AS identifier
   CROSS JOIN entity_names
     ON entity_names.type = identifier.value ->> 0
     AND entity_names.folded = identifier.value ->> 1
@@ -353,12 +349,10 @@ const byEntities = (
   const named = sql
     .exec<{ entity: number }>(
       namedSql,
-      JSON.stringify(asked.sought),
+      JSON.stringify(asked.forms),
       reader.person,
       JSON.stringify(reader.groups),
       at,
-      asked.written,
-      asked.bare,
       JSON.stringify(asked.identifiers)
     )
     .toArray();
