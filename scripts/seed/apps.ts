@@ -115,8 +115,7 @@ export const decisionResponse = JSON.stringify(
  * desk's, starts each run.
  */
 const suite = (tests: Record<string, string>): string =>
-  `/* oxlint-disable vitest/no-standalone-expect -- appTest runs these, not vitest's test blocks. */
-import { appTest } from "@grasp-os/sdk/testing";
+  `import { appTest } from "@grasp-os/sdk/testing";
 import { workflows } from "@server/_generated/api";
 import { expect } from "vitest";
 import schema from "../server/schema.ts";

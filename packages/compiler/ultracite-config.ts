@@ -65,10 +65,52 @@ export const pageOverride = (root = "") => ({
   rules: pageRules,
 });
 
+const standaloneExpect = "vitest/no-standalone-expect";
+
+/** The `vitest` preset's override: its rules, on its test files. */
+const vitestOverride = () => {
+  const override = vitest.overrides?.find(({ rules }) =>
+    Object.hasOwn(rules ?? {}, standaloneExpect)
+  );
+  if (override === undefined) {
+    throw new Error(`Ultracite's vitest preset has no ${standaloneExpect}`);
+  }
+  return override;
+};
+
+/**
+ * The SDK's test blocks, by name: the functions an App test gives
+ * `appTest` (@grasp-os/sdk/testing) are where its `expect`s belong, as a
+ * function given vitest's `it` is.
+ */
+const sdkTestBlocks = ["appTest"] as const;
+
+/**
+ * Ultracite's `vitest/no-standalone-expect` on the `vitest` preset's test
+ * files, at the preset's level, told the SDK's test blocks are test blocks
+ * (the rule's `additionalTestBlockFunctions`): an App test written as the
+ * docs show passes, an `expect` outside any block still doesn't. After the
+ * presets' overrides, as an override's rules replace an earlier one's.
+ */
+export const sdkTestOverride = () => {
+  const { files, rules } = vitestOverride();
+  return {
+    files: [...files],
+    plugins: ["vitest"],
+    rules: {
+      [standaloneExpect]: [
+        rules?.[standaloneExpect],
+        { additionalTestBlockFunctions: [...sdkTestBlocks] },
+      ],
+    },
+  };
+};
+
 /**
  * The presets as one config, merged as oxlint merges what a config
  * extends: plugins added, a later level over an earlier one, overrides in
- * order, then the pages' own rules (`pageOverride`); less `leftOut`, and
+ * order, then the SDK's test blocks (`sdkTestOverride`) and the pages'
+ * own rules (`pageOverride`); less `leftOut`, and
  * the presets' `ignorePatterns`, which pick files (Grasp picks what it
  * lints itself: save-builds.ts `lintedFiles`). Only the overrides for
  * TypeScript: Astro's pages have their own.
@@ -91,6 +133,7 @@ export const ultraciteLint = (): LintConfig => {
           ...(plugins === undefined ? {} : { plugins: [...plugins] }),
           rules: { ...rules },
         })),
+      sdkTestOverride(),
       pageOverride(),
     ],
   };
