@@ -11,8 +11,13 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { drainAuditOutboxes } from "../src/audit-drains.ts";
-import { coreOutbox, drainLogged, outboxedEvent } from "../src/audit-outbox.ts";
-import { handOverNotes } from "../src/brain-hand-overs.ts";
+import {
+  coreOutbox,
+  drainLogged,
+  drainMaxBatches,
+  outboxedEvent,
+} from "../src/audit-outbox.ts";
+import { handOverNotes, loneNotesPerDrain } from "../src/brain-hand-overs.ts";
 import {
   erasePerson,
   eraseSource,
@@ -286,7 +291,7 @@ const racing = (
  * checked, so an id no event could name is noted too.
  */
 const noteRun = async (id: string): Promise<void> => {
-  await handOverNotes(env)([
+  const held = await handOverNotes(env).required([
     {
       id: crypto.randomUUID(),
       at: new Date().toISOString(),
@@ -298,6 +303,7 @@ const noteRun = async (id: string): Promise<void> => {
       detail: {},
     },
   ]);
+  expect(held.ids, "the note was refused").toStrictEqual([]);
 };
 
 /** A run of a new workflow `by` publishes that ended, returning `text`: its id. */
@@ -1120,6 +1126,95 @@ describe("how a hand-over fails closed", () => {
   });
 });
 
+/** Statement methods that run a query: each one of D1's queries a Worker invocation. */
+const queryMethods = new Set(["all", "first", "raw", "run"]);
+
+/** Whether `value` is a prepared statement, as `bind` answers one. */
+const isStatement = (value: unknown): value is D1PreparedStatement =>
+  typeof value === "object" && value !== null && "bind" in value;
+
+/** `statement`, adding each query it runs to `counted`. */
+const countedStatement = (
+  statement: D1PreparedStatement,
+  counted: { queries: number }
+): D1PreparedStatement =>
+  new Proxy(statement, {
+    get: (target, property) => {
+      const value: unknown = Reflect.get(target, property);
+      if (typeof value !== "function") {
+        return value;
+      }
+      return (...args: unknown[]): unknown => {
+        if (typeof property === "string" && queryMethods.has(property)) {
+          counted.queries += 1;
+        }
+        const result: unknown = Reflect.apply(value, target, args);
+        return property === "bind" && isStatement(result)
+          ? countedStatement(result, counted)
+          : result;
+      };
+    },
+  });
+
+/** A note's insert, as drizzle prepares it. */
+const noteInsert = /^insert into "brain_hand_overs"/iu;
+
+/**
+ * `real`, counting the queries D1 charges an invocation (a statement run
+ * on its own, or a batch, as one), and refusing a batch that notes in more
+ * than one statement: a note too large for D1, as #2237's was, which each
+ * note alone fits.
+ */
+const refusingLargeNotes = (
+  real: D1Database
+): { db: D1Database; counted: { queries: number } } => {
+  const counted = { queries: 0 };
+  let notes = 0;
+  return {
+    counted,
+    db: {
+      prepare: (query) => {
+        if (noteInsert.test(query)) {
+          notes += 1;
+        }
+        return countedStatement(real.prepare(query), counted);
+      },
+      batch: async <T>(statements: D1PreparedStatement[]) => {
+        counted.queries += 1;
+        const inBatch = notes;
+        notes = 0;
+        if (inBatch > 1) {
+          await Promise.resolve();
+          throw new Error("D1 refused a note this large");
+        }
+        return await real.batch<T>(statements);
+      },
+      exec: async (query) => await real.exec(query),
+      // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+      dump: async () => await real.dump(),
+      withSession: (constraint) => real.withSession(constraint),
+    },
+  };
+};
+
+/** Stores `events` in core's outbox in the order given, many to a batch. */
+const outboxedMany = async (
+  events: readonly AuditEvent[]
+): Promise<string[]> => {
+  const at = Date.now();
+  const statements = events.map((event) =>
+    env.DB.prepare(
+      "INSERT INTO audit_outbox (id, event, created_at) VALUES (?, ?, ?)"
+    ).bind(event.id, JSON.stringify(event), at)
+  );
+  const perBatch = 500;
+  for (let from = 0; from < statements.length; from += perBatch) {
+    // oxlint-disable-next-line no-await-in-loop -- in order
+    await env.DB.batch(statements.slice(from, from + perBatch));
+  }
+  return events.map(({ id }) => id);
+};
+
 describe("a hand-over whose note keeps failing", () => {
   it("holds only the run end whose note fails, across drains, while sign-ins and permission changes before and after it reach the log in order, and is noted once, then handed over once, when it can be", async () => {
     const runner = await builder();
@@ -1180,6 +1275,50 @@ describe("a hand-over whose note keeps failing", () => {
         recalled: [{ source: { producer: "run", id }, version: 1 }],
         open: { open: [], unrelayed: [] },
       },
+    });
+  });
+
+  it("tries no more notes alone than a drain's share of D1's queries when every batch's note is too large, and notes each once over the drains after", async () => {
+    const runs = Array.from({ length: 1200 }, () => crypto.randomUUID());
+    const events = runs.map(runEnd);
+    const ids = await outboxedMany(events);
+    const { db, counted } = refusingLargeNotes(env.DB);
+    const probed = { ...env, DB: db };
+    // A clock drain at a time, until the outbox is empty: at most as many
+    // as the notes take a drain's tries alone.
+    const queries: number[] = [];
+    const drainsMost = runs.length / loneNotesPerDrain + 1;
+    for (let drain = 0; drain < drainsMost; drain += 1) {
+      counted.queries = 0;
+      // oxlint-disable-next-line no-await-in-loop -- one drain after another
+      await drainLogged(probed, coreOutbox(probed), drainMaxBatches);
+      queries.push(counted.queries);
+      // oxlint-disable-next-line no-await-in-loop -- read after each drain
+      const left = await waitingOf(ids);
+      if (left.length === 0) {
+        break;
+      }
+    }
+    const noted = await env.DB.prepare(
+      "SELECT count(*) AS rows, sum(noting IN (SELECT value FROM json_each(?))) AS own FROM brain_hand_overs WHERE source_id IN (SELECT value FROM json_each(?))"
+    )
+      .bind(JSON.stringify(ids), JSON.stringify(runs))
+      .first<{ rows: number; own: number }>();
+
+    expect({
+      drains: queries.length,
+      overBudget: queries.filter(
+        (made) => made > loneNotesPerDrain + 3 * drainMaxBatches
+      ),
+      waiting: await waitingOf(ids),
+      noted,
+      logged: await loggedOf(ids),
+    }).toStrictEqual({
+      drains: runs.length / loneNotesPerDrain,
+      overBudget: [],
+      waiting: [],
+      noted: { rows: runs.length, own: runs.length },
+      logged: { counts: ids.map(() => 1), inOrder: true },
     });
   });
 

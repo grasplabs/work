@@ -86,6 +86,11 @@ export interface Outbox {
    * keeps no other from the log (up to the drain's own limit, `drain`).
    */
   required?: (events: readonly AuditEvent[]) => Promise<Held>;
+  /**
+   * Run once the drain is done with the outbox, after its last batch, and
+   * also when it failed: for what `required` says of a whole drain.
+   */
+  drained?: () => void;
 }
 
 /** What a drain's `required` step could not finish yet, and why, by name. */
@@ -141,11 +146,11 @@ export const databaseOutbox = (
 /**
  * Core's own outbox, whose events note what core hands over to the new
  * Brain (`handOverNotes`) before they leave it: one whose note fails is
- * held, alone. For one drain: its notes learn from the drain's batches.
+ * held, alone. One drain's: its notes count what the drain tried.
  */
 export const coreOutbox = (env: OutboxEnv): Outbox => ({
   ...databaseOutbox("core", env.DB),
-  required: handOverNotes(env),
+  ...handOverNotes(env),
 });
 
 /**
@@ -157,7 +162,7 @@ export const coreOutbox = (env: OutboxEnv): Outbox => ({
  * hands over to the new Brain (`handOverNotes`: a chat's turns) before
  * they leave it, as core's own outbox's do, in core's database: while that
  * is out of reach, the events that note something are held, and every
- * other reaches the log. For one drain.
+ * other reaches the log. One drain's, as core's own outbox is.
  *
  * Its take binds two values and its settle one, within Durable Object
  * SQLite's 100 bound parameters a statement; the held IDs are one bound
@@ -166,7 +171,7 @@ export const coreOutbox = (env: OutboxEnv): Outbox => ({
  */
 const objectOutbox = (env: Pick<Env, "DB">, storage: SqlStorage): Outbox => ({
   name: "workspace",
-  required: handOverNotes(env),
+  ...handOverNotes(env),
   take: async (held) =>
     await Promise.resolve(
       storage
@@ -437,18 +442,22 @@ const drain = async (
   let appended = 0;
   const held: string[] = [];
   const errors = new Set<string>();
-  for (let batch = 0; batch < maxBatches; batch += 1) {
-    // Each batch after the one before it, so events keep their order.
-    // oxlint-disable-next-line no-await-in-loop
-    const result = await drainBatch(env, outbox, held);
-    appended += result.appended;
-    held.push(...result.holds);
-    for (const name of result.errors) {
-      errors.add(name);
+  try {
+    for (let batch = 0; batch < maxBatches; batch += 1) {
+      // Each batch after the one before it, so events keep their order.
+      // oxlint-disable-next-line no-await-in-loop
+      const result = await drainBatch(env, outbox, held);
+      appended += result.appended;
+      held.push(...result.holds);
+      for (const name of result.errors) {
+        errors.add(name);
+      }
+      if (result.taken < auditOutboxTakeMax) {
+        break;
+      }
     }
-    if (result.taken < auditOutboxTakeMax) {
-      break;
-    }
+  } finally {
+    outbox.drained?.();
   }
   if (held.length > 0) {
     // Once a drain, however many: the next drain tries them again.

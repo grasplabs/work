@@ -262,7 +262,7 @@ const notedFor = async (
     { length: count },
     (_, index) => `${personId}/${chatId}/${index + 1}`
   );
-  await handOverNotes(env)(
+  const held = await handOverNotes(env).required(
     ids.map((id) => ({
       id: crypto.randomUUID(),
       at: new Date().toISOString(),
@@ -274,6 +274,7 @@ const notedFor = async (
       detail: {},
     }))
   );
+  expect(held.ids, "the notes were refused").toStrictEqual([]);
   return ids;
 };
 
@@ -725,9 +726,10 @@ describe("a deleted chat", () => {
 
     await person.api.chats.remove(chatId);
     // The turn noted again, as a drain cut short notes it.
-    if (event !== undefined) {
-      await handOverNotes(env)([event]);
-    }
+    const held = await handOverNotes(env).required(
+      event === undefined ? [] : [event]
+    );
+    expect(held.ids, "the note was refused").toStrictEqual([]);
     await handOverNow();
 
     await expect(recalled(person.userId, marker)).resolves.toStrictEqual([]);

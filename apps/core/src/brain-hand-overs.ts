@@ -5,9 +5,9 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
-import type { Held } from "./audit-outbox.ts";
+import type { Held, Outbox } from "./audit-outbox.ts";
 import { brainHandOvers, personErasures } from "./db/core/schema.ts";
-import { statementsWithin } from "./db/d1.ts";
+import { queriesPerInvocationMax, statementsWithin } from "./db/d1.ts";
 
 // What core has still to hand over to the new Brain: a source by its
 // producer and id, never its content (brain-sources.ts reads that when the
@@ -27,8 +27,13 @@ import { statementsWithin } from "./db/d1.ts";
 //
 // A noting stays until its hand-over ends, and it ends in the same batch
 // as the one event that says how (brain-sources.ts `producersOf`): handed
-// over, refused or skipped. So it ends once, however often its attempt
-// runs or its answer is lost, and never without its event.
+// over, refused or skipped. So it ends once however often its attempt runs
+// or its attempt's answer is lost, and never without its event. A drain
+// that notes it again after it ended opens it again, and it ends a second
+// time: when the drain's own note went through but its answer was lost,
+// so the event stayed in its outbox, and its hand-over ended before the
+// next drain noted it again. Ruling that out needs a memory of ended
+// notings that outlives their rows, which nothing bounds.
 //
 // A producer is registered here, by the audit events that note it, and in
 // brain-sources.ts, by its source's key and how it is read (`producers`,
@@ -151,6 +156,21 @@ const noted = async (
 };
 
 /**
+ * How many notes one drain tries alone, at most (`handOverNotes`): a tenth
+ * of the queries D1 runs for one invocation, which every task of the
+ * clock's shares, so a drain's tries alone leave nine tenths to the rest.
+ * Beside them a drain makes three queries a batch (take, note, settle):
+ * at the clock's 50 batches, 250 at the very most. A tenth is also one
+ * batch's notings (`auditOutboxTakeMax`), so a drain can try each of a
+ * full batch alone.
+ */
+export const loneNotesPerDrain = queriesPerInvocationMax / 10;
+
+/** Each distinct name among `errors`, sorted, for a log line. */
+const namesOf = (errors: readonly unknown[]): string[] =>
+  [...new Set(errors.map(errorName))].toSorted();
+
+/**
  * What a drain must do with an outbox's events before they leave it
  * (audit-outbox.ts `required`), for one drain, batch by batch: notes the
  * hand-overs `events` (audit events the log now has) call for, and
@@ -161,59 +181,71 @@ const noted = async (
  * event it failed for: each of its notings is then tried alone, and only
  * those that fail alone are held. So an event whose note keeps failing
  * holds itself and no other, and a note that failed for the batch's size
- * or mix (#2237's, over D1's bound parameters) is done event by event, in
- * this drain, with one warning naming the errors.
+ * or mix (#2237's, over D1's bound parameters) is done event by event.
  *
- * A note tried alone is a D1 query of its own, and D1 takes 1,000 a Worker
- * invocation, which the clock's every task shares. So once no notings of
- * a batch go through alone (the database refusing every note), the drain's
- * later batches hold their notings after their batch's one failed note,
- * without trying each: a drain then makes about one query for each noting
- * of that first batch, and one for each batch after it. A later drain
- * tries them alone again.
+ * A note tried alone is a D1 query of its own, so a drain tries at most
+ * `loneNotesPerDrain` alone, counted across its batches, whether they
+ * fail or go through. Past that, a batch whose note fails holds its
+ * notings without trying each, and the drain goes on: its events that
+ * note nothing settle, so a newer sign-in still reaches the log behind
+ * any number of notes that fail (up to the drain's own bound,
+ * audit-outbox.ts `drain`), and the next drain tries the held ones alone
+ * again, oldest first. Ending the drain once the tries are spent would
+ * keep the events behind them waiting for as long as that many notes keep
+ * failing.
+ *
+ * When the drain is done, one warning (`brain.hand_overs.noted_alone`)
+ * says how many notings it noted alone and the names of the errors their
+ * batches' notes failed with.
  */
 export const handOverNotes = (
   env: Pick<Env, "DB">
-): ((events: readonly AuditEvent[]) => Promise<Held>) => {
-  let alone = true;
-  return async (events) => {
-    const intents = intentsOf(events);
-    try {
-      await noted(env, intents);
-      return { ids: [], errors: [] };
-    } catch (error) {
-      if (!alone) {
+): Required<Pick<Outbox, "required" | "drained">> => {
+  let left = loneNotesPerDrain;
+  let notedAlone = 0;
+  const why: unknown[] = [];
+  return {
+    required: async (events): Promise<Held> => {
+      const intents = intentsOf(events);
+      try {
+        await noted(env, intents);
+        return { ids: [], errors: [] };
+      } catch (error) {
+        const tried = intents.slice(0, left);
+        left -= tried.length;
+        const each = await Promise.allSettled(
+          tried.map(async (intent) => {
+            await noted(env, [intent]);
+          })
+        );
+        const failed = [
+          ...tried.filter((_, index) => each[index]?.status === "rejected"),
+          ...intents.slice(tried.length),
+        ];
+        const went = intents.length - failed.length;
+        if (went > 0) {
+          notedAlone += went;
+          why.push(error);
+        }
         return {
-          ids: intents.map(({ noting }) => noting),
-          errors: [errorName(error)],
+          ids: failed.map(({ noting }) => noting),
+          errors: namesOf([
+            error,
+            ...each.flatMap((one): unknown[] =>
+              one.status === "rejected" ? [one.reason] : []
+            ),
+          ]),
         };
       }
-      const each = await Promise.allSettled(
-        intents.map(async (intent) => {
-          await noted(env, [intent]);
-        })
-      );
-      const failed = intents.filter(
-        (_, index) => each[index]?.status === "rejected"
-      );
-      alone = failed.length < intents.length;
-      const errors = [
-        ...new Set([
-          errorName(error),
-          ...each.flatMap((one) =>
-            one.status === "rejected" ? [errorName(one.reason)] : []
-          ),
-        ]),
-      ].toSorted();
-      if (failed.length === 0) {
-        // Done: nothing is held, so the drain logs nothing of it.
+    },
+    drained: () => {
+      if (notedAlone > 0) {
         log.warn("brain.hand_overs.noted_alone", {
-          notings: intents.length,
-          errors: errors.join(","),
+          notings: notedAlone,
+          errors: namesOf(why).join(","),
         });
       }
-      return { ids: failed.map(({ noting }) => noting), errors };
-    }
+    },
   };
 };
 
