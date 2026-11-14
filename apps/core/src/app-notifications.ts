@@ -29,7 +29,13 @@ import { z } from "zod";
 
 import { decidedAppRole, functionRoles, isOpenToUsers } from "./app-access.ts";
 import type { AppOpening } from "./app-access.ts";
-import { readerOf, sourcesOf, unreadableBy } from "./app-provenance.ts";
+import {
+  brainTeamsOfApps,
+  readerOf,
+  sourcesOf,
+  unreadableBy,
+  unreadableTeamsBy,
+} from "./app-provenance.ts";
 import type { AppSources } from "./app-provenance.ts";
 import { auditedBatch, outboxed, outboxedWhere } from "./audit-outbox.ts";
 import { activeMember, notRemoved, organizationId } from "./auth/auth.ts";
@@ -214,6 +220,7 @@ const openersOf = async (
       .where(eq(appMembers.appId, app.id)),
   ]);
   let sources: AppSources | undefined;
+  let brainTeams: Map<AppId, string[]> | undefined;
   const opened = new Set<string>();
   for (const row of memberRows) {
     const role = roleSchema.safeParse(row.role);
@@ -246,6 +253,16 @@ const openersOf = async (
       if (
         unreadableBy(sources, readerOf(row.userId, teamIds, role.data)).length >
         0
+      ) {
+        continue;
+      }
+    } else {
+      // Its owner and admins only while they are in every team whose
+      // Brain content it may hold (GRA-1842), as `requireAppRole` decides.
+      // oxlint-disable-next-line no-await-in-loop -- read at most once
+      brainTeams ??= await brainTeamsOfApps(env, [app.id]);
+      if (
+        unreadableTeamsBy(brainTeams.get(app.id) ?? [], { teamIds }).length > 0
       ) {
         continue;
       }

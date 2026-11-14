@@ -4,17 +4,20 @@ import type {
   PermissionSubject,
 } from "@grasp-os/shared/permissions";
 import { i18n } from "@lingui/core";
-import { msg, ph } from "@lingui/core/macro";
+import { msg, ph, plural } from "@lingui/core/macro";
 
 import type { Session } from "../core.ts";
 import {
   appName,
   appsById,
+  readTeams,
+  teamName,
   formatTime,
   personName,
   readPeople,
 } from "../directory.ts";
 import type { Directory } from "../directory.ts";
+import { formatList } from "../format.ts";
 import {
   kindLabels,
   triggerDescription,
@@ -41,11 +44,12 @@ export const readRequestNames = async (
   session: Session,
   requests: Permission[]
 ): Promise<PendingRequests> => {
-  const [apps, people] = await Promise.all([
+  const [apps, people, teams] = await Promise.all([
     session.apps.list(),
     readPeople(session),
+    readTeams(session),
   ]);
-  return { requests, directory: { people, apps: appsById(apps) } };
+  return { requests, directory: { people, teams, apps: appsById(apps) } };
 };
 
 /** Workflow `id`, by the name core gave it in `names`, else by its ID. */
@@ -147,9 +151,22 @@ export const objectOf = (
     );
   }
   if (object.type === "platform" && actions.includes("brain")) {
-    // Consent in plain words: what it reads, and whose access bounds it.
+    // Consent in plain words: what it reads, whose access bounds it, and
+    // who it may then be shared with (core's brain-recall.ts). The teams
+    // by name, or by ID for one that no longer exists.
+    const named = object.teams ?? [];
+    if (named.length === 0) {
+      return i18n._(
+        msg`Company Brain, read only. This can recall what everyone in the company may read, never a team's or anyone's own content. It can never write to the Brain. Every recall is recorded`
+      );
+    }
+    const count = named.length;
+    const teamNames = formatList(named.map((id) => teamName(directory, id)));
     return i18n._(
-      msg`Company Brain, read only. This can read company Brain evidence and its open questions, from the collections it was granted and only what the person it works for may read too. It can never write to the Brain. Every read is recorded`
+      msg`${plural(count, {
+        one: `Company Brain, read only. This App can recall what everyone in the company may read and what the team ${teamNames} may read, as far as the person it works for is in that team. Only people in that team can use it, its owner and admins too. It can never write to the Brain. Every recall is recorded`,
+        other: `Company Brain, read only. This App can recall what everyone in the company may read and what the teams ${teamNames} may read, as far as the person it works for is in them. Only people in all of them can use it, its owner and admins too. It can never write to the Brain. Every recall is recorded`,
+      })}`
     );
   }
   if (object.type === "platform") {
