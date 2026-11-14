@@ -6,6 +6,9 @@
 //   <Icon icon={Plus} />            beside words
 //   <Icon icon={Plus} label="Add" />  standing alone, with a name
 import {
+  AiBrain01Icon,
+  AiUserIcon,
+  Message01Icon,
   Add01Icon,
   Agreement01Icon,
   AiMagicIcon,
@@ -458,6 +461,12 @@ export const AppPanels: IconData = DashboardSquare01Icon;
 export const Cycle: IconData = RepeatIcon;
 /** Agents that help: a hand given. Agreement01Icon. */
 export const Helping: IconData = Agreement01Icon;
+/** A conversation: the frame's Chat row (Ruben's pick). Message01Icon. */
+export const Conversation: IconData = Message01Icon;
+/** What the workspace knows: the frame's Brain row (Ruben's pick). AiBrain01Icon. */
+export const Brain: IconData = AiBrain01Icon;
+/** Agents, people that are AI: the frame's Agents row (Ruben's pick). AiUserIcon. */
+export const AgentPerson: IconData = AiUserIcon;
 /** Integrations: a cable that connects. CableIcon. */
 export const Cable: IconData = CableIcon;
 /** One app, as a window. AppWindowIcon. */

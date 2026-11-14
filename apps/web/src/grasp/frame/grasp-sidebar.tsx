@@ -18,18 +18,18 @@ import { useWorkflowsWaiting } from "../../workflows/nav-item.tsx";
 import { focus } from "../focus/focus.ts";
 import { iconVars } from "../icons/icon.stylex.ts";
 import {
+  AgentPerson,
   AppPanels,
   AppWindow,
+  Brain,
   Cable,
+  Conversation,
   Cycle,
-  Helping,
   Icon,
   Inbox,
   Projects,
   Search,
   SidebarToggle,
-  Sparkle,
-  Waypoints,
 } from "../icons/index.ts";
 import { grasp, media } from "../tokens/tokens.stylex.ts";
 import { frame } from "./frame.stylex.ts";
@@ -284,7 +284,7 @@ const Sections = ({ identity }: { identity: Identity }) => {
       <NavList>
         <NavEntry
           current={at("/", false)}
-          icon={Sparkle}
+          icon={Conversation}
           label={t`Chat`}
           render={<Link to="/" />}
         />
@@ -298,7 +298,7 @@ const Sections = ({ identity }: { identity: Identity }) => {
         />
         <NavEntry
           current={at("/brain")}
-          icon={Waypoints}
+          icon={Brain}
           label={t`Brain`}
           render={<Link to="/brain" />}
         />
@@ -338,7 +338,7 @@ const Sections = ({ identity }: { identity: Identity }) => {
         </NavEntry>
         <NavEntry
           current={at("/agents")}
-          icon={Helping}
+          icon={AgentPerson}
           label={t`Agents`}
           render={<Link to="/agents" />}
         />
