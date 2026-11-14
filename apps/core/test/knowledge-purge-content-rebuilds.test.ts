@@ -3,7 +3,7 @@ import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { drainAuditOutboxes } from "../src/audit-outbox.ts";
+import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import { mockIdp } from "./idp.ts";
 import {
   apiWith,

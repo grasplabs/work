@@ -34,6 +34,8 @@ export type {
   BrainPack,
   BrainPackItem,
   BrainRecall,
+  BrainSkill,
+  BrainSkillText,
 } from "./brain-recall.ts";
 export type {
   AiClient,

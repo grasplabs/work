@@ -123,6 +123,10 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     action: "brain.source.handover_skipped",
     text: msg`Didn't keep something noted for the Brain, and recorded why`,
   },
+  {
+    action: "brain.capture.erased",
+    text: msg`Erased what the Brain kept from a connection, as it was disconnected`,
+  },
   { action: "agent.call", text: msg`The agent looked something up` },
   { action: "model.refused", text: msg`A model call was refused` },
   { action: "model", text: msg`Called a model` },
@@ -341,6 +345,9 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
   },
   { action: "statistics.read", text: msg`Read an App's statistics` },
   { action: "brain.recall", text: msg`Recalled from the Brain` },
+  // Each named exactly: a release installing skills is no read.
+  { action: "brain.skills.select", text: msg`Read skills from the Brain` },
+  { action: "brain.skills.read", text: msg`Read skills from the Brain` },
   { action: "guest.invited", text: msg`Invited a guest` },
   { action: "guest.revoked", text: msg`Took back a guest's link` },
   { action: "guest.read", text: msg`Read what a guest wrote` },

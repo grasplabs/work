@@ -1194,8 +1194,6 @@ export const listVersionsAs = async (
   };
 };
 
-const versionRefsSchema = z.array(versionRefSchema);
-
 /** A version as a key of the Brain names it, as one string. */
 const versionKeyOf = ({
   source,
@@ -1223,57 +1221,6 @@ const readableIn = async (
     )
   );
   return readable.flat();
-};
-
-/**
- * Of `versions`, those the member `personId` may read now, as
- * `readSourceVersionAs` decides it, in the order given and each once,
- * without reading their text: for core to check what a chat once read
- * before it sends it again (history-access.ts), or a run what it
- * recalled (workflows/resource-reads.ts): as far as `reach` goes, as the
- * recall that handed them read. Of the shared store, and of their own for
- * those the shared one doesn't answer (with the `person` reach alone): a
- * source is in one of them (`keptIn`). Their own store failing answers
- * none of its own (`ownOr`): what can't be checked is withheld. Refused
- * once they are no longer a member. For the server only, as `addSource`.
- */
-export const readableVersionsAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
-  personId: string,
-  versions: readonly SourceVersionRef[],
-  { reach = "person" }: { reach?: Reach } = {}
-): Promise<SourceVersionRef[]> => {
-  const asked = checked(versionRefsSchema, versions);
-  if (asked.length === 0) {
-    return [];
-  }
-  const reader = await readerOf(env, personId, reach);
-  const keys = [
-    ...new Map(
-      asked.map(({ source, version }) => {
-        const key = { source: sourceKeyOf(source), version };
-        return [versionKeyOf(key), key] as const;
-      })
-    ).values(),
-  ];
-  const inShared = await readableIn(brain(env), reader, keys);
-  const shared = new Set(inShared.map((key) => versionKeyOf(key)));
-  const rest = keys.filter((key) => !shared.has(versionKeyOf(key)));
-  const own = ownBrainOf(env, reader);
-  const inOwn =
-    rest.length === 0 || own === undefined
-      ? []
-      : await ownOr(async () => await readableIn(own, reader, rest), []);
-  const kept = new Set([...shared, ...inOwn.map((key) => versionKeyOf(key))]);
-  const seen = new Set<string>();
-  return asked.filter(({ source, version }) => {
-    const key = versionKeyOf({ source: sourceKeyOf(source), version });
-    if (!kept.has(key) || seen.has(key)) {
-      return false;
-    }
-    seen.add(key);
-    return true;
-  });
 };
 
 // Erasure: for good, apart from ordinary removal, where a new version
@@ -1341,6 +1288,40 @@ export const eraseSource = async (
     });
   }
   await brain(env).eraseSource(request);
+};
+
+const ownGroupErasureSchema = z.strictObject({
+  personId: idSchema,
+  group: sourceRefSchema,
+  reason: z.enum(erasureReasons),
+});
+
+/**
+ * Erases the group `group` (`addSource`'s `group`) from `personId`'s own
+ * store alone, as `eraseSource` with `asGroup` does there: every source
+ * added in it, in one call, and the group closed, so a later add in it is
+ * refused, also after a restore of the store. For a group only their own
+ * store can hold, so the shared store has no key of it to close: what an
+ * agent read through their own connection (core's `addSource` refuses a
+ * capture any other readers). Answers how many sources it erased, the
+ * same each time it is repeated (none once their store was erased
+ * whole). Safe to repeat; one that throws must be repeated until it
+ * answers.
+ */
+export const eraseOwnGroup = async (
+  env: BrainEnv,
+  erased: { personId: string; group: SourceRef; reason: ErasureReason }
+): Promise<number> => {
+  const { personId, group, reason } = checked(ownGroupErasureSchema, erased);
+  const answered = await ownBrain(env, personId).eraseSource({
+    source: sourceKeyOf(group),
+    reason,
+    asGroup: true,
+  });
+  if (answered === undefined) {
+    throw new Error("A person's own store answers what it erased");
+  }
+  return answered.sources;
 };
 
 /**
@@ -1834,6 +1815,121 @@ const skillOfKey = (key: SourceId): Skill | null => {
   return kind === skillsKind && rest.length === 0 && parsed.success
     ? parsed.data
     : null;
+};
+
+/**
+ * A skill's version as a run keeps it beside what it recalled
+ * (workflows/run-evidence.ts): the skills' kind, then its scope and name,
+ * as its key has them, so the run's checks read it as they read a
+ * recalled version (`readableVersionsAs`).
+ */
+export interface SkillVersionRef {
+  source: { producer: typeof skillsKind; id: string };
+  version: number;
+}
+
+/**
+ * `skill` at its version as a run keeps it (`SkillVersionRef`), whatever
+ * else it carries (a selection's description).
+ */
+export const skillVersionRefOf = ({
+  scope: givenScope,
+  name: givenName,
+  version: givenVersion,
+}: SkillAt): SkillVersionRef => {
+  const { scope, name, version } = checked(skillAtSchema, {
+    scope: givenScope,
+    name: givenName,
+    version: givenVersion,
+  });
+  return {
+    source: {
+      producer: skillsKind,
+      id: skillKeyOf({ scope, name }).slice(skillsKind.length + 1),
+    },
+    version,
+  };
+};
+
+/** A skill's version as `SkillVersionRef` names it, read back as its skill. */
+const skillVersionRefSchema = z.strictObject({
+  source: z.strictObject({
+    producer: z.literal(skillsKind),
+    id: z.string().transform((id, context) => {
+      const skill = skillOfKey(`${skillsKind}:${id}`);
+      if (skill === null) {
+        context.addIssue({ code: "custom", message: "Not a skill" });
+        return z.NEVER;
+      }
+      return skill;
+    }),
+  }),
+  version: z.int().positive(),
+});
+
+/** A version core checks is still readable: a source's or a skill's. */
+export type PinnedVersionRef = SourceVersionRef | SkillVersionRef;
+
+const pinnedVersionRefsSchema = z.array(
+  z.union([versionRefSchema, skillVersionRefSchema])
+);
+
+/**
+ * Of `versions`, those the member `personId` may read now, as
+ * `readSourceVersionAs` decides it, in the order given and each once,
+ * without reading their text: for core to check what a chat once read
+ * before it sends it again (history-access.ts), or a run what it
+ * recalled (workflows/resource-reads.ts): as far as `reach` goes, as the
+ * recall that handed them read; a skill's version too, as a run that
+ * read it keeps it (`skillVersionRefOf`). Of the shared store, and of
+ * their own for those the shared one doesn't answer (with the `person`
+ * reach alone): a source is in one of them (`keptIn`). Their own store
+ * failing answers none of its own (`ownOr`): what can't be checked is
+ * withheld. Refused once they are no longer a member. For the server
+ * only, as `addSource`.
+ */
+export const readableVersionsAs = async <Ref extends PinnedVersionRef>(
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  versions: readonly Ref[],
+  { reach = "person" }: { reach?: Reach } = {}
+): Promise<Ref[]> => {
+  const asked = checked(pinnedVersionRefsSchema, versions).map(
+    ({ source, version }) => ({
+      source:
+        source.producer === skillsKind
+          ? skillKeyOf(source.id)
+          : sourceKeyOf(source),
+      version,
+    })
+  );
+  if (asked.length === 0) {
+    return [];
+  }
+  const reader = await readerOf(env, personId, reach);
+  const keys = [
+    ...new Map(asked.map((key) => [versionKeyOf(key), key] as const)).values(),
+  ];
+  const inShared = await readableIn(brain(env), reader, keys);
+  const shared = new Set(inShared.map((key) => versionKeyOf(key)));
+  const rest = keys.filter((key) => !shared.has(versionKeyOf(key)));
+  const own = ownBrainOf(env, reader);
+  const inOwn =
+    rest.length === 0 || own === undefined
+      ? []
+      : await ownOr(async () => await readableIn(own, reader, rest), []);
+  const kept = new Set([...shared, ...inOwn.map((key) => versionKeyOf(key))]);
+  const seen = new Set<string>();
+  // `asked` is `versions` checked, at the same places.
+  return versions.filter((_, at) => {
+    const ask = asked[at];
+    const key = ask === undefined ? undefined : versionKeyOf(ask);
+    if (key === undefined || !kept.has(key) || seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 };
 
 /** Who may read Grasp's and the company's skills: every current member. */
