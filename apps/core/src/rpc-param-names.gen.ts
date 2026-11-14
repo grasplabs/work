@@ -70,7 +70,7 @@ export const rpcParamNames: ParamNames = {
     "contents": ["app"],
     "create": ["app"],
     "dataModel": ["app"],
-    "define": ["app","operation","preview"],
+    "define": ["app","revision","operation","preview"],
     "definition": ["app"],
     "get": ["app"],
     "list": [],
