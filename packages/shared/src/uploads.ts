@@ -138,6 +138,7 @@ export const uploadErrors = defineErrorFamily({
     "Only PDF, Word (.docx), Excel (.xlsx) and WebVTT captions (.vtt) can be uploaded, with a name that ends in .pdf, .docx, .xlsx or .vtt.",
   "upload.unreadable":
     "The file's text couldn't be read. Check that it opens, then upload it again.",
+  "upload.text_too_large": "This document is too large to save.",
   "upload.too_complex":
     "The file takes more work to read than an upload may take: it may be damaged, or built to be. Check that it opens, or save it again as a simpler file, then upload it again.",
   "upload.no_text":

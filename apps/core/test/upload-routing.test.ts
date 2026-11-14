@@ -198,7 +198,7 @@ describe("upload routing", { timeout: 60_000 }, () => {
     expect(call).toMatchObject({
       model: { provider: "openai", model: "gpt-5.4-mini" },
       detail: {
-        purpose: "knowledge.conversion",
+        purpose: "upload.conversion",
         transport: "connect",
         credential: "platform",
       },
@@ -277,7 +277,7 @@ describe("upload routing", { timeout: 60_000 }, () => {
       requests: await sentCount(name),
     }).toStrictEqual({
       status: "failed",
-      failure: "knowledge.too_large",
+      failure: "upload.text_too_large",
       requests: 2,
     });
   });

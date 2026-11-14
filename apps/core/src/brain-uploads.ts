@@ -13,7 +13,6 @@ import type {
 } from "@grasp-os/shared/brain-sources";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
-import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { log } from "@grasp-os/shared/log";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
@@ -263,10 +262,8 @@ const textOf = async (
     if (error instanceof ExtractorUnavailableError) {
       throw brainUploadErrors.create("brain.upload_busy");
     }
-    // The extractor (files/extract.ts) still says its text is too long
-    // with Knowledge's error code: the file is within its size, its text
-    // isn't.
-    if (knowledgeErrors.codeOf(error) === "knowledge.too_large") {
+    // The file is within its size, its text isn't (files/extract.ts).
+    if (uploadErrors.codeOf(error) === "upload.text_too_large") {
       throw brainUploadErrors.create("brain.upload_text_too_long");
     }
     if (isExpectedError(error)) {
