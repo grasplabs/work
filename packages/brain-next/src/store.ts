@@ -1235,28 +1235,34 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * Whether a source or a person was erased, from this store's record of
    * its ledger alone (erasure.ts `erasureStatusOf`, by the SHA-256 the
    * ledger names it by). A read: it changes nothing and leaves no work.
-   * Refused, as every call is, by a store whose name says no one's;
    * `unavailable` while the ledger can't be read or is being replayed (the
-   * gate `#ready` throws for, answered instead). A person's own store
-   * never written, or erased whole, holds no record: `not_erased`, without
-   * a table read. Staff ask the shared store alone: no staff path
-   * addresses a person's own store (GRA-1762).
+   * gate `#ready` throws for, answered instead).
+   *
+   * The shared store's alone: a person's own store refuses, as it refuses
+   * `handOver`, before it reads or makes anything. Staff's lookup (core's
+   * brain-report.ts) needs no answer of it: a source's erasure closes its
+   * key in the shared ledger only once the owner's own store returned, and
+   * a person's is done in core's own record (its `brain_sources` area)
+   * only once their own store answered erased whole, files included. So
+   * no staff path addresses a person's own store (GRA-1762), and a store
+   * that was never written is never asked into being.
    */
   async erasureStatus(request: ErasureLookup): Promise<ErasureStatus> {
     if (this.#kind.kind === "unknown") {
       this.#refuseNoOnes();
     }
+    if (this.#kind.kind === "person") {
+      throw new Error(sharedOnly);
+    }
     const lookup = checked(erasureLookupSchema, request);
     const subject = await subjectOf(
       lookup.kind === "source" ? lookup.source : lookup.person
     );
+    // Through, the shared store's schema is made (`#start`); the gate,
+    // then the record, with no await between.
     const ledger = await this.#ledgerStep();
     if (ledger !== "through") {
       return { state: "unavailable" };
-    }
-    // The gate, then the record, with no await between.
-    if (!this.#schema) {
-      return { state: "not_erased" };
     }
     return erasureStatusOf(this.ctx.storage.sql, lookup.kind, subject);
   }

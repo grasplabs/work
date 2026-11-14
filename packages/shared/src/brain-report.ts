@@ -132,19 +132,50 @@ export const brainErasureRequestSchema = z.strictObject({
 export type BrainErasureRequest = z.input<typeof brainErasureRequestSchema>;
 
 /**
+ * What a lookup answers besides `erased`: `erasing` while it is recorded
+ * but not done; `not_erased` when the ledger holds no erasure of it, alike
+ * whether it ever existed; `skipped` when core recorded its erasure of a
+ * person from the Brain as skipped, so it is not done and not tried again;
+ * `unavailable` while the Brain can't read its ledger, or applies it after
+ * a restore.
+ */
+export const brainErasureStates = [
+  "erasing",
+  "not_erased",
+  "skipped",
+  "unavailable",
+] as const;
+
+/**
  * Whether it was erased, and nothing else: `erased`, with when the ledger
- * recorded it, once every part of the store and its queue is done;
- * `erasing` while it is recorded but not done; `not_erased` when the
- * ledger holds no erasure of it, alike whether it ever existed;
- * `unavailable` while the Brain can't read its ledger, or applies it after a restore.
+ * recorded it, once every part of the store and its queue is done; or one
+ * of `brainErasureStates`. What core answers. Fields it doesn't name are
+ * dropped, so an admin reads a core of a newer release that adds one.
  */
 export const brainErasureAnswerSchema = z.discriminatedUnion("state", [
-  z.strictObject({ state: z.literal("erased"), at: z.iso.datetime() }),
-  z.strictObject({
-    state: z.enum(["erasing", "not_erased", "unavailable"]),
-  }),
+  z.object({ state: z.literal("erased"), at: z.iso.datetime() }),
+  z.object({ state: z.enum(brainErasureStates) }),
 ]);
 export type BrainErasureAnswer = z.infer<typeof brainErasureAnswerSchema>;
+
+/** Every state this release answers. */
+const answeredStates = new Set<string>(["erased", ...brainErasureStates]);
+
+/**
+ * An answer as the admin reads it: core's, or `unknown` for a state this
+ * release doesn't name (a core of a newer release, on a faster channel),
+ * which the admin says it can't read, rather than refusing the answer. A
+ * state it names that comes malformed is refused as before.
+ */
+export const brainErasureReadSchema = z.union([
+  brainErasureAnswerSchema,
+  z
+    .object({
+      state: z.string().refine((state) => !answeredStates.has(state)),
+    })
+    .transform(() => ({ state: "unknown" as const })),
+]);
+export type BrainErasureRead = z.infer<typeof brainErasureReadSchema>;
 
 const isoTime = z.iso.datetime();
 const count = z.int().min(0);

@@ -40,10 +40,22 @@ const answerWords: Readonly<
 > = {
   erasing:
     "Not finished: the erasure is recorded, and still being written to the ledger or deleted.",
+  skipped:
+    "Not done, and not tried again: the erasure of this person from the Brain was recorded as skipped. Raise it with engineering.",
   unavailable:
     "The Brain can't read its erasure ledger right now, or is applying it after a restore: try again shortly.",
+  unknown:
+    "The company's Grasp answered in a way this admin can't read yet: it runs a newer release. Try again once the admin is updated.",
   not_answered: "The company's Grasp didn't answer: try again.",
 };
+
+/** The answers that say something is wrong: not a yes, a no, or not finished yet. */
+const wrongStates = new Set<BrainErasureResult["state"]>([
+  "skipped",
+  "unavailable",
+  "unknown",
+  "not_answered",
+]);
 
 /** What staff read when no erasure is recorded: a source may have gone with a person. */
 const notErasedWords: Readonly<Record<Kind, string>> = {
@@ -68,7 +80,7 @@ const saidOf = (
   }
   return {
     text: answerWords[result.state],
-    wrong: result.state === "unavailable" || result.state === "not_answered",
+    wrong: wrongStates.has(result.state),
   };
 };
 

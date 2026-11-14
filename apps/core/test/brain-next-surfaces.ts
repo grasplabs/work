@@ -5900,7 +5900,46 @@ export const storeProbes = {
       });
     }
     await store().eraseSource({ source: erased, reason: "deleted" });
+    // A person's own store refuses it, whatever it holds and whoever it
+    // names: each answer is scanned for the markers, as every probe's is.
+    // (Two stores' refusals differ only in the store's id, which its name,
+    // given by the caller, already decides.)
+    const owner = stranger();
+    const ownErased = keyOf(missingSource());
+    for (const source of [keyOf(missingSource()), ownErased]) {
+      // oxlint-disable-next-line no-await-in-loop -- one add at a time
+      await personalStore(owner).addSource({
+        source,
+        change: crypto.randomUUID(),
+        text: markedText(markers),
+        access: { kind: "owner", person: owner },
+      });
+    }
+    await personalStore(owner).eraseSource({
+      source: ownErased,
+      reason: "deleted",
+    });
+    const askOwn = async (name: string, request: unknown) =>
+      await answer(
+        name,
+        async () => await personalStore(owner).erasureStatus(unchecked(request))
+      );
     return [
+      await askOwn(
+        "a person's own store holding marked sources, of its person",
+        {
+          kind: "person",
+          person: owner,
+        }
+      ),
+      await askOwn("a person's own store, of its erased marked source", {
+        kind: "source",
+        source: ownErased,
+      }),
+      await askOwn("a person's own store, of a key of the markers", {
+        kind: "source",
+        source: `upload:${markers.join(" ")}`,
+      }),
       await look(
         "a source no one added",
         { kind: "source", source: keyOf(missingSource()) },

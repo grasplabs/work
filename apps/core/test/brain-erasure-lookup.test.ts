@@ -537,12 +537,37 @@ const throwingStore = (): Env["BRAIN_STORE"] =>
   });
 
 describe("whether something was erased, when a read fails", () => {
-  it("answers the error and records the lookup as failed, when the store throws or core's record can't be read as done or under way", async () => {
+  it("answers the error and records the lookup as failed when the store throws", async () => {
+    // The failed request is logged as an error: that's what it is.
+    const logged = vi.spyOn(console, "error").mockReturnValue();
+    const statuses: number[] = [];
+    const events = await auditedDuring(async () => {
+      const ofStore = await lookUp(
+        { kind: "source", key: `upload:${crypto.randomUUID()}` },
+        { ...env, BRAIN_STORE: throwingStore() }
+      );
+      statuses.push(ofStore.status);
+    });
+    logged.mockRestore();
+
+    expect({
+      statuses,
+      events: lookups(events).map(({ detail }) => detail),
+    }).toStrictEqual({
+      statuses: [500],
+      events: [{ kind: "source", outcome: "failed" }],
+    });
+  });
+});
+
+describe("whether a person was erased, when core recorded its erasure of them from the Brain as skipped", () => {
+  it("says skipped, neither erased nor still under way, and records that", async () => {
     const admin = await signedInApi(idp, "admin");
     const erased = await signedInApi(idp, "builder");
     await admin.api.members.remove(erased.userId);
     await admin.api.members.erase(erased.userId, String(erased.person.name));
-    // An area no step skips, skipped: neither done nor under way.
+    // Core's area for the Brain says skipped: not done, not retried. No
+    // step records it so today; the schema allows it.
     await drizzle(env.DB)
       .update(personErasureAreas)
       .set({ state: "skipped" })
@@ -552,29 +577,16 @@ describe("whether something was erased, when a read fails", () => {
           eq(personErasureAreas.area, "brain_sources")
         )
       );
-    // The failed requests are logged as errors: that's what they are.
-    const logged = vi.spyOn(console, "error").mockReturnValue();
-    const statuses: number[] = [];
-    const events = await auditedDuring(async () => {
-      const ofStore = await lookUp(
-        { kind: "source", key: `upload:${crypto.randomUUID()}` },
-        { ...env, BRAIN_STORE: throwingStore() }
-      );
-      const ofRecord = await lookUp({ kind: "person", id: erased.userId });
-      statuses.push(ofStore.status, ofRecord.status);
-    });
-    logged.mockRestore();
 
-    expect({
-      statuses,
-      events: lookups(events).map(({ detail }) => detail),
-    }).toStrictEqual({
-      statuses: [500, 500],
-      events: [
-        { kind: "source", outcome: "failed" },
-        { kind: "person", outcome: "failed" },
-      ],
+    const events = await auditedDuring(async () => {
+      await expect(
+        lookUp({ kind: "person", id: erased.userId })
+      ).resolves.toMatchObject({ status: 200, answer: { state: "skipped" } });
     });
+
+    expect(lookups(events).map(({ detail }) => detail)).toStrictEqual([
+      { kind: "person", outcome: "skipped" },
+    ]);
   });
 });
 

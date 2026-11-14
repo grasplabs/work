@@ -32,6 +32,7 @@ import { consoleSigned } from "./console-signed.ts";
 import type { ConsoleRefusal } from "./console-signed.ts";
 import { errorResponse } from "./errors.ts";
 import { brainErasureStateOf } from "./person-erasure.ts";
+import type { ErasureAreaState } from "./person-erasure.ts";
 
 // How this client's Brain is doing, for Grasp's staff through the admin
 // (GRA-1733; `@grasp-os/shared/brain-report` says what the report holds).
@@ -192,28 +193,42 @@ export const brainActionResponse = async (
  * (`ledger`), with core's own record of their erasure from the Brain
  * (`core`, person-erasure.ts `brainErasureStateOf`), since a staff path
  * never addresses a person's own store (GRA-1762), and core marks that
- * area complete only once the Brain's erasure of them returned.
+ * area complete only once the Brain's erasure of them returned, which is
+ * only once their own store was erased whole, its files included.
  *
  * - `unavailable` while the shared ledger can't be read;
- * - `erasing` while core's erasure of them is under way, and also if core
- *   says complete but the ledger doesn't hold it (never read as done);
- * - `erased`, at the ledger's time, once core's is complete and the
- *   ledger holds it;
  * - with no erasure in core's record, the ledger's own answer: a person's
  *   withdrawal (`withdrawn`, the shared store's alone) reads `erased` once
  *   it is in the ledger and deleted, and someone never erased
- *   `not_erased`, as someone who never existed.
+ *   `not_erased`, as someone who never existed;
+ * - `erasing` while core's erasure of them is under way, and also if core
+ *   says complete but the ledger doesn't hold it (never read as done);
+ * - `skipped` when core recorded it skipped: not done, not tried again;
+ * - `erased`, at the ledger's time, once core's is complete and the
+ *   ledger holds it.
  */
 const personFound = (
   ledger: BrainErasureAnswer,
-  core: Awaited<ReturnType<typeof brainErasureStateOf>>
+  core: ErasureAreaState | null
 ): BrainErasureAnswer => {
   if (ledger.state === "unavailable" || core === null) {
     return ledger;
   }
-  return core === "complete" && ledger.state === "erased"
-    ? ledger
-    : { state: "erasing" };
+  switch (core) {
+    case "pending": {
+      return { state: "erasing" };
+    }
+    case "skipped": {
+      return { state: "skipped" };
+    }
+    case "complete": {
+      return ledger.state === "erased" ? ledger : { state: "erasing" };
+    }
+    default: {
+      const unhandled: never = core;
+      throw new Error(`No such erasure state (${typeof unhandled})`);
+    }
+  }
 };
 
 /**

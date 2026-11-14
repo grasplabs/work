@@ -8,6 +8,7 @@
 // threat it holds.
 import type {
   ErasureLookup,
+  ErasureStatus,
   Access,
   AskModel,
   Embedders,
@@ -1480,65 +1481,68 @@ const leavingNone = [
   "workOverview",
 ];
 
-/** What `store` says of the erasure `lookup` names, its time as text. */
-const statusOf = async (store: Store, lookup: ErasureLookup) => {
-  const status = await store.erasureStatus(lookup);
-  return status.state === "erased"
-    ? { state: status.state, at: status.at.toISOString() }
-    : status;
-};
+/** What `store` answers when asked whether `lookup` was erased. */
+const statusOf = async (
+  store: Store,
+  lookup: ErasureLookup
+): Promise<ErasureStatus> => await store.erasureStatus(lookup);
 
-describe("whether something was erased, as a person's own store says it", () => {
+describe("whether something was erased, asked of a person's own store", () => {
+  // Staff's erasure lookup is the shared store's alone (core reads a
+  // person's own erasure from its own record): their own store refuses it
+  // as it refuses `handOver`, whoever it names and whatever it holds, and
+  // asking never makes a store that was never written.
   beforeEach(() => {
     person = `person-${crypto.randomUUID()}`;
   });
 
-  it("says nothing was, and makes nothing, while it was never written", async () => {
-    const said = [
-      await statusOf(own(), { kind: "person", person }),
-      await statusOf(own(), { kind: "source", source: "test:never" }),
-    ];
+  it("refuses, and makes nothing, while it was never written", async () => {
+    const who = `person-${crypto.randomUUID()}`;
+    const asked = await Promise.allSettled([
+      statusOf(own(who), { kind: "person", person: who }),
+      statusOf(own(who), { kind: "source", source: "test:never" }),
+    ]);
 
-    expect({ said, tables: await tablesOf(own()) }).toStrictEqual({
-      said: [{ state: "not_erased" }, { state: "not_erased" }],
+    expect({
+      refused: asked.map((result) =>
+        result.status === "rejected" ? String(result.reason) : "answered"
+      ),
+      tables: await tablesOf(own(who)),
+      alarm: await alarmOf(own(who)),
+    }).toStrictEqual({
+      refused: [
+        "Error: The Brain refused it: only the shared store takes this",
+        "Error: The Brain refused it: only the shared store takes this",
+      ],
       tables: [],
+      alarm: null,
     });
   });
 
-  it("says a source of its own was erased, and its person not yet", async () => {
-    const { source } = await add(own(), "Marker of their own", theirs());
-    await own().eraseSource({ source, reason: "deleted" });
+  it("refuses for a source of its own it erased, and for its person", async () => {
+    const who = `person-${crypto.randomUUID()}`;
+    const { source } = await add(own(who), "Marker of their own", theirs(who));
+    await own(who).eraseSource({ source, reason: "deleted" });
 
-    const ofSource = await statusOf(own(), { kind: "source", source });
-    const ofPerson = await statusOf(own(), { kind: "person", person });
-
-    expect([ofSource.state, ofPerson]).toStrictEqual([
-      "erased",
-      { state: "not_erased" },
-    ]);
+    await expect(
+      statusOf(own(who), { kind: "source", source })
+    ).rejects.toThrow(/only the shared store takes this/u);
+    await expect(
+      statusOf(own(who), { kind: "person", person: who })
+    ).rejects.toThrow(/only the shared store takes this/u);
   });
 
-  it("holds no record once it was erased whole, and answers as one never written, without a table", async () => {
+  it("refuses once it was erased whole, and makes nothing again", async () => {
     const { source } = await add(own(), "Marker of their own", theirs());
     await eraseWhole();
 
-    const said = [
-      await statusOf(own(), { kind: "person", person }),
-      await statusOf(own(), {
-        kind: "person",
-        person: `other-${crypto.randomUUID()}`,
-      }),
-      await statusOf(own(), { kind: "source", source }),
-    ];
-
-    expect({ said, tables: await tablesOf(own()) }).toStrictEqual({
-      said: [
-        { state: "not_erased" },
-        { state: "not_erased" },
-        { state: "not_erased" },
-      ],
-      tables: [],
-    });
+    await expect(statusOf(own(), { kind: "source", source })).rejects.toThrow(
+      /only the shared store takes this/u
+    );
+    await expect(statusOf(own(), { kind: "person", person })).rejects.toThrow(
+      /only the shared store takes this/u
+    );
+    await expect(tablesOf(own())).resolves.toStrictEqual([]);
   });
 
   it("refuses the question when its name says no one's", async () => {

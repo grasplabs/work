@@ -708,6 +708,29 @@ describe("how an organization's Brain is doing", () => {
     });
   });
 
+  it("reads a skipped erasure as such, a state of a newer core's it doesn't name as unknown, and refuses a state it names that comes malformed", async () => {
+    const acme = await liveClient();
+    acme.core.brain = brainReport(1_000_000);
+    const asked = async (answered: { state: string; at?: string }) => {
+      acme.core.brainErasure = answered;
+      return await callServerFn(
+        brainErasureFn,
+        { clientId: acme.clientId, lookup: { kind: "person", id: "user-17" } },
+        { email: "grace@grasp.test" }
+      );
+    };
+
+    expect({
+      skipped: await asked({ state: "skipped" }),
+      newer: await asked({ state: "withheld_by_policy" }),
+      erasedWithoutWhen: await asked({ state: "erased" }),
+    }).toStrictEqual({
+      skipped: { state: "skipped" },
+      newer: { state: "unknown" },
+      erasedWithoutWhen: { state: "not_answered" },
+    });
+  });
+
   it("shows an erasure lookup's answer only for the lookup submitted last, while it is still what is typed", () => {
     const yesForA: LookupAnswer = {
       kind: "source",

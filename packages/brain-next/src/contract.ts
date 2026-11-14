@@ -2540,7 +2540,9 @@ export interface Brain {
    * Whether a source or a person was erased, from the store's record of
    * its ledger alone (`ErasureStatus`). For staff, who name what a client
    * gave them: it reads nothing but that record, so what was never erased
-   * answers as what never existed.
+   * answers as what never existed. The shared store's alone: a person's
+   * own store refuses, as it does `handOver` (staff's lookup reads a
+   * person's own erasure from core's record of it, never from their store).
    */
   erasureStatus: (request: ErasureLookup) => Promise<ErasureStatus>;
   /**

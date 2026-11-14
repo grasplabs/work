@@ -2927,8 +2927,11 @@ export const actOnBrainForStaff = async (
  * shared ledger's alone: that its key was closed there. `eraseSource`
  * closes a source its owner keeps in their own store there first, hidden
  * and recorded in that store's ledger, and in the shared store only once
- * that returned, so the shared ledger never says erased while a copy is
- * left; that store's rows still to delete go with its next tick.
+ * that returned, so the shared ledger never says erased while a copy can
+ * still be read or come back after a restore. That store's hidden rows
+ * are deleted by its own next tick, which this answer doesn't wait for:
+ * staff name a source by its key alone, and no staff path addresses a
+ * person's own store to ask.
  */
 export const brainErasureForStaff = async (
   env: BrainEnv,

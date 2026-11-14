@@ -223,8 +223,11 @@ export interface CoreState {
   brainHeld?: () => Promise<void>;
   /** What its core answers a signed Brain action with: `done` unless set. */
   brainOutcome?: BrainActionOutcome;
-  /** What its core answers a signed erasure lookup with: `not_erased` unless set. */
-  brainErasure?: BrainErasureAnswer;
+  /**
+   * What its core answers a signed erasure lookup with: `not_erased` unless
+   * set; any state, as a core of a newer release could answer.
+   */
+  brainErasure?: BrainErasureAnswer | { state: string };
   /** The Brain's reads, actions and lookups its core took, as each signed request sent them. */
   brainAsks: (BrainReportRequest | BrainActionRequest | BrainErasureRequest)[];
 }

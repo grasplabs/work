@@ -129,6 +129,10 @@ interface ErasureStep {
   readonly erase: (env: Env, userId: string) => Promise<void>;
 }
 
+/** Where one area of a person's erasure stands, as its schema stores it. */
+export type ErasureAreaState =
+  (typeof personErasureAreas.$inferSelect)["state"];
+
 /**
  * Marks area `area` of `userId`'s erasure `state`, done one way or
  * another, if `done` holds as the batch reaches it.
@@ -137,7 +141,7 @@ const marked = (
   db: ReturnType<typeof drizzle>,
   userId: string,
   area: string,
-  state: "complete" | "skipped",
+  state: Exclude<ErasureAreaState, "pending">,
   done: SQL = sql`1`
 ) =>
   db
@@ -711,17 +715,18 @@ const inStepOrder = (areas: readonly ErasureArea[]): ErasureArea[] => {
 
 /**
  * Where the erasure of `userId` from the new Brain stands, as core records
- * it (`brain_sources`): `pending` until the Brain's call returned, which is
- * only once it erased them (`brainSources`); `complete` after; null when
- * no erasure of them was asked for. The area's state alone, for Grasp's
- * staff asking whether a person was erased (brain-report.ts): one
- * statement, whoever is named, so a person never erased reads as one who
- * never existed.
+ * it (`brain_sources`), in the area's own states (`ErasureAreaState`):
+ * `pending` until the Brain's call returned, which is only once it erased
+ * them (`brainSources`); `complete` after; `skipped` were it ever recorded
+ * so (no step does today; the schema allows it); null when no erasure of
+ * them was asked for. The area's state alone, for Grasp's staff asking
+ * whether a person was erased (brain-report.ts): one statement, whoever is
+ * named, so a person never erased reads as one who never existed.
  */
 export const brainErasureStateOf = async (
   env: Env,
   userId: string
-): Promise<"pending" | "complete" | null> => {
+): Promise<ErasureAreaState | null> => {
   const [area] = await drizzle(env.DB)
     .select({ state: personErasureAreas.state })
     .from(personErasureAreas)
@@ -731,14 +736,6 @@ export const brainErasureStateOf = async (
         eq(personErasureAreas.area, brainSources.area)
       )
     );
-  // Nothing skips this area (`brainSources` only completes it). Were one
-  // skipped, it would be neither done nor under way: thrown, so the lookup
-  // records `failed` and answers an error, never "not finished" for ever.
-  if (area?.state === "skipped") {
-    throw new Error(
-      "The erasure from the Brain was skipped, which no step does"
-    );
-  }
   return area?.state ?? null;
 };
 
