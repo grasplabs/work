@@ -94,6 +94,13 @@ export const chunks = <T>(items: readonly T[], size: number): T[][] =>
 export const boundParametersMax = 100;
 
 /**
+ * The most queries D1 runs for one Worker invocation (Workers Paid), a
+ * `batch()` counted as one: past it, every later query of that invocation
+ * fails, whichever part of it makes the query.
+ */
+export const queriesPerInvocationMax = 1000;
+
+/**
  * `rows` written as statements `statementOf` makes, each as many rows as
  * D1 binds (`boundParametersMax`): each statement's own parameters are
  * counted, and one over the limit is made again with fewer rows, so rows

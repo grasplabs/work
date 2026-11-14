@@ -119,6 +119,7 @@ import {
   turnSource,
 } from "./brain-capture.ts";
 import type { CaptureStore, TurnFacts } from "./brain-capture.ts";
+import { loneNotesPerDrain } from "./brain-hand-overs.ts";
 import { chatTurnSource, eraseChat } from "./brain-next-origins.ts";
 import { skillsFor, skillsReachOf } from "./brain-skills.ts";
 import {
@@ -1541,11 +1542,22 @@ export class Workspace extends DurableObject<Env> {
    * waiting longer each time.
    */
   #deliverAudit(): void {
-    this.ctx.waitUntil(this.#drainAudit());
+    // Beside every other change of the request: no note tried alone.
+    this.ctx.waitUntil(this.#drainAudit(0));
   }
 
-  async #drainAudit(): Promise<void> {
-    const left = await drainObjectOutbox(this.env, this.ctx.storage.sql);
+  /**
+   * Drains the outbox, trying at most `loneNotes` notes alone
+   * (brain-hand-overs.ts `handOverNotes`): none after a change, which may
+   * be one of many in a request; a drain's share from the alarm, which
+   * runs alone.
+   */
+  async #drainAudit(loneNotes: number): Promise<void> {
+    const left = await drainObjectOutbox(
+      this.env,
+      this.ctx.storage.sql,
+      loneNotes
+    );
     if (left === 0) {
       this.#auditRetryMs = auditRetryMs.first;
       return;
@@ -2389,7 +2401,7 @@ export class Workspace extends DurableObject<Env> {
    */
   override async alarm(): Promise<void> {
     // Audit events the log didn't take yet go first: a turn may run long.
-    await this.#drainAudit();
+    await this.#drainAudit(loneNotesPerDrain);
     await this.#deliverCaptures();
     while (this.#sent.size > 0) {
       // oxlint-disable-next-line no-await-in-loop -- until none is left, as more may start
@@ -4276,7 +4288,13 @@ export class Workspace extends DurableObject<Env> {
       );
     }
     // Every event of what it did is in the log before its outbox goes.
-    if ((await drainObjectOutbox(this.env, this.ctx.storage.sql)) > 0) {
+    if (
+      (await drainObjectOutbox(
+        this.env,
+        this.ctx.storage.sql,
+        loneNotesPerDrain
+      )) > 0
+    ) {
       throw internalErrors.create("internal.unexpected");
     }
     for (const watchers of this.#watchers.values()) {
