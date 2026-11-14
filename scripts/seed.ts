@@ -40,13 +40,7 @@ import { z } from "zod";
 import { appDefinition, appFiles } from "./seed/app-files.ts";
 import { apps, decisionResponse } from "./seed/apps.ts";
 import type { AppSeed, WorkflowSeed } from "./seed/apps.ts";
-import {
-  brainChats,
-  confirmAnsweredBy,
-  seedBrain,
-  skills,
-  uploads,
-} from "./seed/brain.ts";
+import { brainChats, confirmAnsweredBy, seedBrain } from "./seed/brain.ts";
 import { chats, writeTranscript } from "./seed/chats.ts";
 import { companyName, people, roster, teamNames } from "./seed/company.ts";
 import type { Person, PersonKey, TeamName } from "./seed/company.ts";
@@ -798,12 +792,12 @@ const main = async (): Promise<void> => {
     }
     console.info(`${collections.length} Knowledge collections`);
 
-    const { uploadsKept, instructionsWritten } = await seedBrain(
+    const { uploadsAdded, uploadsThere, instructionsWritten } = await seedBrain(
       (key) => sessionFor(sessions, key),
       teams
     );
     console.info(
-      `The Brain: ${uploadsKept} of ${uploads.length} uploads, ${skills.length} skills, ${instructionsWritten} new instruction files`
+      `The Brain: ${uploadsAdded} new uploads (${uploadsThere} there already), ${instructionsWritten} new instruction files`
     );
 
     const appIds = new Map<string, string>();

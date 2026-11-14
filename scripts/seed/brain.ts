@@ -7,14 +7,23 @@
  * skills, one person's own and one shared with the company once an
  * admin approved it.
  *
- * It can run again and adds nothing twice: an upload and its next version
- * go under IDs fixed by their uploader and name, and core answers an ID it
- * has with the version it made (brain-uploads.ts); an instruction file is
- * written only while it was never written; a skill, its share and the
- * share's approval only while they are missing. It never undoes what
- * someone did in the demo since: an upload they deleted, a skill they
- * deleted, a share an admin declined or a file that differs from the
- * seed's stay as they are, each said in one line.
+ * One rule makes it safe to run again: the seed acts on a thing only in
+ * the run that created it. Whatever is there already, from an earlier run
+ * or made by someone since, it leaves alone, whatever happened to it in
+ * between:
+ *
+ * - an upload already there gets nothing, so its next version is added
+ *   only right after the seed's own first one, in the same run;
+ * - an instruction file is written only while it was never written;
+ * - a skill already there gets nothing, so it is shared and the share
+ *   approved only right after the seed's own save, for the version that
+ *   save made, and only the share that run asked for.
+ *
+ * A run that stopped half-way leaves what it made half-done for good (an
+ * upload without its next version, a skill never shared). For the whole
+ * demo again, start over (scripts/seed.ts says how). An upload or a skill
+ * deleted in the demo stays deleted: its ID or name is closed for good,
+ * which the seed says in one line.
  */
 import { createHash } from "node:crypto";
 
@@ -306,26 +315,6 @@ const readersOf = (
   return { kind: "team", teamId };
 };
 
-/**
- * What a refusal of the seed's upload means, when it means the demo has
- * moved on: an upload deleted since (its ID is closed for good), or one
- * whose stored file is another than the seed's text now. Undefined for
- * any other refusal, which stops the seed.
- */
-const movedOn = (error: unknown): string | undefined => {
-  const code = brainUploadErrors.codeOf(error);
-  if (
-    code === "brain.upload_retry_refused" ||
-    code === "brain.upload_deleted"
-  ) {
-    return "deleted in the demo";
-  }
-  if (code === "brain.upload_other_file") {
-    return "the stored file differs from the seed's text";
-  }
-  return undefined;
-};
-
 /** Core's code for a refused upload, for the line that names the file. */
 const codeOf = (error: unknown): string | undefined =>
   brainUploadErrors.codeOf(error) ??
@@ -333,16 +322,20 @@ const codeOf = (error: unknown): string | undefined =>
   uploadErrors.codeOf(error);
 
 /**
- * The upload, then its next version: each the same one when sent again.
- * One the demo moved on from is left as it is, with a line; any other
- * refusal stops the seed, naming the file.
+ * The upload, and right after it its next version, unless the upload is
+ * there already (the rule above). One deleted in the demo is skipped with
+ * a line, as its ID is closed for good; any other refusal stops the seed,
+ * naming the file.
  */
 const seedUpload = async (
   api: Api,
   upload: UploadSeed,
   teams: ReadonlyMap<TeamName, string>
-): Promise<boolean> => {
+): Promise<"added" | "there" | "deleted"> => {
   const id = uploadIdOf(upload);
+  if ((await api.brainSources.uploadOf(id)) !== null) {
+    return "there";
+  }
   try {
     await api.brainSources.upload(
       { name: upload.name, bytes: wordDocument(upload.text) },
@@ -356,22 +349,23 @@ const seedUpload = async (
         seedUuid(`brain-upload-version:${upload.by}:${upload.name}:2`)
       );
     }
-    return true;
+    return "added";
   } catch (error) {
-    const why = movedOn(error);
-    if (why === undefined) {
-      const code = codeOf(error);
-      throw new Error(
-        `Uploading ${upload.name} as ${upload.by} was refused${code === undefined ? "" : ` (${code})`}: ${error instanceof Error ? error.message : String(error)}`,
-        { cause: error }
+    if (brainUploadErrors.codeOf(error) === "brain.upload_retry_refused") {
+      console.info(
+        `Skipped ${upload.name} of ${upload.by}: deleted in the demo`
       );
+      return "deleted";
     }
-    console.info(`Skipped ${upload.name} of ${upload.by}: ${why}`);
-    return false;
+    const code = codeOf(error);
+    throw new Error(
+      `Uploading ${upload.name} as ${upload.by} was refused${code === undefined ? "" : ` (${code})`}: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error }
+    );
   }
 };
 
-/** The file, written once: never over what someone wrote since. */
+/** The file, written only while it was never written (the rule above). */
 const seedInstructions = async (
   api: Api,
   seed: InstructionSeed
@@ -389,11 +383,10 @@ const seedInstructions = async (
 };
 
 /**
- * The skill, its share with the company, and the admin's approval: each
- * once. A skill its owner deleted for good stays deleted, and a share
- * asked once is never asked again, whatever an admin decided. The admin
- * approves only the share this run asked for, by its ID: any other
- * request waits for an admin to read it, also one of the same skill.
+ * The skill, unless it is there already (the rule above), and only right
+ * after the seed's own save: its share with the company, for the version
+ * that save made, and the admin's approval of that share alone. One
+ * deleted in the demo is skipped with a line, as its name is closed.
  */
 const seedSkill = async (
   sessionFor: (key: PersonKey) => Session,
@@ -401,30 +394,28 @@ const seedSkill = async (
 ): Promise<void> => {
   const { skills: own } = sessionFor(seed.by).api;
   const overview = await own.overview();
-  let version = overview.own.find(({ name }) => name === seed.name)?.version;
-  if (version === undefined) {
-    try {
-      ({ version } = await own.save(seed.text));
-    } catch (error) {
-      if (skillErrors.codeOf(error) !== "skills.name_erased") {
-        throw error;
-      }
-      console.info(
-        `Skipped the skill ${seed.name} of ${seed.by}: deleted in the demo`
-      );
-      return;
+  if (overview.own.some(({ name }) => name === seed.name)) {
+    console.info(
+      `Left the skill ${seed.name} of ${seed.by} alone: it is there already`
+    );
+    return;
+  }
+  let saved: Awaited<ReturnType<typeof own.save>>;
+  try {
+    saved = await own.save(seed.text);
+  } catch (error) {
+    if (skillErrors.codeOf(error) !== "skills.name_erased") {
+      throw error;
     }
+    console.info(
+      `Skipped the skill ${seed.name} of ${seed.by}: deleted in the demo`
+    );
+    return;
   }
   if (seed.sharedBy === undefined) {
     return;
   }
-  const asked = overview.shares.some(
-    ({ name, audience }) => name === seed.name && audience.kind === "company"
-  );
-  if (asked) {
-    return;
-  }
-  const share = await own.share(seed.name, version, "company");
+  const share = await own.share(saved.name, saved.version, "company");
   await sessionFor(seed.sharedBy).api.skills.approve(share.id);
 };
 
@@ -435,12 +426,20 @@ const seedSkill = async (
 export const seedBrain = async (
   sessionFor: (key: PersonKey) => Session,
   teams: ReadonlyMap<TeamName, string>
-): Promise<{ uploadsKept: number; instructionsWritten: number }> => {
-  let uploadsKept = 0;
+): Promise<{
+  uploadsAdded: number;
+  uploadsThere: number;
+  instructionsWritten: number;
+}> => {
+  let uploadsAdded = 0;
+  let uploadsThere = 0;
   for (const upload of uploads) {
     // oxlint-disable-next-line no-await-in-loop -- one file at a time
-    if (await seedUpload(sessionFor(upload.by).api, upload, teams)) {
-      uploadsKept += 1;
+    const outcome = await seedUpload(sessionFor(upload.by).api, upload, teams);
+    if (outcome === "added") {
+      uploadsAdded += 1;
+    } else if (outcome === "there") {
+      uploadsThere += 1;
     }
   }
   let instructionsWritten = 0;
@@ -454,7 +453,7 @@ export const seedBrain = async (
     // oxlint-disable-next-line no-await-in-loop -- one skill at a time
     await seedSkill(sessionFor, seed);
   }
-  return { uploadsKept, instructionsWritten };
+  return { uploadsAdded, uploadsThere, instructionsWritten };
 };
 
 /**
