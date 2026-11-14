@@ -715,15 +715,18 @@ export interface AppsApi {
    * Changes the definition in the App's draft by `operation` (an
    * operation of `@grasp-os/sdk/definition`, or a few made as one), or
    * writes it whole (`{ op: "setDefinition", definition }`, an
-   * `AppDefinition` of `@grasp-os/runtime`): the model after it, the plan,
-   * and what this change alone does (`change`), or the problem, which
-   * changed nothing. Its `grasp.config.ts` and `server/schema.ts` are
-   * always what it generates; its other files are written with
-   * `drafts.write`. With `preview`, nothing is saved: what it would do,
-   * to show first. Not for an archived App.
+   * `AppDefinition` of `@grasp-os/runtime`), over `revision`, the one the
+   * person read (`draft.conflict` once the draft moved past it, as
+   * `drafts.write`): the model after it, the plan, and what this change
+   * alone does (`change`), or the problem, which changed nothing. Its
+   * `grasp.config.ts` and `server/schema.ts` are always what it
+   * generates; its other files are written with `drafts.write`. With
+   * `preview`, nothing is saved: what it would do, to show first. Not for
+   * an archived App.
    */
   define: (
     app: string,
+    revision: number,
     operation: unknown,
     preview?: boolean
   ) => Promise<DataModelChange>;

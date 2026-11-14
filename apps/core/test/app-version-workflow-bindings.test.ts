@@ -64,15 +64,15 @@ const rebound = async (
   app: string,
   workflow: string
 ): Promise<number> => {
-  await by.api.apps.define(app, {
+  const read = await by.api.drafts.get({ kind: "app", id: app });
+  await by.api.apps.define(app, read.revision, {
     op: "bindWorkflow",
     alias: "review",
     workflow,
   });
-  const { revision } = await by.api.drafts.get({ kind: "app", id: app });
   const { version } = await by.api.drafts.publish(
     { kind: "app", id: app },
-    revision
+    read.revision + 1
   );
   return version;
 };

@@ -468,6 +468,7 @@ export const AppDataModel = ({
   const [creating, setCreating] = useState(false);
   const changes = useModelChanges({
     app,
+    revision,
     onMade: (next) => {
       onChanged?.();
       // What uses the indexes comes with the next read of the draft.

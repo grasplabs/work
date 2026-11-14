@@ -164,6 +164,7 @@ const shown = async (
     },
     define: async (
       _app: string,
+      _revision: number,
       operation: ModelChange,
       preview = false
     ): Promise<DataModelChange> => {

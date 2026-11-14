@@ -501,6 +501,7 @@ describe("an App's archive", () => {
     const { version } = await publishApp(builder.api, app, {
       "notes.md": "Next",
     });
+    const { revision } = await builder.api.drafts.get({ kind: "app", id: app });
     await builder.api.apps.archive(app);
     const defaultStore = await env.DB.prepare(
       "SELECT store_id AS store FROM app_default_stores WHERE app_id = ?"
@@ -526,7 +527,7 @@ describe("an App's archive", () => {
         })
       ),
       bind: await outcome(
-        builder.api.apps.define(app, {
+        builder.api.apps.define(app, revision, {
           op: "bindWorkflow",
           alias: "followUp",
           workflow: crypto.randomUUID(),

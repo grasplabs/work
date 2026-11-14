@@ -200,7 +200,9 @@ describe("an App and the workflow it binds, changing", () => {
      * names of its live version (all of it without), and publishes it.
      */
     const rebound = async (chosen: Record<string, string[]> = {}) => {
-      const changed = await builder.api.apps.define(app, {
+      const subject = { kind: "app", id: app } as const;
+      const { revision } = await builder.api.drafts.get(subject);
+      const changed = await builder.api.apps.define(app, revision, {
         op: "bindWorkflow",
         alias: "review",
         workflow: flow.id,
@@ -209,9 +211,7 @@ describe("an App and the workflow it binds, changing", () => {
       if (!changed.ok) {
         return changed.problem;
       }
-      const subject = { kind: "app", id: app } as const;
-      const { revision } = await builder.api.drafts.get(subject);
-      return await refusedOf(builder.api.drafts.publish(subject, revision));
+      return await refusedOf(builder.api.drafts.publish(subject, revision + 1));
     };
     /** The workflows the App binds now. */
     const bound = async () => {

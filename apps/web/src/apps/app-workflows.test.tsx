@@ -21,10 +21,10 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 import { AppWorkflows } from "./app-workflows.tsx";
 
 // The workflows an App starts, on its Resources tab, against core's
-// `workflowResources` and `apps.define` as the page reaches them over RPC
-// (the boundary from the web app), faked: it keeps the App's active
-// bindings, and answers a change of the draft as core does, refusing one
-// whose workflow the draft can't bind.
+// `workflowResources`, `drafts` and `apps.define` as the page reaches them
+// over RPC (the boundary from the web app), faked: it keeps the App's
+// active bindings and its draft's revision, and answers a change of the
+// draft as core does, refusing one whose workflow the draft can't bind.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -91,19 +91,40 @@ const fakeWorkflows = () => {
       ];
     },
   };
+  const drafts = {
+    get: async (subject: { kind: "app"; id: string }) => {
+      await Promise.resolve();
+      return {
+        subject,
+        base: 1,
+        changed: [],
+        deleted: [],
+        definitionChanged: false,
+        revision: 4,
+        updatedAt: null,
+        updatedBy: null,
+      };
+    },
+    // Not followed here: the page reads the draft once.
+    watch: async (): Promise<never> => {
+      await Promise.resolve();
+      throw new Error("Not followed");
+    },
+  };
   const apps = {
     define: async (
       app: string,
+      revision: number,
       operation: { op: string; alias: string; workflow: string }
     ): Promise<{ ok: false; problem: string } | { ok: true }> => {
       await Promise.resolve();
-      asked.push(["define", app, operation]);
+      asked.push(["define", app, revision, operation]);
       return operation.workflow === "flow-summary"
         ? { ok: false, problem: "The draft binds this workflow already." }
         : { ok: true };
     },
   };
-  return { session: { workflowResources, apps }, asked };
+  return { session: { workflowResources, drafts, apps }, asked };
 };
 
 let root: Root | undefined;
@@ -226,6 +247,8 @@ describe("The workflows an App starts, for its builders", () => {
         [
           "define",
           "app-1",
+          // Over the revision the page read.
+          4,
           { op: "bindWorkflow", alias: "summary", workflow: "flow-invoice" },
         ],
       ],

@@ -32,6 +32,7 @@ import {
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useEffect, useId, useState } from "react";
 
+import { useDraft } from "../drafts/use-draft.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
@@ -58,15 +59,21 @@ import { buildsApp } from "./app-role.ts";
 const bindable = (workflows: readonly WorkflowResource[]): WorkflowResource[] =>
   workflows.filter((workflow) => workflow.currentVersion !== null);
 
-/** Changing which workflow an alias binds, in the App's draft. */
+/**
+ * Changing which workflow an alias binds, in the App's draft, over
+ * `revision`, the draft's as the page read it last (core refuses one the
+ * draft moved past); undefined until it is read.
+ */
 const BindDialog = ({
   app,
+  revision,
   binding,
   workflows,
   onClose,
   onDrafted,
 }: {
   app: string;
+  revision: number | undefined;
   /** The binding it changes. */
   binding: AppWorkflowBinding;
   workflows: readonly WorkflowResource[];
@@ -84,13 +91,17 @@ const BindDialog = ({
   const workflowId = useId();
   const { alias } = binding;
   const bind = async (): Promise<void> => {
-    if (workflow === null) {
+    if (workflow === null || revision === undefined) {
       return;
     }
     setProblem(undefined);
     const changed = await run(
       async (session) =>
-        await session.apps.define(app, { op: "bindWorkflow", alias, workflow })
+        await session.apps.define(app, revision, {
+          op: "bindWorkflow",
+          alias,
+          workflow,
+        })
     );
     if (changed === undefined) {
       return;
@@ -161,7 +172,7 @@ const BindDialog = ({
             <Trans>Cancel</Trans>
           </Button>
           <Button
-            disabled={busy || workflow === null}
+            disabled={busy || workflow === null || revision === undefined}
             onClick={() => {
               void bind();
             }}
@@ -177,11 +188,14 @@ const BindDialog = ({
 /** The bindings as read, with changing one in the draft for who may. */
 const BindingsView = ({
   app,
+  revision,
   bindings,
   workflows,
   changes,
 }: {
   app: string;
+  /** The draft's revision as read last; undefined until it is. */
+  revision: number | undefined;
   bindings: readonly AppWorkflowBinding[];
   workflows: readonly WorkflowResource[];
   /** Whether the person may change them: not on an archived App. */
@@ -271,6 +285,7 @@ const BindingsView = ({
         <BindDialog
           app={app}
           binding={binding}
+          revision={revision}
           onClose={() => {
             setBinding(null);
           }}
@@ -303,6 +318,11 @@ export const AppWorkflows = ({
 }) => {
   const core = useCore();
   const builds = buildsApp(app, identity);
+  // The draft a change goes into, followed as builders write it.
+  const { draft } = useDraft(
+    builds ? { kind: "app", id: app.id } : undefined,
+    0
+  );
   const [read, setRead] = useState<Loaded<Read>>();
   useEffect(() => {
     const left = new AbortController();
@@ -344,6 +364,7 @@ export const AppWorkflows = ({
       app={app.id}
       bindings={read.data.bindings}
       changes={!app.archived}
+      revision={draft?.revision}
       workflows={read.data.workflows}
     />
   );

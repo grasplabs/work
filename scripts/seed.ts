@@ -261,7 +261,7 @@ const publishSeeded = async (
 ): Promise<void> => {
   const subject = { kind: "app", id: app } as const;
   const whole: unknown = JSON.parse(appDefinitionText(definition));
-  const defined = await owner.api.apps.define(app, {
+  const defined = await owner.api.apps.define(app, revision, {
     op: "setDefinition",
     definition: whole,
   });

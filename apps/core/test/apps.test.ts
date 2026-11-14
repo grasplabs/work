@@ -83,17 +83,18 @@ const drafted = async (
   changes: Record<string, string | null>,
   definition?: unknown
 ) => {
+  const subject = { kind: "app", id: app } as const;
+  let { revision } = await api.drafts.get(subject);
   if (definition !== undefined) {
-    const defined = await api.apps.define(app, {
+    const defined = await api.apps.define(app, revision, {
       op: "setDefinition",
       definition,
     });
     if (!defined.ok) {
       throw new Error(defined.problem);
     }
+    revision += 1;
   }
-  const subject = { kind: "app", id: app } as const;
-  const { revision } = await api.drafts.get(subject);
   return await api.drafts.write(subject, revision, changes);
 };
 
@@ -265,7 +266,8 @@ export const Route = createFileRoute("/")({ component: Page });
     });
     const handwritten = await api.drafts.files(subject);
     // A definition that isn't one: refused, nothing of it kept.
-    const invalid = await api.apps.define(app.id, {
+    const { revision } = await api.drafts.get(subject);
+    const invalid = await api.apps.define(app.id, revision, {
       op: "setDefinition",
       definition: { name: 1 },
     });

@@ -810,11 +810,13 @@ export const saveDraftChanges = async (
  * people use (`before`, null for none), which a release of the draft
  * starts from: never the draft's base, a later commit that may not be
  * current. The plan is the move from it. The problem, for a definition
- * that doesn't read.
+ * that doesn't read. With `revision`, the one its reader read:
+ * `draft.conflict` once the draft moved past it.
  */
 export const draftDefinitions = async (
   env: Env,
-  { id, name, currentVersion }: Pick<App, "id" | "name" | "currentVersion">
+  { id, name, currentVersion }: Pick<App, "id" | "name" | "currentVersion">,
+  revision?: number
 ): Promise<
   | { problem: string }
   | {
@@ -825,6 +827,9 @@ export const draftDefinitions = async (
     }
 > => {
   const draft = await draftOf(env, appKind, id);
+  if (revision !== undefined && draft.revision !== revision) {
+    throw draftErrors.create("draft.conflict");
+  }
   const files = await filesOf(env, appKind, id, draft);
   let current: AppDefinition;
   let before: AppDefinition | null;
@@ -919,8 +924,10 @@ const chosenContract = (
  * definition can't take; otherwise the definition after it, what it does
  * to the App's records (`plan`), and what `save` answered. The chat's
  * agent's definition tools (`BuildApi.define`) and a person's
- * `apps.define` both change it here; only a person's (`whole`) writes it
- * whole (`setDefinition`, app-definition.ts).
+ * `apps.define` both change it here; only a person's (`person`) writes it
+ * whole (`setDefinition`, app-definition.ts), and only over the revision
+ * they read (`draft.conflict` once the draft moved past it), as
+ * `drafts.write` does.
  */
 export const defineInDraft = async <Saved>(
   env: Env,
@@ -933,7 +940,7 @@ export const defineInDraft = async <Saved>(
     changes: Record<string, string | null>,
     definition: AppDefinition
   ) => Promise<Saved>,
-  whole = false
+  person?: { revision: number }
 ): Promise<
   | { ok: false; problem: string }
   | {
@@ -946,10 +953,12 @@ export const defineInDraft = async <Saved>(
 > => {
   const parsed = appErrors.parse(
     "app.invalid",
-    whole ? personDefinitionOperationsSchema : definitionOperationsSchema,
+    person === undefined
+      ? definitionOperationsSchema
+      : personDefinitionOperationsSchema,
     operation
   );
-  const held = await draftDefinitions(env, app);
+  const held = await draftDefinitions(env, app, person?.revision);
   if ("problem" in held) {
     return { ok: false, problem: held.problem };
   }

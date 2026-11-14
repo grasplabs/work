@@ -500,15 +500,19 @@ const ReviewDialog = ({
   );
 };
 /**
- * Making changes of the model of the App's draft of `app`: previewed
- * first, reviewed in a dialog where they remove, retype, change access or
- * need a value (`dialog`), and once made, `onMade` with the model after.
+ * Making changes of the model of the App's draft of `app`, over
+ * `revision`, the one the page read (core refuses one the draft moved
+ * past): previewed first, reviewed in a dialog where they remove, retype,
+ * change access or need a value (`dialog`), and once made, `onMade` with
+ * the model after.
  */
 export const useModelChanges = ({
   app,
+  revision,
   onMade,
 }: {
   app: string;
+  revision: number;
   onMade: (made: Omit<DraftDataModel, "uses">) => void;
 }) => {
   const action = useCoreAction();
@@ -519,7 +523,8 @@ export const useModelChanges = ({
     preview: boolean
   ): Promise<DataModelChange | undefined> =>
     await action.run(
-      async (session) => await session.apps.define(app, change, preview)
+      async (session) =>
+        await session.apps.define(app, revision, change, preview)
     );
   /** Makes `change` now, saying core's problem if it can't be made. */
   const apply = async (change: ModelChange): Promise<boolean> => {

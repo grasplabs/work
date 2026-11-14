@@ -284,6 +284,7 @@ interface DraftSession {
   readonly apps: {
     readonly define: (
       app: string,
+      revision: number,
       operation: unknown
     ) => Promise<{ ok: true } | { ok: false; problem: string }>;
   };
@@ -319,7 +320,7 @@ export const writeApp = async (
   let { revision } = await api.drafts.get(subject);
   const { files, definition } = sourceParts(source);
   if (definition !== undefined) {
-    const answer = await api.apps.define(app, {
+    const answer = await api.apps.define(app, revision, {
       op: "setDefinition",
       definition: definitionInput(definition),
     });

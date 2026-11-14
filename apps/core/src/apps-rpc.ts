@@ -126,12 +126,14 @@ export class AppsRpc extends CoreRpcTarget implements AppsApi {
 
   async define(
     app: string,
+    revision: number,
     operation: unknown,
     preview = false
   ): Promise<DataModelChange> {
     return await withPerson(
       this.#check,
-      async (by) => await defineDraft(this.#env, by, app, operation, preview)
+      async (by) =>
+        await defineDraft(this.#env, by, app, revision, operation, preview)
     );
   }
 

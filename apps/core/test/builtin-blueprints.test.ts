@@ -994,7 +994,7 @@ describe("the built-in blueprints", () => {
     const subject = { kind: "app", id: app.id } as const;
     const { revision } = await builder.api.drafts.get(subject);
     const reIded: unknown = JSON.parse(helloReIded("id7"));
-    await builder.api.apps.define(app.id, {
+    await builder.api.apps.define(app.id, revision, {
       op: "setDefinition",
       definition: reIded,
     });

@@ -577,18 +577,21 @@ export const writeAppDraft = async (
  * Changes the definition in App `app`'s draft by `operation`, by `by`
  * themselves, as a chat's agent's definition tools do (agent-builds.ts,
  * `defineInDraft`), or writes it whole (`setDefinition`), audited as
- * theirs: only while they build the App and it isn't archived. With
- * `preview`, saves nothing: what it would make of the model, and the
- * plan, to show before it is made.
+ * theirs: only while they build the App and it isn't archived, and over
+ * `revision`, the one they read (`draft.conflict` otherwise), as
+ * `writeAppDraft`. With `preview`, saves nothing: what it would make of
+ * the model, and the plan, to show before it is made.
  */
 export const defineDraft = async (
   env: Env,
   by: Identity,
   app: unknown,
+  revision: unknown,
   operation: unknown,
   preview = false
 ): Promise<DataModelChange> => {
   const found = await editableApp(env, by, app);
+  const read = draftErrors.parse("draft.invalid", z.int().min(0), revision);
   const defined = await defineInDraft(
     env,
     by,
@@ -604,7 +607,7 @@ export const defineDraft = async (
         );
       }
     },
-    true
+    { revision: read }
   );
   return defined.ok
     ? {

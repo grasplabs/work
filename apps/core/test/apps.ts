@@ -44,7 +44,7 @@ export const publishDefined = async (
   let { revision } = await draftOf(on, appKind, app);
   const { files, definition } = sourceParts(source);
   if (definition !== undefined) {
-    const defined = await defineDraft(on, by, app, {
+    const defined = await defineDraft(on, by, app, revision, {
       op: "setDefinition",
       definition: definitionInput(definition),
     });

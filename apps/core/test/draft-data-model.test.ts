@@ -46,6 +46,23 @@ const outcome = async (promise: Promise<unknown>): Promise<string> => {
   }
 };
 
+/** Whoever is signed in over RPC. */
+type Api = Awaited<ReturnType<typeof signedInApi>>["api"];
+
+/**
+ * `api`'s person's change of App `app`'s draft by `operation`
+ * (`apps.define`), over the revision they read of it just now.
+ */
+const defined = async (
+  api: Api,
+  app: string,
+  operation: unknown,
+  preview = false
+) => {
+  const { revision } = await api.drafts.get({ kind: "app", id: app });
+  return await api.apps.define(app, revision, operation, preview);
+};
+
 /**
  * A builder's Notes App, published, with one of their notes, and the
  * revision its draft is at: each change counts on from it.
@@ -89,7 +106,7 @@ describe(
         score: "v.number().nullable().default(0)",
       };
 
-      const added = await apps.define(app, {
+      const added = await defined(builder.api, app, {
         op: "addTable",
         name: "tasks",
         fields: kinds,
@@ -224,9 +241,9 @@ describe(
         type: "v.string()",
       };
 
-      const previewed = await apps.define(app, operation, true);
+      const previewed = await defined(builder.api, app, operation, true);
       const unchanged = await apps.dataModel(app);
-      const answered = await apps.define(app, {
+      const answered = await defined(builder.api, app, {
         ...operation,
         answer: "general",
       });
@@ -255,22 +272,24 @@ describe(
 
     it("removes a field and a table, keeping their records, and says what it can't take without saving anything", async () => {
       const { builder, app, start } = await notesWithANote();
-      const { apps, drafts } = builder.api;
+      const { drafts } = builder.api;
 
-      const fieldless = await apps.define(app, {
+      const fieldless = await defined(builder.api, app, {
         op: "removeField",
         table: "notes",
         field: "body",
       });
-      const refused = await apps.define(app, {
+      const refused = await defined(builder.api, app, {
         op: "removeTable",
         table: "nope",
       });
-      const tableless = await apps.define(app, {
+      const tableless = await defined(builder.api, app, {
         op: "removeTable",
         table: "notes",
       });
-      const invalid = await outcome(apps.define(app, { op: "dropEverything" }));
+      const invalid = await outcome(
+        defined(builder.api, app, { op: "dropEverything" })
+      );
       const written = [await drafts.get({ kind: "app", id: app })];
 
       expect({
@@ -294,20 +313,20 @@ describe(
     it("makes a few operations as one change, all or none, and says what that change alone does", async () => {
       const { builder, app, start } = await notesWithANote();
       const { apps, drafts } = builder.api;
-      await apps.define(app, {
+      await defined(builder.api, app, {
         op: "removeField",
         table: "notes",
         field: "body",
       });
       // A field of the draft's own: one a released version has keeps its name.
-      await apps.define(app, {
+      await defined(builder.api, app, {
         op: "addField",
         table: "notes",
         name: "category",
         type: "v.string().optional()",
       });
 
-      const renamedAndRetyped = await apps.define(app, [
+      const renamedAndRetyped = await defined(builder.api, app, [
         { op: "renameField", table: "notes", field: "category", name: "rank" },
         {
           op: "changeField",
@@ -316,7 +335,7 @@ describe(
           type: "v.number().optional()",
         },
       ]);
-      const halfRefused = await apps.define(app, [
+      const halfRefused = await defined(builder.api, app, [
         { op: "renameField", table: "notes", field: "rank", name: "topic" },
         { op: "removeTable", table: "nope" },
       ]);
@@ -356,6 +375,31 @@ describe(
       });
     });
 
+    it("is refused over a revision the draft moved past, previewed or made, and saves nothing", async () => {
+      const { builder, app, start } = await notesWithANote();
+      const { apps, drafts } = builder.api;
+      const operation = { op: "addTable", name: "tasks" };
+      // Another builder's change lands after the person read the draft.
+      await apps.define(app, start, { op: "addTable", name: "projects" });
+
+      const previewed = await outcome(apps.define(app, start, operation, true));
+      const made = await outcome(apps.define(app, start, operation));
+      const model = await apps.dataModel(app);
+      const { revision } = await drafts.get({ kind: "app", id: app });
+
+      expect({
+        previewed,
+        made,
+        tables: model.model.tables.map(({ name }) => name),
+        revision,
+      }).toStrictEqual({
+        previewed: "draft.conflict",
+        made: "draft.conflict",
+        tables: ["notes", "projects"],
+        revision: start + 1,
+      });
+    });
+
     it("is refused to anyone who doesn't build the App, and for an archived App, and shared by every builder of it", async () => {
       const { builder, app, start } = await notesWithANote();
       const [user, otherBuilder] = await Promise.all([
@@ -376,15 +420,15 @@ describe(
 
       // Someone who only uses the App has no chat of it to build in: the
       // builder's is refused to them all the same, for their role first.
-      const user_ = await outcome(user.api.apps.define(app, operation));
+      const user_ = await outcome(user.api.apps.define(app, start, operation));
       const userRead = await outcome(user.api.apps.dataModel(app));
       // Another builder of the App: the same draft, theirs too.
       const othersChat = await outcome(
-        otherBuilder.api.apps.define(app, operation)
+        defined(otherBuilder.api, app, operation)
       );
       const othersRead = await outcome(otherBuilder.api.apps.dataModel(app));
       await builder.api.apps.archive(app);
-      const archived = await outcome(builder.api.apps.define(app, operation));
+      const archived = await outcome(defined(builder.api, app, operation));
       const { revision } = await builder.api.drafts.get({
         kind: "app",
         id: app,
@@ -450,19 +494,19 @@ describe("a workflow bound from a draft", { timeout: 120_000 }, () => {
       workflow: later.id,
     });
 
-    const undeclared = await builder.api.apps.define(app, bindInDraft("ghost"));
+    const undeclared = await defined(builder.api, app, bindInDraft("ghost"));
     const noRole = await outcome(
-      otherBuilder.api.apps.define(app, bindInDraft("review"))
+      defined(otherBuilder.api, app, bindInDraft("review"))
     );
     // What the version has is read by core, never taken from the caller.
     const forged = await outcome(
-      builder.api.apps.define(app, {
+      defined(builder.api, app, {
         op: "setWorkflowContract",
         alias: "review",
         contract: { events: {}, listens: {}, decisions: {} },
       })
     );
-    const declared = await builder.api.apps.define(app, bindInDraft("review"));
+    const declared = await defined(builder.api, app, bindInDraft("review"));
     // Still the first workflow's binding, until the draft is published.
     const boundOf = async () => {
       const listed = await builder.api.workflowResources.appBindings(app);
