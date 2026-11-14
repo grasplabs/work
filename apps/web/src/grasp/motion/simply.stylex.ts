@@ -50,4 +50,8 @@ export const simply = stylex.defineVars({
   travel: { default: grasp.switchTravel, [REDUCED]: "0s" },
   /** A switch's light following its thumb: switch-trail, 0s with reduced motion. */
   trail: { default: grasp.switchTrail, [REDUCED]: "0s" },
+  /** The command palette fading in: duration-search-open, 0s with reduced motion. */
+  searchOpen: { default: grasp.durationSearchOpen, [REDUCED]: "0s" },
+  /** The command palette fading out: duration-search-close, 0s with reduced motion. */
+  searchClose: { default: grasp.durationSearchClose, [REDUCED]: "0s" },
 });

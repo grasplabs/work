@@ -16,22 +16,22 @@ const LINES_SLOPE = 3;
 
 export type FieldLook = "field" | "resolve" | "lines";
 
-/** Nothing to stop: the light never started. */
-export const noop = (): void => {
-  // Nothing was started, so there is nothing to stop.
+/** Starts the light in one placeholder; returns what stops it. */
+/** What a light that never started stops. */
+export const stopNothing = () => {
+  // No light was started: nothing to stop.
 };
 
-/** Starts the light in one placeholder; returns what stops it. */
 export const lightUp = (
   field: HTMLElement,
   band: HTMLElement,
   look: FieldLook
 ): (() => void) => {
   if (typeof window === "undefined" || typeof band.animate !== "function") {
-    return noop;
+    return stopNothing;
   }
   if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-    return noop;
+    return stopNothing;
   }
   const rect = field.getBoundingClientRect();
   // The band's width is its style's (skeleton.tsx, `band`).

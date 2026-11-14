@@ -525,6 +525,10 @@
   --grasp-duration-ui: 250ms;
   /* Something leaving: faster than it came. */
   --grasp-duration-leave: 160ms;
+  /* The command palette coming up: a fade at most this long, as QUALITY.md asks of search. */
+  --grasp-duration-search-open: 150ms;
+  /* The command palette going: faster than it came. */
+  --grasp-duration-search-close: 100ms;
   /* A row opening by its height. */
   --grasp-duration-open: 300ms;
   /* A row closing: faster than it opened, so leaving never drags. */
@@ -923,6 +927,43 @@
   --grasp-spinner-fade: 0.3;
   /* The curve of a still spinner's breath. */
   --grasp-spinner-ease: var(--grasp-skeleton-ease);
+  /* Working mark: working mark. */
+  /* One dot of the dither glyph: nine of them, three by three, fill an icon's room. */
+  --grasp-working-mark-dot: 3px;
+  /* The space between the dither glyph's dots. */
+  --grasp-working-mark-gap: 2px;
+  /* The still point at the middle of the orbit and the breath, and the bead's core. */
+  --grasp-working-mark-core: 2px;
+  /* The orbit's arc and the breath's ring: as fine as an icon's line. */
+  --grasp-working-mark-stroke: 1.5px;
+  /* A dot the light is not on: pine, faint, as the loading dot field rests. */
+  --grasp-working-mark-rest: color-mix(
+    in oklch,
+    var(--grasp-pine) 28%,
+    transparent
+  );
+  /* Where the light is: pine, so the mark is calm on light and dark. */
+  --grasp-working-mark-lit: var(--grasp-pine);
+  /* The mark's mint: only its core, never a blob. */
+  --grasp-working-mark-accent: var(--grasp-mint-deep);
+  /* One pass of the light through the dither glyph and its rest. A continuous sign of life: it may loop longer than a transition. */
+  --grasp-working-mark-wave: 1600ms;
+  /* How far behind each diagonal of the dither glyph lights after the one before. */
+  --grasp-working-mark-wave-step: 130ms;
+  /* The light once round the dither glyph's edge, and its rest. */
+  --grasp-working-mark-circle: 1200ms;
+  /* How far behind each dot of the round lights after the one before. */
+  --grasp-working-mark-circle-step: 150ms;
+  /* The light once through the dither glyph, row by row, and its rest. */
+  --grasp-working-mark-snake: 1500ms;
+  /* How far behind each dot of the snake lights after the one before. */
+  --grasp-working-mark-snake-step: 110ms;
+  /* The orbit's arc once round, and its rest. */
+  --grasp-working-mark-orbit: 1700ms;
+  /* The breath's ring growing, or falling back. */
+  --grasp-working-mark-breath: 1600ms;
+  /* The glint once across the bead, and its rest. */
+  --grasp-working-mark-glide: 2200ms;
   /* Slider: slider. */
   /* How thick a slider's track is: a soft line the thumb rides on. */
   --grasp-slider-track: 4px;
@@ -943,6 +984,30 @@
   --grasp-table-text: 13px;
   /* The line height of table-text. */
   --grasp-table-text-line: 18px;
+  /* Room above and below a compact table's words: a 32px row. */
+  --grasp-table-cell-block-compact: 7px;
+  /* Room above and below a roomy table's words: a 50px row. */
+  --grasp-table-cell-block-roomy: var(--grasp-space-4);
+  /* The head row of a compact table. */
+  --grasp-table-head-height-compact: 40px;
+  /* How far an arrow key widens or narrows a column. */
+  --grasp-table-resize-step: 16px;
+  /* The narrowest a column can be made. */
+  --grasp-table-column-min: 64px;
+  /* A chosen row's band in the mint look: a very soft mint wash. */
+  --grasp-table-row-fill-chosen-mint: color-mix(
+    in oklch,
+    var(--grasp-mint) 12%,
+    transparent
+  );
+  /* The head's ground in the soft look. */
+  --grasp-table-head-fill-soft: var(--grasp-soft);
+  /* The chip a sorted head's place stands in, in the quiet look. */
+  --grasp-table-sort-chip: color-mix(
+    in oklch,
+    var(--grasp-mint) 22%,
+    transparent
+  );
   /* Drawer and sheet: drawer and sheet. */
   /* The widest a drawer grows along the bottom of a wide window; a phone's is its full width. */
   --grasp-drawer-width: 40rem;
@@ -1124,12 +1189,6 @@
   /* Chat message: chat message. */
   /* The widest a person's message grows across the conversation, so it reads as theirs. */
   --grasp-chat-bubble-width: 80%;
-  /* The strip of light under a message while it is being written. */
-  --grasp-chat-stream-width: 4rem;
-  /* How thick the strip of light under a streaming message is: a line of light, not a bar. */
-  --grasp-chat-stream-height: 2px;
-  /* How long the strip of light takes to cross under a streaming message. */
-  --grasp-chat-stream-time: 1.6s;
   /* Audio player: audio player. */
   /* The widest an audio player's bar grows, as Palermo's. */
   --grasp-audio-width: 40rem;
@@ -1320,6 +1379,39 @@
   --grasp-stepper-mark: var(--grasp-chip);
   /* How far a stepper's line stops short of each mark, so it never touches what it joins. */
   --grasp-stepper-line-gap: var(--grasp-space-1);
+  /* A stepper's mark as a tile (the dither look): a squircle a little larger than a chip. */
+  --grasp-stepper-tile: 28px;
+  /* A stepper's step number in Geist Serif (the serif look): the one large thing in the row. */
+  --grasp-stepper-numeral: 28px;
+  /* The light that stands on the current step (the light look): wider than the mark, so it reads as light round it. */
+  --grasp-stepper-glow: 36px;
+  /* The height of a stepper's dither band between two steps: two rows of sparse dots, three of dense. */
+  --grasp-stepper-band: 6px;
+  /* The pitch of the dots in a dither band still to come. */
+  --grasp-stepper-dots-sparse: 6px;
+  /* The pitch of the dots in a dither band that is done: dense enough to read as filled. */
+  --grasp-stepper-dots-dense: 3px;
+  /* One breath of the light on the current step: very slow, so it is alive without asking to be looked at. None with reduced motion. */
+  --grasp-stepper-breathe: 3200ms;
+  /* A stepper's line where it is done, running across: the mint deepened towards pine, Approve's light laid on its side. */
+  --grasp-stepper-fill-across: linear-gradient(
+    90deg,
+    oklch(0.49 0.11 168),
+    oklch(0.4 0.08 173)
+  );
+  /* The same, running down. */
+  --grasp-stepper-fill-down: linear-gradient(
+    180deg,
+    oklch(0.49 0.11 168),
+    oklch(0.4 0.08 173)
+  );
+  /* The light on the current step: the Composer's mint and sea, gathered into a glow. */
+  --grasp-stepper-light: radial-gradient(
+    circle,
+    var(--grasp-light-mint) 0%,
+    color-mix(in oklch, var(--grasp-light-sea) 55%, transparent) 40%,
+    transparent 70%
+  );
   /* A theme's reveal, a circle growing from the switch a person pressed: the product's longest motion. */
   --grasp-theme-reveal: 300ms;
   /* A theme's crossfade of the whole page, when a product chooses it over the reveal. */
@@ -1508,6 +1600,86 @@
   );
   /* Between the question and the box to ask in, where a chat starts. */
   --grasp-chat-start-gap: var(--grasp-space-8);
+  /* Inspector panel: inspector panel. */
+  /* The width of an inspector panel beside a page, as Profound's 421px. */
+  --grasp-inspector-width: 420px;
+  /* The height of an inspector's top bar: its actions, and its views once the head has scrolled away. */
+  --grasp-inspector-bar: 48px;
+  /* The room round an inspector's content: one left edge for its tile, its title and its cards. */
+  --grasp-inspector-pad: var(--grasp-space-6);
+  /* The room under an inspector's last section, so it never ends on the window's edge. */
+  --grasp-inspector-pad-end: var(--grasp-space-20);
+  /* Between the sections of an inspector, and between its head and its first section. */
+  --grasp-inspector-gap: var(--grasp-space-6);
+  /* Between a section's label row and its card. */
+  --grasp-inspector-label-gap: var(--grasp-space-3);
+  /* How far a label and a row's words sit in from the card's edge: one line for both. */
+  --grasp-inspector-inset: var(--grasp-space-3);
+  /* The height of every row in an inspector's card, as Profound's 44px. */
+  --grasp-inspector-row: var(--grasp-tap);
+  /* A row's name, a label and a view: a step under text-sm, as Profound's. */
+  --grasp-inspector-text: 13px;
+  /* The line height of inspector-text. */
+  --grasp-inspector-text-line: 18px;
+  /* The one accent: the small icons that say what kind of thing a row is. Everything else stays neutral. */
+  --grasp-inspector-kind: var(--grasp-mint-deep);
+  /* How far a label's dashed underline sits under its words: it says the label explains itself on hover. */
+  --grasp-inspector-dash-offset: 3px;
+  /* The tile that holds an object's own icon, at the head of its inspector. */
+  --grasp-inspector-tile: 40px;
+  /* The icon inside an object's tile. */
+  --grasp-inspector-tile-icon: 24px;
+  /* The tile's corner, in the system's squircle: the corner a 40px square takes. */
+  --grasp-inspector-tile-corner: 14px;
+  /* The quiet tile: a wash of the light's mint behind the icon. */
+  --grasp-inspector-tile-tint: light-dark(
+    oklch(0.8005 0.1625 165.25 / 0.14),
+    oklch(0.8005 0.1625 165.25 / 0.16)
+  );
+  /* How tall a long text card stands before its words fade and it offers to open in full. */
+  --grasp-inspector-long: 300px;
+  /* How tall the fade is at the foot of a long text card. */
+  --grasp-inspector-long-fade: 64px;
+  /* How strongly the dither shows behind an inspector's head: a texture you find, not a pattern you see. */
+  --grasp-inspector-dither-strength: 0.3;
+  /* The small dot between the parts of an inspector's line of who and when. */
+  --grasp-inspector-dot: 2px;
+  /* Sources: sources. */
+  /* A source's mark inside a named chip in running text. */
+  --grasp-source-mark-inline: 14px;
+  /* One mark in the pile under an answer. */
+  --grasp-source-pile-mark: 26px;
+  /* How far each mark in the pile slides under the one before it. */
+  --grasp-source-pile-overlap: 10px;
+  /* How far apart the pile's marks fan under a pointer, each from the middle one. */
+  --grasp-source-pile-fan: 4px;
+  /* The soft mint behind the words a lit marker backs. */
+  --grasp-source-claim-wash: color-mix(
+    in oklch,
+    var(--grasp-mint) 18%,
+    transparent
+  );
+  /* The fainter mint behind backed words when a mint line runs under them too. */
+  --grasp-source-claim-wash-faint: color-mix(
+    in oklch,
+    var(--grasp-mint) 10%,
+    transparent
+  );
+  /* An agent's or a workflow's tile in its quiet form: a faint wash of mint. */
+  --grasp-source-agent-tint: color-mix(
+    in oklch,
+    var(--grasp-mint) 16%,
+    var(--grasp-raised)
+  );
+  /* The light that crosses a newly found source's mark once. */
+  --grasp-source-light: linear-gradient(
+    100deg,
+    transparent 20%,
+    color-mix(in oklch, var(--grasp-mint) 70%, transparent) 50%,
+    transparent 80%
+  );
+  /* How long the light takes to cross a new mark: once, never more. */
+  --grasp-source-light-cross: 300ms;
   /* Breakpoints, for scripts. A media query cannot read them: see tokens.stylex.ts. */
   /* Under 640px: one column, phone sizes, stacked rows. */
   --grasp-bp-phone: 40rem;

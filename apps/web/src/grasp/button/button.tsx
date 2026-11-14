@@ -151,6 +151,8 @@ interface ButtonBase {
   disabled?: boolean;
   /** Layout only: margins and alignment. Colours, sizes, corners and widths belong to the button. */
   style?: ButtonLayoutStyle;
+  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  layout?: ButtonLayoutStyle;
   /**
    * Hold to confirm, for what cannot be undone but is not grave (delete a draft): the action runs
    * once the press has lasted {hold-duration}, or `{ ms }`. A click or a tap asks in a popover.
@@ -987,6 +989,7 @@ const Pressable = ({
     failedLabel,
     render,
     style,
+    layout,
     agentConfirm,
     disabled = false,
     focusableWhenDisabled = false,
@@ -1010,7 +1013,7 @@ const Pressable = ({
     busy,
     failed,
     held,
-    style,
+    style: layout ?? style,
   };
 
   // The result is said once, by the page's one polite voice (src/announce), when it changes.

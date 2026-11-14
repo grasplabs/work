@@ -18,6 +18,7 @@ import {
   Archive02Icon,
   ArrowDown01Icon,
   ArrowDown02Icon,
+  ArrowExpand01Icon,
   ArrowLeft01Icon,
   ArrowLeft02Icon,
   ArrowLeftRightIcon,
@@ -30,6 +31,7 @@ import {
   Attachment01Icon,
   BubbleChatAddIcon,
   BubbleChatIcon,
+  Building03Icon,
   CableIcon,
   Calendar03Icon,
   Cancel01Icon,
@@ -48,6 +50,7 @@ import {
   ContrastIcon,
   Copy01Icon,
   DashboardSquare01Icon,
+  Database01Icon,
   Delete02Icon,
   DiscordIcon,
   Doc01Icon,
@@ -79,7 +82,9 @@ import {
   Image01Icon,
   InboxIcon,
   InformationCircleIcon,
+  InputTextIcon,
   InstagramIcon,
+  Invoice01Icon,
   KeyboardIcon,
   LeftToRightListBulletIcon,
   LeftToRightListDashIcon,
@@ -87,6 +92,7 @@ import {
   LinkedinIcon,
   Loading03Icon,
   Logout03Icon,
+  Mail01Icon,
   Menu02Icon,
   Message01Icon,
   Mic01Icon,
@@ -97,6 +103,7 @@ import {
   Moon02Icon,
   MoreHorizontalIcon,
   NewTwitterIcon,
+  Note01Icon,
   Notification03Icon,
   NotionIcon,
   PauseIcon,
@@ -114,14 +121,18 @@ import {
   Sent02Icon,
   ServerStack01Icon,
   Settings01Icon,
+  Share08Icon,
   ShopifyIcon,
   SidebarLeftIcon,
   SlackIcon,
   SlidersHorizontalIcon,
+  SourceCodeIcon,
+  SquareLock02Icon,
   StarIcon,
   StopIcon,
   StripeIcon,
   Sun03Icon,
+  Table01Icon,
   Tag01Icon,
   Task01Icon,
   TextAlignCenterIcon,
@@ -147,6 +158,7 @@ import {
   VolumeHighIcon,
   VolumeMute01Icon,
   WhatsappIcon,
+  WorkflowSquare03Icon,
   Wrench01Icon,
   YoutubeIcon,
   ZapIcon,
@@ -513,3 +525,33 @@ export const KindSelect: IconData = LeftToRightListDashIcon;
 export const KindCheckbox: IconData = CheckmarkSquare02Icon;
 /** A column of tags. Tag01Icon. */
 export const KindTag: IconData = Tag01Icon;
+
+// Inspector panel (cloud builder 4): the marks of what a row in a panel's card is. Lock and Mail
+// are the sources' (cloud builder 10), below.
+/** A tag or a category. Tag01Icon. */
+export const Tag: IconData = Tag01Icon;
+/** Open bigger: a card's text to its full height or a window. ArrowExpand01Icon. */
+export const Expand: IconData = ArrowExpand01Icon;
+/** Share with people. Share08Icon. */
+export const Share: IconData = Share08Icon;
+/** A company or an organisation. Building03Icon. */
+export const Company: IconData = Building03Icon;
+/** A note someone wrote. Note01Icon. */
+export const Note: IconData = Note01Icon;
+/** A field someone types into: a text input. InputTextIcon. */
+export const TextInput: IconData = InputTextIcon;
+/** A source of records: a table, a database. Database01Icon. */
+export const Database: IconData = Database01Icon;
+// Sources of every kind (cloud builder 10): the marks a source's kind wears.
+/** A workflow: steps that run in order, by a schedule or a trigger. WorkflowSquare03Icon. */
+export const Workflow: IconData = WorkflowSquare03Icon;
+/** A table or a query: rows of data. Table01Icon. */
+export const Rows: IconData = Table01Icon;
+/** Code: a file of source, some of its lines. SourceCodeIcon. */
+export const Code: IconData = SourceCodeIcon;
+/** A record in an app: a deal, a ticket, an invoice. Invoice01Icon. */
+export const AppRecord: IconData = Invoice01Icon;
+/** An email. Mail01Icon. */
+export const Mail: IconData = Mail01Icon;
+/** Locked: there, but the person cannot open it. SquareLock02Icon. */
+export const Lock: IconData = SquareLock02Icon;

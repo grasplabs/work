@@ -8,7 +8,6 @@ import { useRef, useState } from "react";
 import type { Session } from "../core.ts";
 import { BackdropField } from "../grasp/field/backdrop.tsx";
 import { schemeOf, useLook } from "../grasp/field/look.ts";
-import { frame } from "../grasp/frame/frame.stylex.ts";
 import { SidebarButton } from "../grasp/frame/page-bar.tsx";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import type { Loaded } from "../load-from-core.tsx";
@@ -17,11 +16,11 @@ import type { MakeExample } from "../make/examples.ts";
 import { BlueprintIdeas, WorkflowIdeas } from "../make/make-ideas.tsx";
 import { TourOffer } from "../tour/tour-layer.tsx";
 import { useTour } from "../tour/tour-state.ts";
-import { AgentPicker, agentModelOf, startingAgent } from "./agent-choice.tsx";
+import { AgentPicker, startingAgent } from "./agent-choice.tsx";
 import { openChat } from "./chat-layout.ts";
-import { Composer } from "./composer.tsx";
 import { useGlobalChat } from "./global-chat.tsx";
 import { RecentsButton } from "./recents.tsx";
+import { StartComposer } from "./start-composer.tsx";
 import { useAsk } from "./use-ask.ts";
 
 // Chat's own page (routes/_shell.index.tsx): where to start. The question
@@ -70,15 +69,6 @@ const styles = stylex.create({
   onNight: {
     colorScheme: "dark",
     color: grasp.text,
-  },
-  // The box to ask in is glass: the card's colour, most of the way, over
-  // a blur of what stands behind the page, so a backdrop runs on under it
-  // and its words still read. Its corners are the composer's (14px); the
-  // box's own fill is let go in grasp.css (`data-glass`).
-  composer: {
-    borderRadius: "14px",
-    backgroundColor: `color-mix(in oklch, ${frame.card} 62%, transparent)`,
-    backdropFilter: "blur(14px) saturate(1.5)",
   },
   column: {
     position: "relative",
@@ -237,7 +227,7 @@ export const ChatStart = ({
                 headingId="new-chat"
                 onDeclined={() => {
                   page.current
-                    ?.querySelector<HTMLElement>('[role="textbox"]')
+                    ?.querySelector<HTMLElement>('textarea, [role="textbox"]')
                     ?.focus();
                 }}
                 userId={identity.userId}
@@ -246,22 +236,17 @@ export const ChatStart = ({
               <Greeting making={make !== undefined} />
             )}
           </div>
-          {/* Glass under the box: the backdrop runs on behind it. */}
-          <div data-glass="" {...stylex.props(styles.composer)}>
-            <Composer
-              actions={<RecentsButton />}
-              agent={
-                <AgentPicker
-                  agentId={agentId}
-                  agents={agents}
-                  onAgent={setPicked}
-                />
-              }
-              agentModel={agentModelOf(agents, agentId)}
-              running={false}
-              {...composer}
-            />
-          </div>
+          <StartComposer
+            ask={{ ...composer, models: offered?.models }}
+            end={<RecentsButton />}
+            start={
+              <AgentPicker
+                agentId={agentId}
+                agents={agents}
+                onAgent={setPicked}
+              />
+            }
+          />
           {offeredTour || ideas === undefined ? null : (
             <Ideas
               ideas={ideas}

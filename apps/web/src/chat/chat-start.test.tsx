@@ -4,7 +4,6 @@ import type { ChatAgent, ChatMake, ChatQuestion } from "@grasp-os/shared/chat";
 import { blueprintIdSchema } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { SidebarProvider } from "@grasp-os/ui/components/sidebar";
-import { typeInPrompt } from "@grasp-os/ui/testing";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -149,12 +148,24 @@ const shown = async (
   return { asked };
 };
 
-const box = (): HTMLElement => {
-  const found = document.querySelector<HTMLElement>('[role="textbox"]');
+const box = (): HTMLTextAreaElement => {
+  const found = document.querySelector("textarea");
   if (found === null) {
     throw new Error("No box to ask in");
   }
   return found;
+};
+
+/** Types `text` in the box as a person does: its value, then the input event React listens for. */
+const typeIn = (into: HTMLTextAreaElement, text: string): void => {
+  // Through the prototype's setter, as typing sets it, so React sees the change.
+  Reflect.set(
+    HTMLTextAreaElement.prototype,
+    "value",
+    `${into.value}${text}`,
+    into
+  );
+  into.dispatchEvent(new Event("input", { bubbles: true }));
 };
 
 /** The ideas offered: each tile's words. */
@@ -195,7 +206,7 @@ describe("Chat's page from Make something", () => {
 
     await pick("Service desk");
 
-    expect({ offered, box: box().textContent, asked }).toStrictEqual({
+    expect({ offered, box: box().value, asked }).toStrictEqual({
       offered: ["Service deskEvery client question, until it's solved."],
       box: "Make an App from the Service desk blueprint: Every client question, until it's solved.",
       asked: [],
@@ -211,7 +222,7 @@ describe("Chat's page from Make something", () => {
 
     await pick("Track the month-end close");
 
-    expect({ offered, box: box().textContent, asked }).toStrictEqual({
+    expect({ offered, box: box().value, asked }).toStrictEqual({
       offered: [
         "Track the month-end closeRecord-to-Report",
         "Approve big invoicesPurchase-to-Pay",
@@ -229,7 +240,7 @@ describe("Chat's page from Make something", () => {
     });
 
     await act(async () => {
-      typeInPrompt(box(), "Track the month-end close");
+      typeIn(box(), "Track the month-end close");
       await Promise.resolve();
     });
     await act(async () => {
@@ -252,7 +263,7 @@ describe("Chat's page from Make something", () => {
     const { asked } = await shown();
 
     await act(async () => {
-      typeInPrompt(box(), "What waits on me today?");
+      typeIn(box(), "What waits on me today?");
       await Promise.resolve();
     });
     await act(async () => {
@@ -277,7 +288,7 @@ describe("Chat's page from Make something", () => {
     });
 
     await act(async () => {
-      typeInPrompt(box(), "Which invoices are late?");
+      typeIn(box(), "Which invoices are late?");
       await Promise.resolve();
     });
     await act(async () => {

@@ -78,4 +78,10 @@ export const focus = stylex.create({
     },
     outlineOffset: `calc(-1 * ${grasp.ringWidth})`,
   },
+  // A row whose whole width is one press (a row list's row, cloud/data): the ring round the row
+  // when the press inside it has keyboard focus, drawn inside so the card never clips it.
+  band: {
+    outline: { default: "none", ":has([data-row-press]:focus-visible)": line },
+    outlineOffset: `calc(-1 * ${grasp.ringWidth})`,
+  },
 });

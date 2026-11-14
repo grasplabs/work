@@ -1,0 +1,1779 @@
+// Composer: where a person writes to an assistant, after Profound's Palermo, with Grasp's light.
+// A card with the text on top and a footer of actions under it, send at the end. Enter sends and
+// Shift+Enter starts a line. While the assistant works, Grasp's light travels round the card and
+// send turns into Stop; when it is done, a halo of mint glows once.
+//
+//   <Composer label="Message" placeholder="Ask a question" failedLabel="Could not send" onSend={send} />
+//   <Composer ... activity="working" onStop={stop} />            the assistant is working
+//   <Composer ... start={<ComposerAction icon={Plus} label="Add a file" />} />
+//   <Composer ... takeover={<QuestionTool embedded ... />} />     a question in place of the text
+//
+// The text is UI SDK's Textarea and send and Stop are UI SDK's Button, so an agent can write and
+// send by name, and a send that fails fails for the agent too, with the words the person sees.
+// Every value is a token (src/tokens). A caller may set layout only (the `style` prop).
+"use client";
+
+import * as stylex from "@stylexjs/stylex";
+import { Textarea as TextareaPrimitive } from "@ui-sdk/react/textarea";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import type {
+  ClipboardEvent,
+  ComponentProps,
+  Dispatch,
+  DragEvent,
+  FocusEvent,
+  KeyboardEvent,
+  MouseEvent,
+  PointerEvent,
+  ReactElement,
+  ReactNode,
+  RefObject,
+  SetStateAction,
+  SubmitEvent,
+} from "react";
+
+import { Alert, Icon } from "../icons";
+import { iconVars } from "../icons/icon.stylex";
+import { scroll } from "../scroll/scroll";
+import { grasp, media } from "../tokens/tokens.stylex";
+import { WorkingMark } from "../working-mark";
+import type { ComposerKind } from "./add";
+import type { ComposerAttachmentWords } from "./attachment";
+import { ComposerAttachments } from "./attachments";
+import type { ComposerFile } from "./attachments";
+import { DisabledContext, MentionContext, VoiceContext } from "./context";
+import { ComposerGlow } from "./glow";
+import type { ComposerAccent, ComposerEdge } from "./glow";
+import { MentionMenu, caretPoint, mentionRows } from "./mention";
+import type { ComposerMentionItem, MentionRow } from "./mention";
+import { ComposerSend } from "./send";
+
+type Layout = string | number | null;
+
+/** What a caller may style: where the composer sits and how wide it is. Never its look. */
+export type ComposerLayoutStyle = stylex.StyleXStyles<{
+  alignSelf?: Layout;
+  justifySelf?: Layout;
+  flexGrow?: Layout;
+  flexShrink?: Layout;
+  gridArea?: Layout;
+  gridColumn?: Layout;
+  gridRow?: Layout;
+  width?: Layout;
+  maxWidth?: Layout;
+  margin?: Layout;
+  marginBlock?: Layout;
+  marginBlockStart?: Layout;
+  marginBlockEnd?: Layout;
+  marginInline?: Layout;
+}>;
+
+/** Where the assistant is: at rest, working, just done, or out of use. */
+export type ComposerActivity = "idle" | "working" | "success" | "disabled";
+
+type TextareaProps = ComponentProps<typeof TextareaPrimitive>;
+
+/** Every prop a Composer takes. */
+export interface ComposerProps {
+  /** The name of the text, for a screen reader and an agent ("Message"). It is not shown. */
+  label: string;
+  /** An example of what to write ("Ask a question"). It goes when typing starts. */
+  placeholder?: string;
+  /**
+   * Sends the text. Return a Promise and the composer waits: on success the text clears, on
+   * failure it stays and `failedLabel` shows under the card.
+   */
+  onSend: (text: string) => unknown;
+  /** The words when a send failed, shown under the card and given to an agent ("Could not send"). */
+  failedLabel: string;
+  /**
+   * Where the assistant is. `working`: the light travels round the card, send turns into Stop, and
+   * the text can still be written. `success`: one halo of mint, then rest; set it again to play it
+   * again. `disabled`: nothing can be written or pressed; the card takes the soft fill and its words
+   * go muted. Say why in `note`.
+   * @default "idle"
+   */
+  activity?: ComposerActivity;
+  /**
+   * The colour of the working light and the success halo: Grasp's light, or an agent's own colour.
+   * @default "light"
+   */
+  accent?: ComposerAccent;
+  /**
+   * How the working light's edge is drawn: `smooth`, a soft glow, or `dither`, the same light as a
+   * fine grid of dots that thins out where the glow fades.
+   * @default "smooth"
+   */
+  edge?: ComposerEdge;
+  /** Stops the assistant. Stop shows only while `working`. */
+  onStop?: () => unknown;
+  /**
+   * The words said to a screen reader while working, and shown under the card with the working
+   * mark when `showWorking` is set.
+   * @default "Working"
+   */
+  workingLabel?: string;
+  /**
+   * While working, show the working mark and `workingLabel` under the card ("Searching the web"),
+   * beside the light round it. Give `workingLabel` what the agent is doing now.
+   * @default false
+   */
+  showWorking?: boolean;
+  /**
+   * The words said to a screen reader on success.
+   * @default "Done"
+   */
+  successLabel?: string;
+  /**
+   * The send button's name.
+   * @default "Send"
+   */
+  sendLabel?: string;
+  /**
+   * The stop button's name.
+   * @default "Stop"
+   */
+  stopLabel?: string;
+  /** Actions at the start of the footer: ComposerAction, such as Add a file. */
+  start?: ReactNode;
+  /** Actions at the end of the footer, before send. */
+  end?: ReactNode;
+  /** The quiet controls after the start actions: ComposerModel, then ComposerReasoning. */
+  controls?: ReactNode;
+  /**
+   * Voice input, at the end beside send: a ComposerAction (Dictate). With nothing written it stands
+   * alone, filled, in send's place; once there is text it goes quiet and send appears.
+   */
+  voice?: ReactNode;
+  /** Anything else inside the card above the text. Files go in `attachments`. */
+  above?: ReactNode;
+  /** The files waiting to be sent, shown as cards in a strip above the text. The composer keeps none. */
+  attachments?: ComposerFile[];
+  /**
+   * Called with files that were dropped on the composer or pasted into it. Without it, files cannot
+   * be dropped or pasted.
+   */
+  onAttach?: (files: File[]) => void;
+  /** Takes a file off the message. */
+  onRemoveAttachment?: (id: string) => void;
+  /** Tries a failed upload again. */
+  onRetryAttachment?: (id: string) => void;
+  /** Opens a file: a press on its card. */
+  onOpenAttachment?: (id: string) => void;
+  /** The attachment words, shared with File upload: Uploading, Uploaded, Could not upload, Retry, Remove. */
+  attachmentWords?: Partial<ComposerAttachmentWords>;
+  /**
+   * The kinds of thing that can be mentioned with @, in the menu's first level, each with its one
+   * line of help (People: "Tag someone in the team").
+   */
+  mentionKinds?: ComposerKind[];
+  /** The things that can be mentioned, each with its `kind`; commands for the / menu have kind "commands". */
+  mentionItems?: ComposerMentionItem[];
+  /** Called as the person types after @ or /, to look things up: update `mentionItems` with what is found. */
+  onMentionQuery?: (query: string, kind: string | null) => void;
+  /**
+   * The mention menu is waiting for `onMentionQuery`'s results.
+   * @default false
+   */
+  mentionsLoading?: boolean;
+  /** Called with each thing picked from the mention menu. */
+  onMention?: (item: ComposerMentionItem) => void;
+  /**
+   * What is said when nothing matches what was typed.
+   * @default "Nothing found"
+   */
+  mentionsEmptyLabel?: string;
+  /**
+   * What the commands menu is called.
+   * @default "Commands"
+   */
+  commandsLabel?: string;
+  /**
+   * What the composer says while a file is dragged over the page.
+   * @default "Drop to add"
+   */
+  dropLabel?: string;
+  /**
+   * Why send waits while a file uploads, under the card.
+   * @default "Sending waits for the files to upload"
+   */
+  uploadingLabel?: string;
+  /** A band tucked under the top of the card: ComposerSurface, or ComposerQueue for waiting messages. */
+  top?: ReactNode;
+  /**
+   * Takes the card's place for the text and footer while the assistant needs something first:
+   * ComposerTakeover, or a QuestionTool with `embedded`.
+   */
+  takeover?: ReactNode;
+  /** Escape leaves the takeover. Without it, Escape does nothing there. */
+  onTakeoverDismiss?: () => void;
+  /** What is wrong with the text, in the danger colour under the card ("Add more detail before sending"). */
+  validation?: string;
+  /** A short line under the card, such as a note that answers can be wrong. */
+  note?: ReactNode;
+  /**
+   * One row: the actions and the text side by side, for a narrow panel or a reply.
+   * @default false
+   */
+  compact?: boolean;
+  /** The text it starts with. */
+  defaultValue?: string;
+  /** The text, when you keep it in state. Pair it with `onValueChange`, and clear it in `onSend`. */
+  value?: string;
+  /** Called with the new text and why it changed. `details.source` is `"agent"` for an agent. */
+  onValueChange?: TextareaProps["onValueChange"];
+  /**
+   * What the card is made of: `card`, the raised fill, or `glass` where it stands on a Backdrop, so
+   * the backdrop shows through, blurred.
+   * @default "card"
+   */
+  surface?: "card" | "glass";
+  /** Layout only: margins, alignment and width. The look belongs to the composer. */
+  style?: ComposerLayoutStyle;
+  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  layout?: ComposerLayoutStyle;
+}
+
+// Where the mention menu stands: under the caret's line, or over it when the composer is low on
+// the page.
+type MenuPlace = { x: number; top: number } | { x: number; bottom: number };
+const placeAt = (element: HTMLTextAreaElement, start: number): MenuPlace => {
+  const point = caretPoint(element, start);
+  const box = element.getBoundingClientRect();
+  const lineHeight =
+    // oxlint-disable-next-line unicorn/prefer-number-coercion -- a line height reads "24px", which Number() makes NaN
+    Number.parseFloat(getComputedStyle(element).lineHeight) || 24;
+  const room = window.innerHeight - (box.top + point.y);
+  const x = Math.min(point.x, box.width - 160);
+  return room > 280
+    ? { x, top: point.y + 4 }
+    : { x, bottom: box.height - point.y + lineHeight + 4 };
+};
+
+// Runs a task; if it fails, throws what `failure` makes instead. Out here for the same reason.
+const failingWith = async (
+  task: () => Promise<void>,
+  failure: () => Error
+): Promise<void> => {
+  try {
+    await task();
+  } catch {
+    throw failure();
+  }
+};
+
+// Runs a task, then `after` whether it worked or failed. The React Compiler cannot compile a
+// try with a finally inside a component, so it lives out here.
+const settled = async <T,>(
+  task: () => Promise<T>,
+  after: () => void
+): Promise<T> => {
+  try {
+    return await task();
+  } finally {
+    after();
+  }
+};
+
+const COARSE = media.coarse;
+const FORCED = media.forced;
+
+const styles = stylex.create({
+  root: {
+    display: "grid",
+    width: "100%",
+    maxWidth: grasp.composerWidth,
+    minWidth: 0,
+    margin: 0,
+    fontFamily: grasp.fontSans,
+  },
+  // The card and its light share this box; the light sits under the card.
+  stack: {
+    position: "relative",
+    isolation: "isolate",
+    minWidth: 0,
+  },
+  // The band above the card: over the light, under the card.
+  top: {
+    position: "relative",
+    zIndex: 1,
+  },
+  // The card's own box, which the light is placed against. No stacking context of its own, so
+  // the light (0), the band (1) and the card (2) share the stack's.
+  cardRoom: {
+    position: "relative",
+  },
+  card: {
+    position: "relative",
+    zIndex: 2,
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr)",
+    gap: grasp.space6,
+    boxSizing: "border-box",
+    minWidth: 0,
+    margin: 0,
+    padding: 0,
+    borderWidth: { default: 0, [FORCED]: 1 },
+    borderStyle: "solid",
+    borderColor: "currentColor",
+    borderRadius: grasp.corner,
+    cornerShape: grasp.cornerShape,
+    backgroundColor: { default: grasp.raised, ":disabled": grasp.soft },
+    // Medium lift at rest, as Palermo's; while the text has focus, a soft halo round it says so.
+    boxShadow: {
+      default: grasp.liftMedium,
+      ":has(textarea:focus-visible)": grasp.fieldFocus,
+      ":has(textarea[aria-invalid=true]:focus-visible)":
+        grasp.fieldFocusInvalid,
+    },
+    color: grasp.ink,
+    cursor: { default: "text", ":disabled": "not-allowed" },
+    outline: {
+      default: "none",
+      [FORCED]: {
+        default: "none",
+        ":has(textarea:focus-visible)": `${grasp.ringWidth} solid`,
+      },
+    },
+    outlineOffset: grasp.ringOffset,
+    transitionProperty: "box-shadow, background-color",
+    transitionDuration: grasp.durationHover,
+    transitionTimingFunction: grasp.ease,
+  },
+  // On a Backdrop: the card's colour most of the way, over a blur of what is behind it.
+  glass: {
+    backgroundColor: { default: grasp.backdropGlass, ":disabled": grasp.soft },
+    backdropFilter: grasp.backdropGlassBlur,
+  },
+  // The text over its chips: a positioned layer, transparent, so the chips show through.
+  editor: {
+    position: "relative",
+    display: "grid",
+    minWidth: 0,
+  },
+  overChips: {
+    position: "relative",
+    zIndex: 1,
+    gridArea: "1 / 1",
+  },
+  chips: {
+    gridArea: "1 / 1",
+    color: "transparent",
+    overflow: "hidden",
+    whiteSpace: "pre-wrap",
+    pointerEvents: "none",
+  },
+  // A file is being dragged over the page: the card is a target, tinted in the light, no dashes.
+  target: {
+    backgroundColor: `color-mix(in oklch, ${grasp.lightMint} 8%, ${grasp.raised})`,
+    boxShadow: `inset 0 0 0 ${grasp.ringWidth} color-mix(in oklch, ${grasp.lightMint} 60%, transparent), ${grasp.liftLow}`,
+  },
+  targetOver: {
+    backgroundColor: `color-mix(in oklch, ${grasp.lightMint} 16%, ${grasp.raised})`,
+    boxShadow: `inset 0 0 0 ${grasp.ringWidth} ${grasp.lightMint}, ${grasp.fieldFocus}`,
+  },
+  drop: {
+    position: "absolute",
+    inset: 0,
+    zIndex: 1,
+    display: "grid",
+    placeItems: "center",
+    borderRadius: "inherit",
+    // The card's own tint, over everything inside it, so the words stand alone.
+    backgroundColor: "inherit",
+    color: grasp.ink,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+    fontWeight: grasp.weightMedium,
+    pointerEvents: "none",
+  },
+  taken: {
+    gap: 0,
+    cursor: "default",
+  },
+  compactCard: {
+    gridTemplateColumns: "auto minmax(0, 1fr) auto",
+    alignItems: "center",
+    gap: grasp.space2,
+    padding: grasp.space2,
+    borderRadius: `min(${grasp.corner}, calc((${grasp.controlSm} + 2 * ${grasp.space2}) / 2))`,
+  },
+  above: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: grasp.space2,
+    paddingInline: grasp.space4,
+    paddingBlockStart: grasp.space4,
+    marginBlockEnd: `calc(-1 * ${grasp.space4})`,
+  },
+  text: {
+    display: "block",
+    boxSizing: "border-box",
+    width: "100%",
+    minWidth: 0,
+    // A finger needs 44px: on a touch screen the text is never shorter.
+    minHeight: { default: 0, [COARSE]: grasp.tap },
+    maxHeight: grasp.composerHeight,
+    margin: 0,
+    paddingInline: grasp.space4,
+    paddingBlockStart: grasp.space4,
+    paddingBlockEnd: 0,
+    appearance: "none",
+    borderWidth: 0,
+    borderRadius: 0,
+    backgroundColor: "transparent",
+    outline: "none",
+    resize: "none",
+    fieldSizing: "content",
+    color: { default: grasp.ink, ":disabled": grasp.muted },
+    caretColor: grasp.ink,
+    fontFamily: grasp.fontSans,
+    // 16px on a touch screen, or iOS zooms the page in when the text takes focus.
+    fontSize: { default: grasp.textMd, [COARSE]: grasp.fieldTextTouch },
+    lineHeight: grasp.textMdLine,
+    letterSpacing: "normal",
+    overflowWrap: "anywhere",
+    cursor: { default: "text", ":disabled": "not-allowed" },
+    "::placeholder": {
+      color: grasp.muted,
+      opacity: 1,
+    },
+  },
+  compactText: {
+    paddingInline: grasp.space1,
+    paddingBlockStart: 0,
+    alignSelf: "center",
+  },
+  // One line, always: plus and settings, the model and reasoning, then voice and send at the end.
+  // It answers to its own width: narrow, the model's name folds to its mark, then reasoning steps
+  // aside (control.ts and below).
+  footer: {
+    containerType: "inline-size",
+    containerName: "composer-footer",
+    display: "flex",
+    flexWrap: "nowrap",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: grasp.space2,
+    minWidth: 0,
+    paddingInline: grasp.space3,
+    paddingBlockEnd: grasp.space3,
+  },
+  side: {
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space2,
+    minWidth: 0,
+    flexShrink: 0,
+  },
+  startSide: {
+    flexShrink: 1,
+    gap: grasp.space1,
+  },
+  controls: {
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space1,
+    minWidth: 0,
+  },
+  // Lines under the card, on a band tucked under its foot, as Palermo's disclaimer.
+  under: {
+    display: "grid",
+    gap: grasp.space1,
+    paddingInline: grasp.space4,
+    paddingBlockStart: `calc(${grasp.corner} + ${grasp.space2})`,
+    paddingBlockEnd: grasp.space2,
+    marginBlockStart: `calc(-1 * ${grasp.corner})`,
+    marginInline: grasp.space2,
+    borderEndStartRadius: grasp.corner,
+    borderEndEndRadius: grasp.corner,
+    cornerShape: grasp.cornerShape,
+    backgroundColor: grasp.soft,
+    boxShadow: grasp.edge,
+  },
+  line: {
+    [iconVars.size]: grasp.iconSm,
+    [iconVars.stroke]: grasp.iconStroke,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: grasp.space1,
+    margin: 0,
+    color: grasp.muted,
+    fontSize: grasp.textXs,
+    lineHeight: grasp.textXsLine,
+    textAlign: "center",
+    overflowWrap: "anywhere",
+  },
+  danger: {
+    color: grasp.danger,
+  },
+  // Read by a screen reader, never seen.
+  unseen: {
+    position: "absolute",
+    width: grasp.hairline,
+    height: grasp.hairline,
+    margin: 0,
+    overflow: "hidden",
+    clipPath: "inset(50%)",
+    whiteSpace: "nowrap",
+  },
+});
+
+const kindTint = (
+  kind: string
+): "people" | "agents" | "skills" | "files" | "other" =>
+  kind === "people" ||
+  kind === "agents" ||
+  kind === "skills" ||
+  kind === "files"
+    ? kind
+    : "other";
+
+// A tint per kind, so a person, an agent, a skill and a file each read as their own.
+const chipStyles = stylex.create({
+  chip: {
+    color: "transparent",
+    borderRadius: grasp.cornerMark,
+    boxShadow: `0 0 0 ${grasp.hairline} ${grasp.line}`,
+  },
+  people: { backgroundColor: grasp.infoSoft },
+  agents: {
+    backgroundColor: `color-mix(in oklch, ${grasp.lavender} 22%, transparent)`,
+  },
+  skills: { backgroundColor: grasp.attentionSoft },
+  files: { backgroundColor: grasp.quietFill },
+  other: { backgroundColor: grasp.successSoft },
+});
+
+// A regular expression that matches the word as written.
+const escape = (word: string) =>
+  word.replaceAll(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+
+/** The text with each picked mention marked, for the chip layer behind the text. */
+const chipText = (text: string, picked: ComposerMentionItem[]) => {
+  const labels = picked
+    .map((item) => item.label)
+    .toSorted((a, b) => b.length - a.length);
+  if (labels.length === 0) {
+    return text;
+  }
+  const pattern = new RegExp(`([@/](?:${labels.map(escape).join("|")}))`, "gu");
+  return text.split(pattern).map((part, index) => {
+    const item = picked.find(
+      (entry) => part === `@${entry.label}` || part === `/${entry.label}`
+    );
+    if (item === undefined) {
+      return part;
+    }
+    return (
+      <mark
+        key={index}
+        data-kind={item.kind}
+        {...stylex.props(chipStyles.chip, chipStyles[kindTint(item.kind)])}
+      >
+        {part}
+      </mark>
+    );
+  });
+};
+
+const noFiles: ComposerFile[] = [];
+const noKinds: ComposerKind[] = [];
+const noItems: ComposerMentionItem[] = [];
+
+type TextChangeDetails = Parameters<
+  NonNullable<TextareaProps["onValueChange"]>
+>[1];
+
+// What a change made by the composer itself reports: a mention picked, or one taken out whole.
+const writtenDetails: TextChangeDetails = {
+  reason: "input-change",
+  source: "keyboard",
+  cancel: () => {
+    // Nothing to call off: the composer made this edit itself.
+  },
+  canceled: false,
+};
+
+// Sends with no rejection left to handle: a failure shows under the card, in the person's words.
+const sendQuietly = async (send: () => Promise<void>) => {
+  try {
+    await send();
+  } catch {
+    // Shown under the card already.
+  }
+};
+
+const hasFiles = (event: globalThis.DragEvent) =>
+  [...(event.dataTransfer?.types ?? [])].includes("Files");
+
+// Files dragged over the page make the composer a target. Dropped anywhere but on it, nothing
+// happens (the browser would otherwise open the file). Returns the cleanup.
+const listenForFileDrags = (
+  setDragging: Dispatch<SetStateAction<boolean>>,
+  setOver: Dispatch<SetStateAction<boolean>>
+) => {
+  let depth = 0;
+  const enter = (event: globalThis.DragEvent) => {
+    if (!hasFiles(event)) {
+      return;
+    }
+    depth += 1;
+    setDragging(true);
+  };
+  const leave = (event: globalThis.DragEvent) => {
+    if (!hasFiles(event)) {
+      return;
+    }
+    depth = Math.max(0, depth - 1);
+    if (depth === 0) {
+      setDragging(false);
+    }
+  };
+  const finish = (event: globalThis.DragEvent) => {
+    if (hasFiles(event)) {
+      event.preventDefault();
+    }
+    depth = 0;
+    setDragging(false);
+    setOver(false);
+  };
+  const hold = (event: globalThis.DragEvent) => {
+    if (hasFiles(event)) {
+      event.preventDefault();
+    }
+  };
+  window.addEventListener("dragenter", enter);
+  window.addEventListener("dragleave", leave);
+  window.addEventListener("dragover", hold);
+  window.addEventListener("drop", finish);
+  return () => {
+    window.removeEventListener("dragenter", enter);
+    window.removeEventListener("dragleave", leave);
+    window.removeEventListener("dragover", hold);
+    window.removeEventListener("drop", finish);
+  };
+};
+
+/** Files dragged onto the card, dropped on it, or pasted into the text are attached. */
+const useFileDrop = (
+  onAttach: ((files: File[]) => void) | undefined,
+  disabled: boolean
+) => {
+  const [dragging, setDragging] = useState(false);
+  const [over, setOver] = useState(false);
+  useEffect(
+    () =>
+      onAttach === undefined
+        ? undefined
+        : listenForFileDrags(setDragging, setOver),
+    [onAttach]
+  );
+  const drop = (event: DragEvent<HTMLElement>) => {
+    if (onAttach === undefined || disabled) {
+      return;
+    }
+    const files = [...event.dataTransfer.files];
+    if (files.length === 0) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    setDragging(false);
+    setOver(false);
+    onAttach(files);
+  };
+  const paste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    if (onAttach === undefined) {
+      return;
+    }
+    const files = [...event.clipboardData.files];
+    if (files.length === 0) {
+      return;
+    }
+    event.preventDefault();
+    onAttach(files);
+  };
+  const dragOver = (event: DragEvent<HTMLFormElement>) => {
+    if (
+      onAttach === undefined ||
+      disabled ||
+      ![...event.dataTransfer.types].includes("Files")
+    ) {
+      return;
+    }
+    event.preventDefault();
+    setOver(true);
+  };
+  const dragLeave = (event: DragEvent<HTMLFormElement>) => {
+    const to = event.relatedTarget;
+    if (!(to instanceof Node) || !event.currentTarget.contains(to)) {
+      setOver(false);
+    }
+  };
+  return {
+    dragging,
+    over,
+    handleDrop: drop,
+    handlePaste: paste,
+    handleDragOver: dragOver,
+    handleDragLeave: dragLeave,
+  };
+};
+
+/** How many times the composer has arrived at success: each arrival plays the halo once more. */
+const useSuccessCount = (activity: ComposerActivity) => {
+  const [success, setSuccess] = useState(activity === "success" ? 1 : 0);
+  const [seen, setSeen] = useState(activity);
+  if (activity !== seen) {
+    setSeen(activity);
+    if (activity === "success") {
+      setSuccess(success + 1);
+    }
+  }
+  return success;
+};
+
+/**
+ * A takeover that arrives while the person is in the card takes the focus with it; when it goes,
+ * the focus comes back to the text. Returns the form's focus handlers.
+ */
+const useTakeoverFocus = (
+  taken: boolean,
+  card: RefObject<HTMLFieldSetElement | null>,
+  area: RefObject<HTMLTextAreaElement | null>
+) => {
+  const hadTakeover = useRef(false);
+  // Whether focus was last inside the composer: read from focus events, since by the time the
+  // takeover changes, the button that changed it may already be gone and focus with it.
+  const focusInside = useRef(false);
+  useEffect(() => {
+    const inside =
+      focusInside.current ||
+      (card.current?.contains(document.activeElement) ?? false);
+    const here = inside || document.activeElement === document.body;
+    if (taken && !hadTakeover.current && here) {
+      card.current
+        ?.querySelector<HTMLElement>(
+          "[data-slot=composer-takeover-room] button, [data-slot=composer-takeover-room] input"
+        )
+        ?.focus();
+    }
+    if (!taken && hadTakeover.current && here) {
+      area.current?.focus();
+    }
+    hadTakeover.current = taken;
+  }, [taken, card, area]);
+  const onFocus = () => {
+    focusInside.current = true;
+  };
+  const onBlur = (event: FocusEvent<HTMLFormElement>) => {
+    if (!event.currentTarget.contains(event.relatedTarget)) {
+      focusInside.current = false;
+    }
+  };
+  return { handleFocus: onFocus, handleBlur: onBlur };
+};
+
+interface SendInput {
+  text: string;
+  value: string | undefined;
+  setOwn: Dispatch<SetStateAction<string>>;
+  validation: string | undefined;
+  empty: boolean;
+  disabled: boolean;
+  working: boolean;
+  onSend: (text: string) => unknown;
+  failedLabel: string;
+}
+
+/**
+ * One send for the button and for Enter. It rejects with the failure words, so an agent's press
+ * fails with what the person reads; a person's press is settled by UI SDK and logs nothing. A
+ * second press while a send runs waits for the same send, so an agent waits for the real result.
+ * While `validation` is set nothing is sent, and an agent hears the validation's words.
+ */
+const useSend = ({
+  text,
+  value,
+  setOwn,
+  validation,
+  empty,
+  disabled,
+  working,
+  onSend,
+  failedLabel,
+}: SendInput) => {
+  const [failed, setFailed] = useState(false);
+  // The text as it is now, for a send that ends after the person typed on.
+  const latest = useRef(text);
+  useEffect(() => {
+    latest.current = text;
+  }, [text]);
+  const pending = useRef<Promise<void> | null>(null);
+  const send = async (): Promise<void> => {
+    if (pending.current !== null) {
+      await pending.current;
+      return;
+    }
+    if (validation !== undefined && validation !== "") {
+      throw new Error(validation);
+    }
+    if (empty || disabled || working) {
+      return;
+    }
+    const sent = text;
+    setFailed(false);
+    const run = settled(
+      async () => {
+        await failingWith(
+          async () => {
+            await onSend(sent);
+            // Clear only what was sent: words typed while it went stay.
+            if (value === undefined && latest.current === sent) {
+              setOwn("");
+            }
+          },
+          () => {
+            setFailed(true);
+            return new Error(failedLabel);
+          }
+        );
+      },
+      () => {
+        pending.current = null;
+      }
+    );
+    pending.current = run;
+    await run;
+  };
+  return { handleSend: send, failed, setFailed };
+};
+
+interface Menu {
+  trigger: "@" | "/";
+  start: number;
+  level: string | null;
+}
+
+/** The menu a just-typed character opens: an @ after a space, or a / at a line's start. */
+const openedAt = (
+  next: string,
+  at: number,
+  items: ComposerMentionItem[]
+): Menu | null => {
+  const before = next.slice(0, at);
+  const last = before.slice(-1);
+  const prior = before.slice(-2, -1);
+  if (last === "@" && (prior === "" || /\s/u.test(prior))) {
+    return { trigger: "@", start: at - 1, level: null };
+  }
+  if (
+    last === "/" &&
+    (prior === "" || prior === "\n") &&
+    items.some((item) => item.kind === "commands")
+  ) {
+    return { trigger: "/", start: at - 1, level: null };
+  }
+  return null;
+};
+
+/** The whole mention just before the caret, if there is one. */
+const mentionBefore = (
+  text: string,
+  at: number,
+  picked: ComposerMentionItem[]
+) => {
+  for (const item of picked) {
+    for (const token of [
+      `@${item.label} `,
+      `@${item.label}`,
+      `/${item.label} `,
+      `/${item.label}`,
+    ]) {
+      if (text.slice(at - token.length, at) === token) {
+        return token;
+      }
+    }
+  }
+  return null;
+};
+
+/** The menu's title: the commands' name, or the kind it is one level into. */
+const titleOf = (
+  menu: Menu | null,
+  commandsLabel: string,
+  kinds: ComposerKind[]
+): string | undefined => {
+  if (menu?.trigger === "/") {
+    return commandsLabel;
+  }
+  const level = menu?.level ?? null;
+  return level === null || level === ""
+    ? undefined
+    : kinds.find((kind) => kind.value === level)?.label;
+};
+
+/** What a screen reader hears of the menu: its name and how many it found. */
+const menuStatus = (
+  menu: Menu | null,
+  title: string | undefined,
+  loading: boolean,
+  count: number
+) => {
+  if (menu === null) {
+    return "";
+  }
+  const found = loading
+    ? "looking"
+    : `${count} ${count === 1 ? "result" : "results"}`;
+  return `${title ?? "Mention"}: ${found}`;
+};
+
+interface MentionsInput {
+  text: string;
+  area: RefObject<HTMLTextAreaElement | null>;
+  kinds: ComposerKind[];
+  items: ComposerMentionItem[];
+  onMentionQuery: ((query: string, kind: string | null) => void) | undefined;
+  onMention: ((item: ComposerMentionItem) => void) | undefined;
+  commandsLabel: string;
+  /** Puts new text in, as the composer's own edit. */
+  setText: (next: string) => void;
+}
+
+/** Mentions: @ for people, agents, skills and files; / at a line's start for commands. */
+const useMentions = ({
+  text,
+  area,
+  kinds,
+  items,
+  onMentionQuery,
+  onMention,
+  commandsLabel,
+  setText,
+}: MentionsInput) => {
+  const on = kinds.length > 0 || items.length > 0;
+  const [picked, setPicked] = useState<ComposerMentionItem[]>([]);
+  const [menu, setMenu] = useState<Menu | null>(null);
+  const [caret, setCaret] = useState(0);
+  const [highlight, setHighlight] = useState(0);
+  const nextCaret = useRef<number | null>(null);
+  const id = useId();
+  const query = menu === null ? "" : text.slice(menu.start + 1, caret);
+  const rows: MentionRow[] =
+    menu === null
+      ? []
+      : mentionRows(menu.trigger, query, menu.level, kinds, items);
+  const title = titleOf(menu, commandsLabel, kinds);
+
+  // A new menu, level or query starts the highlight at the top again.
+  const highlightFor = JSON.stringify([menu?.trigger, menu?.level, query]);
+  const [highlightKey, setHighlightKey] = useState(highlightFor);
+  if (highlightKey !== highlightFor) {
+    setHighlightKey(highlightFor);
+    setHighlight(0);
+  }
+
+  // Put the caret where an edit left it, once the new text is in.
+  useEffect(() => {
+    const at = nextCaret.current;
+    if (at === null || area.current === null) {
+      return;
+    }
+    area.current.setSelectionRange(at, at);
+    nextCaret.current = null;
+  });
+
+  // The caller hears each new query, by the handler it gave last.
+  const queryHandler = useRef(onMentionQuery);
+  useEffect(() => {
+    queryHandler.current = onMentionQuery;
+  });
+  const trigger = menu?.trigger;
+  const level = menu?.level ?? null;
+  useEffect(() => {
+    if (trigger !== undefined) {
+      queryHandler.current?.(query, trigger === "/" ? "commands" : level);
+    }
+  }, [trigger, level, query]);
+
+  const write = (next: string, at: number) => {
+    setText(next);
+    setCaret(at);
+    nextCaret.current = at;
+  };
+
+  // After every edit: is the caret just after an @, or a / at a line's start? Is an open menu done?
+  const watch = (next: string, at: number) => {
+    setCaret(at);
+    if (!on) {
+      return;
+    }
+    if (menu !== null) {
+      const typed = next.slice(menu.start + 1, at);
+      if (
+        at <= menu.start ||
+        next[menu.start] !== menu.trigger ||
+        /\n| {2}/u.test(typed)
+      ) {
+        setMenu(null);
+      }
+      return;
+    }
+    const opened = openedAt(next, at, items);
+    if (opened !== null) {
+      setMenu(opened);
+    }
+  };
+
+  const pick = (index: number) => {
+    const row = rows[index];
+    if (menu === null || row === undefined) {
+      return;
+    }
+    if (row.type === "kind") {
+      // One level in: the @ stays, what was typed after it goes.
+      write(
+        `${text.slice(0, menu.start + 1)}${text.slice(caret)}`,
+        menu.start + 1
+      );
+      setMenu({ ...menu, level: row.kind.value });
+      return;
+    }
+    const token = `${menu.trigger}${row.item.label} `;
+    write(
+      `${text.slice(0, menu.start)}${token}${text.slice(caret)}`,
+      menu.start + token.length
+    );
+    setPicked((all) =>
+      all.some((item) => item.value === row.item.value)
+        ? all
+        : [...all, row.item]
+    );
+    setMenu(null);
+    onMention?.(row.item);
+  };
+
+  // Opened from the plus menu: an @ at the caret, one level in at that kind.
+  const openMentions = (kind: string | null) => {
+    const element = area.current;
+    const at = element?.selectionStart ?? text.length;
+    const space = at > 0 && !/\s/u.test(text[at - 1] ?? "") ? " " : "";
+    write(
+      `${text.slice(0, at)}${space}@${text.slice(at)}`,
+      at + space.length + 1
+    );
+    setMenu({ trigger: "@", start: at + space.length, level: kind });
+    element?.focus();
+  };
+
+  // The open menu's keys. True when the key was the menu's.
+  const menuKeys = (event: KeyboardEvent<HTMLTextAreaElement>, open: Menu) => {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const step = event.key === "ArrowDown" ? 1 : -1;
+      setHighlight((now) =>
+        rows.length === 0 ? 0 : (now + step + rows.length) % rows.length
+      );
+      return true;
+    }
+    if (
+      ((event.key === "Enter" && !event.shiftKey) || event.key === "Tab") &&
+      rows.length > 0
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      pick(highlight);
+      return true;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      setMenu(null);
+      return true;
+    }
+    const inKind = open.level !== null && open.level !== "";
+    if (
+      event.key === "Backspace" &&
+      inKind &&
+      query === "" &&
+      event.currentTarget.selectionStart === open.start + 1
+    ) {
+      // Back out of a kind, to the kinds.
+      event.preventDefault();
+      setMenu({ ...open, level: null });
+      return true;
+    }
+    return false;
+  };
+
+  const keys = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (menu !== null && menuKeys(event, menu)) {
+      return;
+    }
+    // One Backspace takes a whole mention out.
+    const element = event.currentTarget;
+    if (
+      event.key !== "Backspace" ||
+      element.selectionStart !== element.selectionEnd ||
+      picked.length === 0
+    ) {
+      return;
+    }
+    const at = element.selectionStart;
+    const token = mentionBefore(text, at, picked);
+    if (token !== null) {
+      event.preventDefault();
+      write(
+        `${text.slice(0, at - token.length)}${text.slice(at)}`,
+        at - token.length
+      );
+    }
+  };
+
+  // The menu stands at the caret: under its line, or over it when the composer is low on the page.
+  // Measured after the text is laid out, never during render.
+  const [place, setPlace] = useState<MenuPlace>({ x: 0, top: 0 });
+  const menuStart = menu?.start;
+  useLayoutEffect(
+    () => {
+      if (menuStart === undefined || area.current === null) {
+        return;
+      }
+      // oxlint-disable-next-line react/set-state-in-effect -- the place is read from the laid-out text, which only an effect can see
+      setPlace(placeAt(area.current, menuStart));
+    },
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- measured again as the caret and the text move, which it reads from the page
+    [menuStart, caret, text, area]
+  );
+
+  return {
+    on,
+    id,
+    menu,
+    rows,
+    title,
+    highlight,
+    handleHover: setHighlight,
+    picked,
+    place,
+    setCaret,
+    watch,
+    handlePick: pick,
+    openMentions,
+    handleKeyDown: keys,
+  };
+};
+
+type Mentions = ReturnType<typeof useMentions>;
+
+interface FieldProps {
+  area: RefObject<HTMLTextAreaElement | null>;
+  label: string;
+  placeholder: string | undefined;
+  text: string;
+  describedBy: string | undefined;
+  invalid: boolean;
+  disabled: boolean;
+  compact: boolean;
+  mentions: Mentions;
+  onChange: TextareaProps["onValueChange"];
+  onPaste: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
+  onSubmit: () => void;
+}
+
+/** The text itself: UI SDK's Textarea, a combobox while mentions are on. */
+const ComposerField = ({
+  area,
+  label,
+  placeholder,
+  text,
+  describedBy,
+  invalid,
+  disabled,
+  compact,
+  mentions,
+  onChange,
+  onPaste,
+  onSubmit,
+}: FieldProps) => {
+  const open = mentions.menu !== null;
+  return (
+    <TextareaPrimitive
+      ref={area}
+      aria-label={label}
+      aria-describedby={describedBy}
+      aria-invalid={invalid ? true : undefined}
+      placeholder={placeholder}
+      value={text}
+      onValueChange={onChange}
+      onPaste={onPaste}
+      onKeyDown={mentions.handleKeyDown}
+      onKeyUp={(event: KeyboardEvent<HTMLTextAreaElement>) => {
+        mentions.setCaret(event.currentTarget.selectionStart);
+      }}
+      onClick={(event: MouseEvent<HTMLTextAreaElement>) => {
+        mentions.setCaret(event.currentTarget.selectionStart);
+      }}
+      aria-autocomplete={mentions.on ? "list" : undefined}
+      aria-controls={open ? mentions.id : undefined}
+      aria-expanded={mentions.on ? open : undefined}
+      aria-activedescendant={
+        open && mentions.rows.length > 0
+          ? `${mentions.id}-${mentions.highlight}`
+          : undefined
+      }
+      rows={1}
+      autoResize
+      submitShortcut="enter"
+      onSubmit={onSubmit}
+      disabled={disabled}
+      render={(props: Record<string, unknown>) => (
+        <textarea
+          {...props}
+          {...stylex.props(
+            styles.text,
+            compact && styles.compactText,
+            mentions.on && styles.overChips,
+            scroll.bar
+          )}
+        />
+      )}
+    />
+  );
+};
+
+interface EditorProps {
+  field: ReactElement;
+  text: string;
+  compact: boolean;
+  mentions: Mentions;
+  loading: boolean;
+  emptyLabel: string;
+}
+
+/**
+ * The text, and with mentions on, the chips and the menu. The chips: a copy of the text behind it,
+ * transparent but for a tint under each mention, so a mention reads as a chip while the text stays
+ * a plain, editable text field.
+ */
+const ComposerEditor = ({
+  field,
+  text,
+  compact,
+  mentions,
+  loading,
+  emptyLabel,
+}: EditorProps) => {
+  if (!mentions.on) {
+    return field;
+  }
+  return (
+    <div {...stylex.props(styles.editor)}>
+      {mentions.picked.length > 0 && (
+        <div
+          aria-hidden="true"
+          data-slot="composer-chips"
+          {...stylex.props(
+            styles.text,
+            compact && styles.compactText,
+            styles.chips
+          )}
+        >
+          {chipText(text, mentions.picked)}
+        </div>
+      )}
+      {field}
+      {mentions.menu !== null && (
+        <MentionMenu
+          id={mentions.id}
+          rows={mentions.rows}
+          highlight={mentions.highlight}
+          title={mentions.title}
+          loading={loading}
+          loadingLabel="Looking"
+          emptyLabel={emptyLabel}
+          place={mentions.place}
+          onPick={mentions.handlePick}
+          onHover={mentions.handleHover}
+        />
+      )}
+      <span aria-live="polite" {...stylex.props(styles.unseen)}>
+        {menuStatus(
+          mentions.menu,
+          mentions.title,
+          loading,
+          mentions.rows.length
+        )}
+      </span>
+    </div>
+  );
+};
+
+interface EndProps {
+  voice: ReactNode;
+  empty: boolean;
+  working: boolean;
+  disabled: boolean;
+  onSend: () => Promise<void>;
+  onStop: (() => unknown) | undefined;
+  sendLabel: string;
+  stopLabel: string;
+}
+
+/** With nothing written, voice stands alone in send's place, filled; with text, both show. */
+const ComposerEnd = ({
+  voice,
+  empty,
+  working,
+  disabled,
+  onSend,
+  onStop,
+  sendLabel,
+  stopLabel,
+}: EndProps) => {
+  if (Boolean(voice) && empty && !working) {
+    return <VoiceContext.Provider value>{voice}</VoiceContext.Provider>;
+  }
+  return (
+    <>
+      {voice}
+      <ComposerSend
+        working={working}
+        empty={empty}
+        disabled={disabled}
+        onSend={onSend}
+        onStop={onStop}
+        sendLabel={sendLabel}
+        stopLabel={stopLabel}
+      />
+    </>
+  );
+};
+
+interface InsideProps {
+  takeover: ReactNode;
+  compact: boolean;
+  start: ReactNode;
+  end: ReactNode;
+  last: ReactNode;
+  editor: ReactNode;
+  controls: ReactNode;
+  above: ReactNode;
+  attachments: ComposerFile[];
+  onAttach: ComposerProps["onAttach"];
+  onRemoveAttachment: ComposerProps["onRemoveAttachment"];
+  onRetryAttachment: ComposerProps["onRetryAttachment"];
+  onOpenAttachment: ComposerProps["onOpenAttachment"];
+  attachmentWords: ComposerProps["attachmentWords"];
+  focusText: (event: PointerEvent<HTMLElement>) => void;
+}
+
+/** What the card holds: a takeover in place of the text, a single row, or the text over a footer. */
+const ComposerInside = ({
+  takeover,
+  compact,
+  start,
+  end,
+  last,
+  editor,
+  controls,
+  above,
+  attachments,
+  onAttach,
+  onRemoveAttachment,
+  onRetryAttachment,
+  onOpenAttachment,
+  attachmentWords,
+  focusText,
+}: InsideProps) => {
+  const taken = Boolean(takeover);
+  if (taken) {
+    return <div data-slot="composer-takeover-room">{takeover}</div>;
+  }
+  if (compact) {
+    return (
+      <>
+        <div {...stylex.props(styles.side)}>{start}</div>
+        {editor}
+        <div {...stylex.props(styles.side)}>
+          {end}
+          {last}
+        </div>
+      </>
+    );
+  }
+  return (
+    <>
+      {onAttach !== undefined || attachments.length > 0 ? (
+        <ComposerAttachments
+          files={attachments}
+          onRemove={onRemoveAttachment}
+          onRetry={onRetryAttachment}
+          onOpen={onOpenAttachment}
+          words={attachmentWords}
+          label="Files to send"
+        />
+      ) : null}
+      {Boolean(above) && <div {...stylex.props(styles.above)}>{above}</div>}
+      {editor}
+      <div onPointerDown={focusText} {...stylex.props(styles.footer)}>
+        <div {...stylex.props(styles.side, styles.startSide)}>
+          {start}
+          {Boolean(controls) && (
+            <div
+              data-slot="composer-controls"
+              {...stylex.props(styles.controls)}
+            >
+              {controls}
+            </div>
+          )}
+        </div>
+        <div {...stylex.props(styles.side)}>
+          {end}
+          {last}
+        </div>
+      </div>
+    </>
+  );
+};
+
+interface UnderProps {
+  id: string;
+  /** The working mark and its words, while working with `showWorking`. */
+  workingLabel: string | null;
+  failed: boolean;
+  failedLabel: string;
+  validation: string | undefined;
+  waiting: boolean;
+  uploadingLabel: string;
+  note: ReactNode;
+}
+
+/** The lines under the card: a failed send, a validation, the wait for uploads, and a note. */
+const ComposerUnder = ({
+  id,
+  workingLabel,
+  failed,
+  failedLabel,
+  validation,
+  waiting,
+  uploadingLabel,
+  note,
+}: UnderProps) => {
+  const invalid = validation !== undefined && validation !== "";
+  const noted = Boolean(note);
+  if (workingLabel === null && !failed && !invalid && !waiting && !noted) {
+    return null;
+  }
+  return (
+    <div id={id} {...stylex.props(styles.under)}>
+      {/* Seen only: the status below says it to a screen reader. */}
+      {workingLabel !== null && (
+        <p
+          aria-hidden="true"
+          data-slot="composer-working"
+          {...stylex.props(styles.line)}
+        >
+          <WorkingMark />
+          {workingLabel}
+        </p>
+      )}
+      {failed && (
+        <p role="alert" {...stylex.props(styles.line, styles.danger)}>
+          <Icon icon={Alert} />
+          {failedLabel}
+        </p>
+      )}
+      {invalid && (
+        <p {...stylex.props(styles.line, styles.danger)}>{validation}</p>
+      )}
+      {waiting && <p {...stylex.props(styles.line)}>{uploadingLabel}</p>}
+      {noted && <p {...stylex.props(styles.line)}>{note}</p>}
+    </div>
+  );
+};
+
+/** What a screen reader hears of the assistant: working, then done. */
+const statusWords = (
+  activity: ComposerActivity,
+  workingLabel: string,
+  successLabel: string
+) => {
+  if (activity === "working") {
+    return workingLabel;
+  }
+  return activity === "success" ? successLabel : "";
+};
+
+// The props with their defaults filled in, in two parts so neither grows too long to follow.
+const lookDefaults = (props: ComposerProps) => ({
+  activity: props.activity ?? "idle",
+  accent: props.accent ?? "light",
+  edge: props.edge ?? "smooth",
+  compact: props.compact ?? false,
+  surface: props.surface ?? "card",
+  defaultValue: props.defaultValue ?? "",
+  attachments: props.attachments ?? noFiles,
+  mentionKinds: props.mentionKinds ?? noKinds,
+  mentionItems: props.mentionItems ?? noItems,
+  mentionsLoading: props.mentionsLoading ?? false,
+});
+
+const wordDefaults = (props: ComposerProps) => ({
+  workingLabel: props.workingLabel ?? "Working",
+  showWorking: props.showWorking ?? false,
+  successLabel: props.successLabel ?? "Done",
+  sendLabel: props.sendLabel ?? "Send",
+  stopLabel: props.stopLabel ?? "Stop",
+  dropLabel: props.dropLabel ?? "Drop to add",
+  mentionsEmptyLabel: props.mentionsEmptyLabel ?? "Nothing found",
+  commandsLabel: props.commandsLabel ?? "Commands",
+  uploadingLabel:
+    props.uploadingLabel ?? "Sending waits for the files to upload",
+});
+
+type Resolved = ComposerProps &
+  ReturnType<typeof lookDefaults> &
+  ReturnType<typeof wordDefaults>;
+
+/** The composer, with every default in place. */
+const ComposerForm = (props: Resolved) => {
+  const {
+    label,
+    activity,
+    value,
+    onValueChange,
+    attachments,
+    takeover,
+    validation,
+    compact,
+  } = props;
+  const [own, setOwn] = useState(props.defaultValue);
+  const text = value ?? own;
+  const area = useRef<HTMLTextAreaElement | null>(null);
+  const card = useRef<HTMLFieldSetElement | null>(null);
+  const underId = useId();
+  // A file still uploading holds send, and the line under the card says why.
+  const uploading = attachments.some((file) => file.status === "uploading");
+  const empty = text.trim() === "" || uploading;
+  const working = activity === "working";
+  const disabled = activity === "disabled";
+  const taken = Boolean(takeover);
+  const invalid = validation !== undefined && validation !== "";
+
+  const files = useFileDrop(props.onAttach, disabled);
+  const success = useSuccessCount(activity);
+  const focusWatch = useTakeoverFocus(taken, card, area);
+  const sending = useSend({
+    text,
+    value,
+    setOwn,
+    validation,
+    empty,
+    disabled,
+    working,
+    onSend: props.onSend,
+    failedLabel: props.failedLabel,
+  });
+  const mentions = useMentions({
+    text,
+    area,
+    kinds: props.mentionKinds,
+    items: props.mentionItems,
+    onMentionQuery: props.onMentionQuery,
+    onMention: props.onMention,
+    commandsLabel: props.commandsLabel,
+    setText: (next) => {
+      if (value === undefined) {
+        setOwn(next);
+      }
+      onValueChange?.(next, writtenDetails);
+    },
+  });
+
+  const change: TextareaProps["onValueChange"] = (next, details) => {
+    if (value === undefined) {
+      setOwn(next);
+    }
+    mentions.watch(next, area.current?.selectionStart ?? next.length);
+    sending.setFailed(false);
+    onValueChange?.(next, details);
+  };
+
+  const sendByKey = () => {
+    // Enter picks from an open menu; it never sends past it.
+    if (mentions.menu !== null && mentions.rows.length > 0) {
+      mentions.handlePick(mentions.highlight);
+      return;
+    }
+    void sendQuietly(sending.handleSend);
+  };
+
+  const submit = (event: SubmitEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    sendByKey();
+  };
+
+  const onKeyDown = (event: KeyboardEvent<HTMLFormElement>) => {
+    const inTakeover =
+      event.target instanceof Element &&
+      event.target.closest("[data-slot=composer-takeover-room]") !== null;
+    if (
+      event.key === "Escape" &&
+      taken &&
+      props.onTakeoverDismiss !== undefined &&
+      inTakeover &&
+      !event.defaultPrevented
+    ) {
+      event.preventDefault();
+      props.onTakeoverDismiss();
+    }
+  };
+
+  // A press on the card's empty space puts the caret in the text.
+  const focusText = (event: PointerEvent<HTMLElement>) => {
+    if (taken || event.target !== event.currentTarget) {
+      return;
+    }
+    event.preventDefault();
+    area.current?.focus();
+  };
+
+  const field = (
+    <ComposerField
+      area={area}
+      label={label}
+      placeholder={props.placeholder}
+      text={text}
+      describedBy={sending.failed || invalid ? underId : undefined}
+      invalid={invalid}
+      disabled={disabled}
+      compact={compact}
+      mentions={mentions}
+      onChange={change}
+      onPaste={files.handlePaste}
+      onSubmit={sendByKey}
+    />
+  );
+  const editor = (
+    <ComposerEditor
+      field={field}
+      text={text}
+      compact={compact}
+      mentions={mentions}
+      loading={props.mentionsLoading}
+      emptyLabel={props.mentionsEmptyLabel}
+    />
+  );
+  const last = (
+    <ComposerEnd
+      voice={props.voice}
+      empty={empty}
+      working={working}
+      disabled={disabled}
+      onSend={sending.handleSend}
+      onStop={props.onStop}
+      sendLabel={props.sendLabel}
+      stopLabel={props.stopLabel}
+    />
+  );
+
+  return (
+    // oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- the form hears what happens in its controls: focus, Escape and files dropped
+    <form
+      data-slot="composer"
+      data-activity={activity}
+      aria-label={label}
+      onFocus={focusWatch.handleFocus}
+      onBlur={focusWatch.handleBlur}
+      onSubmit={submit}
+      onDragOver={files.handleDragOver}
+      onDragLeave={files.handleDragLeave}
+      onDrop={files.handleDrop}
+      onKeyDown={onKeyDown}
+      {...stylex.props(styles.root, props.layout ?? props.style)}
+    >
+      {/* One stacking context, three layers: the light at the bottom, then a band above the card
+          (so the light never paints over its rows), then the card, which tucks over the band. */}
+      <div {...stylex.props(styles.stack)}>
+        {Boolean(props.top) && (
+          <div {...stylex.props(styles.top)}>{props.top}</div>
+        )}
+        <div {...stylex.props(styles.cardRoom)}>
+          {!disabled && (
+            <ComposerGlow
+              edge={props.edge}
+              working={working}
+              success={success}
+              accent={props.accent}
+            />
+          )}
+          <fieldset
+            ref={card}
+            disabled={disabled}
+            onPointerDown={focusText}
+            {...stylex.props(
+              styles.card,
+              props.surface === "glass" && styles.glass,
+              compact && !taken && styles.compactCard,
+              taken && styles.taken,
+              files.dragging && styles.target,
+              files.over && styles.targetOver
+            )}
+          >
+            {files.dragging && (
+              <span aria-hidden="true" {...stylex.props(styles.drop)}>
+                {props.dropLabel}
+              </span>
+            )}
+            <DisabledContext.Provider value={disabled}>
+              <MentionContext.Provider
+                value={mentions.on ? mentions.openMentions : null}
+              >
+                <ComposerInside
+                  takeover={takeover}
+                  compact={compact}
+                  start={props.start}
+                  end={props.end}
+                  last={last}
+                  editor={editor}
+                  controls={props.controls}
+                  above={props.above}
+                  attachments={attachments}
+                  onAttach={props.onAttach}
+                  onRemoveAttachment={props.onRemoveAttachment}
+                  onRetryAttachment={props.onRetryAttachment}
+                  onOpenAttachment={props.onOpenAttachment}
+                  attachmentWords={props.attachmentWords}
+                  focusText={focusText}
+                />
+              </MentionContext.Provider>
+            </DisabledContext.Provider>
+          </fieldset>
+        </div>
+      </div>
+      <ComposerUnder
+        id={underId}
+        workingLabel={props.showWorking && working ? props.workingLabel : null}
+        failed={sending.failed}
+        failedLabel={props.failedLabel}
+        validation={validation}
+        waiting={uploading && text.trim() !== ""}
+        uploadingLabel={props.uploadingLabel}
+        note={props.note}
+      />
+      {/* oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- not every screen reader treats <output> as a live region; role="status" is */}
+      <p role="status" {...stylex.props(styles.unseen)}>
+        {statusWords(activity, props.workingLabel, props.successLabel)}
+      </p>
+    </form>
+  );
+};
+
+/** Where a person writes to an assistant: the text, its actions, and send. */
+export const Composer = (props: ComposerProps) => (
+  <ComposerForm {...props} {...lookDefaults(props)} {...wordDefaults(props)} />
+);

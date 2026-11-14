@@ -8,11 +8,12 @@
 //   <Skeleton shape="block" style={size.chart} />  a block, sized by the layout
 //   <Skeleton shape="circle" />                    an avatar
 //
-// `look` picks how it waits. `grey`, the default for now: the soft fill that breathes. `field`: a
-// fine dot field, almost still, with a wave of our light (mint into pine) crossing it, one wave for
+// `look` picks how it waits. `field`, the default (provisional, 14 November): a fine dot field,
+// almost still, with a wave of our light (mint into pine) crossing it, one wave for
 // the whole page (light.ts). `resolve`: the same, but the field gathers denser over the first passes,
 // so a long wait reads as progress. `lines`: for text, a hairline per line and the light running
-// along the lines one after another, as if being written. With reduced motion every look is still.
+// along the lines one after another, as if being written. `grey`: the soft fill that breathes, as
+// it was. With reduced motion every look is still.
 //
 // It is hidden from screen readers; the region it stands in carries `aria-busy` and a status
 // that says what is loading. Every value is a token (src/tokens). A caller may set size and
@@ -21,7 +22,7 @@ import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef } from "react";
 
 import { grasp, media } from "../tokens/tokens.stylex";
-import { lightUp, noop } from "./light";
+import { lightUp, stopNothing } from "./light";
 
 export type SkeletonShape = "line" | "block" | "circle";
 export type SkeletonText = "sm" | "md" | "lg";
@@ -74,10 +75,10 @@ export interface SkeletonProps {
    */
   pulse?: boolean;
   /**
-   * How it waits: `grey` the soft fill that breathes; `field` a dot field our light crosses;
+   * How it waits: `field` a dot field our light crosses; `grey` the soft fill that breathes;
    * `resolve` the field gathering denser as the wait goes on; `lines` light written along lines of
    * text (a block or circle takes the field).
-   * @default "grey"
+   * @default "field"
    */
   look?: SkeletonLook;
   /** Its size and where it sits: the content it stands for decides. Never its fill or corner. */
@@ -237,7 +238,7 @@ export const Skeleton = ({
   shape = "line",
   text = "sm",
   pulse = true,
-  look = "grey",
+  look = "field",
   style,
   layout,
 }: SkeletonProps) => {
@@ -247,7 +248,7 @@ export const Skeleton = ({
     const element = field.current;
     const light = band.current;
     if (look === "grey" || element === null || light === null) {
-      return noop;
+      return stopNothing;
     }
     return lightUp(element, light, look);
   }, [look]);

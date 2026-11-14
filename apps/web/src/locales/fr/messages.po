@@ -2876,6 +2876,7 @@ msgstr "Demander à un administrateur"
 
 #: src/chat/composer.tsx
 #: src/chat/global-chat.tsx
+#: src/chat/start-composer.tsx
 msgid "Ask anything, or describe a process"
 msgstr "Posez une question ou décrivez un processus"
 
@@ -4467,6 +4468,10 @@ msgstr "Coût"
 msgid "Could be better"
 msgstr "À améliorer"
 
+#: src/chat/start-composer.tsx
+msgid "Could not send"
+msgstr "Envoi impossible"
+
 #: src/apps/app-owner.tsx
 msgid "Couldn't load who may answer for it."
 msgstr "Impossible de charger qui peut en répondre."
@@ -5612,6 +5617,7 @@ msgid "Exported the audit trail"
 msgstr "A exporté le journal d’audit"
 
 #: src/chat/composer.tsx
+#: src/chat/start-composer.tsx
 msgctxt "thinking effort"
 msgid "Extra high"
 msgstr "Très élevé"
@@ -6638,6 +6644,7 @@ msgid "High"
 msgstr "Élevé"
 
 #: src/chat/composer.tsx
+#: src/chat/start-composer.tsx
 msgctxt "thinking effort"
 msgid "High"
 msgstr "Élevé"
@@ -6674,6 +6681,7 @@ msgid "How far back"
 msgstr "Jusqu’où"
 
 #: src/chat/composer.tsx
+#: src/chat/start-composer.tsx
 msgid "How hard it thinks"
 msgstr "Niveau de réflexion"
 
@@ -7965,6 +7973,7 @@ msgid "Low"
 msgstr "Faible"
 
 #: src/chat/composer.tsx
+#: src/chat/start-composer.tsx
 msgctxt "thinking effort"
 msgid "Low"
 msgstr "Faible"
@@ -8126,6 +8135,7 @@ msgid "Marketing"
 msgstr "Marketing"
 
 #: src/chat/composer.tsx
+#: src/chat/start-composer.tsx
 msgctxt "thinking effort"
 msgid "Max"
 msgstr "Maximal"
@@ -8144,6 +8154,7 @@ msgid "Measured return"
 msgstr "Gain mesuré"
 
 #: src/chat/composer.tsx
+#: src/chat/start-composer.tsx
 msgctxt "thinking effort"
 msgid "Medium"
 msgstr "Moyen"
@@ -8184,6 +8195,10 @@ msgctxt "folder of the tools named in interviews"
 msgid "Mentioned"
 msgstr "Cités"
 
+#: src/chat/start-composer.tsx
+msgid "Message"
+msgstr "Message"
+
 #: src/chat/thread.tsx
 #: src/routes/guest.tsx
 msgid "Messages"
@@ -8212,6 +8227,7 @@ msgstr "Minutes gagnées par demande"
 #: src/agents/agent-form.tsx
 #: src/agents/agent-page.tsx
 #: src/apps/resource-bindings.tsx
+#: src/chat/start-composer.tsx
 #: src/onboarding/ai-step.tsx
 #: src/routes/_shell.settings.models.tsx
 msgid "Model"
@@ -8237,6 +8253,7 @@ msgstr "Modèle : {name}, réflexion {effort, select, low {faible} medium {moyen
 msgid "Model: {name}. Change model"
 msgstr "Modèle : {name}. Changer de modèle"
 
+#: src/chat/start-composer.tsx
 #: src/routes/_shell.settings.models.tsx
 #: src/routes/_shell.settings.tsx
 #: src/settings/ai-providers.tsx

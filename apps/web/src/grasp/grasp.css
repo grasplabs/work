@@ -58,12 +58,3 @@
 [data-icons="still"] :is(.lucide, [data-moves]) > * {
   animation: none !important;
 }
-
-/*
- * Glass under the box to ask in (chat/chat-start.tsx): the box's own fill
- * is let go, so the glass it stands on shows, and what is behind the page
- * runs on under it.
- */
-[data-glass] [data-slot="input-group"] {
-  background-color: transparent;
-}
