@@ -22,6 +22,7 @@ import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace, inJurisdiction } from "../src/durable-objects.ts";
 import type { Onboarding } from "../src/onboarding/store.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { erasureAreas } from "../src/person-erasure-inventory.ts";
 import { rollback } from "../src/publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { testApp } from "./app-definitions.ts";
@@ -651,6 +652,17 @@ describe("erasing a person", () => {
       sessions: 0,
       after: { name, email: null, removed: true },
     });
+  });
+
+  it("runs every area the inventory files a table under, and only those", async () => {
+    const { admin, person } = await removedPerson();
+
+    const { areas } = await admin.api.members.erasure(person.userId);
+
+    // Removal is not an area of the erasure: it comes before it.
+    expect(areas.toSorted()).toStrictEqual(
+      erasureAreas.filter((area) => area !== "removal").toSorted()
+    );
   });
 
   it("keeps their name on the company's records, so what they did stays traceable", async () => {

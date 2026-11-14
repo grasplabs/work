@@ -84,6 +84,7 @@ import { dropHeldStarts } from "./held-starts.ts";
 import { brainOf } from "./knowledge/ports.ts";
 import { coreErasure } from "./knowledge/rpc.ts";
 import { onboardingStore } from "./onboarding/store.ts";
+import type { ErasureAreaName } from "./person-erasure-inventory.ts";
 import { stopRunsFor } from "./workflows/resource-runs.ts";
 
 // Erasing a person (GRA-903), from its threat model (person-erasure.test.ts):
@@ -122,10 +123,13 @@ import { stopRunsFor } from "./workflows/resource-runs.ts";
 
 /** An area of a person's erasure: what it erases, in one batch, once. */
 interface ErasureStep {
-  readonly area: string;
+  readonly area: ErasureAreaName;
   /**
    * Erases everything of `userId`'s in the area, and marks the area
-   * complete in the same batch (`completed`), or nothing of it.
+   * complete in the same batch (`completed`), or nothing of it; where the
+   * work is outside core's database (the Brain's), marks it complete by a
+   * statement of its own once that work answered it is done, and a call
+   * that fails marks nothing.
    */
   readonly erase: (env: Env, userId: string) => Promise<void>;
 }
@@ -141,7 +145,7 @@ export type ErasureAreaState =
 const marked = (
   db: ReturnType<typeof drizzle>,
   userId: string,
-  area: string,
+  area: ErasureAreaName,
   state: Exclude<ErasureAreaState, "pending">,
   done: SQL = sql`1`
 ) =>
@@ -163,7 +167,7 @@ const marked = (
 const completed = (
   db: ReturnType<typeof drizzle>,
   userId: string,
-  area: string,
+  area: ErasureAreaName,
   done: SQL = sql`1`
 ) => marked(db, userId, area, "complete", done);
 
@@ -722,7 +726,9 @@ const targetOf = (by: Identity, userId: unknown): string => {
 
 /** `areas` in the order the erasure runs them; any it doesn't know last. */
 const inStepOrder = (areas: readonly ErasureArea[]): ErasureArea[] => {
-  const order = new Map(steps.map(({ area }, index) => [area, index]));
+  const order = new Map<string, number>(
+    steps.map(({ area }, index) => [area, index])
+  );
   return areas.toSorted(
     (one, other) =>
       (order.get(one.area) ?? steps.length) -
