@@ -14,6 +14,10 @@ import { redact } from "../src/redact.ts";
 const withLogin = (host: string, rest: string): string =>
   `https://${["user", "secret"].join(":")}@${host}${rest}`;
 
+/** `length` hex characters, as a session id is written. */
+const hex = (length: number): string =>
+  "9f8e7d6c5b4a3f2e1d0c".repeat(4).slice(0, length);
+
 /** A session id as a server issues one: 128 bits, as hex. */
 const sessionToken = "9f8e7d6c5b4a3f2e".repeat(2);
 
@@ -318,17 +322,72 @@ describe("redacting credentials", () => {
     ]);
   });
 
+  it("redacts each framework's default session cookie wherever it is written", () => {
+    // Each as the framework issues it, built from parts so the source
+    // holds none.
+    const sessions: readonly (readonly [name: string, value: string])[] = [
+      // Laravel: its encrypted payload, base64 JSON, URL-encoded.
+      [
+        "laravel_session",
+        `${["eyJpdiI6IkF4", "ZjR2b1NyM0", "dXZ3ZXJ0eSJ9"].join("")}%3D`,
+      ],
+      // Rails: base64 data, its padding URL-encoded, `--` and a digest.
+      ["_myapp_session", `dGhpcyBpcyBhIHJhaWxz%3D%3D--${hex(40)}`],
+      // express-session, named `session`: `s:` URL-encoded, id, signature.
+      ["session", `s%3A${hex(24)}.${["AbCdEfGh", "IjKlMnOp"].join("")}`],
+      // cookie-session: base64 JSON.
+      [
+        "session",
+        `${["eyJ1c2VySWQi", "OjQyLCJyb2xl", "IjoiYWRtaW4ifQ"].join("")}==`,
+      ],
+      // A JSON Web Token in a cookie.
+      [
+        "session",
+        [
+          "eyJhbGciOiJIUzI1NiJ9",
+          "eyJzdWIiOiJiZW4ifQ",
+          "c2lnbmVkLWJ5LWFjbWU",
+        ].join("."),
+      ],
+      ["PHPSESSID", hex(26)],
+      ["JSESSIONID", hex(32).toUpperCase()],
+      ["ASP.NET_SessionId", hex(24)],
+      // Django.
+      ["sessionid", hex(32)],
+    ];
+    const contexts: readonly ((name: string, value: string) => string)[] = [
+      (name, value) => `Cookie: theme=dark; ${name}=${value}; lang=en`,
+      (name, value) => `Set-Cookie: ${name}=${value}; Path=/; HttpOnly`,
+      (name, value) => `${name}=${value}`,
+      (name, value) => `{"${name}": "${value}", "next": 1}`,
+      (name, value) => JSON.stringify(JSON.stringify({ [name]: value })),
+      (name, value) => `{ ${name}: '${value}' }`,
+      (name, value) => `https://app.acme.test/home?${name}=${value}&tab=1`,
+      (name, value) => `(${name}=${value})`,
+      (name, value) => `[${name}=${value}]`,
+      (name, value) => `{${name}: ${value}}`,
+      (name, value) => `<${name}=${value}>`,
+      (name, value) => `${name}=${value}!`,
+    ];
+    const leaked = sessions.flatMap(([name, value]) =>
+      contexts
+        .map((context) => context(name, value))
+        .filter((text) => redact(text).includes(value))
+    );
+    expect(leaked).toStrictEqual([]);
+  });
+
   it("reads a megabyte of session and cookie names before long runs in one pass", () => {
-    // Runs that read as a token or a cookie string up to their last
-    // character, and then don't.
+    // Runs that read as a session's value or a cookie string up to their
+    // last character, and then don't.
     const run = "a".repeat(5000);
-    const lines = `session: ${run}: cookie: ${run}!\nCookie: a=${run}\n`;
+    const lines = `session: ${run}: cookie: ${run}|\nCookie: a=${run}\n`;
     const flood = "session:".repeat(125_000);
     // Compared whole, so a failure doesn't print a megabyte.
     expect({
       lines:
         redact(lines.repeat(66)) ===
-        `session: ${run}: cookie: ${run}!\nCookie: [redacted]\n`.repeat(66),
+        `session: ${run}: cookie: ${run}|\nCookie: [redacted]\n`.repeat(66),
       flood: redact(flood) === flood,
       cookies: redact(`cookie=${"cookie=".repeat(150_000)}`),
     }).toStrictEqual({

@@ -19,7 +19,7 @@ import { decodeHTMLAttribute } from "entities/decode";
  * spaces included; unquoted, to the next space or separator, with a
  * `Bearer` or `Basic` scheme of any length taken with it. After `session`
  * or `cookie`, the same, but only a value shaped like a credential (a
- * token, or a cookie string to its end: see its entry). JSON quoted
+ * session's value, or a cookie string to its end: see its entry). JSON quoted
  * once more, as a string inside JSON (`{\"password\":\"…\"}`), is
  * caught the same way, to the escaped closing quote. And in every link,
  * its parameters that sign or grant it (`redactLinks`, below). Anything else
@@ -52,11 +52,17 @@ const redactedAssignment = (...args: unknown[]): string => {
 /** A character of a token: what a `Bearer` value is written in (RFC 6750). */
 const tokenChar = String.raw`[\w\-.~+/]`;
 
-/**
- * A token: 16 or more token characters, then any `=` padding. Sixteen hex
- * characters are 64 bits, the least a session id carries (OWASP).
- */
+/** A token: 16 or more token characters, then any `=` padding. */
 const token = String.raw`${tokenChar}{16,}=*`;
+
+/**
+ * A session's value as servers write it: 16 or more token characters or
+ * `%`, as frameworks URL-encode their cookies (Laravel's `eyJ…%3D`, Rails'
+ * `…%3D%3D--…`, express's `s%3A…`), then any `=` padding, ending at a
+ * space, a separator, a closing bracket or `!`. Sixteen hex characters are
+ * 64 bits, the least a session id carries (OWASP).
+ */
+const sessionValue = String.raw`[\w\-.~+/%]{16,}=*(?![^\s"'\\&,;)\]}>!])`;
 
 /**
  * Known credential formats, each recognisable by its shape alone: the
@@ -94,13 +100,14 @@ const credentials: readonly (readonly [
   // `session` and `cookie`, alone or ending a name (`laravel_session`,
   // `authCookie`), are everyday words too ("Session: 45 minutes",
   // "Possession: 61%"), so their value is redacted only when it is shaped
-  // like a credential: a token, whole, or a cookie string (`name=value`,
-  // a cookie's name being a token's characters, RFC 6265), with every pair
-  // after it to a quote or the end of the line. Quoted or not. Each part
-  // backs off at most over the run it read, once per name: linear.
+  // like a credential: a session's value, whole, or a cookie string
+  // (`name=value`, a cookie's name being a token's characters, RFC 6265),
+  // with every pair after it to a quote or the end of the line. Quoted or
+  // not. Each part backs off at most over the run it read, once per name:
+  // linear.
   [
     new RegExp(
-      String.raw`\b(?<name>\w*?(?:session|cookie))(?<between>\\?["']?\s*[:=]\s*)(?<quote>\\?["'])?(?:${tokenChar}+=[^"'\\\n]*|${token}(?![^\s"'\\&,;]))(?<close>\k<quote>)?`,
+      String.raw`\b(?<name>\w*?(?:session|cookie))(?<between>\\?["']?\s*[:=]\s*)(?<quote>\\?["'])?(?:${tokenChar}+=[^"'\\\n]*|${sessionValue})(?<close>\k<quote>)?`,
       "giu"
     ),
     redactedAssignment,
@@ -132,11 +139,18 @@ const credentials: readonly (readonly [
 // `#code=…` are not); a link `URL` can't parse; a link with no scheme
 // (`www.…`, `//host/…`); and an AWS secret key written as
 // `aws_secret_access_key = …` or bare (only its key ID, `AKIA…`, has a
-// shape of its own). After `session` or `cookie`: a session value shorter
-// than a token (`session=9f8e7d`), and a cookie value in quotes past the
-// first quote; and a word of 16 or more token characters
-// (`Session: onboarding-workshop`) reads as a token and is redacted. Prose
-// after the other names loses its first word ("The secret: practice
+// shape of its own). After `session` or `cookie` (everyday words, so only
+// a credential's shape is redacted): a value under 16 characters
+// (`session=9f8e7d`); a value holding `:` or `|` (express's decoded
+// `s:<id>.<sig>`, `user:42:…`, `a|b`), as allowing them would blank a
+// link (`Session: https://…`); a quoted value with a space in it; and, in
+// a cookie string, the pairs after a quoted value (`c="d"; sid=…`), as the
+// string ends at a quote so it never runs past the end of a JSON string
+// holding it. The other way, after them: a word
+// of 16 or more such characters (`Session: onboarding-workshop`) reads as
+// a session's value, and any `name=value` blanks the rest of its line
+// ("cookie: flavour=vanilla, then we walked" → "cookie: [redacted]").
+// Prose after the other names loses its first word ("The secret: practice
 // daily", "Authorization: approved"): what follows them is a credential by
 // name, a short or word-like one too. What is left is bounded: such text
 // reaches only the person who read it (the Brain keeps a connection's
