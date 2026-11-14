@@ -2496,6 +2496,10 @@ msgstr "Une API externe que les applications et les workflows peuvent appeler vi
 msgid "An owner can turn this on."
 msgstr "Un propriétaire peut l’activer."
 
+#: src/activity/audit-words.ts
+msgid "An upload into the Brain failed"
+msgstr "Un import dans le Brain a échoué"
+
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "and {more} more"
 msgstr "et {more} de plus"
@@ -4480,6 +4484,10 @@ msgstr "Coût"
 msgid "Could be better"
 msgstr "À améliorer"
 
+#: src/activity/audit-words.ts
+msgid "Couldn't erase an upload from the Brain"
+msgstr "N'a pas pu effacer un fichier importé du Brain"
+
 #: src/apps/app-owner.tsx
 msgid "Couldn't load who may answer for it."
 msgstr "Impossible de charger qui peut en répondre."
@@ -5310,6 +5318,10 @@ msgstr "Les entrées jusqu’à la {purged} ont été supprimées à la fin de l
 msgid "Erase"
 msgstr "Effacer"
 
+#: src/brain/sources-page.tsx
+msgid "Erase {name} for good"
+msgstr "Effacer {name} définitivement"
+
 #: src/settings/erasures.tsx
 msgid "Erase {name}?"
 msgstr "Effacer {name} ?"
@@ -5317,6 +5329,14 @@ msgstr "Effacer {name} ?"
 #: src/settings/erasures.tsx
 msgid "Erase {who}"
 msgstr "Effacer {who}"
+
+#: src/brain/sources-page.tsx
+msgid "Erase for good"
+msgstr "Effacer définitivement"
+
+#: src/brain/sources-page.tsx
+msgid "Erase this upload for good?"
+msgstr "Effacer ce fichier importé définitivement ?"
 
 #: src/settings/erasures.tsx
 msgid "Erase…"
@@ -5329,6 +5349,10 @@ msgstr "Effacé"
 #: src/activity/audit-words.ts
 msgid "Erased a removed member"
 msgstr "A effacé un membre retiré"
+
+#: src/activity/audit-words.ts
+msgid "Erased an upload from the Brain for good"
+msgstr "A effacé définitivement un fichier importé du Brain"
 
 #: src/settings/erasures.tsx
 msgid "Erasing, {done} of {total}"
@@ -7964,6 +7988,10 @@ msgstr "Londres"
 msgid "Looked at the access to remove by hand"
 msgstr "A consulté l’accès à retirer à la main"
 
+#: src/activity/audit-words.ts
+msgid "Looked at the uploads shared with a team or everyone"
+msgstr "A consulté les fichiers importés partagés avec une équipe ou tout le monde"
+
 #: src/chat/package-requests.tsx
 msgctxt "an advisory's severity"
 msgid "Low"
@@ -8905,6 +8933,10 @@ msgstr "Aucune équipe"
 msgid "No teams yet."
 msgstr "Pas encore d’équipes."
 
+#: src/brain/sources-page.tsx
+msgid "No uploads are shared with a team or everyone."
+msgstr "Aucun fichier importé n'est partagé avec une équipe ou tout le monde."
+
 #: src/workflows/workflow-triggers.tsx
 msgid "No webhook source yet: an admin adds one in Settings, with the URL and secret its sender uses."
 msgstr "Aucune source de webhook pour l’instant : un administrateur en ajoute une dans les Paramètres, avec l’URL et le secret qu’utilise son expéditeur."
@@ -9693,6 +9725,10 @@ msgstr "Uniquement les comptes du locataire {tenantId}."
 #: src/settings/use-team-change.ts
 msgid "Only admins can change teams."
 msgstr "Seuls les administrateurs peuvent modifier les équipes."
+
+#: src/brain/sources-page.tsx
+msgid "Only an admin can remove an upload shared with a team or everyone. Ask an admin to remove it."
+msgstr "Seul un administrateur peut retirer un fichier importé partagé avec une équipe ou tout le monde. Demandez à un administrateur de le retirer."
 
 #: src/knowledge/new-collection.tsx
 msgid "Only an admin makes a collection for everyone or for teams."
@@ -12474,6 +12510,10 @@ msgstr "Boîtes partagées, agendas des collègues et fichiers de l'entreprise."
 msgid "Shared mailboxes, registers and the company's records, after they press a card."
 msgstr "Boîtes partagées, registres et données de l'entreprise, après avoir appuyé sur une carte."
 
+#: src/brain/sources-page.tsx
+msgid "Shared uploads"
+msgstr "Fichiers importés partagés"
+
 #: src/apps/app-sharing.tsx
 #: src/workflows/share-workflow.tsx
 msgid "Shared with"
@@ -13414,6 +13454,10 @@ msgstr "Équipe {name}"
 #: src/brain/sources-page.tsx
 msgid "Team {team} can read this upload."
 msgstr "L'équipe {team} peut lire ce fichier importé."
+
+#: src/brain/sources-page.tsx
+msgid "Team {teamName}"
+msgstr "Équipe {teamName}"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "team leads talked"
@@ -15232,6 +15276,14 @@ msgid "Upload new version"
 msgstr "Importer une nouvelle version"
 
 #: src/activity/audit-words.ts
+msgid "Uploaded a file into the Brain"
+msgstr "A importé un fichier dans le Brain"
+
+#: src/brain/sources-page.tsx
+msgid "Uploaded by {uploaderName}, {uploaded}"
+msgstr "Importé par {uploaderName}, {uploaded}"
+
+#: src/activity/audit-words.ts
 msgid "Uploaded to knowledge"
 msgstr "A téléversé dans les connaissances"
 
@@ -15239,6 +15291,10 @@ msgstr "A téléversé dans les connaissances"
 #: src/knowledge/uploads.tsx
 msgid "Uploading…"
 msgstr "Import en cours…"
+
+#: src/brain/sources-page.tsx
+msgid "Uploads shared with a team or everyone. Only an admin can erase one, for everyone and for good. Its text isn't shown here."
+msgstr "Fichiers importés partagés avec une équipe ou tout le monde. Seul un administrateur peut en effacer un, pour tous et définitivement. Son texte n'est pas affiché ici."
 
 #: src/settings/event-sources.tsx
 msgid "URL of {name}"
@@ -15647,6 +15703,10 @@ msgstr "A été appelée par une autre application"
 #: src/activity/audit-words.ts
 msgid "Was refused adding a member to an App"
 msgstr "N’a pas pu ajouter un membre à une application"
+
+#: src/activity/audit-words.ts
+msgid "Was refused an upload into the Brain, or its removal"
+msgstr "S'est vu refuser un import dans le Brain, ou son retrait"
 
 #: src/activity/audit-words.ts
 msgid "Was refused approving packages that couldn't be checked"

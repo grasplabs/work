@@ -2496,6 +2496,10 @@ msgstr "An outside API that Apps and workflows can call through Grasp, once you 
 msgid "An owner can turn this on."
 msgstr "An owner can turn this on."
 
+#: src/activity/audit-words.ts
+msgid "An upload into the Brain failed"
+msgstr "An upload into the Brain failed"
+
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "and {more} more"
 msgstr "and {more} more"
@@ -4480,6 +4484,10 @@ msgstr "Cost"
 msgid "Could be better"
 msgstr "Could be better"
 
+#: src/activity/audit-words.ts
+msgid "Couldn't erase an upload from the Brain"
+msgstr "Couldn't erase an upload from the Brain"
+
 #: src/apps/app-owner.tsx
 msgid "Couldn't load who may answer for it."
 msgstr "Couldn't load who may answer for it."
@@ -5310,6 +5318,10 @@ msgstr "Entries through {purged} were removed when their retention ended: they s
 msgid "Erase"
 msgstr "Erase"
 
+#: src/brain/sources-page.tsx
+msgid "Erase {name} for good"
+msgstr "Erase {name} for good"
+
 #: src/settings/erasures.tsx
 msgid "Erase {name}?"
 msgstr "Erase {name}?"
@@ -5317,6 +5329,14 @@ msgstr "Erase {name}?"
 #: src/settings/erasures.tsx
 msgid "Erase {who}"
 msgstr "Erase {who}"
+
+#: src/brain/sources-page.tsx
+msgid "Erase for good"
+msgstr "Erase for good"
+
+#: src/brain/sources-page.tsx
+msgid "Erase this upload for good?"
+msgstr "Erase this upload for good?"
 
 #: src/settings/erasures.tsx
 msgid "Erase…"
@@ -5329,6 +5349,10 @@ msgstr "Erased"
 #: src/activity/audit-words.ts
 msgid "Erased a removed member"
 msgstr "Erased a removed member"
+
+#: src/activity/audit-words.ts
+msgid "Erased an upload from the Brain for good"
+msgstr "Erased an upload from the Brain for good"
 
 #: src/settings/erasures.tsx
 msgid "Erasing, {done} of {total}"
@@ -7964,6 +7988,10 @@ msgstr "London"
 msgid "Looked at the access to remove by hand"
 msgstr "Looked at the access to remove by hand"
 
+#: src/activity/audit-words.ts
+msgid "Looked at the uploads shared with a team or everyone"
+msgstr "Looked at the uploads shared with a team or everyone"
+
 #: src/chat/package-requests.tsx
 msgctxt "an advisory's severity"
 msgid "Low"
@@ -8905,6 +8933,10 @@ msgstr "No teams"
 msgid "No teams yet."
 msgstr "No teams yet."
 
+#: src/brain/sources-page.tsx
+msgid "No uploads are shared with a team or everyone."
+msgstr "No uploads are shared with a team or everyone."
+
 #: src/workflows/workflow-triggers.tsx
 msgid "No webhook source yet: an admin adds one in Settings, with the URL and secret its sender uses."
 msgstr "No webhook source yet: an admin adds one in Settings, with the URL and secret its sender uses."
@@ -9693,6 +9725,10 @@ msgstr "Only accounts of the tenant {tenantId}."
 #: src/settings/use-team-change.ts
 msgid "Only admins can change teams."
 msgstr "Only admins can change teams."
+
+#: src/brain/sources-page.tsx
+msgid "Only an admin can remove an upload shared with a team or everyone. Ask an admin to remove it."
+msgstr "Only an admin can remove an upload shared with a team or everyone. Ask an admin to remove it."
 
 #: src/knowledge/new-collection.tsx
 msgid "Only an admin makes a collection for everyone or for teams."
@@ -12474,6 +12510,10 @@ msgstr "Shared mailboxes, colleagues' calendars and the company's files."
 msgid "Shared mailboxes, registers and the company's records, after they press a card."
 msgstr "Shared mailboxes, registers and the company's records, after they press a card."
 
+#: src/brain/sources-page.tsx
+msgid "Shared uploads"
+msgstr "Shared uploads"
+
 #: src/apps/app-sharing.tsx
 #: src/workflows/share-workflow.tsx
 msgid "Shared with"
@@ -13414,6 +13454,10 @@ msgstr "Team {name}"
 #: src/brain/sources-page.tsx
 msgid "Team {team} can read this upload."
 msgstr "Team {team} can read this upload."
+
+#: src/brain/sources-page.tsx
+msgid "Team {teamName}"
+msgstr "Team {teamName}"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "team leads talked"
@@ -15232,6 +15276,14 @@ msgid "Upload new version"
 msgstr "Upload new version"
 
 #: src/activity/audit-words.ts
+msgid "Uploaded a file into the Brain"
+msgstr "Uploaded a file into the Brain"
+
+#: src/brain/sources-page.tsx
+msgid "Uploaded by {uploaderName}, {uploaded}"
+msgstr "Uploaded by {uploaderName}, {uploaded}"
+
+#: src/activity/audit-words.ts
 msgid "Uploaded to knowledge"
 msgstr "Uploaded to knowledge"
 
@@ -15239,6 +15291,10 @@ msgstr "Uploaded to knowledge"
 #: src/knowledge/uploads.tsx
 msgid "Uploading…"
 msgstr "Uploading…"
+
+#: src/brain/sources-page.tsx
+msgid "Uploads shared with a team or everyone. Only an admin can erase one, for everyone and for good. Its text isn't shown here."
+msgstr "Uploads shared with a team or everyone. Only an admin can erase one, for everyone and for good. Its text isn't shown here."
 
 #: src/settings/event-sources.tsx
 msgid "URL of {name}"
@@ -15647,6 +15703,10 @@ msgstr "Was called by another App"
 #: src/activity/audit-words.ts
 msgid "Was refused adding a member to an App"
 msgstr "Was refused adding a member to an App"
+
+#: src/activity/audit-words.ts
+msgid "Was refused an upload into the Brain, or its removal"
+msgstr "Was refused an upload into the Brain, or its removal"
 
 #: src/activity/audit-words.ts
 msgid "Was refused approving packages that couldn't be checked"

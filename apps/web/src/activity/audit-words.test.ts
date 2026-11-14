@@ -29,4 +29,25 @@ describe("an audit entry's words", () => {
       allOwn: [],
     });
   });
+
+  it("say what was done to an upload into the Brain, each in its own words", () => {
+    const uploadActions = [
+      "brain.upload.added",
+      "brain.upload.refused",
+      "brain.upload.failed",
+      "brain.upload.deleted",
+      "brain.upload.delete_failed",
+      "brain.upload.listed",
+    ];
+    const words = uploadActions.map((action) => said(action));
+    expect({
+      erased: said("brain.upload.deleted"),
+      allSaid: words.every((each) => each !== undefined),
+      distinct: new Set(words.slice(1)).size,
+    }).toStrictEqual({
+      erased: "Erased an upload from the Brain for good",
+      allSaid: true,
+      distinct: uploadActions.length - 1,
+    });
+  });
 });

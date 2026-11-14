@@ -136,10 +136,39 @@ export interface BrainUpload {
   /** Whether they may upload its next version: its uploader alone. */
   mayAddVersion: boolean;
   /**
-   * Whether they may delete it: its uploader, or an admin when it isn't
-   * one person's own.
+   * Whether they may delete it, which erases it for good: its uploader,
+   * when it is theirs alone; an admin, when it is shared with a team or
+   * everyone. Its uploader asks an admin to remove a shared one.
    */
   mayDelete: boolean;
+}
+
+/**
+ * An upload shared with a team or everyone, as an admin's listing shows
+ * it to erase: its file's name, who may read it, who uploaded it and
+ * when. Never its text.
+ */
+export interface BrainSharedUpload {
+  source: BrainSourceRef;
+  name: string;
+  readers: BrainUploadReaders;
+  /** The team's name, for a team's upload: null for everyone's. */
+  teamName: string | null;
+  uploaderName: string;
+  /** ISO 8601. */
+  uploadedAt: string;
+}
+
+/** Where the next page of shared uploads starts: after this one. */
+export interface BrainSharedUploadsAfter {
+  uploadedAt: string;
+  id: string;
+}
+
+/** A page of shared uploads, newest first, and where the next starts: null at the last. */
+export interface BrainSharedUploadPage {
+  uploads: BrainSharedUpload[];
+  next: BrainSharedUploadsAfter | null;
 }
 
 /** The Brain's sources, for the person signed in. */
@@ -180,6 +209,13 @@ export interface BrainSourcesApi {
   uploadOf: (uploadId: string) => Promise<BrainUpload | null>;
   /** Deletes an upload for good: every version, from the Brain and core alike. */
   deleteUpload: (uploadId: string) => Promise<void>;
+  /**
+   * For an admin: a page of the uploads shared with a team or everyone,
+   * newest first, after `after`, to erase one they may not read.
+   */
+  sharedUploads: (
+    after?: BrainSharedUploadsAfter | null
+  ) => Promise<BrainSharedUploadPage>;
 }
 
 /**
@@ -198,6 +234,8 @@ export const brainSourceErrors = defineErrorFamily({
 
 export const brainUploadErrors = defineErrorFamily({
   "brain.upload_not_found": "There's no such upload, or you can't see it.",
+  "brain.upload_admin_only":
+    "Only an admin can remove an upload shared with a team or everyone. Ask an admin to remove it.",
   "brain.upload_not_allowed":
     "Only the person who uploaded this file can do that (or an admin can delete it, when it isn't one person's own).",
   "brain.upload_readers":

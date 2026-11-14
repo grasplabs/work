@@ -8,6 +8,7 @@ import type {
   BrainSourceRef,
   BrainSourceText,
   BrainSourceVersionPage,
+  BrainSharedUploadPage,
   BrainUpload,
   BrainUploadReaders,
 } from "@grasp-os/shared/brain-sources";
@@ -454,6 +455,14 @@ const UploadActions = ({
       <p className="text-muted-foreground text-sm">
         <ReadersLine readers={readers} teams={teams} />
       </p>
+      {!mayDelete && readers.kind !== "me" ? (
+        <p className="text-muted-foreground text-sm">
+          <Trans>
+            Only an admin can remove an upload shared with a team or everyone.
+            Ask an admin to remove it.
+          </Trans>
+        </p>
+      ) : null}
       {mayAddVersion ? (
         <form
           className="flex flex-col gap-2 sm:flex-row sm:items-end"
@@ -1004,15 +1013,159 @@ const SourcePanel = ({
   );
 };
 
+/**
+ * For an admin: the uploads shared with a team or everyone, newest first,
+ * each by its file's name, who may read it, who uploaded it and when, never
+ * its text, with Erase for good: a shared upload only an admin erases,
+ * also one of a team they aren't in.
+ */
+const SharedUploads = ({ onErased }: { onErased: () => void }) => {
+  const { t } = useLingui();
+  const core = useCore();
+  const heading = useId();
+  const [listed, setListed] = useState<Read<BrainSharedUploadPage>>({
+    state: "loading",
+  });
+  const [acting, setActing] = useState<Read<unknown>>();
+  const [more, setMore] = useState<Read<BrainSharedUploadPage>>();
+  useEffect(() => {
+    let left = false;
+    const read = async (): Promise<void> => {
+      const answer = await readFrom(
+        core,
+        async (sources) => await sources.sharedUploads()
+      );
+      if (!left) {
+        setListed(answer);
+      }
+    };
+    void read();
+    return () => {
+      left = true;
+    };
+  }, [core]);
+  const busy = acting?.state === "loading";
+  return (
+    <section aria-labelledby={heading} className="flex flex-col gap-3">
+      <h2 className="text-sm font-medium" id={heading}>
+        <Trans>Shared uploads</Trans>
+      </h2>
+      <p className="text-muted-foreground text-sm">
+        <Trans>
+          Uploads shared with a team or everyone. Only an admin can erase one,
+          for everyone and for good. Its text isn&apos;t shown here.
+        </Trans>
+      </p>
+      {listed.state === "refused" ? (
+        <ErrorText>{listed.message}</ErrorText>
+      ) : null}
+      {listed.state === "ready" && listed.data.uploads.length === 0 ? (
+        <p className="text-muted-foreground text-sm">
+          <Trans>No uploads are shared with a team or everyone.</Trans>
+        </p>
+      ) : null}
+      {listed.state === "ready" && listed.data.uploads.length > 0 ? (
+        <ItemGroup render={<ul />} spacing="tight">
+          {listed.data.uploads.map((upload) => {
+            const { name, uploaderName, teamName } = upload;
+            const uploaded = formatDateTime(upload.uploadedAt);
+            return (
+              <li key={upload.source.id}>
+                <Item size="sm">
+                  <ItemContent>
+                    <span className="min-w-0 text-sm">{name}</span>
+                    <span className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
+                      <Badge variant="outline">
+                        {teamName === null ? t`Everyone` : t`Team ${teamName}`}
+                      </Badge>
+                      <span>
+                        <Trans>
+                          Uploaded by {uploaderName}, {uploaded}
+                        </Trans>
+                      </span>
+                    </span>
+                  </ItemContent>
+                  <Confirmed
+                    busy={busy}
+                    button={t`Erase for good`}
+                    confirm={t`Erase for good`}
+                    description={t`Every version of it is erased from the Brain for everyone who could read it. This can't be undone.`}
+                    label={t`Erase ${name} for good`}
+                    onConfirm={() => {
+                      setActing({ state: "loading" });
+                      void (async () => {
+                        const answer = await readFrom(core, async (sources) => {
+                          await sources.deleteUpload(upload.source.id);
+                        });
+                        setActing(answer);
+                        if (answer.state === "ready") {
+                          setMore(undefined);
+                          setListed(
+                            await readFrom(
+                              core,
+                              async (sources) => await sources.sharedUploads()
+                            )
+                          );
+                          onErased();
+                        }
+                      })();
+                    }}
+                    title={t`Erase this upload for good?`}
+                  />
+                </Item>
+              </li>
+            );
+          })}
+        </ItemGroup>
+      ) : null}
+      {acting?.state === "refused" ? <UploadRefusal refused={acting} /> : null}
+      {more?.state === "refused" ? <ErrorText>{more.message}</ErrorText> : null}
+      {listed.state === "ready" && listed.data.next !== null ? (
+        <Button
+          className="self-start"
+          disabled={more?.state === "loading"}
+          onClick={() => {
+            const { next, uploads } = listed.data;
+            setMore({ state: "loading" });
+            void (async () => {
+              const answer = await readFrom(
+                core,
+                async (sources) => await sources.sharedUploads(next)
+              );
+              setMore(answer.state === "refused" ? answer : undefined);
+              if (answer.state === "ready") {
+                setListed({
+                  state: "ready",
+                  data: {
+                    uploads: [...uploads, ...answer.data.uploads],
+                    next: answer.data.next,
+                  },
+                });
+              }
+            })();
+          }}
+          type="button"
+          variant="outline"
+        >
+          <Trans>Show more</Trans>
+        </Button>
+      ) : null}
+    </section>
+  );
+};
+
 /** The Brain's sources page: search, how connections feed it, and the sources. */
 export const SourcesPage = ({
   connections,
   teams,
+  admin,
 }: {
   /** The person's connections, each one they have connected. */
   connections: Connection[];
   /** The teams the person is in, whom they may upload for. */
   teams: Team[];
+  /** Whether they are an admin, who erases shared uploads. */
+  admin: boolean;
 }) => {
   // Each opening counts, so opening a source again (a search result
   // citing a version, after another was picked in its panel) starts its
@@ -1083,6 +1236,13 @@ export const SourcesPage = ({
             teams={teams}
           />
         </section>
+        {admin ? (
+          <SharedUploads
+            onErased={() => {
+              setListing((before) => before + 1);
+            }}
+          />
+        ) : null}
         <ConnectionFeeds connections={connections} />
         <section aria-labelledby={heading} className="flex flex-col gap-3">
           <h2 className="text-sm font-medium" id={heading}>

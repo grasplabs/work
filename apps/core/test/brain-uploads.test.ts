@@ -9,15 +9,19 @@ import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import { organizationId } from "../src/auth/auth.ts";
-import { eraseSource } from "../src/brain-next.ts";
+import { brainExportsPath } from "../src/brain-next-exports.ts";
+import { eraseSource, workBrain } from "../src/brain-next.ts";
 import { brainUploads, teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { allEvents } from "./audit-events.ts";
+import { copyOfStore, restoreStore } from "./brain-next-store-copy.ts";
 import { textOf } from "./brain-next-surfaces.ts";
 import { mockIdp } from "./idp.ts";
-import { signedInApi } from "./sign-in.ts";
+import { noProducers } from "./no-producers.ts";
+import { routed, signedInApi } from "./sign-in.ts";
 
 // Files uploaded straight into the Brain on Brain › Sources (GRA-1824),
 // through core's RPC (`session.brainSources`), from the threat model on
@@ -560,7 +564,10 @@ describe("uploading a file straight into the Brain", () => {
     "leaves an upload whose erasure failed as it was, to delete again",
     slow,
     async () => {
-      const uploader = await signedInApi(idp, "user");
+      const [uploader, admin] = await Promise.all([
+        signedInApi(idp, "user"),
+        signedInApi(idp, "admin"),
+      ]);
       const teamId = await teamOf(uploader);
       const kept = word();
       const { source } = await uploader.api.brainSources.upload(
@@ -571,10 +578,10 @@ describe("uploading a file straight into the Brain", () => {
       await failNextBucketPut();
 
       const failed = await outcome(async () => {
-        await uploader.api.brainSources.deleteUpload(source.id);
+        await admin.api.brainSources.deleteUpload(source.id);
       });
       const afterFailure = await uploader.api.brainSources.uploadOf(source.id);
-      await uploader.api.brainSources.deleteUpload(source.id);
+      await admin.api.brainSources.deleteUpload(source.id);
 
       expect({
         failed,
@@ -648,7 +655,10 @@ describe("uploading a file straight into the Brain", () => {
     "audits each upload by IDs, never by its file's name or words",
     slow,
     async () => {
-      const uploader = await signedInApi(idp, "user");
+      const [uploader, admin] = await Promise.all([
+        signedInApi(idp, "user"),
+        signedInApi(idp, "admin"),
+      ]);
       const teamId = await teamOf(uploader);
       const [inName, inText] = [word(), word()];
       const { source } = await uploader.api.brainSources.upload(
@@ -656,7 +666,7 @@ describe("uploading a file straight into the Brain", () => {
         teamReaders(teamId),
         crypto.randomUUID()
       );
-      await uploader.api.brainSources.deleteUpload(source.id);
+      await admin.api.brainSources.deleteUpload(source.id);
       const events = await eventsOf(source.id);
 
       expect({
@@ -682,7 +692,7 @@ describe("uploading a file straight into the Brain", () => {
   );
 
   it(
-    "lets a team upload's uploader delete it after they left the team, and an admin outside the team; nobody else, and no admin someone's own",
+    "refuses a shared upload's delete to its uploader, changing nothing, and lets an admin outside the team erase it without its text in any reply",
     slow,
     async () => {
       const [uploader, mate, admin, stranger] = await Promise.all([
@@ -692,62 +702,152 @@ describe("uploading a file straight into the Brain", () => {
         signedInApi(idp, "user"),
       ]);
       const teamId = await teamOf(uploader, mate);
-      const left = await uploader.api.brainSources.upload(
-        fileOf("Left behind"),
-        teamReaders(teamId),
-        crypto.randomUUID()
-      );
-      const forAdmin = await mate.api.brainSources.upload(
-        fileOf("For an admin to delete"),
+      const secret = word();
+      const shared = await uploader.api.brainSources.upload(
+        fileOf(`Payroll plan ${secret}`, "Payroll.vtt"),
         teamReaders(teamId),
         crypto.randomUUID()
       );
       const own = await mate.api.brainSources.upload(
-        fileOf("The mate's own"),
+        fileOf(`The mate's own ${word()}`, "Mine.vtt"),
         me,
         crypto.randomUUID()
       );
       const missing = crypto.randomUUID();
-      await leave(teamId, uploader);
-      const asStranger = await askedOf(stranger, left.source.id);
-      const asAdminOfOwn = await askedOf(admin, own.source.id);
+
       const uploaderSees = await uploader.api.brainSources.uploadOf(
-        left.source.id
+        shared.source.id
       );
-      const adminSees = await admin.api.brainSources.uploadOf(
-        forAdmin.source.id
+      const refused = await outcome(async () => {
+        await uploader.api.brainSources.deleteUpload(shared.source.id);
+      });
+      const rowsAfterRefusal = await rowsWith(shared.source.id);
+      const afterRefusal = {
+        rows: rowsAfterRefusal.length,
+        mateFinds: await found(mate, secret),
+      };
+      const asStranger = await askedOf(stranger, shared.source.id);
+      const asAdminOfOwn = await askedOf(admin, own.source.id);
+      // The admin isn't in the team: the listing names it, never its text.
+      const listing = await admin.api.brainSources.sharedUploads();
+      const listed = listing.uploads.find(
+        ({ source }) => source.id === shared.source.id
       );
-      await uploader.api.brainSources.deleteUpload(left.source.id);
-      await admin.api.brainSources.deleteUpload(forAdmin.source.id);
-      const ownAfter = await mate.api.brainSources.uploadOf(own.source.id);
+      const adminSees = await admin.api.brainSources.uploadOf(shared.source.id);
+      await admin.api.brainSources.deleteUpload(shared.source.id);
+      const nonAdminListing = await outcome(
+        async () => await uploader.api.brainSources.sharedUploads()
+      );
+      const rowsAfterErase = await rowsWith(shared.source.id);
+      const events = await eventsOf(shared.source.id);
 
       expect({
-        uploaderSees,
-        adminSees,
+        uploaderSees: uploaderSees?.mayDelete,
+        refused,
+        afterRefusal,
         asStranger,
         asAdminOfOwn,
-        gone: [
-          await mate.api.brainSources.uploadOf(left.source.id),
-          await mate.api.brainSources.uploadOf(forAdmin.source.id),
-        ],
-        ownKept: ownAfter?.source,
+        listed:
+          listed === undefined ? undefined : { ...listed, uploadedAt: "" },
+        ownListed: listing.uploads.some(
+          ({ source }) => source.id === own.source.id
+        ),
+        adminSees,
+        textInReplies: textOf([listing, adminSees]).includes(secret),
+        afterErase: {
+          rows: rowsAfterErase.length,
+          mateFinds: await found(mate, secret),
+          mateSees: await mate.api.brainSources.uploadOf(shared.source.id),
+        },
+        nonAdminListing,
+        refusedAs: events.find(
+          ({ action }) => action === "brain.upload.refused"
+        )?.detail,
       }).toStrictEqual({
-        uploaderSees: {
-          source: left.source,
-          readers: teamReaders(teamId),
-          mayAddVersion: false,
-          mayDelete: true,
-        },
-        adminSees: {
-          source: forAdmin.source,
-          readers: teamReaders(teamId),
-          mayAddVersion: false,
-          mayDelete: true,
-        },
+        uploaderSees: false,
+        refused: { refused: "brain.upload_admin_only" },
+        afterRefusal: { rows: 1, mateFinds: [shared.source.id] },
         asStranger: await askedOf(stranger, missing),
         asAdminOfOwn: await askedOf(admin, missing),
-        gone: [null, null],
-        ownKept: own.source,
+        listed: {
+          source: shared.source,
+          name: "Payroll.vtt",
+          readers: teamReaders(teamId),
+          teamName: `Team ${teamId}`,
+          uploaderName: String(uploader.person.name),
+          uploadedAt: "",
+        },
+        ownListed: false,
+        adminSees: {
+          source: shared.source,
+          readers: teamReaders(teamId),
+          mayAddVersion: false,
+          mayDelete: true,
+        },
+        textInReplies: false,
+        afterErase: { rows: 0, mateFinds: [], mateSees: null },
+        nonAdminListing: { refused: "role.forbidden" },
+        refusedAs: { reason: "admin_only", readers: "team" },
+      });
+    }
+  );
+
+  it(
+    "erases a shared upload for good when an admin deletes it: its key closed, erased again after a restore, and an export holding it stale",
+    slow,
+    async () => {
+      const [uploader, admin] = await Promise.all([
+        signedInApi(idp, "user"),
+        signedInApi(idp, "admin"),
+      ]);
+      const secret = word();
+      const { source } = await uploader.api.brainSources.upload(
+        fileOf(`Price list ${secret}`),
+        everyone,
+        crypto.randomUUID()
+      );
+      const copy = await copyOfStore();
+      // An export of the company's Brain holding it, written before.
+      const started = await routed(brainExportsPath, {
+        method: "POST",
+        headers: { cookie: admin.session, "sec-fetch-site": "same-origin" },
+      });
+      const { id: exportId } = z
+        .object({ id: z.string() })
+        .parse(await started.json());
+      await workBrain(env, new Date(), noProducers);
+      const statusOf = async (): Promise<unknown> => {
+        const response = await routed(
+          `${brainExportsPath}?${new URLSearchParams({ id: exportId }).toString()}`,
+          {
+            headers: { cookie: admin.session, "sec-fetch-site": "same-origin" },
+          }
+        );
+        return z.object({ state: z.string() }).parse(await response.json())
+          .state;
+      };
+      const before = await statusOf();
+
+      await admin.api.brainSources.deleteUpload(source.id);
+      const erased = {
+        key: await brainOf(inJurisdiction(env, env.BRAIN_STORE)).keyState(
+          `upload:${source.id}`
+        ),
+        found: await found(uploader, secret),
+        exported: await statusOf(),
+      };
+      await restoreStore(copy);
+      const restored = {
+        found: await found(uploader, secret),
+        key: await brainOf(inJurisdiction(env, env.BRAIN_STORE)).keyState(
+          `upload:${source.id}`
+        ),
+      };
+
+      expect({ before, erased, restored }).toStrictEqual({
+        before: "done",
+        erased: { key: "erased", found: [], exported: "erased" },
+        restored: { found: [], key: "erased" },
       });
     }
   );
@@ -855,7 +955,8 @@ describe("uploading a file straight into the Brain", () => {
         rows: 1,
         mateBefore: [uploadId],
         versions: 1,
-        mayDelete: true,
+        // Its uploader asks an admin, who deletes it below.
+        mayDelete: false,
         mateAfter: [[], null],
         actions: [
           "brain.upload.added",
@@ -887,18 +988,22 @@ describe("uploading a file straight into the Brain", () => {
         everyone,
         uploadId
       );
-      await uploader.api.brainSources.deleteUpload(uploadId);
+      const admin = await signedInApi(idp, "admin");
+      const adminSees = await admin.api.brainSources.uploadOf(uploadId);
+      await admin.api.brainSources.deleteUpload(uploadId);
 
       expect({
         failed,
         kept: kept.length,
-        mayDelete: shown?.mayDelete,
+        shown: shown?.source,
+        mayDelete: adminSees?.mayDelete,
         retried,
         afterDelete: await rowsWith(uploadId),
         actions: await actionsOf(uploadId),
       }).toStrictEqual({
         failed: { refused: "internal.unexpected" },
         kept: 1,
+        shown: { producer: "upload", id: uploadId },
         mayDelete: true,
         retried: { source: { producer: "upload", id: uploadId }, version: 1 },
         afterDelete: [],
@@ -981,9 +1086,10 @@ describe("uploading a file straight into the Brain", () => {
     "refuses a deleted upload's id on a new upload, whoever sends it, keeping nothing",
     slow,
     async () => {
-      const [uploader, other] = await Promise.all([
+      const [uploader, other, admin] = await Promise.all([
         signedInApi(idp, "user"),
         signedInApi(idp, "user"),
+        signedInApi(idp, "admin"),
       ]);
       const uploadId = crypto.randomUUID();
       await uploader.api.brainSources.upload(
@@ -991,7 +1097,7 @@ describe("uploading a file straight into the Brain", () => {
         everyone,
         uploadId
       );
-      await uploader.api.brainSources.deleteUpload(uploadId);
+      await admin.api.brainSources.deleteUpload(uploadId);
 
       expect({
         byUploader: await outcome(

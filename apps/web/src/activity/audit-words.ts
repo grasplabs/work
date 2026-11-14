@@ -341,6 +341,25 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
   },
   { action: "statistics.read", text: msg`Read an App's statistics` },
   { action: "brain.recall", text: msg`Recalled from the Brain` },
+  { action: "brain.upload", text: msg`Uploaded a file into the Brain` },
+  { action: "brain.upload.added", text: msg`Uploaded a file into the Brain` },
+  {
+    action: "brain.upload.refused",
+    text: msg`Was refused an upload into the Brain, or its removal`,
+  },
+  { action: "brain.upload.failed", text: msg`An upload into the Brain failed` },
+  {
+    action: "brain.upload.deleted",
+    text: msg`Erased an upload from the Brain for good`,
+  },
+  {
+    action: "brain.upload.delete_failed",
+    text: msg`Couldn't erase an upload from the Brain`,
+  },
+  {
+    action: "brain.upload.listed",
+    text: msg`Looked at the uploads shared with a team or everyone`,
+  },
   { action: "guest.invited", text: msg`Invited a guest` },
   { action: "guest.revoked", text: msg`Took back a guest's link` },
   { action: "guest.read", text: msg`Read what a guest wrote` },

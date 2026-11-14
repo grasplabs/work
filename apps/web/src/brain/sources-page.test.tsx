@@ -41,6 +41,7 @@ const handbook: BrainSourceRef = { producer: "upload", id: "u-1" };
 const minutes: BrainSourceRef = { producer: "chat", id: "c-1" };
 const older: BrainSourceRef = { producer: "run", id: "r-1" };
 const uploaded: BrainSourceRef = { producer: "upload", id: "u-2" };
+const shared: BrainSourceRef = { producer: "upload", id: "u-3" };
 
 /** The teams the person is in. */
 const teams = [{ id: "t-1", name: "Finance" }];
@@ -102,6 +103,10 @@ const settle = async (): Promise<void> => {
 interface Faked {
   /** Refuses every call with this. */
   refusal?: string;
+  /** Shows the page as an admin's. */
+  admin?: boolean;
+  /** Answers that the person may not delete the handbook (a reader who isn't an admin). */
+  handbookNotDeletable?: boolean;
   /** Holds each search until it settles. */
   searched?: Promise<boolean>;
   /** Holds each read of a source's first version until it settles. */
@@ -136,6 +141,8 @@ const shown = async (
     firstUploadRefused,
     versioning,
     deleting,
+    admin = false,
+    handbookNotDeletable = false,
   }: Faked = {}
 ) => {
   const calls: string[] = [];
@@ -234,10 +241,31 @@ const shown = async (
         ? {
             source: handbook,
             readers: { kind: "team" as const, teamId: "t-1" },
-            mayAddVersion: true,
-            mayDelete: true,
+            mayAddVersion: !handbookNotDeletable,
+            mayDelete: !handbookNotDeletable,
           }
         : null;
+    },
+    // One upload shared with a team: what an admin's listing shows.
+    sharedUploads: async () => {
+      await Promise.resolve();
+      calls.push("sharedUploads");
+      const erased = calls.includes(`deleteUpload ${shared.id}`);
+      return {
+        uploads: erased
+          ? []
+          : [
+              {
+                source: shared,
+                name: "Payroll.vtt",
+                readers: { kind: "team" as const, teamId: "t-2" },
+                teamName: "Payroll",
+                uploaderName: "Ada",
+                uploadedAt: "2026-11-10T09:00:00.000Z",
+              },
+            ],
+        next: null,
+      };
     },
     deleteUpload: async (uploadId: string) => {
       await (deleting ?? Promise.resolve());
@@ -253,7 +281,9 @@ const shown = async (
   const page = createRoute({
     getParentRoute: () => rootRoute,
     path: "/",
-    component: () => <SourcesPage connections={connections} teams={teams} />,
+    component: () => (
+      <SourcesPage admin={admin} connections={connections} teams={teams} />
+    ),
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([page]),
@@ -789,6 +819,55 @@ describe(SourcesPage, () => {
     }).toStrictEqual({
       afterVersion: [true, false],
       afterDelete: [true, false],
+    });
+  });
+
+  it("tells a reader who isn't an admin that only an admin removes a shared upload, with no Delete to press", async () => {
+    await shown([], { handbookNotDeletable: true });
+    await press("Handbook");
+    await settle();
+    const opened = panel();
+
+    expect({
+      told: opened.includes(
+        "Only an admin can remove an upload shared with a team or everyone. Ask an admin to remove it."
+      ),
+      deleteOffered: [...document.querySelectorAll("button")].some(
+        (button) => button.textContent.trim() === "Delete"
+      ),
+      sharedListed: document.body.textContent.includes("Shared uploads"),
+    }).toStrictEqual({ told: true, deleteOffered: false, sharedListed: false });
+  });
+
+  it("lists shared uploads for an admin, by name, team and uploader, and erases one for good", async () => {
+    const { calls } = await shown([], { admin: true });
+    const sharedText = section("Shared uploads");
+    await press("Erase for good");
+    // The dialog's own button, after the row's of the same words.
+    const confirm = [...document.querySelectorAll("button")].findLast(
+      (button) => button.textContent.trim() === "Erase for good"
+    );
+    await act(async () => {
+      confirm?.click();
+      await Promise.resolve();
+    });
+    await settle();
+    await settle();
+
+    expect({
+      listed: ["Payroll.vtt", "Team Payroll", "Uploaded by Ada"].map((text) =>
+        sharedText.includes(text)
+      ),
+      after: section("Shared uploads").includes(
+        "No uploads are shared with a team or everyone."
+      ),
+      calls: calls.filter(
+        (call) => call.startsWith("sharedUploads") || call.startsWith("delete")
+      ),
+    }).toStrictEqual({
+      listed: [true, true, true],
+      after: true,
+      calls: ["sharedUploads", "deleteUpload u-3", "sharedUploads"],
     });
   });
 });

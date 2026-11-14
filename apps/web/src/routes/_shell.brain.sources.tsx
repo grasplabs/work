@@ -1,3 +1,4 @@
+import { isAdmin } from "@grasp-os/shared/roles";
 import { createFileRoute, useRouteContext } from "@tanstack/react-router";
 
 import { useBrainData } from "../brain/brain-data.ts";
@@ -16,6 +17,7 @@ const Sources = () => {
         ({ status }) => status === "connected"
       )}
       teams={identity.teams}
+      admin={isAdmin(identity.role)}
     />
   );
 };

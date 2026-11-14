@@ -6108,14 +6108,17 @@ export const providerHealth = sqliteTable(
 /**
  * Files people uploaded straight into the Brain (brain-uploads.ts), each
  * a source `upload:<id>` there: who uploaded it and who may read it,
- * fixed for its life. IDs only: the file's name and text are the Brain's,
- * kept and erased with the source. A row is written before the Brain is
+ * fixed for its life, and the name of the file its current version came
+ * from, for an admin's listing of shared uploads to erase (no content:
+ * the text is the Brain's alone). A row is written before the Brain is
  * given anything under its key, and goes only once that key was erased,
  * so every upload the Brain holds is named here for its deletion.
  */
 export const brainUploads = sqliteTable("brain_uploads", {
   id: text().primaryKey(),
   uploadedBy: text("uploaded_by").notNull(),
+  /** The file's name, as its uploader gave it. */
+  name: text().notNull(),
   /** Who may read it: its uploader alone, a team, or everyone. */
   readers: text({ enum: ["me", "team", "everyone"] }).notNull(),
   /** The team, for `team`. */

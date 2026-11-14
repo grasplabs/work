@@ -136,6 +136,7 @@ export const rpcParamNames: ParamNames = {
     "list": ["after"],
     "read": ["source","version"],
     "search": ["question"],
+    "sharedUploads": ["after"],
     "upload": ["file","readers","uploadId"],
     "uploadOf": ["uploadId"],
     "uploadVersion": ["uploadId","file"],

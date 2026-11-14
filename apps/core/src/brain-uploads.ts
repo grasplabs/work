@@ -6,6 +6,7 @@ import {
   brainUploadReadersSchema,
 } from "@grasp-os/shared/brain-sources";
 import type {
+  BrainSharedUploadPage,
   BrainUpload,
   BrainUploadFile,
   BrainUploadReaders,
@@ -14,7 +15,7 @@ import { isExpectedError } from "@grasp-os/shared/errors";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { log } from "@grasp-os/shared/log";
 import { permissionErrors } from "@grasp-os/shared/permissions";
-import { isAdmin } from "@grasp-os/shared/roles";
+import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
   uploadErrors,
@@ -23,7 +24,7 @@ import {
   uploadNameSchema,
   uploadTypes,
 } from "@grasp-os/shared/uploads";
-import { eq } from "drizzle-orm";
+import { and, desc, eq, lt, ne, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -33,7 +34,7 @@ import type { Member } from "./auth/identity.ts";
 import { uploadSource } from "./brain-next-origins.ts";
 import { addSource, eraseSource, sourceTextProblem } from "./brain-next.ts";
 import type { SourceReaders, SourceVersionRef } from "./brain-next.ts";
-import { brainUploads } from "./db/core/schema.ts";
+import { brainUploads, teams, users } from "./db/core/schema.ts";
 import { ExtractorUnavailableError, localExtractor } from "./files/extract.ts";
 import { hasText, signatures } from "./files/upload-checks.ts";
 
@@ -142,16 +143,22 @@ const mayAddVersion = (member: Member, row: UploadRow): boolean =>
   row.uploadedBy === member.userId;
 
 /**
- * Whether `member` may delete `row`'s upload: its uploader always, also
- * once they left its team; an admin when it isn't one person's own, also
- * one they can't read (a team they aren't in, or one dissolved), so no
- * shared upload is left that nobody can delete. Such an admin learns that
- * it exists, but reaches it only by its id, which the audit log shows
- * them already.
+ * Whether `member` may delete `row`'s upload, which erases it for good:
+ * a Brain removal keeps history, and only an admin's hard delete erases
+ * (Nick's rule; a removal that keeps history is GRA-1877). So:
+ *
+ * - its uploader, for one theirs alone: nobody else ever read it, and no
+ *   admin may see that it exists, so their delete is the one that erases;
+ * - an admin, for one shared with a team or everyone, also one they can't
+ *   read (a team they aren't in, or one dissolved), so no shared upload is
+ *   left that nobody can erase. Such an admin learns that it exists, by
+ *   its file's name, team and uploader (`sharedUploadsFor`), never its
+ *   text. Its uploader asks an admin to remove it.
  */
 const mayDelete = (member: Member, row: UploadRow): boolean =>
-  row.uploadedBy === member.userId ||
-  (isAdmin(member.role) && row.readers !== "me");
+  row.readers === "me"
+    ? row.uploadedBy === member.userId
+    : isAdmin(member.role);
 
 /** Whether `member` may reach `row`'s upload at all: read it, or delete it. */
 const mayReach = (member: Member, row: UploadRow): boolean =>
@@ -414,6 +421,11 @@ const addVersion = async (
     throw refusal.error(first);
   }
   await auditedBatch(env, db, [
+    // The name of the file its current version came from.
+    db
+      .update(brainUploads)
+      .set({ name: file.name })
+      .where(eq(brainUploads.id, row.id)),
     event("brain.upload.added", { version: added.version }),
   ]);
   return added;
@@ -471,6 +483,7 @@ export const uploadToBrain = async (
     .values({
       id: id.data,
       uploadedBy: person.userId,
+      name: file.name,
       readers: readers.kind,
       teamId: readers.kind === "team" ? readers.teamId : null,
       createdAt: now,
@@ -577,7 +590,9 @@ export const brainUploadOf = async (
 };
 
 /**
- * Deletes the upload `uploadId` for good, as `person`: its key erased in
+ * Deletes the upload `uploadId` for good, as `person`, who may
+ * (`mayDelete`; anyone else who may read it is refused, audited, as
+ * `brain.upload_admin_only`): its key erased in
  * the Brain, every version, then its row forgotten, with
  * `brain.upload.deleted`. An erasure that failed is recorded
  * (`brain.upload.delete_failed`) and leaves the upload as it was, to
@@ -590,12 +605,22 @@ export const deleteBrainUpload = async (
 ): Promise<void> => {
   const member = await memberNow(env, person);
   const row = await reachableUpload(env, member, uploadId, mayReach);
-  if (!mayDelete(member, row)) {
-    throw brainUploadErrors.create("brain.upload_not_allowed");
-  }
   const db = drizzle(env.DB);
   const actor = actorOf(person);
   const target = { type: "brain_upload", id: row.id };
+  if (!mayDelete(member, row)) {
+    // A shared upload, asked of by one of its readers who isn't an admin:
+    // its uploader or anyone else may read it, and only an admin erases.
+    await auditedBatch(env, db, [
+      outboxed(db, {
+        actor,
+        target,
+        action: "brain.upload.refused",
+        detail: { reason: "admin_only", readers: row.readers },
+      }),
+    ]);
+    throw brainUploadErrors.create("brain.upload_admin_only");
+  }
   // One event, of how it ended, written before the person is answered.
   try {
     await eraseSource(env, {
@@ -623,4 +648,94 @@ export const deleteBrainUpload = async (
       detail: { readers: row.readers },
     }),
   ]);
+};
+
+/** How many shared uploads one page of an admin's listing holds. */
+const sharedPageSize = 50;
+
+const sharedAfterSchema = z.strictObject({
+  uploadedAt: z.iso.datetime(),
+  id: uploadIdSchema,
+});
+
+/**
+ * For an admin: a page of the uploads shared with a team or everyone,
+ * newest first, after `afterInput` (where the page before ended): each by
+ * its file's name, who may read it, who uploaded it and when, so they can
+ * erase one they may not read. Never an upload one person alone may read,
+ * and never any text. Refused (`role.forbidden`) for anyone else. Each
+ * page asked is audited once, with how many it listed.
+ */
+export const sharedUploadsFor = async (
+  env: Env,
+  person: Identity,
+  afterInput: unknown
+): Promise<BrainSharedUploadPage> => {
+  const member = await memberNow(env, person);
+  if (!isAdmin(member.role)) {
+    throw roleErrors.create("role.forbidden");
+  }
+  const after =
+    afterInput === undefined || afterInput === null
+      ? undefined
+      : brainUploadErrors.parse(
+          "brain.upload_not_found",
+          sharedAfterSchema,
+          afterInput
+        );
+  const db = drizzle(env.DB);
+  const at = after === undefined ? undefined : new Date(after.uploadedAt);
+  const rows = await db
+    .select({
+      id: brainUploads.id,
+      name: brainUploads.name,
+      readers: brainUploads.readers,
+      teamId: brainUploads.teamId,
+      teamName: teams.name,
+      uploaderName: users.name,
+      createdAt: brainUploads.createdAt,
+    })
+    .from(brainUploads)
+    .innerJoin(users, eq(users.id, brainUploads.uploadedBy))
+    .leftJoin(teams, eq(teams.id, brainUploads.teamId))
+    .where(
+      and(
+        ne(brainUploads.readers, "me"),
+        at === undefined || after === undefined
+          ? undefined
+          : or(
+              lt(brainUploads.createdAt, at),
+              and(eq(brainUploads.createdAt, at), lt(brainUploads.id, after.id))
+            )
+      )
+    )
+    .orderBy(desc(brainUploads.createdAt), desc(brainUploads.id))
+    .limit(sharedPageSize + 1);
+  const page = rows.slice(0, sharedPageSize);
+  await auditedBatch(env, db, [
+    outboxed(db, {
+      actor: actorOf(person),
+      target: { type: "brain_uploads", id: "shared" },
+      action: "brain.upload.listed",
+      detail: { count: page.length },
+    }),
+  ]);
+  const last = page.at(-1);
+  return {
+    uploads: page.map((row) => ({
+      source: uploadSource(row.id),
+      name: row.name,
+      readers:
+        row.readers === "team" && row.teamId !== null
+          ? { kind: "team", teamId: row.teamId }
+          : { kind: "everyone" },
+      teamName: row.teamName,
+      uploaderName: row.uploaderName,
+      uploadedAt: row.createdAt.toISOString(),
+    })),
+    next:
+      rows.length > sharedPageSize && last !== undefined
+        ? { uploadedAt: last.createdAt.toISOString(), id: last.id }
+        : null,
+  };
 };

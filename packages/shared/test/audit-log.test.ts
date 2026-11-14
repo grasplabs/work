@@ -36,6 +36,19 @@ describe("audit event types", () => {
     ).toStrictEqual(["action", "action", "action", "action", "action"]);
   });
 
+  it("files what is done to an upload into the Brain as actions, and an admin's listing of shared uploads as a read", () => {
+    expect(
+      [
+        "brain.upload.added",
+        "brain.upload.refused",
+        "brain.upload.failed",
+        "brain.upload.deleted",
+        "brain.upload.delete_failed",
+        "brain.upload.listed",
+      ].map((action) => typeOf(action))
+    ).toStrictEqual(["action", "action", "action", "action", "action", "read"]);
+  });
+
   it("gives an audit action no rule names no type, rather than filing it as a read", () => {
     expect(typeOf("audit.something_new")).toBeNull();
   });

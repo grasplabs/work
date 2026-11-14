@@ -79,6 +79,7 @@ import { DurableObject, env } from "cloudflare:workers";
 import { z } from "zod";
 
 import { embedInProcess } from "../../../packages/embed/test/test-models.ts";
+import { organizationId } from "../src/auth/auth.ts";
 import { BrainMemoriesRpc } from "../src/brain-memories-rpc.ts";
 import * as brainMemories from "../src/brain-memories.ts";
 import * as coreBrain from "../src/brain-next.ts";
@@ -5952,6 +5953,20 @@ const sourcesAs = (personId: string): BrainSourcesRpc =>
     async () => await Promise.resolve(sessionOf(personId))
   );
 
+/** A new admin of the organization, as core's records keep one: their ID. */
+const adminMemberOf = async (): Promise<string> => {
+  const userId = crypto.randomUUID();
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO users (id, name, email, email_verified, created_at, updated_at) VALUES (?, 'Admin', ?, 1, ?, ?)"
+    ).bind(userId, `${userId}@acme.test`, Date.now(), Date.now()),
+    env.DB.prepare(
+      "INSERT INTO members (id, organization_id, user_id, role, created_at) VALUES (?, ?, ?, 'admin', ?)"
+    ).bind(crypto.randomUUID(), organizationId, userId, Date.now()),
+  ]);
+  return userId;
+};
+
 /** WebVTT captions holding every marker: a file the extractor reads. */
 const markedFile = (markers: readonly string[]) => ({
   name: "Captions.vtt",
@@ -6261,6 +6276,32 @@ export const sourcesProbes = {
         )
     ),
   ],
+  // An admin's listing of shared uploads: each by its file's name, team
+  // and uploader, never its text; refused to anyone else.
+  sharedUploads: async ({ personId, markers }) => {
+    const admin = await adminMemberOf();
+    return [
+      await answer(
+        "as the reader",
+        async () => await sourcesAs(personId).sharedUploads()
+      ),
+      await answer(
+        "as an admin",
+        async () => await sourcesAs(admin).sharedUploads()
+      ),
+      await answer(
+        "as an admin, after a place named by the markers",
+        async () =>
+          await sourcesAs(admin).sharedUploads(
+            unchecked({ uploadedAt: markers.join(" "), id: markers[0] })
+          )
+      ),
+      await answer(
+        "as someone who isn't a member",
+        async () => await sourcesAs(stranger()).sharedUploads()
+      ),
+    ];
+  },
 } satisfies Record<
   | "list"
   | "versions"
@@ -6269,7 +6310,8 @@ export const sourcesProbes = {
   | "uploadOf"
   | "uploadVersion"
   | "deleteUpload"
-  | "upload",
+  | "upload"
+  | "sharedUploads",
   Probe
 >;
 

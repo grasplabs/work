@@ -8,6 +8,8 @@ import type {
   BrainSourcesApi,
   BrainSourceText,
   BrainSourceVersionPage,
+  BrainSharedUploadPage,
+  BrainSharedUploadsAfter,
   BrainUpload,
   BrainUploadFile,
   BrainUploadReaders,
@@ -23,6 +25,7 @@ import type { ListedSource, SourceRef } from "./brain-next.ts";
 import {
   brainUploadOf,
   deleteBrainUpload,
+  sharedUploadsFor,
   uploadToBrain,
   uploadVersionToBrain,
 } from "./brain-uploads.ts";
@@ -193,5 +196,14 @@ export class BrainSourcesRpc extends CoreRpcTarget implements BrainSourcesApi {
     await withPerson(this.#check, async (person) => {
       await deleteBrainUpload(this.#env, person, uploadId);
     });
+  }
+
+  async sharedUploads(
+    after?: BrainSharedUploadsAfter | null
+  ): Promise<BrainSharedUploadPage> {
+    return await withPerson(
+      this.#check,
+      async (person) => await sharedUploadsFor(this.#env, person, after)
+    );
   }
 }
