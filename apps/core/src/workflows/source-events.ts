@@ -14,11 +14,7 @@ import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import {
-  eventSources,
-  triggerResources,
-  triggerResourceVersions,
-} from "../db/core/schema.ts";
+import { eventSources, triggerResources } from "../db/core/schema.ts";
 import { errorResponse } from "../errors.ts";
 import { sourceSecretKeyOf } from "../event-sources.ts";
 import { startOnce } from "./connector-triggers.ts";
@@ -71,7 +67,7 @@ import type { SourceEvent } from "./event-waits.ts";
 //   or its source deleted) is answered as a revoked secret is, 401, with
 //   the same body: a response never tells a guessed URL from a real one.
 // - An event reaching a workflow nobody approved. Only live, enabled
-//   webhook triggers whose current version names this source and type
+//   webhook triggers that name this source and type
 //   take it, each start needing `start` on its workflow, a grant of its
 //   own only an admin gives, which names the source and type it starts on;
 //   each start reads the trigger, its grant and its person live as it is
@@ -264,31 +260,22 @@ const stillSignedSql = (id: string, generation: number): SQL =>
       AND ${eventSources.secretRevokedAt} IS NULL
       AND ${eventSources.deletedAt} IS NULL)`;
 
-/** The live, enabled webhook triggers whose current version takes `event`. */
+/** The live, enabled webhook triggers that take `event`. */
 const takersOf = async (env: Env, event: SourceEvent): Promise<Taker[]> =>
   await drizzle(env.DB)
     .select({
       id: triggerResources.id,
-      version: triggerResources.currentVersion,
-      workflowId: triggerResourceVersions.workflowResourceId,
-      workflowVersion: triggerResourceVersions.workflowResourceVersion,
-      inputMapping: triggerResourceVersions.inputMapping,
+      workflowId: triggerResources.workflowResourceId,
+      inputMapping: triggerResources.inputMapping,
     })
     .from(triggerResources)
-    .innerJoin(
-      triggerResourceVersions,
-      and(
-        eq(triggerResourceVersions.triggerId, triggerResources.id),
-        eq(triggerResourceVersions.version, triggerResources.currentVersion)
-      )
-    )
     .where(
       and(
         eq(triggerResources.kind, "webhook"),
         eq(triggerResources.enabled, true),
         isNull(triggerResources.deletedAt),
-        eq(triggerResourceVersions.eventSourceId, event.source),
-        eq(triggerResourceVersions.eventType, event.type)
+        eq(triggerResources.eventSourceId, event.source),
+        eq(triggerResources.eventType, event.type)
       )
     )
     .orderBy(asc(triggerResources.id));

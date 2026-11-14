@@ -22,14 +22,14 @@ const pageSaying = (
   other: string
 ) => `import { createFileRoute, Link } from "@tanstack/react-router";
 
-function Page() {
+const Page = () => {
   return (
     <main className="p-4">
       <h2 className="text-lg font-medium">${title}</h2>
       <Link to="${other}">Go to ${other}</Link>
     </main>
   );
-}
+};
 export const Route = createFileRoute("${path}")({ component: Page });
 `;
 
@@ -55,7 +55,7 @@ const newApp = async (
   try {
     const { id } = await api.apps.create({ name, description: "Boards" });
     if (Object.keys(files).length > 0) {
-      await release(api, id, files, "First version");
+      await release(api, id, files);
     }
     return id;
   } finally {

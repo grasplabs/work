@@ -20,7 +20,7 @@ test("a person watches a draft stream in, then cancels a slow one", async ({
   let app: string;
   try {
     const { id } = await api.apps.create({ name });
-    await release(api, id, writerAppFiles(), name);
+    await release(api, id, writerAppFiles());
     app = id;
   } finally {
     core[Symbol.dispose]();

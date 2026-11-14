@@ -3,17 +3,18 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { publishVersion } from "../src/app-publish.ts";
 import { sealRelease } from "../src/app-releases.ts";
 import {
+  appKind,
   commitDraft,
   createApp,
   draftDefinition,
-  draftFiles,
   nextVersion,
 } from "../src/apps.ts";
 import { deleteStore, openStore } from "../src/data-stores.ts";
+import { filesOf } from "../src/drafts.ts";
 import { buildAppCode } from "../src/pages.ts";
+import { rollback } from "../src/publish.ts";
 import {
   changesOf,
   definitionOf,
@@ -181,7 +182,7 @@ JSON.stringify = (value, ...rest) => {
 
   it("binds its own App's store alone: another App's seal, by a builder of both, never reaches it", async () => {
     const first = await appWith(notesFiles());
-    await publishVersion(env, first.owner, first.app, 1);
+    await rollback(env, appKind, first.owner, first.app, 1);
     const second = await appWith(withTable("beta"), "Beta", first.owner);
     const sealed = await seal(second);
     const opened = await openStore(env, first.store);
@@ -196,7 +197,7 @@ JSON.stringify = (value, ...rest) => {
   it("is refused to someone who doesn't build the App, before a store is made or its code is built", async () => {
     const owner = await person("builder");
     const { id } = await createApp(env, owner, { name: "Beta" });
-    await commitDefined(env, owner, id, withTable("beta"), "First version");
+    await commitDefined(env, owner, id, withTable("beta"));
     const outsider = await person("builder");
     const before = await builds();
     const refused = await failure(
@@ -217,7 +218,7 @@ JSON.stringify = (value, ...rest) => {
   it("keeps its store from being deleted while any release kept binds it, and lets it go once retention removed them", async () => {
     const fixture = await appWith(notesFiles());
     await seal(fixture);
-    await publishVersion(env, fixture.owner, fixture.app, 1);
+    await rollback(env, appKind, fixture.owner, fixture.app, 1);
     const current = await failure(async () => {
       await deleteStore(env, fixture.owner, fixture.store);
     });
@@ -232,11 +233,10 @@ JSON.stringify = (value, ...rest) => {
       fixture.app,
       changesOf(tablelessFiles(), {
         "server/notes.ts": null,
-      }),
-      "Two"
+      })
     );
     await seal(fixture, 2);
-    await publishVersion(env, fixture.owner, fixture.app, 2);
+    await rollback(env, appKind, fixture.owner, fixture.app, 2);
     const retained = await failure(async () => {
       await deleteStore(env, fixture.owner, fixture.store);
     });
@@ -320,9 +320,9 @@ export const reach = action({
   it("makes its App's one store when it first declares tables, keyed by the App and audited", async () => {
     const owner = await person("builder");
     const { id } = await createApp(env, owner, { name: "Notes" });
-    await commitDefined(env, owner, id, notesFiles(), "First version");
+    await commitDefined(env, owner, id, notesFiles());
     const first = await sealRelease(env, { app: id, version: 1, by: owner });
-    await commitDefined(env, owner, id, withTable("beta"), "Second version");
+    await commitDefined(env, owner, id, withTable("beta"));
     const second = await sealRelease(env, { app: id, version: 2, by: owner });
     const keyed = await env.DB.prepare(
       "SELECT store_id AS store FROM app_default_stores WHERE app_id = ?"
@@ -355,17 +355,16 @@ export const reach = action({
     const draft = {
       parent: 1,
       version: await nextVersion(env, fixture.app),
-      files: await draftFiles(env, fixture.app, changes),
+      files: await filesOf(env, appKind, fixture.app, changes),
       definition: defined?.definition ?? null,
     };
     await expect(
       failure(
-        async () =>
-          await commitDraft(env, fixture.owner, fixture.app, draft, "No schema")
+        async () => await commitDraft(env, fixture.owner, fixture.app, draft)
       )
       // Its schema generated from its definition again: the version it
       // would commit is the one it is over.
-    ).resolves.toBe("app.draft_empty");
+    ).resolves.toBe("draft.empty");
   });
 
   it("can't keep anything but server code under server/: each is refused by name", async () => {
@@ -463,13 +462,9 @@ export const reach = action({
     await expect(
       failure(
         async () =>
-          await commitDefined(
-            env,
-            owner,
-            id,
-            { "server/_generated/api.ts": "export const api = {};\n" },
-            "Forged references"
-          )
+          await commitDefined(env, owner, id, {
+            "server/_generated/api.ts": "export const api = {};\n",
+          })
       )
     ).resolves.toBe("app.invalid");
   });

@@ -1,9 +1,10 @@
 import { appErrors } from "@grasp-os/shared/apps";
-import type { App, AppRole } from "@grasp-os/shared/apps";
+import type { App } from "@grasp-os/shared/apps";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canBuild, isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import type { MemberRole } from "@grasp-os/shared/subject-members";
 import { and, eq, exists, isNull, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -137,8 +138,8 @@ export const decidedAppRole = (
     shares: readonly SharedRole[];
     open: boolean;
   }
-): { role: AppRole; shared: boolean } | undefined => {
-  let found: { role: AppRole; shared: boolean } | undefined;
+): { role: MemberRole; shared: boolean } | undefined => {
+  let found: { role: MemberRole; shared: boolean } | undefined;
   if (isAdmin(by.role)) {
     found = { role: "builder", shared: false };
   } else if (owns) {
@@ -163,7 +164,7 @@ const appRole = async (
   env: Env,
   by: Person,
   app: Pick<App, "id" | "owner"> & AppOpening
-): Promise<{ role: AppRole; shared: boolean } | undefined> => {
+): Promise<{ role: MemberRole; shared: boolean } | undefined> => {
   const owns = app.owner === by.userId;
   // Whom it is shared with matters only to someone neither admin nor owner.
   const rows =
@@ -191,14 +192,14 @@ export const requireAppRole = async (
   env: Env,
   by: Person,
   app: Pick<App, "id" | "owner"> & AppOpening,
-  needed: AppRole,
+  needed: MemberRole,
   /**
    * For what manages the App without reading its data (archive, restore,
    * removal, a reset): its owner and admins outside a team its Brain
    * grants name aren't refused it.
    */
   { managing = false }: { managing?: boolean } = {}
-): Promise<AppRole> => {
+): Promise<MemberRole> => {
   const found = await appRole(env, by, app);
   if (found === undefined) {
     throw appErrors.create("app.not_found");

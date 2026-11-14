@@ -15,9 +15,9 @@ import {
   httpReadCatalogContract,
 } from "../src/release-contracts.ts";
 import { codeResults, codeStep, personalChatsOf, says } from "./agent-chat.ts";
-import { commitApp, testApp } from "./app-definitions.ts";
+import { testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
-import { requestGranted } from "./apps.ts";
+import { commitApp, requestGranted } from "./apps.ts";
 import {
   httpApiInsideOrigin,
   httpApiOrigin,
@@ -151,8 +151,8 @@ const invoicesApp = async () => {
     credential: { kind: "bearer", token: secret },
   });
   const created = await builder.api.apps.create({ name: "Invoices" });
-  await commitApp(builder.api.apps.files, created.id, billingFiles(), "First");
-  await builder.api.apps.versions.publish(created.id, 1);
+  await commitApp(builder.api, created.id, billingFiles());
+  await builder.api.versions.rollback({ kind: "app", id: created.id }, 1);
   const requested = await builder.api.permissions.request({
     subject: { type: "app", appId: created.id },
     object: { type: "connection", connectionId },

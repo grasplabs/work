@@ -25,10 +25,7 @@ import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { generatedModule } from "../src/workflow-builds.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { setWorkflowParams } from "../src/workflow-params.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { RunHost } from "../src/workflows/host.ts";
 import type { HostHooks, RunStep } from "../src/workflows/host.ts";
@@ -58,6 +55,7 @@ import { engineOfTest } from "./run-host.ts";
 import { admittedFreely, liveStatus } from "./runs.ts";
 import { unique } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // The run host's harness for a sealed build's run (sealed-run.ts), shared
 // by the tests that run a module of their own against a real published
@@ -176,8 +174,11 @@ export const sealedWorkflow = async (extra: readonly unknown[] = []) => {
   const modelKey = `summary-${unique()}`;
   await publishCatalogContract(env, admin, { key: modelKey, kind: "model" });
   const workflow = await createWorkflowResource(env, by, `sealed-${unique()}`);
-  await publishWorkflowVersion(env, by, workflow.id, {
-    definition: JSON.stringify({
+  await publishDefinition(
+    env,
+    by,
+    workflow.id,
+    JSON.stringify({
       $schema: workflowSchemaUrl,
       args: objectOf({ who: { kind: "string" } }),
       returns: objectOf({ status: { kind: "string" } }),
@@ -324,9 +325,8 @@ export const sealedWorkflow = async (extra: readonly unknown[] = []) => {
         { id: "finish", type: "wait", for: "1 second" },
         ...extra,
       ],
-    }),
-    basedOn: null,
-  });
+    })
+  );
   const mail = await mailConnection();
   const permissionId = await granted(by, admin, {
     subject: { type: "workflow", workflowId: workflow.id },
@@ -363,7 +363,7 @@ export const waitingRun = async ({
     serving,
     { type: "person", person: by },
     workflow.id,
-    { version: 1, args: { who: "Ada" }, key: unique() }
+    { expected: 1, args: { who: "Ada" }, key: unique() }
   );
   if (runId === null) {
     throw new Error("The start admitted no run");
@@ -878,8 +878,11 @@ export const decisionWorkflow = async () => {
     response: descriptorOf(decisionAnswers),
   });
   const workflow = await createWorkflowResource(env, by, `review-${unique()}`);
-  await publishWorkflowVersion(env, by, workflow.id, {
-    definition: JSON.stringify({
+  await publishDefinition(
+    env,
+    by,
+    workflow.id,
+    JSON.stringify({
       $schema: workflowSchemaUrl,
       args: objectOf({
         reviewer: { kind: "string" },
@@ -922,9 +925,8 @@ export const decisionWorkflow = async () => {
           ],
         },
       ],
-    }),
-    basedOn: null,
-  });
+    })
+  );
   const approval = await approveWorkflowBinding(env, admin, workflow.id, {
     alias: "approval",
     target: {
@@ -947,7 +949,7 @@ export const reviewRun = async (
     env,
     { type: "person", person: by },
     workflow.id,
-    { version: 1, args: { reviewer, invoice: "INV-7" }, key: unique() }
+    { expected: 1, args: { reviewer, invoice: "INV-7" }, key: unique() }
   );
   if (runId === null) {
     throw new Error("The start admitted no run");

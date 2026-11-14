@@ -3,8 +3,8 @@ import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { commitApp, testApp, withFiles } from "./app-definitions.ts";
-import { outlook, release } from "./apps.ts";
+import { testApp, withFiles } from "./app-definitions.ts";
+import { commitApp, outlook, release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
 import { calledAs } from "./sealed-apps.ts";
@@ -96,14 +96,12 @@ const callsOn = async ({ api }: Person, app: string) => ({
   call: await functionOutcome({ api }, app),
   members: await outcome(api.apps.members.list(app)),
   // Its code and settings.
-  read: await outcome(api.apps.files.read(app)),
-  commit: await outcome(
-    commitApp(api.apps.files, app, { "notes.md": "# Mine\n" }, "Mine")
-  ),
-  versions: await outcome(api.apps.versions.list(app)),
-  version: await outcome(api.apps.versions.get(app, 1)),
-  diff: await outcome(api.apps.versions.diff(app, 1, 1)),
-  publish: await outcome(api.apps.versions.publish(app, 1)),
+  read: await outcome(api.drafts.files({ kind: "app", id: app })),
+  commit: await outcome(commitApp(api, app, { "notes.md": "# Mine\n" })),
+  versions: await outcome(api.versions.list({ kind: "app", id: app })),
+  version: await outcome(api.versions.get({ kind: "app", id: app }, 1)),
+  diff: await outcome(api.versions.diff({ kind: "app", id: app }, 1, 1)),
+  publish: await outcome(api.versions.rollback({ kind: "app", id: app }, 1)),
   errors: await outcome(api.pages.errors(app)),
   permission: await outcome(
     api.permissions.request({
@@ -193,14 +191,7 @@ describe("App roles", { timeout: 60_000 }, () => {
     ).resolves.toStrictEqual([false, false, true, true]);
     // Admins manage every App.
     await expect(
-      outcome(
-        commitApp(
-          admin.api.apps.files,
-          app,
-          { "notes.md": "# Admin\n" },
-          "Admin"
-        )
-      )
+      outcome(commitApp(admin.api, app, { "notes.md": "# Admin\n" }))
     ).resolves.toBe("ok");
   });
 
@@ -283,7 +274,7 @@ describe("App roles", { timeout: 60_000 }, () => {
 
     await expect(
       Promise.all([
-        outcome(anna.api.apps.files.read(app)),
+        outcome(anna.api.drafts.files({ kind: "app", id: app })),
         outcome(ben.api.apps.get(app)),
       ])
     ).resolves.toStrictEqual(["ok", "app.not_found"]);
@@ -299,9 +290,9 @@ describe("App roles", { timeout: 60_000 }, () => {
     using _clock = letSessionRecheckPass();
     await expect(
       Promise.all([
-        outcome(anna.api.apps.files.read(app)),
+        outcome(anna.api.drafts.files({ kind: "app", id: app })),
         outcome(anna.api.apps.get(app)),
-        outcome(ben.api.apps.files.read(app)),
+        outcome(ben.api.drafts.files({ kind: "app", id: app })),
       ])
     ).resolves.toStrictEqual(["role.forbidden", "ok", "ok"]);
     // Ben, now in the team, finds its pages; someone in neither doesn't.
@@ -320,12 +311,7 @@ describe("App roles", { timeout: 60_000 }, () => {
     const { id: app } = await owner.api.apps.create({
       name: `Desk ${unique()}`,
     });
-    const { version } = await commitApp(
-      owner.api.apps.files,
-      app,
-      files,
-      "One"
-    );
+    const { version } = await commitApp(owner.api, app, files);
     await owner.api.apps.members.add(app, {
       type: "person",
       id: user.userId,
@@ -348,21 +334,16 @@ describe("App roles", { timeout: 60_000 }, () => {
       listedBy(owner),
       outcome(user.api.apps.contents(app)),
     ]);
-    await owner.api.apps.versions.publish(app, version);
+    await owner.api.versions.rollback({ kind: "app", id: app }, version);
     // A version committed after the live one doesn't count: its page
     // opens for nobody yet.
-    await commitApp(
-      owner.api.apps.files,
-      app,
-      {
-        "src/routes/later.tsx": `import { createFileRoute } from "@tanstack/react-router";
+    await commitApp(owner.api, app, {
+      "src/routes/later.tsx": `import { createFileRoute } from "@tanstack/react-router";
 const Page = () => <p>Later</p>;
 
 export const Route = createFileRoute("/later")({ component: Page });
 `,
-      },
-      "Later"
-    );
+    });
 
     expect({
       notLive,
@@ -413,13 +394,8 @@ export const Route = createFileRoute("/later")({ component: Page });
       })
     );
     // A draft that serves a business process.
-    const { version } = await commitApp(
-      owner.api.apps.files,
-      middle,
-      files,
-      "Draft"
-    );
-    await owner.api.apps.versions.publish(middle, version);
+    const { version } = await commitApp(owner.api, middle, files);
+    await owner.api.versions.rollback({ kind: "app", id: middle }, version);
     await owner.api.apps.update(middle, { process: "o2c" });
     // Published, then archived.
     await release(owner, newest, files);
@@ -653,7 +629,7 @@ export const Route = createFileRoute("/later")({ component: Page });
     await expect(
       Promise.all([
         outcome(owner.api.apps.get(app)),
-        outcome(owner.api.apps.files.read(app)),
+        outcome(owner.api.drafts.files({ kind: "app", id: app })),
       ])
     ).resolves.toStrictEqual(["ok", "role.forbidden"]);
   });
@@ -700,7 +676,9 @@ export const Route = createFileRoute("/later")({ component: Page });
       // Sharing again in the same role changes and records nothing.
       await owner.api.apps.members.add(app, { ...member, role: "user" });
       await owner.api.apps.members.add(app, { ...member, role: "builder" });
-      await expect(person.api.apps.files.read(app)).resolves.toBeDefined();
+      await expect(
+        person.api.drafts.files({ kind: "app", id: app })
+      ).resolves.toBeDefined();
       await owner.api.apps.members.remove(app, member);
       // So does unsharing again.
       await owner.api.apps.members.remove(app, member);
@@ -796,7 +774,7 @@ export const Route = createFileRoute("/later")({ component: Page });
 
     await expect(
       Promise.all([
-        outcome(staff.apps.files.read(app)),
+        outcome(staff.drafts.files({ kind: "app", id: app })),
         outcome(staff.apps.members.list(app)),
         outcome(
           staff.apps.members.add(app, {

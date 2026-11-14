@@ -19,7 +19,6 @@ import {
   chatMentionsMax,
   chatPlanSchema,
   chatPlatformSchema,
-  chatSubjectSchema,
   chatToolEventsKept,
 } from "@grasp-os/shared/chat";
 import type {
@@ -59,7 +58,7 @@ import {
   identifierSchema,
   workspaceIdSchema,
 } from "@grasp-os/shared/ids";
-import type { AppId, ChatId } from "@grasp-os/shared/ids";
+import type { ChatId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { modelEfforts, modelErrors } from "@grasp-os/shared/models";
 import {
@@ -70,6 +69,8 @@ import {
 import type { Authority } from "@grasp-os/shared/permissions";
 import { redact } from "@grasp-os/shared/redact";
 import { canBuild, roleSchema } from "@grasp-os/shared/roles";
+import { subjectSchema } from "@grasp-os/shared/subject";
+import type { Subject } from "@grasp-os/shared/subject";
 import { customWidgetsMax } from "@grasp-os/shared/widgets";
 import type { CustomWidgetId, WidgetSpec } from "@grasp-os/shared/widgets";
 import { DurableObject } from "cloudflare:workers";
@@ -84,7 +85,6 @@ import {
   inArray,
   isNull,
   ne,
-  or,
   max,
   sql,
 } from "drizzle-orm";
@@ -360,7 +360,7 @@ export const questionSchema = z.strictObject({
     .refine((files) => new Set(files).size === files.length)
     .optional(),
   /** What it is about, as core found it (`ChatsApi.send`): never the page's word alone. */
-  subject: chatSubjectSchema.extend({ name: z.string().min(1) }).optional(),
+  subject: subjectSchema.extend({ name: z.string().min(1) }).optional(),
   /**
    * What the person picked with `@` in it, as core found each for them
    * (`ChatsApi.send`), by name: never the page's word for a name.
@@ -1141,7 +1141,6 @@ export class Workspace extends DurableObject<Env> {
         title: chats.title,
         createdAt: chats.createdAt,
         lastAt: chats.lastAt,
-        appId: chats.appId,
         via: chats.via,
         makeKind: chats.makeKind,
         makeProject: chats.makeProject,
@@ -1291,8 +1290,6 @@ export class Workspace extends DurableObject<Env> {
     by?: AuditActor,
     via: ChatChannel = "web",
     thread?: string,
-    /** The App the chat is for (`appChat`), if any. */
-    appId?: AppId,
     make?: ChatMake
   ): Chat {
     const agent = workspaceAgentIdSchema.safeParse(agentId);
@@ -1305,12 +1302,7 @@ export class Workspace extends DurableObject<Env> {
     const id = chatIdSchema.parse(crypto.randomUUID());
     const chat = this.ctx.storage.transactionSync(() => {
       if (by !== undefined) {
-        this.#outboxed(
-          by,
-          "chat.created",
-          id,
-          appId === undefined ? {} : { app: appId }
-        );
+        this.#outboxed(by, "chat.created", id, {});
       }
       const now = new Date();
       const made = this.#db
@@ -1324,7 +1316,6 @@ export class Workspace extends DurableObject<Env> {
           agentId: agent.data,
           via: channel,
           thread: thread ?? null,
-          appId: appId ?? null,
           makeKind: make?.kind ?? null,
           makeProject: make?.project ?? null,
         })
@@ -3682,7 +3673,6 @@ export class Workspace extends DurableObject<Env> {
         agentId: chats.agentId,
         createdAt: chats.createdAt,
         lastAt: chats.lastAt,
-        appId: chats.appId,
         via: chats.via,
         makeKind: chats.makeKind,
         makeProject: chats.makeProject,
@@ -3704,7 +3694,6 @@ export class Workspace extends DurableObject<Env> {
       | "agentId"
       | "createdAt"
       | "lastAt"
-      | "appId"
       | "via"
       | "makeKind"
       | "makeProject"
@@ -3717,23 +3706,22 @@ export class Workspace extends DurableObject<Env> {
       createdAt: chat.createdAt.toISOString(),
       lastAt: chat.lastAt.toISOString(),
       running: this.#isRunning(chat.id),
-      appId: chat.appId,
       via: chat.via,
       make: makeOf(chat),
     };
   }
 
   /**
-   * `personId`'s chat for App `appId`: the one that last worked on it, as
-   * their list shows it, whether made for the App or one among `drafted`,
-   * whose agent wrote its draft (a chat started on Chat that built it), so
-   * the App's page carries on where they left it, with all it knows;
-   * `null` while they have none. A chat others share on a chat platform is
-   * never one.
+   * `personId`'s chat for `subject`, an App or a workflow: of `drafted`,
+   * the chats that worked on it (`chatsWorkedOn`: whose agent wrote its
+   * draft, or whose Build it made it), the one active last, as their list
+   * shows it, so its page carries on where they left it, with all it
+   * knows; `null` while they have none, when the next question there
+   * starts one. A chat others share on a chat platform is never one.
    */
-  appChat(
+  subjectChat(
     personId: string,
-    appId: AppId,
+    subject: Subject,
     drafted: readonly string[]
   ): ChatSummary | null {
     const chat = this.#db
@@ -3742,10 +3730,7 @@ export class Workspace extends DurableObject<Env> {
       .where(
         and(
           eq(chats.personId, personId),
-          or(
-            eq(chats.appId, appId),
-            sql`${chats.id} IN (SELECT value FROM json_each(${JSON.stringify(drafted)}))`
-          ),
+          sql`${chats.id} IN (SELECT value FROM json_each(${JSON.stringify(drafted)}))`,
           isNull(chats.thread)
         )
       )
@@ -3831,9 +3816,9 @@ export class Workspace extends DurableObject<Env> {
    * Keeps Build it on `personId`'s chat `chatId` when what it made can't
    * go on in a turn (`ChatsApi.build`): their `text` with what was made
    * (`built`), shown as a turn shows it, so the plan waits no more; the
-   * chat made the App's when it is for none, so the App's page carries on
-   * in it and what is asked there is about the App; the agent told what
-   * was made (`#note`), and the chat stopped for `stopped`, to try again.
+   * agent told what was made (`#note`), and the chat stopped for
+   * `stopped`, to try again. What was made is the chat's work already
+   * (`keepMadeInChat`), so its page carries on in this chat.
    */
   async keepBuilt(
     chatId: unknown,
@@ -3857,35 +3842,17 @@ export class Workspace extends DurableObject<Env> {
         },
       }
     );
-    if (app !== undefined && chat.appId === null) {
-      this.#db
-        .update(chats)
-        .set({ appId: app.id })
-        .where(eq(chats.id, chat.id))
-        .run();
-    }
     this.#stopped.set(chat.id, stopped);
     this.#changed(chat.id);
     try {
       await this.#note(chat.id, builtNoteText(built));
     } catch (error) {
-      // Kept and shown all the same: the next question is about the App.
+      // Kept and shown all the same.
       log.warn("agent.built_untold", {
         chatId: chat.id,
         ...errorFields(error),
       });
     }
-  }
-
-  /** The App chat `chatId` is for, or null: what its agent is told (`env.chat.info`). */
-  chatApp(chatId: ChatId): string | null {
-    return (
-      this.#db
-        .select({ appId: chats.appId })
-        .from(chats)
-        .where(eq(chats.id, chatId))
-        .get()?.appId ?? null
-    );
   }
 
   /**
@@ -4524,12 +4491,12 @@ export class Workspace extends DurableObject<Env> {
   }
 
   // What a chat's agent writes of Apps' drafts (agent-builds.ts), which
-  // live in core's database (app-drafts.ts): only what the chat's thread
+  // live in core's database (drafts.ts): only what the chat's thread
   // shows of it. Only core calls these, for the chat's agent.
 
   /**
    * The turn and code step (its tool call's ID) of the chat's code run
-   * `runId`, from the run's own record: what a draft's undo point names,
+   * `runId`, from the run's own record: what a draft's checkpoint names,
    * never what the run's code says. Nulls for a run that isn't there.
    */
   codeRunOf(
@@ -4547,7 +4514,7 @@ export class Workspace extends DurableObject<Env> {
   /**
    * Tells the chat's watchers its agent wrote an App's draft, so they read
    * what it worked on again (`ChatsApi.worked`). The App's preview hears
-   * of the write from the write itself (app-drafts.ts).
+   * of the write from the write itself (drafts.ts).
    */
   draftWritten(chatId: unknown): void {
     const chat = chatIdSchema.safeParse(chatId);

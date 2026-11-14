@@ -1,7 +1,7 @@
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 
-import { useAppDraft } from "../apps/use-app-draft.ts";
+import { useDraft } from "../drafts/use-draft.ts";
 import { useAppAddress } from "../pages/app-address.ts";
 import { PreviewFrame } from "../pages/page-frame.tsx";
 
@@ -19,7 +19,7 @@ const DraftPage = () => {
   const draft = `/apps/${app}/draft`;
   const address = useAppAddress({ root: draft, sub: draft });
   // Each write of the draft comes into the frame, as in the workspace.
-  const { draft: read } = useAppDraft(app, 0);
+  const { draft: read } = useDraft({ kind: "app", id: app }, 0);
   return (
     <main
       aria-label={t`Your version of the App`}

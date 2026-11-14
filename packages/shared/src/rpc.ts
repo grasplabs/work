@@ -15,6 +15,7 @@ import type { DashboardApi } from "./dashboard.ts";
 import type { DataPolicyApi } from "./data-policy.ts";
 import type { DecisionsApi } from "./decisions.ts";
 import type { DependenciesApi } from "./dependencies.ts";
+import type { DraftsApi, VersionsApi } from "./drafts.ts";
 import type { HeldStartsApi } from "./held-starts.ts";
 import type { InstructionsApi } from "./instruction-files.ts";
 import type { KnowledgeSignalsApi } from "./knowledge-signals.ts";
@@ -99,6 +100,13 @@ export interface SessionApi {
    * are shared with them, and every App for admins.
    */
   readonly apps: AppsApi;
+  /**
+   * The drafts of Apps and workflows: one per App or workflow, shared by
+   * its builders and their chats' agents, published by a person.
+   */
+  readonly drafts: DraftsApi;
+  /** The versions of Apps and workflows: compared, and rolled back to. */
+  readonly versions: VersionsApi;
   /** Knowledge: collections, documents and their versions. */
   readonly knowledge: KnowledgeApi;
   /**

@@ -1,4 +1,5 @@
 import { agentErrors } from "@grasp-os/shared/agent";
+import type { ChatUpdate } from "@grasp-os/shared/chat";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -357,8 +358,21 @@ describe("a chat's ChatSession", () => {
         pause: { until: thought.promise },
       },
     });
+    // Held from when the chat shows the thought: by then its object timed
+    // the thinking's start. How long the turn took to get there is no part
+    // of it.
+    const shown = Promise.withResolvers<number>();
+    await stub.watch(chat.id, userId, null, async (update: ChatUpdate) => {
+      if ((update.partial?.reasoning.text ?? "") !== "") {
+        shown.resolve(Date.now());
+      }
+      await Promise.resolve();
+    });
     const reply = ask("How many days?");
-    await scheduler.wait(1500);
+    const since = await shown.promise;
+    const heldMs = 1000;
+    await scheduler.wait(heldMs);
+    const held = Date.now() - since;
     thought.resolve(true);
     await reply;
     const [kept] = await runInDurableObject(stub, (_instance, state) =>
@@ -369,8 +383,8 @@ describe("a chat's ChatSession", () => {
         )
         .toArray()
     );
-    // The pause, to the grain of pi's commits of the stream (100 ms).
-    expect(kept?.thinking_ms ?? 0).toBeGreaterThanOrEqual(1000);
+    // At least the hold: the thinking ended only once it was let go.
+    expect(kept?.thinking_ms ?? 0).toBeGreaterThanOrEqual(held);
   });
 
   it("keeps no alarm for an idle chat once a note reaches it, nor once an alarm finds nothing to do", async () => {

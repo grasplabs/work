@@ -12,6 +12,7 @@ import { ConnectionsRpc } from "./connections.ts";
 import { DashboardRpc } from "./dashboard-rpc.ts";
 import { DataPolicyRpc } from "./data-policy-rpc.ts";
 import { DecisionsRpc } from "./decisions/rpc.ts";
+import { DraftsRpc } from "./drafts-rpc.ts";
 import { HeldStartsRpc } from "./held-starts-rpc.ts";
 import { InstructionsRpc } from "./instructions-rpc.ts";
 import { KnowledgeRpc } from "./knowledge/rpc.ts";
@@ -39,6 +40,7 @@ import { SkillsRpc } from "./skills-rpc.ts";
 import { staffAudited } from "./staff-audit.ts";
 import { StephenRequestsRpc } from "./stephen-requests.ts";
 import { UnknownOutcomesRpc } from "./unknown-outcomes.ts";
+import { VersionsRpc } from "./versions-rpc.ts";
 import { WaitingRpc } from "./waiting-rpc.ts";
 import { WorkflowResourcesRpc } from "./workflow-resources-rpc.ts";
 import { WorkflowsRpc } from "./workflows/rpc.ts";
@@ -57,6 +59,8 @@ import { WorkflowsRpc } from "./workflows/rpc.ts";
 export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #check: SessionCheck;
   readonly #apps: AppsRpc;
+  readonly #drafts: DraftsRpc;
+  readonly #versions: VersionsRpc;
   readonly #knowledge: KnowledgeRpc;
   readonly #brain: BrainRpc;
   readonly #brainSources: BrainSourcesRpc;
@@ -105,6 +109,8 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     // Everything but the onboarding refuses Grasp staff (session-check.ts).
     const full = fullAccess(check);
     this.#apps = new AppsRpc(env, full);
+    this.#drafts = new DraftsRpc(env, full);
+    this.#versions = new VersionsRpc(env, full);
     this.#knowledge = new KnowledgeRpc(env, full);
     this.#brain = new BrainRpc(env, full);
     this.#brainSources = new BrainSourcesRpc(env, full);
@@ -148,7 +154,6 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
       connections: this.#connections,
       decisions: this.#decisions,
       heldStarts: this.#heldStarts,
-      lifecycles: this.#workflowResources.lifecycle,
       bindings: this.#workflowResources,
       skills: this.#skills,
     });
@@ -246,6 +251,14 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
 
   get connections(): ConnectionsRpc {
     return this.#connections;
+  }
+
+  get drafts(): DraftsRpc {
+    return this.#drafts;
+  }
+
+  get versions(): VersionsRpc {
+    return this.#versions;
   }
 
   get workflows(): WorkflowsRpc {

@@ -66,10 +66,9 @@ export const chats = sqliteTable(
      */
     thread: text(),
     /**
-     * The App the chat is for (`ChatsApi.forApp`): the one its person
-     * builds there, which its agent is told of; null for any other chat.
-     * Only a pointer: what the agent may do to the App is decided on
-     * every call, as for any chat.
+     * Unused, dropped in a later release: the App a chat was bound to.
+     * A chat's App or workflow is now the one it worked on, as the
+     * draft's checkpoints name it (`chatsWorkedOn` in drafts.ts).
      */
     appId: text("app_id"),
     /**
@@ -228,7 +227,7 @@ export const chatRunSources = sqliteTable(
   ]
 );
 
-// Unused since the App's one shared draft (app-drafts.ts) replaced each
+// Unused since the App's one shared draft (drafts.ts) replaced each
 // chat's drafts and their previews: nothing reads or writes these, and a
 // chat's rows go with it. Kept so a roll back to the release before still
 // has them; dropped in a later release (expand, then contract).
@@ -477,7 +476,7 @@ export const chatCodeRuns = sqliteTable(
     /**
      * Always written; null on a run an earlier release opened, kept so a
      * rollback's code still writes here. Its draft writes never amend a
-     * turn's undo point (app-drafts.ts).
+     * turn's checkpoint (drafts.ts).
      */
     turnId: text("turn_id"),
     sourceHash: text("source_hash").notNull(),

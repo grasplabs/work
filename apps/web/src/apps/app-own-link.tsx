@@ -32,7 +32,7 @@ import { useCoreAction } from "../use-core-action.ts";
 // An App's own link, as the prototype's publish dialog gives one
 // (`components/apps/publish-dialog.tsx`): the last part of an address under
 // the workspace's, which opens the App for the workspace's members who may
-// use it, while it is published. Core keeps each link once and refuses the
+// use it, while it is live. Core keeps each link once and refuses the
 // workspace's own pages (app-own-links.ts); its builders set it here.
 
 /** A link made of `name`: lower case, its words joined by single dashes. */

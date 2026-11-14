@@ -203,7 +203,7 @@ describe("an App's chat building its App", { timeout: 180_000 }, () => {
       codeStep(calling(app.id)),
       says("The board is drafted.")
     );
-    const chat = await builder.api.chats.forApp(app.id);
+    const chat = await builder.api.chats.create("App changes");
 
     await stub.ask(chat.id, {
       text: "Build a kanban with four columns.",
@@ -236,7 +236,7 @@ describe("an App's chat building its App", { timeout: 180_000 }, () => {
         .filter(({ method }) => method === "build.call")
         .map(({ target, outcome }) => ({ target, outcome }))
     );
-    const drafts = [await builder.api.apps.drafts.get(app.id)];
+    const drafts = [await builder.api.drafts.get({ kind: "app", id: app.id })];
     expect({
       docs: docs?.text.includes("# @grasp-os/sdk/server"),
       // The generated config is never written by hand: the refusal names
@@ -280,7 +280,7 @@ describe("an App's chat building its App", { timeout: 180_000 }, () => {
       checks: turnChecks(provider),
     }).toStrictEqual({ called: { ok: true, answer: [] }, checks: [] });
     expect(
-      drafts.map(({ app: drafted, changed }) => ({ app: drafted, changed }))
+      drafts.map(({ subject, changed }) => ({ app: subject.id, changed }))
     ).toStrictEqual([
       {
         app: app.id,

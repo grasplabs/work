@@ -10,16 +10,7 @@ import type {
   PendingWorkflowBindings,
   WorkflowBindingTarget,
 } from "@grasp-os/shared/workflow-resources";
-import {
-  and,
-  asc,
-  desc,
-  eq,
-  inArray,
-  isNotNull,
-  isNull,
-  or,
-} from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import type { Acting } from "./auth/identity.ts";
@@ -27,7 +18,6 @@ import {
   eventSources,
   permissions,
   workflowBindingApprovals,
-  workflowResourceLifecycles,
   workflowResources,
 } from "./db/core/schema.ts";
 import { modelSettings } from "./models.ts";
@@ -44,8 +34,8 @@ import { ingressOf } from "./workflows/run-inboxes.ts";
 
 // The bindings that wait on an admin (`workflowResources.pendingBindings`,
 // the waiting feed's `bindings`): every catalog binding of a workflow's
-// live version, or of the version asked to go live, that no approval
-// serves, so its starts are refused (workflow-starts.ts). What could go
+// live version that no approval serves, so its starts are refused
+// (workflow-starts.ts). What could go
 // wrong, and what stops it:
 //
 // - Someone else learning which workflows reach what: the organization's
@@ -310,7 +300,7 @@ const unapprovedOf = async (
   const unapproved: PendingWorkflowBindings["bindings"] = [];
   for (const binding of versions.get(version) ?? []) {
     // oxlint-disable-next-line no-await-in-loop -- one point lookup per binding
-    if ((await approvalServing(env, id, version, binding)) !== undefined) {
+    if ((await approvalServing(env, id, binding)) !== undefined) {
       continue;
     }
     unapproved.push({
@@ -329,48 +319,40 @@ const unapprovedOf = async (
 };
 
 /**
- * Of workflow `workflow`'s `versions`, those with catalog bindings no
- * approval serves, each version once, in the order given: `live` the one
- * a start runs now. Every kind is offered targets when `everyKind`.
+ * Workflow `workflow`'s live `version` (none while it has none), when it
+ * has catalog bindings no approval serves. Every kind is offered targets
+ * when `everyKind`.
  */
 const waitingOf = async (
   env: Env,
   workflow: { id: string; name: string },
-  versions: readonly { version: number | null; live: boolean }[],
+  version: number | null,
   everyKind: boolean
 ): Promise<PendingWorkflowBindings[]> => {
-  const pending: PendingWorkflowBindings[] = [];
-  const seen = new Set<number>();
-  const offers: Offers = new Map();
-  for (const { version, live } of versions) {
-    if (version === null || seen.has(version)) {
-      continue;
-    }
-    seen.add(version);
-    // oxlint-disable-next-line no-await-in-loop -- one workflow version at a time, three at most
-    const bindings = await unapprovedOf(
-      env,
-      workflow.id,
-      version,
-      everyKind,
-      offers
-    );
-    if (bindings.length > 0) {
-      pending.push({
-        workflow: { id: workflow.id, name: workflow.name },
-        version,
-        live,
-        bindings,
-      });
-    }
+  if (version === null) {
+    return [];
   }
-  return pending;
+  const bindings = await unapprovedOf(
+    env,
+    workflow.id,
+    version,
+    everyKind,
+    new Map()
+  );
+  return bindings.length === 0
+    ? []
+    : [
+        {
+          workflow: { id: workflow.id, name: workflow.name },
+          version,
+          bindings,
+        },
+      ];
 };
 
 /**
- * The live versions of workflows, and those asked to go live, whose
- * catalog bindings no approval serves, for `by`, one of the
- * organization's own admins.
+ * The live versions of workflows whose catalog bindings no approval
+ * serves, for `by`, one of the organization's own admins.
  */
 export const pendingWorkflowBindings = async (
   env: Env,
@@ -381,21 +363,13 @@ export const pendingWorkflowBindings = async (
     .select({
       id: workflowResources.id,
       name: workflowResources.name,
-      live: workflowResourceLifecycles.liveVersion,
-      goLive: workflowResourceLifecycles.goLiveVersion,
+      version: workflowResources.currentVersion,
     })
     .from(workflowResources)
-    .innerJoin(
-      workflowResourceLifecycles,
-      eq(workflowResourceLifecycles.workflowResourceId, workflowResources.id)
-    )
     .where(
       and(
         isNull(workflowResources.deletedAt),
-        or(
-          isNotNull(workflowResourceLifecycles.liveVersion),
-          isNotNull(workflowResourceLifecycles.goLiveVersion)
-        )
+        isNotNull(workflowResources.currentVersion)
       )
     )
     .orderBy(desc(workflowResources.createdAt), desc(workflowResources.id))
@@ -404,27 +378,16 @@ export const pendingWorkflowBindings = async (
   for (const row of rows) {
     pending.push(
       // oxlint-disable-next-line no-await-in-loop -- one workflow at a time, bounded
-      ...(await waitingOf(
-        env,
-        row,
-        [
-          { version: row.live, live: true },
-          { version: row.goLive, live: false },
-        ],
-        false
-      ))
+      ...(await waitingOf(env, row, row.version, false))
     );
   }
   return pending;
 };
 
 /**
- * Workflow `id`'s versions whose catalog bindings no approval serves, for
- * `by`, one of the organization's own admins, to approve on its page, each
- * kind offered targets: the version a start runs now (the live one, or
- * before any went live the one published last, as a start from its page
- * takes it), the one asked to go live, and the one published last, which a
- * test run starts.
+ * Workflow `id`'s live version, when its catalog bindings no approval
+ * serves, for `by`, one of the organization's own admins, to approve on
+ * its page, each kind offered targets.
  */
 export const workflowPendingBindings = async (
   env: Env,
@@ -433,24 +396,7 @@ export const workflowPendingBindings = async (
 ): Promise<PendingWorkflowBindings[]> => {
   requireMemberAdmin(by);
   const workflow = await requireWorkflowRole(env, by, id, "user");
-  const lifecycle = await drizzle(env.DB)
-    .select({
-      live: workflowResourceLifecycles.liveVersion,
-      goLive: workflowResourceLifecycles.goLiveVersion,
-    })
-    .from(workflowResourceLifecycles)
-    .where(eq(workflowResourceLifecycles.workflowResourceId, workflow.id))
-    .get();
-  return await waitingOf(
-    env,
-    workflow,
-    [
-      { version: lifecycle?.live ?? workflow.currentVersion, live: true },
-      { version: lifecycle?.goLive ?? null, live: false },
-      { version: workflow.currentVersion, live: false },
-    ],
-    true
-  );
+  return await waitingOf(env, workflow, workflow.currentVersion, true);
 };
 
 /**

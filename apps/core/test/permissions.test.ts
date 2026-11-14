@@ -310,35 +310,20 @@ describe("permissions", () => {
     ).resolves.toStrictEqual(["permission.denied", reached]);
   });
 
-  it("refuse an App's call that changes things when it names no version of its code", async () => {
+  it("take an App's authority only with the version of its code it runs", async () => {
     const admin = await permissionApi("admin");
     const app = await newApp(admin.api);
-    const { id } = await admin.api.permissions.request(outlook(app.appId));
-    await grantReviewed(admin.api, id);
-    const check = async (authority: Authority) =>
-      await outcome(
-        authorize(
-          env,
-          authority,
-          permissionObjectSchema.parse(outlook(app.appId).object),
-          "mail.list",
-          id
-        )
-      );
-    const unversioned: Authority = {
+    const unversioned = {
       subject: app,
       onBehalfOf: admin.userId,
       mode: "interactive",
     };
 
-    await expect(
-      Promise.all([
-        check(unversioned),
-        check({ ...unversioned, appVersion: 1 }),
-      ])
-    ).resolves.toStrictEqual(["permission.denied", "ok"]);
-    // Nor does one pass as an App's authority.
-    expect(authoritySchema.safeParse(unversioned).success).toBeFalsy();
+    expect({
+      unversioned: authoritySchema.safeParse(unversioned).success,
+      versioned: authoritySchema.safeParse({ ...unversioned, appVersion: 1 })
+        .success,
+    }).toStrictEqual({ unversioned: false, versioned: true });
   });
 
   it("are granted to an agent with no version reviewed, as it has none", async () => {

@@ -12,7 +12,6 @@ import {
   deleteTriggerResource,
   listWorkflowTriggers,
   setTriggerEnabled,
-  updateTriggerVersion,
   workflowTrigger,
 } from "./trigger-resources.ts";
 
@@ -44,13 +43,6 @@ export class WorkflowTriggersRpc
   async create(input: unknown): Promise<CreatedWorkflowTrigger> {
     return await withPerson(this.#check, async (person) => {
       const { id } = await createTriggerResource(this.#env, person, input);
-      return await workflowTrigger(this.#env, person, id);
-    });
-  }
-
-  async setVersion(id: string, version: number): Promise<WorkflowTrigger> {
-    return await withPerson(this.#check, async (person) => {
-      await updateTriggerVersion(this.#env, person, id, version);
       return await workflowTrigger(this.#env, person, id);
     });
   }
