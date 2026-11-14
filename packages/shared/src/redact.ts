@@ -99,8 +99,9 @@ const credentialFormats: readonly RegExp[] = [
   // flood like "eyJ-eyJ-…", which made the match quadratic. Any segments
   // after the third are taken too, so a JSON Web Encryption's five go
   // whole (and a sentence's closing period with them); one run, not a
-  // repeated group, which overflowed on a run of megabytes.
-  /(?<![\w-])eyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]{8,}[\w.-]*/gu,
+  // repeated group, and eight then any more, not `{8,}`: both overflowed
+  // on a run of megabytes.
+  /(?<![\w-])eyJ[\w-]{8}[\w-]*\.[\w-]{8}[\w-]*\.[\w-]{8}[\w-]*[\w.-]*/gu,
   /\bAKIA[0-9A-Z]{16}\b/gu,
 ];
 
@@ -126,11 +127,12 @@ const credentials: readonly (readonly [
   // named value; or with `name=`, a cookie string (a cookie's name being a
   // token's characters, RFC 6265), then with every pair after it to a
   // quote or the end of the line. Quoted, in a backtick (as Markdown
-  // writes code) or not. Where a value ends is never part of the rule:
-  // only how it starts.
+  // writes code) or not. A value a known format above already began to
+  // redact (`[redacted]%3D%3D--…`) starts as one too. Where a value ends
+  // is never part of the rule: only how it starts.
   [
     new RegExp(
-      String.raw`\b(?<name>\w*?(?:session|cookie))${between}(?=(?:\\?["'\x60])?(?:${tokenChar}+=|${sessionChar}{16}))(?:\x60?${tokenChar}+=[^"'\\\n]*|${namedValue})`,
+      String.raw`\b(?<name>\w*?(?:session|cookie))${between}(?=(?:\\?["'\x60])?(?:\[redacted\]|${tokenChar}+=|${sessionChar}{16}))(?:\x60?${tokenChar}+=[^"'\\\n]*|${namedValue})`,
       "giu"
     ),
     redactedAssignment,
@@ -164,18 +166,20 @@ const credentials: readonly (readonly [
 // `aws_secret_access_key = …` or bare (only its key ID, `AKIA…`, has a
 // shape of its own). After `session` or `cookie` (everyday words, so a
 // value is redacted only when it starts as a credential does), each class
-// but the last held by the differential test: a value under 16 characters
-// (`session=9f8e7d`); a value whose first 16 characters hold one that is
-// not a session character, `:`, `|` or a space among them (express's
-// decoded `s:<id>.<sig>`, `user:42:…`, Bottle's `!<sig>?<data>`), as `:`
-// would let a link (`Session: https://…`) start as one; and, in a cookie
-// string, the pairs after a quoted value (`c="d"; sid=…`), as the string
-// ends at a quote so it never runs past the end of a JSON string holding
-// it (never caught). The other way, after them: a word of 16 or more
-// session characters reads as a value ("Session: internationalisation",
-// "Session: kwartaalplanning": after the loanwords, a Dutch or German
-// compound often is), and any `name=value` blanks the rest of its
-// line ("cookie: flavour=vanilla, then we walked" → "cookie: [redacted]").
+// but the last two held by the differential test: a value under 16
+// characters (`session=9f8e7d`); a value whose first 16 characters hold
+// one that is not a session character, `:`, `|` or a space among them
+// (express's decoded `s:<id>.<sig>`, `user:42:…`, Bottle's
+// `!<sig>?<data>`), as `:` would let a link (`Session: https://…`) start
+// as one; a value after a curly quote or a parenthesis (`session: “…”`,
+// `session: (…)`); and, in a cookie string, the pairs after a quoted
+// value (`c="d"; sid=…`), as the string ends at a quote so it never runs
+// past the end of a JSON string holding it (never caught). The other way,
+// after them: a word of 16 or more session characters reads as a value
+// ("Session: internationalisation", "Session: kwartaalplanning": after
+// the loanwords, a Dutch or German compound often is), and any
+// `name=value` blanks the rest of its line ("cookie: flavour=vanilla,
+// then we walked" → "cookie: [redacted]").
 // Prose after the other names loses its first word ("The secret: practice
 // daily", "Authorization: approved"): what follows them is a credential by
 // name, a short or word-like one too. What is left is bounded: such text

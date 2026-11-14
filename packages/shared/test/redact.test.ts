@@ -484,6 +484,10 @@ describe("redacting credentials", () => {
         `laravel_session=${sessionToken}`,
         `authCookie: '${sessionToken}'`,
         `cookie: \`theme=dark; sid=${sessionToken}\``,
+        // A known format that matches only the start of the value.
+        `session=${jwt}%3D%3D--abcdef0123456789`,
+        `session=${jwt}+rest/of==`,
+        `cookie: ${jwt}*sealpart`,
       ].map(redact)
     ).toStrictEqual([
       "Cookie: [redacted]",
@@ -493,6 +497,9 @@ describe("redacting credentials", () => {
       String.raw`{\"cookie\":\"[redacted]\",\"n\":1}`,
       "laravel_session=[redacted]",
       "authCookie: '[redacted]'",
+      "cookie: [redacted]",
+      "session=[redacted]",
+      "session=[redacted]",
       "cookie: [redacted]",
     ]);
   });
@@ -572,12 +579,14 @@ describe("redacting credentials", () => {
       // Eight megabytes in one run.
       session: redact(`session: ${eightMegabytes}!`),
       bearer: redact(`Bearer ${eightMegabytes}`),
+      jwt: redact(`eyJ${eightMegabytes}.eyJhbGciOi.c2lnbmVkLWJ5`),
     }).toStrictEqual({
       lines: true,
       flood: true,
       cookies: "cookie=[redacted]",
       session: "session: [redacted]",
       bearer: "[redacted]",
+      jwt: "[redacted]",
     });
   });
 
