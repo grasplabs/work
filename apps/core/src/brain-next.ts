@@ -4432,60 +4432,17 @@ export const correctAs = async (
   return saved;
 };
 
-// Memories and entities for code (GRA-1837, threat model on the issue):
-// what an App's action or a workflow's step remembers, forgets and
-// corrects, in its own word, and the entities it reads. All of it in the
-// shared store, read as the company alone (`company`): code never reads
-// or writes a person's own store, so what it writes is read by the
-// company, as everything it may read is, and it reads back what it wrote.
-// Whether code may write at all (its grant, and that the company may read
-// everything it may have read) is its caller's to decide first
-// (brain-recall.ts): these only ever write in the company's readers.
-
-/** Who may read what code writes: every member, as code reads. */
-const companyAccess: Access = { kind: "audience", group: companyGroup };
-
-/**
- * Who writes for code, as the Brain names a writer: the App
- * (`app:<id>`) or the workflow (`workflow:<id>`) whose code it is. Set by
- * core, never by the code.
- */
-const codeWriterSchema = wellFormedString()
-  .regex(/^(?:app|workflow):\S+$/u)
-  .max(principalMaxLength);
-
-/**
- * The attributes code may file a memory under: those whose value is a
- * text, but a person's preference or instruction, which is only ever
- * that person's own word.
- */
-const codeAttributes = attributeNames.filter(
-  (name) => name !== "preference" && name !== "instruction"
-);
-
-/** A memory code says about an entity (`rememberForCompanyAs`). */
-const codeRememberedSchema = z.strictObject({
-  about: memoryAboutSchema,
-  attribute: z.enum(codeAttributes).optional(),
-  value: memoryText(valueMaxLength).optional(),
-  statement: memoryText(statementMaxLength),
-});
-
-/** A memory of its own code forgets (`forgetForCompanyAs`). */
-const codeForgetSchema = z.strictObject({ memory: memoryIdSchema });
-
-/** A correction code makes of a memory (`correctForCompanyAs`). */
-const codeCorrectionSchema = z.strictObject({
-  memory: memoryIdSchema,
-  value: memoryText(valueMaxLength).optional(),
-  statement: memoryText(statementMaxLength),
-});
+// Entities for code (GRA-1837, threat model on the issue): the entities
+// an App's action or a workflow's step reads, and their cards. All of it
+// in the shared store, read as the company alone (`company`): code never
+// reads a person's own store or a team's. Whether code may read at all
+// (its grant) is its caller's to decide first (brain-recall.ts).
 
 /**
  * `error` as core gives it: an erased store's or key's as
  * `brain.source_erased` (`erasedAs`); a refusal of the Brain's rules
- * (an id it doesn't name, a value its attribute doesn't take, a cursor it
- * didn't give) as `brain.request_invalid`, the same whatever the rule, so
+ * (an id it doesn't name, a cursor it didn't give) as
+ * `brain.request_invalid`, the same whatever the rule, so
  * an id the reader may not read is refused as one nobody holds. A store
  * restoring an export, or any other error, as it is: not the caller's to
  * mend.
@@ -4500,124 +4457,6 @@ const refusedAs = (error: unknown): unknown => {
     error.message !== restoringNow
     ? brainSourceErrors.create("brain.request_invalid")
     : error;
-};
-
-/**
- * Saves what code says, in `writer`'s word (`app:<id>`, `workflow:<id>`),
- * for the member `personId`, in the shared store, readable by the company:
- * a fact about an entity the company may read (by id), or one found by an
- * exact identifier there, or a new one; never a preference or an
- * instruction. The same writer's new word on the same entity and
- * one-value attribute ends its earlier memory, which stays as history.
- * `change` names this one save, minted by core: the same change again
- * answers what it saved. Refused once `personId` is no longer a member,
- * and as `brain.request_invalid` for what the Brain's rules refuse.
- */
-export const rememberForCompanyAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
-  personId: string,
-  { writer, change }: { writer: string; change: string },
-  remembered: unknown
-): Promise<{ memory: MemoryId; entity: EntityId; learnedAt: Date }> => {
-  const { about, statement, ...memory } = checked(
-    codeRememberedSchema,
-    remembered
-  );
-  const by = checked(codeWriterSchema, writer);
-  const reader = await readerOf(env, personId, "company");
-  let added: Awaited<ReturnType<Brain["addMemories"]>>;
-  try {
-    added = await brain(env).addMemories({
-      change: checked(changeSchema, change),
-      access: companyAccess,
-      // An entity's id is taken only as the company may see it.
-      reader,
-      entities: [{ key: "about", ...about }],
-      memories: [
-        {
-          about: "about",
-          ...memory,
-          type: "fact",
-          statement,
-          speaker: { kind: "agent", agent: by },
-          basis: { kind: "writer", writer: by },
-        },
-      ],
-    });
-  } catch (error) {
-    throw refusedAs(error);
-  }
-  const [saved] = added.memories;
-  const entity = added.entities.about;
-  // When the store learned it, read back as the company reads it: the
-  // same on every repeat of its change, for its outcome's record.
-  const kept =
-    saved === undefined || entity === undefined
-      ? undefined
-      : await keptMemory(brain(env), reader, entity, saved);
-  if (saved === undefined || entity === undefined || kept === undefined) {
-    throw new Error("The Brain kept no memory");
-  }
-  return { memory: saved, entity, learnedAt: kept.learnedAt };
-};
-
-/**
- * Retires one of `writer`'s own memories (`{ memory }`) in the shared
- * store, as the company reads it, for the member `personId`: `done`, again for one
- * retired before; `nothing` alike for none, another writer's (a person's,
- * a source's or another App's), and an expired one. Refused once
- * `personId` is no longer a member.
- */
-export const forgetForCompanyAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
-  personId: string,
-  writer: string,
-  request: unknown
-): Promise<MemoryChangeOutcome> => {
-  const { memory: id } = checked(codeForgetSchema, request);
-  const by = checked(codeWriterSchema, writer);
-  const reader = await readerOf(env, personId, "company");
-  try {
-    return await brain(env).retireMemory({ memory: id, reader, writer: by });
-  } catch (error) {
-    throw refusedAs(error);
-  }
-};
-
-/**
- * Corrects a current memory of the shared store the company may read, for
- * the member `personId`, in `writer`'s word (contract `correctMemory`):
- * the fix under exactly that memory's readers, beside what says otherwise
- * and unconfirmed, since an agent's word is no person's confirmation. The
- * fix's id, or null alike when there is no such memory the company may
- * read that is current, it is a relation, or its readers can't be kept.
- * `change` as `rememberForCompanyAs`'s.
- */
-export const correctForCompanyAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
-  personId: string,
-  { writer, change }: { writer: string; change: string },
-  correction: unknown
-): Promise<{ memory: MemoryId; learnedAt: Date } | null> => {
-  const { memory, value, statement } = checked(
-    codeCorrectionSchema,
-    correction
-  );
-  const by = checked(codeWriterSchema, writer);
-  const reader = await readerOf(env, personId, "company");
-  try {
-    return await brain(env).correctMemory({
-      change: checked(changeSchema, change),
-      memory,
-      reader,
-      writer: by,
-      speaker: { kind: "agent", agent: by },
-      ...(value === undefined ? {} : { value }),
-      statement,
-    });
-  } catch (error) {
-    throw refusedAs(error);
-  }
 };
 
 /** Most characters of a page's cursor as code holds it: well past any the store gives. */
@@ -4794,26 +4633,23 @@ export const companyEntitiesAs = async (
   return { entities: page.entities, next: cursorTextOf(page.next) };
 };
 
-/** What code asks of the Brain's memories and entities, beside recall, by operation. */
-const codeMemoryRequests = {
-  remember: codeRememberedSchema,
-  forget: codeForgetSchema,
-  correct: codeCorrectionSchema,
+/** What code asks of the Brain's entities, beside recall, by operation. */
+const codeEntitiesRequests = {
   "entities.get": codeCardSchema,
   "entities.find": codeFindSchema,
 } as const;
 
-/** What code asks of the Brain's memories and entities: `ctx.brain.<operation>`. */
-export type CodeMemoryOperation = keyof typeof codeMemoryRequests;
+/** What code asks of the Brain's entities: `ctx.brain.entities.<name>`. */
+export type CodeEntitiesOperation = keyof typeof codeEntitiesRequests;
 
 /**
  * Whether `input` is a request code may make of `operation`, as the
  * functions above take it: for core to refuse it before anything else
  * is looked at, as a recall's (`codeRecallOf`).
  */
-export const isCodeMemoryRequest = (
-  operation: CodeMemoryOperation,
+export const isCodeEntitiesRequest = (
+  operation: CodeEntitiesOperation,
   input: unknown
 ): boolean =>
-  Object.hasOwn(codeMemoryRequests, operation) &&
-  codeMemoryRequests[operation].safeParse(input).success;
+  Object.hasOwn(codeEntitiesRequests, operation) &&
+  codeEntitiesRequests[operation].safeParse(input).success;

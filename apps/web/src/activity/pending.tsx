@@ -101,26 +101,11 @@ export const subjectOf = (
 };
 
 /**
- * The consent to write to the Brain, in plain words: what it writes, who
- * reads it, when it may write (core's app-company.ts and
- * workflows/brain-calls.ts), and what nothing tracks, which can then be
- * written for everyone.
- */
-const brainWriteConsent = (subject: Permission["subject"]): string =>
-  subject.type === "workflow"
-    ? i18n._(
-        msg`Company Brain, write. This workflow can remember facts in its own name that everyone in the company can read, and forget or correct them. It writes only while everyone in the company may read everything it reads, and never from a run started from a chat that had read something. What a run is started with (by a person, an App or a trigger: a webhook, a mail, a connection's event) and what is sent to it aren't tracked, so they can be written for everyone to read. Every write is recorded`
-      )
-    : i18n._(
-        msg`Company Brain, write. This App can remember facts in its own name that everyone in the company can read, and forget or correct them. It writes only while it is shared with everyone in the company, all of them may read every one of its tables, and everyone may read everything it reads. What people type into it and its own data can then be written for everyone to read. Every write is recorded`
-      );
-
-/**
  * What it asks for: a workflow by its name, connections and collections
  * by ID, as they have no names here.
  */
 export const objectOf = (
-  { subject, object, actions, workflowNames, functionName }: Permission,
+  { object, actions, workflowNames, functionName }: Permission,
   directory: Directory
 ): string => {
   if (object.type === "connection") {
@@ -162,9 +147,6 @@ export const objectOf = (
     return i18n._(
       msg`Guest chats. This App can invite people who aren't members to a short chat with a model through a link, and read back what they write. Guests reach nothing else; their chats spend the model budget of whoever invites them`
     );
-  }
-  if (object.type === "platform" && actions.includes("brain.write")) {
-    return brainWriteConsent(subject);
   }
   if (object.type === "platform" && actions.includes("brain")) {
     // Consent in plain words: what it reads, whose access bounds it, and

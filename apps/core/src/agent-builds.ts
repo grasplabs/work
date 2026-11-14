@@ -1889,13 +1889,9 @@ build: {
    * ["recall"] })\`), or to select and read its skills
    * (\`ctx.brain.skills.select\` and \`.read\`, operations \`"skills.select"\`
    * and \`"skills.read"\`), or to read its entities (\`ctx.brain.entities.get\`
-   * and \`.find\`, operations \`"entities.get"\` and \`"entities.find"\`), it
-   * asks for \`{ type: "platform" }\` with actions \`["brain"]\`; to remember,
-   * forget or correct in the App's own word (\`ctx.brain.remember\`,
-   * \`.forget\`, \`.correct\`, read by everyone in the company), a second one
-   * with \`["brain.write"]\` too, which writes only while everyone in the
-   * company may read everything the App may read (never from an App whose
-   * permission names teams). A recall answers what everyone in the company may read,
+   * and \`.find\`, operations \`"entities.get"\` and \`"entities.find"\`, as
+   * everyone in the company may read them), it asks for
+   * \`{ type: "platform" }\` with actions \`["brain"]\`. A recall answers what everyone in the company may read,
    * never anyone's own content. To recall teams' content too, name those
    * teams by ID (\`{ type: "platform", teams: ["<team id>"] }\`): a recall
    * then also answers, of them, the teams the person it is for is in, and

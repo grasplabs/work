@@ -88,11 +88,9 @@ export interface BrainSkillText {
   readonly text: string;
 }
 
-// Memories and entities, beside recall: an App's action (`ctx.brain`) and
-// a workflow's step (`ctx.brain.<alias>`) remember, forget and correct in
-// their own word, and read the entities and memories everyone in the
-// company may read (`ctx.brain.entities`). What they write is read by
-// everyone in the company, as the App's or the workflow's own word.
+// Entities, beside recall: an App's action (`ctx.brain.entities`) and a
+// workflow's step (`ctx.brain.<alias>.entities`) read the entities and
+// memories everyone in the company may read.
 
 /** What kind of thing an entity is. */
 export type BrainEntityKind =
@@ -125,7 +123,7 @@ export interface BrainIdentifier {
 /**
  * A memory on a card: what it says (`statement`), the attribute it is
  * filed under and its value, when the Brain learned it (ISO 8601), whether
- * a person or a correction confirmed it, and whether another current
+ * a person confirmed it, and whether another current
  * memory says otherwise (`contested`).
  */
 export interface BrainMemory {
@@ -158,33 +156,6 @@ export interface BrainCard {
   }[];
   readonly notes: readonly BrainMemory[];
   readonly next: string | null;
-}
-
-/** A fact to remember (`remember`). */
-export interface BrainRemember {
-  /**
-   * The entity it is about: one read from the Brain, by its `id` and
-   * `kind`; or by its `kind`, `names` and exact `identifiers`, the one an
-   * identifier finds, or a new one.
-   */
-  readonly about: {
-    readonly kind: BrainEntityKind;
-    readonly id?: string;
-    readonly names?: readonly string[];
-    readonly identifiers?: readonly BrainIdentifier[];
-  };
-  /** The attribute it is filed under, such as `renewal_date`, and its value. */
-  readonly attribute?: string;
-  readonly value?: string;
-  /** What it says: at most 1,000 characters. */
-  readonly statement: string;
-}
-
-/** A correction of a memory (`correct`): its new value, if its attribute holds one, and what it says. */
-export interface BrainCorrect {
-  readonly memory: string;
-  readonly value?: string;
-  readonly statement: string;
 }
 
 /** Entities to find (`entities.find`): of a kind, by a whole name, or by an exact identifier. */

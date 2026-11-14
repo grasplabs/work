@@ -1,33 +1,27 @@
 import { delegateActorOf } from "@grasp-os/shared/audit";
 import { permissionIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
-import { permissionErrors } from "@grasp-os/shared/permissions";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import type { BrainAction } from "@grasp-os/workflow-schema/format";
 
-import { heldByTheWholeCompany } from "../app-company.ts";
 import {
   brainCardSchema,
-  brainCorrectedSchema,
   brainEntitiesSchema,
   brainPackSchema,
-  brainRememberedSchema,
   brainSkillsSelectedSchema,
   brainSkillTextSchema,
   skillReadSchema,
   skillsSelectSchema,
 } from "../brain-pack.ts";
 import {
+  entitiesCallFor,
   isBrainRecall,
-  isMemoriesRequest,
-  memoriesCallFor,
+  isEntitiesRequest,
   recallFor,
   skillsCallFor,
 } from "../brain-recall.ts";
-import type { MemoriesOperation } from "../brain-recall.ts";
 import { runAuthority, runContext } from "./resource-authority.ts";
 import type { CallingRun, FrozenCatalogBinding } from "./resource-authority.ts";
-import { requireNoChatReads } from "./resource-reads.ts";
 import { recordRunVersions } from "./run-evidence.ts";
 
 // A run's recall of the Brain (`ctx.brain.<alias>.recall`), and its
@@ -40,14 +34,9 @@ import { recordRunVersions } from "./run-evidence.ts";
 // trigger's or a schedule's run), still a member, and of only what
 // everyone in the company may read: the same request, checks and pack as
 // an App's action (threat model on GRA-1731). What it hands the run is pinned with the run
-// (run-evidence.ts). Its memories and entities (`remember`, `forget`,
-// `correct`, `entities.get`, `entities.find`) are an App's too (threat
-// model on GRA-1837): written in the workflow's own word, under the
-// change its step's key makes, so a step replayed writes once; and only
-// while every member may read everything the run may have read: its pins,
-// checked again before the call (resource-calls.ts `handsOut`), no read of
-// the chat that started it (one person's reach), and everything the
-// workflow may hold through its grants (app-company.ts).
+// (run-evidence.ts). Its entities (`entities.get`, `entities.find`) are an
+// App's too (threat model on GRA-1837): read as the company alone, a
+// card's versions pinned with the run as a pack's are.
 
 /** A brain call, as a run's step asks it. */
 export interface BrainCall {
@@ -73,27 +62,13 @@ const requests: Readonly<
     issue:
       "arguments: Give a skill as a selection gave it: its scope, name and version.",
   },
-  remember: {
-    valid: (input) => isMemoriesRequest("remember", input),
-    issue:
-      "arguments: Give what it is about (its kind, and its id or names and identifiers), an attribute and value if any, and a statement of at most 1,000 characters.",
-  },
-  forget: {
-    valid: (input) => isMemoriesRequest("forget", input),
-    issue: "arguments: Give the memory's id.",
-  },
-  correct: {
-    valid: (input) => isMemoriesRequest("correct", input),
-    issue:
-      "arguments: Give the memory's id, its new value if its attribute holds one, and a statement of at most 1,000 characters.",
-  },
   "entities.get": {
-    valid: (input) => isMemoriesRequest("entities.get", input),
+    valid: (input) => isEntitiesRequest("entities.get", input),
     issue:
       "arguments: Give the entity's id, and asOf (an ISO 8601 date-time with its offset) and after (a page's next) if any.",
   },
   "entities.find": {
-    valid: (input) => isMemoriesRequest("entities.find", input),
+    valid: (input) => isEntitiesRequest("entities.find", input),
     issue:
       "arguments: Give a kind, a name or an identifier, and after (a page's next) if any.",
   },
@@ -117,18 +92,6 @@ const answers: Readonly<
     valid: (answer) => brainSkillTextSchema.safeParse(answer).success,
     issue: "output: Answer a skill: its scope, name, version and text.",
   },
-  remember: {
-    valid: (answer) => brainRememberedSchema.safeParse(answer).success,
-    issue: "output: Answer the memory's id and its entity's.",
-  },
-  forget: {
-    valid: (answer) => typeof answer === "boolean",
-    issue: "output: Answer true or false.",
-  },
-  correct: {
-    valid: (answer) => brainCorrectedSchema.safeParse(answer).success,
-    issue: "output: Answer the fix's memory id, or null.",
-  },
   "entities.get": {
     valid: (answer) => brainCardSchema.nullable().safeParse(answer).success,
     issue:
@@ -139,23 +102,6 @@ const answers: Readonly<
     issue: "output: Answer entities (each its id, kind and name) and next.",
   },
 };
-
-/** The Brain's operations on memories and entities, as `memoriesCallFor` takes them. */
-const memoriesActions: ReadonlySet<BrainAction> = new Set<MemoriesOperation>([
-  "remember",
-  "forget",
-  "correct",
-  "entities.get",
-  "entities.find",
-]);
-
-/** Whether `action` is one of them. */
-const isMemoriesAction = (action: BrainAction): action is MemoriesOperation =>
-  memoriesActions.has(action);
-
-/** Whether `action` writes to the Brain. */
-export const isBrainWrite = (action: BrainAction): boolean =>
-  action === "remember" || action === "forget" || action === "correct";
 
 /**
  * Refuses, as `workflow.call_invalid`, a call that isn't one of the
@@ -187,16 +133,14 @@ export const requireBrainAnswer = (call: BrainCall, answer: unknown): void => {
 };
 
 /**
- * Makes call `call` of `run`, under its step's key `key`, through
- * `binding`, its authority already decided again (`makeCall`): what the
- * Brain answers, as JSON.
+ * Makes call `call` of `run` through `binding`, its authority already
+ * decided again (`makeCall`): what the Brain answers, as JSON.
  */
 export const callBrain = async (
   env: Env,
   run: CallingRun,
   binding: FrozenCatalogBinding,
-  call: BrainCall,
-  key: string
+  call: BrainCall
 ): Promise<Json> => {
   const { target } = binding;
   if (target.kind !== "brain") {
@@ -204,8 +148,8 @@ export const callBrain = async (
   }
   const authority = runAuthority(run);
   const permissionId = permissionIdSchema.parse(target.permissionId);
-  if (isMemoriesAction(call.operation)) {
-    return await memoriesCallFor(
+  if (call.operation === "entities.get" || call.operation === "entities.find") {
+    return await entitiesCallFor(
       env,
       {
         authority,
@@ -213,20 +157,6 @@ export const callBrain = async (
         permissionId,
         actor: delegateActorOf(authority),
         target: { type: "workflow_run", id: run.runId },
-        writer: `workflow:${run.workflowId}`,
-        // The step's key, the same in every attempt and replay of it.
-        change: `run:${run.runId}:${key}`,
-        mayWrite: async () => {
-          await requireNoChatReads(env, run.runId);
-          // Everything it may hold through its grants (app-company.ts).
-          if (
-            !(await heldByTheWholeCompany(env, { workflow: run.workflowId }))
-          ) {
-            throw permissionErrors.create("permission.denied", {
-              action: "brain.write",
-            });
-          }
-        },
         // Pinned with the run before it gets them, as a recall's pack.
         keep: async (versions) => {
           await recordRunVersions(env, run.runId, permissionId, versions);

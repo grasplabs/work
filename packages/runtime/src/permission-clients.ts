@@ -8,13 +8,11 @@ import type { HttpContract } from "@grasp-os/shared/http-contract";
 
 import type {
   BrainCard,
-  BrainCorrect,
   BrainEntitiesFind,
   BrainEntity,
   BrainMembersOf,
   BrainPack,
   BrainRecall,
-  BrainRemember,
   BrainSkill,
   BrainSkillText,
 } from "./brain-recall.ts";
@@ -118,28 +116,6 @@ interface BrainCalls {
     /** As a selection gave it: its scope, name and version. */
     readonly skill: Pick<BrainSkill, "scope" | "name" | "version">;
   }) => Promise<BrainSkillText>;
-  /**
-   * Remembers a fact in the App's own word, read by everyone in the
-   * company: its new word on the same entity and attribute replaces its
-   * earlier one. The memory and the entity it is about.
-   */
-  readonly remember: (
-    memory: BrainRemember
-  ) => Promise<{ readonly memory: string; readonly entity: string }>;
-  /**
-   * Forgets one of the App's own memories: true once it is forgotten
-   * (again for one forgotten before), false for none of the App's.
-   */
-  readonly forget: (request: { readonly memory: string }) => Promise<boolean>;
-  /**
-   * Corrects a memory everyone in the company may read, with a fix in the
-   * App's word, read by exactly that memory's readers, beside it, the two
-   * contested until a person confirms one: the
-   * fix, or null for no memory it may correct.
-   */
-  readonly correct: (
-    correction: BrainCorrect
-  ) => Promise<{ readonly memory: string } | null>;
   /**
    * A page of an entity's card, as everyone in the company may read it,
    * now or as of `asOf` (ISO 8601, with its offset): null for no entity

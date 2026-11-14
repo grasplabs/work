@@ -13,7 +13,6 @@ import {
   attributeRuleOf,
   changeRequestSchema,
   confirmRequestSchema,
-  correctRequestSchema,
   contestedRequestSchema,
   currentRequestSchema,
   contextTokensSchema,
@@ -63,9 +62,6 @@ import type {
   CardRequest,
   AddedMemories,
   ConfirmRequest,
-  CorrectRequest,
-  CorrectedMemory,
-  MemoryId,
   ContestedPage,
   ContestedRequest,
   EntitiesRequest,
@@ -77,6 +73,7 @@ import type {
   MemoriesRead,
   MemoriesRequest,
   MemoryChangeOutcome,
+  MemoryId,
   NewMemories,
   ReadableMemoriesRequest,
   RetireRequest,
@@ -124,7 +121,6 @@ import type {
   VersionRequest,
   WorkOverview,
 } from "./contract.ts";
-import { correctMemory } from "./correct.ts";
 import migrations from "./db/migrations/migrations.js";
 import {
   embeddedFor,
@@ -2111,12 +2107,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
 
   /** Retires one of the reader's own memories (memories.ts). */
   async retireMemory(request: RetireRequest): Promise<MemoryChangeOutcome> {
-    const { memory, reader, writer } = checked(retireRequestSchema, request);
-    const whose = writer ?? reader.person;
-    if (whose === null) {
-      // The schema refuses it first: a reader of no person names a writer.
-      throw new Error("Names no writer");
-    }
+    const { memory, reader } = checked(retireRequestSchema, request);
     this.#mayRead(reader);
     return await this.#changing(async () => {
       if (!(await this.#readable())) {
@@ -2127,11 +2118,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         if (isRestoring(this.ctx.storage.sql)) {
           throw new Error(restoringNow);
         }
-        return retireMemory(this.ctx.storage.sql, {
-          id: memory,
-          reader,
-          writer: whose,
-        });
+        return retireMemory(this.ctx.storage.sql, { id: memory, reader });
       });
     });
   }
@@ -2151,32 +2138,6 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         }
         return confirmMemory(this.ctx.storage.sql, { id: memory, reader });
       });
-    });
-  }
-
-  /** Corrects a memory the reader may read, under its readers (correct.ts). */
-  async correctMemory(
-    request: CorrectRequest
-  ): Promise<CorrectedMemory | null> {
-    const { change, memory, reader, writer, speaker, value, statement } =
-      checked(correctRequestSchema, request);
-    this.#mayRead(reader);
-    return await this.#changing(async () => {
-      await this.#readyToWrite();
-      // As an add: its hashing before its transaction leaves room for an
-      // erasure of this person's own store, answered as an erased store.
-      return await this.#unlessErasedMeanwhile(
-        async () =>
-          await correctMemory(this.ctx.storage, {
-            change,
-            id: memory,
-            reader,
-            writer,
-            speaker,
-            value,
-            statement,
-          })
-      );
     });
   }
 

@@ -83,17 +83,6 @@ export const brainSkillTextSchema: z.ZodType<BrainSkillText> = z.strictObject({
   text: z.string(),
 });
 
-/** What `remember` answers code: the memory and its entity, by id. */
-export const brainRememberedSchema = z.strictObject({
-  memory: z.uuid(),
-  entity: z.uuid(),
-});
-
-/** What `correct` answers code: the fix, or null for no memory it may correct. */
-export const brainCorrectedSchema = z
-  .strictObject({ memory: z.uuid() })
-  .nullable();
-
 /** Every kind of entity, each once: the SDK's own (`BrainEntityKind`). */
 const brainEntityKinds = {
   person: "person",

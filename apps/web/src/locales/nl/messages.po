@@ -4145,14 +4145,6 @@ msgstr "Bedrijf"
 msgid "Company Brain, read only. This can recall what everyone in the company may read, never a team's or anyone's own content. It can never write to the Brain. Every recall is recorded"
 msgstr "Company Brain, alleen lezen. Dit kan oproepen wat iedereen in het bedrijf mag lezen, nooit wat van een team of van iemand zelf is. Het kan nooit naar het Brain schrijven. Elke oproep wordt vastgelegd"
 
-#: src/activity/pending.tsx
-msgid "Company Brain, write. This App can remember facts in its own name that everyone in the company can read, and forget or correct them. It writes only while it is shared with everyone in the company, all of them may read every one of its tables, and everyone may read everything it reads. What people type into it and its own data can then be written for everyone to read. Every write is recorded"
-msgstr "Company Brain, schrijven. Deze App kan in eigen naam feiten onthouden die iedereen in het bedrijf kan lezen, en ze vergeten of corrigeren. Hij schrijft alleen zolang hij met iedereen in het bedrijf gedeeld is, iedereen al zijn tabellen mag lezen en iedereen alles mag lezen wat hij leest. Wat mensen erin invoeren en zijn eigen gegevens kunnen dan voor iedereen leesbaar worden geschreven. Elke schrijfactie wordt vastgelegd"
-
-#: src/activity/pending.tsx
-msgid "Company Brain, write. This workflow can remember facts in its own name that everyone in the company can read, and forget or correct them. It writes only while everyone in the company may read everything it reads, and never from a run started from a chat that had read something. What a run is started with (by a person, an App or a trigger: a webhook, a mail, a connection's event) and what is sent to it aren't tracked, so they can be written for everyone to read. Every write is recorded"
-msgstr "Company Brain, schrijven. Deze workflow kan in eigen naam feiten onthouden die iedereen in het bedrijf kan lezen, en ze vergeten of corrigeren. Hij schrijft alleen zolang iedereen in het bedrijf alles mag lezen wat hij leest, en nooit vanuit een run die gestart is vanuit een chat die iets had gelezen. Waarmee een run wordt gestart (door een persoon, een App of een trigger: een webhook, een mail, een gebeurtenis van een verbinding) en wat ernaartoe wordt gestuurd, wordt niet bijgehouden en kan dus voor iedereen leesbaar worden geschreven. Elke schrijfactie wordt vastgelegd"
-
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Complaint"
@@ -4564,10 +4556,6 @@ msgstr "Kopiëren is niet gelukt"
 #: src/brain/memory-page.tsx
 msgid "Correct it"
 msgstr "Corrigeren"
-
-#: src/activity/audit-words.ts
-msgid "Corrected a memory in the Brain"
-msgstr "Een herinnering in het Brein gecorrigeerd"
 
 #: src/brain/memory-page.tsx
 msgid "Corrected by"
@@ -6204,10 +6192,6 @@ msgstr "Voor het team {team}"
 #: src/agents/agent-wakes.tsx
 msgid "For whom"
 msgstr "Voor wie"
-
-#: src/activity/audit-words.ts
-msgid "Forgot a memory in the Brain"
-msgstr "Een herinnering in het Brein vergeten"
 
 #: src/connections/groups.ts
 msgctxt "kind of app"
@@ -11412,10 +11396,6 @@ msgstr "Onthouden"
 #: src/brain/remember-dialog.tsx
 msgid "Remember something"
 msgstr "Iets onthouden"
-
-#: src/activity/audit-words.ts
-msgid "Remembered something in the Brain"
-msgstr "Iets in het Brein onthouden"
 
 #: src/agents/agent-documents.tsx
 #: src/agents/agent-wakes.tsx

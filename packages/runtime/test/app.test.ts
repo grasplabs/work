@@ -726,13 +726,13 @@ describe("the App's permissions in a function's context", () => {
     ]);
   });
 
-  test("the Brain's memory operations are members of their own names, its entity ones of `entities`, each sending its operation", async () => {
+  test("the Brain's operations are members of their own names, its entity ones of `entities`, each sending its operation", async () => {
     const reach = server.action({
       args: {},
       handler: async (ctx) => {
         const brain = loose(Reflect.get(ctx, "brain"));
         const entities = loose(Reflect.get(brain, "entities"));
-        await loose(Reflect.get(brain, "forget"))({ memory: "m" });
+        await loose(Reflect.get(brain, "recall"))({ question: "q" });
         await loose(Reflect.get(entities, "get"))({ entity: "e" });
         return { brain: shapeOf(brain), entities: shapeOf(entities) };
       },
@@ -741,7 +741,7 @@ describe("the App's permissions in a function's context", () => {
       {
         permissions: {
           brain: permission.brain({
-            operations: ["forget", "skills.read", "entities.get"],
+            operations: ["recall", "skills.read", "entities.get"],
           }),
         },
       },
@@ -752,14 +752,14 @@ describe("the App's permissions in a function's context", () => {
       runFunction(registered, "notes.reach", {}, channel)
     ).resolves.toStrictEqual({
       brain: {
-        own: ["forget", "skills", "entities"],
+        own: ["recall", "skills", "entities"],
         prototype: null,
         frozen: true,
       },
       entities: { own: ["get"], prototype: null, frozen: true },
     });
     expect(calls).toStrictEqual([
-      ["permission", "brain", "forget", [{ memory: "m" }]],
+      ["permission", "brain", "recall", [{ question: "q" }]],
       ["permission", "brain", "entities.get", [{ entity: "e" }]],
     ]);
   });

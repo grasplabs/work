@@ -70,9 +70,6 @@ export const brainOperations: readonly BrainOperation[] = [
   "recall",
   "skills.select",
   "skills.read",
-  "remember",
-  "forget",
-  "correct",
   "entities.get",
   "entities.find",
 ];

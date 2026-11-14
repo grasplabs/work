@@ -69,37 +69,6 @@ describe("a pending request on an App", () => {
   });
 });
 
-describe("a pending request to write to the Brain", () => {
-  it("says when an App's and a workflow's writes happen, and what then reaches everyone", () => {
-    const writing: Permission = {
-      ...onApp(["brain.write"]),
-      subject: { type: "app", appId: appIdSchema.parse(app) },
-      object: { type: "platform" },
-    };
-    const byWorkflow: Permission = {
-      ...writing,
-      subject: {
-        type: "workflow",
-        workflowId: workflowResourceIdSchema.parse(
-          "66666666-6666-4666-8666-666666666666"
-        ),
-      },
-    };
-
-    expect([
-      objectOf(writing, directory),
-      objectOf(byWorkflow, directory),
-    ]).toStrictEqual([
-      expect.stringMatching(
-        /shared with everyone in the company.+What people type into it and its own data can then be written for everyone to read/u
-      ),
-      expect.stringMatching(
-        /What a run is started with \(by a person, an App or a trigger: a webhook, a mail, a connection's event\) and what is sent to it aren't tracked/u
-      ),
-    ]);
-  });
-});
-
 /** A workflow's request to read a collection. */
 const onCollection = (): Permission => ({
   ...onApp([]),

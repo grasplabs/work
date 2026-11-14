@@ -5,7 +5,6 @@ import {
   permissionIdSchema,
   workspaceIdSchema,
 } from "@grasp-os/shared/ids";
-import { permissionErrors } from "@grasp-os/shared/permissions";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -68,29 +67,6 @@ const requireChatPinsReadable = async (
   });
   if (rows.some(({ sourceId }) => !readable.has(sourceId))) {
     throw workflowResourceErrors.create("brain.revoked");
-  }
-};
-
-/**
- * Refuses, as `permission.denied`, a write to the Brain by run `runId`
- * when the chat whose agent started it had read anything: that was read
- * as the chat's person may (GRA-1093), so what the run writes for the
- * whole company can't be shown to be readable by it (brain-calls.ts).
- */
-export const requireNoChatReads = async (
-  env: Env,
-  runId: string
-): Promise<void> => {
-  const read = await drizzle(env.DB)
-    .select({ runId: runChatSources.runId })
-    .from(runChatSources)
-    .where(eq(runChatSources.runId, runId))
-    .limit(1)
-    .get();
-  if (read !== undefined) {
-    throw permissionErrors.create("permission.denied", {
-      action: "brain.write",
-    });
   }
 };
 

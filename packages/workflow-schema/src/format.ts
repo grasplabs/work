@@ -329,20 +329,14 @@ export type FilesAction = (typeof filesActions)[number];
  * recalls what bears on a question (`{ question, budget: { tokens },
  * asOf? }`); `skills.select` selects the skills for a task (`{ task }`),
  * and `skills.read` reads one at the version selected (`{ skill: { scope,
- * name, version } }`); `remember` keeps a fact in the workflow's own word
- * (`{ about, attribute?, value?, statement }`), `forget` forgets one of
- * its own (`{ memory }`) and `correct` corrects one (`{ memory, value?,
- * statement }`); `entities.get` reads an entity's card (`{ entity, asOf?,
- * after? }`) and `entities.find` finds entities (`{ kind?, name?,
+ * name, version } }`); `entities.get` reads an entity's card (`{ entity,
+ * asOf?, after? }`) and `entities.find` finds entities (`{ kind?, name?,
  * identifier?, after? }`).
  */
 export const brainActions = [
   "recall",
   "skills.select",
   "skills.read",
-  "remember",
-  "forget",
-  "correct",
   "entities.get",
   "entities.find",
 ] as const;

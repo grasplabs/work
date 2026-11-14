@@ -47,8 +47,8 @@ expectTypeOf(ctx.brain.handbook.skills.read).toBeFunction();
 expectTypeOf(
   ctx.brain.handbook.entities.get({ entity: "e" }, { step: "card" })
 ).resolves.toEqualTypeOf<BrainCard | null>();
-// @ts-expect-error -- no step remembers
-expectTypeOf(ctx.brain.handbook.remember).toBeFunction();
+// @ts-expect-error -- no step finds entities
+expectTypeOf(ctx.brain.handbook.entities.find).toBeFunction();
 
 // A name nobody declared is no member.
 // @ts-expect-error -- no such connection

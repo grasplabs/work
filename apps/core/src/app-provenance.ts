@@ -356,9 +356,9 @@ interface Budget {
 const walk = async (
   env: Env,
   walked: Walked,
-  apps: readonly string[],
+  apps: readonly AppId[],
   budget: Budget
-): Promise<{ reach: Map<string, Reach>; capped: boolean }> => {
+): Promise<{ reach: Map<AppId, Reach>; capped: boolean }> => {
   const holds = new Map<string, Set<string>>();
   const explored = new Set<string>();
   let frontier = [...new Set<string>(apps)];
@@ -413,7 +413,7 @@ const walk = async (
       walked.known.set(id, found.has(id));
     }
   }
-  const reach = new Map<string, Reach>(
+  const reach = new Map<AppId, Reach>(
     apps.map((app) => {
       const reached = new Set<string>([app]);
       const queue: string[] = [app];
@@ -455,8 +455,8 @@ const walk = async (
  */
 const reachedThroughCalls = async (
   env: Env,
-  apps: readonly string[]
-): Promise<Map<string, Reach>> => {
+  apps: readonly AppId[]
+): Promise<Map<AppId, Reach>> => {
   const walked: Walked = { edges: new Map(), known: new Map() };
   const { reach, capped } = await walk(env, walked, apps, {
     levels: Infinity,
@@ -487,19 +487,21 @@ const reachedThroughCalls = async (
 };
 
 /**
- * `sourcesOfApps` for nodes of the graph: Apps, by their IDs, and
- * workflows (`workflowNode`), each walked as an App is, from itself.
+ * The sources each of the Apps `apps` may have read, as they are now, and
+ * those of the Apps whose data they may hold through calls between Apps
+ * (`reachedThroughCalls`), in a few queries whatever their number: those
+ * that follow the calls, one for all their permissions, one series of
+ * pages to connect for all their connections, and one Knowledge batch for
+ * all their collections.
  */
-const sourcesOfNodes = async (
+export const sourcesOfApps = async (
   env: Env,
-  apps: readonly string[],
-  walked?: ReadonlyMap<string, Reach>
-): Promise<Map<string, AppSources>> => {
+  apps: readonly AppId[]
+): Promise<Map<AppId, AppSources>> => {
   const reach =
-    walked ??
-    (apps.length === 0
-      ? new Map<string, Reach>()
-      : await reachedThroughCalls(env, apps));
+    apps.length === 0
+      ? new Map<AppId, Reach>()
+      : await reachedThroughCalls(env, apps);
   const all = [...new Set([...reach.values()].flatMap((of) => [...of.nodes]))];
   const allApps = all.filter((id) => !id.startsWith(workflowPrefix));
   const allWorkflows = all.flatMap((id) =>
@@ -634,59 +636,6 @@ const sourcesOfNodes = async (
       return [app, sources];
     })
   );
-};
-
-/**
- * The sources each of the Apps `apps` may have read, as they are now, and
- * those of the Apps whose data they may hold through calls between Apps
- * (`reachedThroughCalls`), in a few queries whatever their number: those
- * that follow the calls, one for all their permissions, one series of
- * pages to connect for all their connections, and one Knowledge batch for
- * all their collections.
- */
-export const sourcesOfApps = async (
-  env: Env,
-  apps: readonly AppId[]
-): Promise<Map<AppId, AppSources>> => {
-  const sources = await sourcesOfNodes(env, apps);
-  return new Map(
-    apps.map((app) => [
-      app,
-      sources.get(app) ?? {
-        connections: [],
-        collections: [],
-        unresolved: [],
-        brainTeams: [],
-      },
-    ])
-  );
-};
-
-/**
- * What code may hold through every grant the walk follows from it
- * (`reachedThroughCalls`, `edgesOf`, both ways each grant carries data):
- * the sources of all of it (`sourcesOfApps`), and every App among the
- * nodes whose data it may hold, itself included for an App. An App the
- * walk can't place, or a walk past its caps, is among `sources.unresolved`.
- * For the caller an App's action or an independent workflow's run makes.
- */
-export const holdingsOf = async (
-  env: Env,
-  caller: { readonly app: AppId } | { readonly workflow: string }
-): Promise<{ sources: AppSources; apps: string[] }> => {
-  const node = "app" in caller ? caller.app : workflowNode(caller.workflow);
-  const reach = await reachedThroughCalls(env, [node]);
-  const of = await sourcesOfNodes(env, [node], reach);
-  const sources = of.get(node) ?? {
-    connections: [],
-    collections: [],
-    unresolved: [],
-    brainTeams: [],
-  };
-  const apps = [...(reach.get(node)?.nodes ?? [node])].filter(
-    (id) => !id.startsWith(workflowPrefix)
-  );
-  return { sources, apps };
 };
 
 /** The sources `app` may have read, as they are now. */
@@ -926,11 +875,3 @@ export const unreadableBy = (sources: AppSources, reader: Reader): string[] => [
   ...unreadableTeamsBy(sources.brainTeams, reader),
   ...sources.unresolved,
 ];
-
-/**
- * Whether every member of the organization may read every one of
- * `sources`: one with no team and no admin role may (`unreadableBy`). What
- * code writes for the whole company is held to it (brain-recall.ts).
- */
-export const readableByEveryMember = (sources: AppSources): boolean =>
-  unreadableBy(sources, { userId: "", teamIds: [], admin: false }).length === 0;

@@ -63,19 +63,13 @@ describe("an audit entry's words", () => {
     });
   });
 
-  it("say code read entities and wrote, forgot or corrected a memory, each by its own name", () => {
+  it("say code read entities, each by its own name", () => {
     expect({
       get: said("brain.entities.get"),
       find: said("brain.entities.find"),
-      remembered: said("brain.memory.remembered"),
-      forgotten: said("brain.memory.forgotten"),
-      corrected: said("brain.memory.corrected"),
     }).toStrictEqual({
       get: "Read entities from the Brain",
       find: "Read entities from the Brain",
-      remembered: "Remembered something in the Brain",
-      forgotten: "Forgot a memory in the Brain",
-      corrected: "Corrected a memory in the Brain",
     });
   });
 });

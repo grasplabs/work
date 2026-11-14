@@ -321,32 +321,19 @@ expectTypeOf(brainCtx.brain).not.toHaveProperty("skills");
 const selectOnly = permission.brain({ operations: ["skills.select"] });
 declare const selectCtx: ActionCtx<typeof selectOnly>;
 expectTypeOf(selectCtx.brain.skills).not.toHaveProperty("read");
-// Memories and entities: each its own shapes, under the operations declared.
-const memoriesBrain = permission.brain({
-  operations: ["remember", "correct", "entities.get"],
-});
-declare const memoriesCtx: ActionCtx<typeof memoriesBrain>;
+// Entities: each its own shapes, under the operations declared.
+const entitiesBrain = permission.brain({ operations: ["entities.get"] });
+declare const entitiesCtx: ActionCtx<typeof entitiesBrain>;
 expectTypeOf(
-  memoriesCtx.brain.remember({
-    about: { kind: "customer", names: ["Acme"] },
-    statement: "Acme renews on 1 March",
-  })
-).resolves.toEqualTypeOf<{
-  readonly memory: string;
-  readonly entity: string;
-}>();
-expectTypeOf(
-  memoriesCtx.brain.entities.get({ entity: "e" })
+  entitiesCtx.brain.entities.get({ entity: "e" })
 ).resolves.toEqualTypeOf<BrainCard | null>();
-await memoriesCtx.brain.remember({
-  // @ts-expect-error -- an entity is one of the Brain's kinds
-  about: { kind: "planet" },
-  statement: "A fact",
+await entitiesCtx.brain.entities.get({
+  entity: "e",
+  // @ts-expect-error -- a card is read by its entity, as of a time, after a page
+  readers: [],
 });
-// @ts-expect-error -- what code writes names no readers
-await memoriesCtx.brain.correct({ memory: "m", statement: "x", readers: [] });
-expectTypeOf(memoriesCtx.brain).not.toHaveProperty("forget");
-expectTypeOf(memoriesCtx.brain.entities).not.toHaveProperty("find");
+expectTypeOf(entitiesCtx.brain).not.toHaveProperty("recall");
+expectTypeOf(entitiesCtx.brain.entities).not.toHaveProperty("find");
 // Only the operations each declares.
 await brainCtx.guests.revoke("chat");
 expectTypeOf(brainCtx.guests).not.toHaveProperty("invite");

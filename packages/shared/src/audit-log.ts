@@ -152,10 +152,6 @@ const typeRules: readonly {
   // or a cursor. Each named exactly.
   { action: "brain.entities.get", type: "read" },
   { action: "brain.entities.find", type: "read" },
-  // An App or a workflow's run correcting a memory in its own word (core's
-  // src/brain-recall.ts): its attempt and then its outcome, by ids, as
-  // `brain.memory` files a memory saved or retired.
-  { action: "brain.memory.corrected", type: "action" },
   // A Grasp staff member reaching a namespace, method or route of the
   // client's deployment (core's staff-audit.ts): what they looked at or
   // did there, by its surface and identifiers, never its content.

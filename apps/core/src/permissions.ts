@@ -693,19 +693,11 @@ const requireObjectFits = (
   actions: readonly string[]
 ): void => {
   // The Brain is the one platform offer an agent or an independent
-  // workflow may hold too: Apps, runs and agents share its permission to
-  // read it; writing to it is an App's or a workflow's alone.
+  // workflow may hold too: Apps, runs and agents share its permission.
   const brainReader =
     actions.includes("brain") &&
     (subject.type === "agent" || subject.type === "workflow");
-  const brainWriter =
-    actions.includes("brain.write") && subject.type === "workflow";
-  if (
-    object.type === "platform" &&
-    subject.type !== "app" &&
-    !brainReader &&
-    !brainWriter
-  ) {
+  if (object.type === "platform" && subject.type !== "app" && !brainReader) {
     refuseRequest("subject: Only an App uses what the platform offers.");
   }
   // Teams only for an App: what it recalls of a team is checked against

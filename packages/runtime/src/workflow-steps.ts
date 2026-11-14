@@ -2,13 +2,11 @@ import { z } from "zod";
 
 import type {
   BrainCard,
-  BrainCorrect,
   BrainEntitiesFind,
   BrainEntity,
   BrainMembersOf,
   BrainPack,
   BrainRecall,
-  BrainRemember,
   BrainSkill,
   BrainSkillText,
 } from "./brain-recall.ts";
@@ -126,9 +124,8 @@ export interface FilesActions {
  * What a brain permission's steps do, by action, with the same requests
  * and answers as an App's action (`brain-recall.ts`): recall what everyone
  * in the company may read, whoever the run acts for; select and read its
- * skills (`skills.select`, `skills.read`); remember, forget and correct in
- * the workflow's own word; and read entities (`entities.get`,
- * `entities.find`). A dotted action is a member of its group:
+ * skills (`skills.select`, `skills.read`); and read entities
+ * (`entities.get`, `entities.find`). A dotted action is a member of its group:
  * `ctx.brain.<alias>.entities.get`.
  */
 export interface BrainActions {
@@ -146,18 +143,6 @@ export interface BrainActions {
     },
     options: CallOptions
   ) => Promise<BrainSkillText>;
-  readonly remember: (
-    memory: BrainRemember,
-    options: CallOptions
-  ) => Promise<{ readonly memory: string; readonly entity: string }>;
-  readonly forget: (
-    request: { readonly memory: string },
-    options: CallOptions
-  ) => Promise<boolean>;
-  readonly correct: (
-    correction: BrainCorrect,
-    options: CallOptions
-  ) => Promise<{ readonly memory: string } | null>;
   readonly "entities.get": (
     request: {
       readonly entity: string;
