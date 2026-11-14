@@ -156,6 +156,29 @@ const graspOf = (
   );
 };
 
+/**
+ * `ctx.brain`: its declared operations, each a call of its own name,
+ * `recall` as `recall` and `skills.select` as `skills.select`.
+ */
+const brainOf = (
+  operations: readonly string[],
+  call: (method: string) => (...args: unknown[]) => Promise<unknown>
+): Readonly<Record<string, unknown>> => {
+  const skills = operations.flatMap((operation) =>
+    operation.startsWith("skills.")
+      ? [[operation.slice("skills.".length), call(operation)] as const]
+      : []
+  );
+  return membersOf<unknown>([
+    ...operations.flatMap((operation) =>
+      operation.startsWith("skills.")
+        ? []
+        : [[operation, call(operation)] as const]
+    ),
+    ...(skills.length === 0 ? [] : [["skills", membersOf(skills)] as const]),
+  ]);
+};
+
 /** The client of `permission`, over `channel`. */
 const clientOf = (
   permission: AnyPermission,
@@ -169,7 +192,10 @@ const clientOf = (
   if (kind === "ai") {
     return membersOf([["generate", generateOf(call("generate"))]]);
   }
-  if (kind === "brain" || kind === "guests") {
+  if (kind === "brain") {
+    return brainOf(permission.operations, call);
+  }
+  if (kind === "guests") {
     return membersOf(
       permission.operations.map((method) => [method, call(method)])
     );

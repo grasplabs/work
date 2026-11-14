@@ -13,7 +13,7 @@ import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { appFor } from "../src/apps.ts";
-import { drainAuditOutboxes } from "../src/audit-outbox.ts";
+import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import { organizationId } from "../src/auth/auth.ts";
 import { memberOf } from "../src/auth/identity.ts";
 import {
@@ -202,6 +202,14 @@ const readingSurfaces = new Set([
   "sources versions",
   "sources read",
   "sources search",
+  "core entitiesAs",
+  "core entityAs",
+  "core memoriesAs",
+  "core contestedAs",
+  "memoriesRpc entities",
+  "memoriesRpc entity",
+  "memoriesRpc memories",
+  "memoriesRpc contested",
   "store listSources",
   "store listVersions",
   "store recall",
@@ -214,7 +222,9 @@ const readingSurfaces = new Set([
 /** The surfaces that recall, where no instruction file may ever show. */
 const recallSurfaces = new Set([
   "core recallAs",
+  "core recallPassagesAs",
   "store recall",
+  "store findPassages",
   "recall recallFor",
 ]);
 
@@ -805,6 +815,9 @@ describe(
         usedApps,
         instructionGroups,
         moments: [whileDraft],
+        // Code's recall under an App grant naming the outsider's team and
+        // the team they aren't in: the second's source stays hidden.
+        codeTeams: [ownTeam, secretTeam],
       });
       const first = await watched(
         "the outsider",
@@ -884,9 +897,9 @@ describe(
         },
         { inRecall }
       );
-      // Code's recall from an App or a workflow reads only what everyone
-      // in the company may: no person, no team. So nothing team-only
-      // reaches it even for someone in that team, nothing of the
+      // Code's recall from a workflow, or an App whose grant names no
+      // team, reads only what everyone in the company may: no person, no
+      // team. So nothing team-only reaches it even for someone in that team, nothing of the
       // holder's own, and their own store is never addressed.
       const holderThroughCode = await watched(
         "the holder, through code's recall",
@@ -909,6 +922,39 @@ describe(
         },
         {
           among: surfaces.filter(([name]) => name.startsWith("recall ")),
+          inRecall,
+        }
+      );
+
+      // An App's grant naming another team of the holder's: the team's
+      // source the grant doesn't name stays hidden though the holder is
+      // in that team, and so does everything else that isn't theirs.
+      const holderThroughTeamGrant = await watched(
+        "the holder, through an App's recall under a grant naming another team of theirs",
+        {
+          personId: holder,
+          reader: {
+            person: holder,
+            groups: [`team:${secretTeam}`, `team:${holdersTeam}`],
+          },
+          personal: false,
+          sharedWord,
+          markers: [ownerMarker, teamMarker, noneMarker, narrowedMarker],
+          hiddenVersions: everyVersionOf(...ownerIds, teamId, noneId),
+          hiddenInstructionFiles: [agentFile, appFile],
+          instructionGroups,
+          moments: [whileDraft],
+          codeTeams: [holdersTeam],
+        },
+        {
+          "the holder's own source": ownerMarker,
+          "a team's source the grant doesn't name, though the holder is in the team":
+            teamMarker,
+          "a source nobody is known to read": noneMarker,
+          "a source narrowed away from the outsider": narrowedMarker,
+        },
+        {
+          among: surfaces.filter(([name]) => name === "recall recallFor"),
           inRecall,
         }
       );
@@ -1038,6 +1084,7 @@ describe(
           ...outAgain,
           ...asHolder,
           ...holderThroughCode,
+          ...holderThroughTeamGrant,
           ...asApp,
           ...asTeamMate,
           ...asAdmin,

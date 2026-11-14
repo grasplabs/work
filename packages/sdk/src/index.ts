@@ -35,6 +35,8 @@ export type {
   BrainPackItem,
   BrainPermission,
   BrainRecall,
+  BrainSkill,
+  BrainSkillText,
   BrowserPermission,
   ComposioCall,
   ComposioContract,

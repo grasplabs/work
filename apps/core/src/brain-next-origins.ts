@@ -1,4 +1,4 @@
-import { eraseSource } from "./brain-next.ts";
+import { eraseOwnGroup, eraseSource } from "./brain-next.ts";
 import type { SourceReaders, SourceRef } from "./brain-next.ts";
 
 // What core hands the Brain comes from an origin core keeps (an upload, a
@@ -8,7 +8,9 @@ import type { SourceReaders, SourceRef } from "./brain-next.ts";
 // sources. Every id is the server's own (an upload's, a run's), never
 // anything a person typed. A chat's turns go only into its person's own
 // store (GRA-1762, GRA-1805): a source per turn, each in its chat's group,
-// so deleting the chat erases them all in one call (`eraseChat`).
+// so deleting the chat erases them all in one call (`eraseChat`). So do a
+// connection's captures (GRA-1730, GRA-1827), in the group of their
+// connection, erased when it is disconnected (`eraseCaptures`).
 //
 // Erasing what an origin had in the Brain comes before core lets go of
 // what names its keys, and a failure leaves the origin as it was, so the
@@ -44,6 +46,18 @@ export const chatSource = (personId: string, chatId: string): SourceRef => {
     throw new Error("A chat's key is made of ids without /");
   }
   return { producer: "chat", id: `${personId}/${chatId}` };
+};
+
+/**
+ * What the id of every source of `personId`'s chats starts with: each
+ * chat's group and each of its turns. Throws for an id holding "/", as
+ * `chatSource` does.
+ */
+export const chatsOf = (personId: string): string => {
+  if (!isKeyPart(personId)) {
+    throw new Error("A chat's key is made of ids without /");
+  }
+  return `${personId}/`;
 };
 
 /**
@@ -103,6 +117,40 @@ export const eraseChat = async (
     asGroup: true,
   });
 };
+
+/**
+ * The group every capture through the connection `connectionId` is added
+ * in, in its person's own store (connection-capture.ts), and what
+ * disconnecting the connection erases (`eraseCaptures`). Throws for an id
+ * holding "/", which could make one connection's group another's capture:
+ * connect's ids never do.
+ */
+export const captureGroupOf = (connectionId: string): SourceRef => {
+  if (!isKeyPart(connectionId)) {
+    throw new Error("A connection's captures are keyed by an id without /");
+  }
+  return { producer: "capture", id: connectionId };
+};
+
+/**
+ * Erases every capture through `personId`'s own connection `connectionId`
+ * from their own store, the only store that holds any, and closes the
+ * connection's group there, so a capture landing after is refused: one
+ * call, however many captures it had, as `eraseChat`. Answers how many
+ * it erased, the same each time it is repeated. Throws when it failed:
+ * the connect event that asked for it stays to be drained again
+ * (audit-outbox.ts). Safe to repeat.
+ */
+export const eraseCaptures = async (
+  env: Pick<Env, "BRAIN_STORE" | "DURABLE_OBJECT_JURISDICTION">,
+  personId: string,
+  connectionId: string
+): Promise<number> =>
+  await eraseOwnGroup(env, {
+    personId,
+    group: captureGroupOf(connectionId),
+    reason: "deleted",
+  });
 
 /** Why sources are erased, as the Brain's ledger records it. */
 type ErasureReason = Parameters<typeof eraseSource>[1]["reason"];

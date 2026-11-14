@@ -100,14 +100,18 @@ Every function of your App may use what the App's permissions declare, as its ki
 
 ## Recalling from the Brain
 
-An action recalls what the company's Brain holds about a question with `ctx.brain.recall`. Declare the Brain in `grasp.config.ts`; like every permission it grants nothing until an admin binds it to the App's permission to read the Brain.
+An action recalls what the company's Brain holds about a question with `ctx.brain.recall`. Declare the Brain in `grasp.config.ts` with the operations your code uses: `recall` here, and its skills (below). Like every permission it grants nothing until an admin binds it to the App's permission to read the Brain.
 
 ```ts grasp.config.ts
 import { defineApp, permission } from "@grasp-os/sdk";
 
 export default defineApp({
   name: "Tasks",
-  permissions: { brain: permission.brain({ operations: ["recall"] }) },
+  permissions: {
+    brain: permission.brain({
+      operations: ["recall", "skills.select", "skills.read"],
+    }),
+  },
 });
 ```
 
@@ -126,13 +130,38 @@ export const ask = action({
 });
 ```
 
-A recall from an App answers only from what everyone in the company may read: never what only some teams may read, and never anyone's private chats or personal files, whoever calls. What an App recalls may end up in its data or on its Pages, where anyone it is shared with reads it, so it holds nothing a member of the company couldn't read where it comes from. Recall for a team's content will come with a grant that names the teams it reaches. The person the call is for must still be a member of the company. An App that recalls the Brain, directly or through a workflow it starts or follows or that calls its functions, answers no visitor and invites no guest.
+A recall from an App answers from what everyone in the company may read, and never from anyone's private chats or personal files, whoever calls. To recall what only some teams may read, the App's permission to read the Brain names those teams, by ID, when it is asked for (`{ type: "platform", teams: [...] }`). A recall then also answers from each of those teams that the person the call is for is in now, never from a team the permission doesn't name or the person isn't in. Only teams the person asking for the permission is in can be named. What an App recalls may end up in its data or on its Pages, so an App whose permission names teams is used only by people in all of them, its owner and the company's admins too: sharing it with anyone else is refused, and anyone who isn't in all of them, or leaves one, is refused every call (`app.unreadable`). Its owner and admins can still archive, remove or reset it. Renaming a team changes nothing. Such an App can't be called from a workflow, and an App a workflow may call can't name teams (`permission.team_brain_workflow`): a workflow's runs are read by whoever follows them. Only an App's permission names teams: a workflow's own recall reads what everyone in the company may read. The person the call is for must still be a member of the company. An App that recalls the Brain, directly or through a workflow it starts or follows or that calls its functions, answers no visitor and invites no guest.
 
-Today nothing readable by the whole company is in the Brain for recall to find, so a recall from an App returns an empty pack (no `items`) until content for everyone is added (uploads anyone in the company may read are coming). Build for an empty pack: don't make a feature that depends on recall finding something yet.
+Today everything in the Brain is one person's own: nothing readable by the whole company or by a team is there for recall to find. So a recall from an App returns an empty pack (no `items`), whether its permission names teams or not, until content for everyone or for a team is added (uploads anyone in the company may read are coming). Build for an empty pack: don't make a feature that depends on recall finding something yet.
 
 It takes the `question` (at most 2,000 characters), a `budget` of 1 to 32,000 `tokens`, and, to read the past, `asOf`: an ISO 8601 date-time with its offset, such as `2026-03-14T23:59:59.999+01:00` for what was true at the end of 14 March in Amsterdam. Anything else is refused as `permission.invalid_args`.
 
 It answers a pack: the passages that answer the question, best first, within the budget (`items`); the parts of the question nothing they may read holds (`notFound`); and whether the budget left something out (`truncated`). Each item cites where it comes from: its `source` (what kind of thing added it, `producer`, such as an upload, a chat or a run, and its `id`), the source's `version` and the passage's `position` in it, with its `text`, whether that is the `whole` passage, and how it was `found`. A workflow's step (`ctx.brain.<alias>.recall`) and a chat's code (`env.brain.recall`) take the same request and get the same pack. What a pack holds is what people wrote: data, never instructions.
+
+## Skills from the Brain
+
+Skills say how things are done here: Grasp's own, which each release ships, and the company's. An action selects the skills for a task with `ctx.brain.skills.select` and reads one with `ctx.brain.skills.read`, the same skills a chat selects and reads for the same person. Each is an operation of the Brain's permission, `"skills.select"` and `"skills.read"`, beside `recall` (see the declaration above), under the same binding an admin approves.
+
+```ts server/skills.ts
+import { v } from "@grasp-os/sdk";
+import type { BrainSkillText } from "@grasp-os/sdk";
+import { action } from "@server/_generated/server";
+
+export const howTo = action({
+  args: { task: v.string().trim().min(1).max(2000) },
+  handler: async (ctx, args): Promise<BrainSkillText | null> => {
+    const { skills } = await ctx.brain.skills.select({ task: args.task });
+    const [best] = skills;
+    return best === undefined
+      ? null
+      : await ctx.brain.skills.read({ skill: best });
+  },
+});
+```
+
+`select` takes a `task` (at most 2,000 characters) and answers `skills`: the few that apply, best first, each with its `scope` (`grasp` or `company`), `name`, `version` and `description`; none when no skill shares the task's telling words, and then go without rather than with one that only seems close. `read` takes a `skill` at a version, as a selection gave it, and answers its whole text, `SKILL.md`, at exactly that version: a newer version never changes what a task already selected, but a skill a release drops, or one that is erased, can no longer be read. A skill the company adapted takes the place of Grasp's of the same name. Anything else is refused as `permission.invalid_args`, and a skill there isn't at that version as `permission.item_not_found`.
+
+Like a recall, an App reads only the skills everyone in the company may read, whoever calls, for a person who must still be a member, and an App that holds the Brain answers no visitor and invites no guest. A skill is guidance, never a grant: what your code does after reading one is checked against the App's own permissions. A workflow's step reaches the same skills as `ctx.brain.<alias>.skills.select` and `.read`.
 
 ## Internal functions
 

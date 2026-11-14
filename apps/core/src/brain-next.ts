@@ -1,12 +1,15 @@
 import { packAcross, sourcesAcross } from "@grasp-os/brain-next/across";
 import {
   brainOf,
+  contestedCursorSchema,
   currentReadMax,
+  entitiesCursorSchema,
   entityAttributes,
   entityIdSchema,
   entityKinds,
   fitsSourceText,
   erasedSource,
+  changeReused,
   listPageMax,
   erasureReasons,
   exportFileNameSchema,
@@ -16,6 +19,7 @@ import {
   instructionsMaxLength,
   instructionsTextSchema,
   isOverInstructionsLimit,
+  memoriesCursorSchema,
   memoryIdSchema,
   memoryTypes,
   namesPerEntityMax,
@@ -45,6 +49,9 @@ import type {
   AskModel,
   AttributeRule,
   Brain,
+  ContestedCursor,
+  Entity,
+  EntitiesCursor,
   ErasureReason,
   Embedders,
   EntityKind,
@@ -56,13 +63,16 @@ import type {
   MemoryChangeOutcome,
   MemoryId,
   ExportStatus,
+  Finding,
   KeyState,
   HandOverPriority,
+  HandOverRequest,
   HandOverResult,
   HandOvers,
   ModelReply,
   Pack,
   PackItem,
+  PackMemory,
   PersonReader,
   Reader,
   RecallRequest,
@@ -74,6 +84,11 @@ import type {
 } from "@grasp-os/brain-next/contract";
 import { skillCardOf, skillNameSchema } from "@grasp-os/brain-next/skills";
 import { brainExportErrors } from "@grasp-os/shared/brain-exports";
+import { brainMemoryErrors } from "@grasp-os/shared/brain-memories";
+import type {
+  BrainEntityKind,
+  BrainMemoryAttribute,
+} from "@grasp-os/shared/brain-memories";
 import {
   brainReportSchema,
   brainSearchWays,
@@ -338,6 +353,12 @@ export interface Recall {
    */
   company?: boolean;
   /**
+   * With `company`, the teams it reads beyond the company too: of these
+   * (an App's grant's, brain-recall.ts), those the person is in now, so
+   * never wider than the grant, nor than the person. None when absent.
+   */
+  teams?: readonly string[];
+  /**
    * Read each source as it was at this moment, to the millisecond and
    * including it: a version added at it counts. A caller who means "on
    * that day" passes the day's last millisecond in the time zone they
@@ -389,10 +410,35 @@ export interface RecalledItem extends Omit<PackItem, "source"> {
   source: SourceRef;
 }
 
-/** A pack, as recall answers (`recallAs`). */
-export interface RecalledPack extends Omit<Pack, "items"> {
-  items: RecalledItem[];
+/** A memory of a pack, citing its source as its producer named it. */
+export interface RecalledMemory extends Omit<PackMemory, "source"> {
+  source: SourceVersionRef | null;
 }
+
+/** A pack, as recall answers (`recallAs`): passages and memories. */
+export interface RecalledPack extends Omit<Pack, "items" | "memories"> {
+  items: RecalledItem[];
+  memories: RecalledMemory[];
+}
+
+/**
+ * A pack of passages alone (`recallPassagesAs`): what the chat hands its
+ * model and the Brain page shows, until each carries memories with their
+ * own checks when history is read again.
+ */
+export interface RecalledPassages {
+  items: RecalledItem[];
+  notFound: string[];
+  truncated: boolean;
+}
+
+/** `source` of the Brain as its producer named it, or none. */
+const versionRefOf = (
+  source: { source: SourceId; version: number } | null
+): SourceVersionRef | null =>
+  source === null
+    ? null
+    : { source: sourceRefOf(source.source), version: source.version };
 
 /** A version of a source, whole. */
 export interface SourceVersion extends SourceVersionRef {
@@ -564,13 +610,14 @@ const personReaderOf = async (
 
 /**
  * The member `personId` as the Brain's reader, as far as `reach` goes
- * (`Reach`). Refused once they have no current membership, whatever the
- * reach.
+ * (`Reach`), and with `company`, of `teams` those they are in now.
+ * Refused once they have no current membership, whatever the reach.
  */
 const readerOf = async (
   env: Pick<Env, "DB">,
   personId: string,
-  reach: Reach
+  reach: Reach,
+  teams: readonly string[] = []
 ): Promise<Reader> => {
   const { person, groups } = await personReaderOf(env, personId);
   switch (reach) {
@@ -581,7 +628,12 @@ const readerOf = async (
       return { person: null, groups };
     }
     case "company": {
-      return { person: null, groups: [companyGroup] };
+      // Of `teams`, those the person is in now: a group of theirs.
+      const named = new Set(teams.map((id) => teamGroup(id)));
+      return {
+        person: null,
+        groups: [...groups.filter((group) => named.has(group)), companyGroup],
+      };
     }
     default: {
       throw new Error("Unknown reach");
@@ -727,66 +779,128 @@ const meaningOf = async (
 };
 
 /**
- * A pack of what the member `personId` may read for `question`, as core
- * counts them now, within `budget.tokens` (the Brain's estimate,
- * `tokensOf`), and, with `asOf`, of each source as it was then: the
- * Brain's `recall`, by words, exact parts and, once a model ships, by
- * meaning: the question is embedded while its reader is read. Every item
- * cites its source, version and place; the pack says what was not found
- * and whether the budget cut it short, all from what they may read alone.
- * With `personal`, from the shared store and their own together, packed
- * as one store holding both would pack them (`packAcross`); without, from
- * the shared store alone, as their teams may read it (a reader with no
- * person: no `owner` source matches), or with `company` as the company
- * alone. Refused once they are no longer a member, or when `personId`
- * isn't an ID.
+ * The Brain's request of a recall by the member `personId`, as core counts
+ * them now: the question checked as the Brain checks it before the
+ * embedder sees any of it, and embedded while their reader is read. With
+ * `personal`, as the person (`person`: their own store too); without, as
+ * their teams (a reader with no person: no `owner` source matches); with
+ * `company`, as the company and, of `teams`, those they are in now.
  */
-export const recallAs = async (
+const recallRequestAs = async (
   env: BrainEnv & Pick<Env, "DB" | "EMBEDDER">,
   personId: string,
-  { question: asked, budget, asOf, personal, company = false }: Recall
-): Promise<RecalledPack> => {
-  // As the Brain checks it, before the embedder sees any of it.
+  { question: asked, budget, asOf, personal, company = false, teams }: Recall
+): Promise<RecallRequest> => {
   const question = checked(questionSchema, asked);
   let reach: Reach = personal ? "person" : "teams";
   if (company) {
     reach = "company";
   }
   const [reader, meaning] = await Promise.all([
-    readerOf(env, personId, reach),
+    readerOf(env, personId, reach, teams),
     // As of a moment the Brain never searches by meaning: nothing to embed.
     asOf === undefined ? meaningOf(env, question) : {},
   ]);
-  const request: RecallRequest = {
+  return {
     question,
     reader,
     budget,
     ...(asOf === undefined ? {} : { asOf }),
     ...meaning,
   };
-  const own = ownBrainOf(env, reader);
-  const { items, notFound, truncated } =
-    own === undefined
-      ? await brain(env).recall(request)
-      : packAcross(
-          question,
-          budget.tokens,
-          // The same request of both, the shared store first, as ties go
-          // to the store given first.
-          await Promise.all([brain(env).find(request), own.find(request)])
-        );
+};
+
+/**
+ * What every store `request`'s reader may read from finds for it, by
+ * `finding` (`find`, or `findPassages` for passages alone): the shared
+ * store, and their own when the reader names them (`ownBrainOf`), the
+ * shared store first, as ties go to the store given first.
+ */
+const findingsOf = async (
+  env: BrainEnv,
+  request: RecallRequest,
+  finding: "find" | "findPassages"
+): Promise<Finding[]> => {
+  const own = ownBrainOf(env, request.reader);
+  return await Promise.all([
+    brain(env)[finding](request),
+    ...(own === undefined ? [] : [own[finding](request)]),
+  ]);
+};
+
+/** `items` of a pack, each citing its source as its producer named it. */
+const recalledItems = (items: Pack["items"]): RecalledItem[] =>
+  items.map(({ source, version, position, text, whole, found }) => ({
+    source: sourceRefOf(source),
+    version,
+    position,
+    text,
+    whole,
+    found,
+  }));
+
+/**
+ * A pack of what the member `personId` may read for `question`, as core
+ * counts them now, within `budget.tokens` (the Brain's estimate,
+ * `tokensOf`), and, with `asOf`, of each source as it was then: the
+ * Brain's `recall`, by words, exact parts, the entities the question
+ * names and, once a model ships, by meaning: passages and memories, each
+ * citing its source, version and place, and the contested facts among
+ * them; what was not found and whether the budget cut it short, all from
+ * what they may read alone. With `personal`, from the shared store and
+ * their own together, packed as one store holding both would pack them
+ * (`packAcross`); without, from the shared store alone, as their teams
+ * may read it, or with `company` as the company and, of `teams`, those they
+ * are in. Refused once they are no longer a member, or when `personId` isn't an ID. For a caller
+ * that hands memories on with their own checks: none yet. The chat, the
+ * Brain page and code (`recallFor`) take passages alone
+ * (`recallPassagesAs`).
+ */
+export const recallAs = async (
+  env: BrainEnv & Pick<Env, "DB" | "EMBEDDER">,
+  personId: string,
+  recall: Recall
+): Promise<RecalledPack> => {
+  const request = await recallRequestAs(env, personId, recall);
+  const { items, memories, contested, notFound, truncated } = packAcross(
+    request.question,
+    request.budget.tokens,
+    await findingsOf(env, request, "find")
+  );
   return {
-    items: items.map(({ source, version, position, text, whole, found }) => ({
-      source: sourceRefOf(source),
-      version,
-      position,
-      text,
-      whole,
-      found,
+    items: recalledItems(items),
+    memories: memories.map((memory) => ({
+      ...memory,
+      source: versionRefOf(memory.source),
     })),
+    contested,
     notFound,
     truncated,
   };
+};
+
+/**
+ * A pack of the passages alone that the member `personId` may read for
+ * `question`, as `recallAs` finds them, the whole budget theirs: the
+ * stores find passages alone (`findPassages`), so no memory is read,
+ * takes room, reaches the caller, or counts as found in `notFound`, and
+ * no memory way can fail the recall. What the
+ * chat hands its model and the Brain page shows (GRA-1742: memories reach
+ * them in their own pull request, re-checked when history is read again),
+ * and what code recalls (`recallFor`, the SDK's `BrainPack`).
+ */
+export const recallPassagesAs = async (
+  env: BrainEnv & Pick<Env, "DB" | "EMBEDDER">,
+  personId: string,
+  recall: Recall
+): Promise<RecalledPassages> => {
+  const request = await recallRequestAs(env, personId, recall);
+  const { items, notFound, truncated } = packAcross(
+    request.question,
+    request.budget.tokens,
+    await findingsOf(env, request, "findPassages")
+  );
+  return { items: recalledItems(items), notFound, truncated };
 };
 
 /** Where an item of a pack is: its source, version and place. */
@@ -794,31 +908,33 @@ const placeOf = ({ source, version, position }: RecalledItem): string =>
   JSON.stringify([sourceKeyOf(source), version, position]);
 
 /**
- * Two recalls for one reader as one pack within `budget.tokens`: the
- * first's items in their order, then the second's that the first doesn't
- * hold (the same passage of the same version), best first, each while it
- * fits as the Brain counts it (`packItemTokens`); cut short when either
- * was or one of the second's didn't fit. What was not found is the
- * second's: it was asked for what the first meant. Both must be packs of
- * the same reader's, as `recallAs` gave them.
+ * Two recalls of passages for one reader as one pack within
+ * `budget.tokens`, as one pass over both would fit them: the first's
+ * items in their order, then the second's that the first doesn't hold
+ * (the same passage of the same version), best first, each while it fits
+ * in what is left, as the Brain counts it (`packItemTokens`). Cut short
+ * when either was or anything was left out for room. What was not found
+ * is the second's: it was asked for what the first meant. Both must be
+ * packs of the same reader's, as `recallPassagesAs` gave them.
  */
 export const mergeRecalled = (
-  first: RecalledPack,
-  second: RecalledPack,
+  first: RecalledPassages,
+  second: RecalledPassages,
   budget: { tokens: number }
-): RecalledPack => {
-  const tokensOf = (item: RecalledItem): number =>
-    packItemTokens({ ...item, source: sourceKeyOf(item.source) });
-  const held = new Set(first.items.map((item) => placeOf(item)));
-  const items = [...first.items];
-  let used = items.reduce((sum, item) => sum + tokensOf(item), 0);
+): RecalledPassages => {
+  let used = 0;
   let truncated = first.truncated || second.truncated;
-  for (const item of second.items) {
+  const held = new Set<string>();
+  const items: RecalledItem[] = [];
+  for (const item of [...first.items, ...second.items]) {
     const place = placeOf(item);
     if (held.has(place)) {
       continue;
     }
-    const tokens = tokensOf(item);
+    const tokens = packItemTokens({
+      ...item,
+      source: sourceKeyOf(item.source),
+    });
     if (used + tokens > budget.tokens) {
       truncated = true;
       continue;
@@ -1010,8 +1126,6 @@ export const listVersionsAs = async (
   };
 };
 
-const versionRefsSchema = z.array(versionRefSchema);
-
 /** A version as a key of the Brain names it, as one string. */
 const versionKeyOf = ({
   source,
@@ -1039,57 +1153,6 @@ const readableIn = async (
     )
   );
   return readable.flat();
-};
-
-/**
- * Of `versions`, those the member `personId` may read now, as
- * `readSourceVersionAs` decides it, in the order given and each once,
- * without reading their text: for core to check what a chat once read
- * before it sends it again (history-access.ts), or a run what it
- * recalled (workflows/resource-reads.ts): as far as `reach` goes, as the
- * recall that handed them read. Of the shared store, and of their own for
- * those the shared one doesn't answer (with the `person` reach alone): a
- * source is in one of them (`keptIn`). Their own store failing answers
- * none of its own (`ownOr`): what can't be checked is withheld. Refused
- * once they are no longer a member. For the server only, as `addSource`.
- */
-export const readableVersionsAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
-  personId: string,
-  versions: readonly SourceVersionRef[],
-  { reach = "person" }: { reach?: Reach } = {}
-): Promise<SourceVersionRef[]> => {
-  const asked = checked(versionRefsSchema, versions);
-  if (asked.length === 0) {
-    return [];
-  }
-  const reader = await readerOf(env, personId, reach);
-  const keys = [
-    ...new Map(
-      asked.map(({ source, version }) => {
-        const key = { source: sourceKeyOf(source), version };
-        return [versionKeyOf(key), key] as const;
-      })
-    ).values(),
-  ];
-  const inShared = await readableIn(brain(env), reader, keys);
-  const shared = new Set(inShared.map((key) => versionKeyOf(key)));
-  const rest = keys.filter((key) => !shared.has(versionKeyOf(key)));
-  const own = ownBrainOf(env, reader);
-  const inOwn =
-    rest.length === 0 || own === undefined
-      ? []
-      : await ownOr(async () => await readableIn(own, reader, rest), []);
-  const kept = new Set([...shared, ...inOwn.map((key) => versionKeyOf(key))]);
-  const seen = new Set<string>();
-  return asked.filter(({ source, version }) => {
-    const key = versionKeyOf({ source: sourceKeyOf(source), version });
-    if (!kept.has(key) || seen.has(key)) {
-      return false;
-    }
-    seen.add(key);
-    return true;
-  });
 };
 
 // Erasure: for good, apart from ordinary removal, where a new version
@@ -1157,6 +1220,40 @@ export const eraseSource = async (
     });
   }
   await brain(env).eraseSource(request);
+};
+
+const ownGroupErasureSchema = z.strictObject({
+  personId: idSchema,
+  group: sourceRefSchema,
+  reason: z.enum(erasureReasons),
+});
+
+/**
+ * Erases the group `group` (`addSource`'s `group`) from `personId`'s own
+ * store alone, as `eraseSource` with `asGroup` does there: every source
+ * added in it, in one call, and the group closed, so a later add in it is
+ * refused, also after a restore of the store. For a group only their own
+ * store can hold, so the shared store has no key of it to close: what an
+ * agent read through their own connection (core's `addSource` refuses a
+ * capture any other readers). Answers how many sources it erased, the
+ * same each time it is repeated (none once their store was erased
+ * whole). Safe to repeat; one that throws must be repeated until it
+ * answers.
+ */
+export const eraseOwnGroup = async (
+  env: BrainEnv,
+  erased: { personId: string; group: SourceRef; reason: ErasureReason }
+): Promise<number> => {
+  const { personId, group, reason } = checked(ownGroupErasureSchema, erased);
+  const answered = await ownBrain(env, personId).eraseSource({
+    source: sourceKeyOf(group),
+    reason,
+    asGroup: true,
+  });
+  if (answered === undefined) {
+    throw new Error("A person's own store answers what it erased");
+  }
+  return answered.sources;
 };
 
 /**
@@ -1674,6 +1771,121 @@ const skillOfKey = (key: SourceId): Skill | null => {
   return kind === skillsKind && rest.length === 0 && parsed.success
     ? parsed.data
     : null;
+};
+
+/**
+ * A skill's version as a run keeps it beside what it recalled
+ * (workflows/run-evidence.ts): the skills' kind, then its scope and name,
+ * as its key has them, so the run's checks read it as they read a
+ * recalled version (`readableVersionsAs`).
+ */
+export interface SkillVersionRef {
+  source: { producer: typeof skillsKind; id: string };
+  version: number;
+}
+
+/**
+ * `skill` at its version as a run keeps it (`SkillVersionRef`), whatever
+ * else it carries (a selection's description).
+ */
+export const skillVersionRefOf = ({
+  scope: givenScope,
+  name: givenName,
+  version: givenVersion,
+}: SkillAt): SkillVersionRef => {
+  const { scope, name, version } = checked(skillAtSchema, {
+    scope: givenScope,
+    name: givenName,
+    version: givenVersion,
+  });
+  return {
+    source: {
+      producer: skillsKind,
+      id: skillKeyOf({ scope, name }).slice(skillsKind.length + 1),
+    },
+    version,
+  };
+};
+
+/** A skill's version as `SkillVersionRef` names it, read back as its skill. */
+const skillVersionRefSchema = z.strictObject({
+  source: z.strictObject({
+    producer: z.literal(skillsKind),
+    id: z.string().transform((id, context) => {
+      const skill = skillOfKey(`${skillsKind}:${id}`);
+      if (skill === null) {
+        context.addIssue({ code: "custom", message: "Not a skill" });
+        return z.NEVER;
+      }
+      return skill;
+    }),
+  }),
+  version: z.int().positive(),
+});
+
+/** A version core checks is still readable: a source's or a skill's. */
+export type PinnedVersionRef = SourceVersionRef | SkillVersionRef;
+
+const pinnedVersionRefsSchema = z.array(
+  z.union([versionRefSchema, skillVersionRefSchema])
+);
+
+/**
+ * Of `versions`, those the member `personId` may read now, as
+ * `readSourceVersionAs` decides it, in the order given and each once,
+ * without reading their text: for core to check what a chat once read
+ * before it sends it again (history-access.ts), or a run what it
+ * recalled (workflows/resource-reads.ts): as far as `reach` goes, as the
+ * recall that handed them read; a skill's version too, as a run that
+ * read it keeps it (`skillVersionRefOf`). Of the shared store, and of
+ * their own for those the shared one doesn't answer (with the `person`
+ * reach alone): a source is in one of them (`keptIn`). Their own store
+ * failing answers none of its own (`ownOr`): what can't be checked is
+ * withheld. Refused once they are no longer a member. For the server
+ * only, as `addSource`.
+ */
+export const readableVersionsAs = async <Ref extends PinnedVersionRef>(
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  versions: readonly Ref[],
+  { reach = "person" }: { reach?: Reach } = {}
+): Promise<Ref[]> => {
+  const asked = checked(pinnedVersionRefsSchema, versions).map(
+    ({ source, version }) => ({
+      source:
+        source.producer === skillsKind
+          ? skillKeyOf(source.id)
+          : sourceKeyOf(source),
+      version,
+    })
+  );
+  if (asked.length === 0) {
+    return [];
+  }
+  const reader = await readerOf(env, personId, reach);
+  const keys = [
+    ...new Map(asked.map((key) => [versionKeyOf(key), key] as const)).values(),
+  ];
+  const inShared = await readableIn(brain(env), reader, keys);
+  const shared = new Set(inShared.map((key) => versionKeyOf(key)));
+  const rest = keys.filter((key) => !shared.has(versionKeyOf(key)));
+  const own = ownBrainOf(env, reader);
+  const inOwn =
+    rest.length === 0 || own === undefined
+      ? []
+      : await ownOr(async () => await readableIn(own, reader, rest), []);
+  const kept = new Set([...shared, ...inOwn.map((key) => versionKeyOf(key))]);
+  const seen = new Set<string>();
+  // `asked` is `versions` checked, at the same places.
+  return versions.filter((_, at) => {
+    const ask = asked[at];
+    const key = ask === undefined ? undefined : versionKeyOf(ask);
+    if (key === undefined || !kept.has(key) || seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 };
 
 /** Who may read Grasp's and the company's skills: every current member. */
@@ -2327,7 +2539,8 @@ const embeddersOf = async (env: Env): Promise<Embedders> => ({
 // it to the queue by key alone (brain-sources.ts `relayHandOvers`, through
 // `queueHandOvers`); the queue's item asks core's producers for the source
 // as their records hold it when it runs (brain-sources.ts `producersOf`,
-// given to `workBrain`), and tells them how it ended. The readers are
+// given to `workBrain`), and every way it ends is recorded here, the same
+// for every producer: added, refused or skipped, with why. The readers are
 // checked here as an add's (`sourceReadersSchema`): a producer that names
 // none is refused, and nothing is added.
 
@@ -2335,20 +2548,13 @@ const embeddersOf = async (env: Env): Promise<Embedders> => ({
  * A source as its producer holds it now: its change, text and readers,
  * and the text to keep instead when `text` is past a source's bound
  * (`whenTooLarge`: what it is, saying plainly that the rest was too large
- * to keep, never a cut part of it); or nothing to hand over (`gone`); or
- * nothing, as the erasure of its one reader (`readers`, the store that
- * may hold it) has begun, when the Brain closes its key, as an add of it
- * may have landed after that erasure.
+ * to keep, never a cut part of it); or nothing to hand over (`gone`), and
+ * why; or nothing, as the erasure of its one reader (`readers`, the store
+ * that may hold it) has begun, when the Brain closes its key, as an add of
+ * it may have landed after that erasure.
  */
 export type Handed =
-  | {
-      kind: "gone";
-      /**
-       * Why a source its producer noted is not handed over, for those that
-       * record it (brain-sources.ts): what a note promised ends in this.
-       */
-      skipped?: HandOverSkip;
-    }
+  | { kind: "gone"; skipped: HandOverSkip }
   | { kind: "erased"; readers: SourceReaders }
   | {
       kind: "source";
@@ -2361,28 +2567,53 @@ export type Handed =
     };
 
 /**
- * Why a noted source is not handed over after all: its record restricted
- * since, deleted or gone, its reader no longer a member, or nothing of it
- * to keep (a question of no words).
+ * Why a noted source is not handed over after all, one of a fixed set:
+ * its record restricted since, deleted or gone, its details past their
+ * retention, its reader no longer a member, or nothing of it to keep (a
+ * question of no words).
  */
 export type HandOverSkip =
   | "restricted"
   | "deleted"
+  | "past_retention"
   | "not_a_member"
   | "no_text";
 
 /** How a hand-over that did something ended: added, or refused for good. */
 export type HandOverEnd = Exclude<HandOverResult, { kind: "nothing" }>;
 
+/** How a hand-over ended: added, refused for good, or skipped with why. */
+export type HandOverOutcome =
+  | HandOverEnd
+  | { kind: "skipped"; reason: HandOverSkip };
+
+/**
+ * One attempt at a hand-over, as its producer answers it: the source as
+ * its records hold it now, and the records of the one noted hand-over
+ * this attempt may end, read before the source was.
+ */
+export interface HandOverAttempt {
+  handed: Handed;
+  /**
+   * Records that the source's text leaves core now, if its noted hand-over
+   * is still open as this attempt read it: false when it is not (an
+   * earlier attempt ended it, its answer lost; or it was noted anew,
+   * which a later item hands over), and then nothing may leave.
+   */
+  started: () => Promise<boolean>;
+  /**
+   * Records how it ended and ends its noted hand-over, both or neither:
+   * nothing when that is not open as this attempt read it, so a noted
+   * hand-over ends in exactly one outcome. Throws when it can't, so the
+   * item is tried again.
+   */
+  ended: (outcome: HandOverOutcome) => Promise<void>;
+}
+
 /** Core's producers, as the Brain's hand-overs reach them (brain-sources.ts). */
 export interface Producers {
-  /** `source` as its producer's records hold it now. */
-  read: (source: SourceRef) => Promise<Handed>;
-  /**
-   * Records how the hand-over of `source` ended: once it did, and again
-   * on a repeat. Throws when it can't, so the item is tried again.
-   */
-  settled: (source: SourceRef, outcome: HandOverEnd) => Promise<void>;
+  /** Begins an attempt at handing `source` over. */
+  attempt: (source: SourceRef) => Promise<HandOverAttempt>;
 }
 
 /** The class of the Brain's work every hand-over takes. */
@@ -2410,21 +2641,21 @@ const isErasedRefusal = (error: unknown): boolean =>
   brainSourceErrors.codeOf(error) === "brain.source_erased";
 
 /**
- * Refuses the hand-over of `source` for `reason`: recorded first, then,
- * when its one reader's erasure began (`closing`), its key closed. In
- * that order, as closing the key takes this item off the queue with every
- * other of its key: a refusal recorded after could, failing, never be
- * tried again. A close that fails fails the item, which is tried again,
- * recording again: each attempt records its own.
+ * Refuses the hand-over `attempt` is at for `reason`: recorded first,
+ * then, when its one reader's erasure began (`closing`), its key closed.
+ * In that order, as closing the key takes this item off the queue with
+ * every other of its key: a refusal recorded after could, failing, never
+ * be tried again. A close that fails fails the item, which is tried again
+ * and closes it then, its refusal recorded once.
  */
 const refuse = async (
   env: Env,
-  producers: Producers,
+  attempt: HandOverAttempt,
   source: SourceRef,
   reason: HandOverEnd & { kind: "refused" },
   closing?: SourceReaders
 ): Promise<HandOverResult> => {
-  await producers.settled(source, reason);
+  await attempt.ended(reason);
   if (closing !== undefined) {
     await closeKey(env, source, closing);
   }
@@ -2436,13 +2667,17 @@ const refuse = async (
  * `addSource`, which takes it to the store its readers belong in, and says
  * how it ended (`HandOverResult`), which settles the item as done:
  *
- * - nothing, when the producer has nothing to hand over;
+ * - nothing, when the producer has nothing to hand over: skipped, with
+ *   its producer's reason;
  * - refused as `invalid`, when the producer's answer can't be added (no
  *   readers, a text that isn't one): never tried again;
  * - its text, or its `whenTooLarge` when the text is past a source's
  *   bound as given or as indexed (`fitsSourceText`); refused as
  *   `too_large` when neither fits;
  * - refused as `erased` when what it adds was erased: final.
+ *
+ * Each records its outcome, which ends the noted hand-over: once, as a
+ * repeat of an attempt that ended it records nothing (`HandOverAttempt`).
  *
  * A source for one person alone whose erasure has begun is erased (its key
  * closed), never left: when the producer says so (`erased`), as an add of
@@ -2457,15 +2692,16 @@ const handOver = async (
   producers: Producers,
   source: SourceRef
 ): Promise<HandOverResult> => {
-  const handed = await producers.read(source);
+  const attempt = await producers.attempt(source);
+  const { handed } = attempt;
   if (handed.kind === "gone") {
+    await attempt.ended({ kind: "skipped", reason: handed.skipped });
     return { kind: "nothing" };
   }
   const refused = async (
     reason: (HandOverEnd & { kind: "refused" })["reason"],
     closing?: SourceReaders
-  ) =>
-    await refuse(env, producers, source, { kind: "refused", reason }, closing);
+  ) => await refuse(env, attempt, source, { kind: "refused", reason }, closing);
   if (handed.kind === "erased") {
     return await refused("erased", handed.readers);
   }
@@ -2479,6 +2715,9 @@ const handOver = async (
   const text = texts.find((each) => fitsSourceText(each));
   if (text === undefined) {
     return await refused("too_large");
+  }
+  if (!(await attempt.started())) {
+    return { kind: "nothing" };
   }
   let version: number;
   try {
@@ -2502,7 +2741,7 @@ const handOver = async (
     return await refused("erased", readers.data);
   }
   const added: HandOverResult = { kind: "added", version };
-  await producers.settled(source, added);
+  await attempt.ended(added);
   return added;
 };
 
@@ -2517,28 +2756,35 @@ const handOversOf = (env: Env, producers: Producers): HandOvers => ({
  * alone, as what is added is what its producer answers when the item runs
  * (`workBrain`). One the Brain can't key (too long, a control character)
  * never will be: left out and counted in the log, never named, as an id
- * can echo what a person typed. Sent `handOversMax` at a time, one call
- * after the other: a call that fails leaves those after it unsent.
+ * can echo what a person typed. Returns those it left out, as given. Sent
+ * `handOversMax` at a time, one call after the other: a call that fails
+ * leaves those after it unsent.
  */
 export const queueHandOvers = async (
   env: BrainEnv,
   sources: readonly SourceRef[]
-): Promise<void> => {
-  const items = sources.flatMap((each) => {
+): Promise<SourceRef[]> => {
+  const items: HandOverRequest["items"] = [];
+  const unkeyable: SourceRef[] = [];
+  for (const each of sources) {
     const source = sourceRefSchema.safeParse(each);
-    return source.success
-      ? [{ source: sourceKeyOf(source.data), priority: handOverPriority }]
-      : [];
-  });
-  if (items.length < sources.length) {
-    log.warn("brain.hand_over.unkeyed", {
-      count: sources.length - items.length,
-    });
+    if (source.success) {
+      items.push({
+        source: sourceKeyOf(source.data),
+        priority: handOverPriority,
+      });
+    } else {
+      unkeyable.push(each);
+    }
+  }
+  if (unkeyable.length > 0) {
+    log.warn("brain.hand_over.unkeyed", { count: unkeyable.length });
   }
   for (let at = 0; at < items.length; at += handOversMax) {
     // oxlint-disable-next-line no-await-in-loop -- one call after the other
     await brain(env).handOver({ items: items.slice(at, at + handOversMax) });
   }
+  return unkeyable;
 };
 
 /**
@@ -2996,6 +3242,53 @@ export const rememberAs = async (
   };
 };
 
+/** The names and identifiers of `entity` that `reader` may see in `store`, each page read. */
+const entityNamesOf = async (
+  store: Brain,
+  reader: Reader,
+  entity: EntityId
+): Promise<{ names: string[]; identifiers: Identifier[] }> => {
+  const names: string[] = [];
+  const identifiers: Identifier[] = [];
+  let after: EntityNamesCursor | undefined;
+  do {
+    // oxlint-disable-next-line no-await-in-loop -- each page after the last
+    const page = await store.readEntityNames({
+      entity,
+      reader,
+      ...(after === undefined ? {} : { after }),
+    });
+    for (const { type, value } of page.names) {
+      if (type === "name") {
+        names.push(value);
+      } else {
+        identifiers.push({ type, value });
+      }
+    }
+    after = page.more ? page.next : undefined;
+  } while (after !== undefined);
+  return { names, identifiers };
+};
+
+/**
+ * The exact identifier a person's own entity carries for the shared
+ * entity it stands for (`correctAs`): one form, minted here alone, so
+ * every correction of that shared entity links to the same entity of
+ * theirs. Kept only in their own store, and never shown as one of the
+ * entity's identifiers (`ownEntityAs` leaves it out).
+ */
+const sharedEntityRefPrefix = "grasp:shared-entity:";
+
+/** The identifier of the person's own entity for shared entity `id`. */
+const sharedEntityRefOf = (id: EntityId): Identifier => ({
+  type: "ref",
+  value: `${sharedEntityRefPrefix}${id}`,
+});
+
+/** Whether `identifier` is one `sharedEntityRefOf` made. */
+const isSharedEntityRef = ({ type, value }: Identifier): boolean =>
+  type === "ref" && value.startsWith(sharedEntityRefPrefix);
+
 /**
  * An entity of a person's own store, as they may read it: its kind, the
  * earliest name they may see (`name`), and every name and exact
@@ -3027,26 +3320,14 @@ export const ownEntityAs = async (
   if (read === null) {
     return null;
   }
-  const names: string[] = [];
-  const identifiers: Identifier[] = [];
-  let after: EntityNamesCursor | undefined;
-  do {
-    // oxlint-disable-next-line no-await-in-loop -- each page after the last
-    const page = await store.readEntityNames({
-      entity: id,
-      reader,
-      ...(after === undefined ? {} : { after }),
-    });
-    for (const { type, value } of page.names) {
-      if (type === "name") {
-        names.push(value);
-      } else {
-        identifiers.push({ type, value });
-      }
-    }
-    after = page.more ? page.next : undefined;
-  } while (after !== undefined);
-  return { kind: read.kind, name: read.name, names, identifiers };
+  const { names, identifiers } = await entityNamesOf(store, reader, id);
+  return {
+    kind: read.kind,
+    name: read.name,
+    names,
+    // What stands for a shared entity is core's own link, not one of it.
+    identifiers: identifiers.filter((each) => !isSharedEntityRef(each)),
+  };
 };
 
 /**
@@ -3072,4 +3353,487 @@ export const forgetAs = async (
   } catch (error) {
     throw erasedAs(error);
   }
+};
+
+// The Brain's Memories page (GRA-1746), for a person core verified: the
+// entities they may see, what the Brain remembers about one, history
+// included, the facts sources disagree on, and their confirmation or
+// correction. Each reads as them, from what they may read alone, in the
+// store each entity and memory is in: their own (theirs alone) or the
+// shared one, whose ids are their own, so each is named with its store.
+// A listing reads their own store first, then the shared one, a page of
+// one store's at a time, with that store's own place to go on from: what
+// they may not read takes no place in a page nor says more follow.
+
+/** Which store: the person's own (theirs alone), or the shared one. */
+export type MemoryStoreName = "own" | "shared";
+
+export type {
+  ContestedCursor,
+  EntitiesCursor,
+  MemoriesCursor,
+} from "@grasp-os/brain-next/contract";
+
+// The page's own lists of kinds and attributes (shared's
+// brain-memories.ts, which can't reach the Brain's contract) are the
+// Brain's, both ways: a kind or an attribute added to one fails here.
+type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+type AnyAttribute = {
+  [K in EntityKind]: keyof (typeof entityAttributes)[K];
+}[EntityKind];
+const listsAgree: [
+  Same<EntityKind, BrainEntityKind>,
+  Same<AnyAttribute, BrainMemoryAttribute>,
+] = [true, true];
+void listsAgree;
+
+const memoryStoreSchema = z.enum(["own", "shared"]);
+
+/** `store` as `reader` reaches it. */
+const storeNamed = (
+  env: BrainEnv,
+  reader: PersonReader,
+  store: MemoryStoreName
+): Brain => (store === "own" ? ownBrain(env, reader.person) : brain(env));
+
+/** Where a listing goes on: in `store`, after `after` (from its start when absent). */
+export interface StorePlace<C> {
+  store: MemoryStoreName;
+  after?: C;
+}
+
+/** A page of a listing across both stores, and where it goes on: null at the last. */
+export interface AcrossStores<T, C> {
+  items: T[];
+  next: StorePlace<C> | null;
+}
+
+/** A page of one store's listing, as each of the Brain's listings pages. */
+interface StorePage<T, C> {
+  items: T[];
+  more: boolean;
+  next?: C;
+}
+
+/**
+ * A page of a listing across the person's own store and the shared one,
+ * from `from` (their own store's start when absent): a page of the store
+ * it is in, and once their own store has no more, the shared one's first
+ * page with it. Their own store's part is left out while it fails
+ * (`ownOr`), never the shared one's.
+ */
+const acrossStores = async <T, C>(
+  from: StorePlace<C> | undefined,
+  read: (store: MemoryStoreName, after?: C) => Promise<StorePage<T, C>>
+): Promise<AcrossStores<T, C>> => {
+  const place: StorePlace<C> = from ?? { store: "own" };
+  const page =
+    place.store === "own"
+      ? await ownOr(async () => await read("own", place.after), {
+          items: [],
+          more: false,
+        })
+      : await read("shared", place.after);
+  const { items } = page;
+  if (page.more && page.next !== undefined) {
+    return { items, next: { store: place.store, after: page.next } };
+  }
+  if (place.store === "shared") {
+    return { items, next: null };
+  }
+  const shared = await read("shared");
+  return {
+    items: [...items, ...shared.items],
+    next:
+      shared.more && shared.next !== undefined
+        ? { store: "shared", after: shared.next }
+        : null,
+  };
+};
+
+/** An entity in one of the stores, as a listing names it. */
+export interface StoredEntity {
+  store: MemoryStoreName;
+  id: EntityId;
+  kind: EntityKind;
+  name: string | null;
+  /**
+   * The person's own entity stands for a shared one (a correction made
+   * it) that they may no longer read: shown with no name at all, as for
+   * one there isn't.
+   */
+  unreadable: boolean;
+}
+
+/**
+ * `entity` as the page names it, as `reader` may see it now. One of the
+ * person's own that a correction made stands for a shared entity
+ * (`sharedEntityRefOf`) and holds no name of its own: its name is that
+ * shared entity's earliest name the reader may see, read live from the
+ * shared store, as the page reads a shared entity, never kept; when they
+ * may no longer read it, or it is gone, alike, `unreadable`. Any other
+ * entity as the store gives it. Per entity: the store has no read of
+ * several entities at once, so a page of own entities takes at most a
+ * page of these, each two reads (its identifiers, the shared entity).
+ */
+const liveNamed = async (
+  env: BrainEnv,
+  reader: PersonReader,
+  store: MemoryStoreName,
+  entity: Entity
+): Promise<StoredEntity> => {
+  const plain = { store, ...entity, unreadable: false };
+  if (store !== "own" || entity.name !== null) {
+    return plain;
+  }
+  const { identifiers } = await entityNamesOf(
+    ownBrain(env, reader.person),
+    reader,
+    entity.id
+  );
+  const standsFor = identifiers.find(isSharedEntityRef);
+  if (standsFor === undefined) {
+    return plain;
+  }
+  const shared = await brain(env).readEntity({
+    entity: standsFor.value.slice(sharedEntityRefPrefix.length),
+    reader,
+  });
+  return shared === null
+    ? { ...plain, unreadable: true }
+    : { ...plain, name: shared.name };
+};
+
+const entitiesWantedSchema = z.strictObject({
+  kind: z.enum(entityKinds),
+  from: z
+    .strictObject({
+      store: memoryStoreSchema,
+      after: entitiesCursorSchema.optional(),
+    })
+    .optional(),
+});
+
+/**
+ * A page of the entities of `kind` the member `personId` may see, their
+ * own store's first, then the shared one's, each in the order the store
+ * finds them, from `from`. Refused once they are no longer a member.
+ */
+export const entitiesAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  wanted:
+    | { kind: EntityKind; from?: StorePlace<EntitiesCursor> }
+    | Readonly<Record<string, unknown>>
+): Promise<AcrossStores<StoredEntity, EntitiesCursor>> => {
+  const { kind, from } = checked(entitiesWantedSchema, wanted);
+  // The person on their own Brain page: both stores (`"person"` reach).
+  const reader = await personReaderOf(env, personId);
+  return await acrossStores(from, async (store, after) => {
+    const found = await storeNamed(env, reader, store).findEntities({
+      reader,
+      kind,
+      ...(after === undefined ? {} : { after }),
+    });
+    return {
+      items: await Promise.all(
+        found.entities.map(
+          async (each) => await liveNamed(env, reader, store, each)
+        )
+      ),
+      more: found.more,
+      next: found.next,
+    };
+  });
+};
+
+const entityRefSchema = z.strictObject({
+  store: memoryStoreSchema,
+  id: entityIdSchema,
+});
+
+/**
+ * A memory as the page shows it: the store's own, with the source it was
+ * drawn from as its producer named it, and the entity it relates to with
+ * its earliest name the reader may see.
+ */
+export interface StoredMemory extends Omit<Memory, "source" | "object"> {
+  store: MemoryStoreName;
+  source: { source: SourceRef; version: number } | null;
+  object: { id: EntityId; name: string | null } | null;
+}
+
+/** `memories` of `store`, as the page shows them to `reader` (above). */
+const storedMemories = async (
+  store: Brain,
+  name: MemoryStoreName,
+  reader: Reader,
+  memories: readonly Memory[]
+): Promise<StoredMemory[]> => {
+  const objects = [
+    ...new Set(
+      memories.flatMap(({ object }) => (object === null ? [] : [object]))
+    ),
+  ];
+  const names = new Map(
+    await Promise.all(
+      objects.map(async (id) => {
+        const read = await store.readEntity({ entity: id, reader });
+        return [id, read?.name ?? null] as const;
+      })
+    )
+  );
+  return memories.map(({ source, object, ...memory }) => ({
+    ...memory,
+    store: name,
+    source:
+      source === null
+        ? null
+        : { source: sourceRefOf(source.source), version: source.version },
+    object:
+      object === null ? null : { id: object, name: names.get(object) ?? null },
+  }));
+};
+
+const memoriesWantedSchema = z.strictObject({
+  entity: entityRefSchema,
+  after: memoriesCursorSchema.optional(),
+});
+
+/** A page of an entity's memories, and where it goes on: null at the last. */
+export interface StoredMemoryPage {
+  /**
+   * The entity as the reader may see it now (`liveNamed`), what the page
+   * names it by: null alike when there is none and when they may no
+   * longer see it.
+   */
+  entity: StoredEntity | null;
+  memories: StoredMemory[];
+  next: MemoriesCursor | null;
+}
+
+/**
+ * A page of what the Brain remembers about `entity` that the member
+ * `personId` may read, history included, in the store's order, after
+ * `after`: none, alike, for an entity there isn't or they may not see.
+ * Refused once they are no longer a member.
+ */
+export const memoriesAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  wanted:
+    | { entity: { store: MemoryStoreName; id: string }; after?: MemoriesCursor }
+    | Readonly<Record<string, unknown>>
+): Promise<StoredMemoryPage> => {
+  const { entity, after } = checked(memoriesWantedSchema, wanted);
+  // The person on their own Brain page: both stores (`"person"` reach).
+  const reader = await personReaderOf(env, personId);
+  const store = storeNamed(env, reader, entity.store);
+  const [page, read] = await Promise.all([
+    store.readMemories({
+      entity: entity.id,
+      reader,
+      history: true,
+      ...(after === undefined ? {} : { after }),
+    }),
+    store.readEntity({ entity: entity.id, reader }),
+  ]);
+  return {
+    entity:
+      read === null ? null : await liveNamed(env, reader, entity.store, read),
+    memories: await storedMemories(store, entity.store, reader, page.memories),
+    next: page.more && page.next !== undefined ? page.next : null,
+  };
+};
+
+/** A fact sources disagree on, as the page shows it. */
+export interface StoredContestedFact {
+  about: StoredEntity;
+  attribute: string;
+  sides: StoredMemory[];
+  more: boolean;
+}
+
+const contestedWantedSchema = z.strictObject({
+  from: z
+    .strictObject({
+      store: memoryStoreSchema,
+      after: contestedCursorSchema.optional(),
+    })
+    .optional(),
+});
+
+/**
+ * A page of the facts sources disagree on that the member `personId` may
+ * read, their own store's first, then the shared one's, from `from`: each
+ * with the entity it is about and its first sides, as the store gives
+ * them. Refused once they are no longer a member.
+ */
+export const contestedAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  wanted:
+    | { from?: StorePlace<ContestedCursor> }
+    | Readonly<Record<string, unknown>> = {}
+): Promise<AcrossStores<StoredContestedFact, ContestedCursor>> => {
+  const { from } = checked(contestedWantedSchema, wanted);
+  // The person on their own Brain page: both stores (`"person"` reach).
+  const reader = await personReaderOf(env, personId);
+  return await acrossStores(from, async (name, after) => {
+    const store = storeNamed(env, reader, name);
+    const page = await store.listContested({
+      reader,
+      ...(after === undefined ? {} : { after }),
+    });
+    const facts = await Promise.all(
+      page.facts.map(async ({ about, attribute, memories, more }) => {
+        const entity = await store.readEntity({ entity: about, reader });
+        // Read after the listing: who may read a source can change in
+        // between, and a fact they may no longer read is left out, as the
+        // store leaves out what that change hides (contract v11).
+        return entity === null
+          ? []
+          : [
+              {
+                about: await liveNamed(env, reader, name, entity),
+                attribute,
+                sides: await storedMemories(store, name, reader, memories),
+                more,
+              },
+            ];
+      })
+    );
+    return { items: facts.flat(), more: page.more, next: page.next };
+  });
+};
+
+const memoryRefSchema = z.strictObject({
+  store: memoryStoreSchema,
+  entity: entityIdSchema,
+  memory: memoryIdSchema,
+});
+
+/** A memory, by its store and id, with the entity it is about. */
+export type StoredMemoryRef = z.infer<typeof memoryRefSchema>;
+
+const memoryPlaceSchema = memoryRefSchema.omit({ entity: true });
+
+/** A memory, by its store and id. */
+export type StoredMemoryPlace = z.infer<typeof memoryPlaceSchema>;
+
+/**
+ * The member `personId` confirms memory `memory`, current and one they may
+ * read, over the current memories they may read that say otherwise, as
+ * their own word (the Brain's `confirmMemory`): `nothing` alike for one
+ * there isn't, they may not read, or that isn't current. Refused once
+ * they are no longer a member.
+ */
+export const confirmAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  memory: StoredMemoryPlace | Readonly<Record<string, unknown>>
+): Promise<MemoryChangeOutcome> => {
+  const { store, memory: id } = checked(memoryPlaceSchema, memory);
+  // The person on their own Brain page: both stores (`"person"` reach).
+  const reader = await personReaderOf(env, personId);
+  try {
+    return await storeNamed(env, reader, store).confirmMemory({
+      memory: id,
+      reader,
+    });
+  } catch (error) {
+    throw erasedAs(error);
+  }
+};
+
+const correctionSchema = z.strictObject({
+  wrong: memoryRefSchema,
+  right: memoryText(valueMaxLength),
+  // Minted once by the page when the person starts the correction.
+  change: z.uuid(),
+});
+
+/** A correction, as `correctAs` takes it. */
+export type Correction = z.input<typeof correctionSchema>;
+
+/**
+ * The member `personId` says memory `wrong` is wrong, and what is right
+ * (`right`): saved as their own word, readable by them alone, in their own
+ * store (`rememberAs`), and confirmed there over what they may read that
+ * says otherwise. About the same entity: in their own store by its id;
+ * from the shared one, the entity of theirs that stands for it, found by
+ * its exact identifier (`sharedEntityRefOf`) alone, made at the first
+ * correction with no name of its own (`liveNamed` names it). Under the same
+ * attribute when it holds a value, so a newer correction of a one-value
+ * attribute ends the one before. A wrong memory that is their own word is
+ * retired too, as `forgetAs` retires it: on a many-value attribute the
+ * correction would otherwise stand beside it.
+ *
+ * The shared store is left as it is: a correction others may read would
+ * widen what the person read, theirs to publish, not this. What is saved
+ * is built from what never changes for one correction (the entity's id
+ * and kind, the memory's attribute and type, the text), so the same
+ * `change` again answers what it saved while the wrong memory is one they
+ * may still read, whatever else has happened to it since (ended by it, or
+ * retired), and confirms and retires again, each a repeat that records
+ * nothing new. Once they may no longer read it (its source narrowed or
+ * erased), a retry answers null, as for any memory they may not read: a
+ * correction an earlier try saved stays in their own store, where the
+ * page shows it and they can confirm it themselves. The same `change`
+ * with other text is refused (`brain.correction_reused`). Null alike when
+ * the memory isn't one they may read and when it is a relation. Refused
+ * once they are no longer a member.
+ */
+export const correctAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  correction: Correction | Readonly<Record<string, unknown>>
+): Promise<RememberedMemory | null> => {
+  const { wrong, right, change } = checked(correctionSchema, correction);
+  // The person on their own Brain page: both stores (`"person"` reach).
+  const reader = await personReaderOf(env, personId);
+  const store = storeNamed(env, reader, wrong.store);
+  const [read, entity] = await Promise.all([
+    keptMemory(store, reader, wrong.entity, wrong.memory),
+    store.readEntity({ entity: wrong.entity, reader }),
+  ]);
+  // A relation names another entity, which the person's own word can't:
+  // it is not one a correction takes, alike for one there isn't.
+  if (read === undefined || entity === null || read.object !== null) {
+    return null;
+  }
+  // No name of the shared entity is copied: a copy would outlive a
+  // narrowing or an erasure of the source that gave it. The page names
+  // it live (`liveNamed`).
+  const about =
+    wrong.store === "own"
+      ? { id: entity.id, kind: entity.kind }
+      : { kind: entity.kind, identifiers: [sharedEntityRefOf(entity.id)] };
+  const attribute = read.attribute ?? undefined;
+  let saved: RememberedMemory;
+  try {
+    saved = await rememberAs(env, personId, {
+      change: `correct:${change}`,
+      about,
+      ...(attribute === undefined ? {} : { attribute, value: right }),
+      type: read.type,
+      statement: right,
+      quote: right,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === changeReused) {
+      throw brainMemoryErrors.create("brain.correction_reused");
+    }
+    throw error;
+  }
+  const own = ownBrain(env, reader.person);
+  try {
+    await own.confirmMemory({ memory: saved.memory, reader });
+    if (wrong.store === "own" && read.writer === reader.person) {
+      await own.retireMemory({ memory: read.id, reader });
+    }
+  } catch (error) {
+    throw erasedAs(error);
+  }
+  return saved;
 };

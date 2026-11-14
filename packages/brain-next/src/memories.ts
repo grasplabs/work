@@ -111,18 +111,31 @@ const newerSql = (
   learned: string,
   valid: string,
   visible: boolean
-): string => `
-  SELECT ${startSql("newer")} AS at FROM memories AS newer
-  WHERE newer.entity = ${alias}.entity
-    AND newer.attribute = ${alias}.attribute
-    AND newer.lineage = ${alias}.lineage
-    AND (${alias}.one_value = 1 OR newer.value_key = ${alias}.value_key)
+): string => {
+  // Two seeks, one for each kind of attribute, never an OR between them:
+  // an OR kept `value_key` out of the index (`memories_lineage_value_idx`),
+  // so a memory of many values read every memory of its lineage.
+  const rest = `
     AND (newer.lineage_order > ${alias}.lineage_order
       OR (newer.lineage_order = ${alias}.lineage_order AND newer.row > ${alias}.row))
     AND newer.learned_at <= ${learned}
     AND ${startSql("newer")} <= ${valid}
     AND (newer.retired_at IS NULL OR newer.retired_at > ${learned})
     ${visible ? `AND ${visibleSql("newer")}` : ""}`;
+  return `
+  SELECT ${startSql("newer")} AS at FROM memories AS newer
+  WHERE ${alias}.one_value = 1
+    AND newer.entity = ${alias}.entity
+    AND newer.attribute = ${alias}.attribute
+    AND newer.lineage = ${alias}.lineage${rest}
+  UNION ALL
+  SELECT ${startSql("newer")} AS at FROM memories AS newer
+  WHERE ${alias}.one_value = 0
+    AND newer.entity = ${alias}.entity
+    AND newer.attribute = ${alias}.attribute
+    AND newer.lineage = ${alias}.lineage
+    AND newer.value_key = ${alias}.value_key${rest}`;
+};
 
 /**
  * The later versions of `alias`'s source marked fully extracted by `?4`,
@@ -184,7 +197,7 @@ const confirmationSql = `(
 )`;
 
 /** A memory as the statements below return it. */
-interface MemoryRow extends Record<string, SqlStorageValue> {
+export interface MemoryRow extends Record<string, SqlStorageValue> {
   row: number;
   entity_row: number;
   id: string;
@@ -211,7 +224,7 @@ interface MemoryRow extends Record<string, SqlStorageValue> {
 }
 
 /** What a statement over memories is made of (`memoriesSql`). */
-interface MemoriesQuery {
+export interface MemoriesQuery {
   /** Common tables the others use, after `readable`. */
   prelude?: string;
   /** The memories asked about, as rows (`row`). */
@@ -242,7 +255,7 @@ interface MemoriesQuery {
  * one-value attribute) are judged with them, and returned only if asked
  * about too.
  */
-const memoriesSql = ({
+export const memoriesSql = ({
   prelude,
   base,
   filter,
@@ -258,15 +271,15 @@ candidates AS MATERIALIZED (
   SELECT row FROM base
   UNION
   SELECT partner.row FROM base
-  JOIN memories AS asked ON asked.row = base.row AND asked.one_value = 1
-  JOIN memories AS partner
+  CROSS JOIN memories AS asked ON asked.row = base.row AND asked.one_value = 1
+  CROSS JOIN memories AS partner
     ON partner.attribute = asked.attribute
     AND partner.entity = asked.entity
 ),
 seen AS MATERIALIZED (
   SELECT m.row AS row, ${endedAtSql} AS ended_at
   FROM candidates
-  JOIN memories AS m ON m.row = candidates.row
+  CROSS JOIN memories AS m ON m.row = candidates.row
   WHERE m.learned_at <= ?4 AND ${visibleSql("m")}
 ),
 judged AS MATERIALIZED (
@@ -274,7 +287,7 @@ judged AS MATERIALIZED (
     (seen.ended_at IS NULL
       AND (m.valid_from IS NULL OR m.valid_from <= ${validSql})
       AND (m.valid_until IS NULL OR m.valid_until > ${validSql})) AS is_current
-  FROM seen JOIN memories AS m ON m.row = seen.row
+  FROM seen CROSS JOIN memories AS m ON m.row = seen.row
 )`;
   const select = `
 SELECT m.row AS row, about.row AS entity_row, m.id AS id, about.id AS about,
@@ -369,7 +382,7 @@ const confirmationOf = (
 };
 
 /** `row` as the contract's `Memory`. */
-const memoryOf = (row: MemoryRow): Memory => {
+export const memoryOf = (row: MemoryRow): Memory => {
   const confirmed = confirmationOf(row.confirmation);
   return {
     id: row.id,
@@ -432,7 +445,7 @@ const memoryRowsAt = (
     .toArray();
 
 /** Runs a statement over memories with its bindings, as rows. */
-const memoryRows = (
+export const memoryRows = (
   sql: SqlStorage,
   statement: string,
   first: SqlStorageValue,
@@ -846,15 +859,19 @@ matched AS MATERIALIZED (
 )`,
   base: "SELECT row FROM matched",
   joins: "\nJOIN matched ON matched.row = m.row",
-  columns: ", matched.words AS words",
+  columns: ", matched.words AS words, matched.exact AS exact",
   filter: "judged.is_current = 1",
   order: `matched.words DESC, matched.exact DESC, confirmation IS NULL,
   m.learned_at DESC, m.id DESC`,
 });
 
-/** A memory the words way found, with how many of the question's telling words it holds. */
+/**
+ * A memory the words way found: how many of the question's telling words
+ * it holds in any form, and how many as written.
+ */
 export interface MemoryFound extends Memory {
   words: number;
+  exact: number;
 }
 
 /**
@@ -888,5 +905,9 @@ export const memoriesByWords = (
     reader,
     at,
     limit
-  ).map((row) => ({ ...memoryOf(row), words: Number(row.words) }));
+  ).map((row) => ({
+    ...memoryOf(row),
+    words: Number(row.words),
+    exact: Number(row.exact),
+  }));
 };

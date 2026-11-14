@@ -241,7 +241,7 @@ const waiting = (ranOut = true) =>
       state: "ready",
       data: {
         requests: [request],
-        directory: { people: new Map(), apps: new Map() },
+        directory: { people: new Map(), teams: new Map(), apps: new Map() },
       },
     },
     heldStarts: {
@@ -409,7 +409,7 @@ describe(inboxItems, () => {
           // Listed without what it is: by its ID, as before.
           triggerAsks("unknown-1", workflow, ["start"]),
         ],
-        directory: { people: new Map(), apps: new Map() },
+        directory: { people: new Map(), teams: new Map(), apps: new Map() },
       },
     };
 

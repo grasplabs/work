@@ -59,3 +59,29 @@ export interface BrainPack {
   readonly notFound: readonly string[];
   readonly truncated: boolean;
 }
+
+// Skills, beside recall: an App's action (`ctx.brain.skills`) and a
+// workflow's step (`ctx.brain.<alias>.skills`) select and read the same
+// skills a chat's code does (`env.skills`): Grasp's own and the
+// company's. A skill is guidance; it grants nothing.
+
+/**
+ * A skill at one version, as a selection names it, Grasp's own (`grasp`)
+ * or the company's (`company`): keep it for the whole task, and read that
+ * version.
+ */
+export interface BrainSkill {
+  readonly scope: "grasp" | "company";
+  readonly name: string;
+  readonly version: number;
+  /** When to use it. */
+  readonly description: string;
+}
+
+/** A skill at its version, whole: its `SKILL.md`. */
+export interface BrainSkillText {
+  readonly scope: "grasp" | "company";
+  readonly name: string;
+  readonly version: number;
+  readonly text: string;
+}
