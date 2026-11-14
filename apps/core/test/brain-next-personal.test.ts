@@ -32,6 +32,7 @@ import { inJurisdiction } from "../src/durable-objects.ts";
 import { ageOwnErasure, breakOwnStore } from "./brain-next-own-store.ts";
 import { holdNextBucketPut, ledgerOf } from "./brain-next-traces.ts";
 import { mockIdp } from "./idp.ts";
+import { addedSharedFile } from "./instruction-saves.ts";
 import { signedInWithRole } from "./sign-in.ts";
 
 // A person's own store (GRA-1762), as core reaches it: what only one
@@ -363,12 +364,9 @@ describe("what one person alone may read, in their own store", () => {
       file,
       change: crypto.randomUUID(),
       text: "Call me by my first name",
+      after: 0,
     });
-    await addInstructionFile(env, {
-      file: company,
-      change: crypto.randomUUID(),
-      text: "We sell bicycles",
-    });
+    await addedSharedFile(company, "We sell bicycles");
     const theirStore = `person:${person}`;
     const wanted = { source, version: 1 };
 
@@ -774,15 +772,12 @@ describe("a person's own store failing", () => {
     });
     const company: InstructionFile = { scope: "company", name: "facts" };
     const theirFile: InstructionFile = { scope: "person", personId: person };
-    await addInstructionFile(env, {
-      file: company,
-      change: crypto.randomUUID(),
-      text: "We sell bicycles",
-    });
+    await addedSharedFile(company, "We sell bicycles");
     await addInstructionFile(env, {
       file: theirFile,
       change: crypto.randomUUID(),
       text: "Call me by my first name",
+      after: 0,
     });
     const broken = await breakOwnStore(person);
     try {
@@ -845,12 +840,16 @@ describe("erasing a person", () => {
     });
     // Their instruction file, two versions, in their own store alone.
     const file: InstructionFile = { scope: "person", personId: person };
-    for (const text of ["Call me Sam", "Call me by my first name"]) {
+    for (const [after, text] of [
+      "Call me Sam",
+      "Call me by my first name",
+    ].entries()) {
       // oxlint-disable-next-line no-await-in-loop -- one version at a time
       await addInstructionFile(env, {
         file,
         change: crypto.randomUUID(),
         text,
+        after,
       });
     }
     const theirFile = async () => {

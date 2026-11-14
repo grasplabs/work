@@ -1,6 +1,7 @@
 import { agentErrors } from "@grasp-os/shared/agent";
 import { appErrors } from "@grasp-os/shared/apps";
-import { actorOf } from "@grasp-os/shared/audit";
+import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema, identifierSchema } from "@grasp-os/shared/ids";
 import {
   authoritySchema,
@@ -13,7 +14,8 @@ import { z } from "zod";
 
 import { readAgent } from "./agents.ts";
 import { editableApp } from "./apps.ts";
-import { appendAuditEvent } from "./audit-outbox.ts";
+import { auditLog } from "./audit-log.ts";
+import { uuidFromHash } from "./audit-outbox.ts";
 import { memberOf } from "./auth/identity.ts";
 import type { Member } from "./auth/identity.ts";
 import {
@@ -296,10 +298,18 @@ const requireWriter = async (
 };
 
 /**
- * The version a save was edited from, which every save names: 0 for a
- * file never written.
+ * A save as a person's page sends it, checked whole before anything is
+ * read: `after`, the version it was edited from (0 for a file never
+ * written), named by every save, whatever the caller's types said. The
+ * file is checked as `instructionFileOf` checks it; `change` and `text`
+ * as the Brain checks them (`addInstructionFile`).
  */
-const afterSchema = z.int().min(0);
+const savedSchema = z.strictObject({
+  file: z.unknown(),
+  change: z.string(),
+  text: z.string(),
+  after: z.int().min(0),
+});
 
 /** The file's own ID in the audit log: its scope and whose it is. */
 const instructionFileId = (file: InstructionFile): string => {
@@ -333,8 +343,9 @@ const instructionFileId = (file: InstructionFile): string => {
  * `instructions.too_large` over `instructionsMaxLength` UTF-16 units;
  * `instructions.changed` once `after`, the version it was edited from
  * (0 for none), is no longer the current one; `permission.invalid` for an
- * `Identity` or file that isn't one, or a save that names no `after`. Empty text empties the file, which
- * then loads nowhere. `change` names this save, minted before its first
+ * `Identity` or file that isn't one, or a save that isn't one (one that
+ * names no `after` among them). Empty text empties the file, which then
+ * loads nowhere. `change` names this save, minted before its first
  * try, so a retry saves it once.
  *
  * A person's route passes the session's `Identity` as the RPC layer built
@@ -346,28 +357,43 @@ export const saveInstructionFile = async (
   by: Identity | Authority,
   saved: { file: InstructionFile; change: string; text: string; after: number }
 ): Promise<{ file: InstructionFile; version: number }> => {
-  const file = instructionFileOf(saved.file);
-  // Required here, whatever the caller's types said: a client's save
-  // without it would skip the store's check and overwrite a newer save.
-  const after = permissionErrors.parse(
+  // A save without `after` would overwrite whatever is current.
+  const { change, text, after, ...named } = permissionErrors.parse(
     "permission.invalid",
-    afterSchema,
-    Reflect.get(saved, "after")
+    savedSchema,
+    saved
   );
+  const file = instructionFileOf(named.file);
   const member = await signedInMember(env, by, "write");
   await requireWriter(env, member, file);
-  const added = await addInstructionFile(env, { ...saved, file, after });
+  const added = await addInstructionFile(env, { file, change, text, after });
   // Recorded once the version is there, so an entry never reads as a
   // save that wasn't made. One the log can't take fails the call, and the
-  // version it saved stays unrecorded unless the same save (the same
-  // change) is tried again, which records it then. Which file and
-  // version, never its text.
-  await appendAuditEvent(env, {
-    actor: actorOf(member),
-    action: "instructions.saved",
-    target: { type: "instructions", id: instructionFileId(file) },
-    detail: { scope: file.scope, version: added.version },
-  });
+  // version it saved stays unrecorded until the same save (the same
+  // change) is tried again, which records it then. Its ID comes from who
+  // saved which file under which change, so a retry the log already has
+  // is kept once (the log keeps an event ID once): one event per save.
+  // Which file and version, never its text.
+  const id = instructionFileId(file);
+  const event = createAuditEvent(
+    {
+      actor: actorOf(member),
+      action: "instructions.saved",
+      target: { type: "instructions", id },
+      detail: { scope: file.scope, version: added.version },
+    },
+    "core"
+  );
+  await auditLog(env).append([
+    {
+      ...event,
+      id: uuidFromHash(
+        await sha256Hex(
+          JSON.stringify(["instructions.saved", member.userId, id, change])
+        )
+      ),
+    },
+  ]);
   return added;
 };
 

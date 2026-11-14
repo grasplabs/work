@@ -810,18 +810,45 @@ describe("instruction files, edited from a page", setUpTime, () => {
     });
   });
 
-  it("records each save, by whom and of which file and version, and never its text", async () => {
+  it("refuses through the session a file whose text, escaped as the prompt holds it, is over the limit, and keeps the one before", async () => {
+    const person = await signedInApi(idp, "user");
+    const own = { scope: "person", personId: person.userId } as const;
+    const first = await person.api.instructions.save({
+      file: own,
+      change: crypto.randomUUID(),
+      text: "Kept.",
+      after: 0,
+    });
+    // Within the limit as text, several times over it escaped.
+    const escaped = await outcome(
+      person.api.instructions.save({
+        file: own,
+        change: crypto.randomUUID(),
+        text: "&".repeat(instructionsMaxLength / 2),
+        after: first.version,
+      })
+    );
+
+    expect({
+      escaped,
+      now: await person.api.instructions.read(own),
+    }).toStrictEqual({
+      escaped: "instructions.too_large",
+      now: { version: first.version, text: "Kept." },
+    });
+  });
+
+  it("records each save once, by whom and of which file and version, and never its text", async () => {
     const admin = await signedInApi(idp, "admin");
     const text = `Secret rule ${unique()}`;
     const file = { scope: "company", name: "facts" } as const;
+    const after = await versionAs(admin.api, file);
+    const change = crypto.randomUUID();
 
     const events = await auditedDuring(async () => {
-      await admin.api.instructions.save({
-        file,
-        change: crypto.randomUUID(),
-        text,
-        after: await versionAs(admin.api, file),
-      });
+      await admin.api.instructions.save({ file, change, text, after });
+      // Its answer lost, the same save again: one save, one entry.
+      await admin.api.instructions.save({ file, change, text, after });
     });
     const recorded = events.filter(
       ({ action }) => action === "instructions.saved"
@@ -963,18 +990,33 @@ describe("instruction files, edited from a page", setUpTime, () => {
       text: "From the first.",
       after: 1,
     });
+    // Nor does core's own add to the Brain, behind the rule's check.
+    const addedWithoutAfter = await outcome(
+      addInstructionFile(
+        env,
+        // SAFETY: as a caller whose types are wrong may pass it.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+        {
+          file: own,
+          change: crypto.randomUUID(),
+          text: "No version named here either.",
+        } as never
+      )
+    );
 
     expect({
       withoutAfter,
       first,
       second,
       stale,
+      addedWithoutAfter,
       now: await person.api.instructions.read(own),
     }).toStrictEqual({
       withoutAfter: "permission.invalid",
       first: "ok",
       second: "ok",
       stale: "instructions.changed",
+      addedWithoutAfter: "brain.request_invalid",
       now: { version: 2, text: "Second." },
     });
   });

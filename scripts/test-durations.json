@@ -321,6 +321,7 @@
   "@grasp-os/core test/knowledge-purge-content-rebuilds.test.ts": 29.2,
   "@grasp-os/core test/knowledge-purge-content.test.ts": 13.8,
   "@grasp-os/core test/knowledge-purge-records.test.ts": 14.1,
+  "@grasp-os/core test/knowledge-purge-search-index.test.ts": 23.5,
   "@grasp-os/core test/knowledge-purge.test.ts": 8.3,
   "@grasp-os/core test/knowledge-search-speed.test.ts": 7.1,
   "@grasp-os/core test/knowledge-search.test.ts": 3.7,

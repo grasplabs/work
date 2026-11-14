@@ -1500,6 +1500,7 @@ export const coreProbes = {
             file,
             change: crypto.randomUUID(),
             text: as,
+            after: 0,
           })
       );
     return [

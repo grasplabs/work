@@ -52,7 +52,7 @@ import type { StoreCopy } from "./brain-next-store-copy.ts";
 import { brainSurfaces, membersOf, textOf } from "./brain-next-surfaces.ts";
 import type { Answer, Probe, Probing } from "./brain-next-surfaces.ts";
 import { mockIdp } from "./idp.ts";
-import { saveInstructions } from "./instruction-saves.ts";
+import { addedSharedFile, saveInstructions } from "./instruction-saves.ts";
 import { answeringProvider, testModel } from "./model-provider.ts";
 import { noProducers } from "./no-producers.ts";
 import { carrying } from "./platform-providers.ts";
@@ -544,6 +544,7 @@ describe(
           file,
           change: crypto.randomUUID(),
           text: `Instructions ${sharedWord} ${marker}`,
+          after: 0,
         });
       }
       const instructionMarkers = [
@@ -1083,17 +1084,13 @@ describe(
       ]);
       await admin.api.members.remove(former.userId);
       const marker = markerWord();
-      const companyFiles: InstructionFile[] = [
+      const companyFiles: Extract<InstructionFile, { scope: "company" }>[] = [
         { scope: "company", name: "instructions" },
         { scope: "company", name: "facts" },
       ];
       for (const file of companyFiles) {
         // oxlint-disable-next-line no-await-in-loop -- one file at a time
-        await addInstructionFile(env, {
-          file,
-          change: crypto.randomUUID(),
-          text: `Company instructions ${marker}`,
-        });
+        await addedSharedFile(file, `Company instructions ${marker}`);
       }
       const forbidden = { "the company's instruction files": marker };
       const findings: Finding[] = [];
@@ -1185,6 +1182,7 @@ describe(
         file: holderFile,
         change: crypto.randomUUID(),
         text: `Instructions ${sharedWord} ${fileMarker}`,
+        after: 0,
       });
       const backup = await copyOfStore();
 

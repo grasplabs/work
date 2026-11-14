@@ -4,9 +4,16 @@ import type {
 } from "@grasp-os/shared/instruction-files";
 import { env } from "cloudflare:workers";
 
+import {
+  addInstructionFile,
+  readInstructionFilesAs,
+} from "../src/brain-next.ts";
+import type { InstructionFile } from "../src/brain-next.ts";
+
 // Instruction files as the tests write them: through the session, as a
-// page does, from the version the page would have read; and agents the
-// company has, whose files an admin may write.
+// page does, from the version the page would have read; straight to the
+// Brain, over the version it has; and agents the company has, whose files
+// an admin may write.
 
 /**
  * Saves `text` as `file`'s next version through `api`, from its version
@@ -40,4 +47,22 @@ export const keptAgent = async (id = `agent-${crypto.randomUUID()}`) => {
     .bind(id, `Agent ${id}`, `agent ${id}`.toLowerCase(), now, now)
     .run();
   return id;
+};
+
+/**
+ * Adds `text` as the next version of the company's or an agent's file
+ * `file` straight to the Brain, with no check of who writes, over the
+ * version it has now (other tests of the file may have written it).
+ */
+export const addedSharedFile = async (
+  file: Extract<InstructionFile, { scope: "company" | "agent" }>,
+  text: string
+) => {
+  const [now] = await readInstructionFilesAs(env, { userId: "reader" }, [file]);
+  return await addInstructionFile(env, {
+    file,
+    change: crypto.randomUUID(),
+    text,
+    after: now?.version ?? 0,
+  });
 };

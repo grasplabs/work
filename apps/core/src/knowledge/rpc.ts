@@ -66,7 +66,7 @@ import { recall } from "@grasp-os/brain/recall";
 import { relationsExplain, relationsFor } from "@grasp-os/brain/relations";
 import { search } from "@grasp-os/brain/search";
 import { follow, read } from "@grasp-os/brain/tools";
-import { knowledgeErrors } from "@grasp-os/shared/knowledge";
+import { knowledgeErrors, purgeInputSchema } from "@grasp-os/shared/knowledge";
 import type {
   BacklinkPage,
   Collection,
@@ -215,12 +215,14 @@ const purgerOf = (person: Identity): Writer => {
  * recorded. A content purge is not a person's: it passes.
  */
 const requireErasing = async (env: Env, input: PurgeInput): Promise<void> => {
-  if (
-    typeof input !== "object" ||
-    input === null ||
-    input.type !== "personal" ||
-    typeof input.userId !== "string"
-  ) {
+  // Read as the purge reads it (purge.ts), so no shape it takes for a
+  // person's slips past.
+  const purging = knowledgeErrors.parse(
+    "knowledge.invalid",
+    purgeInputSchema,
+    input
+  );
+  if (purging.type !== "personal") {
     return;
   }
   const erasing = await drizzle(env.DB)
@@ -228,7 +230,7 @@ const requireErasing = async (env: Env, input: PurgeInput): Promise<void> => {
     .from(personErasures)
     .where(
       and(
-        eq(personErasures.userId, input.userId),
+        eq(personErasures.userId, purging.userId),
         isNull(personErasures.completedAt)
       )
     )
