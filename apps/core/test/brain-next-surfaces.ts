@@ -544,6 +544,32 @@ const plainSupplier = async (): Promise<{ entity: string; name: string }> => {
 };
 
 /**
+ * A supplier everyone in the company may read of, whose status two
+ * writers give otherwise: a fact the reader may see contested.
+ */
+const contestedSupplier = async (): Promise<void> => {
+  const name = `Contested supplier ${crypto.randomUUID()}`;
+  const said = (value: string) => {
+    const writer = stranger();
+    return {
+      about: "s",
+      attribute: "status",
+      value,
+      type: "fact" as const,
+      statement: `${name} is ${value}`,
+      speaker: { kind: "agent" as const, agent: writer },
+      basis: { kind: "writer" as const, writer },
+    };
+  };
+  await store().addMemories({
+    change: crypto.randomUUID(),
+    access: { kind: "audience", group: "company" },
+    entities: [{ key: "s", kind: "supplier", names: [name] }],
+    memories: [said("Active"), said("Paused")],
+  });
+};
+
+/**
  * `probe`, of a surface that shows entities to people or to code: what a
  * name rests on (`nameFrom`) is the host's to keep, so an answer carrying
  * it hands the harness the markers, and is found as a leak.
@@ -5351,6 +5377,7 @@ const memoryPageProbes = (calls: MemoryPageCalls) => {
     contested: async (probing: Probing): Promise<Answer[]> => {
       const { personId, markers } = probing;
       await scene(probing);
+      await contestedSupplier();
       return [
         // Hidden memories contest the reader's: none of it shows.
         await answer(

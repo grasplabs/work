@@ -549,6 +549,26 @@ const namedBy = async (
   return { entity: added.entities.e ?? "", memory: added.memories[0] ?? "" };
 };
 
+/** A system fact about `about` resting on `source`'s first version, with `extra`. */
+const memoryFrom = (
+  about: string,
+  source: SourceRef,
+  statement: string,
+  extra: { object?: string; validFrom?: Date; validUntil?: Date } = {}
+) => ({
+  about,
+  type: "fact" as const,
+  statement,
+  speaker: { kind: "system" as const },
+  basis: {
+    kind: "source" as const,
+    source: `${source.producer}:${source.id}`,
+    version: 1,
+    quote: statement,
+  },
+  ...extra,
+});
+
 /** What `by` sees of run `runId` of `id`: its status, its error's code, and which of `names` its result shows. */
 const showsOf = async (
   by: Member,
@@ -735,6 +755,110 @@ describe("entities, as a workflow reads them", setUpTime, () => {
         // hidden from them.
         said: { status: "completed", error: null, shows: [said] },
       },
+    });
+  });
+
+  it("keeps a card's own name with the run apart from its memories, and withholds a run whose related entity's naming source is narrowed to a team", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const team = await teamOf(ada);
+    const workflow = await entitiesWorkflow(ada, admin);
+    // A project named only by a source that is later narrowed to a team,
+    // which a customer's relation, from another source, points to.
+    const related = `Narrowed ${unique()}`;
+    const holder = `Holder ${unique()}`;
+    const relatedSource = await sourceForEveryone(`${related} is a project.`);
+    const project = await namedBy("project", related, {
+      source: relatedSource,
+    });
+    const linkSource = await sourceForEveryone(`${holder} works on it.`);
+    const linked = await store().addMemories({
+      change: crypto.randomUUID(),
+      access: { kind: "audience", group: "company" },
+      entities: [
+        { key: "c", kind: "customer", names: [holder] },
+        { key: "p", id: project.entity, kind: "project" },
+      ],
+      memories: [
+        memoryFrom("c", linkSource, `${holder} works on it`, { object: "p" }),
+      ],
+    });
+    // A supplier whose own name comes only from an ended memory of one
+    // source, never on its card, and whose card rests on another.
+    const early = `Early ${unique()}`;
+    const later = `Later ${unique()}`;
+    const naming = await sourceForEveryone(`${early} was here.`);
+    const current = await sourceForEveryone(`${later} is here.`);
+    const first = await store().addMemories({
+      change: crypto.randomUUID(),
+      access: { kind: "audience", group: "company" },
+      entities: [{ key: "e", kind: "supplier", names: [early] }],
+      memories: [
+        memoryFrom("e", naming, `${early} was here`, {
+          validFrom: new Date("2019-01-01T00:00:00Z"),
+          validUntil: new Date("2020-01-01T00:00:00Z"),
+        }),
+      ],
+    });
+    const supplier = first.entities.e ?? "";
+    await store().addMemories({
+      change: crypto.randomUUID(),
+      access: { kind: "audience", group: "company" },
+      entities: [{ key: "e", id: supplier, kind: "supplier", names: [later] }],
+      memories: [memoryFrom("e", current, `${later} is here`)],
+    });
+
+    const runs = {
+      narrowed: await endedRun(ada, workflow.id, {
+        entity: linked.entities.c ?? "",
+        name: related,
+      }),
+      ownName: await endedRun(ada, workflow.id, {
+        entity: supplier,
+        name: `Nobody ${unique()}`,
+      }),
+    };
+    const names = [related, early, later];
+    const before = {
+      narrowed: await showsOf(ada, workflow.id, runs.narrowed, names),
+      ownName: await showsOf(ada, workflow.id, runs.ownName, names),
+    };
+    // A new version of the project's source, for the team alone.
+    await store().addSource({
+      source: `upload:${relatedSource.id}`,
+      change: crypto.randomUUID(),
+      text: `${related} is a project, for the team.`,
+      access: { kind: "audience", group: `team:${team}` },
+    });
+    await eraseSource(env, {
+      source: naming,
+      readers: { kind: "none" },
+      reason: "deleted",
+    });
+
+    const now = await store().readEntity({
+      entity: supplier,
+      reader: { person: null, groups: ["company"] },
+    });
+
+    expect({
+      before,
+      after: {
+        narrowed: await showsOf(admin, workflow.id, runs.narrowed, names),
+        ownName: await showsOf(admin, workflow.id, runs.ownName, names),
+      },
+      // The company now reads the supplier by its later name.
+      nowNamed: now?.name,
+    }).toStrictEqual({
+      before: {
+        narrowed: { status: "completed", error: null, shows: [related] },
+        ownName: { status: "completed", error: null, shows: [early, later] },
+      },
+      after: {
+        narrowed: { status: "completed", error: "brain.revoked", shows: [] },
+        ownName: { status: "completed", error: "brain.revoked", shows: [] },
+      },
+      nowNamed: later,
     });
   });
 
