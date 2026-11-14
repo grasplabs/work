@@ -979,6 +979,80 @@ describe("entities, as a workflow reads them", setUpTime, () => {
     });
   });
 
+  it("keeps what makes a memory confirmed: a rival it was confirmed over, no longer current and so on no page, narrowed to a team withholds the run", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const team = await teamOf(ada);
+    const workflow = await entitiesWorkflow(ada, admin);
+    const name = `Confirmed ${unique()}`;
+    const active = await sourceForEveryone(`${name} is active.`);
+    const lost = await sourceForEveryone(`${name} is lost.`);
+    const status = (value: string, source: SourceRef, until?: Date) => ({
+      ...memoryFrom(
+        "c",
+        source,
+        `${name} is ${value}`,
+        until === undefined ? {} : { validUntil: until }
+      ),
+      attribute: "status",
+      value,
+    });
+    const made = await store().addMemories({
+      change: crypto.randomUUID(),
+      access: { kind: "audience", group: "company" },
+      entities: [{ key: "c", kind: "customer", names: [name] }],
+      memories: [status("active", active)],
+    });
+    const customer = made.entities.c ?? "";
+    // A rival, current for a moment: confirmed over, then no longer
+    // current, so on no page and no rival, while the company may read it.
+    const until = new Date(Date.now() + 2000);
+    await store().addMemories({
+      change: crypto.randomUUID(),
+      access: { kind: "audience", group: "company" },
+      entities: [{ key: "c", kind: "customer", id: customer }],
+      memories: [status("lost", lost, until)],
+    });
+    const confirmed = await store().confirmMemory({
+      memory: made.memories[0] ?? "",
+      reader: { person: ada.userId, groups: ["company"] },
+    });
+    await vi.waitFor(
+      () => {
+        expect(Date.now()).toBeGreaterThan(until.getTime() + 200);
+      },
+      { timeout: 15_000, interval: 250 }
+    );
+    const runId = await endedRun(ada, workflow.id, {
+      entity: customer,
+      name: `Nobody ${unique()}`,
+    });
+    const before = await recordOf(ada, workflow.id, runId);
+    // The rival's source, for the team alone: the confirmation no longer
+    // counts for the company.
+    await store().addSource({
+      source: `upload:${lost.id}`,
+      change: crypto.randomUUID(),
+      text: `${name} is lost, for the team.`,
+      access: { kind: "audience", group: `team:${team}` },
+    });
+
+    expect({
+      confirmed,
+      before: {
+        error: before.error,
+        confirmed: JSON.stringify(before.result).includes(
+          String.raw`\"confirmed\":true`
+        ),
+      },
+      after: await recordOf(admin, workflow.id, runId),
+    }).toStrictEqual({
+      confirmed: "done",
+      before: { error: null, confirmed: true },
+      after: { status: "completed", result: null, error: "brain.revoked" },
+    });
+  });
+
   it("refuses a test run's card or page of entities that carries what it rests on, as a real answer that did would be", async () => {
     const admin = await person("admin");
     const ada = await person("builder");

@@ -25,10 +25,12 @@ import { runBrainVersions } from "../db/core/schema.ts";
 // does.
 
 /**
- * Most versions one run keeps (one per version and permission): far above
- * what a run's recalls hand it, so a run past it is recalling in a loop.
- * It is refused further recalls rather than kept growing, and each check
- * before something leaves the run stays bounded.
+ * Most versions one run keeps (one per version and permission). A recall's
+ * pack keeps one per passage it hands on; a page of entities up to about
+ * 300, and a card about 200, when every memory has a source of its own. So a run that loops over
+ * entities' cards reaches it in a handful of calls. Past it, a run is
+ * refused what would add more (`brain.budget_exceeded`) rather than kept
+ * growing, so each check before something leaves the run stays bounded.
  */
 export const runEvidenceMaxRows = 1000;
 
