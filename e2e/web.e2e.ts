@@ -171,7 +171,7 @@ test("names each member's actions for them, and asks before making someone an ad
 });
 
 for (const [where, path, landed] of [
-  ["a shell page", "/knowledge", "Knowledge"],
+  ["a shell page", "/projects", "Projects"],
   // Outside the shell, in the app's frame all the same.
   [
     "a decision page",
@@ -186,7 +186,9 @@ for (const [where, path, landed] of [
     const { member } = peopleIn("signOutFailure");
     await signInTo(context, member);
     await page.goto(path);
-    await expect(page.getByRole("heading", { name: landed })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: landed, exact: true })
+    ).toBeVisible();
     // Core, or something in front of it, answers the sign-out with a failure.
     await page.route("**/api/auth/sign-out", async (route) => {
       await route.fulfill({ status: 503, body: "Unavailable" });
@@ -511,7 +513,7 @@ test("sends someone whose session ended elsewhere to sign in, and back to the pa
 }) => {
   const { member } = peopleIn("sessionEnded");
   await signInTo(context, member);
-  await page.goto("/knowledge");
+  await page.goto("/projects");
   const nav = page.getByRole("navigation", { name: "Main" });
   await expect(nav.getByRole("link", { name: "Apps" })).toBeVisible();
 
