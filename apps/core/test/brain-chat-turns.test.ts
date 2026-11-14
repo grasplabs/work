@@ -8,7 +8,7 @@ import { and, eq, like } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { drainAuditOutboxes } from "../src/audit-outbox.ts";
+import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import { organizationId } from "../src/auth/auth.ts";
 import { noteHandOvers } from "../src/brain-hand-overs.ts";
 import {

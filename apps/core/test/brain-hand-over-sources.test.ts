@@ -10,7 +10,8 @@ import { inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
-import { drainAuditOutboxes, outboxedEvent } from "../src/audit-outbox.ts";
+import { drainAuditOutboxes } from "../src/audit-drains.ts";
+import { outboxedEvent } from "../src/audit-outbox.ts";
 import { noteHandOvers } from "../src/brain-hand-overs.ts";
 import {
   erasePerson,
