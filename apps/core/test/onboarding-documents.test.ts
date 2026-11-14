@@ -1143,6 +1143,46 @@ export default class extends WorkerEntrypoint {
     });
   });
 
+  it("still fails, its file taken back, when its file was deleted first and its reading can't be forgotten, the reading left for a remove", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const name = `doublefault-${crypto.randomUUID()}.docx`;
+    const row = held();
+    await fakeProvider(answer(reading));
+    // As (i) below, but the share's own forget is refused too.
+    const sharing = outcome(
+      shareDocument(
+        envWith(
+          "ONBOARDING",
+          holding(
+            refusing(env.ONBOARDING, "forgetDocuments"),
+            "addDocument",
+            row.reach,
+            row.released
+          )
+        ),
+        await admin.api.whoami(),
+        { locale: "en", name, bytes: fileWith(markerOf("doublefault")) }
+      )
+    );
+    const id = await within(row.reached, "the share never kept its reading");
+    await admin.api.brainSources.deleteUpload(id);
+    row.release();
+    const shared = await sharing;
+    const left = await listed(admin.api, name);
+    await admin.api.onboarding.removeDocument(id);
+    expect({
+      shared,
+      left,
+      named: await uploadNamed(id),
+      listed: await listed(admin.api, name),
+    }).toStrictEqual({
+      shared: "document.not_read",
+      left: true,
+      named: false,
+      listed: false,
+    });
+  });
+
   it("keeps no reading when its file's erasure lands after the share checked it", async () => {
     const admin = await signedInApi(idp, "admin");
     const name = `racinglate-${crypto.randomUUID()}.docx`;

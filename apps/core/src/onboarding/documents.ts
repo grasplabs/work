@@ -1,5 +1,6 @@
 import { actorOf } from "@grasp-os/shared/audit";
 import { brainUploadErrors } from "@grasp-os/shared/brain-sources";
+import { log } from "@grasp-os/shared/log";
 import type { InterviewLocale } from "@grasp-os/shared/onboarding";
 import {
   documentErrors,
@@ -304,13 +305,28 @@ export const shareDocument = async (
   //   share forgets the reading it kept and fails;
   // - a delete whose erasure lands after this check: its forget comes
   //   later still, after the reading was kept, and forgets it.
-  // A reading never outlives a delete that completed. The same holds for
-  // the sharer's erasure as a person: one that lands before the check
+  // So no reading outlives a completed delete, unless the share's own
+  // forget below fails too: then the reading stays, logged, until an admin
+  // removes it on /setup. A check that fails or is refused counts as the
+  // file gone (fail closed): the share then erases its file and fails, and
+  // the admin shares it again.
+  // The sharer's erasure as a person: one that lands before the check
   // leaves nothing; one after it leaves the reading without its file, as
-  // erasing a sharer always does. A remove can't race the share: it names
-  // the document by an ID that is answered only once the share is done.
+  // erasing a sharer always does.
+  // A remove can land between the reading being kept (the documents'
+  // list shows it from then on) and this check: the sharer's own remove
+  // erases both, and the share then answers `document.not_read`; another
+  // admin's takes the reading, and the file stays the sharer's.
   if (!(await uploadVersionKept(env, person, kept))) {
-    await store.forgetDocuments([id], actorOf(person), person.userId);
+    try {
+      await store.forgetDocuments([id], actorOf(person), person.userId);
+    } catch (error) {
+      // Its ID and the error's name alone: never what it holds.
+      log.warn("onboarding.document.forget_failed", {
+        document: id,
+        errorName: error instanceof Error ? error.name : typeof error,
+      });
+    }
     await takeBack(env, person, id);
     throw documentErrors.create("document.not_read");
   }
