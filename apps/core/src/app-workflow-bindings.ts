@@ -83,9 +83,11 @@ import type { StartFiles } from "./workflows/start-files.ts";
 //   workflow's change at once, the one landing second is refused.
 // - An archived App holding a workflow back: it runs nothing, so its
 //   bindings constrain no workflow's publish or roll back. Restored, it
-//   runs on as it was; whatever its pages name that the workflow dropped
-//   meanwhile is refused as it is used, and its next publish checks its
-//   declaration again as any does.
+//   runs on as it was, and its bindings keep no contract (cleared in the
+//   restore's batch, app-status.ts): it holds no workflow back until its
+//   next version goes live, which checks its declaration again as any
+//   does. Whatever its pages name that the workflow dropped meanwhile is
+//   refused as it is used.
 // - A binding removed under a start: the start's admitting statement
 //   requires the binding still active, as it requires the grant.
 // - Deleting a workflow an App relies on: an active binding whose App

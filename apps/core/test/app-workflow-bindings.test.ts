@@ -358,7 +358,7 @@ describe("an App and the workflow it binds, changing", () => {
     });
   });
 
-  it("lets an archived App hold no workflow back, and checks it again as its next version goes live once restored", async () => {
+  it("lets an archived App hold no workflow back, nor once restored, and checks it again as its next version goes live", async () => {
     const { builder, events, flow, app, publish } = await contractSetUp();
     await publish(jobWaitingOf(events));
     const declaring = boundIn(requestsApp("review", jobEventsDeclared), {
@@ -369,6 +369,9 @@ describe("an App and the workflow it binds, changing", () => {
 
     const whileArchived = await publish(greetingOf(undefined, "No events"));
     await builder.api.apps.restore(app);
+    // What it declares was checked against nothing live since: it holds
+    // the workflow back no more until its next version goes live.
+    const onceRestored = await publish(greetingOf(undefined, "Still none"));
     const next = appOf(declaring.definition, {
       ...declaring.files,
       "src/routes/index.tsx": (
@@ -379,9 +382,11 @@ describe("an App and the workflow it binds, changing", () => {
 
     expect({
       whileArchived,
+      onceRestored,
       restored: saying(restored, "Requests uses event `jobEvents`"),
     }).toStrictEqual({
       whileArchived: "ok",
+      onceRestored: "ok",
       restored: {
         code: "workflow.app_binding_contract_changed",
         details: {
