@@ -1038,10 +1038,18 @@ describe(
 
     let planting: ReturnType<typeof plantWorld> | undefined;
 
-    /** The world, planted by the first pass that asks for it. */
+    /**
+     * The world, planted by the first pass that asks for it; planted again
+     * by the next one if planting failed, as a retried pass does.
+     */
     const plantedWorld = async () => {
       planting ??= plantWorld();
-      return await planting;
+      try {
+        return await planting;
+      } catch (error) {
+        planting = undefined;
+        throw error;
+      }
     };
 
     // A pass that finds nothing, in any answer, log line or prompt, and
@@ -1105,8 +1113,13 @@ describe(
         teamSkillsOf,
       } = world;
 
-      // Joining the team counts from the very next recall: its source is
-      // theirs to read, and nothing else is.
+      // Out of the team, whatever a pass before left (a retry of this one
+      // among them), and recalling as such: then joining it counts from
+      // the very next recall. Its source is theirs to read, and nothing
+      // else is.
+      await leave(secretTeam, outsider);
+      const outsideFinds = await textsFor(outsider, world.teamMarker);
+      const outsideSkills = await teamSkillsOf(outsider);
       await join(secretTeam, outsider);
       const joinedFinds = await textsFor(outsider, world.teamMarker);
       const joinedSkills = await teamSkillsOf(outsider);
@@ -1149,10 +1162,14 @@ describe(
           ...(await promptedWith("the outsider, in the team", markers)),
         ],
         holdersStoreAddressed: addressed.includes(`person:${holder}`),
+        outsideFinds,
+        outsideSkills,
         joinedFinds,
         joinedSkills,
       }).toStrictEqual({
         ...nothingGivenAway,
+        outsideFinds: [],
+        outsideSkills: [],
         joinedFinds: [world.teamSource],
         joinedSkills: [`${secretTeam}:${world.teamSkillMarker}`],
       });
@@ -1169,9 +1186,17 @@ describe(
         asOutsider,
         teamSkillsOf,
         teamMarker,
+        teamSource,
+        teamSkillMarker,
       } = await plantedWorld();
 
-      // Leaving counts from the very next recall too.
+      // In the team, whatever a pass before left (a retry of this one
+      // among them), and recalling as a member: then leaving counts from
+      // the very next recall too.
+      await leave(secretTeam, outsider);
+      await join(secretTeam, outsider);
+      const memberFinds = await textsFor(outsider, teamMarker);
+      const memberSkills = await teamSkillsOf(outsider);
       await leave(secretTeam, outsider);
       const leftFinds = await textsFor(outsider, teamMarker);
       const leftSkills = await teamSkillsOf(outsider);
@@ -1191,9 +1216,17 @@ describe(
           )),
         ],
         holdersStoreAddressed: addressed.includes(`person:${holder}`),
+        memberFinds,
+        memberSkills,
         leftFinds,
         leftSkills,
-      }).toStrictEqual({ ...nothingGivenAway, leftFinds: [], leftSkills: [] });
+      }).toStrictEqual({
+        ...nothingGivenAway,
+        memberFinds: [teamSource],
+        memberSkills: [`${secretTeam}:${teamSkillMarker}`],
+        leftFinds: [],
+        leftSkills: [],
+      });
     });
 
     it("gives the holder, who may read everything else, nothing of the source nobody may read or of a version never theirs", async () => {
