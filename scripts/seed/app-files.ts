@@ -65,6 +65,9 @@ export const appDefinition = (
   return definition;
 };
 
+/** A capital letter, which a file's name has as a hyphen and the lower case. */
+const capital = /[A-Z]/gu;
+
 /**
  * An App's files: its AGENTS.md, the code generated from its definition
  * (`appDefinition`), its board's server functions and page, and an
@@ -78,7 +81,7 @@ export const appFiles = (seed: AppSeed): Record<string, string> => {
     ...(board === undefined ? {} : boardFiles(board)),
     ...Object.fromEntries(
       seed.workflows.map(({ alias, tests }) => [
-        `tests/${alias}.test.ts`,
+        `tests/${alias.replaceAll(capital, (upper) => `-${upper.toLowerCase()}`)}.test.ts`,
         tests,
       ])
     ),
