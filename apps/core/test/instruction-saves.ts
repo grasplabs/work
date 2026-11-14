@@ -52,13 +52,15 @@ export const keptAgent = async (id = `agent-${crypto.randomUUID()}`) => {
 /**
  * Adds `text` as the next version of the company's or an agent's file
  * `file` straight to the Brain, with no check of who writes, over the
- * version it has now (other tests of the file may have written it).
+ * version it has now (other tests of the file may have written it), as
+ * the member `readBy` reads it.
  */
 export const addedSharedFile = async (
   file: Extract<InstructionFile, { scope: "company" | "agent" }>,
-  text: string
+  text: string,
+  readBy: string
 ) => {
-  const [now] = await readInstructionFilesAs(env, { userId: "reader" }, [file]);
+  const [now] = await readInstructionFilesAs(env, readBy, [file]);
   return await addInstructionFile(env, {
     file,
     change: crypto.randomUUID(),
