@@ -11,6 +11,7 @@ import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import { appFor } from "../src/apps.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
@@ -56,7 +57,11 @@ import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { storeOfNewApp } from "./app-stores.ts";
 import { standInLive } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
-import { greetingOf } from "./json-workflow-apps.ts";
+import {
+  definitionOf,
+  greetingOf,
+  greetingTasks,
+} from "./json-workflow-apps.ts";
 import { configuredLimits } from "./quota-limits.ts";
 import { outcome, refusal, unique } from "./sign-in.ts";
 import { webhookConfig } from "./source-config.ts";
@@ -395,17 +400,29 @@ describe("a person starting a workflow", () => {
     }).toStrictEqual({ reasons: ["workflow.start_invalid"], leaks: false });
   });
 
-  it("is the same start for the same key, after a publish too, and refuses the key with other input", async () => {
+  it("is the same start for the same key, after a publish that changes its input too, and refuses the key with other input", async () => {
     const ada = await person("builder");
     const workflow = await workflowOf(ada);
     const first = request();
     const started = await startWorkflow(env, personOf(ada), workflow.id, first);
-    // Another version live since: sent again, it is the start it made.
+    // Another version live since, taking other input (`name`, not `who`):
+    // sent again as its answer was lost, it is the start it made, its input
+    // read as the version it started on took it.
+    const renamed = z.looseObject({ args: z.looseObject({}) }).parse(
+      JSON.parse(
+        definitionOf(greetingTasks(undefined, "Version 2"), {
+          status: { $expr: '"Hello, " + args.name' },
+        })
+      )
+    );
     await publishDefinition(
       env,
       ada,
       workflow.id,
-      greetingOf(undefined, "Version 2")
+      JSON.stringify({
+        ...renamed,
+        args: { ...renamed.args, fields: { name: { kind: "string" } } },
+      })
     );
     expect({
       again: await startWorkflow(env, personOf(ada), workflow.id, first),

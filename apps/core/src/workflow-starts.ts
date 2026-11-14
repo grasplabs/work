@@ -1114,10 +1114,12 @@ const requireOwnKey = (invoker: StartInvoker, key: string): void => {
  * idempotency key and the version a person expects) to start the live
  * version of workflow `id` for
  * `invoker` (see the rules above). The invoker's own access is checked
- * first, every time; then the version and the input; then a start already
- * admitted under the key is answered as it was (`workflow.start_conflict`
- * if the key was used for another); only a new start freezes the
- * workflow's parameters and bindings and needs them to hold now.
+ * first, every time; then the input, as the version a start already
+ * admitted under the key started on takes it, or the live one for a new
+ * start; then such a start is answered as it was
+ * (`workflow.start_conflict` if the key was used for another); only a new
+ * start freezes the workflow's parameters and bindings and needs them to
+ * hold now.
  *
  * Refused with `workflow.resource_unavailable` (a person with no role, as
  * for a workflow that doesn't exist), `workflow.version_not_found`,
@@ -1161,10 +1163,19 @@ export const decideWorkflowStart = async (
       throw denied();
     }
   }
-  // The version live now: what every start runs.
+  // A start admitted before under the key, retried as its answer was
+  // lost: its input is read as the version it started took it, which a
+  // publish since may have replaced; only a new start is read as the
+  // version live now, which it runs. Answered only once the invoker's
+  // access holds (below).
+  const existing = await receiptOf(env, rule.invoker, rule.principal, key);
+  const startedOn =
+    existing?.workflowResourceId === id
+      ? existing.workflowResourceVersion
+      : undefined;
   let found: Awaited<ReturnType<typeof pinned>>;
   try {
-    found = await pinned(env, id);
+    found = await pinned(env, id, startedOn);
   } catch (error) {
     if (invoker.type !== "person" && isExpectedError(error)) {
       throw denied();
@@ -1219,7 +1230,6 @@ export const decideWorkflowStart = async (
       throw denied();
     }
   }
-  const existing = await receiptOf(env, rule.invoker, rule.principal, key);
   if (existing !== undefined) {
     try {
       return {
