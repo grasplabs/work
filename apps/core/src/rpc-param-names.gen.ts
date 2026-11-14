@@ -110,6 +110,9 @@ export const rpcParamNames: ParamNames = {
     "searchArchive": ["filter","before"],
     "verify": ["after"],
   },
+  "BrainMemoriesRpc": {
+    "forget": ["memory"],
+  },
   "BrainRpc": {
     "addRecords": ["records"],
     "answerGap": ["gapId","answer"],
@@ -187,6 +190,9 @@ export const rpcParamNames: ParamNames = {
     "list": [],
     "makeAgent": ["input"],
     "makeAgentWake": ["agentId","input"],
+    "makeOwnAgent": ["input"],
+    "ownAgents": [],
+    "ownAgentsUsage": [],
     "pointApp": ["request"],
     "pointSharedMailbox": ["mailbox","audience"],
     "removeAgentDocument": ["agentId","documentId"],
@@ -356,8 +362,10 @@ export const rpcParamNames: ParamNames = {
   },
   "OrgSettingsRpc": {
     "billing": [],
+    "ownAgents": [],
     "signIn": [],
     "updateBilling": ["input"],
+    "updateOwnAgents": ["input"],
   },
   "OrganizationRpc": {
     "get": [],
@@ -423,6 +431,17 @@ export const rpcParamNames: ParamNames = {
   "SignalsRpc": {
     "list": ["filter"],
   },
+  "SkillsRpc": {
+    "approve": ["id"],
+    "decline": ["id"],
+    "overview": [],
+    "read": ["scope","name"],
+    "remove": ["name"],
+    "retire": ["name"],
+    "save": ["text"],
+    "share": ["name","version"],
+    "waiting": [],
+  },
   "StephenRequestsRpc": {
     "billed": [],
     "needs": ["locale"],
@@ -479,7 +498,6 @@ export const rpcParamNames: ParamNames = {
     "files": ["id"],
     "get": ["id"],
     "itemTest": ["id","testId"],
-    "knowledge": ["id"],
     "list": [],
     "members": ["id"],
     "params": ["id"],

@@ -57,6 +57,41 @@
       "when": 1794450706838,
       "tag": "0007_embedding",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1794517644436,
+      "tag": "0008_memories",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1794523217893,
+      "tag": "0009_exports",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1794562202108,
+      "tag": "0010_export_memories",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1794566018767,
+      "tag": "0011_groups",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1794604583761,
+      "tag": "0012_read_at",
+      "breakpoints": true
     }
   ]
 }

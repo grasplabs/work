@@ -44,6 +44,14 @@ import { auditExportResponse } from "./audit-rpc.ts";
 import { authBasePath } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
 import { handleAuthRequest } from "./auth/routes.ts";
+import {
+  brainExportsPath,
+  brainExportsResponse,
+  brainOwnExportPath,
+  brainOwnExportResponse,
+  brainRestorePath,
+  brainRestoreResponse,
+} from "./brain-next-exports.ts";
 import { brainActionResponse, brainReportResponse } from "./brain-report.ts";
 import { installBuiltinsOnce } from "./builtins.ts";
 import { ensureClockOnce } from "./clock.ts";
@@ -347,6 +355,9 @@ const pathHandlers: ReadonlyMap<
   [aiStatusReportPath, aiStatusReportResponse],
   [brainReportPath, brainReportResponse],
   [brainActionPath, brainActionResponse],
+  [brainExportsPath, brainExportsResponse],
+  [brainOwnExportPath, brainOwnExportResponse],
+  [brainRestorePath, brainRestoreResponse],
   [adminSnapshotPath, adminSnapshotResponse],
   [adminKickoffPath, adminKickoffResponse],
   [adminCommandPath, adminCommandResponse],

@@ -7,6 +7,11 @@
  */
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@grasp-os/ui/components/collapsible";
 import { Field, FieldLabel } from "@grasp-os/ui/components/field";
 import {
   NativeSelect,
@@ -15,6 +20,7 @@ import {
 import { Progress } from "@grasp-os/ui/components/progress";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { Link, useRouter } from "@tanstack/react-router";
+import { ChevronDownIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { formatTime } from "../releases/format.ts";
@@ -25,10 +31,12 @@ import { promoteReleaseFn, retryChannelFn } from "../rollout/functions.ts";
 import type { ChannelProgress, ClientProgress } from "../rollout/progress.ts";
 import { useRolloutAction } from "../rollout/use-action.ts";
 import { thenRefresh } from "../use-action.ts";
+import { Attention } from "./parts.tsx";
 import { fetchChannels } from "./platform-data.ts";
 import { clientStateWords } from "./platform-parts.tsx";
 import { Quiet } from "./release-parts.tsx";
 import { Section } from "./section.tsx";
+import { formatList } from "./words.ts";
 
 /** What a channel with no release yet says. */
 const emptyWords = (channel: ChannelProgress["channel"]): string =>
@@ -56,10 +64,10 @@ const ClientLine = ({ client }: { client: ClientProgress }) => (
     >
       {clientStateWords[client.state]}
       {client.pinnedReleaseId === null ? null : (
-        <span className="font-mono text-xs">{` ${client.pinnedReleaseId}`}</span>
+        <span className="tabular-nums">{` ${client.pinnedReleaseId}`}</span>
       )}
       {client.error === null ? null : (
-        <span className="font-mono text-xs">{` ${client.error}`}</span>
+        <span className="tabular-nums">{` ${client.error}`}</span>
       )}
     </span>
   </li>
@@ -75,7 +83,7 @@ const Promote = ({ channel }: { channel: ChannelProgress }) => {
   }
   return (
     <form
-      className="flex flex-wrap items-end gap-2"
+      className="flex flex-wrap items-center gap-2"
       onSubmit={(event) => {
         event.preventDefault();
         const releaseId = new FormData(event.currentTarget).get("releaseId");
@@ -96,7 +104,7 @@ const Promote = ({ channel }: { channel: ChannelProgress }) => {
         );
       }}
     >
-      <Field>
+      <Field className="min-w-0 flex-1">
         <FieldLabel className="sr-only" htmlFor={id}>
           {`Release for ${channelWords[channel.channel]}`}
         </FieldLabel>
@@ -125,7 +133,7 @@ const Retry = ({ channel }: { channel: ChannelProgress["channel"] }) => {
   const router = useRouter();
   const { busy, failure, run } = useRolloutAction();
   return (
-    <div className="flex flex-col items-end gap-1">
+    <div className="flex flex-col items-start gap-1">
       <Button
         disabled={busy}
         onClick={() => {
@@ -152,64 +160,147 @@ const Retry = ({ channel }: { channel: ChannelProgress["channel"] }) => {
   );
 };
 
-/** One channel: its release, its progress, its companies and what can be done. */
-const ChannelPanel = ({ channel }: { channel: ChannelProgress }) => {
-  const title = releaseTitle(channel.notes);
+/** The states of a channel's companies that say something is still to happen, the most pressing first. */
+const openStates = [
+  "failed",
+  "deploying",
+  "waiting",
+  "no_release",
+  "pinned",
+] as const satisfies readonly ClientProgress["state"][];
+
+/** Where a channel's companies stand, in a few words: all of them up to date, or how many aren't and why. */
+const standsWords = (clients: readonly ClientProgress[]): string => {
+  const parts = openStates.flatMap((state) => {
+    const count = clients.filter((client) => client.state === state).length;
+    return count === 0
+      ? []
+      : [`${count} ${clientStateWords[state].toLowerCase()}`];
+  });
+  return parts.length === 0 ? "All up to date" : formatList(parts);
+};
+
+/**
+ * A channel's companies, folded under one line that says how many there
+ * are and where they stand: three channels side by side stay one height
+ * and in line, however many companies each has. Open from the start while
+ * a deploy moves or failed, which is when each company's state is what the
+ * page is opened for. Kept on the page while folded: found by its search.
+ */
+const ChannelClients = ({ channel }: { channel: ChannelProgress }) => {
+  const { clients } = channel;
+  if (clients.length === 0) {
+    return <Quiet>No company follows it.</Quiet>;
+  }
+  const moving = clients.some(
+    ({ state }) =>
+      state === "failed" || state === "deploying" || state === "waiting"
+  );
+  const count =
+    clients.length === 1 ? "1 organization" : `${clients.length} organizations`;
   return (
-    <Section
-      action={
-        <div className="flex flex-col items-end gap-2">
-          {channel.failed ? <Retry channel={channel.channel} /> : null}
-          <Promote channel={channel} />
-        </div>
-      }
-      description={
-        channel.releaseId === null ? (
-          emptyWords(channel.channel)
-        ) : (
-          <span className="flex flex-col gap-0.5">
-            <Link
-              className="font-mono text-xs underline-offset-4 hover:underline"
-              params={{ releaseId: channel.releaseId }}
-              to="/platform/releases/$releaseId"
-            >
-              {channel.releaseId}
-            </Link>
-            {title === "" ? null : <span>{title}</span>}
-          </span>
-        )
-      }
-      title={channelWords[channel.channel]}
-    >
-      {channel.releaseId === null ? null : (
-        <div className="flex flex-col gap-1.5 border-t px-5 py-3">
-          <span className="flex items-center justify-between gap-4">
-            <span className="tabular-nums">{`${channel.upToDate} of ${channel.following} up to date`}</span>
-            {channel.failed ? (
-              <Badge variant="attention">
-                Failed: nothing new starts until Retry
-              </Badge>
-            ) : null}
-          </span>
-          <Progress
-            aria-label={`${channelWords[channel.channel]} companies up to date`}
-            value={
-              channel.following === 0
-                ? 100
-                : (channel.upToDate / channel.following) * 100
-            }
+    <Collapsible defaultOpen={moving}>
+      <CollapsibleTrigger
+        // A whole row of the card that opens, as a card's other rows that open are drawn.
+        render={
+          <button
+            aria-label={`${count}: ${standsWords(clients)}`}
+            className="hover:bg-muted/50 focus-visible:ring-ring/50 flex w-full items-center gap-3 border-t px-5 py-3 text-left outline-none focus-visible:ring-3 focus-visible:ring-inset"
+            type="button"
           />
-        </div>
-      )}
-      {channel.clients.length === 0 ? (
-        <Quiet>No company follows it.</Quiet>
-      ) : (
+        }
+      >
+        <span className="flex-none">{count}</span>
+        <span className="text-muted-foreground min-w-0 flex-1 truncate text-right">
+          {channel.failed ? (
+            <Attention className="justify-end">
+              {standsWords(clients)}
+            </Attention>
+          ) : (
+            standsWords(clients)
+          )}
+        </span>
+        <ChevronDownIcon
+          aria-hidden
+          className="text-muted-foreground size-4 flex-none transition-transform in-data-panel-open:rotate-180"
+        />
+      </CollapsibleTrigger>
+      <CollapsibleContent keepMounted>
         <ul className="flex flex-col">
-          {channel.clients.map((client) => (
+          {clients.map((client) => (
             <ClientLine client={client} key={client.id} />
           ))}
         </ul>
-      )}
+      </CollapsibleContent>
+    </Collapsible>
+  );
+};
+
+/**
+ * One channel: its release, its progress, its companies and what can be
+ * done. The same parts at the same heights in each, so Edge, Beta and
+ * Stable line up side by side: the release in three lines at most, how
+ * many companies run it, the companies folded under one line, and what
+ * staff can do at the foot of the card.
+ */
+const ChannelPanel = ({ channel }: { channel: ChannelProgress }) => {
+  const title = releaseTitle(channel.notes);
+  const promotes = channel.promotable.length > 0;
+  return (
+    <Section
+      description={
+        <span className="flex min-h-15 flex-col gap-0.5">
+          {channel.releaseId === null ? (
+            emptyWords(channel.channel)
+          ) : (
+            <>
+              <Link
+                className="text-foreground self-start tabular-nums underline-offset-4 hover:underline"
+                params={{ releaseId: channel.releaseId }}
+                to="/platform/releases/$releaseId"
+              >
+                {channel.releaseId}
+              </Link>
+              {title === "" ? null : (
+                <span className="line-clamp-2" title={title}>
+                  {title}
+                </span>
+              )}
+            </>
+          )}
+        </span>
+      }
+      title={channelWords[channel.channel]}
+    >
+      <div className="flex flex-col gap-2 border-t px-5 py-3">
+        <span className="flex min-h-6 flex-wrap items-center justify-between gap-x-4 gap-y-1">
+          <span className="tabular-nums">
+            {channel.releaseId === null
+              ? "Nothing to roll out yet"
+              : `${channel.upToDate} of ${channel.following} up to date`}
+          </span>
+          {channel.failed ? (
+            <Badge variant="attention">
+              Failed: nothing new starts until Retry
+            </Badge>
+          ) : null}
+        </span>
+        <Progress
+          aria-label={`${channelWords[channel.channel]} companies up to date`}
+          value={
+            channel.releaseId === null || channel.following === 0
+              ? 0
+              : (channel.upToDate / channel.following) * 100
+          }
+        />
+      </div>
+      <ChannelClients channel={channel} />
+      {channel.failed || promotes ? (
+        <div className="mt-auto flex flex-col gap-3 border-t px-5 py-3">
+          {channel.failed ? <Retry channel={channel.channel} /> : null}
+          <Promote channel={channel} />
+        </div>
+      ) : null}
     </Section>
   );
 };
@@ -310,7 +401,7 @@ export const PromotionHistory = ({
           >
             <span className="min-w-0">
               {`${channelWords[event.channel]} ${event.back ? "set back" : "set"} to `}
-              <span className="font-mono text-xs">{event.releaseId}</span>
+              <span className="tabular-nums">{event.releaseId}</span>
               {event.from === null ? null : (
                 <span className="text-muted-foreground">{` from ${event.from}`}</span>
               )}

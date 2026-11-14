@@ -1,3 +1,4 @@
+import { agentErrors } from "@grasp-os/shared/agent";
 import type { ChatMention, MentionablePerson } from "@grasp-os/shared/chat";
 import { memberErrors } from "@grasp-os/shared/members";
 import { isMemberAdmin, roleSchema } from "@grasp-os/shared/roles";
@@ -9,6 +10,7 @@ import type { QuestionMention } from "./agent.ts";
 import { appFor } from "./apps.ts";
 import { currentMembership, notRemoved, organizationId } from "./auth/auth.ts";
 import { teamsOf } from "./auth/identity.ts";
+import { chatAgentsFor } from "./chat-agents.ts";
 import { members, users } from "./db/core/schema.ts";
 import { requireWorkflowRole } from "./workflow-resources.ts";
 
@@ -29,6 +31,9 @@ import { requireWorkflowRole } from "./workflow-resources.ts";
 //   ID, which whoever shares or starts a workflow picks people by
 //   (workflow-share-candidates.ts); their role and teams only for the
 //   organization's admins, whose member list shows those.
+// - A page names an agent the person may not ask, to have it answer them:
+//   it is found among the agents they may ask, as their list has them,
+//   and refused as one the company doesn't have (`agent.unknown`).
 
 /** A current member of the organization, by name, or `member.not_found`. */
 const mentionedMember = async (
@@ -68,6 +73,16 @@ const mentionOf = async (
   if (kind === "workflow") {
     const workflow = await requireWorkflowRole(env, by, id, "user");
     return { kind, id: workflow.id, name: workflow.name };
+  }
+  if (kind === "agent") {
+    // One they may ask in Grasp's chat, as its list has it: any other is
+    // one the company doesn't have, to them (chat-agents.ts).
+    const theirs = await chatAgentsFor(env, by.userId);
+    const agent = theirs.find((each) => each.id === id);
+    if (agent === undefined) {
+      throw agentErrors.create("agent.unknown");
+    }
+    return { kind, id: agent.id, name: agent.name };
   }
   return await mentionedMember(env, by, id);
 };

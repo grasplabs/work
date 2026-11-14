@@ -265,6 +265,9 @@ catalogs:
     embla-carousel-react:
       specifier: 8.6.0
       version: 8.6.0
+    entities:
+      specifier: 9.0.0
+      version: 9.0.0
     es-module-lexer:
       specifier: 3.0.4
       version: 3.0.4
@@ -1279,9 +1282,6 @@ importers:
 
   packages/runtime:
     dependencies:
-      '@grasp-os/brain':
-        specifier: workspace:*
-        version: link:../brain
       '@grasp-os/shared':
         specifier: workspace:*
         version: link:../shared
@@ -1316,6 +1316,9 @@ importers:
       '@cloudflare/vitest-plugin':
         specifier: 'catalog:'
         version: 1.6.0(@cloudflare/workers-types@5.20261104.1)(@types/node@26.6.2)(vitest@4.1.11)
+      '@grasp-os/brain-next':
+        specifier: workspace:*
+        version: link:../brain-next
       '@types/react':
         specifier: 'catalog:'
         version: 19.3.0
@@ -1352,6 +1355,9 @@ importers:
       croner:
         specifier: 'catalog:'
         version: 10.0.1
+      entities:
+        specifier: 'catalog:'
+        version: 9.0.0
       zod:
         specifier: 'catalog:'
         version: 4.6.7

@@ -41,6 +41,7 @@ import {
   visitorPeople,
 } from "./app-people.ts";
 import type { PeopleAccess } from "./app-people.ts";
+import { recallsTheBrain } from "./app-provenance.ts";
 import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
 import {
@@ -1116,6 +1117,13 @@ export const callVisitorFunction = async (
       isWorkflowQueryPath(contractId) ||
       isWorkflowMutationPath(contractId)
     ) {
+      return refused(await caller.notGranted(contractId));
+    }
+    // An App that may hold what the Brain recalled answers no visitor:
+    // recall reads what everyone in the company may, and a visitor is
+    // outside it. Checked on every call, so visitors let in before the
+    // Brain reached the App are held to it too.
+    if (await recallsTheBrain(env, caller.app)) {
       return refused(await caller.notGranted(contractId));
     }
     const release = await loadRelease(env, caller.app, caller.version);

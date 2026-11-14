@@ -1,3 +1,4 @@
+import { stillDeletingAtMostMs } from "@grasp-os/brain-next/contract";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
@@ -916,6 +917,55 @@ describe("erasing a person", () => {
       attempts: 0,
       failedLogged: false,
       done: "string",
+    });
+  });
+
+  it("counts and logs a person's own store still deleting past the Brain's bound for it, once, whatever failed before", async () => {
+    const { admin, person } = await removedPerson();
+    const name = String(person.person.name);
+    await addSource(env, {
+      source: { producer: "upload", id: crypto.randomUUID() },
+      change: crypto.randomUUID(),
+      text: "A note of theirs alone",
+      readers: { kind: "owner", personId: person.userId },
+    });
+    const logged: string[] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((...args) => {
+      logged.push(JSON.stringify(args));
+    });
+    try {
+      await admin.api.members.erase(person.userId, name);
+      // Asked for longer ago than the Brain lets a store be still deleting,
+      // and failed twice before it grew stuck, for another reason.
+      const askedAt = Date.now() - stillDeletingAtMostMs - 60_000;
+      await env.DB.prepare(
+        "UPDATE person_erasures SET requested_at = ? WHERE user_id = ?"
+      )
+        .bind(askedAt, person.userId)
+        .run();
+      await env.DB.prepare(
+        "UPDATE person_erasure_areas SET attempts = 2, updated_at = ? WHERE user_id = ? AND area = 'brain_sources'"
+      )
+        .bind(askedAt + 60_000, person.userId)
+        .run();
+      await runMinuteTasks();
+      await runMinuteTasks();
+    } finally {
+      spy.mockRestore();
+    }
+    const area = await env.DB.prepare(
+      "SELECT attempts, state FROM person_erasure_areas WHERE user_id = ? AND area = 'brain_sources'"
+    )
+      .bind(person.userId)
+      .first<{ attempts: number; state: string }>();
+    expect({
+      area,
+      failedLogged: logged.filter((line) =>
+        line.includes("member.erasure_failed")
+      ).length,
+    }).toStrictEqual({
+      area: { attempts: 3, state: "pending" },
+      failedLogged: 1,
     });
   });
 

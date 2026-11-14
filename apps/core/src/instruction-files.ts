@@ -40,7 +40,12 @@ import type { InstructionFile, InstructionFileVersion } from "./brain-next.ts";
 // - an agent in a shared channel: the company's and the agent's, never a
 //   person's, which others there would read through the agent;
 // - an AI step of a workflow: none, so a run does the same whoever's
-//   files changed.
+//   files changed;
+// - a turn nobody asked for there and then (a wake-up, an event): as its
+//   chat's, but never the person's own. What woke it steers it, and what
+//   it hands on goes where that leads, so it holds none of their own
+//   content, as it recalls none of their own store (workspace.ts,
+//   `answersAlone`).
 //
 // Shared files first, so the part many chats share comes first and stays
 // the same.
@@ -63,8 +68,12 @@ const instructionContextSchema = z.discriminatedUnion("conversation", [
   z.strictObject({
     conversation: z.literal("own"),
     appId: appIdSchema.optional(),
+    unattended: z.literal(true).optional(),
   }),
-  z.strictObject({ conversation: z.literal("direct") }),
+  z.strictObject({
+    conversation: z.literal("direct"),
+    unattended: z.literal(true).optional(),
+  }),
   z.strictObject({ conversation: z.literal("channel") }),
 ]);
 
@@ -122,18 +131,17 @@ const filesOf = async (
   context: z.output<typeof instructionContextSchema>,
   { agent, person }: { agent: InstructionFile; person: InstructionFile }
 ): Promise<InstructionFileVersion[]> => {
+  if (context.conversation === "channel") {
+    return await readInstructionFilesAs(env, member, [...companyFiles, agent]);
+  }
+  // Theirs only in a turn they asked for (above).
+  const own = context.unattended === true ? [] : [person];
   switch (context.conversation) {
-    case "channel": {
-      return await readInstructionFilesAs(env, member, [
-        ...companyFiles,
-        agent,
-      ]);
-    }
     case "direct": {
       return await readInstructionFilesAs(env, member, [
         ...companyFiles,
         agent,
-        person,
+        ...own,
       ]);
     }
     case "own": {
@@ -146,13 +154,13 @@ const filesOf = async (
         return await readInstructionFilesAs(env, member, [
           ...companyFiles,
           agent,
-          person,
+          ...own,
         ]);
       }
       return await readInstructionFilesAs(
         env,
         member,
-        [...companyFiles, agent, { scope: "app", appId }, person],
+        [...companyFiles, agent, { scope: "app", appId }, ...own],
         appId
       );
     }
@@ -170,7 +178,8 @@ const filesOf = async (
  * Refused with `permission.context_invalid` for code that isn't an agent,
  * and for a chat without a context or with one that isn't one; with
  * `permission.person_inactive` once the person is no longer a member.
- * Working on an App they don't build, its file is left out.
+ * Working on an App they don't build, its file is left out; in a turn
+ * nobody asked for (`unattended`), the person's own.
  */
 export const instructionFilesFor = async (
   env: Env,
@@ -264,8 +273,15 @@ const requireWriter = async (
       requireAdmin(member);
       // Only one of the company's agents has a file: none is kept under
       // an ID nobody made, or one an admin deleted.
-      if ((await readAgent(env, file.agentId)) === undefined) {
+      const agent = await readAgent(env, file.agentId);
+      if (agent === undefined) {
         throw agentErrors.create("agent.unknown");
+      }
+      // Never a person's own agent's (agents.ts): what it is told is its
+      // owner's to say, in its instructions, and an admin who learnt its
+      // ID from the audit log tells it nothing.
+      if (agent.ownerId !== null) {
+        throw roleErrors.create("role.forbidden");
       }
       return;
     }

@@ -153,7 +153,7 @@ export const organizations = sqliteTable("organizations", {
 
 /**
  * The organization's settings an admin keeps beside its name and time zone
- * (org-settings.ts): one row per kind (`billing`), its value as
+ * (org-settings.ts): one row per kind (`billing`, `own_agents`), its value as
  * JSON, checked again as it is read. None until an admin saves one.
  */
 export const orgSettings = sqliteTable("org_settings", {
@@ -1471,7 +1471,7 @@ export const sdkResourceBindings = sqliteTable(
         "model",
         "decision",
         "event",
-        "knowledge",
+        "brain",
         "files",
       ],
     }).notNull(),
@@ -1804,7 +1804,7 @@ export const appResourceBindings = sqliteTable(
       .references(() => apps.id),
     alias: text().notNull(),
     kind: text({
-      enum: ["model", "connector", "knowledge", "grasp", "guests"],
+      enum: ["model", "connector", "brain", "grasp", "guests"],
     }).notNull(),
     target: text().notNull(),
     declarationHash: text("declaration_hash").notNull(),
@@ -2386,14 +2386,11 @@ export const brainCaptureIntents = sqliteTable(
 );
 
 /**
- * Every document version a run's recalls cited (GRA-299; workflows/
- * run-evidence.ts), with the Brain binding's permission each came through:
- * identifiers and a stand-in for each text only. It only grows while
- * the run lives, so no recall can narrow it, and before the run's next
- * model, connection or App call, decision or output, the host checks the
- * run may still read them all, under those permissions, as they were
- * recalled. A run that may no longer, or whose recalled text a purge
- * rewrote, is refused from then on. Goes with the run's details.
+ * What a run's recalls of today's Brain cited (GRA-299). Nothing writes or
+ * reads it since runs recall from the new Brain (`runBrainVersions`);
+ * retention still removes its rows with the run (workflows/retention.ts).
+ * Kept until a later release drops it, so a core still serving during a
+ * rollout keeps working (expand, then contract).
  */
 export const runBrainEvidence = sqliteTable(
   "run_brain_evidence",
@@ -2426,6 +2423,40 @@ export const runBrainEvidence = sqliteTable(
       columns: [
         table.runId,
         table.documentId,
+        table.version,
+        table.permissionId,
+      ],
+    }),
+  ]
+);
+
+/**
+ * Every version of the Brain a run's recalls handed it (workflows/
+ * run-evidence.ts), by its source as its producer names it and its
+ * number, with the permission to read the Brain it came through:
+ * identifiers only. A version never changes, so a row means the same text
+ * for as long as it is kept. It only grows while the run lives, and
+ * before the run's next model, connection or App call, decision or
+ * output, the host checks the run may still read them all: each grant
+ * still the run's, and each version still one its person may read. A run
+ * that may no longer is refused from then on. Goes with the run's details.
+ */
+export const runBrainVersions = sqliteTable(
+  "run_brain_versions",
+  {
+    runId: text("run_id").notNull(),
+    producer: text().notNull(),
+    sourceId: text("source_id").notNull(),
+    version: integer().notNull(),
+    permissionId: text("permission_id").notNull(),
+    recordedAt: timestamp("recorded_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [
+        table.runId,
+        table.producer,
+        table.sourceId,
         table.version,
         table.permissionId,
       ],
@@ -3205,6 +3236,13 @@ export const agents = sqliteTable(
      * made, which takes one; its name's key is cleared, free for another.
      */
     state: text({ enum: ["on", "paused", "deleted"] }).notNull(),
+    /**
+     * The person whose own agent it is (agents.ts): only they see, ask
+     * and change it, and it goes when they are erased. Null: one of the
+     * company's. Its name's key is null, as two people may each call
+     * theirs the same.
+     */
+    ownerId: text("owner_id"),
     madeBy: text("made_by").notNull(),
     madeAt: timestamp("made_at").notNull(),
     changedBy: text("changed_by").notNull(),
@@ -3214,6 +3252,10 @@ export const agents = sqliteTable(
     // No two agents answer to one name, however it is capitalised: people
     // say which agent they mean by it.
     uniqueIndex("agents_name_key_idx").on(table.nameKey),
+    // A person's own agents, and dropping them when they are erased.
+    index("agents_owner_idx")
+      .on(table.ownerId)
+      .where(sql`${table.ownerId} IS NOT NULL`),
   ]
 );
 
@@ -3416,6 +3458,81 @@ export const appRequests = sqliteTable(
     uniqueIndex("app_requests_name_key_idx").on(table.nameKey),
     index("app_requests_requested_at_idx").on(table.requestedAt),
   ]
+);
+
+/**
+ * A person's ask to share one of their own skills with the company
+ * (skill-shares.ts, GRA-1754). `text` is the exact `SKILL.md` they asked
+ * to share, kept only while it waits: an admin decides that text and no
+ * other (`skillDecisions` takes it on). At most one waits per person and
+ * name; asking again, deleting the skill or being removed takes the waiting
+ * one away, so a decision on it is refused.
+ */
+export const skillShares = sqliteTable(
+  "skill_shares",
+  {
+    id: text().primaryKey(),
+    name: text().notNull(),
+    text: text(),
+    requestedBy: text("requested_by").notNull(),
+    requestedAt: timestamp("requested_at").notNull(),
+    status: text({ enum: ["pending", "approved", "declined"] }).notNull(),
+    decidedBy: text("decided_by"),
+    decidedAt: timestamp("decided_at"),
+  },
+  (table) => [
+    uniqueIndex("skill_shares_pending_idx")
+      .on(table.requestedBy, table.name)
+      .where(sql`status = 'pending'`),
+    index("skill_shares_status_idx").on(table.status, table.requestedAt),
+  ]
+);
+
+/**
+ * The admins' decisions on the company's skills, the one record of what
+ * should be live (skill-shares.ts): numbered per name (`seq`), the latest
+ * is what the Brain follows, an approved share's text (`share_id`) or a
+ * retirement (none). `text` is what the decision writes, kept with it so
+ * an erasure of the asker never takes a decision's text away. `outcome` is
+ * what became of it in the Brain, recorded once by the reconciler:
+ * `landed` at `version`, or `superseded` by a later decision before it
+ * did; null while it is on its way.
+ */
+export const skillDecisions = sqliteTable(
+  "skill_decisions",
+  {
+    id: text().primaryKey(),
+    name: text().notNull(),
+    seq: integer().notNull(),
+    shareId: text("share_id"),
+    text: text().notNull(),
+    decidedBy: text("decided_by"),
+    decidedAt: timestamp("decided_at").notNull(),
+    outcome: text({ enum: ["landed", "superseded"] }),
+    version: integer(),
+  },
+  (table) => [
+    uniqueIndex("skill_decisions_seq_idx").on(table.name, table.seq),
+    index("skill_decisions_share_idx").on(table.shareId),
+    index("skill_decisions_open_idx")
+      .on(table.name)
+      .where(sql`outcome IS NULL`),
+  ]
+);
+
+/**
+ * The names of their own skills people deleted for good: no ask of one is
+ * written from then on (skill-shares.ts). The name can't be used again
+ * (the Brain closes its key), so the row is never taken back; it goes with
+ * its person's erasure.
+ */
+export const skillDeletions = sqliteTable(
+  "skill_deletions",
+  {
+    personId: text("person_id").notNull(),
+    name: text().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.personId, table.name] })]
 );
 
 /**
@@ -4969,10 +5086,10 @@ export const workflowCatalogContracts = sqliteTable(
   "workflow_catalog_contracts",
   {
     key: text().primaryKey(),
-    // An older row may still say `template` (or `operation`): read as not
+    // An older row may still say `template`, `operation` or `knowledge`: read as not
     // there, as every read filters by the kinds still served.
     kind: text({
-      enum: ["connector", "model", "decision", "event", "knowledge", "files"],
+      enum: ["connector", "model", "decision", "event", "brain", "files"],
     }).notNull(),
     contract: text().notNull(),
     fingerprint: text().notNull(),
@@ -4999,10 +5116,10 @@ export const workflowBindingApprovals = sqliteTable(
       .notNull()
       .references(() => workflowResources.id),
     alias: text().notNull(),
-    // An older row may still say `template`: read as not there, as every
+    // An older row may still say `template` or `knowledge`: read as not there, as every
     // read filters by the kinds still served.
     kind: text({
-      enum: ["connector", "model", "decision", "event", "knowledge", "files"],
+      enum: ["connector", "model", "decision", "event", "brain", "files"],
     }).notNull(),
     contractId: text("contract_id").notNull(),
     fingerprint: text().notNull(),
@@ -5920,6 +6037,13 @@ export const modelUsage = sqliteTable(
     bindingAlias: text("binding_alias"),
     /** `<provider>/<model>`. */
     model: text().notNull(),
+    /**
+     * What the call was for, as its `model.call` audit event says
+     * (`brain.recall_analysis`, say): the Brain's spend by purpose is read
+     * from it (model-spend.ts `brainSpendByPurpose`). Nullable as a schema
+     * expands: every row the gateway writes names it.
+     */
+    purpose: text(),
     /** Whose key: `organization`, or `platform` for Grasp's own features. */
     credential: text().notNull(),
     /** Which of Grasp's own features, on Grasp's key. */
@@ -6003,3 +6127,30 @@ export const brainHandOvers = sqliteTable(
     index("brain_hand_overs_noted_at_idx").on(table.notedAt),
   ]
 );
+
+/**
+ * How each person's own store of the new Brain is doing, as its own alarm
+ * last found it (src/brain-own-stores.ts): one row per store, written by
+ * the store about itself when its tick ends, and removed once the person's
+ * erasure has erased the store. Numbers and flags only, keyed by the
+ * SHA-256 of the person's id, never the id: staff read only their sums
+ * (the Brain's staff report), never a row.
+ */
+export const brainOwnStores = sqliteTable("brain_own_stores", {
+  /** The SHA-256 of the person's id, in hex. */
+  store: text().primaryKey(),
+  /** When the store's tick ended: an older report never replaces a newer one. */
+  reportedAt: timestamp("reported_at").notNull(),
+  /** Items waiting in its queue. */
+  waiting: integer().notNull(),
+  /** When the one waiting longest was added; null while none waits. */
+  oldestWaitingAt: timestamp("oldest_waiting_at"),
+  /** Items parked in its queue. */
+  parked: integer().notNull(),
+  /** Whether a step of its tick last failed, its queue is paused, or its ledger isn't read through. */
+  failing: integer({ mode: "boolean" }).notNull(),
+  /** Whether a model ships and its rebuild for that model isn't done. */
+  notRebuilt: integer("not_rebuilt", { mode: "boolean" }).notNull(),
+  /** Whether its SQLite is near what one object holds (`storeNearLimit`). */
+  nearLimit: integer("near_limit", { mode: "boolean" }).notNull(),
+});

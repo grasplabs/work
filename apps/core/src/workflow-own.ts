@@ -1,20 +1,14 @@
-import { collections } from "@grasp-os/brain/schema";
 import { isAdmin } from "@grasp-os/shared/roles";
-import {
-  workflowBindingTargetSchema,
-  workflowOwnListed,
-} from "@grasp-os/shared/workflow-resources";
+import { workflowOwnListed } from "@grasp-os/shared/workflow-resources";
 import type {
   WorkflowActivity,
   WorkflowFile,
-  WorkflowKnowledge,
 } from "@grasp-os/shared/workflow-resources";
-import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import type { Acting } from "./auth/identity.ts";
 import {
-  permissions,
   workflowBindingApprovals,
   workflowResourceRuns,
   workflowResourceVersions,
@@ -22,10 +16,9 @@ import {
 } from "./db/core/schema.ts";
 import { requireWorkflowRole } from "./workflow-resources.ts";
 
-// A workflow's own knowledge, files and activity (GRA-515), for its page:
-// the Knowledge collections it may read itself, the files its runs wrote,
-// and what happened to it. Reads only, nothing audited, as reading the
-// workflow's runs and versions isn't. From the threat model:
+// A workflow's own files and activity (GRA-515), for its page: the files
+// its runs wrote, and what happened to it. Reads only, nothing audited, as
+// reading the workflow's runs and versions isn't. From the threat model:
 //
 // - Someone with no role in the workflow learning of it: every read
 //   starts from `requireWorkflowRole`, which answers one they have no role
@@ -37,116 +30,9 @@ import { requireWorkflowRole } from "./workflow-resources.ts";
 //   those outside the run itself (workflows/run-files.ts). Runs in
 //   the activity are as `listResourceRuns` shows them: every one to the
 //   workflow's builders, a user's own to a user.
-// - A collection named that its readers can't see: only collections the
-//   workflow itself holds an active read permission on are listed, never
-//   one only its owner or only admins read, which no workflow may bind.
 
 /** The most files and activity entries a read answers: the newest. */
 const pageSize = workflowOwnListed;
-
-/** The actions a permission row allows. */
-const actionsOf = (json: string): string[] => {
-  const parsed: unknown = JSON.parse(json);
-  return Array.isArray(parsed)
-    ? parsed.filter((action): action is string => typeof action === "string")
-    : [];
-};
-
-/** The collections workflow `id` may read itself, with the aliases of the active bindings that use each. */
-export const workflowKnowledge = async (
-  env: Env,
-  by: Acting,
-  id: unknown
-): Promise<WorkflowKnowledge[]> => {
-  const workflow = await requireWorkflowRole(env, by, id, "user");
-  const db = drizzle(env.DB);
-  const [held, bindings] = await db.batch([
-    db
-      .select({
-        id: permissions.id,
-        objectId: permissions.objectId,
-        actions: permissions.actions,
-      })
-      .from(permissions)
-      .where(
-        and(
-          eq(permissions.subjectType, "workflow"),
-          eq(permissions.subjectId, workflow.id),
-          eq(permissions.objectType, "collection"),
-          eq(permissions.status, "active"),
-          isNull(permissions.chatId)
-        )
-      ),
-    db
-      .select({
-        alias: workflowBindingApprovals.alias,
-        target: workflowBindingApprovals.target,
-      })
-      .from(workflowBindingApprovals)
-      .where(
-        and(
-          eq(workflowBindingApprovals.workflowResourceId, workflow.id),
-          eq(workflowBindingApprovals.kind, "knowledge"),
-          eq(workflowBindingApprovals.status, "active")
-        )
-      ),
-  ]);
-  const readable = held.flatMap((row) => {
-    const actions = actionsOf(row.actions);
-    return actions.includes("read") ? [{ ...row, actions }] : [];
-  });
-  if (readable.length === 0) {
-    return [];
-  }
-  const named = await drizzle(env.KNOWLEDGE)
-    .select({
-      id: collections.id,
-      name: collections.name,
-      access: collections.access,
-    })
-    .from(collections)
-    .where(
-      inArray(
-        collections.id,
-        readable.map(({ objectId }) => objectId)
-      )
-    );
-  const aliasesOf = (permissionId: string): string[] =>
-    bindings
-      .flatMap(({ alias, target }) => {
-        const parsed = workflowBindingTargetSchema.safeParse(
-          JSON.parse(target)
-        );
-        return parsed.success &&
-          parsed.data.kind === "knowledge" &&
-          parsed.data.permissionId === permissionId
-          ? [alias]
-          : [];
-      })
-      .filter((alias, at, all) => all.indexOf(alias) === at)
-      .toSorted();
-  return readable
-    .flatMap((row): WorkflowKnowledge[] => {
-      const collection = named.find(({ id: each }) => each === row.objectId);
-      // Gone, or one no workflow may read: never named.
-      if (
-        collection === undefined ||
-        collection.access === "me" ||
-        collection.access === "admins"
-      ) {
-        return [];
-      }
-      return [
-        {
-          collectionId: collection.id,
-          name: collection.name,
-          actions: row.actions,
-          aliases: aliasesOf(row.id),
-        },
-      ];
-    })
-    .toSorted((one, other) => one.name.localeCompare(other.name));
-};
 
 /** The files workflow `id`'s runs wrote, newest first, of the runs `by` may see the results of. */
 export const workflowFiles = async (

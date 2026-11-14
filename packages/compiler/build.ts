@@ -96,11 +96,10 @@ const shared = realpathSync(
   path.join(runtime, "node_modules/@grasp-os/shared")
 );
 /**
- * The Brain's contract, which the runtime re-exports
- * (`@grasp-os/runtime/host`) and Knowledge's types come from: carried
- * for the same reason.
+ * Today's Brain's contract, which some of `@grasp-os/shared`'s types come
+ * from (its IDs, Knowledge's): carried for the same reason.
  */
-const brain = realpathSync(path.join(runtime, "node_modules/@grasp-os/brain"));
+const brain = realpathSync(path.join(shared, "node_modules/@grasp-os/brain"));
 /** The platform's own packages the kit's types come from, by name. */
 const ownPackages: Readonly<Record<string, string>> = {
   "@grasp-os/sdk": sdk,

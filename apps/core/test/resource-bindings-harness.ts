@@ -5,10 +5,8 @@ import type { ResourceBindingsReview } from "@grasp-os/shared/resource-bindings"
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
-import type { FunctionAnswer } from "../src/app-functions.ts";
 import { publishVersion } from "../src/app-publish.ts";
 import type { Release } from "../src/app-releases.ts";
 import { appFor } from "../src/apps.ts";
@@ -16,8 +14,6 @@ import {
   appResourceBindings,
   permissions as permissionRows,
 } from "../src/db/core/schema.ts";
-import { createCollection } from "../src/knowledge/collection-rules.ts";
-import { saveDocument } from "../src/knowledge/person-writes.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { approveResourceBinding } from "../src/resource-bindings.ts";
 import { testApp } from "./app-definitions.ts";
@@ -231,11 +227,6 @@ export const call = async (
 export const codeOfError = (error: unknown): string =>
   error instanceof Error ? String(Reflect.get(error, "code")) : "?";
 
-/** Knowledge hits, as an action answers them. */
-export const hitsSchema = z.array(
-  z.strictObject({ title: z.string(), excerpt: z.string() })
-);
-
 /** What a call answered: its value, or its error's code. */
 export const outcomeOf = (result: FunctionResult): Json =>
   result.ok ? result.value : { failed: result.error.code };
@@ -278,66 +269,19 @@ export const writerApproval = (sealed: Sealed) => ({
   reviewed: { version: 1 },
 });
 
-/** An App whose actions search and read two of the Brain's collections. */
-export const knowledgeFiles = (): TestApp =>
-  testApp(
-    {
-      name: "Help",
-      tables: notesTable,
-      permissions: [
-        'permission.brain({ operations: ["search", "read"], collections: ["handbook", "salaries"] })',
-        "permission.ai({ maxOutputTokens: 300 })",
-      ],
-    },
-    {
-      "server/help.ts": `import { v } from "@grasp-os/sdk";
-import { action } from "@server/_generated/server";
-import { permissions } from "../grasp.config.ts";
-
-export const brain = permissions.brain;
-
-export const find = action({
-  args: { text: v.string().min(1) },
-  returns: v.array(v.object({ title: v.string(), excerpt: v.string() })).max(20),
-  handler: async (ctx, args) => await ctx.brain.search({ text: args.text, limit: 5 }),
-});
-
-export const open = action({
-  args: { id: v.string().min(1) },
-  returns: v.object({ title: v.string(), text: v.string() }),
-  handler: async (ctx, args) => await ctx.brain.read({ id: args.id }),
-});
-
-export const ai = permissions.ai;
-
-/** Reads a document, then has the model summarize it. */
-export const summarize = action({
-  args: { id: v.string().min(1) },
-  returns: v.string(),
-  handler: async (ctx, args) => {
-    const document = await ctx.brain.read({ id: args.id });
-    return await ctx.ai.generate({ prompt: document.text });
-  },
-});
-`,
-    }
-  );
-
-/** A collection permission of the App, asked for by its owner and granted. */
-export const grantedCollection = async (
+/** The App's permission to read the Brain, asked for by its owner and granted. */
+export const grantedBrain = async (
   sealed: Sealed,
-  admin: Awaited<ReturnType<typeof person>>,
-  collectionId: string,
-  binding: string
+  admin: Awaited<ReturnType<typeof person>>
 ): Promise<string> => {
   const requested = await requestPermission(
     env,
     sealed.owner,
     {
       subject: { type: "app", appId: sealed.app },
-      object: { type: "collection", collectionId },
-      actions: ["read"],
-      binding,
+      object: { type: "platform" },
+      actions: ["brain"],
+      binding: "BRAIN",
     },
     {
       app: async (app, role) => await appFor(env, sealed.owner, app, role),
@@ -352,95 +296,6 @@ export const grantedCollection = async (
   });
   return requested.id;
 };
-
-/**
- * The Help App, sealed and current, with a handbook everyone reads, a
- * sensitive salaries collection of a team its owner is in, and one more
- * collection it was never granted; each holds one document.
- */
-export const knowledgeApp = async () => {
-  const sealed = await sealedApp(knowledgeFiles());
-  const admin = await person("admin");
-  const team = crypto.randomUUID();
-  await env.DB.batch([
-    env.DB.prepare(
-      "INSERT INTO teams (id, name, organization_id, created_at) VALUES (?, 'Payroll', 'organization', ?)"
-    ).bind(team, Date.now()),
-    ...[sealed.owner, admin].map((member) =>
-      env.DB.prepare(
-        "INSERT INTO team_members (id, team_id, user_id, created_at) VALUES (?, ?, ?, ?)"
-      ).bind(crypto.randomUUID(), team, member.userId, Date.now())
-    ),
-  ]);
-  const teamAdmin = { ...admin, teams: [{ id: team, name: "Payroll" }] };
-  const documentIn = async (collectionId: string, path: string, text: string) =>
-    await saveDocument(env, teamAdmin, {
-      collectionId,
-      path,
-      text,
-      ifVersion: 0,
-    });
-  const handbook = await createCollection(env, admin, {
-    name: "Handbook",
-    access: "everyone",
-  });
-  const salaries = await createCollection(env, teamAdmin, {
-    name: "Salaries",
-    access: "teams",
-    teams: [team],
-    sensitive: true,
-  });
-  const other = await createCollection(env, admin, {
-    name: "Other",
-    access: "everyone",
-  });
-  const leave = await documentIn(
-    handbook.id,
-    "leave.md",
-    "# Leave\nAsk your lead before you take leave."
-  );
-  const pay = await documentIn(
-    salaries.id,
-    "pay.md",
-    "# Pay\nLeave is paid at the usual rate."
-  );
-  const secret = await documentIn(other.id, "other.md", "# Other\nNot bound.");
-  const permissions = {
-    handbook: await grantedCollection(sealed, admin, handbook.id, "HANDBOOK"),
-    salaries: await grantedCollection(sealed, admin, salaries.id, "SALARIES"),
-  };
-  const binding = await approveResourceBinding(env, admin, {
-    app: sealed.app,
-    alias: "brain",
-    target: { kind: "knowledge", collections: permissions },
-    reviewed: { version: 1 },
-  });
-  return {
-    sealed,
-    admin,
-    team,
-    binding,
-    permissions,
-    collections: { handbook: handbook.id, salaries: salaries.id },
-    documents: {
-      leave: leave.id,
-      pay: pay.id,
-      secret: secret.id,
-    },
-  };
-};
-
-/** Calls `path` of the App as its owner: the whole answer. */
-export const answerOf = async (
-  { app, owner, release }: Sealed,
-  path: string,
-  input: unknown
-): Promise<FunctionAnswer> =>
-  await callAppFunction(env, owner, app, requestFor(release, path, input));
-
-/** A search text of exactly `length` code units that still finds the leave policy. */
-export const searchTextOf = (length: number): string =>
-  "leave ".repeat(length).slice(0, length);
 
 /** An admin's approval of the App's `writer`. */
 export const approveWriter = async (sealed: Sealed) =>
@@ -471,21 +326,19 @@ export const active = (app: string) =>
 
 /**
  * An App whose actions use its `ai` (unless `withWriter` is false), with
- * `maxOutputTokens`, and the Brain's `collections` (unless `withBrain` is
- * false); with `sneak`, one more action that reaches for the Brain past
+ * `maxOutputTokens`, and the Brain (unless `withBrain` is false); with
+ * `sneak`, one more action that reaches for the Brain past
  * its types without listing it.
  */
 export const deskFiles = ({
   withWriter = true,
   withBrain = true,
   maxOutputTokens = 300,
-  collections = ["handbook", "salaries"],
   sneak = false,
 }: {
   withWriter?: boolean;
   withBrain?: boolean;
   maxOutputTokens?: number;
-  collections?: readonly string[];
   sneak?: boolean;
 } = {}): TestApp =>
   testApp(
@@ -496,11 +349,7 @@ export const deskFiles = ({
         ...(withWriter
           ? [`permission.ai({ maxOutputTokens: ${maxOutputTokens} })`]
           : []),
-        ...(withBrain
-          ? [
-              `permission.brain({ operations: ["search"], collections: ${JSON.stringify(collections)} })`,
-            ]
-          : []),
+        ...(withBrain ? ['permission.brain({ operations: ["recall"] })'] : []),
       ],
     },
     {
@@ -516,8 +365,11 @@ ${
 
 export const find = action({
   args: { text: v.string().min(1) },
-  returns: v.array(v.object({ title: v.string(), excerpt: v.string() })).max(20),
-  handler: async (ctx, args) => await ctx.brain.search({ text: args.text }),
+  returns: v.array(v.string()),
+  handler: async (ctx, args) => {
+    const pack = await ctx.brain.recall({ question: args.text, budget: { tokens: 500 } });
+    return pack.items.map((item) => item.text);
+  },
 });`
     : ""
 }
@@ -548,21 +400,12 @@ ${
     }
   );
 
-/** The Desk App, sealed and current, granted to read one collection. */
+/** The Desk App, sealed and current, granted to read the Brain. */
 export const deskApp = async () => {
   const sealed = await sealedApp(deskFiles());
   const admin = await person("admin");
-  const handbook = await createCollection(env, admin, {
-    name: "Handbook",
-    access: "everyone",
-  });
-  const permission = await grantedCollection(
-    sealed,
-    admin,
-    handbook.id,
-    "HANDBOOK"
-  );
-  return { sealed, admin, handbook, permission };
+  const permission = await grantedBrain(sealed, admin);
+  return { sealed, admin, permission };
 };
 
 export type Desk = Awaited<ReturnType<typeof deskApp>>;
@@ -577,10 +420,7 @@ export const bindDesk = async ({ sealed, admin, permission }: Desk) => {
       reviewed: { version: 1 },
     });
   await approve("ai", { kind: "model", model: chosenModel });
-  await approve("brain", {
-    kind: "knowledge",
-    collections: { handbook: permission, salaries: permission },
-  });
+  await approve("brain", { kind: "brain", permissionId: permission });
 };
 
 /**

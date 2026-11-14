@@ -135,6 +135,14 @@ export interface ToolDefinition<
    */
   answersFile?: true;
   /**
+   * The tool reads one item and answers its content, not a list or a view
+   * of several: a message, a page. Its provenance names exactly that item,
+   * checked when it runs. Core keeps what such a tool reads of the
+   * person's own things as a source in the Brain (GRA-1730); nothing else
+   * is kept. Only a read-only tool declares it.
+   */
+  answersItem?: true;
+  /**
    * The write attaches files (GRA-887): its input has an `attachments`
    * property, exactly {@link attachmentsSchema}, naming each file by name,
    * type, size and digest. The bytes come beside the input, and
@@ -657,6 +665,45 @@ const answersFileShape = ({
   fileAnswerFields.every((field) => Object.hasOwn(output.shape, field));
 
 /**
+ * Throws if what a tool declares of files and items doesn't fit it: only
+ * a write takes files, with exactly the platform's attachments input; a
+ * tool that answers a file has that shape; only a read answers an item.
+ */
+const checkDeclared = (
+  definition: Pick<
+    ToolDefinition<z.ZodObject, z.ZodObject>,
+    | "name"
+    | "readOnly"
+    | "input"
+    | "output"
+    | "takesFiles"
+    | "answersFile"
+    | "answersItem"
+  >,
+  inputSchema: JsonObject
+): void => {
+  const { name, readOnly } = definition;
+  if (definition.takesFiles === true) {
+    if (readOnly) {
+      throw new Error(`${name}: only a write takes files`);
+    }
+    if (!takesAttachmentsExactly(inputSchema)) {
+      throw new Error(
+        `${name}: a tool that takes files has an optional \`attachments\` input of exactly the platform's attachments schema`
+      );
+    }
+  }
+  if (definition.answersItem === true && !readOnly) {
+    throw new Error(`${name}: only a read answers an item`);
+  }
+  if (definition.answersFile === true && !answersFileShape(definition)) {
+    throw new Error(
+      `${name}: a tool that answers a file is read-only, takes \`as\`, and answers \`name\`, \`contentType\`, \`encoding\` and \`content\``
+    );
+  }
+};
+
+/**
  * A tool. Throws if it breaks the connector contract: input that isn't
  * strict everywhere, a resource that isn't one of its string properties.
  */
@@ -673,21 +720,7 @@ export const defineTool = <
   if (!isClosed(inputSchema)) {
     throw new Error(`${name}: its input must be strict objects throughout`);
   }
-  if (definition.takesFiles === true) {
-    if (readOnly) {
-      throw new Error(`${name}: only a write takes files`);
-    }
-    if (!takesAttachmentsExactly(inputSchema)) {
-      throw new Error(
-        `${name}: a tool that takes files has an optional \`attachments\` input of exactly the platform's attachments schema`
-      );
-    }
-  }
-  if (definition.answersFile === true && !answersFileShape(definition)) {
-    throw new Error(
-      `${name}: a tool that answers a file is read-only, takes \`as\`, and answers \`name\`, \`contentType\`, \`encoding\` and \`content\``
-    );
-  }
+  checkDeclared(definition, inputSchema);
   const resourceProperty: unknown =
     resource === undefined ? undefined : inputSchema.properties?.[resource];
   if (
@@ -711,6 +744,9 @@ export const defineTool = <
       input: Object.keys(inputSchema.properties ?? {}),
       ...(definition.answersFile === true
         ? { answersFile: true as const }
+        : {}),
+      ...(definition.answersItem === true
+        ? { answersItem: true as const }
         : {}),
       ...(definition.takesFiles === true ? { takesFiles: true as const } : {}),
       contract: {
@@ -787,7 +823,10 @@ export const defineTool = <
       }
       const checked = output.safeParse(result.output);
       const provenance = provenanceSchema.safeParse(result.provenance ?? []);
-      if (!checked.success || !provenance.success) {
+      // A tool that answers an item names exactly that one.
+      const itemNamed =
+        definition.answersItem !== true || provenance.data?.length === 1;
+      if (!checked.success || !provenance.success || !itemNamed) {
         // A writing tool that got this far sent its write: it went through,
         // but what it made can't be told.
         return failure(

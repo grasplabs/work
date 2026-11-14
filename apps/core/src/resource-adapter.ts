@@ -173,7 +173,7 @@ export interface BindingCaller {
 interface PermissionOfTarget {
   readonly model: "ai";
   readonly connector: "connections";
-  readonly knowledge: "brain";
+  readonly brain: "brain";
   readonly grasp: "grasp";
   readonly guests: "guests";
 }
@@ -186,7 +186,7 @@ export type DeclarationOf<Kind extends BindingTarget["kind"]> = Extract<
 
 /**
  * The kind of target `declaration` binds to: AI to a model, a connection
- * to a connection permission, the Brain to collection permissions, guests
+ * to a connection permission, the Brain to the platform's brain permission, guests
  * to the platform's guests permission, and the platform's own functions
  * (`grasp`) to its statistics permission.
  */
@@ -201,7 +201,7 @@ export const targetKindOf = (
     return "connector";
   }
   if (kind === "brain") {
-    return "knowledge";
+    return "brain";
   }
   if (kind === "guests") {
     return "guests";

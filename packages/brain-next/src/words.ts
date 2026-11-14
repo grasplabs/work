@@ -429,15 +429,59 @@ export const wordsVersion = 2;
 export const reindexPerTick = 200;
 
 /**
+ * Indexes the words of the memory at `row`, its statement, in the
+ * caller's transaction, as a chunk's (`indexWords`): in `memory_words`
+ * and `memory_stems` (migration 0008).
+ */
+export const indexMemoryWords = (
+  sql: SqlStorage,
+  row: number,
+  statement: string,
+  memo: WordMemo
+): void => {
+  const { words, stems } = indexedOf(statement, memo);
+  sql.exec("INSERT INTO memory_words (rowid, text) VALUES (?, ?)", row, words);
+  sql.exec("INSERT INTO memory_stems (rowid, stems) VALUES (?, ?)", row, stems);
+};
+
+/**
  * Marks the store's word indexes as built by the current rules when it
- * holds no chunks: nothing to rebuild. Run as the store starts.
+ * holds no chunks and no memories: nothing to rebuild. Run as the store
+ * starts.
  */
 export const markWordsCurrentIfEmpty = (sql: SqlStorage): void => {
   sql.exec(
-    `UPDATE word_index SET version = ?1, target = ?1, cursor = 0
-    WHERE id = 1 AND version <> ?1 AND NOT EXISTS (SELECT 1 FROM chunks)`,
+    `UPDATE word_index SET version = ?1, target = ?1, cursor = 0, memory_cursor = 0
+    WHERE id = 1 AND version <> ?1 AND NOT EXISTS (SELECT 1 FROM chunks)
+      AND NOT EXISTS (SELECT 1 FROM memories)`,
     wordsVersion
   );
+};
+
+/**
+ * The next `limit` memories after `cursor` re-indexed (`indexMemoryWords`):
+ * the last one's row, or null past the last memory.
+ */
+const reindexMemories = (
+  sql: SqlStorage,
+  cursor: number,
+  limit: number
+): number | null => {
+  const batch = sql
+    .exec<{ row: number; statement: string }>(
+      "SELECT row, statement FROM memories WHERE row > ? ORDER BY row LIMIT ?",
+      cursor,
+      limit
+    )
+    .toArray();
+  const memo: WordMemo = new Map();
+  for (const { row, statement } of batch) {
+    sql.exec("DELETE FROM memory_words WHERE rowid = ?", row);
+    sql.exec("DELETE FROM memory_stems WHERE rowid = ?", row);
+    indexMemoryWords(sql, row, statement, memo);
+  }
+  const last = batch.at(-1);
+  return last === undefined || batch.length < limit ? null : last.row;
 };
 
 /**
@@ -447,8 +491,9 @@ export const markWordsCurrentIfEmpty = (sql: SqlStorage): void => {
  * again from its text, then the place reached saved. Run it in one
  * transaction, so a stop at any point leaves each chunk's rows whole, by
  * the old rules or the new, and the next batch starts after the last one
- * written. Past the last chunk, the store is marked current. Answers
- * whether more are left.
+ * written. Past the last chunk, the memories' word indexes the same way
+ * (`memory_words`, `memory_stems`), then the store is marked current.
+ * Answers whether more are left.
  *
  * Recall goes on meanwhile: a chunk not yet rebuilt answers by the rules
  * it was indexed by, so a word folded or stemmed otherwise now may miss it
@@ -465,42 +510,62 @@ export const reindexWords = (
   limit: number = reindexPerTick
 ): boolean => {
   const state = sql
-    .exec<{ version: number; target: number; cursor: number }>(
-      "SELECT version, target, cursor FROM word_index WHERE id = 1"
+    .exec<{
+      version: number;
+      target: number;
+      cursor: number;
+      memory_cursor: number;
+    }>(
+      "SELECT version, target, cursor, memory_cursor FROM word_index WHERE id = 1"
     )
     .one();
   if (state.version === wordsVersion) {
     return false;
   }
-  // A rebuild to other rules than these starts over.
-  const cursor = state.target === wordsVersion ? state.cursor : 0;
-  const batch = sql
-    .exec<{ row: number; text: string }>(
-      "SELECT row, text FROM chunks WHERE row > ? ORDER BY row LIMIT ?",
-      cursor,
-      limit
-    )
-    .toArray();
-  const memo: WordMemo = new Map();
-  for (const { row, text } of batch) {
-    sql.exec("DELETE FROM chunk_words WHERE rowid = ?", row);
-    sql.exec("DELETE FROM chunk_stems WHERE rowid = ?", row);
-    indexWords(sql, row, text, memo);
+  // A rebuild to other rules than these starts over. The chunks first;
+  // past the last one (`cursor` -1), the memories, by `memory_cursor`.
+  const again = state.target === wordsVersion;
+  const cursor = again ? state.cursor : 0;
+  const memoryCursor = again ? state.memory_cursor : 0;
+  if (cursor >= 0) {
+    const batch = sql
+      .exec<{ row: number; text: string }>(
+        "SELECT row, text FROM chunks WHERE row > ? ORDER BY row LIMIT ?",
+        cursor,
+        limit
+      )
+      .toArray();
+    const memo: WordMemo = new Map();
+    for (const { row, text } of batch) {
+      sql.exec("DELETE FROM chunk_words WHERE rowid = ?", row);
+      sql.exec("DELETE FROM chunk_stems WHERE rowid = ?", row);
+      indexWords(sql, row, text, memo);
+    }
+    const last = batch.at(-1);
+    if (last !== undefined && batch.length === limit) {
+      sql.exec(
+        "UPDATE word_index SET target = ?, cursor = ?, memory_cursor = 0 WHERE id = 1",
+        wordsVersion,
+        last.row
+      );
+      return true;
+    }
   }
-  const last = batch.at(-1);
-  if (last === undefined || batch.length < limit) {
+  const reached = reindexMemories(sql, memoryCursor, limit);
+  if (reached !== null) {
     sql.exec(
-      "UPDATE word_index SET version = ?1, target = ?1, cursor = 0 WHERE id = 1",
-      wordsVersion
+      "UPDATE word_index SET target = ?, cursor = -1, memory_cursor = ? WHERE id = 1",
+      wordsVersion,
+      reached
     );
-    return false;
+    return true;
   }
   sql.exec(
-    "UPDATE word_index SET target = ?, cursor = ? WHERE id = 1",
-    wordsVersion,
-    last.row
+    `UPDATE word_index SET version = ?1, target = ?1, cursor = 0, memory_cursor = 0
+    WHERE id = 1`,
+    wordsVersion
   );
-  return true;
+  return false;
 };
 
 /** Whether the word indexes are behind the current rules: a rebuild under way. */
@@ -521,7 +586,7 @@ export const wordsRebuilding = (sql: SqlStorage): boolean =>
  */
 export const startWordsRebuild = (sql: SqlStorage): boolean => {
   const started = sql.exec(
-    "UPDATE word_index SET version = 0, target = 0, cursor = 0 WHERE id = 1 AND version = ?",
+    "UPDATE word_index SET version = 0, target = 0, cursor = 0, memory_cursor = 0 WHERE id = 1 AND version = ?",
     wordsVersion
   );
   started.toArray();
