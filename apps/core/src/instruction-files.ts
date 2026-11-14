@@ -2,6 +2,7 @@ import { appErrors } from "@grasp-os/shared/apps";
 import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema, identifierSchema } from "@grasp-os/shared/ids";
+import { errorFields, log } from "@grasp-os/shared/log";
 import {
   authoritySchema,
   permissionErrors,
@@ -9,12 +10,12 @@ import {
 import type { Authority } from "@grasp-os/shared/permissions";
 import { requireAdmin, roleErrors, roleSchema } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { companyAgent } from "./agents.ts";
 import { editableApp } from "./apps.ts";
-import { auditLog } from "./audit-log.ts";
-import { uuidFromHash } from "./audit-outbox.ts";
+import { keepEvent, uuidFromHash } from "./audit-outbox.ts";
 import { memberOf } from "./auth/identity.ts";
 import type { Member } from "./auth/identity.ts";
 import {
@@ -346,15 +347,25 @@ export const saveInstructionFile = async (
   await requireWriter(env, member, file);
   const added = await addInstructionFile(env, { file, change, text, after });
   // Recorded once the version is there, so an entry never reads as a
-  // save that wasn't made. One the log can't take fails the call, and the
-  // version it saved stays unrecorded until the same save (the same
-  // change) is tried again, which records it then. Every try makes the
-  // same event: its ID from who saved which file under which change, its
-  // time the version's own, and the rest fixed by those, so the log keeps
-  // a retry it already has as a duplicate, never a conflict: one event
-  // per save. Which file and version, never its text.
+  // save that wasn't made, in core's outbox (`keepEvent`), which the
+  // clock's drain hands to the log and tries again until the log has it:
+  // a log out of reach neither fails the save, which is done, nor leaves
+  // it unrecorded, and nobody has to save again for it. Every try makes
+  // the same event: its ID from who saved which file under which change,
+  // its time the version's own, and the rest fixed by those, so the
+  // outbox and the log keep it once, a retry the log already has a
+  // duplicate, never a conflict: one event per save. A version whose time
+  // can't be read just now takes the time now: recorded all the same,
+  // and only a retry of that same save could then differ from it. Which
+  // file and version, never its text.
   const id = instructionFileId(file);
-  const at = await instructionVersionAddedAt(env, file, added.version);
+  let at: Date;
+  try {
+    at = await instructionVersionAddedAt(env, file, added.version);
+  } catch (error) {
+    log.warn("instructions.saved_time_unread", errorFields(error));
+    at = new Date();
+  }
   const event = createAuditEvent(
     {
       actor: actorOf(member),
@@ -364,17 +375,15 @@ export const saveInstructionFile = async (
     },
     "core"
   );
-  await auditLog(env).append([
-    {
-      ...event,
-      at: at.toISOString(),
-      id: uuidFromHash(
-        await sha256Hex(
-          JSON.stringify(["instructions.saved", member.userId, id, change])
-        )
-      ),
-    },
-  ]);
+  await keepEvent(env, drizzle(env.DB), {
+    ...event,
+    at: at.toISOString(),
+    id: uuidFromHash(
+      await sha256Hex(
+        JSON.stringify(["instructions.saved", member.userId, id, change])
+      )
+    ),
+  });
   return added;
 };
 

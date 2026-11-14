@@ -10,6 +10,7 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import { auditLog } from "../src/audit-log.ts";
 import {
   addInstructionFile,
@@ -922,6 +923,62 @@ describe("instruction files, edited from a page", setUpTime, () => {
         },
       ],
       carriesText: false,
+    });
+  });
+
+  it("answers a save as saved and records it once, though the log refuses its event at first", async () => {
+    const person = await member("user");
+    const file: InstructionFile = { scope: "person", personId: person.userId };
+    // The audit log, out of reach for its first append: the save's own.
+    const log = auditLog(env);
+    let refused = 0;
+    const refusing = {
+      append: async (events: Parameters<typeof log.append>[0]) => {
+        if (refused === 0) {
+          refused += 1;
+          throw new Error("The audit log is out of reach");
+        }
+        return await log.append(events);
+      },
+    };
+    const namespace = {
+      getByName: () => refusing,
+      jurisdiction: () => namespace,
+    };
+    // SAFETY: core reaches the log only through `getByName(...).append`.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    const logDown: Env = { ...env, AUDIT_LOG: namespace as never };
+
+    let answered = "";
+    const events = await auditedDuring(async () => {
+      answered = await outcome(
+        saveInstructionFile(logDown, person, {
+          file,
+          change: crypto.randomUUID(),
+          text: "Call me Sam.",
+          after: 0,
+        })
+      );
+      // The system tries the event again, as the clock's drain does.
+      await drainAuditOutboxes(env);
+    });
+
+    expect({
+      // Saved, so the page shows it saved: nothing is left for the person
+      // to try again.
+      answered,
+      refused,
+      recorded: events.filter(
+        ({ action, target }) =>
+          action === "instructions.saved" &&
+          target?.id === `person:${person.userId}`
+      ).length,
+      now: await instructionFileToEdit(env, person, file),
+    }).toStrictEqual({
+      answered: "ok",
+      refused: 1,
+      recorded: 1,
+      now: { version: 1, text: "Call me Sam." },
     });
   });
 
