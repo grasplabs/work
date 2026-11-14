@@ -1,4 +1,4 @@
-import { actorOf } from "@grasp-os/shared/audit";
+import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import { brainExportErrors } from "@grasp-os/shared/brain-exports";
 import {
   brainSourceErrors,
@@ -11,6 +11,7 @@ import type {
   BrainUploadFile,
   BrainUploadReaders,
 } from "@grasp-os/shared/brain-sources";
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { log } from "@grasp-os/shared/log";
@@ -28,7 +29,12 @@ import { and, desc, eq, lt, ne, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
+import {
+  auditedBatch,
+  outboxed,
+  outboxedEvent,
+  uuidFromHash,
+} from "./audit-outbox.ts";
 import { memberOf } from "./auth/identity.ts";
 import type { Member } from "./auth/identity.ts";
 import { uploadSource } from "./brain-next-origins.ts";
@@ -164,8 +170,9 @@ const mayAddVersion = (member: Member, row: UploadRow): boolean =>
  * - an admin, for one shared with a team or everyone, also one they can't
  *   read (a team they aren't in, or one dissolved), so no shared upload is
  *   left that nobody can erase. Such an admin learns that it exists, by
- *   its file's name, team and uploader (`sharedUploadsFor`), never its
- *   text. Its uploader asks an admin to remove it.
+ *   its team, uploader and when (`sharedUploadsFor`), and by its file's
+ *   name only when they may read it; never its text. Its uploader asks an
+ *   admin to remove it.
  */
 const mayDelete = (member: Member, row: UploadRow): boolean =>
   row.readers === "me"
@@ -433,9 +440,23 @@ const addVersion = async (
       : auditedBatch(env, db, [refused]));
     throw refusal.error(first);
   }
-  // Only an add that made a version past the row's records it: a retry
-  // the Brain answers with the version it made before (its answer lost),
-  // even after a later one, changes nothing and is audited once.
+  // Every answered add records its version, once: the event's ID is the
+  // upload's and the version's, which the outbox and the log keep once
+  // (`outboxedEvent`), so each version is audited exactly once whatever
+  // the order its adds land in or how often one is retried. The name
+  // moves only forward, to an add past the row's version: a retry the
+  // Brain answers with an older version (its answer lost) leaves it.
+  const addedEvent = {
+    ...createAuditEvent(
+      entry("brain.upload.added", { version: added.version }),
+      "core"
+    ),
+    id: uuidFromHash(
+      await sha256Hex(
+        JSON.stringify(["brain.upload.added", row.id, added.version])
+      )
+    ),
+  };
   await auditedBatch(env, db, [
     db
       .update(brainUploads)
@@ -452,10 +473,7 @@ const addVersion = async (
           lt(brainUploads.version, added.version)
         )
       ),
-    outboxedIfChanged(
-      db,
-      entry("brain.upload.added", { version: added.version })
-    ),
+    outboxedEvent(db, addedEvent),
   ]);
   return added;
 };

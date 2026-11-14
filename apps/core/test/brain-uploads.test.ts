@@ -13,7 +13,8 @@ import { z } from "zod";
 
 import { organizationId } from "../src/auth/auth.ts";
 import { brainExportsPath } from "../src/brain-next-exports.ts";
-import { eraseSource, workBrain } from "../src/brain-next.ts";
+import { uploadSource } from "../src/brain-next-origins.ts";
+import { addSource, eraseSource, workBrain } from "../src/brain-next.ts";
 import { brainUploads, teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { allEvents } from "./audit-events.ts";
@@ -21,7 +22,7 @@ import { copyOfStore, restoreStore } from "./brain-next-store-copy.ts";
 import { textOf } from "./brain-next-surfaces.ts";
 import { mockIdp } from "./idp.ts";
 import { noProducers } from "./no-producers.ts";
-import { routed, signedInApi } from "./sign-in.ts";
+import { callAuth, routed, signedInApi } from "./sign-in.ts";
 
 // Files uploaded straight into the Brain on Brain › Sources (GRA-1824),
 // through core's RPC (`session.brainSources`), from the threat model on
@@ -896,7 +897,78 @@ describe("uploading a file straight into the Brain", () => {
   );
 
   it(
-    "lists a shared upload to an admin by name only if they may read it, and a team's since deleted as its team's still",
+    "audits each version added exactly once, whatever order its adds land in or how often one is retried, and keeps the latest version's name",
+    slow,
+    async () => {
+      const uploader = await signedInApi(idp, "user");
+      const { source } = await uploader.api.brainSources.upload(
+        fileOf(`First ${word()}`, "First.vtt"),
+        everyone,
+        crypto.randomUUID()
+      );
+      const version = async (
+        file: ReturnType<typeof fileOf>,
+        versionId = crypto.randomUUID()
+      ) =>
+        await uploader.api.brainSources.uploadVersion(
+          source.id,
+          file,
+          versionId
+        );
+      // Two tabs at once: whichever lands second, each is audited.
+      await Promise.all([
+        version(fileOf(`Alpha ${word()}`, "Alpha.vtt")),
+        version(fileOf(`Beta ${word()}`, "Beta.vtt")),
+      ]);
+      // The Brain takes one whose answer is lost before core writes
+      // anything: the text core sends for it, read from a scratch upload.
+      const lost = fileOf(`Gamma ${word()}`, "Gamma.vtt");
+      const scratch = await uploader.api.brainSources.upload(
+        lost,
+        everyone,
+        crypto.randomUUID()
+      );
+      const lostId = crypto.randomUUID();
+      const landed = await addSource(env, {
+        source: uploadSource(source.id),
+        change: lostId,
+        text: String(await readAs(uploader, scratch.source)),
+        readers: { kind: "everyone" },
+      });
+      // A later version, then the lost one sent again, then the later
+      // one sent twice more.
+      const laterId = crypto.randomUUID();
+      const later = fileOf(`Delta ${word()}`, "Delta.vtt");
+      const last = await version(later, laterId);
+      const retried = await version(lost, lostId);
+      await version(later, laterId);
+      await version(later, laterId);
+      const events = await eventsOf(source.id);
+      const [row] = await rowsWith(source.id);
+
+      expect({
+        landed: landed.version,
+        last: last.version,
+        retried: retried.version,
+        added: events
+          .filter(({ action }) => action === "brain.upload.added")
+          .map(({ detail }) => Number(detail?.version))
+          .toSorted((a, b) => a - b),
+        name: row?.name,
+        version: row?.version,
+      }).toStrictEqual({
+        landed: 4,
+        last: 5,
+        retried: 4,
+        added: [1, 2, 3, 4, 5],
+        name: "Delta.vtt",
+        version: 5,
+      });
+    }
+  );
+
+  it(
+    "lists a shared upload to an admin by name only if they may read it, and one for a team since removed as that team's still, to open and erase",
     slow,
     async () => {
       const [uploader, admin] = await Promise.all([
@@ -914,7 +986,12 @@ describe("uploading a file straight into the Brain", () => {
         everyone,
         crypto.randomUUID()
       );
-      await drizzle(env.DB).delete(teams).where(eq(teams.id, teamId));
+      // Removed as an admin removes a team.
+      const removed = await callAuth(
+        "/organization/remove-team",
+        admin.session,
+        { teamId, organizationId }
+      );
       const { uploads } = await admin.api.brainSources.sharedUploads();
       const shown = (id: string) => {
         const upload = uploads.find(({ source }) => source.id === id);
@@ -926,13 +1003,30 @@ describe("uploading a file straight into the Brain", () => {
               teamName: upload.teamName,
             };
       };
+      const opened = await admin.api.brainSources.uploadOf(forTeam.source.id);
+      await admin.api.brainSources.deleteUpload(forTeam.source.id);
+      const teamLeft = await drizzle(env.DB)
+        .select()
+        .from(teams)
+        .where(eq(teams.id, teamId));
+      const rowsLeft = await rowsWith(forTeam.source.id);
 
       expect({
+        removed: removed.status,
+        teamLeft: teamLeft.length,
         forTeam: shown(forTeam.source.id),
         forAll: shown(forAll.source.id),
+        opened: opened?.mayDelete,
+        rows: rowsLeft.length,
+        actions: await actionsOf(forTeam.source.id),
       }).toStrictEqual({
+        removed: 200,
+        teamLeft: 0,
         forTeam: { name: null, readers: teamReaders(teamId), teamName: null },
         forAll: { name: "Handbook.vtt", readers: everyone, teamName: null },
+        opened: true,
+        rows: 0,
+        actions: ["brain.upload.added", "brain.upload.deleted"],
       });
     }
   );

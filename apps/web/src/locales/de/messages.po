@@ -5454,6 +5454,10 @@ msgid "Erase for good"
 msgstr "Endgültig löschen"
 
 #: src/brain/sources-page.tsx
+msgid "Erase this upload for good"
+msgstr "Diesen Upload endgültig löschen"
+
+#: src/brain/sources-page.tsx
 msgid "Erase this upload for good?"
 msgstr "Diesen Upload endgültig löschen?"
 

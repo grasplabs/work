@@ -935,6 +935,13 @@ describe(SourcesPage, () => {
   it("lists shared uploads for an admin, by name only if they may read it, team and uploader, and erases one for good", async () => {
     const { calls } = await shown([], { admin: true });
     const sharedText = section("Shared uploads");
+    // Each row's button, by what a screen reader says of it.
+    const labels = [...document.querySelectorAll("button")].flatMap(
+      (button) => {
+        const label = button.getAttribute("aria-label");
+        return label !== null && label.startsWith("Erase ") ? [label] : [];
+      }
+    );
     await press("Erase for good");
     // The dialog's own button, after the row's of the same words.
     const confirm = [...document.querySelectorAll("button")].findLast(
@@ -956,6 +963,7 @@ describe(SourcesPage, () => {
         "A deleted team",
         "Uploaded by Grace",
       ].map((text) => sharedText.includes(text)),
+      labels,
       after: ["Payroll.vtt", "An upload"].map((text) =>
         section("Shared uploads").includes(text)
       ),
@@ -964,6 +972,7 @@ describe(SourcesPage, () => {
       ),
     }).toStrictEqual({
       listed: [true, true, true, true, true, true],
+      labels: ["Erase Payroll.vtt for good", "Erase this upload for good"],
       after: [false, true],
       calls: ["sharedUploads", "deleteUpload u-3", "sharedUploads"],
     });

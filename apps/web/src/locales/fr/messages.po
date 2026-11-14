@@ -5454,6 +5454,10 @@ msgid "Erase for good"
 msgstr "Effacer définitivement"
 
 #: src/brain/sources-page.tsx
+msgid "Erase this upload for good"
+msgstr "Effacer ce fichier importé définitivement"
+
+#: src/brain/sources-page.tsx
 msgid "Erase this upload for good?"
 msgstr "Effacer ce fichier importé définitivement ?"
 

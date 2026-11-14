@@ -1110,7 +1110,7 @@ const SharedUploads = ({ onErased }: { onErased: () => void }) => {
             const { uploaderName, teamName, readers } = upload;
             // Named only for an admin who may read it; else told apart by
             // its team, uploader and the minute it was uploaded.
-            const name = upload.name ?? t`An upload`;
+            const { name } = upload;
             const uploaded = formatDateTime(upload.uploadedAt);
             let readBy = t`Everyone`;
             if (readers.kind === "team") {
@@ -1121,7 +1121,9 @@ const SharedUploads = ({ onErased }: { onErased: () => void }) => {
               <li key={upload.source.id}>
                 <Item size="sm">
                   <ItemContent>
-                    <span className="min-w-0 text-sm">{name}</span>
+                    <span className="min-w-0 text-sm">
+                      {name ?? t`An upload`}
+                    </span>
                     <span className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
                       <Badge variant="outline">{readBy}</Badge>
                       <span>
@@ -1136,7 +1138,11 @@ const SharedUploads = ({ onErased }: { onErased: () => void }) => {
                     button={t`Erase for good`}
                     confirm={t`Erase for good`}
                     description={t`Every version of it is erased from the Brain for everyone who could read it. This can't be undone.`}
-                    label={t`Erase ${name} for good`}
+                    label={
+                      name === null
+                        ? t`Erase this upload for good`
+                        : t`Erase ${name} for good`
+                    }
                     onConfirm={() => {
                       setActing({ state: "loading" });
                       void (async () => {
