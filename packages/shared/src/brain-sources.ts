@@ -88,8 +88,9 @@ export type BrainMemoryFoundBy = "words" | "entities" | "contested";
  * A memory of a pack: the Brain's store it is in (the person's own, theirs
  * alone, or the shared one) and that store's id for it; what it says; the
  * words of its source it rests on and the passage around them, when the
- * pack holds them; where it came from (a source's version, or someone's
- * word: `yours` when it is the person's own); whether a person confirmed
+ * pack holds them; where it came from: a source's version, or whose word
+ * it is (`said`: the person's own, another person's, an agent's or a
+ * system's; null for one drawn from a source); whether a person confirmed
  * it, whether sources disagree on it, and how it was found.
  */
 export interface BrainSearchMemory {
@@ -99,7 +100,7 @@ export interface BrainSearchMemory {
   quote: string | null;
   context: { position: number; text: string } | null;
   source: { source: BrainSourceRef; version: number } | null;
-  yours: boolean;
+  said: "you" | "someone" | "agent" | "system" | null;
   confirmed: boolean;
   contested: boolean;
   found: BrainMemoryFoundBy;

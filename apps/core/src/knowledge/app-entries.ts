@@ -8,6 +8,7 @@ import { drizzle } from "drizzle-orm/d1";
 
 import { appsFoundBy, appsReadableBy } from "../app-access.ts";
 import type { Person } from "../app-access.ts";
+import { anyTeamGrant } from "../app-provenance.ts";
 import { memberOf } from "../auth/identity.ts";
 import { apps } from "../db/core/schema.ts";
 import { collectionsAllowed } from "./access.ts";
@@ -65,23 +66,29 @@ type Found = "every" | readonly string[];
 
 /** The entries `person` finds: those of the Apps they may open. */
 const foundBy = async (env: Env, person: Person): Promise<Found> => {
-  // Who may open every App (as `appFor` decides it), whatever it read:
-  // every entry, but a removed App's (app-removal.ts), which nobody opens.
+  // Who may open every App (as `appFor` decides it): every entry, but a
+  // removed App's (app-removal.ts), which nobody opens, and one holding a
+  // Brain team's content they aren't in (GRA-1842, `appsReadableBy`).
   if (isAdmin(person.role)) {
-    const removed = await drizzle(env.DB)
-      .select({ id: apps.id })
-      .from(apps)
-      .where(isNotNull(apps.removedAt))
-      .limit(1)
-      .get();
-    if (removed === undefined) {
+    const [removed, teamGranted] = await Promise.all([
+      drizzle(env.DB)
+        .select({ id: apps.id })
+        .from(apps)
+        .where(isNotNull(apps.removedAt))
+        .limit(1)
+        .get(),
+      anyTeamGrant(env),
+    ]);
+    if (removed === undefined && !teamGranted) {
       return "every";
     }
     const kept = await drizzle(env.DB)
       .select({ id: apps.id })
       .from(apps)
       .where(isNull(apps.removedAt));
-    return kept.map(({ id }) => appEntryPath(id));
+    const ids = kept.map(({ id }) => id);
+    const open = await appsReadableBy(env, person, ids);
+    return ids.filter((id) => open.has(id)).map(appEntryPath);
   }
   const rows = await drizzle(env.DB)
     .select({ id: apps.id })

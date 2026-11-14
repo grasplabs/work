@@ -424,6 +424,10 @@ msgstr "{count, plural, one {Hat dir eine Frage gestellt} other {Hat dir # Frage
 msgid "{count, plural, one {Back to the question} other {Back to the # questions}}"
 msgstr "{count, plural, one {Zurück zur Frage} other {Zurück zu den # Fragen}}"
 
+#: src/activity/pending.tsx
+msgid "{count, plural, one {Company Brain, read only. This App can recall what everyone in the company may read and what the team {teamNames} may read, as far as the person it works for is in that team. Only people in that team can use it, its owner and admins too. It can never write to the Brain. Every recall is recorded} other {Company Brain, read only. This App can recall what everyone in the company may read and what the teams {teamNames} may read, as far as the person it works for is in them. Only people in all of them can use it, its owner and admins too. It can never write to the Brain. Every recall is recorded}}"
+msgstr "{count, plural, one {Company Brain, nur lesen. Diese App kann abrufen, was alle im Unternehmen lesen dürfen und was das Team {teamNames} lesen darf, soweit die Person, für die sie arbeitet, in diesem Team ist. Nur Personen in diesem Team können sie nutzen, auch ihr Eigentümer und Admins. Sie kann nie ins Brain schreiben. Jeder Abruf wird protokolliert} other {Company Brain, nur lesen. Diese App kann abrufen, was alle im Unternehmen lesen dürfen und was die Teams {teamNames} lesen dürfen, soweit die Person, für die sie arbeitet, in ihnen ist. Nur Personen in all diesen Teams können sie nutzen, auch ihr Eigentümer und Admins. Sie kann nie ins Brain schreiben. Jeder Abruf wird protokolliert}}"
+
 #: src/apps/publish.tsx
 msgid "{count, plural, one {It can't be shared yet: # problem} other {It can't be shared yet: # problems}}"
 msgstr "{count, plural, one {Es kann noch nicht geteilt werden: # Problem} other {Es kann noch nicht geteilt werden: # Probleme}}"
@@ -1752,6 +1756,10 @@ msgstr "Eine Mitarbeiterliste ist der schnellste Weg: Namen, E-Mail-Adressen, Te
 msgid "A step is a JSON object."
 msgstr "Ein Schritt ist ein JSON-Objekt."
 
+#: src/brain/sources-page.tsx
+msgid "A system's word"
+msgstr "Die Angabe eines Systems"
+
 #: src/workflows/requests/request-needs.tsx
 #: src/workflows/requests/request-parts.tsx
 msgid "A team"
@@ -2424,6 +2432,10 @@ msgstr "Ein eigener Agent für eine Aufgabe, die du oft erledigst. Nur du siehst
 #: src/chat/thread.tsx
 msgid "An agent you can no longer ask"
 msgstr "Ein Agent, den du nicht mehr fragen kannst"
+
+#: src/brain/sources-page.tsx
+msgid "An agent's word"
+msgstr "Die Aussage eines Agenten"
 
 #: src/apps/field-kinds.tsx
 msgid "An amount in a currency"
@@ -4130,8 +4142,8 @@ msgid "Company"
 msgstr "Unternehmen"
 
 #: src/activity/pending.tsx
-msgid "Company Brain, read only. This can read company Brain evidence and its open questions, from the collections it was granted and only what the person it works for may read too. It can never write to the Brain. Every read is recorded"
-msgstr "Company Brain, nur lesend. Es kann Belege und offene Fragen des Company Brain lesen, aus den freigegebenen Sammlungen und nur das, was auch die Person lesen darf, für die es arbeitet. Es kann nie in das Brain schreiben. Jeder Lesezugriff wird protokolliert"
+msgid "Company Brain, read only. This can recall what everyone in the company may read, never a team's or anyone's own content. It can never write to the Brain. Every recall is recorded"
+msgstr "Company Brain, nur lesen. Dies kann abrufen, was alle im Unternehmen lesen dürfen, nie Inhalte eines Teams oder einer einzelnen Person. Es kann nie ins Brain schreiben. Jeder Abruf wird protokolliert"
 
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"

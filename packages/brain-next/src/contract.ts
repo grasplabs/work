@@ -2647,14 +2647,14 @@ export interface Brain {
    */
   listContested: (request: ContestedRequest) => Promise<ContestedPage>;
   /**
-   * Of the memories asked for, by id, those the reader may read now and
-   * that are current as they see them now, as `readMemories` judges both,
-   * in the order asked and each once: what a host checks before it sends
-   * again a memory it once recalled (a chat's earlier recall). Each left
-   * out alike, whether it doesn't exist, was erased, rests on a version
-   * the reader may no longer read, was retired, was ended by a newer
-   * memory of its lineage they may read, or its time is over. A newer
-   * memory they may not read ends nothing for them.
+   * Of the memories asked for, by id, those the reader may read now (as
+   * `readMemories` decides who may read one) and their writer has not
+   * retired, in the order asked and each once: what a host checks before
+   * it sends again a memory it once recalled (a chat's earlier recall).
+   * Each left out alike, whether it doesn't exist, was erased, rests on a
+   * version the reader may no longer read, or was retired. One ended by a
+   * newer memory of its lineage, or whose time is over, stays: as a
+   * source's older version stays readable once a newer one is added.
    */
   readableMemories: (request: ReadableMemoriesRequest) => Promise<MemoryId[]>;
   /**

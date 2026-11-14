@@ -341,7 +341,7 @@ describe("the Brain's sources, as a person reads them", () => {
             store: memory.store,
             statement: memory.statement,
             source: memory.source,
-            yours: memory.yours,
+            said: memory.said,
           };
     };
     expect({
@@ -349,12 +349,12 @@ describe("the Brain's sources, as a person reads them", () => {
       team: shown(teamMemory),
       hidden: JSON.stringify(searched).includes(hidden),
     }).toStrictEqual({
-      theirs: { store: "own", statement: theirs, source: null, yours: true },
+      theirs: { store: "own", statement: theirs, source: null, said: "you" },
       team: {
         store: "shared",
         statement: teamStatement,
         source: { source: teamSource, version: 1 },
-        yours: false,
+        said: null,
       },
       hidden: false,
     });

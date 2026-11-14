@@ -3200,7 +3200,7 @@ describe("names that grow when folded", () => {
 describe("which memories a reader may still read", () => {
   // GRA-1864 threat 5: what a host checks before it sends again a memory
   // it once recalled.
-  it("answers, in the order asked and each once, the memories the reader may read that are current, alike for one unknown, hidden or retired", async () => {
+  it("answers, in the order asked and each once, the memories the reader may read, alike for one unknown, hidden or retired", async () => {
     const group = unique("group");
     const writer = unique("writer");
     const version = await addSource("Acme is active", audience(group));
@@ -3246,7 +3246,7 @@ describe("which memories a reader may still read", () => {
     });
   });
 
-  it("leaves out a memory once its source is narrowed or erased, or a newer one of its lineage the reader may read ends it, never one they can't read", async () => {
+  it("leaves out a memory once its source is narrowed or erased, and keeps one a newer memory of its lineage ended, as an older version stays readable", async () => {
     const group = unique("group");
     const writer = unique("writer");
     const narrowedSource = await addSource(
@@ -3296,8 +3296,8 @@ describe("which memories a reader may still read", () => {
     const both = readerOf(unique("both"), group, right);
 
     const before = await shared().readableMemories({ memories: asked, reader });
-    // The same writer's newer status, readable to `both` alone, ends the
-    // older one for them, and only for them.
+    // The same writer's newer status ends the older one for `both`, who
+    // may still read the older one, as an older version of a source.
     const lineage = await shared().readableMemories({
       memories: asked,
       reader: both,
@@ -3315,7 +3315,7 @@ describe("which memories a reader may still read", () => {
 
     expect({ before, lineage, after }).toStrictEqual({
       before: [narrowed, erased, active],
-      lineage: [narrowed, erased, churned],
+      lineage: [narrowed, erased, active, churned],
       after: [active],
     });
   });

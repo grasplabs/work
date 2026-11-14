@@ -61,29 +61,26 @@ const listedOf = ({
   versions,
 });
 
-/** `memory` of a pack as the page shows it, recalled for `personId`. */
-const shownOf = (
-  {
-    store,
-    memory,
-    statement,
-    quote,
-    context,
-    source,
-    writer,
-    confirmed,
-    contested,
-    found,
-  }: RecalledMemory,
-  personId: string
-): BrainSearchMemory => ({
+/** `memory` of a pack as the page shows it. */
+const shownOf = ({
+  store,
+  memory,
+  statement,
+  quote,
+  context,
+  source,
+  said,
+  confirmed,
+  contested,
+  found,
+}: RecalledMemory): BrainSearchMemory => ({
   store,
   id: memory,
   statement,
   quote,
   context,
   source,
-  yours: writer === personId,
+  said,
   confirmed,
   contested,
   found,
@@ -179,7 +176,7 @@ export class BrainSourcesRpc extends CoreRpcTarget implements BrainSourcesApi {
       );
       return {
         items,
-        memories: memories.map((memory) => shownOf(memory, person.userId)),
+        memories: memories.map((memory) => shownOf(memory)),
         notFound,
         truncated,
       };

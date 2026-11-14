@@ -143,6 +143,21 @@ const MemoryFoundBadge = ({ found }: { found: BrainMemoryFoundBy }) => {
   return <Badge variant="secondary">{label}</Badge>;
 };
 
+/** Whose word a memory not drawn from a source is. */
+const SaidBadge = ({ said }: { said: BrainSearchMemory["said"] }) => {
+  const { t } = useLingui();
+  if (said === null) {
+    return null;
+  }
+  const label = {
+    you: t`Your own word`,
+    someone: t`Someone's word`,
+    agent: t`An agent's word`,
+    system: t`A system's word`,
+  }[said];
+  return <Badge variant="outline">{label}</Badge>;
+};
+
 /**
  * A memory of the pack: what it says, the words of its source it rests on
  * and the passage around them when the pack holds them, and where it came
@@ -180,13 +195,7 @@ const MemoryResult = ({
         )}
         <span className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
           {source === null ? (
-            <Badge variant="outline">
-              {memory.yours ? (
-                <Trans>Your own word</Trans>
-              ) : (
-                <Trans>Someone&apos;s word</Trans>
-              )}
-            </Badge>
+            <SaidBadge said={memory.said} />
           ) : (
             <>
               <ProducerBadge producer={source.source.producer} />

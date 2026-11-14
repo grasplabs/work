@@ -352,6 +352,12 @@ export interface Recall {
    */
   company?: boolean;
   /**
+   * With `company`, the teams it reads beyond the company too: of these
+   * (an App's grant's, brain-recall.ts), those the person is in now, so
+   * never wider than the grant, nor than the person. None when absent.
+   */
+  teams?: readonly string[];
+  /**
    * Read each source as it was at this moment, to the millisecond and
    * including it: a version added at it counts. A caller who means "on
    * that day" passes the day's last millisecond in the time zone they
@@ -413,13 +419,49 @@ const memoryStoreSchema = z.enum(["own", "shared"]);
 type MemoryStore = z.infer<typeof memoryStoreSchema>;
 
 /**
- * A memory of a pack, citing its source as its producer named it, and
- * the store it is in.
+ * Whose word a memory is, as the person recalling it reads it: theirs
+ * (`you`), another person's, inside the company or out (`someone`), an
+ * agent's or a system's; none for one drawn from a source, which it cites
+ * instead.
+ */
+export type MemorySaid = "you" | "someone" | "agent" | "system" | null;
+
+/**
+ * A memory of a pack, citing its source as its producer named it, the
+ * store it is in, and whose word it is (`MemorySaid`).
  */
 export interface RecalledMemory extends Omit<PackMemory, "source"> {
   store: MemoryStore;
   source: SourceVersionRef | null;
+  said: MemorySaid;
 }
+
+/** Whose word `memory` is, as `personId` reads it (`MemorySaid`). */
+const saidOf = (
+  { writer, speaker }: PackMemory,
+  personId: string
+): MemorySaid => {
+  if (writer === null) {
+    return null;
+  }
+  switch (speaker.kind) {
+    case "system": {
+      return "system";
+    }
+    case "agent": {
+      return "agent";
+    }
+    case "internal": {
+      return speaker.person === personId ? "you" : "someone";
+    }
+    case "outside": {
+      return "someone";
+    }
+    default: {
+      throw new Error("Unknown speaker");
+    }
+  }
+};
 
 /** A pack, as recall answers (`recallAs`): passages and memories. */
 export interface RecalledPack extends Omit<Pack, "items" | "memories"> {
@@ -615,13 +657,14 @@ const personReaderOf = async (
 
 /**
  * The member `personId` as the Brain's reader, as far as `reach` goes
- * (`Reach`). Refused once they have no current membership, whatever the
- * reach.
+ * (`Reach`), and with `company`, of `teams` those they are in now.
+ * Refused once they have no current membership, whatever the reach.
  */
 const readerOf = async (
   env: Pick<Env, "DB">,
   personId: string,
-  reach: Reach
+  reach: Reach,
+  teams: readonly string[] = []
 ): Promise<Reader> => {
   const { person, groups } = await personReaderOf(env, personId);
   switch (reach) {
@@ -632,7 +675,12 @@ const readerOf = async (
       return { person: null, groups };
     }
     case "company": {
-      return { person: null, groups: [companyGroup] };
+      // Of `teams`, those the person is in now: a group of theirs.
+      const named = new Set(teams.map((id) => teamGroup(id)));
+      return {
+        person: null,
+        groups: [...groups.filter((group) => named.has(group)), companyGroup],
+      };
     }
     default: {
       throw new Error("Unknown reach");
@@ -783,12 +831,12 @@ const meaningOf = async (
  * embedder sees any of it, and embedded while their reader is read. With
  * `personal`, as the person (`person`: their own store too); without, as
  * their teams (a reader with no person: no `owner` source matches); with
- * `company`, as the company alone.
+ * `company`, as the company and, of `teams`, those they are in now.
  */
 const recallRequestAs = async (
   env: BrainEnv & Pick<Env, "DB" | "EMBEDDER">,
   personId: string,
-  { question: asked, budget, asOf, personal, company = false }: Recall
+  { question: asked, budget, asOf, personal, company = false, teams }: Recall
 ): Promise<RecallRequest> => {
   const question = checked(questionSchema, asked);
   let reach: Reach = personal ? "person" : "teams";
@@ -796,7 +844,7 @@ const recallRequestAs = async (
     reach = "company";
   }
   const [reader, meaning] = await Promise.all([
-    readerOf(env, personId, reach),
+    readerOf(env, personId, reach, teams),
     // As of a moment the Brain never searches by meaning: nothing to embed.
     asOf === undefined ? meaningOf(env, question) : {},
   ]);
@@ -862,12 +910,13 @@ const storesOf = (findings: readonly Finding[]): Map<string, MemoryStore> =>
  * what they may read alone. With `personal`, from the shared store and
  * their own together, packed as one store holding both would pack them
  * (`packAcross`); without, from the shared store alone, as their teams
- * may read it, or with `company` as the company alone. Refused once they
- * are no longer a member, or when `personId` isn't an ID. Each memory
- * names the store it is in. What the chat hands its model before a
- * question (turn-recall.ts, each memory pinned and checked again before
- * every later request: `readableMemoriesAs`) and the Brain page's search
- * show. Code (`recallFor`) takes passages alone (`recallPassagesAs`).
+ * may read it, or with `company` as the company and, of `teams`, those they
+ * are in. Refused once they are no longer a member, or when `personId`
+ * isn't an ID. Each memory names the store it is in. What the chat hands
+ * its model before a question (turn-recall.ts, each memory pinned and
+ * checked again before every later request: `readableMemoriesAs`) and the
+ * Brain page's search show. Code (`recallFor`) takes passages alone
+ * (`recallPassagesAs`).
  */
 export const recallAs = async (
   env: BrainEnv & Pick<Env, "DB" | "EMBEDDER">,
@@ -890,7 +939,12 @@ export const recallAs = async (
       if (store === undefined) {
         throw new Error("A packed memory no store found");
       }
-      return { ...memory, store, source: versionRefOf(memory.source) };
+      return {
+        ...memory,
+        store,
+        source: versionRefOf(memory.source),
+        said: saidOf(memory, personId),
+      };
     }),
     contested,
     notFound,
@@ -928,6 +982,10 @@ const placeOf = ({ source, version, position }: RecalledItem): string =>
 const memoryKeyOf = ({ store, memory }: StoredMemoryPlace): string =>
   JSON.stringify([store, memory]);
 
+/** A passage of a pack as the Brain counts it (`packItemTokens`). */
+const itemTokens = (item: RecalledItem): number =>
+  packItemTokens({ ...item, source: sourceKeyOf(item.source) });
+
 /** A memory of a pack as the Brain counts it (`packMemoryTokens`). */
 const memoryTokens = (memory: RecalledMemory): number =>
   packMemoryTokens({
@@ -946,45 +1004,33 @@ const memoryTokens = (memory: RecalledMemory): number =>
  * `packMemoryTokens`): never more than the budget it was packed within.
  */
 export const recalledTokens = ({ items, memories }: RecalledPack): number =>
-  items.reduce(
-    (sum, item) =>
-      sum + packItemTokens({ ...item, source: sourceKeyOf(item.source) }),
-    0
-  ) + memories.reduce((sum, memory) => sum + memoryTokens(memory), 0);
+  items.reduce((sum, item) => sum + itemTokens(item), 0) +
+  memories.reduce((sum, memory) => sum + memoryTokens(memory), 0);
 
 /**
- * The contested facts among `memories`: each entity's attribute, in one
- * store, for which they hold more than one side, in the order of its
- * first, as the Brain's pack lists them.
+ * Of two copies of one passage or memory, the fuller: the one that takes
+ * more of the budget holds more of it (a passage whole rather than its
+ * best part; a memory with its quote, then the passage around it), `one`
+ * on a tie.
  */
-const contestedOf = (
-  memories: readonly RecalledMemory[]
-): Pack["contested"] => {
-  const facts = new Map<string, Pack["contested"][number]>();
-  for (const { store, memory, about, attribute, contested } of memories) {
-    if (!contested || attribute === null) {
-      continue;
-    }
-    const key = JSON.stringify([store, about, attribute]);
-    const fact = facts.get(key) ?? { about, attribute, memories: [] };
-    fact.memories.push(memory);
-    facts.set(key, fact);
-  }
-  return [...facts.values()].filter(({ memories: sides }) => sides.length > 1);
-};
+const fuller = <T>(
+  one: T,
+  other: T | undefined,
+  tokens: (copy: T) => number
+): T => (other !== undefined && tokens(other) > tokens(one) ? other : one);
 
 /**
  * Two recalls for one reader as one pack, `second` packed within what
  * `first` left of the budget (`recalledTokens`), so nothing of either is
  * left out for room: the first's passages and memories in their order,
- * each one the second holds too (the same passage of the same version, the
- * same memory) as the second packed it, then the second's others in
- * theirs. So the pack takes at most the budget, and holds everything the
- * second's `notFound` counted as found: what was not found is the
- * second's, asked for what the first meant. A contested fact is listed
- * when the pack holds more than one of its sides, whichever recall packed
- * each; each packed every side of a fact or none. Cut short when either
- * was.
+ * then the second's others in theirs. One both hold (the same passage of
+ * the same version, the same memory) is held once, as the fuller of the
+ * two copies, so it shows no less than either recall gave: the budget
+ * paid for both, so one less copy keeps the pack within it. A memory's
+ * fuller copy holds all the other does, so what was not found, the
+ * second's (asked for what the first meant), stays true of the pack. A
+ * contested fact is listed with every side either recall listed: each
+ * packed every side of a fact or none. Cut short when either was.
  */
 export const mergeRecalled = (
   first: RecalledPack,
@@ -996,25 +1042,39 @@ export const mergeRecalled = (
   const secondMemories = new Map(
     second.memories.map((memory) => [memoryKeyOf(memory), memory])
   );
-  const items = [
-    ...first.items.map((item) => secondItems.get(placeOf(item)) ?? item),
-    ...second.items.filter(
-      (item) => !first.items.some((held) => placeOf(held) === placeOf(item))
-    ),
-  ];
+  const firstPlaces = new Set(first.items.map((item) => placeOf(item)));
   const firstKeys = new Set(
     first.memories.map((memory) => memoryKeyOf(memory))
   );
-  const memories = [
-    ...first.memories.map(
-      (memory) => secondMemories.get(memoryKeyOf(memory)) ?? memory
-    ),
-    ...second.memories.filter((memory) => !firstKeys.has(memoryKeyOf(memory))),
-  ];
+  const facts = new Map<string, Pack["contested"][number]>();
+  for (const { about, attribute, memories } of [
+    ...first.contested,
+    ...second.contested,
+  ]) {
+    const key = JSON.stringify([about, attribute]);
+    const sides = facts.get(key)?.memories ?? [];
+    facts.set(key, {
+      about,
+      attribute,
+      memories: [...new Set([...sides, ...memories])],
+    });
+  }
   return {
-    items,
-    memories,
-    contested: contestedOf(memories),
+    items: [
+      ...first.items.map((item) =>
+        fuller(item, secondItems.get(placeOf(item)), itemTokens)
+      ),
+      ...second.items.filter((item) => !firstPlaces.has(placeOf(item))),
+    ],
+    memories: [
+      ...first.memories.map((memory) =>
+        fuller(memory, secondMemories.get(memoryKeyOf(memory)), memoryTokens)
+      ),
+      ...second.memories.filter(
+        (memory) => !firstKeys.has(memoryKeyOf(memory))
+      ),
+    ],
+    contested: [...facts.values()],
     notFound: second.notFound,
     truncated: first.truncated || second.truncated,
   };
@@ -1209,25 +1269,34 @@ const versionKeyOf = ({
   version: number;
 }): string => `${version}:${source}`;
 
+/**
+ * What `check` answers of `asked`, asked of at most `readableCheckMax`
+ * at a time (the store's bound on one check), all at once.
+ */
+const checkedInParts = async <T, R>(
+  asked: readonly T[],
+  check: (part: T[]) => Promise<R[]>
+): Promise<R[]> => {
+  const parts = Array.from(
+    { length: Math.ceil(asked.length / readableCheckMax) },
+    (_, at) => asked.slice(at * readableCheckMax, (at + 1) * readableCheckMax)
+  );
+  const answered = await Promise.all(
+    parts.map(async (part) => await check(part))
+  );
+  return answered.flat();
+};
+
 /** Of `versions` (keys), those `reader` may read in `store` now. */
 const readableIn = async (
   store: Brain,
   reader: Reader,
   versions: readonly { source: string; version: number }[]
-): Promise<{ source: string; version: number }[]> => {
-  const parts = Array.from(
-    { length: Math.ceil(versions.length / readableCheckMax) },
-    (_, at) =>
-      versions.slice(at * readableCheckMax, (at + 1) * readableCheckMax)
+): Promise<{ source: string; version: number }[]> =>
+  await checkedInParts(
+    versions,
+    async (part) => await store.readableVersions({ versions: part, reader })
   );
-  const readable = await Promise.all(
-    parts.map(
-      async (part) =>
-        await store.readableVersions({ versions: [...part], reader })
-    )
-  );
-  return readable.flat();
-};
 
 // Erasure: for good, apart from ordinary removal, where a new version
 // keeps the one before as history. Each erasure is in the Brain's ledger
@@ -1942,31 +2011,23 @@ const memoryPlacesSchema = z.array(
   z.strictObject({ store: memoryStoreSchema, memory: memoryIdSchema })
 );
 
-/** Of `memories` (ids), those `reader` may read in `store` now and are current. */
+/** Of `memories` (ids), those `reader` may read in `store` now, not retired. */
 const readableMemoriesIn = async (
   store: Brain,
   reader: Reader,
   memories: readonly string[]
-): Promise<string[]> => {
-  const parts = Array.from(
-    { length: Math.ceil(memories.length / readableCheckMax) },
-    (_, at) =>
-      memories.slice(at * readableCheckMax, (at + 1) * readableCheckMax)
+): Promise<string[]> =>
+  await checkedInParts(
+    memories,
+    async (part) => await store.readableMemories({ memories: part, reader })
   );
-  const readable = await Promise.all(
-    parts.map(
-      async (part) =>
-        await store.readableMemories({ memories: [...part], reader })
-    )
-  );
-  return readable.flat();
-};
 
 /**
- * Of `memories`, those the member `personId` may read now and that are
- * current for them, as the store judges both (`readableMemories`): read
- * with the teams core counts them in now, in the order given and each
- * once. For core to check what a chat once handed over before it sends it
+ * Of `memories`, those the member `personId` may read now and their
+ * writer has not retired, as the store judges it (`readableMemories`):
+ * read with the teams core counts them in now, in the order given and
+ * each once. One a newer memory ended, or whose time is over, stays, as
+ * an older version of a source does. For core to check what a chat once handed over before it sends it
  * again (history-access.ts). Each is asked of the store it names, and of
  * no other: the shared one, or their own. Their own store failing answers
  * none of its own (`ownOr`): what can't be checked is withheld. Refused

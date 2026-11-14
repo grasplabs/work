@@ -620,21 +620,24 @@ ORDER BY fact_first, about, attribute, side`,
 });
 
 /**
- * `?1` the memory ids asked about (JSON): the ids of those the reader may
- * read that are current as of `?4`, judged as every read judges them
- * (`memoriesSql`), a seek by id each.
+ * `?1` the memory ids asked about (JSON), `?2` and `?3` the reader
+ * (`readableSql`), `?4` the moment: the ids of those learned by then that
+ * the reader may read (`visibleSql`, as every read decides it) and that
+ * their writer had not retired by then, a seek by id each. Whether a
+ * newer memory ended one, or its time is over, is not asked: a memory
+ * once recalled stays as readable as a passage of an older version does.
  */
-const readableMemoriesSql = memoriesSql({
-  base: `SELECT memories.row AS row FROM json_each(?1) AS asked
-    CROSS JOIN memories ON memories.id = asked.value`,
-  filter: "judged.is_current = 1",
-  order: "m.row",
-  outer: "SELECT id FROM rows",
-});
+const readableMemoriesSql = `
+WITH ${readableSql}
+SELECT m.id AS id FROM json_each(?1) AS asked
+CROSS JOIN memories AS m ON m.id = asked.value
+WHERE m.learned_at <= ?4
+  AND (m.retired_at IS NULL OR m.retired_at > ?4)
+  AND ${visibleSql("m")}`;
 
 /**
- * Of `memories`, those the reader may read and that are current for them
- * now (contract.ts `readableMemories`), in the order asked, each once.
+ * Of `memories`, those the reader may read now and their writer has not
+ * retired (contract.ts `readableMemories`), in the order asked, each once.
  */
 export const readableMemories = (
   sql: SqlStorage,
@@ -645,14 +648,16 @@ export const readableMemories = (
     return [];
   }
   const readable = new Set(
-    memoryRows(
-      sql,
-      readableMemoriesSql,
-      JSON.stringify(asked),
-      reader,
-      readMoment(sql),
-      asked.length
-    ).map(({ id }) => id)
+    sql
+      .exec<{ id: string }>(
+        readableMemoriesSql,
+        JSON.stringify(asked),
+        reader.person,
+        JSON.stringify(reader.groups),
+        readMoment(sql)
+      )
+      .toArray()
+      .map(({ id }) => id)
   );
   return asked.filter((id) => readable.has(id));
 };

@@ -1,4 +1,4 @@
-import { brainOf } from "@grasp-os/brain-next/contract";
+import { brainOf, personalBrainOf } from "@grasp-os/brain-next/contract";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
@@ -1203,7 +1203,7 @@ const handedSchema = z.object({
       quote: z.string().nullable(),
       source: z.string().nullable(),
       version: z.number().nullable(),
-      writtenBy: z.string().nullable(),
+      said: z.string().nullable(),
       contested: z.boolean(),
     })
   ),
@@ -1266,7 +1266,7 @@ describe("the recall before a question hands over memories", setUpTime, () => {
         quote: statement,
         source: null,
         version: null,
-        writtenBy: "you",
+        said: "you",
         contested: undefined,
       },
       depotNotFound: false,
@@ -1423,13 +1423,17 @@ const recalledMemoryOf = async (
 };
 
 // Memories a recall handed over, read again on every later request
-// (history-access.ts `brainMemoryRead`). From the ways it can fail: a
-// memory the person may no longer read, or that is no longer current for
-// them, reaches the model again; a contested fact loses one side in
+// (history-access.ts `brainMemoryRead`), as a passage is: withheld once
+// the person may no longer read it or its writer retired it; kept when a
+// newer memory replaced it (a correction, a source's newer version
+// extracted again), as an older version of a source stays readable. From
+// the ways it can fail: a memory the person may no longer read reaches
+// the model again; a routine re-sync hides an earlier answer as if the
+// person could no longer read it; a contested fact loses one side in
 // history; the check decides from what it reads now rather than the
 // store and memory pinned.
 describe("memories a recall handed over, read again", setUpTime, () => {
-  it("withholds a memory of the person's own once it is retired or corrected, and audits it by the memory, never what it said", async () => {
+  it("withholds a memory of the person's own once it is retired or its source erased, keeps one a correction replaced, and audits it by the memory, never what it said", async () => {
     const person = await signedInWithRole(idp, "user");
     /** A memory of theirs about a depot of its own, recalled by a chat. */
     const recalledOwn = async () => {
@@ -1470,19 +1474,65 @@ describe("memories a recall handed over, read again", setUpTime, () => {
       quote: "It closed",
     });
     const correctedNext = await corrected.next();
+    // A memory of theirs drawn from a source of their own, which they
+    // then erase.
+    const depot = word();
+    const drawn = `Depot ${depot} keeps its keys at the gate`;
+    const own = await added(drawn, owner(person.userId));
+    const {
+      memories: [drawnMemory = ""],
+    } = await personalBrainOf(
+      inJurisdiction(env, env.BRAIN_STORE),
+      person.userId
+    ).addMemories({
+      change: crypto.randomUUID(),
+      access: { kind: "owner", person: person.userId },
+      entities: [{ key: "c", kind: "customer", names: [`Depot ${depot}`] }],
+      memories: [
+        {
+          about: "c",
+          type: "fact",
+          statement: drawn,
+          speaker: { kind: "system" },
+          basis: {
+            kind: "source",
+            source: `upload:${own.id}`,
+            version: 1,
+            quote: drawn,
+          },
+        },
+      ],
+    });
+    const erased = await recalledMemoryOf(
+      person.userId,
+      `Where does depot ${depot} keep its keys?`,
+      [drawn]
+    );
+    await eraseSource(env, {
+      source: own,
+      readers: owner(person.userId),
+      reason: "deleted",
+    });
+    const erasedNext = await erased.next();
 
     expect({
-      recalled: [unchanged, retired, corrected].map(({ handed, memory }) =>
-        handed.memories.some((each) => each.memory === memory)
-      ),
+      recalled: [
+        ...[unchanged, retired, corrected].map(({ handed, memory }) =>
+          handed.memories.some((each) => each.memory === memory)
+        ),
+        erased.handed.memories.some((each) => each.memory === drawnMemory),
+      ],
       unchanged: unchangedNext,
       retired: retiredNext,
+      // The corrected fact arrives with the next recall that finds it.
       corrected: correctedNext,
+      erased: erasedNext,
     }).toStrictEqual({
-      recalled: [true, true, true],
+      recalled: [true, true, true, true],
       unchanged: { sent: [true], withheld: false },
       retired: { sent: [false], withheld: true },
-      corrected: { sent: [false], withheld: true },
+      corrected: { sent: [true], withheld: false },
+      erased: { sent: [false], withheld: true },
     });
     const events = await eventsOf(retired.agent.agentId, (all) =>
       all.some(({ action }) => action === "chat.history_withheld")
@@ -1499,7 +1549,7 @@ describe("memories a recall handed over, read again", setUpTime, () => {
     });
   });
 
-  it("withholds a team's memories once a source one side of their fact rests on is erased or narrowed, or the person leaves the team: every side of it", async () => {
+  it("withholds a team's memories once a source one side of their fact rests on is erased or narrowed, or the person leaves the team, every side of it, and keeps them when that source is edited and extracted again", async () => {
     const db = drizzle(env.DB);
     /** A contested fact a team of `personId`'s may read, recalled by a chat. */
     const recalledFact = async (personId: string) => {
@@ -1522,9 +1572,19 @@ describe("memories a recall handed over, read again", setUpTime, () => {
         `Is depot ${depot} open in winter?`,
         [open, closed]
       );
-      return { ...chat, readers, teamId, one, open, memories };
+      return {
+        ...chat,
+        readers,
+        group,
+        name: `Depot ${depot}`,
+        teamId,
+        one,
+        open,
+        memories,
+      };
     };
-    const [ann, ben, cas, dee] = await Promise.all([
+    const [ann, ben, cas, dee, eve] = await Promise.all([
+      signedInWithRole(idp, "user"),
       signedInWithRole(idp, "user"),
       signedInWithRole(idp, "user"),
       signedInWithRole(idp, "user"),
@@ -1562,9 +1622,41 @@ describe("memories a recall handed over, read again", setUpTime, () => {
         )
       );
     const leavingNext = await leaving.next();
+    // The same document edited, for the same readers, and extracted again:
+    // the memory of its first version ends, as the version does.
+    const resynced = await recalledFact(eve.userId);
+    await addSource(env, {
+      source: resynced.one,
+      change: crypto.randomUUID(),
+      text: `${resynced.open}.`,
+      readers: resynced.readers,
+    });
+    await shared().addMemories({
+      change: crypto.randomUUID(),
+      access: { kind: "audience", group: resynced.group },
+      entities: [{ key: "c", kind: "customer", names: [resynced.name] }],
+      memories: [
+        {
+          about: "c",
+          attribute: "status",
+          value: "open",
+          type: "fact",
+          statement: resynced.open,
+          speaker: { kind: "system" },
+          basis: {
+            kind: "source",
+            source: `upload:${resynced.one.id}`,
+            version: 2,
+            quote: resynced.open,
+          },
+        },
+      ],
+      extracted: { source: `upload:${resynced.one.id}`, version: 2 },
+    });
+    const resyncedNext = await resynced.next();
 
     expect({
-      recalled: [unchanged, erased, narrowed, leaving].map(
+      recalled: [unchanged, erased, narrowed, leaving, resynced].map(
         ({ handed, memories }) =>
           memories.every((memory) =>
             handed.memories.some((each) => each.memory === memory)
@@ -1574,12 +1666,14 @@ describe("memories a recall handed over, read again", setUpTime, () => {
       erased: erasedNext,
       narrowed: narrowedNext,
       leaving: leavingNext,
+      resynced: resyncedNext,
     }).toStrictEqual({
-      recalled: [true, true, true, true],
+      recalled: [true, true, true, true, true],
       unchanged: { sent: [true, true], withheld: false },
       erased: { sent: [false, false], withheld: true },
       narrowed: { sent: [false, false], withheld: true },
       leaving: { sent: [false, false], withheld: true },
+      resynced: { sent: [true, true], withheld: false },
     });
   });
 });
@@ -1618,12 +1712,24 @@ const secondPassOf =
       mergeBudget.tokens - recalledTokens(first)
     )(question);
 
+/** Each side of each contested fact `packs` list, sorted. */
+const sidesOf = (...packs: RecalledPack[]): string[] =>
+  [
+    ...new Set(
+      packs.flatMap(({ contested }) =>
+        contested.flatMap(({ about, attribute, memories }) =>
+          memories.map((side) => JSON.stringify([about, attribute, side]))
+        )
+      )
+    ),
+  ].toSorted();
+
 /**
  * What a merge of `first` and `second` must hold, whatever their shape:
  * within `budget`; every passage and memory of the first once, in its
- * order, then the second's others in theirs; each the second holds
- * exactly as the second packed it, so its `notFound` stays true; and the
- * contested facts the pack holds more than one side of.
+ * order, then the second's others in theirs; none showing less than
+ * either pass handed over, so the second's `notFound` stays true; and
+ * every side of every contested fact either pass listed.
  */
 const mergedHolds = (
   first: RecalledPack,
@@ -1632,17 +1738,13 @@ const mergedHolds = (
   budget: number
 ) => {
   const firstKeys = keysOf(first);
-  const sides = new Map<string, string[]>();
-  for (const memory of merged.memories) {
-    if (memory.contested && memory.attribute !== null) {
-      const fact = JSON.stringify([
-        memory.store,
-        memory.about,
-        memory.attribute,
-      ]);
-      sides.set(fact, [...(sides.get(fact) ?? []), memory.memory]);
-    }
-  }
+  /** The tokens of `merged`'s copy of the passage or memory at `key`. */
+  const mergedTokens = (key: string): number =>
+    recalledTokens({
+      ...merged,
+      items: merged.items.filter((item) => placeOf(item) === key),
+      memories: merged.memories.filter((memory) => memoryKeyOf(memory) === key),
+    });
   return {
     within: recalledTokens(merged) <= budget,
     order:
@@ -1667,22 +1769,26 @@ const mergedHolds = (
             .map((memory) => memoryKeyOf(memory))
             .filter((key) => !firstKeys.includes(key)),
         ]),
-    secondWhole:
-      second.items.every((item) =>
-        merged.items.some(
-          (held) => JSON.stringify(held) === JSON.stringify(item)
-        )
-      ) &&
-      second.memories.every((memory) =>
-        merged.memories.some(
-          (held) => JSON.stringify(held) === JSON.stringify(memory)
-        )
-      ),
+    // Each passage and memory once, never less of it than either recall
+    // handed over: a memory's fuller copy holds all the other does, so
+    // the second's `notFound` stays true.
+    noLess: [first, second].every((pack) =>
+      [
+        ...pack.items.map((item) => ({
+          key: placeOf(item),
+          tokens: recalledTokens({ ...pack, items: [item], memories: [] }),
+        })),
+        ...pack.memories.map((memory) => ({
+          key: memoryKeyOf(memory),
+          tokens: recalledTokens({ ...pack, items: [], memories: [memory] }),
+        })),
+      ].every(({ key, tokens }) => mergedTokens(key) >= tokens)
+    ),
     notFound:
       JSON.stringify(merged.notFound) === JSON.stringify(second.notFound),
     contested:
-      JSON.stringify(merged.contested.map(({ memories }) => memories)) ===
-      JSON.stringify([...sides.values()].filter((each) => each.length > 1)),
+      JSON.stringify(sidesOf(merged)) ===
+      JSON.stringify(sidesOf(first, second)),
     truncated: merged.truncated === (first.truncated || second.truncated),
   };
 };
@@ -1702,6 +1808,19 @@ const within = (pack: RecalledPack, tokens: number): RecalledPack => {
       kept.memories = more.memories;
     }
   }
+  // Its contested facts as a pack lists them: those it holds more than
+  // one side of.
+  const facts = new Map<string, RecalledPack["contested"][number]>();
+  for (const { about, attribute, memory, contested } of kept.memories) {
+    if (contested && attribute !== null) {
+      const key = JSON.stringify([about, attribute]);
+      const fact = facts.get(key) ?? { about, attribute, memories: [] };
+      facts.set(key, { ...fact, memories: [...fact.memories, memory] });
+    }
+  }
+  kept.contested = [...facts.values()].filter(
+    ({ memories: sides }) => sides.length > 1
+  );
   return kept;
 };
 
@@ -1709,20 +1828,20 @@ const within = (pack: RecalledPack, tokens: number): RecalledPack => {
 const holding = {
   within: true,
   order: true,
-  secondWhole: true,
+  noLess: true,
   notFound: true,
   contested: true,
   truncated: true,
 };
 
 // The second pass's pack merged into the first's (`mergeRecalled`), from
-// the ways it can fail: what both passes found is handed over twice; the
-// second pass overruns the budget the first left, or is cut so that its
-// `notFound` counts words of what was left out; a contested fact loses a
-// side; what the person may not read reaches the merged pack, or changes
+// the ways it can fail: what both passes found is handed over twice, or
+// as the shorter copy the budget paid for twice; the second pass overruns
+// the budget the first left, or is cut so that its `notFound` counts
+// words of what was left out; a contested fact loses a side; what the person may not read reaches the merged pack, or changes
 // it at all.
 describe("two recalls merged into one pack", setUpTime, () => {
-  it("holds what both passes found once, as the second packed it, then the second's own, passages and memories alike", async () => {
+  it("holds what both passes found once, the fuller copy, then the second's own, passages and memories alike", async () => {
     const person = await signedInWithRole(idp, "user");
     const { readers, group } = await teamOf(person.userId);
     const [first, second] = [word(), word()];
@@ -1754,46 +1873,61 @@ describe("two recalls merged into one pack", setUpTime, () => {
   // Packs of every shape, sharing passages and memories, contested ones
   // among them, the second packed within what the first left: the merged
   // pack holds every property above.
-  it("never goes over the budget, and holds the second whole, whatever the shape of either pass", () => {
+  it("never goes over the budget, and shows no less of anything than either pass, whatever their shape", () => {
     let seed = 7;
     const random = (): number => {
       seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
       return seed / 2_147_483_648;
     };
     const count = (most: number): number => Math.floor(random() * (most + 1));
-    const items: RecalledItem[] = Array.from({ length: 12 }, (_, index) => ({
-      source: { producer: "upload", id: `s${index}` },
-      version: 1,
-      position: 0,
-      text: "word ".repeat(1 + count(120)),
-      whole: true,
-      found: "words",
-    }));
-    const memories: RecalledMemory[] = Array.from(
-      { length: 12 },
-      (_, index) => ({
-        store: index % 2 === 0 ? "shared" : "own",
-        memory: crypto.randomUUID(),
-        about: `entity-${index % 3}`,
-        attribute: index < 6 ? "status" : null,
-        object: null,
-        type: "fact",
-        statement: "fact ".repeat(1 + count(60)),
-        quote: random() < 0.5 ? "quote ".repeat(1 + count(30)) : null,
-        context: null,
-        source: null,
-        writer: "crm",
-        speaker: { kind: "system" },
-        validFrom: null,
-        validUntil: null,
-        learnedAt: new Date(0),
-        contested: index < 6,
-        confirmed: false,
+    // Each passage as its best part or whole, and each memory without its
+    // quote or with it: a pass holds either copy.
+    const items: RecalledItem[][] = Array.from({ length: 12 }, (_, index) => {
+      const whole: RecalledItem = {
+        source: { producer: "upload", id: `s${index}` },
+        version: 1,
+        position: 0,
+        text: "word ".repeat(2 + count(120)),
+        whole: true,
         found: "words",
-      })
+      };
+      return [{ ...whole, text: "word", whole: false }, whole];
+    });
+    const memories: RecalledMemory[][] = Array.from(
+      { length: 12 },
+      (_, index): RecalledMemory[] => {
+        const quoted: RecalledMemory = {
+          store: index % 2 === 0 ? "shared" : "own",
+          memory: crypto.randomUUID(),
+          about: `entity-${index % 3}`,
+          attribute: index < 6 ? "status" : null,
+          object: null,
+          type: "fact",
+          statement: "fact ".repeat(1 + count(60)),
+          quote: "quote ".repeat(1 + count(30)),
+          context: null,
+          source: null,
+          said: "system",
+          writer: "crm",
+          speaker: { kind: "system" },
+          validFrom: null,
+          validUntil: null,
+          learnedAt: new Date(0),
+          contested: index < 6,
+          confirmed: false,
+          found: "words",
+        };
+        return [{ ...quoted, quote: null }, quoted];
+      }
     );
-    const some = <T>(list: readonly T[]): T[] =>
-      list.filter(() => random() < 0.4);
+    /** Some of `copies`, each as one of its copies. */
+    const some = <T>(copies: readonly T[][]): T[] =>
+      copies
+        .filter(() => random() < 0.4)
+        .flatMap((each) => {
+          const copy = each[count(each.length - 1)];
+          return copy === undefined ? [] : [copy];
+        });
     const packOf = (tokens: number): RecalledPack =>
       within(
         {

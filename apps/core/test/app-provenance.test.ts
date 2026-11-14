@@ -903,6 +903,42 @@ describe("how far sharing follows Apps reaching each other", () => {
       shareRefusal(owner, chain[0] ?? "", { type: "person", id: anna.userId })
     ).resolves.toStrictEqual({ sources: ["app:*"], people: [anna.userId] });
   });
+
+  it("closes an App past the depth it follows to its owner once a Brain grant names teams, and not before", async () => {
+    const [owner, admin] = await Promise.all([
+      personApi("builder"),
+      personApi("admin"),
+    ]);
+    const chain = await Promise.all(
+      Array.from({ length: 40 }, async () => await newApp(owner))
+    );
+    for (const [at, from] of chain.entries()) {
+      const to = chain[at + 1];
+      if (to !== undefined) {
+        // oxlint-disable-next-line no-await-in-loop -- in order
+        await linked(from, to);
+      }
+    }
+    const opened = async () =>
+      await owner.api.apps.get(chain[0] ?? "").then(
+        () => "opened",
+        (error: unknown) => z.object({ code: z.string() }).parse(error).code
+      );
+    // No grant names teams: the owner opens their App, however deep.
+    const before = await opened();
+    // A grant at the far end names a team, the owner's own: what the walk
+    // can't place is closed, to them too (GRA-1842).
+    const team = await newTeam(admin, [owner]);
+    await env.DB.prepare(
+      "INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id, actions, binding, status, requested_by, requested_at, granted_by, granted_at, teams) VALUES (?, 'app', ?, 'platform', 'platform', '[\"brain\"]', 'TEAM_BRAIN', 'active', 'test', 0, 'test', 0, ?)"
+    )
+      .bind(crypto.randomUUID(), chain.at(-1) ?? "", JSON.stringify([team]))
+      .run();
+    expect({ before, after: await opened() }).toStrictEqual({
+      before: "opened",
+      after: "app.unreadable",
+    });
+  });
 });
 
 describe("sharing an App granted an independent workflow", () => {
