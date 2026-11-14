@@ -1011,7 +1011,7 @@ describe("instruction files, edited from a page", setUpTime, () => {
       await saveInstructionFile(env, person, sent);
       await drainAuditOutboxes(env);
     });
-    const [version] = await readInstructionFilesAs(env, person, [file]);
+    const [version] = await readInstructionFilesAs(env, person.userId, [file]);
     const recorded = events.filter(
       ({ action, target }) =>
         action === "instructions.saved" &&
@@ -1267,11 +1267,9 @@ describe("instruction files, edited from a page", setUpTime, () => {
     await Promise.allSettled([erasePerson(env, erasing)]);
     await ageOwnErasure(person.userId);
     const erased = await erasePerson(env, erasing);
-    const afterErasure = await readInstructionFilesAs(
-      env,
-      { userId: person.userId },
-      [file]
-    );
+    const afterErasure = await readInstructionFilesAs(env, person.userId, [
+      file,
+    ]);
 
     expect({
       saves,
