@@ -13,8 +13,8 @@ import { frame } from "./frame.stylex.ts";
 // The bar above a page in Grasp UI's frame: flush on the page's ground,
 // with no edge, where the page is (its crumbs) on the left and its actions
 // on the right. The sidebar's button leads it on a phone, where the sidebar
-// is a sheet, and wherever the sidebar is closed. It stays in view as the page scrolls, and keeps to one
-// line: on a narrow window only the step before the page is kept, or the
+// is a sheet (on a wider window the folded sidebar has its own). It stays
+// in view as the page scrolls, and keeps to one line: on a narrow window only the step before the page is kept, or the
 // first alone (`phoneCrumbs`).
 
 /** A step on the way to the page, and the link it renders as where it leads somewhere. */
@@ -40,9 +40,7 @@ const styles = stylex.create({
     fontSize: grasp.textXs,
     lineHeight: grasp.textXsLine,
   },
-  // The sidebar's button: on a phone, where the sidebar is a sheet; on a
-  // wider window only while the sidebar is closed, as its way back for the
-  // keyboard (the pointer has the window's left edge).
+  // The sidebar's button: on a phone only, where the sidebar is a sheet.
   trigger: {
     [iconVars.size]: grasp.iconSm,
     display: { default: "none", [media.belowTablet]: "inline-flex" },
@@ -77,9 +75,6 @@ const styles = stylex.create({
     top: frame.gutter,
     insetInlineStart: frame.gutter,
     marginInlineStart: 0,
-  },
-  triggerShown: {
-    display: "inline-flex",
   },
   crumbs: {
     display: "flex",
@@ -161,9 +156,10 @@ const CrumbLink = ({ link, label }: { link: ReactElement; label: string }) =>
   });
 
 /**
- * The sidebar's button: shown on a phone, where the sidebar is a sheet,
- * and wherever the sidebar is closed. In the bar, or on a page with no
- * bar (Chat), where it floats over its top left corner (`floating`).
+ * The sidebar's button, shown on a phone, where the sidebar is a sheet (on
+ * a wider window the folded sidebar shows its own button to open it). In
+ * the bar, or on a page with no bar (Chat), where it floats over its top
+ * left corner (`floating`).
  */
 export const SidebarButton = ({
   label,
@@ -172,19 +168,14 @@ export const SidebarButton = ({
   label: string;
   floating?: boolean;
 }) => {
-  const { toggleSidebar, open } = useSidebar();
+  const { toggleSidebar } = useSidebar();
   return (
     <button
       aria-label={label}
       data-icons="still"
       onClick={toggleSidebar}
       type="button"
-      {...stylex.props(
-        styles.trigger,
-        !open && styles.triggerShown,
-        floating && styles.floating,
-        focus.ring
-      )}
+      {...stylex.props(styles.trigger, floating && styles.floating, focus.ring)}
     >
       <Icon icon={SidebarToggle} />
     </button>
