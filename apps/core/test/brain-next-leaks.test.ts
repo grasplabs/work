@@ -1137,7 +1137,7 @@ describe(
           onBehalfOf: holder,
           mode: "interactive",
         }),
-        { conversation: "own", appId: withFile }
+        { conversation: "own", appId: withFile, personal: true }
       );
       // And the outsider does use it: it is theirs to open.
       const outsiderMember = await memberOf(env.DB, outsider);

@@ -796,7 +796,12 @@ const hiddenIdsOf = (
   });
 
 /** The kinds of conversation a context names. */
-const conversations = ["own", "direct", "channel"] as const;
+/** Every kind of chat an agent works in, as its instruction files see it. */
+const conversations = [
+  ["their own chat", { conversation: "own", personal: true }],
+  ["a chat not theirs alone", { conversation: "own", personal: false }],
+  ["a shared channel", { conversation: "channel" }],
+] as const;
 /**
  * Work whose items carry the markers and whose handler fails with them in
  * its error, so the queue's surfaces show whether either gets out: its
@@ -1952,6 +1957,38 @@ export const coreProbes = {
   },
   recallAs: recallProbe(coreBrain.recallAs),
   recallPassagesAs: recallProbe(coreBrain.recallPassagesAs),
+  // Reads a version's time without a check of who reads
+  // (instruction-files.ts reads only what it just saved): only of files no
+  // reader is, and its refusals.
+  instructionVersionAddedAt: async ({ markers }) => {
+    const at = async (name: string, file: InstructionFile, version = 1) =>
+      await answer(
+        name,
+        async () =>
+          await coreBrain.instructionVersionAddedAt(env, file, version)
+      );
+    // A file no reader is, just saved: its one version answers.
+    const saved = unwrittenFile();
+    const { version } = await coreBrain.addInstructionFile(env, {
+      file: saved,
+      change: crypto.randomUUID(),
+      text: "Kept.",
+      after: 0,
+    });
+    return [
+      await at("one just saved", saved, version),
+      await at("someone else's", unwrittenFile()),
+      await at("no version", unwrittenFile(), 0),
+      await at("an id of the markers and control characters", {
+        scope: "agent",
+        agentId: `${markers.join("\n")}\u0000`,
+      }),
+      await at(
+        "an unknown scope named by the markers",
+        unchecked({ scope: "team", teamId: markers.join("") })
+      ),
+    ];
+  },
   // Adds without a check of who writes (instruction-files.ts checks
   // first): only to files no reader is, and its refusals.
   addInstructionFile: async ({ markers }) => {
@@ -3157,7 +3194,7 @@ export const instructionProbes = {
         like
       );
     const asked: Answer[] = [];
-    for (const conversation of conversations) {
+    for (const [kind, context] of conversations) {
       // A context naming another agent, or another person, by a real id:
       // refused alike, whatever their file holds.
       for (const [field, ids, unwritten] of [
@@ -3169,31 +3206,40 @@ export const instructionProbes = {
         ["personId", hiddenIdsOf(probing, "person"), stranger],
       ] as const) {
         for (const id of ids) {
-          const like = `${conversation}, naming ${field} ${id}`;
+          const like = `${kind}, naming ${field} ${id}`;
           asked.push(
             // oxlint-disable-next-line no-await-in-loop -- one at a time
             await side(
               like,
               "nothing",
-              unchecked({ conversation, [field]: unwritten() })
+              unchecked({ ...context, [field]: unwritten() })
             ),
             // oxlint-disable-next-line no-await-in-loop -- one at a time
-            await side(like, "hidden", unchecked({ conversation, [field]: id }))
+            await side(like, "hidden", unchecked({ ...context, [field]: id }))
           );
         }
       }
     }
-    // A shared channel gives what a direct message does, but never a
+    // A shared channel gives what a chat of theirs does, but never a
     // person's file, the reader's own included: others there would read
-    // it through the agent.
+    // it through the agent. Nor does a chat whose answer doesn't reach
+    // them alone (a chat app's direct message while GRA-1821 is open, a
+    // turn nobody asked for): it gives what a shared channel does.
     asked.push(
       await side(
         "a shared channel",
         "nothing",
-        { conversation: "direct" },
+        { conversation: "own", personal: true },
         (file) => file.scope !== "person"
       ),
-      await side("a shared channel", "hidden", { conversation: "channel" })
+      await side("a shared channel", "hidden", { conversation: "channel" }),
+      await side("a chat not theirs alone", "nothing", {
+        conversation: "channel",
+      }),
+      await side("a chat not theirs alone", "hidden", {
+        conversation: "own",
+        personal: false,
+      })
     );
     // An App they use but don't build: its file is for its builders.
     if (usedApps !== undefined) {
@@ -3202,10 +3248,12 @@ export const instructionProbes = {
         await side(like, "nothing", {
           conversation: "own",
           appId: usedApps.withoutFile,
+          personal: true,
         }),
         await side(like, "hidden", {
           conversation: "own",
           appId: usedApps.withFile,
+          personal: true,
         })
       );
     }
@@ -3215,19 +3263,30 @@ export const instructionProbes = {
       await side(noApp, "nothing", {
         conversation: "own",
         appId: crypto.randomUUID(),
+        personal: true,
       })
     );
     for (const appId of hiddenAppsOf(probing)) {
       asked.push(
         // oxlint-disable-next-line no-await-in-loop -- one App at a time
-        await side(noApp, "hidden", { conversation: "own", appId })
+        await side(noApp, "hidden", {
+          conversation: "own",
+          appId,
+          personal: true,
+        })
       );
     }
     const inWorkflow = authoritySchema.parse({ ...agent, mode: "workflow" });
     asked.push(
       await raw("a workflow step", inWorkflow),
-      await raw("their own chat", agent, { conversation: "own" }),
-      await raw("a direct message", agent, { conversation: "direct" }),
+      await raw("their own chat", agent, {
+        conversation: "own",
+        personal: true,
+      }),
+      await raw("a chat not theirs alone", agent, {
+        conversation: "own",
+        personal: false,
+      }),
       await raw("a shared channel", agent, { conversation: "channel" }),
       ...(usedApps === undefined
         ? []
@@ -3235,10 +3294,12 @@ export const instructionProbes = {
             await raw("an App they use", agent, {
               conversation: "own",
               appId: usedApps.withFile,
+              personal: true,
             }),
           ]),
       await raw("as someone who isn't a member", readersAgent(stranger()), {
-        conversation: "direct",
+        conversation: "own",
+        personal: true,
       }),
       await raw(
         "as an App's code",
@@ -3248,7 +3309,7 @@ export const instructionProbes = {
           mode: "interactive",
           appVersion: 1,
         }),
-        { conversation: "own" }
+        { conversation: "own", personal: true }
       ),
       await raw("no context", agent),
       await raw(
@@ -3259,7 +3320,7 @@ export const instructionProbes = {
       await raw(
         "an authority acting for the markers",
         unchecked({ ...agent, onBehalfOf: markers.join("") }),
-        { conversation: "direct" }
+        { conversation: "own", personal: true }
       )
     );
     return asked;

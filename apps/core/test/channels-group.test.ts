@@ -286,7 +286,7 @@ describe("in a group chat", setUpTime, () => {
     ]);
   });
 
-  it("starts from the company's and the agent's instruction files, and never a person's, the asker's own included", async () => {
+  it("starts from the company's and the agent's instruction files, and never a person's, the asker's own included, in a group or a direct message", async () => {
     const admin = await signedInApi(idp, "admin");
     const ann = await member(idp, says("In private."), says("In the group."));
     const u = unique();
@@ -310,7 +310,9 @@ describe("in a group chat", setUpTime, () => {
       );
     };
     expect({ direct: told(0), group: told(1) }).toStrictEqual({
-      direct: [`Company ${u}`, `Agent ${u}`, `Ann's ${u}`],
+      // Her direct message isn't hers alone while GRA-1821 is open: the
+      // chat app keeps its answer too (workspace.ts, `answersAlone`).
+      direct: [`Company ${u}`, `Agent ${u}`],
       group: [`Company ${u}`, `Agent ${u}`],
     });
   });

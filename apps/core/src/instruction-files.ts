@@ -1,4 +1,3 @@
-import { agentErrors } from "@grasp-os/shared/agent";
 import { appErrors } from "@grasp-os/shared/apps";
 import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
@@ -12,7 +11,7 @@ import { requireAdmin, roleErrors, roleSchema } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { z } from "zod";
 
-import { readAgent } from "./agents.ts";
+import { companyAgent } from "./agents.ts";
 import { editableApp } from "./apps.ts";
 import { auditLog } from "./audit-log.ts";
 import { uuidFromHash } from "./audit-outbox.ts";
@@ -21,6 +20,7 @@ import type { Member } from "./auth/identity.ts";
 import {
   addInstructionFile,
   instructionFileOf,
+  instructionVersionAddedAt,
   readInstructionFilesAs,
 } from "./brain-next.ts";
 import type { InstructionFile, InstructionFileVersion } from "./brain-next.ts";
@@ -33,21 +33,22 @@ import type { InstructionFile, InstructionFileVersion } from "./brain-next.ts";
 // signed-in person's `Identity`, and the role and membership behind both
 // are read from core's records at each call.
 //
-// Which files, by where the agent works, as today's memory has them:
+// Which files, by where the agent works:
 //
-// - a person's own chat: the company's, the acting agent's, the App's
-//   when they work on one they build, and their own;
-// - an agent in a direct message: the company's, the agent's and the
-//   person's it acts for;
+// - a chat of the person's own: the company's, the acting agent's, the
+//   App's when they work on one they build, and, only in a turn whose
+//   answer reaches them alone (`personal`), their own;
 // - an agent in a shared channel: the company's and the agent's, never a
 //   person's, which others there would read through the agent;
 // - an AI step of a workflow: none, so a run does the same whoever's
-//   files changed;
-// - a turn nobody asked for there and then (a wake-up, an event): as its
-//   chat's, but never the person's own. What woke it steers it, and what
-//   it hands on goes where that leads, so it holds none of their own
-//   content, as it recalls none of their own store (workspace.ts,
-//   `answersAlone`).
+//   files changed.
+//
+// `personal` is the turn's one gate for a person's own content, as their
+// own recall and their own skills take it (workspace.ts, `answersAlone`):
+// their attended chat in Grasp. Not a turn nobody asked for there and
+// then (a wake-up, an event), which what woke it steers; nor, while
+// GRA-1821 is open, a chat app's direct message, which the chat app keeps
+// too, though the plan lists their file there.
 //
 // Shared files first, so the part many chats share comes first and stays
 // the same.
@@ -60,21 +61,18 @@ import type { InstructionFile, InstructionFileVersion } from "./brain-next.ts";
 
 /**
  * Where an agent works in a chat, beyond who it is and whom it acts for
- * (its `Authority`): which kind of conversation, and in a person's own
- * chat the App they work on. The kind is vouched for by the chat's host,
- * which knows whether the chat is shared on its platform, as it does for
- * today's memory (workspace.ts); an `Authority` doesn't carry it. The App
- * is checked here: its file is given only to one of its builders.
+ * (its `Authority`): a chat others share, or one of the person's own, with
+ * the App they work on and whether its answer reaches them alone
+ * (`personal`). Both are vouched for by the chat's host, which knows
+ * whether the chat is shared on its platform and who asked the turn
+ * (workspace.ts); an `Authority` carries neither. The App is checked
+ * here: its file is given only to one of its builders.
  */
 const instructionContextSchema = z.discriminatedUnion("conversation", [
   z.strictObject({
     conversation: z.literal("own"),
     appId: appIdSchema.optional(),
-    unattended: z.literal(true).optional(),
-  }),
-  z.strictObject({
-    conversation: z.literal("direct"),
-    unattended: z.literal(true).optional(),
+    personal: z.boolean(),
   }),
   z.strictObject({ conversation: z.literal("channel") }),
 ]);
@@ -136,40 +134,26 @@ const filesOf = async (
   if (context.conversation === "channel") {
     return await readInstructionFilesAs(env, member, [...companyFiles, agent]);
   }
-  // Theirs only in a turn they asked for (above).
-  const own = context.unattended === true ? [] : [person];
-  switch (context.conversation) {
-    case "direct": {
-      return await readInstructionFilesAs(env, member, [
-        ...companyFiles,
-        agent,
-        ...own,
-      ]);
-    }
-    case "own": {
-      const { appId } = context;
-      // An App's file is for those who may change it, while it isn't
-      // archived. A chat about an App they no longer build, or one put
-      // away, goes on without it, as with an App that has none: refusing
-      // would end the chat over a file, and tell them it exists.
-      if (appId === undefined || !(await buildsApp(env, member, appId))) {
-        return await readInstructionFilesAs(env, member, [
-          ...companyFiles,
-          agent,
-          ...own,
-        ]);
-      }
-      return await readInstructionFilesAs(
-        env,
-        member,
-        [...companyFiles, agent, { scope: "app", appId }, ...own],
-        appId
-      );
-    }
-    default: {
-      throw permissionErrors.create("permission.context_invalid");
-    }
+  // Theirs only where the answer reaches them alone (above).
+  const own = context.personal ? [person] : [];
+  const { appId } = context;
+  // An App's file is for those who may change it, while it isn't
+  // archived. A chat about an App they no longer build, or one put away,
+  // goes on without it, as with an App that has none: refusing would end
+  // the chat over a file, and tell them it exists.
+  if (appId === undefined || !(await buildsApp(env, member, appId))) {
+    return await readInstructionFilesAs(env, member, [
+      ...companyFiles,
+      agent,
+      ...own,
+    ]);
   }
+  return await readInstructionFilesAs(
+    env,
+    member,
+    [...companyFiles, agent, { scope: "app", appId }, ...own],
+    appId
+  );
 };
 
 /**
@@ -180,8 +164,8 @@ const filesOf = async (
  * Refused with `permission.context_invalid` for code that isn't an agent,
  * and for a chat without a context or with one that isn't one; with
  * `permission.person_inactive` once the person is no longer a member.
- * Working on an App they don't build, its file is left out; in a turn
- * nobody asked for (`unattended`), the person's own.
+ * Working on an App they don't build, its file is left out; where the
+ * answer doesn't reach them alone (`personal` false), the person's own.
  */
 export const instructionFilesFor = async (
   env: Env,
@@ -273,18 +257,12 @@ const requireWriter = async (
     }
     case "agent": {
       requireAdmin(member);
-      // Only one of the company's agents has a file: none is kept under
-      // an ID nobody made, or one an admin deleted.
-      const agent = await readAgent(env, file.agentId);
-      if (agent === undefined) {
-        throw agentErrors.create("agent.unknown");
-      }
-      // Never a person's own agent's (agents.ts): what it is told is its
-      // owner's to say, in its instructions, and an admin who learnt its
-      // ID from the audit log tells it nothing.
-      if (agent.ownerId !== null) {
-        throw roleErrors.create("role.forbidden");
-      }
+      // Only an agent the company has has a file: none is kept under an
+      // ID nobody made, one an admin deleted, or a person's own agent's
+      // (agents.ts), which is its owner's to instruct; each answers alike,
+      // so an admin who learnt an own agent's ID from the audit log learns
+      // nothing more and tells it nothing.
+      await companyAgent(env, file.agentId);
       return;
     }
     case "app": {
@@ -370,11 +348,13 @@ export const saveInstructionFile = async (
   // Recorded once the version is there, so an entry never reads as a
   // save that wasn't made. One the log can't take fails the call, and the
   // version it saved stays unrecorded until the same save (the same
-  // change) is tried again, which records it then. Its ID comes from who
-  // saved which file under which change, so a retry the log already has
-  // is kept once (the log keeps an event ID once): one event per save.
-  // Which file and version, never its text.
+  // change) is tried again, which records it then. Every try makes the
+  // same event: its ID from who saved which file under which change, its
+  // time the version's own, and the rest fixed by those, so the log keeps
+  // a retry it already has as a duplicate, never a conflict: one event
+  // per save. Which file and version, never its text.
   const id = instructionFileId(file);
+  const at = await instructionVersionAddedAt(env, file, added.version);
   const event = createAuditEvent(
     {
       actor: actorOf(member),
@@ -387,6 +367,7 @@ export const saveInstructionFile = async (
   await auditLog(env).append([
     {
       ...event,
+      at: at.toISOString(),
       id: uuidFromHash(
         await sha256Hex(
           JSON.stringify(["instructions.saved", member.userId, id, change])

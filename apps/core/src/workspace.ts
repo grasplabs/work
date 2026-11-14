@@ -326,27 +326,22 @@ export type ChatPlace = z.infer<typeof chatPlaceSchema>;
 
 /**
  * Where a chat's agent works, for its instruction files: never a person's
- * own file where others read the answer (a chat others share); a chat
- * platform's direct message is the person's, without an App; Grasp's own
- * chat is theirs, about the App it was made for, if any. A turn nobody
- * asked for (`unattended`) holds none of the person's own, as it recalls
- * none of their own store (`answersAlone`).
+ * own file where others read the answer (a chat others share); in a chat
+ * of theirs, the App it was made for, if any, and their own file only in
+ * a turn whose answer reaches them alone (`personal`, `answersAlone`):
+ * the one gate their own recall and skills take too.
  */
 const instructionContextOf = (
   shared: boolean,
-  { via, appId }: Pick<Chat, "via" | "appId">,
-  unattended: boolean
+  appId: string | null,
+  personal: boolean
 ): InstructionContext => {
   if (shared) {
     return { conversation: "channel" };
   }
-  const woken = unattended ? { unattended: true as const } : {};
-  if (via !== "web") {
-    return { conversation: "direct", ...woken };
-  }
   return appId === null
-    ? { conversation: "own", ...woken }
-    : { conversation: "own", appId, ...woken };
+    ? { conversation: "own", personal }
+    : { conversation: "own", appId, personal };
 };
 
 /** The title of a chat others share on `platform`. */
@@ -2113,11 +2108,14 @@ export class Workspace extends DurableObject<Env> {
         throw permissionErrors.create("permission.context_invalid");
       }
       // Before the model is admitted: what memory reads is a source too.
+      // Whether the turn's answer reaches its person alone: the one gate
+      // for their own content, whatever reads it (`answersAlone`).
+      const personal = answersAlone(chat, unattended);
       const context = await this.#turnContext(
         scope,
         authority,
         work,
-        shared,
+        { shared, personal },
         agent
       );
       // Refuses a model the deployment or its rules don't allow before
@@ -2160,7 +2158,7 @@ export class Workspace extends DurableObject<Env> {
         ),
         shared,
         audience,
-        personal: answersAlone(chat, unattended),
+        personal,
         readsBrain: await hasBrainGrant(this.env, authority),
         context,
         capture: {
@@ -2462,22 +2460,22 @@ export class Workspace extends DurableObject<Env> {
     scope: Parameters<typeof auditAgentCall>[1],
     authority: Authority,
     work: Extract<WorkContext, { type: "chat" }>,
-    shared: boolean,
+    { shared, personal }: { shared: boolean; personal: boolean },
     agent: Awaited<ReturnType<typeof turnAgent>>
   ): Promise<TurnContext> {
-    const chat = this.#chat(work.chatId);
-    const { via } = chat;
+    const { via, appId } = this.#chat(work.chatId);
     // A Brain that can't give the files leaves the turn without them, as
     // it does without skills (below) and without the person's own file
     // when their store fails (brain-next.ts): missing guidance is no
     // question of access. A refusal (who it acts for, where) still
-    // refuses the turn.
+    // refuses the turn. One that went without them is recorded, as the
+    // skills' call records it (`unavailable`, below).
     let instructions: Awaited<ReturnType<typeof instructionFilesFor>> = [];
     try {
       instructions = await instructionFilesFor(
         this.env,
         authority,
-        instructionContextOf(shared, chat, scope.unattended === true)
+        instructionContextOf(shared, appId, personal)
       );
     } catch (error) {
       if (permissionErrors.codeOf(error) !== undefined) {
@@ -2485,6 +2483,10 @@ export class Workspace extends DurableObject<Env> {
       }
       log.warn("instructions.turn_unavailable", {
         errorName: error instanceof Error ? error.name : typeof error,
+      });
+      await auditAgentCall(this.env, scope, {
+        method: "brain.instructions",
+        detail: { files: 0, turn: true, unavailable: true },
       });
     }
     // The skills the chat may use, from the Brain: guidance, never a grant

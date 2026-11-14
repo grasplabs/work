@@ -1904,6 +1904,45 @@ export const addInstructionFile = async (
   return { file, version };
 };
 
+/**
+ * When the version `version` of the instruction file `file` was added, as
+ * the store that holds it lists it (the person's own for theirs): what a
+ * save's audit event takes as its time, so every try of one save makes
+ * the same event. Refused when that store no longer lists that version.
+ *
+ * For instruction-files.ts only, after the add it answers for: nothing
+ * here checks who reads.
+ */
+export const instructionVersionAddedAt = async (
+  env: BrainEnv,
+  file: InstructionFile,
+  version: number
+): Promise<Date> => {
+  const checkedFile = checked(instructionFileSchema, file);
+  const access = instructionAccessOf(checkedFile);
+  if (access.kind === "none") {
+    throw new Error("An instruction file always has readers");
+  }
+  // Who the file's own access names, so the listing reads what it holds.
+  const reader =
+    access.kind === "owner"
+      ? { person: access.person, groups: [] }
+      : { person: null, groups: [access.group] };
+  const store =
+    access.kind === "owner" ? ownBrain(env, access.person) : brain(env);
+  const { versions } = await store.listVersions({
+    source: instructionKeyOf(checkedFile),
+    reader,
+    before: checked(z.int().min(1), version) + 1,
+    limit: 1,
+  });
+  const [listed] = versions;
+  if (listed?.version !== version) {
+    throw new Error("The Brain no longer lists that version");
+  }
+  return listed.addedAt;
+};
+
 const instructionFilesSchema = z
   .array(instructionFileSchema)
   .max(currentReadMax);

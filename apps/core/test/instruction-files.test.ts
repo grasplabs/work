@@ -8,8 +8,9 @@ import type { Authority } from "@grasp-os/shared/permissions";
 import { authoritySchema } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
+import { auditLog } from "../src/audit-log.ts";
 import {
   addInstructionFile,
   erasePerson,
@@ -215,13 +216,20 @@ describe("instruction files", setUpTime, () => {
     const asAgent = agentFor(agentId, personId);
 
     const got = {
-      ownChat: await markersFor(markers, asAgent, { conversation: "own" }),
+      ownChat: await markersFor(markers, asAgent, {
+        conversation: "own",
+        personal: true,
+      }),
       ownChatOnApp: await markersFor(markers, asAgent, {
         conversation: "own",
         appId,
+        personal: true,
       }),
-      directMessage: await markersFor(markers, asAgent, {
-        conversation: "direct",
+      // A chat of theirs whose answer doesn't reach them alone: a chat
+      // app's direct message while GRA-1821 is open, a turn nobody asked.
+      notTheirsAlone: await markersFor(markers, asAgent, {
+        conversation: "own",
+        personal: false,
       }),
       sharedChannel: await markersFor(markers, asAgent, {
         conversation: "channel",
@@ -230,12 +238,12 @@ describe("instruction files", setUpTime, () => {
       otherPersonsChat: await markersFor(
         markers,
         agentFor(agentId, other.userId),
-        { conversation: "own" }
+        { conversation: "own", personal: true }
       ),
-      otherAgentsMessage: await markersFor(
+      otherAgentsChat: await markersFor(
         markers,
         agentFor(otherAgentId, personId),
-        { conversation: "direct" }
+        { conversation: "own", personal: true }
       ),
     };
     expect(got).toStrictEqual({
@@ -247,7 +255,7 @@ describe("instruction files", setUpTime, () => {
         "app",
         "person",
       ],
-      directMessage: ["companyInstructions", "companyFacts", "agent", "person"],
+      notTheirsAlone: ["companyInstructions", "companyFacts", "agent"],
       sharedChannel: ["companyInstructions", "companyFacts", "agent"],
       workflowStep: [],
       otherPersonsChat: [
@@ -256,7 +264,7 @@ describe("instruction files", setUpTime, () => {
         "agent",
         "otherPerson",
       ],
-      otherAgentsMessage: [
+      otherAgentsChat: [
         "companyInstructions",
         "companyFacts",
         "otherAgent",
@@ -266,6 +274,7 @@ describe("instruction files", setUpTime, () => {
     const files = await instructionFilesFor(env, asAgent, {
       conversation: "own",
       appId,
+      personal: true,
     });
     expect(files.map(({ file }) => file)).toStrictEqual([
       { scope: "company", name: "instructions" },
@@ -276,7 +285,7 @@ describe("instruction files", setUpTime, () => {
     ]);
   });
 
-  it("gives a direct message only the file of the person the agent acts for, whatever the context holds", async () => {
+  it("gives a chat only the file of the person the agent acts for, and none where its answer doesn't reach them alone, whatever the context holds", async () => {
     const [one, other] = await Promise.all([member("user"), member("user")]);
     const u = unique();
     await save(one, { scope: "person", personId: one.userId }, `one ${u}`);
@@ -288,8 +297,17 @@ describe("instruction files", setUpTime, () => {
     const asAgent = agentFor(newAgentId(), one.userId);
 
     await expect(
-      textsFor(asAgent, { conversation: "direct" })
+      textsFor(asAgent, { conversation: "own", personal: true })
     ).resolves.not.toContain(`other ${u}`);
+    // A chat app's direct message, while GRA-1821 is open: not theirs
+    // alone, so not their own file either (the plan lists it there).
+    const direct = await textsFor(asAgent, {
+      conversation: "own",
+      personal: false,
+    });
+    expect(
+      [`one ${u}`, `other ${u}`].filter((text) => direct.includes(text))
+    ).toStrictEqual([]);
     // A context naming someone else is no context.
     const named = await outcome(
       instructionFilesFor(
@@ -297,7 +315,8 @@ describe("instruction files", setUpTime, () => {
         asAgent,
         // SAFETY: a call from outside TypeScript can send any shape.
         {
-          conversation: "direct",
+          conversation: "own",
+          personal: true,
           personId: other.userId,
         } as InstructionContext
       )
@@ -312,7 +331,9 @@ describe("instruction files", setUpTime, () => {
       person.userId
     );
     await expect(
-      outcome(instructionFilesFor(env, asApp, { conversation: "own" }))
+      outcome(
+        instructionFilesFor(env, asApp, { conversation: "own", personal: true })
+      )
     ).resolves.toBe("permission.context_invalid");
     // A chat needs its context: which kind of conversation it is.
     await expect(
@@ -325,7 +346,8 @@ describe("instruction files", setUpTime, () => {
     const asAgent = agentFor(newAgentId(), person.userId);
     const scopesNow = async (): Promise<string[]> => {
       const files = await instructionFilesFor(env, asAgent, {
-        conversation: "direct",
+        conversation: "own",
+        personal: true,
       });
       return files.map(({ file }) => file.scope);
     };
@@ -365,7 +387,7 @@ describe("instruction files", setUpTime, () => {
     const files = await instructionFilesFor(
       env,
       agentFor(newAgentId(), person.userId),
-      { conversation: "own" }
+      { conversation: "own", personal: true }
     );
     expect(files.at(-1)).toMatchObject({ file, version: 2, text: "second" });
   });
@@ -390,7 +412,10 @@ describe("instruction files", setUpTime, () => {
       saveOutcome(person, file, "&".repeat(instructionsMaxLength / 2))
     ).resolves.toBe("instructions.too_large");
     await expect(
-      textsFor(agentFor(newAgentId(), person.userId), { conversation: "own" })
+      textsFor(agentFor(newAgentId(), person.userId), {
+        conversation: "own",
+        personal: true,
+      })
     ).resolves.toContain(atMost);
   });
 
@@ -516,6 +541,7 @@ describe("instruction files", setUpTime, () => {
       outcome(
         instructionFilesFor(env, agentFor(newAgentId(), person.userId), {
           conversation: "own",
+          personal: true,
         })
       )
     ).resolves.toBe("permission.person_inactive");
@@ -529,7 +555,7 @@ describe("instruction files", setUpTime, () => {
     const { id: appId } = await builder.api.apps.create({ name: "Desk" });
     const marker = `app ${unique()}`;
     await save(builder.identity, { scope: "app", appId }, marker);
-    const onApp = { conversation: "own", appId } as const;
+    const onApp = { conversation: "own", appId, personal: true } as const;
 
     await expect(
       textsFor(agentFor(newAgentId(), builder.userId), onApp)
@@ -562,7 +588,7 @@ describe("instruction files", setUpTime, () => {
     });
     const marker = `app ${unique()}`;
     await save(owner.identity, { scope: "app", appId }, marker);
-    const onApp = { conversation: "own", appId } as const;
+    const onApp = { conversation: "own", appId, personal: true } as const;
     const before = await textsFor(agentFor(newAgentId(), shared.userId), onApp);
 
     // The App is granted the owner's own mailbox, which the builder it is
@@ -598,7 +624,7 @@ describe("instruction files", setUpTime, () => {
     const { id: appId } = await builder.api.apps.create({ name: "Desk" });
     const marker = `app ${unique()}`;
     await save(builder.identity, { scope: "app", appId }, marker);
-    const onApp = { conversation: "own", appId } as const;
+    const onApp = { conversation: "own", appId, personal: true } as const;
     const loaded = async () => {
       const texts = await textsFor(
         agentFor(newAgentId(), builder.userId),
@@ -703,7 +729,10 @@ describe("instruction files", setUpTime, () => {
     const asAgent = agentFor(newAgentId(), userId);
     const malformed: unknown[] = [
       { conversation: "channel", appId: "app" },
-      { conversation: "direct", appId: "app" },
+      { conversation: "direct" },
+      // Whether its answer reaches them alone is always said.
+      { conversation: "own" },
+      { conversation: "own", personal: "yes" },
       { conversation: "channel", people: ["someone"] },
       { conversation: "own", agentId: "another" },
       { conversation: "elsewhere" },
@@ -851,16 +880,29 @@ describe("instruction files, edited from a page", setUpTime, () => {
     const after = await versionAs(admin.api, file);
     const change = crypto.randomUUID();
 
+    const warned = vi.spyOn(console, "warn");
     const events = await auditedDuring(async () => {
       await admin.api.instructions.save({ file, change, text, after });
-      // Its answer lost, the same save again: one save, one entry.
+      // Later, so a time taken from the clock would differ.
+      await scheduler.wait(20);
+      // Its answer lost, the same save again: one save, one entry, the
+      // same each try, so the log takes the retry as a duplicate.
       await admin.api.instructions.save({ file, change, text, after });
     });
     const recorded = events.filter(
       ({ action }) => action === "instructions.saved"
     );
+    const [entry] = recorded;
+    const replay =
+      entry === undefined ? undefined : await auditLog(env).append([entry]);
+    const conflicting = warned.mock.calls.filter((call) =>
+      JSON.stringify(call).includes("audit.conflicting_duplicate")
+    );
+    warned.mockRestore();
 
     expect({
+      conflictsWarned: conflicting.length,
+      replayConflicts: replay?.conflicts,
       saved: recorded.map(({ actor, target, detail }) => ({
         actor,
         target,
@@ -869,6 +911,8 @@ describe("instruction files, edited from a page", setUpTime, () => {
       })),
       carriesText: JSON.stringify(events).includes(text),
     }).toStrictEqual({
+      conflictsWarned: 0,
+      replayConflicts: 0,
       saved: [
         {
           actor: { type: "person", userId: admin.userId },
@@ -935,19 +979,34 @@ describe("instruction files, edited from a page", setUpTime, () => {
       text: "",
       after: first.version,
     });
-
-    const loaded = await textsFor(agentFor(newAgentId(), person.userId), {
-      conversation: "own",
+    const loadsTheirs = async () => {
+      const loaded = await textsFor(agentFor(newAgentId(), person.userId), {
+        conversation: "own",
+        personal: true,
+      });
+      return loaded.some((text) => text === marker || text.trim() === "");
+    };
+    const whenEmpty = await loadsTheirs();
+    // Only whitespace holds nothing either.
+    const blank = await person.api.instructions.save({
+      file: own,
+      change: crypto.randomUUID(),
+      text: " \n ",
+      after: emptied.version,
     });
 
     expect({
       emptied: emptied.version,
+      whenEmpty,
+      blank: blank.version,
       read: await person.api.instructions.read(own),
-      loadsTheirs: loaded.some((text) => text === marker || text === ""),
+      whenBlank: await loadsTheirs(),
     }).toStrictEqual({
       emptied: first.version + 1,
-      read: { version: first.version + 1, text: "" },
-      loadsTheirs: false,
+      whenEmpty: false,
+      blank: first.version + 2,
+      read: { version: first.version + 2, text: " \n " },
+      whenBlank: false,
     });
   });
 
@@ -1062,9 +1121,11 @@ describe("instruction files, edited from a page", setUpTime, () => {
     });
     const theirChat = await textsFor(agentFor(newAgentId(), person.userId), {
       conversation: "own",
+      personal: true,
     });
     const othersChat = await textsFor(agentFor(newAgentId(), other.userId), {
       conversation: "own",
+      personal: true,
     });
     const erasing = {
       personId: person.userId,
