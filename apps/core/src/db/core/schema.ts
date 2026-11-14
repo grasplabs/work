@@ -4580,7 +4580,7 @@ export const keptEventKeys = sqliteTable(
 
 /**
  * Unused since a trigger has no versions and keeps its configuration on
- * its own row (`trigger_resources`, where migration 0246 copied each
+ * its own row (`trigger_resources`, where migration 0247 copied each
  * trigger's): written and read by nothing. Dropped in a later release
  * (expand, then contract).
  */

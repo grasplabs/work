@@ -409,7 +409,7 @@ test("a builder makes something that runs on its own by saying what they want do
   ).toBeVisible();
 
   // A first step that passes is saved as the chat's agent would save it
-  // (`env.workflowBuild.edit`): this script only answers (a script that
+  // (`env.workflowBuild.write`): this script only answers (a script that
   // saves through the agent's tools is workflow-drawn-decides.e2e.ts), so
   // the builder's own session saves it.
   const { core, api } = apiOf(builder);
