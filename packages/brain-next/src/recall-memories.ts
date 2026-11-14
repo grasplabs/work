@@ -123,29 +123,37 @@ const namedBy = (question: string): Named => {
  * A name the question holds is a run of one form's words, so each run is
  * sought in the index of names (`entity_names_folded_idx`) by equality:
  * every word, and a run one word longer only while some name begins with
- * the run and a space (one probe of the same index, at most one row). What
- * it reads is bounded by the question's words, however many names the
- * store holds, alike or not. The probe asks only whether to seek further,
- * of any name: what is found is a name equal to a run, checked against the
- * reader, so a name the reader may not read never changes the answer; it
- * costs the seeks a readable one does, and nothing for the names that
- * share its first words.
+ * the run and a space (one probe of the same index, at most one row). The
+ * question's words are a table of their own, read by position, so a step
+ * costs the same however far into the question it is. What it reads is a
+ * few rows a step, and its steps are at most each word of the question
+ * times the words of the longest name a run of it begins, and one: never
+ * more for the names the store holds, alike or not. (At the contract's
+ * limits a question folds into 6,001 words, and a name into 250.)
+ *
+ * The probe asks only whether to seek further, of any name: what is found
+ * is a name equal to a run, checked against the reader, so a name the
+ * reader may not read never changes the answer; it costs the steps a
+ * readable one does, and nothing for the names that share its first words.
  */
 const namedSql = `
 WITH RECURSIVE ${readableSql},
-runs (form, next, run) AS (
-  SELECT form.key, word.key + 1, word.value
+words (form, position, word) AS MATERIALIZED (
+  SELECT form.key, word.key, word.value
   FROM json_each(?1) AS form, json_each(form.value) AS word
+),
+runs (form, next, run) AS (
+  SELECT form, position + 1, word FROM words
   UNION ALL
-  SELECT runs.form, runs.next + 1, runs.run || ' ' || (?1 ->> printf('$[%d][%d]', runs.form, runs.next))
-  FROM runs
-  WHERE (?1 ->> printf('$[%d][%d]', runs.form, runs.next)) IS NOT NULL
-    AND EXISTS (
-      SELECT 1 FROM entity_names
-      WHERE entity_names.type = 'name'
-        AND entity_names.folded >= runs.run || ' '
-        AND entity_names.folded < runs.run || '!'
-    )
+  SELECT runs.form, runs.next + 1, runs.run || ' ' || words.word
+  FROM runs CROSS JOIN words
+    ON words.form = runs.form AND words.position = runs.next
+  WHERE EXISTS (
+    SELECT 1 FROM entity_names
+    WHERE entity_names.type = 'name'
+      AND entity_names.folded >= runs.run || ' '
+      AND entity_names.folded < runs.run || '!'
+  )
 ),
 sought AS MATERIALIZED (SELECT DISTINCT run FROM runs),
 held AS MATERIALIZED (

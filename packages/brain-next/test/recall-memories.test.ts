@@ -570,6 +570,29 @@ describe("recall through memories, hidden versus absent", () => {
       ].toSorted()
     );
   });
+
+  // A name only a hidden memory gave, of an entity a readable memory is
+  // about under no name the reader may read: the question naming it finds
+  // nothing along entities, as if that name did not exist.
+  it("never finds an entity by a name only a memory hidden from the reader gave", async () => {
+    const [seen, hiddenGroup] = [unique("seen"), unique("hidden")];
+    const name = `${word()} holding`;
+    const { entities } = await remember(
+      audience(hiddenGroup),
+      [{ key: "e", kind: "customer", names: [name] }],
+      [fact("e", "A secret customer")]
+    );
+    await remember(
+      audience(seen),
+      [{ key: "e", id: entities.e ?? "", kind: "customer", names: [] }],
+      [fact("e", "Pays on time")],
+      readerOf(unique("maker"), hiddenGroup, seen)
+    );
+
+    await expect(
+      byEntitiesOf(readerOf(unique("ann"), seen), `who is ${name}`)
+    ).resolves.toStrictEqual([]);
+  });
 });
 
 /** A relation from `from` to `to`, under `attribute`. */
@@ -1089,6 +1112,23 @@ describe("recall through memories, the names a question holds", () => {
         "named Jan de Vries",
         "named de Vries",
       ].toSorted()
+    );
+  });
+
+  // A name of three words whose third begins with the last code point
+  // (U+10FFFF) begins with its first two and a space as any other.
+  it("finds a name of more than two words whatever its next character", async () => {
+    const group = unique("team");
+    const reader = readerOf(unique("ann"), group);
+    const name = `${word()} ${word()} \u{10FFFF}${word()}`;
+    await remember(
+      audience(group),
+      [{ key: "n", kind: "person", names: [name] }],
+      [fact("n", "named at the last code point")]
+    );
+
+    await expect(byEntitiesOf(reader, `who is ${name}`)).resolves.toStrictEqual(
+      ["named at the last code point"]
     );
   });
 
