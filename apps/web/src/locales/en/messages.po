@@ -559,6 +559,10 @@ msgid "{field} in {table} needs a change in code before this can be published."
 msgstr "{field} in {table} needs a change in code before this can be published."
 
 #: src/onboarding/document-drop.tsx
+msgid "{file} couldn’t be removed"
+msgstr "{file} couldn’t be removed"
+
+#: src/onboarding/document-drop.tsx
 msgid "{file} removed"
 msgstr "{file} removed"
 
@@ -3502,6 +3506,7 @@ msgstr "Can't offer Run: {unread}"
 #: src/knowledge/new-collection.tsx
 #: src/knowledge/new-document.tsx
 #: src/link-confirmation.tsx
+#: src/onboarding/document-drop.tsx
 #: src/onboarding/place-picker.tsx
 #: src/projects/file-item-dialog.tsx
 #: src/projects/project-dialog.tsx
@@ -7051,6 +7056,10 @@ msgstr "I couldn’t read this one"
 msgid "I do every interview myself. Here’s what that sounds like."
 msgstr "I do every interview myself. Here’s what that sounds like."
 
+#: src/onboarding/document-drop.tsx
+msgid "I forget what I read in it, and draw again what I drew with it. If you shared it, its file in your Brain, if there is one, is deleted too; if another admin did, the file stays in theirs until they delete it. This can’t be undone."
+msgstr "I forget what I read in it, and draw again what I drew with it. If you shared it, its file in your Brain, if there is one, is deleted too; if another admin did, the file stays in theirs until they delete it. This can’t be undone."
+
 #: src/onboarding/hr-leads.tsx
 msgid "I found nobody in {name}."
 msgstr "I found nobody in {name}."
@@ -7062,6 +7071,10 @@ msgstr "I found nobody in {signIn}."
 #: src/interview/sound-check.tsx
 msgid "I hear you. Shall we start?"
 msgstr "I hear you. Shall we start?"
+
+#: src/onboarding/setup-steps.tsx
+msgid "I keep each file in your Brain, for you alone."
+msgstr "I keep each file in your Brain, for you alone."
 
 #: src/interview/words.ts
 msgid "I lost the connection. Please check your internet. I have kept what you said, and I keep trying."
@@ -11413,6 +11426,7 @@ msgstr "Remember something"
 #: src/apps/data-model-changes.tsx
 #: src/apps/field-editor.tsx
 #: src/connections/tool-permissions.tsx
+#: src/onboarding/document-drop.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/ai-providers.tsx
 msgid "Remove"
@@ -11428,6 +11442,10 @@ msgstr "Remove"
 #: src/onboarding/document-drop.tsx
 msgid "Remove {file}"
 msgstr "Remove {file}"
+
+#: src/onboarding/document-drop.tsx
+msgid "Remove {file}?"
+msgstr "Remove {file}?"
 
 #: src/settings/ai-providers.tsx
 msgid "Remove {label}"

@@ -32,6 +32,7 @@ import {
   auditedBatch,
   outboxed,
   outboxedEvent,
+  outboxedIfChanged,
   uuidFromHash,
 } from "./audit-outbox.ts";
 import { memberOf } from "./auth/identity.ts";
@@ -41,12 +42,14 @@ import {
   addSource,
   eraseSource,
   listVersionsAs,
+  readSourceVersionAs,
   sourceTextProblem,
 } from "./brain-next.ts";
 import type { SourceReaders, SourceVersionRef } from "./brain-next.ts";
 import { brainUploads, teams, users } from "./db/core/schema.ts";
 import { ExtractorUnavailableError, localExtractor } from "./files/extract.ts";
 import { hasText, signatures } from "./files/upload-checks.ts";
+import { onboardingStore } from "./onboarding/store.ts";
 
 // Files a person uploads straight into the Brain, on Brain › Sources
 // (GRA-1824; its threat model is on the issue). The uploader chooses who
@@ -637,6 +640,25 @@ export const uploadVersionToBrain = async (
 };
 
 /**
+ * Whether `kept`, a version of an upload of `person`'s, is still there for
+ * them, as the Brain reads it now: the authoritative read of whether it
+ * was deleted, since an erasure in the Brain answers only once nothing it
+ * covers is read any more, while core's row of the upload goes last. A
+ * read refused (they are no member any more) or failed counts as gone.
+ */
+export const uploadVersionKept = async (
+  env: Env,
+  person: Identity,
+  kept: SourceVersionRef
+): Promise<boolean> => {
+  try {
+    return (await readSourceVersionAs(env, person.userId, kept)) !== null;
+  } catch {
+    return false;
+  }
+};
+
+/**
  * The upload `uploadId`, as `person` may act on it: for anyone who may
  * read or delete it (`mayReach`); null when there is none or they may do
  * neither, alike.
@@ -671,9 +693,20 @@ export const brainUploadOf = async (
  * (`mayDelete`; anyone else who may read it is refused, audited, as
  * `brain.upload_admin_only`): its key erased in
  * the Brain, every version, then its row forgotten, with
- * `brain.upload.deleted`. An erasure that failed is recorded
- * (`brain.upload.delete_failed`) and leaves the upload as it was, to
- * delete again: the erasure is safe to repeat.
+ * `brain.upload.deleted`, once however many deletes ran at once. An
+ * erasure that failed is recorded (`brain.upload.delete_failed`) and
+ * leaves the upload as it was, to delete again: the erasure is safe to
+ * repeat.
+ *
+ * An upload for its uploader alone may be the file of a document they
+ * shared in the onboarding (onboarding/documents.ts), whose ID it shares:
+ * deleting it is that admin's hard delete, so what was read from it goes
+ * too, the reading and every drawing made with it (the store's
+ * `forgetDocuments`). So every such delete asks the onboarding's store,
+ * which answers 0 at once, writing nothing and waiting for nothing, for
+ * any upload that isn't a document its uploader shared. A forget that
+ * fails is recorded as a failed erasure is, and leaves the row for the
+ * next delete to finish.
  */
 export const deleteBrainUpload = async (
   env: Env,
@@ -705,6 +738,13 @@ export const deleteBrainUpload = async (
       readers: sourceReadersOf(row),
       reason: "deleted",
     });
+    if (row.readers === "me") {
+      await onboardingStore(env).forgetDocuments(
+        [row.id],
+        actor,
+        row.uploadedBy
+      );
+    }
   } catch (error) {
     await auditedBatch(env, db, [
       outboxed(db, {
@@ -718,7 +758,8 @@ export const deleteBrainUpload = async (
   }
   await auditedBatch(env, db, [
     db.delete(brainUploads).where(eq(brainUploads.id, row.id)),
-    outboxed(db, {
+    // Only by the delete that took the row: two at once record it once.
+    outboxedIfChanged(db, {
       actor,
       target,
       action: "brain.upload.deleted",

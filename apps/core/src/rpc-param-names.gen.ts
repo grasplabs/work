@@ -357,6 +357,7 @@ export const rpcParamNames: ParamNames = {
     "programme": [],
     "readDirectory": [],
     "readHrPlatform": [],
+    "removeDocument": ["id"],
     "review": [],
     "saveChoices": ["choices"],
     "savePlan": ["plan"],

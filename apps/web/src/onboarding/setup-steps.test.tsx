@@ -414,7 +414,7 @@ describe("a step the admin comes back to", () => {
     });
   });
 
-  it("shows the documents shared, read, as they were left", () => {
+  it("shows the documents shared, read, as they were left, each one the admin can remove", () => {
     const handbook: OnboardingDocument = {
       id: "handbook",
       name: "Handbook.pdf",
@@ -432,9 +432,16 @@ describe("a step the admin comes back to", () => {
     expect({
       listed: again.includes("Handbook.pdf"),
       read: again.includes("How claims are handled, start to end."),
+      removable: again.includes('aria-label="Remove Handbook.pdf"'),
       held: again.includes("inert"),
       comesIn: comesIn(again),
-    }).toStrictEqual({ listed: true, read: true, held: false, comesIn: false });
+    }).toStrictEqual({
+      listed: true,
+      read: true,
+      removable: true,
+      held: false,
+      comesIn: false,
+    });
   });
 
   it("has the plan summed up at once on how this works", () => {

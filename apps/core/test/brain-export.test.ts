@@ -17,6 +17,7 @@ import { newChat } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import { newAgent, purged, saveOver } from "./knowledge-purge.ts";
 import { newTeam, ownCollectionOf } from "./knowledge.ts";
+import { fakeProvider } from "./model-provider.ts";
 import {
   openRpc,
   outcome,
@@ -26,6 +27,7 @@ import {
   staffPerson,
   unique,
 } from "./sign-in.ts";
+import { wordFile } from "./word-file.ts";
 
 // Exporting the company's Brain (GRA-1192, GRA-335's E1; the threat model
 // is on GRA-335). It starts from the ways it can fail:
@@ -337,11 +339,11 @@ describe("exporting the company's Brain", setUpTime, () => {
     const admin = await signedInApi(idp, "admin");
     const other = await signedInApi(idp, "admin");
     const word = `onboardingword${unique().replaceAll("-", "")}`;
-    // As the onboarding keeps a shared document: in a collection of its
-    // own, which the export leaves out (core's `OnExport.excluded`).
-    const brain = brainOf(env);
+    // As the onboarding kept a shared document before GRA-1889: in a
+    // collection of its own, which the export leaves out (core's
+    // `OnExport.excluded`) until the cutover removes Knowledge.
     await ensureCollection(
-      brain,
+      brainOf(env),
       {
         id: collectionIdSchema.parse(onboardingDocumentsCollection),
         name: "Onboarding documents",
@@ -359,6 +361,25 @@ describe("exporting the company's Brain", setUpTime, () => {
       path: `claims-${unique()}.md`,
       text: `# Claims\nTyped into ${word}.`,
       ifVersion: 0,
+    });
+    // And as it keeps one now: its reading the onboarding's, its file the
+    // sharer's own upload in the new Brain, neither in this export.
+    await fakeProvider({
+      text: JSON.stringify({
+        about: `How claims are typed into ${word}.`,
+        tools: [word],
+        teams: [],
+        unclear: [],
+        question: "",
+        options: [],
+      }),
+      inputTokens: 1200,
+      outputTokens: 150,
+    });
+    await admin.api.onboarding.shareDocument({
+      locale: "en",
+      name: `claims-${unique()}.docx`,
+      bytes: wordFile(["Claims procedure", `Claims are typed into ${word}.`]),
     });
     const first = await admin.api.knowledge.prepareBrainExport();
     const { exportId } = await admin.api.knowledge.startBrainExport(

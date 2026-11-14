@@ -106,7 +106,7 @@ import { z } from "zod";
 import { gapAnswerErasure } from "../brain-gaps.ts";
 import { brainRecordErasure } from "../brain-records.ts";
 import { personErasures } from "../db/core/schema.ts";
-import { documentReadingErasure } from "../onboarding/documents.ts";
+import { documentReadingErasure } from "../onboarding/document-erasure.ts";
 import {
   drawingErasure,
   interviewErasure,
@@ -158,38 +158,40 @@ const allOf = (copies: readonly Copies[]): Copies => ({
  * from them, the Apps collection's entries and each person's Personal
  * collection.
  */
-export const coreErasure = (env: Env): OnErase => {
-  const readings = documentReadingErasure(env);
-  return {
-    ...allOf([
-      // The kickoff first: once it is gone, nothing gives the brain its
-      // words again while the records are rewritten.
-      kickoffErasure(env),
-      // The interviews' words, and what was drawn from them, before the
-      // brain's records: an intake after reads them as the purge left
-      // them, and one before gave the brain words its records step then
-      // rewrites. Each intake runs under the onboarding's brain lock, as
-      // each of these does.
-      interviewErasure(env),
-      drawingErasure(env),
-      // Staff's own notes and Stephen's setup: a purge of terms only, never
-      // one naming a document (it has no `forgetDocuments`).
-      staffTextErasure(env),
-      gapAnswerErasure(env),
-      brainRecordErasure(env),
-      // A reading names no person: there is no one to forget in it.
-      {
-        ...readings,
-        forgetActor: async () => {
-          // Nothing to forget.
-        },
+export const coreErasure = (env: Env): OnErase => ({
+  ...allOf([
+    // The kickoff first: once it is gone, nothing gives the brain its
+    // words again while the records are rewritten.
+    kickoffErasure(env),
+    // The interviews' words, and what was drawn from them, before the
+    // brain's records: an intake after reads them as the purge left
+    // them, and one before gave the brain words its records step then
+    // rewrites. Each intake runs under the onboarding's brain lock, as
+    // each of these does.
+    interviewErasure(env),
+    drawingErasure(env),
+    // Staff's own notes and Stephen's setup: a purge of terms only, never
+    // one naming a document (it has no `forgetDocuments`).
+    staffTextErasure(env),
+    gapAnswerErasure(env),
+    brainRecordErasure(env),
+    // A reading names no person: there is no one to forget in it.
+    {
+      ...documentReadingErasure(env),
+      forgetActor: async () => {
+        // Nothing to forget.
       },
-    ]),
-    ...uploadErasure(env),
-    ...appsErasure(env),
-    forgetDocuments: readings.forgetDocuments,
-  };
-};
+    },
+  ]),
+  ...uploadErasure(env),
+  ...appsErasure(env),
+  // No copy core keeps is a Knowledge document's by its place: the
+  // onboarding's readings were the one, and their files are uploads in
+  // the Brain since GRA-1889 (onboarding/document-erasure.ts).
+  forgetDocuments: async () => {
+    // Nothing to forget.
+  },
+});
 
 /** A purge's ID, as a purge answers it. */
 const purgeIdSchema = z.uuid();

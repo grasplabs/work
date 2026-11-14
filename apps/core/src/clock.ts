@@ -34,7 +34,6 @@ import { brainOf } from "./knowledge/ports.ts";
 import { sweepUploads } from "./knowledge/uploads.ts";
 import { retryDisconnects } from "./members.ts";
 import { sweepModelUsage } from "./model-usage.ts";
-import { checkReadings } from "./onboarding/documents.ts";
 import { rescanPackages } from "./packages/rescan.ts";
 import { sweepPageFrames } from "./page-frame.ts";
 import { sweepBuilds } from "./pages.ts";
@@ -106,13 +105,6 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   // Exports of the company's Brain being written, and those past their
   // window (src/knowledge/brain-export.ts).
   { name: "brain.exports", period: "minute", run: advanceExports },
-  // Shared documents' readings their writer never checked against the
-  // purges since (src/onboarding/documents.ts `checkReading`).
-  {
-    name: "onboarding.readings",
-    period: "minute",
-    run: checkReadings,
-  },
   // Knowledge payloads no version refers to (src/knowledge/payloads.ts).
   {
     name: "knowledge.payloads",
