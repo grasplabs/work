@@ -557,10 +557,31 @@ export const storedDefinition = async (
 };
 
 /**
+ * A definition stored in a format Grasp no longer reads: one written
+ * before a workflow binding named only its workflow, which pinned each
+ * to a version of it. Recognized only to be refused as such
+ * (`app.definition_outdated`), never read: a version's definition is
+ * hashed and never changes, so publishing the App again replaces it.
+ */
+const outdatedDefinitionSchema = z.looseObject({
+  workflowBindings: z
+    .array(z.unknown())
+    .refine((bindings) =>
+      bindings.some(
+        (binding) =>
+          typeof binding === "object" &&
+          binding !== null &&
+          Object.hasOwn(binding, "version")
+      )
+    ),
+});
+
+/**
  * The definition a version's row, a chat's draft or a blueprint holds,
  * read and checked whole: the one reader of a stored definition. Checked
  * against the hash the row holds, where it holds one (a version's, see
- * the header). `app.definition_invalid` for one that holds none.
+ * the header). `app.definition_invalid` for one that holds none,
+ * `app.definition_outdated` for one of a format Grasp no longer reads.
  */
 export const readStored = async (stored: {
   readonly definition: string | null;
@@ -576,8 +597,42 @@ export const readStored = async (stored: {
   if (definitionHash !== undefined && hash !== definitionHash) {
     throw new Error("A stored definition doesn't match its hash");
   }
-  return { definition: readDefinition(JSON.parse(text)), text, hash };
+  const data: unknown = JSON.parse(text);
+  if (outdatedDefinitionSchema.safeParse(data).success) {
+    throw appErrors.create("app.definition_outdated");
+  }
+  return { definition: readDefinition(data), text, hash };
 };
+
+/**
+ * The definition of `row`, a version's, that a draft and the commit of
+ * it build on (its base, its parent, the version live): none for a
+ * version whose definition is of a format Grasp no longer reads
+ * (`readStored`, `app.definition_outdated`). Such a version's draft starts
+ * its definition anew, as an App's first draft does, and publishing it
+ * replaces the version: nothing else would let its builders go on.
+ */
+const builtOn = async (row: VersionRow): Promise<StoredDefinition | null> => {
+  try {
+    return await readStored(row);
+  } catch (error) {
+    if (appErrors.codeOf(error) === "app.definition_outdated") {
+      return null;
+    }
+    throw error;
+  }
+};
+
+/**
+ * The definition of version `version` of App `app` a draft builds on
+ * (`builtOn`): none for no version.
+ */
+export const definitionToBuildOn = async (
+  env: Env,
+  app: AppId,
+  version: number | null
+): Promise<StoredDefinition | null> =>
+  version === null ? null : await builtOn(await findVersion(env, app, version));
 
 /**
  * The stable IDs `release`'s schema is applied by (app-definition.ts,
@@ -641,10 +696,8 @@ export const carriedDefinitions = async (
   if (currentVersion !== null && currentVersion !== latest.version) {
     rows.push(await findVersion(env, app, currentVersion));
   }
-  const read = await Promise.all(
-    rows.map(async (row) => await readStored(row))
-  );
-  return read.map(({ definition }) => definition);
+  const read = await Promise.all(rows.map(async (row) => await builtOn(row)));
+  return read.flatMap((stored) => (stored === null ? [] : [stored.definition]));
 };
 
 /**
@@ -1081,9 +1134,7 @@ export const draftDefinition = async (
   if (definition !== null) {
     return await readStored({ definition });
   }
-  return base === null
-    ? null
-    : await readStored(await findVersion(env, app, base));
+  return await definitionToBuildOn(env, app, base);
 };
 
 /** What a publish commits of a draft: its files and definition, over its base. */
@@ -1681,9 +1732,17 @@ export const appKind: DraftKind = {
     new Map(
       Object.entries(await versionFiles(env, appIdSchema.parse(app), version))
     ),
+  // None for a version a draft builds no definition on (`builtOn`).
   versionDefinition: async (env, app, version) => {
-    const row = await findVersion(env, appIdSchema.parse(app), version);
-    return row.definition;
+    const { definition } = await findVersion(
+      env,
+      appIdSchema.parse(app),
+      version
+    );
+    return definition !== null &&
+      outdatedDefinitionSchema.safeParse(JSON.parse(definition)).success
+      ? null
+      : definition;
   },
   versions: {
     list: async (env, by, app, before) =>

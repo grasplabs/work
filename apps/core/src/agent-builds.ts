@@ -60,9 +60,9 @@ import {
   appFor,
   appKind,
   applyChanges,
+  definitionToBuildOn,
   draftDefinition,
   editableApp,
-  findVersion,
   readStored,
 } from "./apps.ts";
 import { memberOf } from "./auth/identity.ts";
@@ -713,9 +713,7 @@ export const saveDraftChanges = async (
   admit?: () => Promise<void>
 ): Promise<string[]> => {
   const definitionAt = async (version: number | null) =>
-    version === null
-      ? null
-      : await readStored(await findVersion(env, id, version));
+    await definitionToBuildOn(env, id, version);
   const filesAt = async (version: number | null) =>
     await filesOf(env, appKind, id, { base: version, changes: {} });
   // A draft left over an older version (a write that landed while a
@@ -836,10 +834,7 @@ export const draftDefinitions = async (
   try {
     const held = await draftDefinition(env, id, draft);
     current = held?.definition ?? emptyDefinition(name);
-    const released =
-      currentVersion === null
-        ? null
-        : await readStored(await findVersion(env, id, currentVersion));
+    const released = await definitionToBuildOn(env, id, currentVersion);
     before = released?.definition ?? null;
   } catch (error) {
     const refusal = definitionRefusal(error);

@@ -42,11 +42,10 @@ import type { Release } from "./app-releases.ts";
 import {
   appFor,
   appKind,
+  definitionToBuildOn,
   diffFiles,
   draftDefinition,
   editableApp,
-  findVersion,
-  readStored,
   versionFiles,
 } from "./apps.ts";
 import type { Member } from "./auth/identity.ts";
@@ -340,12 +339,7 @@ const definitionReviewOf = async (
 ): Promise<{ changed: boolean; plan: AppReview["plan"] }> => {
   try {
     const own = await draftDefinition(env, found.id, draft);
-    const live =
-      found.currentVersion === null
-        ? null
-        : await readStored(
-            await findVersion(env, found.id, found.currentVersion)
-          );
+    const live = await definitionToBuildOn(env, found.id, found.currentVersion);
     const changed = (own?.hash ?? null) !== (live?.hash ?? null);
     if (own === null) {
       return { changed, plan: null };

@@ -780,6 +780,8 @@ export const appErrors = defineErrorFamily({
     "grasp.config.ts and server/schema.ts are the code Grasp generates from the App's definition, which is no file: change it with the definition tools (addTable, addField, changeField, renameField, renameTable, setAccess, addIndex, addPermission, renameFunction and their remove counterparts), never by writing them.",
   "app.definition_invalid":
     "The App's definition, from which its grasp.config.ts and server/schema.ts are generated, isn't valid.",
+  "app.definition_outdated":
+    "This App version's definition was stored in a format Grasp no longer reads, from before an update: it pinned each workflow it binds to a version. Publish the App again: its draft starts a new definition.",
   "app.draft_failed":
     "The changes don't pass their checks yet. Ask Grasp in the chat to fix them, then publish.",
   "app.preview_outdated":

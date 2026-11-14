@@ -128,7 +128,10 @@ export interface DraftKind {
     id: string,
     version: number
   ) => Promise<Map<string, string>>;
-  /** An App version's own definition text; null for a kind without one. */
+  /**
+   * An App version's own definition text, as its draft builds on it; null
+   * for a kind without one, or a version whose draft builds on none.
+   */
   versionDefinition: (
     env: Env,
     id: string,

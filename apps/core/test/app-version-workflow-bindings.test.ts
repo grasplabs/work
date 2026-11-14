@@ -1,9 +1,15 @@
+import { releaseFormatVersion } from "@grasp-os/shared/app-releases";
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
+import type { AppId } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import { loadRelease } from "../src/app-releases.ts";
+import { findVersion, readStored } from "../src/apps.ts";
 import { boundIn, publishApp } from "./app-definitions.ts";
+import { rewrite } from "./app-releases-harness.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -13,6 +19,7 @@ import {
   jsonWorkflowAppsOf,
   requestsApp,
 } from "./json-workflow-apps.ts";
+import { failure } from "./sealed-apps.ts";
 import { outcome, unique } from "./sign-in.ts";
 import { publishOverRpc } from "./workflow-publishing.ts";
 
@@ -93,6 +100,39 @@ const sealedOf = async (app: string, version: number) => {
   );
 };
 
+/**
+ * Rewrites the stored definition of `version` of App `app` as a version
+ * stored before bindings named only their workflow held it, each binding
+ * pinning the workflow's version: its new hash.
+ */
+const pinnedEarlier = async (app: AppId, version: number): Promise<string> => {
+  const { definition } = await findVersion(env, app, version);
+  const stored = z
+    .looseObject({ workflowBindings: z.array(z.looseObject({})) })
+    .parse(JSON.parse(definition ?? "{}"));
+  const text = JSON.stringify({
+    ...stored,
+    workflowBindings: stored.workflowBindings.map((binding) => ({
+      ...binding,
+      version: 1,
+    })),
+  });
+  const hash = await sha256Hex(text);
+  // Written once and never changed (migration 0228's trigger): as storage
+  // could, the trigger set aside for the rewrite.
+  const trigger = await env.DB.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'app_versions_definition_immutable'"
+  ).first<{ sql: string }>();
+  await env.DB.batch([
+    env.DB.prepare("DROP TRIGGER app_versions_definition_immutable"),
+    env.DB.prepare(
+      "UPDATE app_versions SET definition = ?, definition_hash = ? WHERE app_id = ? AND version = ?"
+    ).bind(text, hash, app, version),
+    env.DB.prepare(trigger?.sql ?? ""),
+  ]);
+  return hash;
+};
+
 describe(
   "a workflow binding recorded with an App version",
   { timeout: 180_000 },
@@ -141,6 +181,67 @@ describe(
         sealed: { review: then },
         audited: [{ workflowId: then, replacedWorkflowId: first }],
         rolledBack: { review: first },
+      });
+    });
+
+    it("refuses a version from before bindings named only their workflow as one to publish again, and publishes the App again from a draft that starts its definition anew", async () => {
+      const [admin, builder] = await Promise.all([
+        signedIn("admin"),
+        signedIn("builder"),
+      ]);
+      const events = await jobEventsContract(admin);
+      const first = await declaredWorkflow(builder, events);
+      const { id } = await builder.api.apps.create({ name: "Requests" });
+      const app = appIdSchema.parse(id);
+      const source = boundIn(requestsApp("review", jobEventsDeclared), {
+        review: first,
+      });
+      await publishApp(builder.api, app, source);
+      // As version 1 was stored and sealed before: its definition pinning
+      // the workflow's version, its release of the format before.
+      const pinned = await pinnedEarlier(app, 1);
+      await rewrite(app, await loadRelease(env, app, 1), {
+        contracts: (contracts) => {
+          contracts.formatVersion = 6;
+          contracts.workflows = {
+            review: {
+              alias: "review",
+              pinned: { workflowId: first, version: 1 },
+            },
+          };
+        },
+        manifest: (manifest) => {
+          manifest.formatVersion = releaseFormatVersion - 1;
+          manifest.definitionHash = pinned;
+        },
+      });
+      const refused = {
+        release: await failure(async () => await loadRelease(env, app, 1)),
+        definition: await failure(
+          async () => await readStored(await findVersion(env, app, 1))
+        ),
+      };
+
+      // Its draft reads, and starts its definition anew: the builder
+      // writes the App again and publishes it.
+      const draft = await builder.api.drafts.get({ kind: "app", id: app });
+      const { version } = await publishApp(builder.api, app, source);
+
+      expect({
+        refused,
+        draftBase: draft.base,
+        version,
+        sealed: await sealedOf(app, version),
+        bound: await boundOf(builder, app),
+      }).toStrictEqual({
+        refused: {
+          release: "version.format_unsupported",
+          definition: "app.definition_outdated",
+        },
+        draftBase: 1,
+        version: 2,
+        sealed: { review: first },
+        bound: { review: first },
       });
     });
 
