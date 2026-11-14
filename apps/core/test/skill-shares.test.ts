@@ -1,11 +1,16 @@
 import { brainOf, personalBrainOf } from "@grasp-os/brain-next/contract";
 import type { Authority } from "@grasp-os/shared/permissions";
 import type { SessionApi } from "@grasp-os/shared/rpc";
-import type { SkillsOverview } from "@grasp-os/shared/skills";
+import type {
+  SkillAudienceAsked,
+  SkillInUse,
+  SkillsOverview,
+} from "@grasp-os/shared/skills";
 import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import { erasePerson } from "../src/brain-next.ts";
 import {
@@ -14,13 +19,19 @@ import {
   skillsFor,
   skillsReachOf,
 } from "../src/brain-skills.ts";
-import type { SkillAt } from "../src/brain-skills.ts";
-import { skillShares } from "../src/db/core/schema.ts";
+import type { SkillAt, SkillsReach } from "../src/brain-skills.ts";
+import {
+  personErasures,
+  skillDecisions,
+  skillDeletions,
+  skillShares,
+} from "../src/db/core/schema.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
 import { personalWorkspaceId } from "../src/personal-workspace.ts";
 import {
   approveShare,
   reconcileSkills,
+  retireSkill,
   shareOwnSkill,
 } from "../src/skill-shares.ts";
 import { chatOf, codeResults, codeStep, model, says } from "./agent-chat.ts";
@@ -30,6 +41,15 @@ import { actingFor } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
+import { holdsNothing } from "./stored-skills.ts";
+import {
+  joinTeam,
+  leaveTeam,
+  namedTeam,
+  newTeam,
+  otherOrganizationsTeam,
+} from "./teams.ts";
+import { testBinding } from "./test-env.ts";
 
 // Writing skills and sharing one with the company (GRA-1754), from the
 // threat model on the issue: someone else reads, lists or is given a
@@ -51,6 +71,10 @@ const setUpTime = { timeout: 60_000 };
 const skillText = (name: string, description: string, steps = "The steps.") =>
   `---\nname: ${name}\ndescription: ${description}\n---\n\n${steps}\n`;
 
+/** How far a chat's skills go: their own too, or their teams' and the company's. */
+const reachOf = (personal: boolean): SkillsReach =>
+  personal ? "person" : "teams";
+
 /** A chat's agent acting for `userId`. */
 const agentOf = (userId: string): Authority =>
   actingFor({ type: "agent", agentId: `agent-${unique()}` }, userId);
@@ -61,7 +85,12 @@ const usable = async (
   personal: boolean,
   names: readonly string[]
 ): Promise<string[][]> => {
-  const listed = await skillsFor(env, agentOf(userId), { personal });
+  const listed = await skillsFor(
+    env,
+    agentOf(userId),
+    reachOf(personal),
+    holdsNothing
+  );
   return listed
     .filter(({ name }) => names.includes(name))
     .map(({ scope, name }) => [scope, name]);
@@ -76,7 +105,8 @@ const selected = async (
   const skills = await selectSkillsFor(
     env,
     agentOf(userId),
-    { personal },
+    reachOf(personal),
+    holdsNothing,
     { task }
   );
   return skills.map(({ scope, name }) => [scope, name]);
@@ -93,7 +123,8 @@ const readIn = async (
     ({ text } = await readSkillFor(
       env,
       agentOf(userId),
-      { personal },
+      reachOf(personal),
+      holdsNothing,
       { skill }
     ));
   };
@@ -104,6 +135,18 @@ const readIn = async (
 /** What `api`'s skills page shows. */
 const overviewOf = async (api: SessionApi): Promise<SkillsOverview> =>
   await api.skills.overview();
+
+/** The IDs of the shares `api`'s skills page shows waiting for an admin. */
+const requestedIds = async (api: SessionApi): Promise<string[]> => {
+  const { requests } = await overviewOf(api);
+  return requests?.map(({ id }) => id) ?? [];
+};
+
+/** The IDs of the shares `api`'s person asked, as their page shows them. */
+const askedIds = async (api: SessionApi): Promise<string[]> => {
+  const { shares } = await overviewOf(api);
+  return shares.map(({ id }) => id);
+};
 
 /** The text the share `id` keeps. */
 const keptText = async (id: string): Promise<(string | null)[]> => {
@@ -247,6 +290,31 @@ const hooked = (
 /** A fresh skill name. */
 const nameOf = (what: string): string => `${what}-${unique()}`;
 
+/** Where each of `skills` stands: its version in use and what is on its way. */
+const standingOf = (skills: readonly SkillInUse[]) =>
+  skills.map(({ version, onItsWay }) => ({ version, onItsWay }));
+
+/** The same standing for the company's skill and the team's. */
+const both = (version: number | null, onItsWay: SkillInUse["onItsWay"]) => ({
+  company: [{ version, onItsWay }],
+  team: [{ version, onItsWay }],
+});
+
+/** What is kept of the share `id`: its status, or nothing. */
+const statusOf = async (id: string) => {
+  const rows = await drizzle(env.DB)
+    .select({ status: skillShares.status })
+    .from(skillShares)
+    .where(eq(skillShares.id, id));
+  return rows.map(({ status }) => status);
+};
+
+/** A hook that fails its call, as a store out of reach does. */
+const outOfReach = async (): Promise<void> => {
+  await Promise.resolve();
+  throw new Error("Out of reach, for the test");
+};
+
 describe("writing and sharing skills", setUpTime, () => {
   it("keeps a person's own skill theirs: used in their own chat, never in a shared one, never by anyone else", async () => {
     const [author, other] = await Promise.all([
@@ -281,7 +349,7 @@ describe("writing and sharing skills", setUpTime, () => {
       otherSelects: await selected(other.userId, true, "quote a tender"),
       otherReads: await readIn(other.userId, true, current),
       otherReadsOnPage: await outcome(other.api.skills.read("own", name)),
-      otherShares: await outcome(other.api.skills.share(name, 1)),
+      otherShares: await outcome(other.api.skills.share(name, 1, "company")),
     }).toStrictEqual({
       versions: [1, 2],
       ownPage: [{ name, version: 2, description }],
@@ -309,7 +377,7 @@ describe("writing and sharing skills", setUpTime, () => {
     const name = nameOf("close-the-month");
     const asked = skillText(name, "Close the month", "The steps as asked.");
     const saved = await author.api.skills.save(asked);
-    const share = await author.api.skills.share(name, saved.version);
+    const share = await author.api.skills.share(name, saved.version, "company");
     // Edited after asking: the edit isn't what the admin approves.
     await author.api.skills.save(
       skillText(name, "Close the month", "Steps nobody reviewed.")
@@ -370,7 +438,12 @@ describe("writing and sharing skills", setUpTime, () => {
       authorDecides: "role.forbidden",
       approved: ["approved", 1],
       memberUses: [["company", name]],
-      company: { name, version: 1, description: "Close the month" },
+      company: {
+        name,
+        description: "Close the month",
+        version: 1,
+        onItsWay: null,
+      },
       read: asked,
       selected: [["company", name]],
       // Decided: a second click has nothing waiting to decide.
@@ -389,11 +462,15 @@ describe("writing and sharing skills", setUpTime, () => {
     ]);
     const name = nameOf("book-travel");
     const first = await author.api.skills.save(skillText(name, "Book travel"));
-    const shown = await author.api.skills.share(name, first.version);
+    const shown = await author.api.skills.share(name, first.version, "company");
     const second = await author.api.skills.save(
       skillText(name, "Book travel", "Other steps.")
     );
-    const again = await author.api.skills.share(name, second.version);
+    const again = await author.api.skills.share(
+      name,
+      second.version,
+      "company"
+    );
 
     const approvingShown = await outcome(admin.api.skills.approve(shown.id));
     const declined = await admin.api.skills.decline(again.id);
@@ -426,11 +503,13 @@ describe("writing and sharing skills", setUpTime, () => {
     const saved = await author.api.skills.save(
       skillText(name, "File expenses")
     );
-    const first = await author.api.skills.share(name, saved.version);
+    const first = await author.api.skills.share(name, saved.version, "company");
     await admin.api.skills.approve(first.id);
 
-    const memberRetires = await outcome(member.api.skills.retire(name));
-    await admin.api.skills.retire(name);
+    const memberRetires = await outcome(
+      member.api.skills.retire(name, "company")
+    );
+    await admin.api.skills.retire(name, "company");
     const retired = {
       memberRetires,
       memberUses: await usable(member.userId, true, [name]),
@@ -439,9 +518,9 @@ describe("writing and sharing skills", setUpTime, () => {
         name,
         version: 1,
       }),
-      retiredAgain: await outcome(admin.api.skills.retire(name)),
+      retiredAgain: await outcome(admin.api.skills.retire(name, "company")),
     };
-    const again = await author.api.skills.share(name, saved.version);
+    const again = await author.api.skills.share(name, saved.version, "company");
     const page = await overviewOf(admin.api);
     const back = await admin.api.skills.approve(again.id);
 
@@ -472,7 +551,7 @@ describe("writing and sharing skills", setUpTime, () => {
     const saved = await author.api.skills.save(
       skillText(name, "Onboard a hire")
     );
-    const share = await author.api.skills.share(name, saved.version);
+    const share = await author.api.skills.share(name, saved.version, "company");
 
     await author.api.skills.remove(name);
     await author.api.skills.remove(name);
@@ -506,7 +585,7 @@ describe("writing and sharing skills", setUpTime, () => {
     ]);
     const name = nameOf("plan-a-route");
     const saved = await author.api.skills.save(skillText(name, "Plan a route"));
-    const share = await author.api.skills.share(name, saved.version);
+    const share = await author.api.skills.share(name, saved.version, "company");
     const kindsFor = async (api: SessionApi) => {
       const { items } = await api.waiting.list();
       return items
@@ -548,7 +627,7 @@ describe("writing and sharing skills", setUpTime, () => {
     const name = nameOf("count-the-till");
     const saved = await author.api.skills.save(skillText(name, "Count it"));
     const own = await keptWhere(author.userId, `skill:person:${name}`);
-    const share = await author.api.skills.share(name, saved.version);
+    const share = await author.api.skills.share(name, saved.version, "company");
     const asked = await keptWhere(author.userId, `skill:company:${name}`);
     await admin.api.skills.approve(share.id);
 
@@ -683,7 +762,11 @@ describe("writing and sharing skills", setUpTime, () => {
     const kept = nameOf("my-own-way");
     const first = await author.api.skills.save(skillText(shared, "Close it"));
     await author.api.skills.save(skillText(kept, "Mine"));
-    const share = await author.api.skills.share(shared, first.version);
+    const share = await author.api.skills.share(
+      shared,
+      first.version,
+      "company"
+    );
     await admin.api.skills.approve(share.id);
     const before = await usable(author.userId, true, [shared, kept]);
 
@@ -717,20 +800,36 @@ describe("writing and sharing skills", setUpTime, () => {
     ]);
     const companys = nameOf("pay-suppliers");
     const first = await author.api.skills.save(skillText(companys, "Pay"));
-    const firstShare = await author.api.skills.share(companys, first.version);
+    const firstShare = await author.api.skills.share(
+      companys,
+      first.version,
+      "company"
+    );
     await admin.api.skills.approve(firstShare.id);
     const again = await author.api.skills.save(
       skillText(companys, "Pay", "Newer steps.")
     );
-    const replacing = await author.api.skills.share(companys, again.version);
+    const replacing = await author.api.skills.share(
+      companys,
+      again.version,
+      "company"
+    );
     // Grasp ships a skill of this name: a company skill of it takes its
     // place for everyone, so the admin is told.
     const grasps = "draw-a-workflow";
     const planted = await author.api.skills.save(skillText(grasps, "Mine"));
-    const overGrasp = await author.api.skills.share(grasps, planted.version);
+    const overGrasp = await author.api.skills.share(
+      grasps,
+      planted.version,
+      "company"
+    );
     const fresh = nameOf("count-pallets");
     const freshSaved = await author.api.skills.save(skillText(fresh, "Count"));
-    const nothing = await author.api.skills.share(fresh, freshSaved.version);
+    const nothing = await author.api.skills.share(
+      fresh,
+      freshSaved.version,
+      "company"
+    );
     const page = await overviewOf(admin.api);
     const replaces = (id: string) =>
       page.requests?.find((request) => request.id === id)?.replaces;
@@ -750,7 +849,7 @@ describe("writing and sharing skills", setUpTime, () => {
     ]);
     const name = nameOf("race");
     const saved = await author.api.skills.save(skillText(name, "Race"));
-    const share = await author.api.skills.share(name, saved.version);
+    const share = await author.api.skills.share(name, saved.version, "company");
     const head = await logHead();
     const [x, y] = await Promise.all([
       outcome(first.api.skills.approve(share.id)),
@@ -780,11 +879,19 @@ describe("writing and sharing skills", setUpTime, () => {
     const name = nameOf("audit");
     const head = await logHead();
     const saved = await author.api.skills.save(skillText(name, "Audit"));
-    const declined = await author.api.skills.share(name, saved.version);
+    const declined = await author.api.skills.share(
+      name,
+      saved.version,
+      "company"
+    );
     await admin.api.skills.decline(declined.id);
-    const approved = await author.api.skills.share(name, saved.version);
+    const approved = await author.api.skills.share(
+      name,
+      saved.version,
+      "company"
+    );
     await admin.api.skills.approve(approved.id);
-    await admin.api.skills.retire(name);
+    await admin.api.skills.retire(name, "company");
     const { events } = await eventsAfterWithHead(head);
 
     expect(
@@ -802,15 +909,17 @@ describe("writing and sharing skills", setUpTime, () => {
     ]);
   });
 
-  it("gives a person's own skills only to a scope that says it is their own attended turn", () => {
+  it("gives a person's own skills only to a scope that says it is their own attended turn, and no team's where others share the chat", () => {
     expect({
-      saysNothing: skillsReachOf({}),
-      saysNo: skillsReachOf({ ownChat: false }),
-      ownTurn: skillsReachOf({ ownChat: true }),
+      saysNothing: skillsReachOf({}, false),
+      saysNo: skillsReachOf({ ownChat: false }, false),
+      ownTurn: skillsReachOf({ ownChat: true }, false),
+      shared: skillsReachOf({ ownChat: true }, true),
     }).toStrictEqual({
-      saysNothing: { personal: false },
-      saysNo: { personal: false },
-      ownTurn: { personal: true },
+      saysNothing: "teams",
+      saysNo: "teams",
+      ownTurn: "person",
+      shared: "company",
     });
   });
 
@@ -844,7 +953,8 @@ describe("writing and sharing skills", setUpTime, () => {
         ),
         person,
         name,
-        saved.version
+        saved.version,
+        "company"
       )
     );
     const { requests } = await admin.api.skills.overview();
@@ -872,7 +982,7 @@ describe("writing and sharing skills", setUpTime, () => {
     ]);
     const name = nameOf("removed-asking");
     const saved = await asker.api.skills.save(skillText(name, "Mine"));
-    const share = await asker.api.skills.share(name, saved.version);
+    const share = await asker.api.skills.share(name, saved.version, "company");
     await admin.api.members.remove(asker.userId);
     const { requests } = await admin.api.skills.overview();
 
@@ -895,7 +1005,7 @@ describe("writing and sharing skills", setUpTime, () => {
     ]);
     const name = nameOf("count-stock");
     const saved = await author.api.skills.save(skillText(name, "Count it"));
-    const share = await author.api.skills.share(name, saved.version);
+    const share = await author.api.skills.share(name, saved.version, "company");
     const head = await logHead();
     const decided = await approveShare(
       sharedStoreFailing("addInstructions"),
@@ -950,7 +1060,8 @@ describe("writing and sharing skills", setUpTime, () => {
       ),
       person,
       name,
-      saved.version
+      saved.version,
+      "company"
     );
     const { requests } = await admin.api.skills.overview();
     const { shares } = await overviewOf(asker.api);
@@ -975,8 +1086,8 @@ describe("writing and sharing skills", setUpTime, () => {
     const second = await asker.api.skills.save(skillText(name, "Second"));
     const head = await logHead();
     await Promise.allSettled([
-      asker.api.skills.share(name, first.version),
-      asker.api.skills.share(name, second.version),
+      asker.api.skills.share(name, first.version, "company"),
+      asker.api.skills.share(name, second.version, "company"),
     ]);
     const { requests } = await admin.api.skills.overview();
     const cards = requests?.filter(({ name: named }) => named === name);
@@ -994,7 +1105,7 @@ describe("writing and sharing skills", setUpTime, () => {
     const asker = await signedInApi(idp, "user");
     const name = nameOf("saved-since");
     const first = await asker.api.skills.save(skillText(name, "Old"));
-    const old = await asker.api.skills.share(name, first.version);
+    const old = await asker.api.skills.share(name, first.version, "company");
     /** Each of the person's shares of `name`: old or new, status, outdated. */
     const rows = async () => {
       const { shares } = await overviewOf(asker.api);
@@ -1009,13 +1120,614 @@ describe("writing and sharing skills", setUpTime, () => {
     const asked = await rows();
     const second = await asker.api.skills.save(skillText(name, "New"));
     const saved = await rows();
-    await asker.api.skills.share(name, second.version);
+    await asker.api.skills.share(name, second.version, "company");
 
     expect({ asked, saved, again: await rows() }).toStrictEqual({
       asked: [["old", "pending", false]],
       saved: [["old", "pending", true]],
       // The old ask is gone with its text; the new one is current.
       again: [["new", "pending", false]],
+    });
+  });
+});
+
+// Sharing a skill with a team (GRA-1844), from the threat model on the
+// issue: instructions planted in a team by someone outside it; a team's
+// skill reaching anyone outside the team, or a conversation others share;
+// a click on a card left over after its asker left the team; a missing
+// audience read as the company's. Every step of these held, failed or its
+// reply lost is skill-interleavings.test.ts's; that no other way in
+// answers a team's skill to someone outside it, the permission harness
+// tries (brain-next-leaks.test.ts).
+describe("sharing a skill with a team", setUpTime, () => {
+  it("lets only a member of a team ask to share with it: a team they aren't in, one that doesn't exist and another organization's are refused alike, and nothing waits", async () => {
+    const [author, admin, other] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    const theirs = await newTeam(author.userId);
+    const notTheirs = await newTeam(other.userId);
+    const elsewhere = await otherOrganizationsTeam(author.userId);
+    const name = nameOf("pitch-a-client");
+    const saved = await author.api.skills.save(skillText(name, "Pitch"));
+    const askFor = async (team: string) =>
+      await outcome(author.api.skills.share(name, saved.version, { team }));
+    const refused = {
+      notTheirs: await askFor(notTheirs),
+      none: await askFor(crypto.randomUUID()),
+      elsewhere: await askFor(elsewhere),
+    };
+    const asked = await author.api.skills.share(name, saved.version, {
+      team: theirs,
+    });
+    const { requests } = await overviewOf(admin.api);
+
+    expect({
+      refused,
+      asked: asked.audience,
+      waiting: requests
+        ?.filter((request) => request.name === name)
+        .map(({ audience, text }) => ({ audience, text })),
+    }).toStrictEqual({
+      refused: {
+        notTheirs: "skills.not_in_team",
+        none: "skills.not_in_team",
+        elsewhere: "skills.not_in_team",
+      },
+      asked: { kind: "team", team: { id: theirs, name: `Team ${theirs}` } },
+      waiting: [
+        {
+          audience: {
+            kind: "team",
+            team: { id: theirs, name: `Team ${theirs}` },
+          },
+          text: skillText(name, "Pitch"),
+        },
+      ],
+    });
+  });
+
+  it("gives a team's skill to its members alone, in place of the company's of its name, and to no one once they leave, from their next turn", async () => {
+    const [author, admin, mate, outsider] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+    ]);
+    const team = await newTeam(author.userId, mate.userId);
+    const name = nameOf("quote-a-tender");
+    const first = await author.api.skills.save(skillText(name, "Company way"));
+    const forCompany = await author.api.skills.share(
+      name,
+      first.version,
+      "company"
+    );
+    await admin.api.skills.approve(forCompany.id);
+    const second = await author.api.skills.save(skillText(name, "Team way"));
+    const forTeam = await author.api.skills.share(name, second.version, {
+      team,
+    });
+    const { requests } = await overviewOf(admin.api);
+    const shown = requests?.find(({ id }) => id === forTeam.id);
+    await admin.api.skills.approve(forTeam.id);
+    const given = async (userId: string) => await usable(userId, false, [name]);
+    const before = {
+      mate: await given(mate.userId),
+      outsider: await given(outsider.userId),
+    };
+    const teamSkill = { scope: "team", team, name, version: 1 } as const;
+    const read = {
+      mate: await readIn(mate.userId, false, teamSkill),
+      outsider: await readIn(outsider.userId, false, teamSkill),
+      inAThreadOthersShare: await outcome(
+        readSkillFor(env, agentOf(mate.userId), "company", holdsNothing, {
+          skill: teamSkill,
+        })
+      ),
+    };
+    await leaveTeam(team, mate.userId);
+
+    expect({
+      replaces: shown?.replaces,
+      before,
+      read,
+      afterLeaving: await given(mate.userId),
+    }).toStrictEqual({
+      replaces: "company",
+      before: {
+        mate: [["team", name]],
+        outsider: [["company", name]],
+      },
+      read: {
+        mate: skillText(name, "Team way"),
+        outsider: "skills.not_found",
+        inAThreadOthersShare: "skills.not_found",
+      },
+      afterLeaving: [["company", name]],
+    });
+  });
+
+  it("lists a team's skill in its members' own conversations alone: never in a thread others share, or anyone else's chat", async () => {
+    const [author, admin, outsider] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    // A team's name is any length: the prompt cuts it, as a description.
+    const longName = `Sales-${"x".repeat(1000)}`;
+    const team = await namedTeam(longName, author.userId);
+    const name = nameOf("quote-a-tender");
+    const saved = await author.api.skills.save(skillText(name, "Quote it"));
+    const share = await author.api.skills.share(name, saved.version, { team });
+    await admin.api.skills.approve(share.id);
+    // Their own copy goes, so what is listed is the team's.
+    await author.api.skills.remove(name);
+    const listed = `- ${name} (team, of "${longName.slice(0, 300)}", team ${team}`;
+    /** The chat's code: the skills of this name `env.skills` selects for quoting a tender. */
+    const selectsThis = codeStep(
+      `export default async (self, env) => { const { skills } = await env.skills.select({ task: "quote a tender" }); return skills.filter(({ name }) => name === ${JSON.stringify(name)}).map(({ scope, name }) => scope + ":" + name).join(",") || "none"; };`
+    );
+    const listedIn = (requests: { body: unknown }[]) =>
+      requests.map(({ body }) =>
+        stringsIn(body).some((text) => text.includes(listed))
+      );
+
+    const own = await chatOf(author.userId, selectsThis, says("Done."));
+    await own.ask("Quote a tender.");
+    const group = workspace(env, personalWorkspaceId(author.userId));
+    const groupProvider = await fakeProvider(selectsThis, says("Done."));
+    const { chatId } = await group.askThrough(
+      author.userId,
+      crypto.randomUUID(),
+      "slack",
+      "Quote a tender.",
+      undefined,
+      {
+        thread: `C-${unique()}`,
+        kind: "group",
+        audience: {
+          members: [author.userId, outsider.userId],
+          outsiders: false,
+        },
+      }
+    );
+    const others = await chatOf(outsider.userId, selectsThis, says("Done."));
+    await others.ask("Quote a tender.");
+
+    expect({
+      own: {
+        selected: await returnedIn(own.stub, own.chat.id),
+        listed: listedIn(own.provider.requests),
+      },
+      sharedThread: {
+        selected: await returnedIn(group, chatId),
+        listed: listedIn(groupProvider.requests),
+      },
+      othersChat: {
+        selected: await returnedIn(others.stub, others.chat.id),
+        listed: listedIn(others.provider.requests),
+      },
+    }).toStrictEqual({
+      own: { selected: [`Returned:\nteam:${name}`], listed: [true, true] },
+      sharedThread: { selected: ["Returned:\nnone"], listed: [false, false] },
+      othersChat: { selected: ["Returned:\nnone"], listed: [false, false] },
+    });
+  });
+
+  it("decides a team share only while its asker is in the team: once they leave, no admin is shown it and approving it is refused", async () => {
+    const [author, admin] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+    ]);
+    const team = await newTeam(author.userId);
+    const name = nameOf("close-the-month");
+    const saved = await author.api.skills.save(skillText(name, "Close it"));
+    const share = await author.api.skills.share(name, saved.version, { team });
+    await leaveTeam(team, author.userId);
+    const shownOf = async () => {
+      const shown = await requestedIds(admin.api);
+      return shown.includes(share.id);
+    };
+    const asked = await askedIds(author.api);
+    const whileOut = {
+      shown: await shownOf(),
+      own: asked.includes(share.id),
+      approved: await outcome(admin.api.skills.approve(share.id)),
+      declined: await outcome(admin.api.skills.decline(share.id)),
+      given: await usable(author.userId, false, [name]),
+    };
+    await joinTeam(team, author.userId);
+
+    expect({ whileOut, back: await shownOf() }).toStrictEqual({
+      whileOut: {
+        shown: false,
+        own: false,
+        approved: "skills.not_found",
+        declined: "skills.not_found",
+        given: [],
+      },
+      // Their own ask, of a team they are in again: it waits again.
+      back: true,
+    });
+  });
+
+  it("lists every team's skill in use to an admin outside the team, from core's decisions, and lets them retire it for its members alone, audited by its team and name", async () => {
+    const [author, admin, mate] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    const team = await newTeam(author.userId, mate.userId);
+    const name = nameOf("book-travel");
+    const saved = await author.api.skills.save(skillText(name, "Book it"));
+    const forCompany = await author.api.skills.share(
+      name,
+      saved.version,
+      "company"
+    );
+    await admin.api.skills.approve(forCompany.id);
+    const forTeam = await author.api.skills.share(name, saved.version, {
+      team,
+    });
+    await admin.api.skills.approve(forTeam.id);
+    /** The team's skills of this name each page lists, for admins alone. */
+    const listedFor = async (api: SessionApi) => {
+      const { teamSkills } = await overviewOf(api);
+      return teamSkills?.filter((skill) => skill.name === name) ?? null;
+    };
+    const listed = {
+      admin: await listedFor(admin.api),
+      author: await listedFor(author.api),
+    };
+    /** Whether the author's team share is in use, as their page says. */
+    const inUse = async () => {
+      const { shares } = await overviewOf(author.api);
+      return shares.find(({ id }) => id === forTeam.id)?.inUse;
+    };
+    // Out of the team now: their page still says, from core's records.
+    await leaveTeam(team, author.userId);
+    const inUseBefore = await inUse();
+    const head = await logHead();
+    await admin.api.skills.retire(name, { team });
+    const { events } = await eventsAfterWithHead(head);
+
+    expect({
+      listed,
+      inUse: [inUseBefore, await inUse()],
+      afterRetiring: await listedFor(admin.api),
+      given: await usable(mate.userId, false, [name]),
+      events: events
+        .filter(({ action }) => action.startsWith("skill."))
+        .map(({ action, target }) => [action, target?.type, target?.id]),
+    }).toStrictEqual({
+      // Its team and name, from core's records: the admin is in no team.
+      listed: {
+        admin: [
+          {
+            team: { id: team, name: `Team ${team}` },
+            name,
+            version: 1,
+            onItsWay: null,
+          },
+        ],
+        author: null,
+      },
+      inUse: [true, false],
+      afterRetiring: [],
+      // A team-mate's is the company's again: the team's is retired.
+      given: [["company", name]],
+      events: [
+        ["skill.retired", "team_skill", `${team}:${name}`],
+        ["skill.retire_done", "team_skill", `${team}:${name}`],
+      ],
+    });
+  });
+
+  it("never reads a share or decision without an audience as the company's: it is never shown, decided, reconciled or given", async () => {
+    const [author, admin] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+    ]);
+    const name = nameOf("old-format");
+    const text = skillText(name, "Old");
+    const shareId = crypto.randomUUID();
+    const db = drizzle(env.DB);
+    await db.insert(skillShares).values({
+      id: shareId,
+      name,
+      text,
+      requestedBy: author.userId,
+      requestedAt: new Date(),
+      status: "pending",
+    });
+    await db.insert(skillDecisions).values({
+      id: crypto.randomUUID(),
+      name,
+      seq: 1,
+      shareId: crypto.randomUUID(),
+      text,
+      decidedBy: admin.userId,
+      decidedAt: new Date(),
+    });
+    const approved = await outcome(admin.api.skills.approve(shareId));
+    await reconcileSkills(env);
+    const [shown, asked] = await Promise.all([
+      requestedIds(admin.api),
+      askedIds(author.api),
+    ]);
+
+    expect({
+      shown: shown.includes(shareId),
+      asked: asked.includes(shareId),
+      approved,
+      given: await usable(admin.userId, false, [name]),
+    }).toStrictEqual({
+      shown: false,
+      asked: false,
+      approved: "skills.not_found",
+      given: [],
+    });
+  });
+
+  it("treats what was written before audiences as the company's once migrated: listed, decided, retired and on its asker's page", async () => {
+    const [author, admin, member] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    const name = nameOf("old-company-way");
+    const first = await author.api.skills.save(skillText(name, "Old way"));
+    const landed = await author.api.skills.share(
+      name,
+      first.version,
+      "company"
+    );
+    await admin.api.skills.approve(landed.id);
+    const second = await author.api.skills.save(skillText(name, "New way"));
+    const waiting = await author.api.skills.share(
+      name,
+      second.version,
+      "company"
+    );
+    // As the release before wrote them: no audience. Then migrated, by the
+    // migration's own statements.
+    const db = drizzle(env.DB);
+    await db
+      .update(skillShares)
+      .set({ audience: null })
+      .where(eq(skillShares.name, name));
+    await db
+      .update(skillDecisions)
+      .set({ audience: null })
+      .where(eq(skillDecisions.name, name));
+    const carried = z
+      .array(z.object({ name: z.string(), queries: z.array(z.string()) }))
+      .parse(testBinding("CORE_MIGRATIONS"))
+      .flatMap(({ queries }) =>
+        queries.filter((query) => query.includes("SET `audience` = 'company'"))
+      );
+    if (carried.length !== 2) {
+      throw new Error("No migration carries the shares and decisions over");
+    }
+    await env.DB.batch(carried.map((query) => env.DB.prepare(query)));
+    const { requests } = await overviewOf(admin.api);
+    const card = requests?.find(({ id }) => id === waiting.id);
+    const asked = await askedIds(author.api);
+    await admin.api.skills.approve(waiting.id);
+    const approved = await usable(member.userId, false, [name]);
+    const read = await readIn(member.userId, false, {
+      scope: "company",
+      name,
+      version: 2,
+    });
+    const retired = await outcome(admin.api.skills.retire(name, "company"));
+
+    expect({
+      card: card === undefined ? null : [card.audience, card.replaces],
+      asked: [landed.id, waiting.id].map((id) => asked.includes(id)),
+      approved,
+      read,
+      retired,
+      afterRetiring: await usable(member.userId, false, [name]),
+    }).toStrictEqual({
+      card: [{ kind: "company" }, "company"],
+      asked: [true, true],
+      approved: [["company", name]],
+      read: skillText(name, "New way"),
+      retired: "ok",
+      afterRetiring: [],
+    });
+  });
+
+  it("lists a skill as in use until a retirement lands, and a version on its way until it lands, for a team's skill and the company's alike", async () => {
+    const [author, admin, mate, member] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+    ]);
+    const team = await newTeam(author.userId, mate.userId);
+    const name = nameOf("count-the-stock");
+    const decider = await admin.api.whoami();
+    /** An env whose Brain refuses its first write: the decision waits for the clock. */
+    const failingOnce = () =>
+      hooked({ before: { addInstructions: { 1: outOfReach } } });
+    /** Where the company's and the team's skill of the name stand, as the admin's page lists them. */
+    const standing = async () => {
+      const { company, teamSkills } = await overviewOf(admin.api);
+      return {
+        company: standingOf(company.filter((skill) => skill.name === name)),
+        team: standingOf(
+          teamSkills?.filter((skill) => skill.name === name) ?? []
+        ),
+      };
+    };
+    /** Whether the member and the team-mate are given the skill now. */
+    const given = async () => ({
+      company: await usable(member.userId, false, [name]),
+      team: await usable(mate.userId, false, [name]),
+    });
+    /** Asks for `how` with both audiences and approves each while the Brain fails. */
+    const approvedPending = async (how: string) => {
+      const saved = await author.api.skills.save(skillText(name, how));
+      for (const audience of ["company", { team }] as const) {
+        // oxlint-disable-next-line no-await-in-loop -- one audience at a time
+        const share = await author.api.skills.share(
+          name,
+          saved.version,
+          audience
+        );
+        // oxlint-disable-next-line no-await-in-loop -- one audience at a time
+        await approveShare(failingOnce(), decider, share.id);
+      }
+    };
+
+    await approvedPending("First way");
+    const firstOnItsWay = { listed: await standing(), given: await given() };
+    await reconcileSkills(env);
+    const firstLanded = await standing();
+    await approvedPending("Second way");
+    const secondOnItsWay = await standing();
+    await reconcileSkills(env);
+    const secondLanded = await standing();
+    for (const audience of ["company", { team }] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one audience at a time
+      await retireSkill(failingOnce(), decider, name, audience);
+    }
+    const retiring = { listed: await standing(), given: await given() };
+    await reconcileSkills(env);
+
+    expect({
+      firstOnItsWay,
+      firstLanded,
+      secondOnItsWay,
+      secondLanded,
+      retiring,
+      retired: { listed: await standing(), given: await given() },
+    }).toStrictEqual({
+      // Approved, not added yet: listed as on its way, given to nobody.
+      firstOnItsWay: {
+        listed: both(null, "version"),
+        given: { company: [], team: [] },
+      },
+      firstLanded: both(1, null),
+      // The first versions in use while the second ones are on their way.
+      secondOnItsWay: both(1, "version"),
+      secondLanded: both(2, null),
+      // Retired, not yet in the Brain: still in use, and listed so.
+      retiring: {
+        listed: both(2, "retirement"),
+        given: { company: [["company", name]], team: [["team", name]] },
+      },
+      retired: {
+        listed: { company: [], team: [] },
+        given: { company: [], team: [] },
+      },
+    });
+  });
+
+  it("says nothing of a skill in use to someone whose share of its name was declined or still waits, however they stand in its team", async () => {
+    const [author, admin, mate] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    const team = await newTeam(author.userId, mate.userId);
+    const name = nameOf("plan-the-week");
+    /** `api`'s person saves `how` as the skill and asks to share it with the team. */
+    const asked = async (api: SessionApi, how: string) => {
+      const saved = await api.skills.save(skillText(name, how));
+      return await api.skills.share(name, saved.version, { team });
+    };
+    const declined = await asked(author.api, "Mine");
+    await admin.api.skills.decline(declined.id);
+    const theirs = await asked(mate.api, "Theirs");
+    await admin.api.skills.approve(theirs.id);
+    const waiting = await asked(author.api, "Mine again");
+    await leaveTeam(team, author.userId);
+    const inUseOf = async (api: SessionApi, id: string) => {
+      const { shares } = await overviewOf(api);
+      return shares.find((share) => share.id === id)?.inUse;
+    };
+
+    expect({
+      declined: await inUseOf(author.api, declined.id),
+      // Hidden while they are out of the team; false when back.
+      waiting: await (async () => {
+        await joinTeam(team, author.userId);
+        return await inUseOf(author.api, waiting.id);
+      })(),
+      approved: await inUseOf(mate.api, theirs.id),
+    }).toStrictEqual({ declined: false, waiting: false, approved: true });
+  });
+
+  it("never takes away a waiting share when an ask of its skill is refused: out of the team, the skill deleted, an erasure begun", async () => {
+    const [author, admin, deleting, erasing] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+    ]);
+    const name = nameOf("brief-a-client");
+    const team = await newTeam(author.userId);
+    /** `api`'s person saves `how` as the skill and asks to share it with `audience`. */
+    const asked = async (
+      api: SessionApi,
+      how: string,
+      audience: SkillAudienceAsked
+    ) => {
+      const saved = await api.skills.save(skillText(name, how));
+      return await api.skills.share(name, saved.version, audience);
+    };
+    const db = drizzle(env.DB);
+
+    // Out of the team: asked again from a stale page, refused.
+    const first = await asked(author.api, "First", { team });
+    await leaveTeam(team, author.userId);
+    const outOfTeam = await outcome(asked(author.api, "Second", { team }));
+    await joinTeam(team, author.userId);
+    const shownAgain = await requestedIds(admin.api);
+    const approved = await outcome(admin.api.skills.approve(first.id));
+
+    // The skill deleted while an ask was on its way: the deletion is
+    // recorded first, then the ask is refused.
+    const toDelete = await asked(deleting.api, "Mine", "company");
+    await db.insert(skillDeletions).values({ personId: deleting.userId, name });
+    const afterDeletion = await outcome(
+      deleting.api.skills.share(name, 1, "company")
+    );
+
+    // An erasure begun, as it is before the removal is done.
+    const toErase = await asked(erasing.api, "Theirs", "company");
+    await db.insert(personErasures).values({
+      userId: erasing.userId,
+      name: "Erasing",
+      emailKeyVersion: 1,
+      requestedBy: admin.userId,
+      requestedAt: new Date(),
+    });
+    const erasureBegun = await outcome(
+      erasing.api.skills.share(name, 1, "company")
+    );
+
+    expect({
+      outOfTeam,
+      shownAgain: shownAgain.includes(first.id),
+      approved,
+      afterDeletion,
+      deletedKept: await statusOf(toDelete.id),
+      erasureBegun,
+      erasingKept: await statusOf(toErase.id),
+    }).toStrictEqual({
+      outOfTeam: "skills.not_in_team",
+      // The first ask waits again once they are back, and is decided.
+      shownAgain: true,
+      approved: "ok",
+      afterDeletion: "skills.not_found",
+      deletedKept: ["pending"],
+      erasureBegun: "permission.person_inactive",
+      erasingKept: ["pending"],
     });
   });
 });
