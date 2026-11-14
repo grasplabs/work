@@ -160,7 +160,9 @@ const noted = async (
  * of the queries D1 runs for one invocation, which every task of the
  * clock's shares, so a drain's tries alone leave nine tenths to the rest.
  * Beside them a drain makes three queries a batch (take, note, settle):
- * at the clock's 50 batches, 250 at the very most. A tenth is also one
+ * at the clock's 50 batches, 250 at the very most for core's outbox. The
+ * same clock drain (`drainAuditOutboxes`) also drains Knowledge's, up to
+ * 100 more (take and settle a batch), about 350 in all. A tenth is also one
  * batch's notings (`auditOutboxTakeMax`), so a drain can try each of a
  * full batch alone.
  */
