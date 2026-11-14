@@ -154,8 +154,7 @@ const added = async (
 
 /**
  * A source everyone in the company may read, added to the shared store
- * as its producer would: core's producers add none yet, so code's recall
- * finds nothing else today.
+ * as an upload shared with everyone is (brain-uploads.ts).
  */
 const forEveryone = async (text: string): Promise<SourceRef> => {
   const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };

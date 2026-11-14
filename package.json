@@ -55,6 +55,7 @@
     "@types/semver": "catalog:",
     "aws4fetch": "catalog:",
     "capnweb": "catalog:",
+    "fflate": "catalog:",
     "lightningcss": "catalog:",
     "oxc-parser": "catalog:oxc",
     "oxfmt": "catalog:",
