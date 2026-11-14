@@ -54,6 +54,7 @@ CREATE TABLE `drafts` (
 );
 --> statement-breakpoint
 ALTER TABLE `workflow_resource_versions` ADD `label` text;--> statement-breakpoint
+ALTER TABLE `app_workflow_bindings` ADD `contract` text;--> statement-breakpoint
 CREATE UNIQUE INDEX `workflow_resource_versions_label` ON `workflow_resource_versions` (`workflow_resource_id`,`label`);--> statement-breakpoint
 -- An approval serves every version declaring its binding
 -- (src/workflow-bindings.ts): of the active approvals of one binding,

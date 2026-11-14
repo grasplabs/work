@@ -5,7 +5,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { appOf, boundIn, publishApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
-import { publishDefined, racingDb, release } from "./apps.ts";
+import { publishDefined, racingDb } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import {
   contractOf,
@@ -57,14 +57,14 @@ const setUp = async () => {
 describe("an App's workflow bindings, as its builders read them", () => {
   it("lists what each alias the live version binds, and ends a binding the next version no longer makes", async () => {
     const { builder, app, flow } = await setUp();
-    await release(
-      builder,
+    await publishApp(
+      builder.api,
       app,
       boundIn(requestsApp("summary"), { summary: flow.id })
     );
     const first = await builder.api.workflowResources.appBindings(app);
-    await release(
-      builder,
+    await publishApp(
+      builder.api,
       app,
       boundIn(requestsApp("archive"), { archive: flow.id })
     );
@@ -87,8 +87,8 @@ describe("an App's workflow bindings, as its builders read them", () => {
 
   it("keeps an archived App's bindings readable for when it is restored", async () => {
     const { builder, app, flow } = await setUp();
-    await release(
-      builder,
+    await publishApp(
+      builder.api,
       app,
       boundIn(requestsApp("summary"), { summary: flow.id })
     );
@@ -102,8 +102,8 @@ describe("an App's workflow bindings, as its builders read them", () => {
 
   it("is read by its builders, and by nobody else, never Grasp staff", async () => {
     const { builder, app, flow } = await setUp();
-    await release(
-      builder,
+    await publishApp(
+      builder.api,
       app,
       boundIn(requestsApp("summary"), { summary: flow.id })
     );
@@ -241,8 +241,8 @@ describe("an App and the workflow it binds, changing", () => {
     const { builder, events, flow, app, publish, rebound, bound, declares } =
       await contractSetUp();
     await publish(jobWaitingOf(events));
-    await release(
-      builder,
+    await publishApp(
+      builder.api,
       app,
       boundIn(requestsApp("review", jobEventsDeclared), { review: flow.id })
     );
@@ -273,8 +273,8 @@ describe("an App and the workflow it binds, changing", () => {
     const { builder, events, flow, app, publish, rebound } =
       await contractSetUp();
     await publish(jobWaitingOf(events, { more: ["laterEvents"] }));
-    await release(
-      builder,
+    await publishApp(
+      builder.api,
       app,
       boundIn(requestsApp("review"), { review: flow.id })
     );
@@ -312,6 +312,92 @@ describe("an App and the workflow it binds, changing", () => {
       },
       undeclared: "ok",
       dropped: "ok",
+    });
+  });
+
+  it("holds a workflow back by what its bindings keep, never an App's release: one revoked blocks no publish or roll back, yet what it uses stays", async () => {
+    const { admin, builder, events, flow, app, publish } =
+      await contractSetUp();
+    await publish(jobWaitingOf(events, { more: ["laterEvents"] }));
+    const { version } = await publishApp(
+      builder.api,
+      app,
+      boundIn(requestsApp("review", jobEventsDeclared), { review: flow.id })
+    );
+    // Its live release can't load any more.
+    await admin.api.apps.releases.revoke(app, version, { reason: "Leaks" });
+
+    // Drops the event the App doesn't declare.
+    const published = await publish(jobWaitingOf(events));
+    const rolledBack = await refusedOf(
+      builder.api.versions.rollback({ kind: "workflow", id: flow.id }, 1)
+    );
+    // Drops the event and the task the App does.
+    const dropped = await publish(greetingOf(undefined, "No events"));
+
+    expect({
+      published,
+      rolledBack,
+      dropped: saying(dropped, "Requests uses event `jobEvents`"),
+    }).toStrictEqual({
+      published: "ok",
+      rolledBack: "ok",
+      dropped: {
+        code: "workflow.app_binding_contract_changed",
+        details: {
+          apps: [
+            {
+              id: app,
+              name: "Requests",
+              uses: ["event `jobEvents`", "listen task `job`"],
+            },
+          ],
+        },
+        says: true,
+      },
+    });
+  });
+
+  it("lets an archived App hold no workflow back, and checks it again as its next version goes live once restored", async () => {
+    const { builder, events, flow, app, publish } = await contractSetUp();
+    await publish(jobWaitingOf(events));
+    const declaring = boundIn(requestsApp("review", jobEventsDeclared), {
+      review: flow.id,
+    });
+    await publishApp(builder.api, app, declaring);
+    await builder.api.apps.archive(app);
+
+    const whileArchived = await publish(greetingOf(undefined, "No events"));
+    await builder.api.apps.restore(app);
+    const next = appOf(declaring.definition, {
+      ...declaring.files,
+      "src/routes/index.tsx": (
+        declaring.files["src/routes/index.tsx"] ?? ""
+      ).replace("Requests", "Open requests"),
+    });
+    const restored = await refusedOf(publishApp(builder.api, app, next));
+
+    expect({
+      whileArchived,
+      restored: saying(restored, "Requests uses event `jobEvents`"),
+    }).toStrictEqual({
+      whileArchived: "ok",
+      restored: {
+        code: "workflow.app_binding_contract_changed",
+        details: {
+          apps: [
+            {
+              id: app,
+              name: "Requests",
+              uses: [
+                expect.stringContaining("event `jobEvents`"),
+                expect.stringContaining("listen task `job`"),
+              ],
+            },
+          ],
+        },
+        says: true,
+      },
     });
   });
 
@@ -383,15 +469,22 @@ describe("an App and the workflow it binds, changing", () => {
     const declaring = boundIn(requestsApp("review", jobEventsDeclared), {
       review: flow.id,
     });
-    await release(builder, app, declaring);
-    /** Another version of the App, declaring and binding the same. */
-    const anotherApp = (title: string): TestApp =>
-      appOf(declaring.definition, {
-        ...declaring.files,
+    await publishApp(builder.api, app, declaring);
+    /** Another version of the App, binding the same, declaring `declares`. */
+    const anotherApp = (
+      title: string,
+      declares = jobEventsDeclared
+    ): TestApp => {
+      const declared = boundIn(requestsApp("review", declares), {
+        review: flow.id,
+      });
+      return appOf(declared.definition, {
+        ...declared.files,
         "src/routes/index.tsx": (
-          declaring.files["src/routes/index.tsx"] ?? ""
+          declared.files["src/routes/index.tsx"] ?? ""
         ).replace("Requests", title),
       });
+    };
     // The workflow's version 2, of what the App declares, goes live as
     // the App's next version, checked against version 1, is about to.
     const appRaced = await outcome(
@@ -412,8 +505,9 @@ describe("an App and the workflow it binds, changing", () => {
       )
     );
     let appLive: number | undefined;
-    // The App's next version goes live as the workflow's version 3,
-    // checked against the App's version before, is about to.
+    // The App's next version, declaring less, goes live as the workflow's
+    // version 3, checked against what the App declared before, is about
+    // to.
     const workflowRaced = await outcome(
       publishDefinition(
         {
@@ -422,7 +516,10 @@ describe("an App and the workflow it binds, changing", () => {
             ({ version: appLive } = await publishApp(
               builder.api,
               app,
-              anotherApp("All requests")
+              anotherApp(
+                "All requests",
+                contractOf({ events: jobEventsDeclared.events })
+              )
             ));
           }, /^update "workflow_resources" set "current_version"/iu),
         },

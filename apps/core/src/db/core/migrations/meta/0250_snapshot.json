@@ -3608,6 +3608,13 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "contract": {
+          "name": "contract",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {

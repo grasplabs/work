@@ -61,11 +61,12 @@ import {
 //   binding follows the workflow's live version, so a version whose
 //   events, decisions or listen tasks differ from what an App binding it
 //   declares never goes live (`workflow.app_binding_contract_changed`),
-//   checked against each bound App's current version and required still
-//   so in the batch that makes it live, as an App's publish requires the
+//   checked against what each binding keeps of its App's live version
+//   (never the App's release, which may not load) and required still so
+//   in the batch that makes it live, as an App's publish requires the
 //   workflow's live version it checked (app-workflow-bindings.ts). An App
-//   with no current version declares nothing yet: its first publish
-//   checks its declaration against the version live then.
+//   with no live version, or archived, holds nothing back: its next
+//   publish checks its declaration against the version live then.
 // - A batch whose answer was lost, tried again (`retriedBatch`): its event
 //   is stored by the try that landed, and found by the one after; every
 //   other statement holds only once, so the retry is answered as the
@@ -145,8 +146,8 @@ const activate = async (
           eq(workflowResources.id, workflow.id),
           sql`${workflowResources.currentVersion} IS ${basedOn}`,
           sql`${workflowResources.deletedAt} IS NULL`,
-          // An App bound, or a bound App's version made current, since
-          // its declaration was checked.
+          // An App bound, restored or declaring otherwise since its
+          // declaration was checked.
           appsDeclare
         )
       )

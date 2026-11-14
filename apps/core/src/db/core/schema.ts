@@ -5653,6 +5653,16 @@ export const appWorkflowBindings = sqliteTable(
     boundAt: timestamp("bound_at").notNull(),
     removedBy: text("removed_by"),
     removedAt: timestamp("removed_at"),
+    /**
+     * What the App's live version declares of the workflow under the
+     * alias (its events, listen tasks and decisions), as canonical JSON,
+     * set each time an App version is made live (apps.ts,
+     * `activateVersion`); null while it declares nothing, or none is
+     * live. What a workflow's publish checks its version against
+     * (src/app-workflow-bindings.ts, `requireBoundAppsDeclare`), so it
+     * never loads an App's release.
+     */
+    contract: text(),
   },
   (table) => [
     uniqueIndex("app_workflow_bindings_active_idx")

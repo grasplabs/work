@@ -9,6 +9,7 @@ import { actorOf } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
+import { canonicalText } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { Authority } from "@grasp-os/shared/permissions";
 import {
@@ -19,18 +20,17 @@ import type {
   AppWorkflowBinding,
   WorkflowStart,
 } from "@grasp-os/shared/workflow-resources";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 
-import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
-import { appFor, findApp } from "./apps.ts";
+import { appFor } from "./apps.ts";
 import { outboxedWhere } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import { versionEventContract } from "./bound-workflows.ts";
-import { appWorkflowBindings } from "./db/core/schema.ts";
+import { apps, appWorkflowBindings } from "./db/core/schema.ts";
 import { appHost } from "./durable-objects.ts";
 import { requireNotStaff } from "./sharing.ts";
 import { liveWorkflow, requireWorkflowRole } from "./workflow-resources.ts";
@@ -64,19 +64,28 @@ import type { StartFiles } from "./workflows/start-files.ts";
 //   company, since. Grasp staff bind nothing (`role.forbidden`).
 // - A new version breaking the App: the App declares the events it
 //   sends, the listen tasks waiting on them and the decisions it answers
-//   (`permission.workflow`), and its references name them. A workflow
-//   version goes live only if it gives everything each App binding it
-//   declares (`requireBoundAppsDeclare`, workflow-publish.ts), whatever
-//   else it has, and an App version is made current only if the live
-//   version of each workflow it binds gives everything it declares
-//   (`versionBindingChanges`), each refusal naming the App and what it
-//   still uses (`workflow.app_binding_contract_changed`). So a workflow
-//   adds to its contract at once and an App declares the addition after;
-//   it drops something only once no App it is bound to declares it. Each
-//   side's batch requires what it checked still so: an App's switch the
-//   live version of each workflow it was checked against, a workflow's
-//   publish or roll back each bound App's current version, so of an App's
-//   and a workflow's change at once, the one landing second is refused.
+//   (`permission.workflow`), and its references name them. Each binding
+//   keeps what the App's live version declares of its workflow
+//   (`contract`), set as each App version is made current. A workflow
+//   version goes live only if it gives everything each binding keeps
+//   (`requireBoundAppsDeclare`, workflow-publish.ts), whatever else it
+//   has, read from the bindings alone: an App whose release can't load
+//   (revoked, or a dependency revoked) holds no workflow back. An App
+//   version is made current only if the live version of each workflow it
+//   binds gives everything it declares (`versionBindingChanges`), each
+//   refusal naming the App and what it still uses
+//   (`workflow.app_binding_contract_changed`). So a workflow adds to its
+//   contract at once and an App declares the addition after; it drops
+//   something only once no App it is bound to declares it. Each side's
+//   batch requires what it checked still so: an App's switch the live
+//   version of each workflow it was checked against, a workflow's publish
+//   or roll back each binding's contract as read, so of an App's and a
+//   workflow's change at once, the one landing second is refused.
+// - An archived App holding a workflow back: it runs nothing, so its
+//   bindings constrain no workflow's publish or roll back. Restored, it
+//   runs on as it was; whatever its pages name that the workflow dropped
+//   meanwhile is refused as it is used, and its next publish checks its
+//   declaration again as any does.
 // - A binding removed under a start: the start's admitting statement
 //   requires the binding still active, as it requires the grant.
 // - Deleting a workflow an App relies on: an active binding whose App
@@ -185,15 +194,33 @@ const contractRefusal = (uses: readonly ContractUse[], next: string) =>
   );
 
 /**
- * That every App binding workflow `workflow` declares nothing its
- * version `version` doesn't give (`contractGaps`): what it has besides
- * is no App's concern. A binding follows its workflow's live version, so
- * a version that drops what an App's pages name never goes live,
- * refused naming each such App and what it uses
- * (`workflow.app_binding_contract_changed`; workflow-publish.ts).
- * Answers what the batch making the version live requires still holds,
- * as SQL: the same Apps bound, each at the current version checked, so
- * an App bound or published since refuses the whole batch.
+ * What App version `release` declares of the workflow it binds under
+ * `alias`, as a binding keeps it (`contract`): its events, listen tasks
+ * and decisions as canonical JSON, or null when it declares none.
+ */
+const declaredContract = (
+  release: Pick<Release, "app">,
+  alias: string
+): string | null => {
+  const declared = declaredPermission(release.app, alias, "workflows");
+  if (declared === undefined) {
+    return null;
+  }
+  const { events, listens, decisions } = declared;
+  return canonicalText({ events, listens, decisions });
+};
+
+/**
+ * That every binding of workflow `workflow` keeps nothing its version
+ * `version` doesn't give (`contractGaps`), an archived App's aside: what
+ * it has besides is no App's concern. A binding follows its workflow's
+ * live version, so a version that drops what an App's pages name never
+ * goes live, refused naming each such App and what it uses
+ * (`workflow.app_binding_contract_changed`; workflow-publish.ts). Read
+ * from the bindings alone, never an App's release. Answers what the
+ * batch making the version live requires still holds, as SQL: the same
+ * bindings constraining it, each keeping the contract read, so an App
+ * bound, published or restored since refuses the whole batch.
  */
 export const requireBoundAppsDeclare = async (
   env: Env,
@@ -203,40 +230,40 @@ export const requireBoundAppsDeclare = async (
   const bound = await drizzle(env.DB)
     .select({
       id: appWorkflowBindings.id,
-      app: appWorkflowBindings.appId,
-      alias: appWorkflowBindings.alias,
+      contract: appWorkflowBindings.contract,
+      app: apps.id,
+      name: apps.name,
     })
     .from(appWorkflowBindings)
+    .innerJoin(apps, eq(apps.id, appWorkflowBindings.appId))
     .where(
       and(
         eq(appWorkflowBindings.workflowResourceId, workflow),
-        eq(appWorkflowBindings.status, "active")
+        eq(appWorkflowBindings.status, "active"),
+        isNull(apps.archivedAt)
       )
     )
     .all();
-  const checked: [string, number | null][] = [];
-  const uses: ContractUse[] = [];
-  const provided =
-    bound.length === 0
-      ? undefined
-      : await versionEventContract(env, workflow, version);
-  for (const { id, app, alias } of bound) {
-    // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
-    const found = await findApp(env, app);
-    checked.push([id, found.currentVersion]);
-    // An App binds only from a current version; one with none declares
-    // nothing yet.
-    if (found.currentVersion === null || provided === undefined) {
+  const checked = bound.map(({ id, contract }) => [id, contract]);
+  const provided = bound.some(({ contract }) => contract !== null)
+    ? await versionEventContract(env, workflow, version)
+    : undefined;
+  // By App: one may bind the workflow under more than one alias.
+  const byApp = new Map<string, ContractUse>();
+  for (const { app, name, contract } of bound) {
+    if (provided === undefined || contract === null) {
       continue;
     }
-    // oxlint-disable-next-line no-await-in-loop -- as above
-    const release = await loadRelease(env, found.id, found.currentVersion);
-    const declared = declaredPermission(release.app, alias, "workflows");
-    const gaps = declared === undefined ? [] : contractGaps(declared, provided);
+    const stored: unknown = JSON.parse(contract);
+    // SAFETY: only `declaredContract`, above, writes it, from a declaration.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    const gaps = contractGaps(stored as WorkflowEventContract, provided);
     if (gaps.length > 0) {
-      uses.push({ app: found.id, name: found.name, uses: gaps });
+      const held = byApp.get(app)?.uses ?? [];
+      byApp.set(app, { app, name, uses: [...held, ...gaps] });
     }
   }
+  const uses = [...byApp.values()];
   if (uses.length > 0) {
     throw contractRefusal(
       uses,
@@ -248,9 +275,10 @@ export const requireBoundAppsDeclare = async (
   return sql`NOT EXISTS (SELECT 1 FROM app_workflow_bindings AS bound
       JOIN apps AS app ON app.id = bound.app_id
     WHERE bound.workflow_resource_id = ${workflow} AND bound.status = 'active'
+      AND app.archived_at IS NULL
       AND NOT EXISTS (SELECT 1 FROM json_each(${JSON.stringify(checked)}) AS checked
         WHERE checked.value ->> 0 = bound.id
-          AND app.current_version IS checked.value ->> 1))`;
+          AND bound.contract IS checked.value ->> 1))`;
 };
 
 /**
@@ -285,13 +313,14 @@ interface HeldBinding {
 /**
  * A binding making an App version current makes: the workflow its
  * release seals under `alias`, where the App binds another now or none,
- * and its live version as checked, which the binding records it was made
- * at.
+ * its live version as checked, which the binding records it was made
+ * at, and what the App version declares of it (`declaredContract`).
  */
 export interface BindingChange {
   readonly alias: string;
   readonly workflowId: string;
   readonly version: number;
+  readonly contract: string | null;
   /** The active binding it replaces, if any. */
   readonly replacing?: HeldBinding;
 }
@@ -361,14 +390,19 @@ export const requireRecordableBindings = async (
 
 /**
  * What making an App version current does to its workflow bindings: the
- * bindings it makes (`changes`) and ends (`removals`, an alias its
- * release seals nothing under), what every alias it touches binds as it
- * was checked (`held`, an active binding's ID, or none), and the live
- * version of each workflow its declaration was checked against (`live`),
- * which the switch requires still so.
+ * bindings it makes (`changes`), keeps with what the version declares of
+ * them (`kept`) and ends (`removals`, an alias its release seals nothing
+ * under), what every alias it touches binds as it was checked (`held`,
+ * an active binding's ID, or none), and the live version of each
+ * workflow its declaration was checked against (`live`), which the
+ * switch requires still so.
  */
 export interface BindingSwitch {
   readonly changes: readonly BindingChange[];
+  readonly kept: readonly {
+    readonly id: string;
+    readonly contract: string | null;
+  }[];
   readonly removals: readonly HeldBinding[];
   readonly held: readonly { readonly alias: string; readonly id?: string }[];
   readonly live: readonly {
@@ -409,6 +443,7 @@ export const versionBindingChanges = async (
       )
     );
   const changes: BindingChange[] = [];
+  const kept: BindingSwitch["kept"][number][] = [];
   const live: BindingSwitch["live"][number][] = [];
   const uses: string[] = [];
   for (const { alias, workflowId } of release.workflows) {
@@ -419,12 +454,16 @@ export const versionBindingChanges = async (
       throw unavailableToBind();
     }
     live.push({ workflowId, version });
+    const contract = declaredContract(release, alias);
     const held = active.find((binding) => binding.alias === alias);
-    if (held?.workflowId !== workflowId) {
+    if (held?.workflowId === workflowId) {
+      kept.push({ id: held.id, contract });
+    } else {
       changes.push({
         alias,
         workflowId,
         version,
+        contract,
         ...(held === undefined ? {} : { replacing: held }),
       });
     }
@@ -459,6 +498,7 @@ export const versionBindingChanges = async (
   ]);
   return {
     changes,
+    kept,
     removals,
     held: [...aliases].map((alias) => {
       const id = active.find((binding) => binding.alias === alias)?.id;
@@ -505,7 +545,8 @@ const unboundSql = (app: AppId, alias: string): SQL =>
  * `appVersion` of App `app` is made current by `by`, each only if
  * `landed` holds as it runs (the switch's event was stored): each change
  * replaces the binding its alias was checked against, each removal ends
- * one, audited with the App version it came with. Once only: a batch
+ * one, audited with the App version it came with, and each binding kept
+ * takes what the version declares of its workflow. Once only: a batch
  * tried again after one that landed finds the alias binding another, or
  * none, and changes nothing.
  */
@@ -522,7 +563,11 @@ export const bindingChangeStatements = (
     /** The switch's event: one binding per alias and switch, ever. */
     readonly switchId: string;
   },
-  { changes, removals }: Pick<BindingSwitch, "changes" | "removals">,
+  {
+    changes,
+    kept,
+    removals,
+  }: Pick<BindingSwitch, "changes" | "kept" | "removals">,
   landed: SQL
 ): BatchItem<"sqlite">[] => {
   const db = drizzle(env.DB);
@@ -549,7 +594,7 @@ export const bindingChangeStatements = (
         // Only once the alias binds nothing: the binding it was checked
         // against ended just above, or none there to begin with.
         db.insert(appWorkflowBindings).select(
-          sql`SELECT ${id}, ${app}, ${change.alias}, ${change.workflowId}, ${change.version}, 'active', ${by.userId}, ${now.getTime()}, NULL, NULL
+          sql`SELECT ${id}, ${app}, ${change.alias}, ${change.workflowId}, ${change.version}, 'active', ${by.userId}, ${now.getTime()}, NULL, NULL, ${change.contract}
               WHERE ${landed} AND ${unboundSql(app, change.alias)}
                 AND NOT EXISTS (SELECT 1 FROM app_workflow_bindings WHERE id = ${id})`
         ),
@@ -575,6 +620,18 @@ export const bindingChangeStatements = (
         ),
       ];
     }),
+    ...kept.map(({ id, contract }) =>
+      db
+        .update(appWorkflowBindings)
+        .set({ contract })
+        .where(
+          and(
+            eq(appWorkflowBindings.id, id),
+            eq(appWorkflowBindings.status, "active"),
+            landed
+          )
+        )
+    ),
     ...removals.flatMap((binding) => [
       ended(binding),
       outboxedWhere(
