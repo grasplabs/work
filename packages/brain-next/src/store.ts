@@ -7,7 +7,9 @@ import { z } from "zod";
 import { packAcross } from "./across.ts";
 import { bucketUnder, countingWrites, keptUntilSettled } from "./bucket.ts";
 import type { BrainBucket } from "./bucket.ts";
+import { readCard } from "./cards.ts";
 import {
+  cardRequestSchema,
   attributeRuleOf,
   changeRequestSchema,
   confirmRequestSchema,
@@ -53,6 +55,8 @@ import {
 } from "./contract.ts";
 import type {
   AddedVersion,
+  Card,
+  CardRequest,
   AddedMemories,
   ConfirmRequest,
   ContestedPage,
@@ -175,7 +179,7 @@ import {
   newRecallCounts,
   recallOverviewOf,
 } from "./recall-counts.ts";
-import { find, recall } from "./recall.ts";
+import { find, findPassages, recall } from "./recall.ts";
 import { addMemories } from "./remember.ts";
 import { checkRestore, restoreStatus, startRestore } from "./restore.ts";
 import { isRestoring } from "./restoring.ts";
@@ -348,6 +352,7 @@ const nothingFound: Finding = {
   exact: [],
   capped: [],
   meaning: [],
+  memories: { words: [], entities: [], rivals: [] },
 };
 
 const encoder = new TextEncoder();
@@ -926,6 +931,19 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * each way counted as `recall` counts it.
    */
   async find(request: RecallRequest): Promise<Finding> {
+    return await this.#find(request, find);
+  }
+
+  /**
+   * What `find` finds of passages alone: no memory way runs or counts
+   * (recall.ts `findPassages`).
+   */
+  async findPassages(request: RecallRequest): Promise<Finding> {
+    return await this.#find(request, findPassages);
+  }
+
+  /** `request` checked and found by `finding`, each way counted. */
+  async #find(request: RecallRequest, finding: typeof find): Promise<Finding> {
     const asked = checked(recallRequestSchema, request);
     this.#mayRead(asked.reader);
     const readable = await this.#readable();
@@ -934,7 +952,11 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       return nothingFound;
     }
     await this.#wakeForModel(asked);
-    return find(this.ctx.storage.sql, asked, countingInto(this.#recallCounts));
+    return finding(
+      this.ctx.storage.sql,
+      asked,
+      countingInto(this.#recallCounts)
+    );
   }
 
   /**
@@ -2082,6 +2104,21 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     this.#mayRead(asked.reader);
     return (await this.#readable())
       ? readEntity(this.ctx.storage.sql, asked)
+      : null;
+  }
+
+  /** An entity's card as the reader sees it, built now (cards.ts). */
+  async readCard(request: CardRequest): Promise<Card | null> {
+    const asked = checked(cardRequestSchema, request);
+    this.#mayRead(asked.reader);
+    return (await this.#readable())
+      ? readCard(this.ctx.storage.sql, {
+          entity: asked.entity,
+          reader: asked.reader,
+          ...this.#pageMoments(asked.after, asked.asOf),
+          ...(asked.after === undefined ? {} : { after: asked.after }),
+          limit: asked.limit,
+        })
       : null;
   }
 

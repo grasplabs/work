@@ -345,9 +345,10 @@ export type RecallRequest = z.infer<typeof recallRequestSchema>;
 
 /**
  * The ways recall searches by (`Brain.recall`): words (its stop words
- * included), exact parts and meaning.
+ * included, over passages and memories), exact parts, the entities the
+ * question names and their relations, and meaning.
  */
-export const searchWays = ["words", "exact", "meaning"] as const;
+export const searchWays = ["words", "exact", "entities", "meaning"] as const;
 export type SearchWay = (typeof searchWays)[number];
 
 /**
@@ -423,6 +424,13 @@ export interface PackItem extends SourceVersionRef {
  */
 export interface Pack {
   items: PackItem[];
+  /**
+   * The memories found, best first, by the same fused order as `items`
+   * and from the same budget (contract.ts `PackMemory`).
+   */
+  memories: PackMemory[];
+  /** The contested facts among `memories`, each with every side packed. */
+  contested: PackContested[];
   notFound: string[];
   truncated: boolean;
 }
@@ -483,6 +491,17 @@ export interface Finding {
    * cosine and when their version was added, which ties are ordered by.
    */
   meaning: (FoundPassage & { score: number; addedAt: number })[];
+  /**
+   * The memories found: by their statement's words, best first, at most
+   * `recallLimit`; along the relations of the entities the question
+   * names, nearest first, at most `recallLimit`; and the other current
+   * sides of each contested one found.
+   */
+  memories: {
+    words: FoundMemory[];
+    entities: FoundMemory[];
+    rivals: FoundMemory[];
+  };
 }
 
 /** An ASCII letter or the space: a third of a token each (`tokensOf`). */
@@ -1657,10 +1676,12 @@ export const nameSchema = someText(valueMaxLength).refine(
  * An entity an add names, by a key of its own within the add (`key`,
  * which its memories use): the known entity `id`, or else one found by
  * its exact identifiers, the first entity of its kind holding any of
- * them (never by a name alone: linking on names and proposals are the
- * linker's), or else a new one. Its names and identifiers are kept as
- * given by each memory of the add that mentions it, so each is visible
- * only to those who can read such a memory.
+ * them; or else, given no identifier, the one entity of its kind holding
+ * one of its names of two words or more through memories read by exactly
+ * the add's readers ("Cards and links" below); or else a new one.
+ * Its names and identifiers are kept as given by each memory of the add
+ * that mentions it, so each is visible only to those who can read such a
+ * memory.
  */
 export const newEntitySchema = z.strictObject({
   key: wellFormedString().min(1).max(64),
@@ -2108,6 +2129,173 @@ export interface EntityNamesPage {
  */
 export type MemoryChangeOutcome = "done" | "nothing";
 
+// Cards and links (cards.ts, linking.ts).
+//
+// An entity's card is a view, built for each reader when asked, from the
+// memories that reader may read: never stored, so nothing has to be kept
+// in step and nobody sees a line they shouldn't.
+//
+// An add links an entity on exact evidence (contract `NewEntity`): its
+// known id, an exact identifier, or else an exact name, only where one
+// entity of its kind alone holds that name through memories read by
+// exactly the add's readers (so a link is never decided on what other
+// readers hold). A likely match short of that is never a link: proposing
+// one is GRA-1857's, joining two GRA-1835's.
+//
+// The order of adds decides a link. An entity given an identifier links
+// by its identifiers alone; one given none links by its exact name. So
+// "Jan de Vries" with an email, then "Jan de Vries" alone, are one
+// entity; "Jan de Vries" alone first, then with the email, are two. Two
+// entities of one add with the same name are not linked to each other by
+// it, and a later add of that name, finding two holders, links to
+// neither.
+//
+// A link, once made, stays; erasing the evidence does not undo it. Jan
+// holds email x; a source says "Anna Smit" has email x, so her entity is
+// Jan's (by the identifier); "Anna Smit" added without one then links to
+// it by her name. Erasing the source leaves Anna's memories on Jan's
+// card, and later adds of "Anna Smit" go on linking there. No reader sees
+// more than they may read (the readers are the same), but the evidence
+// for the join is gone, and nothing splits an entity.
+
+/**
+ * An entity's card to read, for a reader: as now, or as of a moment; a
+ * page at a time, as `readMemories` pages the memories it is built from.
+ */
+export const cardRequestSchema = z.strictObject({
+  entity: entityIdSchema,
+  reader: readerSchema,
+  asOf: z.date().optional(),
+  after: memoriesCursorSchema.optional(),
+  limit: z.int().min(1).max(memoriesReadMax).default(memoriesReadMax),
+});
+export type CardRequest = z.input<typeof cardRequestSchema>;
+
+/**
+ * An attribute of an entity on a card: its current memories the reader
+ * may read (one, or several for an attribute of many values, or for a
+ * contested one: each side with its source), and whether it is contested.
+ */
+export interface CardAttribute {
+  attribute: string;
+  memories: Memory[];
+  contested: boolean;
+}
+
+/**
+ * A relation on a card: a current memory relating the entity to another
+ * (`other`, as the reader sees it), the entity being what the memory is
+ * about (`about`) or what it relates to (`object`).
+ */
+export interface CardRelation {
+  attribute: string | null;
+  side: "about" | "object";
+  other: Entity;
+  memory: Memory;
+}
+
+/**
+ * A page of an entity's card as a reader sees it: the entity, its
+ * current values per attribute (`attributes`, in the order of the kind's
+ * list), its relations, and its current memories filed under no
+ * attribute (`notes`); all from a page of the memories the reader may
+ * read about it, in `readMemories`' order; whether more follow, and
+ * where to go on from. An attribute's values may go on in the next page.
+ */
+export interface Card {
+  entity: Entity;
+  attributes: CardAttribute[];
+  relations: CardRelation[];
+  notes: Memory[];
+  more: boolean;
+  next?: MemoriesCursor;
+}
+
+// Memories in a recall's pack (recall-memories.ts, pack.ts).
+
+/**
+ * How recall found a memory: by its statement's words (`words`), or along
+ * the relations of an entity the question names (`entities`), at most two
+ * steps; or as another side of a contested fact it found (`contested`).
+ */
+export type MemoryFoundBy = "words" | "entities" | "contested";
+
+/**
+ * A memory one store found for a recall, with what its way orders it by,
+ * as the way's statement gave them; its passage
+ * around its quote (`context`: the chunk of its version holding the
+ * quote, or none), and for the entities way how many steps from an
+ * entity the question names (0 to 2).
+ */
+export interface FoundMemory extends Memory {
+  words: number;
+  exact: number;
+  step: number;
+  context: { position: number; text: string } | null;
+}
+
+/**
+ * A memory in a pack: its stable id and what it is about, its statement,
+ * its source (or writer) to cite, whose word it is, its dates; its quote
+ * and the passage around it (`context`) when the budget allowed (null
+ * otherwise, or when it has none), whether it is contested, and how it
+ * was found.
+ */
+export interface PackMemory {
+  memory: MemoryId;
+  about: EntityId;
+  attribute: string | null;
+  object: EntityId | null;
+  /**
+   * What it says, as a kind. An instruction is in a pack only for its
+   * writer, as their own (`writer` is the reader): a consumer presents it
+   * as an instruction only in that person's own chats.
+   */
+  type: MemoryType;
+  statement: string;
+  quote: string | null;
+  context: { position: number; text: string } | null;
+  source: SourceVersionRef | null;
+  writer: string | null;
+  speaker: Speaker;
+  validFrom: Date | null;
+  validUntil: Date | null;
+  learnedAt: Date;
+  contested: boolean;
+  confirmed: boolean;
+  found: MemoryFoundBy;
+}
+
+/**
+ * A contested fact in a pack: an entity's attribute for which the pack
+ * holds current memories of more than one lineage saying different
+ * things, by their ids, each in `memories`.
+ */
+export interface PackContested {
+  about: EntityId;
+  attribute: string;
+  memories: MemoryId[];
+}
+
+/**
+ * The tokens a memory takes of a pack's budget: its statement, quote and
+ * context as held, and its citation (its id and source or writer).
+ */
+export const packMemoryTokens = ({
+  memory,
+  statement,
+  quote,
+  context,
+  source,
+  writer,
+}: PackMemory): number =>
+  tokensOf(statement) +
+  tokensOf(quote ?? "") +
+  tokensOf(context?.text ?? "") +
+  tokensOf(
+    `${memory} ${source === null ? (writer ?? "") : `${source.source} ${source.version}`}`
+  );
+
 /** The Brain, as its host calls it. */
 export interface Brain {
   /**
@@ -2167,6 +2355,12 @@ export interface Brain {
    * (across.ts `packAcross`): `recall` is that, over this store alone.
    */
   find: (request: RecallRequest) => Promise<Finding>;
+  /**
+   * What `find` finds of passages alone: no memory is read, so no memory
+   * way runs, counts or can fail it (`memories` is empty). For a host
+   * that hands on passages alone.
+   */
+  findPassages: (request: RecallRequest) => Promise<Finding>;
   /**
    * A version of a source, current or history, whole as it was added, for
    * a reader among that version's readers and the source's current
@@ -2478,6 +2672,13 @@ export interface Brain {
   readEntityNames: (request: EntityNamesRequest) => Promise<EntityNamesPage>;
   /** An entity, if the reader may see it; null alike when there is none. */
   readEntity: (request: EntityRequest) => Promise<Entity | null>;
+  /**
+   * An entity's card as the reader sees it (`Card`), built now from the
+   * memories they may read: null when they may see no such entity, alike
+   * for one nobody holds; with `asOf`, null too when no memory they may
+   * read mentioned it by then.
+   */
+  readCard: (request: CardRequest) => Promise<Card | null>;
 }
 
 /** The shared store's name: everything readable by more than one person. */

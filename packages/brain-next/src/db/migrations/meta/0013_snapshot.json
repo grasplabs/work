@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "1c87227c-f96e-47e8-aa79-ddd68dad640b",
+  "id": "b91ccb20-87a8-41ee-82a4-38409dff4986",
   "prevId": "54de0393-0012-4bd6-afe2-ecef1cd4f426",
   "tables": {
     "chunks": {
@@ -271,6 +271,15 @@
           ],
           "isUnique": false
         },
+        "entity_names_entity_idx": {
+          "name": "entity_names_entity_idx",
+          "columns": [
+            "entity",
+            "type",
+            "folded"
+          ],
+          "isUnique": false
+        },
         "entity_names_memory_idx": {
           "name": "entity_names_memory_idx",
           "columns": [
@@ -504,13 +513,6 @@
           "notNull": true,
           "autoincrement": false,
           "default": false
-        },
-        "sources": {
-          "name": "sources",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         }
       },
       "indexes": {
@@ -1087,6 +1089,24 @@
           "name": "memories_object_idx",
           "columns": [
             "object"
+          ],
+          "isUnique": false
+        },
+        "memories_entity_object_idx": {
+          "name": "memories_entity_object_idx",
+          "columns": [
+            "entity",
+            "object"
+          ],
+          "isUnique": false
+        },
+        "memories_lineage_value_idx": {
+          "name": "memories_lineage_value_idx",
+          "columns": [
+            "entity",
+            "attribute",
+            "lineage",
+            "value_key"
           ],
           "isUnique": false
         },

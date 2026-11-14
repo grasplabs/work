@@ -1,16 +1,29 @@
+import { brainOf, packItemTokens } from "@grasp-os/brain-next/contract";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import { withheldResult } from "../src/agent.ts";
 import { organizationId } from "../src/auth/auth.ts";
-import { addSource, eraseSource } from "../src/brain-next.ts";
-import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
+import {
+  addSource,
+  eraseSource,
+  mergeRecalled,
+  recallPassagesAs,
+  rememberAs,
+} from "../src/brain-next.ts";
+import type {
+  RecalledItem,
+  RecalledPassages,
+  SourceReaders,
+  SourceRef,
+} from "../src/brain-next.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
-import { workspace } from "../src/durable-objects.ts";
+import { inJurisdiction, workspace } from "../src/durable-objects.ts";
 import {
   analysisPurpose,
   recallTimeoutReason,
@@ -552,16 +565,17 @@ describe("a recall before a question that doesn't hand over", setUpTime, () => {
     const fact = `Depot ${depot} opens at seven`;
     const chat = await recallingChat(says("I can't say."), says("Nor now."));
     await added(fact, owner(chat.personId));
-    /** What the model got, with the Brain's stores finding as `recall` does. */
+    /** What the model got, with the Brain's stores finding passages as `recall` does. */
     const askedWith = async (recall: Call) => {
       const before = chat.provider.requests.length;
       await withEnv(
         chat,
         {
-          // A person's own chat recalls from both stores (`find`).
+          // A person's own chat recalls passages alone from both stores
+          // (`findPassages`).
           BRAIN_STORE: answering(
             env.BRAIN_STORE,
-            "find",
+            "findPassages",
             async () => await recall()
           ),
         },
@@ -1099,5 +1113,327 @@ describe("what the recall before a question may reach", setUpTime, () => {
       ],
       recordedBefore: true,
     });
+  });
+});
+
+/** The shared store, where a team's memories are kept. */
+const shared = () => brainOf(inJurisdiction(env, env.BRAIN_STORE));
+
+/** A new team of `personId`'s: its readers, and its group as the Brain names it. */
+const teamOf = async (
+  personId: string
+): Promise<{ readers: SourceReaders; group: string }> => {
+  const teamId = crypto.randomUUID();
+  const db = drizzle(env.DB);
+  await db.insert(teams).values({
+    id: teamId,
+    name: `Team ${unique()}`,
+    organizationId,
+    createdAt: new Date(),
+  });
+  await db.insert(teamMembers).values({
+    id: crypto.randomUUID(),
+    teamId,
+    userId: personId,
+    createdAt: new Date(),
+  });
+  return { readers: { kind: "team", teamId }, group: `team:${teamId}` };
+};
+
+/** Adds a memory that `group` may read, `statement`, about a customer of its own. */
+const remembered = async (group: string, statement: string) =>
+  await shared().addMemories({
+    change: crypto.randomUUID(),
+    access: { kind: "audience", group },
+    entities: [{ key: "c", kind: "customer", names: [`Depot ${word()}`] }],
+    memories: [
+      {
+        about: "c",
+        type: "fact",
+        statement,
+        speaker: { kind: "system" },
+        basis: { kind: "writer", writer: "crm" },
+      },
+    ],
+  });
+
+/** The tokens of `item`, as the Brain counts them. */
+const itemTokensOf = (item: RecalledItem): number =>
+  packItemTokens({
+    ...item,
+    source: `${item.source.producer}:${item.source.id}`,
+  });
+
+/** The tokens of all of `pack`'s passages. */
+const tokensOf = (pack: RecalledPassages): number =>
+  pack.items.reduce((sum, item) => sum + itemTokensOf(item), 0);
+
+/** The person's recall of passages for `question`, within `tokens`. */
+const recalledBy =
+  (personId: string, tokens: number) => async (question: string) =>
+    await recallPassagesAs(env, personId, {
+      question,
+      budget: { tokens },
+      personal: false,
+    });
+
+/** How many of `pack`'s passages its question's words found. */
+const byWords = (pack: RecalledPassages): number =>
+  pack.items.filter(({ found }) => found === "words").length;
+
+/** Where an item of a pack is: its source, version and place. */
+const placeOf = (item: RecalledItem): string =>
+  JSON.stringify([item.source, item.version, item.position]);
+
+/** Where each of `pack`'s passages is, in its order. */
+const placesOf = (pack: RecalledPassages): string[] =>
+  pack.items.map((item) => placeOf(item));
+
+/** A passage of an upload `id`, as recall gives it. */
+const randomItem = (id: string, text: string): RecalledItem => ({
+  source: { producer: "upload", id },
+  version: 1,
+  position: 0,
+  text,
+  whole: true,
+  found: "words",
+});
+
+/**
+ * One pass over `first`'s passages, then `second`'s that `first` doesn't
+ * hold, keeping each while it fits in `tokens`: what a merge of the two
+ * packs gives, written out plainly.
+ */
+const onePass = (
+  first: RecalledPassages,
+  second: RecalledPassages,
+  tokens: number
+): RecalledPassages => {
+  let used = 0;
+  let truncated = first.truncated || second.truncated;
+  const held = new Set<string>();
+  const items = [...first.items, ...second.items].filter((item) => {
+    if (held.has(placeOf(item))) {
+      return false;
+    }
+    if (used + itemTokensOf(item) > tokens) {
+      truncated = true;
+      return false;
+    }
+    used += itemTokensOf(item);
+    held.add(placeOf(item));
+    return true;
+  });
+  return { items, notFound: second.notFound, truncated };
+};
+
+/** What the model is handed of a recall, as far as these tests read it. */
+const handedSchema = z.object({
+  evidence: z.array(z.unknown()),
+  notFound: z.array(z.string()),
+});
+
+/** The budget both passes of the merge tests recall within. */
+const mergeBudget = { tokens: 3000 };
+
+// Passages alone before a question, as on main (GRA-1742): memories reach
+// the chat in their own pull request, re-checked when history is read
+// again. From the ways it can fail: a memory reaches the model, or takes
+// room or a word from what it is handed.
+describe(
+  "the recall before a question hands over passages alone",
+  setUpTime,
+  () => {
+    it("hands the model no memory: what only a memory answers is no evidence, and its words are not found", async () => {
+      const depot = word();
+      const chat = await recallingChat(says("I don't know."));
+      const statement = `Depot ${depot} opens at seven`;
+      await rememberAs(env, chat.personId, {
+        change: crypto.randomUUID(),
+        about: { kind: "customer", names: [`Depot ${depot}`] },
+        type: "fact",
+        statement,
+        quote: statement,
+      });
+      await chat.ask(`When does depot ${depot} open?`);
+      const handed = recallIn(chat.provider.requests.at(-1)?.body) ?? "";
+      const { evidence, notFound } = handedSchema.parse(
+        JSON.parse(handed.slice(handed.indexOf("{")))
+      );
+
+      expect({
+        evidence,
+        depotNotFound: notFound.includes(depot),
+        memory: handed.includes(statement),
+      }).toStrictEqual({ evidence: [], depotNotFound: true, memory: false });
+    });
+
+    it("gives passages the whole budget, whatever memories the question also finds", async () => {
+      const person = await signedInWithRole(idp, "user");
+      const { readers, group } = await teamOf(person.userId);
+      const asked = word();
+      await added(`Depot ${asked} opens on Monday at the north gate`, readers);
+      const roomy = await recalledBy(person.userId, mergeBudget.tokens)(asked);
+      // Memories the same word finds, after: they take no room and hold no
+      // word for the pack of passages.
+      await remembered(group, `Depot ${asked} opens on Monday`);
+      await remembered(group, `Depot ${asked} keeps its keys at the gate`);
+      const exact = { tokens: tokensOf(roomy) };
+      const after = await recalledBy(person.userId, exact.tokens)(asked);
+      const afterRoomy = await recalledBy(
+        person.userId,
+        mergeBudget.tokens
+      )(asked);
+
+      expect(roomy.items).toHaveLength(1);
+      expect({ after, afterRoomy }).toStrictEqual({
+        after: roomy,
+        afterRoomy: roomy,
+      });
+    });
+  }
+);
+
+// The second pass's pack merged into the first's (`mergeRecalled`), from
+// the ways it can fail: a passage both passes found is handed over twice;
+// the second pass's passages overrun the budget the first left; what the
+// person may not read reaches the merged pack, or changes it at all.
+describe("two recalls merged into one pack", setUpTime, () => {
+  it("holds a passage both passes found once, then the second's own", async () => {
+    const person = await signedInWithRole(idp, "user");
+    const { readers } = await teamOf(person.userId);
+    const [first, second] = [word(), word()];
+    await added(`Depot ${first} ships ${second}`, readers);
+    await added(`Depot ${second} closes`, readers);
+    const recall = recalledBy(person.userId, mergeBudget.tokens);
+    const firstPack = await recall(first);
+    const secondPack = await recall(second);
+    const merged = mergeRecalled(firstPack, secondPack, mergeBudget);
+
+    // Counted by how each was found: recall by meaning may find either
+    // passage for either word too.
+    expect({
+      first: byWords(firstPack),
+      second: byWords(secondPack),
+      merged: placesOf(merged),
+      truncated: merged.truncated,
+    }).toStrictEqual({
+      first: 1,
+      second: 2,
+      merged: [
+        ...placesOf(firstPack),
+        ...placesOf(secondPack).filter(
+          (place) => !placesOf(firstPack).includes(place)
+        ),
+      ],
+      truncated: false,
+    });
+  });
+
+  it("keeps both passes within one budget, and says the second's was cut", async () => {
+    const person = await signedInWithRole(idp, "user");
+    const { readers } = await teamOf(person.userId);
+    const [first, second] = [word(), word()];
+    await added(`Depot ${first} opens on Monday at the north gate`, readers);
+    await added(`Depot ${second} opens on Tuesday at noon`, readers);
+    const recall = recalledBy(person.userId, mergeBudget.tokens);
+    const firstPack = await recall(first);
+    const secondPack = await recall(second);
+    // The second's passages the first doesn't hold (recall by meaning may
+    // find a passage for both words): what the merge adds.
+    const newOnes = secondPack.items.filter(
+      (item) => !placesOf(firstPack).includes(placeOf(item))
+    );
+    const room =
+      tokensOf(firstPack) + tokensOf({ ...secondPack, items: newOnes });
+    const tight = mergeRecalled(firstPack, secondPack, { tokens: room - 1 });
+    const roomy = mergeRecalled(firstPack, secondPack, { tokens: room });
+
+    expect({
+      adds: newOnes.length > 0,
+      tightHoldsFirst: placesOf(tight).slice(0, firstPack.items.length),
+      tightLeftSome:
+        placesOf(tight).length < firstPack.items.length + newOnes.length,
+      tightCut: tight.truncated,
+      within: tokensOf(tight) <= room - 1,
+      roomy: placesOf(roomy),
+      roomyCut: roomy.truncated,
+    }).toStrictEqual({
+      adds: true,
+      tightHoldsFirst: placesOf(firstPack),
+      tightLeftSome: true,
+      tightCut: true,
+      within: true,
+      roomy: [...placesOf(firstPack), ...newOnes.map((item) => placeOf(item))],
+      roomyCut: false,
+    });
+  });
+
+  // Packs of every shape, the second sharing passages with the first: the
+  // merged pack never goes over the budget, and it is what one pass over
+  // the first's passages, then the second's new ones, keeping each while
+  // it fits, would give.
+  it("never goes over the budget, and fits as one pass over both would", () => {
+    let seed = 7;
+    const random = (): number => {
+      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return seed / 2_147_483_648;
+    };
+    const count = (most: number): number => Math.floor(random() * (most + 1));
+    const items = Array.from({ length: 12 }, (_, index) =>
+      randomItem(`s${index}`, "word ".repeat(1 + count(120)))
+    );
+    const some = <T>(list: readonly T[]): T[] =>
+      list.filter(() => random() < 0.4);
+    for (let round = 0; round < 300; round += 1) {
+      const first: RecalledPassages = {
+        items: some(items),
+        notFound: [],
+        truncated: random() < 0.2,
+      };
+      const second: RecalledPassages = {
+        items: some(items),
+        notFound: [],
+        truncated: random() < 0.2,
+      };
+      const tokens = tokensOf(first) + count(400);
+      const merged = mergeRecalled(first, second, { tokens });
+
+      expect(tokensOf(merged)).toBeLessThanOrEqual(tokens);
+      expect(merged).toStrictEqual(onePass(first, second, tokens));
+    }
+  });
+
+  it("is the same pack when the second pass's words reach what the person may not read", async () => {
+    const person = await signedInWithRole(idp, "user");
+    const { readers } = await teamOf(person.userId);
+    const other = await signedInWithRole(idp, "user");
+    const { readers: theirTeam, group: theirGroup } = await teamOf(
+      other.userId
+    );
+    const [first, second, theirs] = [word(), word(), word()];
+    await added(`Depot ${first} ships ${second}`, readers);
+    await added(`Depot ${second} renews in March`, readers);
+    const recall = recalledBy(person.userId, mergeBudget.tokens);
+    const asked = async () =>
+      mergeRecalled(
+        await recall(first),
+        await recall(`${second} ${theirs}`),
+        mergeBudget
+      );
+    const before = await asked();
+    // What only another team may read, holding both of the second pass's
+    // words: a passage, and a memory.
+    await added(
+      `Depot ${second} ${theirs} keeps the other team's note`,
+      theirTeam
+    );
+    await remembered(
+      theirGroup,
+      `Depot ${second} ${theirs} keeps another note`
+    );
+
+    expect(before.notFound).toContain(theirs);
+    await expect(asked()).resolves.toStrictEqual(before);
   });
 });
