@@ -25,11 +25,12 @@ import type { WorkDefinition } from "./work.ts";
 //
 // Its judgments count once it has finished: its last page marks the
 // version re-checked (`memory_rechecked`), in the transaction of its own
-// judgments, and only the judgments of the latest version so marked count (memories.ts `judgedAtSql`), for readers of
-// that version. Until then the judgments of the version re-checked
-// before count as they did, for its readers: a memory out stays out while
-// a newer version waits for its turn, and a reader who may not read the
-// version judged against is answered as by a store that never held it.
+// judgments, and each reader gets the judgments of the latest version so
+// marked that they may read, not under erasure (memories.ts
+// `judgedAtSql`). Until a newer one finishes, the one before counts as it
+// did: a memory out stays out while a newer version waits for its turn,
+// and a reader who may not read a version is answered as by a store that
+// never held it.
 // The memory itself is never written: `retired_at` stays its writer's.
 //
 // A page of the source's memories a run, in the order they were added

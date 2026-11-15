@@ -960,9 +960,9 @@ export const memoryExtractions = sqliteTable(
 /**
  * A re-check's judgment (recheck.ts) that version `version` of the source
  * memory `memory` rests on no longer holds its quote: the memory is out
- * from `at`, while `version` is the latest version of its source a
- * re-check finished (`memory_rechecked`), at or before its current one,
- * for readers of that version (memories.ts `judgedAtSql`). Nothing is
+ * from `at` for a reader who may read `version`, while no re-check
+ * finished (`memory_rechecked`) on a later version that reader may read
+ * and that is not under erasure (memories.ts `judgedAtSql`). Nothing is
  * written to the memory itself: `retired_at` stays its writer's. Deleted
  * with the memory, and with the version it judged against.
  */
@@ -986,8 +986,9 @@ export const memoryRechecks = sqliteTable(
 );
 
 /**
- * A version of a source whose re-check finished (recheck.ts): the latest
- * of a source is the version whose judgments count (`memory_rechecks`).
+ * A version of a source whose re-check finished (recheck.ts): for each
+ * reader, the latest such version they may read is the one whose
+ * judgments count (`memory_rechecks`, memories.ts `judgedAtSql`).
  * Written by a re-check's last page with its judgments, never changed;
  * `at` is when, as the store stamps writes (memories.ts `stampWrite`), so
  * an export holds those of before it started. Deleted with the version.
