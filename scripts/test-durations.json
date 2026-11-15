@@ -208,7 +208,6 @@
   "@grasp-os/core test/brain-memory-lineage.test.ts": 5,
   "@grasp-os/core test/brain-memory-list.test.ts": 0.4,
   "@grasp-os/core test/brain-memory-recall.test.ts": 3.9,
-  "@grasp-os/core test/brain-memory-writes.test.ts": 4.1,
   "@grasp-os/core test/brain-next-embedding.test.ts": 0.3,
   "@grasp-os/core test/brain-next-erasure.test.ts": 38.2,
   "@grasp-os/core test/brain-next-exports.test.ts": 1.2,
