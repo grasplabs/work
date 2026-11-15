@@ -1,14 +1,10 @@
-import type {
-  CollectionInput,
-  DocumentSummary,
-  KnowledgeApi,
-} from "@grasp-os/shared/knowledge";
+import type { KnowledgeApi } from "@grasp-os/shared/knowledge";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { mockIdp } from "./idp.ts";
-import { newTeam } from "./knowledge.ts";
+import { newTeam, seed } from "./knowledge.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
 // Search holds one generation of each document, published after the save
@@ -20,13 +16,8 @@ const idp = mockIdp();
 const knowledgeOf = async (role: "admin" | "user" = "admin") => {
   const person = await signedInApi(idp, role);
   const api: KnowledgeApi = person.api.knowledge;
-  return { ...person, api };
+  return { ...person, api, seeded: seed(person.api) };
 };
-
-const shared = (): CollectionInput => ({
-  name: `Handbook ${unique()}`,
-  access: "everyone",
-});
 
 /** A document whose one section holds `word`. */
 const textOf = (word: string): string => `# Policy\n${word} applies.`;
@@ -100,109 +91,18 @@ const withEngineDown = async <T>(run: () => Promise<T>): Promise<T> => {
   }
 };
 
-/** The document `documentId` as its collection lists it. */
-const listed = async (
-  api: KnowledgeApi,
-  collectionId: string,
-  documentId: string
-): Promise<DocumentSummary | undefined> => {
-  const { documents } = await api.listDocuments(collectionId);
-  return documents.find(({ id }) => id === documentId);
-};
-
-/** The versions of the sections a search for `word` finds, in `scope`. */
-const foundVersions = async (
-  api: KnowledgeApi,
-  word: string,
-  collectionId: string
-): Promise<number[]> => {
-  const { hits } = await api.search(word, { collectionId });
-  return hits.map(({ version }) => version);
-};
-
-/** A content purge of `term` from `documentId`. */
-const purgeOf = (documentId: string, term: string) => ({
-  type: "content" as const,
-  documentIds: [documentId],
-  terms: [term],
-  reason: "offboarding" as const,
-});
-
-/** The current text of `documentId`. */
-const readTextOf = async (
-  api: KnowledgeApi,
-  documentId: string
-): Promise<string> => {
-  const { version } = await api.getDocument(documentId);
-  return version.text;
-};
-
-const indexingOf = (document: DocumentSummary | undefined) => ({
-  indexing: document?.indexing,
-  indexedVersion: document?.indexedVersion,
-});
-
 describe("publishing search generations", () => {
-  it("publishes a save's sections before it returns, and says so", async () => {
-    const { api } = await knowledgeOf();
-    const { id: collectionId } = await api.createCollection(shared());
-    const word = `Inline${unique()}`;
-    const saved = await api.saveDocument({
-      collectionId,
-      path: "policy.md",
-      text: textOf(word),
-      ifVersion: 0,
-    });
-    const { coverage } = await api.search(word, { collectionId });
-
-    expect({
-      saved: indexingOf(saved),
-      found: await foundVersions(api, word, collectionId),
-      coverage,
-    }).toStrictEqual({
-      saved: { indexing: "indexed", indexedVersion: 1 },
-      found: [1],
-      coverage: { pending: 0, failed: 0 },
-    });
-  });
-
-  it("indexes a document with no sections as indexed, and empties what search held of it", async () => {
-    const { api } = await knowledgeOf();
-    const { id: collectionId } = await api.createCollection(shared());
-    const word = `Emptied${unique()}`;
-    const first = await api.saveDocument({
-      collectionId,
-      path: "policy.md",
-      text: textOf(word),
-      ifVersion: 0,
-    });
-    const emptied = await api.saveDocument({
-      collectionId,
-      path: "policy.md",
-      text: "",
-      ifVersion: first.currentVersion,
-    });
-
-    expect({
-      emptied: indexingOf(emptied),
-      found: await foundVersions(api, word, collectionId),
-    }).toStrictEqual({
-      emptied: { indexing: "indexed", indexedVersion: 2 },
-      found: [],
-    });
-  });
-
   it("counts and finds only what the reader may read, however far indexing is behind", async () => {
-    const { api: admin } = await knowledgeOf("admin");
+    const { api: admin, seeded } = await knowledgeOf("admin");
     const { api: user } = await knowledgeOf("user");
     const word = `Private${unique()}`;
-    const { id: collectionId } = await admin.createCollection({
+    const { id: collectionId } = await seeded.createCollection({
       name: `Mine ${unique()}`,
       access: "me",
     });
     const { coverage: before } = await user.search(word);
     // Version 1 is indexed; version 2 waits.
-    await admin.saveDocument({
+    await seeded.saveDocument({
       collectionId,
       path: "policy.md",
       text: textOf(word),
@@ -212,7 +112,7 @@ describe("publishing search generations", () => {
     try {
       await withEngineDown(
         async () =>
-          await admin.saveDocument({
+          await seeded.saveDocument({
             collectionId,
             path: "policy.md",
             text: textOf(`${word} again`),
@@ -244,7 +144,7 @@ describe("publishing search generations", () => {
     const admin = await knowledgeOf("admin");
     const teamId = await newTeam(admin, [admin]);
     const word = `Sensitive${unique()}`;
-    const { id: collectionId } = await admin.api.createCollection({
+    const { id: collectionId } = await admin.seeded.createCollection({
       name: `Payroll ${unique()}`,
       access: "teams",
       teams: [teamId],
@@ -255,7 +155,7 @@ describe("publishing search generations", () => {
     try {
       await withEngineDown(
         async () =>
-          await admin.api.saveDocument({
+          await admin.seeded.saveDocument({
             collectionId,
             path: "salaries.md",
             text: textOf(word),
@@ -278,60 +178,6 @@ describe("publishing search generations", () => {
       unscopedRestricted: false,
       scoped: { pending: 1, failed: 0 },
       scopedSensitive: true,
-    });
-  });
-
-  it("publishes what a save made current during a purge, so no generation with the terms stays live", async () => {
-    const { api } = await knowledgeOf();
-    const { id: collectionId } = await api.createCollection(shared());
-    const name = `Visser${unique()}`;
-    const document = await api.saveDocument({
-      collectionId,
-      path: "policy.md",
-      text: textOf(`${name} signs`),
-      ifVersion: 0,
-    });
-    const clean = textOf(`Clean${unique()}`);
-    const { token } = await api.preparePurge(purgeOf(document.id, name));
-    // Just before the purge publishes, someone saves over it, and that
-    // save's own publish fails, with no engine to index it.
-    const restore = watchPublishes({
-      before: async (nth) => {
-        if (nth !== 1) {
-          return;
-        }
-        await withEngineDown(
-          async () =>
-            await api.saveDocument({
-              collectionId,
-              path: "policy.md",
-              text: clean,
-              ifVersion: 2,
-            })
-        );
-      },
-      fail: (nth) => nth === 2,
-    });
-    let outcome: string;
-    try {
-      outcome = await api.purge(purgeOf(document.id, name), token).then(
-        () => "purged",
-        (error: unknown) => String(knowledgeErrors.codeOf(error))
-      );
-    } finally {
-      restore();
-    }
-
-    expect({
-      outcome,
-      indexed: indexingOf(await listed(api, collectionId, document.id)),
-      term: await foundVersions(api, name, collectionId),
-      clean: await readTextOf(api, document.id),
-    }).toStrictEqual({
-      outcome: "purged",
-      indexed: { indexing: "indexed", indexedVersion: 3 },
-      term: [],
-      clean,
     });
   });
 });

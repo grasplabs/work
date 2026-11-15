@@ -24,32 +24,23 @@ import type {
   BacklinkPage,
   DocumentPage,
   DocumentRead,
-  DocumentSummary,
   FollowResult,
   HistoryOptions,
   HistoryPage,
   KnowledgeRead,
   ListDocumentsOptions,
-  PurgeInput,
-  PurgePlan,
-  PurgeResult,
-  PurgeStatus,
   ReadOptions,
-  RestoreInput,
-  SaveInput,
   SearchOptions,
   SearchResults,
 } from "@grasp-os/brain/knowledge";
 import { z } from "zod";
 
-import { documentIdSchema, identifierSchema } from "./ids.ts";
 import type { CollectionId } from "./ids.ts";
 
 // Knowledge: Markdown documents with typed frontmatter, in collections. A
 // save never overwrites: it adds a version, and names the version it was
 // edited from, so two people editing at once get a conflict instead of
-// losing a change. Only a purge rewrites versions: an admin erasing
-// personal data from all of them.
+// losing a change.
 
 /**
  * Who may read a collection: everyone in the organization, the members of
@@ -90,57 +81,6 @@ export const readOnlySources: ReadonlySet<CollectionSource> = new Set([
   "apps",
 ]);
 
-/** Most teams one collection is shared with. */
-export const collectionMaxTeams = 50;
-
-/** A new collection, as a person creates it. */
-export const collectionInputSchema = z
-  .strictObject({
-    name: z.string().trim().min(1).max(100),
-    /** When to use it: what agents see before they look inside. */
-    description: z.string().trim().max(1024).default(""),
-    access: collectionAccessSchema,
-    /** The teams that may read it; only for `teams` access. */
-    teams: z
-      .array(identifierSchema)
-      .max(collectionMaxTeams)
-      .default([])
-      .transform((teams) => [...new Set(teams)]),
-    /** Marks a team collection's content as sensitive for the model gateway. */
-    sensitive: z.boolean().default(false),
-  })
-  .superRefine(({ access, teams, sensitive }, context) => {
-    if (access === "teams" && teams.length === 0) {
-      context.addIssue({
-        code: "custom",
-        path: ["teams"],
-        message: "A team collection needs at least one team",
-      });
-    }
-    if (access === "admins") {
-      context.addIssue({
-        code: "custom",
-        path: ["access"],
-        message: "Only the platform makes a collection for admins",
-      });
-    }
-    if (access !== "teams" && teams.length > 0) {
-      context.addIssue({
-        code: "custom",
-        path: ["teams"],
-        message: "Only a team collection has teams",
-      });
-    }
-    if (sensitive && access !== "teams") {
-      context.addIssue({
-        code: "custom",
-        path: ["sensitive"],
-        message: "Only a team collection can be marked sensitive",
-      });
-    }
-  });
-export type CollectionInput = z.input<typeof collectionInputSchema>;
-
 /** A collection, as the API returns it. */
 export interface Collection {
   id: CollectionId;
@@ -155,30 +95,6 @@ export interface Collection {
   source: CollectionSource;
   /** ISO 8601. */
   createdAt: string;
-  /**
-   * Whether the person who asked may change it: save and restore its
-   * documents. Always `false` for an App or agent reading it.
-   */
-  writable: boolean;
-}
-
-/**
- * A Grasp skill to copy into the client's skills, to adapt there: its
- * `SKILL.md`, at the same path.
- */
-export const copySkillInputSchema = z.strictObject({
-  documentId: documentIdSchema,
-});
-export type CopySkillInput = z.input<typeof copySkillInputSchema>;
-
-/**
- * Where skills are: the Grasp skills, which ship with each release and
- * only Grasp changes, and the client's own, which its admins write. `null`
- * while one doesn't exist yet.
- */
-export interface SkillCollections {
-  grasp: CollectionId | null;
-  client: CollectionId | null;
 }
 
 /**
@@ -186,54 +102,19 @@ export interface SkillCollections {
  * session and what the person may see and change, on the server, and
  * every read of documents is recorded in the audit log.
  */
-/** How many entity match proposals to show. */
-export interface EntityMatchesOptions {
-  limit?: number;
-}
-
-/** Entities of different collections that may be one, on their name alone. */
-export interface EntityMatch {
-  kind: string;
-  name: string;
-  basis: "name";
-  entities: { id: string; collectionIds: string[]; sources: number }[];
-}
-
-/** A decision on two entities, and the evidence for `same`. */
-export interface EntityMatchDecisionInput {
-  entities: [string, string];
-  decision: "same" | "different";
-  evidence?: { documentId: string; version: number };
-}
-
-/** A decision as recorded. */
-export interface EntityMatchDecision {
-  entities: [string, string];
-  decision: "same" | "different";
-}
-
 export interface KnowledgeApi {
   /** The collections the person may read. */
   listCollections: () => Promise<Collection[]>;
-  /**
-   * Creates a collection the person owns. Anyone can create one only they
-   * can read; shared ones (everyone, teams) only admins.
-   */
-  createCollection: (input: CollectionInput) => Promise<Collection>;
   listDocuments: (
     collectionId: string,
     options?: ListDocumentsOptions
   ) => Promise<DocumentPage>;
   /** The current version, or `version`. */
   getDocument: (documentId: string, version?: number) => Promise<DocumentRead>;
-  /** Saves a new version; `knowledge.conflict` if `ifVersion` is stale. */
-  saveDocument: (input: SaveInput) => Promise<DocumentSummary>;
   history: (
     documentId: string,
     options?: HistoryOptions
   ) => Promise<HistoryPage>;
-  /** Saves an earlier version's text as a new version. */
-  restoreVersion: (input: RestoreInput) => Promise<DocumentSummary>;
   /** A page of the documents that link to this one, in path order. */
   backlinks: (
     documentId: string,
@@ -296,78 +177,10 @@ export interface KnowledgeApi {
     lessonId: string;
     expectedRevision: number;
   }) => Promise<void>;
-  /**
-   * Entities of different collections the person reads that may be one
-   * (GRA-1080): of one kind and name, worked out from what they read now,
-   * never kept, and never merged. A collection they can't read is never a
-   * side, nor shapes what they see.
-   */
-  entityMatches: (options?: EntityMatchesOptions) => Promise<EntityMatch[]>;
-  /**
-   * Decides whether two entities are one: by a person who reads both
-   * sides, `same` only with a document they read as evidence, audited. It
-   * rewrites no ID, and shows only to readers of both sides.
-   */
-  decideEntityMatch: (
-    input: EntityMatchDecisionInput
-  ) => Promise<EntityMatchDecision>;
   /** A document, or one section of it (a search hit's `section`). */
   read: (documentId: string, options?: ReadOptions) => Promise<KnowledgeRead>;
   /** A document's links and backlinks, and for a skill, its files. */
   follow: (documentId: string) => Promise<FollowResult>;
-  /**
-   * The Grasp skills and the client's skills collections, creating the
-   * client's when an admin asks and it doesn't exist yet.
-   */
-  skillCollections: () => Promise<SkillCollections>;
-  /**
-   * Copies a Grasp skill into the client's skills, as a new document at
-   * the same path: admins only. `knowledge.conflict` when the client's
-   * skills have that path already.
-   */
-  copySkill: (input: CopySkillInput) => Promise<DocumentSummary>;
-  /**
-   * What a purge would remove, and a token to confirm it with. Admins
-   * only, whatever the collection, but for the Grasp skills, the
-   * release's text, and an App's entry in the Apps collection while the
-   * App holds a term (`knowledge.read_only`, saying where): the entry is
-   * made from the App's name, description and current version's
-   * AGENTS.md, so the App changes first (a version without it; a name or
-   * description only through its builders or Grasp support, as no API
-   * changes them yet), then purge. Nothing changes yet.
-   */
-  preparePurge: (input: PurgeInput) => Promise<PurgePlan>;
-  /**
-   * Runs the purge `preparePurge` returned `token` for, with the same
-   * input, by the same admin, before it expires; else
-   * `knowledge.purge_expired`. The audit log records who purged what and
-   * why, never what was removed.
-   */
-  purge: (
-    input: PurgeInput,
-    token: string,
-    /**
-     * `fresh`: begins it anew; an unfinished purge of the same input is
-     * kept as it stood, superseded. Resumed otherwise, every step run again.
-     */
-    options?: { fresh?: boolean }
-  ) => Promise<PurgeResult>;
-  /**
-   * Where purge `purgeId` stands (GRA-1122): each projection it reaches,
-   * queued, running, complete or blocked (with an error code), and what
-   * each changed. A blocked one goes on when the purge is run again with
-   * the same input. Admins only, as purging is.
-   */
-  purgeStatus: (purgeId: string) => Promise<PurgeStatus>;
-  /**
-   * Finishes unfinished content purge `purgeId` by its ID alone, for any
-   * admin: what it still owes that needs none of its terms, a document
-   * gone since skipped (`knowledge.purge_needs_input` while it owes more).
-   * For a purge whoever began it can't run again. Answers where it stands:
-   * its steps' states, with no counts and no document a step is of.
-   * Audited.
-   */
-  finishPurge: (purgeId: string) => Promise<PurgeStatus>;
 }
 
 // The Brain's documents, versions, search and purge, as the Brain defines
@@ -388,15 +201,8 @@ export {
   linkPath,
   listDocumentsOptionsSchema,
   pageMaxLimit,
-  purgeInputSchema,
-  purgeMaxDocuments,
-  purgeMaxTerms,
-  purgeReasonSchema,
-  purgeTermMaxLength,
   purgedMarker,
   readOptionsSchema,
-  restoreInputSchema,
-  saveInputSchema,
   searchCoverageCap,
   searchMaxLimit,
   searchOptionsSchema,
@@ -428,14 +234,7 @@ export type {
   KnowledgeRead,
   ListDocumentsOptions,
   Provenance,
-  PurgeInput,
-  PurgePlan,
-  PurgeReason,
-  PurgeResult,
-  PurgeStatus,
   ReadOptions,
-  RestoreInput,
-  SaveInput,
   SearchCoverage,
   SearchHit,
   SearchOptions,

@@ -11,6 +11,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { brainOf } from "../src/knowledge/ports.ts";
 import { mockIdp } from "./idp.ts";
 import { purged } from "./knowledge-purge.ts";
+import { seed } from "./knowledge.ts";
 import { runMinuteTasks } from "./maintenance.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
@@ -86,11 +87,11 @@ const holds = async (exportId: string, text: string): Promise<boolean> => {
 
 /** A document of the company's in a collection for everyone, holding `text`. */
 const companyDocument = async (admin: Person, text: string) => {
-  const handbook = await admin.api.knowledge.createCollection({
+  const handbook = await seed(admin.api).createCollection({
     name: `Handbook ${unique()}`,
     access: "everyone",
   });
-  return await admin.api.knowledge.saveDocument({
+  return await seed(admin.api).saveDocument({
     collectionId: handbook.id,
     path: "people.md",
     text,
@@ -138,21 +139,14 @@ describe("today's Brain's exports", setUpTime, () => {
     });
   });
 
-  it("are deleted at once once a purge erased what they hold, and tried again while R2 refuses", async () => {
+  it("are deleted at once once a person's erasure ran after them, and tried again while R2 refuses", async () => {
     const admin = await signedInApi(idp, "admin");
-    const marker = `purged${unique().replaceAll("-", "")}`;
-    const document = await companyDocument(
-      admin,
-      `# People\nWrite to ${marker}.`
-    );
+    const leaver = await signedInApi(idp, "user");
+    const marker = `erased${unique().replaceAll("-", "")}`;
+    await companyDocument(admin, `# People\nWrite to ${marker}.`);
     const exportId = await exportedBy(admin, { complete: true });
     const written = await holds(exportId, marker);
-    await purged(admin, {
-      type: "content",
-      documentIds: [document.id],
-      terms: [marker],
-      reason: "erasure_request",
-    });
+    await purged(admin, leaver.userId);
     await runMinuteTasks({ BRAIN_OBJECTS: refusingDeletes() });
     const whileRefused = await holds(exportId, marker);
     await runMinuteTasks();
@@ -162,22 +156,6 @@ describe("today's Brain's exports", setUpTime, () => {
       whileRefused,
       left: await objectsOf(exportId),
     }).toStrictEqual({ written: true, whileRefused: true, left: [] });
-  });
-
-  it("are deleted once a person's erasure ran after them", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const leaver = await signedInApi(idp, "user");
-    const marker = `erased${unique().replaceAll("-", "")}`;
-    await companyDocument(admin, `# People\nWrite to ${marker}.`);
-    const exportId = await exportedBy(admin, { complete: true });
-    await purged(admin, {
-      type: "personal",
-      userId: leaver.userId,
-      reason: "offboarding",
-    });
-    await runMinuteTasks();
-
-    await expect(objectsOf(exportId)).resolves.toStrictEqual([]);
   });
 
   it("left running are stopped, and what they wrote deleted", async () => {
