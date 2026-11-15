@@ -2,7 +2,7 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
-import { beforeEach, describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 
 import { publishApp } from "./app-definitions.ts";
 import { grantReviewed, reviewedOf } from "./apps.ts";
@@ -32,21 +32,12 @@ const Desk = () => <main>Desk</main>;
 export const Route = createFileRoute("/")({ component: Desk });
 `;
 
-/**
- * The collection the Apps read, open to everyone, which an admin creates
- * before each test.
- */
-let collectionId = "";
-
-/** A permission for `app` to read the collection under `binding`. */
-const collectionFor = (
-  app: AppId,
-  binding = "NOTES_READ"
-): PermissionRequest => ({
+/** A permission for `app` to read the platform's statistics. */
+const statisticsFor = (app: AppId): PermissionRequest => ({
   subject: { type: "app", appId: app },
-  object: { type: "collection", collectionId },
-  actions: ["read"],
-  binding,
+  object: { type: "platform" },
+  actions: ["statistics"],
+  binding: "STATS",
 });
 
 /** A permission for `app` to invite guests: one that changes things. */
@@ -66,14 +57,14 @@ const mailFor = (app: AppId, binding: string): PermissionRequest => ({
 });
 
 /**
- * An App `builder` published, which `admin` granted guests, and
- * the collection to read.
+ * An App `builder` published, which `admin` granted guests, and the
+ * platform's statistics to read.
  */
 const builtBy = async (builder: Person, admin: Person): Promise<AppId> => {
   const { id } = await builder.api.apps.create({ name: `Map ${unique()}` });
   const app = appIdSchema.parse(id);
   await publishApp(builder.api, id, { "src/routes/index.tsx": deskPage });
-  for (const request of [guestsFor(app), collectionFor(app)]) {
+  for (const request of [guestsFor(app), statisticsFor(app)]) {
     // oxlint-disable-next-line no-await-in-loop -- one at a time, in order
     const { id: permission } = await builder.api.permissions.request(request);
     // oxlint-disable-next-line no-await-in-loop -- as above
@@ -106,15 +97,6 @@ const permissionsOf = async (admin: Person, app: AppId) => {
 };
 
 describe("An App's next version", { timeout: 60_000 }, () => {
-  // After the identity provider's mock is in place (`mockIdp`).
-  beforeEach(async () => {
-    const admin = await personApi("admin");
-    ({ id: collectionId } = await admin.api.knowledge.createCollection({
-      name: `Notes ${unique()}`,
-      access: "everyone",
-    }));
-  });
-
   it("keeps every grant when a builder publishes it or rolls back to an older one, asking nothing again", async () => {
     const [admin, builder] = await Promise.all([
       personApi("admin"),

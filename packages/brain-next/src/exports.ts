@@ -23,6 +23,7 @@ import type {
 } from "./contract.ts";
 import { subjectOf } from "./erasure.ts";
 import { fileKeyOf, hashOf } from "./files.ts";
+import { unerasedSql, writerErasedAfterSql } from "./memories.ts";
 import { accessOfKey, readerSetKeyOf } from "./reader-sets.ts";
 import { answerSchema } from "./remember.ts";
 import {
@@ -98,7 +99,12 @@ import type { WorkContext } from "./work.ts";
 // extraction marks rest on, by their source's key as the ledger names it
 // and their number (`export_sources`); a source's erasure names every
 // version of its source, whoever's export it is. So retention's erasures
-// of what an export doesn't hold leave it be. A stale export is never served
+// of what an export doesn't hold leave it be. A writer's memories are held
+// by the writer's lineage as the ledger names it and the earliest moment
+// one of them a part holds was learned: a writer's erasure names every
+// memory of it learned before the erasure, so it makes stale every export
+// holding one, and none that holds only what the writer added after it.
+// A stale export is never served
 // (`exportFile` asks before and after it reads), a restore refuses it, and
 // its files are deleted by the queue (`dropFiles`). The same rule is asked
 // of a part's holdings before its files are put, and of a part as it is
@@ -290,6 +296,12 @@ export const memoryLineSchema = z.strictObject({
   /** When the store learned it, and retired it if it did by then, in milliseconds. */
   learnedAt: z.int().nonnegative(),
   retiredAt: z.int().nonnegative().nullable(),
+  /**
+   * The change that retired it (`RetiredMemory.change`): null when it
+   * isn't retired, or was retired before changes were kept. Absent from
+   * an export an older release wrote, which kept none.
+   */
+  retiredChange: z.string().nullable().optional(),
   access: accessSchema,
 });
 export type MemoryLine = z.infer<typeof memoryLineSchema>;
@@ -411,25 +423,34 @@ const rowOf = (sql: SqlStorage, id: string): ExportRow | undefined =>
   sql.exec<ExportRow>("SELECT * FROM exports WHERE id = ?", id).toArray().at(0);
 
 /**
- * Whether the erasure ledger, as the store holds it, names the versions
- * of the source whose key's subject is `subject` (an SQL expression): a
- * source's erasure names every version. The one rule of staleness (above).
+ * Whether the erasure ledger, as the store holds it, names the version
+ * `version` of the source whose key's subject is `subject` (SQL
+ * expressions): a source's erasure names every version. A writer's memory
+ * is held by its writer's subject and when it was learned
+ * (`memoriesLineOf`): a writer's erasure names every one learned before
+ * it. The one rule of staleness (above).
  */
-const namedSql = (subject: string): string => `EXISTS (
-  SELECT 1 FROM erasures
-  WHERE erasures.kind = 'source' AND erasures.subject = ${subject}
+const namedSql = (subject: string, version: string): string => `(
+  EXISTS (
+    SELECT 1 FROM erasures
+    WHERE erasures.kind = 'source' AND erasures.subject = ${subject}
+  )
+  OR EXISTS (
+    SELECT 1 FROM erasures
+    WHERE ${writerErasedAfterSql("erasures", subject, version)}
+  )
 )`;
 
 /** Of a row of `exports`: whether the ledger names a version it holds. */
 const staleSql = `EXISTS (
   SELECT 1 FROM export_sources AS held
   WHERE held.export = exports.id
-    AND ${namedSql("held.subject")}
+    AND ${namedSql("held.subject", "held.version")}
 )`;
 
 /** `?1` versions as JSON (`[subject, version]` each): whether the ledger names one. */
 export const namesAnySql = `SELECT 1 FROM json_each(?1) AS pair
-WHERE ${namedSql("pair.value ->> 0")}
+WHERE ${namedSql("pair.value ->> 0", "pair.value ->> 1")}
 LIMIT 1`;
 
 /** Of a row of `exports`: whether a restore of it runs, or failed and may start again. */
@@ -601,8 +622,9 @@ const writtenVersionSql = (
 
 /**
  * `?2` the export, `?4` the stamp it started at: whether the memory
- * `alias` is one the export holds: learned by then, read by one group, and
- * resting on no version or one a part of it wrote.
+ * `alias` is one the export holds: learned by then, read by one group, no
+ * erasure of its writer since (memories.ts `unerasedSql`), and resting on
+ * no version or one a part of it wrote.
  */
 const exportedMemorySql = (
   scope: ExportScope["kind"],
@@ -610,6 +632,7 @@ const exportedMemorySql = (
 ): string => `(
   ${alias}.learned_at <= ?4
   AND ${exportedReadersSql(scope, `${alias}.readers`)}
+  AND ${unerasedSql(alias)}
   AND (${alias}.source IS NULL
     OR ${writtenVersionSql(`${alias}.subject`, `${alias}.version`)})
 )`;
@@ -627,9 +650,10 @@ const memoryPhaseSqlOf = (
   m.attribute AS attribute, m.value AS value, m.type AS type,
   m.statement AS statement, m.quote AS quote, m.source AS source,
   m.version AS version, m.subject AS subject, m.writer AS writer,
-  m.speaker AS speaker, m.valid_from AS valid_from,
+  m.writer_subject AS writer_subject, m.speaker AS speaker, m.valid_from AS valid_from,
   m.valid_until AS valid_until, m.learned_at AS learned_at,
   CASE WHEN m.retired_at <= ?4 THEN m.retired_at END AS retired_at,
+  CASE WHEN m.retired_at <= ?4 THEN m.retired_change END AS retired_change,
   m.readers AS readers,
   (SELECT json_group_array(json_array(named.id, named.kind))
     FROM entities AS named WHERE named.row IN (m.entity, m.object)) AS entities,
@@ -728,7 +752,7 @@ const memoriesLineOf = (
   scope: ExportScope,
   phase: (typeof memoryPhases)[number],
   row: PhaseRow
-): { line: MemoriesLine; held: Held | undefined } => {
+): { line: MemoriesLine; held: Held | undefined; byWriter?: true } => {
   if (phase === "memories") {
     const names = z
       .array(z.tuple([z.string(), z.string(), z.string()]))
@@ -766,14 +790,19 @@ const memoriesLineOf = (
       validUntil: row.valid_until,
       learnedAt: row.learned_at,
       retiredAt: row.retired_at,
+      retiredChange: row.retired_change,
       access: exportedAccessOf(scope, row.readers),
     });
     const subject = textOrNull(row.subject);
-    return {
-      line,
-      held:
-        subject === null || version === null ? undefined : [subject, version],
-    };
+    const writerSubject = textOrNull(row.writer_subject);
+    if (subject !== null && version !== null) {
+      return { line, held: [subject, version] };
+    }
+    // A writer's memory is held by its writer and when it was learned: an
+    // erasure of the writer after that makes the export stale (`namedSql`).
+    return writerSubject === null
+      ? { line, held: undefined }
+      : { line, held: [writerSubject, line.learnedAt], byWriter: true };
   }
   if (phase === "confirmations") {
     return {
@@ -1771,21 +1800,35 @@ const memoriesPart = (
       .toArray();
     const lines: Uint8Array[] = [];
     const held: Held[] = [];
+    // A writer's memories by its subject, held once a part by the earliest
+    // learned: an erasure of it after that one is after none of them.
+    const writers = new Map<string, number>();
     let cursor = 0;
     let bytes = 0;
     for (const found of rows) {
-      const { line, held: rests } = memoriesLineOf(scope, name, found);
+      const {
+        line,
+        held: rests,
+        byWriter,
+      } = memoriesLineOf(scope, name, found);
       const encoded = encoder.encode(`${JSON.stringify(line)}\n`);
       if (lines.length > 0 && bytes + encoded.byteLength > exportPartBytes) {
         break;
       }
       lines.push(encoded);
       bytes += encoded.byteLength;
-      if (rests !== undefined) {
+      if (rests !== undefined && byWriter === true) {
+        const [subject, learnedAt] = rests;
+        writers.set(
+          subject,
+          Math.min(learnedAt, writers.get(subject) ?? learnedAt)
+        );
+      } else if (rests !== undefined) {
         held.push(rests);
       }
       cursor = found.row;
     }
+    held.push(...writers);
     if (lines.length > 0) {
       return {
         lines,

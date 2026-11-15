@@ -68,8 +68,8 @@ export interface SubjectMembersApi {
    * Shares it, or changes the role of someone it is shared with. An App
    * is refused with `app.share_unreadable`, naming the `sources` and
    * `people` in its details, when it has read data (from someone's
-   * personal connection, or a collection they can't read) that anyone it
-   * would reach can't read where it comes from.
+   * personal connection, or a team's Brain content) that anyone it would
+   * reach can't read where it comes from.
    */
   add: (id: string, member: NewSubjectMember) => Promise<SubjectMember>;
   /**

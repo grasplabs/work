@@ -1,7 +1,7 @@
 import {
   agentIdSchema,
   appIdSchema,
-  collectionIdSchema,
+  connectionIdSchema,
   permissionIdSchema,
   triggerIdSchema,
   workflowResourceIdSchema,
@@ -69,8 +69,8 @@ describe("a pending request on an App", () => {
   });
 });
 
-/** A workflow's request to read a collection. */
-const onCollection = (): Permission => ({
+/** A workflow's request to read a connection. */
+const onConnection = (): Permission => ({
   ...onApp([]),
   subject: {
     type: "workflow",
@@ -79,8 +79,8 @@ const onCollection = (): Permission => ({
     ),
   },
   object: {
-    type: "collection",
-    collectionId: collectionIdSchema.parse(
+    type: "connection",
+    connectionId: connectionIdSchema.parse(
       "22222222-2222-4222-8222-222222222222"
     ),
   },
@@ -117,7 +117,7 @@ describe("a pending request that names a workflow", () => {
   });
 
   it("names the workflow that asks", () => {
-    const asking = onCollection();
+    const asking = onConnection();
     const { subject } = asking;
     const id = subject.type === "workflow" ? subject.workflowId : "";
 

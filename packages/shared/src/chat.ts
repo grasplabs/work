@@ -473,60 +473,6 @@ export interface ChatReplyUsage {
 }
 
 /**
- * A note an answer cites: a Knowledge document the chat's code was given
- * by one of its reads before the answer, which the answer links to as
- * `[title](grasp:note/<documentId>)`. Only its ID: who reads the answer
- * resolves it with their own access.
- */
-export interface ChatCitation {
-  kind: "document";
-  documentId: string;
-}
-
-/** Most citations one answer carries: the first it links to. */
-export const chatCitationsMax = 50;
-
-/**
- * A span of an answer that cites a document: one of its links to the
- * note, `[text](grasp:note/<documentId> "quote")`, as stored. `at` is where
- * the link starts in the answer's text (the offset of its `[`), so a page
- * finds it as it renders the Markdown; `text` is the words it links, as
- * Markdown. `quote` is the words of the document it rests on, which the
- * answer wrote as the link's title, only when the document says them now
- * (whitespace aside), and never longer than {@link citedQuoteMax}; else
- * null, and the span cites the document alone.
- */
-export interface ChatCitedSpan {
-  at: number;
-  text: string;
-  quote: string | null;
-}
-
-/** Longest quote a cited span keeps (`ChatCitedSpan`). */
-export const citedQuoteMax = 300;
-
-/**
- * A document an answer cites (`ChatCitation`), as the chat's agent may
- * read it for the chat's person now: where it is, what it is called, and
- * the start of what it says (its description, or else its first section),
- * cut to {@link citedSnippetMax} characters; and the spans of the answer
- * that cite it, in order, each with its quote. A document either of them
- * can no longer read, or that is gone, is never one, so neither are its
- * spans nor their quotes.
- */
-export interface ChatCitedDocument {
-  documentId: string;
-  collectionId: string;
-  title: string;
-  path: string;
-  snippet: string;
-  spans: ChatCitedSpan[];
-}
-
-/** Longest snippet of a cited document (`ChatCitedDocument`). */
-export const citedSnippetMax = 200;
-
-/**
  * How much the chat's agent may ask at once (`askQuestions`): a few short
  * questions, each with a few options, plain text, one line each. The
  * person can always answer in their own words, which the page offers
@@ -806,14 +752,8 @@ export type ChatMessage =
        * kept before a chat could have several.
        */
       agentId?: string;
-      /**
-       * Its answer, in Markdown. A link to a note it was given stays a
-       * `grasp:note/<documentId>` link, one of `citations`; one to any
-       * other note is shown as its text alone.
-       */
+      /** Its answer, in Markdown. */
       text: string;
-      /** The notes it cites, in the order it first links to them. */
-      citations: ChatCitation[];
       /** The code it asked to run, each run in a code step. */
       code: ChatCode[];
       /** The calls of its other tools, each shown as one line. */
@@ -870,12 +810,7 @@ export type ChatMessage =
       saved?: ChatSavedMemory;
     };
 
-/**
- * What the agent is writing now, before it is stored. It holds no note
- * link: each is its text alone until the answer is stored and its
- * citations decided. A page makes a `grasp:note/<id>` link a link only
- * when `<id>` is among that stored message's `citations`, never in this.
- */
+/** What the agent is writing now, before it is stored. */
 export interface ChatPartial {
   /** The agent writing it: the chat's agent of the turn under way. */
   agentId?: string;
@@ -1249,12 +1184,6 @@ export interface ChatsApi {
    * App or workflow whose draft it wrote (`ChatWork`).
    */
   worked: (chatId: string) => Promise<ChatWork[]>;
-  /**
-   * The documents the chat's answer `messageId` cites, in the order it
-   * first links to them, each only while the chat's agent may still read
-   * it for the person; none for a message that isn't an answer.
-   */
-  cited: (chatId: string, messageId: number) => Promise<ChatCitedDocument[]>;
   /** Stops the agent's work on the chat; `false` when there was none. */
   cancel: (chatId: string) => Promise<boolean>;
   /** The npm packages the chat's agent asked for that wait, oldest first. */

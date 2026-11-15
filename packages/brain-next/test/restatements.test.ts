@@ -467,6 +467,7 @@ describe("merging what one lineage says twice", () => {
       memory: later.memories[0] ?? "",
       reader,
       writer: person,
+      change: crypto.randomUUID(),
     });
 
     expect({
@@ -480,6 +481,64 @@ describe("merging what one lineage says twice", () => {
       merged: ["ended", "current"],
       retired: true,
       after: ["current", "ended"],
+    });
+  });
+
+  it("lets a writer's erasure take a fact and its restatement both, and a restatement the writer adds after it stand alone", async () => {
+    const group = unique("g");
+    const reader = readerOf(unique("p"), group);
+    const name = unique("Vandelay");
+    // An App writes the fact, then says it again: a restatement is always
+    // its earlier memory's writer's, so erasing the writer takes both.
+    const app = `app:${crypto.randomUUID()}`;
+    const said = fact(
+      `${name} imports latex.`,
+      { kind: "writer", writer: app },
+      {
+        speaker: { kind: "system" },
+      }
+    );
+    const earlier = await add(audience(group), [customer(name)], [said]);
+    const later = await add(
+      audience(group),
+      [{ key: "c", id: earlier.entity, kind: "customer", names: [] }],
+      [said],
+      reader
+    );
+    const ids = [...earlier.memories, ...later.memories];
+    const merged = statesOf(
+      await read(earlier.entity, reader, { history: true }),
+      ids
+    );
+    await shared().eraseWriter({
+      writer: app,
+      reason: "deleted",
+      change: "reset",
+    });
+    const erased = statesOf(
+      await read(earlier.entity, reader, { history: true }),
+      ids
+    );
+    // Said again after the erasure: nothing erased ends it, or is ended.
+    const after = await add(audience(group), [customer(name)], [said]);
+    const afterIds = [...ids, ...after.memories];
+
+    expect({
+      merged,
+      erased,
+      after: statesOf(
+        await read(after.entity, reader, { history: true }),
+        afterIds
+      ),
+      readable: await shared().readableMemories({
+        memories: afterIds,
+        reader,
+      }),
+    }).toStrictEqual({
+      merged: ["ended", "current"],
+      erased: ["unread", "unread"],
+      after: ["unread", "unread", "current"],
+      readable: after.memories,
     });
   });
 });

@@ -83,14 +83,53 @@ const readableKeysSql = `SELECT key FROM reader_sets
     WHERE id IN (SELECT reader_set FROM readable)`;
 
 /**
+ * Whether the row `erasure` of `erasures` is an erasure of the writer
+ * whose lineage's SHA-256 is `subject` made after the moment `at` (SQL
+ * expressions): one seek of `erasures_writer_idx`, however often the
+ * writer was erased. The one rule of what a writer's erasure covers.
+ */
+export const writerErasedAfterSql = (
+  erasure: string,
+  subject: string,
+  at: string
+): string =>
+  `(${erasure}.kind = 'writer' AND ${erasure}.subject = ${subject}
+    AND ${erasure}.erased_at > ${at})`;
+
+/** Whether the row `erasure` of `erasures` covers the memory `memory` (`writerErasedAfterSql`). */
+export const erasedBySql = (memory: string, erasure: string): string =>
+  writerErasedAfterSql(
+    erasure,
+    `${memory}.writer_subject`,
+    `${memory}.learned_at`
+  );
+
+/**
+ * Whether no erasure of the memory `alias`'s writer came after it was
+ * learned (erasure.ts `eraseWriter`): a writer's erasure hides, from the
+ * statement that records it on, every memory of that writer learned
+ * before it, until the tick deletes them, also those an older copy of the
+ * store comes back with (a restore of an export writes none: restore.ts
+ * `passesOverMemory`); what the writer adds afterwards is learned after it.
+ * Asked of every memory a statement may read, count, link or export.
+ */
+export const unerasedSql = (alias: string): string => `(
+  ${alias}.writer_subject IS NULL OR NOT EXISTS (
+    SELECT 1 FROM erasures AS gone WHERE ${erasedBySql(alias, "gone")}
+  )
+)`;
+
+/**
  * The conditions under which the memory `alias` is visible to the reader:
  * in its set of readers, and, resting on a version, in that version's and
- * its source's current version's, that version not hidden by an erasure.
+ * its source's current version's, that version not hidden by an erasure;
+ * and no erasure of its writer since it was learned (`unerasedSql`).
  */
 export const visibleSql = (alias: string): string => `(
   ${alias}.readers IN (${readableKeysSql})
   AND (${alias}.source IS NULL
     OR ${versionVisibleSql(`${alias}.source`, `${alias}.version`)})
+  AND ${unerasedSql(alias)}
 )`;
 
 /**
@@ -347,7 +386,7 @@ const latestStamp = (sql: SqlStorage): number =>
     .at(0)?.latest ?? 0;
 
 /** The stamp the next write gets (`stampWrite`), not yet kept. */
-const nextStamp = (sql: SqlStorage): number =>
+export const nextStamp = (sql: SqlStorage): number =>
   Math.max(Date.now(), latestStamp(sql)) + 1;
 
 /** `stamp` kept as the latest a write was given. */
@@ -371,6 +410,18 @@ export const stampWrite = (sql: SqlStorage): number => {
   const stamp = nextStamp(sql);
   keepStamp(sql, stamp);
   return stamp;
+};
+
+/**
+ * Keeps `at` as the latest stamp if it is later, in the caller's
+ * transaction: a writer's erasure (erasure.ts), so every write after it,
+ * also after a replay of it into an older copy of the store, is stamped
+ * after it. Never lowers it.
+ */
+export const raiseStamp = (sql: SqlStorage, at: number): void => {
+  if (at > latestStamp(sql)) {
+    keepStamp(sql, at);
+  }
 };
 
 /**
@@ -1012,15 +1063,22 @@ export const confirmMemory = (
  * read it, it is not retired, and it is in its world time now: current, or
  * ended by a newer memory of its lineage, which a writer forgets as well,
  * so it never becomes current again when the newer one is retired too.
- * Answers when it was retired, as recorded: one this writer already
- * retired answers its recorded time again, never a new one, so a retry
- * answers what the first try did (contract.ts `retireMemory`). Null alike
+ * Answers when it was retired and by which change (`change`, kept with
+ * it), as recorded: one this writer already retired answers its recorded
+ * time and change again, never new ones, whatever change the call names,
+ * so a retry answers what the first try did and another call learns it
+ * wasn't the one (contract.ts `retireMemory`). Null alike
  * for no such memory, another writer's (retired or not), one the reader
  * may not read and one that expired before it was retired.
  */
 export const retireMemory = (
   sql: SqlStorage,
-  { id, reader, writer }: { id: string; reader: Reader; writer: string }
+  {
+    id,
+    reader,
+    writer,
+    change,
+  }: { id: string; reader: Reader; writer: string; change: string }
 ): RetiredMemory | null => {
   const asked = [
     id,
@@ -1031,34 +1089,40 @@ export const retireMemory = (
   ];
   const stamp = nextStamp(sql);
   const [retired] = sql
-    .exec<{ retired_at: number }>(
+    .exec<{ retired_at: number; retired_change: string | null }>(
       `WITH ${readableSql}
-      UPDATE memories AS m SET retired_at = ?6
+      UPDATE memories AS m SET retired_at = ?6, retired_change = ?7
       WHERE m.id = ?1 AND m.lineage = ?4 AND m.retired_at IS NULL
         AND (m.valid_from IS NULL OR m.valid_from <= ?5)
         AND (m.valid_until IS NULL OR m.valid_until > ?5)
         AND ${visibleSql("m")}
-      RETURNING retired_at`,
+      RETURNING retired_at, retired_change`,
       ...asked,
-      stamp
+      stamp,
+      change
     )
     .toArray();
   if (retired !== undefined) {
     keepStamp(sql, stamp);
-    return { retiredAt: new Date(retired.retired_at) };
+    return {
+      retiredAt: new Date(retired.retired_at),
+      change: retired.retired_change,
+    };
   }
-  // Retired already, by this writer, and the reader may read it: a retry,
-  // answered with the time recorded then.
+  // Retired already, by this writer, and the reader may read it: a retry
+  // or another call, answered with the time and change recorded then.
   const [again] = sql
-    .exec<{ retired_at: number }>(
+    .exec<{ retired_at: number; retired_change: string | null }>(
       `WITH ${readableSql}
-      SELECT m.retired_at FROM memories AS m
+      SELECT m.retired_at, m.retired_change FROM memories AS m
       WHERE m.id = ?1 AND m.lineage = ?4 AND m.retired_at <= ?5
         AND ${visibleSql("m")}`,
       ...asked
     )
     .toArray();
-  return again === undefined ? null : { retiredAt: new Date(again.retired_at) };
+  return again === undefined
+    ? null
+    : { retiredAt: new Date(again.retired_at), change: again.retired_change };
 };
 
 /**
