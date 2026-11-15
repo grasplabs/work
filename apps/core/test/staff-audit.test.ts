@@ -21,7 +21,6 @@ import { CoreRpcTarget } from "../src/rpc-target.ts";
 import { SessionRpc } from "../src/session-rpc.ts";
 import { staffAudited } from "../src/staff-audit.ts";
 import { mockIdp } from "./idp.ts";
-import { collectionWithNote } from "./knowledge.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import {
   auditedDuring,
@@ -125,22 +124,15 @@ const secret = `Salary${crypto.randomUUID().slice(0, 8)}`;
 describe("Grasp staff's views, audited", () => {
   it("write one entry for each ask, answered or refused, over /rpc or a route, without content", async () => {
     const admin = await signedInApi(idp, "admin");
-    const { noteId } = await collectionWithNote(admin.api, {
-      name: `Handbook ${secret}`,
-      access: "everyone",
-    });
+    const uploadId = crypto.randomUUID();
     const { session, api } = await staffOn();
     const { userId } = await api.whoami();
     const app = crypto.randomUUID();
     const reads: [string, () => Promise<unknown>][] = [
+      ["chats.search", async () => await api.chats.search(secret)],
       [
-        "knowledge.listCollections",
-        async () => await api.knowledge.listCollections(),
-      ],
-      ["knowledge.search", async () => await api.knowledge.search(secret)],
-      [
-        "knowledge.getDocument",
-        async () => await api.knowledge.getDocument(noteId),
+        "brainSources.uploadOf",
+        async () => await api.brainSources.uploadOf(uploadId),
       ],
       ["chats.list", async () => await api.chats.list()],
       ["decisions.waiting", async () => await api.decisions.waiting()],
@@ -285,8 +277,8 @@ describe("Grasp staff's views, audited", () => {
     );
     expect({
       actors: [...new Set(all.map(({ actor }) => actor.type))],
-      document: all.find(
-        ({ detail }) => detail.surface === "knowledge.getDocument"
+      upload: all.find(
+        ({ detail }) => detail.surface === "brainSources.uploadOf"
       )?.provenance,
       content: JSON.stringify(all).includes(secret),
       // The client's admins read them in their own log.
@@ -295,22 +287,14 @@ describe("Grasp staff's views, audited", () => {
       ),
     }).toStrictEqual({
       actors: ["staff"],
-      document: [noteId],
+      upload: [uploadId],
       content: false,
       visible: true,
     });
   });
 
   it("write the same view once a window, and every other view apart", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const first = await collectionWithNote(admin.api, {
-      name: "First",
-      access: "everyone",
-    });
-    const second = await collectionWithNote(admin.api, {
-      name: "Second",
-      access: "everyone",
-    });
+    const [first, second] = [crypto.randomUUID(), crypto.randomUUID()];
     const { api } = await staffOn();
     await api.whoami();
 
@@ -318,9 +302,9 @@ describe("Grasp staff's views, audited", () => {
       async () => {
         for (let time = 0; time < 5; time += 1) {
           // oxlint-disable-next-line no-await-in-loop -- a page asking again
-          await outcome(api.knowledge.getDocument(first.noteId));
+          await outcome(api.brainSources.uploadOf(first));
         }
-        await outcome(api.knowledge.getDocument(second.noteId));
+        await outcome(api.brainSources.uploadOf(second));
       },
       { staffAccesses: true }
     );
@@ -331,8 +315,8 @@ describe("Grasp staff's views, audited", () => {
         provenance,
       ])
     ).toStrictEqual([
-      ["knowledge.getDocument", [first.noteId]],
-      ["knowledge.getDocument", [second.noteId]],
+      ["brainSources.uploadOf", [first]],
+      ["brainSources.uploadOf", [second]],
     ]);
   });
 
@@ -352,7 +336,7 @@ describe("Grasp staff's views, audited", () => {
       async () => {
         for (const query of asked) {
           // oxlint-disable-next-line no-await-in-loop -- one ask after another
-          await outcome(api.knowledge.search(query));
+          await outcome(api.chats.search(query));
         }
       },
       { staffAccesses: true }
@@ -367,7 +351,7 @@ describe("Grasp staff's views, audited", () => {
       ]),
       leaked: asked.filter((query) => JSON.stringify(views).includes(query)),
     }).toStrictEqual({
-      entries: asked.map(() => ["knowledge.search", "query", []]),
+      entries: asked.map(() => ["chats.search", "query", []]),
       leaked: [],
     });
   });
@@ -396,11 +380,7 @@ describe("Grasp staff's views, audited", () => {
   });
 
   it("write the same view asked at once only once, and the same method of two targets apart", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const { noteId } = await collectionWithNote(admin.api, {
-      name: "Parallel",
-      access: "everyone",
-    });
+    const uploadId = crypto.randomUUID();
     const { api } = await staffOn();
     await api.whoami();
     const session = await signedIn(idp, "grasp-staff", staffPerson());
@@ -426,7 +406,7 @@ describe("Grasp staff's views, audited", () => {
         await Promise.all(
           Array.from(
             { length: 5 },
-            async () => await outcome(api.knowledge.getDocument(noteId))
+            async () => await outcome(api.brainSources.uploadOf(uploadId))
           )
         );
         for (const frame of frames) {
@@ -440,7 +420,7 @@ describe("Grasp staff's views, audited", () => {
     expect(
       staffViews(events).map(({ detail }) => detail.surface)
     ).toStrictEqual([
-      "knowledge.getDocument",
+      "brainSources.uploadOf",
       "pageFrame.delivery",
       "pageFrame.delivery",
     ]);
@@ -448,15 +428,11 @@ describe("Grasp staff's views, audited", () => {
 
   it("write no staff entry for an admin who isn't staff", async () => {
     const admin = await signedInApi(idp, "admin");
-    const { noteId } = await collectionWithNote(admin.api, {
-      name: "Handbook",
-      access: "everyone",
-    });
 
     const events = await auditedDuring(
       async () => {
-        await admin.api.knowledge.getDocument(noteId);
-        await admin.api.knowledge.search("handbook");
+        await admin.api.brainSources.uploadOf(crypto.randomUUID());
+        await admin.api.chats.search("handbook");
         await admin.api.chats.list();
         await routed(`${auditExportPath}?format=csv`, {
           headers: { cookie: admin.session },
