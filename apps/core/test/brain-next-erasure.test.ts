@@ -64,10 +64,10 @@ import { signedInWithRole } from "./sign-in.ts";
 // long enough that only their tail is looked for in the index pages:
 // FTS5 keeps a term after the start it shares with the one before it.
 //
-// All of it in the shared store, planted and erased there directly: core
-// keeps what one person alone may read in that person's own store and
-// erases it whole with them (brain-next-personal.test.ts), while the
-// shared store still takes such content when it is put there.
+// All of it in the shared store, planted and erased there directly, for
+// teams: core keeps what one person alone may read in that person's own
+// store and erases it whole with them (brain-next-personal.test.ts); the
+// shared store refuses it.
 
 const idp = mockIdp();
 
@@ -102,10 +102,34 @@ const teamOf = async (...members: string[]): Promise<string> => {
   return id;
 };
 
-const owner = (personId: string): SourceReaders => ({
-  kind: "owner",
-  personId,
-});
+/** Each person's team of one, made once (`alone`). */
+const soleTeams = new Map<string, Promise<string>>();
+
+/**
+ * Readers that are `personId` alone in the shared store: a team only they
+ * are in. The shared store keeps nothing for one person alone (`owner`):
+ * core keeps that in their own store, erased whole with them
+ * (brain-next-personal.test.ts).
+ */
+const alone = async (personId: string): Promise<SourceReaders> => {
+  let team = soleTeams.get(personId);
+  if (team === undefined) {
+    team = teamOf(personId);
+    soleTeams.set(personId, team);
+  }
+  return { kind: "team", teamId: await team };
+};
+
+/** `personId` as the shared store reads them: in their team of one. */
+const readerOf = async (
+  personId: string
+): Promise<{ person: string; groups: string[] }> => {
+  const readers = await alone(personId);
+  return {
+    person: personId,
+    groups: readers.kind === "team" ? [`team:${readers.teamId}`] : [],
+  };
+};
 
 /** A source of its own, as an upload names it. */
 const newSource = (): SourceRef => ({
@@ -119,19 +143,14 @@ const keyOf = ({ producer, id }: SourceRef): string => `${producer}:${id}`;
 /** The shared store's access for `readers`, as core names them. */
 const accessOf = (readers: SourceReaders): Access => {
   if (readers.kind === "owner") {
-    return { kind: "owner", person: readers.personId };
+    throw new Error("The shared store keeps nothing for one person alone");
   }
   return readers.kind === "team"
     ? { kind: "audience", group: `team:${readers.teamId}` }
     : { kind: "none" };
 };
 
-/**
- * Adds `text` as the next version of `source`, in the shared store
- * itself: core keeps what one person alone may read in their own store
- * (brain-next-personal.test.ts), and this file is about the shared
- * store's erasure, which still takes such content until it refuses it.
- */
+/** Adds `text` as the next version of `source`, in the shared store itself. */
 const add = async (
   source: SourceRef,
   text: string,
@@ -147,9 +166,10 @@ const add = async (
 };
 
 /**
- * Erases what only `personId` may read in the shared store, where `add`
- * keeps it. Core's `erasePerson` also erases their own store whole
- * (brain-next-personal.test.ts), after which it answers them nothing.
+ * A person's erasure in the shared store: an entry of its ledger, which a
+ * replay reads. It covers nothing there, as the shared store keeps
+ * nothing for one person alone; core's `erasePerson` erases their own
+ * store whole (brain-next-personal.test.ts).
  */
 const erasePersonShared = async ({
   personId,
@@ -323,29 +343,26 @@ describe("erasing a source", { timeout: 120_000 }, () => {
 
   it("leaves nothing of it anywhere: recall, history, every table and index page, vector blocks, the queue, the bucket, the overview and the logs", async () => {
     const reader = await person();
+    const readers = await alone(reader);
     const marks = [newMark(), newMark(), newMark()];
     const erased = newSource();
     for (const mark of marks) {
       // oxlint-disable-next-line no-await-in-loop -- one version at a time
-      await add(
-        erased,
-        `Salary review ${wordOf(mark)} payingen`,
-        owner(reader)
-      );
+      await add(erased, `Salary review ${wordOf(mark)} payingen`, readers);
     }
     // Its current version in 600 chunks, their codes packed in one block
     // with another source's 424.
     const model = modelOf();
     const packed = await chunkedSource(
       erased,
-      { kind: "owner", person: reader },
+      accessOf(await alone(reader)),
       600,
       `Appendix ${wordOf(marks[2] ?? "")}`
     );
     const neighbourSource = newSource();
     const neighbour = await chunkedSource(
       neighbourSource,
-      { kind: "owner", person: reader },
+      accessOf(await alone(reader)),
       blockSize - 600,
       "Neighbour"
     );
@@ -424,7 +441,7 @@ describe("erasing a source", { timeout: 120_000 }, () => {
     const erased = newSource();
     // One passage: one chunk, one vector.
     const texts = [`Vector passage ${crypto.randomUUID()}`];
-    await add(erased, texts.join(""), owner(reader));
+    await add(erased, texts.join(""), await alone(reader));
     // The queue embeds it, with the embed package's test model.
     const { model } = await embedInProcess([]);
     const name = vectorModelNameOf(model);
@@ -493,8 +510,8 @@ describe("erasing a source", { timeout: 120_000 }, () => {
     const mark = newMark();
     const text = `Shared contract ${wordOf(mark)}`;
     const [first, second] = [newSource(), newSource()];
-    await add(first, text, owner(reader));
-    await add(second, text, owner(reader));
+    await add(first, text, await alone(reader));
+    await add(second, text, await alone(reader));
 
     await eraseShared(first, "deleted");
     await tickPastGrace();
@@ -521,7 +538,7 @@ describe("erasing a source", { timeout: 120_000 }, () => {
     const mark = newMark();
     const text = `Board minutes ${wordOf(mark)}`;
     const [held, never] = [newSource(), newSource()];
-    await add(held, text, owner(reader));
+    await add(held, text, await alone(reader));
 
     const answers = [
       await settled(eraseShared(held, "deleted")),
@@ -529,13 +546,13 @@ describe("erasing a source", { timeout: 120_000 }, () => {
       // The same erasure delivered twice.
       await settled(eraseShared(held, "deleted")),
     ];
-    const lateAdd = await settled(add(held, text, owner(reader)));
+    const lateAdd = await settled(add(held, text, await alone(reader)));
     await tickPastGrace();
     // The same bytes under a source of their own are that source's: their
     // file is stored again, after the sweep took the erased one's.
     const again = newSource();
     const fileBefore = await fileOf(text);
-    await add(again, text, owner(reader));
+    await add(again, text, await alone(reader));
 
     const [heldLedger, neverLedger] = [
       await ledgerOf(keyOf(held)),
@@ -572,7 +589,7 @@ describe("erasing a source", { timeout: 120_000 }, () => {
     const source = newSource();
     const text = `In flight ${wordOf(mark)}`;
     const gate = await holdNextBucketPut();
-    const adding = settled(add(source, text, owner(reader)));
+    const adding = settled(add(source, text, await alone(reader)));
     await vi.waitFor(() => {
       expect(gate.reached).toBeTruthy();
     });
@@ -600,12 +617,12 @@ describe("erasing a source", { timeout: 120_000 }, () => {
     const reader = await person();
     const [erasedMark, keptMark] = [newMark(), newMark()];
     const [erased, kept] = [newSource(), newSource()];
-    await add(erased, `Going ${wordOf(erasedMark)}`, owner(reader));
-    await add(kept, `Staying ${wordOf(keptMark)}`, owner(reader));
+    await add(erased, `Going ${wordOf(erasedMark)}`, await alone(reader));
+    await add(kept, `Staying ${wordOf(keptMark)}`, await alone(reader));
     // A block with removed codes waiting for its repack: a source's
     // version replaced after its codes were packed with the erased one's.
     const model = modelOf();
-    const access: Access = { kind: "owner", person: reader };
+    const access: Access = accessOf(await alone(reader));
     const replaced = newSource();
     const erasedChunks = await chunkedSource(
       erased,
@@ -620,7 +637,7 @@ describe("erasing a source", { timeout: 120_000 }, () => {
       "Replaced"
     );
     await putCodes(model, [...erasedChunks, ...replacedChunks]);
-    await add(replaced, "Replaced again", owner(reader));
+    await add(replaced, "Replaced again", await alone(reader));
     // The word indexes behind their rules: a rebuild under way.
     await runInDurableObject(store(), (_instance, state) => {
       state.storage.sql.exec(
@@ -650,7 +667,7 @@ describe("erasing a source", { timeout: 120_000 }, () => {
     const reader = await person();
     const text = `Doubtful ${wordOf(newMark())}`;
     const erased = newSource();
-    await add(erased, text, owner(reader));
+    await add(erased, text, await alone(reader));
     await eraseShared(erased, "deleted");
     later(fileGraceMs + 1);
     // R2 hangs on the delete: the sweep gives up, and the file is in doubt.
@@ -676,13 +693,13 @@ describe("erasing a source", { timeout: 120_000 }, () => {
     gate.released = true;
     // A store of its own bucket again.
     await killStore();
-    const inDoubt = await settled(add(newSource(), text, owner(reader)));
+    const inDoubt = await settled(add(newSource(), text, await alone(reader)));
     const keptInDoubt = await fileOf(text);
     later(fileGraceMs + 1);
     await workBrain(env, new Date(), noProducers);
     const swept = await fileOf(text);
     const again = newSource();
-    await add(again, text, owner(reader));
+    await add(again, text, await alone(reader));
 
     expect({
       inDoubt,
@@ -702,138 +719,6 @@ describe("erasing a source", { timeout: 120_000 }, () => {
   });
 });
 
-describe("erasing a person", { timeout: 120_000 }, () => {
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it("erases what they alone may read, whole where it is theirs now, and keeps what others read and what comes later", async () => {
-    const [erasedPerson, colleague] = await Promise.all([person(), person()]);
-    const team = await teamOf(erasedPerson, colleague);
-    // Their instruction file is in their own store, erased whole with it
-    // (brain-next-personal.test.ts).
-    const [own, shared, narrowed] = [newMark(), newMark(), newMark()];
-    const teamMark = newMark();
-    // Their own source, two versions.
-    const ownSource = newSource();
-    await add(ownSource, `Own draft ${wordOf(own)}`, owner(erasedPerson));
-    await add(ownSource, `Own final ${wordOf(own)}`, owner(erasedPerson));
-    // A source first theirs alone, then the team's.
-    const sharedSource = newSource();
-    await add(
-      sharedSource,
-      `Private note ${wordOf(shared)}`,
-      owner(erasedPerson)
-    );
-    await add(sharedSource, `Team note ${wordOf(teamMark)}`, {
-      kind: "team",
-      teamId: team,
-    });
-    // A source first the team's, then narrowed to them alone.
-    const narrowedSource = newSource();
-    await add(narrowedSource, `Team plan ${wordOf(narrowed)}`, {
-      kind: "team",
-      teamId: team,
-    });
-    await add(
-      narrowedSource,
-      `My plan ${wordOf(narrowed)}`,
-      owner(erasedPerson)
-    );
-    await erasePersonShared({
-      personId: erasedPerson,
-      reason: "person_erased",
-    });
-    // What comes for them afterwards is new, and kept.
-    const afterward = newSource();
-    await add(afterward, "Written afterwards", owner(erasedPerson));
-    await tickUntilErased();
-    await tickPastGrace();
-
-    const teamTables = await tablesHolding([teamMark]);
-    const memberSets = await runInDurableObject(
-      store(),
-      (_instance, state) =>
-        state.storage.sql
-          .exec<{ count: number }>(
-            "SELECT count(*) AS count FROM reader_set_members WHERE principal = ?",
-            erasedPerson
-          )
-          .one().count
-    );
-    expect({
-      tables: await tablesHolding([own, shared, narrowed]),
-      objects: await objectsHolding([own, shared, narrowed]),
-      ownSource: await historyAs(erasedPerson, ownSource, 2),
-      sharedFirst: await historyAs(erasedPerson, sharedSource, 1),
-      sharedNow: await historyAs(colleague, sharedSource, 2),
-      narrowedNow: await historyAs(erasedPerson, narrowedSource, 2),
-      afterward: await historyAs(erasedPerson, afterward, 1),
-      teamKept: teamTables.includes("chunks"),
-      memberSets,
-    }).toStrictEqual({
-      tables: [],
-      objects: [],
-      ownSource: null,
-      sharedFirst: null,
-      sharedNow: `Team note ${wordOf(teamMark)}`,
-      narrowedNow: null,
-      afterward: "Written afterwards",
-      teamKept: true,
-      memberSets: 1,
-    });
-  });
-
-  it("answers alike for a person with nothing, and finishes a large erasure over ticks though the store is killed in the middle", async () => {
-    const [erasedPerson, nobody] = [
-      await person(),
-      `nobody-${crypto.randomUUID()}`,
-    ];
-    const mark = newMark();
-    const access: Access = { kind: "owner", person: erasedPerson };
-    for (let source = 0; source < 3; source += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- one source at a time
-      await chunkedSource(newSource(), access, 600, `Archive ${wordOf(mark)}`);
-    }
-
-    const answers = [
-      await settled(
-        erasePersonShared({ personId: erasedPerson, reason: "withdrawn" })
-      ),
-      await settled(
-        erasePersonShared({ personId: nobody, reason: "withdrawn" })
-      ),
-    ];
-    const { erasing } = await brainWorkOverview(env);
-    const recalledAtOnce = await recalledAs(erasedPerson, wordOf(mark));
-    await killStore();
-    const recalledAfterKill = await recalledAs(erasedPerson, wordOf(mark));
-    const ticks = await tickUntilErased();
-    await tickPastGrace();
-
-    expect({
-      answers,
-      erasing,
-      recalledAtOnce,
-      recalledAfterKill,
-      finished: ticks <= 3,
-      tables: await tablesHolding([mark]),
-      objects: await objectsHolding([mark]),
-      // Their id goes with the last version that named them.
-      named: await tablesHolding([erasedPerson]),
-    }).toStrictEqual({
-      answers: [{ value: undefined }, { value: undefined }],
-      erasing: 1,
-      recalledAtOnce: [],
-      recalledAfterKill: [],
-      finished: true,
-      tables: [],
-      objects: [],
-      named: [],
-    });
-  });
-});
-
 describe(
   "an erasure the store crashed in, or a store restored from before it",
   { timeout: 120_000 },
@@ -846,7 +731,7 @@ describe(
       const reader = await person();
       const mark = newMark();
       const source = newSource();
-      await add(source, `Crash ${wordOf(mark)}`, owner(reader));
+      await add(source, `Crash ${wordOf(mark)}`, await alone(reader));
       await nextBucketPut(async (state, write) => {
         await write();
         state.abort("Crashed by the test, the ledger written");
@@ -864,7 +749,7 @@ describe(
         history: await historyAs(reader, source, 1),
         tables: await tablesHolding([mark]),
         objects: await objectsHolding([mark]),
-        lateAdd: await settled(add(source, "Back again", owner(reader))),
+        lateAdd: await settled(add(source, "Back again", await alone(reader))),
       }).toStrictEqual({
         crashed: true,
         recalled: [],
@@ -879,28 +764,23 @@ describe(
 
     it("erases again what was erased since an older copy of the store came back, before it answers anything", async () => {
       const reader = await person();
-      const [sourceMark, personMark] = [newMark(), newMark()];
+      const sourceMark = newMark();
       const source = newSource();
-      await add(source, `Restored ${wordOf(sourceMark)}`, owner(reader));
-      const leaver = await person();
-      const theirs = newSource();
-      await add(theirs, `Leaver ${wordOf(personMark)}`, owner(leaver));
+      await add(source, `Restored ${wordOf(sourceMark)}`, await alone(reader));
       const kept = newSource();
-      await add(kept, "Kept through the restore", owner(reader));
+      await add(kept, "Kept through the restore", await alone(reader));
       const backup = await copyOfStore();
 
       await eraseShared(source, "deleted");
-      await erasePersonShared({ personId: leaver, reason: "person_erased" });
       await tickUntilErased();
       await tickPastGrace();
-      // The copy from before both erasures comes back; the bucket, its files
+      // The copy from before the erasure comes back; the bucket, its files
       // already swept, stays as it is.
       await restoreStore(backup);
 
       const atOnce = {
         recalled: await recalledAs(reader, wordOf(sourceMark)),
         history: await historyAs(reader, source, 1),
-        leaver: await historyAs(leaver, theirs, 1),
         kept: await historyAs(reader, kept, 1),
       };
       await tickUntilErased();
@@ -908,14 +788,13 @@ describe(
 
       expect({
         atOnce,
-        tables: await tablesHolding([sourceMark, personMark]),
-        objects: await objectsHolding([sourceMark, personMark]),
-        lateAdd: await settled(add(source, "Back again", owner(reader))),
+        tables: await tablesHolding([sourceMark]),
+        objects: await objectsHolding([sourceMark]),
+        lateAdd: await settled(add(source, "Back again", await alone(reader))),
       }).toStrictEqual({
         atOnce: {
           recalled: [],
           history: null,
-          leaver: null,
           kept: "Kept through the restore",
         },
         tables: [],
@@ -930,14 +809,14 @@ describe(
       const reader = await person();
       const [gone, whole] = [newSource(), newSource()];
       const goneText = `Gone file ${newMark()}`;
-      await add(gone, goneText, owner(reader));
-      await add(whole, "Whole file", owner(reader));
+      await add(gone, goneText, await alone(reader));
+      await add(whole, "Whole file", await alone(reader));
       // As a restore brings back a version whose file the sweep deleted.
       await env.BRAIN_OBJECTS.delete(`sources/${await hashOf(goneText)}`);
       const warned = vi.spyOn(console, "warn");
       const current = await brain().readCurrent({
         sources: [keyOf(gone), keyOf(whole)],
-        reader: { person: reader, groups: [] },
+        reader: await readerOf(reader),
       });
       const history = {
         gone: await historyAs(reader, gone, 1),
@@ -1029,92 +908,11 @@ const currentChunksOf = async (source: SourceRef): Promise<ChunkRef[]> =>
       }))
   );
 
-describe("an add under way as an erasure lands", { timeout: 120_000 }, () => {
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it("refuses an add for a person alone that was writing its file as they were erased, and keeps one begun after", async () => {
-    const leaver = await person();
-    const [inFlight, after] = [newMark(), newMark()];
-    const source = newSource();
-    const gate = await holdNextBucketPut();
-    const adding = settled(
-      add(source, `In flight ${wordOf(inFlight)}`, owner(leaver))
-    );
-    await vi.waitFor(() => {
-      expect(gate.reached).toBeTruthy();
-    });
-    await erasePersonShared({ personId: leaver, reason: "withdrawn" });
-    gate.released = true;
-    const added = await adding;
-    // Begun after the erasure returned: new, and kept.
-    const afterwardSource = newSource();
-    await add(afterwardSource, `Afterwards ${wordOf(after)}`, owner(leaver));
-    await tickUntilErased();
-    await tickPastGrace();
-
-    expect({
-      added,
-      recalled: await recalledAs(leaver, wordOf(inFlight)),
-      history: await historyAs(leaver, source, 1),
-      tables: await tablesHolding([inFlight]),
-      objects: await objectsHolding([inFlight]),
-      afterwards: await historyAs(leaver, afterwardSource, 1),
-    }).toStrictEqual({
-      added: {
-        error: "Error: The Brain refused it: what this adds was erased",
-      },
-      recalled: [],
-      history: null,
-      tables: [],
-      objects: [],
-      afterwards: `Afterwards ${wordOf(after)}`,
-    });
-  });
-
-  it("refuses a version only they may read of a source others read, under way as they were erased, and keeps the others' version", async () => {
-    const [leaver, colleague] = await Promise.all([person(), person()]);
-    const team = await teamOf(leaver, colleague);
-    const [teamMark, theirs] = [newMark(), newMark()];
-    const source = newSource();
-    await add(source, `Team plan ${wordOf(teamMark)}`, {
-      kind: "team",
-      teamId: team,
-    });
-    const gate = await holdNextBucketPut();
-    const adding = settled(
-      add(source, `My plan ${wordOf(theirs)}`, owner(leaver))
-    );
-    await vi.waitFor(() => {
-      expect(gate.reached).toBeTruthy();
-    });
-    await erasePersonShared({ personId: leaver, reason: "person_erased" });
-    gate.released = true;
-    const added = await adding;
-    await tickPastGrace();
-
-    expect({
-      added,
-      current: await recalledAs(colleague, wordOf(teamMark)),
-      version2: await historyAs(leaver, source, 2),
-      tables: await tablesHolding([theirs]),
-    }).toStrictEqual({
-      added: {
-        error: "Error: The Brain refused it: what this adds was erased",
-      },
-      current: [`Team plan ${wordOf(teamMark)}`],
-      version2: null,
-      tables: [],
-    });
-  });
-});
-
 describe("queued work about what is erased", { timeout: 120_000 }, () => {
   it("drops an item waiting about an erased source before any tick, and its handler never runs", async () => {
     const reader = await person();
     const source = newSource();
-    await add(source, `Queued ${wordOf(newMark())}`, owner(reader));
+    await add(source, `Queued ${wordOf(newMark())}`, await alone(reader));
     await queueRecorded(source);
     const before = await queuedAbout(source);
 
@@ -1134,7 +932,7 @@ describe("queued work about what is erased", { timeout: 120_000 }, () => {
   it("stops an item running about a source as it is erased: its signal aborts, its row goes, it never runs again, and what it would write for the source is not kept", async () => {
     const reader = await person();
     const source = newSource();
-    const access: Access = { kind: "owner", person: reader };
+    const access: Access = accessOf(await alone(reader));
     await chunkedSource(source, access, 3, `Running ${wordOf(newMark())}`);
     const chunks = await currentChunksOf(source);
     const gate = { reached: false, released: false };
@@ -1200,128 +998,15 @@ describe("queued work about what is erased", { timeout: 120_000 }, () => {
 });
 
 describe(
-  "a person's erasure replayed after a restore",
-  { timeout: 120_000 },
-  () => {
-    afterEach(() => {
-      vi.useRealTimers();
-    });
-
-    it("erases again what it erased, though the older copy's readers say the source was shared then", async () => {
-      const [leaver, colleague] = await Promise.all([person(), person()]);
-      const team = await teamOf(leaver, colleague);
-      const mark = newMark();
-      const source = newSource();
-      await add(source, `Team draft ${wordOf(mark)}`, {
-        kind: "team",
-        teamId: team,
-      });
-      const backup = await copyOfStore();
-      // Narrowed to the leaver, then the leaver erased: the source goes
-      // whole, its first version, the team's, too.
-      await add(source, `Mine now ${wordOf(newMark())}`, owner(leaver));
-      await erasePersonShared({ personId: leaver, reason: "person_erased" });
-      await tickUntilErased();
-      await tickPastGrace();
-
-      await restoreStore(backup);
-      const atOnce = {
-        recalled: await recalledAs(colleague, wordOf(mark)),
-        history: await historyAs(colleague, source, 1),
-      };
-      await tickUntilErased();
-
-      expect({ atOnce, tables: await tablesHolding([mark]) }).toStrictEqual({
-        atOnce: { recalled: [], history: null },
-        tables: [],
-      });
-    });
-
-    it("erases again only what it erased, though the older copy's readers say a source was theirs alone then", async () => {
-      const [leaver, colleague] = await Promise.all([person(), person()]);
-      const team = await teamOf(leaver, colleague);
-      const [teamFirst, theirs, teamNow] = [newMark(), newMark(), newMark()];
-      const source = newSource();
-      await add(source, `Team first ${wordOf(teamFirst)}`, {
-        kind: "team",
-        teamId: team,
-      });
-      await add(source, `Theirs ${wordOf(theirs)}`, owner(leaver));
-      const backup = await copyOfStore();
-      // The copy's own count, as it comes back.
-      const { sourcesWithoutCurrent: inCopy } = await brainWorkOverview(env);
-      // Shared again, then the leaver erased: only their own version goes.
-      await add(source, `Team now ${wordOf(teamNow)}`, {
-        kind: "team",
-        teamId: team,
-      });
-      await erasePersonShared({ personId: leaver, reason: "person_erased" });
-      await tickUntilErased();
-
-      await restoreStore(backup);
-      await tickUntilErased();
-
-      // The team's first version was not erased, and is still kept; the
-      // leaver's own is gone. Without a current version, which the copy
-      // had as theirs, the source answers no one (the team's latest
-      // version came after the copy): history never becomes recall. The
-      // overview counts it, so it is never out of sight.
-      const teamFirstTables = await tablesHolding([teamFirst]);
-      const { sourcesWithoutCurrent } = await brainWorkOverview(env);
-      expect({
-        tables: await tablesHolding([theirs]),
-        teamFirstKept: teamFirstTables.includes("chunks"),
-        teamFirstRead: await historyAs(colleague, source, 1),
-        counted: sourcesWithoutCurrent - inCopy,
-      }).toStrictEqual({
-        tables: [],
-        teamFirstKept: true,
-        teamFirstRead: null,
-        counted: 1,
-      });
-    });
-  }
-);
-
-describe(
   "an erasure that takes more than one batch, or that fails",
   { timeout: 120_000 },
   () => {
-    it("hides a version of a source others read from its person's history before the batch that deletes it", async () => {
-      const [leaver, colleague] = await Promise.all([person(), person()]);
-      const team = await teamOf(leaver, colleague);
-      const access: Access = { kind: "owner", person: leaver };
-      // Two of their own sources, more than one batch, before the version.
-      await chunkedSource(newSource(), access, 600, "Archive one");
-      await chunkedSource(newSource(), access, 600, "Archive two");
-      const source = newSource();
-      const theirs = `Mine first ${wordOf(newMark())}`;
-      await add(source, theirs, owner(leaver));
-      await add(source, "Ours now", { kind: "team", teamId: team });
-      const before = await historyAs(leaver, source, 1);
-
-      await erasePersonShared({ personId: leaver, reason: "withdrawn" });
-      const { erasing } = await brainWorkOverview(env);
-
-      expect({
-        before,
-        erasing,
-        history: await historyAs(leaver, source, 1),
-        current: await historyAs(colleague, source, 2),
-      }).toStrictEqual({
-        before: theirs,
-        erasing: 1,
-        history: null,
-        current: "Ours now",
-      });
-    });
-
     it("goes on with the erasures behind a version that keeps failing, says so, and deletes it once it can", async () => {
       const reader = await person();
       const [stuck, free] = [newSource(), newSource()];
       const [stuckMark, freeMark] = [newMark(), newMark()];
-      await add(stuck, `Stuck ${wordOf(stuckMark)}`, owner(reader));
-      await add(free, `Free ${wordOf(freeMark)}`, owner(reader));
+      await add(stuck, `Stuck ${wordOf(stuckMark)}`, await alone(reader));
+      await add(free, `Free ${wordOf(freeMark)}`, await alone(reader));
       // Deleting the stuck source's version fails, as a fault would.
       await runInDurableObject(store(), (_instance, state) => {
         state.storage.sql.exec(
@@ -1376,7 +1061,7 @@ describe("the erasure ledger out of reach", { timeout: 120_000 }, () => {
     const reader = await person();
     const mark = newMark();
     const source = newSource();
-    await add(source, `Unwritten ${wordOf(mark)}`, owner(reader));
+    await add(source, `Unwritten ${wordOf(mark)}`, await alone(reader));
     const backup = await copyOfStore();
     await nextBucketPut(async () => {
       await Promise.resolve();
@@ -1414,7 +1099,7 @@ describe("the erasure ledger out of reach", { timeout: 120_000 }, () => {
   it("writes one entry for an erasure whose write landed though its answer was lost, retried", async () => {
     const reader = await person();
     const source = newSource();
-    await add(source, `Landed ${wordOf(newMark())}`, owner(reader));
+    await add(source, `Landed ${wordOf(newMark())}`, await alone(reader));
     await nextBucketPut(async (_state, write) => {
       await write();
       throw new Error("The answer lost, by the test");
@@ -1437,7 +1122,7 @@ describe("the erasure ledger out of reach", { timeout: 120_000 }, () => {
   it("answers nothing but its overview while it can't read its ledger, with why, and everything once it can", async () => {
     const reader = await person();
     const source = newSource();
-    await add(source, "Readable", owner(reader));
+    await add(source, "Readable", await alone(reader));
     // An outage of R2 as the store starts: the store reads its bucket from
     // the env it is constructed with, so only a bucket swapped on the
     // shared env reaches a new instance (a swap on the running instance,
@@ -1480,49 +1165,6 @@ describe("the erasure ledger out of reach", { timeout: 120_000 }, () => {
     }
   });
 });
-
-/** Most versions one part of a person's ledger entry names (erasure.ts). */
-const ledgerPartVersions = 1000;
-
-/** The ledger's objects under the entry naming `id`: its parts. */
-const ledgerPartsOf = async (id: string): Promise<string[]> => {
-  const [entry] = await ledgerOf(id);
-  if (entry === undefined) {
-    return [];
-  }
-  const listed = await env.BRAIN_OBJECTS.list({ prefix: `${entry}/` });
-  return listed.objects.map(({ key }) => key);
-};
-
-/**
- * Has the store's next bucket writes go through, and the store crash as
- * the `crashAt`-th begins, before it writes: as a restart between two
- * writes of one ledger entry would.
- */
-const crashAtBucketPut = async (crashAt: number): Promise<void> => {
-  await runInDurableObject(store(), (instance, state) => {
-    const objectEnv: unknown = Reflect.get(instance, "env");
-    if (typeof objectEnv !== "object" || objectEnv === null) {
-      throw new TypeError("The store has no env");
-    }
-    const bucket = env.BRAIN_OBJECTS;
-    let puts = 0;
-    Reflect.set(instance, "env", {
-      ...objectEnv,
-      BRAIN_OBJECTS: {
-        get: async (key: string) => await bucket.get(key),
-        list: async (options: R2ListOptions) => await bucket.list(options),
-        put: async (key: string, value: string) => {
-          puts += 1;
-          if (puts === crashAt) {
-            state.abort("Crashed by the test, between two writes");
-          }
-          return await bucket.put(key, value);
-        },
-      },
-    });
-  });
-};
 
 /**
  * Counts the store's listings and reads of its bucket from its next
@@ -1569,70 +1211,11 @@ describe(
       vi.useRealTimers();
     });
 
-    it("writes a person's erasure in parts of a bounded size, goes on after a crash between parts, and erases it all again after a restore", async () => {
-      const leaver = await person();
-      const mark = newMark();
-      const access: Access = { kind: "owner", person: leaver };
-      // More versions than one part names, each a source of its own.
-      const count = ledgerPartVersions + 50;
-      for (let start = 0; start < count; start += 25) {
-        // oxlint-disable-next-line no-await-in-loop -- a few adds at a time
-        await Promise.all(
-          Array.from(
-            { length: Math.min(25, count - start) },
-            async (_, index) => {
-              await brain().addSource({
-                source: keyOf(newSource()),
-                change: crypto.randomUUID(),
-                text: `Run ${start + index} ${wordOf(mark)}`,
-                access,
-              });
-            }
-          )
-        );
-      }
-      const backup = await copyOfStore();
-      // The first part is written; the store crashes as the second begins.
-      await crashAtBucketPut(2);
-
-      const erased = await settled(
-        erasePersonShared({ personId: leaver, reason: "person_erased" })
-      );
-      const afterCrash = {
-        recalled: await recalledAs(leaver, wordOf(mark)),
-        // Its parts so far, and no entry: not yet in the ledger.
-        entries: await ledgerOf(leaver),
-      };
-      await workBrain(env, new Date(), noProducers);
-      const parts = await ledgerPartsOf(leaver);
-      const entries = await ledgerOf(leaver);
-      await tickUntilErased(5);
-      await restoreStore(backup);
-      const restored = await recalledAs(leaver, wordOf(mark));
-      await tickUntilErased(5);
-
-      expect({
-        crashed: "error" in erased,
-        afterCrash,
-        entries: entries.length,
-        parts: parts.length,
-        restored,
-        tables: await tablesHolding([mark]),
-      }).toStrictEqual({
-        crashed: true,
-        afterCrash: { recalled: [], entries: [] },
-        entries: 1,
-        parts: 2,
-        restored: [],
-        tables: [],
-      });
-    });
-
     it("goes through a backlog longer than one page a page a step, each step one listing, an erased source's entry taking no read", async () => {
       const reader = await person();
       const mark = newMark();
       const source = newSource();
-      await add(source, `Restored late ${wordOf(mark)}`, owner(reader));
+      await add(source, `Restored late ${wordOf(mark)}`, await alone(reader));
       const backup = await copyOfStore();
       await eraseShared(source, "deleted");
       // More entries than two pages of the listing (1,000 keys a page):
@@ -1699,7 +1282,7 @@ describe(
     it("stops a step whose reads are slow once its time is up, keeping what it applied, and the next step goes on", async () => {
       const reader = await person();
       const source = newSource();
-      await add(source, "Answered once through", owner(reader));
+      await add(source, "Answered once through", await alone(reader));
       const backup = await copyOfStore();
       // Nine people's erasures, each an entry of the ledger to read.
       for (let erased = 0; erased < 9; erased += 1) {
@@ -1749,7 +1332,11 @@ describe(
       const reader = await person();
       const mark = newMark();
       const source = newSource();
-      await add(source, `Behind an unknown key ${wordOf(mark)}`, owner(reader));
+      await add(
+        source,
+        `Behind an unknown key ${wordOf(mark)}`,
+        await alone(reader)
+      );
       const backup = await copyOfStore();
       await eraseShared(source, "deleted");
       const [erasure] = await ledgerOf(keyOf(source));
@@ -1790,7 +1377,11 @@ describe(
       const reader = await person();
       const mark = newMark();
       const source = newSource();
-      await add(source, `Behind orphan parts ${wordOf(mark)}`, owner(reader));
+      await add(
+        source,
+        `Behind orphan parts ${wordOf(mark)}`,
+        await alone(reader)
+      );
       const backup = await copyOfStore();
       await eraseShared(source, "deleted");
       const [erasure] = await ledgerOf(keyOf(source));
@@ -1921,70 +1512,14 @@ describe(
       vi.useRealTimers();
     });
 
-    it.each([
-      ["no tick", "none"],
-      ["a tick that can't write the entry and deletes what it hid", "failing"],
-      ["a tick that writes the first entry", "writing"],
-    ] as const)(
-      "erases on a retry of a person's erasure what was added for them since the call that failed, with %s between, and a restore erases both again",
-      async (_between, tick) => {
-        const leaver = await person();
-        const [before, since] = [newMark(), newMark()];
-        await add(newSource(), `Before ${wordOf(before)}`, owner(leaver));
-        const backup = await copyOfStore();
-        const switched = await failLedgerWrites();
-
-        const first = await settled(
-          erasePersonShared({ personId: leaver, reason: "person_erased" })
-        );
-        // Added for them after the call that failed, before its retry.
-        await add(newSource(), `Since ${wordOf(since)}`, owner(leaver));
-        if (tick === "failing") {
-          await workBrain(env, new Date(), noProducers);
-        }
-        switched.failing = false;
-        if (tick === "writing") {
-          await workBrain(env, new Date(), noProducers);
-        }
-        const retried = await settled(
-          erasePersonShared({ personId: leaver, reason: "person_erased" })
-        );
-        await tickUntilErased();
-        const afterRetry = {
-          before: await recalledAs(leaver, wordOf(before)),
-          since: await recalledAs(leaver, wordOf(since)),
-        };
-        const entries = await ledgerOf(leaver);
-        await restoreStore(backup);
-        const restored = await recalledAs(leaver, wordOf(before));
-        await tickUntilErased();
-
-        expect({
-          first: "error" in first,
-          retried,
-          afterRetry,
-          entries: entries.length,
-          restored,
-          tables: await tablesHolding([before, since]),
-        }).toStrictEqual({
-          first: true,
-          retried: { value: undefined },
-          afterRetry: { before: [], since: [] },
-          entries: 2,
-          restored: [],
-          tables: [],
-        });
-      }
-    );
-
     it("refuses an add to a source between its erasure that failed to be written and the retry", async () => {
       const reader = await person();
       const source = newSource();
-      await add(source, `Erased ${wordOf(newMark())}`, owner(reader));
+      await add(source, `Erased ${wordOf(newMark())}`, await alone(reader));
       const switched = await failLedgerWrites();
       const first = await settled(eraseShared(source, "deleted"));
       const between = await settled(
-        add(source, "Added between", owner(reader))
+        add(source, "Added between", await alone(reader))
       );
       switched.failing = false;
       const retried = await settled(eraseShared(source, "deleted"));
@@ -2001,7 +1536,7 @@ describe(
     it("writes the erasure's ledger entry though an abort listener of a handler under way throws", async () => {
       const reader = await person();
       const source = newSource();
-      await add(source, `Listened ${wordOf(newMark())}`, owner(reader));
+      await add(source, `Listened ${wordOf(newMark())}`, await alone(reader));
       const gate = { reached: false, released: false };
       handling.set(keyOf(source), async (signal) => {
         signal.addEventListener("abort", () => {
@@ -2039,7 +1574,7 @@ describe(
     it("aborts the handler under way on an erased source though the erasure's ledger write failed", async () => {
       const reader = await person();
       const source = newSource();
-      await add(source, `Under way ${wordOf(newMark())}`, owner(reader));
+      await add(source, `Under way ${wordOf(newMark())}`, await alone(reader));
       const gate = holdHandlerOf(source);
       await queueRecorded(source);
       const ticking = settled(workBrain(env, new Date(), noProducers));
@@ -2067,7 +1602,7 @@ describe(
     it("settles a handler that ends after its source was erased without touching an item added after it", async () => {
       const reader = await person();
       const [erased, next] = [newSource(), newSource()];
-      await add(erased, `Erased ${wordOf(newMark())}`, owner(reader));
+      await add(erased, `Erased ${wordOf(newMark())}`, await alone(reader));
       const first = holdHandlerOf(erased);
       const second = holdHandlerOf(next);
       await queueRecorded(erased);
@@ -2095,8 +1630,12 @@ describe(
     it("never answers a read of a version erased while its file was being read", async () => {
       const reader = await person();
       const [history, current] = [newSource(), newSource()];
-      await add(history, `Read late ${wordOf(newMark())}`, owner(reader));
-      await add(current, `Read late too ${wordOf(newMark())}`, owner(reader));
+      await add(history, `Read late ${wordOf(newMark())}`, await alone(reader));
+      await add(
+        current,
+        `Read late too ${wordOf(newMark())}`,
+        await alone(reader)
+      );
 
       const heldHistory = await holdNextBucketGet();
       const readingHistory = settled(historyAs(reader, history, 1));
@@ -2110,7 +1649,7 @@ describe(
       const readingCurrent = settled(
         brain().readCurrent({
           sources: [keyOf(current)],
-          reader: { person: reader, groups: [] },
+          reader: await readerOf(reader),
         })
       );
       await vi.waitFor(() => {
@@ -2128,40 +1667,10 @@ describe(
       });
     });
 
-    it("numbers a source's next version past those a person's erasure deleted, so a late vector put for the old one writes nothing", async () => {
-      const leaver = await person();
-      const source = newSource();
-      const access: Access = { kind: "owner", person: leaver };
-      const [old] = await chunkedSource(source, access, 1, "Old text");
-      await erasePersonShared({ personId: leaver, reason: "withdrawn" });
-      await tickUntilErased();
-      // Their own again, after the erasure: new, and kept.
-      const version = await add(source, "New text", owner(leaver));
-      const model = modelOf();
-      await putCodes(model, old === undefined ? [] : [old]);
-      const codes = await runInDurableObject(
-        store(),
-        (_instance, state) =>
-          state.storage.sql
-            .exec<{ count: number }>(
-              `SELECT count(*) AS count FROM vector_codes
-              WHERE model = (SELECT id FROM vector_models WHERE name = ?)`,
-              model.name
-            )
-            .one().count
-      );
-
-      expect({ old: old?.version, version, codes }).toStrictEqual({
-        old: 1,
-        version: 2,
-        codes: 0,
-      });
-    });
-
     it("repacks at once each block that held a code of an erased source's earlier version", async () => {
       const reader = await person();
       const source = newSource();
-      const access: Access = { kind: "owner", person: reader };
+      const access: Access = accessOf(await alone(reader));
       const model = modelOf();
       const earlier = await chunkedSource(source, access, 600, "Earlier");
       const neighbour = await chunkedSource(
@@ -2174,7 +1683,7 @@ describe(
       const earlierRows = await chunkRowsOf(source);
       // A new version: the earlier one's codes are marked removed in their
       // block, waiting for a repack.
-      await add(source, "Later", owner(reader));
+      await add(source, "Later", await alone(reader));
       const waiting = await vectorsOf(earlierRows, []);
 
       await eraseShared(source, "deleted");
@@ -2186,9 +1695,10 @@ describe(
       }).toStrictEqual({ waiting: 600, afterErasure: 0 });
     });
 
-    it("leaves no plain source key or person id once a person's sources are erased, nor for a source erased before it was added", async () => {
+    // Core still erases every person in the shared store too, until
+    // GRA-1903 removes that path.
+    it("leaves no plain person id once a person is erased, nor a source key for a source erased before it was added", async () => {
       const leaver = await person();
-      await add(newSource(), `Theirs ${wordOf(newMark())}`, owner(leaver));
       const never = newSource();
 
       await erasePersonShared({ personId: leaver, reason: "person_erased" });
@@ -2241,9 +1751,8 @@ const citedBy = async (
 
 // The cited pack (GRA-1728) after an erasure: no way of recall (words,
 // an exact ID, a quoted phrase, as of a moment) reaches an erased version,
-// before the tick deletes it or after; a source added again for a person
-// after their erasure is cited at its new version; and while the store
-// replays its ledger, recall is refused as every call is.
+// before the tick deletes it or after; and while the store replays its
+// ledger, recall is refused as every call is.
 
 /** What finds `mark`: its word, its ID and its phrase. */
 const questions = (mark: string): string[] => [
@@ -2257,122 +1766,58 @@ describe("a pack after an erasure", { timeout: 120_000 }, () => {
     vi.useRealTimers();
   });
 
-  it("never cites a version erased with its source or its person, by words, ID, phrase or as of when it was current, before the tick deletes it or after", async () => {
-    const [reader, erased] = await Promise.all([person(), person()]);
-    const team = await teamOf(reader, erased);
-    const [sourceMark, personMark] = [newMark(), newMark()];
+  it("never cites a version of an erased source, by words, ID, phrase or as of when it was current, before the tick deletes it or after", async () => {
+    const reader = await person();
+    const sourceMark = newMark();
     const hour = 3_600_000;
     const start = Date.now() - 10 * hour;
-    // More of the erased person's own chunks than one batch deletes, added
-    // first: the erasure returns with the versions below still to delete.
-    const access: Access = { kind: "owner", person: erased };
-    await chunkedSource(newSource(), access, 600, "Archive one");
-    await chunkedSource(newSource(), access, 600, "Archive two");
-    // A source of the reader's, two versions, erased whole.
+    // A source of the reader's, three versions, erased whole: its current
+    // one in more chunks than one batch deletes, each holding the mark, so
+    // the erasure returns with versions still to delete.
     const whole = newSource();
     await addAt(
       start,
       whole,
       `Draft ${wordOf(sourceMark)} INV-${sourceMark} "night rota ${sourceMark}"`,
-      owner(reader)
+      await alone(reader)
     );
     await addAt(
       start + 2 * hour,
       whole,
       `Final ${wordOf(sourceMark)} INV-${sourceMark} night rota ${sourceMark}`,
-      owner(reader)
+      await alone(reader)
     );
-    // A team's source with a middle version the erased person alone could
-    // read: as of then, the version before it answers, never it.
-    const middle = newSource();
-    const before = await addAt(
-      start,
-      middle,
-      `Team plan ${wordOf(personMark)}`,
-      { kind: "team", teamId: team }
-    );
-    await addAt(
-      start + 2 * hour,
-      middle,
-      `Private plan ${wordOf(personMark)} INV-${personMark} night rota ${personMark}`,
-      owner(erased)
-    );
-    await addAt(
-      start + 4 * hour,
-      middle,
-      `Team plan again ${wordOf(personMark)}`,
-      {
-        kind: "team",
-        teamId: team,
-      }
+    await chunkedSource(
+      whole,
+      accessOf(await alone(reader)),
+      1200,
+      `Archive ${wordOf(sourceMark)} INV-${sourceMark} night rota ${sourceMark}`
     );
     const moments = [
       undefined,
       new Date(start + hour),
       new Date(start + 3 * hour),
-      new Date(start + 5 * hour),
     ];
+    const before = await citedBy(reader, questions(sourceMark), moments);
 
     await eraseShared(whole, "deleted");
-    await erasePersonShared({ personId: erased, reason: "withdrawn" });
     const { erasing: left } = await brainWorkOverview(env);
-    const erasing = {
-      source: await citedBy(reader, questions(sourceMark), moments),
-      person: await citedBy(reader, questions(personMark), moments),
-    };
+    const erasing = await citedBy(reader, questions(sourceMark), moments);
     await tickUntilErased();
-    const deleted = {
-      source: await citedBy(reader, questions(sourceMark), moments),
-      person: await citedBy(reader, questions(personMark), moments),
-    };
+    const deleted = await citedBy(reader, questions(sourceMark), moments);
 
-    // Of the team's source: by its words, the version current at each
-    // moment that isn't erased (v1 for the hours v1 and the erased v2
-    // were current, v3 since and now); never v2, and nothing of the
-    // erased source.
-    const team1 = `${middle.id} v${before}`;
-    const team3 = `${middle.id} v3`;
-    const expected = {
-      source: [],
-      person: [team3, team1, team1, team3],
-    };
-    expect({ left: left > 0, erasing, deleted }).toStrictEqual({
-      left: true,
-      erasing: expected,
-      deleted: expected,
-    });
-  });
-
-  it("cites a source added again for a person after their erasure at its new version", async () => {
-    const reader = await person();
-    const mark = newMark();
-    const source = newSource();
-    await add(source, `Old note ${wordOf(mark)} INV-${mark}`, owner(reader));
-    await erasePersonShared({ personId: reader, reason: "withdrawn" });
-    await tickUntilErased();
-    const again = `New note ${wordOf(mark)} INV-${mark}`;
-    const version = await add(source, again, owner(reader));
-
-    const { items } = await recallAs(env, reader, {
-      personal: true,
-      question: `INV-${mark}`,
-      budget: { tokens: recallBudgetMax },
-    });
-
-    expect(
-      items.map(({ source: cited, version: at, text }) => ({
-        source: cited,
-        version: at,
-        text,
-      }))
-    ).toStrictEqual([{ source, version, text: again }]);
-    await expect(historyAs(reader, source, version)).resolves.toBe(again);
+    expect({
+      cited: before.length > 0,
+      left: left > 0,
+      erasing,
+      deleted,
+    }).toStrictEqual({ cited: true, left: true, erasing: [], deleted: [] });
   });
 
   it("refuses a recall while the store replays its ledger after a restore, as every other call", async () => {
     const reader = await person();
     const source = newSource();
-    await add(source, "Recalled once through", owner(reader));
+    await add(source, "Recalled once through", await alone(reader));
     const backup = await copyOfStore();
     for (let erased = 0; erased < 9; erased += 1) {
       // oxlint-disable-next-line no-await-in-loop -- in order
@@ -2413,8 +1858,8 @@ describe("a pack after an erasure", { timeout: 120_000 }, () => {
 });
 
 /**
- * A scene for the vector scan beside an erasure: `reader`'s own source of
- * a few chunks with codes, and one live passage their team reads, also
+ * A scene for the vector scan beside an erasure: a source of a few chunks
+ * with codes their team reads, and one live passage it reads too, also
  * with a code. The scan may offer a code only of a current version the
  * reader may read (vectors.ts), so the erased chunks' codes must leave it
  * as the erasure hides them, whatever happens to its ledger write: else,
@@ -2436,7 +1881,12 @@ const erasedBesideLive = async () => {
   await putCodes(model, livePassages);
   await putCodes(
     model,
-    await chunkedSource(erased, { kind: "owner", person: reader }, 3, "Erased")
+    await chunkedSource(
+      erased,
+      { kind: "audience", group: `team:${team}` },
+      3,
+      "Erased"
+    )
   );
   const erasedRows = await chunkRowsOf(erased);
   const at = model.name.lastIndexOf("@");
@@ -2475,15 +1925,6 @@ describe("the vector scan beside an erasure", { timeout: 120_000 }, () => {
       name: "a source's",
       erase: async (scene: Scene) => {
         await eraseShared(scene.erased, "deleted");
-      },
-    },
-    {
-      name: "a person's",
-      erase: async (scene: Scene) => {
-        await erasePersonShared({
-          personId: scene.reader,
-          reason: "person_erased",
-        });
       },
     },
   ];

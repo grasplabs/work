@@ -525,7 +525,7 @@ describe("the Brain's sources, as a person reads them", () => {
         source: `${prefix}hidden-${index}`,
         change: crypto.randomUUID(),
         text: `Hidden ${index}`,
-        access: { kind: "owner", person: `someone-${tag}` },
+        access: { kind: "audience", group: `team:someone-${tag}` },
       });
     }
     const pages = [];
