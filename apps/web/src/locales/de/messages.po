@@ -1499,10 +1499,6 @@ msgstr "Ein Gast hat eine Nachricht geschrieben"
 msgid "A JSON value"
 msgstr "Ein JSON-Wert"
 
-#: src/dashboard/signals.tsx
-msgid "A Knowledge search from {about} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
-msgstr "Eine Wissenssuche aus {about} hat {searches, plural, one {einmal} other {#-mal}} nichts gefunden, bei {askers, plural, one {# fragenden Person} other {# fragenden Personen}}."
-
 #: src/workflows/requests/request-plan.tsx
 msgid "A look-up"
 msgstr "Ein Nachschlagen"
@@ -6138,8 +6134,8 @@ msgid "Grasp converts uploaded documents on this deployment: nothing is sent out
 msgstr "Grasp wandelt hochgeladene Dokumente in dieser Umgebung selbst um: Nichts wird nach außen gesendet."
 
 #: src/settings/ai-providers.tsx
-msgid "Grasp converts uploaded PDFs with {whereItRuns}, using Grasp's own key. Files in sensitive collections are converted on this deployment and never sent out."
-msgstr "Grasp wandelt hochgeladene PDFs mit {whereItRuns} um, mit Grasps eigenem Schlüssel. Dateien in vertraulichen Sammlungen werden in dieser Umgebung umgewandelt und nie nach außen gesendet."
+msgid "Grasp converts uploaded PDFs with {whereItRuns}, using Grasp's own key."
+msgstr "Grasp wandelt hochgeladene PDFs mit {whereItRuns} um, mit Grasps eigenem Schlüssel."
 
 #: src/chat/failure.ts
 msgid "Grasp could not be reached. Try again."
@@ -14765,10 +14761,6 @@ msgstr "Tippen Sie, was fehlt, oder Ja"
 #: src/interview/page.tsx
 msgid "Type your answer"
 msgstr "Tippen Sie Ihre Antwort"
-
-#: src/dashboard/signals.tsx
-msgid "Unanswered question"
-msgstr "Unbeantwortete Frage"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "Under 5"

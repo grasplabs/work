@@ -776,7 +776,7 @@ const useUsageLine = () => {
     }
     const { whereItRuns } = provider;
     if (feature === "conversion") {
-      return t`Grasp converts uploaded PDFs with ${whereItRuns}, using Grasp's own key. Files in sensitive collections are converted on this deployment and never sent out.`;
+      return t`Grasp converts uploaded PDFs with ${whereItRuns}, using Grasp's own key.`;
     }
     if (feature === "transcription") {
       return t`Grasp transcribes interviews with ${whereItRuns}, using Grasp's own key.`;
