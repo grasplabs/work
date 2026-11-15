@@ -63,8 +63,10 @@ import type { WorkContext } from "./work.ts";
 // history), left out in the statement that selects them. In the company's
 // export, a removed source (removal.ts) is held by the version that was
 // current when it was removed, as if that were current, and that version is
-// marked `removed`, so a restore brings it back removed; a person's own
-// export leaves it out, as no one reads it; and the skills
+// marked `removed`, so a restore brings it back removed; a key removed
+// before any version was added under it is a line of its own (`removals`,
+// the last step), so a restore closes it again; a person's own export
+// leaves both out, as no one reads them; and the skills
 // Grasp ships (contract.ts `shippedSkillsPrefix`), which each release adds
 // again. It holds the company's instruction files and its own skills. Of
 // memories and extraction marks, those one group reads (the shared store
@@ -339,12 +341,26 @@ export const changeLineSchema = z.strictObject({
 });
 export type ChangeLine = z.infer<typeof changeLineSchema>;
 
-/** A line of a part past the versions: one of the memories' steps (`memoryPhases`). */
+/**
+ * A line of a key removed with no version to mark (removal.ts): one removed
+ * before anything was added under it. Its key alone, which a restore
+ * closes again, so an add that began before the removal never lands after
+ * a restore either. A removed key with a version is marked on that
+ * version's line instead (`ExportLine.removed`).
+ */
+export const removalLineSchema = z.strictObject({
+  kind: z.literal("removal"),
+  source: z.string(),
+});
+export type RemovalLine = z.infer<typeof removalLineSchema>;
+
+/** A line of a part past the versions: one of the memories' steps (`memoryPhases`), or a removal. */
 export type MemoriesLine =
   | MemoryLine
   | ConfirmationLine
   | ExtractionLine
-  | ChangeLine;
+  | ChangeLine
+  | RemovalLine;
 
 /**
  * The format of the exports this release writes, and the only one it
@@ -603,7 +619,20 @@ export const memoryPhases = [
   "confirmations",
   "extractions",
   "changes",
+  "removals",
 ] as const;
+
+/**
+ * How many bindings each step's statement names in the company's export
+ * (`memoryPhaseSqlOf`); a person's names all six.
+ */
+const companyBindings: Record<(typeof memoryPhases)[number], number> = {
+  memories: 4,
+  confirmations: 4,
+  extractions: 4,
+  changes: 5,
+  removals: 3,
+};
 
 /** Most rows one part of a step of memories reads; its bytes bound it first. */
 const memoryPartRows = 500;
@@ -723,6 +752,22 @@ WHERE changed.rowid > ?1 AND changed.rowid <= ?5
   )
 ORDER BY changed.rowid
 LIMIT ?3`,
+  // Keys removed with no version to mark. The company's export alone: a
+  // mark names no readers, only a key, and only a company export is ever
+  // restored (restore.ts), so a person's own export carries none (`?6`, the
+  // person's own key, is never null).
+  removals:
+    scope === "company"
+      ? `SELECT gone.rowid AS row, gone.source AS source
+FROM removed_sources AS gone
+WHERE gone.rowid > ?1 AND gone.version_row IS NULL
+ORDER BY gone.rowid
+LIMIT ?3`
+      : `SELECT gone.rowid AS row, gone.source AS source
+FROM removed_sources AS gone
+WHERE gone.rowid > ?1 AND ?6 IS NULL
+ORDER BY gone.rowid
+LIMIT ?3`,
 });
 
 const memoryPhaseSql = {
@@ -826,6 +871,12 @@ const memoriesLineOf = (
         at: row.at,
         over: jsonOf(row.over),
       }),
+      held: undefined,
+    };
+  }
+  if (phase === "removals") {
+    return {
+      line: removalLineSchema.parse({ kind: "removal", source: row.source }),
       held: undefined,
     };
   }
@@ -1808,7 +1859,7 @@ const memoriesPart = (
     const named =
       scope.kind === "person"
         ? [...bindings, ...ownKeyOf(scope)]
-        : bindings.slice(0, name === "changes" ? 5 : 4);
+        : bindings.slice(0, companyBindings[name]);
     const rows = sql
       .exec<PhaseRow>(memoryPhaseSql[scope.kind][name], ...named)
       .toArray();

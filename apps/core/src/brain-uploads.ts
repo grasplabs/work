@@ -890,8 +890,13 @@ const removeUpload = async (
 
 /**
  * Completes every removal still owed (`completeRemoval`), oldest first,
- * each on its own: one that fails is logged by its error's name and tried
- * again at the clock's next run. The clock runs it each minute.
+ * each on its own: one that fails is logged with its upload's id and its
+ * error's name, and the run goes on to the rest, so it never holds up a
+ * newer one; it is tried again at the clock's next run. The clock runs it
+ * each minute. Unbounded, as `retryErasures` beside it: what is owed is
+ * only a removal whose completion failed, and a run that overlaps the next
+ * (or starts over after an interruption) repeats nothing, as a completion
+ * is safe to repeat and stores its one event once.
  */
 export const completeOwedRemovals = async (env: Env): Promise<void> => {
   const owed = await drizzle(env.DB)

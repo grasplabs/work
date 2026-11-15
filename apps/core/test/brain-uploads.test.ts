@@ -1264,6 +1264,77 @@ describe("uploading a file straight into the Brain", () => {
   );
 
   it(
+    "completes a newer owed removal in the same clock run as an older one whose Brain call keeps failing, which stays owed",
+    slow,
+    async () => {
+      const older = await sharedToRemove();
+      const newer = await sharedToRemove();
+      const store = async (statement: string) => {
+        await runInDurableObject(sharedStore(), (_store, state) => {
+          state.storage.sql.exec(statement);
+        });
+      };
+      const holdAll = "removed_sources_test_holds_every_removal";
+      const holdOlder = "removed_sources_test_holds_the_older";
+      // Both owed: the Brain takes neither removal.
+      await store(
+        `CREATE TRIGGER ${holdAll} BEFORE INSERT ON removed_sources BEGIN SELECT RAISE(ABORT, 'held by the test'); END`
+      );
+      try {
+        for (const { uploader, source } of [older, newer]) {
+          // oxlint-disable-next-line no-await-in-loop -- the older first
+          await outcome(async () => {
+            await uploader.api.brainSources.deleteUpload(source.id);
+          });
+        }
+      } finally {
+        await store(`DROP TRIGGER IF EXISTS ${holdAll}`);
+      }
+      // Then the older one's alone keeps failing, through the clock's run.
+      await store(
+        `CREATE TRIGGER ${holdOlder} BEFORE INSERT ON removed_sources WHEN NEW.source = 'upload:${older.source.id}' BEGIN SELECT RAISE(ABORT, 'held by the test'); END`
+      );
+      let run;
+      try {
+        await completeOwedRemovals(env);
+        run = {
+          older: await removalOf(older),
+          newer: await removalOf(newer),
+        };
+      } finally {
+        await store(`DROP TRIGGER IF EXISTS ${holdOlder}`);
+      }
+      await completeOwedRemovals(env);
+
+      expect({ run, older: await removalOf(older) }).toStrictEqual({
+        run: {
+          older: {
+            row: { removed: true, owed: true, name: null },
+            mateFinds: [older.source.id],
+            mateSees: null,
+            removed: [],
+            failed: 0,
+          },
+          newer: {
+            row: { removed: true, owed: false, name: null },
+            mateFinds: [],
+            mateSees: null,
+            removed: [true],
+            failed: 0,
+          },
+        },
+        older: {
+          row: { removed: true, owed: false, name: null },
+          mateFinds: [],
+          mateSees: null,
+          removed: [true],
+          failed: 0,
+        },
+      });
+    }
+  );
+
+  it(
     "keeps a removal the Brain failed owed, its upload gone from core, and completes it by the clock once the Brain takes it",
     slow,
     async () => {

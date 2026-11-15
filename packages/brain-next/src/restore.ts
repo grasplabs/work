@@ -20,9 +20,10 @@ import {
 import type { RestoreStatus } from "./contract.ts";
 import { enqueueEmbedding } from "./embedding.ts";
 import { keepNames } from "./entities.ts";
-import { keepSubject, subjectOf } from "./erasure.ts";
+import { isErased, keepSubject, subjectOf } from "./erasure.ts";
 import {
   changeLineSchema,
+  removalLineSchema,
   confirmationLineSchema,
   dropPartsBeyond,
   exportKeyOf,
@@ -49,6 +50,7 @@ import type {
   Manifest,
   MemoriesLine,
   MemoryLine,
+  RemovalLine,
 } from "./exports.ts";
 import {
   fileKeyOf,
@@ -402,6 +404,10 @@ const partLineSchema = z.union([
     { message: "Not an extraction mark to restore" }
   ),
   changeLineSchema,
+  removalLineSchema.refine(
+    ({ source }) => sourceIdSchema.safeParse(source).success,
+    { message: "Not a removal to restore" }
+  ),
 ]);
 type PartLine = z.infer<typeof partLineSchema>;
 
@@ -880,6 +886,31 @@ const restoreChange = (
 };
 
 /**
+ * Closes again a key removed before any version was added under it
+ * (removal.ts): its mark, with no version, unless the ledger erased the
+ * key since (the erasure closes it, and no plain key outlives it) or it is
+ * marked already.
+ */
+const restoreRemoval = async (
+  storage: DurableObjectStorage,
+  line: RemovalLine
+): Promise<void> => {
+  const subject = await subjectOf(line.source);
+  storage.transactionSync(() => {
+    const { sql } = storage;
+    if (isErased(sql, subject)) {
+      return;
+    }
+    sql.exec(
+      `INSERT INTO removed_sources (source, subject, version_row) VALUES (?, ?, NULL)
+      ON CONFLICT (source) DO NOTHING`,
+      line.source,
+      subject
+    );
+  });
+};
+
+/**
  * Writes `line`, one of the memories' steps (exports.ts), back as it was,
  * unless it is passed over (above). A change key goes in as kept, once.
  */
@@ -894,6 +925,8 @@ const restoreMemoriesLine = async (
     restoreConfirmation(storage, line);
   } else if (line.kind === "extraction") {
     await restoreExtraction(storage, db, line);
+  } else if (line.kind === "removal") {
+    await restoreRemoval(storage, line);
   } else {
     restoreChange(storage, line);
   }

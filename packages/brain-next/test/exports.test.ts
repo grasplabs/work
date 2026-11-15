@@ -22,6 +22,7 @@ import { z } from "zod";
 import {
   exportFileNameSchema,
   instructionsMaxLength,
+  removedSource,
 } from "../src/contract.ts";
 import {
   exportFormat,
@@ -574,7 +575,7 @@ describe("exports and restores", () => {
     // export this is: it refuses it (personal.test.ts).
     it("holds every version a group may read, with its readers and history, and nothing no one known may read (threats 4, 5)", async () => {
       const teamSource = `test:${unique()}`;
-      const removedSource = `test:${unique()}`;
+      const removedKey = `test:${unique()}`;
       const nobodys = `test:${unique()}`;
       const instructions = `instructions:${unique()}`;
       const group = `team:${unique()}`;
@@ -583,9 +584,9 @@ describe("exports and restores", () => {
       await add(shared(), nobodys, "nobody's words", { kind: "none" });
       // Removed (removal.ts): held by the version that was current then,
       // marked removed, as its history.
-      await add(shared(), removedSource, "kept words", team(group), "1");
-      await add(shared(), removedSource, "removed words", team(group), "2");
-      await shared().removeSource({ source: removedSource });
+      await add(shared(), removedKey, "kept words", team(group), "1");
+      await add(shared(), removedKey, "removed words", team(group), "2");
+      await shared().removeSource({ source: removedKey });
       await shared().addInstructions({
         source: instructions,
         change: "1",
@@ -600,7 +601,7 @@ describe("exports and restores", () => {
       const lines = await linesOf(shared(), id);
 
       expect(
-        of(lines, [teamSource, removedSource, nobodys, instructions])
+        of(lines, [teamSource, removedKey, nobodys, instructions])
       ).toStrictEqual(
         [
           {
@@ -624,7 +625,7 @@ describe("exports and restores", () => {
             changes: ["2"],
           },
           {
-            source: removedSource,
+            source: removedKey,
             version: 1,
             current: false,
             removed: false,
@@ -634,7 +635,7 @@ describe("exports and restores", () => {
             changes: ["1"],
           },
           {
-            source: removedSource,
+            source: removedKey,
             version: 2,
             current: false,
             removed: true,
@@ -1281,6 +1282,80 @@ describe("exports and restores", () => {
         afterKept: true,
         status: "done",
         current: ["kept words"],
+      });
+    });
+
+    it("closes again after a restore a key removed before any version was added under it, and one removed with its history, and leaves one erased since to the ledger", async () => {
+      await putBack(shared(), emptyShared);
+      const group = `team:${unique()}`;
+      const [before, after, erased] = [
+        `test:${unique()}`,
+        `test:${unique()}`,
+        `test:${unique()}`,
+      ];
+      // Removed before its first add landed: a mark with no version.
+      await shared().removeSource({ source: before });
+      // Removed with its history: a version marked removed.
+      await add(shared(), after, "kept words", team(group));
+      await shared().removeSource({ source: after });
+      // Removed before any add, then erased: the erasure closes it alone.
+      await shared().removeSource({ source: erased });
+      await shared().eraseSource({ source: erased, reason: "deleted" });
+      const { id } = await shared().startExport("test");
+      await settled(shared(), id);
+      // The keys its removal lines name, read from its parts as downloaded.
+      const manifest = z
+        .looseObject({ parts: z.array(z.looseObject({ file: z.string() })) })
+        .parse(
+          JSON.parse(
+            (await shared().exportFile({ id, file: "manifest.json" })) ?? ""
+          )
+        );
+      const bodies = await Promise.all(
+        manifest.parts.map(
+          async ({ file }) => (await shared().exportFile({ id, file })) ?? ""
+        )
+      );
+      const removalLines = bodies
+        .flatMap((body) => body.trimEnd().split("\n"))
+        .map((line) =>
+          z.looseObject({ kind: z.string().optional() }).parse(JSON.parse(line))
+        )
+        .filter(({ kind }) => kind === "removal");
+      await putBack(shared(), emptyShared);
+      await shared().startRestore(id, "test");
+      const done = await restoreSettled(id);
+      const added = async (source: string) => {
+        try {
+          await shared().addSource({
+            source,
+            change: unique(),
+            text: "new words",
+            access: team(group),
+          });
+          return "added";
+        } catch (error) {
+          return error instanceof Error ? error.message : String(error);
+        }
+      };
+
+      expect({
+        done: done?.state,
+        keys: await Promise.all(
+          [before, after].map(async (key) => await shared().keyState(key))
+        ),
+        adds: await Promise.all([before, after].map(added)),
+        // The erasure was in the ledger the restored store replays.
+        erasedKey: await shared().keyState(erased),
+        // The key removed before any version; the other is marked on its
+        // version's line; the erased one is in no line at all.
+        removalLines,
+      }).toStrictEqual({
+        done: "done",
+        keys: ["held", "held"],
+        adds: [removedSource, removedSource],
+        erasedKey: "erased",
+        removalLines: [{ kind: "removal", source: before }],
       });
     });
 
