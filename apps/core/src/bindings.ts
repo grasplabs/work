@@ -69,6 +69,8 @@ export interface CallGrant {
    * until its person decides it.
    */
   heldUntil?: number;
+  /** It comes from a chat app's conversation (`CapabilityClaims.chatApp`). */
+  chatApp?: boolean;
   /**
    * For an App action's connector resource: the approved binding the call
    * comes through, which a held call pins and its confirmation checks.
@@ -100,6 +102,7 @@ export const signedCall = async (
     sensitive,
     notAfter,
     heldUntil,
+    chatApp,
     binding,
   }: CallGrant,
   { action, idempotencyKey }: Pick<ConnectCall, "action" | "idempotencyKey">,
@@ -135,6 +138,7 @@ export const signedCall = async (
       sensitive,
       notAfter,
       heldUntil,
+      chatApp,
       origin: {
         permissionId,
         context,
@@ -239,6 +243,8 @@ export interface StubCaller {
   notAfter?: number;
   /** When a side effect connect holds from it ends (`CallGrant.heldUntil`). */
   heldUntil?: number;
+  /** It comes from a chat app's conversation (`CallGrant.chatApp`). */
+  chatApp?: boolean;
   /**
    * The resolver's last word, asked just before the call goes to connect,
    * after the permission check and the signing awaited: whether the work
@@ -298,6 +304,7 @@ const signedStub = async (
         sensitive: caller.sensitive,
         notAfter: caller.notAfter,
         heldUntil: caller.heldUntil,
+        chatApp: caller.chatApp,
         context,
         connection,
         permissionId,

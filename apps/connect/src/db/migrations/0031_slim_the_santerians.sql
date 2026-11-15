@@ -1,0 +1,1 @@
+ALTER TABLE `pending_actions` ADD `chat_app` integer DEFAULT false NOT NULL;

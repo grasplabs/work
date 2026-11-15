@@ -1266,12 +1266,17 @@ export class Workspace extends DurableObject<Env> {
     return id;
   }
 
-  /** Refuses `personId` a new chat once they keep {@link maxChatsPerPerson}. */
+  /**
+   * Refuses `personId` a new chat once they keep {@link maxChatsPerPerson}
+   * in Grasp (`shownInGrasp`). A chat app's conversations count toward no
+   * cap: the person deletes them (`forgetChatApps`), and a chat app's
+   * message is never refused for them.
+   */
   requireRoomForChat(personId: string): void {
     const [kept] = this.#db
       .select({ count: count() })
       .from(chats)
-      .where(eq(chats.personId, personId))
+      .where(shownInGrasp(personId))
       .all();
     if ((kept?.count ?? 0) >= maxChatsPerPerson) {
       throw agentErrors.create("agent.too_many_chats");
@@ -1280,7 +1285,8 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * A new chat, which belongs to `personId`: agent `agentId` answers in it,
-   * acting for them. Refused past {@link maxChatsPerPerson}. Made `by`
+   * acting for them. Refused past {@link maxChatsPerPerson} in Grasp; a
+   * chat app's conversation never is (`requireRoomForChat`). Made `by`
    * someone (the person, through the chat API), it is audited with it, in
    * the same transaction; core's own chats (tests) pass nobody.
    *
@@ -1310,7 +1316,9 @@ export class Workspace extends DurableObject<Env> {
       throw permissionErrors.create("permission.context_invalid");
     }
     const channel = chatChannelSchema.parse(via);
-    this.requireRoomForChat(personId);
+    if (channel === "web") {
+      this.requireRoomForChat(personId);
+    }
     const id = chatIdSchema.parse(crypto.randomUUID());
     const chat = this.ctx.storage.transactionSync(() => {
       if (by !== undefined) {
@@ -4026,7 +4034,7 @@ export class Workspace extends DurableObject<Env> {
     if (person.userId !== personId) {
       throw agentErrors.create("agent.chat_not_found");
     }
-    return await this.#deleteChat(id, personId, person, by);
+    return await this.#deleteChat(id, personId, person, by, true);
   }
 
   /**
@@ -4037,8 +4045,12 @@ export class Workspace extends DurableObject<Env> {
    * it, the transcript its agent replays, its rows. Their next message
    * there starts a conversation anew. What the chat app itself keeps of
    * it is the chat app's. Each goes on its own: one that can't go yet
-   * (its agent at work) fails the call and stays, and asked again, it
-   * deletes what is left. How many it deleted.
+   * (its agent at work, `agent.conversation_answering`) or whose deletion
+   * failed part-way stays, and fails the call; asked again, it deletes
+   * what is left, as each step of a deletion is safe to repeat. Audited
+   * once for the action, after every deletion settled, as `by`'s, with
+   * how many went and how many didn't: never one event per conversation,
+   * nor anything they said. How many it deleted.
    */
   async forgetChatApps(
     personId: string,
@@ -4053,19 +4065,52 @@ export class Workspace extends DurableObject<Env> {
       .from(chats)
       .where(and(eq(chats.personId, personId), ne(chats.via, "web")))
       .all();
-    await Promise.all(
+    const settled = await Promise.allSettled(
       conversations.map(
-        async ({ id }) => await this.#deleteChat(id, personId, person, by)
+        async ({ id }) =>
+          await this.#deleteChat(id, personId, person, by, false)
       )
     );
-    return conversations.length;
+    const failures: unknown[] = [];
+    for (const each of settled) {
+      if (each.status === "rejected") {
+        const reason: unknown = each.reason;
+        failures.push(reason);
+      }
+    }
+    const deleted = settled.length - failures.length;
+    this.#outboxEntry({
+      actor: by,
+      action: "chat.apps_deleted",
+      target: { type: "person", id: personId },
+      detail: {
+        workspace: this.ctx.id.name ?? null,
+        deleted,
+        failed: failures.length,
+      },
+    });
+    this.#deliverAudit();
+    const [failure] = failures;
+    if (agentErrors.codeOf(failure) === "agent.busy") {
+      throw agentErrors.create("agent.conversation_answering");
+    }
+    if (failure instanceof Error) {
+      throw failure;
+    }
+    return deleted;
   }
 
+  /**
+   * Deletes chat `id`, as `deleteChat` says; recorded as `chat.deleted`
+   * unless `audited` is false, for an action that records itself once
+   * (`forgetChatApps`).
+   */
   async #deleteChat(
     id: ChatId,
     personId: string,
     person: ConnectionPerson,
-    by: AuditActor
+    by: AuditActor,
+    audited = true
   ): Promise<number> {
     if (this.#turns.has(id) || this.#deleting.has(id)) {
       throw agentErrors.create("agent.busy");
@@ -4142,7 +4187,9 @@ export class Workspace extends DurableObject<Env> {
         this.ctx.storage.kv.delete(`${builtKeyPrefix}${id}`);
         this.ctx.storage.kv.delete(`${runningKeyPrefix}${id}`);
         this.ctx.storage.kv.delete(`${copiedKeyPrefix}${id}`);
-        this.#outboxed(by, "chat.deleted", id, { declined });
+        if (audited) {
+          this.#outboxed(by, "chat.deleted", id, { declined });
+        }
       });
       this.#deliverAudit();
       this.#stopped.delete(id);
@@ -4399,25 +4446,6 @@ export class Workspace extends DurableObject<Env> {
    */
   requireChat(chatId: unknown, personId: string): ChatId {
     return this.#graspChat(chatId, personId).id;
-  }
-
-  /**
-   * Of `chatIds`, those Grasp shows `personId` (`shownInGrasp`): what a
-   * list of things held in chats (the writes waiting for them) may show
-   * or link to. Any other ID is left out as if there were no such chat.
-   */
-  graspChatsAmong(personId: string, chatIds: readonly string[]): string[] {
-    return this.#db
-      .select({ id: chats.id })
-      .from(chats)
-      .where(
-        and(
-          shownInGrasp(personId),
-          sql`${chats.id} IN (SELECT value FROM json_each(${JSON.stringify(chatIds)}))`
-        )
-      )
-      .all()
-      .map(({ id }) => id);
   }
 
   // What a chat's agent writes of Apps' drafts (agent-builds.ts), which

@@ -6,10 +6,9 @@ import { StreamingPlan } from "chat";
 import type { Thread } from "chat";
 import { z } from "zod";
 
-import { signInConfig } from "../auth/config.ts";
 import { chatAgentId, personalWorkspaceId } from "../chats-rpc.ts";
 import { workspace } from "../durable-objects.ts";
-import { answerCard, heldWritesCard, ratingCard } from "./cards.tsx";
+import { answerCards, heldWritesCard, ratingCard } from "./cards.tsx";
 import {
   offerConnectOwn,
   ownMicrosoftNeed,
@@ -449,20 +448,6 @@ const answerOne = async (
   if (streamed) {
     await timed();
   }
-  const origin = signInConfig(env)?.origin;
-  if (origin === undefined) {
-    if (!streamed) {
-      await postIn(env, platform, thread, final);
-      await timed();
-      await offers();
-      await recorded();
-      return;
-    }
-    afterward(offers);
-    afterward(recorded);
-    return;
-  }
-  const chatUrl = `${origin}/?chat=${encodeURIComponent(chatId)}`;
   // Without their own Microsoft 365 he answered from what the company
   // shared alone: once a day, he offers to connect it, in their direct
   // message alone. What he carries on with once they have answers there
@@ -498,22 +483,15 @@ const answerOne = async (
         locale,
         writes,
         ...(check === undefined ? {} : { check }),
-        openUrl: chatUrl,
       })
     );
   });
   if (!streamed) {
-    await postIn(
-      env,
-      platform,
-      thread,
-      answerCard({
-        locale,
-        text: final,
-        chatUrl,
-        rate,
-      })
-    );
+    // Whole, in as many messages as it takes, in order.
+    for (const card of answerCards({ locale, text: final, rate })) {
+      // oxlint-disable-next-line no-await-in-loop -- in order
+      await postIn(env, platform, thread, card);
+    }
     await timed();
     await held();
     await offers();

@@ -1,13 +1,19 @@
+import { permissionErrors } from "@grasp-os/shared/permissions";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { personalWorkspaceId } from "../src/chats-rpc.ts";
+import { appKind } from "../src/apps.ts";
+import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
+import { keepMadeInChat } from "../src/drafts.ts";
 import { workspace } from "../src/durable-objects.ts";
-import { model, says } from "./agent-chat.ts";
+import { maxChatsPerPerson } from "../src/workspace.ts";
+import { codeStep, model, pausedReply, says } from "./agent-chat.ts";
+import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { fakeProviderFor } from "./model-provider.ts";
+import { mailConnection } from "./mail-connection.ts";
+import { fakeProvider, fakeProviderFor } from "./model-provider.ts";
 import type { FakeProvider } from "./model-provider.ts";
 import {
   openRpc,
@@ -21,7 +27,10 @@ import {
 import {
   member,
   memberAnsweredBy,
+  mentionIn,
   messageFrom,
+  newGroup,
+  onGroupRoster,
   post,
   reached,
   watched,
@@ -59,6 +68,62 @@ const conversationsOf = async (userId: string): Promise<string[]> =>
   );
 
 type Api = Awaited<ReturnType<typeof signedInApi>>["api"];
+
+/** Every character but the white space between them, in order. */
+const ink = (text: string): string => text.replaceAll(/\s/gu, "");
+
+/** A Workspace object's env, as the test reaches into it. */
+const envOf = (instance: object): object => {
+  const objectEnv: unknown = Reflect.get(instance, "env");
+  if (typeof objectEnv !== "object" || objectEnv === null) {
+    throw new TypeError("The Workspace object has no env");
+  }
+  return objectEnv;
+};
+
+/**
+ * `userId`'s Workspace object without connect, so a deletion fails after
+ * its Brain part, until the returned function puts it back.
+ */
+const connectOutOfReach = async (
+  userId: string
+): Promise<() => Promise<void>> => {
+  const stub = workspace(env, personalWorkspaceId(userId));
+  const real: unknown = await runInDurableObject(stub, (instance) => {
+    const objectEnv = envOf(instance);
+    const was: unknown = Reflect.get(objectEnv, "CONNECT");
+    Reflect.set(objectEnv, "CONNECT", {
+      declineChatActions: () => {
+        throw new Error("Connect is out of reach");
+      },
+    });
+    return was;
+  });
+  return async () => {
+    await runInDurableObject(stub, (instance) => {
+      Reflect.set(envOf(instance), "CONNECT", real);
+    });
+  };
+};
+
+/** What `userId` was recorded deleting of their chats, oldest first. */
+const deletionsBy = async (userId: string) => {
+  const events = await allEvents();
+  return events
+    .filter(
+      ({ action, actor }) =>
+        action.startsWith("chat.") &&
+        action.includes("deleted") &&
+        actor.type === "person" &&
+        actor.userId === userId
+    )
+    .map(({ action, target, detail }) => ({
+      action,
+      target: target?.type ?? null,
+      deleted: detail.deleted ?? null,
+      failed: detail.failed ?? null,
+    }));
+};
 
 /** What every request of the session API naming chat `chatId` answers. */
 const answersFor = async (api: Api, chatId: string) => ({
@@ -243,6 +308,229 @@ describe("a conversation with the agent in Teams", setUpTime, () => {
       again: 1,
       left: [],
     });
+  });
+
+  it("gets an answer too long for one message whole, over several, and no message links to a chat in Grasp", async () => {
+    // Posted whole where nothing streams: a group chat's thread.
+    const sentence = "The quarter's invoices were paid on time. ";
+    const answer = Array.from(
+      { length: 30 },
+      (_, at) => `${at}. ${sentence.repeat(40).trim()}`
+    ).join("\n\n");
+    const { teams } = await member(idp, says(answer));
+    const group = newGroup();
+    await onGroupRoster(group, [{ person: teams }]);
+
+    await post(mentionIn(teams, group, "Tell me about the invoices."));
+
+    const { activities } = await reached(group);
+    const messages = activities.filter(({ type }) => type === "message");
+    const said = JSON.stringify(messages);
+    const shown = messages
+      .flatMap(
+        (message) =>
+          JSON.stringify(message).match(/"text":"(?:[^"\\]|\\.)*"/gu) ?? []
+      )
+      .map(
+        (field) =>
+          z.object({ text: z.string() }).parse(JSON.parse(`{${field}}`)).text
+      )
+      .join("");
+    expect({
+      several: messages.length > 1,
+      whole: ink(shown).includes(ink(answer)),
+      linksToChat: said.includes("?chat="),
+    }).toStrictEqual({ several: true, whole: true, linksToChat: false });
+  });
+
+  it("counts toward no cap on chats: a person with as many chat-app conversations as the cap still starts a chat in Grasp, and is answered in Teams", async () => {
+    const { api, userId, teams } = await member(idp, says("Still here."));
+    // As many group chats' conversations as the cap allows chats, kept as
+    // the door keeps them.
+    await runInDurableObject(
+      workspace(env, personalWorkspaceId(userId)),
+      (_instance, state) => {
+        for (let at = 0; at < maxChatsPerPerson; at += 1) {
+          state.storage.sql.exec(
+            "INSERT INTO chats (id, title, created_at, last_at, person_id, agent_id, via, thread) VALUES (?, 'Microsoft Teams group chat', ?, ?, ?, ?, 'teams', ?)",
+            crypto.randomUUID(),
+            Date.now(),
+            Date.now(),
+            userId,
+            chatAgentId,
+            `19:${at}@thread.v2`
+          );
+        }
+      }
+    );
+
+    const started = await outcome(api.chats.create("Leave plans"));
+    await post(messageFrom(teams, { text: "Are you there?" }));
+
+    const { activities } = await reached(teams.conversation);
+    expect({
+      started,
+      answered: JSON.stringify(activities).includes("Still here."),
+    }).toStrictEqual({ started: "ok", answered: true });
+  });
+
+  it("is deleted from Settings with every other in one action, recorded once with how many went, and a second click is an action of its own", async () => {
+    const { api, userId, teams } = await member(
+      idp,
+      says("Noted."),
+      says("Noted in the group.")
+    );
+    const group = newGroup();
+    await onGroupRoster(group, [{ person: teams }]);
+    await post(messageFrom(teams, { text: "Hello." }));
+    await post(mentionIn(teams, group, "Hello, group."));
+    await api.chats.create("Leave plans");
+
+    const counts = [
+      await api.channelAccounts.forgetConversations(),
+      await api.channelAccounts.forgetConversations(),
+    ];
+
+    await vi.waitFor(
+      async () => {
+        await expect(deletionsBy(userId)).resolves.toHaveLength(2);
+      },
+      { timeout: 15_000, interval: 200 }
+    );
+    expect({
+      counts,
+      left: await conversationsOf(userId),
+      recorded: await deletionsBy(userId),
+    }).toStrictEqual({
+      counts: [2, 0],
+      left: [],
+      recorded: [
+        {
+          action: "chat.apps_deleted",
+          target: "person",
+          deleted: 2,
+          failed: 0,
+        },
+        {
+          action: "chat.apps_deleted",
+          target: "person",
+          deleted: 0,
+          failed: 0,
+        },
+      ],
+    });
+  });
+
+  it("stays when a step after its Brain part fails, and the next click deletes it", async () => {
+    const { api, userId, teams } = await member(idp, says("Noted."));
+    await post(messageFrom(teams, { text: "Hello." }));
+    const putBack = await connectOutOfReach(userId);
+
+    const refused = await outcome(api.channelAccounts.forgetConversations());
+    const stayed = await conversationsOf(userId);
+    await putBack();
+    const again = await api.channelAccounts.forgetConversations();
+
+    await vi.waitFor(
+      async () => {
+        await expect(deletionsBy(userId)).resolves.toHaveLength(2);
+      },
+      { timeout: 15_000, interval: 200 }
+    );
+    const recorded = await deletionsBy(userId);
+    expect({
+      refused: refused === "ok" ? "deleted" : "refused",
+      stayed: stayed.length,
+      again,
+      left: await conversationsOf(userId),
+      recorded: recorded.map(({ deleted, failed }) => ({ deleted, failed })),
+    }).toStrictEqual({
+      refused: "refused",
+      stayed: 1,
+      again: 1,
+      left: [],
+      recorded: [
+        { deleted: 0, failed: 1 },
+        { deleted: 1, failed: 0 },
+      ],
+    });
+  });
+
+  it("isn't deleted while it is being answered, and says it is still being answered", async () => {
+    const held = pausedReply(says("Almost."), 2);
+    const { api, userId, teams, provider } = await member(idp, held.reply);
+
+    const asked = post(messageFrom(teams, { text: "Hello." }));
+    await vi.waitFor(
+      () => {
+        expect(provider.requests.length).toBeGreaterThan(0);
+      },
+      { timeout: 15_000, interval: 50 }
+    );
+    const refused = await outcome(api.channelAccounts.forgetConversations());
+    held.release();
+    await asked;
+    const left = await conversationsOf(userId);
+
+    expect({ refused, left: left.length }).toStrictEqual({
+      refused: "agent.conversation_answering",
+      left: 1,
+    });
+  });
+
+  it("asks for no connection of the person's own, which only a chat in Grasp can grant, and tells them where", async () => {
+    const provider = await fakeProvider(
+      codeStep(
+        `export default async (self, env) => { const own = (await env.connections.available()).find(({ scope }) => scope === "personal"); return await env.connections.request({ connectionId: own?.connectionId ?? "", actions: ["mail.search"], binding: "MINE", reason: "To find the invoice." }).then(({ binding }) => binding, (error) => error.message); };`
+      ),
+      says("I can't ask for that here.")
+    );
+    const { userId, teams } = await memberAnsweredBy(idp, provider);
+    await mailConnection([], ["mail.search"], { owner: userId });
+
+    await post(messageFrom(teams, { text: "Find the invoice in my mail." }));
+
+    const told = permissionErrors.create("permission.own_in_chat_app").message;
+    const { results } = await env.DB.prepare(
+      "SELECT count(*) AS waiting FROM permissions WHERE requested_by = ? AND status = 'requested'"
+    )
+      .bind(userId)
+      .all<{ waiting: number }>();
+    expect({
+      waiting: results[0]?.waiting,
+      toldModel: provider.requests.some((request) =>
+        JSON.stringify(request.body).includes(told)
+      ),
+      says: told,
+    }).toStrictEqual({
+      waiting: 0,
+      toldModel: true,
+      says: "A connection of the person's own can be granted only in a chat in Grasp, not in a chat app. Tell them to ask you in a chat in Grasp (Chat, in Grasp's sidebar), and grant it there.",
+    });
+  });
+
+  it("is never an App's chat, though it worked on the App last", async () => {
+    const { api, userId, teams } = await memberAnsweredBy(
+      idp,
+      await fakeProvider(says("Noted.")),
+      "builder"
+    );
+    const { id: appId } = await api.apps.create({ name: `Desk ${unique()}` });
+    await post(messageFrom(teams, { text: "Hello." }));
+    const [conversation] = await conversationsOf(userId);
+    if (conversation === undefined) {
+      throw new Error("Expected the Teams conversation to be kept");
+    }
+    // As Build it, or its agent's write, keeps the chat that worked on it.
+    await keepMadeInChat(env, appKind, appId, userId, {
+      chatId: conversation,
+      turnId: null,
+      callId: null,
+    });
+
+    await expect(
+      api.chats.forSubject({ kind: "app", id: appId })
+    ).resolves.toBeNull();
   });
 
   it("is compacted when it outgrows the model's window, and goes on answering", async () => {

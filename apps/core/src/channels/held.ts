@@ -121,7 +121,10 @@ export const turnHeldWrites = async (
   if (member === null) {
     return [];
   }
-  const waiting = await env.CONNECT.listPendingActions(member.person);
+  const waiting = await env.CONNECT.listPendingActions(
+    member.person,
+    "chat_app"
+  );
   return waiting
     .filter(
       ({ context, requestedAt }) =>

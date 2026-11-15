@@ -4657,6 +4657,10 @@ msgstr "Heeft een webhookbron verwijderd"
 msgid "Deleted entries past their retention"
 msgstr "Vermeldingen na hun bewaartermijn verwijderd"
 
+#: src/activity/audit-words.ts
+msgid "Deleted their conversations in chat apps"
+msgstr "Heeft de eigen gesprekken in chat-apps verwijderd"
+
 #: src/interview/page.tsx
 msgid "Deleted. Nothing you said is kept."
 msgstr "Verwijderd. Niets van wat je zei, wordt bewaard."
@@ -12890,6 +12894,10 @@ msgstr "Stephen kan hem in Microsoft Teams aanbieden aan iedereen die hem mag st
 #: src/workflows/requests/request-summary.tsx
 msgid "Stephen can send it in Microsoft Teams once you've had a chat with him there."
 msgstr "Stephen kan het in Microsoft Teams sturen zodra je daar met hem hebt gechat."
+
+#: src/settings/chat-accounts.tsx
+msgid "Stephen is still answering one of your conversations. Try again in a moment."
+msgstr "Stephen is nog bezig een van je gesprekken te beantwoorden. Probeer het zo opnieuw."
 
 #: src/settings/stephen-card.tsx
 msgid "Stephen outside Grasp"

@@ -4657,6 +4657,10 @@ msgstr "Eliminó una fuente de webhook"
 msgid "Deleted entries past their retention"
 msgstr "Eliminó entradas pasado su plazo de conservación"
 
+#: src/activity/audit-words.ts
+msgid "Deleted their conversations in chat apps"
+msgstr "Eliminó sus conversaciones en aplicaciones de chat"
+
 #: src/interview/page.tsx
 msgid "Deleted. Nothing you said is kept."
 msgstr "Eliminada. No se guarda nada de lo que has dicho."
@@ -12890,6 +12894,10 @@ msgstr "Stephen puede ofrecerlo en Microsoft Teams a cualquiera que pueda inicia
 #: src/workflows/requests/request-summary.tsx
 msgid "Stephen can send it in Microsoft Teams once you've had a chat with him there."
 msgstr "Stephen puede enviarlo en Microsoft Teams cuando hayas chateado con él allí."
+
+#: src/settings/chat-accounts.tsx
+msgid "Stephen is still answering one of your conversations. Try again in a moment."
+msgstr "Stephen todavía está respondiendo en una de tus conversaciones. Vuelve a intentarlo en un momento."
 
 #: src/settings/stephen-card.tsx
 msgid "Stephen outside Grasp"

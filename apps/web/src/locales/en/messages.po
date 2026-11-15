@@ -4657,6 +4657,10 @@ msgstr "Deleted a webhook source"
 msgid "Deleted entries past their retention"
 msgstr "Deleted entries past their retention"
 
+#: src/activity/audit-words.ts
+msgid "Deleted their conversations in chat apps"
+msgstr "Deleted their conversations in chat apps"
+
 #: src/interview/page.tsx
 msgid "Deleted. Nothing you said is kept."
 msgstr "Deleted. Nothing you said is kept."
@@ -12890,6 +12894,10 @@ msgstr "Stephen can offer it in Microsoft Teams to anyone who may start it. It s
 #: src/workflows/requests/request-summary.tsx
 msgid "Stephen can send it in Microsoft Teams once you've had a chat with him there."
 msgstr "Stephen can send it in Microsoft Teams once you've had a chat with him there."
+
+#: src/settings/chat-accounts.tsx
+msgid "Stephen is still answering one of your conversations. Try again in a moment."
+msgstr "Stephen is still answering one of your conversations. Try again in a moment."
 
 #: src/settings/stephen-card.tsx
 msgid "Stephen outside Grasp"

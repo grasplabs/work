@@ -716,4 +716,6 @@ export const permissionErrors = defineErrorFamily({
     "An App whose permission to read the Brain names teams can't be called from a workflow, and an App a workflow may call can't name teams.",
   "permission.too_many_requests":
     "This chat already has too many connection requests waiting. Wait until the person decides them.",
+  "permission.own_in_chat_app":
+    "A connection of the person's own can be granted only in a chat in Grasp, not in a chat app. Tell them to ask you in a chat in Grasp (Chat, in Grasp's sidebar), and grant it there.",
 });

@@ -181,21 +181,6 @@ const lines = {
 
   // An answer.
 
-  /** An answer cut to fit the platform. */
-  answerTooLong: {
-    en: "This answer is too long for this chat. Open it in Grasp to read all of it.",
-    nl: "Dit antwoord is te lang voor deze chat. Open het in Grasp om alles te lezen.",
-    de: "Diese Antwort ist zu lang für diesen Chat. Öffnen Sie sie in Grasp, um alles zu lesen.",
-    fr: "Cette réponse est trop longue pour cette conversation. Ouvrez-la dans Grasp pour la lire en entier.",
-    es: "Esta respuesta es demasiado larga para este chat. Ábrela en Grasp para leerla entera.",
-  },
-  openInGrasp: {
-    en: "Open in Grasp",
-    nl: "Openen in Grasp",
-    de: "In Grasp öffnen",
-    fr: "Ouvrir dans Grasp",
-    es: "Abrir en Grasp",
-  },
   /** The thumbs under an answer: whether it helped (stephen-requests.ts). */
   helpful: {
     en: "Helpful",
@@ -318,13 +303,13 @@ const lines = {
     fr: "Pour préparer cela, j’ai lu {where}, où d’autres personnes peuvent aussi faire des modifications. Vérifiez chaque valeur avant de confirmer.",
     es: "Para preparar esto, he leído {where}, donde otras personas también pueden hacer cambios. Revisa cada valor antes de confirmar.",
   },
-  /** What would change doesn't fit the card: it is confirmed in Grasp. */
+  /** What would change doesn't fit the card, so it can't be confirmed on it. */
   cardTooLong: {
-    en: "This card can't show everything that would change. Open it in Grasp to see every value and confirm it there.",
-    nl: "Deze kaart kan niet alles laten zien wat er zou veranderen. Open hem in Grasp om elke waarde te zien en bevestig het daar.",
-    de: "Diese Karte kann nicht alles zeigen, was sich ändern würde. Öffnen Sie sie in Grasp, um jeden Wert zu sehen, und bestätigen Sie dort.",
-    fr: "Cette carte ne peut pas montrer tout ce qui changerait. Ouvrez-la dans Grasp pour voir chaque valeur et confirmez là-bas.",
-    es: "Esta tarjeta no puede mostrar todo lo que cambiaría. Ábrela en Grasp para ver cada valor y confírmalo allí.",
+    en: "This card can't show everything that would change, so it can't be confirmed. Ask me again with fewer changes at a time.",
+    nl: "Deze kaart kan niet alles laten zien wat er zou veranderen, dus je kunt het niet bevestigen. Vraag het me opnieuw met minder wijzigingen tegelijk.",
+    de: "Diese Karte kann nicht alles zeigen, was sich ändern würde, daher lässt es sich nicht bestätigen. Fragen Sie mich noch einmal mit weniger Änderungen auf einmal.",
+    fr: "Cette carte ne peut pas montrer tout ce qui changerait, donc cela ne peut pas être confirmé. Redemandez-moi avec moins de modifications à la fois.",
+    es: "Esta tarjeta no puede mostrar todo lo que cambiaría, así que no se puede confirmar. Pídemelo de nuevo con menos cambios a la vez.",
   },
   confirm: {
     en: "Confirm",

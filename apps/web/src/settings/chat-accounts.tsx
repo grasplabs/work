@@ -1,3 +1,4 @@
+import { agentErrors } from "@grasp-os/shared/agent";
 import type {
   ChannelAccount,
   ChannelLinkPreview,
@@ -19,6 +20,7 @@ import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { Confirmed } from "../confirmed.tsx";
+import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
@@ -226,6 +228,22 @@ const AccountRow = ({ account }: { account: ChannelAccount }) => {
 };
 
 /**
+ * How many of the person's conversations in chat apps were deleted, or
+ * that one is still being answered, so none could go yet. Outside the
+ * component, as the React Compiler can't compile `try`.
+ */
+const forgotten = async (session: Session): Promise<number | "answering"> => {
+  try {
+    return await session.channelAccounts.forgetConversations();
+  } catch (error) {
+    if (agentErrors.codeOf(error) === "agent.conversation_answering") {
+      return "answering";
+    }
+    throw error;
+  }
+};
+
+/**
  * Deleting what Grasp keeps of every conversation the person had with
  * Stephen in a chat app (`channelAccounts.forgetConversations`), and how
  * many it deleted.
@@ -233,7 +251,7 @@ const AccountRow = ({ account }: { account: ChannelAccount }) => {
 const ForgetConversations = () => {
   const { t } = useLingui();
   const { busy, failure, run } = useCoreAction();
-  const [deleted, setDeleted] = useState<number>();
+  const [deleted, setDeleted] = useState<number | "answering">();
   return (
     <SettingsRow
       description={t`Grasp keeps what you say to Stephen in a chat app, so he can follow the conversation and learn from it.`}
@@ -247,25 +265,28 @@ const ForgetConversations = () => {
           description={t`Grasp deletes what it keeps of every conversation you had with Stephen in a chat app, and what your Brain kept from them. He starts afresh the next time you write. The messages stay in the chat app itself. This can't be undone.`}
           label={t`Delete your conversations in chat apps`}
           onConfirm={() => {
+            setDeleted(undefined);
             void (async () => {
-              await run(async ({ channelAccounts }) => {
-                setDeleted(await channelAccounts.forgetConversations());
-              });
+              setDeleted(await run(forgotten));
             })();
           }}
           title={t`Delete your conversations in chat apps?`}
         />
         <p aria-live="polite" className="text-muted-foreground">
-          {deleted === undefined ? null : (
+          {typeof deleted === "number" ? (
             <Plural
               _0="No conversations to delete."
               one="# conversation deleted."
               other="# conversations deleted."
               value={deleted}
             />
-          )}
+          ) : null}
         </p>
-        <ErrorText>{failure}</ErrorText>
+        <ErrorText>
+          {deleted === "answering"
+            ? t`Stephen is still answering one of your conversations. Try again in a moment.`
+            : failure}
+        </ErrorText>
       </div>
     </SettingsRow>
   );

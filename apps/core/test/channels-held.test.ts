@@ -193,5 +193,8 @@ describe("a Teams turn that holds writes", setUpTime, () => {
     }
     // Nothing read mail this turn: no check line.
     expect(card).not.toContain(say("checkMail", "en"));
+    // A chat app's conversation is no chat in Grasp (GRA-1919): nothing
+    // the turn posted leads to one.
+    expect(messages.join("\n")).not.toContain("?chat=");
   });
 });

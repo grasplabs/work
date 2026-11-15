@@ -6,7 +6,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import {
-  answerCard,
+  answerCards,
   ratingCard,
   cancelAction,
   confirmAction,
@@ -250,33 +250,23 @@ const outcomes: PressOutcome[] = [
 
 /** Every card Stephen sends, small and as large as it gets, in each language. */
 const everyCard = channelLocales.flatMap((locale) => [
-  {
-    name: `answer (${locale})`,
-    card: answerCard({
-      locale,
-      text: "You have a call with Jan at 10:00.",
-      chatUrl: `${grasp}/chat/1`,
-    }),
-  },
-  {
-    name: `largest answer (${locale})`,
-    card: answerCard({
-      locale,
-      text: heavy(200_000),
-      chatUrl: `${grasp}/chat/${"a".repeat(2000)}`,
-    }),
-  },
+  ...answerCards({
+    locale,
+    text: "You have a call with Jan at 10:00.",
+    rate: crypto.randomUUID(),
+  }).map((card, at) => ({ name: `answer ${at} (${locale})`, card })),
+  ...answerCards({
+    locale,
+    text: heavy(200_000),
+    rate: crypto.randomUUID(),
+  }).map((card, at) => ({ name: `largest answer ${at} (${locale})`, card })),
   {
     name: `rating (${locale})`,
     card: ratingCard({ locale, rate: crypto.randomUUID() }),
   },
   {
     name: `one held write (${locale})`,
-    card: heldWritesCard({
-      locale,
-      writes: [write(1)],
-      openUrl: `${grasp}/held`,
-    }),
+    card: heldWritesCard({ locale, writes: [write(1)] }),
   },
   {
     name: `largest held writes (${locale})`,
@@ -284,7 +274,6 @@ const everyCard = channelLocales.flatMap((locale) => [
       locale,
       writes: largest(),
       check: { read: "record", where: heavy(5000) },
-      openUrl: `${grasp}/held/${"a".repeat(2000)}`,
     }),
   },
   ...outcomes.map((outcome) => ({
@@ -293,7 +282,6 @@ const everyCard = channelLocales.flatMap((locale) => [
       locale,
       writes: largest("unknown"),
       check: { read: "mail" },
-      openUrl: `${grasp}/held/${"a".repeat(2000)}`,
       outcome,
     }),
   })),
@@ -317,7 +305,7 @@ describe("Stephen's cards in Teams", () => {
   it("asks for a press on held writes with exactly the writes it shows", () => {
     const writes = [write(1), write(2)];
     const { actions, texts, facts } = inTeams(
-      heldWritesCard({ locale: "nl", writes, openUrl: `${grasp}/held` })
+      heldWritesCard({ locale: "nl", writes })
     );
 
     expect({
@@ -343,12 +331,6 @@ describe("Stephen's cards in Teams", () => {
           action: cancelAction,
           press: writes.map(({ id, inputHash }) => ({ id, inputHash })),
         },
-        {
-          type: "Action.OpenUrl",
-          title: "Openen in Grasp",
-          action: undefined,
-          press: null,
-        },
       ],
       says: true,
       values: [
@@ -366,17 +348,19 @@ describe("Stephen's cards in Teams", () => {
       return {
         presses: actions.filter((action) => action.type === "Action.Submit")
           .length,
-        sendsToGrasp: texts.includes(say("cardTooLong", "de")),
+        // A conversation in a chat app is no chat in Grasp (GRA-1919):
+        // nothing on the card leads there.
+        links: actions.filter((action) => action.type === "Action.OpenUrl")
+          .length,
+        saysTooLong: texts.includes(say("cardTooLong", "de")),
       };
     };
-    const openUrl = `${grasp}/held`;
 
     expect({
       tooLong: pressesOf(
         heldWritesCard({
           locale: "de",
           writes: [write(1, { value: "x".repeat(20_000) })],
-          openUrl,
         })
       ),
       tooMany: pressesOf(
@@ -385,51 +369,26 @@ describe("Stephen's cards in Teams", () => {
           writes: Array.from({ length: maxWritesOnCard + 1 }, (_, index) =>
             write(index)
           ),
-          openUrl,
         })
       ),
       running: pressesOf(
         heldWritesCard({
           locale: "de",
           writes: [write(1, { state: "done" }), write(2, { state: "running" })],
-          openUrl,
         })
       ),
       ended: pressesOf(
         heldWritesCard({
           locale: "de",
           writes: [write(1)],
-          openUrl,
           outcome: "expired",
         })
       ),
     }).toStrictEqual({
-      tooLong: { presses: 0, sendsToGrasp: true },
-      tooMany: { presses: 0, sendsToGrasp: true },
-      running: { presses: 0, sendsToGrasp: false },
-      ended: { presses: 0, sendsToGrasp: false },
-    });
-  });
-
-  it("cuts an answer too long for Teams and links to the whole of it in Grasp", () => {
-    const text = "Ein langer Satz über die Rechnungen. ".repeat(2000);
-    const { texts, actions } = inTeams(
-      answerCard({
-        locale: "de",
-        text,
-        chatUrl: `${grasp}/chat/1`,
-      })
-    );
-    const [shown = ""] = texts;
-
-    expect({
-      cut: shown.length < text.length && shown.endsWith("…"),
-      says: texts.includes(say("answerTooLong", "de")),
-      links: actions.map(({ title, url }) => ({ title, url })),
-    }).toStrictEqual({
-      cut: true,
-      says: true,
-      links: [{ title: "In Grasp öffnen", url: `${grasp}/chat/1` }],
+      tooLong: { presses: 0, links: 0, saysTooLong: true },
+      tooMany: { presses: 0, links: 0, saysTooLong: true },
+      running: { presses: 0, links: 0, saysTooLong: false },
+      ended: { presses: 0, links: 0, saysTooLong: false },
     });
   });
 
@@ -553,7 +512,83 @@ const pastSlack = (postable: PostableCard): string[] => {
   return [...past];
 };
 
+/** Every character but the white space between them, in order. */
+const ink = (said: string): string => said.replaceAll(/\s/gu, "");
+
+/** The text of each section of a card, as Block Kit carries it. */
+const sectionTexts = (postable: PostableCard): string[] => {
+  const texts: string[] = [];
+  const walk = (node: unknown): void => {
+    if (typeof node !== "object" || node === null) {
+      return;
+    }
+    if (Reflect.get(node, "type") === "section") {
+      const text: unknown = Reflect.get(node, "text");
+      const said: unknown =
+        typeof text === "object" && text !== null
+          ? Reflect.get(text, "text")
+          : undefined;
+      if (typeof said === "string") {
+        texts.push(said);
+      }
+    }
+    for (const value of Object.values(node)) {
+      walk(value);
+    }
+  };
+  walk(cardToBlockKit(postable.card));
+  return texts;
+};
+
 describe("Stephen's cards in Slack", () => {
+  it("posts an answer too long for one message whole, across messages that each fit Teams and Slack, cut where a paragraph or sentence ends, its thumbs under the last", () => {
+    const sentence = "Ein langer Satz über die Rechnungen des Quartals. ";
+    const paragraphs = Array.from(
+      { length: 40 },
+      (_, at) => `${at}. ${sentence.repeat(30 + (at % 7) * 20).trim()}`
+    );
+    // And one paragraph that is a single sentence too long for any message.
+    const text = [...paragraphs, "x".repeat(40_000)].join("\n\n");
+    const rate = crypto.randomUUID();
+    const cards = answerCards({ locale: "de", text, rate });
+    const inSlack = cards.map((card) => sectionTexts(card));
+    const teams = cards.map((card) => inTeams(card));
+    const shownInTeams = teams.flatMap(({ texts }) => texts).join("");
+    const pieces = inSlack.flat();
+
+    expect({
+      several: cards.length > 1,
+      withinTeams: cards.every(
+        (card) =>
+          JSON.stringify(withinTeams(card)) === JSON.stringify(allWithin)
+      ),
+      withinSlack: cards.every((card) => pastSlack(card).length === 0),
+      wholeInTeams: ink(shownInTeams) === ink(text),
+      wholeInSlack: ink(pieces.join("")) === ink(text),
+      // Each piece ends where a sentence or paragraph does, but for the
+      // one sentence no message holds.
+      cutAtSentences: pieces
+        .filter((piece) => !piece.startsWith("x"))
+        .every((piece) => piece.trimEnd().endsWith(".")),
+      links: teams.flatMap(({ actions }) =>
+        actions.filter((action) => action.type === "Action.OpenUrl")
+      ),
+      thumbs: teams.map(
+        ({ actions }) =>
+          actions.filter((action) => action.data?.value === rate).length
+      ),
+    }).toStrictEqual({
+      several: true,
+      withinTeams: true,
+      withinSlack: true,
+      wholeInTeams: true,
+      wholeInSlack: true,
+      cutAtSentences: true,
+      links: [],
+      thumbs: [...Array.from({ length: cards.length - 1 }, () => 0), 2],
+    });
+  });
+
   it("are all within Block Kit's block, text, button and link limits", () => {
     expect(
       Object.fromEntries(

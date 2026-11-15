@@ -1274,6 +1274,14 @@ export interface ActionDescription {
   complete: boolean;
 }
 
+/**
+ * Where a held action was held: in Grasp (a chat in Grasp, an App, a
+ * run), or in a chat app's conversation, which Grasp never shows as a
+ * chat and whose held actions are decided on their card there.
+ */
+export const heldInSchema = z.enum(["grasp", "chat_app"]);
+export type HeldIn = z.infer<typeof heldInSchema>;
+
 /** A held action, as the person it waits for sees it. */
 export interface PendingAction {
   id: string;
@@ -1996,9 +2004,14 @@ export interface ConnectApi
   ) => Promise<NativeOperation>;
   /**
    * The held actions waiting for `person`, newest first (at most 200):
-   * none for Grasp staff.
+   * none for Grasp staff. Only those held where `heldIn` says, when it
+   * does: in Grasp, or in a chat app's conversation (`chatApp` on the
+   * capability), the limit applying to those alone.
    */
-  listPendingActions: (person: ConnectionPerson) => Promise<PendingAction[]>;
+  listPendingActions: (
+    person: ConnectionPerson,
+    heldIn?: HeldIn
+  ) => Promise<PendingAction[]>;
   /** One held action waiting for the person, or `null`. */
   pendingAction: (request: HeldRequest) => Promise<PendingAction | null>;
   /**

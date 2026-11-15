@@ -118,6 +118,10 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     action: "chat.turn_noted",
     text: msg`Noted a question asked in a chat, to keep in its person's own Brain`,
   },
+  {
+    action: "chat.apps_deleted",
+    text: msg`Deleted their conversations in chat apps`,
+  },
   { action: "chat", text: msg`Changed a chat` },
   {
     action: "brain.source.handover_skipped",

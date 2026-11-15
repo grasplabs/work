@@ -1075,6 +1075,55 @@ describe("a side effect from chat", () => {
     });
   });
 
+  it("is listed apart by where it was held: in Grasp, or in a chat app's conversation, each list as long as its own, however many the other holds", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    // Held in Grasp first, then more in a chat app than a list answers.
+    const inGrasp = await hold(inChat(anna), mail(connectionId));
+    const { pending } = await hold(inChat(anna), mail(connectionId), {
+      chatApp: true,
+    });
+    const db = drizzle(env.DB);
+    const held = await db
+      .select()
+      .from(pendingActions)
+      .where(eq(pendingActions.id, pending?.id ?? ""))
+      .get();
+    if (held === undefined) {
+      throw new Error("Nothing held");
+    }
+    const [one, ...more] = Array.from({ length: 220 }, (_, index) =>
+      db.insert(pendingActions).values({
+        ...held,
+        id: crypto.randomUUID(),
+        idempotencyKey: `chat-1:${crypto.randomUUID()}`,
+        createdAt: new Date(held.createdAt.getTime() + index + 1),
+      })
+    );
+    if (one === undefined) {
+      throw new Error("Nothing to insert");
+    }
+    await db.batch([one, ...more]);
+    const listed = async (heldIn?: "grasp" | "chat_app") =>
+      await exports.default.listPendingActions(anna, heldIn);
+    const [grasp, chatApp, all] = [
+      await listed("grasp"),
+      await listed("chat_app"),
+      await listed(),
+    ];
+    expect({
+      grasp: grasp.map(({ id }) => id),
+      chatApp: chatApp.length,
+      chatAppHoldsGrasps: chatApp.some(({ id }) => id === inGrasp.pending?.id),
+      all: all.length,
+    }).toStrictEqual({
+      grasp: [inGrasp.pending?.id],
+      chatApp: 200,
+      chatAppHoldsGrasps: false,
+      all: 200,
+    });
+  });
+
   it("is dropped with its event when its connection is disconnected, or its person removed", async () => {
     const anna = someone();
     const admin = someone("admin");

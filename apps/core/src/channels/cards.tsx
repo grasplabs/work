@@ -24,9 +24,11 @@ import type { ChannelLocale, LineName } from "./words.ts";
 // A card holds what other people wrote: an answer, a document's title, the
 // values of a change. Each platform caps what one message may carry, and a
 // card over the cap is refused whole, so the cards measure that text as
-// they put it on and stop before the cap. A card of held writes never asks
-// for a press on values it couldn't show in full: it sends the person to
-// Grasp to see and confirm them there instead.
+// they put it on and stop before the cap. An answer too long for one
+// message goes whole, over as many as it takes (`answerCards`). A card of
+// held writes never asks for a press on values it couldn't show in full.
+// Nothing on a card links to the conversation in Grasp: a chat app's
+// conversation is no chat there (GRA-1919).
 
 /**
  * How much text from outside Grasp one card carries, in bytes as JSON
@@ -36,10 +38,17 @@ import type { ChannelLocale, LineName } from "./words.ts";
  */
 const outsideBytes = 16 * 1024;
 
-/** The most held writes one card shows; more are confirmed in Grasp. */
+/**
+ * The most characters of text in one section of a card: Slack's limit for
+ * a section's text in Block Kit, past which its adapter cuts it
+ * (`SECTION_TEXT_MAX_CHARS`). Its conversions (bold, emoji) only shorten.
+ */
+const sectionChars = 3000;
+
+/** The most held writes one card shows; more can't be confirmed on it. */
 export const maxWritesOnCard = 10;
 
-/** The most values one held write shows; more are confirmed in Grasp. */
+/** The most values one held write shows; more can't be confirmed on it. */
 export const maxValuesPerWrite = 10;
 
 /** The longest a title, a label or a link may be on a card, in characters. */
@@ -123,8 +132,6 @@ export interface AnswerCard {
   locale: ChannelLocale;
   /** The answer, in Markdown. */
   text: string;
-  /** The chat in Grasp, where the whole answer is. */
-  chatUrl: string;
   /**
    * The request the answer is for (stephen-requests.ts), where the person
    * can rate it with a thumb: Helpful or Not helpful.
@@ -155,37 +162,109 @@ const RateButtons = ({
         </Button>,
       ];
 
+/** Whether a piece of an answer fits one section of a card. */
+const fitsSection = (piece: string): boolean =>
+  piece.length <= sectionChars && sizeOf(piece) <= outsideBytes;
+
+/**
+ * `units` joined by `joiner` into as few pieces as fit a section, in
+ * order; a unit too long for one is cut by `smaller` first.
+ */
+const packed = (
+  units: readonly string[],
+  joiner: string,
+  smaller: (unit: string) => string[]
+): string[] => {
+  const pieces: string[] = [];
+  let current = "";
+  for (const unit of units) {
+    const joined = current === "" ? unit : `${current}${joiner}${unit}`;
+    if (fitsSection(joined)) {
+      current = joined;
+      continue;
+    }
+    if (current !== "") {
+      pieces.push(current);
+    }
+    current = "";
+    if (fitsSection(unit)) {
+      current = unit;
+      continue;
+    }
+    const cut = smaller(unit);
+    current = cut.pop() ?? "";
+    pieces.push(...cut);
+  }
+  if (current !== "") {
+    pieces.push(current);
+  }
+  return pieces;
+};
+
+/** Where a paragraph ends: a blank line. */
+const paragraphBreak = /\n[^\S\n]*\n\s*/u;
+
+/**
+ * `text` in pieces that each fit a section, cut where a reader pauses:
+ * between paragraphs, else between sentences (`Intl.Segmenter`, in the
+ * person's language), else, for a sentence no section holds, between
+ * characters (graphemes). Nothing is left out: only the white space where
+ * it was cut.
+ */
+const piecesOf = (text: string, locale: ChannelLocale): string[] => {
+  const sentences = new Intl.Segmenter(locale, { granularity: "sentence" });
+  const graphemes = new Intl.Segmenter(locale, { granularity: "grapheme" });
+  const byCharacter = (sentence: string): string[] =>
+    packed(
+      Array.from(graphemes.segment(sentence), ({ segment }) => segment),
+      "",
+      (grapheme) => [grapheme]
+    );
+  const bySentence = (paragraph: string): string[] =>
+    packed(
+      Array.from(sentences.segment(paragraph), ({ segment }) => segment),
+      "",
+      byCharacter
+    ).map((piece) => piece.trim());
+  return packed(text.trim().split(paragraphBreak), "\n\n", bySentence);
+};
+
 /**
  * An answer, labelled as made by AI where the platform has a label for it
- * (Teams). Text past what the platform takes is cut, and the card links
- * to the chat in Grasp.
+ * (Teams), whole: as many cards as it takes, each within what the platform
+ * takes in one message, its text cut only where a paragraph or a sentence
+ * ends (`piecesOf`), in order, and the thumbs under the last.
  */
-export const answerCard = ({
+export const answerCards = ({
   locale,
   text,
-  chatUrl,
   rate,
-}: AnswerCard): PostableCard => {
-  const answer = fit(text, Number.POSITIVE_INFINITY, { left: outsideBytes });
-  const card = (
-    <Card>
-      <CardText>{answer.text}</CardText>
-      {answer.whole ? null : (
-        <CardText style="muted">{say("answerTooLong", locale)}</CardText>
-      )}
-      {answer.whole && rate === undefined ? null : (
-        <Actions>
-          {RateButtons({ locale, rate })}
-          {answer.whole ? null : (
-            <LinkButton url={ownLink(chatUrl)}>
-              {say("openInGrasp", locale)}
-            </LinkButton>
-          )}
-        </Actions>
-      )}
-    </Card>
-  );
-  return { card: cardOf(card), aiGenerated: true };
+}: AnswerCard): PostableCard[] => {
+  const cards: string[][] = [];
+  let room = 0;
+  for (const piece of piecesOf(text, locale)) {
+    const cost = sizeOf(piece);
+    const last = cards.at(-1);
+    if (last === undefined || cost > room) {
+      cards.push([piece]);
+      room = outsideBytes - cost;
+      continue;
+    }
+    last.push(piece);
+    room -= cost;
+  }
+  return cards.map((pieces, at) => {
+    const thumbs = at === cards.length - 1 && rate !== undefined;
+    const card = (
+      <Card>
+        {pieces.map((piece, index) => (
+          <CardText key={index}>{piece}</CardText>
+        ))}
+        {thumbs ? <Actions>{RateButtons({ locale, rate })}</Actions> : null}
+      </Card>
+    );
+    return { card: cardOf(card), aiGenerated: true };
+  });
 };
 
 /**
@@ -249,8 +328,6 @@ export interface HeldWritesCard {
   /** In the order they run. */
   writes: readonly HeldWriteView[];
   check?: ReadCheck;
-  /** The held writes in Grasp, where each can be seen and confirmed too. */
-  openUrl: string;
   /** Set once the press has ended; the card is edited in place. */
   outcome?: PressOutcome;
 }
@@ -306,13 +383,12 @@ const checkLine = (check: ReadCheck, locale: ChannelLocale, room: Room) =>
  * Cancel carry the writes' ids and input hashes, so a press confirms
  * exactly what the card showed. They are on the card only while every
  * write is held and every value is on it whole: otherwise the card says
- * so and links to Grasp, where the person sees all of it.
+ * it can't be confirmed, and to ask for fewer changes at a time.
  */
 export const heldWritesCard = ({
   locale,
   writes,
   check,
-  openUrl,
   outcome,
 }: HeldWritesCard): PostableCard => {
   if (writes.length === 0) {
@@ -370,21 +446,16 @@ export const heldWritesCard = ({
       {outcome === undefined ? null : (
         <CardText style="bold">{say(outcome, locale)}</CardText>
       )}
-      <Actions>
-        {pressable ? (
+      {pressable ? (
+        <Actions>
           <Button id={confirmAction} style="primary" value={press}>
             {say("confirm", locale)}
           </Button>
-        ) : null}
-        {pressable ? (
           <Button id={cancelAction} value={press}>
             {say("cancel", locale)}
           </Button>
-        ) : null}
-        <LinkButton url={ownLink(openUrl)}>
-          {say("openInGrasp", locale)}
-        </LinkButton>
-      </Actions>
+        </Actions>
+      ) : null}
     </Card>
   );
   return { card: cardOf(card) };
