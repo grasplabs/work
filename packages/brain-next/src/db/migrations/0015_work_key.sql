@@ -1,0 +1,1 @@
+CREATE INDEX `work_items_key_idx` ON `work_items` (`key`);

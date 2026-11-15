@@ -367,6 +367,13 @@ export const workItems = sqliteTable(
     index("work_items_parked_idx")
       .on(table.parkedAt, table.id)
       .where(sql.raw("parked_at IS NOT NULL")),
+    // Every item about a key, of any kind, waiting or running: what an
+    // erasure deletes for each source whose current version it hides
+    // (erasure.ts `hideVersions`). Without it each such delete reads the
+    // whole queue, so a group's erasure costs its sources times the
+    // queue: 50,000 sources with an item each took 56 s in workerd, past
+    // a Durable Object request's 30 s of CPU, every retry alike.
+    index("work_items_key_idx").on(table.key),
     check("work_items_priority", sql.raw("priority BETWEEN 0 AND 4")),
   ]
 );
