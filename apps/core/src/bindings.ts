@@ -19,11 +19,6 @@ import { workflowErrors } from "@grasp-os/shared/workflows";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
 import { z } from "zod";
 
-import type {
-  CollectionBinding,
-  CollectionGrant,
-} from "./knowledge/binding.ts";
-import type { KnowledgeBinding } from "./knowledge/tools-binding.ts";
 import { authorize, grantedPermissions } from "./permissions.ts";
 import { isRestricted } from "./restricted.ts";
 import type { WorkContext } from "./restricted.ts";
@@ -440,103 +435,24 @@ export const connectionGrantOf =
       ? { context, permissionId: id, connection: object }
       : undefined;
 
-/** A collection permission as its grant in `context`; nothing for any other. */
-export const collectionGrantOf =
-  (context: WorkContext) =>
-  ({ id, object }: Permission): CollectionGrant | undefined =>
-    object.type === "collection"
-      ? { context, permissionId: id, collectionId: object.collectionId }
-      : undefined;
-
-/** A collection permission's stub; nothing for any other. */
-const collectionStubOf = (authority: Authority, context: WorkContext) => {
-  const grantOf = collectionGrantOf(context);
-  return (permission: Permission): Fetcher<CollectionBinding> | undefined => {
-    const grant = grantOf(permission);
-    return grant === undefined
-      ? undefined
-      : exports.CollectionBinding({ props: { ...grant, authority } });
-  };
-};
-
 /**
  * The env for one authority working in `context`, built from the
  * permission records as they are now, every stub acting for
- * `authority.onBehalfOf` and keeping its restricted mode in `context`.
+ * `authority.onBehalfOf` and keeping its restricted mode in `context`:
+ * a stub for each connection it was granted, and nothing else.
  * Throws `permission.person_inactive` when that person has left.
- *
- * With a permission to read a collection, it also has `KNOWLEDGE`, the
- * agent's Knowledge tools across all of them (`KnowledgeBinding`); a
- * permission can't take that name, which is core's own binding's. Without
- * one, it has nothing to read, so the env stays as empty as its
- * permissions.
- *
- * That fits an agent, which acts for one person. A workflow run gets
- * `runBindingsFor`, and an App, which serves many people at once,
- * `appBindings`.
  */
 export const bindingsFor = async (
   env: Env,
   authority: Authority,
   context: WorkContext
-): Promise<
-  Record<
-    string,
-    | Fetcher<ConnectionBinding>
-    | Fetcher<CollectionBinding>
-    | Fetcher<KnowledgeBinding>
-  >
-> => {
+): Promise<Record<string, Fetcher<ConnectionBinding>>> => {
   const grantOf = connectionGrantOf(context);
-  const collectionOf = collectionStubOf(authority, context);
   const permissions = await grantedPermissions(env, authority, context);
-  const stubs = stubsOf<
-    Fetcher<ConnectionBinding> | Fetcher<CollectionBinding>
-  >(permissions, (permission) => {
+  return stubsOf(permissions, (permission) => {
     const grant = grantOf(permission);
     return grant === undefined
-      ? collectionOf(permission)
+      ? undefined
       : exports.ConnectionBinding({ props: { ...grant, authority } });
   });
-  const readsKnowledge = permissions.some(
-    ({ object, actions }) =>
-      object.type === "collection" && actions.includes("read")
-  );
-  return readsKnowledge
-    ? {
-        ...stubs,
-        KNOWLEDGE: exports.KnowledgeBinding({
-          props: { authority, context },
-        }),
-      }
-    : stubs;
-};
-
-/**
- * A workflow run's permissions as they are now, as `bindingsFor` builds
- * them, but for its connections: those aren't stubs in its env but grants, by binding name, which the run's host calls
- * for it (workflows/host.ts), so each call is checked against the step
- * running then and its key. The workflow dispatcher builds them on every
- * start and resume, so a revoked permission is gone from the next one.
- * Its `brain` permission gives it the Brain's binding by its name, with
- * the permission it is (`brains`, GRA-1067): a recall the host makes for
- * it as the run, under that permission alone.
- */
-export const runBindingsFor = async (
-  env: Env,
-  authority: Authority,
-  context: WorkContext
-): Promise<{
-  bindings: Record<string, Fetcher<CollectionBinding>>;
-  connections: Record<string, ConnectionGrant>;
-  brains: Record<string, PermissionId>;
-}> => {
-  const permissions = await grantedPermissions(env, authority, context);
-  return {
-    bindings: stubsOf(permissions, collectionStubOf(authority, context)),
-    connections: stubsOf(permissions, connectionGrantOf(context)),
-    brains: stubsOf(permissions, ({ id, object, actions }) =>
-      object.type === "platform" && actions.includes("brain") ? id : undefined
-    ),
-  };
 };

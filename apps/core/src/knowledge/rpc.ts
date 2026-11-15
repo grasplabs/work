@@ -81,7 +81,6 @@ import type {
   HistoryOptions,
   HistoryPage,
   KnowledgeApi,
-  KnowledgeCatalog,
   KnowledgeRead,
   ListDocumentsOptions,
   PurgeInput,
@@ -119,7 +118,6 @@ import type { SessionCheck } from "../session-check.ts";
 import type { Reader } from "./access.ts";
 import { appsErasure } from "./apps-collection.ts";
 import { coreExport } from "./brain-export.ts";
-import { catalog } from "./catalog.ts";
 import { createCollection, listCollections } from "./collection-rules.ts";
 import { copySkill, skillCollections } from "./grasp-skills.ts";
 import { sharedChatsOf } from "./memory-publish.ts";
@@ -485,12 +483,6 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     return await this.#asReader(
       async (reader) =>
         await relationsExplain(brainOf(this.#env), reader, input)
-    );
-  }
-
-  async catalog(): Promise<KnowledgeCatalog> {
-    return await this.#asReader(
-      async (reader) => await catalog(brainOf(this.#env), reader)
     );
   }
 
