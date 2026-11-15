@@ -1340,6 +1340,13 @@ interface RecallFixture extends MemoryFixture {
    * reader never reads it.
    */
   builtEntity: string;
+  /**
+   * An App whose store was deleted (`erasedApp`), and an entity only its
+   * code's memories named, marked and erased with them: its own code,
+   * for its users, finds nothing of it.
+   */
+  erasedApp: string;
+  erasedEntity: string;
 }
 
 const plantRecallFixture = async (probing: Probing): Promise<RecallFixture> => {
@@ -1429,10 +1436,18 @@ const plantRecallFixture = async (probing: Probing): Promise<RecallFixture> => {
         },
       ],
     });
-  const [byApp, byBuilders] = await Promise.all([
+  const erasedApp = crypto.randomUUID();
+  const [byApp, byBuilders, byErased] = await Promise.all([
     marked(`app-users:${app}`, `app:${app}`),
     marked(`app:${app}`, stranger()),
+    marked(`app-users:${erasedApp}`, `app:${erasedApp}`),
   ]);
+  // As its store's deletion erases it (app-memory-erasure.ts).
+  await coreBrain.eraseWriter(env, {
+    writer: `app:${erasedApp}`,
+    reason: "deleted",
+    change: `app-store-deleted:${crypto.randomUUID()}`,
+  });
   return {
     ...fixture,
     othersOwnMemory: others.memory,
@@ -1440,6 +1455,8 @@ const plantRecallFixture = async (probing: Probing): Promise<RecallFixture> => {
     appEntity: byApp.entities.c ?? "",
     appMemory: byApp.memories[0] ?? "",
     builtEntity: byBuilders.entities.c ?? "",
+    erasedApp,
+    erasedEntity: byErased.entities.c ?? "",
   };
 };
 
@@ -6070,6 +6087,12 @@ const coreCodeEntities = {
         "one only an App's code remembered, as code that is no App's",
         undefined,
         fixture.appEntity,
+        "hidden"
+      ),
+      await asApp(
+        "one only a deleted App's code remembered, as its code",
+        fixture.erasedApp,
+        fixture.erasedEntity,
         "hidden"
       ),
       await asApp(

@@ -4995,29 +4995,17 @@ export const forgetForAppAs = async (
   personId: string,
   { app, change }: { app: AppId; change: string },
   request: unknown
-): Promise<{ retiredAt: Date; change: string | null } | null> => {
+): Promise<RetiredMemory | null> => {
   const { memory } = checked(codeForgetSchema, request);
-  checked(changeSchema, change);
   const reader = await codeReaderOf(env, personId, "company", app);
-  let retired: RetiredMemory | null;
   try {
-    retired = await brain(env).retireMemory({
+    return await brain(env).retireMemory({
       memory,
       reader,
       writer: appWriterOf(app),
+      change: checked(changeSchema, change),
     });
   } catch (error) {
     throw refusedAs(error);
   }
-  if (retired === null) {
-    return null;
-  }
-  // The store's pull request of GRA-1883 makes `retireMemory` take the
-  // caller's `change` and answer the one it stored: until it lands the
-  // store names none, and no forget is taken for the one that retired it.
-  const stored: unknown = Reflect.get(retired, "change");
-  return {
-    retiredAt: retired.retiredAt,
-    change: typeof stored === "string" ? stored : null,
-  };
 };

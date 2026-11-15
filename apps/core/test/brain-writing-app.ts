@@ -365,3 +365,51 @@ export const holdingFirst = (
     });
   return namespaceOf(namespace);
 };
+
+/**
+ * `namespace` with the shared store's `method` landing, then throwing as
+ * a lost reply does, the first time it is called: what its caller then
+ * believes, and asks again, is a call whose answer it never got.
+ */
+export const losingFirstReply = (
+  namespace: Env["BRAIN_STORE"],
+  method: string
+): Env["BRAIN_STORE"] => {
+  let lost = false;
+  const stubOf = (stub: object): object =>
+    new Proxy(stub, {
+      get: (target, property): unknown => {
+        const value: unknown = Reflect.get(target, property);
+        if (typeof value !== "function") {
+          return value;
+        }
+        // An RPC stub's method takes no `bind`: it would be a remote call.
+        return async (...args: unknown[]): Promise<unknown> => {
+          const answer: unknown = await Reflect.apply(value, target, args);
+          if (property === method && !lost) {
+            lost = true;
+            throw new Error("The reply was lost (a test's)");
+          }
+          return answer;
+        };
+      },
+    });
+  const namespaceOf = (of: Env["BRAIN_STORE"]): Env["BRAIN_STORE"] =>
+    new Proxy(of, {
+      get: (target, property): unknown => {
+        if (property === "jurisdiction") {
+          return (jurisdiction: DurableObjectJurisdiction) =>
+            namespaceOf(target.jurisdiction(jurisdiction));
+        }
+        if (property === "getByName") {
+          return (name: string) => {
+            const stub = target.getByName(name);
+            return name === "brain" ? stubOf(stub) : stub;
+          };
+        }
+        const value: unknown = Reflect.get(target, property);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+  return namespaceOf(namespace);
+};
