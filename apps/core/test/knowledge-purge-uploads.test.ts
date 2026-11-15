@@ -41,7 +41,7 @@ interface LeftAs {
   path: string;
   status: "pending" | "extracting" | "saving" | "ready" | "failed";
   documentId: string | null;
-  /** When it was recorded and last changed: an hour ago unless given. */
+  /** When it was recorded and last changed: now, as a purge meets it, unless given. */
   at?: number;
 }
 
@@ -52,7 +52,7 @@ interface LeftAs {
 const leftUpload = async (
   person: { userId: string },
   collectionId: string,
-  { path, status, documentId, at = Date.now() - 60 * 60_000 }: LeftAs
+  { path, status, documentId, at = Date.now() }: LeftAs
 ): Promise<string> => {
   const uploadId = crypto.randomUUID();
   const bytes = new TextEncoder().encode(`The file ${path}`);
@@ -416,6 +416,7 @@ describe("uploads into Knowledge left behind", () => {
       name: `Files ${unique()}`,
       access: "everyone",
     });
+    const anHourAgo = Date.now() - 60 * 60_000;
     const left = await Promise.all(
       (["pending", "extracting", "saving"] as const).map(
         async (status) =>
@@ -423,6 +424,7 @@ describe("uploads into Knowledge left behind", () => {
             path: `${status}.xlsx`,
             status,
             documentId: null,
+            at: anHourAgo,
           })
       )
     );
@@ -440,11 +442,12 @@ describe("uploads into Knowledge left behind", () => {
       path: "Failed.xlsx",
       status: "failed",
       documentId: null,
+      at: anHourAgo,
     });
     await env.DB.prepare(
       "INSERT INTO upload_cleanups (key, upload_id, created_at) VALUES (?, ?, ?)"
     )
-      .bind(originalKey(collectionId, failed), failed, Date.now() - 60 * 60_000)
+      .bind(originalKey(collectionId, failed), failed, anHourAgo)
       .run();
     const swept = [...left, failed];
     const refusing = new Proxy(env.FILES, {

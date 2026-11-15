@@ -16,15 +16,15 @@ import { inList } from "../db/d1.ts";
 // step, or the clock's run, and its rerun deletes what is left. Nothing
 // reads as erased before it is.
 //
-// Only an upload unchanged for `storingMs` counts as left behind, and only
-// an original recorded at least that long ago is due: an upload the
+// The clock forgets only an upload unchanged for `storingMs`: one the
 // release before this one was still taking as it was replaced may yet
 // store its original, and deleting its key first would leave that object
-// with no row or record to delete it by. One recorded sooner is deleted by
-// the clock's next run past it.
+// with no row or record to delete it by. A recorded delete is due at once,
+// for the purge and for the clock alike, so a purge's step ends with every
+// original it recorded gone.
 
 /**
- * How long after an upload is recorded its original may still be being
+ * How long after an upload last changed its original may still be being
  * stored, by a release still taking uploads: far more than storing 10 MB
  * takes.
  */
@@ -34,8 +34,8 @@ const storingMs = 10 * 60_000;
 export const cleanupsPerPage = 100;
 
 /**
- * Deletes every original recorded for deleting at least `storingMs` ago
- * whose upload is gone or failed, a page at a time, clearing each page's records once R2 has
+ * Deletes every original recorded for deleting whose upload is gone or
+ * failed, a page at a time, clearing each page's records once R2 has
  * deleted them. Throws when R2 or the database refuses: the records stay,
  * for the purge run again.
  */
@@ -47,10 +47,7 @@ const cleanUpOriginals = async (env: Env): Promise<void> => {
       .select({ key: uploadCleanups.key })
       .from(uploadCleanups)
       .where(
-        and(
-          lt(uploadCleanups.createdAt, new Date(Date.now() - storingMs)),
-          sql`NOT EXISTS (SELECT 1 FROM ${uploads} WHERE ${uploads.id} = ${uploadCleanups.uploadId} AND ${uploads.status} != 'failed')`
-        )
+        sql`NOT EXISTS (SELECT 1 FROM ${uploads} WHERE ${uploads.id} = ${uploadCleanups.uploadId} AND ${uploads.status} != 'failed')`
       )
       .orderBy(asc(uploadCleanups.key))
       .limit(cleanupsPerPage);
