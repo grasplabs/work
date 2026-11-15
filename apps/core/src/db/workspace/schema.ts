@@ -470,25 +470,25 @@ export const chatFiles = sqliteTable(
 );
 
 /** Where a held App call stands (held-app-calls.ts). */
-export type HeldAppCallStatus = "waiting" | "confirmed" | "declined";
+export type HeldAppCallStatus = "waiting" | "confirmed" | "declined" | "lapsed";
 
 /**
  * Writes to an App that a chat's agent asked for after the chat used
  * something only its person may read (held-app-calls.ts), held for that
  * person: the call exactly as the agent's code sent it, by its SHA-256,
  * which the person confirms. Kept here, with the chat it came from, as its
- * transcript is; the request is emptied once it is decided, and a held
- * call that waited past its day is neither listed nor confirmable.
+ * transcript is; the request is emptied once it is decided, or once it
+ * waited past its day (`lapsed`), when it is neither listed nor
+ * confirmable.
  * Deleted with the chat.
  */
 export const heldAppCalls = sqliteTable(
   "held_app_calls",
   {
     id: text().primaryKey(),
-    chatId: text("chat_id")
-      .$type<ChatId>()
-      .notNull()
-      .references(() => chats.id),
+    // No foreign key: a core rolled back to before this table deletes a
+    // chat without knowing it, which one would refuse for good.
+    chatId: text("chat_id").$type<ChatId>().notNull(),
     agentId: text("agent_id").notNull(),
     personId: text("person_id").notNull(),
     appId: text("app_id").notNull(),

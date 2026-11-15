@@ -60,7 +60,6 @@ import {
   workspaceIdSchema,
 } from "@grasp-os/shared/ids";
 import type { ChatId } from "@grasp-os/shared/ids";
-import type { InstructionFileRef } from "@grasp-os/shared/instruction-files";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { modelEfforts, modelErrors } from "@grasp-os/shared/models";
 import {
@@ -192,7 +191,7 @@ import {
 } from "./db/workspace/schema.ts";
 import { chatWork } from "./drafts.ts";
 import { callObject, chatSession } from "./durable-objects.ts";
-import { dropHeldStarts } from "./held-starts.ts";
+import { dropHeldStarts, heldStartMs } from "./held-starts.ts";
 import {
   brainMemoryOf,
   brainMemoryPrefix,
@@ -204,8 +203,6 @@ import { instructionFilesFor } from "./instruction-files.ts";
 import type { InstructionContext } from "./instruction-files.ts";
 import { inputTokens, modelSettings, models } from "./models.ts";
 import { hasBrainGrant } from "./permissions.ts";
-import { privateReadEntry } from "./private-reads.ts";
-import type { PrivateRead } from "./private-reads.ts";
 import type { WorkContext } from "./restricted.ts";
 
 export type Chat = typeof chats.$inferSelect;
@@ -362,33 +359,6 @@ const instructionContextOf = (
   return appId === null
     ? { conversation: "own", personal }
     : { conversation: "own", appId, personal };
-};
-
-/**
- * What of a turn's context only its person may read, marking its chat
- * (private-reads.ts): their own instruction file with something in it,
- * one of their own skills, or their own agent's instructions or
- * documents. `undefined` when none.
- */
-const privateReadOf = (
-  instructions: readonly { file: InstructionFileRef; text: string }[],
-  skills: readonly { scope: string }[],
-  agent: { ownerId: string | null; instructions: string } | undefined,
-  documents: readonly unknown[]
-): PrivateRead | undefined => {
-  const ownAgent =
-    agent !== undefined &&
-    agent.ownerId !== null &&
-    (agent.instructions.trim() !== "" || documents.length > 0);
-  if (
-    ownAgent ||
-    instructions.some(
-      ({ file, text }) => file.scope === "person" && text.trim() !== ""
-    )
-  ) {
-    return "instructions";
-  }
-  return skills.some(({ scope }) => scope === "person") ? "skill" : undefined;
 };
 
 /** The title of a chat others share on `platform`. */
@@ -797,9 +767,6 @@ export type HeldOutcome =
   | "unknown"
   | "failed";
 
-/** How long a held App call waits for its person before it lapses. */
-export const heldAppCallMs = 24 * 60 * 60 * 1000;
-
 /** Most characters of a function's path a held App call keeps. */
 const maxHeldFunctionChars = 256;
 
@@ -838,7 +805,7 @@ const heldAppCallRowOf = (
   request: row.request ?? "",
   requestHash: row.requestHash,
   heldAt: row.heldAt.getTime(),
-  expiresAt: row.heldAt.getTime() + heldAppCallMs,
+  expiresAt: row.heldAt.getTime() + heldStartMs,
 });
 
 /** A held write, as its chat's agent knows it: the ID its call answered with. */
@@ -1906,13 +1873,14 @@ export class Workspace extends DurableObject<Env> {
    * restart ran again) is held, and recorded, once. Refused for a chat
    * that isn't `personId`'s.
    */
-  holdAppCall(
+  async holdAppCall(
     chatId: unknown,
     personId: string,
     held: HeldAppCallInput,
     now: number
-  ): HeldAppCallRow {
+  ): Promise<HeldAppCallRow> {
     const chat = this.#ownChat(chatId, personId);
+    await this.#lapseHeldAppCalls(chat.id, now);
     const kept = this.ctx.storage.transactionSync(() => {
       const waiting = this.#db
         .select()
@@ -1922,8 +1890,7 @@ export class Workspace extends DurableObject<Env> {
             eq(heldAppCalls.chatId, chat.id),
             eq(heldAppCalls.status, "waiting"),
             eq(heldAppCalls.appId, held.appId),
-            eq(heldAppCalls.requestHash, held.requestHash),
-            gt(heldAppCalls.heldAt, new Date(now - heldAppCallMs))
+            eq(heldAppCalls.requestHash, held.requestHash)
           )
         )
         .get();
@@ -1966,12 +1933,13 @@ export class Workspace extends DurableObject<Env> {
    * The App writes held for `personId` in their chat `chatId` that still
    * wait, oldest first: none past their day.
    */
-  heldAppCalls(
+  async heldAppCalls(
     chatId: unknown,
     personId: string,
     now: number
-  ): HeldAppCallRow[] {
+  ): Promise<HeldAppCallRow[]> {
     const chat = this.#ownChat(chatId, personId);
+    await this.#lapseHeldAppCalls(chat.id, now);
     return this.#db
       .select()
       .from(heldAppCalls)
@@ -1979,8 +1947,7 @@ export class Workspace extends DurableObject<Env> {
         and(
           eq(heldAppCalls.chatId, chat.id),
           eq(heldAppCalls.personId, personId),
-          eq(heldAppCalls.status, "waiting"),
-          gt(heldAppCalls.heldAt, new Date(now - heldAppCallMs))
+          eq(heldAppCalls.status, "waiting")
         )
       )
       .orderBy(asc(heldAppCalls.heldAt))
@@ -1996,14 +1963,15 @@ export class Workspace extends DurableObject<Env> {
    * confirmed. Anything else (another's, decided already, lapsed, another
    * request) answers as none: `agent.held_call_not_found`.
    */
-  decideHeldAppCall(
+  async decideHeldAppCall(
     chatId: unknown,
     personId: string,
     id: string,
     decision: { confirm: true; requestHash: string } | { confirm: false },
     now: number
-  ): HeldAppCallRow {
+  ): Promise<HeldAppCallRow> {
     const chat = this.#ownChat(chatId, personId);
+    await this.#lapseHeldAppCalls(chat.id, now);
     const decided = this.ctx.storage.transactionSync(() => {
       const row = this.#db
         .select()
@@ -2013,8 +1981,7 @@ export class Workspace extends DurableObject<Env> {
             eq(heldAppCalls.id, id),
             eq(heldAppCalls.chatId, chat.id),
             eq(heldAppCalls.personId, personId),
-            eq(heldAppCalls.status, "waiting"),
-            gt(heldAppCalls.heldAt, new Date(now - heldAppCallMs))
+            eq(heldAppCalls.status, "waiting")
           )
         )
         .get();
@@ -2055,6 +2022,67 @@ export class Workspace extends DurableObject<Env> {
     this.#deliverAudit();
     this.heldChanged(chat.id);
     return heldAppCallRowOf(decided);
+  }
+
+  /**
+   * Ends the App writes held in chat `chatId` that waited past their day
+   * (`heldStartMs`, as a held start's) at `now`, never run: each is
+   * `lapsed`, its request emptied and its end recorded
+   * (`chat.app_call.lapsed`) in one write, then its agent told. Done
+   * whenever the chat's held calls are next read, held or decided, so a
+   * lapsed one is never listed, confirmed or kept with its request past
+   * that read.
+   */
+  async #lapseHeldAppCalls(chatId: ChatId, now: number): Promise<void> {
+    const lapsed = this.ctx.storage.transactionSync(() => {
+      const rows = this.#db
+        .select()
+        .from(heldAppCalls)
+        .where(
+          and(
+            eq(heldAppCalls.chatId, chatId),
+            eq(heldAppCalls.status, "waiting"),
+            lte(heldAppCalls.heldAt, new Date(now - heldStartMs))
+          )
+        )
+        .all();
+      for (const row of rows) {
+        this.#db
+          .update(heldAppCalls)
+          .set({ status: "lapsed", request: null })
+          .where(eq(heldAppCalls.id, row.id))
+          .run();
+        this.#outboxEntry({
+          actor: { type: "system" },
+          action: "chat.app_call.lapsed",
+          target: { type: "app", id: row.appId },
+          detail: {
+            workspace: this.ctx.id.name ?? null,
+            chat: chatId,
+            held: row.id,
+            kind: row.kind,
+          },
+        });
+      }
+      return rows;
+    });
+    if (lapsed.length === 0) {
+      return;
+    }
+    this.#deliverAudit();
+    this.heldChanged(chatId);
+    for (const { id, function: name } of lapsed) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one note each, in order
+        await this.#note(
+          chatId,
+          `The write to an App you asked for, "${name}" (held ID ${id}), waited a day without the person confirming it, so it ended and was not carried out. If they still want it, ask for it afresh.`
+        );
+      } catch (error) {
+        // Ended either way: the agent finds it no longer waits.
+        log.warn("chat.held_app_call_lapse_note_failed", errorFields(error));
+      }
+    }
   }
 
   /**
@@ -2755,16 +2783,6 @@ export class Workspace extends DurableObject<Env> {
     const kept =
       agent === undefined ? [] : await documentsOf(this.env, agent.id);
     const documents = kept.map(({ id, name, type }) => ({ id, name, type }));
-    // What only the person may read marks the chat before the model gets
-    // it (private-reads.ts): their own instruction file, their own skills,
-    // their own agent's instructions and documents.
-    const privateRead = privateReadOf(instructions, skills, agent, documents);
-    if (privateRead !== undefined) {
-      this.markChatPrivateRead(
-        work.chatId,
-        privateReadEntry(scope, privateRead)
-      );
-    }
     return {
       instructions: instructions.map(({ file, text }) => ({ file, text })),
       skills,

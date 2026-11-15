@@ -48,8 +48,11 @@ import type { HeldAppCallRow } from "./workspace.ts";
 //   write that couldn't run is refused at once; confirming checks both
 //   again before the call, and the grant again before every protected
 //   step of it (`stillAllowed`).
-// - A hold waiting for ever: it lapses after a day (`heldAppCallMs`), and
-//   is neither listed nor confirmable after.
+// - A hold waiting for ever, or keeping what it would send: it lapses
+//   after a day (`heldStartMs`, as a held start does), and whenever the
+//   chat's holds are next read its request is emptied, its end recorded
+//   (`chat.app_call.lapsed`) and its agent told; it is neither listed nor
+//   confirmable after.
 // - Restricted mode (restricted.ts) is carried both ways, as on the
 //   agent's own call: a restricted chat restricts the App before the
 //   write, and a restricted App's answer restricts the chat.
@@ -236,6 +239,9 @@ const runConfirmed = async (
   await stillAllowed();
   await appFor(env, person, app, "user");
   await carryChatRestricted(env, scope, app);
+  // The App's current version runs, as for any call: a hold names the App
+  // and its request, never a version, so one published since takes it,
+  // checking its arguments again.
   const answer = await callAppFunction(
     env,
     person,

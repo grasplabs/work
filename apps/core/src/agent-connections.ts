@@ -44,6 +44,7 @@ import { connectionOwnersOf } from "./connections.ts";
 import { callObject, workspace } from "./durable-objects.ts";
 import { endOfCompanyDay } from "./organization.ts";
 import { grantedPermissions } from "./permissions.ts";
+import { markPrivateRead } from "./private-reads.ts";
 import { mailboxesFor } from "./shared-mailboxes.ts";
 
 // Connections for a chat's code: `await env.connections.call("OUTLOOK",
@@ -276,6 +277,24 @@ const keptForChatApp = async (
   }
 };
 
+/**
+ * Marks the chat of `scope` before an answer read through connection
+ * `connectionId` is handed over, when it is a personal connection (its
+ * person's mailbox or drive: connect refuses anyone else's), whose answer
+ * only they may read (private-reads.ts). One connect no longer names
+ * marks it too, failing closed.
+ */
+const markIfPersonal = async (
+  env: Env,
+  scope: AgentScope,
+  connectionId: string
+): Promise<void> => {
+  const [owner] = await connectionOwnersOf(env, [connectionId]);
+  if (owner?.ownerUserId !== null) {
+    await markPrivateRead(env, scope, "connection");
+  }
+};
+
 /** Connections, as a chat's code calls them. */
 export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
   /** The agent's grant under `name`, read now, or why there is none. */
@@ -483,6 +502,9 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
       return { output: null, pending: result.pending };
     }
     const output: unknown = JSON.parse(result.output);
+    // The chat marked first, as nothing that holds the answer runs
+    // unmarked: before it is kept or recorded, and before it is handed over.
+    await markIfPersonal(this.env, scope, grant.connection.connectionId);
     if (shape !== undefined) {
       await keptForChatApp(this.env, scope, request.action, shape, output);
     }
@@ -590,6 +612,7 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
       throw forSandbox(error);
     }
     if (outcome.state === "done" || outcome.state === "failed") {
+      await markIfPersonal(this.env, scope, request.connectionId);
       await recordSources(this.env, scope, [request.connectionId], [read]);
     }
     await recordToolCall(

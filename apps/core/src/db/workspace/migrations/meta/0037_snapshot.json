@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "a03ce613-62b2-4377-85ae-9c98ba5978af",
+  "id": "23b6501b-b8b2-48bf-81e1-1f90a04fe4cf",
   "prevId": "5bce9408-8dfd-4b22-8966-8dc6fa43ceb3",
   "tables": {
     "audit_outbox": {
@@ -1663,21 +1663,7 @@
           "isUnique": false
         }
       },
-      "foreignKeys": {
-        "held_app_calls_chat_id_chats_id_fk": {
-          "name": "held_app_calls_chat_id_chats_id_fk",
-          "tableFrom": "held_app_calls",
-          "tableTo": "chats",
-          "columnsFrom": [
-            "chat_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
+      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}

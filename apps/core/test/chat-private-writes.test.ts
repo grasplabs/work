@@ -1,5 +1,6 @@
 import { personalBrainOf } from "@grasp-os/brain-next/contract";
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -8,7 +9,8 @@ import { callAppFunction } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { addSource } from "../src/brain-next.ts";
-import { inJurisdiction } from "../src/durable-objects.ts";
+import { appHost, inJurisdiction } from "../src/durable-objects.ts";
+import { heldStartMs } from "../src/held-starts.ts";
 import {
   codeResults,
   codeStep,
@@ -24,6 +26,7 @@ import { mockIdp } from "./idp.ts";
 import { saveInstructions } from "./instruction-saves.ts";
 import { mailConnection, mailWithSearch } from "./mail-connection.ts";
 import type { ProviderReply } from "./model-provider.ts";
+import { leave } from "./runs.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
 // What a chat writes for others once it used something only its person
@@ -86,12 +89,14 @@ const callOf = (release: Release, path: string, input: unknown): string =>
   });
 
 /**
- * A builder's Notes App, live, and a chat of theirs in their own
- * Workspace whose agent may write to it and holds the `brain` grant,
- * answered by what `replies` makes of the App.
+ * A builder's Notes App, live, and a chat in its own Workspace whose
+ * agent may write to it and holds the `brain` grant, answered by what
+ * `replies` makes of the App: the builder's chat, or with `asMember` the
+ * chat of a member the builder added to the App as a user.
  */
 const notesChat = async (
-  replies: (app: string, release: Release) => ProviderReply[]
+  replies: (app: string, release: Release) => ProviderReply[],
+  { asMember = false }: { asMember?: boolean } = {}
 ) => {
   const builder = await signedInApi(idp, "builder");
   const admin = await signedInApi(idp, "admin");
@@ -99,8 +104,16 @@ const notesChat = async (
   const { version } = await commitApp(builder.api, app, notesFiles);
   await builder.api.versions.rollback({ kind: "app", id: app }, version);
   const release = await loadRelease(env, app, version);
-  const chats = await personalChatsOf(builder.userId, ...replies(app, release));
-  await requestGranted(idp, builder, {
+  const person = asMember ? await signedInApi(idp, "user") : builder;
+  if (asMember) {
+    await builder.api.apps.members.add(app, {
+      type: "person",
+      id: person.userId,
+      role: "user",
+    });
+  }
+  const chats = await personalChatsOf(person.userId, ...replies(app, release));
+  const grant = await requestGranted(idp, builder, {
     subject: chats.agent,
     object: { type: "app", appId: app },
     actions: ["read", "write"],
@@ -125,7 +138,18 @@ const notesChat = async (
       .object({ ok: z.literal(true), value: z.array(z.string()) })
       .parse(result).value;
   };
-  return { builder, app, release, chats, chat, ask, titles };
+  return {
+    builder,
+    admin,
+    person,
+    grant,
+    app,
+    release,
+    chats,
+    chat,
+    ask,
+    titles,
+  };
 };
 
 /** Adds `text` to `personId`'s own store: readable by them alone. */
@@ -197,6 +221,40 @@ const eventsOf = async (action: string, chatId: string, count: number) =>
       return events;
     },
     { timeout: 10_000, interval: 100 }
+  );
+
+/**
+ * A note titled `title` held for its person, in a chat that recalled their
+ * own source (`notesChat`'s options apply), and the hold as their page
+ * lists it.
+ */
+const heldNote = async (options: { asMember?: boolean } = {}) => {
+  const depot = word();
+  const title = `held-${unique()}`;
+  const notes = await notesChat(
+    (app, release) => [
+      writesNote(app, release, title),
+      says("It waits for you."),
+    ],
+    options
+  );
+  await ownSource(notes.person.userId, `Depot ${depot} opens at seven.`);
+  await notes.ask(`When does depot ${depot} open? Note it.`);
+  const [held] = await notes.person.api.chats.heldCalls(notes.chat.id);
+  if (held === undefined) {
+    throw new Error("Nothing was held");
+  }
+  return { ...notes, held, title };
+};
+
+/** `notes`' person confirming `held`, exactly as it was shown to them: how it went. */
+const confirmedAsShown = async ({
+  person,
+  chat,
+  held,
+}: Awaited<ReturnType<typeof heldNote>>) =>
+  await outcome(
+    person.api.chats.confirmHeldCall(chat.id, held.id, held.requestHash)
   );
 
 describe("what a chat writes for others once it used something only its person may read", () => {
@@ -362,58 +420,236 @@ describe("what a chat writes for others once it used something only its person m
   );
 
   it(
-    "is marked by the person's own instruction file in the turn, and by a file they attached once a code step reads it, in that same step",
+    "is not marked by what the person wrote or brought in themselves: their own instruction file, their own skill and a file they attached leave the write to run at once",
     slow,
     async () => {
-      const fromFile = await notesChat((app, release) => [
+      const title = `mine-${unique()}`;
+      const skill = word();
+      const notes = await notesChat((app, release) => [
         codeStep(
           `export default async (self, env) => {
             const [file] = await env.chat.files();
             await env.chat.readFile(file.id);
+            await env.skills.read({ skill: { scope: "person", name: ${JSON.stringify(skill)}, version: 1 } });
             return await env.apps.call(${JSON.stringify(app)}, new Blob([${JSON.stringify(
-              callOf(release, "notes.create", { title: "From the file" })
+              callOf(release, "notes.create", { title })
             )}]).stream());
           };`
         ),
-        says("It waits for you."),
+        says("Written."),
       ]);
-      const file = await fromFile.builder.api.chats.attachFile(
-        fromFile.chat.id,
-        {
-          name: "notes.md",
-          bytes: new TextEncoder().encode(`# Mine ${unique()}`),
-        }
+      const { person, chats, chat, titles } = notes;
+      await saveInstructions(
+        person.api,
+        { scope: "person", personId: person.userId },
+        `Call me ${unique()}.`
       );
-      await fromFile.chats.stub.ask(fromFile.chat.id, {
+      await person.api.skills.save(
+        `---\nname: ${skill}\ndescription: How to note ${skill}\n---\nSteps for ${skill}`
+      );
+      const file = await person.api.chats.attachFile(chat.id, {
+        name: "notes.md",
+        bytes: new TextEncoder().encode(`# Mine ${unique()}`),
+      });
+      await chats.stub.ask(chat.id, {
         text: `Note what my ${word()} file says.`,
         model,
         files: [file.id],
       });
-      const fromInstructions = await notesChat((app, release) => [
-        writesNote(app, release, `told-${unique()}`),
-        says("It waits for you."),
-      ]);
-      await saveInstructions(
-        fromInstructions.builder.api,
-        { scope: "person", personId: fromInstructions.builder.userId },
-        `Call me ${unique()}.`
-      );
-      await fromInstructions.ask(`Add a note about the ${word()} keys.`);
 
       expect({
-        file: await answers(fromFile.chats.stub, fromFile.chat.id),
-        fileTitles: await fromFile.titles(),
-        instructions: await answers(
-          fromInstructions.chats.stub,
-          fromInstructions.chat.id
-        ),
-        instructionsTitles: await fromInstructions.titles(),
+        answers: await answers(chats.stub, chat.id),
+        held: await person.api.chats.heldCalls(chat.id),
+        after: await titles(),
       }).toStrictEqual({
-        file: ["held"],
-        fileTitles: [],
-        instructions: ["held"],
-        instructionsTitles: [],
+        answers: ["written"],
+        held: [],
+        after: [title],
       });
+    }
+  );
+
+  it(
+    "is marked by an answer read through the person's own mailbox, in the same code step that writes, and not by one read through a shared connection",
+    slow,
+    async () => {
+      const ownTitle = `own-mail-${unique()}`;
+      const sharedTitle = `shared-mail-${unique()}`;
+      /** A code step searching `binding`'s mail, then writing a note titled `title`. */
+      const searchesThenWrites = (
+        app: string,
+        release: Release,
+        binding: string,
+        title: string
+      ) =>
+        codeStep(
+          `export default async (self, env) => {
+            await env.connections.call(${JSON.stringify(binding)}, "mail.search", { query: "invoice" });
+            return await env.apps.call(${JSON.stringify(app)}, new Blob([${JSON.stringify(
+              callOf(release, "notes.create", { title })
+            )}]).stream());
+          };`
+        );
+      // One chat at a time: the fake provider answers the last one made.
+      const own = await notesChat((app, release) => [
+        searchesThenWrites(app, release, "MYMAIL", ownTitle),
+        says("It waits for you."),
+      ]);
+      const mine = await mailConnection([], mailWithSearch, {
+        provider: "mail_own",
+        owner: own.person.userId,
+      });
+      await requestGranted(idp, own.admin, {
+        subject: own.chats.agent,
+        object: { type: "connection", connectionId: mine.id },
+        actions: ["mail.search"],
+        binding: "MYMAIL",
+      });
+      await own.ask(`Find the ${word()} invoice and note it.`);
+      const shared = await notesChat((app, release) => [
+        searchesThenWrites(app, release, "MAIL", sharedTitle),
+        says("Written."),
+      ]);
+      const company = await mailConnection([], mailWithSearch);
+      await requestGranted(idp, shared.admin, {
+        subject: shared.chats.agent,
+        object: { type: "connection", connectionId: company.id },
+        actions: ["mail.search"],
+        binding: "MAIL",
+      });
+      await shared.ask(`Find the ${word()} invoice and note it.`);
+
+      expect({
+        own: await answers(own.chats.stub, own.chat.id),
+        ownTitles: await own.titles(),
+        shared: await answers(shared.chats.stub, shared.chat.id),
+        sharedTitles: await shared.titles(),
+      }).toStrictEqual({
+        own: ["held"],
+        ownTitles: [],
+        shared: ["written"],
+        sharedTitles: [sharedTitle],
+      });
+      await eventsOf("chat.private_read", own.chat.id, 1);
+    }
+  );
+
+  it(
+    "lets a hold lapse after a day: it is no longer listed or confirmable, its request is emptied and its end recorded",
+    slow,
+    async () => {
+      const notes = await heldNote();
+      const { person, chats, chat, held, titles } = notes;
+      // Read a day and a moment later: the hold lapses on that read.
+      const later = await chats.stub.heldAppCalls(
+        chat.id,
+        person.userId,
+        Date.now() + heldStartMs + 1
+      );
+      const kept = await runInDurableObject(chats.stub, (_instance, state) =>
+        state.storage.sql
+          .exec<{
+            status: string;
+            request: string | null;
+          }>("SELECT status, request FROM held_app_calls WHERE id = ?", held.id)
+          .toArray()
+      );
+
+      expect({
+        later,
+        now: await person.api.chats.heldCalls(chat.id),
+        confirmed: await confirmedAsShown(notes),
+        kept,
+        after: await titles(),
+      }).toStrictEqual({
+        later: [],
+        now: [],
+        confirmed: "agent.held_call_not_found",
+        kept: [{ status: "lapsed", request: null }],
+        after: [],
+      });
+      await eventsOf("chat.app_call.lapsed", chat.id, 1);
+    }
+  );
+
+  it(
+    "checks again at confirming whether the agent may still write, the person may still use the App, and is still a member: none of them runs",
+    slow,
+    async () => {
+      const revoked = await heldNote();
+      await revoked.admin.api.permissions.revoke(revoked.grant);
+      const roleLost = await heldNote({ asMember: true });
+      await roleLost.builder.api.apps.members.remove(roleLost.app, {
+        type: "person",
+        id: roleLost.person.userId,
+      });
+      const left = await heldNote();
+      const comeBack = await leave(left.person.userId);
+      try {
+        expect({
+          revoked: await confirmedAsShown(revoked),
+          revokedTitles: await revoked.titles(),
+          roleLost: await confirmedAsShown(roleLost),
+          roleLostTitles: await roleLost.titles(),
+          left: await confirmedAsShown(left),
+          leftTitles: await left.titles(),
+        }).toStrictEqual({
+          revoked: "permission.denied",
+          revokedTitles: [],
+          // Answered as an App they can't see at all.
+          roleLost: "app.not_found",
+          roleLostTitles: [],
+          left: "permission.person_inactive",
+          leftTitles: [],
+        });
+      } finally {
+        await comeBack();
+      }
+    }
+  );
+
+  it(
+    "carries restricted mode both ways on a confirmed write, as on the agent's own: a restricted chat restricts the App, a restricted App the chat",
+    slow,
+    async () => {
+      const fromChat = await heldNote();
+      await fromChat.chats.stub.restrictChat(fromChat.chat.id);
+      const fromApp = await heldNote();
+      await appHost(env, fromApp.app).restrict();
+
+      expect({
+        fromChat: await confirmedAsShown(fromChat),
+        appRestricted: await appHost(env, fromChat.app).isRestricted(),
+        fromApp: await confirmedAsShown(fromApp),
+        chatRestricted: await fromApp.chats.stub.isChatRestricted(
+          fromApp.chat.id
+        ),
+      }).toStrictEqual({
+        fromChat: "ok",
+        appRestricted: true,
+        fromApp: "ok",
+        chatRestricted: true,
+      });
+    }
+  );
+
+  it(
+    "takes exactly one of a confirm and a decline sent at once, and runs the write at most once",
+    slow,
+    async () => {
+      const notes = await heldNote();
+      const { person, chat, held, title, titles } = notes;
+      const [confirm, decline] = await Promise.all([
+        confirmedAsShown(notes),
+        outcome(person.api.chats.declineHeldCall(chat.id, held.id)),
+      ]);
+      const after = await titles();
+
+      expect([confirm, decline].filter((each) => each === "ok")).toStrictEqual([
+        "ok",
+      ]);
+      expect([confirm, decline]).toContain("agent.held_call_not_found");
+      expect(after).toStrictEqual(confirm === "ok" ? [title] : []);
     }
   );
 

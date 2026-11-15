@@ -225,11 +225,12 @@ const typeRules: readonly {
   // A chat that handed its model or code something only its person may
   // read, so what it writes for others waits for them (core's
   // private-reads.ts); and a write to an App held for them since, then
-  // confirmed or declined by them, and how a confirmed one ended (core's
-  // held-app-calls.ts).
+  // confirmed or declined by them, how a confirmed one ended, or that it
+  // waited past its day unconfirmed (core's held-app-calls.ts).
   { action: "chat.private_read", type: "permission" },
   { action: "chat.app_call.held", type: "action" },
   { action: "chat.app_call.ended", type: "action" },
+  { action: "chat.app_call.lapsed", type: "action" },
   { action: "chat.app_call", type: "decision" },
   { action: "chat", type: "action" },
   // A call of the chat agent's code that nothing else records: a listing,

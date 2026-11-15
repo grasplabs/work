@@ -5129,6 +5129,10 @@ msgstr "End the tour"
 msgid "Ended"
 msgstr "Ended"
 
+#: src/activity/audit-words.ts
+msgid "Ended a held write to an App nobody confirmed within a day"
+msgstr "Ended a held write to an App nobody confirmed within a day"
+
 #: src/workflows/workflow-diagram.tsx
 msgid "Ends the workflow"
 msgstr "Ends the workflow"

@@ -9,8 +9,7 @@ CREATE TABLE `held_app_calls` (
 	`request` text,
 	`request_hash` text NOT NULL,
 	`held_at` integer NOT NULL,
-	`status` text NOT NULL,
-	FOREIGN KEY (`chat_id`) REFERENCES `chats`(`id`) ON UPDATE no action ON DELETE no action
+	`status` text NOT NULL
 );
 --> statement-breakpoint
 CREATE INDEX `held_app_calls_chat` ON `held_app_calls` (`chat_id`,`status`);--> statement-breakpoint

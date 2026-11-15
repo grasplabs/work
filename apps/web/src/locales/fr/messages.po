@@ -5129,6 +5129,10 @@ msgstr "Terminer la visite"
 msgid "Ended"
 msgstr "Terminé"
 
+#: src/activity/audit-words.ts
+msgid "Ended a held write to an App nobody confirmed within a day"
+msgstr "A mis fin à une modification retenue dans une application que personne n’a confirmée en un jour"
+
 #: src/workflows/workflow-diagram.tsx
 msgid "Ends the workflow"
 msgstr "Termine le workflow"

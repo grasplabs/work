@@ -5129,6 +5129,10 @@ msgstr "Terminar el recorrido"
 msgid "Ended"
 msgstr "Terminó"
 
+#: src/activity/audit-words.ts
+msgid "Ended a held write to an App nobody confirmed within a day"
+msgstr "Terminó un cambio retenido en una aplicación que nadie confirmó en un día"
+
 #: src/workflows/workflow-diagram.tsx
 msgid "Ends the workflow"
 msgstr "Termina el flujo de trabajo"

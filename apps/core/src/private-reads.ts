@@ -7,23 +7,29 @@ import type { AgentScope } from "./agent-scope.ts";
 import { workspace } from "./durable-objects.ts";
 
 // What a chat wrote for others after it used something only its person
-// may read (GRA-1843; the threat model is on the issue). Decided on 15
-// November 2026: confirm, don't block. A chat that handed its model or its
-// code something only its person may read is marked, for good; from then
-// on what its agent writes where others read waits for the person, who
-// sees exactly what will be sent before it goes. What it writes to their
-// own space (their own memory, their own dashboard, their own connection's
+// may read (GRA-1843; the threat model and the decisions are on the
+// issue). Confirm, don't block: a chat that handed its model or its code
+// something only its person may read is marked, for good; from then on
+// what its agent writes where others read waits for the person, who sees
+// exactly what will be sent before it goes. What it writes to their own
+// space (their own memory, their own dashboard, their own connection's
 // request) goes on as before.
 //
-// What marks a chat is what it handed over, never where it is:
+// What marks a chat is what it handed over that the person may not have
+// in mind, never where it is, nor what they wrote or brought in
+// themselves:
 // - the recall before a question that hands over a passage or a memory
 //   of the person's own store (turn-recall.ts), where everything only
 //   they may read is kept;
-// - the person's own instruction file, their own agent's instructions or
-//   documents, or one of their own skills, in a turn or read by its code
-//   (workspace.ts, agent-skills.ts);
-// - a file attached to a chat nobody else shares, read by its code
-//   (agent-apis.ts).
+// - an answer read through the person's own personal connection (their
+//   mailbox, their drive: agent-connections.ts), a call's or a confirmed
+//   held call's.
+// Their own instruction file, their own agent's instructions and
+// documents, their own skills and a file they attached mark nothing:
+// like their typed message, they are theirs, and nobody else can write
+// into them. So an App's answer that steers the agent can still have it
+// copy one of them into App data unasked (a gap the issue names).
+//
 // The mark is set, and audited once (`chat.private_read`), before what
 // marks it is handed over: nothing that holds it runs unmarked. It lasts
 // for good, the strictest option there is: the model's own replies quote
@@ -40,12 +46,15 @@ import { workspace } from "./durable-objects.ts";
 //   while the chat is marked (chat-connections.ts).
 // - A connection's side effects (mail, posts, invites, files) and a
 //   workflow's starts are held for the person from every chat already
-//   (connect's call.ts, held-starts.ts), a stricter rule than this one.
+//   (connect's call.ts, held-starts.ts). A connection's reads are not:
+//   in a marked chat, what a read on a shared connection is asked with
+//   (a CRM search for recalled text) still leaves Grasp at once, allowed
+//   and audited by connect, a gap the issue names.
 // - Building an App or a workflow writes a draft its builders read:
 //   GRA-1918.
 
 /** What a chat handed over that only its person may read. */
-export type PrivateRead = "recall" | "instructions" | "skill" | "file";
+export type PrivateRead = "recall" | "connection";
 
 /** The chat a scope names, as its Workspace keeps it. */
 type ChatScope = Pick<

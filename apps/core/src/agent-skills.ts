@@ -17,7 +17,6 @@ import type {
   SkillsReach,
   SkillVersion,
 } from "./brain-skills.ts";
-import { markPrivateRead } from "./private-reads.ts";
 import { heldNothing } from "./skill-needs.ts";
 import type { HeldCapabilities } from "./skill-needs.ts";
 
@@ -102,17 +101,15 @@ export class SkillsApi extends WorkerEntrypoint<Env, SkillsScope> {
   async select(input: unknown): Promise<{ skills: SkillCard[] }> {
     return await this.#call(
       "skills.select",
-      async (authority) => {
-        const skills = await selectSkillsFor(
+      async (authority) => ({
+        skills: await selectSkillsFor(
           this.env,
           authority,
           this.ctx.props.reach,
           this.#held,
           input
-        );
-        await this.#marked(skills);
-        return { skills };
-      },
+        ),
+      }),
       ({ skills }) => ({ skills: skills.length })
     );
   }
@@ -121,29 +118,16 @@ export class SkillsApi extends WorkerEntrypoint<Env, SkillsScope> {
   async read(input: unknown): Promise<SkillVersion> {
     return await this.#call(
       "skills.read",
-      async (authority) => {
-        const skill = await readSkillFor(
+      async (authority) =>
+        await readSkillFor(
           this.env,
           authority,
           this.ctx.props.reach,
           this.#held,
           input
-        );
-        await this.#marked([skill]);
-        return skill;
-      },
+        ),
       ({ version }) => ({ version })
     );
-  }
-
-  /**
-   * Marks the chat before one of its person's own skills is handed over
-   * (private-reads.ts): theirs alone to read.
-   */
-  async #marked(skills: readonly { scope: string }[]): Promise<void> {
-    if (skills.some(({ scope }) => scope === "person")) {
-      await markPrivateRead(this.env, this.ctx.props, "skill");
-    }
   }
 
   /** What the chat's agent holds, asked only when a skill needs anything. */

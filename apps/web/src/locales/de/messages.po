@@ -5129,6 +5129,10 @@ msgstr "Rundgang beenden"
 msgid "Ended"
 msgstr "Beendet"
 
+#: src/activity/audit-words.ts
+msgid "Ended a held write to an App nobody confirmed within a day"
+msgstr "Eine zurückgehaltene Änderung in einer App beendet, die niemand innerhalb eines Tages bestätigt hat"
+
 #: src/workflows/workflow-diagram.tsx
 msgid "Ends the workflow"
 msgstr "Beendet den Workflow"
