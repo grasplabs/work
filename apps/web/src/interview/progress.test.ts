@@ -1,3 +1,5 @@
+import { erasedFact } from "@grasp-os/shared/interview-links";
+import { readBackParts } from "@grasp-os/shared/interview-story";
 import type { StephenTurn } from "@grasp-os/shared/interview-turn";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -68,6 +70,38 @@ describe("a line they remove", () => {
         file: "booking.pdf",
       },
     ]);
+  });
+});
+
+describe("a statement erased", () => {
+  it("keeps its id taken, and is read back nowhere", () => {
+    const held = {
+      ...said,
+      facts: [
+        erasedFact({
+          id: "f1",
+          tag: "step" as const,
+          text: "You open it.",
+          record: "Open it.",
+        }),
+        { id: "f2", tag: "handoff" as const, text: "Sam.", record: "Sam." },
+      ],
+    };
+    const after = afterTurn(
+      held,
+      turn({
+        facts: [
+          { tag: "step", text: "You book it.", record: "Book it.", quote: "" },
+        ],
+      }),
+      { answered: 1 }
+    );
+    expect({
+      ids: after.facts.map(({ id }) => id),
+      read: readBackParts(after.facts).flatMap(({ facts }) =>
+        facts.map(({ id }) => id)
+      ),
+    }).toStrictEqual({ ids: ["f1", "f2", "f3"], read: ["f2", "f3"] });
   });
 });
 

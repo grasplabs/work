@@ -179,6 +179,36 @@ export const interviewFactSchema = z.strictObject({
 export type InterviewFact = z.output<typeof interviewFactSchema>;
 
 /**
+ * A fact as an interview keeps it: one erased (`erasedFact`) keeps its id
+ * and place, so no id is ever given to another, and holds no words.
+ */
+const keptFactSchema = interviewFactSchema
+  .extend({ text: z.string().trim().max(interviewLimits.fact) })
+  .refine(
+    (fact) =>
+      fact.text === ""
+        ? fact.out === true && fact.record === "" && fact.pin === undefined
+        : true,
+    "An erased fact holds nothing"
+  );
+
+/**
+ * `fact`, taken out and then erased for good (GRA-1897): its id, its kind
+ * and that it is out, nothing of what it said.
+ */
+export const erasedFact = (fact: InterviewFact): InterviewFact => ({
+  id: fact.id,
+  tag: fact.tag,
+  text: "",
+  record: "",
+  out: true,
+});
+
+/** Whether `fact` was erased (`erasedFact`): it is read out and counted nowhere. */
+export const isErased = (fact: InterviewFact): boolean =>
+  fact.out === true && fact.text === "";
+
+/**
  * Where someone's interview is, as their page keeps it and sends it to be
  * kept. Checked item by item: a save with anything else in it, or more of
  * it than an interview holds, is refused whole.
@@ -189,7 +219,7 @@ export const interviewProgressSchema = z.strictObject({
   mode: z.enum(["talk", "type"]).nullable(),
   lines: z.array(keptLineSchema).max(interviewLimits.lines),
   facts: z
-    .array(interviewFactSchema)
+    .array(keptFactSchema)
     .max(interviewLimits.facts)
     .refine(
       (facts) => new Set(facts.map(({ id }) => id)).size === facts.length,

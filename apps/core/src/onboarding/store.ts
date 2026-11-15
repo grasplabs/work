@@ -10,9 +10,11 @@ import { createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditDetailValue } from "@grasp-os/shared/audit";
 import { randomToken, sha256Hex } from "@grasp-os/shared/encoding";
 import {
+  erasedFact,
   factRevision,
   interviewPagePath,
   interviewProgressSchema,
+  isErased,
   participationNotice,
 } from "@grasp-os/shared/interview-links";
 import type {
@@ -827,11 +829,43 @@ const noCounts: InterviewCounts = {
   interviewer: null,
 };
 
+/** The statements of `progress` taken out in the read-back and not erased yet. */
+const takenOut = (progress: InterviewProgress): InterviewFact[] =>
+  progress.facts.filter((fact) => fact.out === true && !isErased(fact));
+
+/** `progress` with every statement taken out erased (`erasedFact`), each in its place. */
+const withTakenOutErased = (
+  progress: InterviewProgress
+): InterviewProgress => ({
+  ...progress,
+  facts: progress.facts.map((fact) =>
+    fact.out === true ? erasedFact(fact) : fact
+  ),
+});
+
+/**
+ * Whether `progress` brings back what `held` holds erased: a line they
+ * removed, or the words of a statement erased (or the statement gone).
+ */
+const bringsBack = (
+  held: InterviewProgress,
+  progress: InterviewProgress
+): boolean =>
+  held.lines.some(
+    (line, at) => line.removed === true && progress.lines[at]?.removed !== true
+  ) ||
+  held.facts.some(
+    (fact) =>
+      isErased(fact) &&
+      !progress.facts.some((each) => each.id === fact.id && isErased(each))
+  );
+
 const countsOf = (progress: InterviewProgress): InterviewCounts => ({
   state: progress.person,
   phase: progress.phase,
   facts: progress.facts.filter(({ out }) => out !== true).length,
-  out: progress.facts.filter(({ out }) => out === true).length,
+  // One erased counts nowhere.
+  out: takenOut(progress).length,
   confirmed: progress.confirmed,
   rating: progress.rating ?? null,
   typed: progress.mode === "type",
@@ -4889,6 +4923,14 @@ export class Onboarding extends DurableObject<Env> {
         });
       }
       await this.forgetLinesNow();
+      try {
+        await this.eraseTakenOutAfterClose();
+      } catch (error) {
+        log.error("onboarding.taken_out_unerased", {
+          error: error instanceof Error ? error.name : "unknown",
+        });
+        await this.#alarmBy(Date.now() + purgeRetryMs);
+      }
       await this.keepKickoffRecordsNow();
       await this.#drainAudit();
       await this.releaseDue();
@@ -7215,13 +7257,15 @@ export class Onboarding extends DurableObject<Env> {
 
   /**
    * What a save of `progress` erases of `person`'s interview as kept
-   * (GRA-1897), or "unremoved" when it brings back a line they removed.
-   * The lines it removes, by how many; once the interview is completed,
-   * the statements they took out in the read-back, dropped from the copy
-   * kept (`progress`), by id; and the stored keys of the voice's lines
-   * among either, which the speech cache may keep, hashed before anything
-   * is written, to go with the save; and each kept fact's revision. Until it is completed, a statement
-   * taken out can be put back.
+   * (GRA-1897), or "unremoved" when it brings back a line they removed or
+   * the words of a statement erased. The lines it removes, by how many;
+   * once the interview is completed, the statements they took out in the
+   * read-back, erased in the copy kept (`progress`, `erasedFact`: each
+   * keeps its id and place, so no id is given again), by id; the stored
+   * keys of the voice's lines among either, which the speech cache may
+   * keep, hashed before anything is written, to go with the save; and
+   * each kept fact's revision. Until it is completed, a statement taken
+   * out can be put back.
    */
   async #erasing(
     person: string,
@@ -7237,23 +7281,27 @@ export class Onboarding extends DurableObject<Env> {
     | "unremoved"
   > {
     const held = this.#storedProgress(person);
-    const kept = held?.lines ?? [];
-    if (
-      kept.some(
-        (line, at) =>
-          line.removed === true && progress.lines[at]?.removed !== true
-      )
-    ) {
+    if (held !== null && bringsBack(held, progress)) {
       return "unremoved";
     }
-    const removed = kept.filter(
+    const removed = (held?.lines ?? []).filter(
       (line, at) =>
         line.removed !== true && progress.lines[at]?.removed === true
     );
-    const out =
-      progress.person === "completed"
-        ? progress.facts.filter((fact) => fact.out === true)
-        : [];
+    // Erased now: taken out of an interview completed, or erased by the
+    // page itself as it completed, each with its words as last held.
+    const heldFacts = new Map(
+      (held?.facts ?? []).map((fact) => [fact.id, fact])
+    );
+    const out = [
+      ...(progress.person === "completed" ? takenOut(progress) : []),
+      ...progress.facts.flatMap((fact) => {
+        const was = heldFacts.get(fact.id);
+        return isErased(fact) && was !== undefined && !isErased(was)
+          ? [was]
+          : [];
+      }),
+    ];
     const voiced = [
       ...removed
         .filter(({ from, text }) => from === "stephen" && text !== "")
@@ -7262,12 +7310,7 @@ export class Onboarding extends DurableObject<Env> {
     ];
     const said = this.#saidIn(person, held ?? progress);
     const keeping =
-      out.length === 0
-        ? progress
-        : {
-            ...progress,
-            facts: progress.facts.filter((fact) => fact.out !== true),
-          };
+      progress.person === "completed" ? withTakenOutErased(progress) : progress;
     return {
       progress: keeping,
       // Each fact's revision as kept, from the save alone: what an
@@ -7286,6 +7329,72 @@ export class Onboarding extends DurableObject<Env> {
           ? []
           : await spokenKeysOf({ ...said, texts: voiced }),
     };
+  }
+
+  /**
+   * Once the interviews closed (`closesOn`), nobody can finish one any
+   * more: what was taken out of each in the read-back is erased, as
+   * completing it erases it (`#erasing`). Run by the alarm, which runs
+   * until just past the close. Each interview is written only if it is
+   * still as read; one saved meanwhile waits for the next run. Returns
+   * how many it erased in.
+   */
+  async eraseTakenOutAfterClose(
+    now: string = new Date().toISOString()
+  ): Promise<number> {
+    const { plan } = this.#row();
+    if (plan === null || dayOf(now) <= closesOn(plan)) {
+      return 0;
+    }
+    let erased = 0;
+    for (const person of this.interviewPeople()) {
+      const held = this.#storedProgress(person);
+      const out = held === null ? [] : takenOut(held);
+      if (held === null || out.length === 0) {
+        continue;
+      }
+      const said = this.#saidIn(person, held);
+      const gone =
+        said === null
+          ? []
+          : // oxlint-disable-next-line no-await-in-loop -- one interview at a time
+            await spokenKeysOf({ ...said, texts: out.map(({ text }) => text) });
+      const dropped = out.map(({ id }) => id);
+      const landed = this.ctx.storage.transactionSync(() => {
+        const current = this.#storedProgress(person);
+        if (
+          current === null ||
+          canonicalJson(current) !== canonicalJson(held)
+        ) {
+          return false;
+        }
+        const revisions = this.#revisionsOf(person);
+        for (const id of dropped) {
+          revisions.delete(id);
+        }
+        this.#db
+          .update(interviews)
+          .set({
+            progress: JSON.stringify(withTakenOutErased(held)),
+            revisions: JSON.stringify(Object.fromEntries(revisions)),
+          })
+          .where(eq(interviews.person, person))
+          .run();
+        // A device's copy, with the words, is older from now on.
+        this.#db
+          .update(links)
+          .set({ version: sql`${links.version} + 1` })
+          .where(eq(links.person, person))
+          .run();
+        this.#keepErased(person, { lines: 0, dropped, gone }, now);
+        return true;
+      });
+      erased += landed ? 1 : 0;
+    }
+    if (erased > 0) {
+      await this.forgetLinesNow();
+    }
+    return erased;
   }
 
   /**

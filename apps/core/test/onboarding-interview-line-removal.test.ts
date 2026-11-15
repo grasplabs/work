@@ -1,5 +1,5 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import { removedLine } from "@grasp-os/shared/interview-links";
+import { erasedFact, removedLine } from "@grasp-os/shared/interview-links";
 import type {
   InterviewFact,
   InterviewProgress,
@@ -134,6 +134,76 @@ const saying = async (stephen: string, theirs: string) => {
   const { version } = await save(link, 0, progress);
   return { link, person, progress, version };
 };
+
+/** A day, in ms. */
+const dayMs = 24 * 60 * 60 * 1000;
+
+/** The statement `f1` as it is kept once erased: nothing of what it said. */
+const erasedOf = { id: "f1", tag: "step", text: "", record: "", out: true };
+
+/**
+ * An interview where they said `theirs`, written down as f1 beside f2,
+ * both approved and their read-back lines in the voice cache; then the
+ * line removed and f1 taken out, not completed yet.
+ */
+const takenOutFrom = async (theirs: string) => {
+  const { link, person, progress, version } = await saying(markerOf(), theirs);
+  const fact: InterviewFact = {
+    id: "f1",
+    tag: "step",
+    text: `${theirs} is the first step.`,
+    record: `${theirs} is the first step.`,
+  };
+  const other: InterviewFact = {
+    id: "f2",
+    tag: "handoff",
+    text: "The lead signs it off.",
+    record: "The lead signs it off.",
+  };
+  const written = { ...progress, facts: [fact, other] };
+  const { version: v1 } = await save(link, version, written);
+  await approve(link, written.facts);
+  const audio = JSON.stringify({
+    audio: "AAAA",
+    mime: "audio/mpeg",
+    words: [],
+  });
+  await keepLine(env, spokenKey(fact.text), audio);
+  await keepLine(env, spokenKey(other.text), audio);
+  const out: InterviewProgress = {
+    ...removing(written, 1),
+    facts: [{ ...fact, out: true }, other],
+  };
+  const { version: v2 } = await save(link, v1, out);
+  return { link, person, fact, other, audio, out, version: v2 };
+};
+
+/** Where `theirs` is left, and the facts kept, after `taken`. */
+const leftOf = async (
+  theirs: string,
+  taken: Awaited<ReturnType<typeof takenOutFrom>>
+) => {
+  const kept = await keptOf(taken.person);
+  return {
+    onboarding: await onboardingTablesWith(theirs),
+    core: await d1ColumnsWith(env.DB, theirs),
+    cached: await keptLine(env, spokenKey(taken.fact.text)),
+    other: await keptLine(env, spokenKey(taken.other.text)),
+    facts: kept !== null && "progress" in kept ? kept.progress.facts : null,
+  };
+};
+
+/** The facts `person` has approvals of, by id. */
+const approvalsOf = async (person: string): Promise<string[]> =>
+  await runInDurableObject(onboardingStore(env), (_instance, state) =>
+    state.storage.sql
+      .exec<{ fact: string }>(
+        "SELECT DISTINCT fact FROM approvals WHERE person = ? ORDER BY fact",
+        person
+      )
+      .toArray()
+      .map(({ fact }) => fact)
+  );
 
 describe("removing a line of an interview", { timeout: 60_000 }, () => {
   it("takes its words, marks and file out of everything kept, Stephen's from the speech cache, and keeps the rest", async () => {
@@ -317,68 +387,168 @@ describe("removing a line of an interview", { timeout: 60_000 }, () => {
     });
   });
 
-  it("erases what was written down from a removed line once they take it out and the interview is completed", async () => {
+  it("erases what was written down from a removed line once they take it out and the interview is completed, in its place", async () => {
     const theirs = markerOf();
-    const { link, person, progress, version } = await saying(
-      markerOf(),
-      theirs
-    );
-    const fact: InterviewFact = {
-      id: "f1",
-      tag: "step",
-      text: `${theirs} is the first step.`,
-      record: `${theirs} is the first step.`,
-    };
-    const other: InterviewFact = {
-      id: "f2",
-      tag: "handoff",
-      text: "The lead signs it off.",
-      record: "The lead signs it off.",
-    };
-    const written = { ...progress, facts: [fact, other] };
-    const { version: v1 } = await save(link, version, written);
-    await approve(link, written.facts);
-    const audio = JSON.stringify({
-      audio: "AAAA",
-      mime: "audio/mpeg",
-      words: [],
-    });
-    await keepLine(env, spokenKey(fact.text), audio);
-    await keepLine(env, spokenKey(other.text), audio);
-
-    // The line removed and what was written from it taken out: until the
-    // interview is completed, it can still be put back.
-    const out = {
-      ...removing(written, 1),
-      facts: [{ ...fact, out: true as const }, other],
-    };
-    const { version: v2 } = await save(link, v1, out);
+    const taken = await takenOutFrom(theirs);
+    const approvedBefore = await approvalsOf(taken.person);
     const putBack = await onboardingTablesWith(theirs);
-    const { saved } = await save(link, v2, {
-      ...out,
+
+    const { saved } = await save(taken.link, taken.version, {
+      ...taken.out,
       person: "completed",
     });
-    const kept = await keptOf(person);
 
     expect({
       putBack,
+      approvedBefore,
       saved,
-      onboarding: await onboardingTablesWith(theirs),
-      core: await d1ColumnsWith(env.DB, theirs),
-      cached: await keptLine(env, spokenKey(fact.text)),
-      other: await keptLine(env, spokenKey(other.text)),
-      facts:
-        kept !== null && "progress" in kept
-          ? kept.progress.facts.map(({ id }) => id)
-          : null,
+      ...(await leftOf(theirs, taken)),
+      approved: await approvalsOf(taken.person),
     }).toStrictEqual({
+      // Until it is completed, it can still be put back.
       putBack: ["interviews"],
+      approvedBefore: ["f1", "f2"],
       saved: true,
       onboarding: [],
       core: [],
       cached: undefined,
-      other: audio,
-      facts: ["f2"],
+      other: taken.audio,
+      facts: [erasedOf, taken.other],
+      approved: ["f2"],
+    });
+  });
+
+  it("erases a statement the page sends erased as it completes, with its approvals and its voice", async () => {
+    const theirs = markerOf();
+    const taken = await takenOutFrom(theirs);
+
+    // As the page completes: what was taken out erased in its own copy.
+    const { saved } = await save(taken.link, taken.version, {
+      ...taken.out,
+      person: "completed",
+      facts: [erasedFact(taken.fact), { ...taken.other, agreed: true }],
+    });
+
+    expect({
+      saved,
+      ...(await leftOf(theirs, taken)),
+      approved: await approvalsOf(taken.person),
+    }).toStrictEqual({
+      saved: true,
+      onboarding: [],
+      core: [],
+      cached: undefined,
+      other: taken.audio,
+      facts: [erasedOf, { ...taken.other, agreed: true }],
+      approved: ["f2"],
+    });
+  });
+
+  it("refuses the words back from the tab that completed it, reopened, or put back", async () => {
+    const theirs = markerOf();
+    const taken = await takenOutFrom(theirs);
+    const { version } = await save(taken.link, taken.version, {
+      ...taken.out,
+      person: "completed",
+    });
+
+    // The tab still holds its own copy, with the words: it adds something.
+    const reopened = await save(taken.link, version, {
+      ...taken.out,
+      person: "progress",
+      wants: "answer",
+      adding: true,
+    });
+    const putBack = await save(taken.link, reopened.version, {
+      ...taken.out,
+      person: "progress",
+      facts: [taken.fact, taken.other],
+    });
+
+    expect({
+      reopened: reopened.saved,
+      putBack: putBack.saved,
+      ...(await leftOf(theirs, taken)),
+    }).toStrictEqual({
+      reopened: false,
+      putBack: false,
+      onboarding: [],
+      core: [],
+      cached: undefined,
+      other: taken.audio,
+      facts: [erasedOf, taken.other],
+    });
+  });
+
+  it("keeps saving a tab that took core's copy and adds a statement after one was erased", async () => {
+    const taken = await takenOutFrom(markerOf());
+    const { version } = await save(taken.link, taken.version, {
+      ...taken.out,
+      person: "completed",
+    });
+    const kept = await keptOf(taken.person);
+    const copy = kept !== null && "progress" in kept ? kept.progress : null;
+    // The page numbers what it writes down by how many facts it holds.
+    const added: InterviewFact = {
+      id: `f${(copy?.facts.length ?? 0) + 1}`,
+      tag: "step",
+      text: "Then it is booked.",
+      record: "Then it is booked.",
+    };
+
+    const answer =
+      copy === null
+        ? null
+        : await save(taken.link, version, {
+            ...copy,
+            person: "progress",
+            wants: "answer",
+            adding: true,
+            facts: [...copy.facts, added],
+          });
+    const after = await keptOf(taken.person);
+
+    expect({
+      saved: answer?.saved,
+      ids:
+        after !== null && "progress" in after
+          ? after.progress.facts.map(({ id }) => id)
+          : null,
+    }).toStrictEqual({ saved: true, ids: ["f1", "f2", "f3"] });
+  });
+
+  it("erases what was taken out of an interview nobody completed once the interviews closed", async () => {
+    const theirs = markerOf();
+    const taken = await takenOutFrom(theirs);
+    const store = onboardingStore(env);
+    const open = await store.eraseTakenOutAfterClose();
+    const kept = await onboardingTablesWith(theirs);
+
+    // Long past the close: the alarm's run then.
+    const closed = await store.eraseTakenOutAfterClose(
+      new Date(Date.now() + 60 * dayMs).toISOString()
+    );
+    // The device's copy, with the words, is older now.
+    const older = await save(taken.link, taken.version, taken.out);
+
+    expect({
+      open,
+      kept,
+      closed,
+      older: older.saved,
+      ...(await leftOf(theirs, taken)),
+      approved: await approvalsOf(taken.person),
+    }).toStrictEqual({
+      open: 0,
+      kept: ["interviews"],
+      closed: 1,
+      older: false,
+      onboarding: [],
+      core: [],
+      cached: undefined,
+      other: taken.audio,
+      facts: [erasedOf, taken.other],
+      approved: ["f2"],
     });
   });
 

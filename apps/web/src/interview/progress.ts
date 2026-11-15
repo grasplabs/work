@@ -1,4 +1,8 @@
-import { interviewLimits, removedLine } from "@grasp-os/shared/interview-links";
+import {
+  erasedFact,
+  interviewLimits,
+  removedLine,
+} from "@grasp-os/shared/interview-links";
 import type {
   InterviewFact,
   InterviewLine,
@@ -316,7 +320,11 @@ export const approved = (progress: InterviewProgress): InterviewProgress => ({
   person: "completed",
   wants: "end",
   adding: false,
-  facts: progress.facts.map((fact) => ({ ...fact, agreed: true })),
+  // What they took out is erased for good now, in its place, as core keeps
+  // it (GRA-1897): no copy of this page holds its words any more.
+  facts: progress.facts.map((fact) =>
+    fact.out === true ? erasedFact(fact) : { ...fact, agreed: true as const }
+  ),
 });
 
 /** Back after agreeing, to add something: only what is new will be read back. */

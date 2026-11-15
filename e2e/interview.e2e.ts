@@ -153,18 +153,20 @@ test("someone removes a line of theirs and takes out what was written from it, a
   const link = await invited(staff, person, "Ria");
   const asked = await answered(page);
   const written = `You check ${run} in Exact.`;
-  // Their answer is written down with their words in it; every other turn
-  // as Stephen answers it.
+  // Their first answer is written down with their words in it; every
+  // other turn as Stephen answers it.
+  let answers = 0;
   await page.route("**/api/interview/turn", async (route: Route) => {
     const turn = interviewTurnRequestSchema.parse(
       route.request().postDataJSON()
     );
     const reply = answerTo(turn);
+    answers += turn.event === "answer" ? 1 : 0;
     await route.fulfill({
       status: 200,
       contentType: "application/x-ndjson",
       body: streamed(
-        turn.event === "answer"
+        turn.event === "answer" && answers === 1
           ? {
               ...reply,
               facts: reply.facts.map((fact, at) =>
@@ -229,6 +231,18 @@ test("someone removes a line of theirs and takes out what was written from it, a
   await expect(
     page.getByRole("heading", { name: "Thank you, Ria." })
   ).toBeVisible();
+
+  // Back from the same tab to add something: what they add is written down
+  // and kept, and what was erased doesn't come back.
+  await page.getByRole("button", { name: "Add something" }).click();
+  const more = page.getByLabel("Your answer");
+  await more.fill("Then I book it in Exact.");
+  await more.press("Enter");
+  await expect(page.getByText(readBack)).toBeVisible();
+  await expect(page.getByText("You check the invoice in Exact.")).toBeVisible();
+  await expect(page.getByText("Saved")).toBeVisible();
+  await page.reload();
+  await expect(page.getByText("You check the invoice in Exact.")).toBeVisible();
   expect({
     asked: told.length > before,
     shown: await page.getByText(run).count(),
