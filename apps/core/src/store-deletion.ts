@@ -87,7 +87,9 @@ export const inventoriedDeleted = async (
  * marked, erases what its App's code remembered (app-memory-erasure.ts),
  * so the store never reads as deleted before those memories are gone; a
  * failure throws, and the next attempt (core's, or the store's alarm)
- * erases again under the same change, nothing more.
+ * erases again under the same change, nothing more. A call already
+ * running can still remember afterwards what it read before: the next
+ * erasure of the App erases that, not this one.
  */
 export const recordStoreDeleted = async (
   env: Env,

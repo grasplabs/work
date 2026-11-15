@@ -14,7 +14,7 @@ import { loadRelease } from "./app-releases.ts";
 import { findApp } from "./apps.ts";
 import { appendAuditEvent, auditedIdOf } from "./audit-outbox.ts";
 import { memberOf } from "./auth/identity.ts";
-import { audited, inHostBrainWords } from "./brain-audited.ts";
+import { audited, inHostBrainWords, landed } from "./brain-audited.ts";
 import type { MemoryCaller } from "./brain-audited.ts";
 import {
   forgetForAppAs,
@@ -283,22 +283,6 @@ const askedOf = (
         ),
       }
     : {};
-
-/**
- * `write` once, and once more when its reply was lost (an error no rule
- * of the Brain's gave): the same change, so what landed, never what the
- * first reply said.
- */
-const landed = async <T>(write: () => Promise<T>): Promise<T> => {
-  try {
-    return await write();
-  } catch (error) {
-    if (isExpectedError(error)) {
-      throw error;
-    }
-    return await write();
-  }
-};
 
 /** What a write answers App code, its outcome's details, and what this call's change did. */
 interface Written {

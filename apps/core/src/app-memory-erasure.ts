@@ -1,13 +1,13 @@
 import { auditEventSchema } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import { isExpectedError } from "@grasp-os/shared/errors";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { keepEvent, uuidFromHash } from "./audit-outbox.ts";
+import { landed } from "./brain-audited.ts";
 import { eraseWriter } from "./brain-next.ts";
 import { appDefaultStores } from "./db/core/schema.ts";
 
@@ -27,14 +27,21 @@ import { appDefaultStores } from "./db/core/schema.ts";
 // - A reset is one change a request, minted as it starts
 //   (data-stores.ts `resetAppStore`), erased before the store resets,
 //   whether or not the App has a store (an App without tables never gets
-//   one), and once more after it, under a change derived from it, for
-//   what a call remembered meanwhile from records it read before; that
-//   second erasure is recorded only when it found some.
+//   one).
 // - An App removed for good while it has no store to delete
-//   (app-removal.ts): one change for the App (`app-removed:<id>`), erased
-//   just before the removal is written. A removed App is never restored,
-//   so nothing it wrote is needed again; one whose store lives keeps its
-//   memories until that store is deleted, as its data stays until then.
+//   (app-removal.ts): one change for the archive it removes
+//   (`app-removed:<id>:<archived at>`), so a retry of that removal is the
+//   same erasure, and an archive after a restore a new one; erased just
+//   before the removal is written. A removed App is never restored; one
+//   whose store lives keeps its memories, unreadable, until that store is
+//   deleted, as its data is kept.
+//
+// What this doesn't close (the same for a reset and a store's deletion):
+// a call already running when the memories are erased can still write a
+// memory afterwards from what it read before, as the Brain stamps a
+// memory when it is written; it is erased by the next erasure of the
+// App, not by this one. The Brain can't tell yet when a write's call
+// began.
 //
 // One audit event an erasure, by ids and the count it covered, its ID
 // from the change and its time the one the Brain recorded, so a repeat
@@ -43,30 +50,10 @@ import { appDefaultStores } from "./db/core/schema.ts";
 
 /**
  * Why an App's memories are erased, as its audit event says: its store
- * deleted; its data reset; what a call remembered while the reset ran,
- * erased once it is done; or the App removed for good while it has no
+ * deleted, its data reset, or the App removed for good while it has no
  * store to delete.
  */
-type Cause =
-  | "store_deleted"
-  | "data_reset"
-  | "written_during_reset"
-  | "app_removed";
-
-/**
- * `erase` once, and once more when its reply was lost (an error no rule
- * of the Brain's gave): the same change, so it answers what landed.
- */
-const landed = async <T>(erase: () => Promise<T>): Promise<T> => {
-  try {
-    return await erase();
-  } catch (error) {
-    if (isExpectedError(error)) {
-      throw error;
-    }
-    return await erase();
-  }
-};
+type Cause = "store_deleted" | "data_reset" | "app_removed";
 
 /**
  * Erases every memory App `app`'s code wrote, under `change` (the same on
@@ -91,11 +78,6 @@ export const eraseAppMemories = async (
         change,
       })
   );
-  // What a call remembered while a reset ran is the reset's own: told
-  // only when there was some, so a reset reads as one erasure otherwise.
-  if (cause === "written_during_reset" && memories === 0) {
-    return;
-  }
   const action = "brain.memory.erased";
   await keepEvent(
     env,
@@ -137,27 +119,5 @@ export const eraseDeletedStoresMemories = async (
     change: `app-store-deleted:${store}`,
     actor,
     cause: "store_deleted",
-  });
-};
-
-/**
- * Erases what App `app`'s code remembered as it is removed for good by
- * `actor`, when it has no store whose deletion would (app-removal.ts):
- * one change for the App.
- */
-export const eraseRemovedAppsMemories = async (
-  env: Env,
-  app: AppId,
-  actor: AuditActor,
-  hasStore: boolean
-): Promise<void> => {
-  if (hasStore) {
-    return;
-  }
-  await eraseAppMemories(env, {
-    app,
-    change: `app-removed:${app}`,
-    actor,
-    cause: "app_removed",
   });
 };

@@ -813,63 +813,6 @@ const failing = <T extends Rpc.DurableObjectBranded | undefined>(
   return namespaceOf(namespace);
 };
 
-/**
- * `namespace` with object `name`'s `method` waiting, its first time, for
- * `held` once it tells `reached`: a call held at that step, for a test to
- * act meanwhile.
- */
-const heldAt = <T extends Rpc.DurableObjectBranded | undefined>(
-  namespace: DurableObjectNamespace<T>,
-  name: string,
-  method: string,
-  {
-    reached,
-    held,
-  }: {
-    reached: PromiseWithResolvers<null>;
-    held: PromiseWithResolvers<null>;
-  }
-): DurableObjectNamespace<T> => {
-  let first = true;
-  const stubOf = (stub: object): object =>
-    new Proxy(stub, {
-      get: (target, property): unknown => {
-        const value: unknown = Reflect.get(target, property);
-        if (typeof value !== "function") {
-          return value;
-        }
-        return async (...args: unknown[]): Promise<unknown> => {
-          if (property === method && first) {
-            first = false;
-            reached.resolve(null);
-            await held.promise;
-          }
-          return await Reflect.apply(value, target, args);
-        };
-      },
-    });
-  const namespaceOf = (
-    of: DurableObjectNamespace<T>
-  ): DurableObjectNamespace<T> =>
-    new Proxy(of, {
-      get: (target, property): unknown => {
-        if (property === "jurisdiction") {
-          return (jurisdiction: DurableObjectJurisdiction) =>
-            namespaceOf(target.jurisdiction(jurisdiction));
-        }
-        if (property === "getByName") {
-          return (named: string) => {
-            const stub = target.getByName(named);
-            return named === name ? stubOf(stub) : stub;
-          };
-        }
-        const value: unknown = Reflect.get(target, property);
-        return typeof value === "function" ? value.bind(target) : value;
-      },
-    });
-  return namespaceOf(namespace);
-};
-
 describe("an App's memories go with its data", setUpTime, () => {
   it("erases what an App remembered when its store is deleted: its users read none of it, the store deletes it, an export taken before is stale, and one event records it", async () => {
     const admin = await person("admin");
@@ -1113,6 +1056,12 @@ describe("an App's memories go with its data", setUpTime, () => {
       await onPage(app, ada, "remember", fact(`Laterco ${unique()}`))
     );
     await setArchived(env, ada, app.app, true);
+    // The archive it removes, which its erasure's change names.
+    const archived = await env.DB.prepare(
+      "SELECT archived_at FROM apps WHERE id = ?"
+    )
+      .bind(app.app)
+      .first<{ archived_at: number }>();
     await removeApp(env, ada, app.app);
     await tick(shared());
     const events = await erasuresOf(app.app);
@@ -1137,7 +1086,9 @@ describe("an App's memories go with its data", setUpTime, () => {
       held: 0,
       events: [
         {
-          id: await erasureIdOf(`app-removed:${app.app}`),
+          id: await erasureIdOf(
+            `app-removed:${app.app}:${archived?.archived_at ?? 0}`
+          ),
           detail: { cause: "app_removed", memories: 1 },
         },
         { id: someText, detail: { cause: "data_reset", memories: 1 } },
@@ -1145,53 +1096,42 @@ describe("an App's memories go with its data", setUpTime, () => {
     });
   });
 
-  it("erases what the App remembered while its data was being reset, as the reset's own second erasure", async () => {
+  it("erases again when a removal that erased was refused, the App restored, and it is removed once more after remembering anew", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
-    const app = await appOf(ada, admin);
-    const before = rememberedSchema.parse(
-      await onPage(app, ada, "remember", fact(`Beforeco ${unique()}`))
+    const app = await appOf(ada, admin, { store: false });
+    await onPage(app, ada, "remember", fact(`Firstco ${unique()}`));
+    await setArchived(env, ada, app.app, true);
+    // Erased, then the removal's own write is cut off: still archived.
+    const cutOff = await failureOf(async () => {
+      await removeApp(firstBatchFailing(env), ada, app.app);
+    });
+    await setArchived(env, ada, app.app, false);
+    const anew = rememberedSchema.parse(
+      await onPage(app, ada, "remember", fact(`Anewco ${unique()}`))
     );
-    // The reset held after its first erasure, before the store resets,
-    // while a page's call remembers what it may have read.
-    const reached = Promise.withResolvers<null>();
-    const held = Promise.withResolvers<null>();
-    const resetting = resetAppData(
-      {
-        ...env,
-        DATA_STORES: heldAt(env.DATA_STORES, storeOf(app), "resetData", {
-          reached,
-          held,
-        }),
-      },
-      admin,
-      app.app,
-      "Accounts"
-    );
-    await reached.promise;
-    const during = rememberedSchema.parse(
-      await onPage(app, ada, "remember", fact(`Duringco ${unique()}`))
-    );
-    held.resolve(null);
-    await resetting;
+    await setArchived(env, ada, app.app, true);
+    await removeApp(env, ada, app.app);
+    await tick(shared());
     const events = await erasuresOf(app.app);
     expect({
-      cards: await Promise.all(
-        [before, during].map(
-          async ({ entity }) =>
-            await codeCardAs(env, ada.userId, "company", { entity }, app.app)
-        )
+      cutOff,
+      card: await codeCardAs(
+        env,
+        ada.userId,
+        "company",
+        { entity: anew.entity },
+        app.app
       ),
-      events: events
-        .map(({ detail }) => detail)
-        .toSorted((one, other) =>
-          JSON.stringify(one).localeCompare(JSON.stringify(other))
-        ),
+      held: await heldBy(`app:${app.app}`),
+      events: events.map(({ detail }) => detail),
     }).toStrictEqual({
-      cards: [null, null],
+      cutOff: "Error: The batch was cut off (a test's)",
+      card: null,
+      held: 0,
       events: [
-        { cause: "data_reset", memories: 1 },
-        { cause: "written_during_reset", memories: 1 },
+        { cause: "app_removed", memories: 1 },
+        { cause: "app_removed", memories: 1 },
       ],
     });
   });

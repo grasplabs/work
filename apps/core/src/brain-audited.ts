@@ -109,3 +109,19 @@ export const inHostBrainWords = (error: unknown): unknown =>
   isExpectedError(error) && error.code === "brain.request_invalid"
     ? functionErrors.create("permission.invalid_args")
     : inHostWords(error);
+
+/**
+ * `write` once, and once more when its reply was lost (an error no rule
+ * of the Brain's gave): the same change, so it answers what landed, never
+ * what the first reply said.
+ */
+export const landed = async <T>(write: () => Promise<T>): Promise<T> => {
+  try {
+    return await write();
+  } catch (error) {
+    if (isExpectedError(error)) {
+      throw error;
+    }
+    return await write();
+  }
+};

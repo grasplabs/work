@@ -324,9 +324,9 @@ export const appStoreFor = async (
  * its data (app-memory-erasure.ts), whether or not it has a store (an App
  * without tables never gets one, yet may remember): erased first, under
  * one change for this request, so a reset that fails afterwards leaves
- * data without memories, never memories without data; and again once the
- * store is reset, under a change derived from the first, for what a call
- * remembered meanwhile from records it read before the reset.
+ * data without memories, never memories without data. A call already
+ * running can still remember afterwards what it read before the reset:
+ * the next erasure of the App erases that, not this one.
  */
 export const resetAppStore = async (
   env: Env,
@@ -335,8 +335,12 @@ export const resetAppStore = async (
   reset: Pick<StoreReset, "apply">
 ): Promise<StoreId | null> => {
   const actor = by.actor ?? actorOf(by);
-  const change = `app-data-reset:${crypto.randomUUID()}`;
-  await eraseAppMemories(env, { app, change, actor, cause: "data_reset" });
+  await eraseAppMemories(env, {
+    app,
+    change: `app-data-reset:${crypto.randomUUID()}`,
+    actor,
+    cause: "data_reset",
+  });
   const store = await liveStoreOf(env, app);
   if (store === null) {
     return null;
@@ -344,12 +348,6 @@ export const resetAppStore = async (
   await inJurisdiction(env, env.DATA_STORES)
     .getByName(store)
     .resetData(store, { ...reset, actor, app });
-  await eraseAppMemories(env, {
-    app,
-    change: `${change}:after`,
-    actor,
-    cause: "written_during_reset",
-  });
   return store;
 };
 

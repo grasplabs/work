@@ -71,7 +71,8 @@ export const ResetAppData = ({ app }: { app: App }) => {
               versions, members and history stay.
             </Trans>{" "}
             <Trans>
-              What its code remembered in the Brain goes with its data.
+              What its code remembered in the Brain until now goes too; a call
+              already running may still remember what it read before.
             </Trans>
           </DialogDescription>
         </DialogHeader>

@@ -15636,8 +15636,8 @@ msgid "What its calls answer"
 msgstr "Was seine Aufrufe antworten"
 
 #: src/apps/app-reset.tsx
-msgid "What its code remembered in the Brain goes with its data."
-msgstr "Was ihr Code im Gehirn gespeichert hat, geht mit ihren Daten."
+msgid "What its code remembered in the Brain until now goes too; a call already running may still remember what it read before."
+msgstr "Was ihr Code bis jetzt im Gehirn gespeichert hat, geht ebenfalls; ein Aufruf, der schon läuft, kann sich noch merken, was er vorher gelesen hat."
 
 #: src/workflows/kept-state.tsx
 msgid "What its steps keep for later runs, which each run reads as it starts. It uses {used} KB of {cap} KB."
