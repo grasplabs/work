@@ -5,7 +5,6 @@ import type { ConnectorContract } from "@grasp-os/shared/connect";
 import { functionErrors } from "@grasp-os/shared/functions";
 import type { AppId, ConnectionId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
-import type { Provenance } from "@grasp-os/shared/knowledge";
 import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
 import type { BindingTarget } from "@grasp-os/shared/resource-bindings";
 
@@ -20,12 +19,12 @@ import type { ResourceContext } from "./function-host.ts";
 // code sees it.
 
 /**
- * Where what an invocation read through its resources comes from: the
- * Knowledge collections and their classification, and each connection it
- * read from with the resources (messages, files) that connection's
- * connector named. It goes back to the caller with the answer.
+ * Where what an invocation read through its resources comes from: each
+ * connection it read from with the resources (messages, files) that
+ * connection's connector named. It goes back to the caller with the
+ * answer.
  */
-export interface InvocationProvenance extends Provenance {
+export interface InvocationProvenance {
   readonly connections: readonly {
     readonly connectionId: string;
     readonly resources: readonly string[];
@@ -47,7 +46,6 @@ export const provenanceMaxResources = 1000;
  * answer.
  */
 export interface InvocationSources {
-  readonly note: (provenance: Provenance) => void;
   readonly snapshot: () => InvocationProvenance;
   /** Notes that data of connection `id`, from `resources`, reached it. */
   readonly noteConnection: (id: string, resources: readonly string[]) => void;
@@ -55,24 +53,11 @@ export interface InvocationSources {
 
 /** A new invocation's sources: nothing read yet. */
 export const invocationSources = (): InvocationSources => {
-  const collectionIds = new Set<Provenance["collectionIds"][number]>();
   const connections = new Map<string, Set<string>>();
   let resourceCount = 0;
   let truncated = false;
-  let sensitive = false;
-  let restricted = false;
   return {
-    note: (provenance) => {
-      for (const id of provenance.collectionIds) {
-        collectionIds.add(id);
-      }
-      sensitive ||= provenance.sensitive;
-      restricted ||= provenance.restricted;
-    },
     snapshot: () => ({
-      collectionIds: [...collectionIds].toSorted(),
-      sensitive,
-      restricted,
       connections: [...connections]
         .toSorted(([one], [other]) => one.localeCompare(other))
         .map(([connectionId, resources]) => ({

@@ -36,7 +36,7 @@ mockIdpWith(idp);
 
 describe("building Apps from a chat", { timeout: 120_000 }, () => {
   it("publishes nothing that fails its checks", async () => {
-    const { person, chat, grant } = await setUp(
+    const { person, chat } = await setUp(
       [
         codeStep(`export default async (self, env) => {
         ${findApp}
@@ -48,7 +48,6 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       "builder",
       true
     );
-    await grant();
 
     await chat.ask("Build an invoice desk");
 
@@ -106,7 +105,7 @@ export const titles = action({
       'import { noteFields } from "../values.ts";',
       'import { noteFields } from "../values.ts";\n\nexport const total: number = "seven";'
     );
-    const { person, chat, grant } = await setUp(
+    const { person, chat } = await setUp(
       [
         codeStep(`export default async (self, env) => {
         ${findApp}
@@ -126,7 +125,6 @@ export const titles = action({
       "builder",
       true
     );
-    await grant();
 
     await chat.ask("Build a notes App");
 
@@ -159,7 +157,7 @@ export const titles = action({
       ),
       "src/routes/index.tsx": `import { Badge } from "@grasp-os/ui/components/badge";\n${notesCode["src/routes/index.tsx"] ?? ""}`,
     };
-    const { chat, grant } = await setUp(
+    const { chat } = await setUp(
       [
         codeStep(`export default async (self, env) => {
         ${findApp}
@@ -184,7 +182,6 @@ export const titles = action({
       "builder",
       true
     );
-    await grant();
 
     await chat.ask("Build a notes App");
 
@@ -238,7 +235,7 @@ export const titles = action({
         "workflows/intake.json": "{}\n",
       }),
     };
-    const { chat, grant } = await setUp([
+    const { chat } = await setUp([
       codeStep(`export default async (self, env) => {
         ${ledger}
         const refusal = async (call) => {
@@ -261,7 +258,6 @@ export const titles = action({
       };`),
       says("Done."),
     ]);
-    await grant();
 
     await chat.ask("Add an intake workflow to the ledger");
 

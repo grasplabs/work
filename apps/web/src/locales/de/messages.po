@@ -1418,11 +1418,6 @@ msgstr "Eine Änderung gilt für Läufe, die danach starten: laufende Läufe beh
 
 #: src/apps/app-access-requests.tsx
 #: src/apps/draft-changes.tsx
-msgid "A collection"
-msgstr "Eine Sammlung"
-
-#: src/apps/app-access-requests.tsx
-#: src/apps/draft-changes.tsx
 msgid "A connection"
 msgstr "Eine Verbindung"
 
@@ -3875,10 +3870,6 @@ msgstr "Münzen"
 #: src/onboarding/interviews-progress.tsx
 msgid "colleagues talked"
 msgstr "Kolleginnen und Kollegen gesprochen"
-
-#: src/activity/pending.tsx
-msgid "Collection {collectionId}"
-msgstr "Sammlung {collectionId}"
 
 #: src/chat/composer-menu.tsx
 #: src/chat/mentions.tsx
@@ -15129,8 +15120,8 @@ msgid "Version {version} declares no binding to approve."
 msgstr "Version {version} deklariert keine Bindung zum Genehmigen."
 
 #: src/inbox/items.ts
-msgid "Version {version} of {name} is live, but nothing starts it until an admin approves what it reaches: each model, connection, store or collection it calls."
-msgstr "Version {version} von {name} ist live, aber nichts startet sie, bis ein Admin freigibt, worauf sie zugreift: jedes Modell, jede Verbindung, jeden Speicher und jede Sammlung, die sie aufruft."
+msgid "Version {version} of {name} is live, but nothing starts it until an admin approves what it reaches: each model and connection it calls, and the Brain."
+msgstr "Version {version} von {name} ist live, aber nichts startet sie, bis ein Admin freigibt, worauf sie zugreift: jedes Modell und jede Verbindung, die sie aufruft, und das Brain."
 
 #: src/brain/sources-page.tsx
 msgid "Version {version}, added {added}"

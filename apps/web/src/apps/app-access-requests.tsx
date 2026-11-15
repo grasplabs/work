@@ -138,9 +138,6 @@ const ObjectName = ({
     const found = read.connections.find(({ id }) => id === object.connectionId);
     return found === undefined ? <Trans>A connection</Trans> : found.label;
   }
-  if (object.type === "collection") {
-    return <Trans>A collection</Trans>;
-  }
   return <span className="font-mono text-xs">{object.type}</span>;
 };
 

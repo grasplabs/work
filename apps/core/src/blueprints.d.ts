@@ -1,6 +1,5 @@
 // The built-in blueprints, generated into dist/ by build-blueprints.ts.
 
-import type { DeclaredCollection } from "@grasp-os/shared/knowledge";
 import type {
   BlueprintWorkflow,
   DeclaredPermission,
@@ -13,8 +12,6 @@ export interface BuiltinBlueprint {
   id: string;
   name: string;
   description: string;
-  /** The collections it keeps records in, which the install creates. */
-  collections: readonly DeclaredCollection[];
   /** What each App created from it asks for, each waiting for an admin. */
   permissions: readonly DeclaredPermission[];
   /**

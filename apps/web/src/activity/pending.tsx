@@ -101,8 +101,8 @@ export const subjectOf = (
 };
 
 /**
- * What it asks for: a workflow by its name, connections and collections
- * by ID, as they have no names here.
+ * What it asks for: a workflow by its name, a connection by ID, as it has
+ * no name here.
  */
 export const objectOf = (
   { object, actions, workflowNames, functionName }: Permission,
@@ -113,10 +113,6 @@ export const objectOf = (
     return resource === undefined
       ? i18n._(msg`Connection ${connectionId}`)
       : i18n._(msg`Connection ${connectionId}, ${resource}`);
-  }
-  if (object.type === "collection") {
-    const { collectionId } = object;
-    return i18n._(msg`Collection ${collectionId}`);
   }
   if (object.type === "app" && object.function !== undefined) {
     // A workflow's permission on one function, by its ID, named by its

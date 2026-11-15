@@ -1,30 +1,23 @@
-import { collections } from "@grasp-os/brain/schema";
 import type { ConnectionOwner } from "@grasp-os/shared/connect";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Role } from "@grasp-os/shared/roles";
-import { and, eq, inArray, isNotNull, ne, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { storedTeamsOf, unreadableTeam } from "./brain-grant-teams.ts";
 import { connectionOwnersOf } from "./connections.ts";
-import {
-  apps as appsTable,
-  collectionTeams,
-  permissions,
-} from "./db/core/schema.ts";
+import { apps as appsTable, permissions } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
-import { mayRead } from "./knowledge/access.ts";
-import type { CollectionAccess, PersonAccess } from "./knowledge/access.ts";
 
 // Provenance on sharing. An App keeps what it reads (in its storage, its
 // workflows' state, what its pages show), so sharing it must not reach
 // anyone who couldn't read that where it comes from.
 //
-// What an App may have read: every connection it was ever granted, every
-// collection it was ever granted to read, and every team a grant to read
+// What an App may have read: every connection it was ever granted, and
+// every team a grant to read
 // the Brain ever named (only its members may read what it recalled of
 // one: brain-recall.ts); and, through grants on
 // independent workflows, what those workflows may have read, and what
@@ -41,22 +34,18 @@ import type { CollectionAccess, PersonAccess } from "./knowledge/access.ts";
 // App the graph reaches that has no row fails closed, as an unresolved
 // source (`app:<id>`), and so does a graph past the caps below (`app:*`).
 // Who may read each: a personal connection (such as a mailbox) only its
-// owner; a shared connection everyone in the organization, who may all use it; a
-// collection whoever Knowledge lets read it now (`mayRead`, the rule of
-// knowledge/access.ts), so a collection whose access narrows reaches fewer
-// people from then on. A granted source that doesn't resolve (connect
-// doesn't know the connection, Knowledge has no such collection) fails
-// closed: nobody reads it but the App's owner and admins, who aren't
-// checked, since what the App read of it can't be placed. So does the
-// Apps collection: it is open to everyone, but Knowledge shows each entry
-// only to whoever may open its App, so its access says nothing of what
-// the App read there. No App is given it now (permissions.ts
-// `requireCollection`); one granted it before counts it unresolved.
+// owner; a shared connection everyone in the organization, who may all use it.
+// A granted source that doesn't resolve (connect doesn't know the
+// connection) fails closed: nobody reads it but the App's owner and
+// admins, who aren't checked, since what the App read of it can't be
+// placed. So does a Knowledge collection an App was granted before the
+// Brain replaced Knowledge (`collection:<id>`): the App may hold what it
+// read there, and nothing can say who may read that now.
 //
 // An App's code is treated as free of provenance, but for its AGENTS.md:
 // that is written from what the App's agents read, and is read only by
-// those who may open the App (its builders, and its users through the
-// Apps collection), so it is under the App's sources like its data. Any
+// those who may open the App, so it is under the App's sources like its
+// data. Any
 // other file is taken to hold no data, which nothing checks: builders
 // must not put data into code. A blueprint copy (app-blueprints.ts)
 // doesn't inherit its source's provenance: it has no sources until an
@@ -77,15 +66,12 @@ import type { CollectionAccess, PersonAccess } from "./knowledge/access.ts";
 // read.
 
 /** A source as the audit log and refusals name it. */
-const sourceId = (
-  type: "connection" | "collection" | "app" | "brain",
-  id: string
-): string => `${type}:${id}`;
+const sourceId = (type: "connection" | "app" | "brain", id: string): string =>
+  `${type}:${id}`;
 
 /** What an App may have read, as `sourcesOf` finds it. */
 export interface AppSources {
   connections: ConnectionOwner[];
-  collections: (CollectionAccess & { id: string })[];
   /**
    * The teams a grant to read the Brain ever named (GRA-1842): what it
    * recalled of each, only that team's members may read.
@@ -95,8 +81,13 @@ export interface AppSources {
   unresolved: string[];
 }
 
-/** A person, as provenance decides what they read: Knowledge's access. */
-export type Reader = PersonAccess;
+/** A person, as provenance decides what they read. */
+export interface Reader {
+  userId: string;
+  teamIds: string[];
+  /** An admin manages every App whatever it read (app-members.ts). */
+  admin: boolean;
+}
 
 /** A `Reader` from a role and teams, as the callers have them. */
 export const readerOf = (
@@ -140,38 +131,6 @@ const workflowNode = (id: string): string => `${workflowPrefix}${id}`;
 /** An App's ID as a node: one that looks like a workflow's is no App. */
 const appNode = (id: string): string =>
   id.startsWith(workflowPrefix) ? `invalid:${id}` : id;
-
-/**
- * Who may read each of the collections `ids` now, as `mayRead` needs it.
- * The Apps collection is left out, so it doesn't resolve: its readers are
- * decided per entry, not by its access, so what an App granted it (before
- * permissions.ts refused that) read there can't be placed.
- */
-const accessOf = async (
-  env: Env,
-  ids: string[]
-): Promise<AppSources["collections"]> => {
-  const [rows, shared] = await Promise.all([
-    drizzle(env.KNOWLEDGE)
-      .select({
-        id: collections.id,
-        access: collections.access,
-        owner: collections.owner,
-      })
-      .from(collections)
-      .where(and(inList(collections.id, ids), ne(collections.source, "apps"))),
-    drizzle(env.DB)
-      .select()
-      .from(collectionTeams)
-      .where(inList(collectionTeams.collectionId, ids)),
-  ]);
-  return rows.map((row) => ({
-    ...row,
-    teamIds: shared
-      .filter(({ collectionId }) => collectionId === row.id)
-      .map(({ teamId }) => teamId),
-  }));
-};
 
 /** Adds `value` to the set of `at` in `map`. */
 const note = (
@@ -490,9 +449,8 @@ const reachedThroughCalls = async (
  * The sources each of the Apps `apps` may have read, as they are now, and
  * those of the Apps whose data they may hold through calls between Apps
  * (`reachedThroughCalls`), in a few queries whatever their number: those
- * that follow the calls, one for all their permissions, one series of
- * pages to connect for all their connections, and one Knowledge batch for
- * all their collections.
+ * that follow the calls, one for all their permissions, and one series of
+ * pages to connect for all their connections.
  */
 export const sourcesOfApps = async (
   env: Env,
@@ -513,7 +471,10 @@ export const sourcesOfApps = async (
   const sourceGrant = and(
     isNotNull(permissions.grantedAt),
     or(
-      inArray(permissions.objectType, ["connection", "collection"]),
+      eq(permissions.objectType, "connection"),
+      // A Knowledge collection, a kind the platform no longer serves:
+      // unresolved (above), whatever its actions.
+      sql`${permissions.objectType} = 'collection'`,
       // A grant to read the Brain that names teams (only an App's does).
       and(eq(permissions.objectType, "platform"), isNotNull(permissions.teams))
     )
@@ -527,7 +488,6 @@ export const sourcesOfApps = async (
             app: permissions.subjectId,
             object: permissions.objectType,
             id: permissions.objectId,
-            actions: permissions.actions,
             teams: permissions.teams,
           })
           .from(permissions)
@@ -546,26 +506,21 @@ export const sourcesOfApps = async (
               sourceGrant
             )
           );
-  /** What one node was granted: connections, collections and teams. */
+  /** What one node was granted: connections, teams, and what can't be placed. */
   interface Granted {
     connected: Set<string>;
-    read: Set<string>;
+    unplaced: Set<string>;
     teams: Set<string>;
   }
   const own = new Map<string, Granted>(
     all.map((node) => [
       node,
-      { connected: new Set(), read: new Set(), teams: new Set() },
+      { connected: new Set(), unplaced: new Set(), teams: new Set() },
     ])
   );
   const add = (
     of: Granted | undefined,
-    {
-      object,
-      id,
-      actions,
-      teams,
-    }: { object: string; id: string; actions: string; teams: string | null }
+    { object, id, teams }: { object: string; id: string; teams: string | null }
   ): void => {
     if (object === "platform") {
       for (const team of teamsIn(teams)) {
@@ -573,8 +528,8 @@ export const sourcesOfApps = async (
       }
     } else if (object === "connection") {
       of?.connected.add(id);
-    } else if (actionsSchema.parse(JSON.parse(actions)).includes("read")) {
-      of?.read.add(id);
+    } else {
+      of?.unplaced.add(`${object}:${id}`);
     }
   };
   for (const row of rows) {
@@ -592,7 +547,7 @@ export const sourcesOfApps = async (
           connected: new Set(
             reached.flatMap((of) => [...(of?.connected ?? [])])
           ),
-          read: new Set(reached.flatMap((of) => [...(of?.read ?? [])])),
+          unplaced: new Set(reached.flatMap((of) => [...(of?.unplaced ?? [])])),
           teams: [...new Set(reached.flatMap((of) => [...(of?.teams ?? [])]))],
         },
       ];
@@ -603,22 +558,17 @@ export const sourcesOfApps = async (
       [...granted.values()].flatMap(({ connected }) => [...connected])
     ),
   ];
-  const collectionIds = [
-    ...new Set([...granted.values()].flatMap(({ read }) => [...read])),
-  ];
-  const [owners, readable] = await Promise.all([
-    connectionIds.length === 0 ? [] : connectionOwnersOf(env, connectionIds),
-    collectionIds.length === 0 ? [] : accessOf(env, collectionIds),
-  ]);
+  const owners =
+    connectionIds.length === 0
+      ? []
+      : await connectionOwnersOf(env, connectionIds);
   const ownerOf = new Map(owners.map((owner) => [owner.id, owner]));
-  const accessById = new Map(readable.map((access) => [access.id, access]));
   return new Map(
-    [...granted].map(([app, { connected, read, teams }]) => {
+    [...granted].map(([app, { connected, unplaced, teams }]) => {
       const sources: AppSources = {
         connections: [],
-        collections: [],
         brainTeams: teams,
-        unresolved: [...(reach.get(app)?.unresolved ?? [])],
+        unresolved: [...(reach.get(app)?.unresolved ?? []), ...unplaced],
       };
       for (const id of connected) {
         const owner = ownerOf.get(id);
@@ -626,14 +576,6 @@ export const sourcesOfApps = async (
           sources.unresolved.push(sourceId("connection", id));
         } else {
           sources.connections.push(owner);
-        }
-      }
-      for (const id of read) {
-        const access = accessById.get(id);
-        if (access === undefined) {
-          sources.unresolved.push(sourceId("collection", id));
-        } else {
-          sources.collections.push(access);
         }
       }
       return [app, sources];
@@ -675,7 +617,6 @@ export const sourcesOf = async (env: Env, app: AppId): Promise<AppSources> => {
   return (
     sources.get(app) ?? {
       connections: [],
-      collections: [],
       brainTeams: [],
       unresolved: [],
     }
@@ -884,13 +825,12 @@ export const mayReadBrainTeamsOf = async (
 /** Whether an App has read from anything at all. */
 export const hasSources = (sources: AppSources): boolean =>
   sources.connections.length > 0 ||
-  sources.collections.length > 0 ||
   sources.brainTeams.length > 0 ||
   sources.unresolved.length > 0;
 
 /**
  * The sources in `sources` that `reader` can't read, as
- * `connection:<id>`, `collection:<id>` and `brain:<team id>`; none when
+ * `connection:<id>` and `brain:<team id>`, and those unresolved; none when
  * they may read all. A team's content in the Brain is its members' alone,
  * admins' too (brain-next.ts reads as a person's teams).
  */
@@ -899,9 +839,6 @@ export const unreadableBy = (sources: AppSources, reader: Reader): string[] => [
     ownerUserId === null || ownerUserId === reader.userId
       ? []
       : [sourceId("connection", id)]
-  ),
-  ...sources.collections.flatMap((collection) =>
-    mayRead(reader, collection) ? [] : [sourceId("collection", collection.id)]
   ),
   ...unreadableTeamsBy(sources.brainTeams, reader),
   ...sources.unresolved,

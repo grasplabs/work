@@ -185,7 +185,7 @@ const restrictedEntry = (
 
 /**
  * Puts `context` in restricted mode, for good, after reading from
- * `sources` (collection IDs); audited when it wasn't yet. Throws
+ * `sources` (what it read, by ID); audited when it wasn't yet. Throws
  * `permission.context_invalid` as `restrictedState` does.
  *
  * A run of an independent workflow never enters it after it starts: it
