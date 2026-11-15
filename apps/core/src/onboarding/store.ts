@@ -3410,7 +3410,7 @@ export class Onboarding extends DurableObject<Env> {
    * with their link once it is out: for the company's admin to send
    * themselves. A link is new to them until they take it.
    */
-  async linksToSend(): Promise<LinkToSend[]> {
+  async linksToSend(): Promise<Omit<LinkToSend, "signsIn">[]> {
     const roster = this.#roster();
     if (roster === null) {
       return [];

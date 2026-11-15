@@ -13,6 +13,7 @@ const link = (
   name,
   team: "Sales",
   email: "",
+  signsIn: false,
   path: out ? `/interview#secret-${person}` : null,
   fresh,
   mailFailed: false,

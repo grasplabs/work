@@ -34,6 +34,7 @@ const link = (person: string, mailFailed: boolean): LinkToSend => ({
   name: person === "oli" ? "Oli" : "Ona",
   team: "Ops",
   email: `${person}@acme.test`,
+  signsIn: true,
   path: `/interview#${person}`,
   fresh: false,
   mailFailed,

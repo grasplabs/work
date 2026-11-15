@@ -341,6 +341,12 @@ export interface LinkToSend {
   team: string;
   /** Empty when they have none. */
   email: string;
+  /**
+   * Their address is one the company's sign-in takes (its domains): they
+   * sign in with it to open their link (GRA-1790). Without one, they can't
+   * be interviewed until the list has one.
+   */
+  signsIn: boolean;
   /** The link's path, its secret after the `#`; null while it isn't out. */
   path: string | null;
   /** Out, and not taken by the admin since: new since they last took links. */

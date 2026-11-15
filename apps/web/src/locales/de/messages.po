@@ -1152,6 +1152,10 @@ msgid "{team} · new"
 msgstr "{team} · neu"
 
 #: src/onboarding/interviews-progress.tsx
+msgid "{team} · no address your sign-in takes, so no interview"
+msgstr "{team} · keine Adresse, die Ihre Anmeldung annimmt, also kein Interview"
+
+#: src/onboarding/interviews-progress.tsx
 msgid "{team} · not out yet"
 msgstr "{team} · noch nicht verfügbar"
 
@@ -3387,10 +3391,6 @@ msgstr "Karte"
 msgid "Carry on now"
 msgstr "Jetzt weitermachen"
 
-#: src/routes/interview.tsx
-msgid "Carry on there. Lost that device? Ask whoever sent you the link for a new start."
-msgstr "Machen Sie dort weiter. Haben Sie das Gerät nicht mehr? Bitten Sie die Person, die Ihnen den Link geschickt hat, um einen Neustart."
-
 #: src/settings/audit-chain.tsx
 msgid "Chain check"
 msgstr "Kettenprüfung"
@@ -5305,8 +5305,8 @@ msgid "Everyone from Grasp is signed out at once, and nobody from Grasp can sign
 msgstr "Alle von Grasp werden sofort abgemeldet, und niemand von Grasp kann sich wieder anmelden, bis ein neues Zeitfenster geöffnet wird."
 
 #: src/onboarding/interviews-progress.tsx
-msgid "Everyone has a link of their own: whoever has it is them, so send each only to its owner. Links that are not out yet open on their day, or once their lead has talked."
-msgstr "Jede Person hat einen eigenen Link: Wer ihn hat, gilt als diese Person, senden Sie ihn also nur an sie. Links, die noch nicht verfügbar sind, öffnen sich an ihrem Tag oder sobald die Teamleitung gesprochen hat."
+msgid "Everyone has a link of their own. It opens only once they sign in with your company's sign-in, at the address on the list. Links that are not out yet open on their day, or once their lead has talked."
+msgstr "Jede Person hat einen eigenen Link. Er öffnet sich erst, wenn sie sich mit der Anmeldung Ihres Unternehmens anmeldet, mit der Adresse auf der Liste. Links, die noch nicht verschickt sind, öffnen sich an ihrem Tag oder sobald ihre Teamleitung gesprochen hat."
 
 #: src/drafts/sharing.tsx
 #: src/people/share-picker.tsx
@@ -5951,6 +5951,10 @@ msgstr "Aus Google Drive. Ich lese nur die Dateien, die Sie hinzufügen."
 msgid "From SharePoint or OneDrive. I read only the files you add."
 msgstr "Aus SharePoint oder OneDrive. Ich lese nur die Dateien, die Sie hinzufügen."
 
+#: src/brain/memories-page.tsx
+msgid "From what your team said, version {version}"
+msgstr "Aus dem, was Ihr Team gesagt hat, Version {version}"
+
 #: src/settings/audit-archive.tsx
 msgid "From when each event was recorded, archive included. After this, archived events are deleted."
 msgstr "Ab der Aufzeichnung jedes Ereignisses, Archiv eingeschlossen. Danach werden archivierte Ereignisse gelöscht."
@@ -5962,6 +5966,10 @@ msgstr "Aus Ihren Apps"
 #: src/onboarding/setup-steps.tsx
 msgid "From your HR or payroll system. Microsoft 365 or Google can be connected later, with us."
 msgstr "Aus Ihrem HR- oder Lohnsystem. Microsoft 365 oder Google lässt sich später mit uns verbinden."
+
+#: src/brain/memories-page.tsx
+msgid "From your interview, version {version}"
+msgstr "Aus Ihrem Interview, Version {version}"
 
 #: src/settings/staff-access.tsx
 msgid "Full access"
@@ -6954,6 +6962,11 @@ msgstr "Integration"
 #: src/routes/_shell.integrations.index.tsx
 msgid "Integrations"
 msgstr "Integrationen"
+
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "Interview"
+msgstr "Interview"
 
 #. Something that has not happened yet, on a timeline
 #: src/brain/brain.ts
@@ -12404,6 +12417,10 @@ msgstr "Anmelden, um {name} jetzt zu verbinden"
 msgid "Sign in to Grasp"
 msgstr "Bei Grasp anmelden"
 
+#: src/routes/interview.tsx
+msgid "Sign in to open your interview"
+msgstr "Melden Sie sich an, um Ihr Interview zu öffnen"
+
 #: src/sign-in-options.tsx
 msgid "Sign in with {label}"
 msgstr "Mit {label} anmelden"
@@ -12488,6 +12505,10 @@ msgstr "E-Signatur"
 #: src/connections/connect-dialog.tsx
 msgid "Signing in happens at {app}. It takes about a minute."
 msgstr "Die Anmeldung erfolgt bei {app}. Sie dauert etwa eine Minute."
+
+#: src/routes/interview.tsx
+msgid "Signing in is recorded by your company's sign-in, as every sign-in is."
+msgstr "Die Anmeldung wird von der Anmeldung Ihres Unternehmens erfasst, wie jede Anmeldung."
 
 #: src/frame/person-menu.tsx
 msgid "Signing out didn't work"
@@ -13303,6 +13324,10 @@ msgstr "Danke. Ich habe unser Team gebeten, {asked} hinzuzufügen. Fügen Sie di
 #: src/onboarding/connect-steps.tsx
 msgid "Thank you. I’ve asked our team to connect {name}. For now, check who leads which team."
 msgstr "Danke. Ich habe unser Team gebeten, {name} zu verbinden. Prüfen Sie vorerst, wer welches Team leitet."
+
+#: src/routes/interview.tsx
+msgid "That account can't open this interview. Sign in with the work account your link was sent to."
+msgstr "Mit diesem Konto lässt sich dieses Interview nicht öffnen. Melden Sie sich mit dem Arbeitskonto an, an das Ihr Link geschickt wurde."
 
 #: src/sign-in-errors.ts
 msgid "That account isn't part of your organization."
@@ -14297,10 +14322,6 @@ msgstr "Der Text dieser Datei ist zu lang, als dass das Brain ihn behalten könn
 msgid "This interview can't be opened"
 msgstr "Dieses Gespräch lässt sich nicht öffnen"
 
-#: src/routes/interview.tsx
-msgid "This interview is open on another device"
-msgstr "Dieses Gespräch ist auf einem anderen Gerät geöffnet"
-
 #: src/interview/composer.tsx
 msgid "This interview went on in another window. You now see that one."
 msgstr "Dieses Gespräch ging in einem anderen Fenster weiter. Sie sehen jetzt dieses."
@@ -15020,6 +15041,10 @@ msgstr "Melden Sie sich mit dem Konto Ihrer Organisation an, um fortzufahren."
 #: src/onboarding/ai-step.tsx
 msgid "Use your own key"
 msgstr "Ihren eigenen Schlüssel nutzen"
+
+#: src/routes/interview.tsx
+msgid "Use your work account, the one your link was sent to."
+msgstr "Verwenden Sie Ihr Arbeitskonto, das, an das Ihr Link geschickt wurde."
 
 #: src/chat/thread.tsx
 msgid "Used {tool}"
@@ -15845,6 +15870,11 @@ msgstr "Was Sie gewählt haben"
 #: src/routes/_shell.settings.instructions.tsx
 msgid "What your chats with Grasp start with, and only yours: how you like to work, what you are responsible for."
 msgstr "Womit deine Chats mit Grasp beginnen, und nur deine: wie du gern arbeitest, wofür du verantwortlich bist."
+
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "What your team said"
+msgstr "Was Ihr Team gesagt hat"
 
 #: src/apps/app-workspace.tsx
 msgid "What your team sees"
