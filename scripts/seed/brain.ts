@@ -238,8 +238,11 @@ interface SkillSeed {
   by: PersonKey;
   name: string;
   text: string;
-  /** Shared with the company, and approved by this admin. */
-  sharedBy?: PersonKey;
+  /**
+   * Shared with the company: approved by `approvedBy`, or, without one,
+   * left waiting for an admin, so the admins' Inbox has a share to decide.
+   */
+  share?: { approvedBy?: PersonKey };
 }
 
 export const skills: SkillSeed[] = [
@@ -258,6 +261,7 @@ export const skills: SkillSeed[] = [
 4. After the third reminder without an answer, put the application on hold and call the client instead.
 `
     ),
+    share: {},
   },
   {
     by: "lisa",
@@ -274,7 +278,7 @@ export const skills: SkillSeed[] = [
 4. Offer compensation only up to €250; above that, ask compliance first.
 `
     ),
-    sharedBy: "sanne",
+    share: { approvedBy: "sanne" },
   },
 ];
 
@@ -362,8 +366,9 @@ const seedInstructions = async (
 /**
  * The skill, unless it is there already (the rule above), and only right
  * after the seed's own save: its share with the company, for the version
- * that save made, and the admin's approval of that share alone. One
- * deleted in the demo is skipped with a line, as its name is closed.
+ * that save made, and, where the seed names an admin, that admin's
+ * approval of that share alone. One deleted in the demo is skipped with a
+ * line, as its name is closed.
  */
 const seedSkill = async (
   sessionFor: (key: PersonKey) => Session,
@@ -389,16 +394,20 @@ const seedSkill = async (
     );
     return;
   }
-  if (seed.sharedBy === undefined) {
+  if (seed.share === undefined) {
     return;
   }
   const share = await own.share(saved.name, saved.version, "company");
-  await sessionFor(seed.sharedBy).api.skills.approve(share.id);
+  if (seed.share.approvedBy !== undefined) {
+    await sessionFor(seed.share.approvedBy).api.skills.approve(share.id);
+  }
 };
 
 /**
  * Fills the Brain as the company's people: their uploads, the instruction
- * files and the skills. Returns how many instruction files it wrote.
+ * files and the skills. Returns how many uploads it added and found, the
+ * names of those deleted in the demo, and how many instruction files it
+ * wrote.
  */
 export const seedBrain = async (
   sessionFor: (key: PersonKey) => Session,
@@ -406,10 +415,12 @@ export const seedBrain = async (
 ): Promise<{
   uploadsAdded: number;
   uploadsThere: number;
+  uploadsDeleted: Set<string>;
   instructionsWritten: number;
 }> => {
   let uploadsAdded = 0;
   let uploadsThere = 0;
+  const uploadsDeleted = new Set<string>();
   for (const upload of uploads) {
     // oxlint-disable-next-line no-await-in-loop -- one file at a time
     const outcome = await seedUpload(sessionFor(upload.by).api, upload, teams);
@@ -417,6 +428,8 @@ export const seedBrain = async (
       uploadsAdded += 1;
     } else if (outcome === "there") {
       uploadsThere += 1;
+    } else {
+      uploadsDeleted.add(upload.name);
     }
   }
   let instructionsWritten = 0;
@@ -430,7 +443,7 @@ export const seedBrain = async (
     // oxlint-disable-next-line no-await-in-loop -- one skill at a time
     await seedSkill(sessionFor, seed);
   }
-  return { uploadsAdded, uploadsThere, instructionsWritten };
+  return { uploadsAdded, uploadsThere, uploadsDeleted, instructionsWritten };
 };
 
 /**
@@ -458,7 +471,7 @@ export const confirmAnsweredBy = async (
       )
     ) {
       throw new Error(
-        `Recall as ${chat.by} doesn't find ${answeredBy} for "${question}"`
+        `Recall as ${chat.by} doesn't find ${answeredBy} for "${question}" in the chat "${chat.title}"`
       );
     }
   }

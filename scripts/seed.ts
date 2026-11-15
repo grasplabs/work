@@ -564,10 +564,13 @@ const seedOrganization = async (adminSession: Session): Promise<boolean> => {
 
 /**
  * The chats, each in its person's Workspace object; one whose answers name
- * uploads only once recall, as its person, finds each of them.
+ * uploads only once recall, as its person, finds each of them. One that
+ * names an upload deleted in the demo is skipped with a line: the seed
+ * leaves alone what a person removed.
  */
 const seedChats = async (
-  sessions: ReadonlyMap<PersonKey, Session>
+  sessions: ReadonlyMap<PersonKey, Session>,
+  uploadsDeleted: ReadonlySet<string>
 ): Promise<number> => {
   let created = 0;
   const now = Date.now();
@@ -576,6 +579,16 @@ const seedChats = async (
     // oxlint-disable-next-line no-await-in-loop -- one chat at a time
     const listed = await api.chats.list();
     if (listed.some(({ title }) => title === chat.title)) {
+      continue;
+    }
+    const deleted = chat.turns.find(
+      ({ answeredBy }) =>
+        answeredBy !== undefined && uploadsDeleted.has(answeredBy)
+    );
+    if (deleted !== undefined) {
+      console.info(
+        `Skipped the chat "${chat.title}" of ${chat.by}: ${deleted.answeredBy} was deleted in the demo`
+      );
       continue;
     }
     // oxlint-disable-next-line no-await-in-loop -- one chat at a time
@@ -613,10 +626,8 @@ const main = async (): Promise<void> => {
         : "The onboarding has its roster and plan already"
     );
 
-    const { uploadsAdded, uploadsThere, instructionsWritten } = await seedBrain(
-      (key) => sessionFor(sessions, key),
-      teams
-    );
+    const { uploadsAdded, uploadsThere, uploadsDeleted, instructionsWritten } =
+      await seedBrain((key) => sessionFor(sessions, key), teams);
     console.info(
       `The Brain: ${uploadsAdded} new uploads (${uploadsThere} there already), ${instructionsWritten} new instruction files`
     );
@@ -633,7 +644,7 @@ const main = async (): Promise<void> => {
       console.info(`App ${seed.name}: ${ran}`);
     }
 
-    const created = await seedChats(sessions);
+    const created = await seedChats(sessions, uploadsDeleted);
     console.info(`${created} new chats`);
     console.info(
       `Done. Sign in at http://localhost:5173 as ${admin.email} (${admin.name}), or as any of its members (people in scripts/seed/company.ts).`
