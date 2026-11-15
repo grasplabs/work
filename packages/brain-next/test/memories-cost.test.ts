@@ -284,6 +284,53 @@ describe("what reading memories costs", () => {
     expect(grown.map((rows) => flat(alone, rows))).toStrictEqual([true, true]);
   });
 
+  it("judges a restatement by one seek, however many memories of the same words its lineage holds about other entities", async () => {
+    const { stub, rowsReadBy } = await countedStore();
+    const group = `seen-${crypto.randomUUID()}`;
+    const reader = readerOf("reader", group);
+    const said = "works from Delft";
+    const { entities } = await add(
+      stub,
+      group,
+      [{ key: "c", kind: "customer", names: [word()] }],
+      [fact("c", said), fact("c", said)]
+    );
+    /** `count` memories of the same words, one an entity of its own, in the same lineage. */
+    const alike = async (count: number) => {
+      for (let start = 0; start < count; start += 100) {
+        const keys = Array.from({ length: 100 }, (_, index) => `a${index}`);
+        // oxlint-disable-next-line no-await-in-loop -- one add at a time
+        await add(
+          stub,
+          group,
+          keys.map((key) => ({ key, kind: "customer", names: [word()] })),
+          keys.map((key) => fact(key, said))
+        );
+      }
+    };
+    const ask = async () =>
+      await stub.readMemories({
+        entity: entities.c ?? "",
+        reader,
+        history: true,
+      });
+    const rows = [await rowsReadBy(ask)];
+    let have = 0;
+    for (const size of [1000, 5000]) {
+      // oxlint-disable-next-line no-await-in-loop -- one size at a time
+      await alike(size - have);
+      have = size;
+      // oxlint-disable-next-line no-await-in-loop -- one size at a time
+      rows.push(await rowsReadBy(ask));
+    }
+    const [alone, ...grown] = rows;
+
+    expect(grown.map((read) => flat(alone ?? 0, read))).toStrictEqual([
+      true,
+      true,
+    ]);
+  }, 120_000);
+
   it("walks from a named entity without reading other memories or names, readable or hidden", async () => {
     const { stub, rowsReadBy } = await countedStore();
     const group = `seen-${crypto.randomUUID()}`;

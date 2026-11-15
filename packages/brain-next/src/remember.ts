@@ -26,7 +26,7 @@ import {
 } from "./memories.ts";
 import { accessOfKey, readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
 import { isRestoring } from "./restoring.ts";
-import { indexMemoryWords } from "./words.ts";
+import { indexMemoryWords, sequenceOf } from "./words.ts";
 import type { WordMemo } from "./words.ts";
 
 // Adding memories (contract.ts `addMemories`): checked whole first, then
@@ -240,41 +240,74 @@ interface Into {
   shared: boolean;
   /** Each source the add names, by its SHA-256 as the erasure ledger names it. */
   subjects: ReadonlyMap<string, string>;
+  /** Each memory's restatement key, by its place in the add (`restatementOf`). */
+  restatements: readonly string[];
   learnedAt: number;
   memo: WordMemo;
 }
 
 /**
- * What one-value attributes compare a memory by, under its attribute's
- * `rule`: its `value` folded, or the id of the entity a relation relates
- * to (`object`); none without an attribute. For an add and a restore
- * (restore.ts) alike.
+ * What a memory filed under no attribute is a restatement of another by:
+ * the SHA-256 of its type, its value folded and its statement word for
+ * word as search folds words (words.ts `sequenceOf`), so the index holds a
+ * fixed length whatever the statement's. Hashed before a transaction.
+ */
+export const restatementOf = async ({
+  type,
+  value,
+  statement,
+}: {
+  type: string;
+  value: string | null;
+  statement: string;
+}): Promise<string> =>
+  await hashOf(
+    encoder.encode(
+      JSON.stringify([
+        type,
+        foldName(value ?? ""),
+        sequenceOf(statement).join(" "),
+      ])
+    )
+  );
+
+/**
+ * What a newer memory of its lineage must match to end it (memories.ts
+ * `newerSql`), under its attribute's `rule`. One-value attributes, and
+ * many-value ones per value, compare its `value` folded, or the id of the
+ * entity a relation relates to (`object`). A memory filed under no
+ * attribute is a restatement of another when it says the same of the
+ * same related entity (`restatementOf`, then the entity's id): so the
+ * same fact said again by its source or its writer ends what it said
+ * before, kept as history, and anything worded otherwise never does. For
+ * an add and a restore (restore.ts) alike.
  */
 export const valueKeyFor = (
   rule: AttributeRule | undefined,
-  value: string | null,
-  object: string | null
+  {
+    value,
+    object,
+    restatement,
+  }: { value: string | null; object: string | null; restatement: string }
 ): string | null => {
   if (rule === undefined) {
-    return null;
+    return `${restatement}:${object ?? ""}`;
   }
   return rule.relation === undefined ? foldName(value ?? "") : object;
 };
 
-/**
- * What one-value attributes compare a memory by: its value folded, or the
- * id of the entity a relation relates to; none without an attribute.
- */
+/** What a newer memory of its lineage must match to end `memory` (`valueKeyFor`). */
 const valueKeyOf = (
-  { ids }: Into,
+  { ids, restatements }: Into,
   memory: NewMemory,
-  plan: Planned
+  plan: Planned,
+  index: number
 ): string | null =>
-  valueKeyFor(
-    plan.rule,
-    memory.value ?? null,
-    plan.object === undefined ? null : (ids[plan.object] ?? null)
-  );
+  valueKeyFor(plan.rule, {
+    value: memory.value ?? null,
+    object: plan.object === undefined ? null : (ids[plan.object] ?? null),
+    restatement: restatements[index] ?? "",
+  });
 
 /** The SHA-256 of `source`, which the add hashed before its transaction. */
 const subjectOfSource = (
@@ -371,7 +404,7 @@ const writeMemory = (
       memory.attribute ?? null,
       plan.object === undefined ? null : (rows[plan.object] ?? null),
       memory.value ?? null,
-      valueKeyOf(into, memory, plan),
+      valueKeyOf(into, memory, plan, index),
       plan.rule?.values === "one" ? 1 : 0,
       memory.type,
       memory.statement,
@@ -430,6 +463,8 @@ export interface AddHashes {
   key: string;
   hash: string;
   subjects: ReadonlyMap<string, string>;
+  /** Each memory's restatement key (`restatementOf`), in the add's order. */
+  restatements: readonly string[];
 }
 
 /** `adding`'s change key, content and sources, hashed: what its write needs, made before it. */
@@ -458,7 +493,13 @@ export const hashesOf = async (adding: Adding): Promise<AddHashes> => {
       )
     )
   );
-  return { key, hash, subjects };
+  const restatements = await Promise.all(
+    adding.memories.map(
+      async ({ type, value, statement }) =>
+        await restatementOf({ type, value: value ?? null, statement })
+    )
+  );
+  return { key, hash, subjects, restatements };
 };
 
 /**
@@ -470,7 +511,7 @@ export const hashesOf = async (adding: Adding): Promise<AddHashes> => {
 export const writeAdd = (
   { storage, db, shared }: RememberStore,
   adding: Adding,
-  { key, hash, subjects }: AddHashes
+  { key, hash, subjects, restatements }: AddHashes
 ): AddedMemories => {
   const planned = planOf(adding);
   const { sql } = storage;
@@ -511,6 +552,7 @@ export const writeAdd = (
       readers,
       shared,
       subjects,
+      restatements,
       learnedAt: stampWrite(sql),
       memo: new Map(),
     };

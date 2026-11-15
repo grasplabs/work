@@ -2210,6 +2210,53 @@ describe("exports and restores", () => {
       });
     });
 
+    it("keys a memory filed under no attribute as it is restored, so a restatement after the restore merges with it (GRA-1752)", async () => {
+      await putBack(shared(), emptyShared);
+      const group = `team:${unique()}`;
+      const person = `person:${unique()}`;
+      const reader = readerOf(person, [group]);
+      const restated: NewMemory = {
+        about: "c",
+        type: "fact",
+        statement: "Acme works from Delft.",
+        speaker: { kind: "system" },
+        basis: { kind: "writer", writer: person },
+      };
+      const before = await shared().addMemories({
+        change: "before",
+        access: team(group),
+        entities: [customer()],
+        memories: [restated],
+      });
+
+      await exportedAndRestored();
+      const entity = before.entities.c ?? "";
+      const after = await shared().addMemories({
+        change: "after",
+        access: team(group),
+        reader,
+        entities: [customer({ id: entity, names: [] })],
+        memories: [restated],
+      });
+      const { memories } = await shared().readMemories({
+        entity,
+        reader,
+        history: true,
+      });
+      const stateOf = (id: string | undefined) => {
+        const memory = memories.find((read) => read.id === id);
+        if (memory === undefined) {
+          return "unread";
+        }
+        return memory.endedAt === null ? "current" : "ended";
+      };
+
+      expect({
+        restored: stateOf(before.memories[0]),
+        restatement: stateOf(after.memories[0]),
+      }).toStrictEqual({ restored: "ended", restatement: "current" });
+    });
+
     it("leaves out a memory drawn from a source erased after the export was made: not in the store, and in no file left in the bucket (threats 2, 3)", async () => {
       await putBack(shared(), emptyShared);
       const group = `team:${unique()}`;
