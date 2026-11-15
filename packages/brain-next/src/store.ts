@@ -205,7 +205,7 @@ import {
 } from "./recall-counts.ts";
 import { find, findPassages, recall } from "./recall.ts";
 import { addMemories } from "./remember.ts";
-import { isRemoved, removeSource } from "./removal.ts";
+import { isRemoved, removeSources } from "./removal.ts";
 import { checkRestore, restoreStatus, startRestore } from "./restore.ts";
 import { isRestoring } from "./restoring.ts";
 import {
@@ -1241,19 +1241,21 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   }
 
   /**
-   * Takes a source out of use for good, keeping its history (removal.ts):
-   * work under way on it is stopped (work.ts `stopWorkOn`). A person's own
-   * store erased whole holds nothing to remove: done.
+   * Takes sources out of use for good, keeping their history, in one
+   * transaction (removal.ts): work under way on them is stopped (work.ts
+   * `stopWorkOn`). A person's own store erased whole holds nothing to
+   * remove: done.
    */
-  async removeSource(request: SourceRemoval): Promise<void> {
-    const { source } = checked(sourceRemovalSchema, request);
+  async removeSources(request: SourceRemoval): Promise<void> {
+    const { sources } = checked(sourceRemovalSchema, request);
     if (await this.#erasedWhole()) {
       return;
     }
     await this.#changing(async () => {
       await this.#readyToWrite();
-      if (await removeSource(this.ctx.storage, source)) {
-        stopWorkOn(this.#work, [source]);
+      const removed = await removeSources(this.ctx.storage, sources);
+      if (removed.length > 0) {
+        stopWorkOn(this.#work, removed);
       }
     });
   }

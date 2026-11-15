@@ -1547,7 +1547,7 @@ const leavingWork: Record<string, (who: string) => Promise<void>> = {
   },
   // The full vectors of its current version's passages, once embedded,
   // go to the sweep (removal.ts).
-  removeSource: async (who) => {
+  removeSources: async (who) => {
     const kept = await add(own(who), "To remove", theirs(who));
     await tick(who);
     await inStore((sql) => {
@@ -1558,7 +1558,7 @@ const leavingWork: Record<string, (who: string) => Promise<void>> = {
       );
     }, who);
     await noAlarm(who);
-    await own(who).removeSource({ source: kept.source });
+    await own(who).removeSources({ sources: [kept.source] });
   },
   // A tick that deletes an erased version lets its file go to the sweep.
   work: async (who) => {

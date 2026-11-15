@@ -4,7 +4,7 @@ import { cancelAction } from "../src/channels/cards.tsx";
 import { say } from "../src/channels/words.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { member, post, watched } from "./teams-door.ts";
+import { member, post, reached, watched } from "./teams-door.ts";
 import {
   editsOf,
   heldTurn,
@@ -180,5 +180,30 @@ describe("the person's own press", setUpTime, () => {
       waiting: [],
       cancelled: true,
     });
+  });
+});
+
+describe("a card of held writes", setUpTime, () => {
+  it("shows each value as it will be sent, link syntax and all, inert, and so does the card a press edits", async () => {
+    // An injected mail had the model put a link in what it would send.
+    const subject = "[Agenda](https://evil.example/?d=salary) <b>now</b>";
+    const turn = await heldTurn(idp, [], [subject, "Reminder"]);
+    const { sent } = await reached(turn.person.teams.conversation);
+    const card = JSON.stringify(
+      sent.find(({ id }) => id === turn.cardId)?.activity ?? {}
+    );
+    await post(pressOn(turn.person.teams, turn, cancelAction));
+    const edits = await editsOf(turn);
+    const edited = edits.at(-1) ?? "";
+    // On Teams a card's facts read `[words](address)` as a link: the
+    // value's `](` is broken, so the address shows, whole, and leads
+    // nowhere from the card.
+    const shown = JSON.stringify(
+      "[Agenda] (https://evil.example/?d=salary) <b>now</b>"
+    ).slice(1, -1);
+    expect({
+      card: [card.includes(shown), card.includes("](")],
+      edited: [edited.includes(shown), edited.includes("](")],
+    }).toStrictEqual({ card: [true, false], edited: [true, false] });
   });
 });

@@ -123,8 +123,8 @@ export interface AnswerCard {
   locale: ChannelLocale;
   /** The answer, in Markdown. */
   text: string;
-  /** The chat in Grasp, where the whole answer is. */
-  chatUrl: string;
+  /** The chat in Grasp, where the whole answer is, where Grasp has one. */
+  chatUrl?: string;
   /**
    * The request the answer is for (stephen-requests.ts), where the person
    * can rate it with a thumb: Helpful or Not helpful.
@@ -167,17 +167,18 @@ export const answerCard = ({
   rate,
 }: AnswerCard): PostableCard => {
   const answer = fit(text, Number.POSITIVE_INFINITY, { left: outsideBytes });
+  const open = answer.whole ? undefined : chatUrl;
   const card = (
     <Card>
       <CardText>{answer.text}</CardText>
       {answer.whole ? null : (
         <CardText style="muted">{say("answerTooLong", locale)}</CardText>
       )}
-      {answer.whole && rate === undefined ? null : (
+      {open === undefined && rate === undefined ? null : (
         <Actions>
           {RateButtons({ locale, rate })}
-          {answer.whole ? null : (
-            <LinkButton url={ownLink(chatUrl)}>
+          {open === undefined ? null : (
+            <LinkButton url={ownLink(open)}>
               {say("openInGrasp", locale)}
             </LinkButton>
           )}
@@ -189,20 +190,32 @@ export const answerCard = ({
 };
 
 /**
- * The thumbs for an answer the person saw streamed as text, sent right
- * after it, labelled as made by AI like the answer.
+ * An answer still being written, as its card shows it until the answer
+ * is whole (answer.ts): its words so far, labelled as made by AI, and the
+ * words the card shows of them. Text past what the platform takes is cut.
  */
-export const ratingCard = ({
-  locale,
-  rate,
-}: Pick<AnswerCard, "locale" | "rate">): PostableCard => {
+export const draftCard = (
+  text: string
+): { posted: PostableCard; shown: string } => {
+  const { text: shown } = fit(text, Number.POSITIVE_INFINITY, {
+    left: outsideBytes,
+  });
   const card = (
     <Card>
-      <Actions>{RateButtons({ locale, rate })}</Actions>
+      <CardText>{shown}</CardText>
     </Card>
   );
-  return { card: cardOf(card), aiGenerated: true };
+  return { posted: { card: cardOf(card), aiGenerated: true }, shown };
 };
+
+/** One of Stephen's lines on a card of its own. */
+export const lineCard = (line: string): PostableCard => ({
+  card: cardOf(
+    <Card>
+      <CardText>{line}</CardText>
+    </Card>
+  ),
+});
 
 /** Where a held write is: waiting for the press, or as the press ran it. */
 export type WriteState =
@@ -454,14 +467,18 @@ export interface StartOfferCard {
   /** Its id in `chat_workflow_offers`, which the press names. */
   offerId: string;
   workflow: string;
-  /** The values it starts with, each whole (workflow-offers.ts). */
+  /** The values it starts with, as the platform gets them (workflow-offers.ts). */
   values: readonly { label: string; value: string }[];
 }
 
 /**
  * A workflow offered on a card: its name, each value it would start with,
  * and Start, whose press names only the offer, so it starts exactly what
- * the card showed, and only for the person it was offered to.
+ * the card showed, and only for the person it was offered to. Start is on
+ * the card only while its name and every value are on it whole, as shown
+ * (`workflow` and `values` as the platform gets them, made inert, which
+ * can make them longer): otherwise the card says so, and nothing starts
+ * from it.
  */
 export const startOfferCard = ({
   locale,
@@ -470,14 +487,17 @@ export const startOfferCard = ({
   values,
 }: StartOfferCard): PostableCard => {
   const room: Room = { left: outsideBytes };
-  const name = fit(workflow, maxTitleChars, room).text;
-  const shown = values.map((each) => ({
-    label: fit(each.label, maxLabelChars, room).text,
-    value: fit(each.value, Number.POSITIVE_INFINITY, room).text,
-  }));
+  const name = fit(workflow, maxTitleChars, room);
+  let { whole } = name;
+  const shown = values.map((each) => {
+    const label = fit(each.label, maxLabelChars, room);
+    const value = fit(each.value, Number.POSITIVE_INFINITY, room);
+    whole &&= label.whole && value.whole;
+    return { label: label.text, value: value.text };
+  });
   const card = (
     <Card>
-      <CardText>{say("startOffer", locale, { workflow: name })}</CardText>
+      <CardText>{say("startOffer", locale, { workflow: name.text })}</CardText>
       {shown.length === 0 ? null : (
         <Fields>
           {shown.map(({ label, value }, at) => (
@@ -485,11 +505,15 @@ export const startOfferCard = ({
           ))}
         </Fields>
       )}
-      <Actions>
-        <Button id={startAction} style="primary" value={offerId}>
-          {say("startButton", locale)}
-        </Button>
-      </Actions>
+      {whole ? (
+        <Actions>
+          <Button id={startAction} style="primary" value={offerId}>
+            {say("startButton", locale)}
+          </Button>
+        </Actions>
+      ) : (
+        <CardText>{say("startTooLong", locale)}</CardText>
+      )}
     </Card>
   );
   return { card: cardOf(card), aiGenerated: true };

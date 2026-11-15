@@ -29,8 +29,6 @@ export const botConnectorFake = (bot: {
     id?: string;
     editOf?: string;
   }[] = [];
-  /** Conversations where Teams refuses a streamed message. */
-  const unstreamed = new Set<string>();
   /**
    * Every roster read, as `<conversation> <user id>`, or `<conversation> *`
    * for a page of the whole roster.
@@ -75,8 +73,7 @@ export const botConnectorFake = (bot: {
 
   /**
    * Takes a post in `conversation`, unless the bot was taken out of it
-   * (`uninstall`) or it is a streamed message where Teams refuses them
-   * (`refuseStreams`).
+   * (`uninstall`).
    */
   const post = (conversation: string, body: unknown): Response => {
     if (uninstalled.has(conversation)) {
@@ -87,13 +84,6 @@ export const botConnectorFake = (bot: {
             message: "The bot is not part of the conversation roster.",
           },
         },
-        { status: 403 }
-      );
-    }
-    const streamed = JSON.stringify(body).includes('"streamType":"streaming"');
-    if (streamed && unstreamed.has(conversation)) {
-      return Response.json(
-        { error: { code: "ContentStreamNotAllowed" } },
         { status: 403 }
       );
     }
@@ -116,12 +106,26 @@ export const botConnectorFake = (bot: {
     });
   };
 
-  /** An edit in `conversation` of the activity `editOf`. */
+  /** Edits to refuse in each conversation, as Teams throttling does (`refuseEdits`). */
+  const editsRefused = new Map<string, number>();
+
+  /**
+   * An edit in `conversation` of the activity `editOf`, unless Teams is to
+   * refuse it as too many requests (`refuseEdits`).
+   */
   const edit = (
     conversation: string,
     editOf: string,
     body: unknown
   ): Response => {
+    const refused = editsRefused.get(conversation) ?? 0;
+    if (refused > 0) {
+      editsRefused.set(conversation, refused - 1);
+      return Response.json(
+        { error: { code: "TooManyRequests" } },
+        { status: 429, headers: { "retry-after": "0" } }
+      );
+    }
     posted.push({ conversation, activity: body, editOf });
     return Response.json({ id: editOf });
   };
@@ -175,9 +179,9 @@ export const botConnectorFake = (bot: {
   return {
     posted,
     asked,
-    /** Teams refuses streamed messages in `conversation` from now on. */
-    refuseStreams: (conversation: string) => {
-      unstreamed.add(conversation);
+    /** Teams refuses the next `count` edits in `conversation`. */
+    refuseEdits: (conversation: string, count: number) => {
+      editsRefused.set(conversation, count);
     },
     /** Removes the bot from `conversation`, as uninstalling its app does. */
     uninstall: (conversation: string) => {

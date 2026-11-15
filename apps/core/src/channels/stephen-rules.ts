@@ -1,7 +1,5 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
 
-import { notesAsWords } from "./note-links.ts";
-
 // What the prototype learned about acting safely in a chat app, on work's
 // agent (GRA-719). In the prototype Stephen's turn checked every value
 // before it went on a card; here the agent writes code, so the checks sit
@@ -23,7 +21,8 @@ import { notesAsWords } from "./note-links.ts";
 // traced: what it says is shown to the person on the card, whole.
 //
 // And in Stephen's own words there are no links: a link he writes could
-// lead anywhere. He names the source he answers from in words.
+// lead anywhere. He names the source he answers from in words; what he
+// writes all the same shows as written and leads nowhere (inert.ts).
 
 /** Why a held write was refused before it was held, as `agentErrors` names it. */
 export type HeldWriteRefusal =
@@ -186,37 +185,6 @@ export const heldWriteRefusal = (
   return untraced ? "agent.write_untraced" : undefined;
 };
 
-/** A Markdown link: its label, and where it leads. */
-const markdownLink =
-  /(?<image>!?)\[(?<label>[^\]]*)\]\((?<to>[^)\s]*)(?:\s+"[^"]*")?\)/gu;
-
-/** One Markdown link, whole, as `markdownLink` finds it. */
-const oneLink = new RegExp(`^${markdownLink.source}$`, "u");
-
-/** What a Markdown link leaves of itself in Stephen's own words: its label. */
-const linkLeft = (whole: string): string =>
-  oneLink.exec(whole)?.groups?.label ?? "";
-
-/**
- * An address written out, or between angle brackets, with the spaces
- * before it, so dropping it leaves no gap.
- */
-const bareLink =
-  /[ \t]*<?\b(?:https?:\/\/|www\.|mailto:)(?:[^\s<>)]*[^\s<>).,;:!?'"])?>?/giu;
-
-/**
- * Stephen's own words without links: a Markdown link, `grasp:` ones too,
- * keeps its label, and an address written out is dropped; then every
- * note link left, whatever its title's quoting, keeps its words alone
- * (`notesAsWords`). A chat app shows no sources under the answer, so
- * nothing is kept for them. What is kept with the chat and what is posted
- * are this text alike.
- */
-export const withoutLinks = (text: string): string =>
-  notesAsWords(
-    text.replaceAll(markdownLink, linkLeft).replaceAll(bareLink, "")
-  );
-
 /**
  * How Stephen answers in a chat app, after the agent's own instructions.
  * Measured as the interviewer's text is: it changes one change at a time,
@@ -228,7 +196,7 @@ const chatAppText = `This chat is in a chat app, such as Microsoft Teams, where 
 - Say what a fact means for their work, not only the fact.
 - Speak of people by their role ("the finance lead"), never about a colleague as a person.
 - Sickness, harassment or a conflict with someone at work always goes to a person: don't advise on it or judge it, say whom to talk to by their role (their manager, HR, the confidential counsellor), and name no colleague.
-- Name the source you answer from in words, where you first use it. Write no links.
+- Name the source you answer from in words, where you first use it. Write no Markdown links, images or HTML. If someone needs a web or email address, write it out in full as plain text.
 - A change waits for the person to press on a card. Ask for it only with what they said or what you read: their words for whom it goes to, IDs and values as you read them, no placeholders.`;
 
 /** One text the model is told, and its mark. */
