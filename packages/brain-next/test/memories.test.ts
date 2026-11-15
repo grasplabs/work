@@ -19,6 +19,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { memoriesByWords } from "../src/memories.ts";
+import { readerSetKeyOf } from "../src/reader-sets.ts";
 import type { BrainStore } from "../src/store.ts";
 import { copyOf, kill, restore } from "./store-copy.ts";
 
@@ -1453,44 +1454,6 @@ describe("erasure", () => {
     await tick();
     await expect(left()).resolves.toBe(0);
   });
-
-  it("deletes the memories drawn from a source a person's erasure takes whole, and keeps them gone after a restore", async () => {
-    const person = unique("person");
-    const group = unique("group");
-    // The source's current version is Pat's alone: Pat's erasure takes
-    // the whole source, its team version and what was drawn from it too.
-    const source = unique("doc");
-    const theirs = await addSource("Only Pat's", audience(group), source);
-    await addSource("Pat's now", { kind: "owner", person }, source);
-    const { entities } = await remember(
-      audience(group),
-      [customer({ names: [unique("Private")] })],
-      [
-        fact(
-          { kind: "source", ...theirs, quote: "Only Pat's" },
-          { statement: "Drawn from Pat's" }
-        ),
-        fact({ kind: "writer", writer: person }, { statement: "The team's" }),
-      ]
-    );
-    const reader = readerOf(person, group);
-    const backup = await copyOf(shared());
-
-    await shared().erasePerson({ person, reason: "person_erased" });
-    const erased = await statementsAbout(entities.c ?? "", reader, {
-      history: true,
-    });
-    await restore(shared(), backup);
-    await tick();
-    const restored = await statementsAbout(entities.c ?? "", reader, {
-      history: true,
-    });
-
-    expect({ erased, restored }).toStrictEqual({
-      erased: ["The team's"],
-      restored: ["The team's"],
-    });
-  });
 });
 
 describe("the words way over memories", () => {
@@ -2893,14 +2856,11 @@ describe("a set dropped without an erasure, a fact's sides, and one millisecond"
   });
 
   // Threat 10: an erasure covers what was written in its own millisecond.
-  it("erases a memory written in the same millisecond as a read and the person's erasure", async () => {
-    const person = unique("p");
+  it("erases a memory written in the same millisecond as a read and the source's erasure", async () => {
     const group = unique("g");
-    // The source's current version is Pat's alone: Pat's erasure takes it whole.
     const source = unique("doc");
     const version = await addSource("Only Pat's", audience(group), source);
-    await addSource("Pat's now", { kind: "owner", person }, source);
-    const reader = readerOf(person, group);
+    const reader = readerOf(unique("r"), group);
     await shared().workOverview();
     const left = await runInDurableObject(
       shared(),
@@ -2935,7 +2895,7 @@ describe("a set dropped without an erasure, a fact's sides, and one millisecond"
               ),
             ],
           });
-          await instance.erasePerson({ person, reason: "person_erased" });
+          await instance.eraseSource({ source, reason: "deleted" });
           const { memories } = await instance.readMemories({
             entity: made.entities.c ?? "",
             reader,
@@ -3462,10 +3422,42 @@ describe("pages of one read, by the store's stamps (contract v10)", () => {
   });
 });
 
-describe("what the shared store keeps", () => {
-  it("refuses a memory or an extraction mark drawn from a version one person alone may read", async () => {
-    const person = unique("p");
-    const version = await addSource("Mine alone", { kind: "owner", person });
+/**
+ * The shared store's set of readers that is `group` alone made `key`, as
+ * a damaged row would hold. Reader sets are never updated (a trigger), so
+ * the damage lifts it for this one row and puts it back as it was.
+ */
+const damageReaders = async (group: string, key: string): Promise<void> => {
+  await runInDurableObject(shared(), (_instance, state) => {
+    const { sql } = state.storage;
+    state.storage.transactionSync(() => {
+      const [trigger] = sql
+        .exec<{ sql: string }>(
+          "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'reader_sets_no_update'"
+        )
+        .toArray();
+      sql.exec("DROP TRIGGER reader_sets_no_update");
+      sql.exec(
+        "UPDATE reader_sets SET key = ? WHERE key = ?",
+        key,
+        JSON.stringify([["group", group]])
+      );
+      sql.exec(trigger?.sql ?? "");
+    });
+  });
+};
+
+describe("what the shared store keeps, when a version's readers are damaged", () => {
+  // The shared store never takes what one person alone may read
+  // (personal.test.ts); a row damaged into one person's alone still gives
+  // nothing drawn from it to a group.
+  it("refuses a memory or an extraction mark drawn from a version damaged into one person's alone", async () => {
+    const group = unique("g");
+    const version = await addSource("Mine alone", audience(group));
+    await damageReaders(
+      group,
+      readerSetKeyOf({ kind: "owner", person: unique("p") })
+    );
     const outcome = async (adding: Parameters<BrainStore["addMemories"]>[0]) =>
       await shared()
         .addMemories(adding)
@@ -3490,32 +3482,12 @@ describe("what the shared store keeps", () => {
       }),
     ]).toStrictEqual(["refused", "refused"]);
   });
-});
 
-describe("what the shared store keeps, when it can't read a version's readers", () => {
   it("refuses a memory drawn from a version whose readers' key it can't read", async () => {
     const group = unique("g");
     const version = await addSource("Unreadable readers", audience(group));
-    // A key no add writes, as a damaged row would hold: one person's
-    // principal without an id. Reader sets are never updated (a trigger),
-    // so the damage lifts it for this one row and puts it back as it was.
-    await runInDurableObject(shared(), (_instance, state) => {
-      const { sql } = state.storage;
-      state.storage.transactionSync(() => {
-        const [trigger] = sql
-          .exec<{ sql: string }>(
-            "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'reader_sets_no_update'"
-          )
-          .toArray();
-        sql.exec("DROP TRIGGER reader_sets_no_update");
-        sql.exec(
-          "UPDATE reader_sets SET key = ? WHERE key = ?",
-          '[["person"]]',
-          JSON.stringify([["group", group]])
-        );
-        sql.exec(trigger?.sql ?? "");
-      });
-    });
+    // A key no add writes: one person's principal without an id.
+    await damageReaders(group, '[["person"]]');
     const outcome = await shared()
       .addMemories({
         change: crypto.randomUUID(),

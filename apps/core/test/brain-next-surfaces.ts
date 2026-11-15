@@ -333,6 +333,16 @@ const unchecked = (value: unknown): never =>
 /** Someone none of the harness's readers is. */
 const stranger = (): string => `stranger-${crypto.randomUUID()}`;
 
+/**
+ * Readers of the shared store none of the harness's readers is among: a
+ * group of a stranger's. The shared store keeps nothing for one person
+ * alone (it refuses it), so someone else's content there is a group's.
+ */
+const strangers = (): Access => ({
+  kind: "audience",
+  group: `team:${stranger()}`,
+});
+
 /** A source's text holding every marker. */
 const markedText = (markers: readonly string[]): string =>
   `Withheld ${markers.join(" ")}`;
@@ -4171,12 +4181,17 @@ const firstChunksOf = (versions: Probing["hiddenVersions"]): ChunkRef[] =>
  * What the vector probes search with: a question, the reader's own chunks
  * at vectors of their own (found every time, so a hidden code that took a
  * place or moved a score would show), and a model holding those alone,
- * whose answer is what the reader gets when nothing hidden is stored.
+ * whose answer is what the reader gets when nothing hidden is stored. The
+ * reader's own chunks are in the shared store for a group only they are
+ * in, the scene's `reader`: the shared store keeps nothing for one person
+ * alone.
  */
-const vectorScene = async (reader: Reader & { person: string }) => {
+const vectorScene = async (probed: Reader & { person: string }) => {
   const question = randomVector();
+  const alone = `team:${stranger()}`;
+  const reader: Reader = { ...probed, groups: [...probed.groups, alone] };
   const own = await chunkedSource(
-    { kind: "owner", person: reader.person },
+    { kind: "audience", group: alone },
     3,
     "The reader's own"
   );
@@ -4202,7 +4217,7 @@ const vectorScene = async (reader: Reader & { person: string }) => {
       reader: as,
       limit: vectorSearchLimitMax,
     });
-  return { question, ownCoded, modelWith, search };
+  return { question, ownCoded, modelWith, search, reader };
 };
 
 /** `model` as the host's embedder names it: its name, and its build after the last `@`. */
@@ -4222,11 +4237,11 @@ const embedModelOf = ({ name }: VectorModel): EmbedModel => {
  * same. And what the vector way refuses, each with the markers in it.
  */
 const meaningProbes = async ({
-  reader,
+  reader: probed,
   markers,
   hiddenVersions,
 }: Probing): Promise<Answer[]> => {
-  const { question, modelWith } = await vectorScene(reader);
+  const { question, modelWith, reader } = await vectorScene(probed);
   const words = markedText(markers);
   const nothing = await modelWith();
   const hidden = await modelWith(
@@ -6186,7 +6201,10 @@ export const storeProbes = {
           await store().addSource({ source, change, text: as, access })
       );
     return [
-      await add("for someone else", { kind: "owner", person: stranger() }),
+      await add("for someone else alone, which the shared store refuses", {
+        kind: "owner",
+        person: stranger(),
+      }),
       await add("for a group", { kind: "audience", group: stranger() }),
       await add("for nobody", { kind: "none" }),
       await add("an unknown kind", unchecked({ kind: "everyone" })),
@@ -6199,11 +6217,7 @@ export const storeProbes = {
         "a field the kind hasn't",
         unchecked({ kind: "none", person: markers.join("") })
       ),
-      await add(
-        "too much text",
-        { kind: "owner", person: stranger() },
-        oversizedText(markers)
-      ),
+      await add("too much text", strangers(), oversizedText(markers)),
       await answer(
         "an unknown field",
         async () =>
@@ -6219,17 +6233,11 @@ export const storeProbes = {
       ),
       await add(
         "a source named by the markers, too long",
-        { kind: "owner", person: stranger() },
+        strangers(),
         text,
         text.repeat(300)
       ),
-      await add(
-        "no change",
-        { kind: "owner", person: stranger() },
-        text,
-        keyOf(missingSource()),
-        ""
-      ),
+      await add("no change", strangers(), text, keyOf(missingSource()), ""),
     ];
   },
   // A number, never text: a change the reader may not read answers as
@@ -6884,7 +6892,7 @@ export const storeProbes = {
     const words = markedText(markers);
     const nothing = await modelWith();
     const tailFiller = await chunkedSource(
-      { kind: "owner", person: stranger() },
+      strangers(),
       rescoredMost + 44,
       words
     );
@@ -6893,7 +6901,7 @@ export const storeProbes = {
       placedAt(tailFiller, question)
     );
     const blockFiller = await chunkedSource(
-      { kind: "owner", person: stranger() },
+      strangers(),
       vectorBlockSize,
       words
     );
@@ -6980,7 +6988,7 @@ export const storeProbes = {
   // marker.
   repackVectors: async ({ markers }) => {
     const words = markedText(markers);
-    const access: Access = { kind: "owner", person: stranger() };
+    const access = strangers();
     // One block, of two sources: the first replaced leaves half of it
     // removed.
     const replaced = await chunkedSource(access, 600, words);
@@ -7056,23 +7064,24 @@ export const storeProbes = {
     }
     return [
       ...ownFiles,
-      await add("for someone else", { kind: "owner", person: stranger() }),
+      await add("for someone else alone, which the shared store refuses", {
+        kind: "owner",
+        person: stranger(),
+      }),
       await add("for a group", { kind: "audience", group: stranger() }),
       await add(
         "too much text",
-        { kind: "owner", person: stranger() },
+        strangers(),
         text.padEnd(instructionsMaxLength + 1, " x")
       ),
+      // Owner access until GRA-1904: the shared store takes an instruction
+      // file of whitespace, which a restore of its export then refuses.
       await add("no text", { kind: "owner", person: stranger() }, " "),
-      await add(
-        "half a surrogate pair",
-        { kind: "owner", person: stranger() },
-        `${text}\uD800`
-      ),
+      await add("half a surrogate pair", strangers(), `${text}\uD800`),
       await add("an unknown kind", unchecked({ kind: "everyone" })),
       await add(
         "a source named by the markers, too long",
-        { kind: "owner", person: stranger() },
+        strangers(),
         text,
         text.repeat(300)
       ),
@@ -7397,7 +7406,7 @@ export const storeProbes = {
       source: marked,
       change: crypto.randomUUID(),
       text: markedText(markers),
-      access: { kind: "owner", person: stranger() },
+      access: strangers(),
     });
     return [
       await erase(
@@ -7450,7 +7459,7 @@ export const storeProbes = {
       source: marked,
       change: crypto.randomUUID(),
       text: markedText(markers),
-      access: { kind: "owner", person: stranger() },
+      access: strangers(),
     });
     return [
       await over(
@@ -7510,12 +7519,14 @@ export const storeProbes = {
         },
         about
       );
+    // The shared store keeps nothing for one person alone: the holder's
+    // marked source is their team's.
     const holder = stranger();
     await store().addSource({
       source: keyOf(missingSource()),
       change: crypto.randomUUID(),
       text: markedText(markers),
-      access: { kind: "owner", person: holder },
+      access: { kind: "audience", group: `team:${holder}` },
     });
     return [
       await erase(
@@ -7524,7 +7535,7 @@ export const storeProbes = {
         "nothing"
       ),
       await erase(
-        "someone with marked sources",
+        "someone whose team holds marked sources",
         { person: holder, reason: "withdrawn" },
         "hidden"
       ),
@@ -7643,7 +7654,7 @@ export const storeProbes = {
         source,
         change: crypto.randomUUID(),
         text: markedText(markers),
-        access: { kind: "owner", person: holder },
+        access: { kind: "audience", group: `team:${holder}` },
       });
     }
     await store().eraseSource({ source: erased, reason: "deleted" });

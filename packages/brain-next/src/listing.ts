@@ -5,7 +5,7 @@ import type {
   VersionList,
   VersionListRequest,
 } from "./contract.ts";
-import { readableSql, readerSetKeyOf } from "./reader-sets.ts";
+import { readableSql } from "./reader-sets.ts";
 
 // Listings: which sources a reader may read, and which versions of one.
 // Each is one statement, the reader's sets of readers inside it, so
@@ -15,18 +15,17 @@ import { readableSql, readerSetKeyOf } from "./reader-sets.ts";
 // key, or a version's number), never by a row of the store, whose number
 // would count what others added.
 //
-// A listed source says whether it is the reader's alone (`personal`): its
-// current version's readers are that one person, so nobody else sees it,
-// admins included. Said only of what the reader may read. When the Brain
-// keeps a store per person beside the shared one, a host lists both with
-// the same page place (a time and a key, the same order in each) and
-// merges them: nothing here depends on which store a row is in.
+// A listed source says whether it is the reader's alone (`personal`), so
+// nobody else sees it, admins included: it is when their own store lists
+// it, never when the shared one does, which keeps nothing one person alone
+// may read (store.ts `#mayKeep`). Which store answered says it, never a
+// comparison of readers. A host lists both stores with the same page place
+// (a time and a key, the same order in each) and merges them.
 
 /**
  * `?1` the prefixes (JSON), `?2` the reader's person, `?3` their groups
  * (JSON), `?4` and `?5` the time (ms) and key a page starts after, or
- * null, `?6` the most rows, `?7` the most characters of an opening, `?8`
- * the key of the set of the reader alone: the
+ * null, `?6` the most rows, `?7` the most characters of an opening: the
  * current versions the reader may read whose source starts with a prefix,
  * newest first, then by key. A source's versions are counted among those
  * the reader may read.
@@ -57,10 +56,6 @@ SELECT listed.source AS source, listed.version AS version,
     SELECT substr(chunks.text, 1, ?7) FROM chunks
     WHERE chunks.version_row = listed.row AND chunks.position = 0
   ), '') AS opening,
-  coalesce((
-    SELECT reader_sets.key = ?8 FROM reader_sets
-    WHERE reader_sets.id = listed.reader_set
-  ), 0) AS personal,
   (
     SELECT count(*) FROM source_versions AS each
     WHERE each.source = listed.source
@@ -72,11 +67,13 @@ ORDER BY listed.added_at DESC, listed.source DESC`;
 
 /**
  * A page of the sources `reader` may read among `prefixes`, newest first,
- * after `after` when given.
+ * after `after` when given, each `personal` as the store listing them is
+ * the reader's own or not (above).
  */
 export const listSources = (
   sql: SqlStorage,
-  { reader, prefixes, after, limit = listPageMax }: SourceListRequest
+  { reader, prefixes, after, limit = listPageMax }: SourceListRequest,
+  { personal }: { personal: boolean }
 ): SourceList => {
   const rows = sql
     .exec<{
@@ -84,7 +81,6 @@ export const listSources = (
       version: number;
       added_at: number;
       opening: string;
-      personal: number;
       versions: number;
     }>(
       sourcesSql,
@@ -95,11 +91,7 @@ export const listSources = (
       after?.source ?? null,
       // One more than the page, to tell whether more follow.
       limit + 1,
-      openingMaxLength,
-      // No person: nothing is theirs alone (`key = NULL` is never true).
-      reader.person === null
-        ? null
-        : readerSetKeyOf({ kind: "owner", person: reader.person })
+      openingMaxLength
     )
     .toArray();
   return {
@@ -108,7 +100,7 @@ export const listSources = (
       version: row.version,
       addedAt: new Date(row.added_at),
       opening: row.opening,
-      personal: row.personal === 1,
+      personal,
       versions: row.versions,
     })),
     more: rows.length > limit,
