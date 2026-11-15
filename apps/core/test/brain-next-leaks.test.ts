@@ -1520,13 +1520,27 @@ describe(
       // Core's surfaces that read refuse the removed member as no longer
       // one before anything is read: each call is refused so, or refused
       // for its input, which is checked first. Not staff's report, which
-      // reads as no one.
+      // reads as no one. And code's entity reads, an App's and a chat's
+      // agent's in its person's own chat among them, the same in the
+      // function host's words (`permission.unavailable`,
+      // `permission.invalid_args`).
       const answeredOrOtherwise: string[] = [];
       const neverInactive: string[] = [];
-      for (const [name, probe] of reading) {
-        if (!name.startsWith("core ") || name === "core brainStaffReport") {
+      const codeEntities = "recall entitiesCallFor";
+      for (const [name, probe] of [
+        ...reading,
+        ...surfaces.filter(([each]) => each === codeEntities),
+      ]) {
+        if (
+          (!name.startsWith("core ") && name !== codeEntities) ||
+          name === "core brainStaffReport"
+        ) {
           continue;
         }
+        const [noLonger, forInput] =
+          name === codeEntities
+            ? ["permission.unavailable", "permission.invalid_args"]
+            : ["permission.person_inactive", "brain.request_invalid"];
         // oxlint-disable-next-line no-await-in-loop -- one surface at a time
         const answers = await probe({
           ...asOutsider,
@@ -1534,8 +1548,7 @@ describe(
           reader: { person: former.userId, groups: [] },
         });
         const inactive = answers.filter(
-          ({ got }) =>
-            "error" in got && textOf(got).includes("permission.person_inactive")
+          ({ got }) => "error" in got && textOf(got).includes(noLonger)
         );
         if (inactive.length === 0) {
           neverInactive.push(name);
@@ -1545,8 +1558,9 @@ describe(
             .filter(
               ({ got }) =>
                 !("error" in got) ||
-                !/permission\.person_inactive|brain\.request_invalid/u.test(
-                  textOf(got)
+                !(
+                  textOf(got).includes(noLonger) ||
+                  textOf(got).includes(forInput)
                 )
             )
             .map(({ call }) => `${name}: ${call}`)

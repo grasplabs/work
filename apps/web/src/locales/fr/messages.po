@@ -5860,6 +5860,10 @@ msgstr "Pour l'équipe {team}"
 msgid "For whom"
 msgstr "Pour qui"
 
+#: src/brain/memories-page.tsx
+msgid "Forgotten, kept as history"
+msgstr "Oublié, conservé dans l’historique"
+
 #: src/connections/groups.ts
 msgctxt "kind of app"
 msgid "Forms and surveys"

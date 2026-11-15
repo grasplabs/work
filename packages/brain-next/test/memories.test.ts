@@ -5,6 +5,7 @@
 // store is hidden from it.
 import type {
   Access,
+  EntitiesRequest,
   EntityName,
   EntityNamesCursor,
   MemoriesCursor,
@@ -604,6 +605,337 @@ describe("who may read a memory", () => {
     });
   });
 
+  // Threat 1 again, for what has no version: a memory in a writer's own
+  // word is said by id wherever a version would be, so a host can keep it.
+  it("says every memory in a writer's word a find's page and a card rest on: the name, what made it match, its memories and a rival", async () => {
+    const group = unique("group");
+    const reader = readerOf(unique("reader"), group);
+    const name = unique("Acme");
+    const said = (value: string) =>
+      fact(
+        { kind: "writer", writer: unique("w") },
+        { attribute: "status", value, statement: `${name} is ${value}` }
+      );
+    const named = await remember(
+      audience(group),
+      [customer({ names: [name] })],
+      [said("Active")]
+    );
+    const entity = named.entities.c ?? "";
+    const rival = await remember(
+      audience(group),
+      [customer({ id: entity })],
+      [said("Paused")]
+    );
+    const both = [...named.memories, ...rival.memories].toSorted();
+
+    const page = await shared().findEntities({ reader, name });
+    const card = await shared().readCard({ entity, reader, limit: 1 });
+    expect({
+      found: page.entities.map(({ id }) => id),
+      page: { restsOn: page.restsOn, words: page.restsOnWords },
+      card: { restsOn: card?.restsOn, words: card?.restsOnWords.toSorted() },
+    }).toStrictEqual({
+      found: [entity],
+      // Named, matched and seen by the first memory alone.
+      page: { restsOn: [], words: named.memories },
+      // Its page of one, the rival that makes it contested, past the page.
+      card: { restsOn: [], words: both },
+    });
+  });
+
+  // Threat 1 again: a memory its writer retired stays history, read where
+  // history is asked for, and gives nothing to any other read: no name, no
+  // match, no mention. So nothing a page or a card says rests on a memory
+  // the host's check withholds (`readableMemories`).
+  it("gives a memory its writer retired to no find or card: no name, no match, no mention, and nothing they rest on", async () => {
+    const group = unique("group");
+    const reader = readerOf(unique("reader"), group);
+    const [first, second] = [unique("w"), unique("w")];
+    /** A customer's memory in `writer`'s word, naming and identifying it as given. */
+    const said = async (
+      writer: string,
+      entity: Partial<NewEntity>,
+      statement: string
+    ) => {
+      const added = await remember(
+        audience(group),
+        [customer({ names: [], ...entity })],
+        [fact({ kind: "writer", writer }, { statement })],
+        shared(),
+        crypto.randomUUID(),
+        reader
+      );
+      return {
+        entity: added.entities.c ?? "",
+        memory: added.memories[0] ?? "",
+      };
+    };
+    const retire = async (writer: string, memory: string) => {
+      await shared().retireMemory({ memory, reader: readerOf(writer, group) });
+    };
+    const name = unique("Acme");
+    const ref = `ref:${unique("r")}`;
+
+    // Named twice, the first retired: the current memory names it.
+    const named = await said(first, { names: [name] }, "First");
+    const renamed = await said(
+      second,
+      { id: named.entity, names: [name] },
+      "Second"
+    );
+    await retire(first, named.memory);
+    // Named and identified only by a retired memory, otherwise current.
+    const nameless = unique("Initech");
+    const unnamed = await said(
+      first,
+      { names: [nameless], identifiers: [{ type: "ref", value: ref }] },
+      "Named"
+    );
+    const kept = await said(second, { id: unnamed.entity }, "Kept");
+    await retire(first, unnamed.memory);
+    // Only ever mentioned by memories since retired.
+    const gone = unique("Globex");
+    const forgotten = await said(first, { names: [gone] }, "Gone");
+    await retire(first, forgotten.memory);
+
+    const find = async (asked: Omit<EntitiesRequest, "reader">) => {
+      const page = await shared().findEntities({ reader, ...asked });
+      return {
+        found: page.entities.map(({ id, name: given }) => [id, given]),
+        words: page.restsOnWords.toSorted(),
+      };
+    };
+    const card = async (entity: string) => {
+      const read = await shared().readCard({ entity, reader });
+      return read === null
+        ? null
+        : {
+            name: read.entity.name,
+            notes: read.notes.map(({ statement }) => statement),
+            words: read.restsOnWords,
+          };
+    };
+
+    expect({
+      byName: await find({ name }),
+      card: await card(named.entity),
+      retiredName: await find({ name: nameless }),
+      retiredRef: await find({ identifier: { type: "ref", value: ref } }),
+      namelessCard: await card(unnamed.entity),
+      goneByName: await find({ name: gone }),
+      goneCard: await card(forgotten.entity),
+      byKind: await find({ kind: "customer" }),
+    }).toStrictEqual({
+      byName: { found: [[named.entity, name]], words: [renamed.memory] },
+      card: { name, notes: ["Second"], words: [renamed.memory] },
+      // A name or identifier only a retired memory gave matches nothing,
+      retiredName: { found: [], words: [] },
+      retiredRef: { found: [], words: [] },
+      // and its entity, current otherwise, has no name.
+      namelessCard: { name: null, notes: ["Kept"], words: [kept.memory] },
+      // An entity only retired memories mention is not seen.
+      goneByName: { found: [], words: [] },
+      goneCard: null,
+      // A page of every kind: the others intact, resting on current ones.
+      byKind: {
+        found: [
+          [named.entity, name],
+          [unnamed.entity, null],
+        ],
+        words: [renamed.memory, kept.memory].toSorted(),
+      },
+    });
+  });
+
+  // The same rule for what a card says of its memories: a forgotten rival
+  // neither contests nor un-confirms, and a relation's other entity named
+  // only by a forgotten memory has no name; none of them is rested on.
+  it("rests a card on no memory its writer retired: a rival confirmed over, a rival, a relation's other entity's name, the memory past the page", async () => {
+    const group = unique("group");
+    const reader = readerOf(unique("reader"), group);
+    const [first, second, third] = [unique("w"), unique("w"), unique("w")];
+    const status = (writer: string, value: string) =>
+      fact(
+        { kind: "writer", writer },
+        { attribute: "status", value, statement: `Acme is ${value}` }
+      );
+    const right = await remember(
+      audience(group),
+      [customer({ names: [unique("Acme")] })],
+      [status(first, "Active")]
+    );
+    const entity = right.entities.c ?? "";
+    const add = async (entities: NewEntity[], memories: NewMemory[]) =>
+      await remember(
+        audience(group),
+        entities,
+        memories,
+        shared(),
+        crypto.randomUUID(),
+        reader
+      );
+    const wrong = await add(
+      [customer({ id: entity })],
+      [status(second, "Paused")]
+    );
+    // Confirmed over the rival; then a relation to a person only a
+    // memory since forgotten names, and a note, past a page of one.
+    await shared().confirmMemory({ memory: right.memories[0] ?? "", reader });
+    const owner = await add(
+      [{ key: "p", kind: "person", names: [unique("Ann")] }],
+      [
+        {
+          about: "p",
+          type: "fact",
+          statement: "Ann works here",
+          speaker: { kind: "system" },
+          basis: { kind: "writer", writer: third },
+        },
+      ]
+    );
+    const relation = await add(
+      [
+        customer({ id: entity }),
+        { key: "p", id: owner.entities.p ?? "", kind: "person" },
+      ],
+      [
+        fact(
+          { kind: "writer", writer: first },
+          {
+            attribute: "account_owner",
+            object: "p",
+            statement: "Ann owns Acme",
+          }
+        ),
+      ]
+    );
+    const card = async (limit?: number) => {
+      const read = await shared().readCard({
+        entity,
+        reader,
+        ...(limit === undefined ? {} : { limit }),
+      });
+      return {
+        statuses: read?.attributes.flatMap(({ memories }) =>
+          memories.map(({ value, confirmed, contested }) => ({
+            value,
+            confirmed: confirmed !== null,
+            contested,
+          }))
+        ),
+        owner: read?.relations.map(({ other }) => other.name),
+        words: read?.restsOnWords.toSorted(),
+      };
+    };
+    const before = await card();
+
+    for (const [writer, memory] of [
+      [second, wrong.memories[0]],
+      [third, owner.memories[0]],
+    ] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one retirement at a time
+      await shared().retireMemory({
+        memory: memory ?? "",
+        reader: readerOf(writer, group),
+      });
+    }
+    const current = [
+      right.memories[0] ?? "",
+      relation.memories[0] ?? "",
+    ].toSorted((a, b) => a.localeCompare(b));
+    const paged = await card(1);
+
+    expect({
+      before: before.words?.includes(wrong.memories[0] ?? ""),
+      after: await card(),
+      paged: paged.words?.every((id) => current.includes(id)),
+    }).toStrictEqual({
+      before: true,
+      after: {
+        // Still confirmed by the person; contested no more.
+        statuses: [{ value: "Active", confirmed: true, contested: false }],
+        owner: [null],
+        words: current,
+      },
+      paged: true,
+    });
+  });
+
+  // Threat 1 for confirmations: a rival a reader could never read keeps a
+  // confirmation made over it from counting for them, retired or not, so
+  // its retirement tells them nothing.
+  it("never counts a confirmation made over a rival a reader can't read, before or after that rival is retired, as of any moment", async () => {
+    const [mine, theirs] = [unique("group"), unique("group")];
+    const [first, second] = [unique("w"), unique("w")];
+    const both = readerOf(unique("confirmer"), mine, theirs);
+    const reader = readerOf(unique("reader"), mine);
+    const status = (writer: string, value: string) =>
+      fact(
+        { kind: "writer", writer },
+        { attribute: "status", value, statement: `Acme is ${value}` }
+      );
+    const right = await remember(
+      audience(mine),
+      [customer({ names: [unique("Acme")] })],
+      [status(first, "Active")]
+    );
+    const entity = right.entities.c ?? "";
+    const rival = await remember(
+      audience(theirs),
+      [customer({ id: entity })],
+      [status(second, "Paused")],
+      shared(),
+      crypto.randomUUID(),
+      both
+    );
+    await shared().confirmMemory({
+      memory: right.memories[0] ?? "",
+      reader: both,
+    });
+    const confirmedFor = async (asOf?: Date) => {
+      const { memories } = await shared().readMemories({
+        entity,
+        reader,
+        ...(asOf === undefined ? {} : { asOf }),
+      });
+      return memories.map(({ value, confirmed }) => [
+        value,
+        confirmed !== null,
+      ]);
+    };
+    const before = await confirmedFor();
+    // When it was confirmed, as the confirmer reads it: a moment after the
+    // confirmation and before the retirement, which writes a later one.
+    const { memories: confirmedRead } = await shared().readMemories({
+      entity,
+      reader: both,
+    });
+    const confirmedAt = confirmedRead.find(({ value }) => value === "Active")
+      ?.confirmed?.at;
+    await shared().retireMemory({
+      memory: rival.memories[0] ?? "",
+      reader: readerOf(second, theirs),
+    });
+    const afterRetired = new Date();
+
+    const unconfirmed = [["Active", false]];
+    expect({
+      // Confirmed for the confirmer, who reads both.
+      confirmedForThem: confirmedAt instanceof Date,
+      before,
+      now: await confirmedFor(),
+      asOfConfirmed: await confirmedFor(confirmedAt),
+      asOfAfter: await confirmedFor(afterRetired),
+    }).toStrictEqual({
+      confirmedForThem: true,
+      before: unconfirmed,
+      now: unconfirmed,
+      asOfConfirmed: unconfirmed,
+      asOfAfter: unconfirmed,
+    });
+  });
+
   // Threat 3: a newer memory ends an older one only for those who may read it.
   it("stays current for a reader who can't read the memory that ended it", async () => {
     const left = unique("left");
@@ -685,17 +1017,28 @@ describe("who may read a memory", () => {
       entities: [{ id: first.entities.p, kind: "person", name: "Anna" }],
       more: false,
       restsOn: [],
+      restsOnWords: first.memories,
     });
     await expect(
       shared().findEntities({ reader: leftReader, name: secret })
-    ).resolves.toStrictEqual({ entities: [], more: false, restsOn: [] });
+    ).resolves.toStrictEqual({
+      entities: [],
+      more: false,
+      restsOn: [],
+      restsOnWords: [],
+    });
     await expect(
       shared().findEntities({
         reader: readerOf(unique("x")),
         kind: "person",
         identifier: { type: "email", value: email },
       })
-    ).resolves.toStrictEqual({ entities: [], more: false, restsOn: [] });
+    ).resolves.toStrictEqual({
+      entities: [],
+      more: false,
+      restsOn: [],
+      restsOnWords: [],
+    });
     await expect(
       shared().readEntity({
         entity: first.entities.p ?? "",
@@ -1011,7 +1354,12 @@ describe("erasure", () => {
     await restore(shared(), backup);
     await expect(
       shared().findEntities({ reader, name: secret })
-    ).resolves.toStrictEqual({ entities: [], more: false, restsOn: [] });
+    ).resolves.toStrictEqual({
+      entities: [],
+      more: false,
+      restsOn: [],
+      restsOnWords: [],
+    });
     await tick();
     await expect(left()).resolves.toBe(0);
   });
@@ -1531,7 +1879,7 @@ describe("what a reader sees of a retire and of an extraction", () => {
 
     expect({ empty, others }).toStrictEqual({
       empty: [
-        { entities: [], more: false, restsOn: [] },
+        { entities: [], more: false, restsOn: [], restsOnWords: [] },
         { facts: [], more: false },
         "nothing",
       ],
