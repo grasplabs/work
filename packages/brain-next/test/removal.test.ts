@@ -193,6 +193,80 @@ describe("removing a source and keeping its history", () => {
     });
   });
 
+  it("answers each of mixed keys removed in one call as it answers that key removed alone", async () => {
+    /**
+     * One of each kind of key: one no one added, one removed before, one
+     * erased before, one in use, which the call names twice.
+     */
+    const kinds = async () => {
+      const removedBefore = await teamSource();
+      await shared().removeSources({ sources: [removedBefore.source] });
+      const erasedBefore = await teamSource();
+      await shared().eraseSource({
+        source: erasedBefore.source,
+        reason: "deleted",
+      });
+      return {
+        unknown: `test:${crypto.randomUUID()}`,
+        removed: removedBefore.source,
+        erased: erasedBefore.source,
+        live: await teamSource(),
+      };
+    };
+    /** What the store has of each key of `keys`, and reads of the one in use. */
+    const stateOf = async (keys: Awaited<ReturnType<typeof kinds>>) => {
+      const named = {
+        unknown: keys.unknown,
+        removed: keys.removed,
+        erased: keys.erased,
+        live: keys.live.source,
+      };
+      const each: Record<string, unknown> = {};
+      for (const [kind, source] of Object.entries(named)) {
+        each[kind] = {
+          // oxlint-disable-next-line no-await-in-loop -- one key after another
+          key: await shared().keyState(source),
+          // oxlint-disable-next-line no-await-in-loop -- one key after another
+          rows: await rowsOf(source),
+        };
+      }
+      // Its own words named alike, so each set's answer is comparable.
+      let liveReads = await readsOf(keys.live, keys.live.reader);
+      for (const [index, said] of keys.live.words.entries()) {
+        liveReads = liveReads.replaceAll(said, `<word ${index}>`);
+      }
+      return { ...each, liveReads };
+    };
+    const [together, alone] = [await kinds(), await kinds()];
+
+    const answered = await outcome(async () => {
+      await shared().removeSources({
+        sources: [
+          together.unknown,
+          together.removed,
+          together.erased,
+          together.live.source,
+          together.live.source,
+        ],
+      });
+    });
+    for (const source of [
+      alone.unknown,
+      alone.removed,
+      alone.erased,
+      alone.live.source,
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- one key a call
+      await shared().removeSources({ sources: [source] });
+    }
+    await tick(shared());
+
+    expect({ answered, state: await stateOf(together) }).toStrictEqual({
+      answered: undefined,
+      state: await stateOf(alone),
+    });
+  });
+
   it("refuses every add to a removed key, a retry of an earlier change and an add whose file was being written as it was removed included, and draws nothing from it", async () => {
     const removing = await teamSource();
     const { source, access } = removing;

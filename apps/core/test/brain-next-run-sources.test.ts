@@ -854,8 +854,9 @@ describe("a person's run results once they lose the workflow", () => {
       first: false,
       second: false,
       removals: [
+        // Each loss counts what it removed: the second, the one new run.
         { personId: user.userId, runs: 1 },
-        { personId: user.userId, runs: 2 },
+        { personId: user.userId, runs: 1 },
       ],
     });
   });
@@ -873,7 +874,7 @@ describe("a person's run results once they lose the workflow", () => {
     const ticks: { owed: number | undefined; removals: number }[] = [];
     for (let tick = 0; tick < 3; tick += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one tick after another
-      await removeLostRunSources(env, new Date(), 1);
+      await removeLostRunSources(env, 1);
       // oxlint-disable-next-line no-await-in-loop -- one tick after another
       const row = await rowOf(user.userId, id);
       ticks.push({
@@ -951,10 +952,10 @@ describe("a person's run results once they lose the workflow", () => {
     await copiesOf(manyRun, 3 * runRemovalsMax);
     await unshared(owner, id, many);
     // The large one begins first, and is older.
-    await removeLostRunSources(env, new Date(), 1);
+    await removeLostRunSources(env, 1);
     await unshared(owner, id, few);
 
-    await removeLostRunSources(env, new Date(), 1);
+    await removeLostRunSources(env, 1);
 
     expect({
       few: {
@@ -1021,7 +1022,62 @@ describe("a person's run results once they lose the workflow", () => {
     });
   });
 
-  it("leave the result of a run an App started for someone who uses the App and holds no role in the workflow, while a run they started follows the role", async () => {
+  it("leave the result of a run an App started for someone who uses the App out of their removal once they lose the workflow, while their own run follows the role", async () => {
+    const [ada, admin, bob] = await Promise.all([
+      person("builder"),
+      person("admin"),
+      person("user"),
+    ]);
+    const secret = word();
+    const workflow = await published(
+      ada,
+      definitionOf([], { value: { status: secret } })
+    );
+    // While the workflow is shared with Bob: a run he starts himself, and
+    // one the App starts for him. Both are handed over, and his own puts
+    // the row of his role in use.
+    await shareWorkflowResource(env, ada, workflow.id, {
+      type: "person",
+      id: bob.userId,
+      role: "user",
+    });
+    const ownRun = await endedRun(bob, workflow.id);
+    const app = await appStartingFor(ada, admin, workflow.id, bob);
+    const appRun = await app.start();
+    await endedInRecords(appRun);
+    await handOverNow();
+    const before = {
+      app: await recalls(bob.userId, secret, appRun),
+      own: await recalls(bob.userId, secret, ownRun),
+    };
+
+    await unshared(ada, workflow.id, bob);
+    await removeLostRunSources(env);
+
+    expect({
+      endings: {
+        app: await endingsFor(appRun),
+        own: await endingsFor(ownRun),
+      },
+      before,
+      after: {
+        app: await recalls(bob.userId, secret, appRun),
+        own: await recalls(bob.userId, secret, ownRun),
+      },
+      removed: await removedOf(workflow.id),
+    }).toStrictEqual({
+      endings: {
+        app: ["brain.source.handed_over"],
+        own: ["brain.source.handed_over"],
+      },
+      before: { app: true, own: true },
+      // The App shows him its run's result still: it stays his to recall.
+      after: { app: true, own: false },
+      removed: [{ personId: bob.userId, runs: 1 }],
+    });
+  });
+
+  it("leave a run an App started for someone with no role in the workflow to be handed over", async () => {
     const [ada, admin, bob] = await Promise.all([
       person("builder"),
       person("admin"),
@@ -1035,38 +1091,19 @@ describe("a person's run results once they lose the workflow", () => {
     const app = await appStartingFor(ada, admin, workflow.id, bob);
     const appRun = await app.start();
     await endedInRecords(appRun);
-    // And a run Bob started himself while the workflow was shared with him.
-    await shareWorkflowResource(env, ada, workflow.id, {
-      type: "person",
-      id: bob.userId,
-      role: "user",
-    });
-    const ownRun = await endedRun(bob, workflow.id);
-    await unshared(ada, workflow.id, bob);
 
     await handOverNow();
     await removeLostRunSources(env);
 
     expect({
-      endings: {
-        app: await endingsFor(appRun),
-        own: await endingsFor(ownRun),
-      },
-      recalls: {
-        app: await recalls(bob.userId, secret, appRun),
-        own: await recalls(bob.userId, secret, ownRun),
-      },
-      row: await rowOf(bob.userId, workflow.id),
-      removed: await removedOf(workflow.id),
-    }).toStrictEqual({
-      endings: {
-        app: ["brain.source.handed_over"],
-        own: ["brain.source.handover_skipped:no_role"],
-      },
-      recalls: { app: true, own: false },
+      endings: await endingsFor(appRun),
+      recalls: await recalls(bob.userId, secret, appRun),
       // The App's run puts no row of the workflow's role in use.
+      row: await rowOf(bob.userId, workflow.id),
+    }).toStrictEqual({
+      endings: ["brain.source.handed_over"],
+      recalls: true,
       row: null,
-      removed: [],
     });
   });
 });

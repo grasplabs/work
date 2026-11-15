@@ -6524,9 +6524,13 @@ export const brainRunSources = sqliteTable(
       .notNull()
       .default(false),
     /**
-     * The last run, by ID, whose source the owed removal took out of use
-     * so far: the next page goes on after it. Null before its first page.
+     * Where the owed removal's next page starts, in the order of the index
+     * its runs are read by: after the run created at `removedThroughAt`
+     * with ID `removedThrough`, the last it took out of use. Before its
+     * first page, the last revocation's moment and no run (after every run
+     * that one covered), or both null for a first revocation.
      */
+    removedThroughAt: timestamp("removed_through_at"),
     removedThrough: text("removed_through"),
   },
   (table) => [

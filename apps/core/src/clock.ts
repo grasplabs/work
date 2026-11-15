@@ -82,7 +82,13 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   { name: "brain.hand_overs", period: "minute", run: relayHandOvers },
   // Run results of people who lost their workflow, taken out of use in the
   // new Brain (src/brain-run-sources.ts).
-  { name: "brain.run_sources", period: "minute", run: removeLostRunSources },
+  {
+    name: "brain.run_sources",
+    period: "minute",
+    run: async (env) => {
+      await removeLostRunSources(env);
+    },
+  },
   { name: "members.disconnects", period: "minute", run: retryDisconnects },
   { name: "members.erasures", period: "minute", run: retryErasures },
   // Shared uploads their uploaders removed, whose removal from the Brain,

@@ -2,7 +2,7 @@ import { createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { errorName, log } from "@grasp-os/shared/log";
-import { and, eq, gt, isNull, lt, or, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -48,17 +48,18 @@ import { workflowRoleSql } from "./workflow-roles.ts";
 // ending batch, brain-sources.ts):
 //
 // 1. One statement marks each row in use whose person no longer holds its
-//    workflow: revoked now, owed, and how many of their runs of it were
-//    created by then (`markLost`). Only a row whose earlier removal is no
+//    workflow: revoked at that statement's time, owed, and how many of
+//    their runs of it were created since its last revocation (`markLost`). Only a row whose earlier removal is no
 //    longer owed, so a second loss never takes the place of a removal
 //    whose event is not stored yet: it is marked at a later tick.
 // 2. The person's own store removes the sources of those runs, a page at a
 //    time in one call each (`removePage`): every run of theirs of that
-//    workflow created by the revocation, so a hand-over that read their
-//    role before the loss is of a run among them, and its key is closed
-//    whichever lands first. After each page the row keeps the last run it
-//    removed, and the next page, at this tick or a later one, goes on from
-//    there.
+//    workflow created by the revocation and after the one before, so a
+//    hand-over that read their role before the loss is of a run among
+//    them, and its key is closed whichever lands first. Pages go in the
+//    order of the index the runs are read by (created, then ID); after
+//    each, the row keeps the last run it removed, and the next page, at
+//    this tick or a later one, goes on from there.
 // 3. With its last page, one batch clears the removal owed and stores its
 //    one event, made the same each time from the row (`removedEvent`).
 //
@@ -118,7 +119,7 @@ export const runSourceInUse = (
   return db
     .insert(brainRunSources)
     .select(
-      sql`SELECT ${runs.principalId}, ${runs.workflowResourceId}, 1, NULL, NULL, 0, NULL
+      sql`SELECT ${runs.principalId}, ${runs.workflowResourceId}, 1, NULL, NULL, 0, NULL, NULL
         FROM ${runs}
         WHERE ${runs.id} = ${runId} AND NOT ${appStartedSql(runs.id)} AND ${condition}`
     )
@@ -130,15 +131,19 @@ export const runSourceInUse = (
     });
 };
 
+/** The database's own time, in milliseconds, as SQL: the same throughout one statement. */
+const statementTimeSql = sql`CAST(unixepoch('subsec') * 1000 AS INTEGER)`;
+
 /**
- * The person-started runs of workflow `workflowId` for `personId`
- * created by `revokedAt` (an instant, or a column holding one): those a
- * revocation then covers.
+ * The person-started runs of workflow `workflowId` for `personId` created
+ * by `revokedAt` (an instant, or SQL for one), in the order of the index
+ * they are read by (`workflow_resource_runs_principal_idx`: created, then
+ * ID).
  */
 const coveredRuns = (
   personId: string | SQLiteColumn,
   workflowId: string | SQLiteColumn,
-  revokedAt: number | SQLiteColumn
+  revokedAt: number | SQL
 ): SQL => {
   const runs = workflowResourceRuns;
   return sql`${runs.workflowResourceId} = ${workflowId}
@@ -149,9 +154,14 @@ const coveredRuns = (
 
 /**
  * Marks every row in use whose person no longer holds its workflow
- * (`holdsWorkflowSql`, read in this statement) as revoked at `now`, owed,
- * and with how many of their runs of it were created by then; only a row
- * whose earlier removal is no longer owed.
+ * (`holdsWorkflowSql`, read in this statement) as revoked, owed, and with
+ * how many of their runs of it it covers; only a row whose earlier removal
+ * is no longer owed. Revoked at the statement's own time, the moment the
+ * role was read: a run created by then is covered, one after it is the
+ * hand-over's to judge (brain-sources.ts). It covers the runs created
+ * after the row's last revocation, whose removal is complete, so each
+ * loss removes, and counts, only what came since: its cursor starts after
+ * that moment (`removedThroughAt`, with no run).
  *
  * What it costs each minute: one pass over the rows in use (their partial
  * index), and for each, the role's indexed lookups until one holds
@@ -161,17 +171,21 @@ const coveredRuns = (
  * through a team; so at 25,000 rows in use, some 125,000 to 200,000 rows
  * read a minute, every one by an index.
  */
-const markLost = async (env: Pick<Env, "DB">, now: Date): Promise<void> => {
+const markLost = async (env: Pick<Env, "DB">): Promise<void> => {
   const rows = brainRunSources;
+  const runs = workflowResourceRuns;
   await drizzle(env.DB)
     .update(rows)
     .set({
       inUse: false,
-      revokedAt: now,
-      removalOwed: true,
+      // Each right-hand side reads the row as it was before this update.
+      revokedAt: sql`${statementTimeSql}`,
+      removedThroughAt: sql`${rows.revokedAt}`,
       removedThrough: null,
-      runs: sql`(SELECT count(*) FROM ${workflowResourceRuns}
-        WHERE ${coveredRuns(rows.personId, rows.workflowId, now.getTime())})`,
+      removalOwed: true,
+      runs: sql`(SELECT count(*) FROM ${runs}
+        WHERE ${coveredRuns(rows.personId, rows.workflowId, statementTimeSql)}
+          AND (${rows.revokedAt} IS NULL OR ${runs.createdAt} > ${rows.revokedAt}))`,
     })
     .where(
       and(
@@ -189,7 +203,14 @@ interface OwedRevocation {
   workflowId: string;
   revokedAt: Date;
   runs: number;
-  /** The last run whose source it removed, or null before its first page. */
+  /**
+   * Where its next page starts, after (`removedThroughAt`,
+   * `removedThrough`) in the runs' index order: the last run it removed,
+   * its creation and ID; before its first page, the last revocation's
+   * moment and no run, so it starts after every run that one covered; or
+   * nothing at all for a first revocation.
+   */
+  removedThroughAt: Date | null;
   removedThrough: string | null;
 }
 
@@ -230,32 +251,44 @@ const stillOwed = (row: OwedRevocation): SQL | undefined =>
     eq(brainRunSources.removalOwed, true)
   );
 
+/** That run (created, ID) comes after `row`'s cursor, in index order, as SQL. */
+const afterCursor = (row: OwedRevocation): SQL | undefined => {
+  const runs = workflowResourceRuns;
+  if (row.removedThroughAt === null) {
+    return undefined;
+  }
+  const at = row.removedThroughAt.getTime();
+  return row.removedThrough === null
+    ? sql`${runs.createdAt} > ${at}`
+    : sql`(${runs.createdAt}, ${runs.id}) > (${at}, ${row.removedThrough})`;
+};
+
 /**
- * One page of `row`'s revocation: the next runs it covers after the last
- * it removed, as many as one call of the store removes (`runRemovalsMax`),
- * removed in the person's own store in that one call (safe to repeat: a
- * key removed already is left as it is). Then, while the row is owed for
- * this revocation, either the page's last run kept (only ever forward, so
- * a tick that overlaps another never moves it back), or, for the last
- * page, the removal no longer owed and its one event stored, in one batch.
- * Whether the revocation is complete. Throws when a step fails: the
- * revocation stays owed, from the last page it kept.
+ * One page of `row`'s revocation: the next runs it covers after its
+ * cursor, in the order of the index they are read by, as many as one call
+ * of the store removes (`runRemovalsMax`), removed in the person's own
+ * store in that one call (safe to repeat: a key removed already is left as
+ * it is). Then, while the row is owed for this revocation, either the
+ * page's last run kept as its cursor (only ever forward, so a tick that
+ * overlaps another never moves it back), or, for the last page, the
+ * removal no longer owed and its one event stored, in one batch. Whether
+ * the revocation is complete. Throws when a step fails: the revocation
+ * stays owed, from the last page it kept.
  */
 const removePage = async (env: Env, row: OwedRevocation): Promise<boolean> => {
   const db = drizzle(env.DB);
   const runs = workflowResourceRuns;
+  const rows = brainRunSources;
   const page = await db
-    .select({ id: runs.id })
+    .select({ id: runs.id, createdAt: runs.createdAt })
     .from(runs)
     .where(
       and(
         coveredRuns(row.personId, row.workflowId, row.revokedAt.getTime()),
-        row.removedThrough === null
-          ? undefined
-          : gt(runs.id, row.removedThrough)
+        afterCursor(row)
       )
     )
-    .orderBy(runs.id)
+    .orderBy(runs.createdAt, runs.id)
     .limit(runRemovalsMax);
   if (page.length > 0) {
     await removeRunSources(
@@ -264,27 +297,28 @@ const removePage = async (env: Env, row: OwedRevocation): Promise<boolean> => {
       page.map(({ id }) => id)
     );
   }
-  const last = page.at(-1)?.id;
+  const last = page.at(-1);
   if (last !== undefined && page.length === runRemovalsMax) {
+    const at = last.createdAt.getTime();
     await db
-      .update(brainRunSources)
-      .set({ removedThrough: last })
+      .update(rows)
+      .set({ removedThroughAt: last.createdAt, removedThrough: last.id })
       .where(
         and(
           stillOwed(row),
-          or(
-            isNull(brainRunSources.removedThrough),
-            lt(brainRunSources.removedThrough, last)
-          )
+          sql`(${rows.removedThroughAt} IS NULL
+            OR ${rows.removedThroughAt} < ${at}
+            OR (${rows.removedThroughAt} = ${at} AND ${rows.removedThrough} < ${last.id}))`
         )
       );
-    row.removedThrough = last;
+    row.removedThroughAt = last.createdAt;
+    row.removedThrough = last.id;
     return false;
   }
   await auditedBatch(env, db, [
     db
-      .update(brainRunSources)
-      .set({ removalOwed: false, removedThrough: null })
+      .update(rows)
+      .set({ removalOwed: false, removedThroughAt: null, removedThrough: null })
       .where(stillOwed(row)),
     outboxedEventWhere(db, await removedEvent(row), sql`changes() > 0`),
   ]);
@@ -297,13 +331,16 @@ const removePage = async (env: Env, row: OwedRevocation): Promise<boolean> => {
  * person's store), and a tick takes a tenth of what one invocation may
  * make (`queriesPerInvocationMax`), which every task of the clock's
  * shares, as brain-hand-overs.ts gives its notes alone. So a tick removes
- * at most 33 pages, 3,300 runs; the rest go on at the next.
+ * at most 33 pages, 3,300 runs, and completes at most 33 revocations; the
+ * rest go on at the next. A team of 200 that loses 30 workflows (6,000
+ * revocations) is done some three hours later, and until then each of
+ * them still recalls their own earlier results.
  */
 export const pagesPerTick = Math.floor(queriesPerInvocationMax / 10 / 3);
 
 /**
  * Takes the run results of everyone who lost a workflow out of use in the
- * Brain (above): marks each loss at `at` (`markLost`), then goes through the
+ * Brain (above): marks each loss (`markLost`), then goes through the
  * revocations still owed, at most `pages` pages: one page for each in turn
  * (those not yet begun first, then the oldest), then a second round for
  * those still owed, and so on. One whose page fails is logged with its
@@ -314,16 +351,17 @@ export const pagesPerTick = Math.floor(queriesPerInvocationMax / 10 / 3);
  */
 export const removeLostRunSources = async (
   env: Env,
-  at: Date = new Date(),
   pages: number = pagesPerTick
 ): Promise<void> => {
-  await markLost(env, at);
+  await markLost(env);
+  // Only those that can get a turn: at most one a page.
   const owed = await drizzle(env.DB)
     .select({
       personId: brainRunSources.personId,
       workflowId: brainRunSources.workflowId,
       revokedAt: brainRunSources.revokedAt,
       runs: brainRunSources.runs,
+      removedThroughAt: brainRunSources.removedThroughAt,
       removedThrough: brainRunSources.removedThrough,
     })
     .from(brainRunSources)
@@ -332,7 +370,8 @@ export const removeLostRunSources = async (
     .orderBy(
       sql`${brainRunSources.removedThrough} IS NOT NULL`,
       brainRunSources.revokedAt
-    );
+    )
+    .limit(pages);
   let turning: OwedRevocation[] = owed.flatMap(({ revokedAt, runs, ...row }) =>
     revokedAt === null || runs === null ? [] : [{ ...row, revokedAt, runs }]
   );

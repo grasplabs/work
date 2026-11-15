@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "e7fde966-e0d1-4017-a0a1-b2be2ef59f9d",
+  "id": "436a0b26-b4ce-47a2-b2ab-6a8784b4cc45",
   "prevId": "64b5cff2-4d76-410b-86fd-624fa01f8613",
   "tables": {
     "access_revocations": {
@@ -4421,6 +4421,13 @@
           "notNull": true,
           "autoincrement": false,
           "default": false
+        },
+        "removed_through_at": {
+          "name": "removed_through_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         },
         "removed_through": {
           "name": "removed_through",
