@@ -467,14 +467,18 @@ export interface StartOfferCard {
   /** Its id in `chat_workflow_offers`, which the press names. */
   offerId: string;
   workflow: string;
-  /** The values it starts with, each whole (workflow-offers.ts). */
+  /** The values it starts with, as the platform gets them (workflow-offers.ts). */
   values: readonly { label: string; value: string }[];
 }
 
 /**
  * A workflow offered on a card: its name, each value it would start with,
  * and Start, whose press names only the offer, so it starts exactly what
- * the card showed, and only for the person it was offered to.
+ * the card showed, and only for the person it was offered to. Start is on
+ * the card only while its name and every value are on it whole, as shown
+ * (`workflow` and `values` as the platform gets them, made inert, which
+ * can make them longer): otherwise the card says so, and nothing starts
+ * from it.
  */
 export const startOfferCard = ({
   locale,
@@ -483,14 +487,17 @@ export const startOfferCard = ({
   values,
 }: StartOfferCard): PostableCard => {
   const room: Room = { left: outsideBytes };
-  const name = fit(workflow, maxTitleChars, room).text;
-  const shown = values.map((each) => ({
-    label: fit(each.label, maxLabelChars, room).text,
-    value: fit(each.value, Number.POSITIVE_INFINITY, room).text,
-  }));
+  const name = fit(workflow, maxTitleChars, room);
+  let { whole } = name;
+  const shown = values.map((each) => {
+    const label = fit(each.label, maxLabelChars, room);
+    const value = fit(each.value, Number.POSITIVE_INFINITY, room);
+    whole &&= label.whole && value.whole;
+    return { label: label.text, value: value.text };
+  });
   const card = (
     <Card>
-      <CardText>{say("startOffer", locale, { workflow: name })}</CardText>
+      <CardText>{say("startOffer", locale, { workflow: name.text })}</CardText>
       {shown.length === 0 ? null : (
         <Fields>
           {shown.map(({ label, value }, at) => (
@@ -498,11 +505,15 @@ export const startOfferCard = ({
           ))}
         </Fields>
       )}
-      <Actions>
-        <Button id={startAction} style="primary" value={offerId}>
-          {say("startButton", locale)}
-        </Button>
-      </Actions>
+      {whole ? (
+        <Actions>
+          <Button id={startAction} style="primary" value={offerId}>
+            {say("startButton", locale)}
+          </Button>
+        </Actions>
+      ) : (
+        <CardText>{say("startTooLong", locale)}</CardText>
+      )}
     </Card>
   );
   return { card: cardOf(card), aiGenerated: true };

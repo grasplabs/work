@@ -99,8 +99,9 @@ export const shownValues = (
  * agent acts for, as `scope` says, for the chat's answer to put on a card.
  * Only in a chat app's chat, never a restricted one; only a workflow they
  * could start themselves whose owner lets people ask for it, with input
- * its live version's contract takes, few and short enough to show whole.
- * Starts nothing.
+ * its live version's contract takes, few and short enough for a card;
+ * the card itself offers Start only where it shows every value whole
+ * (cards.tsx `startOfferCard`). Starts nothing.
  */
 export const offerStart = async (
   env: Env,
