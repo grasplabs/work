@@ -10,6 +10,7 @@ import type {
   Embedders,
   HandOvers,
   NewEntity,
+  ErasedRequest,
   NewMemory,
   PersonReader,
   Reader,
@@ -23,6 +24,7 @@ import {
   exportFileNameSchema,
   instructionsMaxLength,
   removedSource,
+  restoringNow,
 } from "../src/contract.ts";
 import {
   exportFormat,
@@ -528,6 +530,15 @@ const drawn = (source: string, statement: string): NewMemory => ({
   statement,
   speaker: { kind: "system" },
   basis: { kind: "source", source, version: 1, quote: "words" },
+});
+
+/** A memory about `c`, a system's fact, written by `writer`. */
+const writtenBy = (writer: string, statement: string): NewMemory => ({
+  about: "c",
+  type: "fact",
+  statement,
+  speaker: { kind: "system" },
+  basis: { kind: "writer", writer },
 });
 
 /** The text of the object at `key` in the bucket: empty when there is none. */
@@ -2147,6 +2158,100 @@ describe("exports and restores", () => {
             )
             .one().latest
       );
+
+    // GRA-1807: what a chat showed of a memory is replaced only for what
+    // the ledger erased, which outlives a lost storage; never because the
+    // storage lacks it until the restore puts it back.
+    it("answers a memory a host once read as kept while the storage is lost, refuses while it restores, and keeps it after; one whose source or writer was erased answers erased throughout", async () => {
+      await putBack(shared(), emptyShared);
+      const group = `team:${unique()}`;
+      const reader = readerOf(`person:${unique()}`, [group]);
+      const kept = `test:${unique()}`;
+      const erased = `test:${unique()}`;
+      await add(shared(), kept, "words kept", team(group));
+      await add(shared(), erased, "words erased", team(group));
+      const keptWriter = `app:${unique()}`;
+      const erasedWriter = `app:${unique()}`;
+      const added = await shared().addMemories({
+        change: unique(),
+        access: team(group),
+        entities: [customer()],
+        memories: [
+          drawn(kept, "Acme keeps its words"),
+          drawn(erased, "Acme erases its words"),
+          writtenBy(keptWriter, "Acme keeps its writer"),
+          writtenBy(erasedWriter, "Acme erases its writer"),
+        ],
+      });
+      const [onKept = "", onErased = "", byKept = "", byErased = ""] =
+        added.memories;
+      // What a host pinned as each was handed over: what it rests on.
+      const { memories } = await shared().readMemories({
+        entity: added.entities.c ?? "",
+        reader,
+      });
+      const asked: ErasedRequest = {
+        sources: [kept, erased],
+        memories: [onKept, onErased, byKept, byErased].flatMap((id) =>
+          memories.flatMap(({ id: held, source, writer, learnedAt }) =>
+            held === id
+              ? [
+                  {
+                    memory: id,
+                    source: source?.source ?? null,
+                    writer,
+                    learnedAt: learnedAt.getTime(),
+                  },
+                ]
+              : []
+          )
+        ),
+      };
+      await shared().eraseSource({ source: erased, reason: "deleted" });
+      await shared().eraseWriter({
+        writer: erasedWriter,
+        reason: "deleted",
+        change: unique(),
+      });
+      const erasedOnly = {
+        sources: [erased],
+        memories: [onErased, byErased],
+      };
+      const before = await shared().erasedOf(asked);
+
+      const { id } = await shared().startExport("test");
+      await expect(settled(shared(), id)).resolves.toMatchObject({
+        state: "done",
+      });
+      // Its storage lost, its bucket kept: the ledger is read again.
+      await putBack(shared(), emptyShared);
+      const lost = await shared().erasedOf(asked);
+      const started = await shared().startRestore(id, "test");
+      const restoring = await called(shared().erasedOf(asked)).then(
+        () => "answered",
+        (error: unknown) => (error instanceof Error ? error.message : "")
+      );
+      await expect(restoreSettled(id)).resolves.toMatchObject({
+        state: "done",
+      });
+      const after = await shared().erasedOf(asked);
+
+      expect({
+        asked: asked.memories.map(({ memory }) => memory),
+        before,
+        lost,
+        started: started.state,
+        restoring,
+        after,
+      }).toStrictEqual({
+        asked: [onKept, onErased, byKept, byErased],
+        before: erasedOnly,
+        lost: erasedOnly,
+        started: "running",
+        restoring: restoringNow,
+        after: erasedOnly,
+      });
+    });
 
     it("brings back what each reader read of memories, contested facts, confirmations, entities and their names, and recall, and never lowers the write stamp (threats 1, 4, 7)", async () => {
       await putBack(shared(), emptyShared);

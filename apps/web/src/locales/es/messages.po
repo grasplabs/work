@@ -7095,8 +7095,8 @@ msgid "It is gone for good: it answers nobody, and its schedule and settings are
 msgstr "Desaparece para siempre: no responde a nadie, y se eliminan su horario y sus ajustes. Las personas conservan los chats que tuvieron con él."
 
 #: src/apps/app-remove.tsx
-msgid "It is gone for good: its pages, versions and members, and what it was allowed. Its stores and their records stay, and so do the workflows it doesn’t own."
-msgstr "Desaparece para siempre: sus páginas, versiones y miembros, y lo que tenía permitido. Sus almacenes y sus registros se quedan, igual que los flujos de trabajo que no son suyos."
+msgid "It is gone for good: its pages, versions and members, and what it was allowed. Its stores and their records stay, and so do what its code remembered in the Brain and the workflows it doesn’t own."
+msgstr "Desaparece para siempre: sus páginas, versiones y miembros, y lo que tenía permitido. Sus almacenes y sus registros se quedan, igual que lo que su código recordó en el Cerebro y los flujos de trabajo que no son suyos."
 
 #: src/apps/app-page.tsx
 msgid "It is kept as it was, and nobody works on it, until a builder restores it."
@@ -14191,6 +14191,10 @@ msgstr "Lo encontrarán en Workflows y lo ejecutarán tal como está ahora."
 msgid "Thinking"
 msgstr "Pensando"
 
+#: src/apps/resource-bindings.tsx
+msgid "This App can save memories in the Brain in its own name, which everyone who uses the App reads through it, and only through it, and it can take its own back."
+msgstr "Esta aplicación puede guardar recuerdos en el Cerebro en su propio nombre, que todos los que usan la aplicación leen a través de ella, y solo a través de ella, y puede retirar los suyos."
+
 #: src/apps/app-data.tsx
 msgid "This App changed. Reload to see its current version."
 msgstr "Esta aplicación ha cambiado. Recarga para ver su versión actual."
@@ -15634,6 +15638,10 @@ msgstr "Con qué se inicia"
 #: src/workflows/item-test.tsx
 msgid "What its calls answer"
 msgstr "Qué responden sus llamadas"
+
+#: src/apps/app-reset.tsx
+msgid "What its code remembered in the Brain until now goes too; a call already running may still remember what it read before."
+msgstr "Lo que su código recordó en el Cerebro hasta ahora también se va; una llamada que ya está en curso aún puede recordar lo que leyó antes."
 
 #: src/workflows/kept-state.tsx
 msgid "What its steps keep for later runs, which each run reads as it starts. It uses {used} KB of {cap} KB."
