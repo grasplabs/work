@@ -356,7 +356,8 @@ const runs: ErasureStep = {
  * Their interview (GRA-1187), deleted as the onboarding deletes one on
  * its person's own request (`deleteOnRequest`): what they said and agreed
  * to, every drawing it was in, the Brain's records resting on it, and
- * Stephen's lines kept from it. Found on the list by the address that was
+ * everything the voice said in it; and everything the voice said for them
+ * as an admin, on their onboarding. Found on the list by the address that was
  * theirs, through its keyed hash, so whichever area ran first; once an
  * admin released the address, or under an older key, it is found no more.
  * Their entry on the list is the company's (Nick's D5): it stays, removed
@@ -377,6 +378,9 @@ const interview: ErasureStep = {
     if (erasure === undefined) {
       return;
     }
+    // What the voice said for them as an admin, on their onboarding, goes
+    // from its cache, whoever they were on the list (GRA-1897).
+    await onboardingStore(env).forgetSpokenForAdmin(userId);
     // Their address released, or hashed under an older key: they can't be
     // found on the list by it, and whatever interview they have is left.
     // Recorded as skipped, never as done.

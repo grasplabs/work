@@ -819,6 +819,49 @@ export const retireOnboardingRecords = async (
   return retiring.length;
 };
 
+/** Whether a record's id starts with one of `prefixes` (after `onb-`). */
+const onboardingPrefixed = (prefixes: readonly string[]) =>
+  or(
+    ...prefixes.map((prefix) =>
+      like(brainRecords.id, `${onboardingIdPrefix}${prefix}%`)
+    )
+  );
+
+/**
+ * How many records the onboarding gave the brain whose id starts with one
+ * of `prefixes` (after `onb-`), retired ones too: what erasing them
+ * (`eraseOnboardingRecords`) takes.
+ */
+export const onboardingRecordsHeld = async (
+  env: Env,
+  prefixes: readonly string[]
+): Promise<number> => {
+  const [row] = await drizzle(env.DB)
+    .select({ held: sql<number>`count(*)` })
+    .from(brainRecords)
+    .where(onboardingPrefixed(prefixes));
+  return row?.held ?? 0;
+};
+
+/**
+ * Erases, for good, every record the onboarding gave the brain whose id
+ * starts with one of `prefixes` (after `onb-`), retired ones too, which
+ * still hold their words: what the admin deleting the kickoff takes
+ * (onboarding/kickoff-records.ts). The store's own event records the
+ * delete, with how many it takes, before this runs; this writes none of
+ * its own, so one delete is one event. Returns how many it erased.
+ */
+export const eraseOnboardingRecords = async (
+  env: Env,
+  prefixes: readonly string[]
+): Promise<number> => {
+  const erased = await drizzle(env.DB)
+    .delete(brainRecords)
+    .where(onboardingPrefixed(prefixes))
+    .returning({ id: brainRecords.id });
+  return erased.length;
+};
+
 /** A dated value of a team, by the team it is for. */
 interface ForTeam<T> {
   teamId: string;

@@ -1499,6 +1499,10 @@ msgstr "A guest wrote a message"
 msgid "A JSON value"
 msgstr "A JSON value"
 
+#: src/interview/transcript.tsx
+msgid "A line of mine, removed."
+msgstr "A line of mine, removed."
+
 #: src/workflows/requests/request-plan.tsx
 msgid "A look-up"
 msgstr "A look-up"
@@ -3332,8 +3336,10 @@ msgstr "Can't offer Run: {unread}"
 #: src/drafts/draft-history.tsx
 #: src/drafts/sharing.tsx
 #: src/inbox/item-detail.tsx
+#: src/interview/transcript.tsx
 #: src/link-confirmation.tsx
 #: src/onboarding/document-drop.tsx
+#: src/onboarding/forget-kickoff.tsx
 #: src/onboarding/place-picker.tsx
 #: src/projects/file-item-dialog.tsx
 #: src/projects/project-dialog.tsx
@@ -5856,9 +5862,25 @@ msgstr "For the team {team}"
 msgid "For whom"
 msgstr "For whom"
 
+#: src/onboarding/forget-kickoff.tsx
+msgid "Forget it"
+msgstr "Forget it"
+
+#: src/onboarding/forget-kickoff.tsx
+msgid "Forget our first conversation"
+msgstr "Forget our first conversation"
+
+#: src/onboarding/forget-kickoff.tsx
+msgid "Forget our first conversation?"
+msgstr "Forget our first conversation?"
+
 #: src/brain/memories-page.tsx
 msgid "Forgotten, kept as history"
 msgstr "Forgotten, kept as history"
+
+#: src/onboarding/forget-kickoff.tsx
+msgid "Forgotten. Nothing of our first conversation is kept."
+msgstr "Forgotten. Nothing of our first conversation is kept."
 
 #: src/connections/groups.ts
 msgctxt "kind of app"
@@ -6707,6 +6729,10 @@ msgstr "I couldn’t read {name}. Add it again, or as a PDF."
 #: src/onboarding/setup-steps.tsx
 msgid "I couldn’t read this one"
 msgstr "I couldn’t read this one"
+
+#: src/onboarding/forget-kickoff.tsx
+msgid "I delete what was said and everything I took from it: what I know about your company from it, and what your Brain learned from it. I then know less about your company, which can put off the day your Grasp opens. This can’t be undone."
+msgstr "I delete what was said and everything I took from it: what I know about your company from it, and what your Brain learned from it. I then know less about your company, which can put off the day your Grasp opens. This can’t be undone."
 
 #: src/onboarding/about-story.tsx
 msgid "I do every interview myself. Here’s what that sounds like."
@@ -9917,6 +9943,10 @@ msgstr "Our email didn’t reach {names}. Send them their link yourself from Lin
 msgid "Our first conversation gave me the big picture. Now I need the details."
 msgstr "Our first conversation gave me the big picture. Now I need the details."
 
+#: src/onboarding/forget-kickoff.tsx
+msgid "Our first conversation is deleted. I’m still erasing what I took from it, and I finish that by myself."
+msgstr "Our first conversation is deleted. I’m still erasing what I took from it, and I finish that by myself."
+
 #: src/apps/resource-bindings.tsx
 #: src/chat/thread.tsx
 msgid "Output"
@@ -10890,6 +10920,7 @@ msgstr "Reload"
 #: src/apps/data-model-changes.tsx
 #: src/apps/field-editor.tsx
 #: src/connections/tool-permissions.tsx
+#: src/interview/transcript.tsx
 #: src/onboarding/document-drop.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/ai-providers.tsx
@@ -10949,6 +10980,10 @@ msgstr "Remove {what} from the brain?"
 msgid "Remove {when}, for {person}"
 msgstr "Remove {when}, for {person}"
 
+#: src/interview/transcript.tsx
+msgid "Remove {who}’s line: {words}"
+msgstr "Remove {who}’s line: {words}"
+
 #: src/brain/brain-article/kern.tsx
 #: src/brain/forget.tsx
 msgid "Remove from the brain"
@@ -10990,6 +11025,14 @@ msgstr "Remove the search"
 msgid "Remove this from the brain"
 msgstr "Remove this from the brain"
 
+#: src/interview/transcript.tsx
+msgid "Remove this line?"
+msgstr "Remove this line?"
+
+#: src/interview/transcript.tsx
+msgid "Remove your line: {words}"
+msgstr "Remove your line: {words}"
+
 #: src/settings/erasures.tsx
 msgid "Removed"
 msgstr "Removed"
@@ -11027,6 +11070,10 @@ msgstr "Removed on {date} · email erased"
 #: src/settings/erasures.tsx
 msgid "Removed people"
 msgstr "Removed people"
+
+#: src/interview/transcript.tsx
+msgid "Removed."
+msgstr "Removed."
 
 #: src/chat/chat-menus.tsx
 #: src/chat/chat-more.tsx
@@ -13733,6 +13780,10 @@ msgstr "The interviews aren’t planned yet. You plan them at the end of your on
 #: src/workflows/traces.tsx
 msgid "The latest runs, newest first."
 msgstr "The latest runs, newest first."
+
+#: src/interview/transcript.tsx
+msgid "The line is deleted now, and so is what I marked in it. What I wrote down from it is in what I read back to you at the end: take it out there, and it is deleted for good when our conversation is finished. This can’t be undone."
+msgstr "The line is deleted now, and so is what I marked in it. What I wrote down from it is in what I read back to you at the end: take it out there, and it is deleted for good when our conversation is finished. This can’t be undone."
 
 #: src/pages/page-links.ts
 msgid "The link wasn't opened."
