@@ -221,8 +221,10 @@ export class AppPreviewRpc extends CoreRpcTarget implements AppPreviewApi {
         return await load();
       }
       // The draft as it is now: one open per viewer and revision, shared
-      // by every preview of theirs that opens it at once.
-      const opened = await this.#previewOf(id).build(
+      // by every preview of theirs that opens it at once. The preview
+      // answers what `load` answered it, with that call's release, which
+      // this ask owns: released once its data is read.
+      using opened = await this.#previewOf(id).build(
         by.userId,
         "open",
         undefined,
@@ -264,7 +266,8 @@ export class AppPreviewRpc extends CoreRpcTarget implements AppPreviewApi {
       const frame = pageErrors.parse("page.invalid", previewShownSchema, shown);
       const update = async (): Promise<PreviewUpdate> =>
         await this.#updateFor(by, id, frame);
-      const updated = await this.#previewOf(id).build(
+      // Released as `open`'s is.
+      using updated = await this.#previewOf(id).build(
         by.userId,
         // The answer depends on all the frame shows.
         `update:${canonicalJson(frame)}`,
