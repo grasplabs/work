@@ -68,7 +68,6 @@ const reply = (
   id,
   role: "assistant",
   text: "",
-  citations: [],
   code: [],
   tools: [],
   end: "done",

@@ -184,8 +184,7 @@ export const isRunRefusal = (error: unknown): boolean => {
 };
 
 /**
- * Records with the chat what a call read from (collections, a
- * connection), before the call hands over what it read: every later model
+ * Records with the chat what a call read from (a connection), before the call hands over what it read: every later model
  * request of the chat carries them as provenance, so the client's model
  * rules judge it by them (workspace.ts). A run that ended since the call
  * began records nothing, and the call is refused: what it read never
@@ -195,8 +194,6 @@ export const recordSources = async (
   env: Env,
   { workspaceId, chatId, runId }: AgentScope,
   sources: readonly string[],
-  /** The Knowledge documents the call hands over, which answers may cite. */
-  documentIds: readonly string[] = [],
   /**
    * What the run's result rests on, if not `sources`: a connection call's
    * grant (`connectionRead`), where the chat's provenance names the
@@ -208,7 +205,6 @@ export const recordSources = async (
     chatId,
     runId,
     sources,
-    documentIds,
     runReads
   );
   if (recorded !== "open") {
@@ -218,7 +214,7 @@ export const recordSources = async (
 
 /**
  * Records with the run alone what a call read that isn't the chat's
- * provenance (an App's answer or files, the Knowledge catalog), before the
+ * provenance (an App's answer or files, the Brain's grant), before the
  * call hands it over, so the run's result is withheld from the model once
  * the agent may no longer read it for its person (history-access.ts). A
  * run that ended since the call began records nothing, and the call is
@@ -330,7 +326,7 @@ export const agentCallEntry = (
 /**
  * Records a call of the chat's code as `agent.call`, by the workspace's
  * agent acting for the chat's person, in the chat: for the calls nothing
- * below records (a Knowledge read, a connection call and a model request
+ * below records (a connection call and a model request
  * record themselves). Through core's outbox, which never fails the call
  * (`keepAuditEvent`).
  */

@@ -5,7 +5,7 @@ import { checkWorkflow } from "../src/check.ts";
 import { generateWorkflow } from "../src/generate.ts";
 import { checked, fileSteps, withFiles } from "./fixtures.ts";
 
-// Calls on the run's own files, on a Brain collection, and a connection
+// Calls on the run's own files, on the Brain, and a connection
 // call keeping a file or attaching run files, from their threat model
 // (generate.ts, core's sealed-run.ts): each reaches only the permission
 // and the action the document names, both sealed; a file's ID is the

@@ -122,9 +122,8 @@ import type {
 //   and only its arguments are the isolate's: a file is named by its ID,
 //   which an expression may compute, but the host looks each file up by
 //   that ID *and* the run's own, so no ID of another run's file, made up
-//   or carried in data, reaches one; a Brain collection is the
-//   permission's one, read as the run's person may (core's
-//   resource-reads.ts). A connection's `into` and `from`, the files
+//   or carried in data, reaches one; the Brain is read under the
+//   permission, as the run's person may (core's resource-reads.ts). A connection's `into` and `from`, the files
 //   permissions a read keeps its file in and a write attaches files from,
 //   are sealed too: the code names the same ones, and the host refuses a
 //   call that names others, or names any where the action's contract

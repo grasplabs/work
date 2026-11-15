@@ -110,7 +110,7 @@ const stepKinds = {
     ),
     // One member: a connection's action (which alone keeps a file `into`
     // or attaches files `from` a files permission), an action on the run's
-    // files, an action on a Brain collection, or an App's function.
+    // files, an action on the Brain, or an App's function.
     oneOf: [
       {
         required: ["connection", "action"],

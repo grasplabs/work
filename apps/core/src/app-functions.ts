@@ -369,10 +369,9 @@ export const publicFunctionOf = (
 export interface FunctionAnswer {
   readonly result: FunctionResult;
   /**
-   * Where what the call read through its resources comes from, with its
-   * classification (spec 32.3): the Knowledge collections, and whether
-   * any was sensitive or restricted, and each connection read from with
-   * the resources its connector named. Null when no function ran.
+   * Where what the call read through its resources comes from (spec
+   * 32.3): each connection read from with the resources its connector
+   * named. Null when no function ran.
    */
   readonly provenance: InvocationProvenance | null;
   /** The release that ran, when one did. */
