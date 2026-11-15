@@ -85,7 +85,7 @@ export interface StephenObservation {
   held: { action: string; input: Record<string, unknown> }[];
   /** What reached the model that the model didn't write itself. */
   modelRead: string;
-  /** The documents the answer cites. */
+  /** The Brain's passages the turn's recalls handed the model: what the answer can cite. */
   cited: string[];
 }
 
@@ -181,7 +181,7 @@ const english: StephenCheck = ({ answer }) =>
     ? "not English"
     : undefined;
 const cites: StephenCheck = ({ cited }) =>
-  cited.length > 0 ? undefined : "cites no source";
+  cited.length > 0 ? undefined : "recalled no source to cite";
 const noColleagueNamed =
   (own: string): StephenCheck =>
   (seen) => {
