@@ -64,7 +64,7 @@ import {
   writerErasedAfterSql,
 } from "./memories.ts";
 import { readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
-import { planOf, valueKeyFor } from "./remember.ts";
+import { planOf, restatementOf, valueKeyFor } from "./remember.ts";
 import { memoriesWrittenSinceSql, restoreFailedSql } from "./restoring.ts";
 import { indexMemoryWords, indexWords } from "./words.ts";
 import type { WordMemo } from "./words.ts";
@@ -709,6 +709,7 @@ const restoreMemory = async (
   const subject = line.source === null ? null : await subjectOf(line.source);
   const writerSubject =
     line.writer === null ? null : await writerSubjectOf(line.writer);
+  const restatement = await restatementOf(line);
   storage.transactionSync(() => {
     const { sql } = storage;
     if (passesOverMemory(sql, line, subject, writerSubject)) {
@@ -740,7 +741,7 @@ const restoreMemory = async (
         line.attribute,
         line.object === null ? null : (rows.get(line.object) ?? null),
         line.value,
-        valueKeyFor(rule, line.value, line.object),
+        valueKeyFor(rule, { ...line, restatement }),
         rule?.values === "one" ? 1 : 0,
         line.type,
         line.statement,
