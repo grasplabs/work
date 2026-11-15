@@ -121,13 +121,15 @@ const startSql = (alias: string): string =>
  * When the memory `alias` went out by `at` (quotes.ts): the add of its
  * source's current version, when that version is the one its source's
  * memories were judged against and the memory is out. One row or none:
- * an empty seek of `memory_outs` for a memory never put out.
+ * a seek of `memory_outs` that finds nothing for a memory never put out.
  */
 const outSql = (alias: string, at: string): string => `
   SELECT current.added_at AS at FROM memory_outs AS out
-  JOIN current_versions AS pointer
+  -- The out row first, by its key: one row read (workerd counts a seek
+  -- that finds nothing as one) for a memory never out.
+  CROSS JOIN current_versions AS pointer
     ON pointer.source = ${alias}.source AND pointer.judged_row = pointer.version_row
-  JOIN source_versions AS current ON current.row = pointer.version_row
+  CROSS JOIN source_versions AS current ON current.row = pointer.version_row
   WHERE out.memory = ${alias}.row AND current.added_at <= ${at}`;
 
 /**

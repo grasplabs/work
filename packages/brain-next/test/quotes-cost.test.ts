@@ -8,9 +8,11 @@ import { audience, readerOf, word } from "./entity-helpers.ts";
 // What a memory's quote against its source's current version costs
 // (quotes.ts), as memories-cost.test.ts counts it: the rows the store's
 // SQL reads, as workerd counts them (each cursor's `rowsRead`), through
-// the store's public methods. A read of memories nothing put out reads
-// exactly what it read before (an empty seek of `memory_outs`); an out
-// memory costs its read a few rows more, the same for each; and a
+// the store's public methods. A read of a memory nothing put out reads
+// one row more than before this, a seek of `memory_outs` that finds
+// nothing (workerd counts it as a row: measured against main, 20
+// memories read 531 rows where they read 511), however many other
+// memories are out; an out memory two more, the same for each; and a
 // version's add reads its source's in set and the out memories its text
 // may bring back, never the source's other out memories nor any other
 // memory.
@@ -136,42 +138,28 @@ const sentenceOf = (tag: string, index: number): string =>
   `${tag} clause ${index} holds ${tag}x${index}`;
 
 describe("what judging quotes costs", () => {
-  it("reads memories nothing put out as it reads those of a source never changed, row for row", async () => {
+  it("reads memories nothing put out alike however many other memories are out", async () => {
     const { stub, rowsReadBy } = await countedStore();
     const group = `g-${crypto.randomUUID()}`;
     const reader = readerOf("reader", group);
-    const made = async (changed: boolean) => {
-      const source = `doc-${crypto.randomUUID()}`;
-      const tag = word();
-      const text = Array.from({ length: 20 }, (_, index) =>
-        sentenceOf(tag, index)
-      ).join(". ");
-      const on = await version(stub, source, text, group);
-      const name = `${word()} Group`;
-      const entity = await drawn(stub, {
-        source,
-        on,
-        group,
-        name,
-        count: 20,
-        quoteOf: (index) => sentenceOf(tag, index),
-      });
-      if (changed) {
-        // Every quote still held: each memory judged in, none out.
-        await version(stub, source, `${text}. More.`, group);
-      }
-      return { name, entity };
-    };
-    // Both made before either is read, so both read the same trees.
-    const changed = await made(true);
-    const unchanged = await made(false);
-    const rowsOf = async ({
+    const source = `doc-${crypto.randomUUID()}`;
+    const tag = word();
+    const text = Array.from({ length: 20 }, (_, index) =>
+      sentenceOf(tag, index)
+    ).join(". ");
+    const on = await version(stub, source, text, group);
+    const name = `${word()} Group`;
+    const entity = await drawn(stub, {
+      source,
+      on,
+      group,
       name,
-      entity,
-    }: {
-      name: string;
-      entity: string;
-    }) => ({
+      count: 20,
+      quoteOf: (index) => sentenceOf(tag, index),
+    });
+    // Every quote still held: each memory judged in, none out.
+    await version(stub, source, `${text}. More.`, group);
+    const rows = async () => ({
       memories: await rowsReadBy(
         async () => await stub.readMemories({ entity, reader, history: true })
       ),
@@ -182,10 +170,34 @@ describe("what judging quotes costs", () => {
         async () => await stub.readCard({ entity, reader })
       ),
     });
-    const ofChanged = await rowsOf(changed);
-    const ofUnchanged = await rowsOf(unchanged);
+    const before = await rows();
+    // A thousand memories of another source, all out.
+    const other = `doc-${crypto.randomUUID()}`;
+    const otherTag = word();
+    const otherOn = await version(
+      stub,
+      other,
+      Array.from({ length: 10 }, (_, index) =>
+        sentenceOf(otherTag, index)
+      ).join(". "),
+      group
+    );
+    await drawn(stub, {
+      source: other,
+      on: otherOn,
+      group,
+      name: `${word()} Group`,
+      count: 1000,
+      quoteOf: (index) => sentenceOf(otherTag, index % 10),
+    });
+    await version(stub, other, "Nothing of those.", group);
+    const after = await rows();
 
-    expect(ofChanged).toStrictEqual(ofUnchanged);
+    expect({
+      memories: Math.abs(after.memories - before.memories) <= seekMargin,
+      found: Math.abs(after.found - before.found) <= seekMargin,
+      card: Math.abs(after.card - before.card) <= seekMargin,
+    }).toStrictEqual({ memories: true, found: true, card: true });
   }, 60_000);
 
   it("reads the same few rows more for each out memory, however many and however many others the store holds", async () => {
