@@ -160,6 +160,8 @@ export interface StephenCompany {
   mailbox: string;
   /** Each team's ID, by key. */
   teams: Map<StephenTeam, string>;
+  /** The text of each of Noordkade's documents, by its source in the Brain. */
+  sources: Map<string, string>;
   /** The connections Lisa's agent is granted: her own, and the company's. */
   connections: { own: string; company: string };
   /** Each persona's Workspace object and the agent its grants are for. */
@@ -489,10 +491,13 @@ export const setUpStephenCompany = async (
   }
   // Noordkade's documents in the Brain, as uploads shared with their
   // readers are: the handbook with everyone, a team's notes with the team.
+  const sources = new Map<string, string>();
   for (const { reader, text } of Object.values(stephenDocuments)) {
+    const source = `upload:${crypto.randomUUID()}`;
+    sources.set(source, text);
     // oxlint-disable-next-line no-await-in-loop -- one source at a time
     await brainOf(inJurisdiction(env, env.BRAIN_STORE)).addSource({
-      source: `upload:${crypto.randomUUID()}`,
+      source,
       change: crypto.randomUUID(),
       text,
       access: {
@@ -583,6 +588,7 @@ export const setUpStephenCompany = async (
     people,
     mailbox,
     teams,
+    sources,
     connections,
     places,
     clock,
@@ -771,26 +777,48 @@ const modelReadOf = (requests: readonly { body: unknown }[]): string =>
     .map(({ text }) => text)
     .join("\n");
 
-/** A pin of a passage of the Brain a recall handed a run (history-access.ts). */
-const passagePin = /^brain-(?:team-|company-)?version:/u;
+/**
+ * A pin of a passage of the Brain a recall handed a run (history-access.ts),
+ * and its version as JSON: `[producer, id, version]`.
+ */
+const passagePin = /^brain-(?:team-|company-)?version:(?<version>.+)$/u;
+
+const pinnedVersionSchema = z.tuple([z.string(), z.string(), z.int()]);
 
 /**
- * The Brain's passages chat `chatId`'s recalls handed the model, by their
- * pins: what its answer can cite.
+ * The text of each of Noordkade's documents whose passages chat `chatId`'s
+ * recalls handed the model, as its pins name them: what its answer can
+ * name as its source.
  */
 const recalledIn = async (
+  company: Pick<StephenCompany, "sources">,
   stub: ReturnType<typeof workspace>,
   chatId: string
-): Promise<string[]> =>
-  await runInDurableObject(stub, (_object, state) =>
+): Promise<string[]> => {
+  const pins = await runInDurableObject(stub, (_object, state) =>
     state.storage.sql
       .exec<{ source: string }>(
         "SELECT DISTINCT source_id AS source FROM chat_run_sources WHERE chat_id = ?",
         chatId
       )
       .toArray()
-      .flatMap(({ source }) => (passagePin.test(source) ? [source] : []))
+      .map(({ source }) => source)
   );
+  const sources = new Set(
+    pins.flatMap((pin) => {
+      const version = passagePin.exec(pin)?.groups?.version;
+      if (version === undefined) {
+        return [];
+      }
+      const [producer, id] = pinnedVersionSchema.parse(JSON.parse(version));
+      return [`${producer}:${id}`];
+    })
+  );
+  return [...sources].flatMap((source) => {
+    const text = company.sources.get(source);
+    return text === undefined ? [] : [text];
+  });
+};
 
 /** One case, asked in a new chat of its person's, and what it did. */
 const observeCase = async (
@@ -841,7 +869,7 @@ const observeCase = async (
   const started = performance.now();
   let answer = "";
   let failure: string | undefined;
-  let cited: string[] = [];
+  let recalled: string[] = [];
   try {
     const asked = place.stub.ask(chat.id, {
       text: item.text,
@@ -853,7 +881,7 @@ const observeCase = async (
     }
     const reply = await asked;
     ({ answer } = reply);
-    cited = await recalledIn(place.stub, chat.id);
+    recalled = await recalledIn(company, place.stub, chat.id);
     if (reply.outcome !== "answered") {
       failure = `${reply.outcome}: ${reply.error ?? ""}`;
     }
@@ -880,7 +908,7 @@ const observeCase = async (
         )
         .map(({ action, input }) => ({ action, input: inputOf(input) })),
       modelRead: modelReadOf(sent.requests.slice(firstRequest)),
-      cited,
+      recalled,
     },
     context,
     latencyMs,
@@ -1076,7 +1104,7 @@ export const runStephenEval = async (
     const hard = brokenRules(seen, item, context);
     const fails =
       seen.error === undefined
-        ? item.checks.flatMap((check) => check(seen, context) ?? [])
+        ? item.checks.flatMap((check) => check(seen, context, item) ?? [])
         : [`error: ${seen.error}`];
     const verdict =
       judge && breaker === undefined
