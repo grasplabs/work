@@ -770,8 +770,8 @@ const eventIdSql = (fresh: string): SQL =>
 
 /**
  * What `auditDetail` records of a permission row, as SQL: its IDs by name
- * (connectionId and resource; workflowId; appId), its
- * actions and its binding.
+ * (connectionId and resource; workflowId; appId; for a kind the platform
+ * no longer serves, `objectId`), its actions and its binding.
  */
 const auditDetailSql = sql`json_patch(
   json_object('subjectType', ${permissions.subjectType}, 'subjectId', ${permissions.subjectId}, 'objectType', ${permissions.objectType}),
@@ -785,7 +785,9 @@ const auditDetailSql = sql`json_patch(
       CASE WHEN ${permissions.resource} IS NULL THEN '{}' ELSE json_object('function', ${permissions.resource}) END
     )
     WHEN 'workflow' THEN json_object('workflowId', ${permissions.objectId})
-    ELSE '{}'
+    WHEN 'platform' THEN '{}'
+    -- A kind the platform no longer serves (servedSql): its object by ID.
+    ELSE json_object('objectId', ${permissions.objectId})
   END
 )`;
 

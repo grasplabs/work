@@ -687,6 +687,8 @@ describe("permissions", () => {
           actor,
           reason: detail?.reason,
           binding: detail?.binding,
+          objectType: detail?.objectType,
+          objectId: detail?.objectId,
         })),
       }).toStrictEqual({
         requested: "ok",
@@ -696,6 +698,9 @@ describe("permissions", () => {
             actor: { type: "person", userId },
             reason: "binding kind removed",
             binding: "OUTLOOK",
+            // Which one it was, as a served kind's names its object.
+            objectType,
+            objectId: object,
           },
         ],
       });
