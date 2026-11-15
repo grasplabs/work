@@ -95,15 +95,6 @@ export const keepLine = async (
 /** Most keys one delete of the bucket takes. */
 const deleteBatch = 1000;
 
-/**
- * What erasing the lines `texts` takes out of the cache: each one's
- * folder, by a hash of its words, never the words themselves, so they can
- * wait to be taken out without keeping what was said.
- */
-export const storedKeysOf = async (
-  texts: readonly string[]
-): Promise<string[]> => [...new Set(await Promise.all(texts.map(storedKeyOf)))];
-
 /** Every object kept in the folder `folder`, a page at a time. */
 const keptIn = async (
   env: Pick<Env, "FILES">,
@@ -126,7 +117,7 @@ const keptIn = async (
 };
 
 /**
- * Deletes what `stored` names (`storedKeysOf`), whether or not any is
+ * Deletes what `stored` names (`storedKeyOf`), whether or not any is
  * kept: each folder with every way its line was said, and any single key
  * queued before lines had folders. What was said from someone's
  * interview, once it is deleted.

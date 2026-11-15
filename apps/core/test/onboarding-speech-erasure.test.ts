@@ -1,19 +1,21 @@
 import { removedLine } from "@grasp-os/shared/interview-links";
 import type { InterviewProgress } from "@grasp-os/shared/interview-links";
-import { runInDurableObject } from "cloudflare:test";
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
-import { storedKeyOf } from "../src/speech-cache.ts";
+import { platformAi } from "../src/platform-ai.ts";
+import { keepLine, storedKeyOf } from "../src/speech-cache.ts";
+import { speechModelOf } from "../src/speech.ts";
 import { adminCommands } from "./admin-command.ts";
 import { platformElevenLabsKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { onLink, openedFor } from "./interview-link.ts";
 import type { Device } from "./interview-link.ts";
 import { carrying, plan, release } from "./platform-providers.ts";
-import { signedInWithRole, unique } from "./sign-in.ts";
+import { signedInApi, signedInWithRole, unique } from "./sign-in.ts";
 import { sayForAdmin, sayOnLink, stillKept } from "./spoken.ts";
 
 // A line the voice is still saying as what it was said for is erased
@@ -193,3 +195,181 @@ describe(
     });
   }
 );
+
+/** The store's alarm as set now; null for none. */
+const alarmSet = async (): Promise<number | null> =>
+  await runInDurableObject(
+    onboardingStore(env),
+    async (_instance, state) => await state.storage.getAlarm()
+  );
+
+/** Clears the store's alarm: every one set before has run. */
+const noAlarm = async (): Promise<void> => {
+  await runInDurableObject(onboardingStore(env), async (_instance, state) => {
+    await state.storage.deleteAlarm();
+  });
+};
+
+/** The cache, refusing its next delete: it can't be reached a moment. */
+const cacheDownOnce = () =>
+  vi
+    .spyOn(env.FILES, "delete")
+    .mockRejectedValueOnce(new Error("The cache can't be reached."));
+
+/**
+ * Erases what `text` was said for with the cache down once and no alarm
+ * set before: what is left then, whether an alarm was set, and what is
+ * left once it ran.
+ */
+const erasedWithCacheDown = async (
+  text: string,
+  erase: () => Promise<unknown>
+) => {
+  await expect(stillKept(text)).resolves.toBeTruthy();
+  await noAlarm();
+  const down = cacheDownOnce();
+  try {
+    await erase();
+  } finally {
+    down.mockRestore();
+  }
+  const stuck = await leftOf(text);
+  const armed = (await alarmSet()) !== null;
+  const ran = await runDurableObjectAlarm(onboardingStore(env));
+  return { stuck, armed, ran, after: await leftOf(text) };
+};
+
+/** Nothing left of a line, once the alarm took it out: what each case ends on. */
+const takenOutByTheAlarm = {
+  stuck: { cached: true, noted: 0, waiting: 1 },
+  armed: true,
+  ran: true,
+  after: { cached: false, noted: 0, waiting: 0 },
+};
+
+describe("a line whose take-out fails", { timeout: 60_000 }, () => {
+  it("is taken out by the alarm after a line removal", async () => {
+    const text = lineOf();
+    const taken = await interviewSaying(text);
+    await expect(sayOnLink(taken.link, text)).resolves.toBe(200);
+
+    const result = await erasedWithCacheDown(text, async () => {
+      await onLink({
+        action: "save",
+        ...taken.link,
+        version: taken.version,
+        progress: {
+          ...taken.progress,
+          lines: taken.progress.lines.map((line, at) =>
+            at === 0 ? removedLine(line) : line
+          ),
+        },
+      });
+    });
+
+    expect(result).toStrictEqual(takenOutByTheAlarm);
+  });
+
+  it("is taken out by the alarm after the kickoff's deletion, for an admin", async () => {
+    const store = onboardingStore(env);
+    await store.saveKickoff(
+      {
+        transcript: "We sell boats to the islands, and the ferries run late.",
+        fileName: null,
+        reading: {
+          fields: { business: { text: "Boats", quote: "We sell boats" } },
+          ask: {},
+          teams: [],
+        },
+      },
+      { type: "system" },
+      await store.purgeMark()
+    );
+    const admin = await signedInWithRole(idp, "admin");
+    const text = lineOf();
+    await expect(sayForAdmin(admin.session, text)).resolves.toBe(200);
+
+    const result = await erasedWithCacheDown(
+      text,
+      async () => await store.deleteKickoff({ type: "system" })
+    );
+
+    expect(result).toStrictEqual(takenOutByTheAlarm);
+  });
+
+  it("is taken out by the alarm after the admin it was said for is erased as a person", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = await signedInApi(idp, "admin");
+    const text = lineOf();
+    await expect(sayForAdmin(person.session, text)).resolves.toBe(200);
+    await admin.api.members.remove(person.userId);
+
+    const result = await erasedWithCacheDown(
+      text,
+      async () =>
+        await admin.api.members.erase(person.userId, String(person.person.name))
+    );
+
+    expect(result).toStrictEqual(takenOutByTheAlarm);
+  });
+
+  it("stays queued when it is queued again while a take-out of it is under way", async () => {
+    const text = lineOf();
+    const taken = await interviewSaying(text);
+    await expect(sayOnLink(taken.link, text)).resolves.toBe(200);
+    const key = await storedKeyOf(text);
+    const store = onboardingStore(env);
+
+    // Inside the store: a take-out of the line deletes it from the cache
+    // and is held before it answers; meanwhile the voice keeps the line
+    // again, as a request under way does, and that request's own
+    // take-out can't reach the cache.
+    await runInDurableObject(store, async (instance) => {
+      const files: R2Bucket = env.FILES;
+      const remove = files.delete.bind(files);
+      const deleted = Promise.withResolvers<boolean>();
+      const answered = Promise.withResolvers<boolean>();
+      let calls = 0;
+      const cache = vi
+        .spyOn(files, "delete")
+        .mockImplementation(async (keys) => {
+          calls += 1;
+          if (calls === 1) {
+            await remove(keys);
+            deleted.resolve(true);
+            await answered.promise;
+            return;
+          }
+          throw new Error("The cache can't be reached.");
+        });
+      try {
+        const first = instance.forgetSpoken([key]);
+        await deleted.promise;
+        await keepLine(
+          env,
+          {
+            text,
+            spoken: text,
+            voice: platformAi.speech.voices.stephen,
+            model: speechModelOf(),
+            language: "en",
+          },
+          JSON.stringify({ audio: "AAAA", mime: "audio/mpeg", words: [] })
+        );
+        await instance.forgetSpoken([key]);
+        answered.resolve(true);
+        await first;
+      } finally {
+        cache.mockRestore();
+      }
+    });
+    const stuck = await leftOf(text);
+    const ran = await runDurableObjectAlarm(store);
+
+    expect({ stuck, ran, after: await leftOf(text) }).toStrictEqual({
+      stuck: { cached: true, noted: 1, waiting: 1 },
+      ran: true,
+      after: { cached: false, noted: 1, waiting: 0 },
+    });
+  });
+});

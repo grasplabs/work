@@ -7562,10 +7562,15 @@ export class Onboarding extends DurableObject<Env> {
   /** Keeps the voice's lines `keys` waiting to go, in the transaction it is called in. */
   #queueLines(keys: readonly string[]): void {
     for (const key of keys) {
+      // Queued again while it waits: counted, so a take-out already under
+      // way for it leaves it to be asked once more (`forgetLinesNow`).
       this.#db
         .insert(linesToForget)
-        .values({ key })
-        .onConflictDoNothing()
+        .values({ key, queued: 1 })
+        .onConflictDoUpdate({
+          target: linesToForget.key,
+          set: { queued: sql`coalesce(${linesToForget.queued}, 0) + 1` },
+        })
         .run();
     }
   }
@@ -7625,30 +7630,48 @@ export class Onboarding extends DurableObject<Env> {
     let gone = 0;
     for (let tries = 0; tries < Onboarding.#triesPerCall; tries += 1) {
       const page = this.#db
-        .select({ key: linesToForget.key })
+        .select({ key: linesToForget.key, queued: linesToForget.queued })
         .from(linesToForget)
         .orderBy(asc(linesToForget.key))
         .limit(Onboarding.#linesPerTry)
-        .all()
-        .map(({ key }) => key);
+        .all();
       if (page.length === 0) {
         return gone;
       }
       try {
         // oxlint-disable-next-line no-await-in-loop -- one page at a time
-        await forgetStored(this.env, page);
+        await forgetStored(
+          this.env,
+          page.map(({ key }) => key)
+        );
       } catch (error) {
         log.error("onboarding.lines_unforgotten", {
           error: error instanceof Error ? error.name : "unknown",
         });
+        // oxlint-disable-next-line no-await-in-loop -- once, as it stops
+        await this.#alarmBy(Date.now() + purgeRetryMs);
         return gone;
       }
-      this.#db
-        .delete(linesToForget)
-        .where(inList(linesToForget.key, page))
-        .run();
+      // Each as read: one queued again meanwhile is asked once more.
+      this.ctx.storage.transactionSync(() => {
+        for (const { key, queued } of page) {
+          this.#db
+            .delete(linesToForget)
+            .where(
+              and(
+                eq(linesToForget.key, key),
+                queued === null
+                  ? isNull(linesToForget.queued)
+                  : eq(linesToForget.queued, queued)
+              )
+            )
+            .run();
+        }
+      });
       gone += page.length;
     }
+    // More than one call takes: the alarm takes the rest.
+    await this.#alarmBy(Date.now() + purgeRetryMs);
     return gone;
   }
 
