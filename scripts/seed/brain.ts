@@ -40,6 +40,7 @@ import { uploadErrors } from "@grasp-os/shared/uploads";
 import type { ChatSeed } from "./chats.ts";
 import type { PersonKey, TeamName } from "./company.ts";
 import {
+  affordability,
   aiGuideline,
   approvalLimits,
   codingRules,
@@ -90,64 +91,70 @@ export const uploads: UploadSeed[] = [
     name: "Required documents.docx",
     by: "sanne",
     readers: "everyone",
-    text: requiredDocuments.body,
+    text: requiredDocuments,
   },
   {
     name: "Complaints procedure.docx",
     by: "sanne",
     readers: "everyone",
-    text: complaintsProcedure.body,
+    text: complaintsProcedure,
   },
   {
     name: "Response times.docx",
     by: "sanne",
     readers: "everyone",
-    text: responseTimes.body,
+    text: responseTimes,
   },
   {
     name: "AI and data guideline.docx",
     by: "pieter",
     readers: "everyone",
-    text: aiGuideline.body,
+    text: aiGuideline,
   },
   // A team's, by one of its members.
   {
     name: "Month-end close.docx",
     by: "eva",
     readers: "Finance",
-    text: monthEndClose.body,
-    update: monthEndCloseUpdated.body,
+    text: monthEndClose,
+    update: monthEndCloseUpdated,
   },
   {
     name: "Coding supplier invoices.docx",
     by: "eva",
     readers: "Finance",
-    text: codingRules.body,
+    text: codingRules,
   },
   {
     name: "Approval limits.docx",
     by: "eva",
     readers: "Finance",
-    text: approvalLimits.body,
+    text: approvalLimits,
+  },
+  {
+    name: "Affordability calculation.docx",
+    by: "mark",
+    readers: "Mortgage advice",
+    text: affordability,
   },
   {
     name: "Lender requirements.docx",
     by: "mark",
     readers: "Mortgage advice",
-    text: lenderRequirements.body,
+    text: lenderRequirements,
   },
   {
     name: "Handing a file over.docx",
     by: "nina",
     readers: "Client onboarding",
-    text: handoverChecklist.body,
-    update: handoverChecklistUpdated.body,
+    text: handoverChecklist,
+    update: handoverChecklistUpdated,
   },
   {
     name: "Know your customer.docx",
     by: "joost",
     readers: "Compliance",
-    text: kycPolicy.body,
+    text: kycPolicy,
   },
   // Only the uploader's: nobody else sees them, admins included.
   {
@@ -206,7 +213,7 @@ export const instructionFiles: InstructionSeed[] = [
     text: `
 Answer in the language the question is asked in, in plain words: most of us are not lawyers or accountants.
 
-Name the document you answer from, and say so when it is past its review date.
+Name the document you answer from.
 
 Client data stays in the EU, in the tools the company approved. A person approves anything that leaves the company: an offer, a compensation, a letter to a lender.
 `.trim(),
@@ -268,36 +275,6 @@ export const skills: SkillSeed[] = [
 `
     ),
     sharedBy: "sanne",
-  },
-];
-
-/** Chats whose question recall answers from an upload, each answer naming it. */
-export const brainChats: ChatSeed[] = [
-  {
-    by: "jeroen",
-    title: "Booking a new laptop",
-    hoursAgo: 30,
-    answeredBy: "Coding supplier invoices.docx",
-    turns: [
-      {
-        question: "Which ledger account do I book a new laptop on?",
-        answer:
-          "On 4300 Software and data. Coding supplier invoices.docx, which Finance keeps in the Brain, books software, data, laptops and phones there. If the invoice has no VAT number, send it back to the supplier instead of booking it.",
-      },
-    ],
-  },
-  {
-    by: "lisa",
-    title: "Compensation for a complaint",
-    hoursAgo: 8,
-    answeredBy: "Complaints procedure.docx",
-    turns: [
-      {
-        question: "Who approves a compensation above €250 for a complaint?",
-        answer:
-          "Compliance approves it first. Complaints procedure.docx says customer service offers compensation up to €250 itself; anything above that goes to compliance before you offer it.",
-      },
-    ],
   },
 ];
 
@@ -457,28 +434,32 @@ export const seedBrain = async (
 };
 
 /**
- * Refuses unless recall, as the person who asks `chat`'s first question,
- * finds the upload `answeredBy` (its name) for it.
+ * Refuses unless recall, as the person who asks `chat`, finds for each of
+ * its questions the upload that answers it (`answeredBy`, its name).
  */
 export const confirmAnsweredBy = async (
   api: Api,
-  chat: ChatSeed,
-  answeredBy: string
+  chat: ChatSeed
 ): Promise<void> => {
-  const upload = uploads.find(({ name }) => name === answeredBy);
-  if (upload === undefined) {
-    throw new Error(`No seeded upload ${answeredBy}`);
-  }
-  const id = uploadIdOf(upload);
-  const [first] = chat.turns;
-  const { items } = await api.brainSources.search(first?.question ?? "");
-  if (
-    !items.some(
-      ({ source }) => source.producer === "upload" && source.id === id
-    )
-  ) {
-    throw new Error(
-      `Recall as ${chat.by} doesn't find ${answeredBy} for "${first?.question}"`
-    );
+  for (const { question, answeredBy } of chat.turns) {
+    if (answeredBy === undefined) {
+      continue;
+    }
+    const upload = uploads.find(({ name }) => name === answeredBy);
+    if (upload === undefined) {
+      throw new Error(`No seeded upload ${answeredBy}`);
+    }
+    const id = uploadIdOf(upload);
+    // oxlint-disable-next-line no-await-in-loop -- one question at a time
+    const { items } = await api.brainSources.search(question);
+    if (
+      !items.some(
+        ({ source }) => source.producer === "upload" && source.id === id
+      )
+    ) {
+      throw new Error(
+        `Recall as ${chat.by} doesn't find ${answeredBy} for "${question}"`
+      );
+    }
   }
 };
