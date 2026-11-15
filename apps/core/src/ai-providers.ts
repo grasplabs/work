@@ -207,22 +207,14 @@ const platformProvider = (
 /**
  * Who handles Grasp's own AI features for this deployment (platform-ai.ts),
  * on Grasp's keys whatever the organization connected: its admins can't
- * switch them off here, but they see where that data goes. Document
- * conversion stays on the deployment while Grasp has no key for its
- * provider (files/extract.ts, `extractorFor`).
+ * switch them off here, but they see where that data goes. Documents are
+ * converted on the deployment itself: every upload is read in core's
+ * sandbox (files/extract.ts, `localExtractor`), and nothing is sent out.
  */
-const platformUses = (
-  env: Env,
-  keyed: readonly AiProviderId[]
-): AiPlatformUse[] => {
-  const { conversion, transcription, speech } = platformAi;
+const platformUses = (env: Env): AiPlatformUse[] => {
+  const { transcription, speech } = platformAi;
   return [
-    {
-      feature: "conversion",
-      provider: keyed.includes(conversion.provider)
-        ? platformProvider(env, conversion.provider)
-        : null,
-    },
+    { feature: "conversion", provider: null },
     {
       feature: "transcription",
       provider: platformProvider(env, transcription.provider),
@@ -275,7 +267,7 @@ const listing = async (env: Env): Promise<AiProvidersListing> => {
       keys.map(({ provider }) => provider),
       choice
     ),
-    platform: platformUses(env, routes.platform),
+    platform: platformUses(env),
   };
 };
 

@@ -8,6 +8,7 @@ import { sharedChatsOf } from "../src/knowledge/memory-publish.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
 import { newChat } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
+import { seedMemory } from "./knowledge-purge.ts";
 import { newTeam } from "./knowledge.ts";
 import { callAuth, signedInApi, unique } from "./sign-in.ts";
 
@@ -349,7 +350,8 @@ describe("correcting one's own memory", setUpTime, () => {
     const ada = await signedInApi(idp, "user");
     const ben = await signedInApi(idp, "user");
     const u = unique();
-    const remembered = await ada.api.knowledge.remember(
+    const remembered = await seedMemory(
+      ada,
       { kind: "preference", text: `I like long answers ${u}` },
       { idempotencyKey: key() }
     );
@@ -622,7 +624,8 @@ describe("what a published record rests on", setUpTime, () => {
       name: `Mine ${unique()}`,
       access: "me",
     });
-    const remembered = await ada.api.knowledge.remember(
+    const remembered = await seedMemory(
+      ada,
       { kind: "fact", text: `From my notes ${unique()}`, sourceRefs: [own] },
       { idempotencyKey: key() }
     );

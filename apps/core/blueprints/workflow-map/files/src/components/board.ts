@@ -218,9 +218,6 @@ export const signalText = ({ kind, value }: SignalFigure): string => {
     case "cost_per_run": {
       return `$${value.toFixed(2)} of model calls a run`;
     }
-    case "unanswered_question": {
-      return `A question went unanswered ${value} times`;
-    }
     default: {
       return `${kind.replaceAll("_", " ")}: ${value}`;
     }

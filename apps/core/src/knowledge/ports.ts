@@ -5,12 +5,9 @@ import { permissionErrors } from "@grasp-os/shared/permissions";
 
 import { brainEventOf, drainKnowledgeOutboxSoon } from "../audit-outbox.ts";
 import { derivedHmacKey } from "../derived-keys.ts";
-import { runEngine } from "../workflows/engine.ts";
 import { audiencesOf, noteProvenance, readerActor } from "./access.ts";
 import type { Reader } from "./access.ts";
 import { authorize } from "./app-entries.ts";
-import { extractEntities } from "./entities.ts";
-import { wordLesson } from "./lesson-wording.ts";
 import {
   keepRecalledMemories,
   readableByEveryoneOf,
@@ -23,13 +20,15 @@ import { skillAuthorities, skillCapabilities } from "./skill-capabilities.ts";
 import { checkWrite } from "./write-rules.ts";
 
 // Core's side of the Brain's ports (brain.ts): what each port is in core.
+// Core does no background work for today's Brain any more: no indexing
+// or linking run starts, no lesson is worded and no entity extracted
+// (nothing calls the last two). A version a save couldn't publish to
+// search at once stays queued; a purge publishes what it needs itself.
 
-/** Where the engine has a run that has ended. */
-const endedStatuses: ReadonlySet<string> = new Set([
-  "complete",
-  "errored",
-  "terminated",
-]);
+/** What core says to a port of background work it no longer does. */
+const noBackgroundWork = (): never => {
+  throw new Error("Core does no background work for today's Brain");
+};
 
 /** Core's ports for the Brain, over `env`. */
 export const portsOf = (env: Env): BrainPorts<Reader> => ({
@@ -58,7 +57,7 @@ export const portsOf = (env: Env): BrainPorts<Reader> => ({
   mayReplaceMatch: async (reader, decision) => {
     await mayReplaceMatch(reader, decision);
   },
-  wordLesson: async (facts) => await wordLesson(env, facts),
+  wordLesson: noBackgroundWork,
   memories: {
     audienceOf: async (reader) => await recallMemoryAudience(env, reader),
     readableBy: async (_reader, people) =>
@@ -84,28 +83,15 @@ export const portsOf = (env: Env): BrainPorts<Reader> => ({
   keys: {
     hmac: async (purpose, usages) => await derivedHmacKey(env, purpose, usages),
   },
-  extractEntities: async (text) => await extractEntities(env, text),
+  extractEntities: noBackgroundWork,
   rerank: async (reader, request) =>
     await rerankCandidates(env, reader, request),
   jobs: {
-    start: async (id, job) => {
-      await runEngine(env).createInternal(
-        "source" in job
-          ? {
-              id,
-              workflow: "linking",
-              input: { source: job.source, version: job.version },
-            }
-          : {
-              id,
-              workflow: "indexing",
-              input: { documentId: job.documentId, version: job.version },
-            }
-      );
+    start: async () => {
+      // Nothing runs it.
     },
-    status: async (id) => {
-      const found = await runEngine(env).status(id);
-      return found && (endedStatuses.has(found.status) ? "ended" : "running");
+    status: async () => {
+      // Nothing ran it.
     },
   },
   clock: () => new Date(),

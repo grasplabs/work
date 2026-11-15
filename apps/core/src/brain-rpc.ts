@@ -13,7 +13,6 @@ import type {
   TeamGroup,
   ThinkingGround,
   Tool,
-  Transcript,
   Vision,
   Workspace,
 } from "@grasp-os/shared/brain";
@@ -57,10 +56,6 @@ import {
   saveTeamGroups,
   teamGroupsOf,
 } from "./brain-team-groups.ts";
-import {
-  brainTranscript,
-  knowledgeTranscriptSources,
-} from "./brain-transcripts.ts";
 import { askMorePeople, workKnowledge } from "./brain-work.ts";
 import { keepsReadsOf } from "./connection-capture-key.ts";
 import { catalogEntries, personOf } from "./connections.ts";
@@ -96,9 +91,7 @@ import { listWorkflowResources } from "./workflow-resources.ts";
 // |                    | interview and the documents shared in the onboarding     |
 // |                    | (admins); each team's interviews, once the brain holds   |
 // |                    | what they learned, for whoever reads records naming them |
-// |                    | (never with a transcript); Knowledge documents saved     |
-// |                    | with a transcript, for whoever may read them, by turn    |
-// |                    | count (brain-transcripts.ts)                             |
+// |                    | (never with a transcript)                                |
 // | tools              | the tools those documents name (admins)                  |
 // | connections        | the catalog's offered entries and the person's           |
 // |                    | connections                                              |
@@ -1030,15 +1023,13 @@ export const readBrain = async (
   env: Env,
   person: Identity
 ): Promise<Workspace> => {
-  const [core, name, connections, transcribed, groups, weeks] =
-    await Promise.all([
-      readBrainCore(env, person),
-      organizationName(env),
-      connectionsOf(env, person),
-      knowledgeTranscriptSources(env, person),
-      teamGroupsOf(env),
-      onboardingStore(env).interviewWeeks(),
-    ]);
+  const [core, name, connections, groups, weeks] = await Promise.all([
+    readBrainCore(env, person),
+    organizationName(env),
+    connectionsOf(env, person),
+    teamGroupsOf(env),
+    onboardingStore(env).interviewWeeks(),
+  ]);
   const { facts, records, teams } = core;
   const sources = await recordSources(env, core);
 
@@ -1063,9 +1054,7 @@ export const readBrain = async (
     }),
     interviewWeeks: weeks,
     tools: toolsOf(documentTools(facts, teamsByName(teams)), records.tools),
-    sources: [...sources, ...transcribed].map((source) =>
-      witnessed(teams, source)
-    ),
+    sources: sources.map((source) => witnessed(teams, source)),
     statements: records.statements,
     candidates: records.candidates,
     gaps: await brainGaps(env, person, records),
@@ -1112,11 +1101,8 @@ export const readThinkingGround = async (
 };
 
 /**
- * The company brain over `/rpc`: for anyone signed in. Of its workspace,
- * only the Knowledge documents it lists as transcript sources are audited,
- * as the Knowledge read that listing is; the rest reads nothing from
- * Knowledge. Opening a source's transcript is audited as that one read
- * (brain-transcripts.ts). Its changes are, as the Knowledge read they are
+ * The company brain over `/rpc`: for anyone signed in. Its workspace reads
+ * nothing from Knowledge. Its changes are audited, as the Knowledge read they are
  * (brain-changes.ts). Adding records is, with the records it added;
  * taking them out is, by each record's key (brain-forget.ts).
  */
@@ -1175,13 +1161,6 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
       const { goals } = await readBrainRecords(this.#env);
       return await goalsFor(this.#env, person, goals);
     });
-  }
-
-  async transcript(sourceId: unknown): Promise<Transcript | null> {
-    return await withPerson(
-      this.#check,
-      async (person) => await brainTranscript(this.#env, person, sourceId)
-    );
   }
 
   async changes(options: unknown): Promise<BrainChangePage> {
