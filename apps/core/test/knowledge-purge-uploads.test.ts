@@ -34,31 +34,30 @@ const uploadKept = async (uploadId: string): Promise<boolean> =>
     .bind(uploadId)
     .first()) !== null;
 
+/** How an upload into Knowledge was left: its state, and where it was saved. */
+interface LeftAs {
+  path: string;
+  status: "pending" | "extracting" | "saving" | "ready" | "failed";
+  documentId: string | null;
+}
+
 /**
- * A document in `collectionId` saved from a file uploaded into Knowledge,
- * as such an upload left it: the document holding `text`, the upload
- * ready, its original stored.
+ * An upload into `collectionId` as uploads into Knowledge left it, its
+ * original stored in R2: its ID.
  */
-const savedFromUpload = async (
-  person: { userId: string; api: { knowledge: KnowledgeApi } },
+const leftUpload = async (
+  person: { userId: string },
   collectionId: string,
-  text: string
-): Promise<{ uploadId: string; documentId: string }> => {
-  const path = `Offices ${unique()}.xlsx`;
-  const saved = await person.api.knowledge.saveDocument({
-    collectionId,
-    path,
-    text,
-    ifVersion: 0,
-  });
+  { path, status, documentId }: LeftAs
+): Promise<string> => {
   const uploadId = crypto.randomUUID();
-  const bytes = new TextEncoder().encode(text);
+  const bytes = new TextEncoder().encode(`The file ${path}`);
   await env.FILES.put(originalKey(collectionId, uploadId), bytes);
   const at = Date.now() - 60 * 60_000;
   await env.DB.prepare(
     `INSERT INTO uploads (id, collection_id, path, media_type, bytes, sha256,
        uploaded_by, actor, status, document_id, version, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ready', ?, 1, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       uploadId,
@@ -69,12 +68,63 @@ const savedFromUpload = async (
       "0".repeat(64),
       person.userId,
       JSON.stringify({ type: "person", userId: person.userId }),
-      saved.id,
+      status,
+      documentId,
+      documentId === null ? null : 1,
       at,
       at
     )
     .run();
-  return { uploadId, documentId: saved.id };
+  return uploadId;
+};
+
+/**
+ * A document in `collectionId` saved from a file uploaded into Knowledge,
+ * as such an upload left it: the document holding `text`, the upload
+ * ready, its original stored.
+ */
+const savedFromUpload = async (
+  person: { userId: string; api: { knowledge: KnowledgeApi } },
+  collectionId: string,
+  text: string
+): Promise<{ uploadId: string; documentId: string; path: string }> => {
+  const path = `Offices ${unique()}.xlsx`;
+  const saved = await person.api.knowledge.saveDocument({
+    collectionId,
+    path,
+    text,
+    ifVersion: 0,
+  });
+  const uploadId = await leftUpload(person, collectionId, {
+    path,
+    status: "ready",
+    documentId: saved.id,
+  });
+  return { uploadId, documentId: saved.id, path };
+};
+
+/** How many of `uploadIds`' originals R2 still holds. */
+const storedOf = async (
+  collectionId: string,
+  uploadIds: readonly string[]
+): Promise<number> => {
+  const stored = await Promise.all(
+    uploadIds.map(async (id) => await originalStored(collectionId, id))
+  );
+  return stored.filter(Boolean).length;
+};
+
+/** Uploads more than one page of the cleanup's: 25. */
+const manyUploads = 25;
+
+/** A person's personal purge, prepared and run by `admin` over `core`. */
+const personalPurge = async (
+  api: { knowledge: KnowledgeApi },
+  userId: string
+): Promise<void> => {
+  const input: PurgeInput = { type: "personal", userId, reason: "offboarding" };
+  const { token } = await api.knowledge.preparePurge(input);
+  await api.knowledge.purge(input, token);
 };
 
 describe("a Knowledge purge of documents saved from uploads", () => {
@@ -242,5 +292,116 @@ describe("a Knowledge purge of documents saved from uploads", () => {
       // The collection is still there: running the purge again ends it.
       listed: documents.length,
     }).toStrictEqual({ failed: true, recorded: 1, stored: false, listed: 1 });
+  });
+
+  it("deletes every original of a person's own collection, however many, when that person is purged", async () => {
+    const person = await signedInApi(idp, "user");
+    const admin = await signedInApi(idp, "admin");
+    const personal = await ownCollectionOf(person);
+    const ids = await Promise.all(
+      Array.from(
+        { length: manyUploads },
+        async (_, n) =>
+          await leftUpload(person, personal, {
+            path: `File ${n}.xlsx`,
+            status: "ready",
+            documentId: null,
+          })
+      )
+    );
+    await erasing(admin, person.userId);
+    await personalPurge(admin.api, person.userId);
+
+    expect({
+      stored: await storedOf(personal, ids),
+      kept: await Promise.all(ids.map(uploadKept)).then(
+        (kept) => kept.filter(Boolean).length
+      ),
+    }).toStrictEqual({ stored: 0, kept: 0 });
+  });
+
+  it("fails while R2 refuses to delete an original, and deletes every one when it is run again", async () => {
+    const person = await signedInApi(idp, "user");
+    const admin = await signedInApi(idp, "admin");
+    const personal = await ownCollectionOf(person);
+    const ids = [
+      await leftUpload(person, personal, {
+        path: "One.xlsx",
+        status: "ready",
+        documentId: null,
+      }),
+      await leftUpload(person, personal, {
+        path: "Two.xlsx",
+        status: "failed",
+        documentId: null,
+      }),
+    ];
+    await erasing(admin, person.userId);
+    // R2 refusing the purge's deletes, as when it is out of reach.
+    const refusing = new Proxy(env.FILES, {
+      get: (target, property) => {
+        if (property === "delete") {
+          return async () => {
+            await Promise.resolve();
+            throw new Error("R2 is out of reach");
+          };
+        }
+        const value: unknown = Reflect.get(target, property);
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+    const { core } = await openRpc(admin.session, {
+      coreEnv: { ...env, FILES: refusing },
+    });
+    let failed = "";
+    try {
+      failed = await outcome(personalPurge(core.authenticate(), person.userId));
+    } finally {
+      core[Symbol.dispose]();
+    }
+    const storedAfterFailure = await storedOf(personal, ids);
+    await personalPurge(admin.api, person.userId);
+
+    expect({
+      failed: failed !== "ok",
+      storedAfterFailure,
+      stored: await storedOf(personal, ids),
+    }).toStrictEqual({ failed: true, storedAfterFailure: 2, stored: 0 });
+  });
+
+  it("forgets an upload left in the middle of its save, and deletes its original", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const { id: collectionId } = await admin.api.knowledge.createCollection({
+      name: `Files ${unique()}`,
+      access: "everyone",
+    });
+    const { uploadId, documentId, path } = await savedFromUpload(
+      admin,
+      collectionId,
+      "# Offices\nUtrecht and Ghent."
+    );
+    // The same file uploaded again, its save cut short when uploads into
+    // Knowledge stopped: nothing will ever finish it.
+    const saving = await leftUpload(admin, collectionId, {
+      path,
+      status: "saving",
+      documentId: null,
+    });
+    const input: PurgeInput = {
+      type: "content",
+      documentIds: [documentId],
+      terms: ["Ghent"],
+      reason: "erasure_request",
+    };
+    const plan = await admin.api.knowledge.preparePurge(input);
+    const purged = await outcome(admin.api.knowledge.purge(input, plan.token));
+
+    expect({
+      purged,
+      stored: await storedOf(collectionId, [uploadId, saving]),
+      kept: [await uploadKept(uploadId), await uploadKept(saving)],
+    }).toStrictEqual({ purged: "ok", stored: 0, kept: [false, false] });
   });
 });

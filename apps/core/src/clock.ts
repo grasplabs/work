@@ -1,3 +1,4 @@
+import { sweepPayloads } from "@grasp-os/brain/payloads";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
   ClockObject,
@@ -23,6 +24,7 @@ import { inJurisdiction } from "./durable-objects.ts";
 import { warmQuestionEmbedder } from "./embedder.ts";
 import { sweepGuestChats } from "./guests.ts";
 import { sweepHeldStartInputs } from "./held-starts.ts";
+import { brainOf } from "./knowledge/ports.ts";
 import { retryDisconnects } from "./members.ts";
 import { sweepModelUsage } from "./model-usage.ts";
 import { rescanPackages } from "./packages/rescan.ts";
@@ -83,6 +85,19 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     name: "access.revocations",
     period: "minute",
     run: retryAccessRevocations,
+  },
+  // Knowledge payloads no version refers to, past their grace: what a
+  // Knowledge save that failed staged (packages/brain's payloads.ts). A
+  // purge collects them too, but only past their grace: this collects
+  // them after it, so an erasure is complete within minutes. Knowledge is
+  // still written (`env.knowledge`, the purge) until the cutover removes
+  // it, and this with it.
+  {
+    name: "knowledge.payloads",
+    period: "minute",
+    run: async (env, at) => {
+      await sweepPayloads(brainOf(env), at);
+    },
   },
   // Deploys apply migrations first (CI's db:migrate, and the admin's
   // deploy), so `platform_versions` exists. A version running before it
