@@ -617,6 +617,7 @@ describe("recall through memories, hidden versus absent", () => {
     await shared().retireMemory({
       memory: named.memories[0] ?? "",
       reader: { person: namer, groups: [group] },
+      writer: namer,
     });
 
     expect({

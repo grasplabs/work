@@ -19,6 +19,7 @@ import type {
   PersonReader,
   Reader,
   RecallRequest,
+  RetiredMemory,
   SourceVersionRef,
 } from "./contract.ts";
 import { byWordsFound } from "./order.ts";
@@ -999,51 +1000,57 @@ export const confirmMemory = (
 };
 
 /**
- * Retires the memory `id` if its lineage is the reader's person's own (as
- * writer), the reader may read it, it is not retired, and it is in its
- * world time now: current, or ended by a newer memory of its lineage,
- * which a person forgets as well, so it never becomes current again when
- * the newer one is retired too. One they already retired answers `done`
- * again (contract.ts `retireMemory`).
+ * Retires the memory `id` if its lineage is `writer`'s own, the reader may
+ * read it, it is not retired, and it is in its world time now: current, or
+ * ended by a newer memory of its lineage, which a writer forgets as well,
+ * so it never becomes current again when the newer one is retired too.
+ * Answers when it was retired, as recorded: one this writer already
+ * retired answers its recorded time again, never a new one, so a retry
+ * answers what the first try did (contract.ts `retireMemory`). Null alike
+ * for no such memory, another writer's (retired or not), one the reader
+ * may not read and one that expired before it was retired.
  */
 export const retireMemory = (
   sql: SqlStorage,
-  { id, reader }: { id: string; reader: PersonReader }
-): MemoryChangeOutcome => {
+  { id, reader, writer }: { id: string; reader: Reader; writer: string }
+): RetiredMemory | null => {
   const asked = [
     id,
     reader.person,
     JSON.stringify(reader.groups),
-    lineageOfWriter(reader.person),
+    lineageOfWriter(writer),
     readMoment(sql),
   ];
   const stamp = nextStamp(sql);
-  const retired = sql.exec(
-    `WITH ${readableSql}
-    UPDATE memories AS m SET retired_at = ?6
-    WHERE m.id = ?1 AND m.lineage = ?4 AND m.retired_at IS NULL
-      AND (m.valid_from IS NULL OR m.valid_from <= ?5)
-      AND (m.valid_until IS NULL OR m.valid_until > ?5)
-      AND ${visibleSql("m")}`,
-    ...asked,
-    stamp
-  );
-  retired.toArray();
-  if (retired.rowsWritten > 0) {
-    keepStamp(sql, stamp);
-    return "done";
-  }
-  // Retired already, by this writer, and the reader may read it: a retry.
-  const again = sql
-    .exec(
+  const [retired] = sql
+    .exec<{ retired_at: number }>(
       `WITH ${readableSql}
-      SELECT 1 FROM memories AS m
+      UPDATE memories AS m SET retired_at = ?6
+      WHERE m.id = ?1 AND m.lineage = ?4 AND m.retired_at IS NULL
+        AND (m.valid_from IS NULL OR m.valid_from <= ?5)
+        AND (m.valid_until IS NULL OR m.valid_until > ?5)
+        AND ${visibleSql("m")}
+      RETURNING retired_at`,
+      ...asked,
+      stamp
+    )
+    .toArray();
+  if (retired !== undefined) {
+    keepStamp(sql, stamp);
+    return { retiredAt: new Date(retired.retired_at) };
+  }
+  // Retired already, by this writer, and the reader may read it: a retry,
+  // answered with the time recorded then.
+  const [again] = sql
+    .exec<{ retired_at: number }>(
+      `WITH ${readableSql}
+      SELECT m.retired_at FROM memories AS m
       WHERE m.id = ?1 AND m.lineage = ?4 AND m.retired_at <= ?5
         AND ${visibleSql("m")}`,
       ...asked
     )
     .toArray();
-  return again.length > 0 ? "done" : "nothing";
+  return again === undefined ? null : { retiredAt: new Date(again.retired_at) };
 };
 
 /**

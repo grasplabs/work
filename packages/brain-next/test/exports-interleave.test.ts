@@ -223,6 +223,7 @@ const writeBetween = async (part: number, fixture: Fixture) => {
     await shared().retireMemory({
       memory: said.memories[1] ?? "",
       reader: writer,
+      writer: writer.person,
     });
   }
   if (part === 2) {
