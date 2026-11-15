@@ -11,28 +11,11 @@ import { toCard } from "./pile.ts";
 // and exports what the log's filters match. Search, export and the grant
 // themselves are core's tests.
 
-/** A collection everyone reads, made by `admin`, for an App to ask for. */
-const collectionOf = async (
-  admin: Parameters<typeof apiOf>[0]
-): Promise<string> => {
-  const { core, api } = apiOf(admin);
-  try {
-    const { id } = await api.knowledge.createCollection({
-      name: `Board pack ${crypto.randomUUID()}`,
-      access: "everyone",
-    });
-    return id;
-  } finally {
-    core[Symbol.dispose]();
-  }
-};
-
 test("an admin approves a permission request, finds it in the audit log, and exports it", async ({
   pageOf,
 }) => {
   const { admin, builder } = peopleIn("activity");
   const appName = `Board pack ${crypto.randomUUID()}`;
-  const collectionId = await collectionOf(admin);
   const { core, api } = apiOf(builder);
   let approved: string;
   try {
@@ -42,8 +25,8 @@ test("an admin approves a permission request, finds it in the audit log, and exp
     });
     ({ id: approved } = await api.permissions.request({
       subject: { type: "app", appId },
-      object: { type: "collection", collectionId },
-      actions: ["read"],
+      object: { type: "platform" },
+      actions: ["statistics"],
       binding: "BOARD_PACK",
     }));
     await api.permissions.request({
@@ -62,14 +45,14 @@ test("an admin approves a permission request, finds it in the audit log, and exp
   // App's cards.
   const reading = await toCard(
     page,
-    `${appName}: read on Collection ${collectionId}`
+    new RegExp(`^${appName}: statistics on Platform statistics\\.`, "u")
   );
   await expect(reading).toContainText("as BOARD_PACK");
   await expect(reading).toContainText("Version to review: None live");
   await reading.getByRole("button", { name: /^Approve /u }).click();
   await expect(
     page.getByRole("status").filter({
-      hasText: `Approved: ${appName}: read on Collection ${collectionId}.`,
+      hasText: `Approved: ${appName}: statistics on Platform statistics.`,
     })
   ).toHaveCount(1);
   await expect(reading).toHaveCount(0);

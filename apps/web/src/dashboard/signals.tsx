@@ -1,19 +1,13 @@
 import type {
-  KnowledgeSignal,
-  KnowledgeSignals,
-} from "@grasp-os/shared/knowledge-signals";
-import type {
   ImprovementSignal,
   ImprovementSignals,
 } from "@grasp-os/shared/signals";
 import { signalWindowDays } from "@grasp-os/shared/signals";
-import { Button } from "@grasp-os/ui/components/button";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg, plural } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { Await, Link, useRouter } from "@tanstack/react-router";
+import { Await, Link } from "@tanstack/react-router";
 import {
-  BookOpenIcon,
   CircleDollarSignIcon,
   ClockIcon,
   SearchXIcon,
@@ -23,32 +17,27 @@ import {
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { ErrorText } from "../error-text.tsx";
 import { formatDate } from "../format.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
 import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
-import { useCoreAction } from "../use-core-action.ts";
 import { signalKinds } from "./board.ts";
 import type { SignalKind } from "./board.ts";
 import { ItemMark } from "./dashboard-card.tsx";
 import { WidgetBlock } from "./widget-block.tsx";
 
 // What could be better, from the signals core works out daily: workflows
-// that keep failing, waiting or being corrected, what they cost, searches
-// that found nothing, and Knowledge nobody reads or that is past its
-// review. Each in plain words, with the counts core gives (never a score
-// or a ranking), linking to what it is about, and "Ask Grasp" where a chat
-// can help: asking the agent to fix a run that failed. Admins see every
-// improvement signal, an App's builders that App's, and a
-// collection's owners its Knowledge signals; someone with none to see has
-// no widget. On the dashboard's widget board, its block counts the
+// that keep failing, waiting or being corrected, what they cost, and
+// searches that found nothing. Each in plain words, with the counts core
+// gives (never a score or a ranking), linking to what it is about, and
+// "Ask Grasp" where a chat can help: asking the agent to fix a run that
+// failed. Admins see every improvement signal, an App's builders that
+// App's; someone with none to see has no widget. On the dashboard's widget board, its block counts the
 // signals by kind, and its full view lists every one.
 
-/** What the dashboard read of the signals: each read on its own, none for someone it doesn't apply to. */
+/** What the dashboard read of the signals: none for someone they don't apply to. */
 export interface Signals {
   improvement: ImprovementSignals | undefined;
-  knowledge: KnowledgeSignals | undefined;
   /** App names by ID. */
   appNames: ReadonlyMap<string, string>;
 }
@@ -63,8 +52,6 @@ export const signalKindLooks: Record<
   correction: { icon: UndoIcon, name: msg`Often corrected` },
   cost_per_run: { icon: CircleDollarSignIcon, name: msg`Model cost` },
   unanswered_question: { icon: SearchXIcon, name: msg`Unanswered question` },
-  unread_document: { icon: BookOpenIcon, name: msg`Nobody reads it` },
-  overdue_review: { icon: ClockIcon, name: msg`Review overdue` },
 };
 
 /** A duration in whole days, or hours under a day, as words. */
@@ -206,106 +193,6 @@ const ImprovementRow = ({
   );
 };
 
-/** Dismissing a Knowledge signal until something new comes, as its owner can. */
-const Dismiss = ({ id, label }: { id: string; label: string }) => {
-  const router = useRouter();
-  const { busy, failure, run } = useCoreAction();
-  return (
-    <div className="flex flex-col items-end gap-1">
-      <Button
-        aria-label={label}
-        disabled={busy}
-        onClick={() => {
-          void (async () => {
-            await run(async (session) => {
-              await session.knowledgeSignals.dismiss(id);
-            });
-            await router.invalidate();
-          })();
-        }}
-        size="xs"
-        variant="ghost"
-      >
-        <Trans context="put a signal away until something new">Dismiss</Trans>
-      </Button>
-      <ErrorText>{failure}</ErrorText>
-    </div>
-  );
-};
-
-const KnowledgeRow = ({ signal }: { signal: KnowledgeSignal }) => {
-  const { t } = useLingui();
-  const { collection } = signal;
-  const where = (
-    <Link
-      className="underline"
-      params={{ collection: collection.id }}
-      search={{}}
-      to="/knowledge/$collection"
-    >
-      {collection.name}
-    </Link>
-  );
-  const { name } = collection;
-  const dismiss = (
-    <Dismiss id={signal.id} label={t`Dismiss this signal about ${name}`} />
-  );
-  if (signal.kind === "unanswered_question") {
-    const { searches, askers } = signal.evidence;
-    return (
-      <SignalRow action={dismiss} kind="unanswered_question">
-        <Trans>
-          A search in {where} found nothing{" "}
-          <Plural one="once" other="# times" value={searches} />, by{" "}
-          <Plural one="# asker" other="# askers" value={askers} />.
-        </Trans>
-      </SignalRow>
-    );
-  }
-  const { document } = signal.evidence;
-  const doc = (
-    <Link
-      className="underline"
-      params={{ collection: collection.id }}
-      search={{ doc: document.id }}
-      to="/knowledge/$collection"
-    >
-      {document.title}
-    </Link>
-  );
-  if (signal.kind === "unread_document") {
-    const { days } = signal.evidence;
-    return (
-      <SignalRow action={dismiss} kind="unread_document">
-        <Trans>
-          Nobody read or changed {doc} in {where} in the last{" "}
-          <Plural one="day" other="# days" value={days} />.
-        </Trans>
-      </SignalRow>
-    );
-  }
-  const late = signal.value;
-  return (
-    <SignalRow action={dismiss} kind="overdue_review">
-      <Trans>
-        {doc} in {where} is <Plural one="# day" other="# days" value={late} />{" "}
-        past its review date.
-      </Trans>
-    </SignalRow>
-  );
-};
-
-/** When the signals were last worked out: the later of the two. */
-const computedOf = ({
-  improvement,
-  knowledge,
-}: Signals): string | undefined => {
-  const at = [improvement?.computedAt, knowledge?.computedAt].filter(
-    (time): time is string => typeof time === "string"
-  );
-  return at.toSorted().at(-1);
-};
-
 /** How many kinds the block counts at most; the full view has them all. */
 const kindsShown = 4;
 
@@ -323,9 +210,6 @@ const SignalList = ({ signals }: { signals: Signals }) => {
             signal={signal}
           />
         ))}
-        {signals.knowledge?.signals.map((signal) => (
-          <KnowledgeRow key={signal.id} signal={signal} />
-        ))}
       </ul>
     </div>
   );
@@ -334,10 +218,7 @@ const SignalList = ({ signals }: { signals: Signals }) => {
 /** How many signals there are of each kind, the most first: the block's summary. */
 const SignalKinds = ({ signals }: { signals: Signals }) => {
   const { t, i18n } = useLingui();
-  const all = [
-    ...(signals.improvement?.signals ?? []),
-    ...(signals.knowledge?.signals ?? []),
-  ];
+  const all = signals.improvement?.signals ?? [];
   if (all.length === 0) {
     return (
       <p className="text-muted-foreground">
@@ -367,12 +248,9 @@ const SignalKinds = ({ signals }: { signals: Signals }) => {
 
 /** Every signal with when they were last worked out: the full view. */
 const SignalsInFull = ({ signals }: { signals: Signals }) => {
-  const computed = computedOf(signals);
+  const computed = signals.improvement?.computedAt ?? undefined;
   const date = computed === undefined ? undefined : formatDate(computed);
-  const none =
-    (signals.improvement?.signals.length ?? 0) +
-      (signals.knowledge?.signals.length ?? 0) ===
-    0;
+  const none = (signals.improvement?.signals.length ?? 0) === 0;
   return (
     <div className="flex flex-col gap-3">
       {date === undefined ? null : (

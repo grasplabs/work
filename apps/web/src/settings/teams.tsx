@@ -370,7 +370,7 @@ const TeamsList = ({
       action={<NewTeamButton onChanged={onChanged} teams={teams} />}
       description={
         <Trans>
-          Teams group the people who work together, so apps, Knowledge and
+          Teams group the people who work together, so apps, skills and
           workflows can be shared with a whole team at once.
         </Trans>
       }
