@@ -409,25 +409,33 @@ export const HeldWrite = ({
   onDecided,
 }: {
   action: PendingAction;
-  onDecided: () => void;
+  /**
+   * Told once a decision ended, with why it failed if it did: connect
+   * takes a confirmed action before it carries it out, so one that then
+   * fails is gone, its card with it, and only the list can say why.
+   */
+  onDecided: (failed?: DecisionFailed) => void;
 }) => {
-  const { busy, failure, run } = useCoreAction();
+  const { busy, run } = useCoreAction();
   const router = useRouter();
   const { t } = useLingui();
+  const shown = useShown(action);
+  const title = action.description?.title ?? action.action;
+  const what = useHeldName(action);
   // Read again however it went: a failed decision may have changed
   // something too (the action gone already, say).
   const decide = async (
     decision: (session: Session) => Promise<unknown>
   ): Promise<void> => {
-    await run(decision);
-    onDecided();
+    let reason: string | undefined;
+    await run(decision, (failed) => {
+      reason = failed;
+    });
+    onDecided(reason === undefined ? undefined : { what, reason });
     // Core notes the decision in the chat, which moves it up the chat
     // list: the list is read again so it shows under its new time.
     await router.invalidate();
   };
-  const shown = useShown(action);
-  const title = action.description?.title ?? action.action;
-  const what = useHeldName(action);
   return (
     <article
       aria-label={what}
@@ -444,7 +452,6 @@ export const HeldWrite = ({
       </h3>
       <div className="flex flex-col gap-2">
         <HeldWriteDetails action={action} shown={shown} />
-        <ErrorText>{failure}</ErrorText>
       </div>
       <div className="flex flex-wrap gap-2">
         <Button
@@ -472,16 +479,17 @@ export const HeldWrite = ({
   );
 };
 
-/** A held App write whose decision failed: which, and why, in core's words. */
+/** A held write whose decision failed: which, and why, in core's words. */
 interface DecisionFailed {
   what: string;
   reason: string;
 }
 
 /**
- * Why a held App write the person decided didn't go through, kept in the
- * list after its card went (the hold ended either way), with core's
- * reason. Until their next decision.
+ * Why a held write the person decided didn't go through, kept in the
+ * list, since its card may have gone (a held App write ends either way;
+ * connect takes an action before carrying it out), with core's reason.
+ * Until their next decision in this chat.
  */
 const DecisionFailedAlert = ({ failed }: { failed: DecisionFailed }) => {
   const { what, reason } = failed;
@@ -666,12 +674,8 @@ const RejectAll = ({
   );
 };
 
-/**
- * The chat's held writes, each with confirm and reject. Read again when
- * `version` changes (core says the agent had a write held: `ChatUpdate.held`) and after each
- * decision.
- */
-export const HeldWrites = ({
+/** The held writes of chat `chatId`, as `HeldWrites` shows them. */
+const ChatHeldWrites = ({
   chatId,
   version,
 }: {
@@ -737,8 +741,8 @@ export const HeldWrites = ({
         <HeldWrite
           action={action}
           key={action.id}
-          onDecided={() => {
-            setFailed(undefined);
+          onDecided={(failure) => {
+            setFailed(failure);
             setReads(reads + 1);
           }}
         />
@@ -746,3 +750,20 @@ export const HeldWrites = ({
     </section>
   );
 };
+
+/**
+ * The chat's held writes, each with confirm and reject. Read again when
+ * `version` changes (core says the agent had a write held: `ChatUpdate.held`) and after each
+ * decision.
+ */
+export const HeldWrites = ({
+  chatId,
+  version,
+}: {
+  chatId: string;
+  version: number;
+}) => (
+  // One list per chat: what it read and why a decision failed are that
+  // chat's, never shown, announced or pressed in the next one opened.
+  <ChatHeldWrites chatId={chatId} key={chatId} version={version} />
+);

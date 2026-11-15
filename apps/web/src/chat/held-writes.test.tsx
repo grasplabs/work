@@ -1,6 +1,12 @@
 // @vitest-environment happy-dom
 import { heldAppCallsPage } from "@grasp-os/shared/chat";
 import type { HeldAppCall } from "@grasp-os/shared/chat";
+import type { PendingAction } from "@grasp-os/shared/connect";
+import {
+  agentIdSchema,
+  chatIdSchema,
+  workspaceIdSchema,
+} from "@grasp-os/shared/ids";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
@@ -10,7 +16,7 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { act } from "react";
+import { act, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
@@ -22,7 +28,8 @@ import { HeldWrites } from "./held-writes.tsx";
 // actions as the page reaches them over RPC, faked: the card says why it
 // waits and shows exactly the request that would run, before anything is
 // pressed; confirming names that request's hash, and rejecting runs
-// nothing.
+// nothing. A decision that fails is said above the list, as its card
+// may be gone, until the next decision, and in its own chat alone.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -55,25 +62,88 @@ const settled = async (): Promise<void> => {
   });
 };
 
+/** A mail connect holds for the person in chat `chat-1`, as its card shows it. */
+const mail: PendingAction = {
+  id: "pending-1",
+  subject: { type: "agent", agentId: agentIdSchema.parse("agent-1") },
+  appVersion: null,
+  mode: "interactive",
+  context: {
+    type: "chat",
+    workspaceId: workspaceIdSchema.parse("person:someone"),
+    chatId: chatIdSchema.parse("chat-1"),
+  },
+  restricted: false,
+  permissionId: "permission-1",
+  binding: null,
+  connectionId: "connection-1",
+  connectionName: "Outlook",
+  resource: null,
+  action: "mail.send",
+  idempotencyKey: "key-1",
+  input: JSON.stringify({ to: "ben@acme.test", subject: "Invoice" }),
+  inputHash: "c".repeat(64),
+  requestedAt: "2026-11-15T10:00:00.000Z",
+};
+
+/** What a core holds, and how it answers decisions. */
+interface Held {
+  /** The App writes held in each chat, by its ID. */
+  calls?: Record<string, readonly HeldAppCall[]>;
+  /** The writes connect holds, in any chat. */
+  actions?: readonly PendingAction[];
+  /** Each decision of these holds or actions fails with its error. */
+  refusing?: Record<string, Error>;
+}
+
+/** A chat's held writes, with a way to open another chat in the same place. */
+const Switching = () => {
+  const [chatId, setChatId] = useState("chat-1");
+  return (
+    <>
+      <button
+        aria-label="Open chat-2"
+        onClick={() => {
+          setChatId("chat-2");
+        }}
+        type="button"
+      />
+      <HeldWrites chatId={chatId} version={0} />
+    </>
+  );
+};
+
 /**
- * The chat's held writes against a core holding `holds` (`held` alone by
- * default) until one is decided, a page of `heldAppCallsPage` at a time.
- * With `refusing`, confirming fails with it, and ends the hold as core's
- * does (decided before its grant is checked again).
+ * The chat's held writes against a core holding `held` (one App write in
+ * `chat-1` by default) until each is decided, App writes a page of
+ * `heldAppCallsPage` at a time. A decision ends its hold however it went,
+ * as core's and connect's do once they take it; one in `refusing` fails.
  */
-const shown = async (
-  holds: readonly HeldAppCall[] = [held],
-  refusing?: Error
-) => {
+const shown = async ({
+  calls = { "chat-1": [held] },
+  actions = [],
+  refusing = {},
+}: Held = {}) => {
   const confirmed: { chatId: string; id: string; requestHash: string }[] = [];
   const declined: { chatId: string; id: string }[] = [];
+  const decided = new Set<string>();
+  /** Decides `id`: ended either way, refused when `refusing` says so. */
+  const decide = (id: string): void => {
+    decided.add(id);
+    const refusal = refusing[id];
+    if (refusal !== undefined) {
+      throw refusal;
+    }
+  };
   const session = {
     chats: {
       heldCalls: async (
-        _chatId: string,
+        chatId: string,
         after?: string
       ): Promise<HeldAppCall[]> => {
-        const waiting = confirmed.length + declined.length === 0 ? holds : [];
+        const waiting = (calls[chatId] ?? []).filter(
+          ({ id }) => !decided.has(id)
+        );
         const from =
           after === undefined
             ? 0
@@ -89,16 +159,26 @@ const shown = async (
       ): Promise<void> => {
         await Promise.resolve();
         confirmed.push({ chatId, id, requestHash });
-        if (refusing !== undefined) {
-          throw refusing;
-        }
+        decide(id);
       },
       declineHeldCall: async (chatId: string, id: string): Promise<void> => {
         await Promise.resolve();
         declined.push({ chatId, id });
+        decide(id);
       },
     },
-    pendingActions: { list: async () => await Promise.resolve([]) },
+    pendingActions: {
+      list: async (): Promise<PendingAction[]> =>
+        await Promise.resolve(actions.filter(({ id }) => !decided.has(id))),
+      confirm: async (id: string): Promise<void> => {
+        await Promise.resolve();
+        decide(id);
+      },
+      decline: async (id: string): Promise<void> => {
+        await Promise.resolve();
+        decide(id);
+      },
+    },
   };
   const core = {
     withSession: async <T,>(
@@ -106,9 +186,7 @@ const shown = async (
     ): Promise<T> => await action(session),
   };
   const router = createRouter({
-    routeTree: createRootRoute({
-      component: () => <HeldWrites chatId="chat-1" version={0} />,
-    }),
+    routeTree: createRootRoute({ component: Switching }),
     history: createMemoryHistory(),
     context: { core },
   });
@@ -126,6 +204,16 @@ const shown = async (
   await settled();
   return { confirmed, declined };
 };
+
+/** What the list says went wrong, if anything, as a screen reader hears it. */
+const alerted = (): string | null =>
+  document.querySelector('[role="alert"]')?.textContent ?? null;
+
+/** The cards shown, by their names. */
+const cards = (): string[] =>
+  [...document.querySelectorAll("article")].map(
+    (card) => card.getAttribute("aria-label") ?? ""
+  );
 
 const press = async (label: string): Promise<void> => {
   const button = document.querySelector(`button[aria-label="${label}"]`);
@@ -193,7 +281,7 @@ describe("a write to an App held for the person", () => {
       id: `held-${at}`,
       function: `notes.create${at}`,
     }));
-    await shown(holds);
+    await shown({ calls: { "chat-1": holds } });
 
     expect(
       document.querySelectorAll('article[aria-label^="notes.create"]')
@@ -202,16 +290,71 @@ describe("a write to an App held for the person", () => {
 
   it("keeps saying why a confirmed write didn't go through once its card is gone", async () => {
     const refusal = permissionErrors.create("permission.denied");
-    await shown([held], refusal);
+    await shown({ refusing: { [held.id]: refusal } });
     await press("Confirm notes.create in Notes");
-    const alert = document.querySelector('[role="alert"]');
 
-    expect({
-      cards: document.querySelectorAll("article").length,
-      said: alert?.textContent,
-    }).toStrictEqual({
-      cards: 0,
+    expect({ cards: cards(), said: alerted() }).toStrictEqual({
+      cards: [],
       said: `notes.create in Notes didn't go through.${refusal.message}`,
+    });
+  });
+
+  it("says why a rejection didn't go through, and clears it at the next decision that does", async () => {
+    const refusal = permissionErrors.create("permission.denied");
+    const second: HeldAppCall = {
+      ...held,
+      id: "held-2",
+      function: "notes.archive",
+    };
+    await shown({
+      calls: { "chat-1": [held, second] },
+      refusing: { [held.id]: refusal },
+    });
+    await press("Reject notes.create in Notes");
+    const afterFailed = alerted();
+    await press("Confirm notes.archive in Notes");
+
+    expect({ afterFailed, afterNext: alerted() }).toStrictEqual({
+      afterFailed: `notes.create in Notes didn't go through.${refusal.message}`,
+      afterNext: null,
+    });
+  });
+
+  it("keeps a failure to its own chat: the next chat opened shows only its own holds", async () => {
+    const refusal = permissionErrors.create("permission.denied");
+    const theirs: HeldAppCall = {
+      ...held,
+      id: "held-in-chat-2",
+      appName: "Tasks",
+      function: "tasks.add",
+    };
+    await shown({
+      calls: { "chat-1": [held], "chat-2": [theirs] },
+      refusing: { [held.id]: refusal },
+    });
+    await press("Confirm notes.create in Notes");
+    const inFirst = alerted();
+    await press("Open chat-2");
+
+    expect({ inFirst, alert: alerted(), cards: cards() }).toStrictEqual({
+      inFirst: `notes.create in Notes didn't go through.${refusal.message}`,
+      alert: null,
+      cards: ["tasks.add in Tasks"],
+    });
+  });
+
+  it("keeps saying why a write connect held didn't go through once connect took it and its card is gone", async () => {
+    const failure = new Error("The mail server refused the message.");
+    await shown({
+      calls: {},
+      actions: [mail],
+      refusing: { [mail.id]: failure },
+    });
+    await press("Confirm mail.send on Outlook");
+
+    expect({ cards: cards(), said: alerted() }).toStrictEqual({
+      cards: [],
+      said: `mail.send on Outlook didn't go through.${failure.message}`,
     });
   });
 });
