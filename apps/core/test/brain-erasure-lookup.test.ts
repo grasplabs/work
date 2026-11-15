@@ -411,31 +411,26 @@ describe("whether something kept in a person's own store was erased", () => {
   });
 });
 
-describe("whether a person was erased, as core's own record and the shared ledger say", () => {
-  it("says an erasure of a person not finished while core's erasure of them from the Brain is pending, and erased once it is complete", async () => {
+describe("whether a person was erased, as core's own record says", () => {
+  it("says an erasure of a person not finished while core's erasure of them from the Brain is pending, and erased, with when it completed, once it is", async () => {
     const admin = await signedInApi(idp, "admin");
     const erased = await signedInApi(idp, "builder");
     await ownSource(erased.userId, `${marker()} is theirs.`);
     await admin.api.members.remove(erased.userId);
-    // The Brain can't write its ledger: core's area for it stays pending.
-    await bucketPutsFailingDuring(async () => {
-      await Promise.allSettled([
-        admin.api.members.erase(erased.userId, String(erased.person.name)),
-      ]);
-    });
+    // Their own store still deletes until an add under way could have
+    // written its file: core's area for it stays pending.
+    await Promise.allSettled([
+      admin.api.members.erase(erased.userId, String(erased.person.name)),
+    ]);
     const lookup = { kind: "person", id: erased.userId } as const;
     const pending = await answerTo(lookup);
-    // The Brain's tick writes the entry: its ledger has it, core not yet.
-    await workBrain(env, new Date(), noProducers);
-    const ledgerOnly = await answerTo(lookup);
-    // Core's clock asks the Brain again: their own store, erased after the
-    // shared one, still deletes until an add under way could have written
-    // its file, so the area stays pending.
     await retryErasures(env);
     const ownDeleting = await answerTo(lookup);
     // That time passed, the clock asks once more: the area is complete.
     await ageOwnErasure(erased.userId);
+    const before = Date.now();
     await retryErasures(env);
+    const after = Date.now();
     const complete = await answerTo(lookup);
     // Core's other Brain area (the legacy purge, their skill shares)
     // pending again: never erased while any Brain area of theirs is.
@@ -449,18 +444,19 @@ describe("whether a person was erased, as core's own record and the shared ledge
         )
       );
     const otherAreaPending = await answerTo(lookup);
+    const at = complete?.state === "erased" ? Date.parse(complete.at) : 0;
 
     expect({
       pending,
-      ledgerOnly,
       ownDeleting,
       complete: complete?.state,
+      when: at >= before && at <= after,
       otherAreaPending,
     }).toStrictEqual({
       pending: { state: "erasing" },
-      ledgerOnly: { state: "erasing" },
       ownDeleting: { state: "erasing" },
       complete: "erased",
+      when: true,
       otherAreaPending: { state: "erasing" },
     });
   });

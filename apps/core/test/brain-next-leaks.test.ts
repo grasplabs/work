@@ -64,6 +64,7 @@ import { copyOfStore, restoreStore } from "./brain-next-store-copy.ts";
 import type { StoreCopy } from "./brain-next-store-copy.ts";
 import { brainSurfaces, membersOf, textOf } from "./brain-next-surfaces.ts";
 import type { Answer, Probe, Probing } from "./brain-next-surfaces.ts";
+import { codeStepTrace } from "./code-step-trace.ts";
 import { mockIdp } from "./idp.ts";
 import { addedSharedFile, saveInstructions } from "./instruction-saves.ts";
 import { answeringProvider, testModel } from "./model-provider.ts";
@@ -2998,19 +2999,42 @@ describe(
         `Call me ${userMarker}.`
       );
       const question = `What about depot ${depot}?`;
-      /** What reached the model for what `ask` posted. */
+      const annsWorkspace = workspace(env, personalWorkspaceId(ann.userId));
+      /** What a failure may print: the planted words taken out. */
+      const redact = (text: string) =>
+        text
+          .replaceAll(marker, "<marker>")
+          .replaceAll(userMarker, "<userMarker>")
+          .replaceAll(depot, "<depot>");
+      /**
+       * What reached the model for what `ask` posted; and, where the code
+       * step's output didn't, what the turn did with its code step
+       * instead (`codeStepTrace`), for the failure to show.
+       */
       const sentFor = async (ask: () => Promise<unknown>) => {
         const before = ann.provider.requests.length;
+        const listed = await annsWorkspace.chats(ann.userId);
+        const chatsBefore = new Set(listed.map(({ id }) => id));
+        const since = Date.now();
         await ask();
-        const sent = JSON.stringify(
-          ann.provider.requests.slice(before).map(({ body }) => body)
-        );
+        const requests = ann.provider.requests.slice(before);
+        const sent = JSON.stringify(requests.map(({ body }) => body));
+        const ran = sent.includes(`:${marker}`);
         return {
           own: sent.includes(`Depot ${depot} keeps Ann's own note`),
           ownMemory: sent.includes(ownMemory),
           userMd: sent.includes(userMarker),
           connections: sent.includes(`held:${marker}`),
-          ran: sent.includes(`:${marker}`),
+          ran,
+          ...(ran
+            ? {}
+            : {
+                codeStepMissing: await codeStepTrace(
+                  annsWorkspace,
+                  ann.userId,
+                  { chatsBefore, requests, since, redact }
+                ),
+              }),
         };
       };
       // A group chat whose roster holds Ann alone is still one others can

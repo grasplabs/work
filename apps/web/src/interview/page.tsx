@@ -53,6 +53,7 @@ import {
   rated,
   reopened,
   resumed,
+  withoutLine,
 } from "./progress.ts";
 import { ReadBack } from "./read-back.tsx";
 import { Talk } from "./talk.tsx";
@@ -697,7 +698,16 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
         />
       </div>
       <Failed message={deleteFailed ?? withdrawFailed} />
-      <Transcript alone={away} lines={progress.lines} open={floating} />
+      <Transcript
+        alone={away}
+        lines={progress.lines}
+        onRemove={(at) => {
+          // Kept at once: removing can't wait for the next save.
+          update((now) => withoutLine(now, at));
+          keepNow();
+        }}
+        open={floating}
+      />
     </InterviewFrame>
   );
 };

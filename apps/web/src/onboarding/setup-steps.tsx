@@ -82,6 +82,7 @@ import {
 } from "./connect-steps.tsx";
 import { DocumentDrop } from "./document-drop.tsx";
 import type { DocumentRow } from "./document-drop.tsx";
+import { ForgetKickoff } from "./forget-kickoff.tsx";
 import { HrLeads } from "./hr-leads.tsx";
 import { InterviewsProgress } from "./interviews-progress.tsx";
 import { LanguageChoice } from "./language-choice.tsx";
@@ -474,6 +475,7 @@ const Welcome = (props: StepProps) => {
   const chosen = localeNames[isLocale(i18n.locale) ? i18n.locale : "en"];
   const minutes = onboardingMinutes;
   const asked = useAsked(lines, picked);
+  const refresh = useRefresh();
   return (
     <>
       {/* The question is the end of what Stephen says, not a line after it; answered, he says so in the new language. */}
@@ -514,6 +516,7 @@ const Welcome = (props: StepProps) => {
       >
         {t`Let’s start`}
       </Primary>
+      <ForgetKickoff kickoff={props.data.view.kickoff} onForgotten={refresh} />
     </>
   );
 };

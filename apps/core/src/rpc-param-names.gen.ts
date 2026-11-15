@@ -332,6 +332,7 @@ export const rpcParamNames: ParamNames = {
     "connectDirectory": ["suite","returnTo"],
     "connectDocumentPlaces": ["suite","returnTo"],
     "connectHrPlatform": ["platform","credentials"],
+    "deleteKickoff": [],
     "directory": [],
     "documentPlaces": [],
     "documents": [],

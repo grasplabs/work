@@ -1,5 +1,5 @@
 import { purgedMarker } from "@grasp-os/brain/knowledge";
-import { sha256Hex } from "@grasp-os/shared/encoding";
+import { randomToken, sha256Hex } from "@grasp-os/shared/encoding";
 import {
   factRevision,
   participationNotice,
@@ -16,12 +16,10 @@ import {
   interviewErasure,
 } from "../src/onboarding/interview-erasure.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
-import { platformAi } from "../src/platform-ai.ts";
-import { keepLine, keptLine } from "../src/speech-cache.ts";
-import type { SpokenKey } from "../src/speech-cache.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { signedInApi, unique } from "./sign-in.ts";
+import { signedInApi, signedInWithRole, unique } from "./sign-in.ts";
+import { sayForAdmin, sayOnLink, stillKept } from "./spoken.ts";
 
 // A Knowledge content purge reaches the interviews (GRA-528): a purge is
 // the admin's hard delete, and what people said, or Stephen said to them,
@@ -30,8 +28,6 @@ import { signedInApi, unique } from "./sign-in.ts";
 // the record it keeps; the device's older copy saving them back; the
 // audit log naming them.
 
-/** The speech model lines are said in: the platform's default. */
-const speechModel = `${platformAi.speech.provider}/${platformAi.speech.model}`;
 const idp = mockIdp();
 
 /** An interview in which `term` was said, marked and read back. */
@@ -106,20 +102,18 @@ const talking = async (term: string, does = "") => {
   await store.releaseDue();
   const link = (await store.linkOf(lead)) ?? "";
   const mark = await sha256Hex(link.split("#")[1] ?? "");
-  const key = await sha256Hex("lea's device");
+  // The device's key, as the link's session hands one out.
+  const device = randomToken();
+  const key = await sha256Hex(device);
   await store.openLink(mark, null, key);
   await store.saveInterview(mark, key, 0, progressSaying(term));
-  return { mark, key, lead };
+  return {
+    mark,
+    key,
+    lead,
+    device: { secret: link.split("#")[1] ?? "", key: device },
+  };
 };
-
-/** A line as Stephen says it in English, as the speech cache keeps it. */
-const spokenKey = (text: string): SpokenKey => ({
-  text,
-  spoken: `[warm] ${text}`,
-  voice: platformAi.speech.voices.stephen,
-  model: speechModel,
-  language: "en",
-});
 
 /** Purges `term` from the Knowledge, as an admin does, through the API. */
 const purgeTerm = async (term: string): Promise<void> => {
@@ -288,23 +282,30 @@ describe("a content purge of the interviews", () => {
 
   it("takes the lines Stephen said with the term out of the speech cache, and keeps the rest", async () => {
     const term = `Zq${unique()}`;
-    await talking(term);
-    const answer = JSON.stringify({
-      audio: "AAAA",
-      mime: "audio/mpeg",
-      words: [],
-    });
-    const [line] = progressSaying(term).lines;
+    const { device } = await talking(term);
+    // Said as the page says it: a sentence at a time.
+    const pieces = [`The kickoff said ${term} matters.`, "Does it?"];
+    for (const piece of pieces) {
+      // oxlint-disable-next-line no-await-in-loop -- one sentence after another
+      await sayOnLink(device, piece);
+    }
+    const { session } = await signedInWithRole(idp, "admin");
     const elsewhere = `Hello, I'm Stephen. ${unique()}`;
-    await keepLine(env, spokenKey(line?.text ?? ""), answer);
-    await keepLine(env, spokenKey(elsewhere), answer);
+    await sayForAdmin(session, elsewhere);
+    const said = await Promise.all(pieces.map(stillKept));
 
     await purgeTerm(term);
 
     expect({
-      purged: await keptLine(env, spokenKey(line?.text ?? "")),
-      elsewhere: await keptLine(env, spokenKey(elsewhere)),
-    }).toStrictEqual({ purged: undefined, elsewhere: answer });
+      said,
+      purged: await Promise.all(pieces.map(stillKept)),
+      elsewhere: await stillKept(elsewhere),
+    }).toStrictEqual({
+      // The positive control: both sentences were said, and kept.
+      said: [true, true],
+      purged: [false, false],
+      elsewhere: true,
+    });
   });
 
   it("leaves what a team does as drawn again from clean words between the purge's read and its write", async () => {

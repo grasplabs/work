@@ -136,7 +136,7 @@ export const brainCompanyVersionRead = (ref: SourceVersionRef): string =>
 
 // The memories' prefixes (below), beside the versions': what a recall as
 // the company pinned is either kind.
-const brainMemoryPrefix = "brain-memory:";
+export const brainMemoryPrefix = "brain-memory:";
 const brainCompanyMemoryPrefix = "brain-company-memory:";
 
 /** Whether `source` is a pin of a recall as the company. */
@@ -257,13 +257,11 @@ export const brainMemoryRead = ({ store, memory }: StoredMemoryPlace): string =>
 export const brainCompanyMemoryRead = (place: StoredMemoryPlace): string =>
   `${brainCompanyMemoryPrefix}${brainMemoryRead(place).slice(brainMemoryPrefix.length)}`;
 
-const brainMemorySchema = z.tuple([
-  z.enum(["own", "shared"]),
-  z.string().min(1),
-]);
+/** A memory's place in a pin: its store, and its id, a UUID as the Brain's are. */
+export const brainMemorySchema = z.tuple([z.enum(["own", "shared"]), z.uuid()]);
 
 /** The memory `source`, pinned under `prefix`, names, if it is one. */
-const brainMemoryOf = (
+export const brainMemoryOf = (
   source: string,
   prefix: string
 ): StoredMemoryPlace | undefined => {
@@ -287,7 +285,7 @@ const brainMemoryOf = (
 /**
  * Of the memories in `sources` pinned under `prefix`, those `reach` may
  * still read (`readableMemoriesAs`), in one read of each store per 500. A
- * pin whose id isn't one is refused there, and the check withholds all.
+ * pin that names no memory's place is read by no one: its run is withheld.
  */
 const readableMemoriesAt = async (
   env: Env,

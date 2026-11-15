@@ -190,29 +190,28 @@ export const brainActionResponse = async (
 /**
  * A person's erasure as staff read it: core's own record of their erasure
  * from the Brain (person-erasure.ts `brainErasureStateOf`, both Brain
- * areas), and once that is complete the shared store's ledger, since a
- * staff path never addresses a person's own store (GRA-1762), and core
- * marks its areas complete only once the Brain's erasure of them
- * returned, which is only once their own store was erased whole, files
- * included.
+ * areas), alone. Their content lived only in their own store, which a
+ * staff path never addresses (GRA-1762), and core marks its areas
+ * complete only once the Brain's erasure of them returned, which is only
+ * once their own store was erased whole, files included; the store's own
+ * record of that, written first, keeps a restore of it from bringing
+ * anything back. The shared ledger holds no entry of a person.
  *
  * - `not_erased` when core holds no erasure of them, alike whether they
  *   ever existed: one statement either way;
- * - `erasing` while either area is pending, and also if core says complete
- *   but the ledger doesn't hold it as erased (never read as done);
+ * - `erasing` while either area is pending;
  * - `skipped` when core recorded either skipped: not done, not tried again;
- * - once complete, the ledger's answer: `erased` at its time, or
- *   `unavailable` while it can't be read.
+ * - `erased` once both are complete, at when the later one completed.
  */
 const personFound = async (
   env: Env,
   personId: string
 ): Promise<BrainErasureAnswer> => {
   const core = await brainErasureStateOf(env, personId);
-  switch (core) {
-    case null: {
-      return { state: "not_erased" };
-    }
+  if (core === null) {
+    return { state: "not_erased" };
+  }
+  switch (core.state) {
     case "pending": {
       return { state: "erasing" };
     }
@@ -220,16 +219,10 @@ const personFound = async (
       return { state: "skipped" };
     }
     case "complete": {
-      const ledger = await brainErasureForStaff(env, {
-        kind: "person",
-        id: personId,
-      });
-      return ledger.state === "erased" || ledger.state === "unavailable"
-        ? ledger
-        : { state: "erasing" };
+      return { state: "erased", at: core.at.toISOString() };
     }
     default: {
-      const unhandled: never = core;
+      const unhandled: never = core.state;
       throw new Error(`No such erasure state (${typeof unhandled})`);
     }
   }
@@ -241,7 +234,7 @@ const erasureFound = async (
   lookup: BrainErasureLookup
 ): Promise<BrainErasureAnswer> =>
   lookup.kind === "source"
-    ? await brainErasureForStaff(env, lookup)
+    ? await brainErasureForStaff(env, lookup.key)
     : await personFound(env, lookup.id);
 
 /**

@@ -208,8 +208,7 @@ const brainReport = (bytes: number): BrainReport => ({
     replay: "through",
     erasing: 0,
     sourcesWithoutCurrent: 0,
-    source: { written: 3, unwritten: 0 },
-    person: { written: 1, unwritten: 0 },
+    source: { written: 4, unwritten: 0 },
     byReason: { deleted: 3, retention: 0, person_erased: 0, withdrawn: 1 },
   },
   stepsFailed: {

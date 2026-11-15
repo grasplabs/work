@@ -83,6 +83,7 @@ import {
   eq,
   gt,
   lt,
+  lte,
   inArray,
   isNotNull,
   isNull,
@@ -185,11 +186,18 @@ import {
   customWidgets,
   dashboardWidgets,
   dashboards,
+  memoryUses,
 } from "./db/workspace/schema.ts";
 import { chatWork } from "./drafts.ts";
 import { callObject, chatSession } from "./durable-objects.ts";
 import { dropHeldStarts } from "./held-starts.ts";
-import { readableSources, withheldDetail } from "./history-access.ts";
+import {
+  brainMemoryOf,
+  brainMemoryPrefix,
+  brainMemorySchema,
+  readableSources,
+  withheldDetail,
+} from "./history-access.ts";
 import { instructionFilesFor } from "./instruction-files.ts";
 import type { InstructionContext } from "./instruction-files.ts";
 import { inputTokens, modelSettings, models } from "./models.ts";
@@ -626,6 +634,22 @@ const runReadMaxLength = 1024;
 const runReadsSchema = z
   .array(z.string().min(1).max(runReadMaxLength))
   .max(auditProvenanceMaxItems);
+
+/** A memory this person used, by its store and id, and when they last did. */
+export interface MemoryUse {
+  store: "own" | "shared";
+  memory: string;
+  at: number;
+}
+
+/**
+ * The memory `source` pins as one a recall as the person handed over
+ * (history-access.ts `brainMemoryOf`, under `brainMemoryPrefix`): what
+ * counts as their use of it (`memory_uses`). A recall as the company pins
+ * under another prefix, and counts as nobody's use.
+ */
+const memoryUseOf = (source: string) =>
+  brainMemoryOf(source, brainMemoryPrefix);
 
 /**
  * How long Grasp holds a widget in hand at most (`claimWidget`): longer
@@ -3275,7 +3299,11 @@ export class Workspace extends DurableObject<Env> {
     return call;
   }
 
-  /** Keeps `sources` with run `runId`, each once. */
+  /**
+   * Keeps `sources` with run `runId`, each once, and, of the memories a
+   * recall as its person handed over among them (`memoryUseOf`), when
+   * they last used each (`memory_uses`), in one transaction.
+   */
   #keepRunSources(
     chatId: ChatId,
     runId: string,
@@ -3284,13 +3312,58 @@ export class Workspace extends DurableObject<Env> {
     if (sources.length === 0) {
       return;
     }
-    this.#db
-      .insert(chatRunSources)
-      .select(
-        sql`SELECT ${chatId}, ${runId}, value, NULL FROM json_each(${JSON.stringify(sources)}) WHERE true`
-      )
-      .onConflictDoNothing()
-      .run();
+    const used = sources.flatMap((source) => memoryUseOf(source) ?? []);
+    this.ctx.storage.transactionSync(() => {
+      this.#db
+        .insert(chatRunSources)
+        .select(
+          sql`SELECT ${chatId}, ${runId}, value, NULL FROM json_each(${JSON.stringify(sources)}) WHERE true`
+        )
+        .onConflictDoNothing()
+        .run();
+      if (used.length > 0) {
+        // One statement however many: each a bound value would pass the
+        // object's bound on a statement's variables (100).
+        this.ctx.storage.sql.exec(
+          `INSERT INTO memory_uses (store, memory, used_at)
+          SELECT value ->> 0, value ->> 1, ?2 FROM json_each(?1) WHERE true
+          ON CONFLICT (store, memory)
+          DO UPDATE SET used_at = max(used_at, excluded.used_at)`,
+          JSON.stringify(used.map(({ store, memory }) => [store, memory])),
+          Date.now()
+        );
+      }
+    });
+  }
+
+  /**
+   * When this person last used each memory they used, at or before
+   * `until` (milliseconds): a memory a recall as them last handed over
+   * then (`memory_uses`), which their own recall ranks memories by
+   * (brain-next.ts `recallAs`). Theirs alone, so one person's use never
+   * reaches another's recall. One scan of their uses, a row a memory; a
+   * row that isn't a memory's place is passed over, never failing recall.
+   */
+  memoriesUsed(until: number): MemoryUse[] {
+    return this.#db
+      .select()
+      .from(memoryUses)
+      .where(lte(memoryUses.usedAt, new Date(until)))
+      .all()
+      .flatMap(({ store, memory, usedAt }) => {
+        // A row is a pin's place: read back by the same rule
+        // (history-access.ts `brainMemorySchema`).
+        const place = brainMemorySchema.safeParse([store, memory]);
+        return place.success
+          ? [
+              {
+                store: place.data[0],
+                memory: place.data[1],
+                at: usedAt.getTime(),
+              },
+            ]
+          : [];
+      });
   }
 
   /**

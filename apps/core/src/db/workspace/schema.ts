@@ -223,6 +223,25 @@ export const chatRunSources = sqliteTable(
   ]
 );
 
+/**
+ * When this person last used each memory the Brain handed them: one row a
+ * memory, by the store it is in and that store's id for it, kept when a
+ * recall as them pins it (`brain-memory:`, history-access.ts) and moved
+ * on by each later one (workspace.ts `memoriesUsed`). Their own recall
+ * ranks memories by it (brain-next.ts `recallAs`), so one they never use
+ * fades. Theirs alone: no other person's recall reads it; erased with
+ * their Workspace. Outlives the chat that used it.
+ */
+export const memoryUses = sqliteTable(
+  "memory_uses",
+  {
+    store: text({ enum: ["own", "shared"] }).notNull(),
+    memory: text().notNull(),
+    usedAt: integer("used_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.store, table.memory] })]
+);
+
 // Unused since the App's one shared draft (drafts.ts) replaced each
 // chat's drafts and their previews: nothing reads or writes these, and a
 // chat's rows go with it. Kept so a roll back to the release before still
