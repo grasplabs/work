@@ -210,6 +210,9 @@ export const chatDocuments = sqliteTable(
  * withholding is audited once; cleared once it is readable again. Kept
  * with the chat, not with the run's record (`chat_code_runs` keeps the
  * latest runs only), as long as the transcript holds the result.
+ * `pinned_at` is when the run read it: of a memory the Brain handed over,
+ * when its person last used it (`memoriesUsed` in workspace.ts), which
+ * recall ranks their memories by (brain-next.ts `recallAs`).
  */
 export const chatRunSources = sqliteTable(
   "chat_run_sources",
@@ -221,9 +224,12 @@ export const chatRunSources = sqliteTable(
     runId: text("run_id").notNull(),
     sourceId: text("source_id").notNull(),
     withheldAt: integer("withheld_at", { mode: "timestamp_ms" }),
+    pinnedAt: integer("pinned_at", { mode: "timestamp_ms" }),
   },
   (table) => [
     primaryKey({ columns: [table.chatId, table.runId, table.sourceId] }),
+    // When a source was last read: one seek per source asked.
+    index("chat_run_sources_pinned").on(table.sourceId, table.pinnedAt),
   ]
 );
 

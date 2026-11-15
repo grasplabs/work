@@ -201,7 +201,12 @@ import {
 import { chatWork } from "./drafts.ts";
 import { callObject, chatSession } from "./durable-objects.ts";
 import { dropHeldStarts } from "./held-starts.ts";
-import { readableSources, withheldDetail } from "./history-access.ts";
+import {
+  brainCompanyMemoryRead,
+  brainMemoryRead,
+  readableSources,
+  withheldDetail,
+} from "./history-access.ts";
 import { instructionFilesFor } from "./instruction-files.ts";
 import type { InstructionContext } from "./instruction-files.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
@@ -649,6 +654,20 @@ const runReadMaxLength = 1024;
 const runReadsSchema = z
   .array(z.string().min(1).max(runReadMaxLength))
   .max(auditProvenanceMaxItems);
+
+/**
+ * The memories `memoriesUsed` is asked about: those one recall found,
+ * which the Brain's contract bounds (`recallLimit` a way).
+ */
+const usedAskedSchema = z.array(
+  z.strictObject({
+    store: z.enum(["own", "shared"]),
+    memory: z.string().min(1),
+  })
+);
+
+/** A memory `memoriesUsed` is asked about, by its store and id. */
+type UsedAsked = z.infer<typeof usedAskedSchema>[number];
 
 /** Most documents one read hands a chat's code: a page of hits or links. */
 const givenMaxPerRead = 1000;
@@ -3559,7 +3578,7 @@ export class Workspace extends DurableObject<Env> {
     return call;
   }
 
-  /** Keeps `sources` with run `runId`, each once. */
+  /** Keeps `sources` with run `runId`, each once, with when it read them. */
   #keepRunSources(
     chatId: ChatId,
     runId: string,
@@ -3571,10 +3590,56 @@ export class Workspace extends DurableObject<Env> {
     this.#db
       .insert(chatRunSources)
       .select(
-        sql`SELECT ${chatId}, ${runId}, value, NULL FROM json_each(${JSON.stringify(sources)}) WHERE true`
+        sql`SELECT ${chatId}, ${runId}, value, NULL, ${Date.now()} FROM json_each(${JSON.stringify(sources)}) WHERE true`
       )
       .onConflictDoNothing()
       .run();
+  }
+
+  /**
+   * When a run of this person's chats last read each of `sources`, at or
+   * before `until` (milliseconds): of a memory the Brain handed over, when
+   * they last used it, which their recall ranks it by (brain-next.ts
+   * `recallAs`). Their own chats' pins alone, so one person's use never
+   * reaches another's recall. A source no run read is left out. One seek
+   * of `chat_run_sources_pinned` each.
+   */
+  memoriesUsed(
+    memories: readonly UsedAsked[],
+    until: number
+  ): (UsedAsked & { at: number })[] {
+    // Pinned at either reach: a recall as the company in their chat is
+    // their use too.
+    const asked = usedAskedSchema
+      .parse(memories)
+      .map(
+        (place) =>
+          [
+            place,
+            [brainMemoryRead(place), brainCompanyMemoryRead(place)],
+          ] as const
+      );
+    const at = new Map(
+      this.ctx.storage.sql
+        .exec<{ source: string; at: number }>(
+          `SELECT asked.value AS source, (
+            SELECT max(pinned_at) FROM chat_run_sources
+            WHERE source_id = asked.value AND pinned_at <= ?2
+          ) AS at
+          FROM json_each(?1) AS asked
+          WHERE at IS NOT NULL`,
+          JSON.stringify(asked.flatMap(([, sources]) => sources)),
+          until
+        )
+        .toArray()
+        .map(({ source, at: last }) => [source, last])
+    );
+    return asked.flatMap(([place, sources]) => {
+      const last = Math.max(
+        ...sources.map((source) => at.get(source) ?? Number.NEGATIVE_INFINITY)
+      );
+      return Number.isFinite(last) ? [{ ...place, at: last }] : [];
+    });
   }
 
   /**

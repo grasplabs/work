@@ -178,19 +178,50 @@ const byMeaning = (findings: readonly Finding[]): Entry[] =>
     .slice(0, recallLimit)
     .map((passage) => foundAs(passage, "meaning"));
 
-/** A memory of the store `store`, as merged. */
-type MemoryOf = FoundMemory & { store: number };
+/**
+ * A memory of the store `store`, as merged, with its freshness for the
+ * reader (`freshnessOf`).
+ */
+type MemoryOf = FoundMemory & { store: number; freshness: number };
+
+/**
+ * When each memory a store found was last used by the reader, by id, one
+ * map per finding (in `findings`' order): what the host knows of its own
+ * person's use (core: when recall last handed it to them in one of their
+ * chats). Only ever the reader's own, so one reader's use never orders
+ * another's memories; only of the memories found, so a memory hidden from
+ * them never orders what they see.
+ */
+export type UsedAt = readonly ReadonlyMap<string, Date>[];
+
+/**
+ * A memory's freshness for the reader: when it was learned, or when they
+ * last used it if later. A memory nobody uses keeps the moment it was
+ * learned while others move ahead: it fades, and is never dropped.
+ */
+const freshnessOf = (
+  memory: FoundMemory,
+  used: ReadonlyMap<string, Date> | undefined
+): number =>
+  Math.max(
+    memory.learnedAt.getTime(),
+    used?.get(memory.id)?.getTime() ?? Number.NEGATIVE_INFINITY
+  );
 
 /** A memory's key in the fused lists: its store's and its id. */
 const memoryKeyOf = ({ store, id }: MemoryOf): string =>
   `memory ${store} ${id}`;
 
 /**
- * After a way's own order: confirmed first, then newer, then by id, as
- * each store orders them (the contract's tie order), then by store.
+ * After a way's own order: confirmed first, so a confirmed memory never
+ * fades below one that isn't; then fresher for the reader (`freshnessOf`);
+ * then newer, then by id, as each store orders them (the contract's tie
+ * order), then by store. Without use, freshness is when it was learned:
+ * each store's own order.
  */
 const byMemory = (a: MemoryOf, b: MemoryOf): number =>
   Number(a.confirmed === null) - Number(b.confirmed === null) ||
+  b.freshness - a.freshness ||
   b.learnedAt.getTime() - a.learnedAt.getTime() ||
   byBytes(b.id, a.id) ||
   a.store - b.store;
@@ -200,15 +231,24 @@ const byMemory = (a: MemoryOf, b: MemoryOf): number =>
  * statements order them (memories.ts, recall-memories.ts): by words, more
  * of the question's telling words first, then more as written; along
  * entities, the nearest step first; each then as `byMemory`, the first
- * `recallLimit` of all. A contested memory carries the other sides its
- * store found (an entity is one store's: sides are never across stores).
+ * `recallLimit` of all. The reader's use (`used`) only reorders what the
+ * stores found: each store's list and its cut are its own order's. A
+ * contested memory carries the other sides its store found (an entity is
+ * one store's: sides are never across stores).
  */
 const memoriesOf = (
-  findings: readonly Finding[]
+  findings: readonly Finding[],
+  used: UsedAt
 ): { words: Entry[]; entities: Entry[] } => {
-  const tagged = (pick: (memories: Finding["memories"]) => FoundMemory[]) =>
+  const tagged = (
+    pick: (memories: Finding["memories"]) => FoundMemory[]
+  ): MemoryOf[] =>
     findings.flatMap((finding, store) =>
-      pick(finding.memories).map((memory) => ({ ...memory, store }))
+      pick(finding.memories).map((memory) => ({
+        ...memory,
+        store,
+        freshness: freshnessOf(memory, used[store]),
+      }))
     );
   const all = [
     ...tagged(({ words }) => words),
@@ -261,11 +301,14 @@ const memoriesOf = (
  * of the question no store found by words or exact and no packed memory
  * holds: its exact parts, but those capped, then its telling words, but
  * those of its IDs. The same pack, for one finding, as one store makes.
+ * With `used`, the memories the reader used rank fresher among equals
+ * (`byMemory`).
  */
 export const packAcross = (
   question: string,
   budget: number,
-  findings: readonly Finding[]
+  findings: readonly Finding[],
+  used: UsedAt = []
 ): Pack => {
   const exacts = exactsOf(question);
   const terms = termsOf(question);
@@ -283,7 +326,7 @@ export const packAcross = (
       )
     )
   );
-  const memories = memoriesOf(findings);
+  const memories = memoriesOf(findings, used);
   const pack = packOf(
     fuse([
       ...exact.lists,

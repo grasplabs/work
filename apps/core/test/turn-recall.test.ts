@@ -37,6 +37,7 @@ import type { ChatPlace } from "../src/workspace.ts";
 import {
   chatOf,
   codeStep,
+  personalChatsOf,
   model,
   says,
   setObjectEnv,
@@ -3021,5 +3022,79 @@ describe("two recalls merged into one pack", setUpTime, () => {
 
     expect(before.notFound).toContain(theirs);
     await expect(asked()).resolves.toStrictEqual(before);
+  });
+});
+
+/**
+ * Whether what `personId` recalls for `question` (`recallAs`, as their
+ * teams may read) holds both `memories`, and the first above the second.
+ */
+const placeIn = async (
+  personId: string,
+  question: string,
+  memories: readonly [string, string]
+): Promise<{ first: boolean; both: boolean }> => {
+  const pack = await recallAs(env, personId, {
+    question,
+    budget: { tokens: 20_000 },
+    personal: false,
+  });
+  const [upper, lower] = memories.map((memory) =>
+    pack.memories.findIndex((each) => each.memory === memory)
+  );
+  return {
+    first: upper !== undefined && lower !== undefined && upper < lower,
+    both: upper !== -1 && lower !== -1,
+  };
+};
+
+// Fading (GRA-1753): a memory recall handed to a person in their own chat
+// is one they used, as the chat's run pinned it; among equals it ranks
+// above one they never used, for them alone. From the ways it can fail:
+// one person's use reorders another's recall; a faded memory is lost.
+describe("memories a person never uses fade for them", setUpTime, () => {
+  it("ranks the memory their chat used above an equal one, for them alone, and still finds the other first when asked about it", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const [ada, bea] = await Promise.all([
+      signedInWithRole(idp, "user"),
+      signedInWithRole(idp, "user"),
+    ]);
+    const [topic, monday, friday] = [word(), word(), word()];
+    // Two memories everyone may read that hold the topic alike, the second
+    // learned later, each also holding a word of its own.
+    const [used = ""] = await rememberedAbout("company", `Depot ${word()}`, [
+      { statement: `The ${topic} pallets go out on ${monday}` },
+    ]);
+    const [unused = ""] = await rememberedAbout("company", `Depot ${word()}`, [
+      { statement: `The ${topic} pallets go out on ${friday}` },
+    ]);
+    const beaBefore = await placeIn(bea.userId, topic, [unused, used]);
+    const chats = await personalChatsOf(ada.userId, says("Mondays."));
+    await requestGranted(idp, admin, {
+      subject: chats.agent,
+      object: { type: "platform" },
+      actions: ["brain"],
+      binding: "BRAIN",
+    });
+    const { ask } = await chats.newChat();
+
+    // Only the first memory holds this word: the turn hands over that one.
+    await ask(`${monday}?`);
+
+    expect({
+      handed: handedIn(chats.provider.requests[0]?.body)
+        .memories.map(({ memory }) => memory)
+        .filter((memory) => memory === used || memory === unused),
+      ada: await placeIn(ada.userId, topic, [used, unused]),
+      beaBefore,
+      beaAfter: await placeIn(bea.userId, topic, [unused, used]),
+      adaAsked: await placeIn(ada.userId, `${topic} ${friday}`, [unused, used]),
+    }).toStrictEqual({
+      handed: [used],
+      ada: { first: true, both: true },
+      beaBefore: { first: true, both: true },
+      beaAfter: { first: true, both: true },
+      adaAsked: { first: true, both: true },
+    });
   });
 });

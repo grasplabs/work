@@ -1,4 +1,5 @@
 import { packAcross, sourcesAcross } from "@grasp-os/brain-next/across";
+import type { UsedAt } from "@grasp-os/brain-next/across";
 import {
   brainOf,
   contestedCursorSchema,
@@ -132,13 +133,14 @@ import {
   ownStoresTotals,
 } from "./brain-own-stores.ts";
 import type { OwnStoreHealth } from "./brain-own-stores.ts";
-import { inJurisdiction } from "./durable-objects.ts";
+import { inJurisdiction, workspace } from "./durable-objects.ts";
 import { embedInBulk, embedderModel, questionVectorOf } from "./embedder.ts";
 import { promptTextOf } from "./instructions-text.ts";
 import { parseModelRef } from "./model-catalog.ts";
 import { brainSpendByPurpose, spendMonth } from "./model-spend.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
 import { organizationTimeZone } from "./organization.ts";
+import { personalWorkspaceId } from "./personal-workspace.ts";
 import { shippedSkills } from "./shipped-skills.ts";
 import { skillCards, skillCardsKept } from "./skill-cards.ts";
 import type { SkillCardText } from "./skill-cards.ts";
@@ -1023,6 +1025,47 @@ const storesOf = (findings: readonly Finding[]): Map<string, MemoryStore> =>
   );
 
 /**
+ * When `personId` last used each memory `findings` ranks (`findingsOf`'s
+ * order), at or before `until`: when recall last handed it to them in one
+ * of their own chats, as their Workspace keeps it with the run
+ * (workspace.ts `memoriesUsed`), for `packAcross` to rank by, so a memory
+ * they never use fades among equals and is never dropped. Their own use
+ * alone, of what they were found alone: nobody else's use, and nothing
+ * hidden from them, orders what they see. Nothing is asked when nothing
+ * was found.
+ */
+const usedAtOf = async (
+  env: Pick<Env, "WORKSPACES" | "DURABLE_OBJECT_JURISDICTION">,
+  personId: string,
+  findings: readonly Finding[],
+  until: Date
+): Promise<UsedAt> => {
+  const places = findings.flatMap(({ memories }, at) =>
+    [...memories.words, ...memories.entities].map(
+      ({ id }): StoredMemoryPlace => ({
+        store: at === 0 ? "shared" : "own",
+        memory: id,
+      })
+    )
+  );
+  if (places.length === 0) {
+    return [];
+  }
+  const used = await workspace(env, personalWorkspaceId(personId)).memoriesUsed(
+    places,
+    until.getTime()
+  );
+  return findings.map((_, at) => {
+    const store = at === 0 ? "shared" : "own";
+    return new Map(
+      used
+        .filter((place) => place.store === store)
+        .map(({ memory, at: last }) => [memory, new Date(last)])
+    );
+  });
+};
+
+/**
  * A pack of what the member `personId` may read for `question`, as core
  * counts them now, within `budget.tokens` (the Brain's estimate,
  * `tokensOf`), and, with `asOf`, of each source as it was then: the
@@ -1042,7 +1085,7 @@ const storesOf = (findings: readonly Finding[]): Map<string, MemoryStore> =>
  * (`recallPassagesAs`).
  */
 export const recallAs = async (
-  env: BrainEnv & Pick<Env, "DB" | "EMBEDDER">,
+  env: BrainEnv & Pick<Env, "DB" | "EMBEDDER" | "WORKSPACES">,
   personId: string,
   recall: Recall
 ): Promise<RecalledPack> => {
@@ -1051,7 +1094,8 @@ export const recallAs = async (
   const { items, memories, contested, notFound, truncated } = packAcross(
     request.question,
     request.budget.tokens,
-    findings
+    findings,
+    await usedAtOf(env, personId, findings, request.asOf ?? new Date())
   );
   const stores = storesOf(findings);
   return {

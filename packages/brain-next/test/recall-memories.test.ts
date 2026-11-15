@@ -13,6 +13,7 @@ import type { Pack, Reader } from "@grasp-os/brain-next/contract";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { packAcross } from "../src/across.ts";
 import { foldName } from "../src/entities.ts";
 import { hubRelationsMax, stepsMax } from "../src/recall-memories.ts";
 import {
@@ -1268,4 +1269,121 @@ describe("recall through memories, the names a question holds", () => {
       expect(differences).toStrictEqual([]);
     }
   );
+});
+
+// Fading (GRA-1753): the host tells `packAcross` when its reader last used
+// each memory found; a memory nobody uses keeps the moment it was learned
+// while used ones move ahead. Order only: nothing found is ever left out.
+/**
+ * Two memories `group` may read that hold `topic` alike, about two
+ * entities whose names no question here holds, the second learned
+ * later; each also holds a word of its own.
+ */
+const equalPair = async (group: string) => {
+  const [topic, older, newer] = [word(), word(), word()];
+  const { memories } = await remember(
+    audience(group),
+    [{ key: "a", kind: "customer", names: [word()] }],
+    [fact("a", `The ${topic} pallets go out on ${older}`)]
+  );
+  const { memories: later } = await remember(
+    audience(group),
+    [{ key: "b", kind: "customer", names: [word()] }],
+    [fact("b", `The ${topic} pallets go out on ${newer}`)]
+  );
+  return {
+    topic,
+    older: { id: memories[0] ?? "", word: older },
+    newer: { id: later[0] ?? "", word: newer },
+  };
+};
+
+/**
+ * Whether the pack `reader` gets for `question`, their use as `used`
+ * says, holds both `upper` and `lower`, `upper` first.
+ */
+const ranksAbove = async (
+  reader: Reader,
+  question: string,
+  [upper, lower]: readonly [string, string],
+  used: ReadonlyMap<string, Date> = new Map()
+): Promise<boolean> => {
+  const finding = await shared().find({
+    question,
+    reader,
+    budget: { tokens: 20_000 },
+  });
+  const pack = packAcross(question, 20_000, [finding], [used]);
+  const placeOf = (id: string) =>
+    pack.memories.findIndex(({ memory }) => memory === id);
+  return placeOf(upper) >= 0 && placeOf(upper) < placeOf(lower);
+};
+
+describe("memories a reader never uses fade", () => {
+  it("ranks a memory the reader used above an equal one they never used, and still packs both", async () => {
+    const group = unique("team");
+    const reader = readerOf(unique("ann"), group);
+    const { topic, older, newer } = await equalPair(group);
+
+    expect({
+      unused: await ranksAbove(reader, topic, [newer.id, older.id]),
+      used: await ranksAbove(
+        reader,
+        topic,
+        [older.id, newer.id],
+        new Map([[older.id, new Date()]])
+      ),
+    }).toStrictEqual({ unused: true, used: true });
+  });
+
+  it("lets a memory learned after the last use rank above the one used", async () => {
+    const group = unique("team");
+    const reader = readerOf(unique("ann"), group);
+    const { topic, older, newer } = await equalPair(group);
+
+    // Used before the newer one was learned: the newer is fresher.
+    await expect(
+      ranksAbove(
+        reader,
+        topic,
+        [newer.id, older.id],
+        new Map([[older.id, new Date(0)]])
+      )
+    ).resolves.toBeTruthy();
+  });
+
+  it("never fades a confirmed memory below one that isn't, however recently that one was used", async () => {
+    const group = unique("team");
+    const person = unique("ann");
+    const reader = readerOf(person, group);
+    const { topic, older, newer } = await equalPair(group);
+    await shared().confirmMemory({
+      memory: older.id,
+      reader: { person, groups: [group] },
+    });
+
+    await expect(
+      ranksAbove(
+        reader,
+        topic,
+        [older.id, newer.id],
+        new Map([[newer.id, new Date()]])
+      )
+    ).resolves.toBeTruthy();
+  });
+
+  it("finds a faded memory first for a question about it", async () => {
+    const group = unique("team");
+    const reader = readerOf(unique("ann"), group);
+    const { topic, older, newer } = await equalPair(group);
+
+    await expect(
+      ranksAbove(
+        reader,
+        `${topic} ${older.word}`,
+        [older.id, newer.id],
+        new Map([[newer.id, new Date()]])
+      )
+    ).resolves.toBeTruthy();
+  });
 });
