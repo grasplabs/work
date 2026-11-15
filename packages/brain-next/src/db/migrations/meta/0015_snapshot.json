@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "d5c928de-d9c2-476a-847c-f8735e2f22df",
+  "id": "8be12142-6b3b-478c-80bf-980e10d7645c",
   "prevId": "19cd9d80-c60c-4473-8d33-8192da5eab32",
   "tables": {
     "chunks": {
@@ -1891,7 +1891,15 @@
           "autoincrement": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "unembeddable_hash_idx": {
+          "name": "unembeddable_hash_idx",
+          "columns": [
+            "hash"
+          ],
+          "isUnique": false
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {
         "unembeddable_model_hash_pk": {

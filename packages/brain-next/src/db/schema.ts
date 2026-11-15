@@ -619,7 +619,13 @@ export const unembeddable = sqliteTable(
     model: text().notNull(),
     hash: text().notNull(),
   },
-  (table) => [primaryKey({ columns: [table.model, table.hash] })]
+  (table) => [
+    primaryKey({ columns: [table.model, table.hash] }),
+    // A text's passages in every model, as a version that stops being
+    // current or is erased lets go of them (files.ts `releaseVectors`),
+    // without reading the whole table for each such version.
+    index("unembeddable_hash_idx").on(table.hash),
+  ]
 );
 
 // Exports and restores (exports.ts, restore.ts). An export writes what a

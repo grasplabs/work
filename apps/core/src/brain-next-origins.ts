@@ -99,7 +99,7 @@ export const chatTurnOf = (
  * and closes the chat there, so a turn handed over after is refused: one
  * call, however many turns it had: the store writes one ledger entry and
  * hides every turn in one transaction, a turn at a time (linear: about
- * 2.5 s for 50,000 turns, measured in workerd: erasure.ts `sourcesOf`),
+ * 3.0 s for 50,000 turns, measured in workerd: erasure.ts `sourcesOf`),
  * and its tick deletes them a bounded batch at a time. Throws when it
  * failed, and the chat must stay until a repeat returns. Safe to repeat.
  */
