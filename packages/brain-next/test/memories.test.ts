@@ -677,6 +677,7 @@ describe("who may read a memory", () => {
         memory,
         reader: readerOf(writer, group),
         writer,
+        change: "retire",
       });
     };
     const name = unique("Acme");
@@ -844,6 +845,7 @@ describe("who may read a memory", () => {
         memory: memory ?? "",
         reader: readerOf(writer, group),
         writer,
+        change: "retire",
       });
     }
     const current = [
@@ -923,6 +925,7 @@ describe("who may read a memory", () => {
       memory: rival.memories[0] ?? "",
       reader: readerOf(second, theirs),
       writer: second,
+      change: "retire",
     });
     const afterRetired = new Date();
 
@@ -1291,7 +1294,12 @@ describe("ending a memory", () => {
       [fact({ kind: "writer", writer: app }, { statement: "Mine" })]
     );
     const retire = async (writer = app) =>
-      await shared().retireMemory({ memory: mine, reader, writer });
+      await shared().retireMemory({
+        memory: mine,
+        reader,
+        writer,
+        change: "retire",
+      });
 
     // Two retires by its writer and one by another, all at once.
     const [first, alongside, byOther] = await Promise.all([
@@ -1375,9 +1383,15 @@ describe("ending a memory", () => {
       memory: theirsRetired,
       reader,
       writer: other,
+      change: "retire",
     });
     const retire = async (memory: string, as: Reader = reader) =>
-      await shared().retireMemory({ memory, reader: as, writer: app });
+      await shared().retireMemory({
+        memory,
+        reader: as,
+        writer: app,
+        change: "retire",
+      });
 
     const outcomes = [
       await retire(theirs),
@@ -1853,6 +1867,7 @@ describe("what a reader sees of a retire and of an extraction", () => {
         memory: made.memories[0] ?? "",
         reader,
         writer,
+        change: "retire",
       });
       return retired !== null;
     };
@@ -1919,6 +1934,7 @@ describe("what a reader sees of a retire and of an extraction", () => {
         memory: id,
         reader: readerOf(person),
         writer: person,
+        change: "retire",
       }),
     ];
     const others = [
@@ -1942,6 +1958,7 @@ describe("what a reader sees of a retire and of an extraction", () => {
             memory: id,
             reader: other,
             writer: other.person,
+            change: "retire",
           })
       ),
     ];
@@ -2034,6 +2051,7 @@ describe("an instruction, a retire's repeat, and an extraction mark's readers", 
         memory: made.memories[0] ?? "",
         reader: readerOf(writer, group),
         writer,
+        change: "retire",
       })
     ).resolves.toBeNull();
   });
@@ -2250,6 +2268,7 @@ describe("pages, attributes, and a retired newer memory", () => {
       memory: newer.memories[0] ?? "",
       reader: writerReader,
       writer,
+      change: "retire",
     });
 
     expect({
@@ -2295,11 +2314,13 @@ describe("pages, attributes, and a retired newer memory", () => {
         memory: made.memories[0] ?? "",
         reader: writerReader,
         writer,
+        change: "retire",
       }),
       await shared().retireMemory({
         memory: newer.memories[0] ?? "",
         reader: writerReader,
         writer,
+        change: "retire",
       }),
     ].map((each) => each !== null);
 
@@ -3162,6 +3183,7 @@ describe("pages of one read, by the store's stamps (contract v10)", () => {
         memory: mine.memories[0] ?? "",
         reader,
         writer: person,
+        change: "retire",
       });
       return { retired, pages: await allPages(instance, entity, reader) };
     });
@@ -3770,7 +3792,12 @@ describe("which memories a reader may still read", () => {
       memories: asked,
       reader: readerOf(writer),
     });
-    await shared().retireMemory({ memory: mine, reader, writer });
+    await shared().retireMemory({
+      memory: mine,
+      reader,
+      writer,
+      change: "retire",
+    });
     const retired = await shared().readableMemories({
       memories: asked,
       reader,

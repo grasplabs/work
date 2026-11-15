@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "eec08319-98c1-402c-97f3-b17b4831361c",
+  "id": "25016359-d8fb-468e-820c-2fd5d38de94a",
   "prevId": "19cd9d80-c60c-4473-8d33-8192da5eab32",
   "tables": {
     "chunks": {
@@ -95,13 +95,6 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
-        },
-        "judged_row": {
-          "name": "judged_row",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         }
       },
       "indexes": {
@@ -111,14 +104,6 @@
             "version_row"
           ],
           "isUnique": true
-        },
-        "current_versions_unjudged_idx": {
-          "name": "current_versions_unjudged_idx",
-          "columns": [
-            "source"
-          ],
-          "isUnique": false,
-          "where": "judged_row IS NOT version_row"
         }
       },
       "foreignKeys": {
@@ -531,6 +516,13 @@
         },
         "sources": {
           "name": "sources",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "memories": {
+          "name": "memories",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,
@@ -1033,6 +1025,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "writer_subject": {
+          "name": "writer_subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "lineage": {
           "name": "lineage",
           "type": "text",
@@ -1078,6 +1077,13 @@
         "retired_at": {
           "name": "retired_at",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "retired_change": {
+          "name": "retired_change",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -1152,6 +1158,14 @@
           "name": "memories_readers_idx",
           "columns": [
             "readers"
+          ],
+          "isUnique": false
+        },
+        "memories_writer_idx": {
+          "name": "memories_writer_idx",
+          "columns": [
+            "writer_subject",
+            "learned_at"
           ],
           "isUnique": false
         }
@@ -1460,135 +1474,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "memory_ins": {
-      "name": "memory_ins",
-      "columns": {
-        "memory": {
-          "name": "memory",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "memory_ins_source_idx": {
-          "name": "memory_ins_source_idx",
-          "columns": [
-            "source"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "memory_ins_memory_memories_row_fk": {
-          "name": "memory_ins_memory_memories_row_fk",
-          "tableFrom": "memory_ins",
-          "tableTo": "memories",
-          "columnsFrom": [
-            "memory"
-          ],
-          "columnsTo": [
-            "row"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "memory_judged": {
-      "name": "memory_judged",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "through": {
-          "name": "through",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {
-        "memory_judged_one": {
-          "name": "memory_judged_one",
-          "value": "id = 1"
-        }
-      }
-    },
-    "memory_outs": {
-      "name": "memory_outs",
-      "columns": {
-        "memory": {
-          "name": "memory",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "pair": {
-          "name": "pair",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "memory_outs_pair_idx": {
-          "name": "memory_outs_pair_idx",
-          "columns": [
-            "source",
-            "pair"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "memory_outs_memory_memories_row_fk": {
-          "name": "memory_outs_memory_memories_row_fk",
-          "tableFrom": "memory_outs",
-          "tableTo": "memories",
-          "columnsFrom": [
-            "memory"
-          ],
-          "columnsTo": [
-            "row"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "memory_stamps": {
       "name": "memory_stamps",
       "columns": {
@@ -1892,14 +1777,6 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
-        },
-        "thread": {
-          "name": "thread",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
         }
       },
       "indexes": {

@@ -28,7 +28,6 @@ import {
   teamMembers,
 } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
-import { grantedPermissions } from "../permissions.ts";
 import { restrict } from "../restricted.ts";
 import type { WorkContext } from "../restricted.ts";
 
@@ -272,31 +271,6 @@ export const mayRead = (
   }
 };
 
-/**
- * The collections the App or agent may read under its permissions (only
- * `permissionId`, when given), read now. Throws `permission.person_inactive`
- * when the person it acts for has left, and `permission.denied` when
- * `permissionId` doesn't allow reading any more.
- */
-const grantedToRead = async (
-  env: Env,
-  authority: Authority,
-  permissionId: PermissionId | undefined
-): Promise<string[]> => {
-  const granted = await grantedPermissions(env, authority);
-  const ids = granted.flatMap(({ id, object, actions }) =>
-    object.type === "collection" &&
-    actions.includes("read") &&
-    (permissionId === undefined || id === permissionId)
-      ? [object.collectionId]
-      : []
-  );
-  if (permissionId !== undefined && ids.length === 0) {
-    throw permissionErrors.create("permission.denied", { action: "read" });
-  }
-  return ids;
-};
-
 /** The collections a reader may read, and for a delegate, those granted. */
 export interface CollectionsAllowed {
   /** A condition on `collections`. */
@@ -334,35 +308,14 @@ export const collectionsAllowed = async (
       shared: false,
     };
   }
-  const { authority, permissionId, context } = reader;
-  const [granted, audience] = await Promise.all([
-    grantedToRead(env, authority, permissionId),
-    audienceCondition(env, context),
-  ]);
-  const shared = audience !== undefined;
-  if (granted.length === 0) {
-    return { condition: sql`0`, granted, shared };
+  // No permission grants a collection since the Brain replaced Knowledge
+  // (GRA-1735): an App or agent is granted none, and reads nothing, and
+  // a read under one permission is refused as that permission's.
+  if (reader.permissionId !== undefined) {
+    throw permissionErrors.create("permission.denied", { action: "read" });
   }
-  const teams = await teamsOf(env.DB, authority.onBehalfOf);
-  return {
-    condition:
-      and(
-        inList(collections.id, granted),
-        // A collection only its owner reads is never read under a grant:
-        // an App is shared, and a grant isn't the person's own.
-        ne(collections.access, "me"),
-        // Nor one for admins: what the onboarding holds stays with people.
-        ne(collections.access, "admins"),
-        await readableBy(env, {
-          userId: authority.onBehalfOf,
-          teamIds: teams.map(({ id }) => id),
-          admin: false,
-        }),
-        audience
-      ) ?? sql`0`,
-    granted,
-    shared,
-  };
+  const audience = await audienceCondition(env, reader.context);
+  return { condition: sql`0`, granted: [], shared: audience !== undefined };
 };
 
 /** The collections `reader` may read, as a condition on `collections`. */

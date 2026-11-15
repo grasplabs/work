@@ -191,7 +191,6 @@ const generate = async (
       // The App for a page's call; the run for a workflow's, whose
       // workflow and run lineage then count it too.
       trigger: caller.actor,
-      provenance: [...caller.sources.snapshot().collectionIds],
       work: { authority: caller.authority, context: caller.context },
       requestId: context.requestId,
       binding: { app: caller.app, alias: record.alias },

@@ -290,8 +290,8 @@ export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
 /** What the model reads of `env.apps`. */
 const appsDeclaration = `/**
  * The company's Apps that the person has a role in, and the code of those
- * they build. Before suggesting a new App, look for one that already does
- * it: search the Apps collection in Knowledge, then list them here.
+ * they build. Before suggesting a new App, list them here for one that
+ * already does it.
  */
 apps: {
   /** The Apps the person has a role in, oldest first. */

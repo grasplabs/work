@@ -20,7 +20,7 @@ import {
 import type { RestoreStatus } from "./contract.ts";
 import { enqueueEmbedding } from "./embedding.ts";
 import { keepNames } from "./entities.ts";
-import { keepSubject, subjectOf } from "./erasure.ts";
+import { keepSubject, subjectOf, writerSubjectOf } from "./erasure.ts";
 import {
   changeLineSchema,
   confirmationLineSchema,
@@ -58,7 +58,11 @@ import {
   isInDoubt,
   noteWrite,
 } from "./files.ts";
-import { lineageOfSource, lineageOfWriter } from "./memories.ts";
+import {
+  lineageOfSource,
+  lineageOfWriter,
+  writerErasedAfterSql,
+} from "./memories.ts";
 import { readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
 import { planOf, valueKeyFor } from "./remember.ts";
 import { memoriesWrittenSinceSql, restoreFailedSql } from "./restoring.ts";
@@ -655,20 +659,36 @@ const entityRowsOf = (
 
 /**
  * Whether the memory `line` is passed over: the store holds it already (a
- * run of this restore before), or it rests on a version the store doesn't
- * hold. In the caller's transaction.
+ * run of this restore before), it rests on a version the store doesn't
+ * hold, or it is a writer's (`writerSubject`, its lineage's SHA-256) that
+ * an erasure of that writer recorded since covers (memories.ts
+ * `writerErasedAfterSql`): an erasure that came while the restore ran,
+ * whose deletion may already have passed where this memory would go (its
+ * sweep, erasure.ts `eraseWriterBatch`), so it would stay for good. In the
+ * caller's transaction, so no erasure lands between the check and the
+ * write.
  */
 const passesOverMemory = (
   sql: SqlStorage,
   line: MemoryLine,
-  subject: string | null
+  subject: string | null,
+  writerSubject: string | null
 ): boolean =>
   sql.exec("SELECT 1 FROM memories WHERE id = ?", line.id).toArray().length >
     0 ||
   (line.source !== null &&
     (subject === null ||
       line.version === null ||
-      !holdsVersion(sql, line.source, subject, line.version)));
+      !holdsVersion(sql, line.source, subject, line.version))) ||
+  (writerSubject !== null &&
+    sql
+      .exec(
+        `SELECT 1 FROM erasures
+        WHERE ${writerErasedAfterSql("erasures", "?1", "?2")} LIMIT 1`,
+        writerSubject,
+        line.learnedAt
+      )
+      .toArray().length > 0);
 
 /** The lineage of the memory `line`: its writer's, or its source's. */
 const lineageOf = (line: MemoryLine): string =>
@@ -688,9 +708,11 @@ const restoreMemory = async (
   line: MemoryLine
 ): Promise<void> => {
   const subject = line.source === null ? null : await subjectOf(line.source);
+  const writerSubject =
+    line.writer === null ? null : await writerSubjectOf(line.writer);
   storage.transactionSync(() => {
     const { sql } = storage;
-    if (passesOverMemory(sql, line, subject)) {
+    if (passesOverMemory(sql, line, subject, writerSubject)) {
       return;
     }
     const rows = entityRowsOf(sql, line);
@@ -710,9 +732,9 @@ const restoreMemory = async (
       .exec<{ row: number }>(
         `INSERT INTO memories (id, entity, attribute, object, value, value_key,
           one_value, type, statement, quote, source, version, subject, writer,
-          lineage, lineage_order, speaker, valid_from, valid_until, learned_at,
-          retired_at, readers)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          writer_subject, lineage, lineage_order, speaker, valid_from,
+          valid_until, learned_at, retired_at, retired_change, readers)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING row`,
         line.id,
         about,
@@ -728,6 +750,7 @@ const restoreMemory = async (
         line.version,
         subject,
         line.writer,
+        writerSubject,
         lineageOf(line),
         line.version ?? 0,
         JSON.stringify(line.speaker),
@@ -735,6 +758,7 @@ const restoreMemory = async (
         line.validUntil,
         line.learnedAt,
         line.retiredAt,
+        line.retiredChange ?? null,
         readerSetKeyOf(line.access)
       )
       .one();
@@ -923,17 +947,25 @@ const settleNow = (
   });
 };
 
-/** The version `line` holds or rests on, if any. */
-const restsOn = (
-  line: PartLine
-): { source: string; version: number } | undefined => {
+/**
+ * What `line` holds or rests on, as the export records it (exports.ts
+ * `Held`), if anything: the version, by its source's key's SHA-256 and
+ * number; or, for a writer's memory, the writer, by its lineage's SHA-256
+ * and when the memory was learned.
+ */
+const heldBy = async (line: PartLine): Promise<Held | undefined> => {
   if (isVersionLine(line) || line.kind === "extraction") {
-    return { source: line.source, version: line.version };
+    return [await subjectOf(line.source), line.version];
   }
-  if (line.kind === "memory" && line.source !== null && line.version !== null) {
-    return { source: line.source, version: line.version };
+  if (line.kind !== "memory") {
+    return undefined;
   }
-  return undefined;
+  if (line.source !== null && line.version !== null) {
+    return [await subjectOf(line.source), line.version];
+  }
+  return line.writer === null
+    ? undefined
+    : [await writerSubjectOf(line.writer), line.learnedAt];
 };
 
 /**
@@ -954,17 +986,10 @@ const checkPart = async (
     partLinesOf(bucket, id, part),
     partHoldingsOf(bucket, id, index),
   ]);
-  const fromLines: Held[] = await Promise.all(
-    (lines ?? []).flatMap((line) => {
-      const rests = restsOn(line);
-      return rests === undefined
-        ? []
-        : [
-            (async () =>
-              [await subjectOf(rests.source), rests.version] as const)(),
-          ];
-    })
+  const heldByLines = await Promise.all(
+    (lines ?? []).map(async (line) => await heldBy(line))
   );
+  const fromLines = heldByLines.filter((held) => held !== undefined);
   storage.transactionSync(() => {
     const { sql } = storage;
     recordExportSources(sql, id, [...(holdings ?? []), ...fromLines]);

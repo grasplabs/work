@@ -2,15 +2,11 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
+import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
-import { codeStep, pausedReply, says } from "./agent-chat.ts";
-import { requestGranted } from "./apps.ts";
+import { pausedReply, says } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
-import { readCollection } from "./knowledge.ts";
 import { fakeProvider } from "./model-provider.ts";
-import { clientOrigin } from "./sign-in-config.ts";
-import { signedInApi, unique } from "./sign-in.ts";
 import {
   member,
   memberAnsweredBy,
@@ -60,58 +56,25 @@ const answersIn = async (conversation: string): Promise<string[]> => {
 };
 
 describe("a member's question", setUpTime, () => {
-  it("is answered in their own Teams chat, with the documents it cites", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
-      name: `Handbook ${unique()}`,
-      access: "everyone",
-    });
-    const saved = await admin.api.knowledge.saveDocument({
-      collectionId,
-      path: "leave.md",
-      text: "# Parental leave\n\nParental leave lasts sixteen weeks.",
-      ifVersion: 0,
-    });
-    await requestGranted(
-      idp,
-      admin,
-      readCollection(
-        { type: "agent", agentId: chatAgentId },
-        collectionId,
-        `H${unique()}`.toUpperCase()
-      )
-    );
+  it("is answered in their own Teams chat, labelled as made by AI", async () => {
     const { userId, teams } = await member(
       idp,
-      codeStep(
-        `export default async (self, env) => (await env.knowledge.read(${JSON.stringify(saved.id)})).text;`
-      ),
-      says(
-        `Leave lasts sixteen weeks [Parental leave](grasp:note/${saved.id}).`
-      )
+      says("Leave lasts sixteen weeks.")
     );
 
     await post(messageFrom(teams, { text: "How long is parental leave?" }));
 
     const chats = await chatsOf(userId);
     expect(chats).toMatchObject([{ title: "Microsoft Teams", via: "teams" }]);
-    // The answer, streamed in its own message, then its sources.
+    // The answer, streamed in its own message.
     const answers = await answersIn(teams.conversation);
     const answer = answers.join("\n");
     expect({
       answered: answer.includes("Leave lasts sixteen weeks"),
-      noteLinks: answer.includes("grasp:note"),
-      source: answer.includes("1. Parental leave"),
-      sourceLink: answer.includes(
-        `${clientOrigin}/knowledge/${collectionId}?doc=${saved.id}`
-      ),
       // Labelled as made by AI, as Teams shows it.
       aiLabel: answer.includes("AIGeneratedContent"),
     }).toStrictEqual({
       answered: true,
-      noteLinks: false,
-      source: true,
-      sourceLink: true,
       aiLabel: true,
     });
   });
