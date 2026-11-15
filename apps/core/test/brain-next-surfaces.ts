@@ -1994,17 +1994,34 @@ export const coreProbes = {
   erasedForGoodAs: async (probing) => {
     const { personId, hiddenVersions, markers } = probing;
     const fixture = await recallFixture(probing);
+    // It answers the caller's own ids back: what it tells is which of
+    // them, by their places in what was asked.
     const ask = async (
       name: string,
       sources: readonly SourceRef[],
       memories: readonly coreBrain.StoredMemoryPlace[],
       as = personId
     ) =>
-      await answer(
-        name,
-        async () =>
-          await coreBrain.erasedForGoodAs(env, as, { sources, memories })
-      );
+      await answer(name, async () => {
+        const erased = await coreBrain.erasedForGoodAs(env, as, {
+          sources,
+          memories,
+        });
+        return {
+          sources: sources.map((asked) =>
+            erased.sources.some(
+              ({ producer, id }) =>
+                producer === asked.producer && id === asked.id
+            )
+          ),
+          memories: memories.map((asked) =>
+            erased.memories.some(
+              ({ store: kind, memory }) =>
+                kind === asked.store && memory === asked.memory
+            )
+          ),
+        };
+      });
     const hiddenMemories: coreBrain.StoredMemoryPlace[] = [
       { store: "shared", memory: fixture.hiddenMemory },
       { store: "shared", memory: fixture.drawnMemory },
@@ -6481,11 +6498,19 @@ export const storeProbes = {
   erasedOf: async (probing) => {
     const { markers, hiddenVersions } = probing;
     const fixture = await recallFixture(probing);
-    const ask = async (name: string, request: unknown) =>
-      await answer(
-        name,
-        async () => await store().erasedOf(unchecked(request))
-      );
+    // It answers the caller's own ids back: what it tells is which of
+    // them, by their places in what was asked.
+    const ask = async (
+      name: string,
+      request: { sources: string[]; memories: string[]; extra?: string }
+    ) =>
+      await answer(name, async () => {
+        const erased = await store().erasedOf(unchecked(request));
+        return {
+          sources: request.sources.map((key) => erased.sources.includes(key)),
+          memories: request.memories.map((id) => erased.memories.includes(id)),
+        };
+      });
     return [
       await ask("the hidden sources and memories", {
         sources: hiddenVersions.map(({ source }) => keyOf(source)),
