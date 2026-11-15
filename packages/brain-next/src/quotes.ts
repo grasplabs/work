@@ -364,8 +364,13 @@ export const judgeVersion = (
     replaced === undefined || !replaced.judged
       ? everyCandidate(sql, source, version)
       : changedCandidates(sql, source, replaced.version, () => index().pairs());
+  // Sorted by quote: a quote written as the row before is not folded again.
+  let last: { quote: string | null; held: boolean } | undefined;
   for (const { row, quote, was } of candidates) {
-    const held = isHeld(index(), quote);
+    if (last === undefined || last.quote !== quote) {
+      last = { quote, held: isHeld(index(), quote) };
+    }
+    const { held } = last;
     if (held && was !== "in") {
       putIn(sql, row, source);
     } else if (!held && was !== "out") {
