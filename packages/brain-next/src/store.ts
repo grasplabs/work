@@ -41,6 +41,7 @@ import {
   ownExportStartSchema,
   personErasureSchema,
   readableMemoriesRequestSchema,
+  erasedRequestSchema,
   readableRequestSchema,
   recallRequestSchema,
   restoringNow,
@@ -78,6 +79,8 @@ import type {
   MemoryId,
   NewMemories,
   ReadableMemoriesRequest,
+  Erased,
+  ErasedRequest,
   RetireRequest,
   RetiredMemory,
   AskModel,
@@ -1055,13 +1058,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     if (!this.#schema) {
       return "free";
     }
-    const { sql } = this.ctx.storage;
-    // The shared store holds no group: nothing under one to look up.
-    if (
-      isErased(sql, await subjectOf(key)) ||
-      (this.#kind.kind === "person" &&
-        isUnderErasedGroup(sql, await subjectsOver(key)))
-    ) {
+    if (await this.#keyErased(key)) {
       return "erased";
     }
     const held =
@@ -1069,6 +1066,68 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         .exec("SELECT 1 FROM source_versions WHERE source = ? LIMIT 1", key)
         .toArray().length > 0;
     return held ? "held" : "free";
+  }
+
+  /**
+   * Whether an erasure closed `key` here: its own, or, in a person's own
+   * store, a group's it lies under. The shared store holds no group:
+   * nothing under one to look up.
+   */
+  async #keyErased(key: string): Promise<boolean> {
+    const { sql } = this.ctx.storage;
+    return (
+      isErased(sql, await subjectOf(key)) ||
+      (this.#kind.kind === "person" &&
+        isUnderErasedGroup(sql, await subjectsOver(key)))
+    );
+  }
+
+  /**
+   * What an erasure took for good of the keys and memories asked
+   * (contract.ts): a memory this store holds no row of was deleted by
+   * one, as nothing else deletes a memory (forget.ts), and an id is never
+   * used again. A person's own store never written holds no key and no
+   * memory.
+   */
+  async erasedOf(request: ErasedRequest): Promise<Erased> {
+    const asked = checked(erasedRequestSchema, request);
+    const sources = [...new Set(asked.sources)];
+    const memories = [...new Set(asked.memories)];
+    if (await this.#erasedWhole()) {
+      return { sources, memories };
+    }
+    await this.#ready();
+    if (!this.#schema) {
+      return { sources: [], memories };
+    }
+    const held = new Map(
+      this.ctx.storage.sql
+        .exec<{ id: string; source: string | null }>(
+          "SELECT id, source FROM memories WHERE id IN (SELECT value FROM json_each(?))",
+          JSON.stringify(memories)
+        )
+        .toArray()
+        .map(({ id, source }) => [id, source] as const)
+    );
+    const keys = [
+      ...new Set([
+        ...sources,
+        ...[...held.values()].flatMap((source) => source ?? []),
+      ]),
+    ];
+    const found = await Promise.all(
+      keys.map(async (key) => ((await this.#keyErased(key)) ? [key] : []))
+    );
+    const closed = new Set(found.flat());
+    return {
+      sources: sources.filter((key) => closed.has(key)),
+      memories: memories.filter((id) => {
+        const source = held.get(id);
+        return (
+          !held.has(id) || (typeof source === "string" && closed.has(source))
+        );
+      }),
+    };
   }
 
   /**

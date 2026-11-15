@@ -2200,6 +2200,22 @@ export type ReadableMemoriesRequest = z.infer<
 >;
 
 /**
+ * Keys and memories to ask whether an erasure took them for good
+ * (`Brain.erasedOf`): what a host once read itself, by key and by id.
+ */
+export const erasedRequestSchema = z.strictObject({
+  sources: z.array(sourceIdSchema).max(readableCheckMax),
+  memories: z.array(memoryIdSchema).max(readableCheckMax),
+});
+export type ErasedRequest = z.infer<typeof erasedRequestSchema>;
+
+/** Of what `erasedOf` was asked, what an erasure took for good. */
+export interface Erased {
+  sources: SourceId[];
+  memories: MemoryId[];
+}
+
+/**
  * A memory of `writer`'s own to retire (its lineage is that writer's), that
  * the reader may read: a person forgetting their own word is both writer
  * and reader; the host's code writes as the App it runs (`app:<id>`), with
@@ -2902,6 +2918,17 @@ export interface Brain {
    * source's older version stays readable once a newer one is added.
    */
   readableMemories: (request: ReadableMemoriesRequest) => Promise<MemoryId[]>;
+  /**
+   * Of the keys and memories asked, those an erasure took for good,
+   * whoever may read them, in the order asked and each once: a key as
+   * `keyState` answers `erased`; a memory this store no longer holds, or
+   * one resting on a key so erased. Never a retired memory, nor a key
+   * whose readers only changed: those are kept. For the host only, which
+   * asks of what it once read itself, to replace what a chat showed of
+   * it. Ids alone, never text or readers. A person's own store erased
+   * whole answers all of it: it holds nothing.
+   */
+  erasedOf: (request: ErasedRequest) => Promise<Erased>;
   /**
    * Retires one of the writer's own memories (its lineage is the writer's,
    * `RetireRequest`) that the reader may read and that is not retired:

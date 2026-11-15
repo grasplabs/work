@@ -15,6 +15,7 @@ import type { AgentScope } from "./agent-scope.ts";
 import { appFor } from "./apps.ts";
 import { memberOf } from "./auth/identity.ts";
 import {
+  erasedForGoodAs,
   readableMemoriesAs,
   readableVersionsAs,
   versionRefSchema,
@@ -773,4 +774,70 @@ export const readableSources = async (
     ...companyMemories,
   ]);
   return audience === undefined ? { readable } : { readable, audience };
+};
+
+/** The version a pin of the new Brain names, at whatever reach it was read. */
+const versionPinOf = (source: string): SourceVersionRef | undefined => {
+  const prefix = [
+    brainVersionPrefix,
+    brainTeamVersionPrefix,
+    brainCompanyVersionPrefix,
+  ].find((each) => source.startsWith(each));
+  return prefix === undefined
+    ? undefined
+    : brainVersionOf(`${brainVersionPrefix}${source.slice(prefix.length)}`);
+};
+
+/** The memory a pin of the new Brain names, at whatever reach it was read. */
+const memoryPinOf = (source: string): StoredMemoryPlace | undefined =>
+  brainMemoryOf(source, brainMemoryPrefix) ??
+  brainMemoryOf(source, brainCompanyMemoryPrefix);
+
+/** A pinned version's source, as one string. */
+const sourceKey = ({ producer, id }: SourceVersionRef["source"]): string =>
+  JSON.stringify([producer, id]);
+
+/**
+ * Of the new Brain's pins in `sourceIds`, those whose content an erasure
+ * took for good (`erasedForGoodAs`), at whatever reach the read pinned them: a
+ * version whose source was erased, a memory an erasure deleted. What a
+ * chat of `personId`'s shows of a run resting on one is replaced
+ * (workspace.ts `#replaceErased`); one only no longer readable (narrowed,
+ * retired, the person out of a team) never is, as the person saw it while
+ * they could. Any other source, or a pin that names nothing, is not
+ * erased here: its run is withheld from the model all the same
+ * (`readableSources`). Throws what the Brain throws.
+ */
+export const erasedSources = async (
+  env: Env,
+  personId: string,
+  sourceIds: readonly string[]
+): Promise<Set<string>> => {
+  const versions = sourceIds.flatMap((source) => {
+    const pin = versionPinOf(source);
+    return pin === undefined ? [] : [{ source, pin }];
+  });
+  const memories = sourceIds.flatMap((source) => {
+    const pin = memoryPinOf(source);
+    return pin === undefined ? [] : [{ source, pin }];
+  });
+  if (versions.length === 0 && memories.length === 0) {
+    return new Set();
+  }
+  const erased = await erasedForGoodAs(env, personId, {
+    sources: versions.map(({ pin }) => pin.source),
+    memories: memories.map(({ pin }) => pin),
+  });
+  const keys = new Set(erased.sources.map((ref) => sourceKey(ref)));
+  const places = new Set(
+    erased.memories.map((place) => brainMemoryRead(place))
+  );
+  return new Set([
+    ...versions.flatMap(({ source, pin }) =>
+      keys.has(sourceKey(pin.source)) ? [source] : []
+    ),
+    ...memories.flatMap(({ source, pin }) =>
+      places.has(brainMemoryRead(pin)) ? [source] : []
+    ),
+  ]);
 };

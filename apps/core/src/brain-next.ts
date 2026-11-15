@@ -2392,6 +2392,106 @@ export const readableMemoriesAs = async (
   });
 };
 
+/**
+ * Of `keys` and `ids` (memories), those an erasure took for good in
+ * `store` (`erasedOf`), asked in parts as long as the store takes.
+ */
+const erasedIn = async (
+  store: Brain,
+  keys: readonly string[],
+  ids: readonly string[]
+): Promise<{ sources: string[]; memories: string[] }> => {
+  const [sources, memories] = await Promise.all([
+    checkedInParts(keys, async (part) => {
+      const erased = await store.erasedOf({ sources: part, memories: [] });
+      return erased.sources;
+    }),
+    checkedInParts(ids, async (part) => {
+      const erased = await store.erasedOf({ sources: [], memories: part });
+      return erased.memories;
+    }),
+  ]);
+  return { sources, memories };
+};
+
+const sourceRefsSchema = z.array(sourceRefSchema);
+
+/**
+ * Of `sources` and `memories` a chat of the member `personId`'s once
+ * read, those an erasure took for good (`erasedOf`), whoever may read
+ * them now, each once: for core to replace what the chat shows of them
+ * (history-access.ts `erasedSources`). Never one whose readers only
+ * changed, a retired memory or an older version: the chat keeps showing
+ * those. Each source is asked of the shared store, whose ledger an
+ * erasure from a person's own store closes too, then of their own store
+ * those it doesn't call erased (a key under an erased group of theirs: a
+ * deleted chat's turns); each memory of the store its place names.
+ * Refused once they are no longer a member, as their own store is named
+ * for them alone. Throws what a store throws: the caller then shows none
+ * of what it would replace. For the server only, as `addSource`.
+ */
+export const erasedForGoodAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  {
+    sources,
+    memories,
+  }: {
+    sources: readonly SourceRef[];
+    memories: readonly StoredMemoryPlace[];
+  }
+): Promise<{ sources: SourceRef[]; memories: StoredMemoryPlace[] }> => {
+  const refs = checked(sourceRefsSchema, sources);
+  const places = checked(memoryPlacesSchema, memories);
+  if (refs.length === 0 && places.length === 0) {
+    return { sources: [], memories: [] };
+  }
+  const own = ownBrainOf(env, await readerOf(env, personId, "person"));
+  if (own === undefined) {
+    throw new Error("A member reads as a person");
+  }
+  const keys = [...new Set(refs.map((ref) => sourceKeyOf(ref)))];
+  const idsIn = (store: MemoryStore): string[] => [
+    ...new Set(
+      places.flatMap((place) => (place.store === store ? [place.memory] : []))
+    ),
+  ];
+  const shared = await erasedIn(brain(env), keys, idsIn("shared"));
+  const closed = new Set(shared.sources);
+  const inOwn = await erasedIn(
+    own,
+    keys.filter((key) => !closed.has(key)),
+    idsIn("own")
+  );
+  for (const key of inOwn.sources) {
+    closed.add(key);
+  }
+  const gone = new Set([
+    ...shared.memories.map((memory) =>
+      memoryKeyOf({ store: "shared", memory })
+    ),
+    ...inOwn.memories.map((memory) => memoryKeyOf({ store: "own", memory })),
+  ]);
+  const once = new Set<string>();
+  const first = (key: string): boolean => {
+    if (once.has(key)) {
+      return false;
+    }
+    once.add(key);
+    return true;
+  };
+  return {
+    sources: refs.filter((ref) => {
+      const key = sourceKeyOf(ref);
+      return closed.has(key) && first(`source:${key}`);
+    }),
+    memories: places.filter((place) => {
+      const key = memoryKeyOf(place);
+      return gone.has(key) && first(`memory:${key}`);
+    }),
+  };
+};
+
 /** Who may read Grasp's skills: every current member. */
 const skillAccess: Access = { kind: "audience", group: companyGroup };
 

@@ -1988,6 +1988,52 @@ export const coreProbes = {
       ),
     ];
   },
+  // What an erasure took of what a chat once read, for core alone to
+  // replace what the chat shows: ids it was given back, never what they
+  // held, whoever may read them; refused for someone who isn't a member.
+  erasedForGoodAs: async (probing) => {
+    const { personId, hiddenVersions, markers } = probing;
+    const fixture = await recallFixture(probing);
+    const ask = async (
+      name: string,
+      sources: readonly SourceRef[],
+      memories: readonly coreBrain.StoredMemoryPlace[],
+      as = personId
+    ) =>
+      await answer(
+        name,
+        async () =>
+          await coreBrain.erasedForGoodAs(env, as, { sources, memories })
+      );
+    const hiddenMemories: coreBrain.StoredMemoryPlace[] = [
+      { store: "shared", memory: fixture.hiddenMemory },
+      { store: "shared", memory: fixture.drawnMemory },
+      { store: "own", memory: fixture.othersOwnMemory },
+    ];
+    return [
+      await ask(
+        "the hidden sources and memories",
+        hiddenVersions.map(({ source }) => source),
+        hiddenMemories
+      ),
+      await ask(
+        "what no one added",
+        [missingSource()],
+        [{ store: "shared", memory: crypto.randomUUID() }]
+      ),
+      await ask(
+        "as someone who isn't a member",
+        hiddenVersions.map(({ source }) => source),
+        hiddenMemories,
+        stranger()
+      ),
+      await ask(
+        "a source named by the markers",
+        [{ producer: "upload", id: markers.join(" ") }],
+        []
+      ),
+    ];
+  },
   // Which memories a chat once handed over may be sent again: each hidden
   // one (another group's, one resting on a source the reader may not
   // read, someone else's own, named in either store) as one no one holds.
@@ -6375,6 +6421,40 @@ export const storeProbes = {
             unchecked({ versions: [], reader, extra: markers.join(" ") })
           )
       ),
+    ];
+  },
+  // What an erasure took for good, for core alone, whoever reads it: ids
+  // it was asked, and nothing of what they held.
+  erasedOf: async (probing) => {
+    const { markers, hiddenVersions } = probing;
+    const fixture = await recallFixture(probing);
+    const ask = async (name: string, request: unknown) =>
+      await answer(
+        name,
+        async () => await store().erasedOf(unchecked(request))
+      );
+    return [
+      await ask("the hidden sources and memories", {
+        sources: hiddenVersions.map(({ source }) => keyOf(source)),
+        memories: [
+          fixture.hiddenMemory,
+          fixture.drawnMemory,
+          fixture.othersOwnMemory,
+        ],
+      }),
+      await ask("what no one added", {
+        sources: [keyOf(missingSource())],
+        memories: [crypto.randomUUID()],
+      }),
+      await ask("a key named by the markers", {
+        sources: [`upload:${markers.join(" ")}`],
+        memories: [],
+      }),
+      await ask("a request with an unknown field", {
+        sources: [],
+        memories: [],
+        extra: markers.join(" "),
+      }),
     ];
   },
   // Which memories the reader may still read: each hidden one (another

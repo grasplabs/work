@@ -13,6 +13,7 @@ import type {
   AskModel,
   Embedders,
   HandOvers,
+  NewMemory,
   Reader,
 } from "@grasp-os/brain-next/contract";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
@@ -1610,6 +1611,8 @@ const leavingNone = [
   "confirmMemory",
   // Cards likewise: read whole in their call (cards.ts).
   "erasePerson",
+  // One read of which keys and memories an erasure took.
+  "erasedOf",
   "erasureStatus",
   "exportFile",
   "exportStatus",
@@ -2577,4 +2580,86 @@ describe("a group in a person's own store", () => {
       await expect(groupEntries()).resolves.toHaveLength(1);
     }
   );
+});
+
+describe("what an erasure took for good, asked of a person's own store", () => {
+  beforeEach(() => {
+    person = `person-${crypto.randomUUID()}`;
+  });
+
+  /** A memory of this test's person's about `name`, resting on `basis`. */
+  const memoryOn = async (
+    name: string,
+    basis: NewMemory["basis"]
+  ): Promise<string> => {
+    const {
+      memories: [memory = ""],
+    } = await own().addMemories({
+      change: crypto.randomUUID(),
+      access: theirs(),
+      entities: [{ key: "c", kind: "customer", names: [name] }],
+      memories: [
+        {
+          about: "c",
+          type: "fact",
+          statement: `${name} is a customer`,
+          speaker: { kind: "internal", person },
+          basis,
+        },
+      ],
+    });
+    return memory;
+  };
+
+  // GRA-1807: the host replaces what a chat showed of what an erasure
+  // took, and never of what is only kept from readers.
+  it("answers the keys erased, under an erased group too, and the memories deleted or resting on one, never a kept key or a retired memory", async () => {
+    const kept = await add(own(), "Bilby kept", theirs());
+    const erased = await add(own(), "Bilby erased", theirs());
+    const group = newGroup();
+    await addIn(group, "1", "Bilby turn");
+    const onKept = await memoryOn("Bilby Kept", {
+      kind: "source",
+      source: kept.source,
+      version: kept.version,
+      quote: "Bilby kept",
+    });
+    const onErased = await memoryOn("Bilby Erased", {
+      kind: "source",
+      source: erased.source,
+      version: erased.version,
+      quote: "Bilby erased",
+    });
+    const retired = await memoryOn("Bilby Retired", {
+      kind: "writer",
+      writer: person,
+    });
+    await own().retireMemory({ memory: retired, reader: me(), writer: person });
+    await own().eraseSource({ source: erased.source, reason: "deleted" });
+    await own().eraseSource({ source: group, reason: "deleted" });
+    // What erasures hid, deleted.
+    await tick();
+    await tick();
+    const never = crypto.randomUUID();
+
+    await expect(
+      own().erasedOf({
+        sources: [kept.source, erased.source, `${group}/1`, `${group}/2`],
+        memories: [onKept, onErased, retired, never, onErased],
+      })
+    ).resolves.toStrictEqual({
+      sources: [erased.source, `${group}/1`, `${group}/2`],
+      memories: [onErased, never],
+    });
+  });
+
+  it("answers everything asked once it was erased whole", async () => {
+    const { source } = await add(own(), "Numbat", theirs());
+    const memory = await memoryOn("Numbat", { kind: "writer", writer: person });
+    await eraseWhole();
+
+    await expect(
+      own().erasedOf({ sources: [source], memories: [memory] })
+    ).resolves.toStrictEqual({ sources: [source], memories: [memory] });
+  });
 });
