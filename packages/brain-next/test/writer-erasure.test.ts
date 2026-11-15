@@ -742,8 +742,8 @@ describe("a writer's erasure", () => {
         ?.rows.find(({ kind }) => kind === "source")?.key;
       const erasure = typeof key === "string" ? key : "";
       // The store as the release before left it: `erasures` without a
-      // writer's kind, its count or its change, memories without the writer's subject or
-      // the retiring change, the last four migrations not yet run, and a row
+      // writer's kind, its count, its change or its sweep, memories without the writer's subject or
+      // the retiring change, the last five migrations not yet run, and a row
       // that points at the erasure.
       const before: Copy = {
         // The table of memories that failed to delete is the release's own.
@@ -757,11 +757,21 @@ describe("a writer's erasure", () => {
                   created: table.created
                     .replace(", 'writer'", "")
                     .replace(/,\s*`memories` integer/u, "")
-                    .replace(/,\s*`change` text/u, ""),
+                    .replace(/,\s*`change` text/u, "")
+                    .replace(/,\s*`swept_learned_at` integer/u, "")
+                    .replace(/,\s*`swept_row` integer/u, ""),
                   // Earlier tests' writers' erasures: the release before had none.
                   rows: table.rows
                     .filter(({ kind }) => kind !== "writer")
-                    .map((row) => without(row, "memories", "change")),
+                    .map((row) =>
+                      without(
+                        row,
+                        "memories",
+                        "change",
+                        "swept_learned_at",
+                        "swept_row"
+                      )
+                    ),
                 };
               }
               case "memories": {
@@ -791,7 +801,7 @@ describe("a writer's erasure", () => {
                     .toSorted(
                       (a, b) => Number(a.created_at) - Number(b.created_at)
                     )
-                    .slice(0, -4),
+                    .slice(0, -5),
                 };
               }
               default: {
@@ -802,7 +812,8 @@ describe("a writer's erasure", () => {
         others: now.others.filter(
           (made) =>
             !made.includes("memories_writer_idx") &&
-            !made.includes("erasures_writer_idx")
+            !made.includes("erasures_writer_idx") &&
+            !made.includes("memory_erase_failures")
         ),
       };
       expect(

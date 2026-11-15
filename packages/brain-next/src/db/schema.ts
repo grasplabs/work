@@ -473,6 +473,16 @@ export const erasures = sqliteTable(
      * the same change again answers this erasure. Null for the other kinds.
      */
     change: text(),
+    /**
+     * How far a writer's erasure has gone through the memories it hides,
+     * in the order of the writer's index (`memories_writer_idx`): the
+     * moment learned and the row of the last one a batch took
+     * (erasure.ts `eraseWriterBatch`), deleted or failed. Null before the
+     * first. What it hides is fixed once it is applied, so none lies
+     * behind it unseen.
+     */
+    sweptLearnedAt: integer("swept_learned_at"),
+    sweptRow: integer("swept_row"),
   },
   (table) => [
     // An add looks up whether its source, or its one reader, was erased.
@@ -1012,10 +1022,17 @@ export const memoryChanges = sqliteTable("memory_changes", {
  * the memory. By the memory's row, which is never used again
  * (`AUTOINCREMENT`).
  */
-export const memoryEraseFailures = sqliteTable("memory_erase_failures", {
-  memory: integer().primaryKey(),
-  failures: integer().notNull(),
-});
+export const memoryEraseFailures = sqliteTable(
+  "memory_erase_failures",
+  {
+    memory: integer().primaryKey(),
+    failures: integer().notNull(),
+  },
+  // Those that failed least often first, a batch's worth: a seek.
+  (table) => [
+    index("memory_erase_failures_order_idx").on(table.failures, table.memory),
+  ]
+);
 
 /**
  * How far the start-up replay of erasures on memories has come (erasure.ts

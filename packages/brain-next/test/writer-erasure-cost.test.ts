@@ -12,6 +12,8 @@ import { reset, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { tick } from "./export-reads.ts";
+
 /** Every cursor the store's statements opened since the count was last cleared. */
 const cursors: SqlStorageCursor<Record<string, SqlStorageValue>>[] = [];
 
@@ -41,11 +43,12 @@ const countedStore = async () => {
 
 type Store = Awaited<ReturnType<typeof countedStore>>["stub"];
 
-/** Adds `count` memories by `writer`, each about an entity of its own, a hundred an add. */
+/** Adds `count` memories by `writer`, each about an entity of its own, a hundred an add, for `group`. */
 const writtenBy = async (
   stub: Store,
   writer: string,
-  count: number
+  count: number,
+  group = "team:cost"
 ): Promise<void> => {
   for (let start = 0; start < count; start += 100) {
     const keys = Array.from(
@@ -55,7 +58,7 @@ const writtenBy = async (
     // oxlint-disable-next-line no-await-in-loop -- one add at a time
     await stub.addMemories({
       change: crypto.randomUUID(),
-      access: { kind: "audience", group: "team:cost" },
+      access: { kind: "audience", group },
       entities: keys.map((key) => ({
         key,
         kind: "customer",
@@ -142,7 +145,66 @@ const readsAfter = async (times: number): Promise<Record<string, number>> => {
   };
 };
 
+/**
+ * Rows a batch's 1,000 deletes may read more as the indexes they delete
+ * from grow a level (measured: 32,032 rows with no other memories in the
+ * store, 32,132 with 2,000 failed behind it and 32,132 with 20,000), where
+ * finding the batch by reading the failed ones would read a row or more
+ * for each.
+ */
+const batchMargin = 200;
+
+/**
+ * Rows a call erasing 1,000 memories of one writer reads, with `failed`
+ * memories of another writer's erasure behind it that fail to delete
+ * every time (a trigger refuses them), each tried once already: in a
+ * store of its own, every name and statement fixed.
+ */
+const eraseBehindFailures = async (failed: number): Promise<number> => {
+  const { stub, rowsReadBy } = await countedStore();
+  await runInDurableObject(stub, (_instance, state) => {
+    state.storage.sql.exec(
+      `CREATE TRIGGER test_stuck BEFORE DELETE ON memories
+      WHEN old.writer = 'app:stuck' BEGIN
+        SELECT RAISE(ABORT, 'stuck by the test');
+      END`
+    );
+  });
+  await writtenBy(stub, "app:stuck", failed);
+  await stub.eraseWriter({
+    writer: "app:stuck",
+    reason: "deleted",
+    change: "stuck",
+  });
+  // The call took the first batch of them; each tick takes the next.
+  for (let taken = 1000; taken < failed; taken += 1000) {
+    // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+    await tick(stub);
+  }
+  // Read by a group of their own: their set of readers goes with them in
+  // every case alike.
+  await writtenBy(stub, "app:fresh", 1000, "team:fresh");
+  return await rowsReadBy(
+    async () =>
+      await stub.eraseWriter({
+        writer: "app:fresh",
+        reason: "deleted",
+        change: "fresh",
+      })
+  );
+};
+
 describe("what a writer's erasure costs", () => {
+  it("reads as many rows to take a batch however many memories failed to delete behind it", async () => {
+    const none = await eraseBehindFailures(0);
+    const some = await eraseBehindFailures(2000);
+    const many = await eraseBehindFailures(20_000);
+    expect({
+      some: some - none <= batchMargin,
+      many: many - none <= batchMargin,
+    }).toStrictEqual({ some: true, many: true });
+  }, 120_000);
+
   it("leaves reads of the writer's later memories as dear as if it had never been erased, however often it was", async () => {
     const never = await readsAfter(0);
     const often = await readsAfter(20);

@@ -735,19 +735,37 @@ export const eraseBatch = (storage: DurableObjectStorage): Erased => {
 export const eraseMemoriesPerBatch = 1000;
 
 /**
- * The memories a writer's erasure hides, still to delete, with how often
- * each failed to (`memory_erase_failures`, null for never): each erasure
- * of a writer, then its memories learned before it, by the writer's index.
+ * The memories a writer's erasure hides, still to delete: each erasure of
+ * a writer, then its memories learned before it, by the writer's index.
  */
-const hiddenByWritersSql = `SELECT DISTINCT m.row AS row,
-  (SELECT failures FROM memory_erase_failures WHERE memory = m.row) AS failures
-FROM erasures AS gone
+const hiddenByWritersSql = `SELECT 1 FROM erasures AS gone
 CROSS JOIN memories AS m ON ${erasedBySql("m", "gone")}
 WHERE gone.kind = 'writer'`;
 
-/** How a batch of a writer's erasure went: whether more are left, and an error's name, if a memory is left that failed. */
+/**
+ * `?1` the writer's subject, `?2` the erasure's time, `?3`/`?4` where its
+ * sweep is (`swept_learned_at`, `swept_row`), `?5` how many: the next
+ * memories it hides, in the order of the writer's index (a range of
+ * `memories_writer_idx`, the row as its last column), each with whether it
+ * failed to delete before (`memory_erase_failures`, by its key).
+ */
+const sweepSql = `SELECT m.row AS row, m.learned_at AS learned_at,
+  EXISTS (SELECT 1 FROM memory_erase_failures AS failed WHERE failed.memory = m.row) AS failed
+FROM memories AS m
+WHERE m.writer_subject = ?1 AND m.learned_at < ?2
+  AND (m.learned_at, m.row) > (?3, ?4)
+ORDER BY m.learned_at, m.row
+LIMIT ?5`;
+
+/**
+ * `?1` how many: the memories that failed to delete, those that failed
+ * least often first (`memory_erase_failures_order_idx`).
+ */
+const failedSql = `SELECT memory AS row FROM memory_erase_failures
+ORDER BY failures, memory LIMIT ?1`;
+
+/** How a batch of a writer's erasure went: an error's name, if a memory is left that failed. */
 export interface WriterBatch {
-  more: boolean;
   failed: string | null;
 }
 
@@ -755,18 +773,38 @@ export interface WriterBatch {
 const nameOf = (error: unknown): string =>
   error instanceof Error ? error.name : "unknown";
 
+/** A writer's erasure, as its sweep reads it. */
+interface Sweeping extends Record<string, SqlStorageValue> {
+  key: string;
+  subject: string;
+  at: number;
+  swept_at: number | null;
+  swept_row: number | null;
+}
+
 /**
  * Deletes up to `eraseMemoriesPerBatch` of the memories writers' erasures
  * hide (forget.ts `deleteMemories`: their names, entities nothing else
  * mentions, confirmations of them and made over them, their words), and
- * the sets of readers left unused, in one transaction: those that never
- * failed first, then those that failed least often. A batch that fails is
- * deleted again a memory a transaction; each that fails then is counted
- * (`memory_erase_failures`), so it goes behind the others from the next
- * tick on and a batch's worth of them never holds the rest back. A memory
- * left stays hidden, as all of them are until deleted (memories.ts
- * `unerasedSql`). Answers a failure only when a memory that failed is
- * left. A cut-off batch changes nothing anyone reads.
+ * the sets of readers left unused, in one transaction.
+ *
+ * Which ones, without reading what failed before: each erasure's sweep
+ * goes on where it stopped (`sweptLearnedAt`, `sweptRow`), at most a
+ * batch's worth of the memories it hides in all, and takes those that
+ * never failed; then the memories that failed, those that failed least
+ * often first, through their own index. What an erasure hides is fixed
+ * once it is applied (what the writer adds is stamped after it, and a
+ * restore never brings back a memory it hides: an export holding one is
+ * stale), so its sweep reads each memory once, and a tick reads about a
+ * batch's worth however many failed behind it.
+ *
+ * A batch that fails is deleted again a memory a transaction; each that
+ * fails then is counted (`memory_erase_failures`), and retried after the
+ * others from then on, so a batch's worth of them never holds the rest
+ * back. A memory left stays hidden, as all of them are until deleted
+ * (memories.ts `unerasedSql`). The sweeps move on only after, so a cut-off
+ * batch takes the same memories again. Answers a failure only when a
+ * memory that failed is left.
  */
 export const eraseWriterBatch = (
   storage: DurableObjectStorage
@@ -790,43 +828,79 @@ export const eraseWriterBatch = (
       return nameOf(error);
     }
   };
-  const take = eraseMemoriesPerBatch + 1;
-  const fresh = sql
-    .exec<{ row: number }>(
-      `SELECT row FROM (${hiddenByWritersSql}) WHERE failures IS NULL LIMIT ?`,
-      take
+  const fresh = new Set<number>();
+  const swept: [key: string, at: number, row: number][] = [];
+  let read = 0;
+  for (const erasure of sql
+    .exec<Sweeping>(
+      `SELECT key, subject, erased_at AS at, swept_learned_at AS swept_at,
+        swept_row FROM erasures WHERE kind = 'writer'
+      ORDER BY subject, erased_at`
     )
-    .toArray();
-  const rows = [
-    ...fresh,
-    ...(fresh.length < take
-      ? sql
-          .exec<{ row: number }>(
-            `SELECT row FROM (${hiddenByWritersSql}) WHERE failures IS NOT NULL
-            ORDER BY failures, row LIMIT ?`,
-            take - fresh.length
-          )
-          .toArray()
-      : []),
-  ].map(({ row }) => row);
-  const batch = rows.slice(0, eraseMemoriesPerBatch);
-  const more = rows.length > eraseMemoriesPerBatch;
-  if (deleted(batch) === null) {
-    return { more, failed: null };
-  }
-  let failed: string | null = null;
-  for (const row of batch) {
-    const name = deleted([row]);
-    if (name !== null) {
-      failed ??= name;
-      sql.exec(
-        `INSERT INTO memory_erase_failures (memory, failures) VALUES (?1, 1)
-        ON CONFLICT (memory) DO UPDATE SET failures = failures + 1`,
-        row
-      );
+    .toArray()) {
+    if (read >= eraseMemoriesPerBatch) {
+      break;
+    }
+    const next = sql
+      .exec<{ row: number; learned_at: number; failed: number }>(
+        sweepSql,
+        erasure.subject,
+        erasure.at,
+        erasure.swept_at ?? -1,
+        erasure.swept_row ?? -1,
+        eraseMemoriesPerBatch - read
+      )
+      .toArray();
+    read += next.length;
+    for (const { row, failed } of next) {
+      if (failed === 0) {
+        fresh.add(row);
+      }
+    }
+    const last = next.at(-1);
+    if (last !== undefined) {
+      swept.push([erasure.key, last.learned_at, last.row]);
     }
   }
-  return { more: more || failed !== null, failed };
+  const batch = [
+    ...new Set([
+      ...fresh,
+      ...(fresh.size < eraseMemoriesPerBatch
+        ? sql
+            .exec<{ row: number }>(
+              failedSql,
+              eraseMemoriesPerBatch - fresh.size
+            )
+            .toArray()
+            .map(({ row }) => row)
+        : []),
+    ]),
+  ];
+  let failed: string | null = null;
+  if (batch.length > 0 && deleted(batch) !== null) {
+    for (const row of batch) {
+      const name = deleted([row]);
+      if (name !== null) {
+        failed ??= name;
+        sql.exec(
+          `INSERT INTO memory_erase_failures (memory, failures) VALUES (?1, 1)
+          ON CONFLICT (memory) DO UPDATE SET failures = failures + 1`,
+          row
+        );
+      }
+    }
+  }
+  storage.transactionSync(() => {
+    for (const [key, at, row] of swept) {
+      sql.exec(
+        "UPDATE erasures SET swept_learned_at = ?, swept_row = ? WHERE key = ?",
+        at,
+        row,
+        key
+      );
+    }
+  });
+  return { failed };
 };
 
 /**

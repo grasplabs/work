@@ -1,5 +1,5 @@
 // What erasure deletes of memories (erasure.ts): the memories resting on
-// a version it deletes, those only an erased person may read, or those a
+// a version it deletes, or drawn from a source it erases, or those a
 // writer's erasure hid (`deleteMemories`, a batch at a time), each
 // with its names and its confirmations; every confirmation made over one
 // of them, whole, so none shows to readers the erased memory once hid it
