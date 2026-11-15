@@ -16,6 +16,7 @@ import { sharedSkillsApi, skillsApi } from "./agent-skills.ts";
 import { workflowBuildApi } from "./agent-workflow-build.ts";
 import { workflowsApi } from "./agent-workflows.ts";
 import { workspace } from "./durable-objects.ts";
+import { markPrivateRead } from "./private-reads.ts";
 
 // The typed APIs the agent's code gets in its env (Code Mode). Each is a
 // loopback entrypoint of core whose props core sets for one code run of one
@@ -109,6 +110,11 @@ export class ChatApi extends WorkerEntrypoint<Env, AgentScope> {
         { method: "chat.readFile" },
         agentErrors.create("agent.file_not_found")
       );
+    }
+    // A file of a chat nobody else shares is its person's alone: it marks
+    // the chat before it is handed over (private-reads.ts).
+    if (scope.shared !== true) {
+      await markPrivateRead(this.env, scope, "file");
     }
     await auditToolCall(this.env, scope, {
       method: "chat.readFile",

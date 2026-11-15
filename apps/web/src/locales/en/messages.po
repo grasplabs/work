@@ -533,6 +533,10 @@ msgstr "{file} couldn’t be removed"
 msgid "{file} removed"
 msgstr "{file} removed"
 
+#: src/chat/held-writes.tsx
+msgid "{fn} in {app}"
+msgstr "{fn} in {app}"
+
 #. Earlier events on a timeline, folded away
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "{folded, plural, one {# earlier} other {# earlier}}"
@@ -3992,6 +3996,10 @@ msgctxt "a memory a person confirmed"
 msgid "Confirmed"
 msgstr "Confirmed"
 
+#: src/activity/audit-words.ts
+msgid "Confirmed a write to an App"
+msgstr "Confirmed a write to an App"
+
 #: src/brain/brain.ts
 msgid "Confirmed by {person}"
 msgstr "Confirmed by {person}"
@@ -4514,6 +4522,10 @@ msgstr "Decline starting {name}"
 #: src/brain/skills-page.tsx
 msgid "Declined"
 msgstr "Declined"
+
+#: src/activity/audit-words.ts
+msgid "Declined a write to an App"
+msgstr "Declined a write to an App"
 
 #: src/inbox/item-detail.tsx
 msgid "Declined: {name}."
@@ -6470,6 +6482,10 @@ msgstr "Hear both again"
 #: src/brain/work-knowledge.tsx
 msgid "Heard from enough people"
 msgstr "Heard from enough people"
+
+#: src/activity/audit-words.ts
+msgid "Held a write to an App for its person to confirm"
+msgstr "Held a write to an App for its person to confirm"
 
 #: src/interview/words.ts
 msgid "Hello"
@@ -14459,6 +14475,10 @@ msgstr "This page's stored code no longer matches the code that was published, s
 msgid "This upload was already made with another file, which is kept as it was. Choose the file again to upload it as a new upload, or add it as a new version."
 msgstr "This upload was already made with another file, which is kept as it was. Choose the file again to upload it as a new upload, or add it as a new version."
 
+#: src/chat/held-writes.tsx
+msgid "This uses something only you can read"
+msgstr "This uses something only you can read"
+
 #: src/pages/frame-failure.tsx
 msgid "This version can't open"
 msgstr "This version can't open"
@@ -15041,6 +15061,10 @@ msgstr "Used by"
 #: src/apps/indexes-view.tsx
 msgid "Used by {queries}"
 msgstr "Used by {queries}"
+
+#: src/activity/audit-words.ts
+msgid "Used something only its person can read, so what it writes for others waits for them"
+msgstr "Used something only its person can read, so what it writes for others waits for them"
 
 #: src/labels.ts
 msgid "User"

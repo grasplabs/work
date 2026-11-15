@@ -9,6 +9,12 @@ import { defineErrorFamily } from "./errors.ts";
 /** Why a chat's agent refused a question. */
 export const agentErrors = defineErrorFamily({
   "agent.chat_not_found": "There's no such chat.",
+  "agent.held_call_not_found":
+    "Nothing like this waits for you in this chat: it was decided already, or waited past its day.",
+  "agent.held_call_failed":
+    "The App refused or failed this write, so it may not have been done. It no longer waits for you.",
+  "agent.private_shared_request":
+    "This chat used something only its person can read, and admins read why a shared connection is asked for, so it wasn't asked for. Ask the person to ask for it in a new chat, or an admin to grant it.",
   "agent.paused":
     "This agent is paused, so it doesn't answer now. An admin can turn it back on.",
   "agent.not_for_you":

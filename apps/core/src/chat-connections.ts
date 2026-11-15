@@ -1,3 +1,4 @@
+import { agentErrors } from "@grasp-os/shared/agent";
 import { actorOf, delegateActorOf } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import type { ChatConnectionRequest } from "@grasp-os/shared/chat";
@@ -50,6 +51,7 @@ import {
   tellChat,
   toPermission,
 } from "./permissions.ts";
+import { mustConfirmForOthers } from "./private-reads.ts";
 
 // Connections a chat's agent asks for, each granted in that chat alone.
 // The agent asks (`env.connections.request`); the chat's person grants or
@@ -388,6 +390,13 @@ export const askInChat = async (
     });
   }
   const personal = connection.ownerUserId !== null;
+  // Admins read why a shared connection is asked for, and nothing holds a
+  // request for its person first: refused from a chat that used something
+  // only its person may read (private-reads.ts). Their own personal
+  // connection's request reaches them alone.
+  if (!personal && (await mustConfirmForOthers(env, scope))) {
+    throw agentErrors.create("agent.private_shared_request");
+  }
   const row: typeof permissions.$inferSelect = {
     id: crypto.randomUUID(),
     subjectType: "agent",

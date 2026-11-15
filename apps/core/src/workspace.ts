@@ -61,6 +61,7 @@ import {
   workspaceIdSchema,
 } from "@grasp-os/shared/ids";
 import type { ChatId } from "@grasp-os/shared/ids";
+import type { InstructionFileRef } from "@grasp-os/shared/instruction-files";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { modelEfforts, modelErrors } from "@grasp-os/shared/models";
 import {
@@ -193,6 +194,7 @@ import {
   customWidgets,
   dashboardWidgets,
   dashboards,
+  heldAppCalls,
   memoryUses,
 } from "./db/workspace/schema.ts";
 import { chatWork } from "./drafts.ts";
@@ -212,6 +214,8 @@ import { cited } from "./knowledge/citations.ts";
 import { brainOf } from "./knowledge/ports.ts";
 import { hasBrainGrant } from "./knowledge/recall-grants.ts";
 import { inputTokens, modelSettings, models } from "./models.ts";
+import { privateReadEntry } from "./private-reads.ts";
+import type { PrivateRead } from "./private-reads.ts";
 import type { WorkContext } from "./restricted.ts";
 
 export type Chat = typeof chats.$inferSelect;
@@ -370,6 +374,33 @@ const instructionContextOf = (
   return appId === null
     ? { conversation: "own", personal }
     : { conversation: "own", appId, personal };
+};
+
+/**
+ * What of a turn's context only its person may read, marking its chat
+ * (private-reads.ts): their own instruction file with something in it,
+ * one of their own skills, or their own agent's instructions or
+ * documents. `undefined` when none.
+ */
+const privateReadOf = (
+  instructions: readonly { file: InstructionFileRef; text: string }[],
+  skills: readonly { scope: string }[],
+  agent: { ownerId: string | null; instructions: string } | undefined,
+  documents: readonly unknown[]
+): PrivateRead | undefined => {
+  const ownAgent =
+    agent !== undefined &&
+    agent.ownerId !== null &&
+    (agent.instructions.trim() !== "" || documents.length > 0);
+  if (
+    ownAgent ||
+    instructions.some(
+      ({ file, text }) => file.scope === "person" && text.trim() !== ""
+    )
+  ) {
+    return "instructions";
+  }
+  return skills.some(({ scope }) => scope === "person") ? "skill" : undefined;
 };
 
 /** The title of a chat others share on `platform`. */
@@ -801,6 +832,50 @@ export type HeldOutcome =
   | "expired"
   | "unknown"
   | "failed";
+
+/** How long a held App call waits for its person before it lapses. */
+export const heldAppCallMs = 24 * 60 * 60 * 1000;
+
+/** Most characters of a function's path a held App call keeps. */
+const maxHeldFunctionChars = 256;
+
+/** What holding a write to an App keeps (held-app-calls.ts). */
+export interface HeldAppCallInput {
+  agentId: string;
+  appId: string;
+  function: string;
+  kind: string;
+  request: string;
+  requestHash: string;
+}
+
+/** A held App call, as its Workspace keeps it, with when it lapses. */
+export interface HeldAppCallRow extends HeldAppCallInput {
+  id: string;
+  chatId: string;
+  personId: string;
+  heldAt: number;
+  expiresAt: number;
+}
+
+/** `row` as its callers read it: its request as it was held. */
+const heldAppCallRowOf = (
+  row: typeof heldAppCalls.$inferSelect
+): HeldAppCallRow => ({
+  id: row.id,
+  chatId: row.chatId,
+  personId: row.personId,
+  agentId: row.agentId,
+  appId: row.appId,
+  function: row.function,
+  kind: row.kind,
+  // Kept while it waits; decided in the write that empties it, and handed
+  // back from the read before it.
+  request: row.request ?? "",
+  requestHash: row.requestHash,
+  heldAt: row.heldAt.getTime(),
+  expiresAt: row.heldAt.getTime() + heldAppCallMs,
+});
 
 /** A held write, as its chat's agent knows it: the ID its call answered with. */
 const heldSchema = z.strictObject({
@@ -1818,6 +1893,232 @@ export class Workspace extends DurableObject<Env> {
     return chat?.restricted;
   }
 
+  /**
+   * Whether the chat has handed its model or code something only its
+   * person may read (private-reads.ts); `undefined`: no such chat.
+   */
+  isChatPrivateRead(chatId: ChatId): boolean | undefined {
+    return this.#db
+      .select({ privateRead: chats.privateRead })
+      .from(chats)
+      .where(eq(chats.id, chatId))
+      .get()?.privateRead;
+  }
+
+  /**
+   * Marks the chat as having handed its model or code something only its
+   * person may read, for good (private-reads.ts), with `entry` in the
+   * audit outbox in the same write the first time: `true` then, `false`
+   * when it was marked already, `undefined` for no such chat.
+   */
+  markChatPrivateRead(chatId: ChatId, entry: AuditEntry): boolean | undefined {
+    const marked = this.ctx.storage.transactionSync(() => {
+      const chat = this.#db
+        .select({ privateRead: chats.privateRead })
+        .from(chats)
+        .where(eq(chats.id, chatId))
+        .get();
+      if (chat === undefined || chat.privateRead) {
+        return chat === undefined ? undefined : false;
+      }
+      this.#outboxEntry(entry);
+      this.#db
+        .update(chats)
+        .set({ privateRead: true })
+        .where(eq(chats.id, chatId))
+        .run();
+      return true;
+    });
+    if (marked === true) {
+      this.#deliverAudit();
+    }
+    return marked;
+  }
+
+  /**
+   * Holds a write to an App the chat's agent asked for (held-app-calls.ts)
+   * for the chat's person, audited as the agent's for them
+   * (`chat.app_call.held`) in the same write: the same request still
+   * waiting in the chat is the same hold, so a call made again (a step a
+   * restart ran again) is held, and recorded, once. Refused for a chat
+   * that isn't `personId`'s.
+   */
+  holdAppCall(
+    chatId: unknown,
+    personId: string,
+    held: HeldAppCallInput,
+    now: number
+  ): HeldAppCallRow {
+    const chat = this.#ownChat(chatId, personId);
+    const kept = this.ctx.storage.transactionSync(() => {
+      const waiting = this.#db
+        .select()
+        .from(heldAppCalls)
+        .where(
+          and(
+            eq(heldAppCalls.chatId, chat.id),
+            eq(heldAppCalls.status, "waiting"),
+            eq(heldAppCalls.appId, held.appId),
+            eq(heldAppCalls.requestHash, held.requestHash),
+            gt(heldAppCalls.heldAt, new Date(now - heldAppCallMs))
+          )
+        )
+        .get();
+      if (waiting !== undefined) {
+        return waiting;
+      }
+      const row = this.#db
+        .insert(heldAppCalls)
+        .values({
+          id: crypto.randomUUID(),
+          chatId: chat.id,
+          personId,
+          ...held,
+          heldAt: new Date(now),
+          status: "waiting",
+        })
+        .returning()
+        .get();
+      this.#outboxEntry({
+        actor: delegateActorOf(
+          chatAuthority({ agentId: held.agentId, personId })
+        ),
+        action: "chat.app_call.held",
+        target: { type: "app", id: held.appId },
+        detail: {
+          workspace: this.ctx.id.name ?? null,
+          chat: chat.id,
+          held: row.id,
+          kind: held.kind,
+        },
+      });
+      return row;
+    });
+    this.#deliverAudit();
+    this.heldChanged(chat.id);
+    return heldAppCallRowOf(kept);
+  }
+
+  /**
+   * The App writes held for `personId` in their chat `chatId` that still
+   * wait, oldest first: none past their day.
+   */
+  heldAppCalls(
+    chatId: unknown,
+    personId: string,
+    now: number
+  ): HeldAppCallRow[] {
+    const chat = this.#ownChat(chatId, personId);
+    return this.#db
+      .select()
+      .from(heldAppCalls)
+      .where(
+        and(
+          eq(heldAppCalls.chatId, chat.id),
+          eq(heldAppCalls.personId, personId),
+          eq(heldAppCalls.status, "waiting"),
+          gt(heldAppCalls.heldAt, new Date(now - heldAppCallMs))
+        )
+      )
+      .orderBy(asc(heldAppCalls.heldAt))
+      .all()
+      .map((row) => heldAppCallRowOf(row));
+  }
+
+  /**
+   * Decides held App call `id` of `personId`'s chat `chatId`, once: only
+   * while it waits, within its day, and, to confirm it, only for the
+   * request whose SHA-256 is `requestHash`, the one the person was shown.
+   * Its request is emptied in the same write, and handed back to run once
+   * confirmed. Anything else (another's, decided already, lapsed, another
+   * request) answers as none: `agent.held_call_not_found`.
+   */
+  decideHeldAppCall(
+    chatId: unknown,
+    personId: string,
+    id: string,
+    decision: { confirm: true; requestHash: string } | { confirm: false },
+    now: number
+  ): HeldAppCallRow {
+    const chat = this.#ownChat(chatId, personId);
+    const decided = this.ctx.storage.transactionSync(() => {
+      const row = this.#db
+        .select()
+        .from(heldAppCalls)
+        .where(
+          and(
+            eq(heldAppCalls.id, id),
+            eq(heldAppCalls.chatId, chat.id),
+            eq(heldAppCalls.personId, personId),
+            eq(heldAppCalls.status, "waiting"),
+            gt(heldAppCalls.heldAt, new Date(now - heldAppCallMs))
+          )
+        )
+        .get();
+      const taken =
+        row !== undefined &&
+        (!decision.confirm || row.requestHash === decision.requestHash)
+          ? row
+          : undefined;
+      if (taken !== undefined) {
+        this.#db
+          .update(heldAppCalls)
+          .set({
+            status: decision.confirm ? "confirmed" : "declined",
+            request: null,
+          })
+          .where(eq(heldAppCalls.id, taken.id))
+          .run();
+        // The person's decision, recorded before anything runs of it.
+        this.#outboxEntry({
+          actor: { type: "person", userId: personId },
+          action: decision.confirm
+            ? "chat.app_call.confirmed"
+            : "chat.app_call.declined",
+          target: { type: "app", id: taken.appId },
+          detail: {
+            workspace: this.ctx.id.name ?? null,
+            chat: chat.id,
+            held: taken.id,
+            kind: taken.kind,
+          },
+        });
+      }
+      return taken;
+    });
+    if (decided === undefined) {
+      throw agentErrors.create("agent.held_call_not_found");
+    }
+    this.#deliverAudit();
+    this.heldChanged(chat.id);
+    return heldAppCallRowOf(decided);
+  }
+
+  /**
+   * Tells the agent of `personId`'s own chat how a write to an App it had
+   * held for them ended, as `heldDecided` does a connection's: a notice
+   * for its turn under way or its next. Nothing of the App's answer: the
+   * agent reads the App again if it needs to.
+   */
+  async heldAppCallDecided(
+    chatId: unknown,
+    personId: string,
+    held: { id: string; function: string },
+    outcome: Exclude<HeldOutcome, "expired" | "unknown">
+  ): Promise<void> {
+    const chat = this.#ownChat(chatId, personId);
+    const { id } = z.strictObject({ id: z.uuid() }).parse({ id: held.id });
+    const name = z
+      .string()
+      .min(1)
+      .max(maxHeldFunctionChars)
+      .parse(held.function);
+    await this.#note(
+      chat.id,
+      `The write to an App you asked for, "${name}" (held ID ${id}), was decided. ${heldOutcomes[outcome]}`
+    );
+  }
+
   /** Puts the chat in restricted mode, for good; `false`: no such chat. */
   restrictChat(chatId: ChatId): boolean {
     const changed = this.#db
@@ -2475,6 +2776,16 @@ export class Workspace extends DurableObject<Env> {
     const kept =
       agent === undefined ? [] : await documentsOf(this.env, agent.id);
     const documents = kept.map(({ id, name, type }) => ({ id, name, type }));
+    // What only the person may read marks the chat before the model gets
+    // it (private-reads.ts): their own instruction file, their own skills,
+    // their own agent's instructions and documents.
+    const privateRead = privateReadOf(instructions, skills, agent, documents);
+    if (privateRead !== undefined) {
+      this.markChatPrivateRead(
+        work.chatId,
+        privateReadEntry(scope, privateRead)
+      );
+    }
     return {
       instructions: instructions.map(({ file, text }) => ({ file, text })),
       skills,
@@ -4243,6 +4554,7 @@ export class Workspace extends DurableObject<Env> {
           .delete(brainCaptureIntents)
           .where(eq(brainCaptureIntents.evidenceId, id))
           .run();
+        this.#db.delete(heldAppCalls).where(eq(heldAppCalls.chatId, id)).run();
         // Before its messages: a file names the question that carried it.
         this.#db.delete(chatFiles).where(eq(chatFiles.chatId, id)).run();
         this.#db

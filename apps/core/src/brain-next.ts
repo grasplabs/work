@@ -544,6 +544,11 @@ const saidOf = ({ speaker }: PackMemory, personId: string): MemorySaid => {
 export interface RecalledPack extends Omit<Pack, "items" | "memories"> {
   items: RecalledItem[];
   memories: RecalledMemory[];
+  /**
+   * Whether a passage or a memory it holds is of the person's own store,
+   * where everything only they may read is kept (private-reads.ts).
+   */
+  fromOwn: boolean;
 }
 
 /**
@@ -1049,6 +1054,22 @@ const storesOf = (findings: readonly Finding[]): Map<string, MemoryStore> =>
     )
   );
 
+/**
+ * The sources the reader's own store found passages of (`findingsOf`: its
+ * finding follows the shared store's). A source is kept in one store
+ * alone, so a passage of one of these is of their own store.
+ */
+const ownSourcesOf = (findings: readonly Finding[]): Set<string> => {
+  const [, own] = findings;
+  return new Set(
+    own === undefined
+      ? []
+      : [...own.words, ...own.stopWords, ...own.exact, ...own.meaning].map(
+          ({ source }) => source
+        )
+  );
+};
+
 /** A person's use of memories, per store (`usedOf`), for its requests. */
 type Used = Record<MemoryStore, NonNullable<RecallRequest["used"]>>;
 
@@ -1130,24 +1151,29 @@ export const recallAs = async (
     findings
   );
   const stores = storesOf(findings);
+  const recalledMemories = memories.map((memory) => {
+    const store = stores.get(memory.memory);
+    // A packed memory is one a store found: never one of none.
+    if (store === undefined) {
+      throw new Error("A packed memory no store found");
+    }
+    return {
+      ...memory,
+      store,
+      source: versionRefOf(memory.source),
+      said: saidOf(memory, personId),
+    };
+  });
+  const own = ownSourcesOf(findings);
   return {
     items: recalledItems(items),
-    memories: memories.map((memory) => {
-      const store = stores.get(memory.memory);
-      // A packed memory is one a store found: never one of none.
-      if (store === undefined) {
-        throw new Error("A packed memory no store found");
-      }
-      return {
-        ...memory,
-        store,
-        source: versionRefOf(memory.source),
-        said: saidOf(memory, personId),
-      };
-    }),
+    memories: recalledMemories,
     contested,
     notFound,
     truncated,
+    fromOwn:
+      items.some(({ source }) => own.has(source)) ||
+      recalledMemories.some(({ store }) => store === "own"),
   };
 };
 
@@ -1296,6 +1322,7 @@ export const mergeRecalled = (
     contested: [...facts.values()],
     notFound: second.notFound,
     truncated: first.truncated || second.truncated,
+    fromOwn: first.fromOwn || second.fromOwn,
   };
 };
 

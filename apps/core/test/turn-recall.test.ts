@@ -2832,6 +2832,7 @@ const cutPack = (items: RecalledItem[]): RecalledPack => ({
   contested: [],
   notFound: [],
   truncated: true,
+  fromOwn: false,
 });
 
 /** Every property `mergedHolds` checks, holding. */
@@ -2978,6 +2979,7 @@ describe("two recalls merged into one pack", setUpTime, () => {
           contested: [],
           notFound: random() < 0.5 ? ["missing"] : [],
           truncated: random() < 0.2,
+          fromOwn: false,
         },
         tokens
       );

@@ -1,27 +1,26 @@
 import type { App, AppFiles, AppVersion } from "@grasp-os/shared/apps";
 import { functionErrors } from "@grasp-os/shared/functions";
 import { appIdSchema } from "@grasp-os/shared/ids";
-import type { AppId } from "@grasp-os/shared/ids";
-import type { Permission } from "@grasp-os/shared/permissions";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
 import { z } from "zod";
 
 import { asPerson, readDenied } from "./agent-person.ts";
-import {
-  admitEffect,
-  chatAuthority,
-  chatContext,
-  recordRunReads,
-} from "./agent-scope.ts";
+import { admitEffect, chatAuthority, recordRunReads } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { callAppFunction } from "./app-functions.ts";
 import type { FunctionAnswer } from "./app-functions.ts";
 import { cancelRequest, requestText } from "./app-requests.ts";
-import { appFor, findApp, listApps, listVersions, readFiles } from "./apps.ts";
-import { appHost } from "./durable-objects.ts";
+import { appFor, listApps, listVersions, readFiles } from "./apps.ts";
+import {
+  callsApp,
+  carryAppRestricted,
+  carryChatRestricted,
+  holdAppCall,
+} from "./held-app-calls.ts";
+import type { Held } from "./held-app-calls.ts";
 import { appRead } from "./history-access.ts";
 import { grantedPermissions } from "./permissions.ts";
-import { isRestricted, restrict } from "./restricted.ts";
+import { mustConfirmForOthers } from "./private-reads.ts";
 import { inTurn, runSessionOf } from "./run-sessions.ts";
 
 // Apps for a chat's code: `await env.apps.list()`. What the chat's person
@@ -41,17 +40,6 @@ const functionCallMs = 30_000;
 /** What a call's kind needs of the agent's permission on the App. */
 const actionFor = (kind: string): "read" | "write" =>
   kind === "query" ? "read" : "write";
-
-/** Whether the agent holds `action` on App `app` (an `app` permission). */
-const callsApp =
-  (app: string, action: "read" | "write") =>
-  (permissions: Permission[]): boolean =>
-    permissions.some(
-      ({ object, actions }) =>
-        object.type === "app" &&
-        object.appId === app &&
-        actions.includes(action)
-    );
 
 /** The kind a request names, read only for the permission it needs. */
 const requestKindSchema = z.looseObject({
@@ -97,12 +85,16 @@ export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
    * role in the App is checked by the call itself. Restricted mode follows
    * the data both ways: a restricted chat restricts the App before it can
    * write there, and a restricted App restricts the chat before its answer
-   * is handed over. Every call, refused or not, is audited as `agent.call`.
+   * is handed over. In a chat that used something only its person may
+   * read (private-reads.ts), a write is held for that person instead
+   * (held-app-calls.ts) and answers `{ held }`, nothing run. Every call,
+   * refused, held or not, is audited as `agent.call`.
    */
-  async call(app: unknown, request: unknown): Promise<FunctionAnswer> {
+  async call(app: unknown, request: unknown): Promise<FunctionAnswer | Held> {
     const id = appIdSchema.safeParse(app);
     const scope = this.ctx.props;
     let kind: string | null = null;
+    let heldCall = false;
     return await asPerson(this.env, scope, {
       allowed: id.success
         ? (permissions) =>
@@ -143,7 +135,21 @@ export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
                 // Only someone with a role in the App reaches it at all, so a
                 // restricted chat can't restrict an App its person can't use.
                 await appFor(this.env, person, appId, "user");
-                await this.#carryChatRestricted(appId);
+                // A chat that used something only its person may read
+                // writes where the App's members read only once that
+                // person confirms it (private-reads.ts): held, nothing run.
+                if (await mustConfirmForOthers(this.env, scope)) {
+                  await admitEffect(this.env, scope);
+                  heldCall = true;
+                  return await holdAppCall(
+                    this.env,
+                    scope,
+                    appId,
+                    text,
+                    kind ?? "mutation"
+                  );
+                }
+                await carryChatRestricted(this.env, scope, appId);
               }
               const answer = await callAppFunction(
                 this.env,
@@ -178,17 +184,7 @@ export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
                   chatId: scope.chatId,
                 }
               );
-              if (
-                answer.manifestHash !== null &&
-                (await appHost(this.env, appId).isRestricted())
-              ) {
-                await restrict(
-                  this.env,
-                  chatAuthority(scope),
-                  chatContext(scope),
-                  [`app:${appId}`]
-                );
-              }
+              await carryAppRestricted(this.env, scope, appId, answer);
               // Recorded with the run before it is handed over: withheld
               // from the model once the agent or the person loses the App.
               // A refusal of the platform's own (no such App, no role, no
@@ -218,16 +214,17 @@ export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
       detail: () => ({
         app: id.success ? id.data : null,
         kind,
+        ...(heldCall ? { held: true } : {}),
       }),
-      ended: ({ result }) =>
-        result.ok
+      ended: (answer) =>
+        "held" in answer || answer.result.ok
           ? undefined
           : {
               outcome:
-                result.error.code === "internal.unexpected"
+                answer.result.error.code === "internal.unexpected"
                   ? "failed"
                   : "refused",
-              reason: result.error.code,
+              reason: answer.result.error.code,
             },
     });
   }
@@ -243,31 +240,6 @@ export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
     await recordRunReads(this.env, this.ctx.props, [
       appRead(read, appIdSchema.parse(app)),
     ]);
-  }
-
-  /**
-   * Restricts App `app` when the chat is restricted, before a call that may
-   * write there: its input may carry what the chat read restricted.
-   */
-  async #carryChatRestricted(app: AppId): Promise<void> {
-    const scope = this.ctx.props;
-    if (
-      !(await isRestricted(this.env, chatAuthority(scope), chatContext(scope)))
-    ) {
-      return;
-    }
-    const { currentVersion } = await findApp(this.env, app);
-    await restrict(
-      this.env,
-      {
-        subject: { type: "app", appId: app },
-        onBehalfOf: scope.personId,
-        mode: "interactive",
-        appVersion: currentVersion ?? undefined,
-      },
-      { type: "app", appId: app },
-      [`chat:${scope.chatId}`]
-    );
   }
 
   /** An App's versions, newest first: for its builders. */
@@ -315,13 +287,21 @@ apps: {
    * the order made, each within its own 30 seconds, and at most 8 at once (more answer \`function.sandbox_busy\`). Needs a permission on the App (\`read\` for a query,
    * \`write\` otherwise), granted by an admin. Answers the result as data:
    * \`{ result: { ok: true, value } | { ok: false, error }, manifestHash }\`.
+   * Once this chat has used something only the person can read, a mutation
+   * or an action is held for them to confirm in the chat instead, as the
+   * App's members would read what it writes: it answers \`{ held }\` and
+   * has not run. Tell them it waits for them, and end your turn; you are
+   * told how they decided.
    */
-  call(app: string, request: ReadableStream<Uint8Array>): Promise<{
-    result:
-      | { ok: true; value: unknown }
-      | { ok: false; error: { code: string; message: string; category: string; retryable: boolean; requestId: string; details?: unknown } };
-    manifestHash: string | null;
-  }>;
+  call(app: string, request: ReadableStream<Uint8Array>): Promise<
+    | {
+        result:
+          | { ok: true; value: unknown }
+          | { ok: false; error: { code: string; message: string; category: string; retryable: boolean; requestId: string; details?: unknown } };
+        manifestHash: string | null;
+      }
+    | { held: { id: string; expiresAt: string } }
+  >;
   /** An App's versions, newest first, at most 100 before \`before\`. Only for Apps the person builds. */
   versions(app: string, before?: number): Promise<{
     version: number;

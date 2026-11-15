@@ -37,6 +37,7 @@ import {
   brainVersionRead,
 } from "./history-access.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
+import { markPrivateRead } from "./private-reads.ts";
 
 // The recall before a chat's question (GRA-1732), from the Brain
 // (brain-next.ts), as the person whose chat it is. The question is
@@ -500,6 +501,12 @@ export const recallForTurn = async (
     // model never got.
     await withinTime(
       async () => {
+        // Something of the person's own store marks the chat first, for
+        // good: what it writes for others then waits for them
+        // (private-reads.ts).
+        if (pack.fromOwn) {
+          await markPrivateRead(env, scope, "recall");
+        }
         await recordRunReads(env, scope, [
           brainGrantRead,
           ...versions,

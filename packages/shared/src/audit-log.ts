@@ -222,6 +222,13 @@ const typeRules: readonly {
   // question of their own chat noted to keep in their own Brain
   // (`chat.turn_noted`, GRA-1805), whose hand-over records how it ended
   // (`brain.source.*`).
+  // A chat that handed its model or code something only its person may
+  // read, so what it writes for others waits for them (core's
+  // private-reads.ts); and a write to an App held for them since, then
+  // confirmed or declined by them (core's held-app-calls.ts).
+  { action: "chat.private_read", type: "permission" },
+  { action: "chat.app_call.held", type: "action" },
+  { action: "chat.app_call", type: "decision" },
   { action: "chat", type: "action" },
   // A call of the chat agent's code that nothing else records: a listing,
   // a catalog or a run's status, or a call refused before it did anything.

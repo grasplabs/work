@@ -150,6 +150,8 @@ describe("recall by meaning, through core", () => {
     });
     return {
       ...pack,
+      // This file reads the shared store alone.
+      fromOwn: false,
       items: pack.items.map((item) => ({
         ...item,
         source: sources.get(item.source) ?? { producer: "upload", id: "" },

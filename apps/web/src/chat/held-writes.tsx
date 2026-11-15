@@ -1,3 +1,4 @@
+import type { HeldAppCall } from "@grasp-os/shared/chat";
 import type {
   ActionDescription,
   PendingAction,
@@ -26,13 +27,19 @@ import { useCore } from "../use-core.ts";
 // Either way the exact input each runs with, which is what confirming
 // names, is one click away, and open from the start whenever the card
 // doesn't show all of it. Confirm waits until everything that will be
-// sent has been shown in full.
+// sent has been shown in full. Beside them, the writes to Apps core holds
+// once the chat used something only the person can read, each with that
+// reason and its exact request, open from the start.
 
-/** What the page read of the chat's held writes. */
+/**
+ * What the page read of the chat's held writes: connect's (`actions`), and
+ * the writes to Apps core holds once the chat used something only the
+ * person can read (`calls`).
+ */
 type Held =
   | { state: "loading" }
   | { state: "refused"; message: string }
-  | { state: "ready"; actions: PendingAction[] };
+  | { state: "ready"; actions: PendingAction[]; calls: HeldAppCall[] };
 
 /**
  * The person's held writes from chat `chatId`, newest first. Outside the
@@ -43,14 +50,19 @@ const readHeld = async (
   chatId: string
 ): Promise<Held> => {
   try {
-    const waiting = await core.withSession(
-      async (session) => await session.pendingActions.list()
+    const [waiting, calls] = await core.withSession(
+      async (session) =>
+        await Promise.all([
+          session.pendingActions.list(),
+          session.chats.heldCalls(chatId),
+        ])
     );
     return {
       state: "ready",
       actions: waiting.filter(
         ({ context }) => context.type === "chat" && context.chatId === chatId
       ),
+      calls,
     };
   } catch (error) {
     return { state: "refused", message: failureText(error) };
@@ -436,19 +448,122 @@ export const HeldWrite = ({
 };
 
 /**
- * Rejects every write the chat holds at once. Confirming stays one at a
- * time: each is confirmed only once what it sends has been shown.
+ * A write to an App held because the chat used something only the person
+ * can read (held-app-calls.ts in core): which function of which App, why
+ * it waits, and exactly the request that would run, open from the start.
+ * Confirming names that request's hash.
  */
-const RejectAll = ({
-  actions,
+const HeldAppCallCard = ({
+  chatId,
+  call,
   onDecided,
 }: {
-  actions: readonly PendingAction[];
+  chatId: string;
+  call: HeldAppCall;
   onDecided: () => void;
 }) => {
   const { busy, failure, run } = useCoreAction();
   const router = useRouter();
-  const count = actions.length;
+  const { t } = useLingui();
+  const app = call.appName ?? call.appId;
+  const fn = call.function;
+  const title = t`${fn} in ${app}`;
+  const what = title;
+  const where = app;
+  const asked = formatDateTime(call.heldAt);
+  const decide = async (
+    decision: (session: Session) => Promise<unknown>
+  ): Promise<void> => {
+    await run(decision);
+    onDecided();
+    await router.invalidate();
+  };
+  return (
+    <article
+      aria-label={what}
+      className="bg-card flex w-full flex-col gap-4 rounded-xl border p-4 text-sm"
+    >
+      <h3 className="flex items-start gap-2 font-medium">
+        <ClockIcon
+          aria-hidden="true"
+          className="text-status-attention mt-0.5 size-4 flex-none"
+        />
+        <span>
+          <Trans>Waiting for you: {title}</Trans>
+        </span>
+      </h3>
+      <div className="flex flex-col gap-2">
+        <Badge variant="attention">
+          <Trans>This uses something only you can read</Trans>
+        </Badge>
+        <p className="text-muted-foreground">
+          <Trans>On {where}</Trans>
+        </p>
+        <p className="text-muted-foreground">
+          <Trans>
+            Asked for <time dateTime={call.heldAt}>{asked}</time>
+          </Trans>
+        </p>
+        <ExactInput
+          input={call.request}
+          onOpen={() => {
+            // Open from the start: nothing waits for it.
+          }}
+          shown={false}
+        />
+        <ErrorText>{failure}</ErrorText>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          aria-label={t`Confirm ${what}`}
+          disabled={busy}
+          onClick={() => {
+            void decide(async (session) => {
+              await session.chats.confirmHeldCall(
+                chatId,
+                call.id,
+                call.requestHash
+              );
+            });
+          }}
+        >
+          <Trans>Confirm</Trans>
+        </Button>
+        <Button
+          aria-label={t`Reject ${what}`}
+          disabled={busy}
+          onClick={() => {
+            void decide(async (session) => {
+              await session.chats.declineHeldCall(chatId, call.id);
+            });
+          }}
+          variant="outline"
+        >
+          <Trans>Reject</Trans>
+        </Button>
+      </div>
+    </article>
+  );
+};
+
+/**
+ * Rejects every write the chat holds at once. Confirming stays one at a
+ * time: each is confirmed only once what it sends has been shown.
+ */
+const RejectAll = ({
+  chatId,
+  actions,
+  calls,
+  onDecided,
+}: {
+  chatId: string;
+  actions: readonly PendingAction[];
+  calls: readonly HeldAppCall[];
+  onDecided: () => void;
+}) => {
+  const { busy, failure, run } = useCoreAction();
+  const router = useRouter();
+  const count = actions.length + calls.length;
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
       <p className="text-muted-foreground">
@@ -466,11 +581,14 @@ const RejectAll = ({
               // Every rejection settles before the list is read again, so
               // none still running is shown as waiting; then the first
               // refusal says why.
-              const outcomes = await Promise.allSettled(
-                actions.map(async ({ id }) => {
+              const outcomes = await Promise.allSettled([
+                ...actions.map(async ({ id }) => {
                   await session.pendingActions.decline(id);
-                })
-              );
+                }),
+                ...calls.map(async ({ id }) => {
+                  await session.chats.declineHeldCall(chatId, id);
+                }),
+              ]);
               const refused = outcomes.find(
                 (outcome) => outcome.status === "rejected"
               );
@@ -527,20 +645,35 @@ export const HeldWrites = ({
   if (held.state === "refused") {
     return <ErrorText>{held.message}</ErrorText>;
   }
-  if (held.state === "loading" || held.actions.length === 0) {
+  if (
+    held.state === "loading" ||
+    held.actions.length + held.calls.length === 0
+  ) {
     return null;
   }
-  const count = held.actions.length;
+  const count = held.actions.length + held.calls.length;
   return (
     <section aria-label={t`Waiting for you`} className="flex flex-col gap-2">
       {count > 1 ? (
         <RejectAll
           actions={held.actions}
+          calls={held.calls}
+          chatId={chatId}
           onDecided={() => {
             setReads(reads + 1);
           }}
         />
       ) : null}
+      {held.calls.map((call) => (
+        <HeldAppCallCard
+          call={call}
+          chatId={chatId}
+          key={call.id}
+          onDecided={() => {
+            setReads(reads + 1);
+          }}
+        />
+      ))}
       {held.actions.map((action) => (
         <HeldWrite
           action={action}
