@@ -3977,10 +3977,12 @@ export const forgetAs = async (
   const id = checked(memoryIdSchema, memory);
   const reader = await personReaderOf(env, personId);
   try {
-    return await ownBrain(env, reader.person).retireMemory({
+    const retired = await ownBrain(env, reader.person).retireMemory({
       memory: id,
       reader,
+      writer: reader.person,
     });
+    return retired === null ? "nothing" : "done";
   } catch (error) {
     throw erasedAs(error);
   }
@@ -4459,7 +4461,11 @@ export const correctAs = async (
   try {
     await own.confirmMemory({ memory: saved.memory, reader });
     if (wrong.store === "own" && read.writer === reader.person) {
-      await own.retireMemory({ memory: read.id, reader });
+      await own.retireMemory({
+        memory: read.id,
+        reader,
+        writer: reader.person,
+      });
     }
   } catch (error) {
     throw erasedAs(error);

@@ -730,11 +730,12 @@ describe("entities, as a workflow reads them", setUpTime, () => {
     const retired = await store().retireMemory({
       memory: inHerWord.memory,
       reader: { person: ada.userId, groups: ["company"] },
+      writer: ada.userId,
     });
 
     expect({
       before,
-      retired,
+      retired: retired?.retiredAt instanceof Date,
       after: {
         relation: await showsOf(admin, workflow.id, runs.relation, names),
         found: await showsOf(admin, workflow.id, runs.found, names),
@@ -746,7 +747,7 @@ describe("entities, as a workflow reads them", setUpTime, () => {
         found: { status: "completed", error: null, shows: [found] },
         said: { status: "completed", error: null, shows: [said] },
       },
-      retired: "done",
+      retired: true,
       after: {
         relation: { status: "completed", error: "brain.revoked", shows: [] },
         found: { status: "completed", error: "brain.revoked", shows: [] },
