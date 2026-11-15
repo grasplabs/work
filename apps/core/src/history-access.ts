@@ -1,12 +1,5 @@
-import { brainErrors } from "@grasp-os/brain/contract";
-import { d1BrainStore } from "@grasp-os/brain/recall-store";
-import type { BrainStore, PinnedVersion } from "@grasp-os/brain/recall-store";
-import { collections } from "@grasp-os/brain/schema";
 import type { Permission } from "@grasp-os/shared/permissions";
-import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { MemberRole } from "@grasp-os/shared/subject-members";
-import { sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { connectionGrants } from "./agent-connections.ts";
@@ -22,72 +15,28 @@ import {
 import type { StoredMemoryPlace, SourceVersionRef } from "./brain-next.ts";
 import { audienceOf } from "./chat-audiences.ts";
 import { connectionOwnersOf } from "./connections.ts";
-import { inList } from "./db/d1.ts";
-import { collectionsAllowed } from "./knowledge/access.ts";
-import { readAsDelegate } from "./knowledge/binding.ts";
-import { brainOf } from "./knowledge/ports.ts";
-import { grantedPermissions } from "./permissions.ts";
+import { grantedPermissions, hasBrainGrant } from "./permissions.ts";
 
 // What a chat's earlier code results may still send to the model (GRA-690).
-// A result rests on what its run read, each recorded with the run:
-// collections and each connection call, with the action and resource its
-// grant allowed (`recordSources`), and an App's answer or files
-// and the Knowledge catalog's collections (`recordRunReads`). Before every
-// model request the chat asks which of those its agent may still read for
-// its person, as a read made now would be decided, and withholds the
-// results of every run that read one it may not (`withheld` in
-// chat-agent.ts, then `rebase`): a person who left a team or an App, an
-// agent whose grant was revoked (the one a connection call was made under,
-// whatever other grant on that connection stays), a collection or App
-// deleted.
+// A result rests on what its run read, each recorded with the run: each
+// connection call, with the action and resource its grant allowed
+// (`recordSources`), an App's answer or files (`recordRunReads`), and what
+// it read of the Brain (below). Before every model request the chat asks
+// which of those its agent may still read for its person, as a read made
+// now would be decided, and withholds the results of every run that read
+// one it may not (`withheld` in chat-agent.ts, then `rebase`): a person
+// who left a team or an App, an agent whose grant was revoked (the one a
+// connection call was made under, whatever other grant on that connection
+// stays), an App deleted. A source no check here names (one an earlier
+// release recorded, a Knowledge collection or document say) is never
+// readable: its run is withheld.
 //
-// What a run read of the Brain is pinned too (GRA-299; the threat model is
-// on the issue): beside its collections, the agent's `brain` grant it read
-// under (`brainGrantRead`) and each document it was handed
-// (`brainDocumentRead`), at its version, pinned as its text was
-// (`PinnedVersion`), so its results are withheld once that grant is
-// revoked, or once a document it was handed is erased, moved or purged,
-// though its collection may still be read.
+// What a run read under the agent's `brain` grant is pinned with that
+// grant (`brainGrantRead`), so its results are withheld once the grant is
+// revoked.
 
 /** The source a run's read of the Brain under the agent's `brain` grant is recorded as. */
 export const brainGrantRead = "brain-grant";
-
-const brainDocumentPrefix = "brain-document:";
-
-/** The source a document version handed to a run is recorded as: pinned. */
-export const brainDocumentRead = ({
-  collectionId,
-  documentId,
-  version,
-  text,
-}: PinnedVersion): string =>
-  `${brainDocumentPrefix}${JSON.stringify([collectionId, documentId, version, text])}`;
-
-const pinnedSourceSchema = z.tuple([
-  z.string().min(1),
-  z.string().min(1),
-  z.int().min(1),
-  z.string().min(1),
-]);
-
-/** The pinned version a `brainDocumentRead` source names, if it is one. */
-const brainDocumentOf = (source: string): PinnedVersion | undefined => {
-  if (!source.startsWith(brainDocumentPrefix)) {
-    return undefined;
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(source.slice(brainDocumentPrefix.length));
-  } catch {
-    return undefined;
-  }
-  const pin = pinnedSourceSchema.safeParse(parsed);
-  if (!pin.success) {
-    return undefined;
-  }
-  const [collectionId, documentId, version, text] = pin.data;
-  return { collectionId, documentId, version, text };
-};
 
 // What a chat's recall before a question read of the new Brain
 // (turn-recall.ts) is pinned too: each version it handed over, by its
@@ -402,70 +351,19 @@ const readableBrainCompanyMemories = async (
     : [];
 };
 
-/** Whether `error` refuses the Brain's read, rather than failing it. */
-const isBrainRefusal = (error: unknown): boolean =>
-  brainErrors.codeOf(error) === "brain.denied" ||
-  permissionErrors.codeOf(error) === "permission.denied";
-
-/** Whether the Brain's recall admits `reader` now. */
-const holdsBrainGrant = async <C>(
-  store: BrainStore<C>,
-  reader: C
-): Promise<boolean> => {
-  try {
-    await store.requireBrainGrant(reader);
-    return true;
-  } catch (error) {
-    if (isBrainRefusal(error)) {
-      return false;
-    }
-    throw error;
-  }
-};
-
 /**
- * Of the Brain reads in `sources`, those the agent may make for its person
- * now, read as its delegate as a recall is: the grant, while the Brain's
- * recall admits the agent; each document version, while it is in its
- * collection, the agent may read it there, and no purge rewrote it since
- * it was pinned (one query, whatever their number).
+ * Of the Brain reads in `sources`, the agent's `brain` grant, while it
+ * holds it (`hasBrainGrant`), as the Brain's recall decides it.
  */
 const readableBrain = async (
   env: Env,
   scope: Omit<AgentScope, "runId">,
   sources: readonly string[]
-): Promise<string[]> => {
-  const grant = sources.includes(brainGrantRead);
-  const refs = sources.flatMap((source) => {
-    const pin = brainDocumentOf(source);
-    return pin === undefined ? [] : [{ source, pin }];
-  });
-  if (!grant && refs.length === 0) {
-    return [];
-  }
-  const store = d1BrainStore(brainOf(env));
-  return await readAsDelegate(
-    env,
-    chatAuthority(scope),
-    chatContext(scope),
-    undefined,
-    async (reader) => {
-      const [granted, unchanged] = await Promise.all([
-        grant ? holdsBrainGrant(store, reader) : false,
-        store.unchangedPins(
-          reader,
-          refs.map(({ pin }) => pin)
-        ),
-      ]);
-      return [
-        ...(granted ? [brainGrantRead] : []),
-        ...refs.flatMap(({ source, pin }) =>
-          unchanged.includes(pin) ? [source] : []
-        ),
-      ];
-    }
-  );
-};
+): Promise<string[]> =>
+  sources.includes(brainGrantRead) &&
+  (await hasBrainGrant(env, chatAuthority(scope)))
+    ? [brainGrantRead]
+    : [];
 
 /** How a run read an App, each checked as a read made now would be. */
 const appReads = {
@@ -526,13 +424,12 @@ const appReadNeeds = (
 type WithheldKind =
   | "memories"
   | "passages"
-  | "documents"
   | "grants"
   | "connections"
   | "apps"
-  | "collections";
+  | "unknown";
 
-/** The kind of read `source` is: any it doesn't name, a collection, by its ID. */
+/** The kind of read `source` is: `unknown` for any no check names. */
 const withheldKindOf = (source: string): WithheldKind => {
   if (
     source.startsWith(brainMemoryPrefix) ||
@@ -549,16 +446,13 @@ const withheldKindOf = (source: string): WithheldKind => {
   ) {
     return "passages";
   }
-  if (source.startsWith(brainDocumentPrefix)) {
-    return "documents";
-  }
   if (source === brainGrantRead) {
     return "grants";
   }
   if (connectionReadOf(source) !== undefined) {
     return "connections";
   }
-  return appReadOf(source) === undefined ? "collections" : "apps";
+  return appReadOf(source) === undefined ? "unknown" : "apps";
 };
 
 /**
@@ -573,7 +467,7 @@ const withheldKindOf = (source: string): WithheldKind => {
  * revoked grant, a person out of a team) is audited where it happened,
  * and this records its effect on the chat, which the event's target
  * names. A pin is counted under the kind its prefix names, parsed or
- * not; one with none a collection's, as a bare ID is.
+ * not; one with none as `unknown`.
  */
 export const withheldDetail = ({
   runs,
@@ -702,14 +596,10 @@ const readableApps = async (
 
 /**
  * Of `sourceIds`, those the chat's agent may read for its person now: a
- * collection a Knowledge read would allow now (granted to the agent, and
- * readable by the person: `collectionsAllowed`); a connection call a
- * grant the agent holds in this chat now covers, on a connection not
- * disconnected that the person may use themselves; an App read the
- * agent's grants and the person's role in the App allow now; a Brain
- * read, while the Brain's recall admits the agent and each document it
- * was handed is still in its collection for it to read, unpurged; a
- * version of the new Brain, while the person may read it (their teams and
+ * connection call a grant the agent holds in this chat now covers, on a
+ * connection not disconnected that the person may use themselves; an App
+ * read the agent's grants and the person's role in the App allow now; the
+ * agent's `brain` grant, while it holds it; a version of the Brain, while the person may read it (their teams and
  * the company, for what code's recall handed over); a memory of the new
  * Brain, while the person (or, as the company read it, the company) may
  * read it and its writer has not retired it, replaced or expired or not.
@@ -727,22 +617,8 @@ export const readableSources = async (
   if (sourceIds.length === 0) {
     return { readable: new Set() };
   }
-  const db = drizzle(env.KNOWLEDGE);
-  const { condition } = await collectionsAllowed(env, db, {
-    type: "delegate",
-    authority: chatAuthority(scope),
-    context: chatContext(scope),
-  });
-  const known = await db
-    .select({
-      id: collections.id,
-      readable: sql<number>`CASE WHEN ${condition} THEN 1 ELSE 0 END`,
-    })
-    .from(collections)
-    .where(inList(collections.id, sourceIds));
   // Read once for both kinds of company pin, so they agree.
   const cut = audienceCut(env, scope, sourceIds);
-  // `readableBrain` reads today's Brain, and goes with it (GRA-1735).
   const [
     apps,
     connections,
@@ -764,7 +640,6 @@ export const readableSources = async (
   ]);
   const audience = await cut;
   const readable = new Set([
-    ...known.flatMap(({ id, readable: may }) => (may === 1 ? [id] : [])),
     ...apps,
     ...connections,
     ...brain,
