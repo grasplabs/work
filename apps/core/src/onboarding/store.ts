@@ -1,6 +1,10 @@
 import { STARTING_ORG_RULES } from "@grasp-os/shared/admin/onboarding-admin";
 import type { OrgRules } from "@grasp-os/shared/admin/onboarding-admin";
-import { addWorkingDays, dayOf } from "@grasp-os/shared/admin/org-record";
+import {
+  addDays,
+  addWorkingDays,
+  dayOf,
+} from "@grasp-os/shared/admin/org-record";
 import type {
   DrawnWork,
   Told,
@@ -5341,6 +5345,8 @@ export class Onboarding extends DurableObject<Env> {
    * the admin's update fall due by the day.
    */
   async #armLinks(): Promise<void> {
+    // Paused or not, links waiting or not: the erasure at the close runs.
+    await this.#armErasure();
     const roster = this.#roster();
     const { plan } = this.#row();
     if (roster === null || plan === null || !this.isOpen()) {
@@ -5362,6 +5368,36 @@ export class Onboarding extends DurableObject<Env> {
       .map((moment) => Date.parse(moment))
       .filter((moment) => moment > now);
     await this.#alarmBy(Math.min(now + linkCheckMs, ...moments));
+  }
+
+  /**
+   * Sets the alarm for the erasure at the close (`eraseTakenOutAfterClose`)
+   * while any interview kept still holds a statement taken out with its
+   * words: for the start of the day after the close, or, past it, a
+   * moment from now, so a run that failed or skipped one is tried again.
+   * Nothing taken out left, nothing is set.
+   */
+  async #armErasure(): Promise<void> {
+    const { plan } = this.#row();
+    if (plan === null || !this.#anyTakenOut()) {
+      return;
+    }
+    const closed = Date.parse(`${addDays(closesOn(plan), 1)}T00:00:00.000Z`);
+    await this.#alarmBy(Math.max(closed, Date.now() + purgeRetryMs));
+  }
+
+  /** Whether any interview kept holds a statement taken out, with its words. */
+  #anyTakenOut(): boolean {
+    // Only those that hold one taken out at all are read.
+    return this.#db
+      .select({ person: interviews.person })
+      .from(interviews)
+      .where(sql`instr(${interviews.progress}, '"out":true') > 0`)
+      .all()
+      .some(({ person }) => {
+        const held = this.#storedProgress(person);
+        return held !== null && takenOut(held).length > 0;
+      });
   }
 
   /**
@@ -7334,10 +7370,11 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * Once the interviews closed (`closesOn`), nobody can finish one any
    * more: what was taken out of each in the read-back is erased, as
-   * completing it erases it (`#erasing`). Run by the alarm, which runs
-   * until just past the close. Each interview is written only if it is
-   * still as read; one saved meanwhile waits for the next run. Returns
-   * how many it erased in.
+   * completing it erases it (`#erasing`). Run by the alarm, which is set
+   * for it while anything taken out is left (`#armErasure`), paused or
+   * not. Each interview is written only if it is still as read; one
+   * saved meanwhile is tried again on the next run, a moment later.
+   * Returns how many it erased in.
    */
   async eraseTakenOutAfterClose(
     now: string = new Date().toISOString()
@@ -7347,6 +7384,7 @@ export class Onboarding extends DurableObject<Env> {
       return 0;
     }
     let erased = 0;
+    let skipped = false;
     for (const person of this.interviewPeople()) {
       const held = this.#storedProgress(person);
       const out = held === null ? [] : takenOut(held);
@@ -7390,9 +7428,14 @@ export class Onboarding extends DurableObject<Env> {
         return true;
       });
       erased += landed ? 1 : 0;
+      skipped ||= !landed;
     }
     if (erased > 0) {
       await this.forgetLinesNow();
+    }
+    if (skipped) {
+      // Saved meanwhile: tried again on the next run.
+      await this.#alarmBy(Date.now() + purgeRetryMs);
     }
     return erased;
   }

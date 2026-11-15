@@ -1,6 +1,7 @@
 import {
   erasedFact,
   interviewLimits,
+  nextFactId,
   removedLine,
 } from "@grasp-os/shared/interview-links";
 import type {
@@ -218,7 +219,6 @@ export const afterTurn = (
   const have = new Set(
     changed.filter(({ out }) => out !== true).map(({ text }) => sameWords(text))
   );
-  let next = changed.length;
   const added: InterviewFact[] = [];
   for (const fact of turn.facts) {
     const words = sameWords(fact.text);
@@ -228,9 +228,8 @@ export const afterTurn = (
       changed.length + added.length < interviewLimits.facts
     ) {
       have.add(words);
-      next += 1;
       added.push({
-        id: `f${next}`,
+        id: nextFactId([...changed, ...added]),
         tag: fact.tag,
         text: fact.text,
         record: fact.record,

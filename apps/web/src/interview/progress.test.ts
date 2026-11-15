@@ -74,6 +74,42 @@ describe("a line they remove", () => {
 });
 
 describe("a statement erased", () => {
+  it("numbers what is written down next past the highest id held, gaps and all", () => {
+    const held = {
+      ...said,
+      facts: [
+        {
+          id: "f2",
+          tag: "step" as const,
+          text: "Open it.",
+          record: "Open it.",
+        },
+        {
+          id: "f7",
+          tag: "step" as const,
+          text: "Sign it.",
+          record: "Sign it.",
+        },
+      ],
+    };
+    const after = afterTurn(
+      held,
+      turn({
+        facts: [
+          { tag: "step", text: "You book it.", record: "Book it.", quote: "" },
+          { tag: "step", text: "You file it.", record: "File it.", quote: "" },
+        ],
+      }),
+      { answered: 1 }
+    );
+    expect(after.facts.map(({ id }) => id)).toStrictEqual([
+      "f2",
+      "f7",
+      "f8",
+      "f9",
+    ]);
+  });
+
   it("keeps its id taken, and is read back nowhere", () => {
     const held = {
       ...said,

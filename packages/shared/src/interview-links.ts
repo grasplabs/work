@@ -204,6 +204,21 @@ export const erasedFact = (fact: InterviewFact): InterviewFact => ({
   out: true,
 });
 
+/** What a fact's id holds: `f` and its number. */
+const factNumber = /^f(?<number>\d+)$/u;
+
+/**
+ * The id the next fact written down in `facts` gets: one past the
+ * highest, so no id is given twice, whatever was erased or left out.
+ */
+export const nextFactId = (facts: readonly InterviewFact[]): string => {
+  const highest = Math.max(
+    0,
+    ...facts.map(({ id }) => Number(factNumber.exec(id)?.groups?.number ?? 0))
+  );
+  return `f${highest + 1}`;
+};
+
 /** Whether `fact` was erased (`erasedFact`): it is read out and counted nowhere. */
 export const isErased = (fact: InterviewFact): boolean =>
   fact.out === true && fact.text === "";

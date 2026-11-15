@@ -1,11 +1,15 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import { erasedFact, removedLine } from "@grasp-os/shared/interview-links";
+import {
+  erasedFact,
+  nextFactId,
+  removedLine,
+} from "@grasp-os/shared/interview-links";
 import type {
   InterviewFact,
   InterviewProgress,
 } from "@grasp-os/shared/interview-links";
 import { speechPath } from "@grasp-os/shared/voice";
-import { runInDurableObject } from "cloudflare:test";
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
@@ -146,7 +150,10 @@ const erasedOf = { id: "f1", tag: "step", text: "", record: "", out: true };
  * both approved and their read-back lines in the voice cache; then the
  * line removed and f1 taken out, not completed yet.
  */
-const takenOutFrom = async (theirs: string) => {
+const takenOutFrom = async (
+  theirs: string,
+  { approved = true }: { approved?: boolean } = {}
+) => {
   const { link, person, progress, version } = await saying(markerOf(), theirs);
   const fact: InterviewFact = {
     id: "f1",
@@ -162,7 +169,9 @@ const takenOutFrom = async (theirs: string) => {
   };
   const written = { ...progress, facts: [fact, other] };
   const { version: v1 } = await save(link, version, written);
-  await approve(link, written.facts);
+  if (approved) {
+    await approve(link, written.facts);
+  }
   const audio = JSON.stringify({
     audio: "AAAA",
     mime: "audio/mpeg",
@@ -192,6 +201,29 @@ const leftOf = async (
     facts: kept !== null && "progress" in kept ? kept.progress.facts : null,
   };
 };
+
+/** The store's alarm as set now; null for none. */
+const alarmSet = async (): Promise<number | null> =>
+  await runInDurableObject(
+    onboardingStore(env),
+    async (_instance, state) => await state.storage.getAlarm()
+  );
+
+/** Clears the store's alarm: every one set before has run. */
+const noAlarm = async (): Promise<void> => {
+  await runInDurableObject(onboardingStore(env), async (_instance, state) => {
+    await state.storage.deleteAlarm();
+  });
+};
+
+/** As the system sets things in the store. */
+const system = { type: "system" } as const;
+
+/** A plan whose interviews closed weeks ago: the close passed. */
+const closedLongAgo = () => ({
+  start: new Date(Date.now() - 40 * dayMs).toISOString().slice(0, 10),
+  days: 14,
+});
 
 /** The facts `person` has approvals of, by id. */
 const approvalsOf = async (person: string): Promise<string[]> =>
@@ -488,9 +520,9 @@ describe("removing a line of an interview", { timeout: 60_000 }, () => {
     });
     const kept = await keptOf(taken.person);
     const copy = kept !== null && "progress" in kept ? kept.progress : null;
-    // The page numbers what it writes down by how many facts it holds.
+    // Numbered as the page numbers what it writes down.
     const added: InterviewFact = {
-      id: `f${(copy?.facts.length ?? 0) + 1}`,
+      id: nextFactId(copy?.facts ?? []),
       tag: "step",
       text: "Then it is booked.",
       record: "Then it is booked.",
@@ -549,6 +581,102 @@ describe("removing a line of an interview", { timeout: 60_000 }, () => {
       other: taken.audio,
       facts: [erasedOf, taken.other],
       approved: ["f2"],
+    });
+  });
+
+  it("erases at the close of an onboarding paused across it, by the alarm, and sets no alarm after", async () => {
+    const theirs = markerOf();
+    const taken = await takenOutFrom(theirs, { approved: false });
+    const store = onboardingStore(env);
+    await store.setPaused(true, system);
+    await alarmSet();
+    await noAlarm();
+
+    // The interviews close while it is paused.
+    await store.savePlan(closedLongAgo(), system);
+    await expect.poll(alarmSet, { timeout: 10_000 }).not.toBeNull();
+    const ran = await runDurableObjectAlarm(store);
+    const left = await leftOf(theirs, taken);
+    const after = await alarmSet();
+    await store.setPaused(false, system);
+
+    expect({ ran, ...left, after }).toStrictEqual({
+      ran: true,
+      onboarding: [],
+      core: [],
+      cached: undefined,
+      other: taken.audio,
+      facts: [erasedOf, taken.other],
+      after: null,
+    });
+  });
+
+  it("erases at the close of an onboarding resumed after it, by the alarm", async () => {
+    const theirs = markerOf();
+    const taken = await takenOutFrom(theirs, { approved: false });
+    const store = onboardingStore(env);
+    await store.setPaused(true, system);
+    await store.savePlan(closedLongAgo(), system);
+    await alarmSet();
+    await noAlarm();
+
+    await store.setPaused(false, system);
+    await expect.poll(alarmSet, { timeout: 10_000 }).not.toBeNull();
+    const ran = await runDurableObjectAlarm(store);
+
+    expect({ ran, ...(await leftOf(theirs, taken)) }).toStrictEqual({
+      ran: true,
+      onboarding: [],
+      core: [],
+      cached: undefined,
+      other: taken.audio,
+      facts: [erasedOf, taken.other],
+    });
+  });
+
+  it("tries again an interview saved between the erasure's read and its write, by the alarm", async () => {
+    const theirs = markerOf();
+    const taken = await takenOutFrom(theirs, { approved: false });
+    const store = onboardingStore(env);
+    await store.savePlan(closedLongAgo(), system);
+    await alarmSet();
+    await noAlarm();
+    const later = JSON.stringify({
+      ...taken.out,
+      lines: [...taken.out.lines, { from: "stephen", text: "And then?" }],
+    });
+
+    // A save lands while the erasure hashes what it read.
+    const erased = await runInDurableObject(store, async (instance, state) => {
+      const running = instance.eraseTakenOutAfterClose();
+      state.storage.sql.exec(
+        "UPDATE interviews SET progress = ? WHERE person = ?",
+        later,
+        taken.person
+      );
+      return await running;
+    });
+    const kept = await onboardingTablesWith(theirs);
+    const set = await alarmSet();
+    const ran = await runDurableObjectAlarm(store);
+    const left = await leftOf(theirs, taken);
+
+    expect({
+      erased,
+      kept,
+      set: set !== null,
+      ran,
+      onboarding: left.onboarding,
+      cached: left.cached,
+      facts: left.facts,
+    }).toStrictEqual({
+      erased: 0,
+      kept: ["interviews"],
+      set: true,
+      ran: true,
+      onboarding: [],
+      cached: undefined,
+      facts: [erasedOf, taken.other],
     });
   });
 
