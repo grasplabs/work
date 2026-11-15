@@ -620,7 +620,7 @@ const apps: ErasureStep = {
  * could be erased, producers hand over nothing for someone no longer a
  * member, and a hand-over that began before is refused by the Brain as it
  * records. Complete only once the Brain answered that it is all erased,
- * which puts the erasure in its ledger; one that fails or throws, or
+ * which is once their own store recorded it was erased whole; one that fails or throws, or
  * answers that their own store is still deleting, leaves the area pending
  * for the clock, and asking the Brain again is safe.
  */

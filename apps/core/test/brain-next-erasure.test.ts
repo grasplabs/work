@@ -1083,6 +1083,54 @@ describe("the erasure ledger out of reach", { timeout: 120_000 }, () => {
     });
   });
 
+  // A person's row the shared store recorded until GRA-1903, never
+  // written (its write failed): a tick writes the source entries behind it
+  // and never the person's, which an older release replaying it would
+  // refuse.
+  it("writes the source entries behind a person's row recorded before GRA-1903, and never that row", async () => {
+    const reader = await person();
+    const source = newSource();
+    await add(
+      source,
+      `Behind a person's row ${wordOf(newMark())}`,
+      await alone(reader)
+    );
+    await nextBucketPut(async () => {
+      await Promise.resolve();
+      throw new Error("R2 failed, by the test");
+    });
+    await settled(eraseShared(source, "deleted"));
+    const subject = await hashOf(crypto.randomUUID());
+    // At the source's time, sorting before it.
+    const personRow = await runInDurableObject(store(), (_instance, state) => {
+      const { sql } = state.storage;
+      const { key, at } = sql
+        .exec<{ key: string; at: number }>(
+          `SELECT key, erased_at AS at FROM erasures
+            WHERE confirmed = 0 ORDER BY key DESC LIMIT 1`
+        )
+        .one();
+      const row = `${key.slice(0, "erasures/".length + 15)}-person-person_erased-${subject}`;
+      sql.exec(
+        `INSERT INTO erasures (key, kind, subject, reason, erased_at, confirmed)
+          VALUES (?, 'person', ?, 'person_erased', ?, 0)`,
+        row,
+        subject,
+        at
+      );
+      return row;
+    });
+    await workBrain(env, new Date(), noProducers);
+    const { erasures } = await brainWorkOverview(env);
+
+    // The row stays, as every record of an erasure does.
+    expect({
+      written: await ledgerCount(source),
+      personWritten: (await env.BRAIN_OBJECTS.head(personRow)) !== null,
+      unwritten: erasures.source.unwritten,
+    }).toStrictEqual({ written: 1, personWritten: false, unwritten: 0 });
+  });
+
   it("writes one entry for an erasure whose write landed though its answer was lost, retried", async () => {
     const reader = await person();
     const source = newSource();
@@ -1638,13 +1686,15 @@ describe(
       }).toStrictEqual({ waiting: 600, afterErasure: 0 });
     });
 
-    // The shared store erases nothing of a person: it never held their id
-    // to begin with, as it keeps nothing only they may read.
-    it("holds no plain id of a person core erased, who kept their own content and read their team's, nor a source key for a source erased before it was added", async () => {
-      const leaver = await person();
+    // A person's erasure is their own store's: what they wrote for a team
+    // is the team's, not theirs, and keeps naming them as writer and
+    // confirmer. Nothing else of theirs is in the shared store.
+    it("erases through core what a person kept for themselves, keeps the team memory they wrote and confirmed with their id on it, and leaves their id nowhere else, nor a source key for a source erased before it was added", async () => {
+      const [leaver, mate] = [await person(), await person()];
+      const team = await teamOf(leaver, mate);
+      const group = `team:${team}`;
       const mark = newMark();
       const theirs = newSource();
-      const teamNote = newSource();
       const never = newSource();
       await addSource(env, {
         source: theirs,
@@ -1652,16 +1702,25 @@ describe(
         text: `Their own ${wordOf(mark)}`,
         readers: { kind: "owner", personId: leaver },
       });
-      await add(teamNote, `Their team's ${wordOf(mark)}`, await alone(leaver));
-      const texts = [
-        `Their own ${wordOf(mark)}`,
-        `Their team's ${wordOf(mark)}`,
-      ];
-      const recalled = await recalledAs(leaver, wordOf(mark));
-      const readBefore = {
-        recalled: texts.map((text) => recalled.includes(text)),
-        teamNote: await historyAs(leaver, teamNote, 1),
-      };
+      const { memories, entities } = await brain().addMemories({
+        change: crypto.randomUUID(),
+        access: { kind: "audience", group },
+        entities: [{ key: "c", kind: "customer", names: [`Acme ${mark}`] }],
+        memories: [
+          {
+            about: "c",
+            type: "fact",
+            statement: `Acme ${mark} pays on time`,
+            speaker: { kind: "system" },
+            basis: { kind: "writer", writer: leaver },
+          },
+        ],
+      });
+      await brain().confirmMemory({
+        memory: memories[0] ?? "",
+        reader: { person: leaver, groups: [group] },
+      });
+      const before = await historyAs(leaver, theirs, 1);
 
       const erasing = { personId: leaver, reason: "person_erased" } as const;
       await Promise.allSettled([erasePerson(env, erasing)]);
@@ -1669,20 +1728,33 @@ describe(
       const done = await erasePerson(env, erasing);
       await eraseShared(never, "deleted");
       await tickUntilErased();
+      const read = await brain().readMemories({
+        entity: entities.c ?? "",
+        reader: { person: mate, groups: [group] },
+      });
 
       expect({
-        readBefore,
+        before,
         done,
         theirsAfter: await historyAs(leaver, theirs, 1),
+        teamMemory: read.memories.map(({ statement, writer, confirmed }) => ({
+          statement,
+          writer,
+          confirmedBy: confirmed?.by,
+        })),
         tables: await tablesHolding([leaver, never.id]),
       }).toStrictEqual({
-        readBefore: {
-          recalled: [true, true],
-          teamNote: `Their team's ${wordOf(mark)}`,
-        },
+        before: `Their own ${wordOf(mark)}`,
         done: "erased",
         theirsAfter: null,
-        tables: [],
+        teamMemory: [
+          {
+            statement: `Acme ${mark} pays on time`,
+            writer: leaver,
+            confirmedBy: leaver,
+          },
+        ],
+        tables: ["memories", "memory_confirmations"],
       });
     });
   }

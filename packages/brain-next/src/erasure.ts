@@ -604,8 +604,12 @@ export const eraseBatch = (storage: DurableObjectStorage): Erased => {
   }
 };
 
-/** A ledger entry recorded but not yet written (`confirmPending`). */
-const unconfirmed = "confirmed = 0";
+/**
+ * A source's ledger entry recorded but not yet written (`confirmPending`).
+ * A source's alone: a person's row the shared store recorded until
+ * GRA-1903 is never written, nor waited for.
+ */
+const unconfirmed = "confirmed = 0 AND kind = 'source'";
 
 /**
  * Whether the tick has an erasure's work to do: versions an erasure hid
