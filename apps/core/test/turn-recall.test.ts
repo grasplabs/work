@@ -1,4 +1,5 @@
 import { brainOf, personalBrainOf } from "@grasp-os/brain-next/contract";
+import { auditProvenanceMaxItems } from "@grasp-os/shared/audit";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -7,6 +8,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { recordRunReads } from "../src/agent-scope.ts";
 import { withheldResult } from "../src/agent.ts";
 import { organizationId } from "../src/auth/auth.ts";
 import {
@@ -28,6 +30,7 @@ import type {
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { chatAudiences, teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
+import { brainMemoryRead } from "../src/history-access.ts";
 import {
   analysisPurpose,
   recallTimeoutReason,
@@ -37,6 +40,7 @@ import type { ChatPlace } from "../src/workspace.ts";
 import {
   chatOf,
   codeStep,
+  openTestRun,
   personalChatsOf,
   model,
   says,
@@ -3188,6 +3192,34 @@ describe("memories a person never uses fade for them", setUpTime, () => {
       beaAfter: { first: true, both: true },
       adaAsked: { first: true, both: true },
     });
+  });
+
+  it("keeps the use of every memory a run hands over at once, however many", async () => {
+    const eve = await signedInWithRole(idp, "user");
+    const chats = await personalChatsOf(eve.userId);
+    const { chat } = await chats.newChat();
+    const runId = await openTestRun(chats.stub, chat.id);
+    // Past one call's worth of reads (`auditProvenanceMaxItems`), so the
+    // run's reads are kept a hundred at a time.
+    const memories = Array.from({ length: auditProvenanceMaxItems + 50 }, () =>
+      crypto.randomUUID()
+    );
+
+    await recordRunReads(
+      env,
+      {
+        workspaceId: chats.id,
+        agentId: chats.agent.agentId,
+        chatId: chat.id,
+        personId: eve.userId,
+        runId,
+      },
+      memories.map((memory) => brainMemoryRead({ store: "shared", memory }))
+    );
+
+    const uses = await chats.stub.memoriesUsed(Date.now());
+    const used = new Set(uses.map(({ memory }) => memory));
+    expect(memories.filter((memory) => !used.has(memory))).toStrictEqual([]);
   });
 
   it("passes over a use that doesn't name a memory's place, and still ranks by the others", async () => {
