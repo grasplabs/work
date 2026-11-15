@@ -790,6 +790,9 @@ describe("a writer's erasure", () => {
   });
 
   describe("a store of the release before", () => {
+    /** How many migrations the release before had run: 0000 to 0014. */
+    const releaseBeforeMigrations = 15;
+
     // Migration 0016 makes `erasures` anew, which rows of `erased_versions`
     // point at: it must keep every erasure, and the store must start.
     it("keeps every erasure through the upgrade, also one rows point at, and takes a writer's erasure after it", async () => {
@@ -808,9 +811,9 @@ describe("a writer's erasure", () => {
       const erasure = typeof key === "string" ? key : "";
       // The store as the release before left it: `erasures` without a
       // writer's kind, its count, its change or its sweep, memories without the writer's subject or
-      // the retiring change, no removals (removal.ts, a later migration), the
-      // last six migrations not yet run, and a row that points at the
-      // erasure.
+      // the retiring change, no removals (removal.ts, a later migration),
+      // every migration after the release before's not yet run, and a row
+      // that points at the erasure.
       const before: Copy = {
         // The table of memories that failed to delete is the release's own.
         tables: now.tables
@@ -870,7 +873,9 @@ describe("a writer's erasure", () => {
                     .toSorted(
                       (a, b) => Number(a.created_at) - Number(b.created_at)
                     )
-                    .slice(0, -6),
+                    // The release before ran migrations 0000 to 0014: every
+                    // one after them runs again, not only this release's five.
+                    .slice(0, releaseBeforeMigrations),
                 };
               }
               default: {
@@ -883,7 +888,10 @@ describe("a writer's erasure", () => {
             !made.includes("memories_writer_idx") &&
             !made.includes("erasures_writer_idx") &&
             !made.includes("memory_erase_failures") &&
-            !made.includes("removed_sources")
+            !made.includes("removed_sources") &&
+            // Made by a migration after the release before's, as those are.
+            !made.includes("unembeddable_hash_idx") &&
+            !made.includes("work_items_key_idx")
         ),
       };
       expect(

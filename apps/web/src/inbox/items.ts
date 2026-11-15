@@ -337,7 +337,7 @@ const bindingItems = (
       title: t`Approve what ${name} reaches`,
       context: name,
       body: [
-        t`Version ${version} of ${name} is live, but nothing starts it until an admin approves what it reaches: each model, connection, store or collection it calls.`,
+        t`Version ${version} of ${name} is live, but nothing starts it until an admin approves what it reaches: each model and connection it calls, and the Brain.`,
       ],
       facts: [
         { label: t`Version`, value: String(version) },

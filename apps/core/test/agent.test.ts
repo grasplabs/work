@@ -119,7 +119,6 @@ describe("chat agent", () => {
       answer: "You are the person this chat belongs to.",
       // It read nothing: nothing to label it with.
       provenance: { sources: [], restricted: false },
-      cited: [],
       // In Grasp's own app: no chat app's check line, nor its text.
       check: null,
       channelText: null,

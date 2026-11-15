@@ -468,9 +468,24 @@ const rowsOf = (sql: SqlStorage, source: string): number[] =>
 /**
  * The sources an erasure of the key whose subject is `subject` covers:
  * the source of that key, and each added in it as a group. `apply` hides
- * each in turn, in its one transaction: a group's erasure costs time
- * linear in its sources (about 370 ms per 1,000 one-version sources in
- * workerd), and its deleting is the tick's, a bounded batch at a time.
+ * each in turn, in its one transaction, so no reader sees a group part
+ * hidden, and a call cut off hides and records nothing: its caller keeps
+ * the erasure owed and repeats it. Its deleting is the tick's, a bounded
+ * batch at a time.
+ *
+ * So a group's erasure costs time linear in what it hides, each row found
+ * by an index (erasure-cost.test.ts holds it): in local workerd on a
+ * laptop, 3.0 s for a call erasing 50,000 one-chunk sources with an item
+ * queued for each, its first delete batch included (GRA-1812). That
+ * excludes vectors: hiding a version also reads its chunks' vector codes
+ * (`removeVectorsOf`), so a source of many chunks with codes costs more.
+ * A call has a Durable Object request's 30 s of CPU: some 500,000 such
+ * sources. A replay applies the entry as the store starts, within the
+ * 30 s the store may be held, but a step may start the entry's read just
+ * before its own time is up (`replayStepMs`), and that read may take
+ * `ledgerWaitMs`, leaving the apply about 10 s: some 200,000 sources.
+ * Past that, the store is reset and the next start begins at that entry
+ * with a fresh budget. Measured on a laptop, not on Cloudflare.
  */
 const sourcesOf = (sql: SqlStorage, subject: string): string[] =>
   sql

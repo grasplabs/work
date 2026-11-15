@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "52d52fa3-3d75-4e4a-9446-1b2d1094a57b",
+  "id": "e8d29f34-530d-4351-87c2-064a4a5560dd",
   "prevId": "07efb33b-4114-415d-aeac-d3c4ca11e447",
   "tables": {
     "chunks": {
@@ -1667,66 +1667,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "removed_sources": {
-      "name": "removed_sources",
-      "columns": {
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "subject": {
-          "name": "subject",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "version_row": {
-          "name": "version_row",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "removed_sources_version_row_unique": {
-          "name": "removed_sources_version_row_unique",
-          "columns": [
-            "version_row"
-          ],
-          "isUnique": true
-        },
-        "removed_sources_subject_idx": {
-          "name": "removed_sources_subject_idx",
-          "columns": [
-            "subject"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "removed_sources_version_row_source_versions_row_fk": {
-          "name": "removed_sources_version_row_source_versions_row_fk",
-          "tableFrom": "removed_sources",
-          "tableTo": "source_versions",
-          "columnsFrom": [
-            "version_row"
-          ],
-          "columnsTo": [
-            "row"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "restores": {
       "name": "restores",
       "columns": {
@@ -2043,7 +1983,15 @@
           "autoincrement": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "unembeddable_hash_idx": {
+          "name": "unembeddable_hash_idx",
+          "columns": [
+            "hash"
+          ],
+          "isUnique": false
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {
         "unembeddable_model_hash_pk": {
@@ -2657,6 +2605,13 @@
           ],
           "isUnique": false,
           "where": "parked_at IS NOT NULL"
+        },
+        "work_items_key_idx": {
+          "name": "work_items_key_idx",
+          "columns": [
+            "key"
+          ],
+          "isUnique": false
         }
       },
       "foreignKeys": {},

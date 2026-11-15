@@ -1418,11 +1418,6 @@ msgstr "Een wijziging geldt voor runs die daarna starten: runs die al bezig zijn
 
 #: src/apps/app-access-requests.tsx
 #: src/apps/draft-changes.tsx
-msgid "A collection"
-msgstr "Een collectie"
-
-#: src/apps/app-access-requests.tsx
-#: src/apps/draft-changes.tsx
 msgid "A connection"
 msgstr "Een verbinding"
 
@@ -3875,10 +3870,6 @@ msgstr "Munten"
 #: src/onboarding/interviews-progress.tsx
 msgid "colleagues talked"
 msgstr "collega’s gesproken"
-
-#: src/activity/pending.tsx
-msgid "Collection {collectionId}"
-msgstr "Collectie {collectionId}"
 
 #: src/chat/composer-menu.tsx
 #: src/chat/mentions.tsx
@@ -15129,8 +15120,8 @@ msgid "Version {version} declares no binding to approve."
 msgstr "Versie {version} declareert geen koppeling om goed te keuren."
 
 #: src/inbox/items.ts
-msgid "Version {version} of {name} is live, but nothing starts it until an admin approves what it reaches: each model, connection, store or collection it calls."
-msgstr "Versie {version} van {name} is live, maar niets start haar totdat een admin goedkeurt wat ze bereikt: elk model, elke verbinding, elke opslag of verzameling die ze aanroept."
+msgid "Version {version} of {name} is live, but nothing starts it until an admin approves what it reaches: each model and connection it calls, and the Brain."
+msgstr "Versie {version} van {name} is live, maar niets start haar totdat een admin goedkeurt wat ze bereikt: elk model en elke verbinding die ze aanroept, en het Brain."
 
 #: src/brain/sources-page.tsx
 msgid "Version {version}, added {added}"
