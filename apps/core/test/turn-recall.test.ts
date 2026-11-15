@@ -1,4 +1,5 @@
 import { brainOf, personalBrainOf } from "@grasp-os/brain-next/contract";
+import { auditProvenanceMaxItems } from "@grasp-os/shared/audit";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -7,6 +8,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { recordRunReads } from "../src/agent-scope.ts";
 import { withheldResult } from "../src/agent.ts";
 import { organizationId } from "../src/auth/auth.ts";
 import {
@@ -28,6 +30,7 @@ import type {
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { chatAudiences, teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
+import { brainMemoryRead } from "../src/history-access.ts";
 import {
   analysisPurpose,
   recallTimeoutReason,
@@ -37,6 +40,8 @@ import type { ChatPlace } from "../src/workspace.ts";
 import {
   chatOf,
   codeStep,
+  openTestRun,
+  personalChatsOf,
   model,
   says,
   setObjectEnv,
@@ -3021,5 +3026,254 @@ describe("two recalls merged into one pack", setUpTime, () => {
 
     expect(before.notFound).toContain(theirs);
     await expect(asked()).resolves.toStrictEqual(before);
+  });
+});
+
+/**
+ * Whether what `personId` recalls for `question` as themselves, as their
+ * own chat does (`recallAs` with `personal`), as of `asOf` if given, holds
+ * both `memories`, and the first above the second.
+ */
+const placeIn = async (
+  personId: string,
+  question: string,
+  [upper, lower]: readonly [string, string],
+  { asOf }: { asOf?: Date } = {}
+): Promise<{ first: boolean; both: boolean }> => {
+  const pack = await recallAs(env, personId, {
+    question,
+    budget: { tokens: 20_000 },
+    personal: true,
+    ...(asOf === undefined ? {} : { asOf }),
+  });
+  const indexOf = (memory: string) =>
+    pack.memories.findIndex((each) => each.memory === memory);
+  return {
+    first: indexOf(upper) >= 0 && indexOf(upper) < indexOf(lower),
+    both: indexOf(upper) >= 0 && indexOf(lower) >= 0,
+  };
+};
+
+/** A memory of `personId`'s own store, in their own word, `statement`. */
+const ownMemory = async (personId: string, statement: string) => {
+  const { memory } = await rememberAs(env, personId, {
+    change: crypto.randomUUID(),
+    about: { kind: "customer", names: [`Depot ${word()}`] },
+    type: "fact",
+    statement,
+    quote: statement,
+  });
+  return memory;
+};
+
+/**
+ * Whether the recall before the question in `body` (a request to the
+ * provider) handed the model both `memories`, the first above the second.
+ */
+const handedOrder = (
+  body: unknown,
+  [upper, lower]: readonly [string, string]
+): { first: boolean; both: boolean } => {
+  const handed = handedIn(body).memories.map(({ memory }) => memory);
+  return {
+    first:
+      handed.includes(upper) && handed.indexOf(upper) < handed.indexOf(lower),
+    both: handed.includes(upper) && handed.includes(lower),
+  };
+};
+
+// Fading (GRA-1753): a memory a recall as the person handed over in their
+// own chat is one they used, as their Workspace keeps it; among equals it
+// ranks above one they never used, for them alone, in the shared store
+// and in their own, and only where the answer reaches them alone. From
+// the ways it can fail: one person's use reorders another's recall, or a
+// recall others read (a channel, a chat app, a turn they didn't start); a
+// recall of the past is ordered by a use that came later; a faded memory
+// is lost; a failed lookup fails the recall.
+describe("memories a person never uses fade for them", setUpTime, () => {
+  it("ranks the memories their chat used above equal ones, shared and their own, for them alone, from then on and only where the answer reaches them alone, and still finds the others when asked about them", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const [ada, bea] = await Promise.all([
+      signedInWithRole(idp, "user"),
+      signedInWithRole(idp, "user"),
+    ]);
+    const [topic, ownTopic, monday, friday] = [word(), word(), word(), word()];
+    // Two memories everyone may read that hold the topic alike, and two of
+    // Ada's own that hold hers, the second of each learned later; only the
+    // first of each holds the word her turn asks for.
+    const [used = ""] = await rememberedAbout("company", `Depot ${word()}`, [
+      { statement: `The ${topic} pallets go out on ${monday}` },
+    ]);
+    const [unused = ""] = await rememberedAbout("company", `Depot ${word()}`, [
+      { statement: `The ${topic} pallets go out on ${friday}` },
+    ]);
+    const ownUsed = await ownMemory(
+      ada.userId,
+      `The ${ownTopic} crates go out on ${monday}`
+    );
+    const ownUnused = await ownMemory(
+      ada.userId,
+      `The ${ownTopic} crates go out on ${friday}`
+    );
+    const beaBefore = await placeIn(bea.userId, topic, [unused, used]);
+    const chats = await personalChatsOf(ada.userId, says("Mondays."));
+    await requestGranted(idp, admin, {
+      subject: chats.agent,
+      object: { type: "platform" },
+      actions: ["brain"],
+      binding: "BRAIN",
+    });
+    const { ask } = await chats.newChat();
+    const beforeTurn = new Date();
+
+    await ask(`${monday}?`);
+    // The same question everywhere the answer reaches others: as the
+    // company, ordered as for someone who never used either memory.
+    const viaCompany = async (
+      asked: (agentId: string) => Promise<unknown>
+    ): Promise<{ first: boolean; both: boolean }> => {
+      const agentId = crypto.randomUUID();
+      await requestGranted(idp, admin, {
+        subject: { type: "agent", agentId },
+        object: { type: "platform" },
+        actions: ["brain"],
+        binding: "BRAIN",
+      });
+      const provider = await fakeProvider(says("Noted."));
+      await asked(agentId);
+      return handedOrder(provider.requests[0]?.body, [unused, used]);
+    };
+    const through = (inThread: boolean) => async (agentId: string) =>
+      await workspace(env, personalWorkspaceId(ada.userId)).askThrough(
+        ada.userId,
+        agentId,
+        "slack",
+        topic,
+        undefined,
+        inThread
+          ? {
+              thread: `C${unique()}`,
+              kind: "group",
+              audience: { members: [ada.userId], outsiders: false },
+            }
+          : { kind: "direct" }
+      );
+    const chatApp = await viaCompany(through(false));
+    const channel = await viaCompany(through(true));
+    const woken = await recallingChatOf(ada.userId, says("Noted."));
+    await woken.stub.askUnattended(woken.chat.id, { text: topic, model });
+
+    expect({
+      handed: handedIn(chats.provider.requests[0]?.body)
+        .memories.map(({ memory }) => memory)
+        .filter((memory) => [used, unused, ownUsed, ownUnused].includes(memory))
+        .toSorted(),
+      ada: await placeIn(ada.userId, topic, [used, unused]),
+      adaOwn: await placeIn(ada.userId, ownTopic, [ownUsed, ownUnused]),
+      // Before its latest use, a memory ranks as one never used.
+      adaBeforeTurn: await placeIn(ada.userId, topic, [unused, used], {
+        asOf: beforeTurn,
+      }),
+      chatApp,
+      channel,
+      woken: handedOrder(woken.provider.requests[0]?.body, [unused, used]),
+      beaBefore,
+      beaAfter: await placeIn(bea.userId, topic, [unused, used]),
+      adaAsked: await placeIn(ada.userId, `${topic} ${friday}`, [unused, used]),
+    }).toStrictEqual({
+      handed: [used, ownUsed].toSorted(),
+      ada: { first: true, both: true },
+      adaOwn: { first: true, both: true },
+      adaBeforeTurn: { first: true, both: true },
+      chatApp: { first: true, both: true },
+      channel: { first: true, both: true },
+      woken: { first: true, both: true },
+      beaBefore: { first: true, both: true },
+      beaAfter: { first: true, both: true },
+      adaAsked: { first: true, both: true },
+    });
+  });
+
+  it("keeps the use of every memory a run hands over at once, however many", async () => {
+    const eve = await signedInWithRole(idp, "user");
+    const chats = await personalChatsOf(eve.userId);
+    const { chat } = await chats.newChat();
+    const runId = await openTestRun(chats.stub, chat.id);
+    // Past one call's worth of reads (`auditProvenanceMaxItems`), so the
+    // run's reads are kept a hundred at a time.
+    const memories = Array.from({ length: auditProvenanceMaxItems + 50 }, () =>
+      crypto.randomUUID()
+    );
+
+    await recordRunReads(
+      env,
+      {
+        workspaceId: chats.id,
+        agentId: chats.agent.agentId,
+        chatId: chat.id,
+        personId: eve.userId,
+        runId,
+      },
+      memories.map((memory) => brainMemoryRead({ store: "shared", memory }))
+    );
+
+    const uses = await chats.stub.memoriesUsed(Date.now());
+    const used = new Set(uses.map(({ memory }) => memory));
+    expect(memories.filter((memory) => !used.has(memory))).toStrictEqual([]);
+  });
+
+  it("passes over a use that doesn't name a memory's place, and still ranks by the others", async () => {
+    const dan = await signedInWithRole(idp, "user");
+    const topic = word();
+    const [older = ""] = await rememberedAbout("company", `Depot ${word()}`, [
+      { statement: `The ${topic} pallets go out early` },
+    ]);
+    const [newer = ""] = await rememberedAbout("company", `Depot ${word()}`, [
+      { statement: `The ${topic} pallets go out late` },
+    ]);
+    // An id the Brain would refuse beside a use of the older memory.
+    await runInDurableObject(
+      workspace(env, personalWorkspaceId(dan.userId)),
+      (_instance, state) => {
+        for (const memory of ["not-a-memory", older]) {
+          state.storage.sql.exec(
+            "INSERT INTO memory_uses (store, memory, used_at) VALUES ('shared', ?, ?)",
+            memory,
+            Date.now()
+          );
+        }
+      }
+    );
+
+    await expect(
+      placeIn(dan.userId, topic, [older, newer])
+    ).resolves.toStrictEqual({
+      first: true,
+      both: true,
+    });
+  });
+
+  it("recalls without ranking by use when the lookup of what they used fails", async () => {
+    const cara = await signedInWithRole(idp, "user");
+    const topic = word();
+    const [older = ""] = await rememberedAbout("company", `Depot ${word()}`, [
+      { statement: `The ${topic} pallets go out early` },
+    ]);
+    const [newer = ""] = await rememberedAbout("company", `Depot ${word()}`, [
+      { statement: `The ${topic} pallets go out late` },
+    ]);
+    // Their Workspace can no longer read what they used.
+    await runInDurableObject(
+      workspace(env, personalWorkspaceId(cara.userId)),
+      (_instance, state) => {
+        state.storage.sql.exec(
+          "ALTER TABLE memory_uses RENAME TO memory_uses_gone"
+        );
+      }
+    );
+
+    await expect(
+      placeIn(cara.userId, topic, [newer, older])
+    ).resolves.toStrictEqual({ first: true, both: true });
   });
 });

@@ -568,12 +568,15 @@ const requestOf = (
     event,
     locale: told.locale,
     interviewer: now.interviewer ?? "stephen",
-    lines: lines.map(({ from, text, typed, file }) => ({
-      from,
-      text,
-      ...(typed === true ? { typed } : {}),
-      ...(file === undefined ? {} : { file }),
-    })),
+    // A line they removed is said to no one again, the model included.
+    lines: lines
+      .filter(({ removed }) => removed !== true)
+      .map(({ from, text, typed, file }) => ({
+        from,
+        text,
+        ...(typed === true ? { typed } : {}),
+        ...(file === undefined ? {} : { file }),
+      })),
     facts: now.facts
       .filter(({ out }) => out !== true)
       .map(({ id, tag, text }) => ({ id, tag, text })),
