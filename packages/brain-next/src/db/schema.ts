@@ -462,11 +462,22 @@ export const erasures = sqliteTable(
      * the other kinds.
      */
     memories: integer(),
+    /**
+     * The SHA-256 of the change a writer's erasure was asked under
+     * (contract.ts `WriterErasure.change`), as its ledger entry keeps it:
+     * the same change again answers this erasure. Null for the other kinds.
+     */
+    change: text(),
   },
   (table) => [
-    // An add looks up whether its source, or its one reader, was erased;
-    // a read whether a writer's erasure came after a memory.
+    // An add looks up whether its source, or its one reader, was erased.
     index("erasures_subject_idx").on(table.kind, table.subject),
+    // Whether an erasure of a memory's writer came after it was learned,
+    // asked of every memory a read takes (memories.ts `unerasedSql`): one
+    // seek, however often the writer was erased.
+    index("erasures_writer_idx")
+      .on(table.subject, table.erasedAt)
+      .where(sql.raw("kind = 'writer'")),
     // The tick confirms what isn't yet.
     index("erasures_unconfirmed_idx")
       .on(table.key)
@@ -837,9 +848,9 @@ export const memories = sqliteTable(
     /**
      * The SHA-256 of the writer's lineage (`lineage`), as the erasure
      * ledger names a writer: how a read finds the writer's erasures, and a
-     * replay what they covered (erasure.ts). Null for a source's memory;
-     * kept as the store starts for one an older release wrote (erasure.ts
-     * `keepMissingWriterSubjects`).
+     * replay what they covered (erasure.ts). Null for a source's memory.
+     * Set by every add and restore: no release before it wrote a writer's
+     * memories to the shared store.
      */
     writerSubject: text("writer_subject"),
     lineage: text().notNull(),

@@ -77,7 +77,8 @@ const perMemory = async (small: number, large: number, others: number) => {
     await writtenBy(stub, writer, count);
     return (
       (await rowsReadBy(
-        async () => await stub.eraseWriter({ writer, reason: "deleted" })
+        async () =>
+          await stub.eraseWriter({ writer, reason: "deleted", change: "reset" })
       )) / count
     );
   };
@@ -87,7 +88,75 @@ const perMemory = async (small: number, large: number, others: number) => {
 /** How much more a memory of a writer four times as large may cost: index trees grow a level. */
 const margin = 1.1;
 
+/**
+ * Rows an index seek may read more as the indexes grow deeper (as in
+ * memories-cost.test.ts): a check of each memory against every earlier
+ * erasure of its writer would read one more row a memory an erasure.
+ */
+const seekMargin = 8;
+
+/** The reads of 20 memories of one writer's, erased `times` before they were written. */
+const readsAfter = async (
+  { stub, rowsReadBy }: Awaited<ReturnType<typeof countedStore>>,
+  times: number
+): Promise<Record<string, number>> => {
+  const writer = `app:${crypto.randomUUID()}`;
+  for (let time = 0; time < times; time += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one erasure at a time
+    await stub.eraseWriter({ writer, reason: "deleted", change: `${time}` });
+  }
+  const name = `w${crypto.randomUUID().replaceAll(/[\d-]/gu, "").slice(0, 10)}`;
+  const { entities } = await stub.addMemories({
+    change: crypto.randomUUID(),
+    access: { kind: "audience", group: "team:cost" },
+    entities: [{ key: "c", kind: "customer", names: [`${name} Holdings`] }],
+    memories: Array.from({ length: 20 }, (_, index) => ({
+      about: "c",
+      type: "fact" as const,
+      statement: `${name} said ${index}`,
+      speaker: { kind: "system" as const },
+      basis: { kind: "writer" as const, writer },
+    })),
+  });
+  const entity = entities.c ?? "";
+  const reader = { person: "p", groups: ["team:cost"] };
+  return {
+    readMemories: await rowsReadBy(
+      async () => await stub.readMemories({ entity, reader })
+    ),
+    readCard: await rowsReadBy(
+      async () => await stub.readCard({ entity, reader })
+    ),
+    findEntities: await rowsReadBy(
+      async () => await stub.findEntities({ reader, name: `${name} Holdings` })
+    ),
+    recall: await rowsReadBy(
+      async () =>
+        await stub.recall({ question: name, reader, budget: { tokens: 4000 } })
+    ),
+  };
+};
+
 describe("what a writer's erasure costs", () => {
+  it("leaves reads of the writer's later memories as dear as if it had never been erased, however often it was", async () => {
+    const store = await countedStore();
+    const never = await readsAfter(store, 0);
+    const often = await readsAfter(store, 20);
+    expect(
+      Object.fromEntries(
+        Object.entries(often).map(([read, rows]) => [
+          read,
+          rows - (never[read] ?? 0) <= seekMargin,
+        ])
+      )
+    ).toStrictEqual({
+      readMemories: true,
+      readCard: true,
+      findEntities: true,
+      recall: true,
+    });
+  });
+
   it("reads rows in proportion to the writer's memories, and none for anyone else's", async () => {
     const [small = 0, large = 0] = await perMemory(100, 400, 0);
     expect(large).toBeLessThanOrEqual(small * margin);

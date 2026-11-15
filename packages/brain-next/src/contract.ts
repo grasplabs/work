@@ -1337,13 +1337,19 @@ export type PersonErasure = z.infer<typeof personErasureSchema>;
 export const writerErasureSchema = z.strictObject({
   writer: principalSchema,
   reason: z.enum(erasureReasons),
+  /**
+   * The caller's key for this erasure, the same on each of its retries
+   * (one per store deletion, one per data reset): the same change answers
+   * the erasure it made, and erases nothing more; another is another.
+   */
+  change: changeKeySchema,
 });
 export type WriterErasure = z.infer<typeof writerErasureSchema>;
 
 /**
  * What an erasure of a writer's memories answers: when it was recorded,
- * and how many memories it covered then; the same on every repeat that
- * finds nothing of the writer learned since (`Brain.eraseWriter`).
+ * and how many memories it covered then; the same on every repeat of its
+ * change (`Brain.eraseWriter`).
  */
 export interface WriterErased {
   erasedAt: Date;
@@ -2808,8 +2814,9 @@ export interface Brain {
    * source, and no memory of anyone else, on the same entity or not. The
    * writer isn't closed: what it adds afterwards is new and kept. Answers
    * when it was recorded and how many memories it covered
-   * (`WriterErased`); repeated with nothing of the writer learned since,
-   * the same again, so a retry's answer is the first one's. Returns only
+   * (`WriterErased`); repeated with the same change, the same again and
+   * nothing more erased, also after a restart or a restore, so a retry's
+   * answer is the first one's. Another change is another erasure. Returns only
    * once the erasure is in the ledger: one that throws must be repeated.
    * The shared store's alone: a person's own store refuses.
    */

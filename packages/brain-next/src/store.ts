@@ -1173,17 +1173,17 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * kept nowhere else.
    */
   async eraseWriter(request: WriterErasure): Promise<WriterErased> {
-    const { writer, reason } = checked(writerErasureSchema, request);
+    const { writer, reason, change } = checked(writerErasureSchema, request);
     if (this.#kind.kind === "person") {
       throw new Error(sharedOnly);
     }
     return await this.#changing(async () => {
       await this.#readyToWrite();
-      const { at, memories } = await eraseWriter(
-        this.#erasures,
+      const { at, memories } = await eraseWriter(this.#erasures, {
         writer,
-        reason
-      );
+        reason,
+        change,
+      });
       return { erasedAt: new Date(at), memories };
     });
   }
@@ -1658,16 +1658,29 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * parked: an erasure must finish.
    */
   #erase(at: Date): void {
+    let failed = false;
     try {
-      const { failed } = eraseBatch(this.ctx.storage);
-      // Then a batch of the memories writers' erasures hid, each batch in
-      // one transaction (erasure.ts `eraseWriterBatch`).
-      eraseWriterBatch(this.ctx.storage);
-      this.#stepsFailed.erase = failed ? { at, reason: "failed" } : null;
+      ({ failed } = eraseBatch(this.ctx.storage));
     } catch {
       // Nothing of the error is kept: the batch stays to do.
-      this.#stepsFailed.erase = { at, reason: "failed" };
+      failed = true;
     }
+    // Then a batch of the memories writers' erasures hid, on its own, so a
+    // failure of either never holds the other back (erasure.ts
+    // `eraseWriterBatch`). What it fails to delete stays hidden from every
+    // read (memories.ts `unerasedSql`) and is tried again next tick.
+    let writers: string | null;
+    try {
+      writers = eraseWriterBatch(this.ctx.storage).failed;
+    } catch (error) {
+      writers = error instanceof Error ? error.name : "unknown";
+    }
+    if (writers !== null) {
+      // Its name alone: an error's words may be the database's own.
+      log.error("brain.writer_erasure_failed", { error: writers });
+    }
+    this.#stepsFailed.erase =
+      failed || writers !== null ? { at, reason: "failed" } : null;
   }
 
   /**

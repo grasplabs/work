@@ -1620,13 +1620,14 @@ export const erasePerson = async (
  * from every read once it returns, recorded in the Brain's ledger so a
  * restore can't bring them back; what the writer adds afterwards is kept.
  * Answers when it was recorded and how many memories it covered, the same
- * on a repeat that finds nothing of the writer learned since: what one
- * audit event of it says. A call that throws must be repeated until it
+ * on every repeat of `change` (one per store deletion, one per data reset
+ * request), which erases nothing more: what one audit event of it says. A
+ * call that throws must be repeated, with the same change, until it
  * answers.
  */
 export const eraseWriter = async (
   env: BrainEnv,
-  erased: { writer: string; reason: ErasureReason }
+  erased: { writer: string; reason: ErasureReason; change: string }
 ): Promise<Awaited<ReturnType<Brain["eraseWriter"]>>> =>
   await brain(env).eraseWriter(erased);
 

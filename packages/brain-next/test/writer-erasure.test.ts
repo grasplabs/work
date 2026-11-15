@@ -252,7 +252,11 @@ describe("a writer's erasure", () => {
     // Cut off: the call's own batch of deletes fails, as a store stopping
     // mid-deletion would leave it.
     await holdDeletes(true);
-    const erased = await shared().eraseWriter({ writer, reason: "deleted" });
+    const erased = await shared().eraseWriter({
+      writer,
+      reason: "deleted",
+      change: "reset-1",
+    });
     /** What the reader reads now, and what the store still holds. */
     const seen = async () => {
       const read = await everything(
@@ -321,7 +325,7 @@ describe("a writer's erasure", () => {
     });
   });
 
-  it("answers a retry, also after a restart, with the first erasure, and erases what the writer adds afterwards only when asked again", async () => {
+  it("answers its change again, also after a restart and an add in between, with the first erasure and nothing more erased; another change erases anew", async () => {
     const group = unique("g");
     const reader: Reader = { person: unique("p"), groups: [group] };
     const writer = app();
@@ -334,21 +338,18 @@ describe("a writer's erasure", () => {
       );
     const { entities } = await entityOf(`${name} before`);
     const entity = entities.c ?? "";
+    const erase = async (change: string) =>
+      await shared().eraseWriter({ writer, reason: "deleted", change });
 
-    const erased = await shared().eraseWriter({ writer, reason: "deleted" });
-    const retried = await shared().eraseWriter({ writer, reason: "deleted" });
-    await kill(shared());
-    const restarted = await shared().eraseWriter({ writer, reason: "deleted" });
-    expect({ covered: erased.memories, retried, restarted }).toStrictEqual({
-      covered: 1,
-      retried: erased,
-      restarted: erased,
-    });
-
-    // The writer may remember anew: kept, readable, and the retry above
-    // never reaches it. Its name links to nothing the erasure took.
+    const erased = await erase("reset-1");
+    // The answer lost, the writer remembers anew, and the call is made
+    // again: it is the same erasure, and the new memory stays. Its name
+    // links to nothing the erasure took.
     const again = await entityOf(`${name} after`);
     const anew = again.entities.c ?? "";
+    const retried = await erase("reset-1");
+    await kill(shared());
+    const restarted = await erase("reset-1");
     const read = async () => {
       const { memories } = await shared().readMemories({
         entity: anew,
@@ -357,17 +358,27 @@ describe("a writer's erasure", () => {
       });
       return memories.map(({ statement }) => statement);
     };
-    expect({ linked: anew === entity, read: await read() }).toStrictEqual({
+    expect({
+      covered: erased.memories,
+      retried,
+      restarted,
+      linked: anew === entity,
+      read: await read(),
+    }).toStrictEqual({
+      covered: 1,
+      retried: erased,
+      restarted: erased,
       linked: false,
       read: [`${name} after`],
     });
 
-    const later = await shared().eraseWriter({ writer, reason: "deleted" });
+    const later = await erase("reset-2");
     expect({
       memories: later.memories,
       after: later.erasedAt.getTime() > erased.erasedAt.getTime(),
       read: await read(),
-    }).toStrictEqual({ memories: 1, after: true, read: [] });
+      first: await erase("reset-1"),
+    }).toStrictEqual({ memories: 1, after: true, read: [], first: erased });
   });
 
   it("replays after an older copy of the store comes back: what it erased stays gone, what the writer added since is the copy's to hold, and a later add is kept", async () => {
@@ -390,8 +401,19 @@ describe("a writer's erasure", () => {
       return memories.map(({ statement }) => statement);
     };
     const before = await copyOf(shared());
+    // A second memory the copy from before doesn't hold: the erasure
+    // covers two, and a recount in that copy would find one.
+    await remember(
+      group,
+      [{ key: "c", id: entity, kind: "customer", names: [] }],
+      [said("c", `${name} older`, { kind: "writer", writer })]
+    );
 
-    const erased = await shared().eraseWriter({ writer, reason: "deleted" });
+    const erased = await shared().eraseWriter({
+      writer,
+      reason: "deleted",
+      change: "reset-1",
+    });
     const added = await remember(
       group,
       [{ key: "c", kind: "customer", names: [`${name} Fresh`] }],
@@ -404,12 +426,26 @@ describe("a writer's erasure", () => {
     // replay hides it before anything is answered; the new one it never
     // held. Its tick deletes the old one.
     await restore(shared(), before);
-    const replayed = { old: await read(entity), fresh: await read(fresh) };
+    const replayed = {
+      old: await read(entity),
+      fresh: await read(fresh),
+      // The stored answer, as the ledger's entry keeps it: not a recount.
+      retried: await shared().eraseWriter({
+        writer,
+        reason: "deleted",
+        change: "reset-1",
+      }),
+    };
     await tick(shared());
     expect({
       ...replayed,
       held: await heldOf(writer, `${name} Group`),
-    }).toStrictEqual({ old: [], fresh: [], held: { memories: 0, names: 0 } });
+    }).toStrictEqual({
+      old: [],
+      fresh: [],
+      retried: { erasedAt: erased.erasedAt, memories: 2 },
+      held: { memories: 0, names: 0 },
+    });
     // An add now is kept, even with the clock behind the erasure: the
     // replay raised the store's stamp past it.
     vi.useFakeTimers({
@@ -434,7 +470,11 @@ describe("a writer's erasure", () => {
     expect({
       fresh: await read(fresh),
       old: await read(entity),
-      again: await shared().eraseWriter({ writer, reason: "deleted" }),
+      again: await shared().eraseWriter({
+        writer,
+        reason: "deleted",
+        change: "reset-2",
+      }),
     }).toMatchObject({
       fresh: [`${name} new`],
       old: [],
@@ -459,7 +499,12 @@ describe("a writer's erasure", () => {
 
     await breakPuts(true);
     await expect(
-      (async () => await shared().eraseWriter({ writer, reason: "deleted" }))()
+      (async () =>
+        await shared().eraseWriter({
+          writer,
+          reason: "deleted",
+          change: "reset-1",
+        }))()
     ).rejects.toThrow(/could not record the erasure/u);
     await breakPuts(false);
     const hidden = await shared().readMemories({
@@ -474,7 +519,11 @@ describe("a writer's erasure", () => {
       recorded: 1,
     });
 
-    const erased = await shared().eraseWriter({ writer, reason: "deleted" });
+    const erased = await shared().eraseWriter({
+      writer,
+      reason: "deleted",
+      change: "reset-1",
+    });
     const listed = await env.BRAIN_OBJECTS.list({ prefix: "erasures/" });
     const entry = `erasures/${String(erased.erasedAt.getTime()).padStart(15, "0")}-writer-`;
     expect({
@@ -486,12 +535,61 @@ describe("a writer's erasure", () => {
     });
   });
 
+  it("deletes the rest of a batch when one memory keeps failing to delete, and that one once it can be", async () => {
+    const group = unique("g");
+    const writer = app();
+    const name = word();
+    const { memories } = await remember(
+      group,
+      [{ key: "c", kind: "customer", names: [`${name} Works`] }],
+      ["one", "two", "three"].map((which) =>
+        said("c", `${name} ${which}`, { kind: "writer", writer })
+      )
+    );
+    const [stuck] = memories;
+    await runInDurableObject(shared(), (_instance, state) => {
+      state.storage.sql.exec(
+        `CREATE TRIGGER test_stuck BEFORE DELETE ON memories
+        WHEN old.id = '${stuck ?? ""}' BEGIN
+          SELECT RAISE(ABORT, 'stuck by the test');
+        END`
+      );
+    });
+    const held = async () =>
+      await runInDurableObject(shared(), (_instance, state) =>
+        state.storage.sql
+          .exec<{ id: string }>(
+            "SELECT id FROM memories WHERE writer = ?",
+            writer
+          )
+          .toArray()
+          .map(({ id }) => id)
+      );
+    await shared().eraseWriter({ writer, reason: "deleted", change: "reset" });
+    await tick(shared());
+    const stuckOnly = await held();
+    const failing = await shared().workOverview();
+    await runInDurableObject(shared(), (_instance, state) => {
+      state.storage.sql.exec("DROP TRIGGER test_stuck");
+    });
+    await tick(shared());
+    expect({
+      stuckOnly,
+      failed: failing.stepsFailed.erase?.reason,
+      after: await held(),
+    }).toStrictEqual({ stuckOnly: [stuck], failed: "failed", after: [] });
+  });
+
   it("is the shared store's alone", async () => {
     const person = unique("p");
     const own = env.BRAIN_STORE.getByName(`person:${person}`);
     await expect(
       (async () =>
-        await own.eraseWriter({ writer: app(), reason: "deleted" }))()
+        await own.eraseWriter({
+          writer: app(),
+          reason: "deleted",
+          change: "reset-1",
+        }))()
     ).rejects.toThrow("only the shared store takes this");
   });
 
@@ -513,8 +611,8 @@ describe("a writer's erasure", () => {
         ?.rows.find(({ kind }) => kind === "source")?.key;
       const erasure = typeof key === "string" ? key : "";
       // The store as the release before left it: `erasures` without a
-      // writer's kind or its count, memories without the writer's subject or
-      // the retiring change, the last two migrations not yet run, and a row
+      // writer's kind, its count or its change, memories without the writer's subject or
+      // the retiring change, the last three migrations not yet run, and a row
       // that points at the erasure.
       const before: Copy = {
         tables: now.tables.map((table) => {
@@ -524,11 +622,12 @@ describe("a writer's erasure", () => {
                 ...table,
                 created: table.created
                   .replace(", 'writer'", "")
-                  .replace(/,\s*`memories` integer/u, ""),
+                  .replace(/,\s*`memories` integer/u, "")
+                  .replace(/,\s*`change` text/u, ""),
                 // Earlier tests' writers' erasures: the release before had none.
                 rows: table.rows
                   .filter(({ kind }) => kind !== "writer")
-                  .map((row) => without(row, "memories")),
+                  .map((row) => without(row, "memories", "change")),
               };
             }
             case "memories": {
@@ -558,7 +657,7 @@ describe("a writer's erasure", () => {
                   .toSorted(
                     (a, b) => Number(a.created_at) - Number(b.created_at)
                   )
-                  .slice(0, -2),
+                  .slice(0, -3),
               };
             }
             default: {
@@ -567,7 +666,9 @@ describe("a writer's erasure", () => {
           }
         }),
         others: now.others.filter(
-          (made) => !made.includes("memories_writer_idx")
+          (made) =>
+            !made.includes("memories_writer_idx") &&
+            !made.includes("erasures_writer_idx")
         ),
       };
       expect(
@@ -579,7 +680,11 @@ describe("a writer's erasure", () => {
         shared().erasureStatus({ kind: "source", source })
       ).resolves.toMatchObject({ state: "erased" });
       await expect(
-        shared().eraseWriter({ writer: app(), reason: "deleted" })
+        shared().eraseWriter({
+          writer: app(),
+          reason: "deleted",
+          change: "reset-1",
+        })
       ).resolves.toMatchObject({ memories: 0 });
       // Its triggers are back: an erasure is never deleted.
       await expect(
@@ -612,7 +717,11 @@ describe("a writer's erasure", () => {
       // Its memories hidden and not yet deleted, while the next export is
       // written: it holds none of them.
       await holdDeletes(true);
-      await shared().eraseWriter({ writer, reason: "deleted" });
+      await shared().eraseWriter({
+        writer,
+        reason: "deleted",
+        change: "reset-1",
+      });
       await tick(shared());
       await expect(shared().exportStatus({ id: older })).resolves.toMatchObject(
         {

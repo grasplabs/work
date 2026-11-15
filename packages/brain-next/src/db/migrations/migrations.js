@@ -16,6 +16,7 @@ import m0013 from './0013_entity_indexes.sql';
 import m0014 from './0014_erasure_counts.sql';
 import m0015 from './0015_writer_erasure.sql';
 import m0016 from './0016_writer_erasure_kind.sql';
+import m0017 from './0017_writer_erasure_change.sql';
 
   export default {
     journal,
@@ -36,7 +37,8 @@ m0012,
 m0013,
 m0014,
 m0015,
-m0016
+m0016,
+m0017
     }
   }
   

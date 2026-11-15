@@ -78,6 +78,28 @@ const readableKeysSql = `SELECT key FROM reader_sets
     WHERE id IN (SELECT reader_set FROM readable)`;
 
 /**
+ * Whether the row `erasure` of `erasures` is an erasure of the writer
+ * whose lineage's SHA-256 is `subject` made after the moment `at` (SQL
+ * expressions): one seek of `erasures_writer_idx`, however often the
+ * writer was erased. The one rule of what a writer's erasure covers.
+ */
+export const writerErasedAfterSql = (
+  erasure: string,
+  subject: string,
+  at: string
+): string =>
+  `(${erasure}.kind = 'writer' AND ${erasure}.subject = ${subject}
+    AND ${erasure}.erased_at > ${at})`;
+
+/** Whether the row `erasure` of `erasures` covers the memory `memory` (`writerErasedAfterSql`). */
+export const erasedBySql = (memory: string, erasure: string): string =>
+  writerErasedAfterSql(
+    erasure,
+    `${memory}.writer_subject`,
+    `${memory}.learned_at`
+  );
+
+/**
  * Whether no erasure of the memory `alias`'s writer came after it was
  * learned (erasure.ts `eraseWriter`): a writer's erasure hides, from the
  * statement that records it on, every memory of that writer learned
@@ -87,9 +109,7 @@ const readableKeysSql = `SELECT key FROM reader_sets
  */
 export const unerasedSql = (alias: string): string => `(
   ${alias}.writer_subject IS NULL OR NOT EXISTS (
-    SELECT 1 FROM erasures AS gone
-    WHERE gone.kind = 'writer' AND gone.subject = ${alias}.writer_subject
-      AND gone.erased_at > ${alias}.learned_at
+    SELECT 1 FROM erasures AS gone WHERE ${erasedBySql(alias, "gone")}
   )
 )`;
 

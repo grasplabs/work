@@ -2421,15 +2421,27 @@ export const coreProbes = {
       await erase("a writer with marked memories", {
         writer,
         reason: "deleted",
+        change: "reset",
       }),
-      await erase("the same erasure again", { writer, reason: "deleted" }),
+      await erase("the same erasure again", {
+        writer,
+        reason: "deleted",
+        change: "reset",
+      }),
+      await erase("a change named by the markers", {
+        writer,
+        reason: "deleted",
+        change: markers.join(" "),
+      }),
       await erase("a writer named by the markers, too long", {
         writer: markers.join("").repeat(300),
         reason: "deleted",
+        change: "reset",
       }),
       await erase("a reason named by the markers", {
         writer,
         reason: markers.join(" "),
+        change: "reset",
       }),
     ];
   },
@@ -7572,23 +7584,37 @@ export const storeProbes = {
       await erase("a writer who wrote nothing", {
         writer: `app:${stranger()}`,
         reason: "deleted",
+        change: "reset",
       }),
       await erase("a writer with marked memories", {
         writer,
         reason: "deleted",
+        change: "reset",
       }),
-      await erase("the same erasure again", { writer, reason: "deleted" }),
+      await erase("the same erasure again", {
+        writer,
+        reason: "deleted",
+        change: "reset",
+      }),
+      await erase("a change named by the markers", {
+        writer,
+        reason: "deleted",
+        change: markers.join(" "),
+      }),
       await erase("a writer named by the markers, too long", {
         writer: markers.join("").repeat(300),
         reason: "deleted",
+        change: "reset",
       }),
       await erase("a reason named by the markers", {
         writer,
         reason: markers.join(" "),
+        change: "reset",
       }),
       await erase("an unknown field", {
         writer,
         reason: "deleted",
+        change: "reset",
         extra: markers.join(" "),
       }),
     ];

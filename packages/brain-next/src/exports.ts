@@ -23,7 +23,7 @@ import type {
 } from "./contract.ts";
 import { subjectOf } from "./erasure.ts";
 import { fileKeyOf, hashOf } from "./files.ts";
-import { unerasedSql } from "./memories.ts";
+import { unerasedSql, writerErasedAfterSql } from "./memories.ts";
 import { accessOfKey, readerSetKeyOf } from "./reader-sets.ts";
 import { answerSchema } from "./remember.ts";
 import {
@@ -442,8 +442,7 @@ const namedSql = (subject: string, version: string): string => `(
   )
   OR EXISTS (
     SELECT 1 FROM erasures
-    WHERE erasures.kind = 'writer' AND erasures.subject = ${subject}
-      AND erasures.erased_at > ${version}
+    WHERE ${writerErasedAfterSql("erasures", subject, version)}
   )
 )`;
 
