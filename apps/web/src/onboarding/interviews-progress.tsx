@@ -203,10 +203,7 @@ const LinkRow = ({
   const { t } = useLingui();
   const { name, team } = link;
   let about = t`${team} · not out yet`;
-  if (!link.signsIn) {
-    // Opening a link takes the company's sign-in, at the address it went to.
-    about = t`${team} · no address your sign-in takes, so no interview`;
-  } else if (link.mailFailed) {
+  if (link.mailFailed) {
     about = t`${team} · our email didn’t reach them`;
   } else if (link.fresh) {
     about = t`${team} · new`;

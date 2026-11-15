@@ -61,8 +61,6 @@ import { requireAdmin } from "@grasp-os/shared/roles";
 import { uploadMaxBytes } from "@grasp-os/shared/uploads";
 import { z } from "zod";
 
-import { addressInDomains } from "../auth/claims.ts";
-import { signInConfig } from "../auth/config.ts";
 import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
@@ -341,12 +339,7 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
   async links(): Promise<LinkToSend[]> {
     return await withPerson(this.#check, async (person) => {
       requireAdmin(person);
-      const domains = signInConfig(this.#env)?.domains ?? [];
-      const links = await onboardingStore(this.#env).linksToSend();
-      return links.map((link) => ({
-        ...link,
-        signsIn: addressInDomains(link.email, domains),
-      }));
+      return await onboardingStore(this.#env).linksToSend();
     });
   }
 

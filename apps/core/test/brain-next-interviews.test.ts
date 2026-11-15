@@ -4,6 +4,7 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
+import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import { drainObjectOutbox } from "../src/audit-outbox.ts";
 import {
   brainExportFile,
@@ -19,7 +20,11 @@ import {
 import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { interviewErasure } from "../src/onboarding/interview-erasure.ts";
-import { eraseOwedOnboardingSources } from "../src/onboarding/new-brain.ts";
+import {
+  addOwedInterviews,
+  eraseOwedOnboardingSources,
+  settleOnboardingBrain,
+} from "../src/onboarding/new-brain.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { teamMayClaim } from "../src/onboarding/team-claims.ts";
 import { retryErasures } from "../src/person-erasure.ts";
@@ -52,7 +57,6 @@ import {
 import type { Key } from "./onboarding-team.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import {
-  auditedDuring,
   entraPerson,
   signedInApi,
   signedIn,
@@ -324,26 +328,13 @@ const claimsOf = async (userId: string) => {
 };
 
 /**
- * A day passes for `person`'s interview: what they saved and approved is
- * from yesterday, as the store reads it, and core's clock runs, as it does
- * every minute: an interview is noted for the Brain only once nothing they
- * did in it is from today (the store's `#decideInterview`).
+ * Core's clock, as it runs every minute: what the onboarding owes the new
+ * Brain settled (erasures, then interviews to add), and the hand-overs of
+ * team claims taken to the Brain.
  */
-const aDayPassesFor = async (person: string): Promise<void> => {
-  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  await runInDurableObject(onboardingStore(env), (_, state) => {
-    state.storage.sql.exec(
-      "UPDATE interviews SET updated_at = ? WHERE person = ?",
-      yesterday,
-      person
-    );
-    state.storage.sql.exec(
-      "UPDATE approvals SET at = ? WHERE person = ?",
-      yesterday,
-      person
-    );
-  });
-  await eraseOwedOnboardingSources(env);
+const settled = async (): Promise<void> => {
+  await settleOnboardingBrain(env);
+  await handOverNow();
 };
 
 /** `person`'s account: the one their link opened under, signed in as them. */
@@ -353,7 +344,7 @@ const accountOfPerson = async (person: string): Promise<string> =>
 describe("interviews in the new Brain", { timeout: 120_000 }, () => {
   beforeEach(holdAlarm);
 
-  it("are read by the account the link opened under alone, never by whoever the list's address names later, and wait a day before the company's audit log names one", async () => {
+  it("are read by the account the link opened under alone, never by whoever the list's address names later", async () => {
     const marker = `marker${unique()}`;
     const ids = await team();
     // Lea opens her link, signed in as the address it went to, and agrees.
@@ -362,16 +353,6 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
     });
     const store = onboardingStore(env);
     const lea = await accountOfPerson(ids.lea);
-    // The day she agreed, nothing of it is noted: the audit log the
-    // company reads would tell the moment she finished.
-    const sameDay = await auditedDuring(async () => {
-      await eraseOwedOnboardingSources(env);
-      await handOverNow();
-    });
-    const notedSameDay = sameDay.filter(
-      ({ action }) => action === "onboarding.interview.brain_source"
-    ).length;
-    const beforeTheDayTurns = await recalled(lea, marker);
     // An admin puts their own address on Lea's entry after her link went
     // out, and signs in with it; a team-mate signs in as themselves.
     const taken = `admin-${unique()}@acme.test`;
@@ -387,15 +368,12 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
     );
     const admin = await signsIn(taken, "admin");
     const max = await signsIn(`mate-${unique()}@acme.test`);
-    await aDayPassesFor(ids.lea);
-    await handOverNow();
-    // Handing it over again makes no second source.
-    await handOverNow();
+    await settled();
+    // Settling again makes no second source.
+    await settled();
     const key = await interviewKeyOf(lea);
     const { sources } = await listSourcesAs(env, lea);
     expect({
-      notedSameDay,
-      beforeTheDayTurns,
       lea: await recalled(lea, marker),
       admin: await recalled(admin, marker),
       max: await recalled(max, marker),
@@ -405,8 +383,6 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
       // In her own store alone, never in the shared one.
       kept: await keptIn(key, lea),
     }).toStrictEqual({
-      notedSameDay: 0,
-      beforeTheDayTurns: [],
       lea: [expect.stringContaining(marker)],
       admin: [],
       max: [],
@@ -451,7 +427,7 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
     });
   });
 
-  it("are taken out at once when an edit takes an approved fact out, and the rest comes back the day after", async () => {
+  it("are replaced at once when an edit takes an approved fact out: the old copy erased, what still stands added", async () => {
     const marker = `marker${unique()}`;
     const kept = `kept${unique()}`;
     const ids = await team();
@@ -459,8 +435,7 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
     const left = fact("l9", "rule", `Every refund needs ${kept} first.`);
     await mapped(ids, { facts: [taken, left] });
     const lea = await accountOfPerson(ids.lea);
-    await aDayPassesFor(ids.lea);
-    await handOverNow();
+    await settled();
     const before = await interviewKeyOf(lea);
     // She takes one fact out and approves the rest, as her page does.
     const version = await agree(
@@ -482,8 +457,7 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
       kept: await recalled(lea, kept),
       old: await keptIn(before, lea),
     };
-    await aDayPassesFor(ids.lea);
-    await handOverNow();
+    await settled();
     expect({
       version,
       atOnce,
@@ -493,7 +467,11 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
       },
     }).toStrictEqual({
       version: 2,
-      atOnce: { taken: [], kept: [], old: { shared: "erased", own: "erased" } },
+      atOnce: {
+        taken: [],
+        kept: [expect.stringContaining(kept)],
+        old: { shared: "erased", own: "erased" },
+      },
       after: { taken: [], kept: [expect.stringContaining(kept)] },
     });
   });
@@ -505,8 +483,7 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
       facts: [fact("l9", "rule", `Every refund needs ${marker} first.`)],
     });
     const lea = await accountOfPerson(ids.lea);
-    await aDayPassesFor(ids.lea);
-    await handOverNow();
+    await settled();
     const key = await interviewKeyOf(lea);
     // Her own store goes whole (core's erasure of her), then she withdraws:
     // erasing her interview in a store erased whole returns at once.
@@ -554,8 +531,7 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
       fact("m9", "rule", `Every refund needs ${marker} first.`),
     ]);
     const colleague = await accountOfPerson(ids.max);
-    await aDayPassesFor(ids.max);
-    await handOverNow();
+    await settled();
     const theirs = await recalled(colleague, marker);
     // Max asks: staff give a new start once the list has his own address.
     const own = `max-${unique()}@acme.test`;
@@ -593,8 +569,7 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
     const store = onboardingStore(env);
     const address = await sentToOf(ids.lea);
     const lea = await accountOfPerson(ids.lea);
-    await aDayPassesFor(ids.lea);
-    await handOverNow();
+    await settled();
     const key = await interviewKeyOf(lea);
     // Core's erasure of her (person-erasure.ts): an admin removes her,
     // then erases her, which takes her interview out of the Brain before
@@ -635,6 +610,50 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
     });
   });
 
+  it("go with core's erasure of their person by the account the link opened under, though the list's address was corrected since", async () => {
+    const marker = `marker${unique()}`;
+    const ids = await team();
+    await mapped(ids, {
+      facts: [fact("l9", "rule", `Every refund needs ${marker} first.`)],
+    });
+    const store = onboardingStore(env);
+    const lea = await accountOfPerson(ids.lea);
+    await settled();
+    const key = await interviewKeyOf(lea);
+    // The admin corrects her address on the list after her link opened.
+    const { roster } = await store.view();
+    await store.saveRoster(
+      {
+        teams: roster?.teams ?? [],
+        people: (roster?.people ?? []).map((person) =>
+          person.id === ids.lea
+            ? { ...person, email: `corrected-${unique()}@acme.test` }
+            : person
+        ),
+      },
+      { type: "system" }
+    );
+    const admin = await signedInApi(idp, "admin");
+    await admin.api.members.remove(lea);
+    const name = await env.DB.prepare("SELECT name FROM users WHERE id = ?")
+      .bind(lea)
+      .first<string>("name");
+    await admin.api.members.erase(lea, name ?? "");
+    await ageOwnErasure(lea);
+    await retryErasures(env);
+    expect({
+      interview: await store.interviewStored(ids.lea),
+      backs: await store.sentFor(ids.lea),
+      team: await store.interviewTeamOf(lea),
+      kept: await keptIn(key, lea),
+    }).toStrictEqual({
+      interview: null,
+      backs: [],
+      team: null,
+      kept: { shared: "erased", own: "free" },
+    });
+  });
+
   it("are replaced in the Brain when a content purge rewrites them", async () => {
     const marker = `marker${unique()}`;
     const ids = await team();
@@ -642,8 +661,7 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
       facts: [fact("l9", "rule", `Every refund needs ${marker} first.`)],
     });
     const lea = await accountOfPerson(ids.lea);
-    await aDayPassesFor(ids.lea);
-    await handOverNow();
+    await settled();
     const before = await interviewKeyOf(lea);
     // The purge rewrites her interview, and lets go only once the Brain's
     // copy with the purged word is erased.
@@ -651,7 +669,7 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
       { actor: { type: "system" }, userId: "system" },
       (text) => text.replaceAll(marker, "(removed)")
     );
-    await handOverNow();
+    await settled();
     expect({
       purged: await recalled(lea, marker),
       rewritten: await recalled(lea, "(removed)", "interview"),
@@ -667,70 +685,108 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
     });
   });
 
-  it("stay erased when an add of them lands after a withdrawal erased them", async () => {
+  it("stay erased when the clock's add of them lands after a withdrawal erased them", async () => {
     const marker = `marker${unique()}`;
     const ids = await team();
     await mapped(ids, {
       facts: [fact("l9", "rule", `Every refund needs ${marker} first.`)],
     });
     const lea = await accountOfPerson(ids.lea);
-    await aDayPassesFor(ids.lea);
+    await settled();
+    // A content purge rewrites her interview: its new copy waits for the
+    // clock's add, which is held in flight.
+    await interviewErasure(env).rewrite(
+      { actor: { type: "system" }, userId: "system" },
+      (text) => text.replaceAll(marker, "(removed)")
+    );
     const held = holdingAdds((source) => source.startsWith("interview:"));
-    const handing = handOverNow(held.env);
+    const adding = addOwedInterviews(held.env);
     const key = await held.arrived;
-    // She withdraws while her interview's add is in flight, before her own
-    // store was ever written: the withdrawal erases it, and the add lands
-    // after.
+    // She withdraws while that add is in flight, before her own store was
+    // written with it: the withdrawal erases it, and the add lands after.
     await onLink({ action: "withdraw", ...(await openLink(ids.lea)) });
     held.release();
-    await handing;
+    await adding;
+    await settled();
     const { own } = await keptIn(key, lea);
     expect({
-      recalled: await recalled(lea, marker),
+      recalled: await recalled(lea, "(removed)"),
       owed: await onboardingStore(env).owedErasures({ person: ids.lea }),
+      toAdd: await onboardingStore(env).interviewsToAdd(ids.lea),
       held: own === "held",
-    }).toStrictEqual({ recalled: [], owed: [], held: false });
+    }).toStrictEqual({ recalled: [], owed: [], toAdd: [], held: false });
   });
 
-  it("are noted once whatever a drain cut off before the object dropped its events: one source, the same event each time", async () => {
+  it("are in their Brain as soon as they approve, stay the same source through a save that leaves what they approved alone, and give the company's audit log nothing", async () => {
+    const from = new Date().toISOString();
     const marker = `marker${unique()}`;
     const ids = await team();
-    await mapped(ids, {
-      facts: [fact("l9", "rule", `Every refund needs ${marker} first.`)],
-    });
+    const facts = [
+      fact("l1", "work", "Max, Mia and Mo handle new tickets."),
+      fact(
+        "l2",
+        "system",
+        "The team lives in Zendesk and the lead's own rota sheet."
+      ),
+      fact("l9", "rule", `Every refund needs ${marker} first.`),
+    ];
+    // Her approval, from her link: in her Brain before the request answers.
+    await mapped(ids, { facts: facts.slice(2) });
     const lea = await accountOfPerson(ids.lea);
-    await aDayPassesFor(ids.lea);
-    // Cut off after the log took the events and their hand-overs were
-    // noted, before the object dropped them: as a crash between the two.
-    await runInDurableObject(onboardingStore(env), async (_, state) => {
-      const { sql } = state.storage;
-      const cutOff = new Proxy(sql, {
-        get: (target, name): unknown => {
-          const member: unknown = Reflect.get(target, name);
-          if (name !== "exec" || typeof member !== "function") {
-            return typeof member === "function" ? member.bind(target) : member;
-          }
-          return (query: string, ...bindings: unknown[]): unknown => {
-            if (query.startsWith("DELETE FROM audit_outbox")) {
-              throw new Error("The object went away");
-            }
-            return Reflect.apply(member, target, [query, ...bindings]);
-          };
-        },
-      });
-      await drainObjectOutbox(env, cutOff, 0).catch(() => 0);
+    const atOnce = await recalled(lea, marker);
+    const before = await interviewKeyOf(lea);
+    // She saves again, the facts she approved as they were.
+    const version = await agree(ids.lea, facts, 1);
+    await settled();
+    const after = await interviewKeyOf(lea);
+    // A positive control: what the company's admin does is in its log.
+    const admin = await signedInApi(idp, "admin");
+    const { roster } = await onboardingStore(env).view();
+    await admin.api.onboarding.saveRoster({
+      teams: (roster?.teams ?? []).map(({ id, name, lead }) => ({
+        id,
+        name,
+        lead,
+      })),
+      people: (roster?.people ?? []).map(({ id, name, team: of, email }) => ({
+        id,
+        name,
+        team: of,
+        email,
+      })),
     });
+    await drainAuditOutboxes(env);
     await handOverNow();
-    await handOverNow();
-    const { sources } = await listSourcesAs(env, lea);
+    const records = [];
+    let page = await admin.api.audit.search({ from });
+    records.push(...page.records);
+    while (page.next !== null) {
+      // oxlint-disable-next-line no-await-in-loop -- one page after another
+      page = await admin.api.audit.search({ from }, page.next);
+      records.push(...page.records);
+    }
+    const text = JSON.stringify(records);
+    const actions = records.map(({ event }) => event?.action);
     expect({
-      interviews: sources.filter(
-        ({ source }) => source.producer === "interview"
-      ).length,
-      found: await recalled(lea, marker),
+      atOnce,
+      version,
+      same: after === before,
+      kept: await keptIn(after, lea),
+      control: actions.includes("onboarding.roster.saved"),
+      interviews: actions.filter(
+        (action) => action?.startsWith("onboarding.interview") === true
+      ),
+      named: [before.slice("interview:".length), lea, ids.lea, marker].filter(
+        (each) => text.includes(each)
+      ),
     }).toStrictEqual({
-      interviews: 1,
-      found: [expect.stringContaining(marker)],
+      atOnce: [expect.stringContaining(marker)],
+      version: 2,
+      same: true,
+      kept: { shared: "free", own: "held" },
+      control: true,
+      interviews: [],
+      named: [],
     });
   });
 });

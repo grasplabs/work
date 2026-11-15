@@ -1152,10 +1152,6 @@ msgid "{team} · new"
 msgstr "{team} · neu"
 
 #: src/onboarding/interviews-progress.tsx
-msgid "{team} · no address your sign-in takes, so no interview"
-msgstr "{team} · keine Adresse, die Ihre Anmeldung annimmt, also kein Interview"
-
-#: src/onboarding/interviews-progress.tsx
 msgid "{team} · not out yet"
 msgstr "{team} · noch nicht verfügbar"
 
@@ -12426,6 +12422,7 @@ msgstr "Melden Sie sich mit dem Konto Ihrer Organisation an."
 
 #: src/frame/person-menu.tsx
 #: src/routes/_shell.settings.security.tsx
+#: src/routes/interview.tsx
 #: src/routes/staff.tsx
 msgid "Sign out"
 msgstr "Abmelden"

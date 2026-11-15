@@ -1,5 +1,6 @@
 import { interviewPagePath } from "@grasp-os/shared/interview-links";
 import type { SignInOption } from "@grasp-os/shared/rpc";
+import { Button } from "@grasp-os/ui/components/button";
 import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
 import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { useLingui } from "@lingui/react/macro";
@@ -7,7 +8,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
-import { loadCoreStatus } from "../core-connection.ts";
+import { loadCoreStatus, signOut } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
 import { ErrorText } from "../error-text.tsx";
 import {
@@ -36,7 +37,16 @@ import { SignInOptions } from "../sign-in-options.tsx";
 /** What the page shows, and the secret it was opened with. */
 type Page =
   | { state: "loading"; secret: string }
-  | { state: "refused"; secret: string; message: string }
+  | {
+      state: "refused";
+      secret: string;
+      message: string;
+      /**
+       * Someone is signed in: core answered, as it does for a link that
+       * opens nothing, for whoever asks (`interview.link_invalid`).
+       */
+      signedIn: boolean;
+    }
   | { state: "sign_in"; secret: string; options: SignInOption[] }
   | { state: "open"; secret: string; session: OpenSession };
 
@@ -47,16 +57,22 @@ const opened = async (secret: string, core: CoreConnection): Promise<Page> => {
       state: "refused",
       secret,
       message: "",
+      signedIn: false,
     };
   }
   const answer = await openSession(secret);
   if (isRefused(answer)) {
     if (answer.code !== "interview.sign_in") {
-      return { state: "refused", secret, message: answer.message };
+      return {
+        state: "refused",
+        secret,
+        message: answer.message,
+        signedIn: answer.code === "interview.link_invalid",
+      };
     }
     const { connected, signInOptions } = await loadCoreStatus(core);
     if (!connected) {
-      return { state: "refused", secret, message: "" };
+      return { state: "refused", secret, message: "", signedIn: false };
     }
     // Kept in this tab while they are away signing in, and taken back as
     // the page opens again (`linkSecret`).
@@ -115,6 +131,32 @@ const Loading = () => {
       <GraspMark className="size-6" />
       <output className="text-muted-foreground">{t`Opening your interview…`}</output>
     </main>
+  );
+};
+
+/**
+ * Signs this browser out, and the page loads again, asking who signs in
+ * (core-connection.ts `signOut`). A sign-out core didn't carry out leaves
+ * the page as it is.
+ */
+const SignOut = ({ core }: { core: CoreConnection }) => {
+  const { t } = useLingui();
+  const signingOut = async (): Promise<void> => {
+    try {
+      await signOut(core);
+    } catch {
+      // Core didn't sign them out: the page stays as it is.
+    }
+  };
+  return (
+    <Button
+      onClick={() => {
+        void signingOut();
+      }}
+      variant="outline"
+    >
+      {t`Sign out`}
+    </Button>
   );
 };
 
@@ -214,7 +256,12 @@ const Interview = () => {
               : shown.message
           }
           title={t`This interview can't be opened`}
-        />
+        >
+          {/* Signed in with another account than the one the link went to:
+              a way out to sign in again. The same for a link that never
+              was, so it tells nothing about whose this is. */}
+          {shown.signedIn ? <SignOut core={core} /> : null}
+        </Notice>
       );
     }
     case "sign_in": {

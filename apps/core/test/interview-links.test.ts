@@ -692,6 +692,30 @@ describe("when a link opens", () => {
       other: true,
     });
   });
+
+  it("never counts someone else's calls against a link: theirs answer as a made-up link's, call after call, and its person is never held up (L3, L11)", async () => {
+    const { secrets, me } = await running();
+    const admin = await signedInAs("ada@acme.test");
+    const made = randomSecret();
+    const theirs = [];
+    const madeUp = [];
+    for (let call = 0; call < 61; call += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one call after another
+      theirs.push(await session(secrets.oli, admin));
+      // oxlint-disable-next-line no-await-in-loop -- one call after another
+      madeUp.push(await session(made, admin));
+    }
+    const last = theirs.at(-1);
+    const lastMadeUp = madeUp.at(-1);
+    const mine = await session(secrets.oli, me);
+    expect({
+      last: last === undefined ? null : await shape(last),
+      mine: mine.status,
+    }).toStrictEqual({
+      last: lastMadeUp === undefined ? null : await shape(lastMadeUp),
+      mine: 200,
+    });
+  });
 });
 
 describe("deleting and starting again", () => {
@@ -979,6 +1003,9 @@ describe("what the company learns", () => {
       "interview.started",
       "interview.completed",
       "interview.approved",
+      // In their own Brain from now on: noted here alone, which only staff
+      // read (GRA-1790).
+      "interview.in_brain",
       "interview.withdrawn",
       "interview.deleted",
     ]);

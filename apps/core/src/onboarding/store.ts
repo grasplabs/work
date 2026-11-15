@@ -346,9 +346,6 @@ const unconfirmedSchema = z.object({
 const waits = (id: string, known: Set<string>, waited: Set<string>) =>
   !known.has(id) || waited.has(id);
 
-/** A day, in milliseconds. */
-const dayMs = 24 * 60 * 60 * 1000;
-
 /** Most calls one link makes in a minute: a person talks far slower. */
 const linkCallsPerMinute = 60;
 
@@ -670,13 +667,15 @@ export type OwedErasure =
   | { kind: "claim"; source: string; team: string };
 
 /**
- * What someone's interview in the new Brain is settled from, as SQL over
- * their link `l` (`links.brain_mark`): the account linked to them, their
- * link's version (every save, delete, new start and purge rewrite moves
- * it), their withdrawal, and their approvals. NULL, for nothing to hold,
- * without an account or once core erased them.
+ * When what the new Brain holds of someone's interview is to be decided
+ * again, as SQL over their link `l` (`links.brain_mark`): their account,
+ * their link's version (every save, delete, new start and purge rewrite
+ * moves it), their withdrawal and their approvals. It says only when to
+ * look again: which source stands is keyed on what they approved
+ * (`#interviewWanted`), so a save that leaves that alone changes nothing.
+ * NULL without an account or once core erased them.
  */
-const interviewMarkSql = `CASE WHEN l.account IS NULL OR l.erased_at IS NOT NULL THEN NULL ELSE
+const interviewDueSql = `CASE WHEN l.account IS NULL OR l.erased_at IS NOT NULL THEN NULL ELSE
   l.account || '|' || l.version
   || '|' || coalesce((SELECT p.withdrawn_at FROM participations p WHERE p.person = l.person), '-')
   || '|' || (SELECT count(*) || ':' || coalesce(max(a.at), '') FROM approvals a WHERE a.person = l.person)
@@ -3410,7 +3409,7 @@ export class Onboarding extends DurableObject<Env> {
    * with their link once it is out: for the company's admin to send
    * themselves. A link is new to them until they take it.
    */
-  async linksToSend(): Promise<Omit<LinkToSend, "signsIn">[]> {
+  async linksToSend(): Promise<LinkToSend[]> {
     const roster = this.#roster();
     if (roster === null) {
       return [];
@@ -4849,6 +4848,48 @@ export class Onboarding extends DurableObject<Env> {
         .run();
     });
     this.#decideInterviews();
+  }
+
+  /**
+   * Moves the interview that belongs to `from` to `to`: as `from` turned out
+   * to be the member the directory made (`to`), at their first sign-in once
+   * the gate opened (auth.ts `adoptDirectoryMember`), while their interview
+   * was opened under the account their sign-in made before. Its copy in the
+   * new Brain is replaced under `to` (`#decideInterview`: the mark names the
+   * account), erased under `from` by core's clock. Nothing when `from` holds
+   * none, or `to` holds one already.
+   */
+  accountMoved(from: string, to: string): void {
+    this.ctx.storage.transactionSync(() => {
+      const [held] = this.#db
+        .select({ person: links.person })
+        .from(links)
+        .where(eq(links.account, to))
+        .all();
+      if (held !== undefined) {
+        return;
+      }
+      this.#db
+        .update(links)
+        .set({ account: to })
+        .where(eq(links.account, from))
+        .run();
+    });
+    this.#decideInterviews();
+  }
+
+  /**
+   * Whose interview belongs to `account` (`links.account`, GRA-1790): for
+   * core's erasure of that account, which finds it so whatever address the
+   * list has for them now. Null when none does.
+   */
+  personOfAccount(account: string): string | null {
+    const [link] = this.#db
+      .select({ person: links.person })
+      .from(links)
+      .where(eq(links.account, account))
+      .all();
+    return link?.person ?? null;
   }
 
   /**
@@ -6468,15 +6509,14 @@ export class Onboarding extends DurableObject<Env> {
 
   /**
    * People whose interview the new Brain may hold otherwise than the
-   * store last decided: what it was decided from changed
-   * (`interviewMarkSql`), or they left the list with a source of theirs
-   * still standing.
+   * store last decided: something it rests on moved (`interviewDueSql`),
+   * or they left the list with a source of theirs still standing.
    */
   #interviewsDue(): string[] {
     return this.ctx.storage.sql
       .exec<{ person: string }>(
         `SELECT l.person AS person FROM links l
-          WHERE (${interviewMarkSql}) IS NOT l.brain_mark
+          WHERE (${interviewDueSql}) IS NOT l.brain_mark
         UNION
         SELECT b.person AS person FROM brain_interviews b
           WHERE b.erase = 0
@@ -6486,23 +6526,27 @@ export class Onboarding extends DurableObject<Env> {
       .map(({ person }) => person);
   }
 
-  /** What `person`'s interview is settled from now (`interviewMarkSql`); null for nothing. */
-  #interviewMark(person: string): string | null {
+  /** When `person`'s interview is to be decided again (`interviewDueSql`). */
+  #interviewDue(person: string): string | null {
     const [row] = this.ctx.storage.sql
-      .exec<{ mark: string | null }>(
-        `SELECT (${interviewMarkSql}) AS mark FROM links l WHERE l.person = ?`,
+      .exec<{ due: string | null }>(
+        `SELECT (${interviewDueSql}) AS due FROM links l WHERE l.person = ?`,
         person
       )
       .toArray();
-    return row?.mark ?? null;
+    return row?.due ?? null;
   }
 
   /**
    * What the new Brain should hold of `person`'s interview now: the facts
-   * they approved, readable by the account linked to them; null for
-   * nothing (no account, erased, withdrawn, or nothing approved).
+   * they approved, readable by the account it belongs to, and its mark,
+   * which names exactly that: the account and each approved fact at its
+   * revision (`#admittedKeys`, a hash of what was read back and kept).
+   * Null for nothing (no account, erased, withdrawn, or nothing approved).
    */
-  #interviewWanted(person: string): { account: string; text: string } | null {
+  #interviewWanted(
+    person: string
+  ): { account: string; text: string; mark: string } | null {
     const [link] = this.#db
       .select({ account: links.account, erasedAt: links.erasedAt })
       .from(links)
@@ -6515,34 +6559,38 @@ export class Onboarding extends DurableObject<Env> {
       .map(({ record }) => record.trim())
       .filter((record) => record !== "")
       .join("\n");
-    return text === "" ? null : { account: link.account, text };
+    if (text === "") {
+      return null;
+    }
+    const approved = this.#admittedKeys(person).toSorted().join(",");
+    return { account: link.account, text, mark: `${link.account}|${approved}` };
   }
 
   /**
    * Decides, in the caller's transaction, what the new Brain is to hold
    * of `person`'s interview, from one read of the store: a source stands
-   * for one mark of it (`interviewMarkSql`), so one made for another mark
+   * for one mark of it (`#interviewWanted`), so one made for another mark
    * is marked to be erased at once, and a new one is noted
-   * (`brain_interviews`, under an id minted here) before anything adds it.
-   * Its row stays until the Brain's erasure of it returned, so the Brain
-   * never holds an interview the store doesn't know of.
-   *
-   * A new one is noted only once nothing they saved or approved is from
-   * `today` (GRA-1790): noting it writes an event to the audit log the
-   * company reads, which would otherwise tell the company the moment
-   * someone finished, or changed, their interview. Until then it stays due,
-   * and the alarm notes it once the day turns. Whether one waits so.
+   * (`brain_interviews`, under an id minted here) before core adds it
+   * (`interviewsToAdd`). Its row stays until the Brain's erasure of it
+   * returned, so the Brain never holds an interview the store doesn't know
+   * of. A new one is noted in the onboarding's own log alone, which only
+   * staff read: nothing of anyone's interview reaches the audit log the
+   * company reads, not even that it is in their Brain (GRA-1790).
    */
-  #decideInterview(person: string, today: string): boolean {
-    const mark = this.#interviewMark(person);
-    const wanted = mark === null ? null : this.#interviewWanted(person);
+  #decideInterview(person: string, now: string): void {
+    const wanted = this.#interviewWanted(person);
     const rows = this.#db
       .select()
       .from(brainInterviews)
       .where(eq(brainInterviews.person, person))
       .all();
     const standing = rows.find(
-      (row) => !row.erase && wanted !== null && row.mark === mark
+      (row) =>
+        !row.erase &&
+        wanted !== null &&
+        row.mark === wanted.mark &&
+        row.account === wanted.account
     );
     for (const row of rows) {
       if (row !== standing && !row.erase) {
@@ -6553,62 +6601,41 @@ export class Onboarding extends DurableObject<Env> {
           .run();
       }
     }
-    if (wanted !== null && mark !== null && standing === undefined) {
-      if (this.#touchedOn(person) === today) {
-        return true;
-      }
-      const source = crypto.randomUUID();
+    if (wanted !== null && standing === undefined) {
       this.#db
         .insert(brainInterviews)
-        .values({ source, person, account: wanted.account, mark })
+        .values({
+          source: crypto.randomUUID(),
+          person,
+          account: wanted.account,
+          mark: wanted.mark,
+        })
         .run();
-      this.#noteBrainSource("interview", source, person);
+      this.#noted(person, "interview.in_brain", now);
     }
     this.#db
       .update(links)
-      .set({ brainMark: mark })
+      .set({ brainMark: this.#interviewDue(person) })
       .where(eq(links.person, person))
       .run();
-    return false;
-  }
-
-  /**
-   * The day `person` last saved or approved anything of their interview
-   * (ISO); none when they never did.
-   */
-  #touchedOn(person: string): string | null {
-    const [row] = this.ctx.storage.sql
-      .exec<{ at: string | null }>(
-        `SELECT max(coalesce((SELECT updated_at FROM interviews WHERE person = ?1), ''),
-           coalesce((SELECT max(at) FROM approvals WHERE person = ?1), '')) AS at`,
-        person
-      )
-      .toArray();
-    return row?.at === undefined || row.at === null || row.at === ""
-      ? null
-      : dayOf(row.at);
   }
 
   /**
    * Notes, in the caller's transaction, that the new Brain is to take the
-   * source `source` of `kind`: an audit event naming it, which the outbox's
+   * team claim `source`: an audit event naming it, which the outbox's
    * drain notes as a hand-over (brain-hand-overs.ts), in the same
    * transaction as the row that says it stands. What it holds is read when
-   * the hand-over runs (`interviewToHand`, `claimToHand`), never here.
+   * the hand-over runs (`claimToHand`), never here.
    */
-  #noteBrainSource(
-    kind: "interview" | "claim",
-    source: string,
-    about: string | null
-  ): void {
+  #noteClaimSource(source: string): void {
     const at = new Date().toISOString();
     const {
       actions: [action],
       target: targetType,
-    } = handOverProducers[kind];
+    } = handOverProducers.claim;
     this.#db
       .insert(events)
-      .values({ at, by: whoIs({ type: "system" }), what: action, about })
+      .values({ at, by: whoIs({ type: "system" }), what: action, about: null })
       .run();
     const event = createAuditEvent(
       {
@@ -6632,54 +6659,62 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * Decides, in one transaction, what the new Brain is to hold of every
    * interview whose decision is due (`#decideInterview`): at most everyone
-   * on the list, which `onboardingPeopleMax` bounds. Each new source is
-   * noted for the hand-over (`#noteBrainSource`); each that no longer
-   * stands is owed an erasure (`owedErasures`). Run after every change
-   * that may move one, and by the alarm.
+   * on the list, which `onboardingPeopleMax` bounds. Each new source waits
+   * for core to add it (`interviewsToAdd`); each that no longer stands is
+   * owed an erasure (`owedErasures`). Run after every change that may move
+   * one, and from core's clock.
    */
   #decideInterviews(now: string = new Date().toISOString()): void {
-    const today = dayOf(now);
-    const { decided, waiting } = this.ctx.storage.transactionSync(() => {
-      const due = this.#interviewsDue();
-      let held = false;
-      for (const person of due) {
-        held = this.#decideInterview(person, today) || held;
+    this.ctx.storage.transactionSync(() => {
+      for (const person of this.#interviewsDue()) {
+        this.#decideInterview(person, now);
       }
-      return { decided: due.length > 0, waiting: held };
     });
-    if (decided) {
-      this.#deliverAudit();
-    }
-    if (waiting) {
-      // Noted once the day turns (`#decideInterview`).
-      this.ctx.waitUntil(
-        this.#alarmBy(Date.parse(`${today}T00:00:00Z`) + dayMs)
-      );
-    }
   }
 
   /**
-   * The interview `source` as the hand-over adds it now: its account and
-   * the text it stands for, only while it is the one the store decided
-   * for that person's interview as it is now. Null otherwise: withdrawn,
-   * deleted, begun anew, edited, unlinked, erased or gone.
+   * The interview sources core is to add to the new Brain now: each the
+   * store decided stands and core hasn't added yet, with the account that
+   * reads it and the text it stands for, as they are now; only `person`'s
+   * when given (after a request of theirs). Core adds each with
+   * `addSource` and says so (`addedToBrain`); a source that stops standing
+   * meanwhile is owed an erasure, and the erasure closes its key, so an
+   * add that lands after it is refused.
    */
-  interviewToHand(source: string): { account: string; text: string } | null {
+  interviewsToAdd(
+    person?: string
+  ): { source: string; account: string; text: string }[] {
     this.#decideInterviews();
-    const [row] = this.#db
+    const rows = this.#db
       .select()
       .from(brainInterviews)
-      .where(eq(brainInterviews.source, source))
+      .where(
+        and(
+          eq(brainInterviews.erase, false),
+          eq(brainInterviews.added, false),
+          person === undefined ? undefined : eq(brainInterviews.person, person)
+        )
+      )
       .all();
-    if (row === undefined || row.erase) {
-      return null;
-    }
-    const wanted = this.#interviewWanted(row.person);
-    return wanted === null ||
-      wanted.account !== row.account ||
-      this.#interviewMark(row.person) !== row.mark
-      ? null
-      : wanted;
+    return rows.flatMap((row) => {
+      const wanted = this.#interviewWanted(row.person);
+      return wanted === null ||
+        wanted.mark !== row.mark ||
+        wanted.account !== row.account
+        ? []
+        : [{ source: row.source, account: row.account, text: wanted.text }];
+    });
+  }
+
+  /** Notes that core added the interview `source` to the new Brain: it is not added again. */
+  addedToBrain(source: string): void {
+    this.ctx.storage.transactionSync(() => {
+      this.#db
+        .update(brainInterviews)
+        .set({ added: true })
+        .where(eq(brainInterviews.source, source))
+        .run();
+    });
   }
 
   /**
@@ -6965,7 +7000,7 @@ export class Onboarding extends DurableObject<Env> {
           .insert(brainClaims)
           .values({ source, record, team, text })
           .run();
-        this.#noteBrainSource("claim", source, null);
+        this.#noteClaimSource(source);
       }
     }
   }
@@ -7741,22 +7776,24 @@ export class Onboarding extends DurableObject<Env> {
     if (roster === null || person === undefined) {
       return refused("interview.link_invalid");
     }
-    if (call && !this.#withinLimit(person.id, now)) {
-      return refused("interview.limited");
-    }
     const [link] = this.#db
       .select()
       .from(links)
       .where(eq(links.person, person.id))
       .all();
     // Someone else's link answers as one that never was: whose it is, and
-    // whether it is open, paused or over, is for its own person alone.
+    // whether it is open, paused, over or busy, is for its own person
+    // alone. So only the calls of whoever holds it count against its limit:
+    // nobody else can hold its person up.
     if (
       link === undefined ||
       link.erasedAt !== null ||
       this.#heldAt(link, person.email, caller, use === "open") === null
     ) {
       return refused("interview.link_invalid");
+    }
+    if (call && !this.#withinLimit(person.id, now)) {
+      return refused("interview.limited");
     }
     const row = this.#row();
     if (row.plan === null) {

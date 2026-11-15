@@ -12,7 +12,8 @@ CREATE TABLE `brain_interviews` (
 	`person` text NOT NULL,
 	`account` text NOT NULL,
 	`mark` text NOT NULL,
-	`erase` integer DEFAULT false NOT NULL
+	`erase` integer DEFAULT false NOT NULL,
+	`added` integer DEFAULT false NOT NULL
 );
 --> statement-breakpoint
 CREATE INDEX `brain_interviews_person` ON `brain_interviews` (`person`);--> statement-breakpoint

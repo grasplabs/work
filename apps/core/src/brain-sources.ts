@@ -32,12 +32,7 @@ import type {
 } from "./brain-next.ts";
 import { brainHandOvers, workflowStartReceipts } from "./db/core/schema.ts";
 import { workspace } from "./durable-objects.ts";
-import {
-  claimOf,
-  claimSource,
-  interviewOf,
-  interviewSource,
-} from "./onboarding/new-brain.ts";
+import { claimOf, claimSource } from "./onboarding/new-brain.ts";
 import { personalWorkspaceId } from "./personal-workspace.ts";
 import { resultOf, runOf } from "./workflows/resource-runs.ts";
 import { detailsRemoved } from "./workflows/retention.ts";
@@ -225,9 +220,10 @@ const producers: Record<
     read: chatTurnOfId,
     ofPerson: chatsOf,
   },
-  // An interview's and a claim's ids are minted by the onboarding and
-  // name nobody: an erased person's interview reads as erased.
-  interview: { source: interviewSource, read: interviewOf, ofPerson: null },
+  // A team claim's id is minted by the onboarding and names nobody. A
+  // person's interview is no producer here: core adds it itself
+  // (onboarding/new-brain.ts), as the hand-over's audit events would tell
+  // the company about it.
   claim: { source: claimSource, read: claimOf, ofPerson: null },
 };
 

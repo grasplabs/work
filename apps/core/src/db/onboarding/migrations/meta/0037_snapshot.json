@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "0a385963-8bc5-4a94-909c-093bf6b19f4b",
+  "id": "dc8140f5-a7e0-4286-b936-cfb9a025b5ea",
   "prevId": "5c0933c0-7314-44d7-be0f-94bc2f9fe11e",
   "tables": {
     "approvals": {
@@ -200,6 +200,14 @@
         },
         "erase": {
           "name": "erase",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "added": {
+          "name": "added",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,

@@ -2,6 +2,7 @@ import type { Roster } from "@grasp-os/shared/onboarding";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
+import { memberFromDirectory } from "../src/auth/directory-members.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { adminCommands } from "./admin-command.ts";
 import { mockIdp } from "./idp.ts";
@@ -175,6 +176,40 @@ describe("signing in for an interview while the gate is closed", () => {
       interview: 200,
       member: true,
       memberships: 1,
+    });
+  });
+
+  it("adopts no member the directory made when they sign in for their interview, and records nothing of it; once the gate opens they are that member, and their interview is theirs", async () => {
+    const { address, secret } = await invited();
+    const oid = `entra-oid-${address}`;
+    const member = await memberFromDirectory(env, oid, {
+      id: oid,
+      name: "Oli Olsen",
+      email: address,
+      department: "",
+      title: "",
+      manager: null,
+    });
+    let opened = 0;
+    const events = await auditedDuring(async () => {
+      const cookie = await signedInAs(address);
+      const { response } = await openLinkAs(secret, cookie);
+      opened = response.status;
+    });
+    await adminCommands().open();
+    const again = await signedInAs(address);
+    const { userId } = await whoami(again);
+    const { response: reopened } = await openLinkAs(secret, again);
+    expect({
+      opened,
+      events: events.map(({ action }) => action),
+      member: userId === member,
+      reopened: reopened.status,
+    }).toStrictEqual({
+      opened: 200,
+      events: [],
+      member: true,
+      reopened: 200,
     });
   });
 

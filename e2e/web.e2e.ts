@@ -54,7 +54,7 @@ test("shows a refusal with the request ID core answered it under, for the person
   );
 });
 
-test("an interview link nobody made asks to sign in first, then can't be opened, and says nothing was saved", async ({
+test("an interview link nobody made asks to sign in first, then can't be opened, says nothing was saved, and lets them sign out to sign in again", async ({
   context,
   page,
 }) => {
@@ -74,6 +74,12 @@ test("an interview link nobody made asks to sign in first, then can't be opened,
     page.getByRole("heading", { name: "This interview can't be opened" })
   ).toBeVisible();
   await expect(page.getByText("Saved", { exact: true })).toHaveCount(0);
+  // Signed in with another account than the link's: a way out, to sign in
+  // again.
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Sign in to open your interview" })
+  ).toBeVisible();
 });
 
 test("reports an error the page never caught once core has it, cut to the size core takes", async ({

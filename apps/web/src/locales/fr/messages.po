@@ -1152,10 +1152,6 @@ msgid "{team} · new"
 msgstr "{team} · nouveau"
 
 #: src/onboarding/interviews-progress.tsx
-msgid "{team} · no address your sign-in takes, so no interview"
-msgstr "{team} · aucune adresse acceptée par votre connexion, donc pas d’entretien"
-
-#: src/onboarding/interviews-progress.tsx
 msgid "{team} · not out yet"
 msgstr "{team} · pas encore disponible"
 
@@ -12426,6 +12422,7 @@ msgstr "Connectez-vous avec le compte de votre organisation."
 
 #: src/frame/person-menu.tsx
 #: src/routes/_shell.settings.security.tsx
+#: src/routes/interview.tsx
 #: src/routes/staff.tsx
 msgid "Sign out"
 msgstr "Déconnecter"

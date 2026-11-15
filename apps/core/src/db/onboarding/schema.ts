@@ -163,9 +163,9 @@ export const links = sqliteTable("links", {
    */
   sentTo: text("sent_to"),
   /**
-   * What the Brain's copy of their interview was last settled from
-   * (`interviewMarkSql`, store.ts): their interview is owed again while
-   * it differs. None before it ever was.
+   * When what the Brain holds of their interview was last decided
+   * (`interviewDueSql`, store.ts): it is decided again while this differs.
+   * None before it ever was.
    */
   brainMark: text("brain_mark"),
 });
@@ -664,8 +664,8 @@ export const mailOutbox = sqliteTable(
 /**
  * Each interview the Brain is to take as a source (GRA-1790), under an id
  * minted here for one decision of it: the facts the person approved,
- * readable by their linked account alone, handed over by core's hand-over
- * (brain-sources.ts), which reads them as they are then. A decision that
+ * readable by the account the interview belongs to alone, added by core
+ * (onboarding/new-brain.ts) as they are then. A decision that
  * moves is a new source, and the old one is owed an erasure; a row stays
  * until the Brain's erasure of it returned (`erase`), so no source is ever
  * there without a row naming it.
@@ -679,12 +679,20 @@ export const brainInterviews = sqliteTable(
     /** The account that reads it. */
     account: text().notNull(),
     /**
-     * What it was decided from (`interviewMarkSql`, store.ts): a source
-     * stands for one text, so a mark that moved makes a new one.
+     * What it stands for (`#interviewWanted`, store.ts): the account and
+     * each approved fact at its revision, so a mark that moved makes a new
+     * one.
      */
     mark: text().notNull(),
     /** Whether it is to be erased: set once, never cleared. */
     erase: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * Whether core added it to the new Brain (onboarding/new-brain.ts):
+     * until then core adds it, right after the person's request and on its
+     * clock. Core adds it itself, not through the hand-over, whose audit
+     * events the company reads.
+     */
+    added: integer({ mode: "boolean" }).notNull().default(false),
   },
   (table) => [index("brain_interviews_person").on(table.person)]
 );

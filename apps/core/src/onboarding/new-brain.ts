@@ -1,33 +1,36 @@
+import { brainSourceErrors } from "@grasp-os/shared/brain-sources";
 import { log } from "@grasp-os/shared/log";
 
 import { erasureBegun } from "../brain-hand-overs.ts";
-import { eraseSource } from "../brain-next.ts";
+import { addSource, eraseSource } from "../brain-next.ts";
 import type { Handed, SourceRef } from "../brain-next.ts";
 import { onboardingStore } from "./store.ts";
 import type { OwedErasure } from "./store.ts";
 
 // What the onboarding gives the new Brain (GRA-1790, GRA-1741), and takes
-// back. The onboarding's store decides what stands, from its own records,
-// and notes each new source with an audit event its outbox's drain turns
-// into a hand-over (brain-hand-overs.ts). Core's hand-over reads it here,
-// as the store holds it when the hand-over runs (brain-sources.ts
-// `producers`), and adds it through `addSource`:
+// back. The onboarding's store decides what stands, from its own records:
 //
 // - A person's interview (`interview:<id>`): the facts they approved,
-//   readable by the account linked to them alone, so it is kept in their
+//   readable by the account it belongs to alone, so it is kept in their
 //   own store. The id is minted by the store for one decision of it; a
-//   decision that moves is a new source, and the old one is erased.
+//   decision that moves is a new source, and the old one is erased. Core
+//   adds it here itself (`addOwedInterviews`), right after the person's
+//   request and on its clock, never through the hand-over: a hand-over is
+//   noted and ended by audit events, which the company reads, and nothing
+//   of anyone's interview may reach that log, not even that it is in their
+//   Brain. Only the onboarding's own log, which staff read, notes it.
 // - A team's claim (`claim:<id>`): its sentence alone (no names, no
-//   quotes), readable by the people of that staff-list team who signed
-//   in, only while five or more back it and seven or more of the team
-//   were interviewed (counted by the store, never in the Brain).
+//   quotes), readable by the people of that staff-list team, only while
+//   five or more back it and seven or more of the team were interviewed
+//   (counted by the store, never in the Brain). Noted by an audit event
+//   for the hand-over (brain-hand-overs.ts), which reads it here
+//   (`claimOf`) when it runs: a team's, never a person's.
 //
 // What no longer stands is erased with `eraseSource`, directly: at once
 // after anything that takes an interview out (links.ts, admin-command.ts,
 // interview-erasure.ts, person-erasure.ts), and on core's clock until done
-// (`eraseOwedOnboardingSources`). A hand-over that runs after its source
-// stopped standing adds nothing, and one whose add lands after the erasure
-// is refused by the closed key.
+// (`settleOnboardingBrain`). An add that lands after the erasure is
+// refused by the closed key.
 
 /** An interview's source, by the store's id for it. */
 export const interviewSource = (id: string): SourceRef => ({
@@ -44,27 +47,47 @@ export const claimSource = (id: string): SourceRef => ({
 const gone: Handed = { kind: "gone", skipped: "deleted" };
 
 /**
- * Interview `id` as the onboarding holds it now: its approved facts, for
- * its linked account alone; nothing once it no longer stands; erased once
- * that account's erasure began.
+ * Adds to the new Brain each interview the onboarding decided stands and
+ * core hasn't added yet (`interviewsToAdd`), only `person`'s when given,
+ * each in the own store of the account it belongs to, then forgets it
+ * there. One whose account's erasure began is left to that erasure. Each
+ * failure is logged by name alone and left for the next run: core's clock
+ * runs this every minute.
  */
-export const interviewOf = async (env: Env, id: string): Promise<Handed> => {
-  const held = await onboardingStore(env).interviewToHand(id);
-  if (held === null) {
-    return gone;
+export const addOwedInterviews = async (
+  env: Env,
+  person?: string
+): Promise<void> => {
+  const store = onboardingStore(env);
+  for (const owed of await store.interviewsToAdd(person)) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one add at a time
+      if (await erasureBegun(env, owed.account)) {
+        continue;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- one add at a time
+      await addSource(env, {
+        source: interviewSource(owed.source),
+        // A source stands for one decision: its id is its change's key.
+        change: owed.source,
+        text: owed.text,
+        readers: { kind: "owner", personId: owed.account },
+      });
+      // oxlint-disable-next-line no-await-in-loop -- one add at a time
+      await store.addedToBrain(owed.source);
+    } catch (error) {
+      // Erased meanwhile: its key is closed, and its erasure is owed, so
+      // there is nothing more to add.
+      if (brainSourceErrors.codeOf(error) === "brain.source_erased") {
+        // oxlint-disable-next-line no-await-in-loop -- one add at a time
+        await store.addedToBrain(owed.source);
+        continue;
+      }
+      log.error("onboarding.brain_add_failed", {
+        error: error instanceof Error ? error.name : "unknown",
+      });
+    }
   }
-  const readers = { kind: "owner", personId: held.account } as const;
-  if (await erasureBegun(env, held.account)) {
-    return { kind: "erased", readers };
-  }
-  return {
-    kind: "source",
-    // A source stands for one decision: its id is its change's key.
-    change: id,
-    text: held.text,
-    whenTooLarge: "An interview whose approved facts were too large to keep.",
-    readers,
-  };
 };
 
 /** Team claim `id` as the onboarding holds it now: its sentence, for its team; nothing once it no longer stands. */
@@ -127,6 +150,16 @@ export const eraseOwedOnboardingSources = async (
 };
 
 /**
+ * Settles what the onboarding owes the new Brain: every erasure owed
+ * first, then every interview to add (`addOwedInterviews`). Core's clock
+ * runs it every minute.
+ */
+export const settleOnboardingBrain = async (env: Env): Promise<void> => {
+  await eraseOwedOnboardingSources(env);
+  await addOwedInterviews(env);
+};
+
+/**
  * `eraseOwedOnboardingSources`, then throws while the Brain may still hold
  * `person`'s interview: for core's erasures and purges, which let go only
  * once it doesn't.
@@ -142,10 +175,11 @@ export const eraseOnboardingInterview = async (
 };
 
 /**
- * Erases what the onboarding owes the Brain because of `person`'s request
- * (their interview, and their team's claims it took out), where a failure
- * must not fail what ran before it. The rest, and any failure, is core's
- * clock's.
+ * Settles what the onboarding owes the Brain because of `person`'s request,
+ * where a failure must not fail what ran before it: erases their interview
+ * and their team's claims it took out, then adds their interview as it
+ * stands now, so they find it in their Brain as soon as they approve. The
+ * rest, and any failure, is core's clock's.
  */
 export const eraseOwedOfPersonQuietly = async (
   env: Env,
@@ -158,6 +192,7 @@ export const eraseOwedOfPersonQuietly = async (
   }
   try {
     await eraseOwedOnboardingSources(env, { person, teams });
+    await addOwedInterviews(env, person);
   } catch (error) {
     log.error("onboarding.brain_erasure_failed", {
       error: error instanceof Error ? error.name : "unknown",

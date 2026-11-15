@@ -575,18 +575,22 @@ const startSession = async <T extends { expiresAt: Date; userId: string }>(
   }
   const fromClient =
     providerId === providerIds.entra || providerId === providerIds.google;
-  // Someone the directory made a member before they ever signed in is
-  // that member from their first Microsoft sign-in on, by the object id
-  // their verified ID token names.
-  const userId =
-    providerId === providerIds.entra
-      ? await adoptDirectoryMember(env, session.userId)
-      : session.userId;
   if (!fromClient) {
     // Sessions come only from an SSO callback.
     return false;
   }
-  if (await gateLetsIn(env, config, userId)) {
+  if (await gateLetsIn(env, config, session.userId)) {
+    // Someone the directory made a member before they ever signed in is
+    // that member from their first Microsoft sign-in on, by the object id
+    // their verified ID token names; an interview of theirs goes with them
+    // (the store's `accountMoved`).
+    const userId =
+      providerId === providerIds.entra
+        ? await adoptDirectoryMember(env, session.userId)
+        : session.userId;
+    if (userId !== session.userId) {
+      await onboardingStore(env).accountMoved(session.userId, userId);
+    }
     // For members.
     return (await ensureMember(env, config, userId))
       ? {
@@ -602,9 +606,11 @@ const startSession = async <T extends { expiresAt: Date; userId: string }>(
   }
   // The gate is closed to them: a session for their own interview alone,
   // if a link of one went to their address (GRA-1790). They join nothing:
-  // no membership is made, and the session reaches no route but the
-  // interview's (identity.ts `sessionIdentity`, the `/organization/` hook).
-  // Nobody an admin removed comes in for one either.
+  // no membership is made, a member the directory made is not adopted (and
+  // nothing of it reaches the company's audit log), and the session reaches
+  // no route but the interview's (identity.ts `sessionIdentity`, the
+  // `/organization/` hook). Nobody an admin removed comes in for one either.
+  const { userId } = session;
   return (await interviewInvites(env, await emailOf(env, userId))) &&
     !(await isRemoved(env, userId))
     ? { data: { ...session, userId, staff: false, interview: true } }

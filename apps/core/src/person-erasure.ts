@@ -358,9 +358,11 @@ const runs: ErasureStep = {
  * its person's own request (`deleteOnRequest`): what they said and agreed
  * to, every drawing it was in, the Brain's records resting on it, and
  * everything the voice said in it; and everything the voice said for them
- * as an admin, on their onboarding. Found on the list by the address that was
- * theirs, through its keyed hash, so whichever area ran first; once an
- * admin released the address, or under an older key, it is found no more.
+ * as an admin, on their onboarding. Found by the account their interview
+ * belongs to (GRA-1790), whatever the list says now; and on the list by
+ * the address that was theirs, through its keyed hash, so whichever area
+ * ran first; once an admin released the address, or under an older key, it
+ * is found by address no more.
  * Their entry on the list is the company's (Nick's D5): it stays, removed
  * only by an admin.
  */
@@ -382,6 +384,17 @@ const interview: ErasureStep = {
     // What the voice said for them as an admin, on their onboarding, goes
     // from its cache, whoever they were on the list (GRA-1897).
     await onboardingStore(env).forgetSpokenForAdmin(userId);
+    // The interview that belongs to their account (GRA-1790), whatever
+    // address the list has for them now: found by the account it opened
+    // under, and gone, from the Brain too, before this area is done.
+    const owned = await onboardingStore(env).personOfAccount(userId);
+    if (owned !== null) {
+      await onboardingStore(env).eraseInterviewOf(
+        owned,
+        erasure.requestedAt.toISOString()
+      );
+      await eraseOnboardingInterview(env, owned);
+    }
     // Their address released, or hashed under an older key: they can't be
     // found on the list by it, and whatever interview they have is left.
     // Recorded as skipped, never as done.

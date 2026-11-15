@@ -1152,10 +1152,6 @@ msgid "{team} · new"
 msgstr "{team} · new"
 
 #: src/onboarding/interviews-progress.tsx
-msgid "{team} · no address your sign-in takes, so no interview"
-msgstr "{team} · no address your sign-in takes, so no interview"
-
-#: src/onboarding/interviews-progress.tsx
 msgid "{team} · not out yet"
 msgstr "{team} · not out yet"
 
@@ -12426,6 +12422,7 @@ msgstr "Sign in with your organization's account."
 
 #: src/frame/person-menu.tsx
 #: src/routes/_shell.settings.security.tsx
+#: src/routes/interview.tsx
 #: src/routes/staff.tsx
 msgid "Sign out"
 msgstr "Sign out"

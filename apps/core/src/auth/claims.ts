@@ -12,20 +12,20 @@ type Claims = Readonly<Record<string, unknown>>;
 const nonEmpty = (value: unknown): value is string =>
   typeof value === "string" && value.length > 0;
 
-/** Whether `email` is at one of `domains`, the sign-in's, in any case. */
-export const addressInDomains = (
-  email: unknown,
-  domains: readonly string[]
-): boolean => {
+/** The lowercased domain of the token's email claim, if it has one. */
+const emailDomain = (claims: Claims): string | undefined => {
+  const { email } = claims;
   if (!nonEmpty(email)) {
-    return false;
+    return undefined;
   }
   const at = email.lastIndexOf("@");
-  return at > 0 && domains.includes(email.slice(at + 1).toLowerCase());
+  return at > 0 ? email.slice(at + 1).toLowerCase() : undefined;
 };
 
-const inDomains = (claims: Claims, domains: readonly string[]): boolean =>
-  addressInDomains(claims.email, domains);
+const inDomains = (claims: Claims, domains: readonly string[]): boolean => {
+  const domain = emailDomain(claims);
+  return domain !== undefined && domains.includes(domain);
+};
 
 /**
  * Entra: the tenant (`tid`) is the pinned one and the object id (`oid`), the
