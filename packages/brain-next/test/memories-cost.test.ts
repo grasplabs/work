@@ -286,13 +286,13 @@ describe("what reading memories costs", () => {
 
   it("judges a restatement by one seek, however many memories of the same words its lineage holds about other entities", async () => {
     const { stub, rowsReadBy } = await countedStore();
-    const group = `seen-${crypto.randomUUID()}`;
-    const reader = readerOf("reader", group);
+    const group = "alike-readers";
+    const reader = readerOf("alike-reader", group);
     const said = "works from Delft";
     const { entities } = await add(
       stub,
       group,
-      [{ key: "c", kind: "customer", names: [word()] }],
+      [{ key: "c", kind: "customer", names: ["Delftco"] }],
       [fact("c", said), fact("c", said)]
     );
     /** `count` memories of the same words, one an entity of its own, in the same lineage. */
@@ -303,7 +303,11 @@ describe("what reading memories costs", () => {
         await add(
           stub,
           group,
-          keys.map((key) => ({ key, kind: "customer", names: [word()] })),
+          keys.map((key, index) => ({
+            key,
+            kind: "customer",
+            names: [`Other${start + index}`],
+          })),
           keys.map((key) => fact(key, said))
         );
       }
@@ -319,6 +323,60 @@ describe("what reading memories costs", () => {
     for (const size of [1000, 5000]) {
       // oxlint-disable-next-line no-await-in-loop -- one size at a time
       await alike(size - have);
+      have = size;
+      // oxlint-disable-next-line no-await-in-loop -- one size at a time
+      rows.push(await rowsReadBy(ask));
+    }
+    const [alone, ...grown] = rows;
+
+    expect(grown.map((read) => flat(alone ?? 0, read))).toStrictEqual([
+      true,
+      true,
+    ]);
+  }, 120_000);
+
+  it("judges a restatement by its key, however many other facts its lineage holds about the same entity", async () => {
+    const { stub, rowsReadBy } = await countedStore();
+    const group = "restated-readers";
+    const reader = readerOf("restated-reader", group);
+    const said = "Acme ships through Brightwater";
+    // A fact said twice by one writer about one customer: the earlier is
+    // ended by the restatement, judged by its key.
+    const { entities } = await add(
+      stub,
+      group,
+      [{ key: "c", kind: "customer", names: ["Acme"] }],
+      [fact("c", said), fact("c", said)]
+    );
+    const acme = entities.c ?? "";
+    /** Other facts of the same writer about the same customer, each worded its own way, a hundred an add. */
+    const otherFacts = async (from: number, to: number) => {
+      for (let start = from; start < to; start += 100) {
+        // oxlint-disable-next-line no-await-in-loop -- one add at a time
+        await add(
+          stub,
+          group,
+          [{ key: "c", id: acme, kind: "customer", names: [] }],
+          Array.from({ length: 100 }, (_, index) =>
+            fact("c", `Acme note ${start + index}`)
+          )
+        );
+      }
+    };
+    // Recall by the one word only the fact and its restatement hold: the
+    // two are found and each judged, every other fact of the customer left
+    // unread unless judging reads them.
+    const ask = async () =>
+      await stub.recall({
+        question: "brightwater",
+        reader,
+        budget: { tokens: 4000 },
+      });
+    const rows = [await rowsReadBy(ask)];
+    let have = 0;
+    for (const size of [500, 2000]) {
+      // oxlint-disable-next-line no-await-in-loop -- one size at a time
+      await otherFacts(have, size);
       have = size;
       // oxlint-disable-next-line no-await-in-loop -- one size at a time
       rows.push(await rowsReadBy(ask));
