@@ -4534,12 +4534,22 @@ const codeMomentSchema = z.iso
   .datetime({ offset: true })
   .transform((at) => new Date(at));
 
-/** A card code asks for (`companyCardAs`). */
+/** A card code asks for (`codeCardAs`). */
 const codeCardSchema = z.strictObject({
   entity: entityIdSchema,
   asOf: codeMomentSchema.optional(),
   after: z.string().optional(),
 });
+
+/**
+ * Whom code reads entities as, from the shared store alone, never anyone's
+ * own: the company alone (`company`), as an App, a workflow and a chat's
+ * code anywhere but its person's own chat do; or its person's teams and
+ * the company, as no person (`teams`), as a chat's code does in their own
+ * chat in Grasp alone (agent-brain.ts), the reach its recall reads at
+ * there. Set by core, never by the code.
+ */
+export type CodeReach = Extract<Reach, "teams" | "company">;
 
 /** A memory on a card, its source as core names it. */
 export interface CardMemory extends Omit<Memory, "source"> {
@@ -4547,24 +4557,46 @@ export interface CardMemory extends Omit<Memory, "source"> {
 }
 
 /** An entity as code reads it. */
-export interface CompanyEntity {
+export interface CodeEntity {
   id: EntityId;
   kind: EntityKind;
   name: string | null;
 }
 
-/** The versions a page rests on (contract `restsOn`), as core names sources. */
-const restsOnOf = (
-  held: readonly { source: SourceId; version: number }[]
-): SourceVersionRef[] => held.flatMap((each) => versionRefOf(each) ?? []);
+/**
+ * Everything what code is handed rests on (contract `restsOn`,
+ * `restsOnWords`), core's to keep with the run or the chat and never
+ * code's to see: each version of a source, and each memory in a writer's
+ * own word, of the shared store.
+ */
+export interface CodeRestsOn {
+  versions: SourceVersionRef[];
+  words: StoredMemoryPlace[];
+}
 
 /**
- * A page of an entity's card as code reads it: the store's, memories cited
- * as core names sources, with every version what it says rests on
- * (`restsOn`): core's to keep with a run, never code's to see.
+ * What `answer` of the shared store rests on, as core names it. A version
+ * of a kind no producer has fails the read (`sourceRefOf`): what can't be
+ * pinned is never handed over.
  */
-export interface CompanyCard {
-  entity: CompanyEntity;
+const codeRestsOnOf = (answer: {
+  restsOn: readonly { source: SourceId; version: number }[];
+  restsOnWords: readonly string[];
+}): CodeRestsOn => ({
+  versions: answer.restsOn.map(({ source, version }) => ({
+    source: sourceRefOf(source),
+    version,
+  })),
+  words: answer.restsOnWords.map((memory) => ({ store: "shared", memory })),
+});
+
+/**
+ * A page of an entity's card as code reads it: the shared store's,
+ * memories cited as core names sources, with everything what it says
+ * rests on (`restsOn`): core's to keep, never code's to see.
+ */
+export interface CodeCard {
+  entity: CodeEntity;
   attributes: {
     attribute: string;
     memories: CardMemory[];
@@ -4573,12 +4605,12 @@ export interface CompanyCard {
   relations: {
     attribute: string | null;
     side: "about" | "object";
-    other: CompanyEntity;
+    other: CodeEntity;
     memory: CardMemory;
   }[];
   notes: CardMemory[];
   next: string | null;
-  restsOn: SourceVersionRef[];
+  restsOn: CodeRestsOn;
 }
 
 /** `memory` with its source as core names it. */
@@ -4588,20 +4620,21 @@ const cardMemoryOf = ({ source, ...memory }: Memory): CardMemory => ({
 });
 
 /**
- * A page of entity `entity`'s card as the company may read it, for the
- * member `personId` (code's reach: never a team's or a person's own), as
- * now or as of `asOf`, after `after` (a page's `next`): null alike when the
- * company may see no such entity and when nobody holds one. Refused once
- * `personId` is no longer a member, and as `brain.request_invalid` for a
- * request or cursor that isn't one.
+ * A page of entity `entity`'s card as `reach` may read it (`CodeReach`),
+ * for the member `personId`, from the shared store alone, as now or as of
+ * `asOf`, after `after` (a page's `next`): null alike when they may see no
+ * such entity and when nobody holds one. Refused once `personId` is no
+ * longer a member, and as `brain.request_invalid` for a request or cursor
+ * that isn't one.
  */
-export const companyCardAs = async (
+export const codeCardAs = async (
   env: BrainEnv & Pick<Env, "DB">,
   personId: string,
+  reach: CodeReach,
   request: unknown
-): Promise<CompanyCard | null> => {
+): Promise<CodeCard | null> => {
   const { entity, asOf, after } = checked(codeCardSchema, request);
-  const reader = await readerOf(env, personId, "company");
+  const reader = await readerOf(env, personId, reach);
   let card: Awaited<ReturnType<Brain["readCard"]>>;
   try {
     card = await brain(env).readCard({
@@ -4630,11 +4663,11 @@ export const companyCardAs = async (
     })),
     notes: card.notes.map((memory) => cardMemoryOf(memory)),
     next: cursorTextOf(card.next),
-    restsOn: restsOnOf(card.restsOn),
+    restsOn: codeRestsOnOf(card),
   };
 };
 
-/** Entities code asks to find (`companyEntitiesAs`): a kind, a name or an identifier, at least one. */
+/** Entities code asks to find (`codeEntitiesAs`): a kind, a name or an identifier, at least one. */
 const codeFindSchema = z
   .strictObject({
     kind: z.enum(entityKinds).optional(),
@@ -4647,28 +4680,29 @@ const codeFindSchema = z
       kind !== undefined || name !== undefined || identifier !== undefined
   );
 
-/** A page of entities as code reads it, with every version it rests on (`restsOn`, core's alone). */
-interface CompanyEntities {
-  entities: CompanyEntity[];
+/** A page of entities as code reads it, with everything it rests on (`restsOn`, core's alone). */
+interface CodeEntities {
+  entities: CodeEntity[];
   next: string | null;
-  restsOn: SourceVersionRef[];
+  restsOn: CodeRestsOn;
 }
 
 /**
- * A page of the entities the company may see that match `request`'s kind,
- * name (whole, folded) or exact identifier, for the member `personId`,
- * after `after` (a page's `next`), in the order of the first memory the
- * company may read that mentions each. Refused once `personId` is no
- * longer a member, and as `brain.request_invalid` for a request or cursor
- * that isn't one.
+ * A page of the entities `reach` may see (`CodeReach`) that match
+ * `request`'s kind, name (whole, folded) or exact identifier, for the
+ * member `personId`, from the shared store alone, after `after` (a page's
+ * `next`), in the order of the first memory the reader may read that
+ * mentions each. Refused once `personId` is no longer a member, and as
+ * `brain.request_invalid` for a request or cursor that isn't one.
  */
-export const companyEntitiesAs = async (
+export const codeEntitiesAs = async (
   env: BrainEnv & Pick<Env, "DB">,
   personId: string,
+  reach: CodeReach,
   request: unknown
-): Promise<CompanyEntities> => {
+): Promise<CodeEntities> => {
   const { after, ...asked } = checked(codeFindSchema, request);
-  const reader = await readerOf(env, personId, "company");
+  const reader = await readerOf(env, personId, reach);
   let page: Awaited<ReturnType<Brain["findEntities"]>>;
   try {
     page = await brain(env).findEntities({
@@ -4684,7 +4718,7 @@ export const companyEntitiesAs = async (
   return {
     entities: page.entities,
     next: cursorTextOf(page.next),
-    restsOn: restsOnOf(page.restsOn),
+    restsOn: codeRestsOnOf(page),
   };
 };
 

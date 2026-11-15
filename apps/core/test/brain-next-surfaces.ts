@@ -571,7 +571,8 @@ const contestedSupplier = async (): Promise<void> => {
 
 /**
  * `probe`, of a surface that shows entities to people or to code: what a
- * page rests on (`restsOn`: the versions behind its names, matches and
+ * page rests on (`restsOn`, `restsOnWords`: the versions and the memories
+ * in a writer's own word behind its names, matches and
  * memories) is the host's to keep, so an answer carrying it hands the
  * harness the markers, and is found as a leak.
  */
@@ -579,7 +580,7 @@ const showingEntities =
   (probe: Probe): Probe =>
   async (probing) => {
     const answers = await probe(probing);
-    return answers.some(({ got }) => textOf(got).includes('"restsOn"'))
+    return answers.some(({ got }) => textOf(got).includes('"restsOn'))
       ? [
           ...answers,
           {
@@ -1081,10 +1082,7 @@ type CorePersonMember =
   | "correctAs";
 
 /** The exports of core's brain-next.ts for code's entities, probed after them (`coreCodeEntities`). */
-type CoreCodeMember =
-  | "companyCardAs"
-  | "companyEntitiesAs"
-  | "isCodeEntitiesRequest";
+type CoreCodeMember = "codeCardAs" | "codeEntitiesAs" | "isCodeEntitiesRequest";
 
 // Exports (GRA-1755). A company's export holds what the company holds,
 // markers among them, by design: it is for an admin, and core's route
@@ -4374,6 +4372,26 @@ const appWithBrain = async (
   return { authority, permissionId };
 };
 
+/**
+ * An agent of the reader's holding a grant to read the Brain that holds
+ * in every chat, as an admin gives one: a chat's code reads under it.
+ */
+const agentWithBrain = async (
+  personId: string
+): Promise<{ authority: Authority; permissionId: string }> => {
+  const authority = readersAgent(personId);
+  const permissionId = crypto.randomUUID();
+  if (authority.subject.type !== "agent") {
+    throw new Error("Not an agent");
+  }
+  await env.DB.prepare(
+    "INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id, actions, binding, status, requested_by, requested_at) VALUES (?, 'agent', ?, 'platform', 'platform', '[\"brain\"]', 'BRAIN', 'active', ?, ?)"
+  )
+    .bind(permissionId, authority.subject.agentId, personId, Date.now())
+    .run();
+  return { authority, permissionId };
+};
+
 /** An App recalling as `as`, in its own context, under `grant`. */
 const callerOf = (as: Authority, grant: string): codeRecall.RecallCaller => ({
   authority: as,
@@ -4401,9 +4419,15 @@ const skillsCallerOf = (
   return caller;
 };
 
-/** An App reading entities as `as`, under `grant`, keeping nothing. */
-const entitiesCallerOf = (as: Authority, grant: string) => {
-  const { keep: _keep, ...caller } = callerOf(as, grant);
+/**
+ * An App, or a chat's agent anywhere but its person's own chat, reading
+ * entities as `as`, under `grant`, keeping nothing.
+ */
+const entitiesCallerOf = (
+  as: Authority,
+  grant: string
+): codeRecall.EntitiesCaller => {
+  const { keep: _keep, reach: _reach, ...caller } = callerOf(as, grant);
   return caller;
 };
 
@@ -4624,13 +4648,21 @@ export const recallProbes = {
   entitiesCallFor: showingEntities(async (probing) => {
     const { personId, markers } = probing;
     const { authority, permissionId } = await appWithBrain(personId);
-    const fixture = await recallFixture(probing);
+    const agent = await agentWithBrain(personId);
+    const [fixture, others] = await Promise.all([
+      recallFixture(probing),
+      othersOwnMemory(markers),
+    ]);
     const call = async (
       name: string,
       operation: coreBrain.CodeEntitiesOperation,
       input: unknown,
       about?: Answer["about"],
-      { as = authority, grant = permissionId } = {},
+      {
+        as = authority,
+        grant = permissionId,
+        reach,
+      }: { as?: Authority; grant?: string; reach?: "teams" } = {},
       like?: string
     ) =>
       await answer(
@@ -4638,7 +4670,10 @@ export const recallProbes = {
         async () =>
           await codeRecall.entitiesCallFor(
             env,
-            entitiesCallerOf(as, grant),
+            {
+              ...entitiesCallerOf(as, grant),
+              ...(reach === undefined ? {} : { reach }),
+            },
             operation,
             input
           ),
@@ -4647,16 +4682,89 @@ export const recallProbes = {
       );
     const text = markedText(markers);
     const named = await plainSupplier();
+    // A chat's code in its person's own chat: the reader's teams too,
+    // never anyone's own store, theirs included, nor a team they aren't in.
+    const ownChat = {
+      as: agent.authority,
+      grant: agent.permissionId,
+      reach: "teams" as const,
+    };
     // One call site for every case: a refusal's stack is then the same,
     // hidden or not.
-    const cases: [
+    type Case = [
       string,
       coreBrain.CodeEntitiesOperation,
       unknown,
       Answer["about"],
-      { as?: Authority; grant?: string },
+      { as?: Authority; grant?: string; reach?: "teams" },
       string | undefined,
-    ][] = [
+    ];
+    const cases: Case[] = [
+      [
+        "a card no one has, in the person's own chat",
+        "entities.get",
+        { entity: crypto.randomUUID() },
+        "nothing",
+        ownChat,
+        "own chat's card",
+      ],
+      [
+        "a hidden card, in the person's own chat",
+        "entities.get",
+        { entity: fixture.hidden },
+        "hidden",
+        ownChat,
+        "own chat's card",
+      ],
+      [
+        "someone else's own card, in the person's own chat",
+        "entities.get",
+        { entity: others.entity },
+        "hidden",
+        ownChat,
+        "own chat's card",
+      ],
+      [
+        "a name no one gave, in the person's own chat",
+        "entities.find",
+        { name: markers.map(twinOf).join(" ") },
+        "nothing",
+        ownChat,
+        "own chat's find",
+      ],
+      [
+        "a hidden name, in the person's own chat",
+        "entities.find",
+        { name: text },
+        "hidden",
+        ownChat,
+        "own chat's find",
+      ],
+      [
+        "the reader's team's card, in the person's own chat",
+        "entities.get",
+        { entity: fixture.seen },
+        undefined,
+        ownChat,
+        undefined,
+      ],
+      [
+        "the agent's code, anywhere but its person's own chat",
+        "entities.get",
+        { entity: fixture.seen },
+        "hidden",
+        { as: agent.authority, grant: agent.permissionId },
+        "card",
+      ],
+      // Only a chat's agent reads its person's teams, whatever a caller says.
+      [
+        "the reader's team's card, an App asking for its person's teams",
+        "entities.get",
+        { entity: fixture.seen },
+        "hidden",
+        { reach: "teams" },
+        "card",
+      ],
       [
         "a card no one has",
         "entities.get",
@@ -5733,114 +5841,150 @@ const corePersonMemories = {
   ],
 } satisfies Record<CorePersonMember, Probe>;
 
-// Code's entities (GRA-1837): read as the company alone, so everything a
-// team or a person may read is hidden from them, the reader's own team's
-// among it (the fixture's `seen`).
+// Code's entities (GRA-1837, GRA-1894): as the company alone, everything
+// a team or a person may read is hidden, the reader's own team's among it
+// (the fixture's `seen`); as the person's teams (a chat's code in their
+// own chat), their teams too, never anyone's own store nor a team's they
+// aren't in. Each reach compared on its own (`like`).
+const codeReaches: readonly coreBrain.CodeReach[] = ["company", "teams"];
+
 const coreCodeEntities = {
-  companyCardAs: async (probing) => {
+  codeCardAs: async (probing) => {
     const { personId, markers } = probing;
-    // Someone else's own store too: code never reads one.
     const [fixture, others] = await Promise.all([
       recallFixture(probing),
       othersOwnMemory(markers),
     ]);
     const read = async (
       name: string,
+      reach: coreBrain.CodeReach,
       request: Record<string, unknown>,
       about?: Answer["about"],
       as = personId
     ) =>
       await answer(
         name,
-        async () => await coreBrain.companyCardAs(env, as, request),
-        about
+        async () => await coreBrain.codeCardAs(env, as, reach, request),
+        about,
+        reach
       );
+    const perReach = await Promise.all(
+      codeReaches.map(async (reach) => [
+        await read(
+          `an entity no one added, as the ${reach}`,
+          reach,
+          { entity: crypto.randomUUID() },
+          "nothing"
+        ),
+        await read(
+          `one only hidden memories name, as the ${reach}`,
+          reach,
+          { entity: fixture.hidden },
+          "hidden"
+        ),
+        await read(
+          `one drawn from a hidden source, as the ${reach}`,
+          reach,
+          { entity: fixture.drawn },
+          "hidden"
+        ),
+        await read(
+          `one in someone else's own store, as the ${reach}`,
+          reach,
+          { entity: others.entity },
+          "hidden"
+        ),
+        await read(`as of the markers, as the ${reach}`, reach, {
+          entity: fixture.seen,
+          asOf: markers.join(""),
+        }),
+        await read(`after a cursor of the markers, as the ${reach}`, reach, {
+          entity: fixture.seen,
+          after: btoa(JSON.stringify({ at: markers.join("") })),
+        }),
+        await read(
+          `as someone who isn't a member, as the ${reach}`,
+          reach,
+          { entity: fixture.seen },
+          undefined,
+          stranger()
+        ),
+      ])
+    );
     return [
+      ...perReach.flat(),
       await read(
-        "an entity no one added",
-        { entity: crypto.randomUUID() },
-        "nothing"
-      ),
-      await read(
-        "one only hidden memories name",
-        { entity: fixture.hidden },
-        "hidden"
-      ),
-      await read(
-        "one drawn from a hidden source",
-        { entity: fixture.drawn },
-        "hidden"
-      ),
-      await read(
-        "one the reader's team alone reads",
+        "one the reader's team alone reads, as the company",
+        "company",
         { entity: fixture.seen },
         "hidden"
       ),
-      await read(
-        "one in someone else's own store",
-        { entity: others.entity },
-        "hidden"
-      ),
-      await read("as of the markers", {
+      await read("one the reader's team reads, as their teams", "teams", {
         entity: fixture.seen,
-        asOf: markers.join(""),
       }),
-      await read("after a cursor of the markers", {
-        entity: fixture.seen,
-        after: btoa(JSON.stringify({ at: markers.join("") })),
-      }),
-      await read(
-        "as someone who isn't a member",
-        { entity: fixture.seen },
-        undefined,
-        stranger()
-      ),
     ];
   },
-  companyEntitiesAs: async (probing) => {
+  codeEntitiesAs: async (probing) => {
     const { personId, markers } = probing;
     const fixture = await recallFixture(probing);
     const text = markedText(markers);
     const find = async (
       name: string,
+      reach: coreBrain.CodeReach,
       request: Record<string, unknown>,
       about?: Answer["about"],
       like?: string
     ) =>
       await answer(
         name,
-        async () => await coreBrain.companyEntitiesAs(env, personId, request),
+        async () =>
+          await coreBrain.codeEntitiesAs(env, personId, reach, request),
         about,
-        like
+        like === undefined ? undefined : `${like} as the ${reach}`
       );
-    return [
-      await find(
-        "a name only hidden memories give",
-        { name: text },
-        "hidden",
-        "name"
-      ),
-      await find(
-        "a name no one gave",
-        { name: markers.map(twinOf).join(" ") },
-        "nothing",
-        "name"
-      ),
-      await find(
-        "an identifier only hidden memories give",
-        { identifier: { type: "ref", value: fixture.hiddenRef } },
-        "hidden",
-        "identifier"
-      ),
-      await find(
-        "an identifier no one gave",
-        { identifier: { type: "ref", value: `ref:${crypto.randomUUID()}` } },
-        "nothing",
-        "identifier"
-      ),
-      await find("a kind", { kind: "customer" }),
-      await find("nothing to find by", { after: markers.join("") }),
-    ];
+    const perReach = await Promise.all(
+      codeReaches.map(async (reach) => [
+        await find(
+          `a name only hidden memories give, as the ${reach}`,
+          reach,
+          { name: text },
+          "hidden",
+          "name"
+        ),
+        await find(
+          `a name no one gave, as the ${reach}`,
+          reach,
+          { name: markers.map(twinOf).join(" ") },
+          "nothing",
+          "name"
+        ),
+        await find(
+          `an identifier only hidden memories give, as the ${reach}`,
+          reach,
+          { identifier: { type: "ref", value: fixture.hiddenRef } },
+          "hidden",
+          "identifier"
+        ),
+        await find(
+          `an identifier no one gave, as the ${reach}`,
+          reach,
+          {
+            identifier: { type: "ref", value: `ref:${crypto.randomUUID()}` },
+          },
+          "nothing",
+          "identifier"
+        ),
+        await find(`a kind, as the ${reach}`, reach, { kind: "customer" }),
+        await find(`nothing to find by, as the ${reach}`, reach, {
+          after: markers.join(""),
+        }),
+        await find(`a cursor of the markers, as the ${reach}`, reach, {
+          kind: "customer",
+          after: btoa(JSON.stringify({ at: markers.join("") })),
+        }),
+      ])
+    );
+    return perReach.flat();
   },
   // Pure: what a request is, never what it holds.
   isCodeEntitiesRequest: async ({ markers }) => {

@@ -5878,6 +5878,10 @@ msgstr "Ons eerste gesprek vergeten"
 msgid "Forget our first conversation?"
 msgstr "Ons eerste gesprek vergeten?"
 
+#: src/brain/memories-page.tsx
+msgid "Forgotten, kept as history"
+msgstr "Vergeten, bewaard als geschiedenis"
+
 #: src/onboarding/forget-kickoff.tsx
 msgid "Forgotten. Nothing of our first conversation is kept."
 msgstr "Vergeten. Er is niets meer van ons eerste gesprek bewaard."
