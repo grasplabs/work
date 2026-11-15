@@ -4889,7 +4889,7 @@ const appUsersGroup = (appId: AppId): string =>
  * it now.
  */
 const codeReaderOf = async (
-  env: Pick<Env, "DB">,
+  env: ReaderEnv,
   personId: string,
   reach: CodeReach,
   appUsers: AppId | undefined
@@ -5183,7 +5183,7 @@ export const isCodeWriteRequest = (
  * the App's code may not see among them, as one nobody holds).
  */
 export const rememberForAppAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   { app, change }: { app: AppId; change: string },
   request: unknown
@@ -5237,7 +5237,7 @@ export const rememberForAppAs = async (
  * `personId` is no longer a member.
  */
 export const forgetForAppAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   { app, change }: { app: AppId; change: string },
   request: unknown
