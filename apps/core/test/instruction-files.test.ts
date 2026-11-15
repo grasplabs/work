@@ -234,8 +234,8 @@ describe("instruction files", setUpTime, () => {
         appId,
         personal: true,
       }),
-      // A chat of theirs whose answer doesn't reach them alone: a chat
-      // app's direct message while GRA-1821 is open, a turn nobody asked.
+      // A chat of theirs whose answer doesn't reach them alone: a turn
+      // nobody asked for there and then.
       notTheirsAlone: await markersFor(markers, asAgent, {
         conversation: "own",
         personal: false,
@@ -308,8 +308,8 @@ describe("instruction files", setUpTime, () => {
     await expect(
       textsFor(asAgent, { conversation: "own", personal: true })
     ).resolves.not.toContain(`other ${u}`);
-    // A chat app's direct message, while GRA-1821 is open: not theirs
-    // alone, so not their own file either (the plan lists it there).
+    // A turn of theirs nobody asked for there and then: not theirs alone,
+    // so not their own file either.
     const direct = await textsFor(asAgent, {
       conversation: "own",
       personal: false,

@@ -173,8 +173,8 @@ export const brainTeamVersionRead = (ref: SourceVersionRef): string =>
   `${brainTeamVersionPrefix}${brainVersionRead(ref).slice(brainVersionPrefix.length)}`;
 
 // What a chat's recall before a question read as the company alone
-// (turn-recall.ts: anywhere but the person's own chat in Grasp, in a turn
-// they started) is pinned under a prefix of its own too, and checked as
+// (turn-recall.ts: anywhere but the person's own chat, in Grasp or their
+// direct message, in a turn they started) is pinned under a prefix of its own too, and checked as
 // the company reads it: withheld once everyone in the company may no
 // longer read it, even if the person still may, and every one of them
 // once anyone Grasp can't name as a member is in a chat others share.
