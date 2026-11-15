@@ -15635,6 +15635,10 @@ msgstr "Womit er startet"
 msgid "What its calls answer"
 msgstr "Was seine Aufrufe antworten"
 
+#: src/apps/app-reset.tsx
+msgid "What its code remembered in the Brain goes with its data."
+msgstr "Was ihr Code im Gehirn gespeichert hat, geht mit ihren Daten."
+
 #: src/workflows/kept-state.tsx
 msgid "What its steps keep for later runs, which each run reads as it starts. It uses {used} KB of {cap} KB."
 msgstr "Was seine Schritte für spätere Läufe behalten; jeder Lauf liest es beim Start. Belegt {used} KB von {cap} KB."

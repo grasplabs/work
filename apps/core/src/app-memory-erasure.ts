@@ -25,15 +25,33 @@ import { appDefaultStores } from "./db/core/schema.ts";
 //   repeats until it lands: so the deletion never reads as done before
 //   the memories are gone.
 // - A reset is one change a request, minted as it starts
-//   (data-stores.ts `resetAppStore`), erased before the store resets.
+//   (data-stores.ts `resetAppStore`), erased before the store resets,
+//   whether or not the App has a store (an App without tables never gets
+//   one), and once more after it, under a change derived from it, for
+//   what a call remembered meanwhile from records it read before; that
+//   second erasure is recorded only when it found some.
+// - An App removed for good while it has no store to delete
+//   (app-removal.ts): one change for the App (`app-removed:<id>`), erased
+//   just before the removal is written. A removed App is never restored,
+//   so nothing it wrote is needed again; one whose store lives keeps its
+//   memories until that store is deleted, as its data stays until then.
 //
 // One audit event an erasure, by ids and the count it covered, its ID
 // from the change and its time the one the Brain recorded, so a repeat
 // keeps the same event. What the App remembers afterwards is new, and
 // kept: the Brain never closes a writer.
 
-/** Why an App's memories are erased, as its audit event says. */
-type Cause = "store_deleted" | "data_reset";
+/**
+ * Why an App's memories are erased, as its audit event says: its store
+ * deleted; its data reset; what a call remembered while the reset ran,
+ * erased once it is done; or the App removed for good while it has no
+ * store to delete.
+ */
+type Cause =
+  | "store_deleted"
+  | "data_reset"
+  | "written_during_reset"
+  | "app_removed";
 
 /**
  * `erase` once, and once more when its reply was lost (an error no rule
@@ -73,6 +91,11 @@ export const eraseAppMemories = async (
         change,
       })
   );
+  // What a call remembered while a reset ran is the reset's own: told
+  // only when there was some, so a reset reads as one erasure otherwise.
+  if (cause === "written_during_reset" && memories === 0) {
+    return;
+  }
   const action = "brain.memory.erased";
   await keepEvent(
     env,
@@ -114,5 +137,27 @@ export const eraseDeletedStoresMemories = async (
     change: `app-store-deleted:${store}`,
     actor,
     cause: "store_deleted",
+  });
+};
+
+/**
+ * Erases what App `app`'s code remembered as it is removed for good by
+ * `actor`, when it has no store whose deletion would (app-removal.ts):
+ * one change for the App.
+ */
+export const eraseRemovedAppsMemories = async (
+  env: Env,
+  app: AppId,
+  actor: AuditActor,
+  hasStore: boolean
+): Promise<void> => {
+  if (hasStore) {
+    return;
+  }
+  await eraseAppMemories(env, {
+    app,
+    change: `app-removed:${app}`,
+    actor,
+    cause: "app_removed",
   });
 };

@@ -1,3 +1,4 @@
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -9,7 +10,10 @@ import {
 import { callAppFunction } from "../src/app-functions.ts";
 import { addMember, removeMember } from "../src/app-members.ts";
 import { holdingsOf, recallsTheBrain } from "../src/app-provenance.ts";
+import { removeApp } from "../src/app-removal.ts";
 import { resetAppData } from "../src/app-schema.ts";
+import { setArchived } from "../src/app-status.ts";
+import { uuidFromHash } from "../src/audit-outbox.ts";
 import { appUsersReadBy, appWriteFor } from "../src/brain-app-writes.ts";
 import {
   codeCardAs,
@@ -35,6 +39,7 @@ import {
   published,
   rememberedSchema,
   requestOf,
+  storeOf,
   signedIn,
   someText,
   statementsOf,
@@ -356,8 +361,10 @@ describe("an App's code remembers and forgets for its users", setUpTime, () => {
     const mailbox = await appOf(ada, admin);
     const reaching = await appOf(ada, admin);
     const reached = await appOf(ada, admin);
-    // Granted a Knowledge collection before the Brain replaced it.
+    // Granted a Knowledge collection before the Brain replaced it, and,
+    // besides, one also reaching an App that can't be placed.
     const knowledge = await appOf(ada, admin);
+    const knowledgeAndMore = await appOf(ada, admin);
     // A personal connection, granted and then revoked: it still counts.
     const connection = `connection-mailbox-${unique()}`;
     const now = Date.now();
@@ -368,6 +375,7 @@ describe("an App's code remembers and forgets for its users", setUpTime, () => {
       .bind(connection, ada.userId, now, now)
       .run();
     const workflow = `workflow_${unique().replaceAll("-", "")}`;
+    const unplaced = `workflow_${unique().replaceAll("-", "")}`;
     await env.DB.batch([
       grant(
         "app",
@@ -383,6 +391,15 @@ describe("an App's code remembers and forgets for its users", setUpTime, () => {
       grant("app", knowledge.app, "collection", `collection-${unique()}`, [
         "read",
       ]),
+      grant(
+        "app",
+        knowledgeAndMore.app,
+        "collection",
+        `collection-${unique()}`,
+        ["read"]
+      ),
+      grant("app", knowledgeAndMore.app, "workflow", unplaced, ["start"]),
+      grant("workflow", unplaced, "app", crypto.randomUUID(), ["call"]),
     ]);
 
     const tried = async (app: App) =>
@@ -393,12 +410,15 @@ describe("an App's code remembers and forgets for its users", setUpTime, () => {
       reaching: await tried(reaching),
       reached: await tried(reached),
       knowledge: await tried(knowledge),
+      knowledgeAndMore: await tried(knowledgeAndMore),
     }).toStrictEqual({
       teamBrain: { failed: "permission.brain_write_reach" },
       mailbox: { failed: "permission.brain_write_reach" },
       reaching: { failed: "permission.brain_write_reach" },
       reached: { failed: "permission.brain_write_reach" },
       knowledge: { failed: "permission.brain_write_reach" },
+      // The grant that lasts, whatever else can't be placed now.
+      knowledgeAndMore: { failed: "permission.brain_write_reach" },
     });
   });
 
@@ -702,26 +722,30 @@ const freed = async (app: App): Promise<void> => {
   await env.DB.prepare(
     "DELETE FROM sdk_resource_bindings WHERE kind = 'store' AND target_id = ?"
   )
-    .bind(app.store)
+    .bind(storeOf(app))
     .run();
-  await inHost(app.store, async (host) => {
+  await inHost(storeOf(app), async (host) => {
     await host.sweepReceipts(new Date(Date.now() + 31 * 24 * 3_600_000));
   });
 };
 
-/** The erasure events of what `app`'s code remembered, once `count` are kept. */
-const erasuresOf = async (app: string, count: number) =>
-  await vi.waitFor(
-    async () => {
-      const all = await allEvents();
-      const events = all.filter(
-        ({ action, target }) =>
-          action === "brain.memory.erased" && target?.id === app
-      );
-      expect(events.length).toBeGreaterThanOrEqual(count);
-      return events;
-    },
-    { timeout: 10_000, interval: 50 }
+/**
+ * Every erasure event of what `app`'s code remembered, once every outbox
+ * is drained into the log (`allEvents`): exactly those, so a second one
+ * kept later is never missed.
+ */
+const erasuresOf = async (app: string) => {
+  const all = await allEvents();
+  return all.filter(
+    ({ action, target }) =>
+      action === "brain.memory.erased" && target?.id === app
+  );
+};
+
+/** The ID an erasure's event under `change` has: derived from the change. */
+const erasureIdOf = async (change: string): Promise<string> =>
+  uuidFromHash(
+    await sha256Hex(JSON.stringify(["brain.memory.erased", change]))
   );
 
 /** `on` with its database's first batch failing, as a call cut off before it lands. */
@@ -789,6 +813,63 @@ const failing = <T extends Rpc.DurableObjectBranded | undefined>(
   return namespaceOf(namespace);
 };
 
+/**
+ * `namespace` with object `name`'s `method` waiting, its first time, for
+ * `held` once it tells `reached`: a call held at that step, for a test to
+ * act meanwhile.
+ */
+const heldAt = <T extends Rpc.DurableObjectBranded | undefined>(
+  namespace: DurableObjectNamespace<T>,
+  name: string,
+  method: string,
+  {
+    reached,
+    held,
+  }: {
+    reached: PromiseWithResolvers<null>;
+    held: PromiseWithResolvers<null>;
+  }
+): DurableObjectNamespace<T> => {
+  let first = true;
+  const stubOf = (stub: object): object =>
+    new Proxy(stub, {
+      get: (target, property): unknown => {
+        const value: unknown = Reflect.get(target, property);
+        if (typeof value !== "function") {
+          return value;
+        }
+        return async (...args: unknown[]): Promise<unknown> => {
+          if (property === method && first) {
+            first = false;
+            reached.resolve(null);
+            await held.promise;
+          }
+          return await Reflect.apply(value, target, args);
+        };
+      },
+    });
+  const namespaceOf = (
+    of: DurableObjectNamespace<T>
+  ): DurableObjectNamespace<T> =>
+    new Proxy(of, {
+      get: (target, property): unknown => {
+        if (property === "jurisdiction") {
+          return (jurisdiction: DurableObjectJurisdiction) =>
+            namespaceOf(target.jurisdiction(jurisdiction));
+        }
+        if (property === "getByName") {
+          return (named: string) => {
+            const stub = target.getByName(named);
+            return named === name ? stubOf(stub) : stub;
+          };
+        }
+        const value: unknown = Reflect.get(target, property);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+  return namespaceOf(namespace);
+};
+
 describe("an App's memories go with its data", setUpTime, () => {
   it("erases what an App remembered when its store is deleted: its users read none of it, the store deletes it, an export taken before is stale, and one event records it", async () => {
     const admin = await person("admin");
@@ -808,10 +889,10 @@ describe("an App's memories go with its data", setUpTime, () => {
     await expect(exportSettled(shared, before)).resolves.toBe("done");
 
     await freed(app);
-    await deleteStore(env, ada, app.store);
+    await deleteStore(env, ada, storeOf(app));
     await tick(shared());
     const status = await shared().exportStatus({ id: before });
-    const events = await erasuresOf(app.app, 1);
+    const events = await erasuresOf(app.app);
     const found = await codeEntitiesAs(
       env,
       bob.userId,
@@ -830,7 +911,7 @@ describe("an App's memories go with its data", setUpTime, () => {
       found: found.entities,
       held: await heldBy(`app:${app.app}`),
       export: status?.state,
-      events: events.map(({ actor, detail }) => ({ actor, detail })),
+      events: events.map(({ id, actor, detail }) => ({ id, actor, detail })),
     }).toStrictEqual({
       card: null,
       found: [],
@@ -838,6 +919,7 @@ describe("an App's memories go with its data", setUpTime, () => {
       export: "erased",
       events: [
         {
+          id: await erasureIdOf(`app-store-deleted:${storeOf(app)}`),
           actor: { type: "person", userId: ada.userId },
           detail: { cause: "store_deleted", memories: 1 },
         },
@@ -858,7 +940,7 @@ describe("an App's memories go with its data", setUpTime, () => {
       await onPage(app, ada, "remember", fact(afterName))
     );
     await tick(shared());
-    const events = await erasuresOf(app.app, 1);
+    const events = await erasuresOf(app.app);
     expect({
       before: await onPage(app, ada, "get", { entity: before.entity }),
       after: statementsOf(
@@ -884,23 +966,23 @@ describe("an App's memories go with its data", setUpTime, () => {
     await freed(app);
     // Erased, then cut off before core's inventory marks it deleted.
     const cutOff = await failureOf(async () => {
-      await deleteStore(firstBatchFailing(env), ada, app.store);
+      await deleteStore(firstBatchFailing(env), ada, storeOf(app));
     });
     const marked = await env.DB.prepare(
       "SELECT deleted_at FROM business_stores WHERE id = ?"
     )
-      .bind(app.store)
+      .bind(storeOf(app))
       .first<{ deleted_at: number | null }>();
     // The store's alarm, run here rather than waited for.
-    await inHost(app.store, async (host) => {
+    await inHost(storeOf(app), async (host) => {
       await host.runAlarm({});
     });
     const done = await env.DB.prepare(
       "SELECT deleted_at FROM business_stores WHERE id = ?"
     )
-      .bind(app.store)
+      .bind(storeOf(app))
       .first<{ deleted_at: number | null }>();
-    const events = await erasuresOf(app.app, 1);
+    const events = await erasuresOf(app.app);
     expect({
       cutOff,
       markedThen: marked?.deleted_at ?? null,
@@ -936,7 +1018,7 @@ describe("an App's memories go with its data", setUpTime, () => {
       app.app,
       "Accounts"
     );
-    const events = await erasuresOf(app.app, 1);
+    const events = await erasuresOf(app.app);
     expect(events.map(({ detail }) => detail)).toStrictEqual([
       { cause: "data_reset", memories: 2 },
     ]);
@@ -964,19 +1046,19 @@ describe("an App's memories go with its data", setUpTime, () => {
           BRAIN_STORE: failing(env.BRAIN_STORE, "brain", "eraseWriter"),
         },
         ada,
-        deleted.store
+        storeOf(deleted)
       );
     });
     const marked = await env.DB.prepare(
       "SELECT deleted_at FROM business_stores WHERE id = ?"
     )
-      .bind(deleted.store)
+      .bind(storeOf(deleted))
       .first<{ deleted_at: number | null }>();
     const resetting = await failureOf(async () => {
       await resetAppData(
         {
           ...env,
-          DATA_STORES: failing(env.DATA_STORES, reset.store, "resetData"),
+          DATA_STORES: failing(env.DATA_STORES, storeOf(reset), "resetData"),
         },
         admin,
         reset.app,
@@ -1008,6 +1090,109 @@ describe("an App's memories go with its data", setUpTime, () => {
       resetting: "Error: The call failed (a test's)",
       deletedApps: true,
       resetApps: null,
+    });
+  });
+
+  it("erases what an App without a store remembered, when its data is reset and when it is removed for good", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    // As production makes an App with no tables: it never gets a store.
+    const app = await appOf(ada, admin, { store: false });
+    const before = rememberedSchema.parse(
+      await onPage(app, ada, "remember", fact(`Storelessco ${unique()}`))
+    );
+    await resetAppData(env, admin, app.app, "Accounts");
+    const afterReset = await codeCardAs(
+      env,
+      ada.userId,
+      "company",
+      { entity: before.entity },
+      app.app
+    );
+    const later = rememberedSchema.parse(
+      await onPage(app, ada, "remember", fact(`Laterco ${unique()}`))
+    );
+    await setArchived(env, ada, app.app, true);
+    await removeApp(env, ada, app.app);
+    await tick(shared());
+    const events = await erasuresOf(app.app);
+    expect({
+      afterReset,
+      afterRemoval: await codeCardAs(
+        env,
+        ada.userId,
+        "company",
+        { entity: later.entity },
+        app.app
+      ),
+      held: await heldBy(`app:${app.app}`),
+      events: events
+        .map(({ id, detail }) => ({ id, detail }))
+        .toSorted((one, other) =>
+          JSON.stringify(one.detail).localeCompare(JSON.stringify(other.detail))
+        ),
+    }).toStrictEqual({
+      afterReset: null,
+      afterRemoval: null,
+      held: 0,
+      events: [
+        {
+          id: await erasureIdOf(`app-removed:${app.app}`),
+          detail: { cause: "app_removed", memories: 1 },
+        },
+        { id: someText, detail: { cause: "data_reset", memories: 1 } },
+      ],
+    });
+  });
+
+  it("erases what the App remembered while its data was being reset, as the reset's own second erasure", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const app = await appOf(ada, admin);
+    const before = rememberedSchema.parse(
+      await onPage(app, ada, "remember", fact(`Beforeco ${unique()}`))
+    );
+    // The reset held after its first erasure, before the store resets,
+    // while a page's call remembers what it may have read.
+    const reached = Promise.withResolvers<null>();
+    const held = Promise.withResolvers<null>();
+    const resetting = resetAppData(
+      {
+        ...env,
+        DATA_STORES: heldAt(env.DATA_STORES, storeOf(app), "resetData", {
+          reached,
+          held,
+        }),
+      },
+      admin,
+      app.app,
+      "Accounts"
+    );
+    await reached.promise;
+    const during = rememberedSchema.parse(
+      await onPage(app, ada, "remember", fact(`Duringco ${unique()}`))
+    );
+    held.resolve(null);
+    await resetting;
+    const events = await erasuresOf(app.app);
+    expect({
+      cards: await Promise.all(
+        [before, during].map(
+          async ({ entity }) =>
+            await codeCardAs(env, ada.userId, "company", { entity }, app.app)
+        )
+      ),
+      events: events
+        .map(({ detail }) => detail)
+        .toSorted((one, other) =>
+          JSON.stringify(one).localeCompare(JSON.stringify(other))
+        ),
+    }).toStrictEqual({
+      cards: [null, null],
+      events: [
+        { cause: "data_reset", memories: 1 },
+        { cause: "written_during_reset", memories: 1 },
+      ],
     });
   });
 });

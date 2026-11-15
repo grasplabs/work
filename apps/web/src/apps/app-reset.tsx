@@ -69,6 +69,9 @@ export const ResetAppData = ({ app }: { app: App }) => {
               Every record it holds and every file in them is gone for good, and
               its current version runs again with no records. Its pages,
               versions, members and history stay.
+            </Trans>{" "}
+            <Trans>
+              What its code remembered in the Brain goes with its data.
             </Trans>
           </DialogDescription>
         </DialogHeader>

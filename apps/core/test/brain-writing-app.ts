@@ -5,6 +5,7 @@ import {
   teamIdSchema,
   workspaceIdSchema,
 } from "@grasp-os/shared/ids";
+import type { StoreId } from "@grasp-os/shared/ids";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
@@ -12,7 +13,8 @@ import { expect, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { callAppFunction, callPageFunction } from "../src/app-functions.ts";
-import { appFor, appKind } from "../src/apps.ts";
+import { sealRelease } from "../src/app-releases.ts";
+import { appFor, appKind, createApp } from "../src/apps.ts";
 import { teamsOf } from "../src/auth/identity.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
@@ -23,7 +25,7 @@ import type { TableSpec } from "./app-definitions.ts";
 import { commitDefined } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import type { person } from "./sealed-apps.ts";
-import { appWith, seal } from "./sealed-apps.ts";
+import { appWith } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
 
 // An App whose code remembers and forgets in the Brain (GRA-1883), as
@@ -128,16 +130,39 @@ export const table = (
  * App `tables` of `owner`'s, sealed and current, its Brain declaration
  * bound by `admin` to its grant to read the Brain, naming `teams` if any.
  */
+/** A builder's App of no tables, committed, and never given a store. */
+const storelessApp = async (owner: Member) => {
+  const { id } = await createApp(env, owner, { name: "Accounts" });
+  await commitDefined(env, owner, id, memoriesApp());
+  return { owner, app: id, store: null };
+};
+
 export const appOf = async (
   owner: Member,
   admin: Member,
   {
     tables,
     teams,
-  }: { tables?: Readonly<Record<string, TableSpec>>; teams?: string[] } = {}
+    store = true,
+  }: {
+    tables?: Readonly<Record<string, TableSpec>>;
+    teams?: string[];
+    /**
+     * Whether it has a store. Without, it is as production makes an App
+     * with no tables: created and sealed, and never given a store
+     * (app-releases.ts binds none to a release without tables).
+     */
+    store?: boolean;
+  } = {}
 ) => {
-  const fixture = await appWith(memoriesApp(tables), "Accounts", owner);
-  const release = await seal(fixture);
+  const fixture = store
+    ? await appWith(memoriesApp(tables), "Accounts", owner)
+    : await storelessApp(owner);
+  const release = await sealRelease(env, {
+    app: fixture.app,
+    version: 1,
+    by: fixture.owner,
+  });
   await rollback(env, appKind, fixture.owner, fixture.app, 1);
   const asked = await requestPermission(
     env,
@@ -177,7 +202,7 @@ export const published = async (
   tables: Readonly<Record<string, TableSpec>>
 ): Promise<void> => {
   await commitDefined(env, app.owner, app.app, memoriesApp(tables));
-  await seal(app, version);
+  await sealRelease(env, { app: app.app, version, by: app.owner });
   await rollback(env, appKind, app.owner, app.app, version);
 };
 
@@ -412,4 +437,12 @@ export const losingFirstReply = (
       },
     });
   return namespaceOf(namespace);
+};
+
+/** `app`'s store: one made with a store has it. */
+export const storeOf = (app: App): StoreId => {
+  if (app.store === null) {
+    throw new Error("The App has no store");
+  }
+  return app.store;
 };

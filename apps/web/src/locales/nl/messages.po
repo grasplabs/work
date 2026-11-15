@@ -15635,6 +15635,10 @@ msgstr "Waarmee hij start"
 msgid "What its calls answer"
 msgstr "Wat de aanroepen antwoorden"
 
+#: src/apps/app-reset.tsx
+msgid "What its code remembered in the Brain goes with its data."
+msgstr "Wat haar code in het Brein onthield, gaat mee met haar gegevens."
+
 #: src/workflows/kept-state.tsx
 msgid "What its steps keep for later runs, which each run reads as it starts. It uses {used} KB of {cap} KB."
 msgstr "Wat de stappen bewaren voor latere runs, die elke run bij de start leest. Gebruikt {used} KB van {cap} KB."

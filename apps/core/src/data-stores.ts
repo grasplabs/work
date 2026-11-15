@@ -320,10 +320,13 @@ export const appStoreFor = async (
  * Resets the data of App `app`'s store for `by` (`StoreHost.resetData`,
  * audited in the store's own transaction), applying `apply` to the empty
  * store in the same one: its store, if it has one that lives, or null.
- * Its caller decides who may. First, what the App's code remembered is
- * erased (app-memory-erasure.ts), under one change for this request: a
- * reset that fails afterwards leaves data without memories, never
- * memories without data, and the person asks again.
+ * Its caller decides who may. What the App's code remembered goes with
+ * its data (app-memory-erasure.ts), whether or not it has a store (an App
+ * without tables never gets one, yet may remember): erased first, under
+ * one change for this request, so a reset that fails afterwards leaves
+ * data without memories, never memories without data; and again once the
+ * store is reset, under a change derived from the first, for what a call
+ * remembered meanwhile from records it read before the reset.
  */
 export const resetAppStore = async (
   env: Env,
@@ -331,20 +334,22 @@ export const resetAppStore = async (
   app: AppId,
   reset: Pick<StoreReset, "apply">
 ): Promise<StoreId | null> => {
+  const actor = by.actor ?? actorOf(by);
+  const change = `app-data-reset:${crypto.randomUUID()}`;
+  await eraseAppMemories(env, { app, change, actor, cause: "data_reset" });
   const store = await liveStoreOf(env, app);
   if (store === null) {
     return null;
   }
-  const actor = by.actor ?? actorOf(by);
-  await eraseAppMemories(env, {
-    app,
-    change: `app-data-reset:${crypto.randomUUID()}`,
-    actor,
-    cause: "data_reset",
-  });
   await inJurisdiction(env, env.DATA_STORES)
     .getByName(store)
     .resetData(store, { ...reset, actor, app });
+  await eraseAppMemories(env, {
+    app,
+    change: `${change}:after`,
+    actor,
+    cause: "written_during_reset",
+  });
   return store;
 };
 

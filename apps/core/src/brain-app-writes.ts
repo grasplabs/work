@@ -193,11 +193,13 @@ const unreadableReachOf = (
   sources: AppSources
 ): "connection" | "collection" | "team_brain" | "unplaced" | undefined => {
   // As someone in no team, who isn't an admin, reads: what everyone may.
-  const [first] = unreadableBy(sources, readerOf("", [], "user"));
+  const unreadable = unreadableBy(sources, readerOf("", [], "user"));
+  const [first] = unreadable;
   if (first === undefined) {
     return undefined;
   }
-  if (first.startsWith("collection:")) {
+  // A collection's grant lasts, whatever else can't be placed now.
+  if (unreadable.some((source) => source.startsWith("collection:"))) {
     return "collection";
   }
   if (sources.unresolved.includes(first)) {

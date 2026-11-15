@@ -9,8 +9,10 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
+import { eraseRemovedAppsMemories } from "./app-memory-erasure.ts";
 import { appFor } from "./apps.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
+import { liveStoreOf } from "./data-stores.ts";
 import {
   appIntegrations,
   appMembers,
@@ -228,6 +230,16 @@ export const removeApp = async (
   if (await stopsUnsettled(env, found.id)) {
     throw appErrors.create("app.stops_pending");
   }
+  // What its code remembered, when it has no store whose deletion would
+  // erase it (app-memory-erasure.ts): before the removal is written, so a
+  // removal never stands while they remain. A removal refused below (a
+  // restore won the race) leaves the archived App without them.
+  await eraseRemovedAppsMemories(
+    env,
+    found.id,
+    actorOf(by),
+    (await liveStoreOf(env, found.id)) !== null
+  );
   const now = new Date();
   const [[removed]] = await auditedBatch(env, db, [
     db
