@@ -191,9 +191,9 @@ const rivalSql = `
  * row too, for what it rests on), or null: one made over memories they
  * may all read, and over every current rival they may read, so one made
  * without seeing a rival never ranks first for a reader who sees it. A
- * memory it was made over that its writer retired since gives nothing to
- * the read (`retiredSql`): forgetting a wrong rival never un-confirms the
- * right memory, as in a store without that rival.
+ * memory it was made over that its writer retired since still decides
+ * this by whether the reader may read it: a reader who never could learns
+ * nothing from its retirement (Nick, on #2261).
  */
 const confirmationSql = `(
   SELECT json_object('by', confirmed.person, 'at', confirmed.at, 'row', confirmed.row)
@@ -202,8 +202,7 @@ const confirmationSql = `(
     AND NOT EXISTS (
       SELECT 1 FROM memory_confirmed_over AS overruled
       JOIN memories AS other ON other.row = overruled.memory
-      WHERE overruled.confirmation = confirmed.row
-        AND NOT ${retiredSql("other", "?4")} AND NOT ${visibleSql("other")}
+      WHERE overruled.confirmation = confirmed.row AND NOT ${visibleSql("other")}
     )
     AND NOT EXISTS (${rivalSql}
       AND rival.row NOT IN (
@@ -669,7 +668,11 @@ const heldOfRow = ({ source, version, id }: MemoryRow): HeldMemory => ({
 /**
  * `?1` the confirmations' rows (JSON), `?2` the moment read at: the
  * memories each was made over, but those their writer retired by then,
- * which no longer decide whether it counts (`confirmationSql`).
+ * which an answer rests on no more (a forgotten memory gives nothing to a
+ * read but history, `retiredSql`). Whether the confirmation counts still
+ * turns on whether the reader may read each (`confirmationSql`), so a
+ * reader who loses access to a retired one later keeps an earlier read
+ * that says it was confirmed (Known on #2261).
  */
 const overruledSql = `
 SELECT DISTINCT m.source AS source, m.version AS version, m.id AS memory

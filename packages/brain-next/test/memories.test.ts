@@ -862,6 +862,80 @@ describe("who may read a memory", () => {
     });
   });
 
+  // Threat 1 for confirmations: a rival a reader could never read keeps a
+  // confirmation made over it from counting for them, retired or not, so
+  // its retirement tells them nothing (Nick, on #2261).
+  it("never counts a confirmation made over a rival a reader can't read, before or after that rival is retired, as of any moment", async () => {
+    const [mine, theirs] = [unique("group"), unique("group")];
+    const [first, second] = [unique("w"), unique("w")];
+    const both = readerOf(unique("confirmer"), mine, theirs);
+    const reader = readerOf(unique("reader"), mine);
+    const status = (writer: string, value: string) =>
+      fact(
+        { kind: "writer", writer },
+        { attribute: "status", value, statement: `Acme is ${value}` }
+      );
+    const right = await remember(
+      audience(mine),
+      [customer({ names: [unique("Acme")] })],
+      [status(first, "Active")]
+    );
+    const entity = right.entities.c ?? "";
+    const rival = await remember(
+      audience(theirs),
+      [customer({ id: entity })],
+      [status(second, "Paused")],
+      shared(),
+      crypto.randomUUID(),
+      both
+    );
+    await shared().confirmMemory({
+      memory: right.memories[0] ?? "",
+      reader: both,
+    });
+    const confirmedFor = async (asOf?: Date) => {
+      const { memories } = await shared().readMemories({
+        entity,
+        reader,
+        ...(asOf === undefined ? {} : { asOf }),
+      });
+      return memories.map(({ value, confirmed }) => [
+        value,
+        confirmed !== null,
+      ]);
+    };
+    const before = await confirmedFor();
+    // When it was confirmed, as the confirmer reads it: a moment after the
+    // confirmation and before the retirement, which writes a later one.
+    const { memories: confirmedRead } = await shared().readMemories({
+      entity,
+      reader: both,
+    });
+    const confirmedAt = confirmedRead.find(({ value }) => value === "Active")
+      ?.confirmed?.at;
+    await shared().retireMemory({
+      memory: rival.memories[0] ?? "",
+      reader: readerOf(second, theirs),
+    });
+    const afterRetired = new Date();
+
+    const unconfirmed = [["Active", false]];
+    expect({
+      // Confirmed for the confirmer, who reads both.
+      confirmedForThem: confirmedAt instanceof Date,
+      before,
+      now: await confirmedFor(),
+      asOfConfirmed: await confirmedFor(confirmedAt),
+      asOfAfter: await confirmedFor(afterRetired),
+    }).toStrictEqual({
+      confirmedForThem: true,
+      before: unconfirmed,
+      now: unconfirmed,
+      asOfConfirmed: unconfirmed,
+      asOfAfter: unconfirmed,
+    });
+  });
+
   // Threat 3: a newer memory ends an older one only for those who may read it.
   it("stays current for a reader who can't read the memory that ended it", async () => {
     const left = unique("left");
