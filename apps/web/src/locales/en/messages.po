@@ -7095,8 +7095,8 @@ msgid "It is gone for good: it answers nobody, and its schedule and settings are
 msgstr "It is gone for good: it answers nobody, and its schedule and settings are removed. The chats people had with it stay theirs to read."
 
 #: src/apps/app-remove.tsx
-msgid "It is gone for good: its pages, versions and members, and what it was allowed. Its stores and their records stay, and so do the workflows it doesn’t own."
-msgstr "It is gone for good: its pages, versions and members, and what it was allowed. Its stores and their records stay, and so do the workflows it doesn’t own."
+msgid "It is gone for good: its pages, versions and members, and what it was allowed. Its stores and their records stay, and so do what its code remembered in the Brain and the workflows it doesn’t own."
+msgstr "It is gone for good: its pages, versions and members, and what it was allowed. Its stores and their records stay, and so do what its code remembered in the Brain and the workflows it doesn’t own."
 
 #: src/apps/app-page.tsx
 msgid "It is kept as it was, and nobody works on it, until a builder restores it."
@@ -14187,6 +14187,10 @@ msgstr "They'll find it under Workflows, and run it as it is now."
 msgid "Thinking"
 msgstr "Thinking"
 
+#: src/apps/resource-bindings.tsx
+msgid "This App can save memories in the Brain in its own name, which everyone who uses the App reads through it, and only through it, and it can take its own back."
+msgstr "This App can save memories in the Brain in its own name, which everyone who uses the App reads through it, and only through it, and it can take its own back."
+
 #: src/apps/app-data.tsx
 msgid "This App changed. Reload to see its current version."
 msgstr "This App changed. Reload to see its current version."
@@ -15630,6 +15634,10 @@ msgstr "What it starts with"
 #: src/workflows/item-test.tsx
 msgid "What its calls answer"
 msgstr "What its calls answer"
+
+#: src/apps/app-reset.tsx
+msgid "What its code remembered in the Brain until now goes too; a call already running may still remember what it read before."
+msgstr "What its code remembered in the Brain until now goes too; a call already running may still remember what it read before."
 
 #: src/workflows/kept-state.tsx
 msgid "What its steps keep for later runs, which each run reads as it starts. It uses {used} KB of {cap} KB."

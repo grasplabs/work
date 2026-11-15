@@ -2580,6 +2580,7 @@ export const stamp = mutation({
         { manifest: release.app, run: hostedRelease(env, release).run },
         await invocationFor(env, release, {
           by: fixture.owner,
+          origin: "page",
           requestId,
           deadline: Date.now() + 30_000,
         }),
@@ -2776,6 +2777,7 @@ export const both = action({
         { manifest: release.app, run: hostedRelease(env, release).run },
         await invocationFor(env, release, {
           by,
+          origin: "page",
           requestId,
           deadline: Date.now() + 30_000,
         }),
@@ -2907,6 +2909,7 @@ export const probe = action({ args: {}, returns: v.null(), handler: async () => 
       { manifest: release.app, run },
       await invocationFor(env, release, {
         by: fixture.owner,
+        origin: "page",
         requestId: personRequest,
         deadline: Date.now() + 30_000,
       }),

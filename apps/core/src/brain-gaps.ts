@@ -1,9 +1,4 @@
-import type { OnErase } from "@grasp-os/brain/purge";
-import {
-  actorOf,
-  auditActorSchema,
-  createAuditEvent,
-} from "@grasp-os/shared/audit";
+import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import type { Gap } from "@grasp-os/shared/brain";
 import {
@@ -20,7 +15,6 @@ import { drizzle } from "drizzle-orm/d1";
 
 import {
   auditedBatch,
-  outboxed,
   outboxedEventWhere,
   outboxedIfChanged,
   storedEvent,
@@ -411,57 +405,11 @@ export const redactGapAnswer = async (
 };
 
 /**
- * Rewrites every gap answer with `rewrite` (a content purge's: its terms
- * replaced), as `person`; an answer it leaves as it is isn't written.
- * Returns how many it rewrote.
+ * Forgets `userId` as anyone's answerer, as `actor`, when they are erased
+ * (person-erasure.ts): their answers stay, as the company's, said by no
+ * one.
  */
-const rewriteGapAnswers = async (
-  env: Env,
-  actor: AuditActor,
-  rewrite: (text: string) => string
-): Promise<number> => {
-  const db = drizzle(env.DB);
-  const answered = await db
-    .select({ gapId: brainGapStates.gapId, answer: brainGapStates.answer })
-    .from(brainGapStates)
-    .where(isNotNull(brainGapStates.answer));
-  const changed = answered.flatMap(({ gapId, answer }) => {
-    if (answer === null) {
-      return [];
-    }
-    const now = rewrite(answer);
-    return now === answer ? [] : [{ gapId, answer, now }];
-  });
-  const [first, ...rest] = changed;
-  if (first === undefined) {
-    return 0;
-  }
-  const update = ({ gapId, answer, now }: (typeof changed)[number]) =>
-    db
-      .update(brainGapStates)
-      .set({ answer: now })
-      // Only the answer read: one answered since is left to a purge again.
-      .where(
-        and(eq(brainGapStates.gapId, gapId), eq(brainGapStates.answer, answer))
-      );
-  await auditedBatch(env, db, [
-    update(first),
-    ...rest.map(update),
-    outboxed(db, {
-      actor,
-      action: "brain.gap.answers_purged",
-      target: { type: "brain", id: "gaps" },
-      detail: { gaps: changed.length },
-    }),
-  ]);
-  return changed.length;
-};
-
-/**
- * Forgets `userId` as anyone's answerer (a personal purge), as `person`:
- * their answers stay, as the company's, said by no one.
- */
-const eraseGapAnswerer = async (
+export const eraseGapAnswerer = async (
   env: Env,
   actor: AuditActor,
   userId: string
@@ -479,18 +427,3 @@ const eraseGapAnswerer = async (
     }),
   ]);
 };
-
-/**
- * The gap answers as a Knowledge purge reaches them: they hold people's
- * words too, so a purge rewrites them and forgets who gave them.
- */
-export const gapAnswerErasure = (
-  env: Env
-): Pick<OnErase, "rewrite" | "forgetActor"> => ({
-  rewrite: async (by, rewrite) => {
-    await rewriteGapAnswers(env, auditActorSchema.parse(by.actor), rewrite);
-  },
-  forgetActor: async (by, userId) => {
-    await eraseGapAnswerer(env, auditActorSchema.parse(by.actor), userId);
-  },
-});

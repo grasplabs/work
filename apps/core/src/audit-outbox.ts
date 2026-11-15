@@ -23,6 +23,7 @@ import { sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BatchItem, BatchResponse } from "drizzle-orm/batch";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
+import { z } from "zod";
 
 import { auditLog } from "./audit-log.ts";
 import type { AuditLogEnv } from "./audit-log.ts";
@@ -213,6 +214,15 @@ export const connectOutbox = (
     await env.CONNECT.ackAuditEvents([...appended], [...rejected]);
   },
 });
+
+/**
+ * An id as the audit log may name it: a well-formed UUID, never what a
+ * caller sent instead (null), so no event holds text someone typed.
+ */
+export const auditedIdOf = (value: unknown): string | null => {
+  const id = z.uuid().safeParse(value);
+  return id.success ? id.data : null;
+};
 
 /**
  * A UUID (version 5's layout: name-based) made from a SHA-256 hex digest,

@@ -27,9 +27,8 @@ import {
 import { canonicalJson } from "../src/json.ts";
 import { knowledgeErrors } from "../src/knowledge.ts";
 import { citesWrite } from "../src/memories.ts";
-import { preparePurge, purge } from "../src/purge.ts";
 import { restoreExport } from "../src/restore.ts";
-import { newCollection, noCopies, testHost, writerOf } from "./host.ts";
+import { newCollection, testHost, writerOf } from "./host.ts";
 
 // Restoring an export into an empty Brain (GRA-1193, GRA-335's E2; the
 // threat model is on GRA-335). It starts from the ways it can fail: a
@@ -526,60 +525,6 @@ describe("restoring an export of the company's Brain", () => {
     expect({ refused, written: written.length }).toStrictEqual({
       refused: "knowledge.invalid",
       written: 0,
-    });
-  });
-
-  it("restores a Brain a purge rewrote, a skill's name taken out too", async () => {
-    const source = testHost().brain;
-    const u = crypto.randomUUID().slice(0, 8).replaceAll(/[0-9]/gu, "x");
-    const name = `ledger${u}`;
-    const skills = await newCollection(source, `Skills ${u}`);
-    const skill = await writeVersion(source, admin, {
-      collection: skills,
-      path: `${name}/SKILL.md`,
-      text: `---\nname: ${name}\ndescription: Keeps ${name}.\n---\n\n# ${name}\n\nKeep it.\n`,
-      ifVersion: 0,
-      message: null,
-      restoredFrom: null,
-    });
-    // A real purge of its name: its frontmatter keeps `name: (removed)`,
-    // which only a purge's save allows.
-    const input = {
-      type: "content",
-      documentIds: [skill.id],
-      terms: [name],
-      reason: "erasure_request",
-    };
-    const { token } = await preparePurge(source, admin, input, noCopies);
-    await purge(source, admin, input, token, noCopies);
-    const exportId = await exported(source);
-    const bundle = await bundleOf(source, exportId);
-
-    const target = testHost(undefined, {}, env.RESTORED).brain;
-    await emptied(target);
-    const restored = await codeOf(
-      restoreExport(target, admin, readerOf(bundle))
-    );
-    const [document] = await target.db
-      .select()
-      .from(documents)
-      .where(eq(documents.path, `${name}/SKILL.md`));
-    const texts = await Promise.all(
-      [1, 2].map(
-        async (number) =>
-          await versionText(target, target.db, document?.id ?? "", number)
-      )
-    );
-    expect({
-      restored,
-      versions: document?.currentVersion,
-      purged: texts[1]?.includes("name: (removed)"),
-      leftOut: texts[1]?.includes(name),
-    }).toStrictEqual({
-      restored: "ok",
-      versions: 2,
-      purged: true,
-      leftOut: false,
     });
   });
 

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { seed } from "./knowledge.ts";
 import { answeringProvider } from "./model-provider.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
@@ -24,7 +25,7 @@ describe("a reranked recall", () => {
   it("orders a person's evidence by the deployment's model only when asked, for them, and records the call", async () => {
     const person = await signedInApi(idp, "admin");
     const knowledge: KnowledgeApi = person.api.knowledge;
-    const { id: collectionId } = await knowledge.createCollection({
+    const { id: collectionId } = await seed(person.api).createCollection({
       name: `Leave ${unique()}`,
       access: "everyone",
     });
@@ -36,7 +37,12 @@ describe("a reranked recall", () => {
     ];
     for (const [path, text] of notes) {
       // oxlint-disable-next-line no-await-in-loop -- one save at a time
-      await knowledge.saveDocument({ collectionId, path, text, ifVersion: 0 });
+      await seed(person.api).saveDocument({
+        collectionId,
+        path,
+        text,
+        ifVersion: 0,
+      });
     }
     const query = `How many ${word} days?`;
     const plain = await knowledge.recall({ query });

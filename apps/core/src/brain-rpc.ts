@@ -178,7 +178,7 @@ const slugOf = (name: string): string =>
 interface OnboardingFacts {
   view: OnboardingView;
   kickoff: KickoffView;
-  /** When the kickoff the brain names came in, a forgotten one's too (the store's `kickoffSourceAt`). */
+  /** When the kickoff the brain names came in (the store's `kickoffSourceAt`). */
   kickoffSourceAt: string | null;
   rosterSavedAt: string | null;
   sentLinks: { person: string; sentAt: string }[];
