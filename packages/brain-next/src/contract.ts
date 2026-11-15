@@ -1606,11 +1606,12 @@ export interface VectorsFound {
 // current memory, the earlier kept as history, merged only for readers of
 // the later one.
 //
-// Re-checked when its source changes: a memory drawn from an earlier
-// version of a source whose quote its current version no longer holds is
-// out, through the work queue, while that version is current and only for
-// those who may read it; out, it is read as a retired one is: history,
-// and nothing to any other read.
+// Re-checked when its source changes: a re-check through the work queue
+// judges each memory drawn from an earlier version against a newer one,
+// and each reader gets the judgment of the latest finished re-check on a
+// version they can read. A memory whose quote that version no longer
+// holds is out for them: read as a retired one is, history, and nothing
+// to any other read.
 //
 // Who may read a memory: those in the reader set its caller gives
 // (`access`, as a source's), and, when it rests on a source version, only

@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { sourceIdSchema, versionSchema } from "./contract.ts";
 import type { SourceId } from "./contract.ts";
-import { currentOf, textOf } from "./current.ts";
+import { textOf } from "./current.ts";
 import { stampWrite } from "./memories.ts";
 import { quoteIndexOf } from "./quotes.ts";
 import { isRestoring } from "./restoring.ts";
@@ -11,9 +11,12 @@ import { defineWork, enqueueWork, WorkError } from "./work.ts";
 import type { WorkDefinition } from "./work.ts";
 
 // Re-checking memories when their source changes (the plan, "Dreaming"):
-// an item of the work queue per source, keyed by it, put on the queue as
-// a newer version becomes current, so a newer version waiting replaces an
-// older one's item. It reads the version's text and judges every memory
+// an item of the work queue per source and set of readers of its versions
+// (`keyOf`), put on the queue as a newer version is added, so a newer
+// version for the same readers waiting replaces an older one's item, and
+// one for other readers leaves it be: each set of readers gets the
+// re-check of the latest version it may read, as in a store without the
+// versions it may not. It reads the version's text and judges every memory
 // drawn from an earlier version: one whose quote the text no longer
 // holds, word for word as extraction checks a quote (quotes.ts), is
 // recorded as out against that version (`memory_rechecks`). In code,
@@ -58,6 +61,38 @@ interface Held extends Record<string, SqlStorageValue> {
   quote: string | null;
 }
 
+/**
+ * The version `version` of `source` as a re-check judges against it: its
+ * file and its set of readers (`reader_sets.id`), while it is the latest
+ * version of its source for those readers and no erasure is under way of
+ * it; else undefined, and a newer version for the same readers has its
+ * own item. A newer version for other readers leaves it to be judged, so
+ * each set of readers gets the re-check of the latest version it may read
+ * (memories.ts `judgedAtSql`), whatever versions for others came after:
+ * as in a store without those.
+ */
+const judgedVersionOf = (
+  sql: SqlStorage,
+  source: string,
+  version: number
+): { file: string; readerSet: number } | undefined =>
+  sql
+    .exec<{ file: string; readerSet: number }>(
+      `SELECT judging.file AS file, judging.reader_set AS readerSet
+      FROM source_versions AS judging
+      WHERE judging.source = ?1 AND judging.version = ?2
+        AND judging.row NOT IN (SELECT version_row FROM erasing_versions)
+        AND NOT EXISTS (
+          SELECT 1 FROM source_versions AS later
+          WHERE later.source = ?1 AND later.version > ?2
+            AND later.reader_set = judging.reader_set
+        )`,
+      source,
+      version
+    )
+    .toArray()
+    .at(0);
+
 /** `?1` the source, `?2` the last row read, `?3` the page's size: its next memories, in order. */
 const pageSql = `
 SELECT row, version, quote FROM memories
@@ -96,7 +131,7 @@ const judge = (
 ): "marked" | "judged" | "superseded" =>
   storage.transactionSync(() => {
     const { sql } = storage;
-    if (currentOf(sql, source, version) === undefined) {
+    if (judgedVersionOf(sql, source, version) === undefined) {
       return "superseded";
     }
     // A restore under way writes nothing meanwhile: the queue tries again.
@@ -154,8 +189,8 @@ const recheckWork: WorkDefinition<Payload> = defineWork({
     const { source, version, after = 0 } = payload;
     const { storage } = context;
     const { sql } = storage;
-    const found = currentOf(sql, source, version);
-    // Gone, replaced or being erased: done.
+    const found = judgedVersionOf(sql, source, version);
+    // Gone, replaced for its readers or being erased: done.
     if (found === undefined) {
       return;
     }
@@ -204,13 +239,46 @@ const recheckWork: WorkDefinition<Payload> = defineWork({
   },
 });
 
-/** Whether an item of `source` waits or runs for `version` already. */
-const queuedFor = (sql: SqlStorage, source: string, version: number): boolean =>
+/**
+ * The key of the item that re-checks `source`'s memories against
+ * `version`: one per source and set of readers of its versions, so a
+ * newer version for other readers never takes the place of one waiting.
+ * The source by its SHA-256 (`source_subjects`) and the set by its id:
+ * staff see keys, never what they name. None for a version not stored.
+ */
+const keyOf = (
+  sql: SqlStorage,
+  source: string,
+  version: number
+): string | undefined => {
+  const [found] = sql
+    .exec<{ subject: string; readerSet: number }>(
+      `SELECT source_subjects.subject AS subject,
+        source_versions.reader_set AS readerSet
+      FROM source_versions
+      JOIN source_subjects ON source_subjects.source = source_versions.source
+      WHERE source_versions.source = ? AND source_versions.version = ?`,
+      source,
+      version
+    )
+    .toArray();
+  return found === undefined
+    ? undefined
+    : `${found.subject}:${found.readerSet}`;
+};
+
+/** Whether the item `key` waits or runs for `version` already. */
+const queuedFor = (sql: SqlStorage, key: string, version: number): boolean =>
   sql
+    // Two seeks, waiting and running: each of the queue's indexes on a
+    // kind and key is partial on `running` (`work_items_waiting_key`,
+    // `work_items_running_idx`), so one statement for both reads the queue.
     .exec<{ payload: string }>(
-      "SELECT payload FROM work_items WHERE kind = ? AND key = ?",
+      `SELECT payload FROM work_items WHERE kind = ?1 AND key = ?2 AND running = 0
+      UNION ALL
+      SELECT payload FROM work_items WHERE kind = ?1 AND key = ?2 AND running = 1`,
       recheckWork.kind,
-      source
+      key
     )
     .toArray()
     .some(
@@ -220,12 +288,12 @@ const queuedFor = (sql: SqlStorage, source: string, version: number): boolean =>
 
 /**
  * Puts `source`'s memories on the queue to be checked against its version
- * `version`, now current, when it holds a memory drawn from an earlier
- * version: in place of an item of the source still waiting for another
- * version, and never over one that waits or runs for this one, which keeps
- * its place and reaches every memory added since. Run it in the
- * transaction that makes the version current, adds such a memory, or
- * restores one.
+ * `version`, when it holds a memory drawn from an earlier version: in
+ * place of an item still waiting for an earlier version for the same
+ * readers (`keyOf`), and never over one that waits or runs for this one,
+ * which keeps its place and reaches every memory added since. Run it in
+ * the transaction that adds the version, adds such a memory, or restores
+ * one.
  */
 export const enqueueRecheck = (
   storage: DurableObjectStorage,
@@ -241,9 +309,10 @@ export const enqueueRecheck = (
         version
       )
       .toArray().length > 0;
-  if (drawnBefore && !queuedFor(sql, source, version)) {
+  const key = keyOf(sql, source, version);
+  if (drawnBefore && key !== undefined && !queuedFor(sql, key, version)) {
     enqueueWork(storage, recheckWork, {
-      key: source,
+      key,
       payload: { source, version },
       priority: "recent",
     });

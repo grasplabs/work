@@ -758,6 +758,64 @@ describe("what reading memories costs", () => {
     // 9,000 memories over 60 versions, a hundred an add, take their time.
   }, 120_000);
 
+  it("puts a source's re-check on the queue without reading the other items waiting", async () => {
+    const { stub, rowsReadBy } = await countedStore();
+    const group = `seen-${crypto.randomUUID()}`;
+    /** A source with a memory drawn from its first version: its name. */
+    const drawnSource = async (): Promise<string> => {
+      const source = `doc-${crypto.randomUUID()}`;
+      const name = word();
+      const ref = await stub.addSource({
+        source,
+        change: crypto.randomUUID(),
+        text: `${name} renews in March.`,
+        access: audience(group),
+      });
+      await add(
+        stub,
+        group,
+        [{ key: "c", kind: "customer", names: [name] }],
+        [
+          fact("c", `${name} renews in March`, {
+            speaker: { kind: "outside" },
+            basis: { kind: "source", ...ref, quote: `${name} renews in March` },
+          }),
+        ]
+      );
+      return source;
+    };
+    /** A newer version of `source`: its re-check put on the queue, never worked here. */
+    const newer = async (source: string): Promise<void> => {
+      await stub.addSource({
+        source,
+        change: crypto.randomUUID(),
+        text: `${word()} pays late.`,
+        access: audience(group),
+      });
+    };
+    const measured = await drawnSource();
+    await newer(measured);
+    const rows: number[] = [];
+    let waiting = 0;
+    for (const size of [0, 100, 400]) {
+      for (; waiting < size; waiting += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one source at a time
+        await newer(await drawnSource());
+      }
+      // oxlint-disable-next-line no-await-in-loop -- one size at a time
+      const read = await rowsReadBy(async () => {
+        await newer(measured);
+      });
+      rows.push(read);
+    }
+    const [alone, ...grown] = rows;
+
+    expect(grown.map((read) => flat(alone ?? 0, read))).toStrictEqual([
+      true,
+      true,
+    ]);
+  }, 120_000);
+
   it("links an add's names without reading other names or memories, readable or hidden", async () => {
     const { stub, rowsReadBy } = await countedStore();
     const group = `seen-${crypto.randomUUID()}`;

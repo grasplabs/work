@@ -2424,6 +2424,16 @@ describe(
       const [twinA, twinB] = [newSource(), newSource()];
       await version(twinA, said(nameA), ownTeam, true);
       await version(twinB, said(nameB), ownTeam, true);
+      // And twins whose second version, the outsider's too, drops the line:
+      // C then has a version for the holder's team alone, finished, before
+      // a third of the outsider's waits; D the same without it.
+      const [nameC, nameD] = [
+        `c${unique().slice(0, 8)}`,
+        `d${unique().slice(0, 8)}`,
+      ];
+      const [twinC, twinD] = [newSource(), newSource()];
+      await version(twinC, said(nameC), ownTeam, true);
+      await version(twinD, said(nameD), ownTeam, true);
       // The holder's team's: one whose line a newer version drops, and one
       // a newer version says again.
       const out = newSource();
@@ -2450,12 +2460,15 @@ describe(
         });
         return found.entities[0]?.id ?? "";
       };
-      const [entityA, entityB, outEntity, restatedEntity] = await Promise.all([
-        entityOf(outsiderReader, nameA),
-        entityOf(outsiderReader, nameB),
-        entityOf(holderReader, markers["a memory a re-check put out"]),
-        entityOf(holderReader, markers["a merged restatement"]),
-      ]);
+      const [entityA, entityB, entityC, entityD, outEntity, restatedEntity] =
+        await Promise.all([
+          entityOf(outsiderReader, nameA),
+          entityOf(outsiderReader, nameB),
+          entityOf(outsiderReader, nameC),
+          entityOf(outsiderReader, nameD),
+          entityOf(holderReader, markers["a memory a re-check put out"]),
+          entityOf(holderReader, markers["a merged restatement"]),
+        ]);
       await version(
         twinA,
         `${markers["a narrower version between two the outsider reads"]} dropped.`,
@@ -2463,6 +2476,8 @@ describe(
         false
       );
       await version(out, `Nothing of it ${unique()}.`, holdersTeam, false);
+      await version(twinC, `Dropped ${unique()}.`, ownTeam, false);
+      await version(twinD, `Dropped ${unique()}.`, ownTeam, false);
       await version(
         restated,
         `${said(markers["a merged restatement"])} Again.`,
@@ -2470,6 +2485,10 @@ describe(
         true
       );
       await workBrain(env, new Date(), noProducers);
+      await version(twinC, `Narrow ${unique()}.`, holdersTeam, false);
+      await workBrain(env, new Date(), noProducers);
+      await version(twinC, `Still dropped ${unique()}.`, ownTeam, false);
+      await version(twinD, `Still dropped ${unique()}.`, ownTeam, false);
       await version(twinA, said(nameA), ownTeam, false);
       await version(twinB, `${said(nameB)} `, ownTeam, false);
 
@@ -2492,7 +2511,8 @@ describe(
           memories: page.memories.map(
             ({ statement, endedAt, contested, confirmed, source }) => ({
               statement,
-              endedAt,
+              // Two sources are judged at stamps of their own.
+              ended: endedAt !== null,
               contested,
               confirmed,
               version: source?.version,
@@ -2508,6 +2528,8 @@ describe(
       const twinWaiting = {
         a: await twinAsOutsider(entityA, nameA),
         b: await twinAsOutsider(entityB, nameB),
+        c: await twinAsOutsider(entityC, nameC),
+        d: await twinAsOutsider(entityD, nameD),
       };
       await workBrain(env, new Date(), noProducers);
       const customers = await entitiesAs(env, outsider, { kind: "customer" });
@@ -2542,7 +2564,9 @@ describe(
 
       expect({
         twinWaiting: twinWaiting.a,
+        twinWaitingPast: twinWaiting.c,
         twin: await twinAsOutsider(entityA, nameA),
+        twinPast: await twinAsOutsider(entityC, nameC),
         both: [entityA, entityB].every((id) => textOf(customers).includes(id)),
         holder: {
           out: await holderReads(outEntity),
@@ -2553,7 +2577,11 @@ describe(
         // Exactly what the outsider reads of the twin that never had it,
         // before the newest re-check as after.
         twinWaiting: twinWaiting.b,
+        // Past a finished version for the holder's team alone, the
+        // outsider keeps the judgment of their own latest finished one.
+        twinWaitingPast: twinWaiting.d,
         twin: await twinAsOutsider(entityB, nameB),
+        twinPast: await twinAsOutsider(entityD, nameD),
         both: true,
         holder: {
           // Out of its source's current version: history, readable no more.

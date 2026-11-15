@@ -20,6 +20,7 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { fileKeyOf } from "../src/files.ts";
 import { enqueueRecheck, recheckPage } from "../src/recheck.ts";
 import type { BrainStore } from "../src/store.ts";
 import { kill } from "./store-copy.ts";
@@ -695,6 +696,234 @@ describe("re-checking memories when their source changes", () => {
     );
 
     expect({ late, marks }).toStrictEqual({ late: [], marks: 0 });
+  });
+
+  it("gives a reader of the wide versions the judgment of the latest finished re-check they can read, past a narrower finished one, as a store without it", async () => {
+    const wide = unique("wide");
+    const narrow = unique("narrow");
+    /**
+     * A source whose first version, for the wide group, says the line: the
+     * store as it is gets v2 wide without it (finished), v3 narrow without
+     * it (finished) and v4 wide without it (waiting); its twin the same
+     * without v3.
+     */
+    const made = async () => {
+      const name = unique("Initech");
+      const source = unique("doc");
+      const line = `${name} pays by card`;
+      const ref = await shared().addSource({
+        source,
+        change: crypto.randomUUID(),
+        text: `${line}.`,
+        access: audience(wide),
+      });
+      const added = await add(
+        audience(wide),
+        [customer(name)],
+        [fact(`${line}.`, { kind: "source", ...ref, quote: line })]
+      );
+      return { name, source, added };
+    };
+    const real = await made();
+    const twin = await made();
+    const later = async (
+      { source }: { source: string },
+      group: string
+    ): Promise<void> => {
+      await shared().addSource({
+        source,
+        change: crypto.randomUUID(),
+        text: `Without. ${unique("x")}`,
+        access: audience(group),
+      });
+    };
+    await later(real, wide);
+    await later(twin, wide);
+    await tick();
+    await later(real, narrow);
+    await tick();
+    await later(real, wide);
+    await later(twin, wide);
+    const wideOnly = readerOf(unique("p"), wide);
+    const seenOf = async ({
+      name,
+      added,
+    }: Awaited<ReturnType<typeof made>>) => {
+      const found = await shared().findEntities({
+        reader: wideOnly,
+        name: `${name} Group`,
+      });
+      const readable = await shared().readableMemories({
+        memories: added.memories,
+        reader: wideOnly,
+      });
+      return {
+        state: statesOf(
+          await read(added.entity, wideOnly, { history: true }),
+          added.memories
+        ),
+        readable: readable.length,
+        found: found.entities.length,
+      };
+    };
+
+    await expect(seenOf(real)).resolves.toStrictEqual(await seenOf(twin));
+    await expect(seenOf(real)).resolves.toStrictEqual({
+      state: ["ended"],
+      readable: 0,
+      found: 0,
+    });
+  });
+
+  it("keeps a memory out while the latest finished version is being erased, by the judgment of the one before", async () => {
+    const group = unique("g");
+    const reader = readerOf(unique("p"), group);
+    const name = unique("Cyberdyne");
+    const source = unique("doc");
+    const line = `${name} ships from Delft`;
+    const ref = await addVersion(`${line}.`, group, source);
+    const added = await add(
+      audience(group),
+      [customer(name)],
+      [fact(`${line}.`, { kind: "source", ...ref, quote: line })]
+    );
+    await addVersion(`Gone. ${unique("x")}`, group, source);
+    await tick();
+    const third = await addVersion(`Gone again. ${unique("x")}`, group, source);
+    await tick();
+    // An erasure under way of the third version, held part-way as one is
+    // between hiding what it covers and deleting it: its row in the
+    // store's record, and the version listed as being erased.
+    await runInDurableObject(shared(), (_instance, state) => {
+      const { sql } = state.storage;
+      const key = `held-${crypto.randomUUID()}`;
+      sql.exec(
+        `INSERT INTO erasures (key, kind, subject, reason, erased_at, confirmed)
+        VALUES (?, 'person', ?, 'withdrawn', ?, 1)`,
+        key,
+        crypto.randomUUID(),
+        Date.now()
+      );
+      sql.exec(
+        `INSERT INTO erasing_versions (version_row, erasure)
+        SELECT row, ? FROM source_versions WHERE source = ? AND version = ?`,
+        key,
+        source,
+        third.version
+      );
+    });
+    const whileErased = await shared().readableMemories({
+      memories: added.memories,
+      reader,
+    });
+
+    expect(whileErased).toStrictEqual([]);
+  });
+
+  it("gives a reader who loses access to the version judged the answer of a store without it, from the next read", async () => {
+    const wide = unique("wide");
+    const narrow = unique("narrow");
+    const name = unique("Massive");
+    const source = unique("doc");
+    const line = `${name} pays late`;
+    const ref = await shared().addSource({
+      source,
+      change: crypto.randomUUID(),
+      text: `${line}.`,
+      access: audience(wide),
+    });
+    const added = await add(
+      audience(wide),
+      [customer(name)],
+      [fact(`${line}.`, { kind: "source", ...ref, quote: line })]
+    );
+    // A narrow version drops the line, judged; a wide one waits.
+    await shared().addSource({
+      source,
+      change: crypto.randomUUID(),
+      text: `Without. ${unique("x")}`,
+      access: audience(narrow),
+    });
+    await tick();
+    await shared().addSource({
+      source,
+      change: crypto.randomUUID(),
+      text: `Still without. ${unique("x")}`,
+      access: audience(wide),
+    });
+    const person = unique("p");
+    const stateAs = async (...groups: string[]) =>
+      statesOf(
+        await read(added.entity, readerOf(person, ...groups), {
+          history: true,
+        }),
+        added.memories
+      );
+    const withNarrow = await stateAs(wide, narrow);
+    const lost = await stateAs(wide);
+    await tick();
+
+    expect({ withNarrow, lost, judged: await stateAs(wide) }).toStrictEqual({
+      withNarrow: ["ended"],
+      // No finished re-check on a version they can read: as in a store
+      // without the narrow version, current until the wide one's is done.
+      lost: ["current"],
+      judged: ["ended"],
+    });
+  });
+
+  it("fails a re-check whose version's file is gone, retries it later and parks it, and keeps each reader's judgment before it meanwhile", async () => {
+    const group = unique("g");
+    const reader = readerOf(unique("p"), group);
+    const name = unique("Vandelay");
+    const source = unique("doc");
+    const line = `${name} imports latex`;
+    const ref = await addVersion(`${line}.`, group, source);
+    const added = await add(
+      audience(group),
+      [customer(name)],
+      [fact(`${line}.`, { kind: "source", ...ref, quote: line })]
+    );
+    await addVersion(`Gone. ${unique("x")}`, group, source);
+    await tick();
+    const third = await addVersion(`Says it: ${line}.`, group, source);
+    // The third version's file is gone from the bucket.
+    const file = await runInDurableObject(
+      shared(),
+      (_instance, state) =>
+        state.storage.sql
+          .exec<{ file: string }>(
+            "SELECT file FROM source_versions WHERE source = ? AND version = ?",
+            source,
+            third.version
+          )
+          .one().file
+    );
+    await env.BRAIN_OBJECTS.delete(fileKeyOf(file));
+    const states: string[][] = [];
+    // Five attempts, each past the wait after the one before (1, 2, 4 and
+    // 8 minutes).
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      clock += 10 * 60_000;
+      // oxlint-disable-next-line no-await-in-loop -- one attempt at a time
+      await tick();
+      states.push(
+        // oxlint-disable-next-line no-await-in-loop -- one attempt at a time
+        statesOf(await read(added.entity, reader, { history: true }), [
+          added.memories[0] ?? "",
+        ])
+      );
+    }
+    const { parked } = await shared().workOverview();
+    const ours = parked.filter(
+      ({ kind, error }) => kind === "recheck" && error === "unreadable"
+    );
+
+    expect({ states, parked: ours.length > 0 }).toStrictEqual({
+      // The second version's judgment stands for its readers meanwhile.
+      states: [["ended"], ["ended"], ["ended"], ["ended"], ["ended"]],
+      parked: true,
+    });
   });
 
   it("brings a memory back once a newer version says its quote again, and puts it out again when the next one drops it", async () => {

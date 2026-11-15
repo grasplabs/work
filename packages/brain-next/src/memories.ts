@@ -102,30 +102,42 @@ export const retiredSql = (alias: string, at: string): string =>
 
 /**
  * When a re-check (recheck.ts) judged that its source no longer holds the
- * quote of the memory `alias`, as a statement of one row or none: the
- * judgment of version V counts while V is the latest version of its
- * source whose re-check finished (`memory_rechecked`), at or before its
- * current one, and only for a reader who may read V (`versionVisibleSql`),
- * judged by the moment `at` (an expression; any time when none). So a
- * newer version's finished re-check replaces it for everyone, one that
- * says the quote again bringing the memory back, and a reader who may not
- * read V is answered as by a store that never held it. The one fragment
- * every read of it uses: `outSql`, `endedAtSql`.
+ * quote of the memory `alias`, as a statement of one row or none, judged
+ * by the moment `at` (an expression; any time when none). The rule: each
+ * reader gets the judgment of the latest finished re-check on a version
+ * they can read. So a judgment of version V counts for a reader who may
+ * read V (`versionVisibleSql`: V not under erasure, the reader among its
+ * readers and its source's current version's), when V's re-check finished
+ * (`memory_rechecked`) and no re-check finished on a later version that
+ * reader may read and that is not under erasure. A later finished
+ * re-check replaces it for those who may read that later version, one
+ * that found the quote bringing the memory back; a reader who may not
+ * read a version is answered as by a store that never held it, and an
+ * erasure under way of the latest leaves each reader the one before.
+ * The one fragment every read of it uses: `outSql`, `endedAtSql`.
+ *
+ * Written as EXISTS and NOT EXISTS, never as the latest version picked
+ * first and its readers checked after (which answered no judgment where
+ * the reader's own latest one counts), nor an ORDER BY … LIMIT subquery
+ * with `versionVisibleSql` inside: `findEntities`, which takes this
+ * through `droppedSql` for every mention, is close to SQLite's limit on
+ * an expression's depth (100) and passes it then.
  */
 const judgedAtSql = (alias: string, at?: string): string => `
   SELECT judged.at AS at FROM memory_rechecks AS judged
   WHERE judged.memory = ${alias}.row
-    AND judged.version = (
-      SELECT max(finished.through) FROM memory_rechecked AS finished
-      WHERE finished.source = judged.source
-    )
     ${at === undefined ? "" : `AND judged.at <= ${at}`}
-    AND judged.version <= (
-      SELECT latest.version FROM current_versions
-      JOIN source_versions AS latest ON latest.row = current_versions.version_row
-      WHERE current_versions.source = judged.source
-    )
-    AND ${versionVisibleSql("judged.source", "judged.version")}`;
+    AND ${versionVisibleSql("judged.source", "judged.version")}
+    AND EXISTS (SELECT 1 FROM memory_rechecked AS finished
+      WHERE finished.source = judged.source
+        AND finished.through = judged.version)
+    AND NOT EXISTS (
+      SELECT 1 FROM memory_rechecked AS newer
+      JOIN source_versions AS later
+        ON later.source = newer.source AND later.version = newer.through
+      WHERE newer.source = judged.source AND newer.through > judged.version
+        AND later.row NOT IN (SELECT version_row FROM erasing_versions)
+        AND later.reader_set IN (SELECT reader_set FROM readable))`;
 
 /**
  * Whether the memory `alias` is out of its source (`judgedAtSql`) for the
