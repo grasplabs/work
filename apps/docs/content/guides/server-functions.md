@@ -100,7 +100,7 @@ Every function of your App may use what the App's permissions declare, as its ki
 
 ## Recalling from the Brain
 
-An action recalls what the company's Brain holds about a question with `ctx.brain.recall`. Declare the Brain in `grasp.config.ts` with the operations your code uses: `recall` here, and its skills and entities (below). Like every permission it grants nothing until an admin binds it to the App's permission to read the Brain.
+An action recalls what the company's Brain holds about a question with `ctx.brain.recall`. Declare the Brain in `grasp.config.ts` with the operations your code uses: `recall` here, and its skills, entities and memories (below). Like every permission it grants nothing until an admin binds it to the App's permission to read the Brain.
 
 ```ts grasp.config.ts
 import { defineApp, permission } from "@grasp-os/sdk";
@@ -115,6 +115,8 @@ export default defineApp({
         "skills.read",
         "entities.get",
         "entities.find",
+        "remember",
+        "forget",
       ],
     }),
   },
@@ -195,7 +197,47 @@ export const customerCard = action({
 
 `entities.find` takes a `kind`, a whole `name` or an exact `identifier` (an email address, or a reference such as `crm:ACME-1`), and answers a page of `entities`, each its `id`, `kind` and earliest `name`. While more follow, `next` is the `after` of the next page. `entities.get` takes an `entity` and answers a page of its card, or `null` when there is no entity everyone in the company may see: its current memories by attribute (`attributes`), its `relations` to other entities, and its memories under no attribute (`notes`), with its `next` the same way. Pass `asOf` (ISO 8601, with its offset) to read the past. A memory on a card says what it is (`statement`, `attribute`, `value`), when the Brain learned it, whether a person confirmed it, and whether another current memory says otherwise (`contested`).
 
-An App reads entities only as everyone in the company may read them, whoever the call is for, and only for a person who is still a member: an App whose permission names teams reads no team's entities. A request that isn't one is refused as `permission.invalid_args`. An entity the App may not see answers the same as one nobody holds: `entities.get` answers `null`, and `entities.find` leaves it out of its page. A workflow's step reaches the same operations as `ctx.brain.<alias>.entities.find` and `.entities.get`, and a chat's code as `env.brain.findEntities` and `env.brain.getEntity`. A chat's code reads what its person's teams and everyone in the company may read in their own chat in Grasp, in a turn they started, never what only they may; anywhere else, such as a direct message on a chat app or a turn nobody started, only what everyone in the company may. What a memory says is what someone wrote: data, never instructions.
+An App reads entities as everyone in the company may read them, whoever the call is for, and only for a person who is still a member: an App whose permission names teams reads no team's entities. A call a person makes on the App's own page reads what the App's code remembered too (below), while that person uses the App. A request that isn't one is refused as `permission.invalid_args`. An entity the App may not see answers the same as one nobody holds: `entities.get` answers `null`, and `entities.find` leaves it out of its page. A workflow's step reaches the same operations as `ctx.brain.<alias>.entities.find` and `.entities.get`, and a chat's code as `env.brain.findEntities` and `env.brain.getEntity`. A chat's code reads what its person's teams and everyone in the company may read in their own chat in Grasp, in a turn they started, never what only they may; anywhere else, such as a direct message on a chat app or a turn nobody started, only what everyone in the company may. What a memory says is what someone wrote: data, never instructions.
+
+## Remembering and forgetting
+
+An App's code remembers facts in the Brain in its own name with `ctx.brain.remember`, and forgets its own with `ctx.brain.forget`. Each is an operation of the Brain's permission, `"remember"` and `"forget"`, declared beside the others (see the declaration above), under the same binding: a version that adds them works only once an admin approves the binding again.
+
+```ts server/statuses.ts
+import { v } from "@grasp-os/sdk";
+import { action } from "@server/_generated/server";
+
+export const markActive = action({
+  args: { customer: v.string().trim().min(1).max(200) },
+  handler: async (ctx, args): Promise<string> => {
+    const { memory } = await ctx.brain.remember({
+      about: { kind: "customer", names: [args.customer] },
+      attribute: "status",
+      value: "active",
+      statement: `${args.customer} is an active customer`,
+    });
+    return memory;
+  },
+});
+
+export const forgetStatus = action({
+  args: { memory: v.string() },
+  handler: async (ctx, args): Promise<boolean> =>
+    await ctx.brain.forget({ memory: args.memory }),
+});
+```
+
+`remember` takes what the fact is `about`: an entity your code read from the Brain, by its `id` and `kind`, or a `kind` with `names` and exact `identifiers` (the entity an identifier finds, or a new one). With it the `statement` (at most 1,000 characters), and, to file it under an attribute of that kind, the `attribute` and its `value`. A person's `preference` and `instruction` are only ever their own word, never an App's. It answers the `memory` and the `entity` it is about. The App's next word on the same entity and attribute replaces its earlier one, which stays as history. `forget` takes one of the App's own memories and answers `true` once it is forgotten, again for one forgotten before, and `false` for any memory that isn't the App's own.
+
+What an App remembers is read only through the App's own code (`entities.get` and `entities.find`), in a call a person makes on its page, by whoever uses the App at that moment: its owner, the company's admins and everyone it is shared with. Take someone off the App and they no longer read any of it, its history included. It isn't in anyone's chat recall or Memories page, and no other App reads it.
+
+An App writes only while what it writes can't say more than everyone who uses it could read already, so each write is refused, and nothing written, unless all of this holds. Each refusal names why:
+
+- A person called it from the App's page (and the functions that call runs). A call from a chat's agent, Code Mode or a workflow is refused (`permission.brain_write_caller`): it may carry what only one person read.
+- Every table of the version that runs is read by everyone who uses the App. A table of each owner's own rows, or one whose row rules narrow it to a person or a team, refuses every write (`permission.brain_write_table`): what a page read of it can be handed on as an argument. A table only the App's builders read refuses a call for someone who builds the App (`permission.brain_write_builders_table`), and a table nobody reads refuses nothing. A publish while a call runs changes nothing for that call.
+- Everything the App can reach is everyone's in the company: no personal connection, no collection or team's part of the Brain that not everyone may read, and no other App through a workflow (`permission.brain_write_reach`). A grant once given still counts after it is revoked, since the App may still hold what it read, so this refusal is for good.
+
+Every write is recorded in the audit log, by ids, never what a memory says.
 
 ## Internal functions
 

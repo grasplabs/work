@@ -9,7 +9,7 @@ import type {
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { functionErrors } from "@grasp-os/shared/functions";
-import type { PermissionId } from "@grasp-os/shared/ids";
+import type { AppId, PermissionId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
@@ -393,7 +393,9 @@ export const skillsCallFor = async (
 //   a reader.
 // - The caller's grant to read the Brain, now (`authorize`).
 // - Whom it reads as (brain-next.ts `CodeReach`), as a recall's: an App
-//   and a workflow as the company alone, whatever teams their grant names;
+//   and a workflow as the company alone, whatever teams their grant names,
+//   and an App's code, in a person's call on its page while they use it
+//   now, what that App's code remembered too (brain-app-writes.ts);
 //   a chat's code as its person's teams too, only in their own chat in
 //   Grasp in a turn they started (`RecallCaller.reach`), and as the
 //   company alone anywhere else. Never what only a person may read: code
@@ -425,6 +427,12 @@ export interface EntitiesCaller extends Omit<RecallCaller, "keep"> {
    * before it gets it: a run's pins, a chat's reads, as a recall's.
    */
   readonly keep?: (restsOn: CodeRestsOn) => Promise<void>;
+  /**
+   * For an App's code alone (resource-brain.ts): the App whose own
+   * memories it reads too, decided as it reads (brain-app-writes.ts
+   * `appUsersReadBy`); none reads the company's alone.
+   */
+  readonly appUsers?: () => Promise<AppId | undefined>;
 }
 
 /** An id as the audit log may name it: a well-formed one, never what code sent instead. */
@@ -522,8 +530,10 @@ const readFor = async (
     caller.authority.subject.type === "agent" && caller.reach === "teams"
       ? "teams"
       : "company";
+  // Decided now, as it reads: never the call's own roles.
+  const appUsers = await caller.appUsers?.();
   if (operation === "entities.get") {
-    const card = await codeCardAs(env, person, reach, input);
+    const card = await codeCardAs(env, person, reach, input, appUsers);
     if (card === null) {
       return { answer: null, detail: { found: false, memories: 0 } };
     }
@@ -533,7 +543,7 @@ const readFor = async (
     await caller.keep?.(card.restsOn);
     return { answer, detail: { found: true, memories: memoriesOn(card) } };
   }
-  const page = await codeEntitiesAs(env, person, reach, input);
+  const page = await codeEntitiesAs(env, person, reach, input, appUsers);
   const answer = handedAs(brainEntitiesSchema, {
     entities: page.entities.map((entity) => codeEntityOf(entity)),
     next: page.next,

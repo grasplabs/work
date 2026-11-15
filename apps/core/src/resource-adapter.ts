@@ -122,9 +122,24 @@ export const isProviderUnreachable = (error: unknown): boolean =>
   "transient" in error.details &&
   error.details.transient === true;
 
+/**
+ * Where an App's invocation comes from, as core resolved it
+ * (app-functions.ts), never as App code or a request says: a person's own
+ * call on the App's page (`page`: a page's call, a page's action, a live
+ * query it follows), and every function that call runs nested; a chat's
+ * agent (`agent`); a Code Mode run (`code_mode`); a workflow's step
+ * calling the App (`workflow`).
+ */
+export type InvocationOrigin = "page" | "agent" | "code_mode" | "workflow";
+
 /** Who an invocation acts for, as core resolved it, and where it works. */
 export interface BindingCaller {
   readonly app: AppId;
+  /**
+   * Where the invocation comes from (`InvocationOrigin`): only a page's
+   * call writes to the Brain (resource-brain.ts).
+   */
+  readonly origin: InvocationOrigin;
   readonly authority: Authority;
   readonly context: WorkContext;
   readonly sources: InvocationSources;

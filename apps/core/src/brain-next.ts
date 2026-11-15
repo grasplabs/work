@@ -82,6 +82,7 @@ import type {
   Reader,
   RecallRequest,
   RestoreStatus,
+  RetiredMemory,
   SourceErasure,
   SourceId,
   Speaker,
@@ -115,6 +116,8 @@ import type {
 } from "@grasp-os/shared/brain-report";
 import { brainSourceErrors, firstLineOf } from "@grasp-os/shared/brain-sources";
 import { isExpectedError } from "@grasp-os/shared/errors";
+import { appIdSchema } from "@grasp-os/shared/ids";
+import type { AppId } from "@grasp-os/shared/ids";
 import { instructionFileErrors } from "@grasp-os/shared/instruction-files";
 import type { InstructionFileRef } from "@grasp-os/shared/instruction-files";
 import { log } from "@grasp-os/shared/log";
@@ -4535,6 +4538,37 @@ const cursorOfText = <T>(schema: z.ZodType<T>, text: string): T => {
   return checked(schema, cursor);
 };
 
+/**
+ * An App's users, as the Brain's group (GRA-1883): what App `appId`'s
+ * code remembers is read by it (`rememberForAppAs`). Core puts it in a
+ * reader only for that App's own code, and only once core admitted the
+ * person the call acts for to the App now (brain-app-writes.ts): who is
+ * in it is decided as each call reads, never stored, so someone taken
+ * off the App reads none of it, history included, from their next call
+ * on. Apart from `appGroup` (`app:<id>`), the App's builders' group for
+ * its instruction file: neither ever reads the other's.
+ */
+const appUsersGroup = (appId: AppId): string =>
+  `app-users:${checked(appIdSchema, appId)}`;
+
+/**
+ * Code's reader at `reach` (`CodeReach`), for the member `personId`, and
+ * with `appUsers` that App's users' group too (`appUsersGroup`): given
+ * only for that App's own code, by a caller that admitted the person to
+ * it now.
+ */
+const codeReaderOf = async (
+  env: Pick<Env, "DB">,
+  personId: string,
+  reach: CodeReach,
+  appUsers: AppId | undefined
+): Promise<Reader> => {
+  const reader = await readerOf(env, personId, reach);
+  return appUsers === undefined
+    ? reader
+    : { ...reader, groups: [...reader.groups, appUsersGroup(appUsers)] };
+};
+
 /** A moment code reads as of: ISO 8601, with its offset. */
 const codeMomentSchema = z.iso
   .datetime({ offset: true })
@@ -4627,6 +4661,7 @@ const cardMemoryOf = ({ source, ...memory }: Memory): CardMemory => ({
 
 /**
  * A page of entity `entity`'s card as `reach` may read it (`CodeReach`),
+ * and with `appUsers` what that App's code remembered (`codeReaderOf`),
  * for the member `personId`, from the shared store alone, as now or as of
  * `asOf`, after `after` (a page's `next`): null alike when they may see no
  * such entity and when nobody holds one. Refused once `personId` is no
@@ -4637,10 +4672,11 @@ export const codeCardAs = async (
   env: BrainEnv & Pick<Env, "DB">,
   personId: string,
   reach: CodeReach,
-  request: unknown
+  request: unknown,
+  appUsers?: AppId
 ): Promise<CodeCard | null> => {
   const { entity, asOf, after } = checked(codeCardSchema, request);
-  const reader = await readerOf(env, personId, reach);
+  const reader = await codeReaderOf(env, personId, reach, appUsers);
   let card: Awaited<ReturnType<Brain["readCard"]>>;
   try {
     card = await brain(env).readCard({
@@ -4694,7 +4730,8 @@ interface CodeEntities {
 }
 
 /**
- * A page of the entities `reach` may see (`CodeReach`) that match
+ * A page of the entities `reach` may see (`CodeReach`), and with
+ * `appUsers` what that App's code remembered (`codeReaderOf`), that match
  * `request`'s kind, name (whole, folded) or exact identifier, for the
  * member `personId`, from the shared store alone, after `after` (a page's
  * `next`), in the order of the first memory the reader may read that
@@ -4705,10 +4742,11 @@ export const codeEntitiesAs = async (
   env: BrainEnv & Pick<Env, "DB">,
   personId: string,
   reach: CodeReach,
-  request: unknown
+  request: unknown,
+  appUsers?: AppId
 ): Promise<CodeEntities> => {
   const { after, ...asked } = checked(codeFindSchema, request);
-  const reader = await readerOf(env, personId, reach);
+  const reader = await codeReaderOf(env, personId, reach, appUsers);
   let page: Awaited<ReturnType<Brain["findEntities"]>>;
   try {
     page = await brain(env).findEntities({
@@ -4748,3 +4786,137 @@ export const isCodeEntitiesRequest = (
 ): boolean =>
   Object.hasOwn(codeEntitiesRequests, operation) &&
   codeEntitiesRequests[operation].safeParse(input).success;
+
+// What an App's code remembers and forgets (GRA-1883, threat model on the
+// issue): in the shared store, in the App's own word (`app:<id>`), read
+// by the App's users alone (`appUsersGroup`), through its own code. Who
+// may call these, for which App, and whether its code may write at all
+// (where the call comes from, the person a user of the App now, its
+// tables and everything it reaches) is brain-app-writes.ts's to decide
+// first: these only ever write under that App's users' group.
+
+/** Who writes for App `app`'s code, as the Brain names a writer. */
+const appWriterOf = (app: AppId): string => `app:${checked(appIdSchema, app)}`;
+
+/**
+ * The attributes App code may file a memory under: all but a person's
+ * preference and instruction, which are only ever that person's own word.
+ */
+const codeAttributes = attributeNames.filter(
+  (name) => name !== "preference" && name !== "instruction"
+);
+
+/** A fact App code remembers (`rememberForAppAs`). */
+const codeRememberSchema = z.strictObject({
+  about: memoryAboutSchema,
+  attribute: z.enum(codeAttributes).optional(),
+  value: memoryText(valueMaxLength).optional(),
+  statement: memoryText(statementMaxLength),
+});
+
+/** One of its own memories App code forgets (`forgetForAppAs`). */
+const codeForgetSchema = z.strictObject({ memory: memoryIdSchema });
+
+/** What App code writes to the Brain, by operation. */
+const codeWriteRequests = {
+  remember: codeRememberSchema,
+  forget: codeForgetSchema,
+} as const;
+
+/** What App code writes to the Brain: `ctx.brain.<operation>`. */
+export type CodeWriteOperation = keyof typeof codeWriteRequests;
+
+/**
+ * Whether `input` is a write App code may ask for as `operation`: for
+ * core to refuse it before anything else is looked at, as a recall's.
+ */
+export const isCodeWriteRequest = (
+  operation: CodeWriteOperation,
+  input: unknown
+): boolean =>
+  Object.hasOwn(codeWriteRequests, operation) &&
+  codeWriteRequests[operation].safeParse(input).success;
+
+/**
+ * Remembers a fact App `app`'s code says, in the App's word, for the
+ * member `personId` (admitted to the App by the caller), in the shared
+ * store, read by the App's users alone: about an entity the App's code
+ * may see (by id), or one an exact identifier finds there, or a new one;
+ * never a preference or an instruction. Its new word on the same entity
+ * and one-value attribute ends its earlier one, which stays as history.
+ * `change` names this one write, from the call's own key: the same change
+ * again answers what it wrote, with the time the store learned it, the
+ * same on every repeat. Refused once `personId` is no longer a member,
+ * and as `brain.request_invalid` for what the Brain's rules refuse (an id
+ * the App's code may not see among them, as one nobody holds).
+ */
+export const rememberForAppAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  { app, change }: { app: AppId; change: string },
+  request: unknown
+): Promise<{ memory: MemoryId; entity: EntityId; learnedAt: Date }> => {
+  const { about, statement, ...memory } = checked(codeRememberSchema, request);
+  const writer = appWriterOf(app);
+  const reader = await codeReaderOf(env, personId, "company", app);
+  let added: Awaited<ReturnType<Brain["addMemories"]>>;
+  try {
+    added = await brain(env).addMemories({
+      change: checked(changeSchema, change),
+      access: { kind: "audience", group: appUsersGroup(app) },
+      // An entity's id is taken only as the App's code may see it.
+      reader,
+      entities: [{ key: "about", ...about }],
+      memories: [
+        {
+          about: "about",
+          ...memory,
+          type: "fact",
+          statement,
+          speaker: { kind: "agent", agent: writer },
+          basis: { kind: "writer", writer },
+        },
+      ],
+    });
+  } catch (error) {
+    throw refusedAs(error);
+  }
+  const [saved] = added.memories;
+  const entity = added.entities.about;
+  // When the store learned it, read back as the App's code reads it.
+  const kept =
+    saved === undefined || entity === undefined
+      ? undefined
+      : await keptMemory(brain(env), reader, entity, saved);
+  if (saved === undefined || entity === undefined || kept === undefined) {
+    throw new Error("The Brain kept no memory");
+  }
+  return { memory: saved, entity, learnedAt: kept.learnedAt };
+};
+
+/**
+ * Retires one of App `app`'s own memories (`{ memory }`), as its code
+ * reads, for the member `personId` (admitted to the App by the caller):
+ * when the store retired it, the same time again for one it retired
+ * before; null alike for none, another writer's (a person's, a source's,
+ * another App's), one its code may not read and an expired one. Refused
+ * once `personId` is no longer a member.
+ */
+export const forgetForAppAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  app: AppId,
+  request: unknown
+): Promise<RetiredMemory | null> => {
+  const { memory } = checked(codeForgetSchema, request);
+  const reader = await codeReaderOf(env, personId, "company", app);
+  try {
+    return await brain(env).retireMemory({
+      memory,
+      reader,
+      writer: appWriterOf(app),
+    });
+  } catch (error) {
+    throw refusedAs(error);
+  }
+};

@@ -1084,6 +1084,12 @@ type CorePersonMember =
 /** The exports of core's brain-next.ts for code's entities, probed after them (`coreCodeEntities`). */
 type CoreCodeMember = "codeCardAs" | "codeEntitiesAs" | "isCodeEntitiesRequest";
 
+/** The exports of core's brain-next.ts for an App's code's writes, probed after code's entities (`coreAppWrites`). */
+type CoreAppMember =
+  | "rememberForAppAs"
+  | "forgetForAppAs"
+  | "isCodeWriteRequest";
+
 // Exports (GRA-1755). A company's export holds what the company holds,
 // markers among them, by design: it is for an admin, and core's route
 // lets no one else ask for it (brain-next-exports.ts), so no probe reads
@@ -1303,6 +1309,22 @@ const othersOwnMemory = async (
  */
 interface RecallFixture extends MemoryFixture {
   othersOwnMemory: string;
+  /**
+   * An App's code's memory (GRA-1883): marked, in the App's word
+   * (`app:<id>`), read by its users' group (`app-users:<id>`) alone, about
+   * an entity only it names (`appEntity`). Only that App's own code, for
+   * someone who uses it, reads it; every other surface must answer as if
+   * no one had written it.
+   */
+  app: string;
+  appEntity: string;
+  appMemory: string;
+  /**
+   * An entity only a memory of the same App's builders' group
+   * (`app:<id>`, its instruction file's) names, marked: its users'
+   * reader never reads it.
+   */
+  builtEntity: string;
 }
 
 const plantRecallFixture = async (probing: Probing): Promise<RecallFixture> => {
@@ -1364,7 +1386,46 @@ const plantRecallFixture = async (probing: Probing): Promise<RecallFixture> => {
   // Someone else's own store, every marker in it: a recall that reads
   // the reader's own store (their own source is there) reads theirs alone.
   const others = await othersOwnMemory(probing.markers);
-  return { ...fixture, othersOwnMemory: others.memory };
+  // An App's code's memory, and its builders' group's, each marked.
+  const app = crypto.randomUUID();
+  const marked = async (readers: string, writer: string) =>
+    await store().addMemories({
+      change: crypto.randomUUID(),
+      access: { kind: "audience", group: readers },
+      entities: [
+        {
+          key: "c",
+          kind: "customer",
+          names: [text],
+          identifiers: [
+            { type: "ref", value: `ref:app-${first(probing.markers)}` },
+          ],
+        },
+      ],
+      memories: [
+        {
+          about: "c",
+          attribute: "status",
+          value: text,
+          type: "fact",
+          statement: text,
+          speaker: { kind: "agent", agent: writer },
+          basis: { kind: "writer", writer },
+        },
+      ],
+    });
+  const [byApp, byBuilders] = await Promise.all([
+    marked(`app-users:${app}`, `app:${app}`),
+    marked(`app:${app}`, stranger()),
+  ]);
+  return {
+    ...fixture,
+    othersOwnMemory: others.memory,
+    app,
+    appEntity: byApp.entities.c ?? "",
+    appMemory: byApp.memories[0] ?? "",
+    builtEntity: byBuilders.entities.c ?? "",
+  };
 };
 
 /** The recall fixtures planted, by reader and markers. */
@@ -3246,7 +3307,7 @@ export const coreProbes = {
     }),
   ],
 } satisfies Record<
-  Exclude<CoreMember, CorePersonMember | CoreCodeMember>,
+  Exclude<CoreMember, CorePersonMember | CoreCodeMember | CoreAppMember>,
   Probe
 >;
 
@@ -5924,8 +5985,60 @@ const coreCodeEntities = {
         ),
       ])
     );
+    // As an App's code, for someone who uses it: another App's memories
+    // and its own builders' group's are hidden, as are its own to anyone
+    // else's code.
+    const asApp = async (
+      name: string,
+      app: string | undefined,
+      entity: string,
+      about?: Answer["about"]
+    ) =>
+      await answer(
+        name,
+        async () =>
+          await coreBrain.codeCardAs(
+            env,
+            personId,
+            "company",
+            { entity },
+            unchecked(app)
+          ),
+        about,
+        "app"
+      );
     return [
       ...perReach.flat(),
+      await asApp(
+        "an entity no one added, as an App's code",
+        crypto.randomUUID(),
+        crypto.randomUUID(),
+        "nothing"
+      ),
+      await asApp(
+        "one only another App's code remembered, as an App's code",
+        crypto.randomUUID(),
+        fixture.appEntity,
+        "hidden"
+      ),
+      await asApp(
+        "one only an App's code remembered, as code that is no App's",
+        undefined,
+        fixture.appEntity,
+        "hidden"
+      ),
+      await asApp(
+        "one only the App's builders' group names, as the App's code",
+        fixture.app,
+        fixture.builtEntity,
+        "hidden"
+      ),
+      await asApp(
+        "one only hidden memories name, as an App's code",
+        fixture.app,
+        fixture.hidden,
+        "hidden"
+      ),
       await read(
         "one the reader's team alone reads, as the company",
         "company",
@@ -5988,6 +6101,18 @@ const coreCodeEntities = {
           "identifier"
         ),
         await find(`a kind, as the ${reach}`, reach, { kind: "customer" }),
+        await find(
+          `an identifier only an App's code remembered, as the ${reach}`,
+          reach,
+          {
+            identifier: {
+              type: "ref",
+              value: `ref:app-${first(markers)}`,
+            },
+          },
+          "hidden",
+          "identifier"
+        ),
         await find(`nothing to find by, as the ${reach}`, reach, {
           after: markers.join(""),
         }),
@@ -5997,7 +6122,71 @@ const coreCodeEntities = {
         }),
       ])
     );
-    return perReach.flat();
+    // As another App's code, and as the App's own reading its builders'
+    // group: each compared to a name and an identifier no one gave.
+    const asApp = async (
+      name: string,
+      app: string,
+      request: Record<string, unknown>,
+      about: Answer["about"],
+      like: string
+    ) =>
+      await answer(
+        name,
+        async () =>
+          await coreBrain.codeEntitiesAs(
+            env,
+            personId,
+            "company",
+            request,
+            unchecked(app)
+          ),
+        about,
+        `${like} as an App's code`
+      );
+    const appRef = {
+      identifier: { type: "ref", value: `ref:app-${first(markers)}` },
+    };
+    return [
+      ...perReach.flat(),
+      await asApp(
+        "a name no one gave, as an App's code",
+        fixture.app,
+        { name: markers.map(twinOf).join(" ") },
+        "nothing",
+        "name"
+      ),
+      await asApp(
+        "a name only another App's code remembered",
+        crypto.randomUUID(),
+        { name: text },
+        "hidden",
+        "name"
+      ),
+      await asApp(
+        "an identifier no one gave, as an App's code",
+        fixture.app,
+        { identifier: { type: "ref", value: `ref:${crypto.randomUUID()}` } },
+        "nothing",
+        "identifier"
+      ),
+      await asApp(
+        "an identifier only another App's code remembered",
+        crypto.randomUUID(),
+        appRef,
+        "hidden",
+        "identifier"
+      ),
+      await asApp(
+        "an identifier only the App's builders' group gave",
+        // The builders' memory gives the same identifier as the App's own:
+        // read as another App, so neither is the reader's.
+        crypto.randomUUID(),
+        appRef,
+        "hidden",
+        "identifier"
+      ),
+    ];
   },
   // Pure: what a request is, never what it holds.
   isCodeEntitiesRequest: async ({ markers }) => {
@@ -6017,6 +6206,156 @@ const coreCodeEntities = {
     ];
   },
 } satisfies Record<CoreCodeMember, Probe>;
+
+// An App's code's writes (GRA-1883): in its own word, for its users.
+// Linking a fact to an entity its code may not see is refused exactly as
+// an id no one holds, and so is forgetting what isn't its own. Nothing is
+// written that holds a marker: a write's answer holds ids alone.
+const coreAppWrites = {
+  rememberForAppAs: async (probing) => {
+    const { personId, markers } = probing;
+    const [fixture, others] = await Promise.all([
+      recallFixture(probing),
+      othersOwnMemory(markers),
+    ]);
+    const remember = async (
+      name: string,
+      about: Record<string, unknown>,
+      {
+        kind,
+        app = crypto.randomUUID(),
+        as = personId,
+      }: { kind?: Answer["about"]; app?: string; as?: string } = {}
+    ) =>
+      await answer(
+        name,
+        async () =>
+          await coreBrain.rememberForAppAs(
+            env,
+            as,
+            { app: unchecked(app), change: `app:${crypto.randomUUID()}` },
+            { about, statement: "Plain" }
+          ),
+        kind
+      );
+    // One call site for every id, so a refusal's trace is the same.
+    const byId: [string, string, Answer["about"], string?][] = [
+      ["about an entity no one added", crypto.randomUUID(), "nothing"],
+      ["about one only hidden memories name", fixture.hidden, "hidden"],
+      ["about one drawn from a hidden source", fixture.drawn, "hidden"],
+      ["about one in someone else's own store", others.entity, "hidden"],
+      [
+        "about one only another App's code remembered",
+        fixture.appEntity,
+        "hidden",
+      ],
+      [
+        "about one only the App's builders' group names, as the App",
+        fixture.builtEntity,
+        "hidden",
+        fixture.app,
+      ],
+    ];
+    const asked: Answer[] = [];
+    for (const [name, id, kind, app] of byId) {
+      asked.push(
+        // oxlint-disable-next-line no-await-in-loop -- one call site, one at a time
+        await remember(
+          name,
+          { kind: "customer", id },
+          app === undefined ? { kind } : { kind, app }
+        )
+      );
+    }
+    return [
+      ...asked,
+      // A new entity, of none of the markers: written, answering ids alone.
+      await remember("about a new entity", {
+        kind: "customer",
+        names: [markers.map(twinOf).join(" ")],
+      }),
+      await remember(
+        "as someone who isn't a member",
+        { kind: "customer", id: fixture.appEntity },
+        { app: fixture.app, as: stranger() }
+      ),
+    ];
+  },
+  forgetForAppAs: async (probing) => {
+    const { personId } = probing;
+    const fixture = await recallFixture(probing);
+    const forget = async (
+      name: string,
+      memory: string,
+      about: Answer["about"],
+      as = personId
+    ) =>
+      await answer(
+        name,
+        async () =>
+          await coreBrain.forgetForAppAs(
+            env,
+            as,
+            unchecked(crypto.randomUUID()),
+            {
+              memory,
+            }
+          ),
+        about
+      );
+    const byId: [string, string, Answer["about"]][] = [
+      ["a memory no one added", crypto.randomUUID(), "nothing"],
+      ["another App's code's memory", fixture.appMemory, "hidden"],
+      ["a hidden memory", fixture.hiddenMemory, "hidden"],
+      ["one drawn from a hidden source", fixture.drawnMemory, "hidden"],
+      ["someone else's own", fixture.othersOwnMemory, "hidden"],
+      [
+        "one the reader may read, another writer's",
+        fixture.seenMemory,
+        "hidden",
+      ],
+    ];
+    const asked: Answer[] = [];
+    for (const [name, memory, about] of byId) {
+      // oxlint-disable-next-line no-await-in-loop -- one call site, one at a time
+      asked.push(await forget(name, memory, about));
+    }
+    return [
+      ...asked,
+      await forget(
+        "as someone who isn't a member",
+        fixture.appMemory,
+        undefined,
+        stranger()
+      ),
+    ];
+  },
+  // Pure: what a request is, never what it holds.
+  isCodeWriteRequest: async ({ markers }) => {
+    const is = async (name: string, operation: string, input: unknown) =>
+      await answer(name, async () => {
+        await Promise.resolve();
+        return coreBrain.isCodeWriteRequest(unchecked(operation), input);
+      });
+    const hidden = markers.join(" ");
+    return [
+      await is("a fact", "remember", {
+        about: { kind: "customer", names: ["Plain"] },
+        statement: "Plain",
+      }),
+      await is("one naming its readers", "remember", {
+        about: { kind: "customer" },
+        statement: hidden,
+        access: hidden,
+      }),
+      await is("a forget naming its writer", "forget", {
+        memory: crypto.randomUUID(),
+        writer: hidden,
+      }),
+      await is("an operation of the markers", hidden, { memory: hidden }),
+    ];
+  },
+} satisfies Record<CoreAppMember, Probe>;
 
 /** The person themselves, as brain-memories.ts takes a caller. */
 const personCaller = (personId: string): brainMemories.MemoryCaller => ({
@@ -8843,7 +9182,12 @@ export const brainSurfaces = [
   {
     name: "core",
     module: coreBrain,
-    probes: { ...coreProbes, ...corePersonMemories, ...coreCodeEntities },
+    probes: {
+      ...coreProbes,
+      ...corePersonMemories,
+      ...coreCodeEntities,
+      ...coreAppWrites,
+    },
   },
   { name: "instructions", module: instructionFiles, probes: instructionProbes },
   { name: "skills", module: brainSkills, probes: skillProbes },

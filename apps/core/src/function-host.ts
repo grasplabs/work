@@ -90,6 +90,7 @@ import {
   brainCardSchema,
   brainEntitiesSchema,
   brainPackSchema,
+  brainRememberedSchema,
   brainSkillsSelectedSchema,
   brainSkillTextSchema,
 } from "./brain-pack.ts";
@@ -1874,6 +1875,8 @@ const brainResults: Readonly<Record<string, z.ZodType>> = {
   "skills.read": brainSkillTextSchema,
   "entities.get": brainCardSchema.nullable(),
   "entities.find": brainEntitiesSchema,
+  remember: brainRememberedSchema,
+  forget: z.boolean(),
 };
 
 /**
@@ -1963,6 +1966,35 @@ const isAdapterRefusal = (
 ): code is (typeof adapterRefusals)[number] =>
   adapterRefusals.some((refusal) => refusal === code);
 
+/**
+ * Why an App's code may not write to the Brain (brain-app-writes.ts), and
+ * the details each passes on: who called, the table, or what it reaches.
+ */
+const brainWriteRefusals = {
+  "permission.brain_write_caller": z.strictObject({
+    caller: z.enum(["agent", "code_mode", "workflow"]),
+  }),
+  "permission.brain_write_not_user": z.undefined(),
+  "permission.brain_write_table": z.strictObject({ table: z.string() }),
+  "permission.brain_write_builders_table": z.strictObject({
+    table: z.string(),
+  }),
+  "permission.brain_write_reach": z.strictObject({
+    reach: z.enum([
+      "connection",
+      "collection",
+      "team_brain",
+      "app",
+      "unresolved",
+    ]),
+  }),
+} as const;
+
+const isBrainWriteRefusal = (
+  code: string | undefined
+): code is keyof typeof brainWriteRefusals =>
+  code !== undefined && Object.hasOwn(brainWriteRefusals, code);
+
 const providerFailure = (error: unknown, requestId: string): Error => {
   const code = isExpectedError(error) ? error.code : undefined;
   if (code === "effect.outcome_unknown" || code === "connect.outcome_unknown") {
@@ -1980,6 +2012,18 @@ const providerFailure = (error: unknown, requestId: string): Error => {
   // refused or couldn't complete, each in the function host's own words.
   if (isAdapterRefusal(code)) {
     return hostError(functionErrors.create(code));
+  }
+  // Why its code may not write to the Brain, with what names it.
+  if (isBrainWriteRefusal(code)) {
+    const details = brainWriteRefusals[code].safeParse(
+      isExpectedError(error) ? error.details : undefined
+    );
+    return hostError(
+      functionErrors.create(
+        code,
+        details.success && details.data !== undefined ? details.data : undefined
+      )
+    );
   }
   // Room held by runs under way, a provider's rate: worth trying again,
   // after the wait computed, the only detail passed on.

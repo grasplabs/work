@@ -638,6 +638,23 @@ export const sourcesOfApps = async (
   );
 };
 
+/**
+ * The other Apps whose data `app` may hold through grants on workflows
+ * (`reachedThroughCalls`, every grant ever given, both ways each carries
+ * data): what an App's Brain write is held to reach none of
+ * (brain-app-writes.ts). One the walk can't place, or a walk past its
+ * caps, is among `sourcesOf`'s `unresolved` instead.
+ */
+export const otherAppsReachedBy = async (
+  env: Env,
+  app: AppId
+): Promise<string[]> => {
+  const reached = await reachedThroughCalls(env, [app]);
+  return [...(reached.get(app)?.nodes ?? [])].filter(
+    (id) => id !== app && !id.startsWith(workflowPrefix)
+  );
+};
+
 /** The sources `app` may have read, as they are now. */
 export const sourcesOf = async (env: Env, app: AppId): Promise<AppSources> => {
   const sources = await sourcesOfApps(env, [app]);
