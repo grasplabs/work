@@ -1617,7 +1617,9 @@ export class ChatHarness {
   /**
    * Delivers the capture turn `key` owes (`captureTurn`), naming its
    * answer as the copies kept it (`#copy` keeps it there), then retires
-   * it: at least once, kept once by its event ID.
+   * it: at least once, as a call retried or a retire that failed delivers
+   * it again. The Workspace notes it once whatever: one event, by an ID
+   * the turn's source gives it (`Workspace.captureTurn`).
    */
   async #deliver(scope: TurnRequest["scope"], key: string): Promise<void> {
     const owed = await this.#harness.snapshot(CaptureDoc, key, context);

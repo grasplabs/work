@@ -2,6 +2,7 @@ import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
 import { agentErrors } from "@grasp-os/shared/agent";
 import {
   actorOf,
+  auditEventSchema,
   auditProvenanceMaxItems,
   createAuditEvent,
   delegateActorOf,
@@ -48,6 +49,7 @@ import type {
   DashboardWidgetId,
   StandardWidgetId,
 } from "@grasp-os/shared/dashboard";
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import {
   internalErrors,
   isExpectedError,
@@ -111,7 +113,7 @@ import { heldIn } from "./agent-skills.ts";
 import { builtNoteText, inOwnWords } from "./agent.ts";
 import type { QuestionBuilt, TurnContext, TurnResult } from "./agent.ts";
 import { turnAgent } from "./agents.ts";
-import { drainObjectOutbox } from "./audit-outbox.ts";
+import { drainObjectOutbox, uuidFromHash } from "./audit-outbox.ts";
 import { memberRole } from "./auth/identity.ts";
 import { eraseCaptured } from "./brain-capture.ts";
 import { loneNotesPerDrain } from "./brain-hand-overs.ts";
@@ -1599,10 +1601,34 @@ export class Workspace extends DurableObject<Env> {
    * `brain.source.*`): an answered turn they asked there and then, in a
    * chat whose turns go there. None in a chat gone or being deleted.
    * Whose turn it was is the chat's, never the caller's; the hand-over
-   * reads the chat again as it runs. Delivered at least once: a turn
-   * noted again is one hand-over (brain-hand-overs.ts).
+   * reads the chat again as it runs.
+   *
+   * Delivered at least once (a call retried, a capture whose retire
+   * failed), and noted once: the event's ID comes from the turn's source
+   * and its time from the answer as stored, so every delivery makes the
+   * same event, which the outbox keeps once by its ID and the log keeps
+   * once by its ID, also after a drain took the first.
    */
-  captureTurn(chatId: ChatId, capture: TurnCapture): void {
+  async captureTurn(chatId: ChatId, capture: TurnCapture): Promise<void> {
+    const { answerId } = capture;
+    if (
+      !capture.attended ||
+      capture.outcome !== "answered" ||
+      answerId === null
+    ) {
+      return;
+    }
+    const personId = this.#db
+      .select({ personId: chats.personId })
+      .from(chats)
+      .where(eq(chats.id, chatId))
+      .get()?.personId;
+    if (personId === undefined) {
+      return;
+    }
+    const source = chatTurnSource(personId, chatId, answerId).id;
+    const id = uuidFromHash(await sha256Hex(`chat.turn_noted:${source}`));
+    // Read again after the hash: the chat may have gone or changed since.
     const chat = this.#db
       .select({
         personId: chats.personId,
@@ -1613,26 +1639,35 @@ export class Workspace extends DurableObject<Env> {
       .from(chats)
       .where(eq(chats.id, chatId))
       .get();
-    const { answerId } = capture;
+    const answer = this.#db
+      .select({ createdAt: chatMessages.createdAt })
+      .from(chatMessages)
+      .where(
+        and(eq(chatMessages.chatId, chatId), eq(chatMessages.id, answerId))
+      )
+      .get();
     if (
-      chat === undefined ||
+      chat?.personId !== personId ||
+      answer === undefined ||
       this.#deleting.has(chatId) ||
-      !capture.attended ||
-      capture.outcome !== "answered" ||
-      answerId === null ||
       !handsTurnsOver(chat)
     ) {
       return;
     }
-    this.#outboxEntry({
+    const event = auditEventSchema.parse({
       actor: { type: "system" },
       action: "chat.turn_noted",
-      target: {
-        type: "chat_turn",
-        id: chatTurnSource(chat.personId, chatId, answerId).id,
-      },
+      target: { type: "chat_turn", id: source },
       detail: { workspace: this.ctx.id.name ?? null },
+      id,
+      at: answer.createdAt.toISOString(),
+      source: "core",
     });
+    this.#db
+      .insert(auditOutbox)
+      .values({ id, event: JSON.stringify(event), createdAt: new Date() })
+      .onConflictDoNothing({ target: auditOutbox.id })
+      .run();
     this.#deliverAudit();
   }
 
