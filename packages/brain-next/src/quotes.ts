@@ -39,8 +39,9 @@ import { sequenceOf } from "./words.ts";
 // the source's other out memories nor any other source's. When the
 // version it replaces is not the one judged (a store before this, a
 // restore, a release rolled back, new word rules) it judges every memory
-// of the source once instead. Measured in workerd: see
-// memories-cost.test.ts.
+// of the source once instead. At most `judgedMemoriesMax` (the request's
+// CPU): past it the source is left unjudged and the add still lands.
+// Counted in quotes-cost.test.ts.
 
 /** A text's words, as quotes are checked against them. */
 export interface QuoteIndex {
@@ -159,11 +160,27 @@ export interface Replaced {
 }
 
 /**
+ * Most memories one version's add judges: the in set, those on the version
+ * it replaces and the out memories its text may bring back, or, unjudged
+ * before, every memory of its source. A bound of the platform's, not of
+ * the store's: an add runs in one request, whose CPU a Durable Object
+ * holds to 30 s, and judging costs about 10 to 20 µs a memory (measured in
+ * workerd, on a 997 KB text with 10,000 memories in: 415 to 435 ms for the
+ * add that first judged them, 291 to 295 ms for the next, 200 to 325 ms
+ * for the same text with nothing to judge), so this many take about 2 s.
+ * Past it the add still lands, its source left unjudged (`judged_row`
+ * null: its out memories count for no one, the same for every reader), so
+ * a source can always get a version.
+ */
+export const judgedMemoriesMax = 100_000;
+
+/**
  * Judges every memory of `source` resting on a version before `version`,
  * its new current one, against that version's text `text`, the text in
  * hand: in the transaction that makes it current, which sets
  * `judged_row` with the pointer. `replaced` is the version it replaces,
- * if any.
+ * if any. More than `most` to judge (`judgedMemoriesMax`) leaves the
+ * source unjudged, writing nothing else.
  */
 export const judgeVersion = (
   sql: SqlStorage,
@@ -177,7 +194,8 @@ export const judgeVersion = (
     version: number;
     text: string;
     replaced: Replaced | undefined;
-  }
+  },
+  most: number = judgedMemoriesMax
 ): void => {
   if (neverJudged(sql, source)) {
     return;
@@ -187,70 +205,75 @@ export const judgeVersion = (
     indexed ??= quoteIndexOf(text);
     return indexed;
   };
-  if (replaced === undefined || !replaced.judged) {
-    // Every memory of the source on an earlier version, once.
-    for (const { row, quote } of sql
-      .exec<Judged>(
-        "SELECT row, quote FROM memories WHERE source = ? AND version < ?",
+  // Each read stops past the bound: never more than it rows.
+  const upTo = (statement: string, ...bindings: SqlStorageValue[]): Judged[] =>
+    sql.exec<Judged>(statement, ...bindings, most + 1).toArray();
+  const full = replaced === undefined || !replaced.judged;
+  // Every memory of the source on an earlier version, once; or the
+  // memories judged in, those on the version replaced (which rested on
+  // the current version and were never judged), and the out memories
+  // whose quote may be back, found by the new text's words and pairs,
+  // never by reading them all.
+  const all = full
+    ? upTo(
+        "SELECT row, quote FROM memories WHERE source = ?1 AND version < ?2 LIMIT ?3",
         source,
         version
       )
-      .toArray()) {
-      if (isHeld(index(), quote)) {
-        putIn(sql, row, source);
-      } else {
-        putOut(sql, row, source, quote);
-      }
-    }
+    : [];
+  const held = full
+    ? []
+    : upTo(
+        `SELECT m.row AS row, m.quote AS quote FROM memory_ins AS held
+        JOIN memories AS m ON m.row = held.memory
+        WHERE held.source = ?1 LIMIT ?2`,
+        source
+      );
+  const fresh =
+    replaced === undefined || full
+      ? []
+      : upTo(
+          "SELECT row, quote FROM memories WHERE source = ?1 AND version = ?2 LIMIT ?3",
+          source,
+          replaced.version
+        );
+  const outs =
+    !full &&
+    sql
+      .exec("SELECT 1 FROM memory_outs WHERE source = ? LIMIT 1", source)
+      .toArray().length > 0;
+  const back = outs
+    ? upTo(
+        // The text's pairs first, each a seek of the index: never the
+        // source's out memories one by one.
+        `SELECT m.row AS row, m.quote AS quote FROM json_each(?2) AS asked
+        CROSS JOIN memory_outs AS out ON out.source = ?1 AND out.pair = asked.value
+        CROSS JOIN memories AS m ON m.row = out.memory
+        LIMIT ?3`,
+        source,
+        JSON.stringify(index().pairs())
+      )
+    : [];
+  if (all.length + held.length + fresh.length + back.length > most) {
+    sql.exec(
+      "UPDATE current_versions SET judged_row = NULL WHERE source = ?",
+      source
+    );
     return;
   }
-  // The memories judged in, then those on the version replaced, which
-  // rested on the current version and were never judged.
-  for (const { row, quote } of sql
-    .exec<Judged>(
-      `SELECT m.row AS row, m.quote AS quote FROM memory_ins AS held
-      JOIN memories AS m ON m.row = held.memory
-      WHERE held.source = ?`,
-      source
-    )
-    .toArray()) {
-    if (!isHeld(index(), quote)) {
-      putOut(sql, row, source, quote);
-    }
-  }
-  for (const { row, quote } of sql
-    .exec<Judged>(
-      "SELECT row, quote FROM memories WHERE source = ? AND version = ?",
-      source,
-      replaced.version
-    )
-    .toArray()) {
+  for (const { row, quote } of [...all, ...fresh]) {
     if (isHeld(index(), quote)) {
       putIn(sql, row, source);
     } else {
       putOut(sql, row, source, quote);
     }
   }
-  // Out memories whose quote is back: found by the new text's words and
-  // pairs, never by reading them all.
-  if (
-    sql
-      .exec("SELECT 1 FROM memory_outs WHERE source = ? LIMIT 1", source)
-      .toArray().length === 0
-  ) {
-    return;
+  for (const { row, quote } of held) {
+    if (!isHeld(index(), quote)) {
+      putOut(sql, row, source, quote);
+    }
   }
-  for (const { row, quote } of sql
-    .exec<Judged>(
-      // The text's pairs first, each a seek of the index: never the
-      // source's out memories one by one.
-      `SELECT m.row AS row, m.quote AS quote FROM json_each(?2) AS asked
-      CROSS JOIN memory_outs AS out ON out.source = ?1 AND out.pair = asked.value
-      CROSS JOIN memories AS m ON m.row = out.memory`,
-      source,
-      JSON.stringify(index().pairs())
-    )
-    .toArray()) {
+  for (const { row, quote } of back) {
     if (isHeld(index(), quote)) {
       putIn(sql, row, source);
     }

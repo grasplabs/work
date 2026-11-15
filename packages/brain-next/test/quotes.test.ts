@@ -13,6 +13,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { chunksOf } from "../src/chunks.ts";
+import { judgeVersion } from "../src/quotes.ts";
 import type { BrainStore } from "../src/store.ts";
 import { sequenceOf } from "../src/words.ts";
 
@@ -612,5 +613,52 @@ describe("what the store keeps of it", () => {
       atLast: afterAdd.through === afterAdd.last,
       behind: afterOlder.through < unjudged,
     }).toStrictEqual({ atLast: true, behind: true });
+  });
+});
+
+describe("the bound of what a version's add judges", () => {
+  it("leaves a source unjudged past it, its out memories counting for no one, and the next add within it judges again", async () => {
+    const group = unique("g");
+    const reader = readerOf(group);
+    const source = unique("doc");
+    const name = unique("Acme");
+    const line = `${name} pays by card`;
+    const first = await version(source, `${line}. ${name} is big.`, group);
+    const { memory, entity } = await memoryOn(
+      { source, version: first, quote: line, group },
+      { name }
+    );
+    await memoryOn(
+      { source, version: first, quote: `${name} is big`, group },
+      { entity }
+    );
+    const second = await version(source, "Paid in cash.", group);
+    const out = await endOf(entity, memory, reader);
+    // The second version's add as it would be with two memories past the
+    // bound: judged afresh, with room for one.
+    await runInDurableObject(shared(), (_instance, state) => {
+      judgeVersion(
+        state.storage.sql,
+        {
+          source,
+          version: second,
+          text: "Paid in cash.",
+          replaced: { version: first, judged: false },
+        },
+        1
+      );
+    });
+    const pastBound = await endOf(entity, memory, reader);
+    const third = await version(source, "Paid in cash, still.", group);
+
+    expect({
+      out: out === (await addedAt(source, second, reader)),
+      pastBound,
+      judgedAgain: await endOf(entity, memory, reader),
+    }).toStrictEqual({
+      out: true,
+      pastBound: null,
+      judgedAgain: await addedAt(source, third, reader),
+    });
   });
 });
