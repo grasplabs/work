@@ -25,8 +25,12 @@ const model: EmbedModel = { name: "counts-test", build: "1" };
 const dimensions = 4;
 const vector = [1, 0.1, 0.1, 0.1];
 
-const reader: Reader & { person: string } = { person: "reader", groups: [] };
-const own: Access = { kind: "owner", person: reader.person };
+const reader: Reader & { person: string } = {
+  person: "reader",
+  groups: ["team:reader"],
+};
+/** A group only the reader is in: the shared store keeps nothing one person's alone. */
+const own: Access = { kind: "audience", group: "team:reader" };
 
 /** Adds `text` to a source of its own, with a vector for its first chunk. */
 const addWithVector = async (text: string): Promise<void> => {

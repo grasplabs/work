@@ -8,6 +8,7 @@ import {
   attributeRuleOf,
   changeKeySchema,
   isWholeKey,
+  newInstructionsSchema,
   newMemoriesSchema,
   newSourceSchema,
   principalSchema,
@@ -77,8 +78,9 @@ import type { WorkContext } from "./work.ts";
 //
 // 1. Checking, before anything is written: each part's size, SHA-256 and
 //    count against the manifest, and each line by the contract's own rules
-//    for a source, its text and its readers, and by what a company export
-//    holds: readers a group names (never one person, never no one), no
+//    for a source, its text and its readers (the rule of the add its key
+//    goes to: an instruction file's text may be emptied, a document's
+//    never), and by what a company export holds: readers a group names (never one person, never no one), no
 //    skill Grasp ships, and what is kept whole (an instruction file or a
 //    skill, never indexed) only as itself, as the store takes them
 //    (contract.ts `wholeKeyPrefixes`), so a file can't make a document into
@@ -292,11 +294,16 @@ const manifestOf = async (
 };
 
 /**
- * A version's line: by the contract's own rules for what an add takes, and
- * by what a company export holds (above).
+ * A version's line: by the contract's own rules for what an add takes, the
+ * rule of the add that takes its key (`addInstructions` for what is kept
+ * whole, whose text may be emptied; `addSource` otherwise), and by what a
+ * company export holds (above).
  */
 const versionLineSchema = exportLineSchema.superRefine((line, context) => {
-  const asAdd = newSourceSchema.safeParse({
+  const addSchema = isWholeKey(line.source)
+    ? newInstructionsSchema
+    : newSourceSchema;
+  const asAdd = addSchema.safeParse({
     source: line.source,
     change: "restore",
     text: line.text,

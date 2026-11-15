@@ -649,19 +649,6 @@ describe("extracting memories", () => {
     }).toStrictEqual({ board: ["2027-03-01"], company: [] });
   });
 
-  it("asks nothing of a version only one person may read in the shared store, which keeps no memory of theirs", async () => {
-    const token = unique("t");
-    answers.set(token, answering({ entities: [], memories: [] }));
-    await added(
-      `${token}: My own notes.`,
-      { kind: "owner", person: unique("owner") },
-      { extract: fromOutside() }
-    );
-    await tick();
-
-    expect(callsOf(token)).toStrictEqual([]);
-  });
-
   it("draws from a person's own source in their own store, as that store's tick runs it, for them alone", async () => {
     const token = unique("t");
     const name = unique("Pied");
