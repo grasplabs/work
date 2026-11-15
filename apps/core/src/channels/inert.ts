@@ -14,14 +14,24 @@
 // nowhere. An address written out is words: both platforms may still make
 // it clickable, and nothing fetches it (answers go with previews off), so
 // it is a link the person sees whole before following.
-
-/** A `]` that a link, a reference or a definition goes on from. */
-const linkGoesOn = /\](?=[(:[])/gu;
+//
+// What stays: Slack parses a plain `@here`, `@channel`, `@everyone`, a
+// user group's handle or `#channel` in `mrkdwn` itself, and escaping stops
+// only the bracketed forms. The Slack door answers direct messages alone,
+// where such a mention reaches only the person already there (GRA-1916
+// makes them inert before Slack answers anywhere else).
 
 /**
- * `text` as Teams reads it on a card (`TextBlock`): every `](`, `][` and
- * `]:` broken by a space, so no inline link, reference or definition
- * stands, whichever part of it the text is cut at.
+ * A `]` that an inline link or a definition goes on from. A reference
+ * (`[words][name]`, `[name]`) is a link only where a definition names it,
+ * and with every definition broken none does.
+ */
+const linkGoesOn = /\](?=[(:])/gu;
+
+/**
+ * `text` as Teams reads it on a card (`TextBlock`): every `](` and `]:`
+ * broken by a space, so no inline link or definition stands, nor any
+ * reference that needs one, whichever part of it the text is cut at.
  */
 export const inTeams = (text: string): string =>
   text.replaceAll(linkGoesOn, "] ");
@@ -42,13 +52,14 @@ export const inertOn =
 
 /**
  * What the model wrote, inside a line posted as message text on
- * `platform`: on Teams, whose message text renders HTML too, no `<` that
- * opens a tag either. On Slack it goes on a card, so nothing posted
- * resolves a mention in it.
+ * `platform`: on Teams, whose message text renders HTML too, its `&`
+ * escaped, then every `<`, so neither a tag nor an entity that spells one
+ * stands. On Slack the line goes on a card, so the adapter adds no
+ * mention of its own to it.
  */
 export const inertInMessage =
   (platform: string) =>
   (text: string): string =>
     platform === "slack"
       ? inSlack(text)
-      : inTeams(text).replaceAll("<", "&lt;");
+      : inTeams(text).replaceAll("&", "&amp;").replaceAll("<", "&lt;");

@@ -1,3 +1,5 @@
+import { parseMarkdown } from "chat";
+import type { Link, Nodes } from "chat";
 import { describe, expect, it } from "vite-plus/test";
 
 import { inertInMessage, inertOn } from "../src/channels/inert.ts";
@@ -8,7 +10,9 @@ import { attacks, ordinary } from "./inert-answers.ts";
 // mentions and HTML from, and of ordinary words. The doors post what these
 // make (channels-answer, channels-slack, channels-stream): here, that it
 // holds for any answer, and for every prefix of one, as a card being
-// written shows.
+// written shows. Teams' text is read back by a real Markdown parser, the
+// one the Chat SDK renders with; Slack's by its own escapes, which Slack
+// documents as all it decodes.
 
 /** The pieces a random answer is made of. */
 const pieces = [
@@ -77,8 +81,47 @@ const answers = [attacks, ordinary, ...answersFrom(1914, 1000)];
 const prefixesOf = (text: string): string[] =>
   Array.from({ length: text.length }, (_, at) => text.slice(0, at + 1));
 
-/** Where Teams would read a link, a reference or a definition. */
-const teamsLink = /\]\(|\]\[|\]:/u;
+/** The words a node shows. */
+const wordsOf = (node: Nodes): string =>
+  "value" in node
+    ? node.value
+    : ("children" in node ? node.children : []).map(wordsOf).join("");
+
+/**
+ * Whether `link` is an address shown as itself, which a client may make
+ * clickable (an autolink, or a bare `www.` or email address GFM links):
+ * the address in full, nothing hidden behind other words.
+ */
+const isBareAddress = (link: Link): boolean => {
+  const words = wordsOf(link);
+  return [words, `http://${words}`, `mailto:${words}`].includes(link.url);
+};
+
+/**
+ * What a Markdown parser (the Chat SDK's, which its Teams adapter renders
+ * with) reads in `text` that leads somewhere: a link with words of its
+ * own, an image, a reference or a definition, and HTML where `html` is
+ * read too.
+ */
+const leadsSomewhere = (text: string, html: boolean): string[] => {
+  const found: string[] = [];
+  const pending: Nodes[] = [parseMarkdown(text)];
+  for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
+    const leads =
+      (node.type === "link" && !isBareAddress(node)) ||
+      ["image", "imageReference", "linkReference", "definition"].includes(
+        node.type
+      ) ||
+      (html && node.type === "html");
+    if (leads) {
+      found.push(`${node.type} in ${JSON.stringify(text)}`);
+    }
+    if ("children" in node) {
+      pending.push(...node.children);
+    }
+  }
+  return found;
+};
 
 /** A `<` or `>`, or an `&` that starts none of Slack's three escapes. */
 const unescapedInSlack = /[<>]|&(?!amp;|lt;|gt;)/u;
@@ -98,16 +141,19 @@ const decodedBySlack = (text: string): string =>
   );
 
 describe("what the model wrote, as a chat app gets it", () => {
-  it("holds no link form a Teams card reads, in any answer or any prefix of one", () => {
+  it("holds no link, image or definition a Teams card reads, beyond an address shown whole, in any answer or any prefix of one", () => {
+    // A card's `TextBlock` renders no HTML, so a tag is only words there.
     const shown = answers.flatMap(prefixesOf).map(inertOn("teams"));
-    expect(shown.filter((text) => teamsLink.test(text))).toStrictEqual([]);
+    expect(shown.flatMap((text) => leadsSomewhere(text, false))).toStrictEqual(
+      []
+    );
   });
 
-  it("holds no tag or link form in Teams' message text, in any answer", () => {
+  it("holds no link, image, definition or HTML in Teams' message text, beyond an address shown whole, in any answer", () => {
     const shown = answers.map(inertInMessage("teams"));
-    expect(
-      shown.filter((text) => teamsLink.test(text) || text.includes("<"))
-    ).toStrictEqual([]);
+    expect(shown.flatMap((text) => leadsSomewhere(text, true))).toStrictEqual(
+      []
+    );
   });
 
   it("holds nothing Slack reads as markup, and shows the model's words exactly, in any answer", () => {

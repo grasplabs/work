@@ -224,8 +224,8 @@ const cardTextsIn = async (conversation: string): Promise<string[]> => {
   );
 };
 
-/** Where a card's text would still read as a link, a reference or a definition. */
-const linkForm = /\]\(|\]\[|\]:/u;
+/** Where a card's text would still read as an inline link or a definition. */
+const linkForm = /\]\(|\]:/u;
 
 describe("a member's answer with links the model wrote", setUpTime, () => {
   it("is only ever a card showing them as written, every link form broken, in a private chat and a group chat, and kept as written", async () => {

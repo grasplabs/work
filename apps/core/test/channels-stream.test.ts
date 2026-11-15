@@ -115,16 +115,25 @@ const cardShows = async (conversation: string, words: string) => {
 const pausesAt = (points: readonly number[]) =>
   points.map((at) => {
     const until = Promise.withResolvers<boolean>();
+    const stopped = Promise.withResolvers<boolean>();
     return {
-      pause: { at, until: until.promise },
+      pause: {
+        at,
+        until: until.promise,
+        reached: () => {
+          stopped.resolve(true);
+        },
+      },
+      /** Settles once the model's stream stopped here. */
+      reached: stopped.promise,
       release: () => {
         until.resolve(true);
       },
     };
   });
 
-/** Where a card's text would still read as a link, a reference or a definition. */
-const linkForm = /\]\(|\]\[|\]:/u;
+/** Where a card's text would still read as an inline link or a definition. */
+const linkForm = /\]\(|\]:/u;
 
 /** Consecutive repeats of `words` taken out: what the card showed in turn. */
 const inTurn = (words: readonly string[]): string[] =>
@@ -185,10 +194,14 @@ describe("an answer written into its card", setUpTime, () => {
     });
   });
 
-  it("shows no more than a card takes while written, and ends as the card of a long answer", async () => {
+  it("shows no more than a card takes, chunk after chunk past it, then only the answer's own card", async () => {
     const answer = "Leave lasts sixteen weeks. ".repeat(800);
-    // Past what one card takes (cards.tsx), and further on.
-    const pauses = pausesAt([18_000, 20_000]);
+    // Past what one card takes (cards.tsx), then chunk after chunk that
+    // changes nothing it shows. That an update showing what the card
+    // shows already is never sent holds by construction (answer.ts
+    // `cardInto`): here, without a clock, one skipped can't be told from
+    // one the throttles merged.
+    const pauses = pausesAt([18_000, 19_000, 20_000, 21_000]);
     const { teams } = await member(idp, {
       ...says(answer),
       pause: pauses.map(({ pause }) => pause),
@@ -204,25 +217,29 @@ describe("an answer written into its card", setUpTime, () => {
         { timeout: 15_000, message: "the card to show all it takes" }
       )
       .toBe(true);
-    for (const pause of pauses) {
+    for (const [index, pause] of pauses.entries()) {
       pause.release();
+      // oxlint-disable-next-line no-await-in-loop -- chunk by chunk
+      await pauses[index + 1]?.reached;
     }
     await posting;
 
     const messages = await messagesIn(teams.conversation);
-    const shown = inTurn(messages.map(({ words }) => words));
+    const [card] = messages;
     const { sent } = await reached(teams.conversation);
     expect({
-      // The card as cut while written, and as the whole answer cut: the
-      // same words.
-      shown: shown.length,
-      cut: shown[0]?.endsWith("…"),
-      // The answer's own card, which says where the rest is.
+      // The card as cut while written, then only the answer's own card,
+      // which says where the rest is: no update in between.
+      sends: messages.map(({ editOf }) => editOf),
+      cut: card?.words.endsWith("…"),
       tooLong: JSON.stringify(
-        sent.findLast(({ editOf }) => editOf === messages[0]?.id)?.activity
+        sent.findLast(({ editOf }) => editOf === card?.id)?.activity
       ).includes(say("answerTooLong", "en")),
-      posts: messages.filter(({ editOf }) => editOf === undefined).length,
-    }).toStrictEqual({ shown: 1, cut: true, tooLong: true, posts: 1 });
+    }).toStrictEqual({
+      sends: [undefined, card?.id],
+      cut: true,
+      tooLong: true,
+    });
   });
 
   it("keeps its card as it was when Teams refuses an update, and still ends it whole", async () => {

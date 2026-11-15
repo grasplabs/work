@@ -1070,8 +1070,9 @@ describe("the weekly summary", setUpTime, () => {
     // Their chat with Stephen, which the summary goes to.
     await post(messageFrom(owner.teams, { text: "Hi" }));
     const monday = weekOf(await companyDay(env));
+    // A link, a tag, and a tag spelled in entities, which Teams decodes.
     const wording =
-      "[Leave](https://evil.com/l?d=1) <img src=https://evil.com/i.png>";
+      "[Leave](https://evil.com/l?d=1) <img src=https://evil.com/i.png> &lt;img src=https://evil.com/e.png&gt; &#60;img src=https://evil.com/n.png>";
     await seed(
       dayFrom(monday, -3),
       people(5, {
@@ -1086,11 +1087,11 @@ describe("the weekly summary", setUpTime, () => {
 
     const { activities } = await reached(owner.teams.conversation);
     const summary = JSON.stringify(activities.at(-1));
-    // Teams' message text renders `[words](address)` and HTML: the name
-    // shows whole, and is neither.
+    // Teams' message text renders `[words](address)`, HTML and entities:
+    // the name shows whole, as written, and is none of them.
     expect({
       shown: summary.includes(
-        "[Leave] (https://evil.com/l?d=1) &lt;img src=https://evil.com/i.png>"
+        "[Leave] (https://evil.com/l?d=1) &lt;img src=https://evil.com/i.png> &amp;lt;img src=https://evil.com/e.png&amp;gt; &amp;#60;img src=https://evil.com/n.png>"
       ),
       linkOrTag: summary.includes("](") || summary.includes("<img"),
     }).toStrictEqual({ shown: true, linkOrTag: false });

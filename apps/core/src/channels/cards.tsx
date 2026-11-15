@@ -191,13 +191,13 @@ export const answerCard = ({
 
 /**
  * An answer still being written, as its card shows it until the answer
- * is whole (answer.ts): its words so far, labelled as made by AI, and
- * whether they fit. Text past what the platform takes is cut.
+ * is whole (answer.ts): its words so far, labelled as made by AI, and the
+ * words the card shows of them. Text past what the platform takes is cut.
  */
 export const draftCard = (
   text: string
-): { posted: PostableCard; whole: boolean } => {
-  const { text: shown, whole } = fit(text, Number.POSITIVE_INFINITY, {
+): { posted: PostableCard; shown: string } => {
+  const { text: shown } = fit(text, Number.POSITIVE_INFINITY, {
     left: outsideBytes,
   });
   const card = (
@@ -205,7 +205,7 @@ export const draftCard = (
       <CardText>{shown}</CardText>
     </Card>
   );
-  return { posted: { card: cardOf(card), aiGenerated: true }, whole };
+  return { posted: { card: cardOf(card), aiGenerated: true }, shown };
 };
 
 /** One of Stephen's lines on a card of its own. */

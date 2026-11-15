@@ -274,7 +274,7 @@ describe("a chat app's writes", setUpTime, () => {
 
 describe("a chat app's answers", setUpTime, () => {
   it("keep the model's words as written, and the mark of the text it answered by", async () => {
-    // Made inert where they are posted (channels/without-links.ts), never
+    // Made inert where they are posted (channels/inert.ts), never
     // rewritten where they are kept.
     const written =
       "The figures are in [the Q3 report](https://evil.test/q3) and [Q3](grasp:note/doc-1), see https://evil.test/more.";

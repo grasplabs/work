@@ -235,7 +235,7 @@ const waitUntil = async (at: number): Promise<void> => {
 /** Where the card of an answer being written stands (`cardInto`). */
 interface Writing {
   sent: SentMessage | undefined;
-  /** The words the card shows. */
+  /** The words the card shows, as drafted (`draftCard`). */
   shown: string;
   /** The latest words it should show, not yet sent. */
   pending: string | undefined;
@@ -246,8 +246,6 @@ interface Writing {
   backOff: number;
   /** Whether the turn ended: no update after it but the last. */
   ended: boolean;
-  /** Whether the card shows all it can: no update after it but the last. */
-  full: boolean;
 }
 
 /**
@@ -255,11 +253,12 @@ interface Writing {
  * (a Teams direct message): `onText` takes the model's words so far, and
  * the card, inert at every update (`inTeams`), is posted at the first
  * words and updated in place with the latest, one update at a time and at
- * most every {@link updateEveryMs}, until it shows all a card can. An
+ * most every {@link updateEveryMs}, never one that would show what the
+ * card shows already (once the card is full, none until the last). An
  * update Teams refuses leaves the card as it was and holds the next one
- * back, longer each time. `end` makes the card what the turn ended in (the answer, or a
- * line), and says whether it did: if it couldn't, or nothing was posted,
- * the caller posts that whole, once.
+ * back, longer each time. `end` makes the card what the turn ended in
+ * (the answer, or a line), and says whether it did: if it couldn't, or
+ * nothing was posted, the caller posts that whole, once.
  */
 const cardInto = (thread: Thread, onFirst: () => void) => {
   const writing: Writing = {
@@ -270,7 +269,6 @@ const cardInto = (thread: Thread, onFirst: () => void) => {
     nextAt: 0,
     backOff: updateEveryMs,
     ended: false,
-    full: false,
   };
   /** Posts or updates the card as `content`: whether Teams took it. */
   const send = async (content: Parameters<Thread["post"]>[0]) => {
@@ -298,14 +296,16 @@ const cardInto = (thread: Thread, onFirst: () => void) => {
         await waitUntil(writing.nextAt);
         const text = writing.pending;
         writing.pending = undefined;
-        if (writing.ended || text === writing.shown) {
+        if (writing.ended || text === undefined) {
           continue;
         }
         const draft = draftCard(inTeams(text));
+        if (draft.shown === writing.shown) {
+          continue;
+        }
         // oxlint-disable-next-line no-await-in-loop -- one update at a time
         if (await send(draft.posted)) {
-          writing.shown = text;
-          writing.full = !draft.whole;
+          writing.shown = draft.shown;
         }
       }
     } finally {
@@ -314,7 +314,7 @@ const cardInto = (thread: Thread, onFirst: () => void) => {
   };
   return {
     onText: (text: string): void => {
-      if (writing.ended || writing.full || text === "") {
+      if (writing.ended || text === "") {
         return;
       }
       writing.pending = text;

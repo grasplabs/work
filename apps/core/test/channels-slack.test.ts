@@ -582,9 +582,10 @@ describe("a linked person's answer in Slack", () => {
         fields.unfurl_media,
       ]),
       // Escaped once, by Grasp, and sent as such: Slack decodes it for
-      // display, so nothing the model wrote is a link, mention or
-      // broadcast; a bare `@U…` stays text, as the adapter makes a mention
-      // of one only in a text post, never in a card's blocks.
+      // display, so none of the bracketed links, mentions or broadcasts
+      // the model wrote stands; a bare `@U…` stays text, as the adapter
+      // makes a mention of one only in a text post, never in a card's
+      // blocks. A plain `@here` Slack itself would still parse (inert.ts).
       answer,
       unescaped: [answer, String(posts[0]?.fields.text)].filter((text) =>
         unescapedInSlack.test(text)
@@ -652,7 +653,7 @@ const offerOf = (fields: Record<string, unknown>): string | undefined => {
 };
 
 describe("a workflow started from Slack", () => {
-  it("is said to have started on a card, where no mention in what it names resolves", async () => {
+  it("is said to have started on a card, where the adapter adds no mention to what it names", async () => {
     const { userId, slackUser } = await linkedPerson();
     const workflow = await askableWorkflow(userId);
     await fakeProvider(
@@ -723,8 +724,8 @@ describe("a linked person's held write in Slack", () => {
       sent.find(({ fields }) => JSON.stringify(fields).includes(confirmAction))
         ?.fields ?? {}
     );
-    // Escaped once, as Slack decodes it for display: shown in full,
-    // nothing of it a link or a mention.
+    // Escaped once, as Slack decodes it for display: shown in full, its
+    // bracketed link and broadcast neither.
     expect({
       shown: card.includes(
         "&lt;https://evil.example/?d=salary|Agenda&gt; for &lt;!here&gt; &amp; co"
