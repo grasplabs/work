@@ -6,6 +6,7 @@ import {
   inSlack,
   inTeams,
   shownWithoutLinks,
+  streamedWithoutLinks,
   withoutLinks,
 } from "../src/channels/without-links.ts";
 
@@ -289,6 +290,29 @@ describe("Stephen's own words in a chat app", () => {
       plain: true,
       inBudget: true,
       tooDeep: "",
+    });
+  });
+
+  it("show of an answer being written, at every chunk's end, no link form, and never the address of a link, image or tag still open", () => {
+    const answer = [
+      'Leave lasts [sixteen weeks](https://evil.com/leave?d=secret "t") in all. ![chart](https://evil.com/c.png) and <a href="https://evil.com/a">the form</a>.',
+      "See [the policy][p] and `[code](https://evil.com/code)`.",
+      "[p]: https://evil.com/p",
+    ].join("\n\n");
+    const shown = Array.from({ length: answer.length + 1 }, (_, at) =>
+      streamedWithoutLinks(answer.slice(0, at))
+    );
+    expect({
+      linking: shown.flatMap(linking),
+      teamsLinkSyntax: shown.filter((text) => inTeams(text).includes("](")),
+      // Outside code, whose words stay as written.
+      addresses: shown.filter((text) => /evil\.com\/(?!code)/u.test(text)),
+      last: shown.at(-1),
+    }).toStrictEqual({
+      linking: [],
+      teamsLinkSyntax: [],
+      addresses: [],
+      last: shownWithoutLinks(withoutLinks(answer)),
     });
   });
 });

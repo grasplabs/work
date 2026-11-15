@@ -554,3 +554,50 @@ export const inSlack = (shown: string): string => {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
 };
+
+/** The start of the paragraph being written: after the last blank line. */
+const lastBlankLine = /\n[ \t]*\n(?![\s\S]*\n[ \t]*\n)/u;
+
+/**
+ * Whether the construct `tail` opens with (a `[` or `<`) is still open: a
+ * link's label, destination or tag the next chunk may yet close.
+ */
+const stillOpen = (tail: string): boolean => {
+  if (tail.startsWith("<")) {
+    return !tail.includes(">");
+  }
+  const close = tail.indexOf("]");
+  if (close === -1 || close === tail.length - 1) {
+    return true;
+  }
+  const after = tail[close + 1];
+  if (after === "(") {
+    return !tail.includes(")", close);
+  }
+  return after === "[" && !tail.includes("]", close + 2);
+};
+
+/**
+ * Of an answer being written (`partial`), what a chat app shows of it so
+ * far: the whole partial cleaned as the answer is (`shownWithoutLinks`),
+ * every time, so each update is as inert as the answer. Only to keep it
+ * from flickering, a link, image or tag still open in the paragraph being
+ * written is held back until it closes or the paragraph ends: the person
+ * sees its words appear once, never its markup first. Empty where nothing
+ * is worth showing yet, or the parser can't take it.
+ */
+export const streamedWithoutLinks = (partial: string): string => {
+  const paragraph = partial.search(lastBlankLine) + 1;
+  let held = partial.length;
+  for (let at = paragraph; at < partial.length; at += 1) {
+    const character = partial[at];
+    if (
+      (character === "[" || character === "<") &&
+      stillOpen(partial.slice(at))
+    ) {
+      held = partial[at - 1] === "!" ? at - 1 : at;
+      break;
+    }
+  }
+  return shownWithoutLinks(partial.slice(0, held));
+};

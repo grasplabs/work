@@ -217,6 +217,12 @@ export const botConnectorMembersUrl =
   "https://bot-connector-control.test/members";
 
 /**
+ * Where tests have Teams refuse a conversation's next edits as too many
+ * requests: POST `{ conversation, count }`.
+ */
+export const botConnectorEditsUrl = "https://bot-connector-control.test/edits";
+
+/**
  * Where tests read what reached the Bot Connector, in order: `{ posted,
  * asked }`, the activities it took (`{ conversation, activity }` each) and
  * the roster reads (`<conversation id> <user id>` each).
@@ -695,6 +701,11 @@ export default {
     if (request.method === "POST" && url.href === ${JSON.stringify(botConnectorMembersUrl)}) {
       const { members } = await request.json();
       botConnector.setMembers(members);
+      return new Response(null, { status: 204 });
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(botConnectorEditsUrl)}) {
+      const { conversation, count } = await request.json();
+      botConnector.refuseEdits(conversation, count);
       return new Response(null, { status: 204 });
     }
     if (request.method === "POST" && url.href === ${JSON.stringify(botConnectorUninstallUrl)}) {

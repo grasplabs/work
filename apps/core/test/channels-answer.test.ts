@@ -283,7 +283,7 @@ const streamedIn = async (conversation: string): Promise<string[]> => {
 };
 
 describe("a member's answer with links the model wrote", setUpTime, () => {
-  it("is posted once on one card, never streamed, without them, in a private chat and a group chat, as Grasp keeps it", async () => {
+  it("ends on one card, never in Teams' own stream, without them, in a private chat and a group chat, as Grasp keeps it", async () => {
     const ann = await member(idp, says(linked), says(linked));
     const group = newGroup();
     await onGroupRoster(group, [{ person: ann.teams }]);
@@ -299,13 +299,22 @@ describe("a member's answer with links the model wrote", setUpTime, () => {
       const texts = await cardTextsIn(conversation);
       return texts.filter((text) => text.startsWith("Read"));
     };
+    const [inPrivate, inGroup] = [
+      await answers(ann.teams.conversation),
+      await answers(group),
+    ];
     expect({
-      // Typing until the answer is whole, then the card: no stream.
+      // No stream of Teams' own.
       streamed: [
         ...(await streamedIn(ann.teams.conversation)),
         ...(await streamedIn(group)),
       ],
-      cards: [await answers(ann.teams.conversation), await answers(group)],
+      // Its card as it ends: in the private chat, it was written into it
+      // as the model wrote, every update cleaned too (channels-stream).
+      cards: [inPrivate.at(-1), inGroup.at(-1)],
+      inertWhileWritten: [...inPrivate, ...inGroup].every(
+        (text) => !text.includes("](") && !text.includes("evil.com/p")
+      ),
       // Nothing the model linked, showed or marked up, in any form Teams
       // reads; the code's own words stay, with no link form left.
       linked: ["evil.com/p", "c.png", "evil.com/a", "<a ", "]("].filter(
@@ -314,7 +323,8 @@ describe("a member's answer with links the model wrote", setUpTime, () => {
       kept: await keptAnswersOf(ann.userId),
     }).toStrictEqual({
       streamed: [],
-      cards: [[kept.replace("](", "] (")], [kept.replace("](", "] (")]],
+      cards: [kept.replace("](", "] ("), kept.replace("](", "] (")],
+      inertWhileWritten: true,
       linked: [],
       kept: [[kept], [kept]],
     });

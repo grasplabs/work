@@ -884,13 +884,16 @@ export const textOf = (message: AssistantMessage | undefined): string =>
 
 /**
  * `message`, an answer, without links in its text, as a chat platform's
- * chat keeps and shows the agent's own words (`withoutLinks`). Its text is
- * cleaned whole, as the answer is posted whole (`textOf`), so a link split
- * over two of its text blocks goes too: the text stands where its first
- * block stood.
+ * chat keeps and shows the agent's own words (`withoutLinks`, or `clean`).
+ * Its text is cleaned whole, as the answer is posted whole (`textOf`), so
+ * a link split over two of its text blocks goes too: the text stands
+ * where its first block stood.
  */
-export const ownWordsOf = (message: AssistantMessage): AssistantMessage => {
-  const text = withoutLinks(textOf(message));
+export const ownWordsOf = (
+  message: AssistantMessage,
+  clean: (text: string) => string = withoutLinks
+): AssistantMessage => {
+  const text = clean(textOf(message));
   let placed = false;
   const content: AssistantMessage["content"] = [];
   for (const block of message.content) {

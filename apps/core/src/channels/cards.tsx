@@ -256,6 +256,25 @@ export const answerCard = ({
   return { card: cardOf(card), aiGenerated: true };
 };
 
+/**
+ * An answer still being written, as its card shows it until the answer
+ * is whole (answer.ts): its words so far, labelled as made by AI. Text
+ * past what the platform takes is cut.
+ */
+export const draftCard = (text: string): PostableCard => {
+  const { text: shown } = fit(text, Number.POSITIVE_INFINITY, {
+    left: outsideBytes,
+  });
+  return {
+    card: cardOf(
+      <Card>
+        <CardText>{shown}</CardText>
+      </Card>
+    ),
+    aiGenerated: true,
+  };
+};
+
 /** Where a held write is: waiting for the press, or as the press ran it. */
 export type WriteState =
   | "held"

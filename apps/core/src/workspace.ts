@@ -111,7 +111,7 @@ import type {
   CodeRunCall,
 } from "./agent-scope.ts";
 import { heldIn } from "./agent-skills.ts";
-import { builtNoteText, inOwnWords, ownWordsOf } from "./agent.ts";
+import { builtNoteText, inOwnWords, ownWordsOf, textOf } from "./agent.ts";
 import type { QuestionBuilt, TurnContext, TurnResult } from "./agent.ts";
 import { turnAgent } from "./agents.ts";
 import { drainObjectOutbox, uuidFromHash } from "./audit-outbox.ts";
@@ -126,7 +126,10 @@ import {
   turnCheckOf,
 } from "./channels/stephen-rules.ts";
 import type { HeldWriteRefusal, TurnCheck } from "./channels/stephen-rules.ts";
-import { withoutLinks } from "./channels/without-links.ts";
+import {
+  streamedWithoutLinks,
+  withoutLinks,
+} from "./channels/without-links.ts";
 import { questionText } from "./chat-agent.ts";
 import {
   audienceMaxMembers,
@@ -243,6 +246,13 @@ interface LiveTurn {
   /** The last response it kept: its answer, once it ends. */
   answer?: number;
   /**
+   * Tells a chat platform's asker what the answer being written shows so
+   * far (`streamedWithoutLinks`), read from `writing` as it tells it.
+   */
+  onText?: () => void;
+  /** The model's text of the answer being written, while one is. */
+  writing?: string;
+  /**
    * What its model requests read from the provider's prompt cache, of all
    * the prompt tokens they sent, recorded once the turn ends.
    */
@@ -253,6 +263,48 @@ interface LiveTurn {
  * A question for a chat's agent, the model to answer it with, and how hard
  * that model thinks first (`ChatQuestion`).
  */
+/**
+ * How often a chat platform is told an answer's text so far, at most: the
+ * Chat SDK's interval for streaming by edits (channels/answer.ts).
+ */
+const textEveryMs = 500;
+
+/**
+ * `tell`, called at most every {@link textEveryMs}, and once more at the
+ * end of a window that asked for more: what it tells is read as it is
+ * called, so nothing in between is told late.
+ */
+const throttled = (tell: () => unknown) => {
+  let last = Number.NEGATIVE_INFINITY;
+  let gone = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  // A caller that went away stops being told; the turn goes on.
+  const send = async (): Promise<void> => {
+    last = Date.now();
+    try {
+      await tell();
+    } catch {
+      gone = true;
+    }
+  };
+  return (): void => {
+    if (gone) {
+      return;
+    }
+    const wait = last + textEveryMs - Date.now();
+    if (wait <= 0) {
+      void send();
+      return;
+    }
+    timer ??= setTimeout(() => {
+      timer = undefined;
+      if (!gone) {
+        void send();
+      }
+    }, wait);
+  };
+};
+
 /**
  * A chat others share on a chat platform, as its door names it: the Chat
  * SDK's thread, whether it is a group chat or a channel, and who is in it
@@ -1788,8 +1840,10 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * Asks `text` in `personId`'s own chat on chat platform `via`, and waits
-   * for the answer: the chat is the person's one chat there, found by its
-   * channel, or made on their first message, audited as theirs. Asked
+   * for the answer, telling `onText`, if given, what the answer being
+   * written shows so far, at most every {@link textEveryMs}: the chat is
+   * the person's one chat there, found by its channel, or made on their
+   * first message, audited as theirs. Asked
    * with the deployment's default model, the first it allows, as Grasp's
    * own app starts with. Like `ask`, it takes its caller's word for who
    * asks: only the door of a chat platform calls it, once the platform's
@@ -1806,7 +1860,8 @@ export class Workspace extends DurableObject<Env> {
     agentId: string,
     via: string,
     text: string,
-    place: ChatPlace
+    place: ChatPlace,
+    onText?: (text: string) => unknown
   ): Promise<{ chatId: string; answer: Answer; calls: ToolCall[] }> {
     const platform = chatPlatformSchema.parse(via);
     const parsedPlace = permissionErrors.parse(
@@ -1862,7 +1917,10 @@ export class Workspace extends DurableObject<Env> {
     const calls: ToolCall[] = [];
     return {
       chatId: chat.id,
-      answer: await this.#turn(chat, { text, model }, false, { calls }),
+      answer: await this.#turn(chat, { text, model }, false, {
+        onText,
+        calls,
+      }),
       calls,
     };
   }
@@ -1922,9 +1980,11 @@ export class Workspace extends DurableObject<Env> {
     unattended: boolean,
     {
       started,
+      onText,
       calls,
     }: {
       started?: () => void;
+      onText?: (text: string) => unknown;
       calls?: ToolCall[];
     } = {}
   ): Promise<Answer> {
@@ -2039,6 +2099,12 @@ export class Workspace extends DurableObject<Env> {
       delete live.unstarted;
       started?.();
       this.#changed(chat.id);
+      if (onText !== undefined) {
+        // Cleaned as it is told, not as each chunk arrives.
+        live.onText = throttled(
+          async () => await onText(streamedWithoutLinks(live.writing ?? ""))
+        );
+      }
       const end = await this.#runTurn({
         turnId: live.id,
         scope,
@@ -2751,6 +2817,11 @@ export class Workspace extends DurableObject<Env> {
       this.#partials.delete(chatId);
     } else {
       this.#partials.set(chatId, partial);
+      const live = this.#turns.get(chatId);
+      if (live?.onText !== undefined) {
+        live.writing = textOf(partial);
+        live.onText();
+      }
     }
     this.#changed(chatId);
   }
@@ -4575,9 +4646,11 @@ export class Workspace extends DurableObject<Env> {
               // Whose it is, so the page names the agent writing it.
               agentId:
                 this.#turns.get(chatId)?.agentId ?? this.#chat(chatId).agentId,
-              // A chat platform's as its answers are kept (`inOwnWords`).
+              // A chat platform's as the platform shows it so far.
               ...partialOf(
-                this.#chat(chatId).via === "web" ? partial : ownWordsOf(partial)
+                this.#chat(chatId).via === "web"
+                  ? partial
+                  : ownWordsOf(partial, streamedWithoutLinks)
               ),
             },
       output: outputOf(this.#outputs.get(chatId)),

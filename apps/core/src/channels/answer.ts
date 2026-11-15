@@ -2,13 +2,13 @@ import { agentErrors } from "@grasp-os/shared/agent";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
 import { permissionErrors } from "@grasp-os/shared/permissions";
-import type { Thread } from "chat";
+import type { SentMessage, Thread } from "chat";
 import { z } from "zod";
 
 import { signInConfig } from "../auth/config.ts";
 import { chatAgentId, personalWorkspaceId } from "../chats-rpc.ts";
 import { workspace } from "../durable-objects.ts";
-import { answerCard, heldWritesCard } from "./cards.tsx";
+import { answerCard, draftCard, heldWritesCard } from "./cards.tsx";
 import {
   offerConnectOwn,
   ownMicrosoftNeed,
@@ -42,13 +42,17 @@ import { postOffers } from "./workflow-offers.ts";
 // and its agent reads only what everyone in it may (knowledge/access.ts).
 //
 // While the turn runs, the platform shows Stephen typing, sent again every
-// few seconds, as a typing indicator lasts only that long, until the
-// answer is whole: it is posted once, on a card, never streamed, so the
-// person sees only what Grasp keeps, without the links the model wrote
-// (without-links.ts), and Slack is never asked to preview anything. A
-// turn that fails or is refused ends in one of Stephen's lines, in the
-// language the person wrote in, never in the gateway's words, which name
-// models and budgets the person has no part in.
+// few seconds, as a typing indicator lasts only that long. The answer is
+// on one card, without the links the model wrote (without-links.ts). In a
+// Teams direct message it is written into that card as the model writes
+// it: posted once there are words to show, then the same card updated in
+// place, never a second message and never Teams' own stream, whose
+// message text renders HTML and images. Elsewhere it is posted once,
+// whole: Slack never streams, as an edit takes no flags to keep Slack from
+// previewing an address, and an edited message's previews are
+// undocumented. A turn that fails or is refused ends in one of Stephen's
+// lines, in the language the person wrote in, never in the gateway's
+// words, which name models and budgets the person has no part in.
 //
 // A turn that had writes held (a meeting to put in the calendar, a row to
 // change) shows them after its answer on one card, in the order they run,
@@ -199,6 +203,143 @@ const typingIn = (thread: Conversation): (() => void) => {
   };
 };
 
+/**
+ * How often the card of an answer being written is updated at most: the
+ * Chat SDK's own interval for streaming by edits.
+ */
+const updateEveryMs = 500;
+
+/** The longest a refused update holds back the next one, doubling to it. */
+const longestBackOffMs = 8000;
+
+/** How often the card's last update is tried before the answer is posted whole. */
+const lastTries = 2;
+
+/** Waits until `at`, a time in milliseconds, if it is still ahead. */
+const waitUntil = async (at: number): Promise<void> => {
+  const ms = at - Date.now();
+  if (ms > 0) {
+    await scheduler.wait(ms);
+  }
+};
+
+/** Where the card of an answer being written stands (`cardInto`). */
+interface Writing {
+  sent: SentMessage | undefined;
+  /** The words the card shows. */
+  shown: string;
+  /** The latest words it should show, not yet sent. */
+  pending: string | undefined;
+  /** The run of updates under way, if one is. */
+  updating: Promise<void> | undefined;
+  /** When the next update may go. */
+  nextAt: number;
+  backOff: number;
+  /** Whether the turn ended: no update after it but the last. */
+  ended: boolean;
+}
+
+/**
+ * The card an answer is written into as the model writes it, in `thread`
+ * (a Teams direct message): `onText` takes the words so far, as the
+ * workspace cleaned them (`streamedWithoutLinks`); the card is posted at
+ * the first words and updated in place with the latest, one update at a
+ * time and at most every {@link updateEveryMs}. An update Teams refuses
+ * leaves the card as it was and holds the next one back, longer each
+ * time. `end` makes the card what the turn ended in (the answer, or a
+ * line), and says whether it did: if it couldn't, or nothing was posted,
+ * the caller posts that whole, once.
+ */
+const cardInto = (thread: Thread, onFirst: () => void) => {
+  const writing: Writing = {
+    sent: undefined,
+    shown: "",
+    pending: undefined,
+    updating: undefined,
+    nextAt: 0,
+    backOff: updateEveryMs,
+    ended: false,
+  };
+  /** Posts or updates the card as `content`: whether Teams took it. */
+  const send = async (content: Parameters<Thread["post"]>[0]) => {
+    try {
+      if (writing.sent === undefined) {
+        writing.sent = await thread.post(content);
+        onFirst();
+      } else {
+        await writing.sent.edit(content);
+      }
+      writing.backOff = updateEveryMs;
+      writing.nextAt = Date.now() + updateEveryMs;
+      return true;
+    } catch (error) {
+      log.warn("channel.card_update_refused", errorFields(error));
+      writing.nextAt = Date.now() + writing.backOff;
+      writing.backOff = Math.min(writing.backOff * 2, longestBackOffMs);
+      return false;
+    }
+  };
+  const update = async (): Promise<void> => {
+    try {
+      while (writing.pending !== undefined && !writing.ended) {
+        // oxlint-disable-next-line no-await-in-loop -- one update at a time
+        await waitUntil(writing.nextAt);
+        const text = writing.pending;
+        writing.pending = undefined;
+        if (writing.ended || text === writing.shown) {
+          continue;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- one update at a time
+        if (await send(draftCard(inTeams(text)))) {
+          writing.shown = text;
+        }
+      }
+    } finally {
+      writing.updating = undefined;
+    }
+  };
+  return {
+    onText: (text: string): void => {
+      if (writing.ended || text === "") {
+        return;
+      }
+      writing.pending = text;
+      writing.updating ??= update();
+    },
+    end: async (content: Parameters<Thread["post"]>[0]): Promise<boolean> => {
+      writing.ended = true;
+      writing.pending = undefined;
+      await writing.updating;
+      if (writing.sent === undefined) {
+        return false;
+      }
+      for (let tried = 0; tried < lastTries; tried += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- tried in turn
+        await waitUntil(writing.nextAt);
+        // oxlint-disable-next-line no-await-in-loop -- tried in turn
+        if (await send(content)) {
+          return true;
+        }
+      }
+      return false;
+    },
+  };
+};
+
+/**
+ * The card an answer is written into where it streams: only in a Teams
+ * direct message the platform's SDK handed over.
+ */
+const cardIn = (
+  thread: Thread | Conversation,
+  platform: string,
+  place: ChannelMessage["place"],
+  onFirst: () => void
+) =>
+  platform === "teams" && place.kind === "direct" && "isDM" in thread
+    ? cardInto(thread, onFirst)
+    : undefined;
+
 /** Shown words as `platform` gets them: its own link and mention syntax taken out. */
 const postedOn = (platform: string, shown: string): string =>
   platform === "slack" ? inSlack(shown) : inTeams(shown);
@@ -234,6 +375,16 @@ const answerOne = async (
     text,
   });
   const stopTyping = typingIn(thread);
+  const card = cardIn(thread, platform, place, stopTyping);
+  /**
+   * Gives the person what the turn ended in: as its card where one was
+   * posted, or else, or where the card couldn't be updated, posted once.
+   */
+  const deliver = async (content: Parameters<typeof postIn>[3]) => {
+    if ((await card?.end(content)) !== true) {
+      await postIn(env, platform, thread, content);
+    }
+  };
   // Held writes are this turn's from here on: connect stamps each when
   // it holds it, by the same clock.
   const since = Date.now();
@@ -244,7 +395,8 @@ const answerOne = async (
       chatAgentId,
       platform,
       text,
-      place.kind === "direct" ? place : { thread: thread.id, ...place }
+      place.kind === "direct" ? place : { thread: thread.id, ...place },
+      card?.onText
     );
   } catch (error) {
     stopTyping();
@@ -264,7 +416,7 @@ const answerOne = async (
       calls: [],
       cited: false,
     });
-    await postIn(env, platform, thread, say(line, locale));
+    await deliver(say(line, locale));
     return;
   }
   stopTyping();
@@ -284,7 +436,7 @@ const answerOne = async (
       calls,
       cited,
     });
-    await postIn(env, platform, thread, say("failed", locale));
+    await deliver(say("failed", locale));
     return;
   }
   // What the turn did is kept now, before any card of the answer can be
@@ -309,12 +461,7 @@ const answerOne = async (
   };
   const origin = signInConfig(env)?.origin;
   if (origin === undefined) {
-    await postIn(
-      env,
-      platform,
-      thread,
-      answerCard({ locale, text: posted, sources: [], rate })
-    );
+    await deliver(answerCard({ locale, text: posted, sources: [], rate }));
     await timed();
     await offers();
     await recorded();
@@ -364,12 +511,7 @@ const answerOne = async (
       })
     );
   });
-  await postIn(
-    env,
-    platform,
-    thread,
-    answerCard({ locale, text: posted, sources, chatUrl, rate })
-  );
+  await deliver(answerCard({ locale, text: posted, sources, chatUrl, rate }));
   await timed();
   await held();
   await offers();
