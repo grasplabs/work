@@ -167,6 +167,15 @@ const tick = async (): Promise<void> => {
   });
 };
 
+/** `text`'s SHA-256, as hex: as the store keeps a source's. */
+const sha256 = async (text: string): Promise<string> =>
+  Array.from(
+    new Uint8Array(
+      await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))
+    ),
+    (byte) => byte.toString(16).padStart(2, "0")
+  ).join("");
+
 /** How often, and how many times, `until` looks. */
 const untilEveryMs = 10;
 const untilLooks = 1000;
@@ -924,6 +933,66 @@ describe("re-checking memories when their source changes", () => {
       states: [["ended"], ["ended"], ["ended"], ["ended"], ["ended"]],
       parked: true,
     });
+  });
+
+  it("leaves no queued or parked item naming a source once it is erased, its re-checks among them", async () => {
+    const group = unique("g");
+    // A source's key may name a person.
+    const source = unique("Salary review of Jane Doe ");
+    const name = unique("Acme");
+    const line = `${name} pays by card`;
+    const ref = await addVersion(`${line}.`, group, source);
+    await add(
+      audience(group),
+      [customer(name)],
+      [fact(`${line}.`, { kind: "source", ...ref, quote: line })]
+    );
+    // Two re-checks waiting, one for each set of readers, one parked for
+    // good, as one whose file was gone three days running.
+    await addVersion("Without.", group, source);
+    await shared().addSource({
+      source,
+      change: crypto.randomUUID(),
+      text: "Without, for others.",
+      access: audience(unique("other")),
+    });
+    const subject = await sha256(source);
+    /** The queue's items that name the source, by its key or its SHA-256. */
+    const naming = async () =>
+      await runInDurableObject(shared(), (_instance, state) =>
+        state.storage.sql
+          .exec<{ kind: string }>(
+            `SELECT kind FROM work_items
+            WHERE instr(key, ?1) > 0 OR instr(payload, ?1) > 0
+              OR instr(key, ?2) > 0 OR instr(payload, ?2) > 0`,
+            source,
+            subject
+          )
+          .toArray()
+          .map(({ kind }) => kind)
+      );
+    await runInDurableObject(shared(), (_instance, state) => {
+      state.storage.sql.exec(
+        `UPDATE work_items SET parked_at = ?, parks = 3
+        WHERE kind = 'recheck' AND instr(key, ?) > 0
+          AND id = (SELECT min(id) FROM work_items
+            WHERE kind = 'recheck' AND instr(key, ?) > 0)`,
+        Date.now(),
+        subject,
+        subject
+      );
+    });
+    const before = await naming();
+    await shared().eraseSource({ source, reason: "deleted" });
+    const erased = await naming();
+    clock += 2 * 24 * 60 * 60_000;
+    await tick();
+
+    expect({
+      rechecksBefore: before.filter((kind) => kind === "recheck").length,
+      erased,
+      later: await naming(),
+    }).toStrictEqual({ rechecksBefore: 2, erased: [], later: [] });
   });
 
   it("brings a memory back once a newer version says its quote again, and puts it out again when the next one drops it", async () => {

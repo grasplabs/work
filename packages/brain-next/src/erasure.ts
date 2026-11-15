@@ -14,6 +14,7 @@ import {
   eraseMemoriesOn,
 } from "./forget.ts";
 import { readerSetKeyOf } from "./reader-sets.ts";
+import { dropRechecksOf } from "./recheck.ts";
 import { removeVectorsOf, repackBlocks } from "./vectors.ts";
 
 // Erasure: what goes for good, apart from ordinary removal. A new version
@@ -496,8 +497,11 @@ export const keepMissingSubjects = async (
 /**
  * Hides `rows`, versions of `source`, for the erasure `key`: listed to
  * delete, their change keys gone, and, when the source's current version
- * is among them, the source no longer current and its queued work gone.
- * Answers whether it was.
+ * is among them, the source no longer current and its queued work gone:
+ * the items keyed by the source, and its re-checks, keyed by its SHA-256
+ * and a set of readers (recheck.ts `dropRechecksOf`). Answers the keys of
+ * the work it took, for what is under way on them to stop; none when the
+ * current version was not among them.
  *
  * The versions it leaves are kept as they are, and no other becomes
  * current: history never becomes recall. So a replay after a restore,
@@ -511,7 +515,7 @@ const hideVersions = (
   source: string,
   rows: readonly number[],
   key: string
-): boolean => {
+): string[] => {
   const listed = JSON.stringify(rows);
   sql.exec(
     `INSERT OR IGNORE INTO erasing_versions (version_row, erasure)
@@ -542,12 +546,14 @@ const hideVersions = (
         listed
       )
       .toArray().length > 0;
-  if (current) {
-    sql.exec("DELETE FROM current_versions WHERE source = ?", source);
-    // Work about a source is keyed by the source's key (work.ts `NewWork`).
-    sql.exec("DELETE FROM work_items WHERE key = ?", source);
+  if (!current) {
+    return [];
   }
-  return current;
+  sql.exec("DELETE FROM current_versions WHERE source = ?", source);
+  // Work about a source is keyed by the source's key (work.ts `NewWork`),
+  // but its re-checks, keyed by its SHA-256 and a set of readers.
+  sql.exec("DELETE FROM work_items WHERE key = ?", source);
+  return [source, ...dropRechecksOf(sql, source)];
 };
 
 /** The rows of `source`'s versions, those numbered `versions` if given. */
@@ -694,9 +700,7 @@ const apply = (
     for (const source of sourcesOf(sql, subject)) {
       const rows = rowsOf(sql, source, versions);
       sources += rows.length > 0 ? 1 : 0;
-      if (hideVersions(sql, source, rows, key)) {
-        stopped.push(source);
-      }
+      stopped.push(...hideVersions(sql, source, rows, key));
     }
   }
   // The first count of `key` stands: applied again (a replay), the

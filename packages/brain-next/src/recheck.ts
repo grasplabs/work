@@ -1,7 +1,7 @@
 import { log } from "@grasp-os/shared/log";
 import { z } from "zod";
 
-import { sourceIdSchema, versionSchema } from "./contract.ts";
+import { versionSchema } from "./contract.ts";
 import type { SourceId } from "./contract.ts";
 import { textOf } from "./current.ts";
 import { stampWrite } from "./memories.ts";
@@ -46,9 +46,18 @@ import type { WorkDefinition } from "./work.ts";
  */
 export const recheckPage = 500;
 
-/** What an item carries: the source, the version judged against, and the last memory read (its row). */
+/** A SHA-256, in hex, as the store keeps a source's (`source_subjects`). */
+const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/u);
+
+/**
+ * What an item carries: its source by its SHA-256 (`source_subjects`), so
+ * no source's key is kept with work, the version judged against, and the
+ * last memory read (its row). A source's erasure takes its items
+ * (`dropRechecksOf`), and its SHA-256 with its last version, so an item
+ * left from before finds nothing.
+ */
 const payloadSchema = z.strictObject({
-  source: sourceIdSchema,
+  subject: sha256Schema,
   version: versionSchema,
   after: z.int().positive().optional(),
 });
@@ -186,9 +195,20 @@ const recheckWork: WorkDefinition<Payload> = defineWork({
   kind: "recheck",
   payload: payloadSchema,
   run: async (payload, context) => {
-    const { source, version, after = 0 } = payload;
+    const { subject, version, after = 0 } = payload;
     const { storage } = context;
     const { sql } = storage;
+    const [named] = sql
+      .exec<{ source: string }>(
+        "SELECT source FROM source_subjects WHERE subject = ?",
+        subject
+      )
+      .toArray();
+    // Its source erased: done.
+    if (named === undefined) {
+      return;
+    }
+    const { source } = named;
     const found = judgedVersionOf(sql, source, version);
     // Gone, replaced for its readers or being erased: done.
     if (found === undefined) {
@@ -233,7 +253,7 @@ const recheckWork: WorkDefinition<Payload> = defineWork({
       out: out.length,
     });
     if (outcome === "judged") {
-      context.keep({ source, version, after: through });
+      context.keep({ subject, version, after: through });
       context.again(1);
     }
   },
@@ -250,7 +270,7 @@ const keyOf = (
   sql: SqlStorage,
   source: string,
   version: number
-): string | undefined => {
+): { key: string; subject: string } | undefined => {
   const [found] = sql
     .exec<{ subject: string; readerSet: number }>(
       `SELECT source_subjects.subject AS subject,
@@ -264,7 +284,41 @@ const keyOf = (
     .toArray();
   return found === undefined
     ? undefined
-    : `${found.subject}:${found.readerSet}`;
+    : { key: `${found.subject}:${found.readerSet}`, subject: found.subject };
+};
+
+/**
+ * Deletes every re-check item of `source`, waiting, parked or running
+ * (`keyOf`: the keys from its SHA-256 and `:` on): what a source's
+ * erasure takes of its work (erasure.ts `hideVersions`), in the caller's
+ * transaction. Answers their keys, for what runs to stop. Two seeks of a
+ * range of keys, one on each of the queue's indexes of a kind and key,
+ * each partial on `running`. None when the source has no SHA-256 kept.
+ */
+export const dropRechecksOf = (sql: SqlStorage, source: string): string[] => {
+  const [named] = sql
+    .exec<{ subject: string }>(
+      "SELECT subject FROM source_subjects WHERE source = ?",
+      source
+    )
+    .toArray();
+  if (named === undefined) {
+    return [];
+  }
+  // `running` written out, not bound: a partial index is taken only for a
+  // statement that says its condition.
+  return ["running = 0", "running = 1"].flatMap((running) =>
+    sql
+      .exec<{ key: string }>(
+        `DELETE FROM work_items
+        WHERE kind = ?1 AND key >= ?2 || ':' AND key < ?2 || ';' AND ${running}
+        RETURNING key`,
+        recheckWork.kind,
+        named.subject
+      )
+      .toArray()
+      .map(({ key }) => key)
+  );
 };
 
 /** Whether the item `key` waits or runs for `version` already. */
@@ -309,11 +363,15 @@ export const enqueueRecheck = (
         version
       )
       .toArray().length > 0;
-  const key = keyOf(sql, source, version);
-  if (drawnBefore && key !== undefined && !queuedFor(sql, key, version)) {
+  const keyed = keyOf(sql, source, version);
+  if (
+    drawnBefore &&
+    keyed !== undefined &&
+    !queuedFor(sql, keyed.key, version)
+  ) {
     enqueueWork(storage, recheckWork, {
-      key,
-      payload: { source, version },
+      key: keyed.key,
+      payload: { subject: keyed.subject, version },
       priority: "recent",
     });
   }
