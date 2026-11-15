@@ -1184,7 +1184,7 @@ const placeOf = ({ source, version, position }: RecalledItem): string =>
   JSON.stringify([sourceKeyOf(source), version, position]);
 
 /** A memory, by its store and id, as one string. */
-const memoryKeyOf = ({ store, memory }: StoredMemoryPlace): string =>
+export const memoryKeyOf = ({ store, memory }: StoredMemoryPlace): string =>
   JSON.stringify([store, memory]);
 
 /** A passage of a pack as the Brain counts it (`packItemTokens`). */
@@ -2474,36 +2474,31 @@ const pinnedMemoriesSchema = z.array(
 
 /**
  * Of `keys` and `memories`, those an erasure took for good in `store`
- * (`erasedOf`): one call, or one per part as long as the store takes.
+ * (`erasedOf`): one call for as many of both as a check takes, one more
+ * for each part past that (`checkedInParts`).
  */
 const erasedIn = async (
   store: Brain,
   keys: readonly string[],
   memories: readonly ErasedMemory[]
 ): Promise<{ sources: string[]; memories: string[] }> => {
-  const parts = Math.max(
-    Math.ceil(keys.length / readableCheckMax),
-    Math.ceil(memories.length / readableCheckMax)
-  );
-  const answered = await Promise.all(
-    Array.from(
-      { length: parts },
-      async (_, at) =>
-        await store.erasedOf({
-          sources: keys.slice(
-            at * readableCheckMax,
-            (at + 1) * readableCheckMax
-          ),
-          memories: memories.slice(
-            at * readableCheckMax,
-            (at + 1) * readableCheckMax
-          ),
-        })
-    )
-  );
+  const asked: ({ source: string } | { memory: ErasedMemory })[] = [
+    ...keys.map((source) => ({ source })),
+    ...memories.map((memory) => ({ memory })),
+  ];
+  const erased = await checkedInParts(asked, async (part) => {
+    const answer = await store.erasedOf({
+      sources: part.flatMap((item) => ("source" in item ? [item.source] : [])),
+      memories: part.flatMap((item) => ("memory" in item ? [item.memory] : [])),
+    });
+    return [
+      ...answer.sources.map((source) => ({ source })),
+      ...answer.memories.map((memory) => ({ memory })),
+    ];
+  });
   return {
-    sources: answered.flatMap((erased) => erased.sources),
-    memories: answered.flatMap((erased) => erased.memories),
+    sources: erased.flatMap((item) => ("source" in item ? [item.source] : [])),
+    memories: erased.flatMap((item) => ("memory" in item ? [item.memory] : [])),
   };
 };
 

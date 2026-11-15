@@ -3440,6 +3440,17 @@ export const coreProbes = {
         )
     ),
   ],
+  // Pure: a memory's place as one string, from what the caller names
+  // alone, so no markers.
+  memoryKeyOf: async () => [
+    await answer("a memory's place", async () => {
+      await Promise.resolve();
+      return coreBrain.memoryKeyOf({
+        store: "shared",
+        memory: crypto.randomUUID(),
+      });
+    }),
+  ],
   // Pure: a skill's key as a run keeps it, from what the caller names
   // alone (a name it gives comes back as given), so no markers.
   skillVersionRefOf: async () => [

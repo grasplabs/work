@@ -9,6 +9,7 @@ import { appFor } from "./apps.ts";
 import { memberOf } from "./auth/identity.ts";
 import {
   erasedForGoodAs,
+  memoryKeyOf,
   readableMemoriesAs,
   readableVersionsAs,
   versionRefSchema,
@@ -353,10 +354,6 @@ export const brainMemoryOf = (
   return { store, memory, basis };
 };
 
-/** A memory's place, as one string. */
-const placeKeyOf = ({ store, memory }: StoredMemoryPlace): string =>
-  JSON.stringify([store, memory]);
-
 /**
  * Of the memories in `sources` pinned under `prefix`, those `reach` may
  * still read (`readableMemoriesAs`), in one read of each store per 500. A
@@ -382,9 +379,9 @@ const readableMemoriesAt = async (
     pins.map(({ pin: { store, memory } }) => ({ store, memory })),
     { reach }
   );
-  const readable = new Set(memories.map((place) => placeKeyOf(place)));
+  const readable = new Set(memories.map((place) => memoryKeyOf(place)));
   return pins.flatMap(({ source, pin }) =>
-    readable.has(placeKeyOf(pin)) ? [source] : []
+    readable.has(memoryKeyOf(pin)) ? [source] : []
   );
 };
 
@@ -778,13 +775,13 @@ export const erasedSources = async (
     memories: memories.map(({ pin }) => pin),
   });
   const keys = new Set(erased.sources.map((ref) => sourceKey(ref)));
-  const places = new Set(erased.memories.map((place) => placeKeyOf(place)));
+  const places = new Set(erased.memories.map((place) => memoryKeyOf(place)));
   return new Set([
     ...versions.flatMap(({ source, pin }) =>
       keys.has(sourceKey(pin.source)) ? [source] : []
     ),
     ...memories.flatMap(({ source, pin }) =>
-      places.has(placeKeyOf(pin)) ? [source] : []
+      places.has(memoryKeyOf(pin)) ? [source] : []
     ),
   ]);
 };

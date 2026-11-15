@@ -1102,9 +1102,9 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * it answers (`#ready`). Never from whether it holds a memory: a
    * storage lost or brought back from an older copy lacks memories nobody
    * erased, which a restore puts back by their own ids. A person's own
-   * store never written holds no ledger: nothing was erased in it that its
-   * shared store's ledger doesn't hold too, but a key under an erased
-   * group of theirs, which it answers once it is written again.
+   * store without storage (never written, or lost) has replayed no ledger
+   * yet, so until it is written again it answers nothing erased: every
+   * memory of its own kept (GRA-1934).
    */
   async erasedOf(request: ErasedRequest): Promise<Erased> {
     const asked = checked(erasedRequestSchema, request);
