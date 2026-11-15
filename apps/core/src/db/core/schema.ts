@@ -6532,17 +6532,23 @@ export const brainRunSources = sqliteTable(
      */
     removedThroughAt: timestamp("removed_through_at"),
     removedThrough: text("removed_through"),
+    /**
+     * When a tick last took the owed removal for a page, whether the page
+     * went through or failed: the clock gives the one tried longest ago
+     * its turn first, those never tried before all. Null until then.
+     */
+    triedAt: timestamp("tried_at"),
   },
   (table) => [
     primaryKey({ columns: [table.personId, table.workflowId] }),
     // What the clock checks each minute: the rows in use alone, and the
-    // removals still owed, oldest first. Each condition a literal, as the
-    // queries write it, so SQLite uses it.
+    // removals still owed, those tried longest ago (or never) first. Each
+    // condition a literal, as the queries write it, so SQLite uses it.
     index("brain_run_sources_in_use_idx")
       .on(table.personId, table.workflowId)
       .where(sql.raw("in_use = 1")),
     index("brain_run_sources_owed_idx")
-      .on(table.revokedAt)
+      .on(table.triedAt, table.revokedAt)
       .where(sql.raw("removal_owed = 1")),
   ]
 );

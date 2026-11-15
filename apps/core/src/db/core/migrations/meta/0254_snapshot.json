@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "436a0b26-b4ce-47a2-b2ab-6a8784b4cc45",
+  "id": "02cde8dc-5230-40e8-ac22-3688a0e9aed5",
   "prevId": "64b5cff2-4d76-410b-86fd-624fa01f8613",
   "tables": {
     "access_revocations": {
@@ -4435,6 +4435,13 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "tried_at": {
+          "name": "tried_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -4450,6 +4457,7 @@
         "brain_run_sources_owed_idx": {
           "name": "brain_run_sources_owed_idx",
           "columns": [
+            "tried_at",
             "revoked_at"
           ],
           "isUnique": false,

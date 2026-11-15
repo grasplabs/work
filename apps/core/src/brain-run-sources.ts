@@ -119,7 +119,7 @@ export const runSourceInUse = (
   return db
     .insert(brainRunSources)
     .select(
-      sql`SELECT ${runs.principalId}, ${runs.workflowResourceId}, 1, NULL, NULL, 0, NULL, NULL
+      sql`SELECT ${runs.principalId}, ${runs.workflowResourceId}, 1, NULL, NULL, 0, NULL, NULL, NULL
         FROM ${runs}
         WHERE ${runs.id} = ${runId} AND NOT ${appStartedSql(runs.id)} AND ${condition}`
     )
@@ -182,6 +182,7 @@ const markLost = async (env: Pick<Env, "DB">): Promise<void> => {
       revokedAt: sql`${statementTimeSql}`,
       removedThroughAt: sql`${rows.revokedAt}`,
       removedThrough: null,
+      triedAt: null,
       removalOwed: true,
       runs: sql`(SELECT count(*) FROM ${runs}
         WHERE ${coveredRuns(rows.personId, rows.workflowId, statementTimeSql)}
@@ -331,7 +332,9 @@ const removePage = async (env: Env, row: OwedRevocation): Promise<boolean> => {
  * person's store), and a tick takes a tenth of what one invocation may
  * make (`queriesPerInvocationMax`), which every task of the clock's
  * shares, as brain-hand-overs.ts gives its notes alone. So a tick removes
- * at most 33 pages, 3,300 runs, and completes at most 33 revocations; the
+ * at most 33 pages, 3,300 runs, and completes at most 33 revocations
+ * (beside them, a tick makes three statements of its own: the marking, the
+ * owed read and the tried mark); the
  * rest go on at the next. A team of 200 that loses 30 workflows (6,000
  * revocations) is done some three hours later, and until then each of
  * them still recalls their own earlier results.
@@ -342,10 +345,13 @@ export const pagesPerTick = Math.floor(queriesPerInvocationMax / 10 / 3);
  * Takes the run results of everyone who lost a workflow out of use in the
  * Brain (above): marks each loss (`markLost`), then goes through the
  * revocations still owed, at most `pages` pages: one page for each in turn
- * (those not yet begun first, then the oldest), then a second round for
- * those still owed, and so on. One whose page fails is logged with its
- * workflow's ID and its error's name, and has no more turns this tick: it
- * goes on at the next, from the last page it kept. The clock runs it each
+ * (those never tried first, then those tried longest ago, then the
+ * oldest), then a second round for those still owed, and so on. Each one
+ * taken is marked tried now (`tried_at`), so every owed revocation gets a
+ * turn before any gets a second, across ticks as within one, and one that
+ * keeps failing takes no turn from another. One whose page fails is logged
+ * with its workflow's ID and its error's name, and has no more turns this
+ * tick: it goes on at a later one, from the last page it kept. The clock runs it each
  * minute; a run that overlaps the next repeats only pages, which are safe
  * to repeat, and stores each event once.
  */
@@ -367,14 +373,34 @@ export const removeLostRunSources = async (
     .from(brainRunSources)
     // As the partial index on owed removals is written, so it is used.
     .where(sql.raw("removal_owed = 1"))
-    .orderBy(
-      sql`${brainRunSources.removedThrough} IS NOT NULL`,
-      brainRunSources.revokedAt
-    )
+    // Never tried first (SQLite sorts nulls first), then tried longest
+    // ago, then the oldest: as the partial index on owed removals is.
+    .orderBy(brainRunSources.triedAt, brainRunSources.revokedAt)
     .limit(pages);
   let turning: OwedRevocation[] = owed.flatMap(({ revokedAt, runs, ...row }) =>
     revokedAt === null || runs === null ? [] : [{ ...row, revokedAt, runs }]
   );
+  // Each of them gets a turn this tick (no more of them than pages), so
+  // each is tried now, whether its page goes through or fails: those it
+  // leaves owed wait behind every other until each has had one.
+  if (turning.length > 0) {
+    await drizzle(env.DB)
+      .update(brainRunSources)
+      .set({ triedAt: sql`${statementTimeSql}` })
+      .where(
+        and(
+          sql.raw("removal_owed = 1"),
+          sql`(${brainRunSources.personId}, ${brainRunSources.workflowId}) IN
+            (SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]')
+              FROM json_each(${JSON.stringify(
+                turning.map(({ personId, workflowId }) => [
+                  personId,
+                  workflowId,
+                ])
+              )}))`
+        )
+      );
+  }
   let left = pages;
   while (left > 0 && turning.length > 0) {
     const next: OwedRevocation[] = [];

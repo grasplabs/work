@@ -298,6 +298,37 @@ const removalsFailingAfter = (
   return { binding: namespaceOf(env.BRAIN_STORE), calls };
 };
 
+/**
+ * The Brain's store binding, `personId`'s own store refusing every call, as
+ * one person's store out of reach while everyone else's answers.
+ */
+const storeOfRefusing = (personId: string): Env["BRAIN_STORE"] => {
+  const refusing = new Proxy(
+    {},
+    {
+      get: () => async () => {
+        await Promise.resolve();
+        throw new Error("This person's store is out of reach");
+      },
+    }
+  );
+  const namespaceOf = (namespace: Env["BRAIN_STORE"]): Env["BRAIN_STORE"] =>
+    new Proxy(namespace, {
+      get: (target, property) => {
+        if (property === "jurisdiction") {
+          return (jurisdiction: DurableObjectJurisdiction) =>
+            namespaceOf(target.jurisdiction(jurisdiction));
+        }
+        if (property === "getByName") {
+          return (name: string) =>
+            name.endsWith(personId) ? refusing : target.getByName(name);
+        }
+        return forwarded(target, property);
+      },
+    });
+  return namespaceOf(env.BRAIN_STORE);
+};
+
 /** The Brain's store binding, every removal failing, as a store out of reach. */
 const removalsFailing = (): Env["BRAIN_STORE"] =>
   removalsFailingAfter(0).binding;
@@ -1104,6 +1135,52 @@ describe("a person's run results once they lose the workflow", () => {
       endings: ["brain.source.handed_over"],
       recalls: true,
       row: null,
+    });
+  });
+
+  it("give every owed revocation a turn before any gets a second, across ticks, so one person's store out of reach holds up no one else", async () => {
+    const [owner, stuck, healthy] = await Promise.all([
+      builder(),
+      builder("user"),
+      builder("user"),
+    ]);
+    // Two workflows of the person whose store is out of reach, a tick's
+    // pages' worth, and one of a healthy person's behind them.
+    const [first, second, other] = await Promise.all([
+      sharedWorkflow(owner, word(), stuck),
+      sharedWorkflow(owner, word(), stuck),
+      sharedWorkflow(owner, word(), healthy),
+    ]);
+    await Promise.all([
+      endedRun(stuck, first),
+      endedRun(stuck, second),
+      endedRun(healthy, other),
+    ]);
+    await handOverNow();
+    await unshared(owner, first, stuck);
+    await unshared(owner, second, stuck);
+    // Marked first, with no page yet: the older revocations.
+    await removeLostRunSources(env, 0);
+    await unshared(owner, other, healthy);
+    const outOfReach = { ...env, BRAIN_STORE: storeOfRefusing(stuck.userId) };
+
+    await removeLostRunSources(outOfReach, 2);
+    await removeLostRunSources(outOfReach, 2);
+
+    expect({
+      stuck: [
+        await rowOf(stuck.userId, first),
+        await rowOf(stuck.userId, second),
+      ],
+      healthy: await rowOf(healthy.userId, other),
+      removed: await removedOf(other),
+    }).toStrictEqual({
+      stuck: [
+        { inUse: 0, owed: 1, runs: 1 },
+        { inUse: 0, owed: 1, runs: 1 },
+      ],
+      healthy: { inUse: 0, owed: 0, runs: 1 },
+      removed: [{ personId: healthy.userId, runs: 1 }],
     });
   });
 });
