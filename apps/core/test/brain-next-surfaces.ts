@@ -2282,6 +2282,83 @@ export const coreProbes = {
       }),
     ];
   },
+  // Removal has no reader either, as erasure hasn't: it answers alike
+  // whether there was anything to remove, and holds no marker. Each probe
+  // removes marked content of its own (someone else's), never the planted
+  // sources later passes read.
+  removeSource: async ({ markers }) => {
+    const remove = async (
+      name: string,
+      removed: unknown,
+      about?: Answer["about"]
+    ) =>
+      await answer(
+        name,
+        async () => {
+          await coreBrain.removeSource(env, unchecked(removed));
+        },
+        about
+      );
+    const shared: SourceReaders = { kind: "everyone" };
+    const own: SourceReaders = { kind: "owner", personId: stranger() };
+    const markedShared = missingSource();
+    const markedOwn = missingSource();
+    await coreBrain.addSource(env, {
+      source: markedShared,
+      change: crypto.randomUUID(),
+      text: markedText(markers),
+      readers: shared,
+    });
+    await coreBrain.addSource(env, {
+      source: markedOwn,
+      change: crypto.randomUUID(),
+      text: markedText(markers),
+      readers: own,
+    });
+    return [
+      await remove(
+        "a source no one added",
+        { source: missingSource(), readers: shared },
+        "nothing"
+      ),
+      await remove(
+        "a marked source everyone reads",
+        { source: markedShared, readers: shared },
+        "hidden"
+      ),
+      await remove(
+        "the same removal again",
+        { source: markedShared, readers: shared },
+        "hidden"
+      ),
+      await remove(
+        "someone else's marked source, in their own store",
+        { source: markedOwn, readers: own },
+        "hidden"
+      ),
+      await answer("an add to the removed source", async () => {
+        await coreBrain.addSource(env, {
+          source: markedShared,
+          change: crypto.randomUUID(),
+          text: markedText(markers),
+          readers: shared,
+        });
+      }),
+      await remove("an unknown producer named by the markers", {
+        source: { producer: markers.join(""), id: crypto.randomUUID() },
+        readers: shared,
+      }),
+      await remove("readers named by the markers", {
+        source: missingSource(),
+        readers: { kind: "owner", personId: markers.join("\n") },
+      }),
+      await remove("an unknown field", {
+        source: missingSource(),
+        readers: shared,
+        extra: markers.join(" "),
+      }),
+    ];
+  },
   // A group of one person's own store (GRA-1827: a disconnected
   // connection's captures), erased there alone. Its caller acts for that
   // person, so it answers how many of their sources it erased: a count,
@@ -2394,6 +2471,57 @@ export const coreProbes = {
         undefined,
         markers.join(" ")
       ),
+    ];
+  },
+  // No reader: core names the writer (an App's own id). What it answers is
+  // a time and a count; nothing of what was erased.
+  eraseWriter: async ({ markers }) => {
+    const writer = `app:${stranger()}`;
+    await store().addMemories({
+      change: crypto.randomUUID(),
+      access: strangers(),
+      entities: [{ key: "c", kind: "customer", names: [markedText(markers)] }],
+      memories: [
+        {
+          about: "c",
+          type: "fact",
+          statement: markedText(markers),
+          speaker: { kind: "system" },
+          basis: { kind: "writer", writer },
+        },
+      ],
+    });
+    const erase = async (name: string, erased: unknown) =>
+      await answer(
+        name,
+        async () => await coreBrain.eraseWriter(env, unchecked(erased))
+      );
+    return [
+      await erase("a writer with marked memories", {
+        writer,
+        reason: "deleted",
+        change: "reset",
+      }),
+      await erase("the same erasure again", {
+        writer,
+        reason: "deleted",
+        change: "reset",
+      }),
+      await erase("a change named by the markers", {
+        writer,
+        reason: "deleted",
+        change: markers.join(" "),
+      }),
+      await erase("a writer named by the markers, too long", {
+        writer: markers.join("").repeat(300),
+        reason: "deleted",
+        change: "reset",
+      }),
+      await erase("a reason named by the markers", {
+        writer,
+        reason: markers.join(" "),
+        change: "reset",
+      }),
     ];
   },
   // Queuing hand-overs has no reader: whatever it is handed, it answers
@@ -3296,9 +3424,9 @@ export const instructionProbes = {
     }
     // A shared channel gives what a chat of theirs does, but never a
     // person's file, the reader's own included: others there would read
-    // it through the agent. Nor does a chat whose answer doesn't reach
-    // them alone (a chat app's direct message while GRA-1821 is open, a
-    // turn nobody asked for): it gives what a shared channel does.
+    // it through the agent. Nor does a turn whose answer doesn't reach
+    // them alone (one nobody asked for): it gives what a shared channel
+    // does.
     asked.push(
       await side(
         "a shared channel",
@@ -5047,6 +5175,7 @@ const memoryProbes = {
             memory,
             reader: { ...probing.reader, person: writer },
             writer,
+            change: "retire",
           }),
         about
       );
@@ -5060,6 +5189,7 @@ const memoryProbes = {
             memory: fixture.seenMemory,
             reader: { person: null, groups: probing.reader.groups },
             writer: `app:${stranger()}`,
+            change: "retire",
           }),
         "hidden"
       ),
@@ -7409,6 +7539,44 @@ export const storeProbes = {
       }),
     ];
   },
+  // As core's (above), through the contract itself.
+  removeSource: async ({ markers }) => {
+    const remove = async (
+      name: string,
+      request: unknown,
+      about?: Answer["about"]
+    ) =>
+      await answer(
+        name,
+        async () => {
+          await store().removeSource(unchecked(request));
+        },
+        about
+      );
+    const marked = keyOf(missingSource());
+    await store().addSource({
+      source: marked,
+      change: crypto.randomUUID(),
+      text: markedText(markers),
+      access: { kind: "audience", group: "company" },
+    });
+    return [
+      await remove(
+        "a source no one added",
+        { source: keyOf(missingSource()) },
+        "nothing"
+      ),
+      await remove("a marked source", { source: marked }, "hidden"),
+      await remove("the same removal again", { source: marked }, "hidden"),
+      await remove("a source named by the markers, too long", {
+        source: markers.join("").repeat(300),
+      }),
+      await remove("an unknown field", {
+        source: keyOf(missingSource()),
+        extra: markers.join(" "),
+      }),
+    ];
+  },
   // Putting sources on the queue has no reader either: it answers alike
   // whatever was added, and a tick asks the host for each.
   handOver: async ({ markers }) => {
@@ -7473,6 +7641,68 @@ export const storeProbes = {
           },
           contextTokens: null,
         });
+      }),
+    ];
+  },
+  // No reader either: the host names the writer. Its answer is a time and
+  // a count, alike for a writer with marked memories and one with none.
+  eraseWriter: async ({ markers }) => {
+    const erase = async (name: string, request: unknown) =>
+      await answer(
+        name,
+        async () => await store().eraseWriter(unchecked(request))
+      );
+    const writer = `app:${stranger()}`;
+    await store().addMemories({
+      change: crypto.randomUUID(),
+      access: strangers(),
+      entities: [{ key: "c", kind: "customer", names: [markedText(markers)] }],
+      memories: [
+        {
+          about: "c",
+          type: "fact",
+          statement: markedText(markers),
+          speaker: { kind: "system" },
+          basis: { kind: "writer", writer },
+        },
+      ],
+    });
+    return [
+      await erase("a writer who wrote nothing", {
+        writer: `app:${stranger()}`,
+        reason: "deleted",
+        change: "reset",
+      }),
+      await erase("a writer with marked memories", {
+        writer,
+        reason: "deleted",
+        change: "reset",
+      }),
+      await erase("the same erasure again", {
+        writer,
+        reason: "deleted",
+        change: "reset",
+      }),
+      await erase("a change named by the markers", {
+        writer,
+        reason: "deleted",
+        change: markers.join(" "),
+      }),
+      await erase("a writer named by the markers, too long", {
+        writer: markers.join("").repeat(300),
+        reason: "deleted",
+        change: "reset",
+      }),
+      await erase("a reason named by the markers", {
+        writer,
+        reason: markers.join(" "),
+        change: "reset",
+      }),
+      await erase("an unknown field", {
+        writer,
+        reason: "deleted",
+        change: "reset",
+        extra: markers.join(" "),
       }),
     ];
   },

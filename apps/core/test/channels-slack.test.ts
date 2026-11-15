@@ -8,18 +8,22 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import { addSource, rememberAs } from "../src/brain-next.ts";
 import { confirmAction, startAction } from "../src/channels/cards.tsx";
 import { channelResponse } from "../src/channels/door.ts";
 import type { ChannelMessage } from "../src/channels/door.ts";
 import { say } from "../src/channels/words.ts";
+import { chatAgentId } from "../src/chats-rpc.ts";
 import {
   channelConversations,
   channelAccounts,
   channelLinks,
 } from "../src/db/core/schema.ts";
 import { says } from "./agent-chat.ts";
+import { requestGranted } from "./apps.ts";
 import { slackApp, slackPostedUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
+import { saveInstructions } from "./instruction-saves.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 import {
@@ -248,6 +252,9 @@ const slackSawIn = async (channel: string) => {
 };
 
 const refused = { status: 401, text: "Unauthorized", handed: [] };
+
+/** A word no other text holds. */
+const marker = (): string => `m${unique()}`;
 
 /** Which app each of a person's listed chats came through. */
 const viaOf = async (api: Awaited<ReturnType<typeof linkedPerson>>["api"]) => {
@@ -489,12 +496,72 @@ describe("a press on a card in Slack", () => {
   });
 });
 
+/** What of an answer's note and outside links a chat app's post got wrong. */
+const seenOfLinks = (posted: string) => ({
+  words: [
+    "plain,",
+    "double,",
+    "single,",
+    "parenthesised,",
+    "outside,",
+    "outside double",
+    "outside single",
+  ].filter((words) => !posted.includes(words)),
+  addresses: ["grasp:", "doc-", "evil.test"].filter((address) =>
+    posted.includes(address)
+  ),
+});
+
 describe("a linked person's question in Slack", () => {
+  // A note link, as Grasp's answers cited a Knowledge document, in each
+  // way a title may be quoted, and an outside link in each too: as main
+  // posted them before the cutover, each note link shows its words alone
+  // and no address reaches either app.
+  it("shows a note link as its words in Slack and in Teams, whatever its title's quoting, and no address", async () => {
+    const { slackUser } = await linkedPerson();
+    const written = [
+      "Leave lasts sixteen weeks: [plain](grasp:note/doc-1),",
+      "[double](grasp:note/doc-2 \"Leave policy\"), [single](grasp:note/doc-3 'Leave policy'),",
+      "[parenthesised](grasp:note/doc-4 (Leave policy)), [outside](https://evil.test/hr),",
+      "[outside double](https://evil.test/hr \"HR\") and [outside single](https://evil.test/hr 'HR').",
+    ].join(" ");
+    const provider = await fakeProvider(says(written), says(written));
+    const question = "How long is parental leave?";
+    const fromSlack = messageFrom(slackUser);
+    fromSlack.event.text = question;
+    await post(fromSlack, { caught: false });
+    const inTeams = await memberAnsweredBy(idp, provider);
+    await postToTeams(teamsMessageFrom(inTeams.teams, { text: question }));
+
+    const slackSaw = await slackSawIn(fromSlack.event.channel);
+    const slackPosted = JSON.stringify(
+      slackSaw.filter(({ method }) =>
+        ["chat.postMessage", "chat.update"].includes(method)
+      )
+    );
+    const { activities } = await reached(inTeams.teams.conversation);
+    const teamsPosted = JSON.stringify(
+      activities.filter(({ type }) => type === "message")
+    );
+    expect({
+      slack: seenOfLinks(slackPosted),
+      teams: seenOfLinks(teamsPosted),
+    }).toStrictEqual({
+      slack: { words: [], addresses: [] },
+      teams: { words: [], addresses: [] },
+    });
+  });
+
   it("gets the same answer as the same question in Teams, in their own Slack chat, which their list says came through Slack", async () => {
-    const answer = "Parental leave lasts sixteen weeks.";
+    // A link of Grasp's own and one outside it, as a model may write them:
+    // each app shows only their words, as no sources follow the answer.
+    const written =
+      "Parental leave lasts sixteen weeks, as [the leave policy](grasp:note/doc-1) and [the HR page](https://evil.test/leave) say.";
+    const answer =
+      "Parental leave lasts sixteen weeks, as the leave policy and the HR page say.";
     const { slackUser, api } = await linkedPerson();
     // One provider for the organization: it answers both chats.
-    const provider = await fakeProvider(says(answer), says(answer));
+    const provider = await fakeProvider(says(written), says(written));
     const question = "How long is parental leave?";
     const fromSlack = messageFrom(slackUser);
     fromSlack.event.text = question;
@@ -520,15 +587,131 @@ describe("a linked person's question in Slack", () => {
           JSON.stringify(fields).includes(answer)
       ),
       teams: teamsAnswer.includes(answer),
+      links: [JSON.stringify(slackPosts), teamsAnswer].flatMap((posted) =>
+        ["grasp:", "evil.test"].filter((link) => posted.includes(link))
+      ),
       created: inGrasp.via,
       listedForSlackPerson: await viaOf(api),
       listedForTeamsPerson: await viaOf(inTeams.api),
     }).toStrictEqual({
       slack: true,
       teams: true,
+      links: [],
       created: "web",
       listedForSlackPerson: ["slack", "web"],
       listedForTeamsPerson: ["teams"],
+    });
+  });
+});
+
+describe("a linked person's direct message in Slack", () => {
+  it("is their own chat, as in Grasp: their own sources, memories, instruction file and skills, which no channel or group DM gets", async () => {
+    // A direct message is the person's own chat (GRA-1821): only one
+    // Slack names a direct message both ways (`im`, a `D…` channel) is
+    // one, and Slack's channels and group DMs never reach a turn at all.
+    await requestGranted(idp, await signedInApi(idp, "admin"), {
+      subject: { type: "agent", agentId: chatAgentId },
+      object: { type: "platform" },
+      actions: ["brain"],
+      binding: "BRAIN",
+    });
+    const { slackUser, userId, api } = await linkedPerson();
+    const provider = await fakeProvider(says("Noted."));
+    const [depot, own, ownWord, file] = [
+      marker(),
+      marker(),
+      marker(),
+      marker(),
+    ];
+    await addSource(env, {
+      source: { producer: "upload", id: crypto.randomUUID() },
+      change: crypto.randomUUID(),
+      text: `Depot ${depot} keeps the person's own note ${own}`,
+      readers: { kind: "owner", personId: userId },
+    });
+    const statement = `Depot ${depot} keeps the person's own memory ${ownWord}`;
+    await rememberAs(env, userId, {
+      change: crypto.randomUUID(),
+      about: { kind: "customer", names: [`Depot ${depot}`] },
+      type: "fact",
+      statement,
+      quote: statement,
+    });
+    await saveInstructions(
+      api,
+      { scope: "person", personId: userId },
+      `Call me ${file}.`
+    );
+    const skill = `depot-${unique()}`;
+    await api.skills.save(
+      `---\nname: ${skill}\ndescription: Look up a depot\n---\n\nThe steps.\n`
+    );
+    /** What of theirs reached the model for what they posted in `place`. */
+    const sentFor = async (place: {
+      channel?: string;
+      channelType?: string;
+    }) => {
+      const before = provider.requests.length;
+      const message = messageFrom(slackUser, place);
+      message.event.text = `What about depot ${depot}?`;
+      await post(message, { caught: false });
+      const sent = JSON.stringify(
+        provider.requests.slice(before).map(({ body }) => body)
+      );
+      return {
+        answered: provider.requests.length > before,
+        own: sent.includes(own),
+        ownMemory: sent.includes(ownWord),
+        file: sent.includes(file),
+        ownSkill: sent.includes(`- ${skill} (person`),
+      };
+    };
+
+    /** What reached the model for `place`, and the lines posted there. */
+    const answeredIn = async (place: {
+      channel: string;
+      channelType: string;
+    }) => {
+      const sent = await sentFor(place);
+      const posted = await slackSawIn(place.channel);
+      return {
+        ...sent,
+        lines: posted.map(({ method, fields }) => ({
+          method,
+          text: fields.text,
+        })),
+      };
+    };
+    const elsewhere = [
+      await answeredIn({
+        channel: `C${unique().toUpperCase()}`,
+        channelType: "channel",
+      }),
+      await answeredIn({
+        channel: `C${unique().toUpperCase()}`,
+        channelType: "mpim",
+      }),
+    ];
+    const direct = await sentFor({});
+
+    // Told it answers only in a direct message, and nothing else.
+    const none = {
+      answered: false,
+      own: false,
+      ownMemory: false,
+      file: false,
+      ownSkill: false,
+      lines: [{ method: "chat.postMessage", text: say("privateOnly", "en") }],
+    };
+    expect({ elsewhere, direct }).toStrictEqual({
+      elsewhere: [none, none],
+      direct: {
+        answered: true,
+        own: true,
+        ownMemory: true,
+        file: true,
+        ownSkill: true,
+      },
     });
   });
 });

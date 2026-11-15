@@ -6,7 +6,6 @@ import {
   agentIdSchema,
   appIdSchema,
   chatIdSchema,
-  collectionIdSchema,
   connectionIdSchema,
   identifierMaxLength,
   identifierSchema,
@@ -114,12 +113,6 @@ export type PermissionSubjectType = PermissionSubject["type"];
 /** A subject as a client sends it, with a plain string ID. */
 export type PermissionSubjectInput = z.input<typeof permissionSubjectSchema>;
 
-/** A Knowledge collection, as a permission's object. */
-const collectionObjectSchema = z.strictObject({
-  type: z.literal("collection"),
-  collectionId: collectionIdSchema,
-});
-
 /**
  * Most teams one `brain` permission names: the Brain reads as at most
  * 1,000 groups (`readerGroupsMax` in `@grasp-os/brain-next/contract`), and
@@ -176,8 +169,7 @@ const platformObjectSchema = z.strictObject({
 
 /**
  * What a permission gives access to: a connection (all of it, or one
- * resource in it, such as one mailbox), a Knowledge collection, an
- * independent workflow (to follow its runs, `read`, start it, `start`,
+ * resource in it, such as one mailbox), an independent workflow (to follow its runs, `read`, start it, `start`,
  * or send events to its runs, `send`, which neither of the others
  * implies), an App's sealed functions, for an agent (reading with
  * `read`, writing with `write`: core's agent-apps.ts), one of an App's
@@ -192,7 +184,6 @@ export const permissionObjectSchema = z.discriminatedUnion("type", [
     /** One resource in the connection; absent means the whole connection. */
     resource: identifierSchema.optional(),
   }),
-  collectionObjectSchema,
   z.strictObject({
     type: z.literal("workflow"),
     workflowId: workflowResourceIdSchema,
@@ -219,9 +210,8 @@ export type PermissionObjectType = PermissionObject["type"];
  */
 const connectionActionPattern = /^[A-Za-z][\w.-]{0,63}$/u;
 
-/** The actions of collections and workflows, fixed by the platform. */
+/** The actions of workflows and the platform, fixed by the platform. */
 const platformActions = {
-  collection: ["read", "write"],
   workflow: ["read", "start", "send"],
   platform: ["statistics", "guests", "brain"],
 } as const;
@@ -472,32 +462,19 @@ export type PermissionRequest = z.input<typeof permissionRequestSchema>;
 /**
  * A permission a blueprint declares (a built-in's `blueprint.json`, or
  * what its App asked for as it was marked): a request without its
- * subject, which is every App created from it. Only a collection (for a
- * built-in, one it declares: `declaredCollectionSchema` in
- * `@grasp-os/shared/knowledge`), or what the platform offers (its
- * statistics, guest chats): the things that name the same thing for
- * whoever creates from it, where a connection is someone's or set up for
- * one App, and a workflow or exports name an App its creator may not see.
- * A collection only to read: an App never writes one (it keeps what it
- * writes in its own store), so `write` would give it nothing.
+ * subject, which is every App created from it. Only what the platform
+ * offers (its statistics, guest chats, the Brain): the thing that names
+ * the same for whoever creates from it, where a connection is someone's
+ * or set up for one App, and a workflow or exports name an App its
+ * creator may not see.
  */
 export const declaredPermissionSchema = z
   .strictObject({
     ...grantShape,
-    object: z.discriminatedUnion("type", [
-      collectionObjectSchema,
-      platformObjectSchema,
-    ]),
+    object: platformObjectSchema,
   })
   .superRefine(checkGrant)
-  .superRefine(({ object, actions }, context) => {
-    if (object.type === "collection" && actions.includes("write")) {
-      context.addIssue({
-        code: "custom",
-        path: ["actions"],
-        message: "An App only reads a collection",
-      });
-    }
+  .superRefine(({ object }, context) => {
     // Teams are its requester's, as a connection is someone's: whoever
     // creates from it names their own.
     if (object.type === "platform" && object.teams !== undefined) {
@@ -657,7 +634,7 @@ export interface PermissionsApi {
  * member; it doesn't intersect the grant with the person's own access. That
  * part of "never more than the person" (R5) is enforced where the access
  * lives: connect limits personal connections to their owner, and the
- * Knowledge queries limit collections to what the person may read.
+ * Brain recalls only what the person may read.
  */
 export const authoritySchema = z
   .strictObject({

@@ -79,12 +79,9 @@ const build = (dir: string): string => {
 /** The config and schema `fixtureDefinition` generates, which a built-in must hold. */
 const schema = definitionSources(fixtureDefinition);
 
-/** A collection a built-in declares. */
-const tasks = { id: "tasks", name: "Tasks", description: "Things to do." };
-
-/** A permission on `tasks`, to read unless `actions` say otherwise. */
-const onTasks = (binding = "TASKS", actions = ["read"]) => ({
-  object: { type: "collection", collectionId: "tasks" },
+/** A permission on what the platform offers: its statistics, unless `actions` say otherwise. */
+const onPlatform = (binding = "STATS", actions = ["statistics"]) => ({
+  object: { type: "platform" },
   actions,
   binding,
 });
@@ -120,7 +117,6 @@ describe("the built-in blueprints' build", () => {
         id: "fine",
         name: "Fixture",
         description: "A test's built-in.",
-        collections: [],
         permissions: [],
         contracts: [],
         workflows: [],
@@ -166,7 +162,6 @@ describe("the built-in blueprints' build", () => {
         id: "generated",
         name: "Fixture",
         description: "A test's built-in.",
-        collections: [],
         permissions: [],
         contracts: [],
         workflows: [],
@@ -211,7 +206,7 @@ describe("the built-in blueprints' build", () => {
     ["a definition that isn't JSON", {}, {}, { "workflows/greet.json": "{" }],
     [
       "a binding name a permission has",
-      { permissions: [onTasks("GREET")], collections: [tasks] },
+      { permissions: [onPlatform("GREET")] },
       {},
       { "workflows/greet.json": "{}" },
     ],
@@ -246,26 +241,29 @@ describe("the built-in blueprints' build", () => {
     }
   );
 
-  it("embeds the collections and permissions a built-in declares", () => {
-    const out = build(
-      fixture("asks", schema, {
-        collections: [tasks],
-        permissions: [onTasks()],
-      })
-    );
-    expect(embedded(out)).toMatchObject([
-      { collections: [tasks], permissions: [onTasks()] },
-    ]);
+  it("embeds the permissions a built-in declares", () => {
+    const out = build(fixture("asks", schema, { permissions: [onPlatform()] }));
+    expect(embedded(out)).toMatchObject([{ permissions: [onPlatform()] }]);
   });
 
   it.each([
-    ["an action a collection doesn't have", [onTasks("TASKS", ["delete"])]],
+    ["an action the platform doesn't have", [onPlatform("STATS", ["delete"])]],
     [
-      "write on a collection, which an App never does",
-      [onTasks("TASKS", ["read", "write"])],
+      "more than one action on the platform",
+      [onPlatform("STATS", ["statistics", "guests"])],
     ],
-    ["a binding name twice", [onTasks(), onTasks("TASKS", ["read"])]],
-    ["a platform binding name", [onTasks("KNOWLEDGE")]],
+    ["a binding name twice", [onPlatform(), onPlatform("STATS", ["guests"])]],
+    ["a platform binding name", [onPlatform("KNOWLEDGE")]],
+    [
+      "a Knowledge collection, which nothing grants any more",
+      [
+        {
+          object: { type: "collection", collectionId: "tasks" },
+          actions: ["read"],
+          binding: "TASKS",
+        },
+      ],
+    ],
     [
       "a connection, whose ID differs in each deployment",
       [
@@ -277,21 +275,16 @@ describe("the built-in blueprints' build", () => {
       ],
     ],
   ])("fails for a declared permission with %s", (_case, permissions) => {
-    const dir = fixture("asks", schema, { collections: [tasks], permissions });
+    const dir = fixture("asks", schema, { permissions });
     expect(() => build(dir)).toThrow("blueprint.json");
     expect(existsSync(path.join(dir, "blueprints.js"))).toBeFalsy();
   });
 
-  it.each([
-    ["a permission on a collection it doesn't declare", [], [onTasks()]],
-    [
-      "a collection named as a person's would be",
-      [{ ...tasks, id: "3f0c2a44-8f39-4c55-9d6e-2b1a0c6e4d11" }],
-      [],
-    ],
-    ["a collection twice", [tasks, tasks], []],
-  ])("fails for %s", (_case, collections, permissions) => {
-    const dir = fixture("asks", schema, { collections, permissions });
+  // Collections were Knowledge's, which the Brain replaced (GRA-1735).
+  it("fails for a manifest that declares collections", () => {
+    const dir = fixture("asks", schema, {
+      collections: [{ id: "tasks", name: "Tasks", description: "To do." }],
+    });
     expect(() => build(dir)).toThrow("blueprint.json");
     expect(existsSync(path.join(dir, "blueprints.js"))).toBeFalsy();
   });

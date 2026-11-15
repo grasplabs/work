@@ -578,12 +578,13 @@ export const auditOutboxRejected = sqliteTable(
  * and revoke columns ever change.
  *
  * The object is stored by type: a connection is `object_id`, with
- * `resource` naming one resource in it or null for all of it; a collection
- * is `object_id`; a workflow is its workflow resource's ID in `object_id`;
- * an App is its ID in `object_id`: an agent's, to call its functions,
- * with `resource` null; a workflow's, to call one of them, with that
- * function's stable ID in `resource`. `actions` is a JSON array of action
- * names.
+ * `resource` naming one resource in it or null for all of it; a workflow
+ * is its workflow resource's ID in `object_id`; an App is its ID in
+ * `object_id`: an agent's, to call its functions, with `resource` null; a
+ * workflow's, to call one of them, with that function's stable ID in
+ * `resource`. `actions` is a JSON array of action names. Rows of kinds
+ * the platform removed (a store's, a Knowledge collection's) may remain,
+ * which every read takes as not there (`servedSql` in permissions.ts).
  */
 export const permissions = sqliteTable(
   "permissions",
@@ -594,7 +595,7 @@ export const permissions = sqliteTable(
     }).notNull(),
     subjectId: text("subject_id").notNull(),
     objectType: text("object_type", {
-      enum: ["connection", "collection", "workflow", "app", "platform"],
+      enum: ["connection", "workflow", "app", "platform"],
     }).notNull(),
     objectId: text("object_id").notNull(),
     resource: text(),
@@ -6440,12 +6441,33 @@ export const brainUploads = sqliteTable(
     version: integer().notNull().default(0),
     createdAt: timestamp("created_at").notNull(),
     updatedAt: timestamp("updated_at").notNull(),
+    /**
+     * When its uploader removed it, a shared one (only they remove):
+     * out of use in the Brain for good, its history kept, until an admin
+     * erases it (brain-uploads.ts). Null while it is in use. Written first,
+     * before the Brain is asked, with `removalOwed`.
+     */
+    removedAt: timestamp("removed_at"),
+    /**
+     * Whether the removal is still owed: the Brain's removal not yet known
+     * to have returned, or its event not yet stored. The clock completes it
+     * (`completeOwedRemovals`).
+     */
+    removalOwed: integer("removal_owed", { mode: "boolean" })
+      .notNull()
+      .default(false),
   },
   (table) => [
     check(
       "brain_uploads_team_named",
       sql`${table.readers} <> 'team' OR ${table.teamId} IS NOT NULL`
     ),
+    // The removals still owed, oldest first, for the clock to complete
+    // (brain-uploads.ts `completeOwedRemovals`): never the whole table. Its
+    // condition a literal, as the query writes it, so SQLite uses it.
+    index("brain_uploads_removal_owed_idx")
+      .on(table.removedAt)
+      .where(sql.raw("removal_owed = 1")),
   ]
 );
 

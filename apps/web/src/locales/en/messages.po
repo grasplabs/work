@@ -1422,11 +1422,6 @@ msgstr "A change applies to runs that start after it: runs already going keep th
 
 #: src/apps/app-access-requests.tsx
 #: src/apps/draft-changes.tsx
-msgid "A collection"
-msgstr "A collection"
-
-#: src/apps/app-access-requests.tsx
-#: src/apps/draft-changes.tsx
 msgid "A connection"
 msgstr "A connection"
 
@@ -3875,10 +3870,6 @@ msgstr "Coins"
 #: src/onboarding/interviews-progress.tsx
 msgid "colleagues talked"
 msgstr "colleagues talked"
-
-#: src/activity/pending.tsx
-msgid "Collection {collectionId}"
-msgstr "Collection {collectionId}"
 
 #: src/chat/composer-menu.tsx
 #: src/chat/mentions.tsx
@@ -8863,6 +8854,10 @@ msgstr "Nobody asked him anything yet."
 msgid "Nobody by that name"
 msgstr "Nobody by that name"
 
+#: src/brain/sources-page.tsx
+msgid "Nobody can find or read it from then on, you included, and it can't be brought back. The Brain keeps its history until an admin erases it."
+msgstr "Nobody can find or read it from then on, you included, and it can't be brought back. The Brain keeps its history until an admin erases it."
+
 #: src/agents/own-agents-admin.tsx
 msgid "Nobody can make one, and those people have don't answer until you turn this back on."
 msgstr "Nobody can make one, and those people have don't answer until you turn this back on."
@@ -9568,10 +9563,6 @@ msgstr "Only accounts of the tenant {tenantId}."
 #: src/settings/use-team-change.ts
 msgid "Only admins can change teams."
 msgstr "Only admins can change teams."
-
-#: src/brain/sources-page.tsx
-msgid "Only an admin can remove an upload shared with a team or everyone. Ask an admin to remove it."
-msgstr "Only an admin can remove an upload shared with a team or everyone. Ask an admin to remove it."
 
 #: src/apps/app-settings.tsx
 msgid "Only an admin resets an App’s data: every record goes for good, and its current version runs again with no records."
@@ -11070,6 +11061,10 @@ msgstr "Removed a webhook from an App"
 #: src/workflows/item-test.tsx
 msgid "Removed after a week"
 msgstr "Removed after a week"
+
+#: src/brain/sources-page.tsx
+msgid "Removed by its uploader, {removed}"
+msgstr "Removed by its uploader, {removed}"
 
 #: src/brain/brain.ts
 #: src/brain/forget.tsx
@@ -14991,8 +14986,8 @@ msgid "Uploading…"
 msgstr "Uploading…"
 
 #: src/brain/sources-page.tsx
-msgid "Uploads shared with a team or everyone. Only an admin can erase one, for everyone and for good. Its text isn't shown here."
-msgstr "Uploads shared with a team or everyone. Only an admin can erase one, for everyone and for good. Its text isn't shown here."
+msgid "Uploads shared with a team or everyone, those their uploader removed among them. Only an admin can erase one, for everyone and for good. Its text isn't shown here."
+msgstr "Uploads shared with a team or everyone, those their uploader removed among them. Only an admin can erase one, for everyone and for good. Its text isn't shown here."
 
 #: src/settings/event-sources.tsx
 msgid "URL of {name}"
@@ -15150,8 +15145,8 @@ msgid "Version {version} declares no binding to approve."
 msgstr "Version {version} declares no binding to approve."
 
 #: src/inbox/items.ts
-msgid "Version {version} of {name} is live, but nothing starts it until an admin approves what it reaches: each model, connection, store or collection it calls."
-msgstr "Version {version} of {name} is live, but nothing starts it until an admin approves what it reaches: each model, connection, store or collection it calls."
+msgid "Version {version} of {name} is live, but nothing starts it until an admin approves what it reaches: each model and connection it calls, and the Brain."
+msgstr "Version {version} of {name} is live, but nothing starts it until an admin approves what it reaches: each model and connection it calls, and the Brain."
 
 #: src/brain/sources-page.tsx
 msgid "Version {version}, added {added}"

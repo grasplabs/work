@@ -174,23 +174,30 @@ export interface BrainUpload {
   /** Whether they may upload its next version: its uploader alone. */
   mayAddVersion: boolean;
   /**
-   * Whether they may delete it, which erases it for good: its uploader,
-   * when it is theirs alone; an admin, when it is shared with a team or
-   * everyone. Its uploader asks an admin to remove a shared one.
+   * What their Delete does, if they may delete it: `erase`, for good,
+   * every version, for its uploader when it is theirs alone, and for an
+   * admin when it is shared with a team or everyone (removed or not);
+   * `remove`, for its uploader when it is shared: out of use for everyone
+   * for good, its history kept, until an admin erases it. Null when they
+   * may not.
    */
-  mayDelete: boolean;
+  deletes: BrainUploadDeletion | null;
 }
+
+/** What deleting an upload does: erase it for good, or remove it and keep its history. */
+export type BrainUploadDeletion = "erase" | "remove";
 
 /**
  * An upload shared with a team or everyone, as an admin's listing shows
  * it to erase: its file's name, who may read it, who uploaded it and
- * when. Never its text.
+ * when, and when its uploader removed it. Never its text.
  */
 export interface BrainSharedUpload {
   source: BrainSourceRef;
   /**
    * The file's name: null when the admin may not read the upload (a
-   * team's they aren't in), as its name is its readers' alone too.
+   * team's they aren't in, or one removed, which no one reads), as its
+   * name is its readers' alone too.
    */
   name: string | null;
   readers: BrainUploadReaders;
@@ -199,6 +206,8 @@ export interface BrainSharedUpload {
   uploaderName: string;
   /** ISO 8601. */
   uploadedAt: string;
+  /** When its uploader removed it, ISO 8601: null while it is in use. */
+  removedAt: string | null;
 }
 
 /** Where the next page of shared uploads starts: after this one. */
@@ -254,7 +263,10 @@ export interface BrainSourcesApi {
   ) => Promise<{ source: BrainSourceRef; version: number }>;
   /** An upload they may read, with what they may do to it: null when there is none or they may not read it, alike. */
   uploadOf: (uploadId: string) => Promise<BrainUpload | null>;
-  /** Deletes an upload for good: every version, from the Brain and core alike. */
+  /**
+   * Deletes an upload as `BrainUpload.deletes` says: erases it for good,
+   * every version, from the Brain and core alike, or removes it.
+   */
   deleteUpload: (uploadId: string) => Promise<void>;
   /**
    * For an admin: a page of the uploads shared with a team or everyone,
@@ -272,6 +284,8 @@ export interface BrainSourcesApi {
 export const brainSourceErrors = defineErrorFamily({
   "brain.source_erased":
     "What this adds was erased: it stays erased, and isn't added.",
+  "brain.source_removed":
+    "What this adds was removed: it stays out of use, and isn't added.",
   "brain.request_invalid": "That isn't a valid request to the Brain.",
   "brain.source_change_taken":
     "This change was added before with other text or readers; nothing changed.",
@@ -281,8 +295,6 @@ export const brainSourceErrors = defineErrorFamily({
 
 export const brainUploadErrors = defineErrorFamily({
   "brain.upload_not_found": "There's no such upload, or you can't see it.",
-  "brain.upload_admin_only":
-    "Only an admin can remove an upload shared with a team or everyone. Ask an admin to remove it.",
   "brain.upload_not_allowed":
     "Only the person who uploaded this file can do that (or an admin can delete it, when it isn't one person's own).",
   "brain.upload_readers":

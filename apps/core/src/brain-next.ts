@@ -11,6 +11,7 @@ import {
   fitsSourceText,
   isSourceText,
   erasedSource,
+  removedSource,
   changeReused,
   listPageMax,
   erasureReasons,
@@ -450,9 +451,9 @@ export interface Recall {
   budget: { tokens: number };
   /**
    * Whether the pack may hold what only this person may read, from their
-   * own store: only where the answer reaches them alone (their own chat in
-   * Grasp, in a turn they started; a chat app's direct message is kept by
-   * the chat app too, so it reads as the company). Apps, workflows and the
+   * own store: only where the answer reaches them alone (their own chat,
+   * in Grasp or their direct message on a chat app, in a turn they
+   * started). Apps, workflows and the
    * SDK pass `false`, so what is theirs alone never reaches App data or
    * anyone else; then their own store is never addressed.
    */
@@ -887,6 +888,7 @@ const readerOf = async (
  * a producer checks that whoever asks for the change may change that
  * source before it calls this; the Brain can't tell. Refused with a
  * code: `brain.source_erased` when an erasure closed what it adds,
+ * `brain.source_removed` when its source was removed (`removeSource`),
  * `brain.source_no_text` for a text of whitespace alone and
  * `brain.source_too_large` past a source's bound (`sourceTextProblem`),
  * each final, never to be retried; and `brain.source_change_taken` when
@@ -989,6 +991,9 @@ export const addSource = async (
     }
     if (error instanceof Error && error.message === changeTaken) {
       throw brainSourceErrors.create("brain.source_change_taken");
+    }
+    if (error instanceof Error && error.message === removedSource) {
+      throw brainSourceErrors.create("brain.source_removed");
     }
     throw error;
   }
@@ -1190,8 +1195,8 @@ export const recallAs = async (
   recall: Recall
 ): Promise<RecalledPack> => {
   // Ranked by their use only where the answer reaches them alone: a
-  // recall as their teams or the company (a channel, a thread, a chat
-  // app, a turn they didn't start, code) is ordered as for anyone, and
+  // recall as their teams or the company (a channel, a thread, a turn
+  // they didn't start, code) is ordered as for anyone, and
   // their Workspace isn't asked.
   const [request, used] = await Promise.all([
     recallRequestAs(env, personId, recall),
@@ -1684,6 +1689,32 @@ export const eraseSource = async (
   await brain(env).eraseSource(request);
 };
 
+const sourceRemovalSchema = z.strictObject({
+  source: sourceRefSchema,
+  readers: sourceReadersSchema,
+});
+
+/**
+ * Takes `source` out of use for good and keeps its history (the Brain's
+ * `removeSource`): from when it returns, nothing of it is found, listed
+ * or read by anyone, what was drawn from it included, and nothing new is
+ * drawn from it; its key is closed, so an add to it is refused
+ * (`brain.source_removed`), and nothing puts it back in use. An export
+ * holds it removed. `eraseSource` still erases it for good. `readers`
+ * are the source's, as its producer adds it: the store they name holds
+ * it. For core's server code only, once whoever asks may remove it. Safe
+ * to repeat, and answers alike whatever there was.
+ */
+export const removeSource = async (
+  env: BrainEnv,
+  removed: { source: SourceRef; readers: SourceReaders }
+): Promise<void> => {
+  const { source, readers } = checked(sourceRemovalSchema, removed);
+  const store =
+    readers.kind === "owner" ? ownBrain(env, readers.personId) : brain(env);
+  await store.removeSource({ source: sourceKeyOf(source) });
+};
+
 const ownGroupErasureSchema = z.strictObject({
   personId: idSchema,
   group: sourceRefSchema,
@@ -1758,6 +1789,24 @@ export const erasePerson = async (
   await forgetOwnStoreHealth(env, personId);
   return "erased";
 };
+
+/**
+ * Erases every memory `writer` wrote in the shared store, learned up to
+ * now (the Brain's `eraseWriter`): for an App whose data is reset or whose
+ * store is deleted, `app:<id>`, as core names its code's writer. Hidden
+ * from every read once it returns, recorded in the Brain's ledger so a
+ * restore can't bring them back; what the writer adds afterwards is kept.
+ * Answers when it was recorded and how many memories it covered, the same
+ * on every repeat of `change` (one per store deletion, one per data reset
+ * request), which erases nothing more: what one audit event of it says. A
+ * call that throws must be repeated, with the same change, until it
+ * answers.
+ */
+export const eraseWriter = async (
+  env: BrainEnv,
+  erased: { writer: string; reason: ErasureReason; change: string }
+): Promise<Awaited<ReturnType<Brain["eraseWriter"]>>> =>
+  await brain(env).eraseWriter(erased);
 
 /**
  * Whether a person's erasure asked for at `askedAt` has had their own store
@@ -4121,6 +4170,9 @@ export const forgetAs = async (
       memory: id,
       reader,
       writer: reader.person,
+      // Their own store holds only their own word, so one forget of a
+      // memory is theirs: a retry is the same change.
+      change: `forget:${id}`,
     });
     return retired === null ? "nothing" : "done";
   } catch (error) {
@@ -4605,6 +4657,7 @@ export const correctAs = async (
         memory: read.id,
         reader,
         writer: reader.person,
+        change: `correct:${change}`,
       });
     }
   } catch (error) {
@@ -4692,8 +4745,9 @@ const codeCardSchema = z.strictObject({
  * own: the company alone (`company`), as an App, a workflow and a chat's
  * code anywhere but its person's own chat do; or its person's teams and
  * the company, as no person (`teams`), as a chat's code does in their own
- * chat in Grasp alone (agent-brain.ts), the reach its recall reads at
- * there. Set by core, never by the code.
+ * chat alone, in Grasp or their direct message on a chat app
+ * (agent-brain.ts), the reach its recall reads at there. Set by core,
+ * never by the code.
  */
 export type CodeReach = Extract<Reach, "teams" | "company">;
 

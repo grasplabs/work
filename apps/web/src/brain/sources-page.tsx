@@ -77,9 +77,11 @@ import { OwnExportSection } from "./own-export.tsx";
 // from what they may read alone. Texts are shown as text, never markup.
 // A file uploaded here goes straight into the Brain, for who the person
 // chooses: only them, a team of theirs, or everyone (GRA-1824); its
-// uploader adds its next version. Its uploader deletes one for only them;
-// one shared with a team or everyone only an admin erases, from the
-// shared uploads listed for admins. What each may do to an upload is
+// uploader adds its next version. Its uploader deletes one for only them,
+// erasing it; one shared with a team or everyone its uploader removes,
+// out of use for everyone with its history kept (GRA-1877), and an admin
+// erases, from the shared uploads listed for admins, removed ones among
+// them. What each may do to an upload, and what their Delete does, is
 // core's to say (`uploadOf`). At its foot, the person's own export of
 // what only they may read (own-export.tsx).
 
@@ -567,7 +569,7 @@ const ReadersLine = ({
 
 /**
  * What the person may do to an upload, as core says: upload its next
- * version, and delete it for good.
+ * version, and delete it: erase it for good, or remove it.
  */
 const UploadActions = ({
   source,
@@ -614,21 +616,13 @@ const UploadActions = ({
   if (upload.state !== "ready" || upload.data === null) {
     return null;
   }
-  const { readers, mayAddVersion, mayDelete } = upload.data;
+  const { readers, mayAddVersion, deletes } = upload.data;
   const busy = acting?.state === "loading";
   return (
     <div className="flex flex-col gap-3">
       <p className="text-muted-foreground text-sm">
         <ReadersLine readers={readers} teams={teams} />
       </p>
-      {!mayDelete && readers.kind !== "me" ? (
-        <p className="text-muted-foreground text-sm">
-          <Trans>
-            Only an admin can remove an upload shared with a team or everyone.
-            Ask an admin to remove it.
-          </Trans>
-        </p>
-      ) : null}
       {mayAddVersion ? (
         <form
           className="flex flex-col gap-2 sm:flex-row sm:items-end"
@@ -691,12 +685,16 @@ const UploadActions = ({
           </Button>
         </form>
       ) : null}
-      {mayDelete ? (
+      {deletes === null ? null : (
         <Confirmed
           busy={busy}
           button={t`Delete`}
-          confirm={t`Delete for good`}
-          description={t`Every version of it is erased from the Brain for everyone who could read it. This can't be undone.`}
+          confirm={deletes === "erase" ? t`Delete for good` : t`Delete`}
+          description={
+            deletes === "erase"
+              ? t`Every version of it is erased from the Brain for everyone who could read it. This can't be undone.`
+              : t`Nobody can find or read it from then on, you included, and it can't be brought back. The Brain keeps its history until an admin erases it.`
+          }
           label={t`Delete this upload`}
           onConfirm={() => {
             setActing({ state: "loading" });
@@ -720,7 +718,7 @@ const UploadActions = ({
           }}
           title={t`Delete this upload?`}
         />
-      ) : null}
+      )}
       {acting?.state === "refused" ? <UploadRefusal refused={acting} /> : null}
     </div>
   );
@@ -1198,9 +1196,10 @@ const SourcePanel = ({
 
 /**
  * For an admin: the uploads shared with a team or everyone, newest first,
- * each by its file's name, who may read it, who uploaded it and when, never
- * its text, with Erase for good: a shared upload only an admin erases,
- * also one of a team they aren't in.
+ * each by its file's name, who may read it, who uploaded it and when, and
+ * when its uploader removed it, never its text, with Erase for good: a
+ * shared upload only an admin erases, also one of a team they aren't in,
+ * or one removed.
  */
 const SharedUploads = ({ onErased }: { onErased: () => void }) => {
   const { t } = useLingui();
@@ -1235,8 +1234,9 @@ const SharedUploads = ({ onErased }: { onErased: () => void }) => {
       </h2>
       <p className="text-muted-foreground text-sm">
         <Trans>
-          Uploads shared with a team or everyone. Only an admin can erase one,
-          for everyone and for good. Its text isn&apos;t shown here.
+          Uploads shared with a team or everyone, those their uploader removed
+          among them. Only an admin can erase one, for everyone and for good.
+          Its text isn&apos;t shown here.
         </Trans>
       </p>
       {listed.state === "refused" ? (
@@ -1255,6 +1255,10 @@ const SharedUploads = ({ onErased }: { onErased: () => void }) => {
             // its team, uploader and the minute it was uploaded.
             const { name } = upload;
             const uploaded = formatDateTime(upload.uploadedAt);
+            const removed =
+              upload.removedAt === null
+                ? null
+                : formatDateTime(upload.removedAt);
             let readBy = t`Everyone`;
             if (readers.kind === "team") {
               readBy =
@@ -1274,6 +1278,11 @@ const SharedUploads = ({ onErased }: { onErased: () => void }) => {
                           Uploaded by {uploaderName}, {uploaded}
                         </Trans>
                       </span>
+                      {removed === null ? null : (
+                        <Badge variant="secondary">
+                          <Trans>Removed by its uploader, {removed}</Trans>
+                        </Badge>
+                      )}
                     </span>
                   </ItemContent>
                   <Confirmed

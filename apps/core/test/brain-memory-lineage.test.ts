@@ -1,18 +1,23 @@
 import { createBrain } from "@grasp-os/brain/brain";
 import { brainErrors } from "@grasp-os/brain/contract";
 import type { MemoryLineage } from "@grasp-os/brain/contract";
-import { memoriesList } from "@grasp-os/brain/memories";
+import {
+  memoriesProposeChange,
+  memoriesPublish,
+  memoriesRetire,
+  memoriesList,
+} from "@grasp-os/brain/memories";
 import { brainMemories } from "@grasp-os/brain/schema";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { Reader } from "../src/knowledge/access.ts";
-import { portsOf } from "../src/knowledge/ports.ts";
+import { portsOf, brainOf } from "../src/knowledge/ports.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { seedMemory } from "./knowledge-purge.ts";
-import { newTeam } from "./knowledge.ts";
+import { asPerson, newTeam } from "./knowledge.ts";
 import { callAuth, signedInApi, unique } from "./sign-in.ts";
 
 // Inspecting a Brain memory record's lineage, and its correction (GRA-298,
@@ -150,13 +155,17 @@ describe("a memory record's lineage", setUpTime, () => {
       )
     );
     const correction = idOf(
-      await ada.api.knowledge.memoriesProposeChange(
+      await memoriesProposeChange(
+        brainOf(env),
+        await asPerson(ada),
         { memoryId: first, statement: "Floor 4 is the quiet one." },
         { idempotencyKey: key(), expectedRevision: 1 }
       )
     );
     const stale = await codeOf(
-      ada.api.knowledge.memoriesProposeChange(
+      memoriesProposeChange(
+        brainOf(env),
+        await asPerson(ada),
         { memoryId: first, statement: "Floor 5." },
         { idempotencyKey: key(), expectedRevision: 1 }
       )
@@ -480,7 +489,9 @@ describe("a memory record's lineage", setUpTime, () => {
     const mark = `m${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
     const publish = async (text: string, restsOnCited: boolean) =>
       idOf(
-        await ada.api.knowledge.memoriesPublish(
+        await memoriesPublish(
+          brainOf(env),
+          await asPerson(ada),
           {
             scope: "team",
             scopeId: both,
@@ -808,13 +819,17 @@ describe(
       const got = await ada.api.knowledge.memoriesGet({ memoryId });
       const lineage = await ada.api.knowledge.memoriesLineage({ memoryId });
       const byAdmin = await codeOf(
-        admin.api.knowledge.memoriesRetire(
+        memoriesRetire(
+          brainOf(env),
+          await asPerson(admin),
           { memoryId },
           { idempotencyKey: key(), expectedRevision: 1 }
         )
       );
       const byAda = await codeOf(
-        ada.api.knowledge.memoriesRetire(
+        memoriesRetire(
+          brainOf(env),
+          await asPerson(ada),
           { memoryId },
           { idempotencyKey: key(), expectedRevision: 1 }
         )
@@ -867,7 +882,9 @@ describe(
         )
       );
       const correction = idOf(
-        await ada.api.knowledge.memoriesProposeChange(
+        await memoriesProposeChange(
+          brainOf(env),
+          await asPerson(ada),
           {
             memoryId: first,
             statement: `Desk ${word}, by the window.`,

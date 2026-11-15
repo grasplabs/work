@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "9a35c8d6-ff34-4bbb-934c-30712a793a27",
+  "id": "64b5cff2-4d76-410b-86fd-624fa01f8613",
   "prevId": "41dd1d9f-01e4-4e8b-a095-4595cca3f783",
   "tables": {
     "access_revocations": {
@@ -4524,9 +4524,33 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "removed_at": {
+          "name": "removed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "removal_owed": {
+          "name": "removal_owed",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "brain_uploads_removal_owed_idx": {
+          "name": "brain_uploads_removal_owed_idx",
+          "columns": [
+            "removed_at"
+          ],
+          "isUnique": false,
+          "where": "removal_owed = 1"
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
@@ -10802,14 +10826,6 @@
         },
         "staff": {
           "name": "staff",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
-        },
-        "interview": {
-          "name": "interview",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,

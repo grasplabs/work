@@ -7,10 +7,9 @@ import type { Thread } from "chat";
 import { z } from "zod";
 
 import { signInConfig } from "../auth/config.ts";
-import { citedIn } from "../chat-messages.ts";
 import { chatAgentId, personalWorkspaceId } from "../chats-rpc.ts";
 import { workspace } from "../durable-objects.ts";
-import { answerCard, heldWritesCard, sourcesCard } from "./cards.tsx";
+import { answerCard, heldWritesCard, ratingCard } from "./cards.tsx";
 import {
   offerConnectOwn,
   ownMicrosoftNeed,
@@ -23,6 +22,8 @@ import { sortRequest } from "./request-sorting.ts";
 import { countAnswered, countSignal } from "./signals.ts";
 import type { ChannelSignal } from "./signals.ts";
 import {
+  answerDecides,
+  heardFrom,
   heardRequest,
   keepCardsOf,
   settleRequest,
@@ -36,11 +37,11 @@ import { postOffers } from "./workflow-offers.ts";
 
 // A member's message answered by the organization's agent, in the
 // person's own chat for that platform in their own Workspace (`via`, the
-// platform's name), found or made on their first message, with what it
-// cited; the answer goes back to the conversation they wrote in. The door
-// has already checked who wrote (door.ts), so the Workspace takes its word.
-// Asked in a group chat or channel, it is their one chat for that thread,
-// and its agent reads only what everyone in it may (knowledge/access.ts).
+// platform's name), found or made on their first message; the answer goes
+// back to the conversation they wrote in. The door has already checked who
+// wrote (door.ts), so the Workspace takes its word. Asked in a group chat
+// or channel, it is their one chat for that thread, and its agent reads
+// only what everyone in it may.
 //
 // While the turn runs, the platform shows Stephen typing, sent again every
 // few seconds, as a typing indicator lasts only that long, until the
@@ -121,10 +122,17 @@ const takenIn = async (
     if (requestId === null) {
       return;
     }
+    // Whether he answered is asked only where the outcome rests on it.
     const sorted =
       answer === undefined
         ? null
-        : await sortRequest(env, { userId, platform, message: text, answer });
+        : await sortRequest(env, {
+            userId,
+            platform,
+            message: text,
+            answer,
+            judge: answerDecides(ended.ended, heardFrom(ended.calls)),
+          });
     await settleRequest(env, requestId, { ...ended, sorted });
   };
   const rate =
@@ -307,18 +315,17 @@ const streamInto = (thread: Thread, onFirst: () => void) => {
 
 /**
  * What goes under a streamed answer's last words, which Teams gets once
- * the turn returns: its sources and the thumbs for it, or the thumbs
- * alone for an answer without sources, as the stream carries none of its
- * own; nothing when there is neither.
+ * the turn returns: the thumbs for it, as the stream carries none of its
+ * own; nothing for an answer that takes none.
  */
 const underStream =
-  (thread: Conversation, card: Parameters<typeof sourcesCard>[0]) =>
+  (thread: Conversation, card: Parameters<typeof ratingCard>[0]) =>
   async (): Promise<void> => {
-    if (card.sources.length === 0 && card.rate === undefined) {
+    if (card.rate === undefined) {
       return;
     }
-    await quietly("sources", async () => {
-      await thread.post(sourcesCard(card));
+    await quietly("rating", async () => {
+      await thread.post(ratingCard(card));
     })();
   };
 
@@ -335,14 +342,10 @@ const streamingIn = (
     ? streamInto(thread, onFirst)
     : undefined;
 
-/** The answer as a chat app shows it: no links to Grasp's own notes. */
-const shownText = (text: string): string =>
-  citedIn(text, () => false).text.trim();
-
 /**
  * One question asked in the person's chat for `platform`, and its answer
  * posted: streamed as the model writes it where the platform streams, then
- * its sources; otherwise whole, with them, once it is done. A stream the
+ * its thumbs; otherwise whole, with them, once it is done. A stream the
  * platform refuses ends in the whole answer instead.
  */
 const answerOne = async (
@@ -406,7 +409,6 @@ const answerOne = async (
       chatId: null,
       ended: endOfLine[line],
       calls: [],
-      cited: false,
     });
     await postIn(env, platform, thread, say(line, locale));
     return;
@@ -414,14 +416,13 @@ const answerOne = async (
   stopTyping();
   const { chatId, answer, calls } = asked;
   const answered = answer.outcome === "answered";
-  const final = shownText(answer.answer);
+  const final = answer.answer.trim();
   let streamed = false;
   try {
     streamed = (await streaming?.finish(answered ? final : undefined)) ?? false;
   } catch (error) {
     log.warn("channel.stream_refused", { platform, ...errorFields(error) });
   }
-  const cited = answer.cited.length > 0;
   if (!answered || final === "") {
     log.warn("channel.turn_failed", { platform, outcome: answer.outcome });
     await countSignal(env, platform, "failed");
@@ -429,7 +430,6 @@ const answerOne = async (
       chatId,
       ended: endOfTurn(answer.outcome),
       calls,
-      cited,
     });
     await postIn(env, platform, thread, say("failed", locale));
     return;
@@ -440,10 +440,10 @@ const answerOne = async (
   // own; never kept from it by a card after the answer that couldn't be
   // posted (`quietly`).
   if (requestId !== null) {
-    await heardRequest(env, requestId, { calls, cited });
+    await heardRequest(env, requestId, { calls });
   }
   const recorded = async () => {
-    await settle({ chatId, ended: "answered", calls, cited }, final);
+    await settle({ chatId, ended: "answered", calls }, final);
   };
   // The starts the turn offered, each on its card, under the answer, each
   // kept with this request so a press on it is this request's.
@@ -471,10 +471,6 @@ const answerOne = async (
     afterward(recorded);
     return;
   }
-  const sources = answer.cited.map(({ title, collectionId, documentId }) => ({
-    title,
-    url: `${origin}/knowledge/${encodeURIComponent(collectionId)}?doc=${encodeURIComponent(documentId)}`,
-  }));
   const chatUrl = `${origin}/?chat=${encodeURIComponent(chatId)}`;
   // Without their own Microsoft 365 he answered from what the company
   // shared alone: once a day, he offers to connect it, in their direct
@@ -523,7 +519,6 @@ const answerOne = async (
       answerCard({
         locale,
         text: final,
-        sources,
         chatUrl,
         rate,
       })
@@ -535,7 +530,7 @@ const answerOne = async (
     await recorded();
     return;
   }
-  afterward(underStream(thread, { locale, sources, chatUrl, rate }));
+  afterward(underStream(thread, { locale, rate }));
   afterward(held);
   afterward(offers);
   afterward(offer);

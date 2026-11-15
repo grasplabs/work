@@ -30,6 +30,14 @@ export type KeyState = "free" | "held" | "erased";
 export const erasedSource = "The Brain refused it: what this adds was erased";
 
 /**
+ * What an add to a removed source says (`Brain.removeSource`): it is out
+ * of use for good, its key closed while its history is kept, and the add
+ * is never tried again. Said only to the producer that adds it, which
+ * compares it whole.
+ */
+export const removedSource = "The Brain refused it: what this adds was removed";
+
+/**
  * What an add says whose change was added before with other text or
  * readers: nothing changed, and the version that change made stays. Said
  * only to the producer that adds it, which compares it whole.
@@ -1107,6 +1115,7 @@ export interface ErasureCount {
  */
 export interface ErasuresOverview {
   source: ErasureCount;
+  writer: ErasureCount;
   byReason: Record<ErasureReason, number>;
 }
 
@@ -1335,6 +1344,10 @@ export const sourceErasureSchema = z.strictObject({
 });
 export type SourceErasure = z.infer<typeof sourceErasureSchema>;
 
+/** A source to take out of use, keeping its history (`Brain.removeSource`). */
+export const sourceRemovalSchema = z.strictObject({ source: sourceIdSchema });
+export type SourceRemoval = z.infer<typeof sourceRemovalSchema>;
+
 /**
  * Whether `source` may be in `group`: its key is the group's, "/" and
  * more, so no source joins a group its key isn't under.
@@ -1348,6 +1361,32 @@ export const personErasureSchema = z.strictObject({
   reason: z.enum(erasureReasons),
 });
 export type PersonErasure = z.infer<typeof personErasureSchema>;
+
+/**
+ * A writer whose memories to erase (`Brain.eraseWriter`): the host's code
+ * as the App it runs (`app:<id>`), as an add names it, and why.
+ */
+export const writerErasureSchema = z.strictObject({
+  writer: principalSchema,
+  reason: z.enum(erasureReasons),
+  /**
+   * The caller's key for this erasure, the same on each of its retries
+   * (one per store deletion, one per data reset): the same change answers
+   * the erasure it made, and erases nothing more; another is another.
+   */
+  change: changeKeySchema,
+});
+export type WriterErasure = z.infer<typeof writerErasureSchema>;
+
+/**
+ * What an erasure of a writer's memories answers: when it was recorded,
+ * and how many memories it covered then; the same on every repeat of its
+ * change (`Brain.eraseWriter`).
+ */
+export interface WriterErased {
+  erasedAt: Date;
+  memories: number;
+}
 
 /**
  * What staff look up in the store's record of its erasure ledger: a
@@ -1617,7 +1656,14 @@ export interface VectorsFound {
 // the one before, which stays as history; a memory of another lineage
 // that says something else makes the fact contested: both stay current
 // and are read together, each with its source. A memory with no listed
-// attribute never ends or contests another.
+// attribute never contests another, and ends only an earlier one of its
+// lineage that it restates: the same statement as search folds text
+// (case, accents, spacing and a final full stop aside, every sign kept),
+// about the same entity, in the same speaker's word, of the same type,
+// related entity and value. So the same fact said twice by one source or
+// writer is one
+// current memory, the earlier kept as history, merged only for readers of
+// the later one.
 //
 // Who may read a memory: those in the reader set its caller gives
 // (`access`, as a source's), and, when it rests on a source version, only
@@ -1664,8 +1710,9 @@ export interface AttributeRule {
 /**
  * Every attribute a memory may be filed under, per kind of entity: the
  * fixed list. A memory about something not listed has no attribute
- * (`attribute` left out): it is kept and found, and never ends or
- * contests another.
+ * (`attribute` left out): it is kept and found, never contests another,
+ * and ends only an earlier memory of its lineage it restates word for
+ * word.
  */
 export const entityAttributes = {
   person: {
@@ -2209,12 +2256,24 @@ export const retireRequestSchema = z.strictObject({
   memory: memoryIdSchema,
   reader: readerSchema,
   writer: principalSchema,
+  /**
+   * The caller's key for this retirement, the same on each of its retries
+   * (an id minted per person and request, say): kept with the retirement,
+   * so a repeat tells the call that retired the memory from another.
+   */
+  change: changeKeySchema,
 });
 export type RetireRequest = z.infer<typeof retireRequestSchema>;
 
-/** A retired memory: when it was retired, as recorded, the same on every repeat. */
+/**
+ * A retired memory: when it was retired and by which change, as recorded,
+ * the same on every repeat, whoever repeats it. `change` is the stored
+ * one: a call whose own change differs did not retire it. Null for one
+ * retired before changes were kept.
+ */
 export interface RetiredMemory {
   retiredAt: Date;
+  change: string | null;
 }
 
 /** A memory the reader confirms, as their own word. */
@@ -2644,7 +2703,8 @@ export interface Brain {
   /**
    * What this store has of the key `source`, whoever may read it: `erased`
    * when an erasure closed it, `held` when a version of it is kept
-   * (current or history), `free` when it was never given it. For the host
+   * (current or history) or it was removed (`removeSource`), `free` when
+   * it was never given it. For the host
    * only, before it keeps a source in another store (one person's own):
    * a key lives in one store. A person's own store erased whole holds
    * nothing: `free`.
@@ -2776,6 +2836,19 @@ export interface Brain {
    */
   eraseSource: (request: SourceErasure) => Promise<SourceErased | undefined>;
   /**
+   * Takes a source out of use for good and keeps its history (removal.ts):
+   * from when it returns, nothing of it is found, listed or read by
+   * anyone, history and memories drawn from it included, and nothing new
+   * is drawn from it. Its versions, memories and files stay, and nothing
+   * is written to the ledger. Its key is closed: an add to it, a retry of
+   * an earlier change included, is refused (`removedSource`), and nothing
+   * puts it back in use. An export holds it removed, and a restore brings
+   * it back so. `eraseSource` still erases it for good. Covers the key's
+   * own source alone, never a group's members. Safe to repeat, and
+   * answers alike whatever there was.
+   */
+  removeSource: (request: SourceRemoval) => Promise<void>;
+  /**
    * Erases `person`'s own store whole, the one place what only they may
    * read is kept: everything it holds, and from then on every call is
    * refused, also after a restore of its storage. Safe to repeat. A
@@ -2784,6 +2857,23 @@ export interface Brain {
    * refuses this.
    */
   erasePerson: (request: PersonErasure) => Promise<void>;
+  /**
+   * Erases every memory `writer` wrote (its lineage is the writer's),
+   * learned up to now, retired ones too, as `eraseSource` erases a source:
+   * recorded in the ledger and hidden from every read at once, deleted by
+   * the tick if not by the call, with every name, entity, link and
+   * confirmation that rests on them alone; a restore of an older copy or
+   * of an export can't bring them back. Nothing else is touched: no
+   * source, and no memory of anyone else, on the same entity or not. The
+   * writer isn't closed: what it adds afterwards is new and kept. Answers
+   * when it was recorded and how many memories it covered
+   * (`WriterErased`); repeated with the same change, the same again and
+   * nothing more erased, also after a restart or a restore, so a retry's
+   * answer is the first one's. Another change is another erasure. Returns only
+   * once the erasure is in the ledger: one that throws must be repeated.
+   * The shared store's alone: a person's own store refuses.
+   */
+  eraseWriter: (request: WriterErasure) => Promise<WriterErased>;
   /**
    * Whether a source was erased, from the store's record of its ledger
    * alone (`ErasureStatus`). For staff, who name what a client
@@ -2908,9 +2998,12 @@ export interface Brain {
    * current, or ended by a newer one of the writer's. It stops being
    * current from now on, or can never become current again, and stays as
    * history. It no longer ends older memories, which may become current
-   * again unless retired too. Answers when it was retired, as recorded
-   * (`RetiredMemory`): one this writer already retired answers that same
-   * time again, so a retry never reads as not found nor gets a new time.
+   * again unless retired too. Answers when it was retired and by which
+   * change, as recorded (`RetiredMemory`): one this writer already retired
+   * answers that same time and change again, whatever change the call
+   * names, and changes nothing, so a retry never reads as not found nor
+   * gets a new time, and a call that didn't retire it can tell by the
+   * change.
    * Null alike when there is no such memory, when it is another writer's
    * (retired or not), when the reader may not read it, and when it
    * expired before it was retired: nothing tells another writer's memory
