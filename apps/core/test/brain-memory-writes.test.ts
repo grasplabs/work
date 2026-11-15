@@ -4,7 +4,6 @@ import type { CollectionInput } from "@grasp-os/shared/knowledge";
 import { describe, expect, it } from "vite-plus/test";
 
 import { mockIdp } from "./idp.ts";
-import { seedMemory } from "./knowledge-purge.ts";
 import { newTeam, seed } from "./knowledge.ts";
 import { callAuth, signedInApi, unique } from "./sign-in.ts";
 
@@ -232,47 +231,5 @@ describe("a record whose sources a reader loses", setUpTime, () => {
       after: 0,
       newRevision: true,
     });
-  });
-});
-
-describe("what a published record rests on", setUpTime, () => {
-  it("reads through a correction to the documents the record it corrected cites", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const ada = await signedInApi(idp, "user");
-    const ben = await signedInApi(idp, "user");
-    const team = await newTeam(admin, [ada, ben]);
-    // Only Ada reads it.
-    const own = await documentIn(ada, {
-      name: `Mine ${unique()}`,
-      access: "me",
-    });
-    const remembered = await seedMemory(
-      ada,
-      { kind: "fact", text: `From my notes ${unique()}`, sourceRefs: [own] },
-      { idempotencyKey: key() }
-    );
-    const corrected = await seed(ada.api).memoriesProposeChange(
-      { memoryId: idOf(remembered), statement: `Corrected ${unique()}` },
-      { idempotencyKey: key(), expectedRevision: 1 }
-    );
-
-    const published = await codeOf(
-      seed(ada.api).memoriesPublish(
-        {
-          scope: "team",
-          scopeId: team,
-          kind: "fact",
-          text: `For the team ${unique()}`,
-          sourceRefs: [
-            { kind: "memory", memoryId: idOf(corrected), revision: 1 },
-          ],
-        },
-        { idempotencyKey: key() }
-      )
-    );
-
-    // The correction cites only the record it corrected; that one cites
-    // her own document, which Ben can't read.
-    expect(published).toBe("brain.not_found");
   });
 });

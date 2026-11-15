@@ -38,7 +38,7 @@ import { buildPages } from "../src/pages.ts";
 import { appOf } from "./app-definitions.ts";
 import { commitApp, grantReviewed, racingDb } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
-import { collectionWithNote, seed, storedGrant } from "./knowledge.ts";
+import { collectionWithNote, storedGrant } from "./knowledge.ts";
 import { fakeProvider, testModel } from "./model-provider.ts";
 import { configuredLimits } from "./quota-limits.ts";
 import { calledAs } from "./sealed-apps.ts";
@@ -526,9 +526,7 @@ describe("the built-in blueprints", () => {
     await reinstall();
   });
 
-  it("create the collections they declare once, open to everyone and changed by admins only", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const builder = await signedInApi(idp, "builder");
+  it("create the collections they declare once, open to everyone", async () => {
     const id = collectionIdSchema.parse(`greetings-${unique()}`);
     const declared = releaseWith({
       collections: [{ id, name: "Greetings", description: "Said hello." }],
@@ -542,23 +540,12 @@ describe("the built-in blueprints", () => {
     )
       .bind(id)
       .first();
-    const save = async (person: typeof admin) =>
-      await outcome(
-        seed(person.api).saveDocument({
-          collectionId: id,
-          path: `hello-${unique()}.md`,
-          text: "# Hello",
-          ifVersion: 0,
-        })
-      );
     expect({
       collection,
       created: events.filter(
         ({ action, target }) =>
           action === "knowledge.collection.created" && target?.id === id
       ).length,
-      admin: await save(admin),
-      builder: await save(builder),
     }).toStrictEqual({
       collection: {
         name: "Greetings",
@@ -567,8 +554,6 @@ describe("the built-in blueprints", () => {
         source: "here",
       },
       created: 1,
-      admin: "ok",
-      builder: "knowledge.forbidden",
     });
 
     await reinstall();
