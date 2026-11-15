@@ -186,8 +186,11 @@ const entitiesRead = async (
                 ? brainTeamVersionRead(version)
                 : brainCompanyVersionRead(version)
             ),
+            // Handed over by id alone: never told erased (history-access.ts).
             ...words.map((memory) =>
-              ownChat ? brainMemoryRead(memory) : brainCompanyMemoryRead(memory)
+              ownChat
+                ? brainMemoryRead({ ...memory, basis: null })
+                : brainCompanyMemoryRead({ ...memory, basis: null })
             ),
           ]);
         },
