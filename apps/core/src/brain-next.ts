@@ -11,6 +11,7 @@ import {
   fitsSourceText,
   isSourceText,
   erasedSource,
+  removedSource,
   changeReused,
   listPageMax,
   erasureReasons,
@@ -811,6 +812,7 @@ const readerOf = async (
  * a producer checks that whoever asks for the change may change that
  * source before it calls this; the Brain can't tell. Refused with a
  * code: `brain.source_erased` when an erasure closed what it adds,
+ * `brain.source_removed` when its source was removed (`removeSource`),
  * `brain.source_no_text` for a text of whitespace alone and
  * `brain.source_too_large` past a source's bound (`sourceTextProblem`),
  * each final, never to be retried; and `brain.source_change_taken` when
@@ -913,6 +915,9 @@ export const addSource = async (
     }
     if (error instanceof Error && error.message === changeTaken) {
       throw brainSourceErrors.create("brain.source_change_taken");
+    }
+    if (error instanceof Error && error.message === removedSource) {
+      throw brainSourceErrors.create("brain.source_removed");
     }
     throw error;
   }
@@ -1606,6 +1611,32 @@ export const eraseSource = async (
     return;
   }
   await brain(env).eraseSource(request);
+};
+
+const sourceRemovalSchema = z.strictObject({
+  source: sourceRefSchema,
+  readers: sourceReadersSchema,
+});
+
+/**
+ * Takes `source` out of use for good and keeps its history (the Brain's
+ * `removeSource`): from when it returns, nothing of it is found, listed
+ * or read by anyone, what was drawn from it included, and nothing new is
+ * drawn from it; its key is closed, so an add to it is refused
+ * (`brain.source_removed`), and nothing puts it back in use. An export
+ * holds it removed. `eraseSource` still erases it for good. `readers`
+ * are the source's, as its producer adds it: the store they name holds
+ * it. For core's server code only, once whoever asks may remove it. Safe
+ * to repeat, and answers alike whatever there was.
+ */
+export const removeSource = async (
+  env: BrainEnv,
+  removed: { source: SourceRef; readers: SourceReaders }
+): Promise<void> => {
+  const { source, readers } = checked(sourceRemovalSchema, removed);
+  const store =
+    readers.kind === "owner" ? ownBrain(env, readers.personId) : brain(env);
+  await store.removeSource({ source: sourceKeyOf(source) });
 };
 
 const ownGroupErasureSchema = z.strictObject({

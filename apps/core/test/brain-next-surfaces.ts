@@ -2282,6 +2282,83 @@ export const coreProbes = {
       }),
     ];
   },
+  // Removal has no reader either, as erasure hasn't: it answers alike
+  // whether there was anything to remove, and holds no marker. Each probe
+  // removes marked content of its own (someone else's), never the planted
+  // sources later passes read.
+  removeSource: async ({ markers }) => {
+    const remove = async (
+      name: string,
+      removed: unknown,
+      about?: Answer["about"]
+    ) =>
+      await answer(
+        name,
+        async () => {
+          await coreBrain.removeSource(env, unchecked(removed));
+        },
+        about
+      );
+    const shared: SourceReaders = { kind: "everyone" };
+    const own: SourceReaders = { kind: "owner", personId: stranger() };
+    const markedShared = missingSource();
+    const markedOwn = missingSource();
+    await coreBrain.addSource(env, {
+      source: markedShared,
+      change: crypto.randomUUID(),
+      text: markedText(markers),
+      readers: shared,
+    });
+    await coreBrain.addSource(env, {
+      source: markedOwn,
+      change: crypto.randomUUID(),
+      text: markedText(markers),
+      readers: own,
+    });
+    return [
+      await remove(
+        "a source no one added",
+        { source: missingSource(), readers: shared },
+        "nothing"
+      ),
+      await remove(
+        "a marked source everyone reads",
+        { source: markedShared, readers: shared },
+        "hidden"
+      ),
+      await remove(
+        "the same removal again",
+        { source: markedShared, readers: shared },
+        "hidden"
+      ),
+      await remove(
+        "someone else's marked source, in their own store",
+        { source: markedOwn, readers: own },
+        "hidden"
+      ),
+      await answer("an add to the removed source", async () => {
+        await coreBrain.addSource(env, {
+          source: markedShared,
+          change: crypto.randomUUID(),
+          text: markedText(markers),
+          readers: shared,
+        });
+      }),
+      await remove("an unknown producer named by the markers", {
+        source: { producer: markers.join(""), id: crypto.randomUUID() },
+        readers: shared,
+      }),
+      await remove("readers named by the markers", {
+        source: missingSource(),
+        readers: { kind: "owner", personId: markers.join("\n") },
+      }),
+      await remove("an unknown field", {
+        source: missingSource(),
+        readers: shared,
+        extra: markers.join(" "),
+      }),
+    ];
+  },
   // A group of one person's own store (GRA-1827: a disconnected
   // connection's captures), erased there alone. Its caller acts for that
   // person, so it answers how many of their sources it erased: a count,
@@ -7458,6 +7535,44 @@ export const storeProbes = {
       await erase("an unknown field", {
         source: keyOf(missingSource()),
         reason: "deleted",
+        extra: markers.join(" "),
+      }),
+    ];
+  },
+  // As core's (above), through the contract itself.
+  removeSource: async ({ markers }) => {
+    const remove = async (
+      name: string,
+      request: unknown,
+      about?: Answer["about"]
+    ) =>
+      await answer(
+        name,
+        async () => {
+          await store().removeSource(unchecked(request));
+        },
+        about
+      );
+    const marked = keyOf(missingSource());
+    await store().addSource({
+      source: marked,
+      change: crypto.randomUUID(),
+      text: markedText(markers),
+      access: { kind: "audience", group: "company" },
+    });
+    return [
+      await remove(
+        "a source no one added",
+        { source: keyOf(missingSource()) },
+        "nothing"
+      ),
+      await remove("a marked source", { source: marked }, "hidden"),
+      await remove("the same removal again", { source: marked }, "hidden"),
+      await remove("a source named by the markers, too long", {
+        source: markers.join("").repeat(300),
+      }),
+      await remove("an unknown field", {
+        source: keyOf(missingSource()),
         extra: markers.join(" "),
       }),
     ];
