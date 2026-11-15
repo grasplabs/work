@@ -35,6 +35,8 @@ import {
   eraseSource,
   erasePerson,
   listVersionsAs,
+  memoriesAs,
+  readableMemoriesAs,
   readSourceVersionAs,
   recallAs,
   rememberAs,
@@ -2347,6 +2349,81 @@ describe(
         promptCount: 3,
         mixed: [],
         findings: [],
+      });
+    });
+
+    it("gives a reader of a memory alone that memory current when its restatement lands for a team they aren't in, and a reader of both one current (GRA-1752)", async () => {
+      const [{ userId: holder }, { userId: outsider }] = await Promise.all([
+        signedInWithRole(idp, "user"),
+        signedInWithRole(idp, "user"),
+      ]);
+      // The outsider and the holder share a team; the holder alone is in
+      // the other.
+      const sharedTeam = await newTeam(outsider, holder);
+      const holdersTeam = await newTeam(holder);
+      const name = `Merge${unique().replaceAll("-", "").slice(0, 10)}`;
+      const said = {
+        about: "c",
+        type: "fact" as const,
+        statement: `${name} works from Delft.`,
+        speaker: { kind: "system" as const },
+        basis: { kind: "writer" as const, writer: holder },
+      };
+      const earlier = await brainStore().addMemories({
+        change: crypto.randomUUID(),
+        access: { kind: "audience", group: `team:${sharedTeam}` },
+        entities: [{ key: "c", kind: "customer", names: [`${name} Group`] }],
+        memories: [said],
+      });
+      const entity = earlier.entities.c ?? "";
+      // The same fact said again by the same writer, for the holder's team.
+      const later = await brainStore().addMemories({
+        change: crypto.randomUUID(),
+        access: { kind: "audience", group: `team:${holdersTeam}` },
+        reader: {
+          person: holder,
+          groups: [`team:${sharedTeam}`, `team:${holdersTeam}`],
+        },
+        entities: [{ key: "c", id: entity, kind: "customer", names: [] }],
+        memories: [said],
+      });
+      const ids = [...earlier.memories, ...later.memories];
+      /** What `personId` reads of the two through core: each one's state, and which they may read. */
+      const readBy = async (personId: string) => {
+        const page = await memoriesAs(env, personId, {
+          entity: { store: "shared", id: entity },
+        });
+        const readable = await readableMemoriesAs(
+          env,
+          personId,
+          ids.map((memory) => ({ store: "shared", memory }))
+        );
+        return ids.map((id) => {
+          const read = page.memories.find((memory) => memory.id === id);
+          let state = "unread";
+          if (read !== undefined) {
+            state = read.endedAt === null ? "current" : "ended";
+          }
+          return {
+            state,
+            readable: readable.some(({ memory }) => memory === id),
+          };
+        });
+      };
+
+      expect({
+        outsider: await readBy(outsider),
+        holder: await readBy(holder),
+      }).toStrictEqual({
+        // As in a store without the restatement: the earlier, current.
+        outsider: [
+          { state: "current", readable: true },
+          { state: "unread", readable: false },
+        ],
+        holder: [
+          { state: "ended", readable: true },
+          { state: "current", readable: true },
+        ],
       });
     });
 

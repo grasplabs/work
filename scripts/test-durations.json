@@ -38,6 +38,7 @@
   "@grasp-os/brain-next test/recall-cost.test.ts": 0.4,
   "@grasp-os/brain-next test/recall-counts.test.ts": 0.6,
   "@grasp-os/brain-next test/recall-memories.test.ts": 1,
+  "@grasp-os/brain-next test/restatements.test.ts": 2.2,
   "@grasp-os/brain-next test/retire-change.test.ts": 0.3,
   "@grasp-os/brain-next test/skills.test.ts": 0,
   "@grasp-os/brain-next test/when.test.ts": 0.1,
