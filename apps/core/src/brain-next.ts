@@ -58,6 +58,7 @@ import type {
   ContestedCursor,
   Entity,
   EntitiesCursor,
+  ErasedMemory,
   ErasureReason,
   Embedders,
   EntityKind,
@@ -1259,7 +1260,7 @@ const placeOf = ({ source, version, position }: RecalledItem): string =>
   JSON.stringify([sourceKeyOf(source), version, position]);
 
 /** A memory, by its store and id, as one string. */
-const memoryKeyOf = ({ store, memory }: StoredMemoryPlace): string =>
+export const memoryKeyOf = ({ store, memory }: StoredMemoryPlace): string =>
   JSON.stringify([store, memory]);
 
 /** A passage of a pack as the Brain counts it (`packItemTokens`). */
@@ -2515,6 +2516,143 @@ export const readableMemoriesAs = async (
     seen.add(key);
     return true;
   });
+};
+
+/**
+ * What a memory rests on, as a chat pinned it when a recall handed it
+ * over: the source it was drawn from, its writer, and when the store
+ * learned it (ms). What the erasure ledger names, so an erasure of it is
+ * told by them alone (`erasedForGoodAs`), never by whether the store
+ * holds the memory now.
+ */
+export interface MemoryBasis {
+  source: SourceRef | null;
+  writer: string | null;
+  learnedAt: number;
+}
+
+/** A memory a chat was handed, with what it rests on (`MemoryBasis`). */
+export interface PinnedMemory extends StoredMemoryPlace {
+  basis: MemoryBasis;
+}
+
+const pinnedMemoriesSchema = z.array(
+  z.strictObject({
+    store: memoryStoreSchema,
+    memory: memoryIdSchema,
+    basis: z.strictObject({
+      source: sourceRefSchema.nullable(),
+      writer: z.string().min(1).nullable(),
+      learnedAt: z.int().nonnegative(),
+    }),
+  })
+);
+
+/**
+ * Of `keys` and `memories`, those an erasure took for good in `store`
+ * (`erasedOf`): one call for as many of both as a check takes, one more
+ * for each part past that (`checkedInParts`).
+ */
+const erasedIn = async (
+  store: Brain,
+  keys: readonly string[],
+  memories: readonly ErasedMemory[]
+): Promise<{ sources: string[]; memories: string[] }> => {
+  const asked: ({ source: string } | { memory: ErasedMemory })[] = [
+    ...keys.map((source) => ({ source })),
+    ...memories.map((memory) => ({ memory })),
+  ];
+  const erased = await checkedInParts(asked, async (part) => {
+    const answer = await store.erasedOf({
+      sources: part.flatMap((item) => ("source" in item ? [item.source] : [])),
+      memories: part.flatMap((item) => ("memory" in item ? [item.memory] : [])),
+    });
+    return [
+      ...answer.sources.map((source) => ({ source })),
+      ...answer.memories.map((memory) => ({ memory })),
+    ];
+  });
+  return {
+    sources: erased.flatMap((item) => ("source" in item ? [item.source] : [])),
+    memories: erased.flatMap((item) => ("memory" in item ? [item.memory] : [])),
+  };
+};
+
+const sourceRefsSchema = z.array(sourceRefSchema);
+
+/**
+ * Of `sources` and `memories` a chat of the member `personId`'s once
+ * read, those an erasure took for good, as the erasure ledger says it
+ * (`erasedOf`), whoever may read them now, in the order given: for core
+ * to replace what the chat shows of them (history-access.ts
+ * `erasedSources`). Never one whose readers only changed, a retired
+ * memory, an older version, nor a memory a lost storage lacks: the chat
+ * keeps showing those. Sources and the shared memories are asked of the
+ * shared store, whose ledger an erasure from a person's own store closes
+ * too, in one call; then, in one more, their own store: the sources it
+ * didn't call erased (a key under an erased group of theirs: a deleted
+ * chat's turns) and the memories of their own. Refused once they are no
+ * longer a member, as their own store is named for them alone. Throws
+ * what a store throws (one restoring an export refuses): the caller then
+ * shows none of what it would replace. For the server only, as
+ * `addSource`.
+ */
+export const erasedForGoodAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  {
+    sources,
+    memories,
+  }: {
+    sources: readonly SourceRef[];
+    memories: readonly PinnedMemory[];
+  }
+): Promise<{ sources: SourceRef[]; memories: StoredMemoryPlace[] }> => {
+  const refs = checked(sourceRefsSchema, sources);
+  const pins = checked(pinnedMemoriesSchema, memories);
+  if (refs.length === 0 && pins.length === 0) {
+    return { sources: [], memories: [] };
+  }
+  const own = ownBrainOf(env, await readerOf(env, personId, "person"));
+  if (own === undefined) {
+    throw new Error("A member reads as a person");
+  }
+  const keys = [...new Set(refs.map((ref) => sourceKeyOf(ref)))];
+  const askedIn = (store: MemoryStore): ErasedMemory[] =>
+    pins.flatMap(({ store: kind, memory, basis }) =>
+      kind === store
+        ? [
+            {
+              memory,
+              source: basis.source === null ? null : sourceKeyOf(basis.source),
+              writer: basis.writer,
+              learnedAt: basis.learnedAt,
+            },
+          ]
+        : []
+    );
+  const shared = await erasedIn(brain(env), keys, askedIn("shared"));
+  const closed = new Set(shared.sources);
+  const inOwn = await erasedIn(
+    own,
+    keys.filter((key) => !closed.has(key)),
+    askedIn("own")
+  );
+  for (const key of inOwn.sources) {
+    closed.add(key);
+  }
+  const gone = new Set([
+    ...shared.memories.map((memory) =>
+      memoryKeyOf({ store: "shared", memory })
+    ),
+    ...inOwn.memories.map((memory) => memoryKeyOf({ store: "own", memory })),
+  ]);
+  return {
+    sources: refs.filter((ref) => closed.has(sourceKeyOf(ref))),
+    memories: pins.flatMap(({ store, memory }) =>
+      gone.has(memoryKeyOf({ store, memory })) ? [{ store, memory }] : []
+    ),
+  };
 };
 
 /** Who may read Grasp's skills: every current member. */
