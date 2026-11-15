@@ -22,7 +22,6 @@ import {
   permissions,
 } from "./db/core/schema.ts";
 import { appPreview } from "./durable-objects.ts";
-import { forgetAppEntry } from "./knowledge/apps-collection.ts";
 import { withdrawnWith } from "./packages/approvals.ts";
 import { requireNotStaff } from "./sharing.ts";
 import {
@@ -179,13 +178,8 @@ const endedWith = (
   ] as const;
 };
 
-/**
- * What follows a removal, best effort: its entry, its held actions, its
- * preview.
- */
+/** What follows a removal, best effort: its held actions, its preview. */
 const afterRemoval = async (env: Env, appId: AppId): Promise<void> => {
-  // Its Apps-collection entry: its name, description and AGENTS.md go.
-  await forgetAppEntry(env, appId);
   // Its preview's test data, which nobody builds any more, and what the
   // preview kept (app-preview.ts).
   try {

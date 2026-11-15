@@ -118,7 +118,6 @@ export const rpcParamNames: ParamNames = {
     "redactGapAnswer": ["gapId"],
     "saveTeamGroups": ["groups"],
     "thinking": [],
-    "transcript": ["sourceId"],
     "work": ["id"],
   },
   "BrainSourcesRpc": {
@@ -266,7 +265,6 @@ export const rpcParamNames: ParamNames = {
   },
   "KnowledgeRpc": {
     "backlinks": ["documentId","options"],
-    "brainExportStatus": ["exportId"],
     "catalog": [],
     "copySkill": ["input"],
     "createCollection": ["input"],
@@ -289,7 +287,6 @@ export const rpcParamNames: ParamNames = {
     "memoriesProposeChange": ["input","options"],
     "memoriesPublish": ["input","options"],
     "memoriesRetire": ["input","options"],
-    "prepareBrainExport": [],
     "preparePurge": ["input"],
     "purge": ["input","token","options"],
     "purgeStatus": ["purgeId"],
@@ -298,17 +295,11 @@ export const rpcParamNames: ParamNames = {
     "receiptsGet": ["input"],
     "relations": ["input"],
     "relationsExplain": ["input"],
-    "remember": ["input","options"],
     "restoreVersion": ["input"],
     "saveDocument": ["input"],
     "search": ["query","options"],
     "sharedChats": [],
     "skillCollections": [],
-    "startBrainExport": ["token"],
-  },
-  "KnowledgeSignalsRpc": {
-    "dismiss": ["signalId"],
-    "list": [],
   },
   "MembersRpc": {
     "erase": ["userId","name"],
@@ -467,10 +458,6 @@ export const rpcParamNames: ParamNames = {
     "list": ["before"],
     "listAll": ["before"],
     "resolve": ["key","choice","claim"],
-  },
-  "UploadsRpc": {
-    "get": ["uploadId"],
-    "upload": ["input"],
   },
   "VersionsRpc": {
     "diff": ["subject","from","to"],

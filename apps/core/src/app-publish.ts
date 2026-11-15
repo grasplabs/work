@@ -26,7 +26,6 @@ import {
 } from "./apps.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { appVersions } from "./db/core/schema.ts";
-import { indexAppNow } from "./knowledge/apps-collection.ts";
 import { requireMigrationEvidence } from "./migration-run.ts";
 import type { PublishSteps } from "./publish.ts";
 
@@ -209,10 +208,7 @@ const problemsOf = (check: DraftCheck): DraftProblem[] => [
  * a chat's agent's turn checks it (`checkFiles`, with what the App's
  * preview of it ran into), committed as it was checked as the App's next
  * version (`commitDraft`), built, sealed and tested (`buildRelease`), and
- * made live (`activateVersion`), then indexed into the Apps collection
- * (knowledge/apps-collection.ts): its entry holds the live version once
- * this returns, unless indexing failed or raced another; the clock then
- * heals it within 15 minutes. A version committed whose build fails is
+ * made live (`activateVersion`). A version committed whose build fails is
  * marked `failed` and never live, with no label; the draft keeps its
  * changes over its base.
  */
@@ -262,7 +258,6 @@ export const appSteps: PublishSteps = {
       action,
       alongside
     );
-    await indexAppNow(env, app);
     if (live.liveLabel === null) {
       throw new Error("A live App version has no label.");
     }

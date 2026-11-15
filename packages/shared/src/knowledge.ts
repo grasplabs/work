@@ -22,7 +22,6 @@ import type {
   RelationsExplanation,
   RelationsGetInput,
   RecallInput,
-  RememberInput,
   LessonLineage,
   LessonSummary,
 } from "@grasp-os/brain/contract";
@@ -41,7 +40,6 @@ import type {
   PurgePlan,
   PurgeResult,
   PurgeStatus,
-  ExportStatus,
   ReadOptions,
   RestoreInput,
   SaveInput,
@@ -361,16 +359,7 @@ export interface KnowledgeApi {
   relationsExplain: (
     input: RelationsExplainInput
   ) => Promise<RelationsExplanation>;
-  /**
-   * Asks the Brain to remember something of the person's own (brain-api.ts):
-   * retry with the same key after a lost reply. Admitted, it is kept as a
-   * proposed record; refused by admission, only its receipt is kept.
-   */
-  remember: (
-    input: RememberInput,
-    options: CommandOptions
-  ) => Promise<CommandReceipt>;
-  /** A remember's receipt, recovered after a lost reply. */
+  /** A command's receipt, recovered after a lost reply. */
   receiptsGet: (input: ReceiptsGetInput) => Promise<CommandReceipt>;
   /** One of the person's own Brain memory records. */
   memoriesGet: (input: MemoriesGetInput) => Promise<MemoryRecord>;
@@ -498,24 +487,6 @@ export interface KnowledgeApi {
    * Audited.
    */
   finishPurge: (purgeId: string) => Promise<PurgeStatus>;
-  /**
-   * What an export of the company's Brain would hold, with a token to
-   * confirm it with (GRA-1192): admins only, never staff. Audited.
-   */
-  prepareBrainExport: () => Promise<{
-    collections: number;
-    documents: number;
-    token: string;
-    expiresAt: string;
-  }>;
-  /**
-   * Begins the export `prepareBrainExport` returned `token` for: its files
-   * are written by core's clock, and downloaded by this admin for a day
-   * (`/api/brain/export?id=…&file=…`).
-   */
-  startBrainExport: (token: string) => Promise<{ exportId: string }>;
-  /** Where export `exportId` stands, and its files once complete. */
-  brainExportStatus: (exportId: string) => Promise<ExportStatus>;
 }
 
 /**
@@ -619,7 +590,6 @@ export type {
   PurgeReason,
   PurgeResult,
   PurgeStatus,
-  ExportStatus,
   ReadOptions,
   RestoreInput,
   SaveInput,
