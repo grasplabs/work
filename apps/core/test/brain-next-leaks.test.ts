@@ -1,6 +1,7 @@
 import {
   brainOf,
   exactCandidatesMax,
+  onlyInOwnStore,
   recallBudgetMax,
 } from "@grasp-os/brain-next/contract";
 import type { Access, WorkOverview } from "@grasp-os/brain-next/contract";
@@ -1968,6 +1969,111 @@ describe(
       }).toStrictEqual(nothingGivenAway);
     });
 
+    // GRA-1822: what one person alone may read is never in the shared
+    // store, whoever calls it, so no reader of it can be given any: the
+    // store refuses it before it writes anything, in words naming no one.
+    // Core, given the same, keeps it in their own store.
+    it("keeps nothing of one person's own in the shared store, whoever adds it there, and core keeps it in their own", async () => {
+      const [{ userId: holder }, { userId: mate }] = await Promise.all([
+        signedInWithRole(idp, "user"),
+        signedInWithRole(idp, "user"),
+      ]);
+      const team = `team:${await newTeam(holder, mate)}`;
+      const marker = markerWord();
+      const text = `Salary review ${marker}`;
+      const theirs: Access = { kind: "owner", person: holder };
+      const source = newSource();
+      const key = `${source.producer}:${source.id}`;
+      const file = `instructions:person:${holder}`;
+
+      const refusals = [
+        await answerOf(
+          async () =>
+            await sharedStore().addSource({
+              source: key,
+              change: "1",
+              text,
+              access: theirs,
+            })
+        ),
+        await answerOf(
+          async () =>
+            await sharedStore().addInstructions({
+              source: file,
+              change: "1",
+              text,
+              access: theirs,
+            })
+        ),
+        await answerOf(
+          async () =>
+            await sharedStore().addMemories({
+              change: crypto.randomUUID(),
+              access: theirs,
+              entities: [{ key: "c", kind: "customer", names: [marker] }],
+              memories: [
+                {
+                  about: "c",
+                  type: "fact",
+                  statement: text,
+                  speaker: { kind: "internal", person: holder },
+                  basis: { kind: "writer", writer: holder },
+                },
+              ],
+            })
+        ),
+      ];
+      await addSource(env, {
+        source,
+        change: "1",
+        text,
+        readers: { kind: "owner", personId: holder },
+      });
+      /** What the shared store gives `person`, in `team`, for the marker. */
+      const sharedGives = async (person: string) => {
+        const reader = { person, groups: [team] };
+        const { items, memories } = await sharedStore().recall({
+          question: marker,
+          reader,
+          budget: { tokens: recallBudgetMax },
+        });
+        const current = await sharedStore().readCurrent({
+          sources: [key, file],
+          reader,
+        });
+        const { entities } = await sharedStore().findEntities({
+          reader,
+          name: marker,
+        });
+        return [...items, ...memories, ...current, ...entities].length;
+      };
+      const read = async (person: string) => {
+        const version = await readSourceVersionAs(env, person, {
+          source,
+          version: 1,
+        });
+        return version?.text ?? null;
+      };
+
+      expect({
+        refusals,
+        sharedKeys: [
+          await sharedStore().keyState(key),
+          await sharedStore().keyState(file),
+        ],
+        sharedGives: {
+          holder: await sharedGives(holder),
+          mate: await sharedGives(mate),
+        },
+        read: { holder: await read(holder), mate: await read(mate) },
+      }).toStrictEqual({
+        refusals: [onlyInOwnStore, onlyInOwnStore, onlyInOwnStore],
+        sharedKeys: ["free", "free"],
+        sharedGives: { holder: 0, mate: 0 },
+        read: { holder: text, mate: null },
+      });
+    });
+
     it("gives a team-mate of the holder's nothing of the holder's own through any surface that reads", async () => {
       const world = await plantedWorld();
       const { holder, secretTeam, markers } = world;
@@ -2997,168 +3103,6 @@ describe(
           await readsOfTeamSource(shared, shared.teamMate)
         ),
       }).toStrictEqual({ findings: [], teamMate: [] });
-    });
-
-    it("answers what a person's erasure hides as erased to them while it is still under way, though its source stays current for their team", async () => {
-      // A source in the shared store first for a team, then for one
-      // person of it alone, then for the team again: as the store takes it
-      // from whoever holds its namespace (core keeps one person's own in
-      // their own store, and never changes a source's kind of readers).
-      // Their erasure, which leaves them a member (withdrawn), hides the
-      // version for them alone, and the source stays current for the
-      // team: only the erasure's own mark hides that version, until a tick
-      // deletes it. Held part-way, every read of it as the person answers
-      // as once the erasure is done, as of when that version was current
-      // too: then the version before it.
-      const { userId: person } = await signedInWithRole(idp, "user");
-      const group = `team:${await newTeam(person)}`;
-      const reader = { person, groups: [group] };
-      const sharedWord = `s${unique()}`;
-      const marker = markerWord();
-      const key = `upload:${crypto.randomUUID()}`;
-      const theirs = crypto.randomUUID();
-      const hourMs = 3_600_000;
-      const now = Date.now();
-      /** Adds `text` as the source's next version, for `access`, `hoursAgo`. */
-      const addedAgo = async (
-        hoursAgo: number,
-        text: string,
-        access: Access,
-        change = crypto.randomUUID()
-      ): Promise<void> => {
-        vi.useFakeTimers({ toFake: ["Date"] });
-        vi.setSystemTime(now - hoursAgo * hourMs);
-        try {
-          await sharedStore().addSource({ source: key, change, text, access });
-        } finally {
-          vi.useRealTimers();
-        }
-      };
-      const first = `Plan ${sharedWord} first draft`;
-      const theirsText = `Plan ${sharedWord} ${marker}`;
-      await addedAgo(3, first, { kind: "audience", group });
-      await addedAgo(2, theirsText, { kind: "owner", person }, theirs);
-      await sharedStore().addSource({
-        source: key,
-        change: crypto.randomUUID(),
-        text: `Plan ${sharedWord} final`,
-        access: { kind: "audience", group },
-      });
-      const then = new Date(now - hourMs);
-      const budget = { tokens: recallBudgetMax };
-      /** What the person reads of the source, every way the store answers. */
-      const reads = async () => {
-        const version = await sharedStore().readVersion({
-          source: key,
-          version: 2,
-          reader,
-        });
-        const listed = await sharedStore().listSources({
-          reader,
-          prefixes: [key],
-        });
-        const recalledThen = await sharedStore().recall({
-          reader,
-          question: sharedWord,
-          budget,
-          asOf: then,
-        });
-        const markerThen = await sharedStore().recall({
-          reader,
-          question: marker,
-          budget,
-          asOf: then,
-        });
-        const readable = await sharedStore().readableVersions({
-          versions: [1, 2, 3].map((each) => ({ source: key, version: each })),
-          reader,
-        });
-        const history = await sharedStore().listVersions({
-          source: key,
-          reader,
-        });
-        return {
-          version: version?.text ?? null,
-          change: await sharedStore().changeVersion({
-            source: key,
-            change: theirs,
-            reader,
-          }),
-          readable: readable.map((each) => each.version),
-          history: history.versions.map((each) => each.version),
-          listed: listed.sources.map((each) => [each.version, each.versions]),
-          recalledThen: recalledThen.items.map(({ text }) => text),
-          markerThen: textOf([
-            markerThen.items,
-            markerThen.memories,
-            markerThen.contested,
-          ]).includes(marker),
-          drawing: await answerOf(
-            async () =>
-              await sharedStore().addMemories({
-                change: crypto.randomUUID(),
-                access: { kind: "audience", group },
-                entities: [{ key: "c", kind: "customer", names: ["Plain"] }],
-                memories: [
-                  {
-                    about: "c",
-                    type: "fact",
-                    statement: "Plain",
-                    speaker: { kind: "system" },
-                    basis: {
-                      kind: "source",
-                      source: key,
-                      version: 2,
-                      quote: sharedWord,
-                    },
-                  },
-                ],
-              })
-          ),
-        };
-      };
-      const before = await reads();
-      let held = false;
-      let during;
-      await whileErasureHeld(async () => {
-        await sharedStore().erasePerson({ person, reason: "withdrawn" });
-        held = await erasureUnfinished();
-        during = await reads();
-      });
-      await workBrain(env, new Date(), noProducers);
-      const after = await reads();
-      const erased = {
-        version: null,
-        change: null,
-        readable: [1, 3],
-        history: [3, 1],
-        listed: [[3, 2]],
-        recalledThen: [expect.stringContaining(first)],
-        markerThen: false,
-        drawing:
-          "The Brain refused it: memory 0 rests on a version this store doesn't hold",
-      };
-
-      expect({
-        before: {
-          version: before.version,
-          history: before.history,
-          recalledThen: before.recalledThen,
-        },
-        held,
-        during,
-        after,
-      }).toStrictEqual({
-        // Before, they read it, and it was the version then.
-        before: {
-          version: theirsText,
-          history: [3, 2, 1],
-          recalledThen: [expect.stringContaining(theirsText)],
-        },
-        held: true,
-        during: erased,
-        after: erased,
-      });
     });
 
     it("never wakes or addresses one person's own store for another's activity, their store's own work or staff's report", async () => {

@@ -63,6 +63,17 @@ export const changeReused =
 export const storeErased = "The Brain refused it: this store was erased";
 
 /**
+ * What the shared store answers an add only one person may read (`owner`
+ * access): a source, an instruction file or memories. That is kept only
+ * in that person's own store (`personalBrainOf`), so the shared store
+ * refuses it whoever calls, before it reads or writes anything. The
+ * message alone, naming no one, so a host tells it from any other failure
+ * by comparing it whole: for a host that routes by readers, it is a bug.
+ */
+export const onlyInOwnStore =
+  "The Brain refused it: what only one person may read is kept in that person's own store";
+
+/**
  * What an add with an expected current version (`NewInstructions.after`)
  * says when the source's current version is another by the time it would
  * write: nothing is written. The caller reads the source again and decides;
@@ -740,8 +751,9 @@ export type SourceListRequest = z.infer<typeof sourceListRequestSchema>;
  * A source, as a listing names it: its current version and when that was
  * added; the opening of its text (of its first passage, at most
  * `openingMaxLength` characters), for a title; whether it is the
- * reader's alone (its current version's readers are that one person); and
- * how many of its versions the reader may read.
+ * reader's alone (listed by their own store: the shared store keeps
+ * nothing one person alone may read); and how many of its versions the
+ * reader may read.
  */
 export interface ListedSource {
   source: SourceId;

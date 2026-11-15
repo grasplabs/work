@@ -541,21 +541,17 @@ describe("exports and restores", () => {
   });
 
   describe("a company's export", { timeout: 60_000 }, () => {
-    it("holds every version a group may read, with its readers and history, and nothing one person alone, or no one known, may read (threats 4, 5)", async () => {
+    // What one person alone may read is never in the shared store, whose
+    // export this is: it refuses it (personal.test.ts).
+    it("holds every version a group may read, with its readers and history, and nothing no one known may read (threats 4, 5)", async () => {
       const teamSource = `test:${unique()}`;
       const removedSource = `test:${unique()}`;
       const nobodys = `test:${unique()}`;
-      const theirs = `test:${unique()}`;
-      const wasTeams = `test:${unique()}`;
       const instructions = `instructions:${unique()}`;
-      const person = unique();
       const group = `team:${unique()}`;
       await add(shared(), teamSource, "first words", team(group));
       await add(shared(), teamSource, "second words", team(group), "2");
       await add(shared(), nobodys, "nobody's words", { kind: "none" });
-      await add(shared(), theirs, "their own words", alone(person));
-      await add(shared(), wasTeams, "a team's words", team(group));
-      await add(shared(), wasTeams, "now theirs alone", alone(person), "2");
       // Removed (removal.ts): held by the version that was current then,
       // marked removed, as its history.
       await add(shared(), removedSource, "kept words", team(group), "1");
@@ -575,14 +571,7 @@ describe("exports and restores", () => {
       const lines = await linesOf(shared(), id);
 
       expect(
-        of(lines, [
-          teamSource,
-          removedSource,
-          nobodys,
-          theirs,
-          wasTeams,
-          instructions,
-        ])
+        of(lines, [teamSource, removedSource, nobodys, instructions])
       ).toStrictEqual(
         [
           {
@@ -727,31 +716,6 @@ describe("exports and restores", () => {
         olderFiles: await keysUnder(`exports/${older}/`),
         kept: kept?.state,
       }).toStrictEqual({ replaced: "expired", olderFiles: [], kept: "done" });
-    });
-
-    it("is made stale by a person's erasure that hid a source's history it holds (threat 6)", async () => {
-      const person = unique();
-      const group = `team:${unique()}`;
-      const source = `test:${unique()}`;
-      await add(shared(), source, "the team's first words", team(group));
-      const { id } = await shared().startExport("test");
-      await settled(shared(), id);
-      // The source narrows to the person alone, who is then erased: their
-      // erasure takes its every version, the team's first among them.
-      await add(shared(), source, "now theirs alone", alone(person), "2");
-      await shared().erasePerson({ person, reason: "person_erased" });
-      const status = await shared().exportStatus({ id });
-      const served = await shared().exportFile({
-        id,
-        file: "manifest.json",
-      });
-      await tick(shared());
-      await tick(shared());
-      expect({
-        state: status?.state,
-        served,
-        files: await keysUnder(`exports/${id}/`),
-      }).toStrictEqual({ state: "erased", served: null, files: [] });
     });
 
     it("is made stale by an erasure that lands while a part's versions are read, before the part is recorded (threat 11)", async () => {
@@ -1100,14 +1064,14 @@ describe("exports and restores", () => {
       await putBack(shared(), emptyShared);
       await shared().startRestore(id, "test");
 
-      // An add lands while the restore runs: it narrows the source.
+      // An add lands while the restore runs: it changes the source's readers.
       await expect(
         called(
           shared().addSource({
             source,
             change: "3",
             text: "narrowed",
-            access: alone(unique()),
+            access: team(`team:${unique()}`),
           })
         )
       ).rejects.toThrow("restoring an export");

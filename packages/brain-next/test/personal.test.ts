@@ -26,6 +26,7 @@ import {
   brainOf,
   erasedSource,
   fileGraceMs,
+  onlyInOwnStore,
   personalBrainOf,
   recallBudgetMax,
   vectorModelNameOf,
@@ -659,39 +660,138 @@ describe("a person's own store", () => {
     await expect(tablesOf(own())).resolves.toStrictEqual([]);
   });
 
-  it("is the only store that keeps their instruction file: the shared one refuses it, and keeps nothing of it", async () => {
+  it("is the only store that keeps what its person alone may read: the shared one refuses a source, an instruction file and memories, in words naming no one, and keeps nothing of them", async () => {
+    const source = `test:${crypto.randomUUID()}`;
     const file = `instructions:person:${person}`;
-    const adding = {
-      source: file,
-      change: "1",
-      text: "Call me by my first name",
+    const text = `Marker ${crypto.randomUUID()} of their own`;
+    const sourceAdd = { source, change: "1", text, access: theirs() };
+    const fileAdd = { ...sourceAdd, source: file };
+    const memoriesAdd = {
+      change: crypto.randomUUID(),
       access: theirs(),
+      entities: [{ key: "c", kind: "customer" as const, names: ["Acme"] }],
+      memories: [
+        {
+          about: "c",
+          type: "fact" as const,
+          statement: text,
+          speaker: { kind: "internal" as const, person },
+          basis: { kind: "writer" as const, writer: person },
+        },
+      ],
     };
 
     const inShared = await Promise.allSettled([
-      called(shared().addInstructions(adding)),
+      called(shared().addSource(sourceAdd)),
+      called(shared().addInstructions(fileAdd)),
+      called(shared().addMemories(memoriesAdd)),
     ]);
-    await own().addInstructions(adding);
-    const ownReads = await called(
-      own().readCurrent({ sources: [file], reader: readerOf(person) })
+    await own().addSource(sourceAdd);
+    await own().addInstructions(fileAdd);
+    await own().addMemories(memoriesAdd);
+    const readsOf = async (store: Store) => {
+      const current = await called(
+        store.readCurrent({ sources: [source, file], reader: me() })
+      );
+      const { items } = await called(
+        store.recall({ question: text, reader: me(), budget: whole })
+      );
+      return {
+        current: current.map((version) => version.text),
+        found: items.map((item) => item.source),
+      };
+    };
+
+    expect({
+      refused: inShared.map((outcome) =>
+        outcome.status === "rejected" ? String(outcome.reason) : "kept"
+      ),
+      sharedKeys: [
+        await called(shared().keyState(source)),
+        await called(shared().keyState(file)),
+      ],
+      shared: await readsOf(shared()),
+      own: await readsOf(own()),
+    }).toStrictEqual({
+      refused: [0, 1, 2].map(() => `Error: ${onlyInOwnStore}`),
+      sharedKeys: ["free", "free"],
+      shared: { current: [], found: [] },
+      own: { current: [text, text], found: [source] },
+    });
+    expect(onlyInOwnStore).not.toContain(person);
+  });
+
+  // A shared source never becomes one person's own in the shared store:
+  // the readers it was first added for stay, and its versions with them.
+  it("refuses, in the shared store, a version of a shared source for one person alone, and keeps the shared one current", async () => {
+    const team: Access = {
+      kind: "audience",
+      group: `team:${crypto.randomUUID()}`,
+    };
+    const teamReader: Reader = { person: null, groups: [team.group] };
+    const kept = await add(shared(), "Kept for the team", team);
+
+    const narrowed = await Promise.allSettled([
+      called(
+        shared().addSource({
+          source: kept.source,
+          change: "2",
+          text: "Now theirs alone",
+          access: theirs(),
+        })
+      ),
+    ]);
+
+    const teamReads = await called(
+      shared().readCurrent({ sources: [kept.source], reader: teamReader })
     );
 
     expect({
-      refused: inShared.map(
-        (outcome) =>
-          outcome.status === "rejected" &&
-          /kept in that person's own store/u.test(String(outcome.reason))
+      refused: narrowed.map((outcome) =>
+        outcome.status === "rejected" ? String(outcome.reason) : "kept"
       ),
-      sharedKey: await called(shared().keyState(file)),
-      sharedReads: await called(
-        shared().readCurrent({ sources: [file], reader: readerOf(person) })
+      team: teamReads.map(({ version, text }) => ({ version, text })),
+      theirs: await called(
+        shared().readCurrent({ sources: [kept.source], reader: me() })
       ),
-      ownReads: ownReads.map(({ text }) => text),
     }).toStrictEqual({
-      refused: [true],
-      sharedKey: "free",
-      sharedReads: [],
-      ownReads: ["Call me by my first name"],
+      refused: [`Error: ${onlyInOwnStore}`],
+      team: [{ version: 1, text: "Kept for the team" }],
+      theirs: [],
+    });
+  });
+
+  // Whether a listed source is its reader's alone follows from the store
+  // that listed it: their own store's are, the shared store's never.
+  it("lists its sources as its person's alone, and the shared store lists none so", async () => {
+    const team: Access = {
+      kind: "audience",
+      group: `team:${crypto.randomUUID()}`,
+    };
+    const prefix = `test:${crypto.randomUUID()}:`;
+    const addUnder = async (store: Store, access: Access) =>
+      await store.addSource({
+        source: `${prefix}${crypto.randomUUID()}`,
+        change: "1",
+        text: "Listed",
+        access,
+      });
+    const theirsKept = await addUnder(own(), theirs());
+    const teamKept = await addUnder(shared(), team);
+    const reader: Reader = { person, groups: [team.group] };
+    const listedBy = async (store: Store) => {
+      const { sources } = await called(
+        store.listSources({ reader, prefixes: [prefix] })
+      );
+      return sources.map(({ source, personal }) => ({ source, personal }));
+    };
+
+    expect({
+      own: await listedBy(own()),
+      shared: await listedBy(shared()),
+    }).toStrictEqual({
+      own: [{ source: theirsKept.source, personal: true }],
+      shared: [{ source: teamKept.source, personal: false }],
     });
   });
 
@@ -802,18 +902,35 @@ describe("a person's own store", () => {
   });
 
   // Threat 8: recall across two stores leaks nothing and loses nothing.
-  // The same content twice in the shared store: once for one reader, all
-  // of it there (one store); once for another, split between the shared
-  // store and that reader's own (two stores). Each reader's half of the
+  // The same content twice: once for one reader, all of it in the shared
+  // store (one store), its private half for a group only they are in, as
+  // the shared store keeps nothing one person alone may read; once for
+  // another, split between the shared store and that reader's own (two
+  // stores). Recall ranks a passage by its own words, never by who may
+  // read it, so the two halves rank alike. Each reader's half of the
   // shared store is hidden from the other, with more no one reads. Their
   // packs must be the same, source names aside.
   it("packs what it and the shared store find as one store holding both would", async () => {
     const random = seeded(1762);
-    const one = {
-      reader: { person: `one-${person}`, groups: [`one-${person}`] },
+    /** A reader, what they alone read here by, and their sources' prefix. */
+    interface Setup {
+      reader: Reader & { person: string };
+      alone: Access;
+      prefix: string;
+    }
+    const one: Setup = {
+      reader: {
+        person: `one-${person}`,
+        groups: [`one-${person}`, `alone-one-${person}`],
+      },
+      alone: { kind: "audience", group: `alone-one-${person}` },
       prefix: "a",
     };
-    const two = { reader: { person, groups: [`two-${person}`] }, prefix: "b" };
+    const two: Setup = {
+      reader: { person, groups: [`two-${person}`] },
+      alone: theirs(),
+      prefix: "b",
+    };
     const nobody: Access = { kind: "audience", group: `nobody-${person}` };
     const vectors = new Map<string, number[]>();
     const vectorOf = (key: string): number[] => {
@@ -833,7 +950,7 @@ describe("a person's own store", () => {
     );
     /** Adds the corpus for `setup`, its private half to `privately`. */
     const addAll = async (
-      setup: typeof one,
+      setup: Setup,
       privately: Store,
       change: string,
       only: (index: number) => boolean
@@ -842,7 +959,7 @@ describe("a person's own store", () => {
         if (only(index)) {
           const ownedHere = index % 2 === 0;
           const access: Access = ownedHere
-            ? { kind: "owner", person: setup.reader.person }
+            ? setup.alone
             : { kind: "audience", group: setup.reader.groups[0] ?? "" };
           const store = ownedHere ? privately : shared();
           const source = `${setup.prefix}:${String(index).padStart(2, "0")}`;
@@ -880,7 +997,7 @@ describe("a person's own store", () => {
             change,
             text: longTextOf(ownedHere ? 0 : 1),
             access: ownedHere
-              ? { kind: "owner", person: setup.reader.person }
+              ? setup.alone
               : { kind: "audience", group: setup.reader.groups[0] ?? "" },
           });
         })
