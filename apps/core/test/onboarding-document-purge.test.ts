@@ -1,4 +1,3 @@
-import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import type {
   InterviewFact,
   InterviewProgress,
@@ -11,7 +10,6 @@ import { speechPath } from "@grasp-os/shared/voice";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import { z } from "zod";
 
 import {
   drawingErasure,
@@ -28,6 +26,9 @@ import {
   answeringWith as answeringWithRequests,
   approveAgreed,
   holdAlarm,
+  onLink,
+  openLinkAs,
+  signedInAs,
 } from "./interview-link.ts";
 import { d1ColumnsWith, onboardingTablesWith } from "./kept-where.ts";
 import { ownCollectionOf } from "./knowledge.ts";
@@ -65,7 +66,6 @@ const idp = mockIdp();
 
 const dayMs = 24 * 60 * 60 * 1000;
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
-const sessionKey = z.object({ key: z.string().optional() });
 
 /** A word nobody else says, as one lower-case token: what must go. */
 // Letters only: a drawn part with a digit never reaches the brain (GRA-1084).
@@ -169,7 +169,7 @@ const team = async () => {
       id: ids[key],
       name: names[key][0],
       team: ids.team,
-      email: "",
+      email: `${ids[key]}@acme.test`,
       title: names[key][1],
       away: false,
     })),
@@ -187,17 +187,15 @@ const team = async () => {
 
 type Ids = Awaited<ReturnType<typeof team>>;
 
-/** Someone's link opened on a device: their secret and key. */
+/** Someone's link opened signed in as them: its secret and the session. */
 const openLink = async (person: string) => {
   const link = await onboardingStore(env).linkOf(person);
   const secret = link?.split("#")[1] ?? "";
-  const session = await routed(interviewApiPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "session", secret }),
-  });
-  const { key } = sessionKey.parse(await session.json());
-  return { secret, key: key ?? "" };
+  const { link: device } = await openLinkAs(
+    secret,
+    await signedInAs(`${person}@acme.test`)
+  );
+  return device;
 };
 
 /** A fact as agreed. */
@@ -229,10 +227,11 @@ const agree = async (
     adding: false,
     addedAt: 0,
   };
-  const response = await routed(interviewApiPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "save", ...link, version: 0, progress }),
+  const response = await onLink({
+    action: "save",
+    ...link,
+    version: 0,
+    progress,
   });
   const saved: InterviewSaved = await response.json();
   await approveAgreed(link, facts);
@@ -944,8 +943,16 @@ const writers: Writer[] = [
       await planReplies(platformElevenLabsKey, [{ release: held }]);
       const saying = routed(speechPath, {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text: told.text, language: "en", link }),
+        headers: {
+          "content-type": "application/json",
+          "sec-fetch-site": "same-origin",
+          cookie: link.cookie,
+        },
+        body: JSON.stringify({
+          text: told.text,
+          language: "en",
+          link: { secret: link.secret },
+        }),
       });
       await vi.waitFor(async () => {
         await expect(carrying(told.text)).resolves.toHaveLength(1);

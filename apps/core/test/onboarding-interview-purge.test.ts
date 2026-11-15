@@ -1,5 +1,5 @@
 import { purgedMarker } from "@grasp-os/brain/knowledge";
-import { randomToken, sha256Hex } from "@grasp-os/shared/encoding";
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import {
   factRevision,
   participationNotice,
@@ -18,6 +18,7 @@ import {
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { accountOf, openLinkAs, signedInAs } from "./interview-link.ts";
 import { signedInApi, signedInWithRole, unique } from "./sign-in.ts";
 import { sayForAdmin, sayOnLink, stillKept } from "./spoken.ts";
 
@@ -102,17 +103,15 @@ const talking = async (term: string, does = "") => {
   await store.releaseDue();
   const link = (await store.linkOf(lead)) ?? "";
   const mark = await sha256Hex(link.split("#")[1] ?? "");
-  // The device's key, as the link's session hands one out.
-  const device = randomToken();
-  const key = await sha256Hex(device);
-  await store.openLink(mark, null, key);
+  // Opened signed in as Lea, the address her link went to: her account is
+  // what the store is given for her from then on.
+  const { link: device } = await openLinkAs(
+    link.split("#")[1] ?? "",
+    await signedInAs("lea@acme.test")
+  );
+  const key = await accountOf(device);
   await store.saveInterview(mark, key, 0, progressSaying(term));
-  return {
-    mark,
-    key,
-    lead,
-    device: { secret: link.split("#")[1] ?? "", key: device },
-  };
+  return { mark, key, lead, device };
 };
 
 /** Purges `term` from the Knowledge, as an admin does, through the API. */
@@ -211,7 +210,7 @@ describe("a content purge of the interviews", () => {
         },
       });
     const erasure = interviewErasure({
-      DURABLE_OBJECT_JURISDICTION: env.DURABLE_OBJECT_JURISDICTION,
+      ...env,
       ONBOARDING: namespace(env.ONBOARDING),
     });
     await erasure.rewrite(

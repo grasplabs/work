@@ -47,6 +47,7 @@ import {
   subjectsOf,
 } from "../erased-people.ts";
 import { mayComeIn, staffMayStay } from "../onboarding/gate.ts";
+import { onboardingStore } from "../onboarding/store.ts";
 import { checkClaims } from "./claims.ts";
 import {
   devIdpOrigin,
@@ -343,6 +344,18 @@ const ensureMember = async (
   return !(await isRemoved(env, userId));
 };
 
+/** `userId`'s address, as their sign-in gave it. */
+const emailOf = async (
+  env: Env,
+  userId: string
+): Promise<string | undefined> => {
+  const [user] = await drizzle(env.DB)
+    .select({ email: users.email })
+    .from(users)
+    .where(eq(users.id, userId));
+  return user?.email;
+};
+
 /**
  * Whether the gate lets `userId` in: checked again as their session is
  * made, beside the check of their claims (`validateUserInfo`).
@@ -351,12 +364,29 @@ const gateLetsIn = async (
   env: Env,
   config: SignInConfig,
   userId: string
+): Promise<boolean> => await mayComeIn(env, config, await emailOf(env, userId));
+
+/**
+ * Whether `email`, verified by the company's sign-in, opens someone's
+ * interview link while the gate is closed (GRA-1790, the store's
+ * `interviewInvites`). Fails closed: an onboarding that can't be asked
+ * lets nobody in for an interview.
+ */
+const interviewInvites = async (
+  env: Env,
+  email: string | undefined
 ): Promise<boolean> => {
-  const [user] = await drizzle(env.DB)
-    .select({ email: users.email })
-    .from(users)
-    .where(eq(users.id, userId));
-  return await mayComeIn(env, config, user?.email);
+  if (email === undefined) {
+    return false;
+  }
+  try {
+    return await onboardingStore(env).interviewInvites(email);
+  } catch (error) {
+    log.error("auth.interview_check_failed", {
+      error: error instanceof Error ? error.name : "unknown",
+    });
+    return false;
+  }
 };
 
 /**
@@ -552,24 +582,33 @@ const startSession = async <T extends { expiresAt: Date; userId: string }>(
     providerId === providerIds.entra
       ? await adoptDirectoryMember(env, session.userId)
       : session.userId;
-  if (
-    !(
-      fromClient &&
-      (await gateLetsIn(env, config, userId)) &&
-      (await ensureMember(env, config, userId))
-    )
-  ) {
-    // Sessions come only from an SSO callback, for members.
+  if (!fromClient) {
+    // Sessions come only from an SSO callback.
     return false;
   }
-  return {
-    data: {
-      ...session,
-      userId,
-      staff: false,
-      activeOrganizationId: organizationId,
-    },
-  };
+  if (await gateLetsIn(env, config, userId)) {
+    // For members.
+    return (await ensureMember(env, config, userId))
+      ? {
+          data: {
+            ...session,
+            userId,
+            staff: false,
+            interview: false,
+            activeOrganizationId: organizationId,
+          },
+        }
+      : false;
+  }
+  // The gate is closed to them: a session for their own interview alone,
+  // if a link of one went to their address (GRA-1790). They join nothing:
+  // no membership is made, and the session reaches no route but the
+  // interview's (identity.ts `sessionIdentity`, the `/organization/` hook).
+  // Nobody an admin removed comes in for one either.
+  return (await interviewInvites(env, await emailOf(env, userId))) &&
+    !(await isRemoved(env, userId))
+    ? { data: { ...session, userId, staff: false, interview: true } }
+    : false;
 };
 
 const idTokenClaimsSchema = z.looseObject({ oid: z.string().optional() });
@@ -695,6 +734,7 @@ const createAuth = (
       disableSessionRefresh: true,
       additionalFields: {
         staff: { type: "boolean", defaultValue: false, input: false },
+        interview: { type: "boolean", defaultValue: false, input: false },
       },
     },
     // Never link an IdP account to an existing user by email.
@@ -739,11 +779,13 @@ const createAuth = (
               )
             : "method_not_allowed";
         // While the company is onboarding, only its admins come in through
-        // its IdP, before any user or membership is made (onboarding/gate.ts).
+        // its IdP, and those an interview link went to, for their interview
+        // alone, before any user or membership is made (onboarding/gate.ts).
         if (
           refusal === undefined &&
           provider !== providerIds.staff &&
-          !(await mayComeIn(env, config, user.email))
+          !(await mayComeIn(env, config, user.email)) &&
+          !(await interviewInvites(env, user.email))
         ) {
           refusal = "not_open_yet";
         }
@@ -802,8 +844,12 @@ const createAuth = (
             }
             // The gate again, now the session is stored: one the gate
             // closed on after `startSession` looked is gone either way, by
-            // this or by the close, which ends every stored session.
-            if (!(await gateLetsIn(env, config, session.userId))) {
+            // this or by the close, which ends every stored session; and an
+            // interview's that the gate opened on is gone, by this or by the
+            // opening, which ends every interview's session, so they sign
+            // in again as a member.
+            const open = await gateLetsIn(env, config, session.userId);
+            if (session.interview === true ? open : !open) {
               await drizzle(env.DB)
                 .delete(sessions)
                 .where(eq(sessions.id, session.id));
@@ -819,8 +865,14 @@ const createAuth = (
         }
         // A removed person's membership row may outlive the removal if
         // deleting it failed; the organization plugin would still trust it.
+        // An interview's session reaches nothing of the organization, though
+        // the directory may have made them a member already (GRA-1790).
         const caller = await getSessionFromCtx(context);
-        if (caller && (await isRemoved(env, caller.user.id))) {
+        if (
+          caller &&
+          (caller.session.interview === true ||
+            (await isRemoved(env, caller.user.id)))
+        ) {
           throw new APIError("FORBIDDEN", { message: "Not a member." });
         }
       }),

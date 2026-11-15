@@ -1,5 +1,4 @@
 import { randomToken, toBase64 } from "@grasp-os/shared/encoding";
-import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import type { Roster } from "@grasp-os/shared/onboarding";
 import { transcriptionPath } from "@grasp-os/shared/voice";
 import type { TranscriptionStart } from "@grasp-os/shared/voice";
@@ -13,7 +12,13 @@ import type { RealtimeSocket } from "./ai-providers-fake.ts";
 import { allEvents, logHead, eventsAfter } from "./audit-events.ts";
 import { platformOpenAiKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
-import { onLink, participate } from "./interview-link.ts";
+import {
+  onLink,
+  openLinkAs,
+  participate,
+  signedInAs,
+} from "./interview-link.ts";
+import type { Device } from "./interview-link.ts";
 import { spentMicros } from "./model-usage.ts";
 import { closeWhenTestEnds } from "./open-sockets.ts";
 import {
@@ -56,7 +61,6 @@ const dayMs = 24 * 60 * 60 * 1000;
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
 /** What a session answers, as far as these tests read it: the device's key. */
-const sessionKey = z.object({ key: z.string().optional() });
 
 /** The realtime sockets OpenAI's fake took while `run` ran, as they are now. */
 interface Upstream {
@@ -120,7 +124,7 @@ const openedTwo = async (participating = true) => {
       id,
       name: `Person ${id}`,
       team: "ops",
-      email: "",
+      email: `${id}@acme.test`,
       title: "",
       away: false,
     })),
@@ -138,13 +142,10 @@ const openedTwo = async (participating = true) => {
     ids.map(async (person) => {
       const link = await store.linkOf(person);
       const secret = link?.split("#")[1] ?? "";
-      const session = await routed(interviewApiPath, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "session", secret }),
-      });
-      const { key } = sessionKey.parse(await session.json());
-      const device = { secret, key: key ?? "" };
+      const { link: device } = await openLinkAs(
+        secret,
+        await signedInAs(`${person}@acme.test`)
+      );
       if (participating) {
         await participate(device);
       }
@@ -206,8 +207,23 @@ const listen = async (headers: Record<string, string> = {}) => {
   return {
     socket,
     closed: closed.promise,
-    start: (start: TranscriptionStart | Record<string, unknown>) => {
-      socket.send(JSON.stringify(start));
+    /**
+     * Sends the first frame: a link in it is its secret alone, as the page
+     * sends it; its session went with the upgrade (`listen`'s cookie).
+     */
+    start: ({
+      link,
+      ...start
+    }: (TranscriptionStart | Record<string, unknown>) & {
+      link?: { secret: string };
+    }) => {
+      socket.send(
+        JSON.stringify(
+          link === undefined
+            ? start
+            : { ...start, link: { secret: link.secret } }
+        )
+      );
     },
     /** The next message core sent; `undefined` once it closed with none left. */
     next: async (): Promise<Message | undefined> => {
@@ -247,7 +263,7 @@ const refusalOf = async (page: Awaited<ReturnType<typeof listen>>) => {
 const twoSeconds = (): Uint8Array => new Uint8Array(32_000).fill(7);
 
 /** A start on `link`, its audio at 8 kHz. */
-const slowStart = (link: { secret: string; key: string }) =>
+const slowStart = (link: Device) =>
   ({ type: "start", language: "en", sampleRate: 8000, link }) as const;
 
 /** What `seconds` heard cost, in micros: $0.60 an hour. */
@@ -329,7 +345,7 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
     const before = await heardCounted("interviews");
 
     const { upstream, result } = await relaying(async () => {
-      const page = await listen();
+      const page = await listen({ cookie: ada.cookie });
       page.start({
         type: "start",
         language: "nl",
@@ -414,7 +430,7 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
     const { ada } = await openedTwo();
 
     const { upstream, result } = await relaying(async () => {
-      const page = await listen();
+      const page = await listen({ cookie: ada.cookie });
       page.start({
         type: "start",
         language: "en",
@@ -450,7 +466,7 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
     const { ada } = await openedTwo();
 
     const { result } = await relaying(async () => {
-      const page = await listen();
+      const page = await listen({ cookie: ada.cookie });
       page.start({
         type: "start",
         language: "en",
@@ -493,7 +509,12 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
 
   it.each([
     ["a link that isn't one", "unknown", "interview.link_invalid"],
-    ["another person's link, on this device", "other", "interview.elsewhere"],
+    [
+      "another person's link, signed in as this one",
+      "other",
+      "interview.link_invalid",
+    ],
+    ["a link, signed in as nobody", "signedOut", "interview.sign_in"],
     [
       "a link whose person didn't agree to take part",
       "unagreed",
@@ -511,6 +532,8 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
       if (kind === "user") {
         const member = await signedInWithRole(idp, "user");
         headers.cookie = member.session;
+      } else if (kind !== "none" && kind !== "signedOut") {
+        headers.cookie = ada.cookie;
       }
 
       const { upstream, result } = await relaying(async () => {
@@ -526,8 +549,9 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
           });
         } else {
           const link = {
-            unknown: { secret: randomToken(), key: ada.key },
-            other: { secret: bo.secret, key: ada.key },
+            unknown: { secret: randomToken() },
+            other: { secret: bo.secret },
+            signedOut: ada,
             unagreed: ada,
             none: undefined,
             user: undefined,
@@ -580,7 +604,7 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
     const { ada } = await openedTwo();
 
     const { result } = await relaying(async () => {
-      const page = await listen();
+      const page = await listen({ cookie: ada.cookie });
       page.start({
         type: "start",
         language: "en",
@@ -621,7 +645,10 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
     const { result } = await relaying(async () => {
       // A day's hour on the link: four sockets of fifteen minutes.
       const pages = await Promise.all(
-        Array.from({ length: 4 }, async () => await listen())
+        Array.from(
+          { length: 4 },
+          async () => await listen({ cookie: ada.cookie })
+        )
       );
       for (const page of pages) {
         page.start(start);
@@ -629,7 +656,7 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
       const ready = await Promise.all(
         pages.map(async (page) => await page.next())
       );
-      const fifth = await listen();
+      const fifth = await listen({ cookie: ada.cookie });
       fifth.start(start);
       const spent = await refusalOf(fifth);
       // One socket hears a tenth of a second and leaves: the rest is back.
@@ -639,7 +666,7 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
       first?.socket.close(1000, "Done");
       await first?.ended();
       const again = await vi.waitFor(async () => {
-        const page = await listen();
+        const page = await listen({ cookie: ada.cookie });
         page.start(start);
         const message = await page.next();
         if (message?.type !== "ready") {
@@ -678,9 +705,9 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
       const by = { type: "system" } as const;
 
       const { result } = await relaying(async () => {
-        const page = await listen(
-          admin === undefined ? {} : { cookie: admin.session }
-        );
+        const page = await listen({
+          cookie: admin === undefined ? ada.cookie : admin.session,
+        });
         page.start({
           type: "start",
           language: "en",
@@ -776,7 +803,10 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
       const starts: {
         link?: typeof ada;
         headers: Record<string, string>;
-      }[] = [{ link: ada, headers: {} }, { headers: { cookie: session } }];
+      }[] = [
+        { link: ada, headers: { cookie: ada.cookie } },
+        { headers: { cookie: session } },
+      ];
       for (const start of starts) {
         // oxlint-disable-next-line no-await-in-loop -- one session after another
         const page = await listen(start.headers);
@@ -827,11 +857,11 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
     const before = await heardCounted("interviews");
     const { upstream, result } = await relaying(
       async () => {
-        const first = await listen();
+        const first = await listen({ cookie: ada.cookie });
         first.start(slowStart(ada));
         const ready = await first.next();
         // Bo's minute opens beside Ada's.
-        const second = await listen();
+        const second = await listen({ cookie: bo.cookie });
         second.start(slowStart(bo));
         const alsoReady = await second.next();
         // Ada talks for her whole minute, and leaves; Bo leaves saying nothing.
@@ -897,7 +927,7 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
     const { ada } = await openedTwo();
 
     const { upstream, result } = await relaying(async () => {
-      const page = await listen();
+      const page = await listen({ cookie: ada.cookie });
       page.start({
         type: "start",
         language: "en",

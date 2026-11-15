@@ -63,6 +63,17 @@ export const handOverProducers = {
     actions: ["chat.turn_noted"],
     target: "chat_turn",
   },
+  // A person's interview, and a team's claim, as the onboarding decides
+  // they stand (onboarding/store.ts `#noteBrainSource`, drained from its
+  // own outbox).
+  interview: {
+    actions: ["onboarding.interview.brain_source"],
+    target: "onboarding_interview",
+  },
+  claim: {
+    actions: ["onboarding.claim.brain_source"],
+    target: "onboarding_claim",
+  },
 } as const satisfies Record<
   string,
   { actions: readonly string[]; target: string }

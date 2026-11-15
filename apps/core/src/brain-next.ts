@@ -143,6 +143,7 @@ import { promptTextOf } from "./instructions-text.ts";
 import { parseModelRef } from "./model-catalog.ts";
 import { brainSpendByPurpose, spendMonth } from "./model-spend.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
+import { onboardingStoreName } from "./onboarding/store-name.ts";
 import { organizationTimeZone } from "./organization.ts";
 import { personalWorkspaceId } from "./personal-workspace.ts";
 import { shippedSkills } from "./shipped-skills.ts";
@@ -199,6 +200,22 @@ const teamPrefix = "team:";
  */
 const companyGroup = "company";
 
+/**
+ * A team of the onboarding's staff list, as the Brain's group: its people
+ * who took part read what five or more of them said in their interviews
+ * (GRA-1741). A staff-list team is not one of core's teams, so it is a
+ * group of its own kind.
+ */
+const interviewsPrefix = "interviews:";
+
+/** A staff-list team's ID, as core passes it: never empty. */
+const rosterTeamIdSchema = wellFormedString()
+  .min(1)
+  .max(principalMaxLength - interviewsPrefix.length);
+
+/** What reading as a member needs: core's records and the onboarding's. */
+type ReaderEnv = Pick<Env, "DB" | "ONBOARDING" | "DURABLE_OBJECT_JURISDICTION">;
+
 /** A person's or a team's ID, as core passes it: never empty. */
 const idSchema = wellFormedString()
   .min(1)
@@ -208,6 +225,7 @@ const sourceReadersSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("owner"), personId: idSchema }),
   z.strictObject({ kind: z.literal("team"), teamId: idSchema }),
   z.strictObject({ kind: z.literal("everyone") }),
+  z.strictObject({ kind: z.literal("interviews"), teamId: rosterTeamIdSchema }),
   z.strictObject({ kind: z.literal("none") }),
 ]);
 
@@ -269,7 +287,17 @@ const kindsWithoutColon = <const K extends string>(
 // chat's group (brain-next-origins.ts `chatTurnSource`, GRA-1805).
 // `capture`: what a chat's agent read through its person's own connection
 // (connection-capture.ts, GRA-1730), in their own store alone.
-const producerKinds = kindsWithoutColon(["upload", "chat", "run", "capture"]);
+// `interview`: a person's interview, theirs alone, in their own store;
+// `claim`: what five or more people of a staff-list team said in theirs,
+// readable by that team (onboarding/new-brain.ts, GRA-1790, GRA-1741).
+const producerKinds = kindsWithoutColon([
+  "upload",
+  "chat",
+  "run",
+  "capture",
+  "interview",
+  "claim",
+]);
 
 /**
  * The kinds the Sources page lists (`listSourcesAs`): not a chat's turns,
@@ -683,6 +711,10 @@ const keptIn = async <T>(
 const teamGroup = (teamId: string): string =>
   `${teamPrefix}${checked(idSchema, teamId)}`;
 
+/** A staff-list team, as the Brain's group (`interviewsPrefix`). */
+const interviewsGroup = (teamId: string): string =>
+  `${interviewsPrefix}${checked(rosterTeamIdSchema, teamId)}`;
+
 const accessOf = (readers: SourceReaders): Access => {
   switch (readers.kind) {
     case "owner": {
@@ -693,6 +725,9 @@ const accessOf = (readers: SourceReaders): Access => {
     }
     case "everyone": {
       return { kind: "audience", group: companyGroup };
+    }
+    case "interviews": {
+      return { kind: "audience", group: interviewsGroup(readers.teamId) };
     }
     case "none": {
       return { kind: "none" };
@@ -714,21 +749,57 @@ const accessOf = (readers: SourceReaders): Access => {
 export type Reach = "person" | "teams" | "company";
 
 /**
+ * The staff-list team whose claims `personId` reads (GRA-1741): that of
+ * the interview they took part in under their own account, while they are
+ * on the list in it (the store's `interviewTeamOf`). Asked of the
+ * onboarding's object at every read, beside core's own records, so a move
+ * or a removal holds from the next question on. A failure there drops only
+ * that group, so the onboarding can't take the Brain down with it: the
+ * reader then reads less, never more. It has no timeout of its own: a slow
+ * onboarding object holds the read up to the platform's own RPC limits,
+ * and a throw fails closed as above.
+ */
+const interviewTeamOf = async (
+  env: ReaderEnv,
+  personId: string
+): Promise<string | null> => {
+  try {
+    return await inJurisdiction(env, env.ONBOARDING)
+      .getByName(onboardingStoreName)
+      .interviewTeamOf(personId);
+  } catch (error) {
+    log.error("brain.interview_team_failed", {
+      error: error instanceof Error ? error.name : "unknown",
+    });
+    return null;
+  }
+};
+
+/**
  * The member `personId` as the Brain's reader: the person, their teams as
- * core counts them now, and the company. Refused once they have no
- * current membership.
+ * core counts them now, the staff-list team whose claims they read
+ * (`interviewTeamOf`), and the company. Refused once they have no current
+ * membership.
  */
 const personReaderOf = async (
-  env: Pick<Env, "DB">,
+  env: ReaderEnv,
   personId: string
 ): Promise<PersonReader> => {
-  const member = await memberOf(env.DB, checked(idSchema, personId));
+  const id = checked(idSchema, personId);
+  const [member, interviewTeam] = await Promise.all([
+    memberOf(env.DB, id),
+    interviewTeamOf(env, id),
+  ]);
   if (member === undefined) {
     throw permissionErrors.create("permission.person_inactive");
   }
   return {
     person: member.userId,
-    groups: [...member.teams.map(({ id }) => teamGroup(id)), companyGroup],
+    groups: [
+      ...member.teams.map(({ id: teamId }) => teamGroup(teamId)),
+      ...(interviewTeam === null ? [] : [interviewsGroup(interviewTeam)]),
+      companyGroup,
+    ],
   };
 };
 
@@ -755,7 +826,7 @@ export const sourceTextProblem = (
  * Refused once they have no current membership, whatever the reach.
  */
 const readerOf = async (
-  env: Pick<Env, "DB">,
+  env: ReaderEnv,
   personId: string,
   reach: Reach,
   teams: readonly string[] = []
@@ -766,7 +837,12 @@ const readerOf = async (
       return { person, groups };
     }
     case "teams": {
-      return { person: null, groups };
+      // What their interviews' team said (GRA-1741) is read as the person
+      // alone: never by code or an App acting as their teams.
+      return {
+        person: null,
+        groups: groups.filter((group) => !group.startsWith(interviewsPrefix)),
+      };
     }
     case "company": {
       // Of `teams`, those the person is in now: a group of theirs.
@@ -827,7 +903,7 @@ const readerOf = async (
  * version is kept and found, and nothing is drawn from it.
  */
 export const addSource = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   added: {
     source: SourceRef;
     change: string;
@@ -976,7 +1052,7 @@ const reachOf = ({ personal, company = false }: Recall): Reach => {
  * `company`, as the company and, of `teams`, those they are in now.
  */
 const recallRequestAs = async (
-  env: BrainEnv & Pick<Env, "DB" | "EMBEDDER">,
+  env: BrainEnv & ReaderEnv & Pick<Env, "EMBEDDER">,
   personId: string,
   recall: Recall
 ): Promise<RecallRequest> => {
@@ -1109,7 +1185,7 @@ const usedOf = async (
  * (`recallPassagesAs`).
  */
 export const recallAs = async (
-  env: BrainEnv & Pick<Env, "DB" | "EMBEDDER" | "WORKSPACES">,
+  env: BrainEnv & ReaderEnv & Pick<Env, "EMBEDDER" | "WORKSPACES">,
   personId: string,
   recall: Recall
 ): Promise<RecalledPack> => {
@@ -1160,7 +1236,7 @@ export const recallAs = async (
  * SDK's `BrainPack`).
  */
 export const recallPassagesAs = async (
-  env: BrainEnv & Pick<Env, "DB" | "EMBEDDER">,
+  env: BrainEnv & ReaderEnv & Pick<Env, "EMBEDDER">,
   personId: string,
   recall: Recall
 ): Promise<RecalledPassages> => {
@@ -1313,7 +1389,7 @@ export const mergeRecalled = (
  * only, as `addSource`.
  */
 export const readSourceVersionAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   wanted: { source: SourceRef; version: number }
 ): Promise<SourceVersion | null> => {
@@ -1372,7 +1448,7 @@ export interface SourcePage {
  * are no longer a member.
  */
 export const listSourcesAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   { after }: { after?: SourcesAfter } = {}
 ): Promise<SourcePage> => {
@@ -1456,7 +1532,7 @@ const versionsWantedSchema = z.strictObject({
  * Refused once they are no longer a member.
  */
 export const listVersionsAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   wanted: { source: SourceRef; before?: number }
 ): Promise<VersionPage> => {
@@ -1664,7 +1740,7 @@ export const eraseOwnGroup = async (
  * the Brain's store can bring what it covers back.
  */
 export const erasePerson = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   erased: { personId: string; reason: "person_erased" }
 ): Promise<"erased" | "still_deleting"> => {
   const { personId, reason } = checked(personErasureSchema, erased);
@@ -2038,7 +2114,7 @@ const instructionFilesSchema = z
  * file alone.)
  */
 export const readInstructionFilesAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   wanted: InstructionFile[],
   builtApp?: string
@@ -2281,7 +2357,7 @@ const pinnedVersionRefsSchema = z.array(
  * only, as `addSource`.
  */
 export const readableVersionsAs = async <Ref extends PinnedVersionRef>(
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   versions: readonly Ref[],
   { reach = "person" }: { reach?: Reach } = {}
@@ -2353,7 +2429,7 @@ const readableMemoriesIn = async (
  * once they are no longer a member. For the server only, as `addSource`.
  */
 export const readableMemoriesAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   memories: readonly StoredMemoryPlace[],
   { reach = "person" }: { reach?: Reach } = {}
@@ -2722,7 +2798,7 @@ const ownSkillsAs = async (
  * `permission.person_inactive` once they are no longer a member.
  */
 export const listSkillsAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   shipped: ReadonlySet<string>,
   { reach }: { reach: Reach }
@@ -2783,7 +2859,7 @@ const skillStoreOf = (
  * longer a member, whatever is asked.
  */
 export const readSkillAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   wanted: SkillAt,
   { reach }: { reach: Reach }
@@ -2811,7 +2887,7 @@ export const readSkillAs = async (
  * reads it at the person's reach: `null` when there is none they may read.
  */
 export const readCurrentSkillAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   wanted: Skill
 ): Promise<SkillVersion | null> => {
@@ -2981,7 +3057,7 @@ export const writeSharedSkill = async (
  * `permission.person_inactive` once they are no longer a member.
  */
 export const addOwnSkill = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   added: { change: string; text: string }
 ): Promise<SkillAt> => {
@@ -3033,7 +3109,7 @@ export const addOwnSkill = async (
  * erased" for it, with its hedge.
  */
 export const eraseOwnSkill = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   name: string
 ): Promise<void> => {
@@ -3889,7 +3965,7 @@ const keptMemory = async (
  * doesn't have, say).
  */
 export const rememberAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   remembered: Remembered
 ): Promise<RememberedMemory> => {
@@ -4004,7 +4080,7 @@ export interface OwnEntity {
  * member.
  */
 export const ownEntityAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   entity: string
 ): Promise<OwnEntity | null> => {
@@ -4034,7 +4110,7 @@ export const ownEntityAs = async (
  * has expired. Refused once they are no longer a member.
  */
 export const forgetAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   memory: string
 ): Promise<MemoryChangeOutcome> => {
@@ -4215,7 +4291,7 @@ const entitiesWantedSchema = z.strictObject({
  * finds them, from `from`. Refused once they are no longer a member.
  */
 export const entitiesAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   wanted:
     | { kind: EntityKind; from?: StorePlace<EntitiesCursor> }
@@ -4314,7 +4390,7 @@ export interface StoredMemoryPage {
  * Refused once they are no longer a member.
  */
 export const memoriesAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   wanted:
     | { entity: { store: MemoryStoreName; id: string }; after?: MemoriesCursor }
@@ -4365,7 +4441,7 @@ const contestedWantedSchema = z.strictObject({
  * them. Refused once they are no longer a member.
  */
 export const contestedAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   wanted:
     | { from?: StorePlace<ContestedCursor> }
@@ -4424,7 +4500,7 @@ export type StoredMemoryPlace = z.infer<typeof memoryPlaceSchema>;
  * they are no longer a member.
  */
 export const confirmAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   memory: StoredMemoryPlace | Readonly<Record<string, unknown>>
 ): Promise<MemoryChangeOutcome> => {
@@ -4480,7 +4556,7 @@ export type Correction = z.input<typeof correctionSchema>;
  * once they are no longer a member.
  */
 export const correctAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   correction: Correction | Readonly<Record<string, unknown>>
 ): Promise<RememberedMemory | null> => {
@@ -4698,7 +4774,7 @@ const cardMemoryOf = ({ source, ...memory }: Memory): CardMemory => ({
  * that isn't one.
  */
 export const codeCardAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   reach: CodeReach,
   request: unknown
@@ -4766,7 +4842,7 @@ interface CodeEntities {
  * `brain.request_invalid` for a request or cursor that isn't one.
  */
 export const codeEntitiesAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   reach: CodeReach,
   request: unknown

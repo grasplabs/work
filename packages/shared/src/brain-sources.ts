@@ -12,10 +12,17 @@ import { z } from "zod";
 import { defineErrorFamily } from "./errors.ts";
 
 /**
- * Who added a source: an upload, a chat, a workflow run, or what an agent
- * fetched through a connection (`capture`).
+ * Who added a source: an upload, a chat, a workflow run, what an agent
+ * fetched through a connection (`capture`), the person's own interview,
+ * or a claim five or more of their team made in theirs.
  */
-export type BrainSourceProducer = "upload" | "chat" | "run" | "capture";
+export type BrainSourceProducer =
+  | "upload"
+  | "chat"
+  | "run"
+  | "capture"
+  | "interview"
+  | "claim";
 
 /** A source, as its producer names it. */
 export interface BrainSourceRef {

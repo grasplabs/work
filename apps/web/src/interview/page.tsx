@@ -518,7 +518,7 @@ const useDeleting = () => {
       return;
     }
     setDeleted("deleting");
-    const answer = await deleteInterview(link.secret, link.key);
+    const answer = await deleteInterview(link.secret);
     if (isRefused(answer)) {
       setDeleted("no");
       setDeleteFailed(answer.message);
@@ -568,7 +568,7 @@ const useWithdrawing = (session: OpenSession) => {
     if (link === null) {
       return;
     }
-    const answer = await withdrawInterview(link.secret, link.key);
+    const answer = await withdrawInterview(link.secret);
     if (isRefused(answer)) {
       setWithdrawFailed(answer.message);
       return;

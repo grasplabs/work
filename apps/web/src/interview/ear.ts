@@ -32,7 +32,7 @@ export interface EarOptions {
   /** The language spoken. */
   locale: Locale;
   /** The interview link it listens for: the live line and the recordings go by it. */
-  link: { secret: string; key: string };
+  link: { secret: string };
   /** How long a silence ends a stretch, in ms, asked every moment: it can change while they talk. `pauseMs` without it. */
   pause?: () => number;
 }

@@ -29,6 +29,7 @@ import { brainOf } from "./knowledge/ports.ts";
 import { sweepLeftUploads } from "./knowledge/uploads.ts";
 import { retryDisconnects } from "./members.ts";
 import { sweepModelUsage } from "./model-usage.ts";
+import { eraseOwedOnboardingSources } from "./onboarding/new-brain.ts";
 import { rescanPackages } from "./packages/rescan.ts";
 import { sweepPageFrames } from "./page-frame.ts";
 import { sweepBuilds } from "./pages.ts";
@@ -78,6 +79,16 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   // What core noted to hand over to the new Brain, put on its work queue
   // (src/brain-hand-overs.ts, src/brain-sources.ts).
   { name: "brain.hand_overs", period: "minute", run: relayHandOvers },
+  // The erasures the onboarding still owes the new Brain: interviews and
+  // team claims that no longer stand, each erased until it is
+  // (src/onboarding/new-brain.ts). What it adds goes by the hand-over.
+  {
+    name: "onboarding.brain_erasures",
+    period: "minute",
+    run: async (env) => {
+      await eraseOwedOnboardingSources(env);
+    },
+  },
   { name: "members.disconnects", period: "minute", run: retryDisconnects },
   { name: "members.erasures", period: "minute", run: retryErasures },
   // Decisions on the company's skills whose outcome the Brain hasn't given

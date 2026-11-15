@@ -19,7 +19,13 @@ import { closesOn } from "../src/onboarding/rules.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { platformElevenLabsKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
-import { approve, codeOf, onLink, openedFor } from "./interview-link.ts";
+import {
+  accountOf,
+  approve,
+  codeOf,
+  onLink,
+  openedFor,
+} from "./interview-link.ts";
 import type { Device } from "./interview-link.ts";
 import { d1ColumnsWith, onboardingTablesWith } from "./kept-where.ts";
 import { carrying, plan, release } from "./platform-providers.ts";
@@ -102,12 +108,19 @@ const save = async (
   return savedSchema.parse(await response.json());
 };
 
-/** Asks for a line to be said, as the page does. */
-const speak = async (body: unknown): Promise<Response> =>
+/** Asks for a line to be said on `link`, as the page does. */
+const speak = async ({
+  link,
+  ...body
+}: Record<string, unknown> & { link: Device }): Promise<Response> =>
   await routed(speechPath, {
     method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
+    headers: {
+      "content-type": "application/json",
+      "sec-fetch-site": "same-origin",
+      cookie: link.cookie,
+    },
+    body: JSON.stringify({ ...body, link: { secret: link.secret } }),
   });
 
 /** Their interview as kept. */
@@ -367,7 +380,7 @@ describe("removing a line of an interview", { timeout: 60_000 }, () => {
         lines: [...progress.lines, { from: "stephen", text: "And then?" }],
       };
       const secretMark = await sha256Hex(link.secret);
-      const keyMark = await sha256Hex(link.key);
+      const keyMark = await accountOf(link);
 
       // Both inside the store at once: the removal waits on hashing the
       // voice's line, and the other save may land meanwhile.

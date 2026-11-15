@@ -1,14 +1,17 @@
+import type { SignInOption } from "@grasp-os/shared/rpc";
 import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
 import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 
+import { loadCoreStatus } from "../core-connection.ts";
+import type { CoreConnection } from "../core-connection.ts";
 import { ErrorText } from "../error-text.tsx";
 import {
   isRefused,
-  keepKey,
-  keptKey,
+  keepWhileSigningIn,
   linkSecret,
   openSession,
 } from "../interview/api.ts";
@@ -16,24 +19,28 @@ import type { OpenSession } from "../interview/api.ts";
 import { holdInterview, releaseInterview } from "../interview/kept.ts";
 import { InterviewPage } from "../interview/page.tsx";
 import { resumed } from "../interview/progress.ts";
+import { signInErrorMessage, signInErrorSearch } from "../sign-in-errors.ts";
+import { SignInOptions } from "../sign-in-options.tsx";
 
 // Where someone's own interview link leads (`/interview#<secret>`): their
-// interview with Stephen, full screen, outside the app. No sign-in, no
-// session: the secret after the `#`, which the browser sends nowhere but in
-// the bodies of the link's own calls, and the key this device was given the
-// first time it opened the link, are all the page has. Another device
-// holding the link is told the interview is open elsewhere, and nothing
-// that was said (core's onboarding/links.ts).
+// interview with Stephen, full screen, outside the app. They sign in with
+// their company's sign-in first (GRA-1790): the interview belongs to the
+// account whose address the link was sent to, from the first time it opens
+// the link, and opens for that account alone. The secret after the `#`,
+// which the browser sends nowhere but in the bodies of the link's own
+// calls, names which interview; while they are away signing in, this tab
+// alone keeps it (api.ts `keepWhileSigningIn`). Anyone else is told the
+// link opens nothing, and nothing that was said (core's onboarding/links.ts).
 
 /** What the page shows, and the secret it was opened with. */
 type Page =
   | { state: "loading"; secret: string }
   | { state: "refused"; secret: string; message: string }
-  | { state: "elsewhere"; secret: string }
+  | { state: "sign_in"; secret: string; options: SignInOption[] }
   | { state: "open"; secret: string; session: OpenSession };
 
-/** Opens the link on this device: the device's key is kept the one time it is given. */
-const opened = async (secret: string): Promise<Page> => {
+/** Opens the link for whoever is signed in, or asks them to sign in. */
+const opened = async (secret: string, core: CoreConnection): Promise<Page> => {
   if (secret === "") {
     return {
       state: "refused",
@@ -41,25 +48,23 @@ const opened = async (secret: string): Promise<Page> => {
       message: "",
     };
   }
-  const kept = await keptKey(secret);
-  const answer = await openSession(secret, kept);
+  const answer = await openSession(secret);
   if (isRefused(answer)) {
-    return { state: "refused", secret, message: answer.message };
-  }
-  if (answer.state === "elsewhere") {
-    return { state: "elsewhere", secret };
-  }
-  const key = answer.key ?? kept;
-  if (key === undefined) {
-    return { state: "elsewhere", secret };
-  }
-  if (answer.key !== undefined) {
-    await keepKey(secret, answer.key);
+    if (answer.code !== "interview.sign_in") {
+      return { state: "refused", secret, message: answer.message };
+    }
+    const { connected, signInOptions } = await loadCoreStatus(core);
+    if (!connected) {
+      return { state: "refused", secret, message: "" };
+    }
+    // Kept in this tab while they are away signing in, and taken back as
+    // the page opens again (`linkSecret`).
+    keepWhileSigningIn(secret);
+    return { state: "sign_in", secret, options: signInOptions };
   }
   // Back on the link after stopping, it carries on where it was.
   holdInterview({
     secret,
-    key,
     version: answer.version,
     progress: answer.progress === null ? null : resumed(answer.progress),
   });
@@ -72,24 +77,28 @@ const opened = async (secret: string): Promise<Page> => {
  */
 const Notice = ({
   title,
-  children,
+  message,
   failed = false,
+  children,
 }: {
   title: string;
-  children: string;
+  message: string;
   /** Core's refusal, with its reference for the person to quote. */
   failed?: boolean;
+  /** What they can do about it, under what there is to say. */
+  children?: ReactNode;
 }) => (
   <main className="bg-background flex min-h-svh flex-col items-center justify-center gap-6 px-4 text-center text-sm">
     <GraspMark className="size-6" />
     <div className="flex max-w-sm flex-col items-center gap-3">
       <PageHeaderTitle>{title}</PageHeaderTitle>
       {failed ? (
-        <ErrorText>{children}</ErrorText>
+        <ErrorText>{message}</ErrorText>
       ) : (
-        <p className="text-muted-foreground text-balance">{children}</p>
+        <p className="text-muted-foreground text-balance">{message}</p>
       )}
     </div>
+    {children}
   </main>
 );
 
@@ -103,8 +112,57 @@ const Loading = () => {
   );
 };
 
+/**
+ * Why a sign-in on the way to an interview was refused: an account the
+ * gate doesn't let in is one no link went to (core's auth.ts), so they are
+ * told which account to use; anything else as anywhere.
+ */
+const signInRefusal = (error: string, wrongAccount: string): string =>
+  error === "not_open_yet" ? wrongAccount : signInErrorMessage(error);
+
+/**
+ * Before the interview: the company's sign-in, and that it is recorded
+ * there, said before the button (GRA-1790).
+ */
+const SignIn = ({
+  options,
+  error,
+}: {
+  options: SignInOption[];
+  error: string | undefined;
+}) => {
+  const { t } = useLingui();
+  return (
+    <Notice
+      message={t`Use your work account, the one your link was sent to.`}
+      title={t`Sign in to open your interview`}
+    >
+      <div className="flex w-full max-w-sm flex-col items-center gap-4">
+        <p className="text-muted-foreground text-balance">
+          {t`Signing in is recorded by your company's sign-in, as every sign-in is.`}
+        </p>
+        <ErrorText>
+          {error === undefined
+            ? undefined
+            : signInRefusal(
+                error,
+                t`That account can't open this interview. Sign in with the work account your link was sent to.`
+              )}
+        </ErrorText>
+        <SignInOptions
+          error={undefined}
+          options={options}
+          returnTo={interviewPath}
+        />
+      </div>
+    </Notice>
+  );
+};
+
 const Interview = () => {
   const { t } = useLingui();
+  const { core } = Route.useRouteContext();
+  const { error } = Route.useSearch();
   // The link's secret, read from the URL once, and again only when its
   // fragment changes: what is shown, and where every call goes, is the
   // interview this opened.
@@ -122,7 +180,7 @@ const Interview = () => {
   useEffect(() => {
     let current = true;
     const load = async (): Promise<void> => {
-      const next = await opened(secret);
+      const next = await opened(secret, core);
       if (current) {
         setPage(next);
       }
@@ -132,7 +190,7 @@ const Interview = () => {
       current = false;
       releaseInterview();
     };
-  }, [secret]);
+  }, [secret, core]);
   // What was opened with another secret is never shown for this one.
   const shown: Page =
     page.secret === secret ? page : { state: "loading", secret };
@@ -142,19 +200,19 @@ const Interview = () => {
     }
     case "refused": {
       return (
-        <Notice failed title={t`This interview can't be opened`}>
-          {shown.message === ""
-            ? t`This link doesn't work. Ask whoever sent it for a new one.`
-            : shown.message}
-        </Notice>
+        <Notice
+          failed
+          message={
+            shown.message === ""
+              ? t`This link doesn't work. Ask whoever sent it for a new one.`
+              : shown.message
+          }
+          title={t`This interview can't be opened`}
+        />
       );
     }
-    case "elsewhere": {
-      return (
-        <Notice title={t`This interview is open on another device`}>
-          {t`Carry on there. Lost that device? Ask whoever sent you the link for a new start.`}
-        </Notice>
-      );
+    case "sign_in": {
+      return <SignIn error={error} options={shown.options} />;
     }
     case "open": {
       return <InterviewPage key={shown.secret} session={shown.session} />;
@@ -165,4 +223,11 @@ const Interview = () => {
   }
 };
 
-export const Route = createFileRoute("/interview")({ component: Interview });
+/** Where an interview link leads, and the sign-in sends them back to. */
+const interviewPath = "/interview";
+
+export const Route = createFileRoute(interviewPath)({
+  validateSearch: (search: Record<string, unknown>): { error?: string } =>
+    signInErrorSearch(search),
+  component: Interview,
+});

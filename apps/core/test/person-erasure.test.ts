@@ -1,13 +1,8 @@
 import { stillDeletingAtMostMs } from "@grasp-os/brain-next/contract";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { storeIdSchema } from "@grasp-os/shared/ids";
-import type { InterviewSession } from "@grasp-os/shared/interview-links";
-import {
-  interviewApiPath,
-  interviewProgressSchema,
-} from "@grasp-os/shared/interview-links";
+import { interviewProgressSchema } from "@grasp-os/shared/interview-links";
 import type { ErasureArea } from "@grasp-os/shared/members";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { runInDurableObject } from "cloudflare:test";
@@ -33,7 +28,12 @@ import { allEvents } from "./audit-events.ts";
 import { finishedByTheClock } from "./brain-next-own-store.ts";
 import { consentCode } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
-import { answering, answeringWith, holdAlarm } from "./interview-link.ts";
+import {
+  answering,
+  answeringWith,
+  holdAlarm,
+  sentToOf,
+} from "./interview-link.ts";
 import { ownCollectionOf } from "./knowledge.ts";
 import { runMinuteTasks } from "./maintenance.ts";
 import { onboardingLog } from "./onboarding-log.ts";
@@ -237,18 +237,24 @@ const onList = async (sql: string, ...values: unknown[]) =>
 const byPeople = (events: readonly AuditEvent[]): AuditEvent[] =>
   events.filter(({ actor }) => actor.type !== "system");
 
-/** What a link's page gets opening it with `secret`: open, or the refusal. */
-const sessionWith = async (secret: string): Promise<string> => {
-  const response = await routed(interviewApiPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "session", secret }),
+/** The account that signs in as `address`, as the store is told of it. */
+const accountFor = (address: string): string =>
+  `account-${address.toLowerCase()}`;
+
+/**
+ * What a link's page gets opening it with `secret`, signed in as the
+ * account of `address`, the one it was sent to: open, or the refusal. Asked
+ * of the store, as the link's endpoint asks it (onboarding/links.ts).
+ */
+const sessionWith = async (
+  secret: string,
+  address: string
+): Promise<string> => {
+  const answer = await onboardingStore(env).openLink(await sha256Hex(secret), {
+    account: accountFor(address),
+    address,
   });
-  if (response.ok) {
-    return "open";
-  }
-  const payload = errorPayloadSchema.safeParse(await response.json());
-  return payload.success ? payload.data.code : String(response.status);
+  return answer.ok ? "open" : answer.code;
 };
 
 /**
@@ -326,17 +332,6 @@ const progress = {
 
 /** Most saves a test's page tries while their interview is erased. */
 const savesWhileErasing = 200;
-
-/** Opens a link's page with `secret` on a new device: the key it is given. */
-const keyFor = async (secret: string): Promise<string> => {
-  const response = await routed(interviewApiPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "session", secret }),
-  });
-  const session = await response.json<InterviewSession>();
-  return session.key ?? "";
-};
 
 /** A link's path in `rows`, as the admin lists them, for `id`. */
 const pathOf = (
@@ -1398,10 +1393,9 @@ describe("erasing a person", () => {
       vi.restoreAllMocks();
     });
     const { admin, person } = await removedPerson();
-    const { theirs, others, theirSecret, otherSecret } = await onTheList(
-      String(person.person.email)
-    );
-    const before = await sessionWith(theirSecret);
+    const { theirs, others, theirSecret, otherSecret, roster } =
+      await onTheList(String(person.person.email));
+    const before = await sessionWith(theirSecret, String(person.person.email));
     await onList(
       "INSERT INTO interview_settings (person, mark, interviewer, locale) VALUES (?, 'what they heard', 'stephen', 'en')",
       theirs
@@ -1460,8 +1454,8 @@ describe("erasing a person", () => {
     expect({
       before,
       // Their old link opens nothing any more, so nothing new is saved.
-      after: await sessionWith(theirSecret),
-      other: await sessionWith(otherSecret),
+      after: await sessionWith(theirSecret, String(person.person.email)),
+      other: await sessionWith(otherSecret, roster.people[1]?.email ?? ""),
       theirSettings: await settingsOf(theirs),
       theirEntry: await listed(theirs),
       otherEntry: await listed(others),
@@ -1504,7 +1498,7 @@ describe("erasing a person", () => {
       again: pathOf(again, theirs),
       other: typeof pathOf(again, others),
       codes: codes.length,
-      link: await sessionWith(theirSecret),
+      link: await sessionWith(theirSecret, String(person.person.email)),
     }).toStrictEqual({
       listed: null,
       again: null,
@@ -1519,7 +1513,8 @@ describe("erasing a person", () => {
     const { theirs, theirSecret } = await onTheList(
       String(person.person.email)
     );
-    const key = await keyFor(theirSecret);
+    const address = String(person.person.email);
+    await sessionWith(theirSecret, address);
     // A record the Brain was given from their interview: deleting the
     // interview takes it out of the Brain after, as the voice's lines.
     await onList(
@@ -1528,7 +1523,7 @@ describe("erasing a person", () => {
       theirs
     );
     const secretMark = await sha256Hex(theirSecret);
-    const keyMark = await sha256Hex(key);
+    const keyMark = accountFor(address);
 
     // Their page keeps saving for as long as core erases their interview
     // (`eraseInterviewOf`, as person-erasure.ts asks it), the cleanup
@@ -1551,9 +1546,11 @@ describe("erasing a person", () => {
           save += 1
         ) {
           // The page reads its version anew, then saves on it.
-          const read = store.openLink(secretMark, keyMark, keyMark);
-          const version =
-            read.ok && read.value.state === "open" ? read.value.version : 0;
+          const read = store.openLink(secretMark, {
+            account: keyMark,
+            address,
+          });
+          const version = read.ok ? read.value.version : 0;
           // oxlint-disable-next-line no-await-in-loop -- one save after another
           const answer = await store.saveInterview(
             secretMark,
@@ -1575,7 +1572,7 @@ describe("erasing a person", () => {
     expect({
       kept: kept.length,
       saves: [...new Set(saves)],
-      link: await sessionWith(theirSecret),
+      link: await sessionWith(theirSecret, String(person.person.email)),
     }).toStrictEqual({
       kept: 0,
       // Every one of them, from the first.
@@ -1704,6 +1701,7 @@ describe("erasing a person", () => {
       return row?.work ?? null;
     };
     const pimLink = await store.linkOf(ids.pim);
+    const pimAddress = await sentToOf(ids.pim);
     const pimSecret = pimLink?.split("#")[1] ?? "";
     const queuedToPim = async () => {
       const rows = await onList(
@@ -1717,7 +1715,7 @@ describe("erasing a person", () => {
       const after = await store.teamWorks(ids.team);
       return {
         pimAsked: await askedOf(ids.pim),
-        pimLink: await sessionWith(pimSecret),
+        pimLink: await sessionWith(pimSecret, pimAddress),
         pimMail: await queuedToPim(),
         maxAsked: await askedOf(ids.max),
         maxOnRota: after
@@ -1838,7 +1836,7 @@ describe("erasing a person", () => {
     expect({
       interview: erased.areas.find(({ area }) => area === "interview")?.state,
       settings: settings.length,
-      link: await sessionWith(theirSecret),
+      link: await sessionWith(theirSecret, String(person.person.email)),
     }).toStrictEqual({ interview: "complete", settings: 1, link: "open" });
   });
 

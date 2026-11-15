@@ -16,25 +16,41 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { adminCommands } from "./admin-command.ts";
-import { auditedDuring, routed, unique } from "./sign-in.ts";
+import { mockIdp } from "./idp.ts";
+import { signedInAs } from "./interview-link.ts";
+import {
+  auditedDuring,
+  routed,
+  signedIn,
+  staffPerson,
+  unique,
+  whoami,
+} from "./sign-in.ts";
 
 // Everyone's own interview link (src/onboarding/links.ts): it opens one
-// person's interview, on the first device that opens it, while the
-// interviews run, and nothing else. The link cases of the threat model
-// (GRA-307), each tried here:
+// person's interview, for the account signed in with the company's
+// sign-in whose address it was sent to, while the interviews run, and
+// nothing else. The link cases of the threat model (GRA-307, GRA-1790),
+// each tried here:
 //
-// - L1: a made-up or malformed link opens nothing; no secret or key is
+// - L1: a made-up or malformed link opens nothing; no secret or session is
 //   kept as it is.
 // - L2: the secret is in no answer or log, and no answer gives a referrer.
-// - L3: anyone else with the link, the admin among them, gets nothing that
-//   was said, and can neither save nor delete.
+// - L3: anyone else with the link, signed in or not, the admin among them,
+//   gets nothing that was said, can neither save nor delete, and learns
+//   nothing a link that never was wouldn't tell them; the interview
+//   belongs to its account from the first opening, so a list edited
+//   afterwards, a resend to another address or a forwarded link opened
+//   first changes nothing; a link with no address, or one shared by two on
+//   the list, opens for nobody; staff and another site drive nothing.
 // - L4: two tabs on the device never lose a save.
 // - L5, L8: nothing opens before the link went out, before the agreements,
 //   or while the interviews are paused.
 // - L6: after the last day nothing more is taken; deleting still works.
 // - L7, L10: someone taken off the list has a link like one that never
 //   was, and what they said is gone.
-// - L9: staff give someone who lost their device a new start.
+// - L9: a lost device costs nothing: they sign in on another one; staff
+//   give a new start, after which the link's address opens it again.
 // - L11: the store counts calls per link.
 // - P3: a save with anything but an interview in it is refused.
 // - D3: a copy left open can't save a deleted interview back.
@@ -45,12 +61,14 @@ import { auditedDuring, routed, unique } from "./sign-in.ts";
 //
 // - T1: taking part is kept with the notice it was for, its purpose and
 //   audience; an older notice is refused.
-// - T4: anyone else with the link, the admin too, can't take part, approve
-//   or withdraw for them.
+// - T4: anyone else signed in with the link, the admin too, can't take
+//   part, approve or withdraw for them.
 // - T5: withdrawing works whenever deleting does, and nobody takes part
 //   again after it: not after a delete, nor a new start from staff.
 // - T6: after the last day nothing is approved any more.
 // - T7: taking part and withdrawing asked again answer as the first time.
+
+const idp = mockIdp();
 
 /** Words nobody else uses, to look for where they must not be. */
 const sentinel = "Quillfeather ledger seventeen";
@@ -75,6 +93,9 @@ const progress = (text = sentinel): InterviewProgress => ({
   adding: false,
   addedAt: 0,
 });
+
+/** Everyone's address on the list: their id, at the company's domain. */
+const emailOf = (person: string): string => `${person}@acme.test`;
 
 /**
  * A fresh onboarding in the deployment's one store, running since
@@ -101,7 +122,12 @@ const running = async () => {
       { id: ids.member, name: "Sam Berg", team: "sales" },
       { id: ids.oli, name: "Oli Olsen", team: "ops" },
       { id: ids.ona, name: "Ona Ek", team: "ops" },
-    ].map((person) => ({ ...person, email: "", title: "", away: false })),
+    ].map((person) => ({
+      ...person,
+      email: emailOf(person.id),
+      title: "",
+      away: false,
+    })),
   };
   const by = { type: "system" } as const;
   await store.setPaused(false, by);
@@ -119,18 +145,32 @@ const running = async () => {
   return {
     store,
     ids,
+    roster,
     secrets: {
       lead: await secretOf(ids.lead),
       member: await secretOf(ids.member),
       oli: await secretOf(ids.oli),
     },
+    // Oli, signed in with the company's sign-in as the address their link
+    // went to: what most of these tests open it as.
+    me: await signedInAs(emailOf(ids.oli)),
   };
 };
 
-const post = async (body: unknown): Promise<Response> =>
+/** One of the link's calls, as the page makes it, with `cookie` as its session. */
+const post = async (
+  body: unknown,
+  cookie: string,
+  headers: Record<string, string> = {}
+): Promise<Response> =>
   await routed(interviewApiPath, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      "sec-fetch-site": "same-origin",
+      cookie,
+      ...headers,
+    },
     body: JSON.stringify(body),
   });
 
@@ -149,59 +189,54 @@ const sessionOf = async (response: Response): Promise<InterviewSession> =>
 const savedOf = async (response: Response): Promise<InterviewSaved> =>
   await response.json<InterviewSaved>();
 
-const session = async (secret: string, key?: string) =>
-  await post({
-    action: "session",
-    secret,
-    ...(key === undefined ? {} : { key }),
-  });
+const session = async (secret: string, cookie: string) =>
+  await post({ action: "session", secret }, cookie);
 
-/** Opens a link on a new device: the session, and the key it was given. */
+/** Opens a link as whoever `cookie` signs in: what it opened. */
 const opened = async (
-  secret: string
-): Promise<{ session: InterviewSession; key: string }> => {
-  const response = await session(secret);
-  const body = await sessionOf(response);
-  return { session: body, key: body.key ?? "" };
-};
+  secret: string,
+  cookie: string
+): Promise<InterviewSession> => await sessionOf(await session(secret, cookie));
 
 const save = async (
   secret: string,
-  key: string,
+  cookie: string,
   version: number,
   sent: unknown = progress()
-) => await post({ action: "save", secret, key, version, progress: sent });
+) => await post({ action: "save", secret, version, progress: sent }, cookie);
 
-const remove = async (secret: string, key: string) =>
-  await post({ action: "delete", secret, key });
+const remove = async (secret: string, cookie: string) =>
+  await post({ action: "delete", secret }, cookie);
 
 const takePart = async (
   secret: string,
-  key: string,
+  cookie: string,
   notice: number = participationNotice.version
-) => await post({ action: "participate", secret, key, notice });
+) => await post({ action: "participate", secret, notice }, cookie);
 
-const withdraw = async (secret: string, key: string) =>
-  await post({ action: "withdraw", secret, key });
+const withdraw = async (secret: string, cookie: string) =>
+  await post({ action: "withdraw", secret }, cookie);
 
 /** An approval of the fact `progress()` writes down, as it stands. */
-const approveFact = async (secret: string, key: string) =>
-  await post({
-    action: "approve",
-    secret,
-    key,
-    facts: [
-      {
-        id: "f1",
-        revision: await factRevision({
+const approveFact = async (secret: string, cookie: string) =>
+  await post(
+    {
+      action: "approve",
+      secret,
+      facts: [
+        {
           id: "f1",
-          tag: "step",
-          text: sentinel,
-          record: sentinel,
-        }),
-      },
-    ],
-  });
+          revision: await factRevision({
+            id: "f1",
+            tag: "step",
+            text: sentinel,
+            record: sentinel,
+          }),
+        },
+      ],
+    },
+    cookie
+  );
 
 /** Every value in the store's tables, as text. */
 const storeText = async (): Promise<string> =>
@@ -231,6 +266,12 @@ const staffLog = async (person: string): Promise<string[]> =>
       .map(({ what }) => what)
   );
 
+/** A refusal, read from its status and its body's text. */
+const shapeOf = (status: number, text: string) => {
+  const { code, message } = errorPayloadSchema.parse(JSON.parse(text));
+  return { status, code, message };
+};
+
 /** A refusal as someone without the link's secret would compare it. */
 const shape = async (response: Response) => {
   const { code, message } = errorPayloadSchema.parse(await response.json());
@@ -244,13 +285,13 @@ const randomSecret = () =>
     .replace(/[=]+$/u, "");
 
 describe("a made-up link", () => {
-  it("opens nothing, and the store keeps no secret or key as it is (L1, L2)", async () => {
-    const { secrets } = await running();
+  it("opens nothing, and the store keeps no secret or session as it is (L1, L2)", async () => {
+    const { secrets, me } = await running();
     const warned = vi.spyOn(console, "warn");
     const made = randomSecret();
-    const unknown = await session(made);
-    const malformed = await post({ action: "session", secret: "short" });
-    const { key } = await opened(secrets.oli);
+    const unknown = await session(made, me);
+    const malformed = await post({ action: "session", secret: "short" }, me);
+    await opened(secrets.oli, me);
     expect({
       unknown: unknown.status,
       unknownCode: await codeOf(unknown),
@@ -271,7 +312,8 @@ describe("a made-up link", () => {
       page.headers.get("cache-control"),
     ]).toStrictEqual(["no-referrer", "no-store"]);
     const kept = await storeText();
-    expect([kept.includes(secrets.oli), kept.includes(key)]).toStrictEqual([
+    const token = me.split("=")[1]?.split(".")[0] ?? me;
+    expect([kept.includes(secrets.oli), kept.includes(token)]).toStrictEqual([
       false,
       false,
     ]);
@@ -279,9 +321,9 @@ describe("a made-up link", () => {
 });
 
 describe("someone's own link", () => {
-  it("opens on the first device, keeps what they say, and gives it back there", async () => {
-    const { secrets } = await running();
-    const { session: first, key } = await opened(secrets.oli);
+  it("opens for the account its address signs in, keeps what they say, and gives it back on another device they sign in on", async () => {
+    const { ids, secrets, me } = await running();
+    const first = await opened(secrets.oli, me);
     expect(first).toMatchObject({
       state: "open",
       name: "Oli",
@@ -292,71 +334,237 @@ describe("someone's own link", () => {
       progress: null,
       version: 0,
     });
-    expect(key).toMatch(/^[A-Za-z0-9_-]{43}$/u);
-    const saved = await save(secrets.oli, key, 0);
+    const saved = await save(secrets.oli, me, 0);
     await expect(saved.json()).resolves.toStrictEqual({
       saved: true,
       version: 1,
     });
-    const again = await session(secrets.oli, key);
-    const back = await sessionOf(again);
-    expect({ key: back.key, version: back.version }).toStrictEqual({
-      key: undefined,
-      version: 1,
-    });
-    expect(back.progress?.lines[1]?.text).toBe(sentinel);
+    // Signed in again, as on their phone: the same person, a new session.
+    const phone = await signedInAs(emailOf(ids.oli));
+    const back = await opened(secrets.oli, phone);
+    expect({
+      newSession: phone !== me,
+      version: back.version,
+      said: back.progress?.lines[1]?.text,
+    }).toStrictEqual({ newSession: true, version: 1, said: sentinel });
   });
 
   it("keeps the clock that leaves time away out of the minutes, and gives it back (GRA-1468)", async () => {
-    const { secrets } = await running();
-    const { key } = await opened(secrets.oli);
+    const { secrets, me } = await running();
+    await opened(secrets.oli, me);
     const withClock = {
       ...progress(),
       seenAt: Date.now(),
       awayMs: 20 * 60 * 60_000,
     };
-    const saved = await save(secrets.oli, key, 0, withClock);
+    const saved = await save(secrets.oli, me, 0, withClock);
     await expect(saved.json()).resolves.toStrictEqual({
       saved: true,
       version: 1,
     });
-    const back = await sessionOf(await session(secrets.oli, key));
+    const back = await opened(secrets.oli, me);
     expect({
       seenAt: back.progress?.seenAt,
       awayMs: back.progress?.awayMs,
     }).toStrictEqual({ seenAt: withClock.seenAt, awayMs: withClock.awayMs });
     // A clock that is no clock is refused whole, as anything else would be.
-    const bad = await save(secrets.oli, key, 1, { ...progress(), awayMs: -5 });
+    const bad = await save(secrets.oli, me, 1, { ...progress(), awayMs: -5 });
     expect(bad.ok).toBeFalsy();
   });
 
-  it("gives anyone else with the link, the admin too, nothing that was said (L3)", async () => {
-    const { secrets } = await running();
-    const { key } = await opened(secrets.oli);
-    await save(secrets.oli, key, 0);
-    const other = randomSecret();
-    const noKey = await session(secrets.oli);
-    const otherKey = await session(secrets.oli, other);
-    const texts = [await noKey.text(), await otherKey.text()];
-    expect(texts.map((text): unknown => JSON.parse(text))).toStrictEqual([
-      { state: "elsewhere" },
-      { state: "elsewhere" },
-    ]);
-    expect(texts.join("")).not.toContain(sentinel);
+  it("gives anyone else with the link, signed in or not, the admin too, nothing that was said, and nothing a link that never was wouldn't (L3)", async () => {
+    const { secrets, me } = await running();
+    await opened(secrets.oli, me);
+    await save(secrets.oli, me, 0);
+    // The configured admin, and a team-mate, each signed in as themselves.
+    const admin = await signedInAs("ada@acme.test");
+    const mate = await signedInAs(`mate-${unique()}@acme.test`);
+    const never = randomSecret();
+    const asked = {
+      admin: await session(secrets.oli, admin),
+      mate: await session(secrets.oli, mate),
+      signedOut: await session(secrets.oli, ""),
+    };
+    const texts = {
+      admin: await asked.admin.text(),
+      mate: await asked.mate.text(),
+      signedOut: await asked.signedOut.text(),
+    };
+    expect({
+      admin: shapeOf(asked.admin.status, texts.admin),
+      mate: shapeOf(asked.mate.status, texts.mate),
+      signedOut: shapeOf(asked.signedOut.status, texts.signedOut),
+    }).toStrictEqual({
+      admin: await shape(await session(never, admin)),
+      mate: await shape(await session(never, mate)),
+      signedOut: {
+        status: 401,
+        code: "interview.sign_in",
+        message: "Sign in with your work account to open your interview.",
+      },
+    });
+    expect(Object.values(texts).join("")).not.toContain(sentinel);
     expect([
-      await codeOf(await save(secrets.oli, other, 1, progress("Overwritten"))),
-      await codeOf(await remove(secrets.oli, other)),
-    ]).toStrictEqual(["interview.elsewhere", "interview.elsewhere"]);
-    const mine = await session(secrets.oli, key);
+      await codeOf(await save(secrets.oli, admin, 1, progress("Overwritten"))),
+      await codeOf(await remove(secrets.oli, mate)),
+    ]).toStrictEqual(["interview.link_invalid", "interview.link_invalid"]);
+    const mine = await session(secrets.oli, me);
     await expect(mine.text()).resolves.toContain(sentinel);
   });
 
+  it("is never someone else's for having opened a forwarded link first: their address isn't the one it went to (L3)", async () => {
+    const { secrets, me } = await running();
+    const forwarded = await signedInAs(`forwarded-${unique()}@acme.test`);
+    const first = await session(secrets.oli, forwarded);
+    const mine = await opened(secrets.oli, me);
+    expect({
+      first: [first.status, await codeOf(first)],
+      mine: mine.state,
+    }).toStrictEqual({ first: [404, "interview.link_invalid"], mine: "open" });
+  });
+
+  it("stays the account's it first opened for, whatever the list says or a link goes to afterwards (L3)", async () => {
+    const { ids, roster, store, secrets, me } = await running();
+    await opened(secrets.oli, me);
+    await save(secrets.oli, me, 0);
+    // The admin puts their own address on Oli's entry, and the link goes out
+    // to it again.
+    const theirs = `taker-${unique()}@acme.test`;
+    await store.saveRoster(
+      {
+        ...roster,
+        people: roster.people.map((person) =>
+          person.id === ids.oli ? { ...person, email: theirs } : person
+        ),
+      },
+      { type: "system" }
+    );
+    await store.remindDue(new Date(Date.now() + 10 * dayMs).toISOString());
+    const taker = await signedInAs(theirs);
+    const taken = await session(secrets.oli, taker);
+    const mine = await opened(secrets.oli, me);
+    expect({
+      taken: [taken.status, await codeOf(taken)],
+      mine: mine.progress?.lines[1]?.text,
+    }).toStrictEqual({
+      taken: [404, "interview.link_invalid"],
+      mine: sentinel,
+    });
+  });
+
+  it("opens for the address it went to though the list changed since, and never for the new one (L3)", async () => {
+    const { ids, roster, store, secrets, me } = await running();
+    const theirs = `taker-${unique()}@acme.test`;
+    await store.saveRoster(
+      {
+        ...roster,
+        people: roster.people.map((person) =>
+          person.id === ids.oli ? { ...person, email: theirs } : person
+        ),
+      },
+      { type: "system" }
+    );
+    const taker = await signedInAs(theirs);
+    const taken = await session(secrets.oli, taker);
+    const mine = await opened(secrets.oli, me);
+    expect({
+      taken: [taken.status, await codeOf(taken)],
+      mine: mine.state,
+    }).toStrictEqual({ taken: [404, "interview.link_invalid"], mine: "open" });
+  });
+
+  it("opens for nobody while it was sent to no address, and for the address once the list has one (L3)", async () => {
+    const { ids, roster, store, me } = await running();
+    // Ona has no address on the list when her link goes out, so no mail
+    // carries it: an admin hands it over by hand.
+    await store.saveRoster(
+      {
+        ...roster,
+        people: roster.people.map((person) =>
+          person.id === ids.ona ? { ...person, email: "" } : person
+        ),
+      },
+      { type: "system" }
+    );
+    const link = await store.linkOf(ids.ona);
+    const secret = link?.split("#")[1] ?? "";
+    const before = await session(secret, me);
+    await store.saveRoster(
+      {
+        ...roster,
+        people: roster.people.map((person) =>
+          person.id === ids.ona
+            ? { ...person, email: emailOf(ids.ona) }
+            : person
+        ),
+      },
+      { type: "system" }
+    );
+    const ona = await signedInAs(emailOf(ids.ona));
+    const after = await opened(secret, ona);
+    expect({
+      before: [before.status, await codeOf(before)],
+      after: { state: after.state, name: after.name },
+    }).toStrictEqual({
+      before: [404, "interview.link_invalid"],
+      after: { state: "open", name: "Ona" },
+    });
+  });
+
+  it("opens for neither of two on the list with the same address (L3)", async () => {
+    const { ids, roster, store, secrets } = await running();
+    const shared = `shared-${unique()}@acme.test`;
+    await store.saveRoster(
+      {
+        ...roster,
+        people: roster.people.map((person) =>
+          person.id === ids.oli || person.id === ids.lead
+            ? { ...person, email: shared }
+            : person
+        ),
+      },
+      { type: "system" }
+    );
+    const them = await signedInAs(shared);
+    const oli = await session(secrets.oli, them);
+    const lead = await session(secrets.lead, them);
+    expect([
+      [oli.status, await codeOf(oli)],
+      [lead.status, await codeOf(lead)],
+    ]).toStrictEqual([
+      [404, "interview.link_invalid"],
+      [404, "interview.link_invalid"],
+    ]);
+  });
+
+  it("drives nothing for a request another site sent, nor for Grasp's staff", async () => {
+    const { secrets, me } = await running();
+    const fromElsewhere = await post(
+      { action: "session", secret: secrets.oli },
+      me,
+      {
+        "sec-fetch-site": "cross-site",
+      }
+    );
+    const staff = await post(
+      { action: "session", secret: secrets.oli },
+      await signedIn(idp, "grasp-staff", staffPerson())
+    );
+    expect([
+      [fromElsewhere.status, await codeOf(fromElsewhere)],
+      [staff.status, await codeOf(staff)],
+    ]).toStrictEqual([
+      [403, "request.forbidden"],
+      [401, "interview.sign_in"],
+    ]);
+  });
+
   it("never loses a save to a second tab: the older copy is refused with the one kept (L4)", async () => {
-    const { secrets } = await running();
-    const { key } = await opened(secrets.oli);
-    await save(secrets.oli, key, 0);
-    const first = await save(secrets.oli, key, 1, progress("First tab"));
-    const second = await save(secrets.oli, key, 1, progress("Second tab"));
+    const { secrets, me } = await running();
+    await opened(secrets.oli, me);
+    await save(secrets.oli, me, 0);
+    const first = await save(secrets.oli, me, 1, progress("First tab"));
+    const second = await save(secrets.oli, me, 1, progress("Second tab"));
     const refused = await savedOf(second);
     await expect(first.json()).resolves.toStrictEqual({
       saved: true,
@@ -369,8 +577,8 @@ describe("someone's own link", () => {
   });
 
   it("refuses a save with anything but an interview in it (P3)", async () => {
-    const { secrets } = await running();
-    const { key } = await opened(secrets.oli);
+    const { secrets, me } = await running();
+    await opened(secrets.oli, me);
     const good = progress();
     const wrong = [
       { ...good, approvedBy: "the boss" },
@@ -380,7 +588,7 @@ describe("someone's own link", () => {
     ];
     const codes = await Promise.all(
       wrong.map(
-        async (sent) => await codeOf(await save(secrets.oli, key, 0, sent))
+        async (sent) => await codeOf(await save(secrets.oli, me, 0, sent))
       )
     );
     expect(codes).toStrictEqual(Array.from(wrong, () => "interview.invalid"));
@@ -391,25 +599,27 @@ describe("when a link opens", () => {
   // No link goes out before the agreements are in, and once one did they
   // stay as agreed (onboarding.test.ts): a link out without them can't be.
   it("opens nothing before it went out (L5)", async () => {
-    const { secrets } = await running();
-    // The lead hasn't talked: their team's other links wait.
-    const waiting = await session(secrets.member);
+    const { ids, secrets } = await running();
+    // The lead hasn't talked: their team's other links wait. Not yet sent,
+    // the link was sent to nobody, so it opens for nobody.
+    const member = await signedInAs(emailOf(ids.member));
+    const waiting = await session(secrets.member, member);
     expect([waiting.status, await codeOf(waiting)]).toStrictEqual([
-      403,
-      "interview.not_yet",
+      404,
+      "interview.link_invalid",
     ]);
   });
 
   it("takes nothing while the interviews are paused, and opens again after (L8)", async () => {
-    const { store, secrets } = await running();
-    const { key } = await opened(secrets.oli);
+    const { store, secrets, me } = await running();
+    await opened(secrets.oli, me);
     await store.setPaused(true, { type: "system" });
     const paused = [
-      await codeOf(await session(secrets.oli, key)),
-      await codeOf(await save(secrets.oli, key, 0)),
+      await codeOf(await session(secrets.oli, me)),
+      await codeOf(await save(secrets.oli, me, 0)),
     ];
     await store.setPaused(false, { type: "system" });
-    const resumed = await save(secrets.oli, key, 0);
+    const resumed = await save(secrets.oli, me, 0);
     expect({ paused, resumed: resumed.status }).toStrictEqual({
       paused: ["interview.paused", "interview.paused"],
       resumed: 200,
@@ -417,17 +627,16 @@ describe("when a link opens", () => {
   });
 
   it("takes nothing more after the last day, and can still be deleted (L6)", async () => {
-    const { store, secrets } = await running();
-    const { key } = await opened(secrets.oli);
-    await save(secrets.oli, key, 0);
+    const { store, secrets, me } = await running();
+    await opened(secrets.oli, me);
+    await save(secrets.oli, me, 0);
     await store.savePlan(
       { start: isoDay(Date.now() - 20 * dayMs), days: 14 },
       { type: "system" }
     );
-    const read = await session(secrets.oli, key);
-    const closed = await sessionOf(read);
-    const late = await save(secrets.oli, key, 1);
-    const deleted = await remove(secrets.oli, key);
+    const closed = await opened(secrets.oli, me);
+    const late = await save(secrets.oli, me, 1);
+    const deleted = await remove(secrets.oli, me);
     expect({
       closed: closed.closed,
       late: await codeOf(late),
@@ -436,9 +645,9 @@ describe("when a link opens", () => {
   });
 
   it("answers for someone taken off the list as for a link that never was, and forgets what they said (L7, L10)", async () => {
-    const { store, ids, secrets } = await running();
-    const { key } = await opened(secrets.oli);
-    await save(secrets.oli, key, 0);
+    const { store, ids, secrets, me } = await running();
+    await opened(secrets.oli, me);
+    await save(secrets.oli, me, 0);
     const view = await store.view();
     const roster = view.roster ?? { teams: [], people: [] };
     await store.saveRoster(
@@ -448,8 +657,8 @@ describe("when a link opens", () => {
       },
       { type: "system" }
     );
-    const gone = await session(secrets.oli, key);
-    const never = await session(randomSecret(), key);
+    const gone = await session(secrets.oli, me);
+    const never = await session(randomSecret(), me);
     await expect(shape(gone)).resolves.toStrictEqual(await shape(never));
     await expect(storeText()).resolves.not.toContain(sentinel);
     // Put back, they get a new link: the old one stays shut.
@@ -458,17 +667,21 @@ describe("when a link opens", () => {
   });
 
   it("counts calls per link: past sixty a minute a link waits, the others don't (L11)", async () => {
-    const { store, secrets } = await running();
+    const { store, ids, secrets } = await running();
     const { sha256Hex } = await import("@grasp-os/shared/encoding");
     const oli = await sha256Hex(secrets.oli);
     const lead = await sha256Hex(secrets.lead);
     const now = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const caller = (person: string) => ({
+      account: `account-${person}`,
+      address: emailOf(person),
+    });
     const answers = [];
     for (let call = 0; call < 61; call += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one call after another
-      answers.push(await store.openLink(oli, null, "issue", now));
+      answers.push(await store.openLink(oli, caller(ids.oli), now));
     }
-    const other = await store.openLink(lead, null, "issue", now);
+    const other = await store.openLink(lead, caller(ids.lead), now);
     expect({
       sixtieth: answers[59]?.ok,
       sixtyFirst: answers[60]?.ok === false ? answers[60].code : "ok",
@@ -483,23 +696,23 @@ describe("when a link opens", () => {
 
 describe("deleting and starting again", () => {
   it("deletes at once, and no copy from before, saved or not, can save it back after a new start (D3)", async () => {
-    const { secrets } = await running();
-    const { key } = await opened(secrets.oli);
-    await save(secrets.oli, key, 0);
-    const deleted = await remove(secrets.oli, key);
-    const empty = await sessionOf(await session(secrets.oli, key));
+    const { secrets, me } = await running();
+    await opened(secrets.oli, me);
+    await save(secrets.oli, me, 0);
+    const deleted = await remove(secrets.oli, me);
+    const empty = await opened(secrets.oli, me);
     // A tab that saved before the delete, and one that never saved.
-    const back = await save(secrets.oli, key, 1);
-    const unsaved = await save(secrets.oli, key, 0);
+    const back = await save(secrets.oli, me, 1);
+    const unsaved = await save(secrets.oli, me, 0);
     const fresh = await save(
       secrets.oli,
-      key,
+      me,
       empty.version,
       progress("A new start")
     );
     // Once the new start is saved, the old copies still can't overwrite it.
-    const stale = await savedOf(await save(secrets.oli, key, 1));
-    const kept = await sessionOf(await session(secrets.oli, key));
+    const stale = await savedOf(await save(secrets.oli, me, 1));
+    const kept = await opened(secrets.oli, me);
     expect({
       deleted: await deleted.json(),
       progress: empty.progress,
@@ -530,7 +743,7 @@ describe("deleting and starting again", () => {
     });
     const link = await store.linkOf(ids.ona);
     const secret = link?.split("#")[1] ?? "";
-    const { session: first } = await opened(secret);
+    const first = await opened(secret, await signedInAs(emailOf(ids.ona)));
     expect({ state: first.state, name: first.name }).toStrictEqual({
       state: "open",
       name: "Ona",
@@ -538,39 +751,35 @@ describe("deleting and starting again", () => {
     await expect(store.linkOf("nobody")).resolves.toBeNull();
   });
 
-  it("gives someone who lost their device a new start, from Grasp's admin (L9)", async () => {
-    const { ids, secrets } = await running();
-    const { key: lost } = await opened(secrets.oli);
-    await save(secrets.oli, lost, 0);
+  it("gives a new start from Grasp's admin, after which the link opens for its address again, and for no one else (L9)", async () => {
+    const { ids, secrets, me } = await running();
+    await opened(secrets.oli, me);
+    await save(secrets.oli, me, 0);
     await adminCommands().newStart(ids.oli);
-    const { session: fresh, key } = await opened(secrets.oli);
-    const old = await session(secrets.oli, lost);
+    const stranger = await signedInAs(`stranger-${unique()}@acme.test`);
+    const refused = await session(secrets.oli, stranger);
+    const fresh = await opened(secrets.oli, me);
     expect({
+      refused: await codeOf(refused),
       fresh: fresh.progress,
-      newKey: key !== "" && key !== lost,
-      old: await old.json(),
-    }).toStrictEqual({
-      fresh: null,
-      newKey: true,
-      old: { state: "elsewhere" },
-    });
+    }).toStrictEqual({ refused: "interview.link_invalid", fresh: null });
   });
 });
 
 describe("taking part, approving and withdrawing", () => {
   it("keeps who took part, to which notice, for what and whom, and answers the same when asked again (T1, T7)", async () => {
-    const { ids, secrets } = await running();
-    const { key } = await opened(secrets.oli);
+    const { ids, secrets, me } = await running();
+    await opened(secrets.oli, me);
     const old = await takePart(
       secrets.oli,
-      key,
+      me,
       participationNotice.version + 1
     );
-    const before = await sessionOf(await session(secrets.oli, key));
-    await save(secrets.oli, key, 0);
-    const first = await takePart(secrets.oli, key);
-    const again = await takePart(secrets.oli, key);
-    const after = await sessionOf(await session(secrets.oli, key));
+    const before = await opened(secrets.oli, me);
+    await save(secrets.oli, me, 0);
+    const first = await takePart(secrets.oli, me);
+    const again = await takePart(secrets.oli, me);
+    const after = await opened(secrets.oli, me);
     const kept = await runInDurableObject(
       onboardingStore(env),
       (_instance, state) =>
@@ -605,21 +814,21 @@ describe("taking part, approving and withdrawing", () => {
     });
   });
 
-  it("lets nobody else with the link, the admin too, take part, approve or withdraw for them (T4)", async () => {
-    const { secrets } = await running();
-    const { key } = await opened(secrets.oli);
-    await save(secrets.oli, key, 0);
-    const other = randomSecret();
+  it("lets nobody else signed in with the link, the admin too, take part, approve or withdraw for them (T4)", async () => {
+    const { secrets, me } = await running();
+    await opened(secrets.oli, me);
+    await save(secrets.oli, me, 0);
+    const admin = await signedInAs("ada@acme.test");
     expect([
-      await codeOf(await takePart(secrets.oli, other)),
-      await codeOf(await approveFact(secrets.oli, other)),
-      await codeOf(await withdraw(secrets.oli, other)),
+      await codeOf(await takePart(secrets.oli, admin)),
+      await codeOf(await approveFact(secrets.oli, admin)),
+      await codeOf(await withdraw(secrets.oli, admin)),
     ]).toStrictEqual([
-      "interview.elsewhere",
-      "interview.elsewhere",
-      "interview.elsewhere",
+      "interview.link_invalid",
+      "interview.link_invalid",
+      "interview.link_invalid",
     ]);
-    const mine = await sessionOf(await session(secrets.oli, key));
+    const mine = await opened(secrets.oli, me);
     expect({
       told: mine.progress?.told,
       withdrawn: mine.withdrawn,
@@ -627,18 +836,18 @@ describe("taking part, approving and withdrawing", () => {
   });
 
   it("withdraws once, whenever deleting works, keeps what was said theirs to read, and takes no one back after (T5, T7)", async () => {
-    const { store, secrets } = await running();
-    const { key } = await opened(secrets.oli);
-    const unagreed = await withdraw(secrets.oli, key);
-    await takePart(secrets.oli, key);
-    await save(secrets.oli, key, 0);
+    const { store, secrets, me } = await running();
+    await opened(secrets.oli, me);
+    const unagreed = await withdraw(secrets.oli, me);
+    await takePart(secrets.oli, me);
+    await save(secrets.oli, me, 0);
     await store.setPaused(true, { type: "system" });
-    const first = await withdraw(secrets.oli, key);
-    const again = await withdraw(secrets.oli, key);
+    const first = await withdraw(secrets.oli, me);
+    const again = await withdraw(secrets.oli, me);
     await store.setPaused(false, { type: "system" });
-    const read = await sessionOf(await session(secrets.oli, key));
-    const back = await takePart(secrets.oli, key);
-    const deleted = await remove(secrets.oli, key);
+    const read = await opened(secrets.oli, me);
+    const back = await takePart(secrets.oli, me);
+    const deleted = await remove(secrets.oli, me);
     expect({
       unagreed: await codeOf(unagreed),
       first: first.status,
@@ -666,30 +875,28 @@ describe("taking part, approving and withdrawing", () => {
   ] as const)(
     "keeps a withdrawal final through %s: nobody takes part again (T5)",
     async (_, how) => {
-      const { ids, store, secrets } = await running();
-      const { key } = await opened(secrets.oli);
-      await takePart(secrets.oli, key);
-      await save(secrets.oli, key, 0);
-      await withdraw(secrets.oli, key);
+      const { ids, store, secrets, me } = await running();
+      await opened(secrets.oli, me);
+      await takePart(secrets.oli, me);
+      await save(secrets.oli, me, 0);
+      await withdraw(secrets.oli, me);
       await (how === "delete"
-        ? remove(secrets.oli, key)
+        ? remove(secrets.oli, me)
         : store.newStart(ids.oli, { type: "system" }));
-      const { key: again } = await opened(secrets.oli);
-      const device = again === "" ? key : again;
-      const read = await sessionOf(await session(secrets.oli, device));
+      const read = await opened(secrets.oli, me);
       expect({
         withdrawn: read.withdrawn,
-        back: await codeOf(await takePart(secrets.oli, device)),
+        back: await codeOf(await takePart(secrets.oli, me)),
       }).toStrictEqual({ withdrawn: true, back: "interview.withdrawn" });
     }
   );
 
   it("keeps no mark of someone who withdrew once they leave the roster", async () => {
-    const { ids, store, secrets } = await running();
-    const { key } = await opened(secrets.oli);
-    await takePart(secrets.oli, key);
-    await save(secrets.oli, key, 0);
-    await withdraw(secrets.oli, key);
+    const { ids, store, secrets, me } = await running();
+    await opened(secrets.oli, me);
+    await takePart(secrets.oli, me);
+    await save(secrets.oli, me, 0);
+    await withdraw(secrets.oli, me);
     const marks = async () =>
       await runInDurableObject(onboardingStore(env), (_instance, state) =>
         state.storage.sql
@@ -715,34 +922,31 @@ describe("taking part, approving and withdrawing", () => {
   });
 
   it("approves nothing after the last day: what wasn't approved stays theirs alone (T6)", async () => {
-    const { ids, store, secrets } = await running();
-    const { key } = await opened(secrets.oli);
-    await takePart(secrets.oli, key);
-    await save(secrets.oli, key, 0);
+    const { ids, store, secrets, me } = await running();
+    await opened(secrets.oli, me);
+    await takePart(secrets.oli, me);
+    await save(secrets.oli, me, 0);
     await store.savePlan(
       { start: isoDay(Date.now() - 20 * dayMs), days: 14 },
       { type: "system" }
     );
     expect({
-      late: await codeOf(await approveFact(secrets.oli, key)),
+      late: await codeOf(await approveFact(secrets.oli, me)),
       drawn: await store.drawInput(ids.oli),
     }).toStrictEqual({ late: "interview.closed", drawn: null });
   });
 
   it("asks again before anything new once the interview is deleted: taking part goes with it", async () => {
-    const { secrets } = await running();
-    const { key } = await opened(secrets.oli);
-    await takePart(secrets.oli, key);
-    await save(secrets.oli, key, 0);
-    await remove(secrets.oli, key);
-    const { key: fresh } = await opened(secrets.oli);
-    const read = await sessionOf(await session(secrets.oli, fresh));
+    const { secrets, me } = await running();
+    await opened(secrets.oli, me);
+    await takePart(secrets.oli, me);
+    await save(secrets.oli, me, 0);
+    await remove(secrets.oli, me);
+    const read = await opened(secrets.oli, me);
     expect({
-      key: fresh === "" ? "same device" : "new",
       told: read.progress?.told ?? false,
-      approve: await codeOf(await approveFact(secrets.oli, key)),
+      approve: await codeOf(await approveFact(secrets.oli, me)),
     }).toStrictEqual({
-      key: "same device",
       told: false,
       approve: "interview.not_participating",
     });
@@ -751,22 +955,25 @@ describe("taking part, approving and withdrawing", () => {
 
 describe("what the company learns", () => {
   it("finds nothing of what anyone did on their link in the audit log; only staff's log has it (W7)", async () => {
-    const { ids, secrets } = await running();
+    const { ids, secrets, me } = await running();
+    const { userId } = await whoami(me);
     const events = await auditedDuring(async () => {
-      const { key } = await opened(secrets.oli);
-      await takePart(secrets.oli, key);
-      await save(secrets.oli, key, 0, { ...progress(), person: "completed" });
-      await approveFact(secrets.oli, key);
-      await withdraw(secrets.oli, key);
-      await remove(secrets.oli, key);
+      await opened(secrets.oli, me);
+      await takePart(secrets.oli, me);
+      await save(secrets.oli, me, 0, { ...progress(), person: "completed" });
+      await approveFact(secrets.oli, me);
+      await withdraw(secrets.oli, me);
+      await remove(secrets.oli, me);
     });
     const text = JSON.stringify(events);
     expect([
       text.includes(ids.oli),
+      text.includes(userId),
       text.includes(sentinel),
       text.includes(secrets.oli),
-    ]).toStrictEqual([false, false, false]);
+    ]).toStrictEqual([false, false, false, false]);
     await expect(staffLog(ids.oli)).resolves.toStrictEqual([
+      "mail.link.sent",
       "interview.opened",
       "interview.participated",
       "interview.started",

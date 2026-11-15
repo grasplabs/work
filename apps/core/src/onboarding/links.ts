@@ -1,25 +1,25 @@
-import { randomToken, sha256Hex } from "@grasp-os/shared/encoding";
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import { requestErrors } from "@grasp-os/shared/errors";
 import {
   interviewErrors,
   interviewRequestMaxBytes,
   interviewRequestSchema,
 } from "@grasp-os/shared/interview-links";
-import type {
-  InterviewElsewhere,
-  InterviewSession,
-} from "@grasp-os/shared/interview-links";
 import { log } from "@grasp-os/shared/log";
 
 import { errorResponse } from "../errors.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
+import { interviewCaller } from "./interview-caller.ts";
+import type { NoCaller } from "./interview-caller.ts";
+import { eraseOwedOfPersonQuietly } from "./new-brain.ts";
 import { onboardingStore } from "./store.ts";
 import type { LinkAnswer, LinkRefusal } from "./store.ts";
 
 // Everyone's own interview link (`@grasp-os/shared/interview-links`): the
-// page's calls, `POST /api/interview`, with the link's secret, and the
-// device's key once it has one, in the body. How it can fail, from the
-// threat model (GRA-307, L1 to L11), and what stops it:
+// page's calls, `POST /api/interview`, with the link's secret in the body
+// and the session of the company's sign-in on the request
+// (interview-caller.ts). How it can fail, from the threat model (GRA-307,
+// L1 to L11, and GRA-1790), and what stops it:
 //
 // - A link guessed (L1): its secret is 256 bits, made from core's key and
 //   a random id per person (link-secret.ts); the store keeps the id and
@@ -28,25 +28,31 @@ import type { LinkAnswer, LinkRefusal } from "./store.ts";
 //   sends, and in request bodies; never in a log, an error, the audit log
 //   or a referrer (`no-referrer` on every answer here and on the page).
 // - Someone else with the link, the company's admin among them (L3): the
-//   first device to open it is given a key of 256 bits, and only its hash
-//   is kept; reading, saving and deleting need it, and anyone else is told
-//   the interview is open elsewhere, and nothing that was said.
+//   interview belongs to the account that first opened it signed in with
+//   the address the link was sent to, verified by the company's sign-in
+//   (GRA-1790); everything on it needs that account's session, and anyone
+//   else is told the link opens nothing, as for one that never was.
 // - Two tabs losing a save (L4): saves are versioned, and one from an
 //   older copy is refused with the copy kept.
 // - Opening too early, while paused, or too late (L5, L6, L8): a link
 //   opens once it was sent (the store's alarm, by its day and its lead),
 //   while the interviews run and the agreements are in; after the plan's
 //   last day what was said can be read and deleted, and nothing more.
-//   Deleting works at any time on the device the link opened on.
+//   Deleting works at any time for the account the link belongs to.
 // - Someone taken off the list (L7): their link, and what they said, go
 //   with them, and their link answers as one that never was (L10).
-// - A lost device (L9): staff give a new start from Grasp's admin
+// - A lost device (L9): nothing to do; they sign in on another one. Staff
+//   give a new start from Grasp's admin when an interview went wrong
 //   (admin-command.ts).
 // - Floods (L11): the router limits this endpoint per address; the store
 //   counts calls per link.
 // - The company learning who talked, and when: what someone does on their
 //   link is in the onboarding's own log, which only staff read, never in
-//   the audit log, which the company's admin reads.
+//   the audit log, which the company's admin reads. Their sign-in is in
+//   their company's own sign-in records, as every sign-in is, and the page
+//   says so before they sign in (GRA-1790); Grasp records it nowhere the
+//   company reads, and makes no membership for them while the gate is
+//   closed.
 //
 // And from the threat model of read-back approval (GRA-329, T1 to T8):
 //
@@ -65,12 +71,15 @@ import type { LinkAnswer, LinkRefusal } from "./store.ts";
 //   brain at once, and takes out what the brain has that rests on them.
 
 /** The HTTP status of each refusal. */
-const statusFor: Record<LinkRefusal | "interview.invalid", number> = {
+const statusFor: Record<
+  LinkRefusal | "interview.invalid" | "interview.sign_in",
+  number
+> = {
   "interview.link_invalid": 404,
+  "interview.sign_in": 401,
   "interview.not_yet": 403,
   "interview.paused": 423,
   "interview.closed": 410,
-  "interview.elsewhere": 403,
   "interview.deleted": 410,
   "interview.limited": 429,
   "interview.invalid": 400,
@@ -86,7 +95,7 @@ export const linkHeaders = {
 } as const;
 
 export const linkRefusal = (
-  code: LinkRefusal | "interview.invalid",
+  code: LinkRefusal | "interview.invalid" | "interview.sign_in",
   requestId: string
 ): Response => {
   const response = errorResponse(
@@ -111,18 +120,24 @@ const answer = <T>(
 ): Response =>
   result.ok ? shown(result.value) : linkRefusal(result.code, requestId);
 
-/** What a session answers the device: its key, the one time it is given. */
-const sessionOf = (
-  value:
-    | (Omit<InterviewSession, "key"> & { issued: boolean })
-    | InterviewElsewhere,
-  key: string
-): InterviewSession | InterviewElsewhere => {
-  if (value.state === "elsewhere") {
-    return value;
+/**
+ * The answer to a request that names nobody who may open an interview
+ * (interview-caller.ts): one another site sent is forbidden; one with no
+ * session of the company's sign-in is asked to sign in.
+ */
+export const noCallerRefusal = (why: NoCaller, requestId: string): Response => {
+  if (why === "sign_in") {
+    return linkRefusal("interview.sign_in", requestId);
   }
-  const { issued, ...session } = value;
-  return issued ? { ...session, key } : session;
+  const response = errorResponse(
+    403,
+    requestErrors.create("request.forbidden"),
+    requestId
+  );
+  for (const [name, value] of Object.entries(linkHeaders)) {
+    response.headers.set(name, value);
+  }
+  return response;
 };
 
 /** The interview page's calls: session, save, delete, and taking part, approving and withdrawing. */
@@ -138,6 +153,12 @@ export const interviewResponse = async (
       requestId
     );
   }
+  // Who asks, before anything they sent is read.
+  const caller = await interviewCaller(env, request.headers);
+  if (typeof caller === "string") {
+    return noCallerRefusal(caller, requestId);
+  }
+  const { account } = caller;
   const length = Number(request.headers.get("content-length") ?? 0);
   const raw =
     length > interviewRequestMaxBytes
@@ -152,7 +173,16 @@ export const interviewResponse = async (
   const body = parsed.data;
   const store = onboardingStore(env);
   const secretMark = await sha256Hex(body.secret);
-  const keyMark = body.key === undefined ? null : await sha256Hex(body.key);
+  // Whose link it is, and the teams whose claims they back, read before
+  // a request that may drop them: what it takes out leaves the new Brain
+  // in the same request (onboarding/new-brain.ts).
+  const ownBrainWork = async () => {
+    const person = await store.personOfLink(secretMark);
+    return {
+      person,
+      backed: person === null ? [] : await store.claimTeamsOf(person),
+    };
+  };
   const done = (result: LinkAnswer<unknown>) => {
     if (!result.ok && result.code === "interview.link_invalid") {
       // Never the secret: only that one opened nothing.
@@ -161,51 +191,58 @@ export const interviewResponse = async (
   };
   switch (body.action) {
     case "session": {
-      const key = randomToken();
-      const result = await store.openLink(
-        secretMark,
-        keyMark,
-        await sha256Hex(key)
-      );
+      const result = await store.openLink(secretMark, caller);
       done(result);
-      return answer(result, requestId, (value) => json(sessionOf(value, key)));
+      return answer(result, requestId, (value) => json(value));
     }
     case "save": {
+      const { person, backed } = await ownBrainWork();
       const result = await store.saveInterview(
         secretMark,
-        keyMark ?? "",
+        account,
         body.version,
         body.progress
       );
       done(result);
+      // What it took out of their interview leaves the new Brain now
+      // (onboarding/new-brain.ts); what it added is handed over.
+      await eraseOwedOfPersonQuietly(env, person, backed);
       return answer(result, requestId, (value) =>
         json(value, value.saved ? 200 : 409)
       );
     }
     case "delete": {
-      const result = await store.deleteInterview(secretMark, keyMark ?? "");
+      const { person, backed } = await ownBrainWork();
+      const result = await store.deleteInterview(secretMark, account);
       done(result);
+      // What it took out of their interview leaves the new Brain now
+      // (onboarding/new-brain.ts); what it added is handed over.
+      await eraseOwedOfPersonQuietly(env, person, backed);
       return answer(result, requestId, (value) => json(value));
     }
     case "participate": {
-      const result = await store.participate(
-        secretMark,
-        keyMark ?? "",
-        body.notice
-      );
+      const result = await store.participate(secretMark, account, body.notice);
       done(result);
       return answer(result, requestId, (value) => json(value));
     }
     case "approve": {
-      const result = await store.approve(secretMark, keyMark ?? "", body.facts);
+      const { person, backed } = await ownBrainWork();
+      const result = await store.approve(secretMark, account, body.facts);
       done(result);
+      // What it took out of their interview leaves the new Brain now
+      // (onboarding/new-brain.ts); what it added is handed over.
+      await eraseOwedOfPersonQuietly(env, person, backed);
       return answer(result, requestId, (value) =>
         json(value, value.approved ? 200 : 409)
       );
     }
     case "withdraw": {
-      const result = await store.withdraw(secretMark, keyMark ?? "");
+      const { person, backed } = await ownBrainWork();
+      const result = await store.withdraw(secretMark, account);
       done(result);
+      // What it took out of their interview leaves the new Brain now
+      // (onboarding/new-brain.ts); what it added is handed over.
+      await eraseOwedOfPersonQuietly(env, person, backed);
       return answer(result, requestId, (value) => json(value));
     }
     default: {

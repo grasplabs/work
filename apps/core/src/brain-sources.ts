@@ -32,6 +32,12 @@ import type {
 } from "./brain-next.ts";
 import { brainHandOvers, workflowStartReceipts } from "./db/core/schema.ts";
 import { workspace } from "./durable-objects.ts";
+import {
+  claimOf,
+  claimSource,
+  interviewOf,
+  interviewSource,
+} from "./onboarding/new-brain.ts";
 import { personalWorkspaceId } from "./personal-workspace.ts";
 import { resultOf, runOf } from "./workflows/resource-runs.ts";
 import { detailsRemoved } from "./workflows/retention.ts";
@@ -219,6 +225,10 @@ const producers: Record<
     read: chatTurnOfId,
     ofPerson: chatsOf,
   },
+  // An interview's and a claim's ids are minted by the onboarding and
+  // name nobody: an erased person's interview reads as erased.
+  interview: { source: interviewSource, read: interviewOf, ofPerson: null },
+  claim: { source: claimSource, read: claimOf, ofPerson: null },
 };
 
 /** Whether `kind` is a producer's: a source of any other has nothing to hand over. */

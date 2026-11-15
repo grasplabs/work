@@ -12,13 +12,16 @@ import { vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { createIdp } from "./fake-idp.ts";
 import { answeringProvider } from "./model-provider.ts";
 import type { ProviderReply, SentRequest } from "./model-provider.ts";
-import { routed, unique } from "./sign-in.ts";
+import { acmeTenant } from "./sign-in-config.ts";
+import { entraPerson, routed, signedIn, unique, whoami } from "./sign-in.ts";
 
 // What the tests of an interview's endpoints share (interview-turn.test.ts,
-// interview-story.test.ts): someone's link, opened on a device, and the
-// organization's provider with Stephen's two models, faked behind connect
+// interview-story.test.ts): someone's link, opened signed in with the
+// company's sign-in as the person it was sent to, and the organization's
+// provider with Stephen's two models, faked behind connect
 // (test/model-provider.ts).
 
 /** The organization's default: both roles resolve to it. */
@@ -31,8 +34,6 @@ export const interviewModels = [quick, careful] as const;
 
 const dayMs = 24 * 60 * 60 * 1000;
 
-/** What a session answers, as far as these tests read it: the device's key. */
-const sessionKey = z.object({ key: z.string().optional() });
 /** A provider request, as far as these tests read it: its model. */
 const requestModel = z.object({ model: z.unknown() });
 
@@ -43,19 +44,118 @@ export const codeOf = async (response: Response) => {
 };
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
-/** A link as the page holds it: its secret and the device's key. */
+/**
+ * A link as the page holds it: its secret, and the session cookie of the
+ * person signed in with the company's sign-in, which the browser sends with
+ * each of its calls (GRA-1790).
+ */
 export interface Device {
   secret: string;
-  key: string;
+  cookie: string;
 }
 
-/** One of the link's calls, as the page makes it. */
-export const onLink = async (body: unknown): Promise<Response> =>
-  await routed(interviewApiPath, {
+/** The IdP these sign-ins go through: one, so sign-ins side by side work. */
+const interviewIdp = createIdp();
+
+/** Sign-ins under way, and what answered core's calls before the first. */
+const signingIn = { count: 0, before: globalThis.fetch };
+
+/**
+ * The session cookie of someone signed in through the company's sign-in
+ * as `email`, end to end: core, the IdP (the fake one, answering only while
+ * a sign-in is under way), back to core. The same address is the same
+ * person at the IdP each time, so signing in again (on another device) is
+ * them again.
+ */
+export const signedInAs = async (
+  email: string,
+  coreEnv: Env = env
+): Promise<string> => {
+  // Whatever answered before (a file's own IdP, say) answers again once
+  // the last sign-in under way is done.
+  if (signingIn.count === 0) {
+    signingIn.before = globalThis.fetch;
+    globalThis.fetch = interviewIdp.fetch;
+  }
+  signingIn.count += 1;
+  const idp = interviewIdp;
+  try {
+    return await signedIn(
+      idp,
+      "microsoft",
+      entraPerson(acmeTenant, "acme.test", {
+        email,
+        sub: `entra-sub-${email}`,
+        oid: `entra-oid-${email}`,
+        name: email.split("@")[0],
+      }),
+      { coreEnv }
+    );
+  } finally {
+    signingIn.count -= 1;
+    if (signingIn.count === 0) {
+      globalThis.fetch = signingIn.before;
+    }
+  }
+};
+
+/**
+ * One call of `path`, as the page makes it: `cookie` goes as the browser's
+ * cookie, never in the body, and the rest as JSON.
+ */
+export const postedOnLink = async (
+  path: string,
+  { cookie = "", ...body }: Record<string, unknown> & { cookie?: string }
+): Promise<Response> =>
+  await routed(path, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      "sec-fetch-site": "same-origin",
+      cookie,
+    },
     body: JSON.stringify(body),
   });
+
+/** One of the link's calls, as the page makes it (`postedOnLink`). */
+export const onLink = async (
+  body: Record<string, unknown> & { cookie?: string }
+): Promise<Response> => await postedOnLink(interviewApiPath, body);
+
+/**
+ * The address `person`'s link went to, which signs in to open it: as the
+ * store keeps it once a mail carried the link, else the list's.
+ */
+export const sentToOf = async (person: string): Promise<string> => {
+  const store = onboardingStore(env);
+  const sent = await runInDurableObject(store, (_instance, state) =>
+    state.storage.sql
+      .exec<{ to: string | null }>(
+        'SELECT sent_to AS "to" FROM links WHERE person = ?',
+        person
+      )
+      .toArray()
+  );
+  const { roster } = await store.view();
+  return (
+    sent[0]?.to ?? roster?.people.find(({ id }) => id === person)?.email ?? ""
+  );
+};
+
+/** The account a link's session is for: what the store names it by. */
+export const accountOf = async ({ cookie }: Device): Promise<string> => {
+  const { userId } = await whoami(cookie);
+  return userId;
+};
+
+/**
+ * `secret`'s link opened by whoever `cookie` signs in, as the page opens it
+ * first: what it answered, and the link as the page holds it.
+ */
+export const openLinkAs = async (secret: string, cookie: string) => {
+  const response = await onLink({ action: "session", secret, cookie });
+  return { response, link: { secret, cookie } };
+};
 
 /** They agree to take part, to the notice as it is now (or `notice`). */
 export const participate = async (
@@ -105,12 +205,15 @@ export const approveAgreed = async (
 
 /**
  * A fresh onboarding running since yesterday, with one person in Ops (no
- * lead) whose link is out, opened on a device, and who agreed to take part
- * unless `participating` is false: their secret and key, and who they are.
+ * lead) whose link is out, opened signed in as them, and who agreed to take
+ * part unless `participating` is false: their link as the page holds it,
+ * and who they are.
  */
 export const openedFor = async ({ participating = true } = {}) => {
   const store = onboardingStore(env);
   const person = `oli-${unique()}`;
+  // An address of their own, holding nothing of their id on the list.
+  const email = `person-${unique()}@acme.test`;
   const roster: Roster = {
     teams: [{ id: "ops", name: "Ops", lead: null, does: "", off: false }],
     people: [
@@ -118,7 +221,7 @@ export const openedFor = async ({ participating = true } = {}) => {
         id: person,
         name: "Oli Olsen",
         team: "ops",
-        email: "",
+        email,
         title: "",
         away: false,
       },
@@ -135,20 +238,14 @@ export const openedFor = async ({ participating = true } = {}) => {
   await store.releaseDue();
   const link = await store.linkOf(person);
   const secret = link?.split("#")[1] ?? "";
-  const session = await routed(interviewApiPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "session", secret }),
-  });
-  const { key } = sessionKey.parse(await session.json());
-  const device = { secret, key: key ?? "" };
+  const { link: device } = await openLinkAs(secret, await signedInAs(email));
   if (participating) {
     await participate(device);
   }
   return { link: device, person };
 };
 
-/** The same, as the page holds it: the link's secret and the device's key. */
+/** The same, as the page holds it: the link's secret and the session. */
 export const opened = async () => {
   const { link } = await openedFor();
   return link;

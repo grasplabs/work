@@ -1,5 +1,4 @@
 import type { BrainRecordInput } from "@grasp-os/shared/brain-records";
-import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { InterviewProgress } from "@grasp-os/shared/interview-links";
 import type { PurgeInput, PurgePlan } from "@grasp-os/shared/knowledge";
 import type { Roster } from "@grasp-os/shared/onboarding";
@@ -8,7 +7,8 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { mockIdp } from "./idp.ts";
-import { onLink } from "./interview-link.ts";
+import { onLink, openLinkAs, signedInAs } from "./interview-link.ts";
+import type { Device } from "./interview-link.ts";
 import { purged, rememberAs, saveOver, setUpTime } from "./knowledge-purge.ts";
 import type { Person } from "./knowledge-purge.ts";
 import { auditedDuring, signedInApi, unique } from "./sign-in.ts";
@@ -73,14 +73,11 @@ const progressSaying = (passage: string): InterviewProgress => ({
   addedAt: 0,
 });
 
-/** The key the interviewed person's device holds: 32 bytes, base64url. */
-const deviceKey = "D".repeat(43);
-
 /**
- * Someone interviewed who said `passage`: the link's secret, which with
- * `deviceKey` reads the interview as they do.
+ * Someone interviewed who said `passage`: their link, signed in as them,
+ * which reads the interview as they do.
  */
-const interviewSaying = async (passage: string): Promise<string> => {
+const interviewSaying = async (passage: string): Promise<Device> => {
   const store = onboardingStore(env);
   const lead = `lea-${unique()}`;
   const roster: Roster = {
@@ -110,24 +107,23 @@ const interviewSaying = async (passage: string): Promise<string> => {
   await store.releaseDue();
   const link = (await store.linkOf(lead)) ?? "";
   const secret = link.split("#")[1] ?? "";
-  const key = await sha256Hex(deviceKey);
-  await store.openLink(await sha256Hex(secret), null, key);
-  await store.saveInterview(
-    await sha256Hex(secret),
-    key,
-    0,
-    progressSaying(passage)
+  // Opened signed in as the address it went to.
+  const { link: device } = await openLinkAs(
+    secret,
+    await signedInAs("lea@acme.test")
   );
-  return secret;
+  await onLink({
+    action: "save",
+    ...device,
+    version: 0,
+    progress: progressSaying(passage),
+  });
+  return device;
 };
 
-/** The interview as the person interviewed reads it, on their device. */
-const interviewAsRead = async (secret: string): Promise<string> => {
-  const response = await onLink({
-    action: "session",
-    secret,
-    key: deviceKey,
-  });
+/** The interview as the person interviewed reads it, signed in. */
+const interviewAsRead = async (device: Device): Promise<string> => {
+  const response = await onLink({ action: "session", ...device });
   return await response.text();
 };
 
@@ -139,14 +135,14 @@ const privatelyHeld = async (passage: string, holder: Holder) => {
   const admin = await personOf("admin");
   const member = await personOf("user");
   let gap = "";
-  let secret = "";
+  let device: Device = { secret: "", cookie: "" };
   if (holder === "memory record") {
     await rememberAs(member, `Note to self: ${passage}.`);
   } else if (holder === "gap answer") {
     gap = await gapIn(admin, unique());
     await member.api.brain.answerGap(gap, `Ask around: ${passage}.`);
   } else {
-    secret = await interviewSaying(passage);
+    device = await interviewSaying(passage);
   }
   const handbook = await admin.api.knowledge.createCollection({
     name: `Handbook ${unique()}`,
@@ -163,7 +159,7 @@ const privatelyHeld = async (passage: string, holder: Holder) => {
       const workspace = await member.api.brain.read();
       return workspace.gaps.find(({ id }) => id === gap)?.answer ?? "";
     }
-    return await interviewAsRead(secret);
+    return await interviewAsRead(device);
   };
   return { admin, own, read };
 };

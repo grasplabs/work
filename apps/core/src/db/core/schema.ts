@@ -65,6 +65,12 @@ export const sessions = sqliteTable(
     activeTeamId: text("active_team_id"),
     /** A Grasp staff session: time-bound, and not a member of the organization. */
     staff: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * A session for someone's own interview alone, made while the gate is
+     * closed (onboarding/gate.ts, GRA-1790): it opens their interview and
+     * nothing else of Grasp, and the gate's opening ends it.
+     */
+    interview: integer({ mode: "boolean" }).notNull().default(false),
   },
   (table) => [index("sessions_user_id_idx").on(table.userId)]
 );
