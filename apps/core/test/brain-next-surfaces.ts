@@ -3507,9 +3507,9 @@ export const instructionProbes = {
     }
     // A shared channel gives what a chat of theirs does, but never a
     // person's file, the reader's own included: others there would read
-    // it through the agent. Nor does a chat whose answer doesn't reach
-    // them alone (a chat app's direct message while GRA-1821 is open, a
-    // turn nobody asked for): it gives what a shared channel does.
+    // it through the agent. Nor does a turn whose answer doesn't reach
+    // them alone (one nobody asked for): it gives what a shared channel
+    // does.
     asked.push(
       await side(
         "a shared channel",

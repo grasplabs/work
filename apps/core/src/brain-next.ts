@@ -426,9 +426,9 @@ export interface Recall {
   budget: { tokens: number };
   /**
    * Whether the pack may hold what only this person may read, from their
-   * own store: only where the answer reaches them alone (their own chat in
-   * Grasp, in a turn they started; a chat app's direct message is kept by
-   * the chat app too, so it reads as the company). Apps, workflows and the
+   * own store: only where the answer reaches them alone (their own chat,
+   * in Grasp or their direct message on a chat app, in a turn they
+   * started). Apps, workflows and the
    * SDK pass `false`, so what is theirs alone never reaches App data or
    * anyone else; then their own store is never addressed.
    */
@@ -1122,8 +1122,8 @@ export const recallAs = async (
   recall: Recall
 ): Promise<RecalledPack> => {
   // Ranked by their use only where the answer reaches them alone: a
-  // recall as their teams or the company (a channel, a thread, a chat
-  // app, a turn they didn't start, code) is ordered as for anyone, and
+  // recall as their teams or the company (a channel, a thread, a turn
+  // they didn't start, code) is ordered as for anyone, and
   // their Workspace isn't asked.
   const [request, used] = await Promise.all([
     recallRequestAs(env, personId, recall),
@@ -4703,8 +4703,9 @@ const codeCardSchema = z.strictObject({
  * own: the company alone (`company`), as an App, a workflow and a chat's
  * code anywhere but its person's own chat do; or its person's teams and
  * the company, as no person (`teams`), as a chat's code does in their own
- * chat in Grasp alone (agent-brain.ts), the reach its recall reads at
- * there. Set by core, never by the code.
+ * chat alone, in Grasp or their direct message on a chat app
+ * (agent-brain.ts), the reach its recall reads at there. Set by core,
+ * never by the code.
  */
 export type CodeReach = Extract<Reach, "teams" | "company">;
 

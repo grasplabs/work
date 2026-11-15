@@ -166,6 +166,15 @@ const notedEvents = async (personId: string, chatId = "") => {
   );
 };
 
+/** Strings in a fixed order, for comparing sets. */
+const byText = (a: string, b: string): number => a.localeCompare(b);
+
+/** The chats each of `refs` is a turn of, each once. */
+const chatsOf = (refs: readonly { id: string }[]): string[] =>
+  [...new Set(refs.flatMap(({ id }) => chatTurnOf(id)?.chatId ?? []))].toSorted(
+    byText
+  );
+
 /** A store binding out of reach: every store it names throws. */
 const outOfReach = (): never => {
   throw new Error("The Brain is out of reach");
@@ -673,23 +682,38 @@ describe("a person's chat turn", () => {
     ]);
   });
 
-  it("is never handed over from a chat app's chat, a turn nothing but a wake asked for, or a restricted chat", async () => {
+  it("is handed over from their direct message on a chat app as from their chat in Grasp, and never from a thread others share, a turn nothing but a wake asked for, or a restricted chat", async () => {
     const marker = word();
     const { person, stub, chatId, ask } = await chatter(
       says(`Woken ${marker}.`),
-      says(`Teams ${marker}.`),
+      says(`Direct ${marker}.`),
+      says(`Shared ${marker}.`),
       says(`Restricted ${marker}.`),
       says(`Asked ${marker}.`)
     );
     await stub.askUnattended(chatId, { text: `Wake ${marker}`, model });
-    const onTeams = await stub.createChat(
-      "On Teams",
+    // Their direct message is their own chat (GRA-1821); a thread others
+    // share is not, though its roster holds them alone.
+    const direct = await stub.askThrough(
       person.userId,
       chatAgentId,
+      "teams",
+      `Direct ${marker}?`,
       undefined,
-      "teams"
+      { kind: "direct" }
     );
-    await stub.ask(onTeams.id, { text: `Teams ${marker}?`, model });
+    await stub.askThrough(
+      person.userId,
+      chatAgentId,
+      "slack",
+      `Shared ${marker}?`,
+      undefined,
+      {
+        thread: `C${crypto.randomUUID()}`,
+        kind: "group",
+        audience: { members: [person.userId], outsiders: false },
+      }
+    );
     const restricted = await person.api.chats.create("Restricted");
     await stub.restrictChat(chatIdSchema.parse(restricted.id));
     await stub.ask(chatIdSchema.parse(restricted.id), {
@@ -698,13 +722,23 @@ describe("a person's chat turn", () => {
     });
     // A turn of their own chat after them, handed over as ever.
     await ask(`Asked ${marker}?`);
-    const found = await handedTo(person.userId, marker);
+    const both = [direct.chatId, chatId].toSorted(byText);
+    // Recalled by them from their own store, each once handed over.
+    const found = await vi.waitFor(
+      async () => {
+        await handOverNow();
+        const recalledNow = chatsOf(await recalled(person.userId, marker));
+        expect(recalledNow, "a turn was never handed over").toStrictEqual(both);
+        return recalledNow;
+      },
+      { timeout: 15_000, interval: 200 }
+    );
     const kept = await notedEvents(person.userId);
 
     expect({
-      found: found.length,
-      kept: kept.length,
-    }).toStrictEqual({ found: 1, kept: 1 });
+      found,
+      noted: chatsOf(kept.flatMap(({ target }) => target ?? [])),
+    }).toStrictEqual({ found: both, noted: both });
   });
 });
 
