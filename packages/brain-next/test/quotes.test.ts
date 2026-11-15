@@ -15,6 +15,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { chunksOf } from "../src/chunks.ts";
 import { fileKeyOf } from "../src/files.ts";
+import { quoteIndexOf } from "../src/quotes.ts";
 import type { BrainStore } from "../src/store.ts";
 import { sequenceOf } from "../src/words.ts";
 
@@ -564,60 +565,6 @@ describe("what the store keeps of it", () => {
       judgedAgain: await addedAt(source, third, reader),
     });
   });
-
-  it("moves the mark of memories judged on with each add, and keeps it behind a memory an older release added unjudged", async () => {
-    const group = unique("g");
-    const source = unique("doc");
-    const name = unique("Acme");
-    const first = await version(source, `${name} pays.`, group);
-    const mark = async () =>
-      await runInDurableObject(shared(), (_instance, state) => ({
-        through:
-          state.storage.sql
-            .exec<{ through: number }>(
-              "SELECT through FROM memory_judged WHERE id = 1"
-            )
-            .toArray()
-            .at(0)?.through ?? 0,
-        last: state.storage.sql
-          .exec<{ last: number }>(
-            "SELECT coalesce(max(row), 0) AS last FROM memories"
-          )
-          .one().last,
-      }));
-    await memoryOn(
-      { source, version: first, quote: `${name} pays`, group },
-      { name }
-    );
-    const afterAdd = await mark();
-    // An older release's add: a memory written with no judgment.
-    const unjudged = await runInDurableObject(
-      shared(),
-      (_instance, state) =>
-        state.storage.sql
-          .exec<{ row: number }>(
-            `INSERT INTO memories (id, entity, type, statement, quote, source,
-              version, subject, lineage, lineage_order, speaker, learned_at,
-              readers, one_value)
-            SELECT ?, entity, type, statement, quote, source, version, subject,
-              lineage, lineage_order, speaker, learned_at, readers, one_value
-            FROM memories ORDER BY row DESC LIMIT 1
-            RETURNING row`,
-            crypto.randomUUID()
-          )
-          .one().row
-    );
-    await memoryOn(
-      { source, version: first, quote: `${name} pays`, group },
-      { name }
-    );
-    const afterOlder = await mark();
-
-    expect({
-      atLast: afterAdd.through === afterAdd.last,
-      behind: afterOlder.through < unjudged,
-    }).toStrictEqual({ atLast: true, behind: true });
-  });
 });
 
 describe("what judging against the current version rests on", () => {
@@ -852,4 +799,73 @@ describe("late adds and large sources", () => {
 
     expect(kept).toStrictEqual([500, 400, 300]);
   }, 120_000);
+});
+
+/** The rule from scratch: the folded words, one space apart. */
+const holdsRun = (text: string, quote: string): boolean => {
+  const run = sequenceOf(quote).join(" ");
+  return run !== "" && ` ${sequenceOf(text).join(" ")} `.includes(` ${run} `);
+};
+
+/** A thousand words "z", the `capital`th written "Z". */
+const quoteOf = (capital: number): string =>
+  Array.from({ length: 1000 }, (_, at) => (at === capital ? "Z" : "z")).join(
+    " "
+  );
+
+describe("matching a quote against a text", () => {
+  it("finds exactly the runs of words a text holds, whatever their case and form", () => {
+    let state = 7;
+    const random = (): number => {
+      state = (state * 48_271) % 2_147_483_647;
+      return state / 2_147_483_647;
+    };
+    const words = ["a", "B", "c", "ä", "Ab", "b"];
+    const textOf = (length: number): string =>
+      Array.from(
+        { length },
+        () => words[Math.floor(random() * words.length)] ?? ""
+      ).join(random() < 0.5 ? " " : ", ");
+    const differ: string[] = [];
+    for (let round = 0; round < 300; round += 1) {
+      const text = textOf(40);
+      const index = quoteIndexOf(text);
+      for (let asked = 0; asked < 10; asked += 1) {
+        const quote = textOf(1 + Math.floor(random() * 5));
+        if (index.holds(quote) !== holdsRun(text, quote)) {
+          differ.push(`${text} / ${quote}`);
+        }
+      }
+    }
+
+    expect(differ).toStrictEqual([]);
+  });
+
+  it("checks a quote in steps linear in the text's and the quote's words, and a quote that folds alike once", () => {
+    // 999 words of one kind, then one of another, again and again: each
+    // place of the quote's word starts a near match.
+    const segment = `${"z ".repeat(999)}q `;
+    const text = segment.repeat(200);
+    const textWords = 200 * 1000;
+    const index = quoteIndexOf(text);
+    const first = index.holds(quoteOf(0));
+    const afterFirst = index.steps();
+    const again = Array.from({ length: 50 }, (_, capital) =>
+      index.holds(quoteOf(capital + 1))
+    );
+
+    expect({
+      first,
+      again: again.every((held) => !held),
+      linear: afterFirst <= 2 * (textWords + 1000),
+      foldedOnce: index.steps() === afterFirst,
+      held: index.holds("z z q Z"),
+    }).toStrictEqual({
+      first: false,
+      again: true,
+      linear: true,
+      foldedOnce: true,
+      held: true,
+    });
+  });
 });

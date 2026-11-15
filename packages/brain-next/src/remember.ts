@@ -27,12 +27,7 @@ import {
   lineageOfWriter,
   stampWrite,
 } from "./memories.ts";
-import {
-  CurrentTextsNeededError,
-  heldIn,
-  judgeLate,
-  markJudged,
-} from "./quotes.ts";
+import { CurrentTextsNeededError, heldIn, judgeLate } from "./quotes.ts";
 import type { CurrentText, CurrentTexts, Written } from "./quotes.ts";
 import { accessOfKey, readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
 import { isRestoring } from "./restoring.ts";
@@ -655,11 +650,6 @@ export const writeAdd = (
     );
     const written = made.map((memory) => memory.written);
     judgeLate(sql, written, texts);
-    const first = written.at(0);
-    const last = written.at(-1);
-    if (first !== undefined && last !== undefined) {
-      markJudged(sql, first.row, last.row);
-    }
     const memories = made.map((memory) => memory.id);
     if (adding.extracted !== undefined) {
       markExtracted(sql, adding.extracted, into);

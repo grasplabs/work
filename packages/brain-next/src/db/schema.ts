@@ -114,33 +114,23 @@ export const sourceVersions = sqliteTable(
  * version whole (its chunks and their words), so recall never sees half
  * of one. The versions it no longer points at are history.
  */
-export const currentVersions = sqliteTable(
-  "current_versions",
-  {
-    source: text().primaryKey(),
-    versionRow: integer("version_row")
-      .notNull()
-      .unique()
-      .references(() => sourceVersions.row),
-    /**
-     * The version the source's memories were last judged against
-     * (quotes.ts): its out memories (`memory_outs`) count only while this
-     * is `version_row`. Set with the pointer by an add; a path that moves
-     * the pointer without judging (a restore, an older release) leaves it
-     * behind, and the source's out memories then count for no one until it
-     * is judged again. Added by a later migration than the table's: null
-     * in a store made before it.
-     */
-    judgedRow: integer("judged_row"),
-  },
-  (table) => [
-    // The sources whose memories are not judged against their current
-    // version: what a catch-up walks.
-    index("current_versions_unjudged_idx")
-      .on(table.source)
-      .where(sql`judged_row IS NOT version_row`),
-  ]
-);
+export const currentVersions = sqliteTable("current_versions", {
+  source: text().primaryKey(),
+  versionRow: integer("version_row")
+    .notNull()
+    .unique()
+    .references(() => sourceVersions.row),
+  /**
+   * The version the source's memories were last judged against
+   * (quotes.ts): its out memories (`memory_outs`) count only while this
+   * is `version_row`. Set with the pointer by an add; a path that moves
+   * the pointer without judging (a restore, an older release) leaves it
+   * behind, and the source's out memories then count for no one until it
+   * is judged again. Added by a later migration than the table's: null
+   * in a store made before it.
+   */
+  judgedRow: integer("judged_row"),
+});
 
 /**
  * A source taken out of use for good, its history kept (removal.ts): its
@@ -1131,7 +1121,12 @@ export const memoryStamps = sqliteTable(
 // version before its source's current one is out when the current
 // version's text no longer holds its quote, word for word; judged in the
 // transaction that changes either, never on the queue. Neither table holds
-// content, and both go with their memory.
+// content, and both go with their memory (`ON DELETE CASCADE`). So a
+// migration that makes `memories` anew (copy, drop, rename, as migration
+// 0016 makes `erasures`) fires that cascade and wipes every out and in
+// row: it must also set every `current_versions.judged_row` to null, so
+// each source is judged again in full at its next version, rather than
+// its out memories reading in.
 
 /**
  * A memory that is out: resting on a version before its source's current
@@ -1168,20 +1163,4 @@ export const memoryIns = sqliteTable(
     source: text().notNull(),
   },
   (table) => [index("memory_ins_source_idx").on(table.source)]
-);
-
-/**
- * The highest memory (`memories.row`) up to which every memory was judged
- * as it was added (quotes.ts): moved on by an add only when no memory lies
- * between it and the add's first, so a memory an older release added
- * unjudged keeps it behind, for a catch-up to find. One row; none before
- * the first add.
- */
-export const memoryJudged = sqliteTable(
-  "memory_judged",
-  {
-    id: integer().primaryKey(),
-    through: integer().notNull(),
-  },
-  () => [check("memory_judged_one", sql.raw("id = 1"))]
 );

@@ -56,56 +56,157 @@ import { sequenceOf } from "./words.ts";
 
 /** A text's words, as quotes are checked against them. */
 export interface QuoteIndex {
-  /** Whether `quote` is in the text as consecutive words: at least one. */
+  /**
+   * Whether `quote` is in the text as consecutive words: at least one.
+   * Answered once for each run of folded words, however its quotes are
+   * written.
+   */
   holds: (quote: string) => boolean;
   /** The text's words and pairs of adjacent words: what `pairOf` of a quote it holds is among. */
   pairs: () => string[];
+  /**
+   * The words compared so far, by every `holds`: at most twice the text's
+   * words and the quote's for each quote checked (Knuth–Morris–Pratt), so
+   * no text and quote make it more than linear.
+   */
+  steps: () => number;
 }
 
-/** `text`, its words indexed once by where each is written. */
-export const quoteIndexOf = (text: string): QuoteIndex => {
-  const words = sequenceOf(text);
-  const places = new Map<string, number[]>();
-  for (const [at, word] of words.entries()) {
-    const held = places.get(word);
-    if (held === undefined) {
-      places.set(word, [at]);
-    } else {
-      held.push(at);
+/**
+ * Knuth–Morris–Pratt's failure table of `run`: for each place, how long a
+ * start of `run` also ends there. Counts its comparisons in `count`.
+ */
+const failureOf = (run: Int32Array, count: { steps: number }): Int32Array => {
+  const failure = new Int32Array(run.length);
+  let matched = 0;
+  for (let at = 1; at < run.length; at += 1) {
+    while (matched > 0 && run[at] !== run[matched]) {
+      count.steps += 1;
+      matched = failure[matched - 1] ?? 0;
+    }
+    count.steps += 1;
+    if (run[at] === run[matched]) {
+      matched += 1;
+    }
+    failure[at] = matched;
+  }
+  return failure;
+};
+
+/**
+ * Whether `words[from, to)` holds `run`, by Knuth–Morris–Pratt with its
+ * failure table: at most twice `to - from` comparisons.
+ */
+const holdsBetween = (
+  words: Int32Array,
+  { from, to }: { from: number; to: number },
+  run: Int32Array,
+  failure: Int32Array,
+  count: { steps: number }
+): boolean => {
+  let matched = 0;
+  for (let at = from; at < to; at += 1) {
+    while (matched > 0 && words[at] !== run[matched]) {
+      count.steps += 1;
+      matched = failure[matched - 1] ?? 0;
+    }
+    count.steps += 1;
+    if (words[at] === run[matched]) {
+      matched += 1;
+      if (matched === run.length) {
+        return true;
+      }
     }
   }
+  return false;
+};
+
+/**
+ * `text`, its folded words indexed once: each word as a number, and where
+ * each is written. A quote is looked for only in the stretches of the text
+ * its rarest word can start a match in (each place of that word, less its
+ * place in the quote), joined where they overlap, and each stretch scanned
+ * by Knuth–Morris–Pratt: so a quote costs at most a pass over the text
+ * and one over itself, and a rare word far less.
+ */
+export const quoteIndexOf = (text: string): QuoteIndex => {
+  const ids = new Map<string, number>();
+  const vocabulary: string[] = [];
+  const folded = sequenceOf(text);
+  const words = new Int32Array(folded.length);
+  const places: number[][] = [];
+  for (const [at, word] of folded.entries()) {
+    let id = ids.get(word);
+    if (id === undefined) {
+      id = vocabulary.length;
+      ids.set(word, id);
+      vocabulary.push(word);
+      places.push([]);
+    }
+    words[at] = id;
+    places[id]?.push(at);
+  }
+  const count = { steps: 0 };
+  const verdicts = new Map<string, boolean>();
+  const judge = (run: Int32Array): boolean => {
+    let rarest = -1;
+    for (const [index, id] of run.entries()) {
+      if (
+        rarest < 0 ||
+        (places[id]?.length ?? 0) < (places[run[rarest] ?? 0]?.length ?? 0)
+      ) {
+        rarest = index;
+      }
+    }
+    const failure = failureOf(run, count);
+    let stretch: { from: number; to: number } | undefined;
+    for (const place of places[run[rarest] ?? 0] ?? []) {
+      const from = place - rarest;
+      if (from < 0 || from + run.length > words.length) {
+        continue;
+      }
+      if (stretch !== undefined && from < stretch.to) {
+        stretch.to = from + run.length;
+        continue;
+      }
+      if (
+        stretch !== undefined &&
+        holdsBetween(words, stretch, run, failure, count)
+      ) {
+        return true;
+      }
+      stretch = { from, to: from + run.length };
+    }
+    return (
+      stretch !== undefined && holdsBetween(words, stretch, run, failure, count)
+    );
+  };
   return {
     holds: (quote) => {
       const run = sequenceOf(quote);
-      // Checked from the word with the fewest places in the text.
-      let fewest: readonly number[] = [];
-      let offset = -1;
-      for (const [index, word] of run.entries()) {
-        const at = places.get(word);
-        if (at === undefined) {
-          return false;
-        }
-        if (offset < 0 || at.length < fewest.length) {
-          fewest = at;
-          offset = index;
-        }
+      const key = run.join(" ");
+      const known = verdicts.get(key);
+      if (known !== undefined) {
+        return known;
       }
-      return fewest.some((at) => {
-        const start = at - offset;
-        return (
-          start >= 0 &&
-          start + run.length <= words.length &&
-          run.every((word, index) => words[start + index] === word)
-        );
-      });
+      const asIds = run.map((word) => ids.get(word));
+      const held =
+        run.length > 0 &&
+        asIds.every((id) => id !== undefined) &&
+        judge(Int32Array.from(asIds));
+      verdicts.set(key, held);
+      return held;
     },
     pairs: () => {
-      const found = new Set(places.keys());
+      const found = new Set(vocabulary);
       for (let at = 1; at < words.length; at += 1) {
-        found.add(`${words[at - 1]} ${words[at]}`);
+        found.add(
+          `${vocabulary[words[at - 1] ?? 0]} ${vocabulary[words[at] ?? 0]}`
+        );
       }
       return [...found];
     },
+    steps: () => count.steps,
   };
 };
 
@@ -231,10 +332,11 @@ const changedCandidates = (
  *
  * The memories come from one statement, sorted by quote: SQLite sorts
  * them whole before it gives the first row, so the writes below never
- * change what it reads, and each distinct quote is judged once, against
- * the one text in memory, the rows streamed one at a time. No count of
- * rows decides anything: every memory of the source is judged, however
- * many, by whoever it is readable.
+ * change what it reads, and the rows are streamed one at a time. Each
+ * run of folded words is judged once, against the one text in memory
+ * (`QuoteIndex.holds`), in steps linear in the text and the quote. No
+ * count of rows decides anything: every memory of the source is judged,
+ * however many, by whoever it is readable.
  */
 export const judgeVersion = (
   sql: SqlStorage,
@@ -262,14 +364,11 @@ export const judgeVersion = (
     replaced === undefined || !replaced.judged
       ? everyCandidate(sql, source, version)
       : changedCandidates(sql, source, replaced.version, () => index().pairs());
-  let judged: { quote: string | null; held: boolean } | undefined;
   for (const { row, quote, was } of candidates) {
-    if (judged === undefined || judged.quote !== quote) {
-      judged = { quote, held: isHeld(index(), quote) };
-    }
-    if (judged.held && was !== "in") {
+    const held = isHeld(index(), quote);
+    if (held && was !== "in") {
       putIn(sql, row, source);
-    } else if (!judged.held && was !== "out") {
+    } else if (!held && was !== "out") {
       putOut(sql, row, source, quote);
     }
   }
@@ -407,26 +506,4 @@ export const judgeLate = (
       putOut(sql, row, source, quote);
     }
   }
-};
-
-/**
- * Moves the mark of memories judged as they were added (`memory_judged`)
- * to `last`, the add's last memory, when no memory lies between it and
- * `first`, the add's first: one an older release added unjudged keeps it
- * behind. The first add sets it.
- */
-export const markJudged = (
-  sql: SqlStorage,
-  first: number,
-  last: number
-): void => {
-  sql.exec(
-    `INSERT INTO memory_judged (id, through) VALUES (1, ?2)
-    ON CONFLICT (id) DO UPDATE SET through = ?2
-    WHERE NOT EXISTS (
-      SELECT 1 FROM memories WHERE row > memory_judged.through AND row < ?1
-    )`,
-    first,
-    last
-  );
 };

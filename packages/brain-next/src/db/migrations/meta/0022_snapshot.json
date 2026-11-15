@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "2a0c38cb-b78a-4f0c-9de0-00c9069ed147",
+  "id": "4471a10c-5e8e-4404-a5a4-9893d8f1d072",
   "prevId": "0cf4ba64-6b2f-4fa4-a91c-43937c8d2c4b",
   "tables": {
     "chunks": {
@@ -111,14 +111,6 @@
             "version_row"
           ],
           "isUnique": true
-        },
-        "current_versions_unjudged_idx": {
-          "name": "current_versions_unjudged_idx",
-          "columns": [
-            "source"
-          ],
-          "isUnique": false,
-          "where": "judged_row IS NOT version_row"
         }
       },
       "foreignKeys": {
@@ -1597,35 +1589,6 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
-    },
-    "memory_judged": {
-      "name": "memory_judged",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "through": {
-          "name": "through",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {
-        "memory_judged_one": {
-          "name": "memory_judged_one",
-          "value": "id = 1"
-        }
-      }
     },
     "memory_outs": {
       "name": "memory_outs",
