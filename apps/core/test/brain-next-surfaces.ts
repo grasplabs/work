@@ -54,6 +54,7 @@ import type {
   NewMemory,
   ChunkRef,
   EmbedModel,
+  ErasedMemory,
   ErasureReason,
   Embedders,
   HandOvers,
@@ -528,6 +529,13 @@ const missingSource = (): SourceRef => ({
 
 /** `source`'s key in the store, as core names it (core's brain-next.ts). */
 const keyOf = ({ producer, id }: SourceRef): string => `${producer}:${id}`;
+
+/** `memory` as a host pins it for the store, resting on `source` or on no one's. */
+const storePin = (
+  memory: string,
+  source: string | null,
+  writer: string | null = null
+): ErasedMemory => ({ memory, source, writer, learnedAt: Date.now() });
 
 /** What a pinned memory rests on: `source`, and no writer. */
 const pinBasis = (source: SourceRef | null): coreBrain.MemoryBasis => ({
@@ -6611,31 +6619,40 @@ export const storeProbes = {
     // them, by their places in what was asked.
     const ask = async (
       name: string,
-      request: { sources: string[]; memories: string[]; extra?: string }
+      request: { sources: string[]; memories: ErasedMemory[]; extra?: string }
     ) =>
       await answer(name, async () => {
         const erased = await store().erasedOf(unchecked(request));
         return {
           sources: request.sources.map((key) => erased.sources.includes(key)),
-          memories: request.memories.map((id) => erased.memories.includes(id)),
+          memories: request.memories.map(({ memory }) =>
+            erased.memories.includes(memory)
+          ),
         };
       });
+    const hiddenKeys = hiddenVersions.map(({ source }) => keyOf(source));
     return [
       await ask("the hidden sources and memories", {
-        sources: hiddenVersions.map(({ source }) => keyOf(source)),
+        sources: hiddenKeys,
         memories: [
-          fixture.hiddenMemory,
-          fixture.drawnMemory,
-          fixture.othersOwnMemory,
+          storePin(fixture.hiddenMemory, hiddenKeys[0] ?? null),
+          storePin(fixture.drawnMemory, hiddenKeys[1] ?? null),
+          storePin(fixture.othersOwnMemory, null),
         ],
       }),
       await ask("what no one added", {
         sources: [keyOf(missingSource())],
-        memories: [crypto.randomUUID()],
+        memories: [storePin(crypto.randomUUID(), keyOf(missingSource()))],
       }),
-      await ask("a key named by the markers", {
+      await ask("a key and a writer named by the markers", {
         sources: [`upload:${markers.join(" ")}`],
-        memories: [],
+        memories: [
+          storePin(
+            crypto.randomUUID(),
+            `upload:${markers.join(" ")}`,
+            `app:${markers.join("")}`
+          ),
+        ],
       }),
       await ask("a request with an unknown field", {
         sources: [],
