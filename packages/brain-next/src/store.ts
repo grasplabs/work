@@ -40,6 +40,7 @@ import {
   ownExportRequestSchema,
   ownExportStartSchema,
   personErasureSchema,
+  writerErasureSchema,
   readableMemoriesRequestSchema,
   readableRequestSchema,
   recallRequestSchema,
@@ -105,6 +106,8 @@ import type {
   StoreKind,
   NewSource,
   PersonErasure,
+  WriterErasure,
+  WriterErased,
   RecallRequest,
   Pack,
   RestoreStatus,
@@ -138,6 +141,8 @@ import {
   deleteStoreObjects,
   erase,
   eraseBatch,
+  eraseWriter,
+  eraseWriterBatch,
   erasureStatusOf,
   erasuresOverview,
   erasureDue,
@@ -1161,6 +1166,29 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   }
 
   /**
+   * Erases every memory a writer wrote, learned up to now (erasure.ts
+   * `eraseWriter`), as `eraseSource` erases a source: recorded in the
+   * ledger and hidden before it returns, deleted by its tick if not at
+   * once. The shared store's alone: a writer's memories (an App's) are
+   * kept nowhere else.
+   */
+  async eraseWriter(request: WriterErasure): Promise<WriterErased> {
+    const { writer, reason } = checked(writerErasureSchema, request);
+    if (this.#kind.kind === "person") {
+      throw new Error(sharedOnly);
+    }
+    return await this.#changing(async () => {
+      await this.#readyToWrite();
+      const { at, memories } = await eraseWriter(
+        this.#erasures,
+        writer,
+        reason
+      );
+      return { erasedAt: new Date(at), memories };
+    });
+  }
+
+  /**
    * This person's own store erased whole (erasure.ts): the record of it
    * written first, then all the store holds deleted, while it takes
    * nothing else, so from then on it refuses every call, also after a
@@ -1621,7 +1649,8 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
 
   /**
    * One batch of the versions erasures hid, each deleted with everything
-   * it holds in a transaction of its own (erasure.ts `eraseBatch`), so a
+   * it holds in a transaction of its own (erasure.ts `eraseBatch`), and one
+   * of the memories writers' erasures hid (`eraseWriterBatch`), so a
    * failure or a stop leaves it hidden and whole. First in the tick but
    * the ledger, so the files it lets go are swept the same tick when due.
    * A version that fails goes behind the others and is tried again; the
@@ -1631,6 +1660,9 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   #erase(at: Date): void {
     try {
       const { failed } = eraseBatch(this.ctx.storage);
+      // Then a batch of the memories writers' erasures hid, each batch in
+      // one transaction (erasure.ts `eraseWriterBatch`).
+      eraseWriterBatch(this.ctx.storage);
       this.#stepsFailed.erase = failed ? { at, reason: "failed" } : null;
     } catch {
       // Nothing of the error is kept: the batch stays to do.
@@ -1837,6 +1869,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       erasures: {
         source: { written: 0, unwritten: 0 },
         person: { written: 0, unwritten: 0 },
+        writer: { written: 0, unwritten: 0 },
         byReason: { deleted: 0, retention: 0, person_erased: 0, withdrawn: 0 },
       },
       recall: recallOverviewOf(this.#recallCounts),
@@ -2118,7 +2151,10 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
 
   /** Retires one of the writer's own memories the reader may read (memories.ts). */
   async retireMemory(request: RetireRequest): Promise<RetiredMemory | null> {
-    const { memory, reader, writer } = checked(retireRequestSchema, request);
+    const { memory, reader, writer, change } = checked(
+      retireRequestSchema,
+      request
+    );
     this.#mayRead(reader);
     return await this.#changing(async () => {
       if (!(await this.#readable())) {
@@ -2133,6 +2169,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
           id: memory,
           reader,
           writer,
+          change,
         });
       });
     });

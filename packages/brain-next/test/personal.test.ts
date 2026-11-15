@@ -1610,6 +1610,8 @@ const leavingNone = [
   "confirmMemory",
   // Cards likewise: read whole in their call (cards.ts).
   "erasePerson",
+  // The shared store's alone: a person's own store refuses it.
+  "eraseWriter",
   "erasureStatus",
   "exportFile",
   "exportStatus",

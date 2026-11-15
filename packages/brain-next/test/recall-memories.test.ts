@@ -618,6 +618,7 @@ describe("recall through memories, hidden versus absent", () => {
       memory: named.memories[0] ?? "",
       reader: { person: namer, groups: [group] },
       writer: namer,
+      change: "retire",
     });
 
     expect({

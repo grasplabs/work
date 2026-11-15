@@ -19,7 +19,7 @@ import {
 import type { RestoreStatus } from "./contract.ts";
 import { enqueueEmbedding } from "./embedding.ts";
 import { keepNames } from "./entities.ts";
-import { keepSubject, subjectOf } from "./erasure.ts";
+import { keepSubject, subjectOf, writerSubjectOf } from "./erasure.ts";
 import {
   changeLineSchema,
   confirmationLineSchema,
@@ -681,6 +681,8 @@ const restoreMemory = async (
   line: MemoryLine
 ): Promise<void> => {
   const subject = line.source === null ? null : await subjectOf(line.source);
+  const writerSubject =
+    line.writer === null ? null : await writerSubjectOf(line.writer);
   storage.transactionSync(() => {
     const { sql } = storage;
     if (passesOverMemory(sql, line, subject)) {
@@ -703,9 +705,9 @@ const restoreMemory = async (
       .exec<{ row: number }>(
         `INSERT INTO memories (id, entity, attribute, object, value, value_key,
           one_value, type, statement, quote, source, version, subject, writer,
-          lineage, lineage_order, speaker, valid_from, valid_until, learned_at,
-          retired_at, readers)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          writer_subject, lineage, lineage_order, speaker, valid_from,
+          valid_until, learned_at, retired_at, retired_change, readers)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING row`,
         line.id,
         about,
@@ -721,6 +723,7 @@ const restoreMemory = async (
         line.version,
         subject,
         line.writer,
+        writerSubject,
         lineageOf(line),
         line.version ?? 0,
         JSON.stringify(line.speaker),
@@ -728,6 +731,7 @@ const restoreMemory = async (
         line.validUntil,
         line.learnedAt,
         line.retiredAt,
+        line.retiredChange ?? null,
         readerSetKeyOf(line.access)
       )
       .one();
@@ -916,17 +920,25 @@ const settleNow = (
   });
 };
 
-/** The version `line` holds or rests on, if any. */
-const restsOn = (
-  line: PartLine
-): { source: string; version: number } | undefined => {
+/**
+ * What `line` holds or rests on, as the export records it (exports.ts
+ * `Held`), if anything: the version, by its source's key's SHA-256 and
+ * number; or, for a writer's memory, the writer, by its lineage's SHA-256
+ * and when the memory was learned.
+ */
+const heldBy = async (line: PartLine): Promise<Held | undefined> => {
   if (isVersionLine(line) || line.kind === "extraction") {
-    return { source: line.source, version: line.version };
+    return [await subjectOf(line.source), line.version];
   }
-  if (line.kind === "memory" && line.source !== null && line.version !== null) {
-    return { source: line.source, version: line.version };
+  if (line.kind !== "memory") {
+    return undefined;
   }
-  return undefined;
+  if (line.source !== null && line.version !== null) {
+    return [await subjectOf(line.source), line.version];
+  }
+  return line.writer === null
+    ? undefined
+    : [await writerSubjectOf(line.writer), line.learnedAt];
 };
 
 /**
@@ -947,17 +959,10 @@ const checkPart = async (
     partLinesOf(bucket, id, part),
     partHoldingsOf(bucket, id, index),
   ]);
-  const fromLines: Held[] = await Promise.all(
-    (lines ?? []).flatMap((line) => {
-      const rests = restsOn(line);
-      return rests === undefined
-        ? []
-        : [
-            (async () =>
-              [await subjectOf(rests.source), rests.version] as const)(),
-          ];
-    })
+  const heldByLines = await Promise.all(
+    (lines ?? []).map(async (line) => await heldBy(line))
   );
+  const fromLines = heldByLines.filter((held) => held !== undefined);
   storage.transactionSync(() => {
     const { sql } = storage;
     recordExportSources(sql, id, [...(holdings ?? []), ...fromLines]);

@@ -224,6 +224,7 @@ const writeBetween = async (part: number, fixture: Fixture) => {
       memory: said.memories[1] ?? "",
       reader: writer,
       writer: writer.person,
+      change: "retire",
     });
   }
   if (part === 2) {
