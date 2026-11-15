@@ -5059,10 +5059,23 @@ const memoryProbes = {
           await store().retireMemory({
             memory,
             reader: { ...probing.reader, person: writer },
+            writer,
           }),
         about
       );
     return [
+      // Another writer's memory the reader may read, retired by an App's
+      // code (a reader of no person): answered as one no one added.
+      await answer(
+        "another writer's memory, as an App's code",
+        async () =>
+          await store().retireMemory({
+            memory: fixture.seenMemory,
+            reader: { person: null, groups: probing.reader.groups },
+            writer: `app:${stranger()}`,
+          }),
+        "hidden"
+      ),
       await retire(
         "a memory no one added",
         crypto.randomUUID(),
