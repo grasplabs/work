@@ -133,11 +133,12 @@ export type BrainErasureRequest = z.input<typeof brainErasureRequestSchema>;
 
 /**
  * What a lookup answers besides `erased`: `erasing` while it is recorded
- * but not done; `not_erased` when the ledger holds no erasure of it, alike
- * whether it ever existed; `skipped` when core recorded its erasure of a
- * person from the Brain as skipped, so it is not done and not tried again;
- * `unavailable` while the Brain can't read its ledger, or applies it after
- * a restore.
+ * but not done; `not_erased` when the record (the ledger for a source,
+ * core's for a person) holds no erasure of it, alike whether it ever
+ * existed; `skipped` when core recorded its erasure of a person from the
+ * Brain as skipped, so it is not done and not tried again; `unavailable`
+ * while the Brain can't read its ledger, or applies it after a restore
+ * (a source's alone).
  */
 export const brainErasureStates = [
   "erasing",
@@ -147,11 +148,12 @@ export const brainErasureStates = [
 ] as const;
 
 /**
- * Whether it was erased, and nothing else: `erased`, with when the ledger
- * recorded it, once it is hidden for good (nothing can read it, and a
- * restore can't bring it back) and recorded in the ledger; what the Brain
- * kept of it is deleted in the background, its files after a 15-minute
- * grace. Or one of `brainErasureStates`. What core answers, and what the
+ * Whether it was erased, and nothing else: `erased`, with when, once it
+ * is hidden for good (nothing can read it, and a restore can't bring it
+ * back): a source once recorded in the ledger, when the ledger recorded
+ * it, what the Brain kept of it deleted in the background, its files
+ * after a 15-minute grace; a person once their own store was erased
+ * whole, when core recorded that. Or one of `brainErasureStates`. What core answers, and what the
  * admin reads: a state it doesn't name is a malformed answer.
  */
 export const brainErasureAnswerSchema = z.discriminatedUnion("state", [
@@ -215,7 +217,7 @@ const stepFailureSchema = z
 /** How many recalls searched by a way, and how many it failed. */
 const wayCountSchema = z.object({ recalls: count, failed: count });
 
-/** How many erasures of one kind are in the ledger, and how many not yet. */
+/** How many erasures are in the ledger, and how many not yet. */
 const erasureCountSchema = z.object({ written: count, unwritten: count });
 
 /**
@@ -315,7 +317,6 @@ export const brainReportSchema = z.object({
      * The shared ledger's source erasures, which count one per chat deleted and one per connection disconnected, keys the shared store never held.
      */
     source: erasureCountSchema,
-    person: erasureCountSchema,
     /** How many erasures there are of each reason, in all. */
     byReason: z.object({
       deleted: count,

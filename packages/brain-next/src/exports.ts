@@ -93,13 +93,12 @@ import type { WorkContext } from "./work.ts";
 // Erasure, one rule: an export is stale exactly when the erasure ledger
 // names a version it holds. A version of a source added in a group (a
 // person's chat) is held under its group's key too, so erasing the group,
-// which the ledger names by that key alone, makes it stale the same way. Each part records the versions it holds, and
-// those its memories and extraction marks rest on, by their source's key as
-// the ledger names it and their number (`export_sources`); a source's erasure names every version of its source,
-// a person's names each version it hid (`erased_versions`), whoever's export
-// it is. So retention's erasures of what an export doesn't hold leave it be,
-// and a person's erasure that hid a team source's history makes the
-// company export holding that history stale. A stale export is never served
+// which the ledger names by that key alone, makes it stale the same way.
+// Each part records the versions it holds, and those its memories and
+// extraction marks rest on, by their source's key as the ledger names it
+// and their number (`export_sources`); a source's erasure names every
+// version of its source, whoever's export it is. So retention's erasures
+// of what an export doesn't hold leave it be. A stale export is never served
 // (`exportFile` asks before and after it reads), a restore refuses it, and
 // its files are deleted by the queue (`dropFiles`). The same rule is asked
 // of a part's holdings before its files are put, and of a part as it is
@@ -412,33 +411,25 @@ const rowOf = (sql: SqlStorage, id: string): ExportRow | undefined =>
   sql.exec<ExportRow>("SELECT * FROM exports WHERE id = ?", id).toArray().at(0);
 
 /**
- * Whether the erasure ledger, as the store holds it, names the version
- * `version` of the source whose key's subject is `subject` (SQL
- * expressions): a source's erasure names every version, a person's those it
- * hid. The one rule of staleness (above).
+ * Whether the erasure ledger, as the store holds it, names the versions
+ * of the source whose key's subject is `subject` (an SQL expression): a
+ * source's erasure names every version. The one rule of staleness (above).
  */
-const namedSql = (subject: string, version: string): string => `(
-  EXISTS (
-    SELECT 1 FROM erasures
-    WHERE erasures.kind = 'source' AND erasures.subject = ${subject}
-  )
-  OR EXISTS (
-    SELECT 1 FROM erased_versions
-    WHERE erased_versions.subject = ${subject}
-      AND erased_versions.version = ${version}
-  )
+const namedSql = (subject: string): string => `EXISTS (
+  SELECT 1 FROM erasures
+  WHERE erasures.kind = 'source' AND erasures.subject = ${subject}
 )`;
 
 /** Of a row of `exports`: whether the ledger names a version it holds. */
 const staleSql = `EXISTS (
   SELECT 1 FROM export_sources AS held
   WHERE held.export = exports.id
-    AND ${namedSql("held.subject", "held.version")}
+    AND ${namedSql("held.subject")}
 )`;
 
 /** `?1` versions as JSON (`[subject, version]` each): whether the ledger names one. */
 export const namesAnySql = `SELECT 1 FROM json_each(?1) AS pair
-WHERE ${namedSql("pair.value ->> 0", "pair.value ->> 1")}
+WHERE ${namedSql("pair.value ->> 0")}
 LIMIT 1`;
 
 /** Of a row of `exports`: whether a restore of it runs, or failed and may start again. */

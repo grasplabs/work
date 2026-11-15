@@ -23,8 +23,7 @@ export type KeyState = "free" | "held" | "erased";
 
 /**
  * What an add says that an erasure closed: to an erased source, whose key
- * is closed for good, or for a person alone that began before that
- * person's erasure (erasure.ts). Said only to the producer that adds it,
+ * is closed for good (erasure.ts). Said only to the producer that adds it,
  * which never retries it: the message alone, so a producer tells it from
  * any other failure by comparing it whole.
  */
@@ -1094,21 +1093,20 @@ export const storeBytesMax = 10 * 1000 ** 3;
  */
 export type StaffActionOutcome = "done" | "nothing" | "unavailable";
 
-/** How many erasures of one kind are in the ledger, and how many not yet. */
+/** How many erasures are in the ledger, and how many not yet. */
 export interface ErasureCount {
   written: number;
   unwritten: number;
 }
 
 /**
- * The erasures the store applied, as counts only: by kind, written to the
- * ledger or not yet, and by reason. Never which, when, or the SHA-256 the
+ * The erasures of sources the store applied, as counts only: written to
+ * the ledger or not yet, and by reason. Never which, when, or the SHA-256 the
  * ledger names one by: an unsalted hash of an id confirms to anyone
  * holding the id that it was erased.
  */
 export interface ErasuresOverview {
   source: ErasureCount;
-  person: ErasureCount;
   byReason: Record<ErasureReason, number>;
 }
 
@@ -1344,7 +1342,7 @@ export type SourceErasure = z.infer<typeof sourceErasureSchema>;
 export const isInGroup = (source: string, group: string): boolean =>
   source.length > group.length + 1 && source.startsWith(`${group}/`);
 
-/** A person whose own content to erase, and why. */
+/** A person whose own store to erase whole, and why. */
 export const personErasureSchema = z.strictObject({
   person: principalSchema,
   reason: z.enum(erasureReasons),
@@ -1353,12 +1351,10 @@ export type PersonErasure = z.infer<typeof personErasureSchema>;
 
 /**
  * What staff look up in the store's record of its erasure ledger: a
- * source, by its key, or a person, by their id, as they were erased.
+ * source, by its key, as it was erased. A person's erasure is no entry of
+ * it: their own store is erased whole, and core keeps the record of that.
  */
-export const erasureLookupSchema = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("source"), source: sourceIdSchema }),
-  z.strictObject({ kind: z.literal("person"), person: principalSchema }),
-]);
+export const erasureLookupSchema = z.strictObject({ source: sourceIdSchema });
 export type ErasureLookup = z.infer<typeof erasureLookupSchema>;
 
 /**
@@ -2780,17 +2776,17 @@ export interface Brain {
    */
   eraseSource: (request: SourceErasure) => Promise<SourceErased | undefined>;
   /**
-   * Erases what only `person` may read, as `eraseSource` erases a source:
-   * every version readable by them alone, added up to now, and whole each
-   * source whose current version is such, and every memory readable by
-   * them alone, learned up to now, at once. A source others read now keeps
-   * their versions. Content added for them afterwards is new and kept.
-   * Answers alike whatever they held, and is safe to repeat.
+   * Erases `person`'s own store whole, the one place what only they may
+   * read is kept: everything it holds, and from then on every call is
+   * refused, also after a restore of its storage. Safe to repeat. A
+   * person's own store alone, and only for that person: the shared store
+   * holds nothing only one person may read (it refuses such an add), so it
+   * refuses this.
    */
   erasePerson: (request: PersonErasure) => Promise<void>;
   /**
-   * Whether a source or a person was erased, from the store's record of
-   * its ledger alone (`ErasureStatus`). For staff, who name what a client
+   * Whether a source was erased, from the store's record of its ledger
+   * alone (`ErasureStatus`). For staff, who name what a client
    * gave them: it reads nothing but that record, so what was never erased
    * answers as what never existed. The shared store's alone: a person's
    * own store refuses, as it does `handOver` (staff's lookup reads a

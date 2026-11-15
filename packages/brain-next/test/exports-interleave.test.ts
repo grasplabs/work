@@ -227,9 +227,9 @@ const writeBetween = async (part: number, fixture: Fixture) => {
     });
   }
   if (part === 2) {
-    await shared().erasePerson({
-      person: `nobody-${tag}`,
-      reason: "person_erased",
+    await shared().eraseSource({
+      source: `test:nobody-${tag}`,
+      reason: "deleted",
     });
   }
   return added.memories;
