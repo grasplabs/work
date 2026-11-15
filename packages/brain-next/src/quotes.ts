@@ -25,12 +25,21 @@ import { sequenceOf } from "./words.ts";
 //
 // Out is read as ended (memories.ts `endedAtSql`), at the current
 // version's add, never retired: names, finds and pins stay as for any
-// ended memory. A version whose text is the current one's again is a new
+// ended memory.
+//
+// A version whose text and readers are the current one's again is a new
 // version only when a version between was another's (sources.ts
-// `madeBefore` compares with the current version alone), so a text
-// repeated after a narrowed version ends its out memories at the repeat,
-// where a store without the narrowed version would keep the earlier time.
-// That is main's own channel (version numbers, the current version's time).
+// `madeBefore` compares with the current version alone). So a text
+// repeated after a narrowed version (T for some, X for fewer, T again)
+// is a third version in the store and the first one, still current, in a
+// store without X. Its out memories then end at the repeat in the one and
+// earlier in the other. And a memory resting on the first version whose
+// quote that version itself doesn't hold (an add's quote is not checked
+// against the version it cites) is out in the store, resting on a version
+// before the current one, and current in the other, where it rests on the
+// current version: there the state differs, not only the time. That is
+// main's own channel (version numbers, the current version's time) made
+// wider; nothing checks a quote against its version.
 //
 // Cost of a version's add: its text, once, then the source's memories
 // judged in (`memory_ins`), those on the version it replaces (never
@@ -39,9 +48,11 @@ import { sequenceOf } from "./words.ts";
 // the source's other out memories nor any other source's. When the
 // version it replaces is not the one judged (a store before this, a
 // restore, a release rolled back, new word rules) it judges every memory
-// of the source once instead. At most `judgedMemoriesMax` (the request's
-// CPU): past it the source is left unjudged and the add still lands.
-// Counted in quotes-cost.test.ts.
+// of the source once instead. The work follows the distinct quotes it
+// judges (each once, against the one text), and what it holds in memory
+// is that text indexed and one row at a time. No count of rows decides
+// whether a source is judged. Counted in quotes-cost.test.ts; measured in
+// workerd at `judgeVersion`.
 
 /** A text's words, as quotes are checked against them. */
 export interface QuoteIndex {
@@ -115,12 +126,6 @@ export const pairOf = (quote: string): string | null => {
 const neverJudged = (sql: SqlStorage, source: string): boolean =>
   isWholeKey(source) || isThread(sql, source) === true;
 
-/** A memory to judge: its row and quote. */
-interface Judged extends Record<string, SqlStorageValue> {
-  row: number;
-  quote: string | null;
-}
-
 /** Puts the memory `row` of `source` in: its quote is held. */
 const putIn = (sql: SqlStorage, row: number, source: string): void => {
   sql.exec("DELETE FROM memory_outs WHERE memory = ?", row);
@@ -159,28 +164,77 @@ export interface Replaced {
   judged: boolean;
 }
 
+/** A memory to judge: its row, its quote, and what it was before this add. */
+interface Candidate extends Record<string, SqlStorageValue> {
+  row: number;
+  quote: string | null;
+  /** "in" judged in, "out" judged out, "new" never judged. */
+  was: string;
+}
+
+/** Every memory of `source` on a version before `version`, by quote: a full pass. */
+const everyCandidate = (
+  sql: SqlStorage,
+  source: string,
+  version: number
+): SqlStorageCursor<Candidate> =>
+  sql.exec<Candidate>(
+    `SELECT row, quote, 'new' AS was FROM memories
+    WHERE source = ?1 AND version < ?2
+    ORDER BY quote`,
+    source,
+    version
+  );
+
 /**
- * Most memories one version's add judges: the in set, those on the version
- * it replaces and the out memories its text may bring back, or, unjudged
- * before, every memory of its source. A bound of the platform's, not of
- * the store's: an add runs in one request, whose CPU a Durable Object
- * holds to 30 s, and judging costs about 10 to 20 µs a memory (measured in
- * workerd, on a 997 KB text with 10,000 memories in: 415 to 435 ms for the
- * add that first judged them, 291 to 295 ms for the next, 200 to 325 ms
- * for the same text with nothing to judge), so this many take about 2 s.
- * Past it the add still lands, its source left unjudged (`judged_row`
- * null: its out memories count for no one, the same for every reader), so
- * a source can always get a version.
+ * The memories of `source` a version's add may change, by quote: those
+ * judged in, those on the version replaced, `replaced` (which rested on
+ * the current version and were never judged), and the out memories whose
+ * quote may be back, found by the new text's words and pairs (`pairs`),
+ * each a seek of the index, never by reading them all.
  */
-export const judgedMemoriesMax = 100_000;
+const changedCandidates = (
+  sql: SqlStorage,
+  source: string,
+  replaced: number,
+  pairs: () => string[]
+): SqlStorageCursor<Candidate> =>
+  sql.exec<Candidate>(
+    `SELECT m.row AS row, m.quote AS quote, 'in' AS was
+    FROM memory_ins AS held
+    CROSS JOIN memories AS m ON m.row = held.memory
+    WHERE held.source = ?1
+    UNION ALL
+    SELECT row, quote, 'new' AS was FROM memories
+    WHERE source = ?1 AND version = ?2
+    UNION ALL
+    SELECT m.row AS row, m.quote AS quote, 'out' AS was
+    FROM json_each(?3) AS asked
+    CROSS JOIN memory_outs AS out ON out.source = ?1 AND out.pair = asked.value
+    CROSS JOIN memories AS m ON m.row = out.memory
+    ORDER BY quote`,
+    source,
+    replaced,
+    sql
+      .exec("SELECT 1 FROM memory_outs WHERE source = ? LIMIT 1", source)
+      .toArray().length === 0
+      ? "[]"
+      : JSON.stringify(pairs())
+  );
 
 /**
  * Judges every memory of `source` resting on a version before `version`,
  * its new current one, against that version's text `text`, the text in
  * hand: in the transaction that makes it current, which sets
  * `judged_row` with the pointer. `replaced` is the version it replaces,
- * if any. More than `most` to judge (`judgedMemoriesMax`) leaves the
- * source unjudged, writing nothing else.
+ * if any.
+ *
+ * The memories come from one statement, sorted by quote: SQLite sorts
+ * them whole before it gives the first row, so the writes below never
+ * change what it reads, and each distinct quote is judged once, against
+ * the one text in memory, the rows streamed one at a time. No count of
+ * rows decides anything: every memory of the source is judged, however
+ * many, by whoever it is readable.
  */
 export const judgeVersion = (
   sql: SqlStorage,
@@ -194,8 +248,7 @@ export const judgeVersion = (
     version: number;
     text: string;
     replaced: Replaced | undefined;
-  },
-  most: number = judgedMemoriesMax
+  }
 ): void => {
   if (neverJudged(sql, source)) {
     return;
@@ -205,77 +258,19 @@ export const judgeVersion = (
     indexed ??= quoteIndexOf(text);
     return indexed;
   };
-  // Each read stops past the bound: never more than it rows.
-  const upTo = (statement: string, ...bindings: SqlStorageValue[]): Judged[] =>
-    sql.exec<Judged>(statement, ...bindings, most + 1).toArray();
-  const full = replaced === undefined || !replaced.judged;
-  // Every memory of the source on an earlier version, once; or the
-  // memories judged in, those on the version replaced (which rested on
-  // the current version and were never judged), and the out memories
-  // whose quote may be back, found by the new text's words and pairs,
-  // never by reading them all.
-  const all = full
-    ? upTo(
-        "SELECT row, quote FROM memories WHERE source = ?1 AND version < ?2 LIMIT ?3",
-        source,
-        version
-      )
-    : [];
-  const held = full
-    ? []
-    : upTo(
-        `SELECT m.row AS row, m.quote AS quote FROM memory_ins AS held
-        JOIN memories AS m ON m.row = held.memory
-        WHERE held.source = ?1 LIMIT ?2`,
-        source
-      );
-  const fresh =
-    replaced === undefined || full
-      ? []
-      : upTo(
-          "SELECT row, quote FROM memories WHERE source = ?1 AND version = ?2 LIMIT ?3",
-          source,
-          replaced.version
-        );
-  const outs =
-    !full &&
-    sql
-      .exec("SELECT 1 FROM memory_outs WHERE source = ? LIMIT 1", source)
-      .toArray().length > 0;
-  const back = outs
-    ? upTo(
-        // The text's pairs first, each a seek of the index: never the
-        // source's out memories one by one.
-        `SELECT m.row AS row, m.quote AS quote FROM json_each(?2) AS asked
-        CROSS JOIN memory_outs AS out ON out.source = ?1 AND out.pair = asked.value
-        CROSS JOIN memories AS m ON m.row = out.memory
-        LIMIT ?3`,
-        source,
-        JSON.stringify(index().pairs())
-      )
-    : [];
-  if (all.length + held.length + fresh.length + back.length > most) {
-    sql.exec(
-      "UPDATE current_versions SET judged_row = NULL WHERE source = ?",
-      source
-    );
-    return;
-  }
-  for (const { row, quote } of [...all, ...fresh]) {
-    if (isHeld(index(), quote)) {
-      putIn(sql, row, source);
-    } else {
-      putOut(sql, row, source, quote);
+  const candidates =
+    replaced === undefined || !replaced.judged
+      ? everyCandidate(sql, source, version)
+      : changedCandidates(sql, source, replaced.version, () => index().pairs());
+  let judged: { quote: string | null; held: boolean } | undefined;
+  for (const { row, quote, was } of candidates) {
+    if (judged === undefined || judged.quote !== quote) {
+      judged = { quote, held: isHeld(index(), quote) };
     }
-  }
-  for (const { row, quote } of held) {
-    if (!isHeld(index(), quote)) {
-      putOut(sql, row, source, quote);
-    }
-  }
-  for (const { row, quote } of back) {
-    if (isHeld(index(), quote)) {
+    if (judged.held && was !== "in") {
       putIn(sql, row, source);
+    } else if (!judged.held && was !== "out") {
+      putOut(sql, row, source, quote);
     }
   }
 };
@@ -304,11 +299,33 @@ export const currentVersionOf = (
     .toArray()
     .at(0);
 
-/** The current versions' texts a late add was given, by source: each version's row and file, and its text, indexed. */
-export type CurrentTexts = ReadonlyMap<
-  string,
-  { row: number; file: string; index: QuoteIndex }
->;
+/**
+ * What a late add read of its sources' current versions, by source: each
+ * version's row and file, and whether its text holds each of the add's
+ * quotes citing that source (`heldIn`). Only the verdicts are kept, never
+ * a text: one text is read and indexed at a time.
+ */
+export interface CurrentText {
+  row: number;
+  file: string;
+  held: ReadonlyMap<string, boolean>;
+}
+export type CurrentTexts = ReadonlyMap<string, CurrentText>;
+
+/**
+ * Whether `text` holds each of `quotes`; with no text (its file lost),
+ * none: a memory resting on it lands out, failing closed, and is current
+ * again when a later version says its quote.
+ */
+export const heldIn = (
+  text: string | null,
+  quotes: Iterable<string>
+): Map<string, boolean> => {
+  const index = text === null ? undefined : quoteIndexOf(text);
+  return new Map(
+    [...quotes].map((quote) => [quote, index?.holds(quote) === true])
+  );
+};
 
 /**
  * Thrown in a late add's transaction when it holds no text of a source's
@@ -368,9 +385,13 @@ export const judgeLate = (
   const needed = [
     ...new Map(
       late
-        .filter(({ source, current }) => {
+        .filter(({ source, current, quote }) => {
           const text = texts.get(source);
-          return text?.row !== current.row || text.file !== current.file;
+          return (
+            text?.row !== current.row ||
+            text.file !== current.file ||
+            (quote !== null && !text.held.has(quote))
+          );
         })
         .map(({ source, current }) => [source, { source, ...current }])
     ).values(),
@@ -380,7 +401,7 @@ export const judgeLate = (
   }
   for (const { row, source, quote } of late) {
     const text = texts.get(source);
-    if (text !== undefined && isHeld(text.index, quote)) {
+    if (quote !== null && text?.held.get(quote) === true) {
       putIn(sql, row, source);
     } else {
       putOut(sql, row, source, quote);

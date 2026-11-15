@@ -5,6 +5,7 @@
 // and a from-scratch oracle are in quotes-twins.test.ts.
 import type {
   Access,
+  MemoriesCursor,
   NewMemory,
   PersonReader,
 } from "@grasp-os/brain-next/contract";
@@ -13,7 +14,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { chunksOf } from "../src/chunks.ts";
-import { judgeVersion } from "../src/quotes.ts";
+import { fileKeyOf } from "../src/files.ts";
 import type { BrainStore } from "../src/store.ts";
 import { sequenceOf } from "../src/words.ts";
 
@@ -619,53 +620,6 @@ describe("what the store keeps of it", () => {
   });
 });
 
-describe("the bound of what a version's add judges", () => {
-  it("leaves a source unjudged past it, its out memories counting for no one, and the next add within it judges again", async () => {
-    const group = unique("g");
-    const reader = readerOf(group);
-    const source = unique("doc");
-    const name = unique("Acme");
-    const line = `${name} pays by card`;
-    const first = await version(source, `${line}. ${name} is big.`, group);
-    const { memory, entity } = await memoryOn(
-      { source, version: first, quote: line, group },
-      { name }
-    );
-    await memoryOn(
-      { source, version: first, quote: `${name} is big`, group },
-      { entity }
-    );
-    const second = await version(source, "Paid in cash.", group);
-    const out = await endOf(entity, memory, reader);
-    // The second version's add as it would be with two memories past the
-    // bound: judged afresh, with room for one.
-    await runInDurableObject(shared(), (_instance, state) => {
-      judgeVersion(
-        state.storage.sql,
-        {
-          source,
-          version: second,
-          text: "Paid in cash.",
-          replaced: { version: first, judged: false },
-        },
-        1
-      );
-    });
-    const pastBound = await endOf(entity, memory, reader);
-    const third = await version(source, "Paid in cash, still.", group);
-
-    expect({
-      out: out === (await addedAt(source, second, reader)),
-      pastBound,
-      judgedAgain: await endOf(entity, memory, reader),
-    }).toStrictEqual({
-      out: true,
-      pastBound: null,
-      judgedAgain: await addedAt(source, third, reader),
-    });
-  });
-});
-
 describe("what judging against the current version rests on", () => {
   // Main's rules (memories.ts `visibleSql`; erasure.ts hides a source
   // whole): whoever may see a memory of a source may read its current
@@ -694,4 +648,208 @@ describe("what judging against the current version rests on", () => {
       both: await endOf(entity, memory, both),
     }).toStrictEqual({ wideOnly: "unread", wideOnlyReadable: [], both: null });
   });
+});
+
+/** How many memories about `entity` `reader` reads as current, page by page. */
+const currentCount = async (
+  entity: string,
+  reader: PersonReader
+): Promise<number> => {
+  let count = 0;
+  let after: MemoriesCursor | undefined;
+  for (let pages = 0; pages < 100; pages += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one page after another
+    const page = await shared().readMemories({
+      entity,
+      reader,
+      ...(after === undefined ? {} : { after }),
+    });
+    count += page.memories.length;
+    if (page.next === undefined) {
+      return count;
+    }
+    after = page.next;
+  }
+  throw new Error("More pages than a test makes");
+};
+
+/** A text of about `bytes`, its sentences of its own words, each holding `tag`. */
+const largeText = (tag: string, bytes: number): string => {
+  const sentences: string[] = [];
+  let size = 0;
+  for (let index = 0; size < bytes; index += 1) {
+    const sentence = `${tag} clause ${index} holds ${tag}x${index} and pays on time`;
+    sentences.push(sentence);
+    size += sentence.length + 2;
+  }
+  return sentences.join(". ");
+};
+
+describe("late adds and large sources", () => {
+  it("judges one add citing several large sources, each against its own current text", async () => {
+    const group = unique("g");
+    const reader = readerOf(group);
+    const sources = await Promise.all(
+      Array.from({ length: 10 }, async (_, index) => {
+        const source = unique(`doc${index}`);
+        const tag = unique("t");
+        const first = await version(source, largeText(tag, 990_000), group);
+        // Kept: the clause 1 line; dropped: clause 0's.
+        await version(
+          source,
+          largeText(tag, 990_000).replace(`${tag} clause 0 holds`, "gone"),
+          group
+        );
+        return { source, tag, first };
+      })
+    );
+    const name = unique("Acme");
+    const added = await shared().addMemories({
+      change: crypto.randomUUID(),
+      access: audience(group),
+      entities: [{ key: "c", kind: "customer", names: [name] }],
+      memories: sources.flatMap(({ source, tag, first }) =>
+        [0, 1].map((clause): NewMemory => ({
+          about: "c",
+          type: "fact",
+          statement: `${name} ${source} clause ${clause}.`,
+          speaker: { kind: "outside" },
+          basis: {
+            kind: "source",
+            source,
+            version: first,
+            quote: `${tag} clause ${clause} holds`,
+          },
+        }))
+      ),
+    });
+    const entity = added.entities.c ?? "";
+    const states = await Promise.all(
+      added.memories.map(async (memory) =>
+        (await endOf(entity, memory, reader)) === null ? "current" : "ended"
+      )
+    );
+
+    expect(states).toStrictEqual(sources.flatMap(() => ["ended", "current"]));
+  }, 120_000);
+
+  it("lands a late memory as out when its source's current file is gone, and brings it back when a later version says it", async () => {
+    const group = unique("g");
+    const reader = readerOf(group);
+    const source = unique("doc");
+    const name = unique("Acme");
+    const line = `${name} pays by card`;
+    const first = await version(source, `${line}.`, group);
+    const second = await version(source, `${line}, monthly.`, group);
+    const file = await runInDurableObject(
+      shared(),
+      (_instance, state) =>
+        state.storage.sql
+          .exec<{ file: string }>(
+            "SELECT file FROM source_versions WHERE source = ? AND version = ?",
+            source,
+            second
+          )
+          .one().file
+    );
+    await env.BRAIN_OBJECTS.delete(fileKeyOf(file));
+    const late = await memoryOn(
+      { source, version: first, quote: line, group },
+      { name }
+    );
+    const lost = await endOf(late.entity, late.memory, reader);
+    await version(source, `${line}, yearly.`, group);
+
+    expect({
+      lost: typeof lost === "number",
+      back: await endOf(late.entity, late.memory, reader),
+    }).toStrictEqual({ lost: true, back: null });
+  });
+
+  it("reads a memory ended alike whether or not memories of others rest on a version it can't read", async () => {
+    const a = unique("a");
+    const b = unique("b");
+    const reader = readerOf(a);
+    const side = async (hidden: boolean) => {
+      const source = unique("doc");
+      const name = unique("Acme");
+      const line = `${name} pays by card`;
+      const first = await version(source, `${line}. ${unique("x")}`, a);
+      const { memory, entity } = await memoryOn(
+        { source, version: first, quote: line, group: a },
+        { name }
+      );
+      if (hidden) {
+        const narrow = await version(source, `${line}. ${unique("y")}`, b);
+        for (let index = 0; index < 3; index += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- one add at a time
+          await memoryOn(
+            { source, version: narrow, quote: line, group: b },
+            { name: unique("Other") },
+            { statement: `${line} ${index}.` }
+          );
+        }
+      }
+      await version(source, `Paid in cash. ${unique("z")}`, a);
+      return (await endOf(entity, memory, reader)) === null
+        ? "current"
+        : "ended";
+    };
+
+    expect({ real: await side(true), twin: await side(false) }).toStrictEqual({
+      real: "ended",
+      twin: "ended",
+    });
+  });
+
+  it("keeps a source with many memories judged across many adds", async () => {
+    const group = unique("g");
+    const reader = readerOf(group);
+    const source = unique("doc");
+    const tag = unique("t");
+    const name = unique("Acme");
+    const sentences = Array.from(
+      { length: 600 },
+      (_, index) => `${tag} clause ${index} holds ${tag}x${index}`
+    );
+    const first = await version(source, sentences.join(". "), group);
+    let entity: string | undefined;
+    const memories: string[] = [];
+    for (let start = 0; start < 600; start += 100) {
+      // oxlint-disable-next-line no-await-in-loop -- one add at a time
+      const added = await shared().addMemories({
+        change: crypto.randomUUID(),
+        access: audience(group),
+        entities: [
+          entity === undefined
+            ? { key: "c", kind: "customer", names: [name] }
+            : { key: "c", id: entity, kind: "customer" },
+        ],
+        memories: Array.from({ length: 100 }, (_, offset) => ({
+          about: "c",
+          type: "fact" as const,
+          statement: `${name} fact ${start + offset}.`,
+          speaker: { kind: "outside" as const },
+          basis: {
+            kind: "source" as const,
+            source,
+            version: first,
+            quote: sentences[start + offset] ?? "",
+          },
+        })),
+      });
+      entity ??= added.entities.c;
+      memories.push(...added.memories);
+    }
+    // Each version drops a hundred more sentences.
+    const kept: number[] = [];
+    for (let dropped = 100; dropped <= 300; dropped += 100) {
+      // oxlint-disable-next-line no-await-in-loop -- one version at a time
+      await version(source, sentences.slice(dropped).join(". "), group);
+      // oxlint-disable-next-line no-await-in-loop -- one version at a time
+      kept.push(await currentCount(entity ?? "", reader));
+    }
+
+    expect(kept).toStrictEqual([500, 400, 300]);
+  }, 120_000);
 });

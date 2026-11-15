@@ -1,3 +1,4 @@
+import { log } from "@grasp-os/shared/log";
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
 
@@ -28,11 +29,11 @@ import {
 } from "./memories.ts";
 import {
   CurrentTextsNeededError,
+  heldIn,
   judgeLate,
   markJudged,
-  quoteIndexOf,
 } from "./quotes.ts";
-import type { CurrentTexts, Written } from "./quotes.ts";
+import type { CurrentText, CurrentTexts, Written } from "./quotes.ts";
 import { accessOfKey, readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
 import { isRestoring } from "./restoring.ts";
 import { foldForSearch, indexMemoryWords } from "./words.ts";
@@ -682,32 +683,34 @@ export const writeAdd = (
   }
 };
 
-/** What a late add answers when a current version's file is gone. */
-const lostCurrentFile =
-  "The Brain lost the file of a source's current version, so it can't judge a memory resting on an earlier one";
-
 /**
- * The texts of `needed`, read from the bucket and indexed: what a late
- * add's transaction asked for (`CurrentTextsNeededError`).
+ * What `needed` holds of `adding`'s quotes, read from the bucket one
+ * version at a time, each text let go before the next is read: what a late
+ * add's transaction asked for (`CurrentTextsNeededError`). A version whose
+ * file is gone holds none (quotes.ts `heldIn`).
  */
 const textsOf = async (
   bucket: BrainBucket,
-  needed: CurrentTextsNeededError["needed"]
-): Promise<CurrentTexts> =>
-  new Map(
-    await Promise.all(
-      needed.map(async ({ source, row, file }) => {
-        const object = await bucket.get(fileKeyOf(file));
-        if (object === null) {
-          throw refused(lostCurrentFile);
-        }
-        return [
-          source,
-          { row, file, index: quoteIndexOf(await object.text()) },
-        ] as const;
-      })
-    )
-  );
+  needed: CurrentTextsNeededError["needed"],
+  adding: Adding
+): Promise<Map<string, CurrentText>> => {
+  const read = new Map<string, CurrentText>();
+  for (const { source, row, file } of needed) {
+    const quotes = adding.memories.flatMap(({ basis }) =>
+      basis.kind === "source" && basis.source === source ? [basis.quote] : []
+    );
+    // oxlint-disable-next-line no-await-in-loop -- one text in memory at a time
+    const object = await bucket.get(fileKeyOf(file));
+    if (object === null) {
+      // As a read of a version whose file is gone says it (sources.ts).
+      log.warn("brain.version_file_missing", {});
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one text in memory at a time
+    const text = object === null ? null : await object.text();
+    read.set(source, { row, file, held: heldIn(text, quotes) });
+  }
+  return read;
+};
 
 /**
  * Adds `adding` (above), or answers what its change added before. Its
@@ -738,7 +741,7 @@ export const addMemories = async (
       texts = new Map([
         ...texts,
         // oxlint-disable-next-line no-await-in-loop -- read again only when a newer version landed
-        ...(await textsOf(store.bucket, error.needed)),
+        ...(await textsOf(store.bucket, error.needed, adding)),
       ]);
     }
   }
