@@ -8,11 +8,18 @@ import type { AgentScope } from "./agent-scope.ts";
 import { appFor } from "./apps.ts";
 import { memberOf } from "./auth/identity.ts";
 import {
+  erasedForGoodAs,
+  memoryKeyOf,
   readableMemoriesAs,
   readableVersionsAs,
   versionRefSchema,
 } from "./brain-next.ts";
-import type { StoredMemoryPlace, SourceVersionRef } from "./brain-next.ts";
+import type {
+  MemoryBasis,
+  RecalledMemory,
+  StoredMemoryPlace,
+  SourceVersionRef,
+} from "./brain-next.ts";
 import { audienceOf } from "./chat-audiences.ts";
 import { connectionOwnersOf } from "./connections.ts";
 import { grantedPermissions, hasBrainGrant } from "./permissions.ts";
@@ -249,22 +256,87 @@ const readableBrainCompanyVersions = async (
 // (`readableMemoriesAs`), and with the agent's `brain` grant. A newer
 // memory that replaced it withholds nothing: the next recall brings that.
 
+// A pin carries what its memory rests on as the recall read it
+// (`MemoryBasis`): the source it was drawn from, its writer, and when the
+// store learned it. That is what an erasure of it is told by
+// (`erasedSources`): the erasure ledger names those, and outlives a lost
+// storage, which a memory's row doesn't. A pin of a memory handed over
+// without them (what names an entity a chat's code read rests on) holds
+// `null`, and is never told erased.
+
+/** What a pinned memory rests on, and none when it was handed over without it. */
+export interface MemoryPin extends StoredMemoryPlace {
+  basis: MemoryBasis | null;
+}
+
+/** The pin of `memory` as a recall handed it over, with what it rests on. */
+export const recalledMemoryPin = (memory: RecalledMemory): MemoryPin => ({
+  store: memory.store,
+  memory: memory.memory,
+  basis: {
+    source: memory.source?.source ?? null,
+    writer: memory.writer,
+    learnedAt: memory.learnedAt.getTime(),
+  },
+});
+
 /** The source a memory the new Brain handed a run is recorded as. */
-export const brainMemoryRead = ({ store, memory }: StoredMemoryPlace): string =>
-  `${brainMemoryPrefix}${JSON.stringify([store, memory])}`;
+export const brainMemoryRead = ({ store, memory, basis }: MemoryPin): string =>
+  `${brainMemoryPrefix}${JSON.stringify([
+    store,
+    memory,
+    basis === null
+      ? null
+      : [
+          basis.source === null
+            ? null
+            : [basis.source.producer, basis.source.id],
+          basis.writer,
+          basis.learnedAt,
+        ],
+  ])}`;
 
 /** The source a memory a recall as the company handed a run is recorded as. */
-export const brainCompanyMemoryRead = (place: StoredMemoryPlace): string =>
-  `${brainCompanyMemoryPrefix}${brainMemoryRead(place).slice(brainMemoryPrefix.length)}`;
+export const brainCompanyMemoryRead = (pin: MemoryPin): string =>
+  `${brainCompanyMemoryPrefix}${brainMemoryRead(pin).slice(brainMemoryPrefix.length)}`;
 
 /** A memory's place in a pin: its store, and its id, a UUID as the Brain's are. */
 export const brainMemorySchema = z.tuple([z.enum(["own", "shared"]), z.uuid()]);
+
+/** What a memory rests on, as a pin holds it (`brainMemoryRead`). */
+const memoryBasisSchema = z
+  .tuple([
+    z.tuple([z.unknown(), z.unknown()]).nullable(),
+    z.string().min(1).nullable(),
+    z.int().nonnegative(),
+  ])
+  .transform(([source, writer, learnedAt], context) => {
+    if (source === null) {
+      return { source: null, writer, learnedAt };
+    }
+    const ref = versionRefSchema.shape.source.safeParse({
+      producer: source[0],
+      id: source[1],
+    });
+    if (!ref.success) {
+      context.addIssue({ code: "custom", message: "Not a source" });
+      return z.NEVER;
+    }
+    return { source: ref.data, writer, learnedAt };
+  });
+
+/** A memory's pin: its place, and what it rests on, or none. */
+const memoryPinSchema = z.tuple([
+  z.enum(["own", "shared"]),
+  z.uuid(),
+  memoryBasisSchema.nullable(),
+]);
 
 /** The memory `source`, pinned under `prefix`, names, if it is one. */
 export const brainMemoryOf = (
   source: string,
   prefix: string
-): StoredMemoryPlace | undefined => {
+): MemoryPin | undefined => {
   if (!source.startsWith(prefix)) {
     return undefined;
   }
@@ -274,12 +346,12 @@ export const brainMemoryOf = (
   } catch {
     return undefined;
   }
-  const pin = brainMemorySchema.safeParse(parsed);
+  const pin = memoryPinSchema.safeParse(parsed);
   if (!pin.success) {
     return undefined;
   }
-  const [store, memory] = pin.data;
-  return { store, memory };
+  const [store, memory, basis] = pin.data;
+  return { store, memory, basis };
 };
 
 /**
@@ -304,16 +376,13 @@ const readableMemoriesAt = async (
   const memories = await readableMemoriesAs(
     env,
     scope.personId,
-    pins.map(({ pin }) => pin),
+    pins.map(({ pin: { store, memory } }) => ({ store, memory })),
     { reach }
   );
-  const readable = new Set(
-    memories.map(
-      (place) =>
-        `${prefix}${brainMemoryRead(place).slice(brainMemoryPrefix.length)}`
-    )
+  const readable = new Set(memories.map((place) => memoryKeyOf(place)));
+  return pins.flatMap(({ source, pin }) =>
+    readable.has(memoryKeyOf(pin)) ? [source] : []
   );
-  return pins.flatMap(({ source }) => (readable.has(source) ? [source] : []));
 };
 
 /** Of the memories the person's own chat pinned in `sources`, those they may still read. */
@@ -648,4 +717,71 @@ export const readableSources = async (
     ...companyMemories,
   ]);
   return audience === undefined ? { readable } : { readable, audience };
+};
+
+/** The version a pin of the new Brain names, at whatever reach it was read. */
+const versionPinOf = (source: string): SourceVersionRef | undefined => {
+  const prefix = [
+    brainVersionPrefix,
+    brainTeamVersionPrefix,
+    brainCompanyVersionPrefix,
+  ].find((each) => source.startsWith(each));
+  return prefix === undefined
+    ? undefined
+    : brainVersionOf(`${brainVersionPrefix}${source.slice(prefix.length)}`);
+};
+
+/** The memory a pin of the new Brain names, at whatever reach it was read. */
+const memoryPinOf = (source: string): MemoryPin | undefined =>
+  brainMemoryOf(source, brainMemoryPrefix) ??
+  brainMemoryOf(source, brainCompanyMemoryPrefix);
+
+/** A pinned version's source, as one string. */
+const sourceKey = ({ producer, id }: SourceVersionRef["source"]): string =>
+  JSON.stringify([producer, id]);
+
+/**
+ * Of the new Brain's pins in `sourceIds`, those whose content an erasure
+ * took for good (`erasedForGoodAs`), at whatever reach the read pinned them: a
+ * version whose source was erased, a memory an erasure deleted. What a
+ * chat of `personId`'s shows of a run resting on one is replaced
+ * (workspace.ts `#replaceErased`); one only no longer readable (narrowed,
+ * retired, the person out of a team) never is, as the person saw it while
+ * they could. Any other source, or a pin that names nothing, is not
+ * erased here: its run is withheld from the model all the same
+ * (`readableSources`). Throws what the Brain throws.
+ */
+export const erasedSources = async (
+  env: Env,
+  personId: string,
+  sourceIds: readonly string[]
+): Promise<Set<string>> => {
+  const versions = sourceIds.flatMap((source) => {
+    const pin = versionPinOf(source);
+    return pin === undefined ? [] : [{ source, pin }];
+  });
+  // A memory pinned without what it rests on is never told erased.
+  const memories = sourceIds.flatMap((source) => {
+    const pin = memoryPinOf(source);
+    return pin?.basis === undefined || pin.basis === null
+      ? []
+      : [{ source, pin: { ...pin, basis: pin.basis } }];
+  });
+  if (versions.length === 0 && memories.length === 0) {
+    return new Set();
+  }
+  const erased = await erasedForGoodAs(env, personId, {
+    sources: versions.map(({ pin }) => pin.source),
+    memories: memories.map(({ pin }) => pin),
+  });
+  const keys = new Set(erased.sources.map((ref) => sourceKey(ref)));
+  const places = new Set(erased.memories.map((place) => memoryKeyOf(place)));
+  return new Set([
+    ...versions.flatMap(({ source, pin }) =>
+      keys.has(sourceKey(pin.source)) ? [source] : []
+    ),
+    ...memories.flatMap(({ source, pin }) =>
+      places.has(memoryKeyOf(pin)) ? [source] : []
+    ),
+  ]);
 };

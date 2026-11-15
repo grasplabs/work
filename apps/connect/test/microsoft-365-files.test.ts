@@ -1056,8 +1056,10 @@ describe("the Microsoft 365 connector's Excel tools", () => {
       },
       { origin: chatOrigin }
     );
-    const waiting: PendingAction[] =
-      await exports.default.listPendingActions(person);
+    const waiting: PendingAction[] = await exports.default.listPendingActions(
+      person,
+      "grasp"
+    );
     expect({
       held: asked.pending?.id,
       sent: graph.sent.length,

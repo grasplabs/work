@@ -145,7 +145,7 @@ const outcomeOf = async (
 ) => {
   const answer = await stub.ask(chat.id, { text: question, model });
   const results = await codeResults(stub, chat.id);
-  const held = await heldFor(person);
+  const held = await heldFor(person, chat.via === "web" ? "grasp" : "chat_app");
   return {
     answer,
     returned: results.map(({ text }) => text),

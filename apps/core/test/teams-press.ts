@@ -50,7 +50,7 @@ export const heldTurn = async (idp: Idp, plan: MailAnswer[] = []) => {
   if (card?.id === undefined) {
     throw new Error("Expected a card of held writes");
   }
-  const writes = await heldFor(person);
+  const writes = await heldFor(person, "chat_app");
   // The card's order: the order they were asked for.
   const ordered = writes.toSorted(
     (a, b) => Date.parse(a.requestedAt) - Date.parse(b.requestedAt)
@@ -81,7 +81,7 @@ export const mailOf = async (mail: Turn["mail"]) => {
 
 /** The held writes still waiting for `person`, by id. */
 export const waitingOf = async (person: Turn["person"]): Promise<string[]> => {
-  const waiting = await heldFor(person);
+  const waiting = await heldFor(person, "chat_app");
   return waiting.map(({ id }) => id);
 };
 

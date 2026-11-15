@@ -144,7 +144,7 @@ describe("Settings › Security › Chat apps › Your conversations in chat app
     await press("Delete for good");
 
     expect(text()).toContain(
-      "Your conversations are already being deleted. Wait a moment, then look again."
+      "Your conversations are being deleted. If any remain, try again in a moment."
     );
   });
 

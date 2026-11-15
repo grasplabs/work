@@ -596,48 +596,51 @@ const answerFrom = (seed: number): string => {
 const cardBytes = (text: string): number =>
   new TextEncoder().encode(JSON.stringify(text)).length - 2;
 
-/** The fence lines a text holds, as the generator writes them. */
-const fenceLines = (text: string): number =>
-  text.split("\n").filter((line) => line.startsWith("```")).length;
+/** What is wrong with `pieces` of `text`: none of it, for pieces as they must be. */
+const wrongWith = (text: string, pieces: readonly string[]) => ({
+  joinedBack: pieces.join("") === text,
+  empty: pieces.filter((piece) => piece === "").length,
+  tooLarge: pieces.filter(
+    (piece) => piece.length > 3000 || cardBytes(piece) > 16 * 1024
+  ).length,
+});
+
+const allRight = { joinedBack: true, empty: 0, tooLarge: 0 };
 
 describe("an answer in pieces", () => {
   it("keeps every character where it was, indentation and blank lines too, when it fits one message", () => {
     const text =
       "Here:\n\n```python\ndef f():\n    x = 1\n\n    return x\n```\n\n- a\n\n  - nested b";
-    expect(piecesOf(text, "en")).toStrictEqual([
-      { text, opens: "", closes: "" },
-    ]);
+    expect(piecesOf(text, "en")).toStrictEqual([text]);
   });
 
-  it("joins back to exactly the answer, each piece within a section and every fence closed in it, for answers of every kind", () => {
-    const broken: unknown[] = [];
-    let reopened = 0;
-    for (let seed = 1; seed <= 60; seed += 1) {
-      const text = answerFrom(seed);
-      const pieces = piecesOf(text, "en");
-      reopened += pieces.filter(({ opens }) => opens !== "").length;
-      const shown = pieces.map(
-        ({ opens, text: piece, closes }) => `${opens}${piece}${closes}`
-      );
-      const joined = pieces.map(({ text: piece }) => piece).join("");
-      const tooLarge = shown.filter(
-        (piece) => piece.length > 3000 || cardBytes(piece) > 16 * 1024
-      );
-      const unclosed = shown.filter((piece) => fenceLines(piece) % 2 !== 0);
-      if (joined !== text || tooLarge.length > 0 || unclosed.length > 0) {
-        broken.push({
-          seed,
-          same: joined === text,
-          tooLarge: tooLarge.length,
-          unclosed: unclosed.length,
-        });
-      }
-    }
-    // Cut inside fenced code too, so that is covered as well.
-    expect({ broken, cutInsideCode: reopened > 0 }).toStrictEqual({
-      broken: [],
-      cutInsideCode: true,
-    });
+  it("joins back to exactly the answer, with no piece empty and each within a section, for answers of every kind", () => {
+    const answers = Array.from({ length: 60 }, (_, at) => answerFrom(at + 1));
+    expect(
+      answers.map((text) => wrongWith(text, piecesOf(text, "en")))
+    ).toStrictEqual(answers.map(() => allRight));
+  });
+
+  it("cuts what a model may write to break it, each into pieces that join back to it", () => {
+    const hostile = {
+      stars: "*".repeat(64 * 1024),
+      emphasis: "*a".repeat(16 * 1024),
+      quotes: `${"> ".repeat(32_000)}deep`,
+      fenceOpening: `\`\`\`${"a".repeat(2997)}\n${"code line\n".repeat(500)}\`\`\``,
+      // One character cluster longer than a section: a letter and its marks.
+      cluster: `a${"\u0301".repeat(5000)} and after`,
+      pairs: "😀".repeat(5000),
+    };
+    expect(
+      Object.fromEntries(
+        Object.entries(hostile).map(([name, text]) => [
+          name,
+          wrongWith(text, piecesOf(text, "en")),
+        ])
+      )
+    ).toStrictEqual(
+      Object.fromEntries(Object.keys(hostile).map((name) => [name, allRight]))
+    );
   });
 });
 

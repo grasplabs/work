@@ -735,7 +735,12 @@ describe("a chat's connections", setUpTime, () => {
     await chat.stub.ask(teams.id, { text: asked, model });
     await chat.ask(asked);
 
-    const waiting = await heldFor(person);
+    // Where each was held: the Teams chat's in a chat app, the web chat's
+    // in Grasp.
+    const waiting = [
+      ...(await heldFor(person, "chat_app")),
+      ...(await heldFor(person, "grasp")),
+    ];
     const fromTeams = waiting.find(
       ({ context }) => context.type === "chat" && context.chatId === teams.id
     );

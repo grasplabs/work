@@ -2003,14 +2003,14 @@ export interface ConnectApi
     request: NativeOperationRequest
   ) => Promise<NativeOperation>;
   /**
-   * The held actions waiting for `person`, newest first (at most 200):
-   * none for Grasp staff. Only those held where `heldIn` says, when it
-   * does: in Grasp, or in a chat app's conversation (`chatApp` on the
-   * capability), the limit applying to those alone.
+   * The held actions waiting for `person` that were held where `heldIn`
+   * says, newest first (at most 200, of those alone): in Grasp, or in a
+   * chat app's conversation (`chatApp` on the capability). None for Grasp
+   * staff.
    */
   listPendingActions: (
     person: ConnectionPerson,
-    heldIn?: HeldIn
+    heldIn: HeldIn
   ) => Promise<PendingAction[]>;
   /** One held action waiting for the person, or `null`. */
   pendingAction: (request: HeldRequest) => Promise<PendingAction | null>;

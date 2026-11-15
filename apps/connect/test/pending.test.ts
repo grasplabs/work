@@ -77,7 +77,7 @@ const hold = async (
   await callAs(authority, call, { origin: chatOrigin, ...signed });
 
 const waitingFor = async (person: ConnectionPerson): Promise<PendingAction[]> =>
-  await exports.default.listPendingActions(person);
+  await exports.default.listPendingActions(person, "grasp");
 
 /** The one held action waiting for `person`. */
 const heldFor = async (person: ConnectionPerson): Promise<PendingAction> => {
@@ -1104,23 +1104,17 @@ describe("a side effect from chat", () => {
       throw new Error("Nothing to insert");
     }
     await db.batch([one, ...more]);
-    const listed = async (heldIn?: "grasp" | "chat_app") =>
+    const listed = async (heldIn: "grasp" | "chat_app") =>
       await exports.default.listPendingActions(anna, heldIn);
-    const [grasp, chatApp, all] = [
-      await listed("grasp"),
-      await listed("chat_app"),
-      await listed(),
-    ];
+    const [grasp, chatApp] = [await listed("grasp"), await listed("chat_app")];
     expect({
       grasp: grasp.map(({ id }) => id),
       chatApp: chatApp.length,
       chatAppHoldsGrasps: chatApp.some(({ id }) => id === inGrasp.pending?.id),
-      all: all.length,
     }).toStrictEqual({
       grasp: [inGrasp.pending?.id],
       chatApp: 200,
       chatAppHoldsGrasps: false,
-      all: 200,
     });
   });
 

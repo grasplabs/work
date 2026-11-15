@@ -10,8 +10,6 @@ import {
   toCardElement,
 } from "chat";
 import type { CardElement, PostableCard } from "chat";
-import type { Root, RootContent } from "mdast";
-import { fromMarkdown } from "mdast-util-from-markdown";
 import { z } from "zod";
 
 import { say } from "./words.ts";
@@ -168,74 +166,55 @@ const RateButtons = ({
 const fitsSection = (piece: string): boolean =>
   piece.length <= sectionChars && sizeOf(piece) <= outsideBytes;
 
-/**
- * A piece of an answer: `text`, exactly as the answer has it, so the
- * pieces joined are the answer; and, for a cut inside fenced code, the
- * fence's opening line it reopens with (`opens`) and the marker it closes
- * with (`closes`), so each piece shows as code where it is code.
- */
-export interface AnswerPiece {
-  text: string;
-  opens: string;
-  closes: string;
-}
+/** Where UTF-16 keeps the second half of a surrogate pair. */
+const lowSurrogates = { from: 0xdc_00, to: 0xdf_ff };
 
-/** A fenced code block of an answer: where its code starts and it ends. */
-interface Fence {
-  /** Where its code starts, past its opening line. */
-  code: number;
-  end: number;
-  /** Its opening line, as written, with the line's end. */
-  opening: string;
-  /** What closes it: its opening's run of backticks or tildes. */
-  marker: string;
-}
-
-/** The fenced code blocks of `text`, as CommonMark reads it (mdast). */
-const fencesOf = (text: string): Fence[] => {
-  const fences: Fence[] = [];
-  const walk = (node: Root | RootContent): void => {
-    const start = node.position?.start.offset;
-    const end = node.position?.end.offset;
-    if (node.type === "code" && start !== undefined && end !== undefined) {
-      const line = text.slice(start, text.indexOf("\n", start) + 1 || end);
-      // Indented code has no fence, and nothing to close.
-      const marker = /^(?:`{3,}|~{3,})/u.exec(line.trimStart())?.[0];
-      if (marker !== undefined && line.endsWith("\n")) {
-        fences.push({ code: start + line.length, end, opening: line, marker });
-      }
-    }
-    if ("children" in node) {
-      for (const child of node.children) {
-        walk(child);
-      }
-    }
-  };
-  walk(fromMarkdown(text));
-  return fences;
+/** Whether a piece starting at `at` would part a surrogate pair. */
+const partsPair = (text: string, at: number): boolean => {
+  // At the second half of a pair, its own value: a lone low surrogate.
+  const unit = text.codePointAt(at) ?? 0;
+  return unit >= lowSurrogates.from && unit <= lowSurrogates.to;
 };
 
 /** Where a paragraph ends: a blank line, and any more after it. */
 const paragraphBreaks = /\n[^\S\n]*\n(?:[^\S\n]*\n)*/gu;
 
+/** The largest of ascending `cuts` the piece from its start to fits a section. */
+const largestFitting = (
+  cuts: readonly number[],
+  fits: (cut: number) => boolean
+): number | undefined => {
+  let low = 0;
+  let high = cuts.length - 1;
+  let found: number | undefined;
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const cut = cuts[middle];
+    if (cut !== undefined && fits(cut)) {
+      found = cut;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+  return found;
+};
+
 /**
  * `text` in pieces that each fit a section, untouched when it fits one,
- * cut where a reader pauses: after a paragraph's blank lines, else between
- * sentences (`Intl.Segmenter`, in the person's language), else, for a
- * sentence no section holds, between characters (graphemes). Every
- * character stays where it was: the pieces' `text` joined is `text`. A cut
- * inside fenced code closes the fence and reopens it in the next piece.
+ * each an exact slice of it, so the pieces joined are `text`, never one
+ * empty. Cut where a reader pauses: after a paragraph's blank lines, else
+ * between sentences (`Intl.Segmenter`, in the person's language), else
+ * between characters (graphemes), else, inside a character cluster no
+ * section holds, between code points. Each piece reads at most a section's
+ * stretch of the text, so the work grows with the text alone, whatever it
+ * holds. Fenced code is not repaired: Slack, which shows fences, reads them
+ * its own way, and a block longer than a section is cut like any text.
  */
-export const piecesOf = (
-  text: string,
-  locale: ChannelLocale
-): AnswerPiece[] => {
+export const piecesOf = (text: string, locale: ChannelLocale): string[] => {
   if (fitsSection(text)) {
-    return [{ text, opens: "", closes: "" }];
+    return [text];
   }
-  const fences = fencesOf(text);
-  const fenceAt = (cut: number) =>
-    fences.find(({ code, end }) => cut > code && cut < end);
   const paragraphs = Array.from(
     text.matchAll(paragraphBreaks),
     (match) => match.index + match[0].length
@@ -243,60 +222,52 @@ export const piecesOf = (
   const segmenters = (["sentence", "grapheme"] as const).map(
     (granularity) => new Intl.Segmenter(locale, { granularity })
   );
-  const pieces: AnswerPiece[] = [];
+  const pieces: string[] = [];
   let start = 0;
-  let opens = "";
+  let paragraph = 0;
   while (start < text.length) {
     const from = start;
-    const opening = opens;
-    /** The piece from here to `cut`, if it fits a section. */
-    const pieceTo = (cut: number): AnswerPiece | undefined => {
-      const fence = fenceAt(cut);
-      const piece = text.slice(from, cut);
-      const closes =
-        fence === undefined
-          ? ""
-          : `${piece.endsWith("\n") ? "" : "\n"}${fence.marker}`;
-      return fitsSection(`${opening}${piece}${closes}`)
-        ? { text: piece, opens: opening, closes }
-        : undefined;
-    };
-    const last = pieceTo(text.length);
-    if (last !== undefined) {
-      pieces.push(last);
+    if (text.length - from <= sectionChars && fitsSection(text.slice(from))) {
+      pieces.push(text.slice(from));
       break;
     }
-    // Where each kind of cut could fall, in the stretch a section holds.
-    const window = text.slice(from, from + sectionChars + 1);
-    const within = (cut: number) => cut > from && cut < from + window.length;
-    const cuts = [
-      paragraphs.filter(within),
-      ...segmenters.map((segmenter) =>
-        Array.from(
-          segmenter.segment(window),
-          ({ index }) => from + index
-        ).filter(within)
-      ),
-    ];
-    let found: { cut: number; piece: AnswerPiece } | undefined;
-    for (const candidates of cuts) {
-      for (const cut of candidates.toReversed()) {
-        const piece = pieceTo(cut);
-        if (piece !== undefined) {
-          found = { cut, piece };
-          break;
-        }
-      }
-      if (found !== undefined) {
+    // The stretch a section could hold, and where each kind of cut falls.
+    const window = text.slice(from, from + sectionChars);
+    const fits = (cut: number) => fitsSection(text.slice(from, cut));
+    while ((paragraphs[paragraph] ?? Number.POSITIVE_INFINITY) <= from) {
+      paragraph += 1;
+    }
+    const byParagraph: number[] = [];
+    for (let at = paragraph; at < paragraphs.length; at += 1) {
+      const cut = paragraphs[at] ?? Number.POSITIVE_INFINITY;
+      if (cut > from + window.length) {
         break;
       }
+      byParagraph.push(cut);
     }
-    if (found === undefined) {
-      throw new Error("No piece of the answer fits a section");
+    const bySegment = segmenters.map((segmenter) =>
+      Array.from(segmenter.segment(window), ({ index }) => from + index).filter(
+        (cut) => cut > from
+      )
+    );
+    // Never between the halves of a surrogate pair, which the stretch's
+    // end may part.
+    const byCodePoint: number[] = [];
+    let at = from;
+    for (const point of window) {
+      at += point.length;
+      if (!partsPair(text, at)) {
+        byCodePoint.push(at);
+      }
     }
-    pieces.push(found.piece);
-    start = found.cut;
-    opens = fenceAt(start)?.opening ?? "";
+    // A single code point always fits a section: the last resort can't fail.
+    const cut =
+      [byParagraph, ...bySegment, byCodePoint]
+        .map((cuts) => largestFitting(cuts, fits))
+        .find((found) => found !== undefined) ??
+      from + (byCodePoint[0] === undefined ? 1 : byCodePoint[0] - from);
+    pieces.push(text.slice(from, cut));
+    start = cut;
   }
   return pieces;
 };
@@ -314,16 +285,15 @@ export const answerCards = ({
 }: AnswerCard): PostableCard[] => {
   const cards: string[][] = [];
   let room = 0;
-  for (const { opens, text: piece, closes } of piecesOf(text, locale)) {
-    const shown = `${opens}${piece}${closes}`;
-    const cost = sizeOf(shown);
+  for (const piece of piecesOf(text, locale)) {
+    const cost = sizeOf(piece);
     const last = cards.at(-1);
     if (last === undefined || cost > room) {
-      cards.push([shown]);
+      cards.push([piece]);
       room = outsideBytes - cost;
       continue;
     }
-    last.push(shown);
+    last.push(piece);
     room -= cost;
   }
   return cards.map((pieces, at) => {

@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { appKind } from "../src/apps.ts";
+import { drainObjectOutbox } from "../src/audit-outbox.ts";
 import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
 import { keepMadeInChat } from "../src/drafts.ts";
 import { workspace } from "../src/durable-objects.ts";
@@ -509,11 +510,13 @@ describe("a conversation with the agent in Teams", setUpTime, () => {
     const deleted = await first;
     await putBack();
 
-    await vi.waitFor(
-      async () => {
-        await expect(deletionsBy(userId)).resolves.toHaveLength(1);
-      },
-      { timeout: 15_000, interval: 200 }
+    // Everything the Workspace noted delivered first: a stray second event
+    // would be in the log by now.
+    await runInDurableObject(
+      workspace(env, personalWorkspaceId(userId)),
+      async (_instance, state) => {
+        await drainObjectOutbox(env, state.storage.sql, 0);
+      }
     );
     const recorded = await deletionsBy(userId);
     expect({ second, deleted, recorded }).toStrictEqual({

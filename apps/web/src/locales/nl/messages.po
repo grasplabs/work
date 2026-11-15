@@ -16721,8 +16721,8 @@ msgid "Your company’s VAT number, as invoices show it."
 msgstr "Het btw-nummer van je bedrijf, zoals het op facturen staat."
 
 #: src/settings/chat-accounts.tsx
-msgid "Your conversations are already being deleted. Wait a moment, then look again."
-msgstr "Je gesprekken worden al verwijderd. Wacht even en kijk dan opnieuw."
+msgid "Your conversations are being deleted. If any remain, try again in a moment."
+msgstr "Je gesprekken worden verwijderd. Als er nog over zijn, probeer het dan zo opnieuw."
 
 #: src/settings/chat-accounts.tsx
 msgid "Your conversations in chat apps"

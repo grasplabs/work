@@ -261,7 +261,7 @@ const ForgetConversations = () => {
   const [deleted, setDeleted] = useState<number | "answering" | "under_way">();
   const refusals = {
     answering: t`Stephen is still answering one of your conversations. Try again in a moment.`,
-    under_way: t`Your conversations are already being deleted. Wait a moment, then look again.`,
+    under_way: t`Your conversations are being deleted. If any remain, try again in a moment.`,
   };
   return (
     <SettingsRow

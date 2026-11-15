@@ -47,7 +47,7 @@ export const agentErrors = defineErrorFamily({
   "agent.conversation_answering":
     "One of your conversations in a chat app is still being answered. Try again in a moment.",
   "agent.delete_under_way":
-    "Your conversations in chat apps are already being deleted. Wait a moment, then look again.",
+    "Your conversations in chat apps are being deleted. If any remain, try again in a moment.",
   "agent.invalid_question": "That isn't a question the agent can take.",
   "agent.invalid_request": "That isn't a valid request for a chat.",
   "agent.invalid_title": "A chat's title is 1 to 200 characters.",

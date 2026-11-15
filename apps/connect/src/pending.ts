@@ -922,17 +922,17 @@ const listLimit = 200;
 /**
  * The held actions waiting for `person`, newest first, at most
  * {@link listLimit}: older ones wait on, and show once newer ones are
- * decided. Only those held where `heldIn` says, when it does, in the
- * same statement as the limit: Grasp's own list never loses one to a chat
- * app's (`pending_actions.chat_app`), nor a chat app's card to Grasp's.
+ * decided. Only those held where `heldIn` says, in the same statement
+ * as the limit: Grasp's own list never loses one to a chat app's
+ * (`pending_actions.chat_app`), nor a chat app's card to Grasp's.
  */
 export const listPendingActions = async (
   env: Env,
   request: unknown,
-  heldIn?: unknown
+  heldIn: unknown
 ): Promise<PendingAction[]> => {
   const parsed = connectionPersonSchema.safeParse(request);
-  const where = heldInSchema.optional().safeParse(heldIn);
+  const where = heldInSchema.safeParse(heldIn);
   if (!parsed.success || !where.success) {
     throw connectErrors.create("connect.invalid");
   }
@@ -952,9 +952,7 @@ export const listPendingActions = async (
           isNull(pendingActions.endsAt),
           gt(pendingActions.endsAt, new Date())
         ),
-        where.data === undefined
-          ? undefined
-          : eq(pendingActions.chatApp, where.data === "chat_app")
+        eq(pendingActions.chatApp, where.data === "chat_app")
       )
     )
     .orderBy(desc(pendingActions.createdAt), desc(pendingActions.id))

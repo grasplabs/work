@@ -150,7 +150,7 @@ describe("reaching others from a Teams chat", setUpTime, () => {
     });
     expect({
       card: turn.card,
-      held: await heldFor(turn.person),
+      held: await heldFor(turn.person, "chat_app"),
       connectCalls: turn.connectCalls,
       sent: await sentWith(turn.subject),
       asksToSend: new URL(url).searchParams
@@ -173,7 +173,7 @@ describe("reaching others from a Teams chat", setUpTime, () => {
       asked: "Mail ben@acme.test the invoice and copy cleo@acme.test.",
     });
     const card = JSON.stringify(turn.card?.activity ?? {});
-    const held = await heldFor(turn.person);
+    const held = await heldFor(turn.person, "chat_app");
     expect({
       held: held.length,
       shows: [
@@ -195,7 +195,7 @@ describe("reaching others from a Teams chat", setUpTime, () => {
     });
     expect({
       card: turn.card,
-      held: await heldFor(turn.person),
+      held: await heldFor(turn.person, "chat_app"),
       sent: await sentWith(turn.subject),
     }).toStrictEqual({ card: undefined, held: [], sent: [] });
   });
@@ -206,7 +206,7 @@ describe("reaching others from a Teams chat", setUpTime, () => {
       cc: [],
       asked: "Mail ben@acme.test the invoice.",
     });
-    const writes = await heldFor(turn.person);
+    const writes = await heldFor(turn.person, "chat_app");
     const press = {
       ...messageFrom(turn.teams, { text: undefined }),
       replyToId: turn.card?.id,

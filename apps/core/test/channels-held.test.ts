@@ -160,7 +160,7 @@ describe("a Teams turn that holds writes", setUpTime, () => {
       })
     );
 
-    const waiting = await heldFor(person);
+    const waiting = await heldFor(person, "chat_app");
     const { activities } = await reached(person.teams.conversation);
     const messages = activities
       .filter(({ type }) => type === "message")
@@ -254,7 +254,7 @@ describe("a Teams turn that holds writes", setUpTime, () => {
       .filter(({ type }) => type === "message")
       .map((activity) => JSON.stringify(activity))
       .filter((activity) => !activity.includes("/connect-microsoft"));
-    const waiting = await heldFor(person);
+    const waiting = await heldFor(person, "chat_app");
     expect({
       firstPart: messages.some((each) => each.includes("The first part")),
       secondPart: messages.some((each) => each.includes("SECOND-PART")),

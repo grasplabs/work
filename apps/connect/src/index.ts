@@ -639,7 +639,7 @@ export default class Connect
 
   async listPendingActions(
     person: ConnectionPerson,
-    heldIn?: HeldIn
+    heldIn: HeldIn
   ): Promise<PendingAction[]> {
     return await listPendingActions(this.env, person, heldIn);
   }
