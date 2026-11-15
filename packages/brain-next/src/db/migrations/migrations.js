@@ -19,6 +19,7 @@ import m0016 from './0016_writer_erasure_kind.sql';
 import m0017 from './0017_writer_erasure_change.sql';
 import m0018 from './0018_writer_erase_failures.sql';
 import m0019 from './0019_writer_erase_sweep.sql';
+import m0020 from './0020_work_key.sql';
 
   export default {
     journal,
@@ -42,7 +43,8 @@ m0015,
 m0016,
 m0017,
 m0018,
-m0019
+m0019,
+m0020
     }
   }
   
