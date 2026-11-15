@@ -154,10 +154,12 @@ const coveredRuns = (
  * whose earlier removal is no longer owed.
  *
  * What it costs each minute: one pass over the rows in use (their partial
- * index), and for each, the role's indexed lookups (`workflowRoleSql`: the
- * person's membership, the workflow, its shares by person, team and
- * project), a few dozen rows read: at 25,000 rows in use, about a million
- * rows read a minute, every one by an index.
+ * index), and for each, the role's indexed lookups until one holds
+ * (`workflowRoleSql`: the person's membership, the workflow, its shares by
+ * person, team and project). Measured in workerd (D1's `rows_read`): 5 rows
+ * read a row whose person owns the workflow, 6 through a share to them, 8
+ * through a team; so at 25,000 rows in use, some 125,000 to 200,000 rows
+ * read a minute, every one by an index.
  */
 const markLost = async (env: Pick<Env, "DB">, now: Date): Promise<void> => {
   const rows = brainRunSources;
