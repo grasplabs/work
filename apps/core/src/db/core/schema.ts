@@ -5930,10 +5930,9 @@ export const collectionTeams = sqliteTable(
 );
 
 /**
- * Which version of each App its entry in the Apps collection holds
- * (knowledge/apps-collection.ts): written once the entry is, so it never
- * names a version the entry doesn't have. An App whose current version
- * differs, or that has no row, is indexed again.
+ * Which version of each App its entry in Knowledge's Apps collection held,
+ * while core indexed Apps there. Nothing writes it any more; it is dropped
+ * in a later release.
  */
 export const appEntries = sqliteTable("app_entries", {
   appId: text("app_id").primaryKey(),
@@ -5947,9 +5946,10 @@ export const appEntries = sqliteTable("app_entries", {
 });
 
 /**
- * A file uploaded into a collection (knowledge/uploads.ts): its original,
- * kept in R2 under its hash, and where extracting its text into the
- * document at `path` stands. Only the person who uploaded it sees it.
+ * A file once uploaded into a Knowledge collection: its original, kept in
+ * R2, and where extracting its text into the document at `path` stood.
+ * Nothing uploads into Knowledge any more; a purge forgets them
+ * (knowledge/uploads.ts), and the table is dropped in a later release.
  */
 export const uploads = sqliteTable(
   "uploads",
@@ -5994,10 +5994,8 @@ export const uploads = sqliteTable(
 );
 
 /**
- * Originals to delete from R2 (knowledge/uploads.ts), by key: recorded
- * with the upload, before its original is stored, and cleared once it is
- * saved; recorded again by a purge. Deleted by the failure that makes one
- * unneeded, or by the clock once its upload is gone or failed.
+ * Originals to delete from R2 (knowledge/uploads.ts), by key: recorded by
+ * a purge as it forgets their uploads, and deleted by its cleanup.
  */
 export const uploadCleanups = sqliteTable("upload_cleanups", {
   /** The original's key in R2. */
@@ -6012,9 +6010,9 @@ export const uploadCleanups = sqliteTable("upload_cleanups", {
 });
 
 /**
- * The daily computations of Knowledge's usage signals
- * (knowledge/signals.ts), one row per attempt, as
- * `improvement_signal_computations` has them (src/daily-claims.ts).
+ * The daily computations of Knowledge's usage signals, one row per
+ * attempt, while core computed them. Nothing writes it any more; it is
+ * dropped in a later release.
  */
 export const knowledgeSignalComputations = sqliteTable(
   "knowledge_signal_computations",

@@ -3,12 +3,12 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { chatAgentId, personalWorkspaceId } from "../../src/chats-rpc.ts";
+import { personalWorkspaceId } from "../../src/chats-rpc.ts";
 import { workspace } from "../../src/durable-objects.ts";
 import { codeResults, codeStep, model, says } from "../agent-chat.ts";
 import { testApp, withoutDefinition } from "../app-definitions.ts";
 import type { TestApp } from "../app-definitions.ts";
-import { release, requestGranted } from "../apps.ts";
+import { release } from "../apps.ts";
 import { mockIdp } from "../idp.ts";
 import { fakeProvider } from "../model-provider.ts";
 import { signedInApi } from "../sign-in.ts";
@@ -80,28 +80,11 @@ describe(
   { timeout: 180_000 },
   () => {
     it("hands the agent's check what its function wrote with console", async () => {
-      const admin = await signedInApi(idp, "admin");
       const builder = await signedInApi(idp, "builder");
       const { id: app } = await builder.api.apps.create({
         name: "Invoice desk",
       });
       await release(builder, app, releasedDesk);
-      const granted = await admin.api.permissions.list();
-      if (
-        !granted.some(
-          ({ subject, binding, status }) =>
-            subject.type === "agent" &&
-            binding === "APP_LIBRARY" &&
-            status === "active"
-        )
-      ) {
-        await requestGranted(idp, admin, {
-          subject: { type: "agent", agentId: chatAgentId },
-          object: { type: "collection", collectionId: "apps" },
-          actions: ["read"],
-          binding: "APP_LIBRARY",
-        });
-      }
       const chat = await builder.api.chats.create("Invoice desk");
       const stub = workspace(env, personalWorkspaceId(builder.userId));
       await fakeProvider(

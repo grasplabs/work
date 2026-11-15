@@ -34,6 +34,7 @@ import {
   saveOver,
   setUpTime,
   erasing,
+  seedMemory,
 } from "./knowledge-purge.ts";
 import { ownCollectionOf } from "./knowledge.ts";
 import {
@@ -137,7 +138,8 @@ describe("a purge's record", setUpTime, () => {
     const blocked = await admin.api.knowledge.purgeStatus(purgeId);
     // Remembered after the first run erased the records: the run again
     // erases it too, though that step finished (the security review).
-    await admin.api.knowledge.remember(
+    await seedMemory(
+      admin,
       { kind: "fact", text: `Mail ${secret} on Mondays.` },
       { idempotencyKey: `key-${unique()}` }
     );

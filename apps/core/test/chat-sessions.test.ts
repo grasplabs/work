@@ -110,7 +110,7 @@ const sessionOf = (
     personal: true,
     readsBrain: false,
     context: { skills: [] },
-    capture: { model: asked, audience: null, attended: true },
+    capture: { attended: true },
   }),
 });
 

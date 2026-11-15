@@ -64,17 +64,17 @@ describe("the signals by kind", () => {
     expect(
       signalKinds([
         { kind: "correction" },
-        { kind: "unanswered_question" },
-        { kind: "failing_step" },
-        { kind: "unanswered_question" },
         { kind: "cost_per_run" },
-        { kind: "unanswered_question" },
+        { kind: "failing_step" },
+        { kind: "cost_per_run" },
+        { kind: "waiting_for_person" },
+        { kind: "cost_per_run" },
       ])
     ).toStrictEqual([
-      { kind: "unanswered_question", count: 3 },
+      { kind: "cost_per_run", count: 3 },
       { kind: "failing_step", count: 1 },
+      { kind: "waiting_for_person", count: 1 },
       { kind: "correction", count: 1 },
-      { kind: "cost_per_run", count: 1 },
     ]);
     expect(signalKinds([])).toStrictEqual([]);
   });

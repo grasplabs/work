@@ -43,7 +43,6 @@ import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
 
-import { turnSource } from "../src/brain-capture.ts";
 import { chatSession, workspace } from "../src/durable-objects.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
 import { usageRecorded } from "../src/model-usage.ts";
@@ -373,10 +372,6 @@ const bookkeeping = new Set([
  */
 export type KnowledgeStateCheck = "rows" | "counts";
 
-/** A placeholder for each of `values`, for an `IN` list. */
-const placeholders = (values: readonly string[]): string =>
-  values.map(() => "?").join(", ");
-
 /** A chat a trial asks in, and its Workspace object. */
 interface OwnTrial {
   chatId: string;
@@ -384,54 +379,13 @@ interface OwnTrial {
 }
 
 /**
- * The Brain's capture of the trial's own turns (src/brain-capture.ts), as
- * conditions on Knowledge's capture tables that leave it out, by table:
- * the learning events resting on the trial's chat, their members, and the
- * cursor of its Workspace object's turns. Every settled turn writes these,
- * whatever the task asked, as it writes the chat's own messages
- * (`historyTables`): host-written learning evidence that no reader or
- * model receives, so not a change a task made. Left out as narrowly as
- * the chat's messages are, by the chats the trial itself asks in (its own,
- * and the elsewhere control's, whose object the gate doesn't read either):
- * an event of any other chat or run, a member added to another's, or another source's cursor
- * moving is still a change, and the gate's "would catch" test still
- * catches a real leak and an unrequested change.
- */
-const ownCapture = (
-  asked: readonly OwnTrial[]
-): Record<string, { where: string; bindings: string[] }> => {
-  const sources = asked.map(({ workspaceId }) => turnSource(workspaceId));
-  // Exactly the trial's own turns: a chat turn's episode, from the trial
-  // Workspace object's turns, about the trial's chat. Anything else about
-  // that chat (a run's episode, another source's) still counts.
-  const own = `task_type = 'chat.turn' AND (${asked
-    .map(() => "(source = ? AND evidence_id = ?)")
-    .join(" OR ")})`;
-  const pairs = asked.flatMap(({ chatId, workspaceId }) => [
-    turnSource(workspaceId),
-    chatId,
-  ]);
-  return {
-    brain_episodes: { where: `NOT (${own})`, bindings: pairs },
-    brain_episode_members: {
-      where: `episode_id NOT IN (SELECT id FROM brain_episodes WHERE ${own})`,
-      bindings: pairs,
-    },
-    brain_capture_cursors: {
-      where: `source NOT IN (${placeholders(sources)})`,
-      bindings: sources,
-    },
-  };
-};
-
-/**
  * The new Brain's hand-over notes of the trial's own turns
  * (src/brain-hand-overs.ts), as a condition on core's table that leaves
  * them out: each question a person asks in their own chat is noted, by
  * ids alone (`chat:<person>/<chat>/<answer>`), to be kept in their own
- * store (GRA-1805). Host-written like the capture above, and like it
- * nothing a reader or a model receives, so not a change a task made.
- * Left out as narrowly, by the chats the trial asks in: a note for any
+ * store (GRA-1805). Host-written, and nothing a reader or a model
+ * receives, so not a change a task made. Left out narrowly, by the
+ * chats the trial asks in: a note for any
  * other chat, or of any other producer (a run, an upload), still counts.
  */
 const ownHandOvers = (
@@ -448,8 +402,8 @@ const ownHandOvers = (
 
 /**
  * Each table's digest, in core's and Knowledge's databases, but the
- * bookkeeping ones and, for a trial, its own turns' capture (`ownCapture`)
- * and hand-over notes (`ownHandOvers`): what stored state holds.
+ * bookkeeping ones and, for a trial, its own turns' hand-over notes
+ * (`ownHandOvers`): what stored state holds.
  */
 const stateOf = async (
   knowledge: KnowledgeStateCheck,
@@ -469,8 +423,8 @@ const stateOf = async (
       return [];
     }
     const counts = name === "knowledge" && knowledge === "counts";
-    const ownRows = name === "knowledge" ? ownCapture : ownHandOvers;
-    const leftOut = asked.length === 0 ? {} : ownRows(asked);
+    const leftOut =
+      asked.length === 0 || name === "knowledge" ? {} : ownHandOvers(asked);
     const results = await db.batch(
       tables.map((table) => {
         const what = counts ? "count(*) AS count" : "*";
@@ -1264,7 +1218,7 @@ const changeState = async (
     const otherChat = crypto.randomUUID();
     await recordOutcome(brainOf(env), {
       eventId: `chat.turn:${otherChat}:control`,
-      source: turnSource(place.agent.agentId),
+      source: `chat.turn:${place.agent.agentId}`,
       sourceSeq: 1,
       purpose: "production",
       ownerId: company.people[place.persona].userId,
@@ -1377,8 +1331,6 @@ const historyTables = [
   ["chat_messages", "chat_id"],
   ["chat_sources", "chat_id"],
   ["chat_code_runs", "chat_id"],
-  // Its turns' captures for the Brain, owed or given up on (`ownCapture`).
-  ["brain_capture_intents", "evidence_id"],
 ] as const;
 
 const workspaceStateOf = async (

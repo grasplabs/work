@@ -1,28 +1,13 @@
-import { auditEventSchema } from "@grasp-os/shared/audit";
-import type { AuditEvent } from "@grasp-os/shared/audit";
-import type { ImprovementSignal } from "@grasp-os/shared/signals";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
-import type { z } from "zod";
+import { describe, expect, it } from "vite-plus/test";
 
-import { auditLog } from "../src/audit-log.ts";
-import { chatAgentId } from "../src/chats-rpc.ts";
 import { refreshDailySignals } from "../src/daily-signals.ts";
-import { published } from "./apps.ts";
-import { allEvents, logHead } from "./audit-events.ts";
-import { mockIdp } from "./idp.ts";
+import { allEvents } from "./audit-events.ts";
 import { runMinuteTasks, runQuarterHourTasks } from "./maintenance.ts";
-import { signedInApi, unique } from "./sign-in.ts";
 
-// Improvement signals from runs, decisions and the audit log, computed
-// once a day. Each test seeds its own App's runs, decisions and events,
-// computes the signals as of a day of its own (later than the last
-// test's), and reads them through the API: as an admin, who sees them
-// whole, unless the test is about what builders see.
-
-const idp = mockIdp();
-
-type Person = Awaited<ReturnType<typeof signedInApi>>;
+// Improvement signals, computed once a day: how a day's computation is
+// claimed by the clock. What each signal says is tested with what it is
+// computed from (workflow-run-signals.test.ts, workflow-decisions.test.ts).
 
 const dayMs = 24 * 60 * 60 * 1000;
 const hourMs = 60 * 60 * 1000;
@@ -38,14 +23,6 @@ const nextDay = (): Date => {
   const today = new Date();
   today.setUTCHours(12, 0, 0, 0);
   return new Date(today.getTime() + days * dayMs);
-};
-
-/** A builder with an App of their own. */
-const builderWithApp = async (): Promise<Person & { app: string }> => {
-  const builder = await signedInApi(idp, "builder");
-  const { id } = await builder.api.apps.create({ name: `Signals ${unique()}` });
-  await published(id);
-  return { ...builder, app: id };
 };
 
 /** The computations of `day` there are, finished or not. */
@@ -71,95 +48,6 @@ const seedClaim = async (day: Date, ago: number): Promise<void> => {
     .run();
 };
 
-/** Appends events to the deployment's log, as draining an outbox does. */
-const logged = async (
-  ...entries: Partial<z.input<typeof auditEventSchema>>[]
-): Promise<string[]> => {
-  const events: AuditEvent[] = entries.map((entry) =>
-    auditEventSchema.parse({
-      id: crypto.randomUUID(),
-      at: new Date().toISOString(),
-      source: "core",
-      actor: { type: "system" },
-      action: "model.call",
-      ...entry,
-    })
-  );
-  await auditLog(env).append(events);
-  return events.map(({ id }) => id);
-};
-
-/** When the log received the event `id`, appended after position `after`. */
-const receivedAtOf = async (id: string, after: number): Promise<string> => {
-  let page = await auditLog(env).entries(after);
-  while (page.length > 0) {
-    const found = page.find(({ event }) => event.includes(id));
-    if (found !== undefined) {
-      return found.receivedAt;
-    }
-    // Pages are read one after another.
-    // oxlint-disable-next-line no-await-in-loop
-    page = await auditLog(env).entries(page.at(-1)?.seq);
-  }
-  throw new Error(`The log has no event ${id}`);
-};
-
-/** A workflow run's actor in the audit log. */
-const runActor = (app: string, workflow: string, run: string) => ({
-  type: "workflow" as const,
-  appId: app,
-  workflowId: workflow,
-  runId: run,
-});
-
-/** A Knowledge search that found nothing, by `actor`. */
-const emptySearch = (
-  actor: z.input<typeof auditEventSchema>["actor"],
-  queryKey: string,
-  collection?: string
-) => ({
-  actor,
-  action: "knowledge.search.empty",
-  ...(collection === undefined
-    ? {}
-    : { target: { type: "collection", id: collection } }),
-  detail: { terms: 3, queryKey, sensitive: false },
-});
-
-/** The signals of `kind` in `list`, without the App (the tests' own). */
-const ofKind = <Kind extends ImprovementSignal["kind"]>(
-  signals: readonly ImprovementSignal[],
-  kind: Kind
-) =>
-  signals
-    .filter(
-      (signal): signal is Extract<ImprovementSignal, { kind: Kind }> =>
-        signal.kind === kind
-    )
-    .map(({ app: _app, ...signal }) => signal);
-
-/**
- * Unanswered questions without when each was last asked, which the log
- * sets as it receives them; and whether every one was since `since`.
- */
-const questions = (signals: readonly ImprovementSignal[], since: number) => {
-  const found = signals.filter(
-    (
-      signal
-    ): signal is Extract<ImprovementSignal, { kind: "unanswered_question" }> =>
-      signal.kind === "unanswered_question"
-  );
-  return {
-    recent: found.every(({ evidence }) => Date.parse(evidence.lastAt) >= since),
-    questions: found.map(
-      ({ evidence: { lastAt: _lastAt, ...evidence }, ...signal }) => ({
-        ...signal,
-        evidence,
-      })
-    ),
-  };
-};
-
 /** How many computations the audit log recorded for `day`. */
 const computationsOf = async (day: Date): Promise<number> => {
   const events = await allEvents();
@@ -171,118 +59,6 @@ const computationsOf = async (day: Date): Promise<number> => {
 };
 
 describe("improvement signals", () => {
-  it("group Knowledge searches that found nothing by their key, an App's with the App and people's, through the agent too, with the deployment", async () => {
-    const { api, app } = await builderWithApp();
-    const admin = await signedInApi(idp, "admin");
-    const now = nextDay();
-    const asked = `key-${unique()}`;
-    const once = `key-${unique()}`;
-    const people = `key-${unique()}`;
-    const since = Date.now();
-    const head = await logHead();
-    // Its askers take turns, each search received a second after the one
-    // before (the log's clock, moved on here).
-    const turns = [
-      emptySearch(runActor(app, "triage", "run-a"), asked, "collection-a"),
-      emptySearch(runActor(app, "triage", "run-b"), asked),
-      emptySearch(runActor(app, "triage", "run-a"), asked, "collection-b"),
-    ];
-    const received: string[] = [];
-    vi.useFakeTimers({ toFake: ["Date"], now: since });
-    try {
-      for (const turn of turns) {
-        vi.setSystemTime(Date.now() + 1000);
-        // One after another, each at its own time.
-        // oxlint-disable-next-line no-await-in-loop
-        received.push(...(await logged(turn)));
-      }
-    } finally {
-      vi.useRealTimers();
-    }
-    const [lastAsked = ""] = received.slice(-1);
-    // Someone asks, then asks again through the chat agent, as do two
-    // others: three askers, the agent asking for each of them.
-    const [someone, second, third] = [
-      `person-${unique()}`,
-      `person-${unique()}`,
-      `person-${unique()}`,
-    ];
-    const throughAgent = (userId: string) =>
-      emptySearch(
-        { type: "agent", agentId: chatAgentId, onBehalfOf: userId },
-        people
-      );
-    await logged(
-      emptySearch({ type: "app", appId: app, part: "page" }, once),
-      emptySearch({ type: "person", userId: someone }, people),
-      throughAgent(someone),
-      throughAgent(second),
-      throughAgent(third)
-    );
-
-    await refreshDailySignals(env, now);
-    const [mine, everyone] = await Promise.all([
-      api.signals.list({ app }),
-      admin.api.signals.list(),
-    ]);
-
-    const own = questions(mine.signals, since);
-    const askedLast = ofKind(mine.signals, "unanswered_question").find(
-      ({ subject }) => subject === asked
-    )?.evidence.lastAt;
-    expect({
-      // The latest search of any of its askers'.
-      askedLast: askedLast === (await receivedAtOf(lastAsked, head)),
-      mine: {
-        ...own,
-        questions: own.questions.map(({ app: _app, ...signal }) => signal),
-      },
-      people: questions(
-        everyone.signals.filter(({ subject }) => subject === people),
-        since
-      ),
-    }).toStrictEqual({
-      askedLast: true,
-      mine: {
-        recent: true,
-        questions: [
-          {
-            kind: "unanswered_question",
-            workflow: "triage",
-            subject: asked,
-            value: 3,
-            evidence: {
-              searches: 3,
-              askers: 2,
-              terms: 3,
-              collections: ["collection-a", "collection-b"],
-            },
-          },
-          {
-            kind: "unanswered_question",
-            workflow: null,
-            subject: once,
-            value: 1,
-            evidence: { searches: 1, askers: 1, terms: 3, collections: [] },
-          },
-        ],
-      },
-      people: {
-        recent: true,
-        questions: [
-          {
-            kind: "unanswered_question",
-            app: null,
-            workflow: null,
-            subject: people,
-            value: 4,
-            evidence: { searches: 4, askers: 3, terms: 3, collections: [] },
-          },
-        ],
-      },
-    });
-  });
-
   it("leave a day alone while another computation's claim on it is recent", async () => {
     const now = nextDay();
     // Claimed 16 minutes ago: longer than between clock runs, within the lease.
