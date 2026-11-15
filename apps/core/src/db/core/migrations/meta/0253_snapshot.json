@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "2b58d59e-44fc-4e34-805b-a26cafba83aa",
+  "id": "64b5cff2-4d76-410b-86fd-624fa01f8613",
   "prevId": "41dd1d9f-01e4-4e8b-a095-4595cca3f783",
   "tables": {
     "access_revocations": {
@@ -4541,7 +4541,16 @@
           "default": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "brain_uploads_removal_owed_idx": {
+          "name": "brain_uploads_removal_owed_idx",
+          "columns": [
+            "removed_at"
+          ],
+          "isUnique": false,
+          "where": "removal_owed = 1"
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},

@@ -6457,6 +6457,12 @@ export const brainUploads = sqliteTable(
       "brain_uploads_team_named",
       sql`${table.readers} <> 'team' OR ${table.teamId} IS NOT NULL`
     ),
+    // The removals still owed, oldest first, for the clock to complete
+    // (brain-uploads.ts `completeOwedRemovals`): never the whole table. Its
+    // condition a literal, as the query writes it, so SQLite uses it.
+    index("brain_uploads_removal_owed_idx")
+      .on(table.removedAt)
+      .where(sql.raw("removal_owed = 1")),
   ]
 );
 

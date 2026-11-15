@@ -20,10 +20,15 @@ import {
   removeSource,
   workBrain,
 } from "../src/brain-next.ts";
-import { completeOwedRemovals } from "../src/brain-uploads.ts";
+import {
+  completeOwedRemovals,
+  deleteBrainUpload,
+  uploadVersionToBrain,
+} from "../src/brain-uploads.ts";
 import {
   auditOutboxRejected,
   brainUploads,
+  members,
   teamMembers,
   teams,
 } from "../src/db/core/schema.ts";
@@ -83,7 +88,7 @@ const teamReaders = (teamId: string): BrainUploadReaders => ({
   teamId,
 });
 
-const teamOf = async (...members: Person[]): Promise<string> => {
+const teamOf = async (...people: Person[]): Promise<string> => {
   const teamId = crypto.randomUUID();
   const db = drizzle(env.DB);
   await db.insert(teams).values({
@@ -92,7 +97,7 @@ const teamOf = async (...members: Person[]): Promise<string> => {
     organizationId,
     createdAt: new Date(),
   });
-  for (const { userId } of members) {
+  for (const { userId } of people) {
     // oxlint-disable-next-line no-await-in-loop -- one member at a time
     await db.insert(teamMembers).values({
       id: crypto.randomUUID(),
@@ -216,6 +221,101 @@ const failNextBucketPut = async (): Promise<void> => {
       },
     });
   });
+};
+
+/**
+ * `env` whose database runs `before` once, right before the first
+ * statement whose SQL `matches` runs, alone or in a batch: a step of
+ * someone else's landing between two of a call's own, every time.
+ */
+const interleaved = (matches: RegExp, before: () => Promise<void>): Env => {
+  const real = env.DB;
+  const originals = new WeakMap<object, D1PreparedStatement>();
+  const marked = new WeakSet<object>();
+  let ran = false;
+  const beforeOnce = async (): Promise<void> => {
+    if (!ran) {
+      ran = true;
+      await before();
+    }
+  };
+  const wrap = (
+    statement: D1PreparedStatement,
+    isMarked: boolean
+  ): D1PreparedStatement => {
+    const runs = new Set(["run", "all", "raw", "first"]);
+    const proxy = new Proxy(statement, {
+      get: (target, property) => {
+        if (property === "bind") {
+          return (...values: unknown[]) =>
+            wrap(target.bind(...values), isMarked);
+        }
+        const value: unknown = Reflect.get(target, property);
+        if (typeof value !== "function") {
+          return value;
+        }
+        if (isMarked && runs.has(String(property))) {
+          return async (...args: unknown[]): Promise<unknown> => {
+            await beforeOnce();
+            return await Reflect.apply(value, target, args);
+          };
+        }
+        return (...args: unknown[]): unknown =>
+          Reflect.apply(value, target, args);
+      },
+    });
+    originals.set(proxy, statement);
+    if (isMarked) {
+      marked.add(proxy);
+    }
+    return proxy;
+  };
+  const database = new Proxy(real, {
+    get: (target, property) => {
+      if (property === "prepare") {
+        return (query: string) =>
+          wrap(target.prepare(query), matches.test(query));
+      }
+      if (property === "batch") {
+        return async (statements: D1PreparedStatement[]) => {
+          if (statements.some((statement) => marked.has(statement))) {
+            await beforeOnce();
+          }
+          return await target.batch(
+            statements.map((statement) => originals.get(statement) ?? statement)
+          );
+        };
+      }
+      const value: unknown = Reflect.get(target, property);
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
+  return { ...env, DB: database };
+};
+
+/** The statement that marks an upload removed (brain-uploads.ts `removeUpload`). */
+const marking = /^update "brain_uploads" set [^(]*"removed_at" = /iu;
+
+/** The batch that completes a removal (brain-uploads.ts `completeRemoval`). */
+const completing = /^update "brain_uploads" set "removal_owed"/iu;
+
+/** The batch that forgets an erased upload's row (brain-uploads.ts `forgetErased`). */
+const forgetting = /^delete from "brain_uploads"/iu;
+
+/** The batch that records an upload's new version (brain-uploads.ts `addVersion`). */
+const recordingVersion = /^update "brain_uploads" set [^(]*"version" = /iu;
+
+/** Each event of the upload `uploadId` by action and who, with a removal's time and a delete's detail. */
+const ledgerOf = async (uploadId: string) => {
+  const events = await eventsOf(uploadId);
+  return events.map(({ action, actor, at, detail }) => ({
+    action,
+    by: actor.type === "person" ? actor.userId : actor.type,
+    ...(action === "brain.upload.removed" ? { at } : {}),
+    ...(action === "brain.upload.deleted" ? { detail } : {}),
+  }));
 };
 
 /**
@@ -1288,6 +1388,258 @@ describe("uploading a file straight into the Brain", () => {
           failed: 0,
         },
       });
+    }
+  );
+
+  it(
+    "refuses a removal when its uploader leaves the team between core's check and the statement that records it, changing nothing",
+    slow,
+    async () => {
+      const { uploader, mate, teamId, minutes, source } =
+        await sharedToRemove();
+      const identity = await uploader.api.whoami();
+      let left = false;
+      const leaving = interleaved(marking, async () => {
+        left = true;
+        await leave(teamId, uploader);
+      });
+
+      const refused = await outcome(async () => {
+        await deleteBrainUpload(leaving, identity, source.id);
+      });
+      const [row] = await rowsWith(source.id);
+      const mateSees = await mate.api.brainSources.uploadOf(source.id);
+
+      expect({
+        left,
+        refused,
+        row: {
+          removed: row?.removedAt !== null,
+          owed: row?.removalOwed,
+          name: row?.name,
+        },
+        mateFinds: await found(mate, minutes),
+        mateSees: mateSees?.source,
+      }).toStrictEqual({
+        left: true,
+        refused: { refused: "brain.upload_not_found" },
+        row: { removed: false, owed: false, name: "Board.vtt" },
+        mateFinds: [source.id],
+        mateSees: source,
+      });
+    }
+  );
+
+  it(
+    "refuses a removal of an upload for everyone when its uploader stops being a member between core's check and the statement that records it",
+    slow,
+    async () => {
+      const [uploader, reader] = await Promise.all([
+        signedInApi(idp, "user"),
+        signedInApi(idp, "user"),
+      ]);
+      const rota = word();
+      const { source } = await uploader.api.brainSources.upload(
+        fileOf(`Rota ${rota}`, "Rota.vtt"),
+        everyone,
+        crypto.randomUUID()
+      );
+      const identity = await uploader.api.whoami();
+      let gone = false;
+      const removing = interleaved(marking, async () => {
+        gone = true;
+        await drizzle(env.DB)
+          .delete(members)
+          .where(eq(members.userId, uploader.userId));
+      });
+
+      const refused = await outcome(async () => {
+        await deleteBrainUpload(removing, identity, source.id);
+      });
+      const [row] = await rowsWith(source.id);
+
+      expect({
+        gone,
+        refused,
+        row: { removed: row?.removedAt !== null, name: row?.name },
+        readerFinds: await found(reader, rota),
+      }).toStrictEqual({
+        gone: true,
+        refused: { refused: "brain.upload_not_found" },
+        row: { removed: false, name: "Rota.vtt" },
+        readerFinds: [source.id],
+      });
+    }
+  );
+
+  it(
+    "records its uploader's removal when an admin erases an upload whose removal the Brain hadn't taken yet: added, removed, deleted, once each",
+    slow,
+    async () => {
+      const removing = await sharedToRemove();
+      const admin = await signedInApi(idp, "admin");
+      const held = "removed_sources_test_holds_for_erase";
+      await runInDurableObject(sharedStore(), (_store, state) => {
+        state.storage.sql.exec(
+          `CREATE TRIGGER ${held} BEFORE INSERT ON removed_sources BEGIN SELECT RAISE(ABORT, 'held by the test'); END`
+        );
+      });
+      try {
+        await outcome(async () => {
+          await removing.uploader.api.brainSources.deleteUpload(
+            removing.source.id
+          );
+        });
+      } finally {
+        await runInDurableObject(sharedStore(), (_store, state) => {
+          state.storage.sql.exec(`DROP TRIGGER IF EXISTS ${held}`);
+        });
+      }
+      const [marked] = await rowsWith(removing.source.id);
+      await admin.api.brainSources.deleteUpload(removing.source.id);
+      await completeOwedRemovals(env);
+
+      await expect(ledgerOf(removing.source.id)).resolves.toStrictEqual([
+        { action: "brain.upload.added", by: removing.uploader.userId },
+        {
+          action: "brain.upload.removed",
+          by: removing.uploader.userId,
+          at: marked?.removedAt?.toISOString(),
+        },
+        {
+          action: "brain.upload.deleted",
+          by: admin.userId,
+          detail: { readers: "team", removed: true },
+        },
+      ]);
+    }
+  );
+
+  it(
+    "records its uploader's removal when an admin's erase lands between the Brain's removal and its record: added, removed, deleted, once each",
+    slow,
+    async () => {
+      const removing = await sharedToRemove();
+      const admin = await signedInApi(idp, "admin");
+      const identity = await removing.uploader.api.whoami();
+      const erasing = interleaved(completing, async () => {
+        await admin.api.brainSources.deleteUpload(removing.source.id);
+      });
+      const answered = await outcome(async () => {
+        await deleteBrainUpload(erasing, identity, removing.source.id);
+      });
+      const events = await ledgerOf(removing.source.id);
+      await completeOwedRemovals(env);
+
+      expect({
+        answered,
+        events,
+        again: await ledgerOf(removing.source.id),
+        rows: await rowsWith(removing.source.id),
+      }).toStrictEqual({
+        answered: { value: undefined },
+        events: [
+          { action: "brain.upload.added", by: removing.uploader.userId },
+          {
+            action: "brain.upload.removed",
+            by: removing.uploader.userId,
+            at: events[1]?.at,
+          },
+          {
+            action: "brain.upload.deleted",
+            by: admin.userId,
+            detail: { readers: "team", removed: true },
+          },
+        ],
+        again: events,
+        rows: [],
+      });
+    }
+  );
+
+  it(
+    "records its uploader's removal when they remove it after an admin read it to erase and before the admin's erase forgets it: added, removed, deleted, once each",
+    slow,
+    async () => {
+      const removing = await sharedToRemove();
+      const admin = await signedInApi(idp, "admin");
+      const adminIdentity = await admin.api.whoami();
+      const held = "removed_sources_test_holds_for_late_removal";
+      // Just before the admin's erase forgets the row it read in use, its
+      // uploader removes it, the Brain's part held: owed.
+      const removedMeanwhile = interleaved(forgetting, async () => {
+        await runInDurableObject(sharedStore(), (_store, state) => {
+          state.storage.sql.exec(
+            `CREATE TRIGGER ${held} BEFORE INSERT ON removed_sources BEGIN SELECT RAISE(ABORT, 'held by the test'); END`
+          );
+        });
+        try {
+          await outcome(async () => {
+            await removing.uploader.api.brainSources.deleteUpload(
+              removing.source.id
+            );
+          });
+        } finally {
+          await runInDurableObject(sharedStore(), (_store, state) => {
+            state.storage.sql.exec(`DROP TRIGGER IF EXISTS ${held}`);
+          });
+        }
+      });
+      await deleteBrainUpload(
+        removedMeanwhile,
+        adminIdentity,
+        removing.source.id
+      );
+      await completeOwedRemovals(env);
+      const events = await ledgerOf(removing.source.id);
+
+      expect({
+        events,
+        rows: await rowsWith(removing.source.id),
+      }).toStrictEqual({
+        events: [
+          { action: "brain.upload.added", by: removing.uploader.userId },
+          {
+            action: "brain.upload.removed",
+            by: removing.uploader.userId,
+            at: events[1]?.at,
+          },
+          {
+            action: "brain.upload.deleted",
+            by: admin.userId,
+            detail: { readers: "team", removed: true },
+          },
+        ],
+        rows: [],
+      });
+    }
+  );
+
+  it(
+    "keeps a removed upload's name cleared when a new version's add began before the removal and is recorded after it",
+    slow,
+    async () => {
+      const removing = await sharedToRemove();
+      const identity = await removing.uploader.api.whoami();
+      const removedMeanwhile = interleaved(recordingVersion, async () => {
+        await removing.uploader.api.brainSources.deleteUpload(
+          removing.source.id
+        );
+      });
+      await uploadVersionToBrain(
+        removedMeanwhile,
+        identity,
+        removing.source.id,
+        fileOf(`Board minutes ${word()}`, "Board 2.vtt"),
+        crypto.randomUUID()
+      );
+      const [row] = await rowsWith(removing.source.id);
+
+      expect({
+        removed: row?.removedAt !== null,
+        name: row?.name,
+        mateFinds: await found(removing.mate, removing.minutes),
+      }).toStrictEqual({ removed: true, name: null, mateFinds: [] });
     }
   );
 

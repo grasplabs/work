@@ -26,8 +26,20 @@ import {
   uploadNameSchema,
   uploadTypes,
 } from "@grasp-os/shared/uploads";
-import { and, asc, desc, eq, isNull, lt, ne, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  exists,
+  isNull,
+  lt,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import {
@@ -38,6 +50,7 @@ import {
   outboxedIfChanged,
   uuidFromHash,
 } from "./audit-outbox.ts";
+import { currentMembership } from "./auth/auth.ts";
 import { memberOf } from "./auth/identity.ts";
 import type { Member } from "./auth/identity.ts";
 import { uploadSource } from "./brain-next-origins.ts";
@@ -50,7 +63,7 @@ import {
   sourceTextProblem,
 } from "./brain-next.ts";
 import type { SourceReaders, SourceVersionRef } from "./brain-next.ts";
-import { brainUploads, teams, users } from "./db/core/schema.ts";
+import { brainUploads, members, teams, users } from "./db/core/schema.ts";
 import { ExtractorUnavailableError, localExtractor } from "./files/extract.ts";
 import { hasText, signatures } from "./files/upload-checks.ts";
 import { onboardingStore } from "./onboarding/store.ts";
@@ -544,7 +557,9 @@ const addVersion = async (
       .where(
         and(
           eq(brainUploads.id, row.id),
-          lt(brainUploads.version, added.version)
+          lt(brainUploads.version, added.version),
+          // Removed since its add began: its name stays cleared.
+          isNull(brainUploads.removedAt)
         )
       ),
     outboxedEvent(db, addedEvent),
@@ -802,19 +817,27 @@ const completeRemoval = async (
 
 /**
  * Whether `userId` may read the upload the statement is on, as `mayRead`
- * decides it, in SQL: for one shared with everyone, any member; for a
- * team's, a member of that team now.
+ * decides it, in SQL: a member of the organization now, and, for a team's
+ * upload, of that team now.
  */
-const readableBySql = (userId: string) =>
-  or(
-    eq(brainUploads.readers, "everyone"),
-    and(
-      eq(brainUploads.readers, "team"),
-      // Named whole: inside the subquery a bare team_id would be the
-      // member row's.
-      sql`EXISTS (SELECT 1 FROM team_members
-        WHERE team_members.team_id = brain_uploads.team_id
-          AND team_members.user_id = ${userId})`
+const readableBySql = (db: DrizzleD1Database, userId: string) =>
+  and(
+    exists(
+      db
+        .select({ one: sql`1` })
+        .from(members)
+        .where(currentMembership(userId))
+    ),
+    or(
+      eq(brainUploads.readers, "everyone"),
+      and(
+        eq(brainUploads.readers, "team"),
+        // Named whole: inside the subquery a bare team_id would be the
+        // member row's.
+        sql`EXISTS (SELECT 1 FROM team_members
+          WHERE team_members.team_id = brain_uploads.team_id
+            AND team_members.user_id = ${userId})`
+      )
     )
   );
 
@@ -843,7 +866,7 @@ const removeUpload = async (
         eq(brainUploads.id, row.id),
         isNull(brainUploads.removedAt),
         eq(brainUploads.uploadedBy, member.userId),
-        readableBySql(member.userId)
+        readableBySql(db, member.userId)
       )
     );
   const [marked] = await db
@@ -874,7 +897,8 @@ export const completeOwedRemovals = async (env: Env): Promise<void> => {
   const owed = await drizzle(env.DB)
     .select()
     .from(brainUploads)
-    .where(eq(brainUploads.removalOwed, true))
+    // As the partial index on owed removals is written, so it is used.
+    .where(sql.raw("removal_owed = 1"))
     .orderBy(asc(brainUploads.removedAt));
   for (const row of owed) {
     if (row.removedAt === null) {
@@ -884,7 +908,85 @@ export const completeOwedRemovals = async (env: Env): Promise<void> => {
       // oxlint-disable-next-line no-await-in-loop -- one removal at a time
       await completeRemoval(env, { ...row, removedAt: row.removedAt });
     } catch (error) {
-      log.warn("brain.upload.removal_owed", { errorName: errorName(error) });
+      log.warn("brain.upload.removal_owed", {
+        uploadId: row.id,
+        errorName: errorName(error),
+      });
+    }
+  }
+};
+
+/**
+ * Forgets the row of the upload `uploadId`, erased in the Brain, with
+ * `brain.upload.deleted`, once however many deletes ran at once. Its
+ * uploader's removal of it, if one is still owed (`completeRemoval`), is
+ * recorded first, in the same batch: its one event, as a completion
+ * would store it, so the row going never leaves a removal unaudited; D1
+ * runs one batch at a time, so the two never both store it. The row is
+ * forgotten only as it was read: should its uploader have marked it
+ * removed since, it is read again and forgotten as it is then (once more
+ * at most: a row is marked removed once).
+ */
+const forgetErased = async (
+  env: Env,
+  actor: ReturnType<typeof actorOf>,
+  uploadId: string
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  const target = { type: "brain_upload", id: uploadId };
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- read again only if it changed
+    const [row] = await db
+      .select()
+      .from(brainUploads)
+      .where(eq(brainUploads.id, uploadId));
+    if (row === undefined) {
+      // Forgotten by another delete at once with this one, which recorded it.
+      return;
+    }
+    const { removedAt } = row;
+    const forgetting = db
+      .delete(brainUploads)
+      .where(
+        and(
+          eq(brainUploads.id, uploadId),
+          removedAt === null
+            ? isNull(brainUploads.removedAt)
+            : eq(brainUploads.removedAt, removedAt)
+        )
+      )
+      .returning({ id: brainUploads.id });
+    // Only by the delete that took the row: two at once record it once.
+    const deleted = outboxedIfChanged(db, {
+      actor,
+      target,
+      action: "brain.upload.deleted",
+      detail: {
+        readers: row.readers,
+        ...(removedAt === null ? {} : { removed: true }),
+      },
+    });
+    let forgotten: readonly unknown[];
+    if (removedAt === null) {
+      // oxlint-disable-next-line no-await-in-loop -- read again only if it changed
+      [forgotten] = await auditedBatch(env, db, [forgetting, deleted]);
+    } else {
+      // oxlint-disable-next-line no-await-in-loop -- read again only if it changed
+      const owed = await removedEvent({ ...row, removedAt });
+      // oxlint-disable-next-line no-await-in-loop -- read again only if it changed
+      [, forgotten] = await auditedBatch(env, db, [
+        outboxedEventWhere(
+          db,
+          owed,
+          sql`EXISTS (SELECT 1 FROM brain_uploads
+            WHERE id = ${uploadId} AND removal_owed = 1)`
+        ),
+        forgetting,
+        deleted,
+      ]);
+    }
+    if (forgotten.length > 0) {
+      return;
     }
   }
 };
@@ -963,19 +1065,7 @@ export const deleteBrainUpload = async (
     ]);
     throw error;
   }
-  await auditedBatch(env, db, [
-    db.delete(brainUploads).where(eq(brainUploads.id, row.id)),
-    // Only by the delete that took the row: two at once record it once.
-    outboxedIfChanged(db, {
-      actor,
-      target,
-      action: "brain.upload.deleted",
-      detail: {
-        readers: row.readers,
-        ...(row.removedAt === null ? {} : { removed: true }),
-      },
-    }),
-  ]);
+  await forgetErased(env, actor, row.id);
 };
 
 /** How many shared uploads one page of an admin's listing holds. */
