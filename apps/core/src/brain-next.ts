@@ -107,7 +107,6 @@ import type {
   BrainAction,
   BrainActionOutcome,
   BrainErasureAnswer,
-  BrainErasureLookup,
   BrainReport,
   BrainSearchWay,
   BrainStep,
@@ -1456,9 +1455,11 @@ const sourceErasureSchema = z.strictObject({
   asGroup: z.literal(true).optional(),
 });
 
+// Only an admin's erasure of a person: a withdrawal erases what is
+// withdrawn as its source (`eraseSource`), and the person stays a member.
 const personErasureSchema = z.strictObject({
   personId: idSchema,
-  reason: z.enum(erasureReasons),
+  reason: z.literal("person_erased"),
 });
 
 /**
@@ -1567,18 +1568,14 @@ export const eraseOwnGroup = async (
 };
 
 /**
- * Erases what only `personId` may read, added up to now: their own
- * sources' every version (their uploads, chats and runs, their
- * instruction file), and, in a source others read now, the versions that
- * were theirs alone. Content added for them later is new. Safe to repeat.
- * For an admin's erasure of a person (`person_erased`), or a person's
- * withdrawal (`withdrawn`).
- *
- * In the shared store, and, for `person_erased` alone, then their own
- * store, whole: deleted for good, it holds nothing and takes nothing from
- * then on. A withdrawal never touches their own store: they stay a
- * member, and what they withdraw (an interview) is erased as its source
- * (`eraseSource`).
+ * Erases what only `personId` may read, for an admin's erasure of the
+ * person (`person_erased`): their own store, whole, the one place it is
+ * kept (their uploads, chats and runs, their instruction file, their
+ * memories, every version). Deleted for good, it holds nothing and takes
+ * nothing from then on. Safe to repeat. The shared store has nothing of
+ * theirs to erase: it refuses whatever only one person may read as it is
+ * added, and what they wrote for a team or everyone is not theirs alone,
+ * so it stays.
  *
  * Answers `erased` once it is all done, or `still_deleting` while their
  * own store waits out the time an add under way has to write a file
@@ -1591,13 +1588,9 @@ export const eraseOwnGroup = async (
  */
 export const erasePerson = async (
   env: BrainEnv & Pick<Env, "DB">,
-  erased: { personId: string; reason: ErasureReason }
+  erased: { personId: string; reason: "person_erased" }
 ): Promise<"erased" | "still_deleting"> => {
   const { personId, reason } = checked(personErasureSchema, erased);
-  await brain(env).erasePerson({ person: personId, reason });
-  if (reason !== "person_erased") {
-    return "erased";
-  }
   try {
     await ownBrain(env, personId).erasePerson({ person: personId, reason });
   } catch (error) {
@@ -3616,7 +3609,6 @@ export const brainStaffReport = async (
       erasing: overview.erasing,
       sourcesWithoutCurrent: overview.sourcesWithoutCurrent,
       source: overview.erasures.source,
-      person: overview.erasures.person,
       byReason: overview.erasures.byReason,
     },
     stepsFailed: stepsFailedOf(overview.stepsFailed),
@@ -3661,14 +3653,13 @@ export const actOnBrainForStaff = async (
 };
 
 /**
- * Whether what Grasp's staff named (brain-report.ts) is erased, as the
- * Brain's shared store's record of its ledger says: a source, by the
- * Brain's key for it, or a person, by their id, each hashed by the store
- * as its ledger names it. The answer is the store's alone, field by field:
- * a state, and for `erased` when. Never a person's own store: a staff path
- * addresses no personal object (GRA-1762), so a person's erasure is read
- * with core's own record of it (brain-report.ts). A source's answer is the
- * shared ledger's alone: that its key was closed there. `eraseSource`
+ * Whether the source Grasp's staff named (brain-report.ts), by the
+ * Brain's key for it, is erased, as the Brain's shared store's record of
+ * its ledger says, hashed by the store as its ledger names it. The answer
+ * is the store's alone, field by field: a state, and for `erased` when.
+ * Never a person's own store: a staff path addresses no personal object
+ * (GRA-1762), and a person's erasure is read from core's own record of it
+ * alone (brain-report.ts). The answer is that the key was closed there. `eraseSource`
  * closes a source its owner keeps in their own store there first, hidden
  * and recorded in that store's ledger, and in the shared store only once
  * that returned, so the shared ledger never says erased while a copy can
@@ -3679,13 +3670,9 @@ export const actOnBrainForStaff = async (
  */
 export const brainErasureForStaff = async (
   env: BrainEnv,
-  lookup: BrainErasureLookup
+  source: string
 ): Promise<BrainErasureAnswer> => {
-  const status = await brain(env).erasureStatus(
-    lookup.kind === "source"
-      ? { kind: "source", source: lookup.key }
-      : { kind: "person", person: lookup.id }
-  );
+  const status = await brain(env).erasureStatus({ source });
   return status.state === "erased"
     ? { state: "erased", at: status.at.toISOString() }
     : { state: status.state };

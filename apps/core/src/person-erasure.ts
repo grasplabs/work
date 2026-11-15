@@ -745,17 +745,21 @@ const inStepOrder = (areas: readonly ErasureArea[]): ErasureArea[] => {
  * store was erased whole, files included). In the areas' own states
  * (`ErasureAreaState`): `skipped` if either was recorded skipped (no step
  * does today; the schema allows it), else `pending` while either is,
- * else `complete`; null when no erasure of them was asked for. The areas'
- * states alone, for Grasp's staff asking whether a person was erased
- * (brain-report.ts): one statement, whoever is named, so a person never
- * erased reads as one who never existed.
+ * else `complete`; null when no erasure of them was asked for. With it,
+ * when either area last changed: once `complete`, when the later of them
+ * completed. The areas alone, for Grasp's staff asking whether a person
+ * was erased (brain-report.ts): one statement, whoever is named, so a
+ * person never erased reads as one who never existed.
  */
 export const brainErasureStateOf = async (
   env: Env,
   userId: string
-): Promise<ErasureAreaState | null> => {
+): Promise<{ state: ErasureAreaState; at: Date } | null> => {
   const areas = await drizzle(env.DB)
-    .select({ state: personErasureAreas.state })
+    .select({
+      state: personErasureAreas.state,
+      at: personErasureAreas.updatedAt,
+    })
     .from(personErasureAreas)
     .where(
       and(
@@ -767,10 +771,11 @@ export const brainErasureStateOf = async (
   if (states.size === 0) {
     return null;
   }
+  const at = new Date(Math.max(...areas.map((area) => area.at.getTime())));
   if (states.has("skipped")) {
-    return "skipped";
+    return { state: "skipped", at };
   }
-  return states.has("pending") ? "pending" : "complete";
+  return { state: states.has("pending") ? "pending" : "complete", at };
 };
 
 /** Where `userId`'s erasure stands, or null if none was asked for. */

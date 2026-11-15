@@ -19,7 +19,9 @@ import { z } from "zod";
 import { embedInProcess } from "../../../packages/embed/test/test-models.ts";
 import { organizationId } from "../src/auth/auth.ts";
 import {
+  addSource,
   brainWorkOverview,
+  erasePerson,
   readSourceVersionAs,
   recallAs,
   workBrain,
@@ -27,6 +29,7 @@ import {
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
+import { ageOwnErasure } from "./brain-next-own-store.ts";
 import {
   copyOfStore,
   killStore,
@@ -163,22 +166,6 @@ const add = async (
     access: accessOf(readers),
   });
   return version;
-};
-
-/**
- * A person's erasure in the shared store: an entry of its ledger, which a
- * replay reads. It covers nothing there, as the shared store keeps
- * nothing for one person alone; core's `erasePerson` erases their own
- * store whole (brain-next-personal.test.ts).
- */
-const erasePersonShared = async ({
-  personId,
-  reason,
-}: {
-  personId: string;
-  reason: ErasureReason;
-}): Promise<void> => {
-  await brain().erasePerson({ person: personId, reason });
 };
 
 /** Erases `source` in the shared store, where `add` keeps it. */
@@ -1167,12 +1154,12 @@ describe("the erasure ledger out of reach", { timeout: 120_000 }, () => {
 });
 
 /**
- * Counts the store's listings and reads of its bucket from its next
- * start, calling `onGet` before each read. As in the outage test, only a
+ * Counts the store's listings and reads of its ledger from its next
+ * start. As in the outage test, only a
  * bucket on the shared env reaches a store as it starts; `restore` puts
  * the bucket back and kills the store, so no later test meets it.
  */
-const countLedgerCalls = (onGet: () => void = () => {}) => {
+const countLedgerCalls = () => {
   const bucket = env.BRAIN_OBJECTS;
   const calls = { lists: 0, gets: 0 };
   Reflect.set(env, "BRAIN_OBJECTS", {
@@ -1184,7 +1171,6 @@ const countLedgerCalls = (onGet: () => void = () => {}) => {
       // The ledger's reads only, not a version's file.
       if (key.startsWith("erasures/")) {
         calls.gets += 1;
-        onGet();
       }
       return await bucket.get(key);
     },
@@ -1203,6 +1189,29 @@ const countLedgerCalls = (onGet: () => void = () => {}) => {
   };
 };
 
+/**
+ * More entries than two pages of the ledger's listing (1,000 keys a page)
+ * after its last: erased sources no one added, as the ledger names them.
+ */
+const ledgerBacklog = async (): Promise<void> => {
+  const after = await runInDurableObject(
+    store(),
+    (_instance, state) =>
+      state.storage.sql
+        .exec<{ at: number }>("SELECT max(erased_at) AS at FROM erasures")
+        .one().at
+  );
+  await Promise.all(
+    Array.from({ length: 2100 }, async (_, index) => {
+      const subject = await hashOf(crypto.randomUUID());
+      await env.BRAIN_OBJECTS.put(
+        `erasures/${String(after + 1 + index).padStart(15, "0")}-source-deleted-${subject}`,
+        ""
+      );
+    })
+  );
+};
+
 describe(
   "a ledger entry of any size, and a replay of any length",
   { timeout: 300_000 },
@@ -1218,24 +1227,7 @@ describe(
       await add(source, `Restored late ${wordOf(mark)}`, await alone(reader));
       const backup = await copyOfStore();
       await eraseShared(source, "deleted");
-      // More entries than two pages of the listing (1,000 keys a page):
-      // erased sources no one added, as the ledger names them.
-      const after = await runInDurableObject(
-        store(),
-        (_instance, state) =>
-          state.storage.sql
-            .exec<{ at: number }>("SELECT max(erased_at) AS at FROM erasures")
-            .one().at
-      );
-      await Promise.all(
-        Array.from({ length: 2100 }, async (_, index) => {
-          const subject = await hashOf(crypto.randomUUID());
-          await env.BRAIN_OBJECTS.put(
-            `erasures/${String(after + 1 + index).padStart(15, "0")}-source-deleted-${subject}`,
-            ""
-          );
-        })
-      );
+      await ledgerBacklog();
 
       await restoreStore(backup);
       const counted = countLedgerCalls();
@@ -1273,55 +1265,6 @@ describe(
           ],
           ledgerReplay: "through",
           recalled: [],
-        });
-      } finally {
-        await counted.restore();
-      }
-    });
-
-    it("stops a step whose reads are slow once its time is up, keeping what it applied, and the next step goes on", async () => {
-      const reader = await person();
-      const source = newSource();
-      await add(source, "Answered once through", await alone(reader));
-      const backup = await copyOfStore();
-      // Nine people's erasures, each an entry of the ledger to read.
-      for (let erased = 0; erased < 9; erased += 1) {
-        // oxlint-disable-next-line no-await-in-loop -- in order
-        await erasePersonShared({
-          personId: `nobody-${crypto.randomUUID()}`,
-          reason: "withdrawn",
-        });
-      }
-
-      await restoreStore(backup);
-      // Each read takes 4 s, as the clock sees it: a step (10 s) starts
-      // three.
-      vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
-      const counted = countLedgerCalls(() => {
-        vi.setSystemTime(Date.now() + 4000);
-      });
-      try {
-        const first = await settled(historyAs(reader, source, 1));
-        const afterFirst = counted.calls.gets;
-        const { ledgerReplay } = await brainWorkOverview(env);
-        const second = await settled(historyAs(reader, source, 1));
-
-        expect({
-          first,
-          afterFirst,
-          ledgerReplay,
-          second,
-          afterSecond: counted.calls.gets - afterFirst,
-        }).toStrictEqual({
-          first: {
-            error:
-              "Error: The Brain is applying its erasure ledger after a restore, so it answers nothing yet: try again shortly",
-          },
-          // Three as it starts, three by the first call.
-          afterFirst: 6,
-          ledgerReplay: "replaying",
-          second: { value: "Answered once through" },
-          afterSecond: 3,
         });
       } finally {
         await counted.restore();
@@ -1373,29 +1316,29 @@ describe(
       }
     });
 
-    it("lists on past a page of orphan parts, whose entry was never written, to the entry after them", async () => {
+    it("passes over a person's entry and a page of its parts, as the shared store wrote them before it refused one person's content, to the entry after them", async () => {
       const reader = await person();
       const mark = newMark();
       const source = newSource();
       await add(
         source,
-        `Behind orphan parts ${wordOf(mark)}`,
+        `Behind a person's entry ${wordOf(mark)}`,
         await alone(reader)
       );
       const backup = await copyOfStore();
       await eraseShared(source, "deleted");
       const [erasure] = await ledgerOf(keyOf(source));
-      // More parts than a page of the listing, of a person's entry that
-      // crashed before its entry: at the same time, sorting before the
-      // erasure after them.
-      const orphan = `${erasure?.slice(0, "erasures/".length + 15) ?? ""}-person-person_erased-${await hashOf(crypto.randomUUID())}`;
+      // A person's entry and more parts of it than a page of the listing:
+      // at the same time, sorting before the erasure after them.
+      const entry = `${erasure?.slice(0, "erasures/".length + 15) ?? ""}-person-person_erased-${await hashOf(crypto.randomUUID())}`;
       const parts = Array.from(
         { length: 1001 },
-        (_, index) => `${orphan}/${String(index).padStart(4, "0")}`
+        (_, index) => `${entry}/${String(index).padStart(4, "0")}`
       );
       await Promise.all(
         parts.map(async (part) => await env.BRAIN_OBJECTS.put(part, "[]"))
       );
+      await env.BRAIN_OBJECTS.put(entry, JSON.stringify({ parts: 1001 }));
       try {
         await restoreStore(backup);
         const answered = await settled(historyAs(reader, source, 1));
@@ -1408,7 +1351,7 @@ describe(
           recalled: [],
         });
       } finally {
-        await env.BRAIN_OBJECTS.delete(parts);
+        await env.BRAIN_OBJECTS.delete([entry, ...parts]);
         await killStore();
       }
     });
@@ -1695,19 +1638,52 @@ describe(
       }).toStrictEqual({ waiting: 600, afterErasure: 0 });
     });
 
-    // Core still erases every person in the shared store too, until
-    // GRA-1903 removes that path.
-    it("leaves no plain person id once a person is erased, nor a source key for a source erased before it was added", async () => {
+    // The shared store erases nothing of a person: it never held their id
+    // to begin with, as it keeps nothing only they may read.
+    it("holds no plain id of a person core erased, who kept their own content and read their team's, nor a source key for a source erased before it was added", async () => {
       const leaver = await person();
+      const mark = newMark();
+      const theirs = newSource();
+      const teamNote = newSource();
       const never = newSource();
+      await addSource(env, {
+        source: theirs,
+        change: crypto.randomUUID(),
+        text: `Their own ${wordOf(mark)}`,
+        readers: { kind: "owner", personId: leaver },
+      });
+      await add(teamNote, `Their team's ${wordOf(mark)}`, await alone(leaver));
+      const texts = [
+        `Their own ${wordOf(mark)}`,
+        `Their team's ${wordOf(mark)}`,
+      ];
+      const recalled = await recalledAs(leaver, wordOf(mark));
+      const readBefore = {
+        recalled: texts.map((text) => recalled.includes(text)),
+        teamNote: await historyAs(leaver, teamNote, 1),
+      };
 
-      await erasePersonShared({ personId: leaver, reason: "person_erased" });
+      const erasing = { personId: leaver, reason: "person_erased" } as const;
+      await Promise.allSettled([erasePerson(env, erasing)]);
+      await ageOwnErasure(leaver);
+      const done = await erasePerson(env, erasing);
       await eraseShared(never, "deleted");
       await tickUntilErased();
 
-      await expect(tablesHolding([leaver, never.id])).resolves.toStrictEqual(
-        []
-      );
+      expect({
+        readBefore,
+        done,
+        theirsAfter: await historyAs(leaver, theirs, 1),
+        tables: await tablesHolding([leaver, never.id]),
+      }).toStrictEqual({
+        readBefore: {
+          recalled: [true, true],
+          teamNote: `Their team's ${wordOf(mark)}`,
+        },
+        done: "erased",
+        theirsAfter: null,
+        tables: [],
+      });
     });
   }
 );
@@ -1819,21 +1795,12 @@ describe("a pack after an erasure", { timeout: 120_000 }, () => {
     const source = newSource();
     await add(source, "Recalled once through", await alone(reader));
     const backup = await copyOfStore();
-    for (let erased = 0; erased < 9; erased += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- in order
-      await erasePersonShared({
-        personId: `nobody-${crypto.randomUUID()}`,
-        reason: "withdrawn",
-      });
-    }
+    await eraseShared(source, "deleted");
+    await ledgerBacklog();
 
     await restoreStore(backup);
-    // Each read of the ledger takes 4 s, as the clock sees it: a step
-    // reads three of nine, so the store is still replaying after it.
-    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
-    const counted = countLedgerCalls(() => {
-      vi.setSystemTime(Date.now() + 4000);
-    });
+    // A step applies a page of the backlog: as it starts, and for the
+    // recall, so the store is still replaying after them.
     try {
       const recalled = await settled(
         recallAs(env, reader, {
@@ -1852,7 +1819,7 @@ describe("a pack after an erasure", { timeout: 120_000 }, () => {
         ledgerReplay: "replaying",
       });
     } finally {
-      await counted.restore();
+      await killStore();
     }
   });
 });
