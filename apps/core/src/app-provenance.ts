@@ -601,7 +601,6 @@ export const holdingsOf = async (
   return {
     sources: sources.get(app) ?? {
       connections: [],
-      collections: [],
       brainTeams: [],
       unresolved: [],
     },

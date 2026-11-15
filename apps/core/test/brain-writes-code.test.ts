@@ -356,6 +356,8 @@ describe("an App's code remembers and forgets for its users", setUpTime, () => {
     const mailbox = await appOf(ada, admin);
     const reaching = await appOf(ada, admin);
     const reached = await appOf(ada, admin);
+    // Granted a Knowledge collection before the Brain replaced it.
+    const knowledge = await appOf(ada, admin);
     // A personal connection, granted and then revoked: it still counts.
     const connection = `connection-mailbox-${unique()}`;
     const now = Date.now();
@@ -378,6 +380,9 @@ describe("an App's code remembers and forgets for its users", setUpTime, () => {
       // Reaching starts a workflow that calls the other App's functions.
       grant("app", reaching.app, "workflow", workflow, ["start"]),
       grant("workflow", workflow, "app", reached.app, ["call"]),
+      grant("app", knowledge.app, "collection", `collection-${unique()}`, [
+        "read",
+      ]),
     ]);
 
     const tried = async (app: App) =>
@@ -387,11 +392,13 @@ describe("an App's code remembers and forgets for its users", setUpTime, () => {
       mailbox: await tried(mailbox),
       reaching: await tried(reaching),
       reached: await tried(reached),
+      knowledge: await tried(knowledge),
     }).toStrictEqual({
       teamBrain: { failed: "permission.brain_write_reach" },
       mailbox: { failed: "permission.brain_write_reach" },
       reaching: { failed: "permission.brain_write_reach" },
       reached: { failed: "permission.brain_write_reach" },
+      knowledge: { failed: "permission.brain_write_reach" },
     });
   });
 

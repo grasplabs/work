@@ -185,8 +185,9 @@ const readersOf = ({ access, rules }: TableAccess): TableReaders => {
 
 /**
  * What of `sources` not everyone may read, as a refusal names it: the
- * first, of a kind that lasts (a connection, a collection, a team's part
- * of the Brain), or what can't be placed.
+ * first, of a kind that lasts (a connection, a Knowledge collection an App
+ * was granted before the Brain replaced Knowledge, which nothing can place
+ * any more, a team's part of the Brain), or what can't be placed now.
  */
 const unreadableReachOf = (
   sources: AppSources
@@ -196,13 +197,13 @@ const unreadableReachOf = (
   if (first === undefined) {
     return undefined;
   }
+  if (first.startsWith("collection:")) {
+    return "collection";
+  }
   if (sources.unresolved.includes(first)) {
     return "unplaced";
   }
-  if (first.startsWith("connection:")) {
-    return "connection";
-  }
-  return first.startsWith("collection:") ? "collection" : "team_brain";
+  return first.startsWith("connection:") ? "connection" : "team_brain";
 };
 
 /**
