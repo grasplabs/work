@@ -808,12 +808,16 @@ describe("a writer's erasure", () => {
       const erasure = typeof key === "string" ? key : "";
       // The store as the release before left it: `erasures` without a
       // writer's kind, its count, its change or its sweep, memories without the writer's subject or
-      // the retiring change, the last five migrations not yet run, and a row
-      // that points at the erasure.
+      // the retiring change, no removals (removal.ts, a later migration), the
+      // last six migrations not yet run, and a row that points at the
+      // erasure.
       const before: Copy = {
         // The table of memories that failed to delete is the release's own.
         tables: now.tables
-          .filter(({ name }) => name !== "memory_erase_failures")
+          .filter(
+            ({ name }) =>
+              name !== "memory_erase_failures" && name !== "removed_sources"
+          )
           .map((table) => {
             switch (table.name) {
               case "erasures": {
@@ -866,7 +870,7 @@ describe("a writer's erasure", () => {
                     .toSorted(
                       (a, b) => Number(a.created_at) - Number(b.created_at)
                     )
-                    .slice(0, -5),
+                    .slice(0, -6),
                 };
               }
               default: {
@@ -878,7 +882,8 @@ describe("a writer's erasure", () => {
           (made) =>
             !made.includes("memories_writer_idx") &&
             !made.includes("erasures_writer_idx") &&
-            !made.includes("memory_erase_failures")
+            !made.includes("memory_erase_failures") &&
+            !made.includes("removed_sources")
         ),
       };
       expect(
