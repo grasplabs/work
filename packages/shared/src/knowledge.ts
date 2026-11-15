@@ -36,10 +36,6 @@ import type {
   HistoryPage,
   KnowledgeRead,
   ListDocumentsOptions,
-  PurgeInput,
-  PurgePlan,
-  PurgeResult,
-  PurgeStatus,
   ReadOptions,
   RestoreInput,
   SaveInput,
@@ -58,8 +54,7 @@ import type { CollectionId, DocumentId } from "./ids.ts";
 // Knowledge: Markdown documents with typed frontmatter, in collections. A
 // save never overwrites: it adds a version, and names the version it was
 // edited from, so two people editing at once get a conflict instead of
-// losing a change. Only a purge rewrites versions: an admin erasing
-// personal data from all of them.
+// losing a change.
 
 /**
  * Who may read a collection: everyone in the organization, the members of
@@ -445,48 +440,6 @@ export interface KnowledgeApi {
    * skills have that path already.
    */
   copySkill: (input: CopySkillInput) => Promise<DocumentSummary>;
-  /**
-   * What a purge would remove, and a token to confirm it with. Admins
-   * only, whatever the collection, but for the Grasp skills, the
-   * release's text, and an App's entry in the Apps collection while the
-   * App holds a term (`knowledge.read_only`, saying where): the entry is
-   * made from the App's name, description and current version's
-   * AGENTS.md, so the App changes first (a version without it; a name or
-   * description only through its builders or Grasp support, as no API
-   * changes them yet), then purge. Nothing changes yet.
-   */
-  preparePurge: (input: PurgeInput) => Promise<PurgePlan>;
-  /**
-   * Runs the purge `preparePurge` returned `token` for, with the same
-   * input, by the same admin, before it expires; else
-   * `knowledge.purge_expired`. The audit log records who purged what and
-   * why, never what was removed.
-   */
-  purge: (
-    input: PurgeInput,
-    token: string,
-    /**
-     * `fresh`: begins it anew; an unfinished purge of the same input is
-     * kept as it stood, superseded. Resumed otherwise, every step run again.
-     */
-    options?: { fresh?: boolean }
-  ) => Promise<PurgeResult>;
-  /**
-   * Where purge `purgeId` stands (GRA-1122): each projection it reaches,
-   * queued, running, complete or blocked (with an error code), and what
-   * each changed. A blocked one goes on when the purge is run again with
-   * the same input. Admins only, as purging is.
-   */
-  purgeStatus: (purgeId: string) => Promise<PurgeStatus>;
-  /**
-   * Finishes unfinished content purge `purgeId` by its ID alone, for any
-   * admin: what it still owes that needs none of its terms, a document
-   * gone since skipped (`knowledge.purge_needs_input` while it owes more).
-   * For a purge whoever began it can't run again. Answers where it stands:
-   * its steps' states, with no counts and no document a step is of.
-   * Audited.
-   */
-  finishPurge: (purgeId: string) => Promise<PurgeStatus>;
 }
 
 /**
@@ -527,7 +480,7 @@ export interface CollectionReader {
   recall: (input: RecallInput) => Promise<MemoryPack>;
 }
 
-// The Brain's documents, versions, search and purge, as the Brain defines
+// The Brain's documents, versions and search, as the Brain defines
 // them (@grasp-os/brain/knowledge).
 export {
   builtinDocumentTypeSchema,
@@ -545,11 +498,6 @@ export {
   linkPath,
   listDocumentsOptionsSchema,
   pageMaxLimit,
-  purgeInputSchema,
-  purgeMaxDocuments,
-  purgeMaxTerms,
-  purgeReasonSchema,
-  purgeTermMaxLength,
   purgedMarker,
   readOptionsSchema,
   restoreInputSchema,
@@ -585,11 +533,6 @@ export type {
   KnowledgeRead,
   ListDocumentsOptions,
   Provenance,
-  PurgeInput,
-  PurgePlan,
-  PurgeReason,
-  PurgeResult,
-  PurgeStatus,
   ReadOptions,
   RestoreInput,
   SaveInput,

@@ -1,6 +1,5 @@
 import { ensureCollection } from "@grasp-os/brain/collections";
 import { writeVersion } from "@grasp-os/brain/documents";
-import type { PurgeInput } from "@grasp-os/shared/knowledge";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
@@ -126,7 +125,7 @@ const knowledgeActions = <Event extends { action: string }>(
 ): Event[] => events.filter(({ action }) => action.startsWith("knowledge."));
 
 describe("the Grasp skills", setUpTime, () => {
-  it("can't be changed by anyone, an admin neither: not saved, restored or purged", async () => {
+  it("can't be changed by anyone, an admin neither: not saved or restored", async () => {
     const admin = await personOf("admin");
     const [skill] = graspSkills;
     if (!skill) {
@@ -166,29 +165,12 @@ describe("the Grasp skills", setUpTime, () => {
       "knowledge.read_only",
       "knowledge.read_only",
     ]);
-    await expect(
-      refusal(
-        admin.api.knowledge.preparePurge({
-          type: "content",
-          documentIds: [document.id],
-          terms: ["workflow"],
-          reason: "other",
-        })
-      )
-    ).resolves.toMatchObject({
-      code: "knowledge.read_only",
-      details: {
-        issues: [
-          `documentIds: document ${document.id} is a Grasp skill, which is read-only: it holds the release's text, and the next sync would put back anything changed`,
-        ],
-      },
-    });
     await expect(graspDocuments(admin)).resolves.toStrictEqual(before);
   });
 });
 
 describe("copying a Grasp skill", setUpTime, () => {
-  it("puts it in the client's skills, at the same path, where admins adapt and purge it", async () => {
+  it("puts it in the client's skills, at the same path, where admins adapt it", async () => {
     const admin = await personOf("admin");
     const document = await graspDocument(admin, "draw-a-workflow/SKILL.md");
 
@@ -243,17 +225,6 @@ describe("copying a Grasp skill", setUpTime, () => {
       ifVersion: 1,
     });
     expect(adapted.currentVersion).toBe(2);
-    const input: PurgeInput = {
-      type: "content",
-      documentIds: [copyId],
-      terms: ["Anna de Vries"],
-      reason: "erasure_request",
-    };
-    const plan = await admin.api.knowledge.preparePurge(input);
-    await admin.api.knowledge.purge(input, plan.token);
-    await expect(textOf(admin, copyId)).resolves.toContain(
-      "Ask (removed) first."
-    );
   });
 
   it("is refused where the client's skills have the path already, for anyone but admins, and for what isn't a Grasp skill", async () => {

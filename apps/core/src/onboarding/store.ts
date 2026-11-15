@@ -33,7 +33,6 @@ import type {
   InterviewWithdrawal,
 } from "@grasp-os/shared/interview-links";
 import type { FactTag } from "@grasp-os/shared/interview-turn";
-import { canonicalJson } from "@grasp-os/shared/json";
 import { kickoffErrors, visionFields } from "@grasp-os/shared/kickoff";
 import type {
   KickoffReading,
@@ -266,20 +265,20 @@ import type { WorkBrief, WorkKnown } from "./work-drawing.ts";
 //   in only as the mail is sent. Each link goes by email on its day, and
 //   one reminder after `remindAfterWorkingDays`; the admin's update twice
 //   a week holds the admin's own numbers, never a name (mail-text.ts).
-// - A purged term living on in a shared document's reading (GRA-970): a
-//   Knowledge purge of a term the reading holds forgets it here, every
-//   drawing that may have had it for context, and those drawings in the
-//   brain (`forgetDocuments`). A drawing under way when it goes is thrown
-//   away as it ends, and drawn again.
+// - A removed document's reading living on (GRA-970): removing a shared
+//   document forgets its reading here, every drawing that may have had it
+//   for context, and those drawings in the brain (`forgetDocuments`). A
+//   drawing under way when it goes is thrown away as it ends, and drawn
+//   again.
 
 /** The one store of a deployment, by the name it is reached under. */
 const storeName = "onboarding";
 
 /** The deployment's onboarding store. */
 /**
- * The KV key of how often a Knowledge content purge reached the onboarding
- * (`notePurge`) or rewrote what it holds (`rewriteInterview`,
- * `forgetDrawings`): what anything reading the kickoff or the interviews
+ * The KV key of how often something was erased from what the onboarding
+ * holds (`#purged`: the kickoff deleted, a line or statement of an
+ * interview removed): what anything reading the kickoff or the interviews
  * to write from them later checks it still finds, or keeps nothing.
  */
 const purgesKey = "purges";
@@ -302,26 +301,12 @@ const queuedKey = "forget_lines_queued";
 const kickoffOwedKey = "kickoff_records_owed";
 
 /**
- * When the kickoff a purge forgot came in: its source stays, by title and
- * day alone, so the records the purge rewrote still name it.
- */
-const kickoffSourceKey = "kickoff_source_at";
-
-/**
  * Set when the admin deleted the kickoff and the brain's records it gave
  * are still to be erased (`deleteKickoff`): set with the delete in one
  * transaction, cleared once they are erased. Erased before any kickoff's
  * records are kept, and by the alarm until done.
  */
 const kickoffErasureOwedKey = "kickoff_records_erasure_owed";
-
-/** A piece of work's names, as a content purge reads and rewrites them. */
-export interface WorkNames {
-  name: string;
-  local: string;
-  one: string;
-  many: string;
-}
 
 export const onboardingStore = (
   env: Pick<Env, "ONBOARDING" | "DURABLE_OBJECT_JURISDICTION">
@@ -1611,10 +1596,7 @@ export class Onboarding extends DurableObject<Env> {
     });
   }
 
-  /**
-   * Whose interviews are kept: what a Knowledge content purge reads one at
-   * a time (interview-erasure.ts), so no one call carries them all.
-   */
+  /** Whose interviews are kept. */
   interviewPeople(): string[] {
     return this.#db
       .select({ person: interviews.person })
@@ -1624,10 +1606,9 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * `person`'s interview as kept, for a Knowledge content purge
-   * (interview-erasure.ts): read as an interview, or, one that no longer
-   * reads as one, as stored (its words are still in it); null when none
-   * is kept. Never served otherwise.
+   * `person`'s interview as kept: read as an interview, or, one that no
+   * longer reads as one, as stored (its words are still in it); null when
+   * none is kept. Never served otherwise.
    */
   interviewStored(
     person: string
@@ -1644,385 +1625,6 @@ export class Onboarding extends DurableObject<Env> {
     return parsed.success
       ? { progress: parsed.data }
       : { unreadable: row.progress };
-  }
-
-  /**
-   * Keeps `person`'s interview that no longer reads as one as a Knowledge
-   * content purge rewrote it (`after`, its stored text), only if it is
-   * still as the purge read it (`before`): one saved since is left to the
-   * purge to read again. As `rewriteInterview`: under the brain lock, the
-   * link's version moved on, a drawing under way keeps nothing, and in the
-   * audit log without its words. Whether it was rewritten.
-   */
-  async rewriteUnreadableInterview(
-    person: string,
-    before: string,
-    after: string,
-    by: AuditActor
-  ): Promise<boolean> {
-    const rewritten = await this.#withBrain(async () => {
-      await Promise.resolve();
-      const [row] = this.#db
-        .select({ progress: interviews.progress })
-        .from(interviews)
-        .where(eq(interviews.person, person))
-        .all();
-      if (row?.progress !== before) {
-        return false;
-      }
-      this.ctx.storage.transactionSync(() => {
-        this.#db
-          .update(interviews)
-          .set({ progress: after })
-          .where(eq(interviews.person, person))
-          .run();
-        this.#db
-          .update(links)
-          .set({ version: sql`${links.version} + 1` })
-          .where(eq(links.person, person))
-          .run();
-        this.#purged();
-        // Everything the voice said in it goes from the speech cache, as
-        // said (`#queueSpokenOf`).
-        this.#queueSpokenOf(person);
-        this.#changed(by, "onboarding.interview.purged", { unreadable: 1 });
-      });
-      return true;
-    });
-    if (rewritten) {
-      this.#deliverAudit();
-      await this.forgetLinesNow();
-      await this.#armDrawing();
-    }
-    return rewritten;
-  }
-
-  /**
-   * Keeps `person`'s interview as a Knowledge content purge rewrote it
-   * (`after`), only if it is still as the purge read it (`before`): one
-   * saved since is left to the purge run again. The link's version moves
-   * on, as a delete moves it, so a device's older copy, with the purged
-   * words, is refused and given this one. What they approved stays
-   * approved: the purge took words out, nobody changed what they said. So
-   * each rewritten fact is kept at its new revision, and an approval of
-   * it carries over to that revision, the old one's dropped: their next
-   * save counts the same facts, redacted. In the audit log without its
-   * words, or whose it was. Whether it was rewritten.
-   */
-  async rewriteInterview(
-    person: string,
-    before: InterviewProgress,
-    after: InterviewProgress,
-    by: AuditActor
-  ): Promise<boolean> {
-    const checked = interviewProgressSchema.parse(after);
-    // Each fact's revision as rewritten, as a save would compute it.
-    const revisions = new Map(
-      await Promise.all(
-        checked.facts.map(
-          async (fact) => [fact.id, await factRevision(fact)] as const
-        )
-      )
-    );
-    // Under the brain lock: an intake reading what they said ends first,
-    // or reads it rewritten.
-    const rewritten = await this.#withBrain(async () => {
-      await Promise.resolve();
-      return this.#rewriteInterview(
-        person,
-        before,
-        { progress: checked, revisions },
-        by
-      );
-    });
-    if (rewritten) {
-      // Whatever the cache doesn't take now waits for the alarm.
-      await this.forgetLinesNow();
-      await this.#armDrawing();
-    }
-    return rewritten;
-  }
-
-  /** `rewriteInterview`, under the brain lock. */
-  #rewriteInterview(
-    person: string,
-    before: InterviewProgress,
-    after: {
-      progress: InterviewProgress;
-      revisions: ReadonlyMap<string, string>;
-    },
-    by: AuditActor
-  ): boolean {
-    const [row] = this.#db
-      .select({ progress: interviews.progress })
-      .from(interviews)
-      .where(eq(interviews.person, person))
-      .all();
-    if (
-      row === undefined ||
-      canonicalJson(interviewProgressSchema.parse(JSON.parse(row.progress))) !==
-        canonicalJson(before)
-    ) {
-      return false;
-    }
-    const kept = this.#revisionsOf(person);
-    // The facts the purge changed, and each one's approval at the revision
-    // kept, to carry over to its revision as rewritten. Approvals of older
-    // revisions never count again, and are digests of words the purge may
-    // have taken out: they go.
-    const changed = [...after.revisions].flatMap(([fact, revision]) =>
-      kept.get(fact) === revision ? [] : [fact]
-    );
-    const carried = this.#db
-      .select()
-      .from(approvals)
-      .where(eq(approvals.person, person))
-      .all()
-      .flatMap((approval) => {
-        const revision = after.revisions.get(approval.fact);
-        return revision !== undefined &&
-          changed.includes(approval.fact) &&
-          approval.revision === kept.get(approval.fact)
-          ? [{ ...approval, revision }]
-          : [];
-      });
-    this.ctx.storage.transactionSync(() => {
-      this.#db
-        .update(interviews)
-        .set({
-          progress: JSON.stringify(after.progress),
-          revisions: JSON.stringify(Object.fromEntries(after.revisions)),
-        })
-        .where(eq(interviews.person, person))
-        .run();
-      if (changed.length > 0) {
-        this.#db
-          .delete(approvals)
-          .where(
-            and(eq(approvals.person, person), inList(approvals.fact, changed))
-          )
-          .run();
-      }
-      for (const approval of carried) {
-        this.#db.insert(approvals).values(approval).run();
-      }
-      this.#db
-        .update(links)
-        .set({ version: sql`${links.version} + 1` })
-        .where(eq(links.person, person))
-        .run();
-      // Everything the voice said in it goes from the cache, as said, from
-      // the alarm until done (`forgetLinesNow`).
-      const lines = this.#queueSpokenOf(person);
-      // A drawing read what they said before: it keeps nothing.
-      this.#purged();
-      this.#changed(by, "onboarding.interview.purged", { lines });
-    });
-    this.#deliverAudit();
-    return true;
-  }
-
-  /**
-   * Every drawing, piece of work and team's map as kept, as text: what a
-   * Knowledge content purge looks in (interview-erasure.ts); never served
-   * otherwise. A team's `does` is drawn from its lead's interview
-   * (`#mapTeam`).
-   */
-  drawingsSaid(): {
-    drawings: { work: string; drawn: string }[];
-    differences: { work: string; way: string; other: string }[];
-    teams: { id: string; does: string }[];
-    works: {
-      id: string;
-      name: string;
-      local: string;
-      one: string;
-      many: string;
-    }[];
-  } {
-    return {
-      drawings: this.#db
-        .select({ work: drawnWorks.work, drawn: drawnWorks.drawn })
-        .from(drawnWorks)
-        .all()
-        .flatMap(({ work, drawn }) =>
-          drawn === null ? [] : [{ work, drawn }]
-        ),
-      differences: this.#db
-        .select({
-          work: checkedDifferences.work,
-          way: checkedDifferences.way,
-          other: checkedDifferences.other,
-        })
-        .from(checkedDifferences)
-        .all(),
-      teams: this.#db
-        .select({ id: teams.id, does: teams.does })
-        .from(teams)
-        .all(),
-      works: this.#db
-        .select({
-          id: works.id,
-          name: works.name,
-          local: works.local,
-          one: works.one,
-          many: works.many,
-        })
-        .from(works)
-        .all(),
-    };
-  }
-
-  /**
-   * Forgets the drawings a Knowledge content purge reached (`drawings`, as
-   * it read them) for good, to be drawn again from what their people
-   * agreed to as the purge left it; and keeps the works' names, and what
-   * teams do, as the purge rewrote them (`renamed`, `described`). Each
-   * write takes only where the row still holds what the purge read: one
-   * drawn again since, from words the purge already left clean, stays as
-   * it is. The brain's own records of them were rewritten by the same
-   * purge; each drawing drawn again is given as a new version. A checked
-   * difference holding a purged word goes on its own (`differences`, as
-   * read), its drawing kept. In the audit log by counts alone.
-   */
-  async forgetDrawings(
-    drawings: readonly { work: string; drawn: string }[],
-    renamed: readonly { id: string; from: WorkNames; to: WorkNames }[],
-    described: readonly { id: string; from: string; to: string }[],
-    differences: readonly { work: string; way: string; other: string }[],
-    by: AuditActor
-  ): Promise<void> {
-    if (
-      drawings.length === 0 &&
-      renamed.length === 0 &&
-      described.length === 0 &&
-      differences.length === 0
-    ) {
-      return;
-    }
-    // Under the brain lock, as forgetting a document's readings is: no
-    // intake lands between.
-    await this.#withBrain(async () => {
-      await Promise.resolve();
-      this.ctx.storage.transactionSync(() => {
-        const forgotten = drawings.flatMap(({ work, drawn }) =>
-          this.#db
-            .delete(drawnWorks)
-            .where(and(eq(drawnWorks.work, work), eq(drawnWorks.drawn, drawn)))
-            .returning({ work: drawnWorks.work })
-            .all()
-            .map((row) => row.work)
-        );
-        if (forgotten.length > 0) {
-          this.#db
-            .delete(checkedDifferences)
-            .where(inList(checkedDifferences.work, forgotten))
-            .run();
-          this.#db
-            .delete(drawFailures)
-            .where(
-              inList(
-                drawFailures.item,
-                forgotten.map((work) => `work:${work}`)
-              )
-            )
-            .run();
-        }
-        // A checked difference holding a purged word goes on its own, if
-        // still as read: the review shows one again only once a drawing is
-        // checked anew.
-        const unchecked = differences.flatMap(({ work, way, other }) =>
-          this.#db
-            .delete(checkedDifferences)
-            .where(
-              and(
-                eq(checkedDifferences.work, work),
-                eq(checkedDifferences.way, way),
-                eq(checkedDifferences.other, other)
-              )
-            )
-            .returning({ work: checkedDifferences.work })
-            .all()
-        ).length;
-        let named = 0;
-        for (const { id, from, to } of renamed) {
-          named += this.#db
-            .update(works)
-            .set(to)
-            .where(
-              and(
-                eq(works.id, id),
-                eq(works.name, from.name),
-                eq(works.local, from.local),
-                eq(works.one, from.one),
-                eq(works.many, from.many)
-              )
-            )
-            .returning({ id: works.id })
-            .all().length;
-        }
-        let rewritten = 0;
-        for (const { id, from, to } of described) {
-          rewritten += this.#db
-            .update(teams)
-            .set({ does: to })
-            .where(and(eq(teams.id, id), eq(teams.does, from)))
-            .returning({ id: teams.id })
-            .all().length;
-        }
-        this.#purged();
-        this.#changed(by, "onboarding.drawings.purged", {
-          drawings: forgotten.length,
-          differences: unchecked,
-          works: named,
-          teams: rewritten,
-        });
-      });
-    });
-    this.#deliverAudit();
-    await this.#armDrawing();
-  }
-
-  /**
-   * Grasp's staff's own text, as a Knowledge term purge reaches it
-   * (staff-text-erasure.ts): how Stephen is set up (JSON, as stored).
-   * Never served otherwise.
-   */
-  staffTextsSaid(): { setup: string | null } {
-    const [row] = this.#db
-      .select({ stephen: onboarding.stephen })
-      .from(onboarding)
-      .all();
-    return { setup: row?.stephen ?? null };
-  }
-
-  /**
-   * Keeps Stephen's setup as a Knowledge term purge rewrote it (`after`),
-   * only if it is still as the purge read it (`before`): one saved since
-   * is left to the purge to read again. In the audit log without its
-   * words. Whether it was rewritten.
-   */
-  rewriteStaffTexts(
-    before: { setup: string | null },
-    after: { setup: string | null },
-    by: AuditActor
-  ): boolean {
-    if (after.setup === before.setup) {
-      return true;
-    }
-    let landed = false;
-    this.ctx.storage.transactionSync(() => {
-      if (this.staffTextsSaid().setup !== before.setup) {
-        return;
-      }
-      this.#db.update(onboarding).set({ stephen: after.setup }).run();
-      this.#changed(by, "onboarding.staff_text.purged", { setup: 1 });
-      landed = true;
-    });
-    if (landed) {
-      this.#deliverAudit();
-    }
-    return landed;
   }
 
   /**
@@ -4064,15 +3666,15 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Forgets shared documents' readings for good, as a Knowledge purge
-   * reached them (document-erasure.ts): each reading,
+   * Forgets shared documents' readings for good, as removing them does
+   * (documents.ts): each reading,
    * its question and the admin's answer, so neither Stephen's context nor
    * the brain's sources and tools (brain-rpc.ts) show them again; every
    * drawing made since the first of them was shared, which may have had
    * it for context, to be drawn again without it; and every drawing the
    * brain was given since (`purgeOnboardingDrawings`), each of which is
    * given again once drawn again. The brain first: when that fails,
-   * nothing here has changed, and running the purge again finds the
+   * nothing here has changed, and removing them again finds the
    * readings still here. In the audit log by counts alone. Within
    * `#withBrain`, so no intake lands between; answered 0 at once, without
    * waiting for one, when none of `ids` is a shared document's. With
@@ -4252,17 +3854,12 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * When the kickoff the brain names as a source came in: the kickoff's,
-   * or one a purge forgot (`kickoffSourceKey`), whose records the purge
-   * rewrote and still name it. Null when there was none.
+   * When the kickoff the brain names as a source came in. Null when there
+   * is none.
    */
   kickoffSourceAt(): string | null {
     const [row] = this.#db.select({ at: kickoff.at }).from(kickoff).all();
-    if (row !== undefined) {
-      return row.at;
-    }
-    const forgotten = this.ctx.storage.kv.get(kickoffSourceKey);
-    return typeof forgotten === "string" ? forgotten : null;
+    return row?.at ?? null;
   }
 
   /**
@@ -4327,16 +3924,15 @@ export class Onboarding extends DurableObject<Env> {
     return true;
   }
 
-  /** Notes that a purge reached, or rewrote, what the onboarding holds (`purgesKey`). */
+  /** Notes that something was erased from what the onboarding holds (`purgesKey`). */
   #purged(): void {
     this.ctx.storage.kv.put(purgesKey, this.purgeMark() + 1);
   }
 
   /**
-   * How often a Knowledge content purge reached the onboarding, or
-   * rewrote what it holds (`purgesKey`): what a save of the kickoff, or a
-   * drawing, takes as it begins reading, and must still find as it keeps
-   * what it made.
+   * How often something was erased from what the onboarding holds
+   * (`purgesKey`): what a save of the kickoff, or a drawing, takes as it
+   * begins reading, and must still find as it keeps what it made.
    */
   purgeMark(): number {
     const held = this.ctx.storage.kv.get(purgesKey);
@@ -4344,27 +3940,13 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Notes that a Knowledge content purge reached the onboarding, under
-   * the brain lock, before it looks in the kickoff (kickoff-erasure.ts):
-   * a save whose reading began before is refused (`saveKickoff`), so what
-   * it read can't bring the purged words back. One saved already is what
-   * the purge then looks in.
-   */
-  async notePurge(): Promise<void> {
-    await this.#withBrain(async () => {
-      this.#purged();
-      await Promise.resolve();
-    });
-  }
-
-  /**
    * Keeps the kickoff's transcript and its reading, replacing any before
    * them; the sponsor's answers stay, for they answer the company, not one
    * transcript. Then gives the brain what it holds (kickoff-records.ts).
-   * Under the brain lock, as the kickoff's purge is (`forgetKickoff`): a
-   * save whose reading began before a content purge reached the
+   * Under the brain lock, as the kickoff's delete is (`deleteKickoff`): a
+   * save whose reading began before something was erased from the
    * onboarding (`mark`, `purgeMark` as it began) is refused,
-   * `kickoff.purged`, so the purged words never come back with it. In the log and the audit log
+   * `kickoff.purged`, so the erased words never come back with it. In the log and the audit log
    * without its words.
    */
   async saveKickoff(
@@ -4407,74 +3989,6 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Every text the kickoff keeps: its transcript, each of its reading's
-   * words and the sponsor's answers. What a Knowledge purge looks in
-   * (kickoff-records.ts `kickoffErasure`); never served otherwise. Empty
-   * before it is in.
-   */
-  kickoffTexts(): string[] {
-    const [row] = this.#db.select().from(kickoff).all();
-    if (row === undefined) {
-      return [];
-    }
-    // Its file's name too: staff's upload may be named for what a purge
-    // takes out.
-    const texts: string[] = [
-      row.transcript,
-      ...(row.fileName === null ? [] : [row.fileName]),
-    ];
-    const collect = (value: unknown): void => {
-      if (typeof value === "string") {
-        texts.push(value);
-      } else if (Array.isArray(value)) {
-        for (const each of value) {
-          collect(each);
-        }
-      } else if (typeof value === "object" && value !== null) {
-        for (const each of Object.values(value)) {
-          collect(each);
-        }
-      }
-    };
-    collect(JSON.parse(row.reading));
-    collect(JSON.parse(row.answers));
-    return texts;
-  }
-
-  /**
-   * Forgets the kickoff for good, as a Knowledge purge reached it: its
-   * transcript, its reading and the sponsor's answers, so nothing of it
-   * is read, or given the brain, again (kickoff-records.ts). A purge is
-   * the admin's hard delete: what was derived from it goes with it. The
-   * brain's records it gave were rewritten by the same purge. In the audit
-   * log without its words. Whether there was one to forget.
-   */
-  async forgetKickoff(by: AuditActor): Promise<boolean> {
-    // Under the brain lock: a keep of its records already under way ends
-    // first (and the same purge rewrites what it kept); one after finds
-    // no kickoff, and keeps nothing.
-    return await this.#withBrain(async () => {
-      const [row] = this.#db
-        .select({ id: kickoff.id, at: kickoff.at })
-        .from(kickoff)
-        .all();
-      if (row === undefined) {
-        return false;
-      }
-      this.ctx.storage.transactionSync(() => {
-        this.#db.delete(kickoff).where(eq(kickoff.id, row.id)).run();
-        // Its source stays, by its title and day alone: the records the
-        // purge rewrote still name it. Nothing is owed of what's gone.
-        this.ctx.storage.kv.put(kickoffSourceKey, row.at);
-        this.ctx.storage.kv.delete(kickoffOwedKey);
-        this.#changed(by, "onboarding.kickoff.purged", {});
-      });
-      this.#deliverAudit();
-      return await Promise.resolve(true);
-    });
-  }
-
-  /**
    * The admin deletes the kickoff for good (GRA-1897): its transcript,
    * its file's name, its reading and the sponsor's answers, and every
    * record it gave the brain, retired ones too. Whatever reads it reads
@@ -4502,8 +4016,7 @@ export class Onboarding extends DurableObject<Env> {
       this.ctx.storage.transactionSync(() => {
         this.#purged();
         this.#db.delete(kickoff).run();
-        // Nothing names its source any more, nor is owed of it.
-        this.ctx.storage.kv.delete(kickoffSourceKey);
+        // Nothing is owed of it any more.
         this.ctx.storage.kv.delete(kickoffOwedKey);
         this.ctx.storage.kv.put(kickoffErasureOwedKey, true);
         // What the voice said on the admins' onboarding may have quoted it
@@ -4535,8 +4048,8 @@ export class Onboarding extends DurableObject<Env> {
    * Keeps the sponsor's answer to what the kickoff left open about
    * `field`; an empty one takes it back. Then gives the brain what the
    * kickoff holds (kickoff-records.ts): an answer about the goals or the
-   * pain is a new vision. Under the brain lock, as the kickoff's purge is
-   * (`forgetKickoff`): after one, there is nothing to answer. False before
+   * pain is a new vision. Under the brain lock, as the kickoff's delete is
+   * (`deleteKickoff`): after one, there is nothing to answer. False before
    * the kickoff is in.
    */
   async answerKickoff(
@@ -5640,9 +5153,9 @@ export class Onboarding extends DurableObject<Env> {
     });
     this.ctx.storage.transactionSync(() => {
       // Their interview deleted meanwhile, or deleted and begun anew; or
-      // a document it had for context purged meanwhile; or a purge
-      // rewrote what it was drawn from: drawn again without it, as the
-      // work is still due.
+      // a document it had for context removed meanwhile; or something
+      // erased from what it was drawn from (`purgeMark`): drawn again
+      // without it, as the work is still due.
       if (this.#stale(began, purges) || this.#anyForgotten(shared)) {
         return;
       }
@@ -5816,8 +5329,8 @@ export class Onboarding extends DurableObject<Env> {
 
   /**
    * Whether what a drawing was drawn from changed since it `began` (an
-   * interview went, or went and began anew) or a purge since (`purges`,
-   * `purgeMark` as it began) rewrote it: then it keeps nothing.
+   * interview went, or went and began anew) or something was erased from
+   * it since (`purges`, `purgeMark` as it began): then it keeps nothing.
    */
   #stale(began: Map<string, string | null>, purges: number): boolean {
     return this.#goneSince(began).length > 0 || this.purgeMark() !== purges;
@@ -6754,7 +6267,7 @@ export class Onboarding extends DurableObject<Env> {
    * drawn takes the map with them: nothing drawn from it is kept.
    */
   async #mapTeam(teamId: string, at: string): Promise<void> {
-    // Before anything is read: what a purge since would have rewritten.
+    // Before anything is read: whether anything is erased meanwhile.
     const purges = this.purgeMark();
     const roster = this.#roster();
     const team = roster?.teams.find(({ id }) => id === teamId);
@@ -6806,7 +6319,7 @@ export class Onboarding extends DurableObject<Env> {
       const now = this.#roster();
       const still = now?.teams.find(({ id }) => id === teamId);
       // The lead's interview deleted meanwhile, or deleted and begun anew;
-      // or a purge rewrote what it was drawn from: drawn again.
+      // or something erased from what it was drawn from: drawn again.
       if (now === null || still === undefined || this.#stale(began, purges)) {
         return;
       }
@@ -7054,8 +6567,8 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * What someone's interview holds now; none before a save, and none for
    * one that no longer reads as an interview: it gives nothing to a
-   * drawing or a count, and a purge reaches it as stored
-   * (`interviewStored`), so nothing stops on it.
+   * drawing or a count, and its deletion takes it as stored, so nothing
+   * stops on it.
    */
   #held(person: string): InterviewProgress | null {
     const stored = this.interviewStored(person);

@@ -1,4 +1,4 @@
-import type { PurgeInput, KnowledgeApi } from "@grasp-os/shared/knowledge";
+import type { KnowledgeApi } from "@grasp-os/shared/knowledge";
 import { uploadTypes } from "@grasp-os/shared/uploads";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -6,15 +6,15 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { cleanupsPerPage } from "../src/knowledge/uploads.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { erasing } from "./knowledge-purge.ts";
+import { purged } from "./knowledge-purge.ts";
 import { ownCollectionOf } from "./knowledge.ts";
 import { runMinuteTasks } from "./maintenance.ts";
-import { openRpc, outcome, signedInApi, unique } from "./sign-in.ts";
+import { outcome, signedInApi, unique } from "./sign-in.ts";
 
-// A Knowledge purge and the files once uploaded into Knowledge: the
-// originals of the files a purged document was saved from hold its data
+// A person's purge from Knowledge, as their erasure runs it, and the files
+// once uploaded into their own collections: the originals hold their data
 // too, so the purge forgets their uploads and deletes the originals from
-// R2. Nothing uploads into Knowledge any more; the uploads here are as
+// R2 before it reports done. Nothing uploads into Knowledge any more; the uploads here are as
 // those uploads left them, ready, with their originals stored.
 
 const idp = mockIdp();
@@ -120,84 +120,7 @@ const storedOf = async (
 /** Uploads more than one page of the cleanup's. */
 const manyUploads = cleanupsPerPage + 1;
 
-/** A person's personal purge, prepared and run by `admin` over `core`. */
-const personalPurge = async (
-  api: { knowledge: KnowledgeApi },
-  userId: string
-): Promise<void> => {
-  const input: PurgeInput = { type: "personal", userId, reason: "offboarding" };
-  const { token } = await api.knowledge.preparePurge(input);
-  await api.knowledge.purge(input, token);
-};
-
-describe("a Knowledge purge of documents saved from uploads", () => {
-  it("deletes the original of a document it rewrites", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
-      name: `Files ${unique()}`,
-      access: "everyone",
-    });
-    const { uploadId, documentId } = await savedFromUpload(
-      admin,
-      collectionId,
-      "# Contacts\nfacilities@example.com looks after upkeep."
-    );
-    const input: PurgeInput = {
-      type: "content",
-      documentIds: [documentId],
-      terms: ["facilities@example.com"],
-      reason: "erasure_request",
-    };
-    const plan = await admin.api.knowledge.preparePurge(input);
-    const result = await admin.api.knowledge.purge(input, plan.token);
-
-    expect({
-      planned: [plan.documents, plan.originals],
-      rewritten: result.documents,
-      stored: await originalStored(collectionId, uploadId),
-      kept: await uploadKept(uploadId),
-    }).toStrictEqual({
-      planned: [1, 1],
-      rewritten: 1,
-      stored: false,
-      kept: false,
-    });
-  });
-
-  it("deletes a document's originals in a content purge that finds nothing in its text", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
-      name: `Files ${unique()}`,
-      access: "everyone",
-    });
-    const { uploadId, documentId } = await savedFromUpload(
-      admin,
-      collectionId,
-      "# Offices\nUtrecht and Ghent."
-    );
-    // Only in the file, where extraction never read it: an image, say.
-    const input: PurgeInput = {
-      type: "content",
-      documentIds: [documentId],
-      terms: ["Zanzibar"],
-      reason: "erasure_request",
-    };
-    const plan = await admin.api.knowledge.preparePurge(input);
-    const result = await admin.api.knowledge.purge(input, plan.token);
-
-    expect({
-      planned: [plan.documents, plan.originals],
-      rewritten: result.documents,
-      stored: await originalStored(collectionId, uploadId),
-      kept: await uploadKept(uploadId),
-    }).toStrictEqual({
-      planned: [0, 1],
-      rewritten: 0,
-      stored: false,
-      kept: false,
-    });
-  });
-
+describe("a person's purge of the files they uploaded into Knowledge", () => {
   it("deletes the originals in a collection only its owner reads once that person is purged", async () => {
     const person = await signedInApi(idp, "user");
     const admin = await signedInApi(idp, "admin");
@@ -207,14 +130,7 @@ describe("a Knowledge purge of documents saved from uploads", () => {
       personal,
       "# Offices\nUtrecht and Ghent."
     );
-    const input: PurgeInput = {
-      type: "personal",
-      userId: person.userId,
-      reason: "offboarding",
-    };
-    await erasing(admin, person.userId);
-    const plan = await admin.api.knowledge.preparePurge(input);
-    await admin.api.knowledge.purge(input, plan.token);
+    await purged(admin, person.userId);
 
     expect({
       stored: await originalStored(personal, uploadId),
@@ -231,13 +147,6 @@ describe("a Knowledge purge of documents saved from uploads", () => {
       personal,
       "# Offices\nUtrecht and Ghent."
     );
-    const input: PurgeInput = {
-      type: "personal",
-      userId: person.userId,
-      reason: "offboarding",
-    };
-    await erasing(admin, person.userId);
-    const { token } = await admin.api.knowledge.preparePurge(input);
     // Knowledge refusing the batch that deletes the collection, once the
     // originals are gone.
     const refusing = new Proxy(env.KNOWLEDGE, {
@@ -261,27 +170,21 @@ describe("a Knowledge purge of documents saved from uploads", () => {
           : value;
       },
     });
-    const { core } = await openRpc(admin.session, {
-      coreEnv: { ...env, KNOWLEDGE: refusing },
-    });
-    let failed = "";
-    try {
-      failed = await outcome(core.authenticate().knowledge.purge(input, token));
-    } finally {
-      core[Symbol.dispose]();
-    }
+    const failed = await outcome(
+      purged(admin, person.userId, { ...env, KNOWLEDGE: refusing })
+    );
     const recorded = await vi.waitFor(
       async () => {
         const events = await allEvents();
-        const purged = events.filter(
+        const ran = events.filter(
           (event) =>
             event.action === "knowledge.purged" &&
             event.detail.userId === person.userId
         );
-        if (purged.length === 0) {
+        if (ran.length === 0) {
           throw new Error("Not recorded yet");
         }
-        return purged.length;
+        return ran.length;
       },
       { timeout: 10_000, interval: 100 }
     );
@@ -312,8 +215,7 @@ describe("a Knowledge purge of documents saved from uploads", () => {
           })
       )
     );
-    await erasing(admin, person.userId);
-    await personalPurge(admin.api, person.userId);
+    await purged(admin, person.userId);
 
     expect({
       stored: await storedOf(personal, ids),
@@ -339,7 +241,6 @@ describe("a Knowledge purge of documents saved from uploads", () => {
         documentId: null,
       }),
     ];
-    await erasing(admin, person.userId);
     // R2 refusing the purge's deletes, as when it is out of reach.
     const refusing = new Proxy(env.FILES, {
       get: (target, property) => {
@@ -355,17 +256,11 @@ describe("a Knowledge purge of documents saved from uploads", () => {
           : value;
       },
     });
-    const { core } = await openRpc(admin.session, {
-      coreEnv: { ...env, FILES: refusing },
-    });
-    let failed = "";
-    try {
-      failed = await outcome(personalPurge(core.authenticate(), person.userId));
-    } finally {
-      core[Symbol.dispose]();
-    }
+    const failed = await outcome(
+      purged(admin, person.userId, { ...env, FILES: refusing })
+    );
     const storedAfterFailure = await storedOf(personal, ids);
-    await personalPurge(admin.api, person.userId);
+    await purged(admin, person.userId);
 
     expect({
       failed: failed !== "ok",
@@ -375,37 +270,28 @@ describe("a Knowledge purge of documents saved from uploads", () => {
   });
 
   it("forgets an upload left in the middle of its save, and deletes its original", async () => {
+    const person = await signedInApi(idp, "user");
     const admin = await signedInApi(idp, "admin");
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
-      name: `Files ${unique()}`,
-      access: "everyone",
-    });
-    const { uploadId, documentId, path } = await savedFromUpload(
-      admin,
+    const collectionId = await ownCollectionOf(person);
+    const { uploadId, path } = await savedFromUpload(
+      person,
       collectionId,
       "# Offices\nUtrecht and Ghent."
     );
     // The same file uploaded again, its save cut short when uploads into
     // Knowledge stopped: nothing will ever finish it.
-    const saving = await leftUpload(admin, collectionId, {
+    const saving = await leftUpload(person, collectionId, {
       path,
       status: "saving",
       documentId: null,
     });
-    const input: PurgeInput = {
-      type: "content",
-      documentIds: [documentId],
-      terms: ["Ghent"],
-      reason: "erasure_request",
-    };
-    const plan = await admin.api.knowledge.preparePurge(input);
-    const purged = await outcome(admin.api.knowledge.purge(input, plan.token));
+    const ran = await outcome(purged(admin, person.userId));
 
     expect({
-      purged,
+      ran,
       stored: await storedOf(collectionId, [uploadId, saving]),
       kept: [await uploadKept(uploadId), await uploadKept(saving)],
-    }).toStrictEqual({ purged: "ok", stored: 0, kept: [false, false] });
+    }).toStrictEqual({ ran: "ok", stored: 0, kept: [false, false] });
   });
 });
 

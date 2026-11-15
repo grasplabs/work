@@ -100,16 +100,6 @@ const withEngineDown = async <T>(run: () => Promise<T>): Promise<T> => {
   }
 };
 
-/** The document `documentId` as its collection lists it. */
-const listed = async (
-  api: KnowledgeApi,
-  collectionId: string,
-  documentId: string
-): Promise<DocumentSummary | undefined> => {
-  const { documents } = await api.listDocuments(collectionId);
-  return documents.find(({ id }) => id === documentId);
-};
-
 /** The versions of the sections a search for `word` finds, in `scope`. */
 const foundVersions = async (
   api: KnowledgeApi,
@@ -118,23 +108,6 @@ const foundVersions = async (
 ): Promise<number[]> => {
   const { hits } = await api.search(word, { collectionId });
   return hits.map(({ version }) => version);
-};
-
-/** A content purge of `term` from `documentId`. */
-const purgeOf = (documentId: string, term: string) => ({
-  type: "content" as const,
-  documentIds: [documentId],
-  terms: [term],
-  reason: "offboarding" as const,
-});
-
-/** The current text of `documentId`. */
-const readTextOf = async (
-  api: KnowledgeApi,
-  documentId: string
-): Promise<string> => {
-  const { version } = await api.getDocument(documentId);
-  return version.text;
 };
 
 const indexingOf = (document: DocumentSummary | undefined) => ({
@@ -278,60 +251,6 @@ describe("publishing search generations", () => {
       unscopedRestricted: false,
       scoped: { pending: 1, failed: 0 },
       scopedSensitive: true,
-    });
-  });
-
-  it("publishes what a save made current during a purge, so no generation with the terms stays live", async () => {
-    const { api } = await knowledgeOf();
-    const { id: collectionId } = await api.createCollection(shared());
-    const name = `Visser${unique()}`;
-    const document = await api.saveDocument({
-      collectionId,
-      path: "policy.md",
-      text: textOf(`${name} signs`),
-      ifVersion: 0,
-    });
-    const clean = textOf(`Clean${unique()}`);
-    const { token } = await api.preparePurge(purgeOf(document.id, name));
-    // Just before the purge publishes, someone saves over it, and that
-    // save's own publish fails, with no engine to index it.
-    const restore = watchPublishes({
-      before: async (nth) => {
-        if (nth !== 1) {
-          return;
-        }
-        await withEngineDown(
-          async () =>
-            await api.saveDocument({
-              collectionId,
-              path: "policy.md",
-              text: clean,
-              ifVersion: 2,
-            })
-        );
-      },
-      fail: (nth) => nth === 2,
-    });
-    let outcome: string;
-    try {
-      outcome = await api.purge(purgeOf(document.id, name), token).then(
-        () => "purged",
-        (error: unknown) => String(knowledgeErrors.codeOf(error))
-      );
-    } finally {
-      restore();
-    }
-
-    expect({
-      outcome,
-      indexed: indexingOf(await listed(api, collectionId, document.id)),
-      term: await foundVersions(api, name, collectionId),
-      clean: await readTextOf(api, document.id),
-    }).toStrictEqual({
-      outcome: "purged",
-      indexed: { indexing: "indexed", indexedVersion: 3 },
-      term: [],
-      clean,
     });
   });
 });

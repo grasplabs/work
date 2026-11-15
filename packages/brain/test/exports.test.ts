@@ -29,10 +29,16 @@ import {
 import type { HostExportFile, OnExport } from "../src/exports.ts";
 import type { Json } from "../src/json.ts";
 import { knowledgeErrors } from "../src/knowledge.ts";
-import { preparePurge, purge } from "../src/purge.ts";
 import type { OnErase } from "../src/purge.ts";
 import type { Caller } from "./host.ts";
-import { newCollection, noCopies, testHost, writerOf } from "./host.ts";
+import {
+  newCollection,
+  noCopies,
+  ownCollection,
+  purgeOf,
+  testHost,
+  writerOf,
+} from "./host.ts";
 
 // An export of the company's Brain, as its writer fails (GRA-335's E1;
 // the threat model is on GRA-335): more collections than D1 binds to one
@@ -233,8 +239,11 @@ const objectsOf = async (exportId: string): Promise<string[]> => {
   return listed.objects.map(({ key }) => key);
 };
 
-/** A purge of `term` from `documentId` that its host's copies fail. */
-const blockedPurge = async (brain: Brain<Caller>, documentId: string) => {
+/** Who a purge takes, in these cases. */
+const leaver = "leaver";
+
+/** A purge of `leaver`, who has a collection of their own, that its host's files fail. */
+const blockedPurge = async (brain: Brain<Caller>) => {
   const failing: OnErase = {
     ...noCopies,
     forgetFiles: async () => {
@@ -242,14 +251,8 @@ const blockedPurge = async (brain: Brain<Caller>, documentId: string) => {
       throw new Error("The host's copies are out of reach");
     },
   };
-  const input = {
-    type: "content",
-    documentIds: [documentId],
-    terms: ["route"],
-    reason: "erasure_request",
-  };
-  const { token } = await preparePurge(brain, admin, input, failing);
-  return await outcome(purge(brain, admin, input, token, failing));
+  await ownCollection(brain, leaver);
+  return await outcome(purgeOf(brain, admin, leaver, failing));
 };
 
 describe("exporting the company's Brain", () => {
@@ -298,7 +301,7 @@ describe("exporting the company's Brain", () => {
   it("refuses to begin while a purge is unfinished, and fails once one begins while it runs", async () => {
     const { brain } = testHost();
     const plans = await newCollection(brain, "Plans");
-    const plan = await writeVersion(brain, admin, {
+    await writeVersion(brain, admin, {
       collection: plans,
       path: "plan.md",
       text: "# Plan\nThe route is secret.",
@@ -309,7 +312,7 @@ describe("exporting the company's Brain", () => {
     const onExport = hostWith();
     // Begun before the purge: running when one starts.
     const during = await begun(brain, onExport);
-    const blocked = await blockedPurge(brain, plan.id);
+    const blocked = await blockedPurge(brain);
     const duringEnded = await ranToEnd(brain, during, onExport);
     const { token } = await prepareExport(brain, admin, onExport);
     const whileOpen = await outcome(startExport(brain, admin, token, onExport));
@@ -328,14 +331,7 @@ describe("exporting the company's Brain", () => {
       whileOpen: "knowledge.export_purge_open",
     });
     // Finished, as its host's copies come back in reach: exports may run.
-    const input = {
-      type: "content",
-      documentIds: [plan.id],
-      terms: ["route"],
-      reason: "erasure_request",
-    };
-    const again = await preparePurge(brain, admin, input, noCopies);
-    await purge(brain, admin, input, again.token, noCopies);
+    await purgeOf(brain, admin, leaver);
   });
 
   it("goes on with a part from the file a run stopped before, after another takes it over", async () => {
@@ -687,7 +683,7 @@ describe("exporting the company's Brain", () => {
   it("refuses a download a purge began during, and deletes the export", async () => {
     const { brain } = testHost();
     const plans = await newCollection(brain, "Plans");
-    const plan = await writeVersion(brain, admin, {
+    await writeVersion(brain, admin, {
       collection: plans,
       path: "plan.md",
       text: "# Plan\nThe route.",
@@ -709,7 +705,7 @@ describe("exporting the company's Brain", () => {
         get: async (key, options) => {
           const object = await env.BLOBS.get(key, options);
           if (purged === "" && key.startsWith(`exports/${exportId}/`)) {
-            purged = await blockedPurge(brain, plan.id);
+            purged = await blockedPurge(brain);
           }
           return object;
         },
@@ -744,20 +740,13 @@ describe("exporting the company's Brain", () => {
       downloadsAudited: 0,
     });
     // Finished, as its host's copies come back in reach: exports may run.
-    const input = {
-      type: "content",
-      documentIds: [plan.id],
-      terms: ["route"],
-      reason: "erasure_request",
-    };
-    const again = await preparePurge(brain, admin, input, noCopies);
-    await purge(brain, admin, input, again.token, noCopies);
+    await purgeOf(brain, admin, leaver);
   });
 
   it("lists a failed export's files no more once its sweep found them gone", async () => {
     const { brain } = testHost();
     const plans = await newCollection(brain, "Plans");
-    const plan = await writeVersion(brain, admin, {
+    await writeVersion(brain, admin, {
       collection: plans,
       path: "plan.md",
       text: "# Plan\nThe route.",
@@ -768,7 +757,7 @@ describe("exporting the company's Brain", () => {
     const onExport = hostWith();
     // Failed, as a purge begins while it is written.
     const exportId = await begun(brain, onExport);
-    const blocked = await blockedPurge(brain, plan.id);
+    const blocked = await blockedPurge(brain);
     const ended = await ranToEnd(brain, exportId, onExport);
     // Every minute, as core's clock sweeps, once no upload can still land:
     // however many failed before it.
@@ -782,14 +771,7 @@ describe("exporting the company's Brain", () => {
       perSweep.push((listed.get(exportId) ?? 0) - before);
     }
     // Finished, as its host's copies come back in reach: exports may run.
-    const input = {
-      type: "content",
-      documentIds: [plan.id],
-      terms: ["route"],
-      reason: "erasure_request",
-    };
-    const again = await preparePurge(brain, admin, input, noCopies);
-    await purge(brain, admin, input, again.token, noCopies);
+    await purgeOf(brain, admin, leaver);
 
     expect({
       blocked,
@@ -834,7 +816,7 @@ describe("exporting the company's Brain", () => {
   it("leaves no file in the bucket that a run which lost its export uploads after the sweep found it empty", async () => {
     const { brain } = testHost();
     const plans = await newCollection(brain, "Plans");
-    const plan = await writeVersion(brain, admin, {
+    await writeVersion(brain, admin, {
       collection: plans,
       path: "plan.md",
       text: "# Plan\nThe route.",
@@ -870,7 +852,7 @@ describe("exporting the company's Brain", () => {
     const later = withPorts(brain, {
       clock: () => new Date(Date.now() + exportLeaseMs + 60_000),
     });
-    const blocked = await blockedPurge(brain, plan.id);
+    const blocked = await blockedPurge(brain);
     const second = await ranToEnd(later, exportId, onExport);
     await expireExports(
       brain,
@@ -880,14 +862,7 @@ describe("exporting the company's Brain", () => {
     // Then the first run's upload lands.
     release(true);
     const firstEnded = await first;
-    const input = {
-      type: "content",
-      documentIds: [plan.id],
-      terms: ["route"],
-      reason: "erasure_request",
-    };
-    const again = await preparePurge(brain, admin, input, noCopies);
-    await purge(brain, admin, input, again.token, noCopies);
+    await purgeOf(brain, admin, leaver);
 
     expect({
       blocked,

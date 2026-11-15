@@ -1,4 +1,3 @@
-import type { PurgeInput } from "@grasp-os/shared/knowledge";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -6,29 +5,25 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import { mockIdp } from "./idp.ts";
 import {
-  apiWith,
+  envWith,
   holding,
   indexedSections,
   lettersOf,
   payOwedRebuilds,
   purgesWith,
   saveOver,
+  purged,
   setUpTime,
   watchingPurge,
-  erasing,
 } from "./knowledge-purge.ts";
 import type { Person } from "./knowledge-purge.ts";
 import { ownCollectionOf } from "./knowledge.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
-// Purging personal data from Knowledge. These tests start from the ways a
-// purge can fail or be abused: the text survives somewhere (an earlier
-// version, a section, a title, the search index's pages, a Brain memory, memory cached
-// by version); the purge record in the audit log,
-// which can't be purged, carries the text it removed; a purge reaches
-// documents it wasn't aimed at; someone other than the client's admins
-// purges, or purges without confirming, or confirms a purge other than the
-// one prepared; and a purge leaves a document that can't be read.
+// Purging a person from Knowledge, as their erasure does (person-erasure.ts
+// `purgeFromKnowledge`), and what it leaves in the search index: the
+// person's words left in the index's pages or its page directory, a
+// rebuild it owes and never runs, or writes that grow with the corpus.
 
 const idp = mockIdp();
 
@@ -43,17 +38,10 @@ const { leaverWith } = purgesWith(idp);
 const purgeCounted = async (
   admin: Person,
   leaver: Person,
-  watch: Parameters<typeof watchingPurge>[1] = {}
+  watch: Parameters<typeof watchingPurge>[0] = {}
 ) => {
-  const counting = await watchingPurge(admin, watch);
-  const input: PurgeInput = {
-    type: "personal",
-    userId: leaver.userId,
-    reason: "offboarding",
-  };
-  await erasing(admin, leaver.userId);
-  const { token } = await counting.api.knowledge.preparePurge(input);
-  await counting.api.knowledge.purge(input, token);
+  const counting = watchingPurge(watch);
+  await purged(admin, leaver.userId, counting.coreEnv);
   return counting.written;
 };
 
@@ -199,16 +187,10 @@ describe("a personal purge's search index", setUpTime, () => {
     const { leaver } = await leaverWith({
       "notes.md": `# Notes\nAsk ${name}さん.`,
     });
-    const input: PurgeInput = {
-      type: "personal",
-      userId: leaver.userId,
-      reason: "offboarding",
-    };
-    await erasing(admin, leaver.userId);
     // The first run's rebuild fails, once its deletes committed.
     let failed = false;
     let failNext = false;
-    const failing = await apiWith(admin, {
+    const failing = envWith({
       prepare: (query) => {
         if (!failed && query.includes("VALUES ('rebuild')")) {
           failNext = true;
@@ -222,8 +204,7 @@ describe("a personal purge's search index", setUpTime, () => {
         }
       },
     });
-    const { token } = await failing.knowledge.preparePurge(input);
-    const first = await outcome(failing.knowledge.purge(input, token));
+    const first = await outcome(purged(admin, leaver.userId, failing));
     const again = await purgeCounted(admin, leaver);
     expect({
       plainRebuilds: plainPurge.rebuilds,

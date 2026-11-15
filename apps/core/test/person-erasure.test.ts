@@ -1,4 +1,5 @@
 import { stillDeletingAtMostMs } from "@grasp-os/brain-next/contract";
+import { recordOutcome } from "@grasp-os/brain/outcomes";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
@@ -20,6 +21,7 @@ import { organizationId } from "../src/auth/auth.ts";
 import { addSource } from "../src/brain-next.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace, inJurisdiction } from "../src/durable-objects.ts";
+import { brainOf } from "../src/knowledge/ports.ts";
 import type { Onboarding } from "../src/onboarding/store.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import {
@@ -34,6 +36,7 @@ import { finishedByTheClock } from "./brain-next-own-store.ts";
 import { consentCode } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { answering, answeringWith, holdAlarm } from "./interview-link.ts";
+import { holding, rememberAs } from "./knowledge-purge.ts";
 import { ownCollectionOf } from "./knowledge.ts";
 import { runMinuteTasks } from "./maintenance.ts";
 import { onboardingLog } from "./onboarding-log.ts";
@@ -1161,15 +1164,26 @@ describe("erasing a person", () => {
     });
   });
 
-  it("purges what the Brain and Knowledge hold of them, every collection only they read with it, and leaves everyone else's", async () => {
+  it("erases what today's Brain and Knowledge still hold of them, of every kind, before it answers, and leaves everyone else's", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInApi(idp, "builder");
     const other = await signedInApi(idp, "user");
-    const theirs = await noteOf(person, "# Mine\nWhat only I wrote down.");
+    // A word only what is planted for them holds, in every kind of content
+    // the cutover leaves in Knowledge on a deployment until it is deleted.
+    const marker = `planted${unique().replaceAll("-", "")}`;
+    // A document of theirs, in a collection only they read, saved twice:
+    // two versions, each a payload in R2, with sections in the index.
+    const theirs = await noteOf(person, `# Mine\n${marker} wrote this.`);
+    await person.api.knowledge.saveDocument({
+      collectionId: theirs.collectionId,
+      path: theirs.path,
+      text: `# Mine\n${marker} wrote this, and more.`,
+      ifVersion: 1,
+    });
     const others = await noteOf(other, "# Theirs\nWhat someone else wrote.");
     // A file they once uploaded into that collection, its original in R2.
     const original = `knowledge/${theirs.collectionId}/${crypto.randomUUID()}`;
-    await env.FILES.put(original, "What only I uploaded.");
+    await env.FILES.put(original, `${marker} uploaded this.`);
     await env.DB.prepare(
       `INSERT INTO uploads (id, collection_id, path, media_type, bytes, sha256,
          uploaded_by, actor, status, document_id, version, created_at, updated_at)
@@ -1187,6 +1201,62 @@ describe("erasing a person", () => {
         Date.now()
       )
       .run();
+    // A memory of theirs, an outcome captured from a chat of theirs and a
+    // lesson drawn for them, as today's Brain left them.
+    await rememberAs(person, `${marker} likes the morning stand-up.`);
+    await recordOutcome(brainOf(env), {
+      eventId: `chat.turn:${marker}:${crypto.randomUUID()}`,
+      // A source names a chat by its ID alone (its capture cursor stays).
+      source: `chat.turn:${crypto.randomUUID()}`,
+      sourceSeq: 1,
+      purpose: "production",
+      ownerId: person.userId,
+      scope: "person",
+      taskType: "chat.turn",
+      execution: "failed",
+      result: "failure",
+      evidenceId: `chat-${marker}`,
+      evidenceRefs: [{ kind: "chat_turn", id: crypto.randomUUID() }],
+      versionRefs: [],
+      occurredAt: new Date().toISOString(),
+    });
+    const now = Date.now();
+    await env.KNOWLEDGE.prepare(
+      `INSERT INTO brain_lessons (id, revision, scope, scope_id, group_key,
+         kind, applicability, exclusions, instruction, evidence_status, state,
+         retired_by, created_at, updated_at)
+       VALUES (?, 1, 'person', ?, ?, 'avoid', '[]', '[]', ?, 'supported',
+         'active', NULL, ?, ?)`
+    )
+      .bind(
+        `lesson-${marker}`,
+        person.userId,
+        `group-${marker}`,
+        `Ask ${marker} first.`,
+        now,
+        now
+      )
+      .run();
+    // A gap they answered: the answer is the company's, who gave it theirs.
+    const gap = `gap-${marker}`;
+    await admin.api.brain.addRecords([
+      {
+        type: "source",
+        id: `src-${marker}`,
+        kind: "interview",
+        title: "Finance interview",
+        date: "2026-10-20",
+      },
+      {
+        type: "gap",
+        id: gap,
+        question: "How many invoices come in a month?",
+        owner: "Head of finance",
+        sourceId: `src-${marker}`,
+      },
+    ]);
+    await person.api.brain.answerGap(gap, "About two hundred.");
+    const before = await holding(marker);
     await admin.api.members.remove(person.userId);
 
     const erased = await admin.api.members.erase(
@@ -1194,17 +1264,35 @@ describe("erasing a person", () => {
       String(person.person.name)
     );
 
-    // Done when the erasure answers, without the clock.
+    // Gone when the erasure answers, without the clock: from Knowledge's
+    // tables, its search index and its payloads in R2, from the uploads'
+    // originals in R2, and as a gap's answerer. The other person's
+    // document stays.
+    const answered = await env.DB.prepare(
+      "SELECT answer, answered_by AS answeredBy FROM brain_gap_states WHERE gap_id = ?"
+    )
+      .bind(gap)
+      .first<{ answer: string | null; answeredBy: string | null }>();
     expect({
+      before: before.length > 0,
       done: typeof erased.completedAt,
+      brain: erased.areas.find(({ area }) => area === "brain")?.state,
       theirs: await inKnowledge(theirs.id),
       others: await inKnowledge(others.id),
+      held: await holding(marker),
       original: (await env.FILES.head(original)) !== null,
+      uploads: await rowsOf("uploads", "uploaded_by", person.userId),
+      answered,
     }).toStrictEqual({
+      before: true,
       done: "string",
+      brain: "complete",
       theirs: 0,
       others: 1,
+      held: [],
       original: false,
+      uploads: 0,
+      answered: { answer: "About two hundred.", answeredBy: null },
     });
   });
 

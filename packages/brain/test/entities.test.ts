@@ -21,16 +21,14 @@ import {
   sweepLinking,
 } from "../src/entities.ts";
 import type { IndexStep } from "../src/indexing.ts";
-import { purgedMarker } from "../src/knowledge.ts";
 import {
   memoriesProposeChange,
   memoriesPublish,
   memoriesRetire,
   remember,
 } from "../src/memories.ts";
-import { preparePurge, purge } from "../src/purge.ts";
 import type { Caller, StartedJob } from "./host.ts";
-import { newCollection, noCopies, testHost, writerOf } from "./host.ts";
+import { newCollection, purgeOf, testHost, writerOf } from "./host.ts";
 
 // Entity linking, through the Brain's own boundaries: a save, a remember,
 // and the linking job the host runs, swept by the clock. The model is the
@@ -88,25 +86,6 @@ const rowsOf = async (
     entities: await count("brain_entities", "id"),
     keys: await count("brain_entity_keys", "entity_id"),
   };
-};
-
-/** How many entities no mention names, in the whole test database. */
-const unnamedEntities = async (): Promise<number> => {
-  const row = await env.BRAIN.prepare(
-    "SELECT count(*) AS n FROM brain_entities WHERE NOT EXISTS (SELECT 1 FROM brain_mentions WHERE brain_mentions.entity_id = brain_entities.id)"
-  ).first<{ n: number }>();
-  return row?.n ?? -1;
-};
-
-/** Whether `entityId` was made before the fenced commit's test began. */
-let fencedStart = 0;
-const entitiesMadeBefore = async (entityId: string): Promise<boolean> => {
-  const row = await env.BRAIN.prepare(
-    "SELECT created_at AS at FROM brain_entities WHERE id = ?"
-  )
-    .bind(entityId)
-    .first<{ at: number }>();
-  return row === null || row.at < fencedStart;
 };
 
 /** A word no other test's text has. */
@@ -546,10 +525,7 @@ describe("entity linking", () => {
     );
     const changed = await entitiesFor(host.brain, reader);
     // The person's memories purged: their mentions go with them.
-    const writer = writerOf("admin");
-    const input = { type: "personal", userId, reason: "erasure_request" };
-    const { token } = await preparePurge(host.brain, writer, input, noCopies);
-    await purge(host.brain, writer, input, token, noCopies);
+    await purgeOf(host.brain, writerOf("admin"), userId);
     await settle(host, ran);
 
     expect({
@@ -944,104 +920,28 @@ describe("entity linking", () => {
     const [lenaBefore, moBefore] = linked
       .toSorted((a, b) => a.label.localeCompare(b.label))
       .map(({ id }) => id);
-    // A content purge of her name: its rewrite takes what was linked of
-    // the text, and the entity only it named, at once.
-    const writer = writerOf("admin");
-    const content = {
-      type: "content",
-      documentIds: [saved.id],
-      terms: [lena],
-      reason: "erasure_request",
-    };
-    const prepared = await preparePurge(host.brain, writer, content, noCopies);
-    await purge(host.brain, writer, content, prepared.token, noCopies);
-    const lenaErased = await rowsOf(lenaBefore ?? "");
-    // The person purged: their records' entities go with them.
-    const personal = { type: "personal", userId, reason: "erasure_request" };
-    const again = await preparePurge(host.brain, writer, personal, noCopies);
-    await purge(host.brain, writer, personal, again.token, noCopies);
+    // The person purged: the entity only their records named goes with
+    // them; one a document names stays.
+    await purgeOf(host.brain, writerOf("admin"), userId);
     const moErased = await rowsOf(moBefore ?? "");
-    // Her address mentioned again: a new entity, with a new ID.
-    await save(host, collection, "lena-2.md", `${lena} (${address}) is back.`);
+    const lenaKept = await rowsOf(lenaBefore ?? "");
+    // His address mentioned again: a new entity, with a new ID.
+    await save(host, collection, "mo.md", `${mo} (${moAddress}) is back.`);
     await settle(host, ran);
     const after = await entitiesFor(host.brain, reader);
 
     expect({
-      lenaErased,
+      saved: saved.currentVersion,
       moErased,
-      back: after.length,
-      sameId: after.some(({ id }) => id === lenaBefore),
+      lenaKept,
+      sameId: after.some(({ id }) => id === moBefore),
+      back: after.some(({ label }) => label === mo),
     }).toStrictEqual({
-      lenaErased: { entities: 0, keys: 0 },
+      saved: 1,
       moErased: { entities: 0, keys: 0 },
-      back: 1,
+      lenaKept: { entities: 1, keys: 1 },
       sameId: false,
-    });
-  });
-
-  it("leaves nothing of a commit a purge fenced out, so the identifier returns under a new ID", async () => {
-    const nia = `Nia ${word()}`;
-    const address = email("nia");
-    const host = testHost(
-      gazetteer([
-        { kind: "person", name: nia, identifiers: [address] },
-        { kind: "person", name: purgedMarker, identifiers: [address] },
-      ])
-    );
-    const collection = await newCollection(host.brain, "People");
-    const reader: Caller = { userId: "reader", reads: [collection.id] };
-    const saved = await save(
-      host,
-      collection,
-      "nia.md",
-      `${nia} (${address}).`
-    );
-    const writer = writerOf("admin");
-    const content = {
-      type: "content",
-      documentIds: [saved.id],
-      terms: [nia],
-      reason: "erasure_request",
-    };
-    const { token } = await preparePurge(host.brain, writer, content, noCopies);
-    // The purge lands after the run extracted and resolved, just before
-    // its commit's batch: the first key the commit asks for runs it.
-    const { keys } = host.brain.ports;
-    const real = keys.hmac;
-    let purged = false;
-    keys.hmac = async (purpose, usages) => {
-      if (!purged && purpose === "grasp-os brain entity key") {
-        purged = true;
-        await purge(host.brain, writer, content, token, noCopies);
-      }
-      return await real(purpose, usages);
-    };
-    const unnamedBefore = await unnamedEntities();
-    fencedStart = Date.now();
-    try {
-      await link(host, saved.id, 1);
-    } finally {
-      keys.hmac = real;
-    }
-    const unnamedAfter = await unnamedEntities();
-    const fenced = await entitiesFor(host.brain, reader);
-    // The purged version's own run: the address alone is left.
-    await link(host, saved.id, 2);
-    const after = await entitiesFor(host.brain, reader);
-    const createdBefore = await entitiesMadeBefore(after[0]?.id ?? "");
-
-    expect({
-      purged,
-      leftBehind: unnamedAfter - unnamedBefore,
-      fenced,
-      back: after.length,
-      madeBeforeThePurge: createdBefore,
-    }).toStrictEqual({
-      purged: true,
-      leftBehind: 0,
-      fenced: [],
-      back: 1,
-      madeBeforeThePurge: false,
+      back: true,
     });
   });
 
@@ -1389,51 +1289,6 @@ describe("entity linking", () => {
     });
   });
 
-  it("drops a decision with an entity an erasure removes, so none outlives it", async () => {
-    const person = `Bo ${word()}`;
-    const host = testHost(gazetteer([{ kind: "person", name: person }]));
-    const sales = await newCollection(host.brain, "Sales");
-    const support = await newCollection(host.brain, "Support");
-    const first = await save(host, sales, "a.md", `${person} called.`);
-    const second = await save(host, support, "b.md", `${person} called back.`);
-    const proof = await save(host, sales, "proof.md", "The same caller.");
-    for (const { id } of [first, second, proof]) {
-      // oxlint-disable-next-line no-await-in-loop -- in order, on purpose
-      await link(host, id, 1);
-    }
-    const admin: Caller = { userId: "admin", reads: [sales.id, support.id] };
-    const [proposal] = await entityMatchProposals(host.brain, admin);
-    const [a = "", b = ""] = proposal?.entities.map(({ id }) => id) ?? [];
-    await decideEntityMatch(host.brain, admin, {
-      entities: [a, b],
-      decision: "same",
-      evidence: { documentId: proof.id, version: 1 },
-    });
-    const count = async () => {
-      const row = await env.BRAIN.prepare(
-        "SELECT count(*) AS n FROM brain_entity_matches WHERE entity_a IN (?, ?) OR entity_b IN (?, ?)"
-      )
-        .bind(a, b, a, b)
-        .first<{ n: number }>();
-      return row?.n ?? -1;
-    };
-    const before = await count();
-    const writer = writerOf("admin");
-    const content = {
-      type: "content",
-      documentIds: [first.id],
-      terms: [person],
-      reason: "erasure_request",
-    };
-    const prepared = await preparePurge(host.brain, writer, content, noCopies);
-    await purge(host.brain, writer, content, prepared.token, noCopies);
-
-    expect({ before, after: await count() }).toStrictEqual({
-      before: 1,
-      after: 0,
-    });
-  });
-
   /** Ada in Sales and in Support, linked; their match's two entity IDs. */
   const adaTwice = async () => {
     const person = `Ada ${word()}`;
@@ -1561,70 +1416,6 @@ describe("entity linking", () => {
     });
   });
 
-  it("leaves no `same` on evidence a purge rewrote, though it was decided mid-purge and the purge stopped right after", async () => {
-    const { host, admin, pair, proof } = await adaTwice();
-    const writer = writerOf("admin");
-    const content = {
-      type: "content",
-      documentIds: [proof],
-      terms: ["calls"],
-      reason: "erasure_request",
-    };
-    const prepared = await preparePurge(host.brain, writer, content, noCopies);
-    let cleared = false;
-    let decided = false;
-    // Once the purge cleared the evidence's decisions, a `same` on it
-    // lands, then the rewrite commits and the purge stops.
-    const stopping = {
-      ...host.brain,
-      db: new Proxy(host.brain.db, {
-        get: (target, property): unknown => {
-          const value: unknown = Reflect.get(target, property);
-          if (property === "delete" && typeof value === "function") {
-            return (...args: unknown[]): unknown => {
-              if (args[0] === brainEntityMatches) {
-                cleared = true;
-              }
-              return Reflect.apply(value, target, args);
-            };
-          }
-          if (property === "batch" && typeof value === "function") {
-            return async (...args: unknown[]): Promise<unknown> => {
-              if (!cleared || decided) {
-                return await Reflect.apply(value, target, args);
-              }
-              decided = true;
-              await decideEntityMatch(host.brain, admin, {
-                entities: pair,
-                decision: "same",
-                evidence: { documentId: proof, version: 1 },
-              });
-              await Reflect.apply(value, target, args);
-              throw new Error("The purge stopped.");
-            };
-          }
-          return typeof value === "function"
-            ? (...args: unknown[]): unknown =>
-                Reflect.apply(value, target, args)
-            : value;
-        },
-      }),
-    };
-    const stopped = await outcome(
-      purge(stopping, writer, content, prepared.token, noCopies)
-    );
-
-    expect({
-      decided,
-      stopped,
-      same: await sameAsFor(host.brain, admin, pair[0]),
-    }).toStrictEqual({
-      decided: true,
-      stopped: "Error: The purge stopped.",
-      same: [],
-    });
-  });
-
   it("records who read a match, and from which collections", async () => {
     const { host, admin, pair, proof } = await adaTwice();
     await decideEntityMatch(host.brain, admin, {
@@ -1716,67 +1507,6 @@ describe("entity linking", () => {
     }).toStrictEqual({ proposals: [], restricted: true });
   });
 
-  it("forgets a `same` whose evidence a purge rewrites, though both entities stay, and keeps it through a purge that changes nothing", async () => {
-    const { host, admin, pair, proof } = await adaTwice();
-    const decide = async (version: number) => {
-      await decideEntityMatch(host.brain, admin, {
-        entities: pair,
-        decision: "same",
-        evidence: { documentId: proof, version },
-      });
-    };
-    const writer = writerOf("admin");
-    const purgeOf = async (terms: string[]) => {
-      const content = {
-        type: "content",
-        documentIds: [proof],
-        terms,
-        reason: "erasure_request",
-      };
-      const prepared = await preparePurge(
-        host.brain,
-        writer,
-        content,
-        noCopies
-      );
-      return await purge(host.brain, writer, content, prepared.token, noCopies);
-    };
-    await decide(1);
-    const before = await sameAsFor(host.brain, admin, pair[0]);
-    // A term the evidence doesn't hold: nothing of it changes.
-    const absent = await purgeOf([`Nobody ${word()}`]);
-    const afterAbsent = await sameAsFor(host.brain, admin, pair[0]);
-    // Only the evidence's words go: both people stay mentioned elsewhere.
-    const rewritten = await purgeOf(["calls"]);
-    const proposals = await entityMatchProposals(host.brain, admin);
-    const after = await sameAsFor(host.brain, admin, pair[0]);
-    // Decided again on what is left, then the purge run again: the
-    // evidence holds the term no more, so the decision stays.
-    await decide(2);
-    const retried = await purgeOf(["calls"]);
-
-    expect({
-      before,
-      absent: absent.versions,
-      afterAbsent,
-      rewritten: rewritten.versions,
-      after,
-      // An open question again.
-      proposals: proposals.length,
-      retried: retried.versions,
-      afterRetry: await sameAsFor(host.brain, admin, pair[0]),
-    }).toStrictEqual({
-      before: [pair[1]],
-      absent: 0,
-      afterAbsent: [pair[1]],
-      rewritten: 1,
-      after: [],
-      proposals: 1,
-      retried: 0,
-      afterRetry: [pair[1]],
-    });
-  });
-
   it("forgets a `same` whose evidence a personal purge deletes, so another member decides the pair again", async () => {
     const { host, pair, sales, support, proof } = await adaTwice();
     const leaver = `leaver-${word()}`;
@@ -1807,10 +1537,7 @@ describe("entity linking", () => {
       evidence: { documentId: note.id, version: 1 },
     });
     const before = await sameAsFor(host.brain, leaverCaller, pair[0]);
-    const writer = writerOf("admin");
-    const input = { type: "personal", userId: leaver, reason: "offboarding" };
-    const prepared = await preparePurge(host.brain, writer, input, noCopies);
-    await purge(host.brain, writer, input, prepared.token, noCopies);
+    await purgeOf(host.brain, writerOf("admin"), leaver);
     // Another member, who never read the purged note, decides it afresh.
     const member: Caller = { userId: "member", reads: both };
     const decided = await outcome(
@@ -1829,69 +1556,6 @@ describe("entity linking", () => {
       before: [pair[1]],
       decided: "ok",
       after: [pair[1]],
-    });
-  });
-
-  it("refuses a `same` whose evidence a purge rewrote as it was decided", async () => {
-    const { host, admin, pair, proof } = await adaTwice();
-    const writer = writerOf("admin");
-    const content = {
-      type: "content",
-      documentIds: [proof],
-      terms: ["calls"],
-      reason: "erasure_request",
-    };
-    let purged = false;
-    // The purge runs between the decision's read of its evidence and its write.
-    const racing = {
-      ...host.brain,
-      db: new Proxy(host.brain.db, {
-        get: (target, property): unknown => {
-          const value: unknown = Reflect.get(target, property);
-          if (property === "batch" && typeof value === "function") {
-            return async (...args: unknown[]): Promise<unknown> => {
-              if (!purged) {
-                purged = true;
-                const prepared = await preparePurge(
-                  host.brain,
-                  writer,
-                  content,
-                  noCopies
-                );
-                await purge(
-                  host.brain,
-                  writer,
-                  content,
-                  prepared.token,
-                  noCopies
-                );
-              }
-              return await Reflect.apply(value, target, args);
-            };
-          }
-          return typeof value === "function"
-            ? (...args: unknown[]): unknown =>
-                Reflect.apply(value, target, args)
-            : value;
-        },
-      }),
-    };
-    const decided = await outcome(
-      decideEntityMatch(racing, admin, {
-        entities: pair,
-        decision: "same",
-        evidence: { documentId: proof, version: 1 },
-      })
-    );
-
-    expect({
-      purged,
-      decided,
-      same: await sameAsFor(host.brain, admin, pair[0]),
-    }).toStrictEqual({
-      purged: true,
-      decided: "brain.revision_conflict",
-      same: [],
     });
   });
 

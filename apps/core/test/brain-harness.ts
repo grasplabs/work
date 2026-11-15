@@ -36,7 +36,7 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { chatIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
-import { pageMaxLimit } from "@grasp-os/shared/knowledge";
+import { pageMaxLimit, purgedMarker } from "@grasp-os/shared/knowledge";
 import type { KnowledgeRead } from "@grasp-os/shared/knowledge";
 import type { PermissionSubjectInput } from "@grasp-os/shared/permissions";
 import { evictDurableObject, runInDurableObject } from "cloudflare:test";
@@ -88,6 +88,7 @@ import {
 import type {
   BrainCollectionKey,
   BrainPersona,
+  BrainUpdate,
   BrainWindow,
 } from "./fixtures/brain-corpus.ts";
 import {
@@ -606,6 +607,27 @@ export const setUpBrainCompany = async (idp: Idp): Promise<BrainCompany> => {
   };
 };
 
+/**
+ * The text `update` saves over document `documentId`: its own, or, for a
+ * removal, the text as it stands with its terms taken out. The term purge
+ * went with the cutover (decision B): an admin edits a document instead.
+ */
+const textOfUpdate = async (
+  admin: BrainCompany["admin"],
+  documentId: string,
+  update: BrainUpdate
+): Promise<string> => {
+  if (update.type === "save") {
+    return update.text;
+  }
+  const { version } = await admin.api.knowledge.getDocument(documentId);
+  let { text } = version;
+  for (const term of update.terms) {
+    text = text.replaceAll(term, purgedMarker);
+  }
+  return text;
+};
+
 /** Applies the updates of `window`, as the admin who owns the corpus. */
 export const applyWindow = async (
   company: BrainCompany,
@@ -615,27 +637,16 @@ export const applyWindow = async (
   for (const update of brainUpdates.filter((each) => each.window === window)) {
     const document = held(company.documents, update.document);
     const { collection, path } = brainDocuments[update.document];
-    if (update.type === "save") {
-      // oxlint-disable-next-line no-await-in-loop -- in order
-      const saved = await admin.api.knowledge.saveDocument({
-        collectionId: held(company.collections, collection),
-        path,
-        text: update.text,
-        ifVersion: document.version,
-      });
-      document.version = saved.currentVersion;
-    } else {
-      const input = {
-        type: "content" as const,
-        documentIds: [document.id],
-        terms: update.terms,
-        reason: "erasure_request" as const,
-      };
-      // oxlint-disable-next-line no-await-in-loop -- in order
-      const { token } = await admin.api.knowledge.preparePurge(input);
-      // oxlint-disable-next-line no-await-in-loop -- in order
-      await admin.api.knowledge.purge(input, token);
-    }
+    // oxlint-disable-next-line no-await-in-loop -- in order
+    const text = await textOfUpdate(admin, document.id, update);
+    // oxlint-disable-next-line no-await-in-loop -- in order
+    const saved = await admin.api.knowledge.saveDocument({
+      collectionId: held(company.collections, collection),
+      path,
+      text,
+      ifVersion: document.version,
+    });
+    document.version = saved.currentVersion;
   }
 };
 

@@ -138,21 +138,14 @@ describe("today's Brain's exports", setUpTime, () => {
     });
   });
 
-  it("are deleted at once once a purge erased what they hold, and tried again while R2 refuses", async () => {
+  it("are deleted at once once a person's erasure ran after them, and tried again while R2 refuses", async () => {
     const admin = await signedInApi(idp, "admin");
-    const marker = `purged${unique().replaceAll("-", "")}`;
-    const document = await companyDocument(
-      admin,
-      `# People\nWrite to ${marker}.`
-    );
+    const leaver = await signedInApi(idp, "user");
+    const marker = `erased${unique().replaceAll("-", "")}`;
+    await companyDocument(admin, `# People\nWrite to ${marker}.`);
     const exportId = await exportedBy(admin, { complete: true });
     const written = await holds(exportId, marker);
-    await purged(admin, {
-      type: "content",
-      documentIds: [document.id],
-      terms: [marker],
-      reason: "erasure_request",
-    });
+    await purged(admin, leaver.userId);
     await runMinuteTasks({ BRAIN_OBJECTS: refusingDeletes() });
     const whileRefused = await holds(exportId, marker);
     await runMinuteTasks();
@@ -162,22 +155,6 @@ describe("today's Brain's exports", setUpTime, () => {
       whileRefused,
       left: await objectsOf(exportId),
     }).toStrictEqual({ written: true, whileRefused: true, left: [] });
-  });
-
-  it("are deleted once a person's erasure ran after them", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const leaver = await signedInApi(idp, "user");
-    const marker = `erased${unique().replaceAll("-", "")}`;
-    await companyDocument(admin, `# People\nWrite to ${marker}.`);
-    const exportId = await exportedBy(admin, { complete: true });
-    await purged(admin, {
-      type: "personal",
-      userId: leaver.userId,
-      reason: "offboarding",
-    });
-    await runMinuteTasks();
-
-    await expect(objectsOf(exportId)).resolves.toStrictEqual([]);
   });
 
   it("left running are stopped, and what they wrote deleted", async () => {
