@@ -165,7 +165,8 @@ const ledgerKeyPattern =
  * store wrote them until it refused what only one person may read
  * (GRA-1822): a replay passes over them. Nothing released holds one, and
  * a store written since holds nothing such an entry hid; one restored
- * from before keeps what it hid (GRA-1903).
+ * from before keeps what it hid (GRA-1903). Removed once staging's Brain
+ * is reset (GRA-1907).
  */
 const personEntryPattern =
   /^erasures\/\d{15}-person-[a-z_]+-[0-9a-f]{64}(?:\/\d+)?$/u;

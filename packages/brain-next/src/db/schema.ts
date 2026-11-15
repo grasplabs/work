@@ -582,7 +582,7 @@ export const knownGroups = sqliteTable("known_groups", {
  * number under the SHA-256 of its source's key. Neither written nor read
  * since that erasure went (GRA-1903). Kept, as expand then contract asks:
  * a release an admin rolls back to reads it as it adds a version, so it
- * is dropped in a later release.
+ * is dropped in a later release (GRA-1907).
  */
 export const erasedVersions = sqliteTable(
   "erased_versions",
