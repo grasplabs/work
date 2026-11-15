@@ -402,6 +402,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "workspace.chat_search_text": { erased: "workspace" },
   "workspace.chat_sources": { erased: "workspace" },
   "workspace.chat_tool_events": { erased: "workspace" },
+  "workspace.held_app_calls": { erased: "workspace" },
   "workspace.memory_uses": { erased: "workspace" },
   "workspace.preview_release_artifacts": { erased: "workspace" },
   "workspace.preview_releases": { erased: "workspace" },
@@ -752,4 +753,5 @@ export const reviewedPersonColumns: Readonly<
   "workspace.custom_widgets": ["person_id"],
   "workspace.dashboard_widgets": ["person_id"],
   "workspace.dashboards": ["person_id"],
+  "workspace.held_app_calls": ["person_id"],
 };
