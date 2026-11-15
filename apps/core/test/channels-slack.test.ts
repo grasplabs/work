@@ -545,19 +545,21 @@ describe("a linked person's answer in Slack", () => {
   it("is posted once as mrkdwn, previews off, never updated, without the links, images, HTML and Slack syntax the model wrote, as Grasp keeps it", async () => {
     const linked = [
       'Read [the policy](https://evil.com/p?d=secret "t"), ![chart](https://evil.com/c.png) and <a href="https://evil.com/a">here</a>.',
-      "Hey <!here> and <@U12345>: <https://evil.com/s|click> in <#C1> & see www.acme.example.",
+      "Hey <!here> and <@U12345>: <https://evil.com/s|click> in <#C1> & see www.acme.example, @U0123ABCD.",
       '~~~js\nif (a < b) { go("<!channel>"); }\n~~~',
     ].join("\n\n");
     // `<!here>` is HTML to the parser, and goes; `<https://…|click>` an
-    // address written out, which stays words.
+    // address written out, which stays words; a bare `@U…` stays text, as
+    // the Slack adapter turns it into a mention only in a text post, never
+    // in a card's blocks.
     const kept = [
       "Read the policy, chart and here.",
-      "Hey  and <@U12345>: https://evil.com/s|click in <#C1> & see www.acme.example.",
+      "Hey  and <@U12345>: https://evil.com/s|click in <#C1> & see www.acme.example, @U0123ABCD.",
       '~~~js\nif (a < b) { go("<!channel>"); }\n~~~',
     ].join("\n\n");
     const sentText = [
       "Read the policy, chart and here.",
-      "Hey  and &lt;@U12345&gt;: https://evil.com/s|click in &lt;#C1&gt; &amp; see www.acme.example.",
+      "Hey  and &lt;@U12345&gt;: https://evil.com/s|click in &lt;#C1&gt; &amp; see www.acme.example, @U0123ABCD.",
       '```\nif (a &lt; b) { go("&lt;!channel&gt;"); }\n```',
     ].join("\n\n");
     const { userId, slackUser } = await linkedPerson();
