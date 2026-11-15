@@ -3606,15 +3606,16 @@ export class Workspace extends DurableObject<Env> {
         .onConflictDoNothing()
         .run();
       if (used.length > 0) {
-        const usedAt = new Date();
-        this.#db
-          .insert(memoryUses)
-          .values(used.map((place) => ({ ...place, usedAt })))
-          .onConflictDoUpdate({
-            target: [memoryUses.store, memoryUses.memory],
-            set: { usedAt: sql`max(${memoryUses.usedAt}, excluded.used_at)` },
-          })
-          .run();
+        // One statement however many: each a bound value would pass the
+        // object's bound on a statement's variables (100).
+        this.ctx.storage.sql.exec(
+          `INSERT INTO memory_uses (store, memory, used_at)
+          SELECT value ->> 0, value ->> 1, ?2 FROM json_each(?1) WHERE true
+          ON CONFLICT (store, memory)
+          DO UPDATE SET used_at = max(used_at, excluded.used_at)`,
+          JSON.stringify(used.map(({ store, memory }) => [store, memory])),
+          Date.now()
+        );
       }
     });
   }
