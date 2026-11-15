@@ -704,9 +704,12 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
     const said = sentinels();
     await mapped(ids);
     await toldWith(ids, said);
-    // Said as the page says them, on each one's own link.
-    await sayOnLink(await openLink(ids.max), stephenSays(said.max));
-    await sayOnLink(await openLink(ids.mia), stephenSays(said.mia));
+    // Said as the page says them, on each one's own link, and kept.
+    const voiced = [
+      await sayOnLink(await openLink(ids.max), stephenSays(said.max)),
+      await sayOnLink(await openLink(ids.mia), stephenSays(said.mia)),
+      await stillKept(stephenSays(said.max)),
+    ];
     const answer = JSON.stringify({
       audio: "AAAA",
       mime: "audio/mpeg",
@@ -724,10 +727,16 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
     await keepLine(env, before, answer);
     await deleteOnLink(ids.max);
     expect({
+      voiced,
       max: await stillKept(stephenSays(said.max)),
       before: await keptLine(env, before),
       mia: await stillKept(stephenSays(said.mia)),
-    }).toStrictEqual({ max: false, before: undefined, mia: true });
+    }).toStrictEqual({
+      voiced: [200, 200, true],
+      max: false,
+      before: undefined,
+      mia: true,
+    });
   });
 
   it("leaves no line kept the flat way, by model and voice, past the cache's next sweep, whatever its age", async () => {
@@ -854,13 +863,17 @@ describe(
       const said = sentinels();
       await mapped(ids);
       await toldWith(ids, said);
-      await sayOnLink(await openLink(ids.max), stephenSays(said.max));
-      await sayOnLink(await openLink(ids.mia), stephenSays(said.mia));
+      const voiced = [
+        await sayOnLink(await openLink(ids.max), stephenSays(said.max)),
+        await sayOnLink(await openLink(ids.mia), stephenSays(said.mia)),
+        await stillKept(stephenSays(said.max)),
+      ];
       await onLink({ action: "withdraw", ...(await openLink(ids.max)) });
       expect({
+        voiced,
         max: await stillKept(stephenSays(said.max)),
         mia: await stillKept(stephenSays(said.mia)),
-      }).toStrictEqual({ max: false, mia: true });
+      }).toStrictEqual({ voiced: [200, 200, true], max: false, mia: true });
     });
 
     it("withdrawing from a lead's interview draws all of the team's work again without their facts, and nothing in the brain rests on them (T5)", async () => {
@@ -1043,7 +1056,7 @@ describe(
       await mapped(ids);
       await toldWith(ids, said);
       const line = stephenSays(said.max);
-      await sayOnLink(await openLink(ids.max), line);
+      await expect(sayOnLink(await openLink(ids.max), line)).resolves.toBe(200);
       const files: R2Bucket = env.FILES;
       const spy = vi
         .spyOn(files, "delete")

@@ -418,6 +418,10 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "onboarding.asked_about": { erased: "interview" },
   "onboarding.brain_sent": { erased: "interview" },
   "onboarding.interview_settings": { erased: "interview" },
+  // An interview's (`link:<person>`) go with it; an admin's
+  // (`admin:<user>`), hashes of what the voice said for them, go with
+  // the interview area too (person-erasure.ts).
+  "onboarding.spoken_keys": { erased: "interview" },
   // The roster's and the onboarding's own: who did what, by ID (D5).
   "onboarding.teams": { company: "the company's roster: a team's lead (D5)" },
   "onboarding.works": { company: "the company's roster: who does what (D5)" },

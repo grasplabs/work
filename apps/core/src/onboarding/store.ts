@@ -548,6 +548,12 @@ export interface TranscriptionSessionNote {
 const linkWho = "link:";
 
 /**
+ * What an admin's voice counts and notes under (speech.ts): `admin:` and
+ * their user ID.
+ */
+export const adminWho = "admin:";
+
+/**
  * The key what is heard for `who` is counted under, beside what is said
  * for them, in the same daily table.
  */
@@ -1056,7 +1062,7 @@ export class Onboarding extends DurableObject<Env> {
     this.#deliverAudit();
     this.ctx.waitUntil(this.#armLinks());
     if (said.length > 0) {
-      await this.#afterForget(said);
+      await this.#afterForget();
     }
     return this.view();
   }
@@ -2114,7 +2120,7 @@ export class Onboarding extends DurableObject<Env> {
     if (lost) {
       // What rested on a revision that no longer counts leaves the brain
       // now, or from the alarm until it does.
-      this.ctx.waitUntil(this.#afterForget([]));
+      this.ctx.waitUntil(this.#afterForget());
     } else if (changed) {
       this.ctx.waitUntil(this.#alarmBy(Date.parse(now) + drawAfterMs));
     }
@@ -2299,7 +2305,7 @@ export class Onboarding extends DurableObject<Env> {
     // Final, with no undo (GRA-329): every output it was in is erased, the
     // brain's records now or from the alarm until they are, and everything
     // the interviewer's voice said in it.
-    await this.#afterForget([person.id]);
+    await this.#afterForget();
     return answered({ withdrawn: true, at: now });
   }
 
@@ -3175,21 +3181,15 @@ export class Onboarding extends DurableObject<Env> {
     if (link.keyMark === null || link.keyMark !== keyMark) {
       return refused("interview.elsewhere");
     }
-    const said = this.ctx.storage.transactionSync(() => {
-      const forgotten = this.#forget(
-        person.id,
-        now,
-        "interview.deleted",
-        interviewee
-      );
+    this.ctx.storage.transactionSync(() => {
+      this.#forget(person.id, now, "interview.deleted", interviewee);
       this.#db
         .update(links)
         .set({ deletedAt: now, version: link.version + 1 })
         .where(eq(links.person, person.id))
         .run();
-      return forgotten;
     });
-    await this.#afterForget([said]);
+    await this.#afterForget();
     return answered({ deleted: true });
   }
 
@@ -3208,26 +3208,20 @@ export class Onboarding extends DurableObject<Env> {
       return false;
     }
     const now = new Date().toISOString();
-    const said = this.ctx.storage.transactionSync(() => {
-      const forgotten = this.#forget(
-        person,
-        now,
-        "interview.new_start",
-        whoIs(by)
-      );
+    this.ctx.storage.transactionSync(() => {
+      this.#forget(person, now, "interview.new_start", whoIs(by));
       this.#db
         .update(links)
         .set({ keyMark: null, deletedAt: null, version: link.version + 1 })
         .where(eq(links.person, person))
         .run();
       this.#changed(by, "onboarding.interview.restarted", {});
-      return forgotten;
     });
     this.#deliverAudit();
     // The new start is made: failing it now would have the same command,
     // given again, start anew a second time and take what was said since.
     try {
-      await this.#afterForget([said]);
+      await this.#afterForget();
     } catch (error) {
       log.error("onboarding.after_forget_failed", {
         error: error instanceof Error ? error.name : "unknown",
@@ -3446,12 +3440,31 @@ export class Onboarding extends DurableObject<Env> {
    * Whom a line said on someone's link is for, from the device it is on,
    * while their interview may be saved: `link:<person>`, the key its
    * voice is counted under (`countVoice`), and the seconds said under it
-   * today. Counted within the link's limit, as every call on it.
+   * today. Counted within the link's limit, as every call on it. The
+   * line asked for is noted by its cache key (`stored`) in this same call,
+   * so no erasure lands between finding the link open and the note
+   * (`#noteSpoken`).
    */
   speechOnLink(
     secretMark: string,
     keyMark: string,
+    stored: string,
+    budget: number,
     now: string = new Date().toISOString()
+  ): LinkAnswer<{ who: string; said: number }> {
+    const found = this.#voiceOnLink(secretMark, keyMark, now);
+    if (found.ok) {
+      const { who, said } = found.value;
+      this.#noteSpoken(who, stored, said < budget);
+    }
+    return found;
+  }
+
+  /** `speechOnLink`'s checks, noting nothing: whom the link's voice is for, and what was said under it today. */
+  #voiceOnLink(
+    secretMark: string,
+    keyMark: string,
+    now: string
   ): LinkAnswer<{ who: string; said: number }> {
     const found = this.#onLink(secretMark, now, "save");
     if (!found.ok) {
@@ -3468,6 +3481,62 @@ export class Onboarding extends DurableObject<Env> {
     }
     const who = `${linkWho}${person.id}`;
     return answered({ who, said: this.voiceSaid(who, now) });
+  }
+
+  /**
+   * The seconds of voice said for the admin `who` today, noting the line
+   * asked for, by its cache key (`stored`), as it is (`#noteSpoken`).
+   */
+  speechForAdmin(who: string, stored: string, budget: number): number {
+    const said = this.voiceSaid(who);
+    this.#noteSpoken(who, stored, said < budget);
+    return said;
+  }
+
+  /**
+   * Notes that the voice was asked to say, for `who`, the text whose cache
+   * key is `stored` (speech-cache.ts `storedKeyOf`: a hash, never the
+   * words): what erasing anything of theirs takes out of the cache, as
+   * said, a sentence or a story at a time (GRA-1897). Only for a line
+   * that may be said (`sayable`): one past the day's budget is said only
+   * from the cache, where a line said before, and noted then, is kept.
+   */
+  #noteSpoken(who: string, stored: string, sayable: boolean): void {
+    if (sayable) {
+      this.#db
+        .insert(spokenKeys)
+        .values({ who, key: stored })
+        .onConflictDoNothing()
+        .run();
+    }
+  }
+
+  /**
+   * Whether the line `stored` is still noted as said for `who`: false once
+   * something of theirs was erased since it was asked for, so a line the
+   * voice said meanwhile is taken out again (speech.ts).
+   */
+  stillNoted(who: string, stored: string): boolean {
+    return (
+      this.#db
+        .select({ key: spokenKeys.key })
+        .from(spokenKeys)
+        .where(and(eq(spokenKeys.who, who), eq(spokenKeys.key, stored)))
+        .all().length > 0
+    );
+  }
+
+  /**
+   * Takes everything the voice said for the admin `user` out of the cache,
+   * as erasing them as a person does (person-erasure.ts). Otherwise their
+   * notes are bounded by their voice budget (an hour of new speech a
+   * day) and go with the kickoff's deletion.
+   */
+  async forgetSpokenForAdmin(user: string): Promise<void> {
+    this.ctx.storage.transactionSync(() => {
+      this.#queueSpokenBy(eq(spokenKeys.who, `${adminWho}${user}`));
+    });
+    await this.forgetLinesNow();
   }
 
   /** Seconds of voice said for `who` today. */
@@ -3507,7 +3576,7 @@ export class Onboarding extends DurableObject<Env> {
     keyMark: string,
     now: string = new Date().toISOString()
   ): LinkAnswer<{ who: string; heard: number; person: string }> {
-    const found = this.speechOnLink(secretMark, keyMark, now);
+    const found = this.#voiceOnLink(secretMark, keyMark, now);
     if (!found.ok) {
       return found;
     }
@@ -4432,7 +4501,7 @@ export class Onboarding extends DurableObject<Env> {
         // What the voice said on the admins' onboarding may have quoted it
         // (the sponsor, what the company does): all of it goes from the
         // cache, said anew when asked.
-        this.#queueSpokenBy(like(spokenKeys.who, "admin:%"));
+        this.#queueSpokenBy(like(spokenKeys.who, `${adminWho}%`));
         this.#changed(by, "onboarding.kickoff.deleted", {
           kickoff: row === undefined ? 0 : 1,
           records,
@@ -4769,23 +4838,17 @@ export class Onboarding extends DurableObject<Env> {
     if (link === undefined) {
       return false;
     }
-    const said = this.ctx.storage.transactionSync(() => {
-      const forgotten = this.#forget(
-        person,
-        now,
-        "interview.deleted",
-        whoIs(by)
-      );
+    this.ctx.storage.transactionSync(() => {
+      this.#forget(person, now, "interview.deleted", whoIs(by));
       this.#db
         .update(links)
         .set({ deletedAt: now, version: link.version + 1 })
         .where(eq(links.person, person))
         .run();
       this.#changed(by, "onboarding.interview.deleted", {});
-      return forgotten;
     });
     this.#deliverAudit();
-    await this.#afterForget([said]);
+    await this.#afterForget();
     return true;
   }
 
@@ -7187,13 +7250,11 @@ export class Onboarding extends DurableObject<Env> {
 
   /**
    * Removes what someone said, where their interview stood and every
-   * drawing it was in (`#erase`), and notes why. Returns whose it was,
-   * for what follows (`#afterForget`).
+   * drawing it was in (`#erase`), and notes why.
    */
-  #forget(person: string, now: string, what: string, by: string): string {
+  #forget(person: string, now: string, what: string, by: string): void {
     this.#erase(person);
     this.#noted(person, what, now, by);
-    return person;
   }
 
   /**
@@ -7371,12 +7432,13 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * Keeps what a save erases (`#erasing`), in the transaction it is called
    * in: the approvals of the statements dropped, which are digests of
-   * their words; the voice's lines to go from the cache; and the purge
-   * mark moved on, so a line being voiced as it goes is taken out again
-   * once kept (speech.ts `keepUnlessPurged`) and a drawing under way keeps
-   * nothing, and is drawn again. A removed line is noted only in the
-   * onboarding's own log, as a delete from the link is: in the audit log
-   * its moment would tell the admin whose interview it was.
+   * their words; and everything the voice said in the interview, to go
+   * from the cache (`#queueSpokenOf`; a line being said as it goes is
+   * taken out once kept, speech.ts `keepUnlessErased`). Nothing drawn
+   * reads a line or a statement taken out, so no drawing is touched. A
+   * removed line is noted only in the onboarding's own log, as a delete
+   * from the link is: in the audit log its moment would tell the admin
+   * whose interview it was.
    */
   #keepErased(
     person: string,
@@ -7396,7 +7458,6 @@ export class Onboarding extends DurableObject<Env> {
     }
     if (erasing.lines > 0 || erasing.dropped.length > 0) {
       this.#queueSpokenOf(person);
-      this.#purged();
     }
     if (erasing.lines > 0) {
       this.#noted(person, "interview.line_removed", now);
@@ -7472,26 +7533,8 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Notes that the voice was asked to say, for `who`, the texts whose cache
-   * keys are `keys` (speech-cache.ts `storedKeysOf`: hashes, never words):
-   * what erasing anything of theirs takes out of the cache, as said, a
-   * sentence or a story at a time (GRA-1897).
-   */
-  noteSpoken(who: string, keys: readonly string[]): void {
-    this.ctx.storage.transactionSync(() => {
-      for (const key of keys) {
-        this.#db
-          .insert(spokenKeys)
-          .values({ who, key })
-          .onConflictDoNothing()
-          .run();
-      }
-    });
-  }
-
-  /**
    * Queues every text the voice was asked to say in `person`'s interview
-   * to go from the cache (`noteSpoken`), and forgets having said them, in
+   * to go from the cache (`#noteSpoken`), and forgets having said them, in
    * the transaction it is called in. A request for speech holds only its
    * text, never which line or statement it voices, so anything erased of
    * an interview takes all of its speech out: a cache, said again when
@@ -7502,7 +7545,7 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Queues the keys noted (`noteSpoken`) for whoever `who` matches, and
+   * Queues the keys noted (`#noteSpoken`) for whoever `who` matches, and
    * forgets them, in the transaction it is called in. Returns how many.
    */
   #queueSpokenBy(who: SQL): number {
@@ -7535,14 +7578,10 @@ export class Onboarding extends DurableObject<Env> {
    * (`#armDrawing`): the brain's records rest on someone gone until they
    * are out, and the lines wait by their stored keys, hashes, never what
    * was said (`linesToForget`, GRA-329), queued by the erasing transaction
-   * itself; any said for them since is queued here.
+   * itself (`#erase`); one the voice says as it goes is taken out once
+   * kept (speech.ts `keepUnlessErased`).
    */
-  async #afterForget(persons: readonly string[]): Promise<void> {
-    this.ctx.storage.transactionSync(() => {
-      for (const person of persons) {
-        this.#queueSpokenOf(person);
-      }
-    });
+  async #afterForget(): Promise<void> {
     await this.#armDrawing();
     try {
       await this.purgeBrain();
@@ -7556,8 +7595,8 @@ export class Onboarding extends DurableObject<Env> {
 
   /**
    * Takes the voice's lines kept by `stored` (hashes) out of the cache, now
-   * or from the alarm until done: a line the voice said while a content
-   * purge landed (speech.ts, `keepUnlessPurged`).
+   * or from the alarm until done: a line the voice said while what it
+   * was said for was erased (speech.ts, `keepUnlessErased`).
    */
   async forgetSpoken(stored: readonly string[]): Promise<void> {
     this.ctx.storage.transactionSync(() => {

@@ -13,7 +13,7 @@ import { jsonOf } from "./request-body.ts";
 // `caches.default`.
 //
 // Every way a line was said sits under one folder named by its words
-// alone (`linePrefixOf`): erasing a line (an interview deleted, a purge)
+// alone (`storedKeyOf`): erasing a line (an interview deleted, a purge)
 // takes the whole folder, whatever voice, model, tone or language it was
 // said in, so no change of speech provider or settings can leave a copy
 // behind. A line kept the way it was before this layout (one flat object,
@@ -44,8 +44,11 @@ export interface SpokenKey {
   language: string;
 }
 
-/** The folder every way of saying the line `text` is kept in. */
-const linePrefixOf = async (text: string): Promise<string> =>
+/**
+ * The folder every way of saying the line `text` is kept in: what erasing
+ * it takes out of the cache, by a hash of its words, never the words.
+ */
+export const storedKeyOf = async (text: string): Promise<string> =>
   `${prefix}${await sha256Hex(text)}/`;
 
 const keyOf = async ({
@@ -55,7 +58,7 @@ const keyOf = async ({
   model,
   language,
 }: SpokenKey): Promise<string> =>
-  `${await linePrefixOf(text)}${await sha256Hex(JSON.stringify([model, voice, language, spoken]))}.json`;
+  `${await storedKeyOf(text)}${await sha256Hex(JSON.stringify([model, voice, language, spoken]))}.json`;
 
 /** Whether `key` is kept the way lines were before their folders: flat. */
 const isFlat = (key: string): boolean =>
@@ -99,9 +102,7 @@ const deleteBatch = 1000;
  */
 export const storedKeysOf = async (
   texts: readonly string[]
-): Promise<string[]> => [
-  ...new Set(await Promise.all(texts.map(linePrefixOf))),
-];
+): Promise<string[]> => [...new Set(await Promise.all(texts.map(storedKeyOf)))];
 
 /** Every object kept in the folder `folder`, a page at a time. */
 const keptIn = async (

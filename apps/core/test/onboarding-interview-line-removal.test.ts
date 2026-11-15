@@ -172,10 +172,15 @@ const takenOutFrom = async (
   // The read-back as the page says it: a story in words of its own, not
   // the statement's; and a line said for an admin, elsewhere.
   const story = `So it starts with ${theirs}, as you said.`;
-  await sayOnLink(link, story);
   const { session } = await signedInWithRole(idp, "admin");
   const elsewhere = `Welcome back, ${unique()}.`;
-  await sayForAdmin(session, elsewhere);
+  // Both said, and kept: what each test then finds gone was there.
+  expect([
+    await sayOnLink(link, story),
+    await sayForAdmin(session, elsewhere),
+    await stillKept(story),
+    await stillKept(elsewhere),
+  ]).toStrictEqual([200, 200, true, true]);
   return { link, person, fact, other, story, elsewhere, out, version: v2 };
 };
 
@@ -236,17 +241,19 @@ describe("removing a line of an interview", { timeout: 60_000 }, () => {
     const { link, person, progress, version } = await saying(stephen, theirs);
     // Stephen's line as the page says it: a sentence at a time.
     const pieces = [`So ${stephen} is where it starts.`, "Is that right?"];
+    const statuses: number[] = [];
     for (const piece of pieces) {
       // oxlint-disable-next-line no-await-in-loop -- one sentence after another
-      await sayOnLink(link, piece);
+      statuses.push(await sayOnLink(link, piece));
     }
     const { session } = await signedInWithRole(idp, "admin");
     const elsewhere = `And after that? ${unique()}`;
-    await sayForAdmin(session, elsewhere);
+    statuses.push(await sayForAdmin(session, elsewhere));
     const before = {
       stephen: await onboardingTablesWith(stephen),
       theirs: await onboardingTablesWith(theirs),
       said: await Promise.all(pieces.map(stillKept)),
+      statuses,
     };
 
     let saved: z.output<typeof savedSchema> | undefined;
@@ -279,6 +286,7 @@ describe("removing a line of an interview", { timeout: 60_000 }, () => {
         stephen: ["interviews"],
         theirs: ["interviews"],
         said: [true, true],
+        statuses: [200, 200, 200],
       },
       onboarding: [],
       core: [],

@@ -18,13 +18,13 @@ import { identify } from "../auth/identity.ts";
 import { errorResponse } from "../errors.ts";
 import { platformAi } from "../platform-ai.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
-import { keepLine, keptLine, storedKeysOf } from "../speech-cache.ts";
+import { keepLine, keptLine, storedKeyOf } from "../speech-cache.ts";
 import type { SpokenKey } from "../speech-cache.ts";
 import { platformSpeech, speechModelOf } from "../speech.ts";
 import { auditStaffRoute } from "../staff-audit.ts";
 import { linkHeaders, linkRefusal } from "./links.ts";
 import { spokenOf } from "./spoken-lines.ts";
-import { onboardingStore } from "./store.ts";
+import { adminWho, onboardingStore } from "./store.ts";
 import type { Took } from "./store.ts";
 
 // `POST /api/speech` (`@grasp-os/shared/voice`): a line of the onboarding
@@ -148,15 +148,22 @@ const requestOf = async (request: Request) => {
 
 type Asked = NonNullable<Awaited<ReturnType<typeof requestOf>>>;
 
-/** Whom a line on someone's link is for, or why their link refuses it. */
+/**
+ * Whom a line on someone's link is for, or why their link refuses it. The
+ * store notes the line's cache key (`stored`) in the same call that finds
+ * the link open, so no erasure lands between them (`speechOnLink`).
+ */
 const onLink = async (
   env: Env,
   link: NonNullable<Asked["link"]>,
+  stored: string,
   requestId: string
 ): Promise<Listener | Response> => {
   const found = await onboardingStore(env).speechOnLink(
     await sha256Hex(link.secret),
-    await sha256Hex(link.key)
+    await sha256Hex(link.key),
+    stored,
+    voiceBudgets.link
   );
   if (!found.ok) {
     if (found.code === "interview.link_invalid") {
@@ -173,10 +180,15 @@ const onLink = async (
   };
 };
 
-/** Whom a line for an admin signed in is for, or why it is refused. */
+/**
+ * Whom a line for an admin signed in is for, or why it is refused; the
+ * store notes the line's cache key (`stored`) as it reads what they said
+ * today (`speechForAdmin`).
+ */
 const forAdmin = async (
   request: Request,
   env: Env,
+  stored: string,
   requestId: string
 ): Promise<Listener | Response> => {
   const fetchSite = request.headers.get("sec-fetch-site");
@@ -193,10 +205,14 @@ const forAdmin = async (
   if (!isAdmin(person.role)) {
     return refused(403, roleErrors.create("role.forbidden"), requestId);
   }
-  const who = `admin:${person.userId}`;
+  const who = `${adminWho}${person.userId}`;
   return {
     who,
-    said: await onboardingStore(env).voiceSaid(who),
+    said: await onboardingStore(env).speechForAdmin(
+      who,
+      stored,
+      voiceBudgets.admin
+    ),
     budget: voiceBudgets.admin,
     // The admin's own onboarding, as the prototype counted it.
     counted: "reading",
@@ -241,24 +257,25 @@ const keep = async (
 };
 
 /**
- * Keeps a line said, unless a content purge reached the onboarding since
- * `purges` was taken (the store's `purgeMark`): then it is taken out again
- * right after it was put, as an R2 put can't be conditional, and tried
- * again by the store's alarm until it is gone. A purge that
- * lands after this check finds the line kept, and takes it out itself
- * (the store's `rewriteInterview`).
+ * Keeps a line said, unless what was said for `who` was erased while the
+ * voice said it: its key (`stored`), noted as it was asked, is then gone
+ * from the store (`stillNoted`), and the line is taken out again right
+ * after it was put, as an R2 put can't be conditional, and by the store's
+ * alarm until it is gone. An erasure that lands after this check finds
+ * the key noted, and takes the line out itself.
  */
-const keepUnlessPurged = async (
+const keepUnlessErased = async (
   env: Env,
+  who: string,
+  stored: string,
   key: SpokenKey,
   answer: string,
-  purges: number,
   requestId: string
 ): Promise<void> => {
   await keep(env, key, answer, requestId);
   const store = onboardingStore(env);
-  if ((await store.purgeMark()) !== purges) {
-    await store.forgetSpoken(await storedKeysOf([key.text]));
+  if (!(await store.stillNoted(who, stored))) {
+    await store.forgetSpoken([stored]);
   }
 };
 
@@ -294,6 +311,7 @@ const say = async (
   env: Env,
   asked: Asked,
   listener: Listener,
+  stored: string,
   requestId: string
 ): Promise<Response> => {
   const model = speechModelOf(asked.quick);
@@ -306,13 +324,6 @@ const say = async (
     model,
     language: asked.language,
   };
-  // Noted by its cache key, as it was asked, before anything is said or
-  // kept: erasing anything of theirs takes exactly what was said out of
-  // the cache, a sentence or a story at a time (GRA-1897).
-  await onboardingStore(env).noteSpoken(
-    listener.who,
-    await storedKeysOf([asked.text])
-  );
   const kept = await keptAnswer(env, key, requestId);
   if (kept !== undefined) {
     return answered(kept);
@@ -322,10 +333,6 @@ const say = async (
   if (listener.said >= listener.budget) {
     return refused(429, speechErrors.create("speech.limited"), requestId);
   }
-  // A content purge that lands while the voice says the line may have
-  // taken it out of the cache already: taken before the request, the
-  // mark says whether one did (`keepUnlessPurged`).
-  const purges = await onboardingStore(env).purgeMark();
   let speech: Awaited<ReturnType<ReturnType<typeof platformSpeech>["speak"]>>;
   try {
     speech = await platformSpeech(env, {
@@ -344,7 +351,7 @@ const say = async (
   };
   const body = JSON.stringify(answer);
   await Promise.all([
-    keepUnlessPurged(env, key, body, purges, requestId),
+    keepUnlessErased(env, listener.who, stored, key, body, requestId),
     countSaid(env, listener, secondsOf(speech.words), requestId),
   ]);
   return answered(body);
@@ -367,12 +374,17 @@ export const speechResponse = async (
   if (asked === undefined) {
     return refused(400, speechErrors.create("speech.invalid"), requestId);
   }
+  // What was said is noted by this key (a hash, never the words) as it is
+  // asked, and only for a line that may be said: erasing anything of
+  // theirs takes exactly what was said out of the cache, a sentence or a
+  // story at a time (GRA-1897).
+  const stored = await storedKeyOf(asked.text);
   const listener =
     asked.link === undefined
-      ? await forAdmin(request, env, requestId)
-      : await onLink(env, asked.link, requestId);
+      ? await forAdmin(request, env, stored, requestId)
+      : await onLink(env, asked.link, stored, requestId);
   if (listener instanceof Response) {
     return listener;
   }
-  return await say(env, asked, listener, requestId);
+  return await say(env, asked, listener, stored, requestId);
 };
