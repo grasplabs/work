@@ -6133,10 +6133,6 @@ msgstr "Grasp checks what it takes to connect it. You find it under Requested."
 msgid "Grasp converts uploaded documents on this deployment: nothing is sent out."
 msgstr "Grasp converts uploaded documents on this deployment: nothing is sent out."
 
-#: src/settings/ai-providers.tsx
-msgid "Grasp converts uploaded PDFs with {whereItRuns}, using Grasp's own key."
-msgstr "Grasp converts uploaded PDFs with {whereItRuns}, using Grasp's own key."
-
 #: src/chat/failure.ts
 msgid "Grasp could not be reached. Try again."
 msgstr "Grasp could not be reached. Try again."

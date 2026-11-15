@@ -6133,10 +6133,6 @@ msgstr "Grasp prüft, was es braucht, um sie zu verbinden. Sie finden sie unter 
 msgid "Grasp converts uploaded documents on this deployment: nothing is sent out."
 msgstr "Grasp wandelt hochgeladene Dokumente in dieser Umgebung selbst um: Nichts wird nach außen gesendet."
 
-#: src/settings/ai-providers.tsx
-msgid "Grasp converts uploaded PDFs with {whereItRuns}, using Grasp's own key."
-msgstr "Grasp wandelt hochgeladene PDFs mit {whereItRuns} um, mit Grasps eigenem Schlüssel."
-
 #: src/chat/failure.ts
 msgid "Grasp could not be reached. Try again."
 msgstr "Grasp war nicht erreichbar. Versuchen Sie es erneut."
