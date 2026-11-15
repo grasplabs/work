@@ -3,14 +3,19 @@ import type { Finding, FoundMemory, Reader } from "./contract.ts";
 import { foldIdentifier, foldName } from "./entities.ts";
 import {
   endedAtSql,
+  candidatesOuter,
+  chosenMemories,
+  dateOf,
   memoriesByWords,
   memoriesSql,
   memoryOf,
   memoryRows,
   droppedSql,
+  orderOf,
   visibleSql,
 } from "./memories.ts";
-import type { MemoryRow } from "./memories.ts";
+import type { CandidateRow, MemoryRow, UsedAt } from "./memories.ts";
+import { byFreshness } from "./order.ts";
 import { readableSql } from "./reader-sets.ts";
 import type { WayRunner } from "./recall-counts.ts";
 
@@ -226,9 +231,10 @@ const stepSql = memoriesSql({
 /**
  * `?1` one step of the walk (JSON: `here`, each `[row, whole]`; `before`,
  * the rows read whole at an earlier step; `reached`, every row the walk
- * has reached, this step's too), `?5` the room left: the current memories
- * the reader may read about the entities of this step, confirmed first,
- * then the newest. Of an entity read `whole`, its facts and its
+ * has reached, this step's too): the current memories the reader may read
+ * about the entities of this step, as candidates (memories.ts
+ * `candidatesOuter`), for the walk to order and cut with the room it has
+ * left (`byEntities`). Of an entity read `whole`, its facts and its
  * relations; of another (a hub, or one on the last step), its own facts
  * and its relations to entities the walk reached: a relation between two
  * reached entities is a memory about both (GRA-1742), and one leading
@@ -270,18 +276,21 @@ reached AS MATERIALIZED (
   filter: `judged.is_current = 1
     AND m.entity NOT IN (SELECT entity FROM before)
     AND (m.object IS NULL OR m.object NOT IN (SELECT entity FROM before))`,
-  order: "confirmation IS NULL, m.learned_at DESC, m.id DESC",
+  order: "m.row",
+  outer: candidatesOuter(),
 });
 
 /** How a memory is ordered and placed: what `FoundMemory` adds to `Memory`. */
 const foundOf = (
   row: MemoryRow,
-  extra: { words?: number; exact?: number; step?: number }
+  used: UsedAt,
+  extra: { step?: number }
 ): FoundMemory => ({
   ...memoryOf(row),
-  words: extra.words ?? 0,
-  exact: extra.exact ?? 0,
+  words: 0,
+  exact: 0,
   step: extra.step ?? 0,
+  usedAt: dateOf(used.get(row.id)),
   context: null,
 });
 
@@ -346,7 +355,8 @@ const byEntities = (
   sql: SqlStorage,
   question: string,
   reader: Reader,
-  at: number
+  at: number,
+  used: UsedAt
 ): Reached[] => {
   const asked = namedBy(question);
   const named = sql
@@ -362,9 +372,13 @@ const byEntities = (
   if (named.length === 0) {
     return [];
   }
-  // One step at a time, nearest first, each read with the room the list
-  // has left: the nearer steps always rank first, so once they fill it,
-  // what lies further is never read.
+  // One step at a time, nearest first, each cut to the room the list has
+  // left: the nearer steps always rank first, so once they fill it, what
+  // lies further is never read. A step's candidates are judged by one
+  // statement, ordered and cut here (order.ts `byFreshness`), and the
+  // chosen read whole by a second (memories.ts `chosenMemories`), in the
+  // same synchronous step: no await between them, so both read one
+  // snapshot, and the second judges them again all the same.
   const found: Reached[] = [];
   const reached = new Set<number>();
   const before: number[] = [];
@@ -379,22 +393,26 @@ const byEntities = (
     const hubs = last ? new Set<number>() : hubsOf(sql, frontier, reader, at);
     const whole = last ? [] : frontier.filter((entity) => !hubs.has(entity));
     const wholeSet = new Set(whole);
+    const chosen = run<CandidateRow>(
+      sql,
+      stepReadSql,
+      JSON.stringify({
+        here: frontier.map((entity) => [entity, wholeSet.has(entity) ? 1 : 0]),
+        before,
+        reached: [...reached],
+      }),
+      reader,
+      at,
+      -1
+    )
+      .map((candidate) => ({ ...orderOf(candidate, used), row: candidate.row }))
+      .toSorted(byFreshness)
+      .slice(0, recallLimit - found.length)
+      .map(({ row }) => row);
     found.push(
-      ...run<MemoryRow>(
-        sql,
-        stepReadSql,
-        JSON.stringify({
-          here: frontier.map((entity) => [
-            entity,
-            wholeSet.has(entity) ? 1 : 0,
-          ]),
-          before,
-          reached: [...reached],
-        }),
-        reader,
-        at,
-        recallLimit - found.length
-      ).map((row) => foundOf(row, { step }))
+      ...chosenMemories(sql, chosen, reader, at).map((row) =>
+        foundOf(row, used, { step })
+      )
     );
     if (found.length >= recallLimit || whole.length === 0) {
       return found;
@@ -438,7 +456,8 @@ const rivalsOf = (
   sql: SqlStorage,
   found: readonly Reached[],
   reader: Reader,
-  at: number
+  at: number,
+  used: UsedAt
 ): Reached[] => {
   const facts = new Map<string, [number, string]>();
   const ids = new Set(found.map(({ id }) => id));
@@ -468,7 +487,7 @@ const rivalsOf = (
     -1
   )
     .filter(({ id }) => !ids.has(id))
-    .map((row) => foundOf(row, {}));
+    .map((row) => foundOf(row, used, {}));
 };
 
 /**
@@ -519,9 +538,19 @@ export type Reached = FoundMemory;
  */
 export const memoriesByTheirWords = (
   sql: SqlStorage,
-  { question, reader, at }: { question: string; reader: Reader; at: number }
+  {
+    question,
+    reader,
+    at,
+    used,
+  }: {
+    question: string;
+    reader: Reader;
+    at: number;
+    used: UsedAt;
+  }
 ): Reached[] =>
-  memoriesByWords(sql, { question, reader, at }).map((memory) => ({
+  memoriesByWords(sql, { question, reader, at, used }).map((memory) => ({
     ...memory,
     step: 0,
     context: null,
@@ -540,15 +569,22 @@ export const findMemories = (
     question,
     reader,
     at,
+    used,
     words,
-  }: { question: string; reader: Reader; at: number; words: Reached[] },
+  }: {
+    question: string;
+    reader: Reader;
+    at: number;
+    used: UsedAt;
+    words: Reached[];
+  },
   way: WayRunner
 ): Finding["memories"] => {
   const entities =
     question.trim() === ""
       ? []
-      : way("entities", () => byEntities(sql, question, reader, at));
-  const rivals = rivalsOf(sql, [...words, ...entities], reader, at);
+      : way("entities", () => byEntities(sql, question, reader, at, used));
+  const rivals = rivalsOf(sql, [...words, ...entities], reader, at, used);
   return {
     words: withContext(sql, words),
     entities: withContext(sql, entities),

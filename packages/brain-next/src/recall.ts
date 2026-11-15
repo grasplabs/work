@@ -13,7 +13,7 @@ import type {
 } from "./contract.ts";
 import { exactsOf } from "./exact.ts";
 import type { Exact } from "./exact.ts";
-import { readMoment } from "./memories.ts";
+import { readMoment, usedAtOf } from "./memories.ts";
 import { readableSql } from "./reader-sets.ts";
 import type { WayRunner } from "./recall-counts.ts";
 import { findMemories, memoriesByTheirWords } from "./recall-memories.ts";
@@ -439,7 +439,7 @@ const byMeaning = (
  */
 const findOf = (
   sql: SqlStorage,
-  { question, reader, asOf, meaning }: RecallRequest,
+  { question, reader, asOf, meaning, used }: RecallRequest,
   way: WayRunner,
   of: "passages" | "passages and memories"
 ): Finding => {
@@ -453,6 +453,7 @@ const findOf = (
   // believed and true then, one moment for both (recall-memories.ts).
   // Read only when memories are: passages alone need no moment of theirs.
   const memoriesAt = withMemories ? (asOf?.getTime() ?? readMoment(sql)) : 0;
+  const usedAt = usedAtOf(used);
   const {
     memoryWords,
     ...words
@@ -468,6 +469,7 @@ const findOf = (
                 question,
                 reader,
                 at: memoriesAt,
+                used: usedAt,
               })
             : [],
         }));
@@ -484,7 +486,7 @@ const findOf = (
   const memories = withMemories
     ? findMemories(
         sql,
-        { question, reader, at: memoriesAt, words: memoryWords },
+        { question, reader, at: memoriesAt, used: usedAt, words: memoryWords },
         way
       )
     : { words: [], entities: [], rivals: [] };

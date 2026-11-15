@@ -1,4 +1,9 @@
-import { interviewLimits } from "@grasp-os/shared/interview-links";
+import {
+  erasedFact,
+  interviewLimits,
+  nextFactId,
+  removedLine,
+} from "@grasp-os/shared/interview-links";
 import type {
   InterviewFact,
   InterviewLine,
@@ -183,7 +188,8 @@ export const afterTurn = (
     .filter(({ quote }) => quote !== "")
     .map(({ quote, tag }) => ({ quote, tag }));
   const lines = progress.lines.map((line, at) =>
-    at === answered && marks.length > 0
+    // A line they removed meanwhile takes no marks: it holds nothing.
+    at === answered && marks.length > 0 && line.removed !== true
       ? {
           ...line,
           marks: [...(line.marks ?? []), ...marks].slice(
@@ -213,7 +219,6 @@ export const afterTurn = (
   const have = new Set(
     changed.filter(({ out }) => out !== true).map(({ text }) => sameWords(text))
   );
-  let next = changed.length;
   const added: InterviewFact[] = [];
   for (const fact of turn.facts) {
     const words = sameWords(fact.text);
@@ -223,9 +228,8 @@ export const afterTurn = (
       changed.length + added.length < interviewLimits.facts
     ) {
       have.add(words);
-      next += 1;
       added.push({
-        id: `f${next}`,
+        id: nextFactId([...changed, ...added]),
         tag: fact.tag,
         text: fact.text,
         record: fact.record,
@@ -241,6 +245,21 @@ export const afterTurn = (
     wants: turn.wants,
   };
 };
+
+/**
+ * `progress` with the line `at` removed by them (GRA-1897): its words, its
+ * marks and its file's name gone, its place kept, so a turn under way
+ * still finds the line it answers.
+ */
+export const withoutLine = (
+  progress: InterviewProgress,
+  at: number
+): InterviewProgress => ({
+  ...progress,
+  lines: progress.lines.map((line, each) =>
+    each === at ? removedLine(line) : line
+  ),
+});
 
 /** A line of the read-back, put right by them: their words, at once, also for the record until Stephen has heard of it. */
 export const withFactText = (
@@ -300,7 +319,11 @@ export const approved = (progress: InterviewProgress): InterviewProgress => ({
   person: "completed",
   wants: "end",
   adding: false,
-  facts: progress.facts.map((fact) => ({ ...fact, agreed: true })),
+  // What they took out is erased for good now, in its place, as core keeps
+  // it (GRA-1897): no copy of this page holds its words any more.
+  facts: progress.facts.map((fact) =>
+    fact.out === true ? erasedFact(fact) : { ...fact, agreed: true as const }
+  ),
 });
 
 /** Back after agreeing, to add something: only what is new will be read back. */

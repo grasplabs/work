@@ -49,13 +49,17 @@ expectTypeOf<BrainPack["notFound"][number]>().toEqualTypeOf<
 
 // The request: the question and the budget as the Brain takes them, the
 // moment as a string core reads into the Brain's date, and nothing of
-// who reads: core names the reader, never the caller.
+// who reads or what they used: core names the reader and their use
+// (GRA-1753), never the caller.
 expectTypeOf<BrainRecall["question"]>().toEqualTypeOf<Request["question"]>();
 expectTypeOf<Mutable<BrainRecall["budget"]>>().toEqualTypeOf<
   Request["budget"]
 >();
 expectTypeOf<Exclude<keyof BrainRecall, "asOf">>().toEqualTypeOf<
-  Exclude<keyof Request, "asOf" | "reader" | "meaning" | "withoutMeaning">
+  Exclude<
+    keyof Request,
+    "asOf" | "reader" | "used" | "meaning" | "withoutMeaning"
+  >
 >();
 expectTypeOf<Request["asOf"]>().toEqualTypeOf<Date | undefined>();
 

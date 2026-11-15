@@ -35,6 +35,7 @@ import m0032 from './0032_chat_turn_versions.sql';
 import m0033 from './0033_draft_definitions.sql';
 import m0034 from './0034_chat_make.sql';
 import m0035 from './0035_answer_agent.sql';
+import m0036 from './0036_greedy_rafael_vega.sql';
 
   export default {
     journal,
@@ -74,7 +75,8 @@ m0031,
 m0032,
 m0033,
 m0034,
-m0035
+m0035,
+m0036
     }
   }
   

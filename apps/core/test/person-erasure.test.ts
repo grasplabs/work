@@ -55,7 +55,9 @@ import {
   signedIn,
   signedInApi,
   staffPerson,
+  unique,
 } from "./sign-in.ts";
+import { sayForAdmin, stillKept } from "./spoken.ts";
 import { connectDb } from "./test-env.ts";
 import { publishDefinition } from "./workflow-publishing.ts";
 
@@ -1344,6 +1346,45 @@ describe("erasing a person", () => {
       firstRuns: "pending",
       laterStops: 1,
       laterRuns: "complete",
+    });
+  });
+
+  it("takes what the voice said for them as an admin out of its cache, and leaves another admin's", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = await signedInApi(idp, "admin");
+    const theirs = `Hello ${unique().replaceAll(/\d/gu, "x")}, I'm Stephen.`;
+    const other = `Hello ${unique().replaceAll(/\d/gu, "x")}, welcome back.`;
+    const said = [
+      await sayForAdmin(person.session, theirs),
+      await sayForAdmin(admin.session, other),
+    ];
+    const before = [await stillKept(theirs), await stillKept(other)];
+    await admin.api.members.remove(person.userId);
+
+    await admin.api.members.erase(person.userId, String(person.person.name));
+
+    const noted = await runInDurableObject(
+      onboardingStore(env),
+      (_instance, state) =>
+        state.storage.sql
+          .exec(
+            "SELECT key FROM spoken_keys WHERE who = ?",
+            `admin:${person.userId}`
+          )
+          .toArray().length
+    );
+    expect({
+      said,
+      before,
+      theirs: await stillKept(theirs),
+      other: await stillKept(other),
+      noted,
+    }).toStrictEqual({
+      said: [200, 200],
+      before: [true, true],
+      theirs: false,
+      other: true,
+      noted: 0,
     });
   });
 
