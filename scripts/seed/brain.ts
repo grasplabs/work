@@ -40,6 +40,7 @@ import { uploadErrors } from "@grasp-os/shared/uploads";
 import type { ChatSeed } from "./chats.ts";
 import type { PersonKey, TeamName } from "./company.ts";
 import {
+  affordability,
   aiGuideline,
   approvalLimits,
   codingRules,
@@ -90,64 +91,70 @@ export const uploads: UploadSeed[] = [
     name: "Required documents.docx",
     by: "sanne",
     readers: "everyone",
-    text: requiredDocuments.body,
+    text: requiredDocuments,
   },
   {
     name: "Complaints procedure.docx",
     by: "sanne",
     readers: "everyone",
-    text: complaintsProcedure.body,
+    text: complaintsProcedure,
   },
   {
     name: "Response times.docx",
     by: "sanne",
     readers: "everyone",
-    text: responseTimes.body,
+    text: responseTimes,
   },
   {
     name: "AI and data guideline.docx",
     by: "pieter",
     readers: "everyone",
-    text: aiGuideline.body,
+    text: aiGuideline,
   },
   // A team's, by one of its members.
   {
     name: "Month-end close.docx",
     by: "eva",
     readers: "Finance",
-    text: monthEndClose.body,
-    update: monthEndCloseUpdated.body,
+    text: monthEndClose,
+    update: monthEndCloseUpdated,
   },
   {
     name: "Coding supplier invoices.docx",
     by: "eva",
     readers: "Finance",
-    text: codingRules.body,
+    text: codingRules,
   },
   {
     name: "Approval limits.docx",
     by: "eva",
     readers: "Finance",
-    text: approvalLimits.body,
+    text: approvalLimits,
+  },
+  {
+    name: "Affordability calculation.docx",
+    by: "mark",
+    readers: "Mortgage advice",
+    text: affordability,
   },
   {
     name: "Lender requirements.docx",
     by: "mark",
     readers: "Mortgage advice",
-    text: lenderRequirements.body,
+    text: lenderRequirements,
   },
   {
     name: "Handing a file over.docx",
     by: "nina",
     readers: "Client onboarding",
-    text: handoverChecklist.body,
-    update: handoverChecklistUpdated.body,
+    text: handoverChecklist,
+    update: handoverChecklistUpdated,
   },
   {
     name: "Know your customer.docx",
     by: "joost",
     readers: "Compliance",
-    text: kycPolicy.body,
+    text: kycPolicy,
   },
   // Only the uploader's: nobody else sees them, admins included.
   {
@@ -206,7 +213,7 @@ export const instructionFiles: InstructionSeed[] = [
     text: `
 Answer in the language the question is asked in, in plain words: most of us are not lawyers or accountants.
 
-Name the document you answer from, and say so when it is past its review date.
+Name the document you answer from.
 
 Client data stays in the EU, in the tools the company approved. A person approves anything that leaves the company: an offer, a compensation, a letter to a lender.
 `.trim(),
@@ -231,8 +238,11 @@ interface SkillSeed {
   by: PersonKey;
   name: string;
   text: string;
-  /** Shared with the company, and approved by this admin. */
-  sharedBy?: PersonKey;
+  /**
+   * Shared with the company: approved by `approvedBy`, or, without one,
+   * left waiting for an admin, so the admins' Inbox has a share to decide.
+   */
+  share?: { approvedBy?: PersonKey };
 }
 
 export const skills: SkillSeed[] = [
@@ -251,6 +261,7 @@ export const skills: SkillSeed[] = [
 4. After the third reminder without an answer, put the application on hold and call the client instead.
 `
     ),
+    share: {},
   },
   {
     by: "lisa",
@@ -267,37 +278,7 @@ export const skills: SkillSeed[] = [
 4. Offer compensation only up to €250; above that, ask compliance first.
 `
     ),
-    sharedBy: "sanne",
-  },
-];
-
-/** Chats whose question recall answers from an upload, each answer naming it. */
-export const brainChats: ChatSeed[] = [
-  {
-    by: "jeroen",
-    title: "Booking a new laptop",
-    hoursAgo: 30,
-    answeredBy: "Coding supplier invoices.docx",
-    turns: [
-      {
-        question: "Which ledger account do I book a new laptop on?",
-        answer:
-          "On 4300 Software and data. Coding supplier invoices.docx, which Finance keeps in the Brain, books software, data, laptops and phones there. If the invoice has no VAT number, send it back to the supplier instead of booking it.",
-      },
-    ],
-  },
-  {
-    by: "lisa",
-    title: "Compensation for a complaint",
-    hoursAgo: 8,
-    answeredBy: "Complaints procedure.docx",
-    turns: [
-      {
-        question: "Who approves a compensation above €250 for a complaint?",
-        answer:
-          "Compliance approves it first. Complaints procedure.docx says customer service offers compensation up to €250 itself; anything above that goes to compliance before you offer it.",
-      },
-    ],
+    share: { approvedBy: "sanne" },
   },
 ];
 
@@ -385,8 +366,9 @@ const seedInstructions = async (
 /**
  * The skill, unless it is there already (the rule above), and only right
  * after the seed's own save: its share with the company, for the version
- * that save made, and the admin's approval of that share alone. One
- * deleted in the demo is skipped with a line, as its name is closed.
+ * that save made, and, where the seed names an admin, that admin's
+ * approval of that share alone. One deleted in the demo is skipped with a
+ * line, as its name is closed.
  */
 const seedSkill = async (
   sessionFor: (key: PersonKey) => Session,
@@ -412,16 +394,20 @@ const seedSkill = async (
     );
     return;
   }
-  if (seed.sharedBy === undefined) {
+  if (seed.share === undefined) {
     return;
   }
   const share = await own.share(saved.name, saved.version, "company");
-  await sessionFor(seed.sharedBy).api.skills.approve(share.id);
+  if (seed.share.approvedBy !== undefined) {
+    await sessionFor(seed.share.approvedBy).api.skills.approve(share.id);
+  }
 };
 
 /**
  * Fills the Brain as the company's people: their uploads, the instruction
- * files and the skills. Returns how many instruction files it wrote.
+ * files and the skills. Returns how many uploads it added and found, the
+ * names of those deleted in the demo, and how many instruction files it
+ * wrote.
  */
 export const seedBrain = async (
   sessionFor: (key: PersonKey) => Session,
@@ -429,10 +415,12 @@ export const seedBrain = async (
 ): Promise<{
   uploadsAdded: number;
   uploadsThere: number;
+  uploadsDeleted: Set<string>;
   instructionsWritten: number;
 }> => {
   let uploadsAdded = 0;
   let uploadsThere = 0;
+  const uploadsDeleted = new Set<string>();
   for (const upload of uploads) {
     // oxlint-disable-next-line no-await-in-loop -- one file at a time
     const outcome = await seedUpload(sessionFor(upload.by).api, upload, teams);
@@ -440,6 +428,8 @@ export const seedBrain = async (
       uploadsAdded += 1;
     } else if (outcome === "there") {
       uploadsThere += 1;
+    } else {
+      uploadsDeleted.add(upload.name);
     }
   }
   let instructionsWritten = 0;
@@ -453,32 +443,36 @@ export const seedBrain = async (
     // oxlint-disable-next-line no-await-in-loop -- one skill at a time
     await seedSkill(sessionFor, seed);
   }
-  return { uploadsAdded, uploadsThere, instructionsWritten };
+  return { uploadsAdded, uploadsThere, uploadsDeleted, instructionsWritten };
 };
 
 /**
- * Refuses unless recall, as the person who asks `chat`'s first question,
- * finds the upload `answeredBy` (its name) for it.
+ * Refuses unless recall, as the person who asks `chat`, finds for each of
+ * its questions the upload that answers it (`answeredBy`, its name).
  */
 export const confirmAnsweredBy = async (
   api: Api,
-  chat: ChatSeed,
-  answeredBy: string
+  chat: ChatSeed
 ): Promise<void> => {
-  const upload = uploads.find(({ name }) => name === answeredBy);
-  if (upload === undefined) {
-    throw new Error(`No seeded upload ${answeredBy}`);
-  }
-  const id = uploadIdOf(upload);
-  const [first] = chat.turns;
-  const { items } = await api.brainSources.search(first?.question ?? "");
-  if (
-    !items.some(
-      ({ source }) => source.producer === "upload" && source.id === id
-    )
-  ) {
-    throw new Error(
-      `Recall as ${chat.by} doesn't find ${answeredBy} for "${first?.question}"`
-    );
+  for (const { question, answeredBy } of chat.turns) {
+    if (answeredBy === undefined) {
+      continue;
+    }
+    const upload = uploads.find(({ name }) => name === answeredBy);
+    if (upload === undefined) {
+      throw new Error(`No seeded upload ${answeredBy}`);
+    }
+    const id = uploadIdOf(upload);
+    // oxlint-disable-next-line no-await-in-loop -- one question at a time
+    const { items } = await api.brainSources.search(question);
+    if (
+      !items.some(
+        ({ source }) => source.producer === "upload" && source.id === id
+      )
+    ) {
+      throw new Error(
+        `Recall as ${chat.by} doesn't find ${answeredBy} for "${question}" in the chat "${chat.title}"`
+      );
+    }
   }
 };
