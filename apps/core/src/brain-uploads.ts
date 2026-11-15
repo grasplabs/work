@@ -1,4 +1,5 @@
 import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
+import type { AuditEvent } from "@grasp-os/shared/audit";
 import { brainExportErrors } from "@grasp-os/shared/brain-exports";
 import {
   brainSourceErrors,
@@ -8,12 +9,13 @@ import {
 import type {
   BrainSharedUploadPage,
   BrainUpload,
+  BrainUploadDeletion,
   BrainUploadFile,
   BrainUploadReaders,
 } from "@grasp-os/shared/brain-sources";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
-import { log } from "@grasp-os/shared/log";
+import { errorName, log } from "@grasp-os/shared/log";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -24,17 +26,31 @@ import {
   uploadNameSchema,
   uploadTypes,
 } from "@grasp-os/shared/uploads";
-import { and, desc, eq, lt, ne, or } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  exists,
+  isNull,
+  lt,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import {
   auditedBatch,
   outboxed,
   outboxedEvent,
+  outboxedEventWhere,
   outboxedIfChanged,
   uuidFromHash,
 } from "./audit-outbox.ts";
+import { currentMembership } from "./auth/auth.ts";
 import { memberOf } from "./auth/identity.ts";
 import type { Member } from "./auth/identity.ts";
 import { uploadSource } from "./brain-next-origins.ts";
@@ -43,10 +59,11 @@ import {
   eraseSource,
   listVersionsAs,
   readSourceVersionAs,
+  removeSource,
   sourceTextProblem,
 } from "./brain-next.ts";
 import type { SourceReaders, SourceVersionRef } from "./brain-next.ts";
-import { brainUploads, teams, users } from "./db/core/schema.ts";
+import { brainUploads, members, teams, users } from "./db/core/schema.ts";
 import { ExtractorUnavailableError, localExtractor } from "./files/extract.ts";
 import { hasText, signatures } from "./files/upload-checks.ts";
 import { onboardingStore } from "./onboarding/store.ts";
@@ -68,16 +85,35 @@ import { onboardingStore } from "./onboarding/store.ts";
 // the Brain holds is named by a row its uploader can delete; an add that
 // failed, or whose answer was lost, leaves the row, to upload to again or
 // delete. Readers are fixed for its life: a new version keeps them, and
-// other readers are a new upload. Deleting erases the key in the Brain
-// first and forgets the row only after, so a failure leaves the upload as
-// it was; once erased, the Brain refuses any add to the key, also one
+// other readers are a new upload.
+//
+// A Brain removal keeps history, and only an admin's hard delete erases
+// completely (Nick's rule). So a delete is one of two (GRA-1877; its
+// threat model is on the issue):
+//
+// - Erasing, for good: its uploader's, for an upload theirs alone (nobody
+//   else ever read it, and no admin may see that it exists), and an
+//   admin's, for one shared with a team or everyone, removed or not. The
+//   key is erased in the Brain first and the row forgotten only after, so
+//   a failure leaves the upload as it was.
+// - Removing: its uploader's, for one they shared, while they may still
+//   read it. Its row is marked removed first, its file's name cleared and
+//   the removal owed; then the Brain takes the source out of use for
+//   everyone for good and keeps its history (brain-next.ts
+//   `removeSource`); then the removal is no longer owed and its one event
+//   is stored. One left owed (a failure, a lost answer, a Worker that
+//   stopped) is completed by the clock, never by the person. Nobody reads
+//   it again, its uploader neither, and nothing puts it back in use: a
+//   shared upload is reached after only by an admin, who sees it was
+//   removed and when (`sharedUploadsFor`), and may erase it.
+//
+// Once erased or removed, the Brain refuses any add to the key, also one
 // whose file was being read while the delete ran.
 //
 // Who may do what, from core's records read now, never the page's word:
 // readers are only the uploader, a team they are in, or everyone; a new
-// version is its uploader's alone; a delete is its uploader's, or an
-// admin's when it isn't one person's own. An upload they may not read
-// answers as one that doesn't exist, alike.
+// version is its uploader's alone, while it is in use; a delete as above.
+// An upload they may not read answers as one that doesn't exist, alike.
 
 type UploadRow = typeof brainUploads.$inferSelect;
 
@@ -145,8 +181,14 @@ const sourceReadersOf = (row: UploadRow): SourceReaders => {
   }
 };
 
-/** Whether `member` may read `row`'s upload now: as the Brain reads it. */
+/**
+ * Whether `member` may read `row`'s upload now: as the Brain reads it, so
+ * no one once it was removed.
+ */
 const mayRead = (member: Member, row: UploadRow): boolean => {
+  if (row.removedAt !== null) {
+    return false;
+  }
   const readers = readersOf(row);
   switch (readers.kind) {
     case "me": {
@@ -165,30 +207,42 @@ const mayRead = (member: Member, row: UploadRow): boolean => {
 };
 
 const mayAddVersion = (member: Member, row: UploadRow): boolean =>
-  row.uploadedBy === member.userId;
+  row.uploadedBy === member.userId && row.removedAt === null;
 
 /**
- * Whether `member` may delete `row`'s upload, which erases it for good:
- * a Brain removal keeps history, and only an admin's hard delete erases
- * (Nick's rule; a removal that keeps history is GRA-1877). So:
+ * What `member`'s delete of `row`'s upload does, if they may delete it
+ * (above):
  *
- * - its uploader, for one theirs alone: nobody else ever read it, and no
- *   admin may see that it exists, so their delete is the one that erases;
- * - an admin, for one shared with a team or everyone, also one they can't
- *   read (a team they aren't in, or one dissolved), so no shared upload is
- *   left that nobody can erase. Such an admin learns that it exists, by
- *   its team, uploader and when (`sharedUploadsFor`), and by its file's
- *   name only when they may read it; never its text. Its uploader asks an
- *   admin to remove it.
+ * - `erase`, for its uploader when it is theirs alone; and for an admin
+ *   when it is shared, removed or not, also one they can't read (a team
+ *   they aren't in, or one dissolved), so no shared upload is left that
+ *   nobody can erase. Such an admin learns that it exists, by its team,
+ *   uploader and when (`sharedUploadsFor`), and by its file's name only
+ *   when they may read it; never its text. An admin's delete is the hard
+ *   delete, of an upload of their own too.
+ * - `remove`, for its uploader when it is shared and in use, while they
+ *   may read it (a member of its team now, for a team's).
  */
-const mayDelete = (member: Member, row: UploadRow): boolean =>
-  row.readers === "me"
-    ? row.uploadedBy === member.userId
-    : isAdmin(member.role);
+const deletionOf = (
+  member: Member,
+  row: UploadRow
+): BrainUploadDeletion | null => {
+  if (row.readers === "me") {
+    return row.uploadedBy === member.userId ? "erase" : null;
+  }
+  if (isAdmin(member.role)) {
+    return "erase";
+  }
+  // Only while they may still read it: one who left its team reaches it
+  // no more, as an upload nobody made.
+  return row.uploadedBy === member.userId && mayRead(member, row)
+    ? "remove"
+    : null;
+};
 
 /** Whether `member` may reach `row`'s upload at all: read it, or delete it. */
 const mayReach = (member: Member, row: UploadRow): boolean =>
-  mayDelete(member, row) || mayRead(member, row);
+  deletionOf(member, row) !== null || mayRead(member, row);
 
 /**
  * The upload `uploadId` for `member`, when `may` lets them reach it:
@@ -314,6 +368,7 @@ const detailOf = (
  */
 type RefusalReason =
   | "erased"
+  | "removed"
   | "invalid"
   | "too_large"
   | "other_file"
@@ -344,6 +399,16 @@ const refusals: Readonly<
     frees: true,
     // A first upload's id was used before and deleted: a fresh one is the
     // way on, which the page mints for the next file chosen.
+    error: (first) =>
+      first
+        ? brainUploadErrors.create("brain.upload_retry_refused")
+        : brainUploadErrors.create("brain.upload_deleted"),
+  },
+  // Removed meanwhile, by its uploader: its key is closed, and the row is
+  // the record of its removal, kept until an admin erases it.
+  "brain.source_removed": {
+    reason: "removed",
+    frees: false,
     error: (first) =>
       first
         ? brainUploadErrors.create("brain.upload_retry_refused")
@@ -492,7 +557,9 @@ const addVersion = async (
       .where(
         and(
           eq(brainUploads.id, row.id),
-          lt(brainUploads.version, added.version)
+          lt(brainUploads.version, added.version),
+          // Removed since its add began: its name stays cleared.
+          isNull(brainUploads.removedAt)
         )
       ),
     outboxedEvent(db, addedEvent),
@@ -565,8 +632,10 @@ export const uploadToBrain = async (
     .select()
     .from(brainUploads)
     .where(eq(brainUploads.id, id.data));
+  // Removed since: its key is closed, and a fresh id is the way on.
   const theirs =
     row !== undefined &&
+    row.removedAt === null &&
     row.uploadedBy === person.userId &&
     row.readers === readers.kind &&
     row.teamId === (readers.kind === "team" ? readers.teamId : null);
@@ -684,19 +753,259 @@ export const brainUploadOf = async (
     // A new version is for readers its uploader may still choose.
     mayAddVersion:
       mayAddVersion(member, row) && mayGrant(member, readersOf(row)),
-    mayDelete: mayDelete(member, row),
+    deletes: deletionOf(member, row),
   };
 };
 
 /**
- * Deletes the upload `uploadId` for good, as `person`, who may
- * (`mayDelete`; anyone else who may read it is refused, audited, as
- * `brain.upload_admin_only`): its key erased in
- * the Brain, every version, then its row forgotten, with
- * `brain.upload.deleted`, once however many deletes ran at once. An
- * erasure that failed is recorded (`brain.upload.delete_failed`) and
- * leaves the upload as it was, to delete again: the erasure is safe to
- * repeat.
+ * The one event a removal of `row` is recorded by, the same each time it
+ * is made: its ID derived from the upload's, its time when its uploader
+ * removed it, its actor that uploader (only they remove), and its detail
+ * from the row. So a completion repeated, by the person's call or the
+ * clock's, stores the same event, which the outbox and the log keep once.
+ */
+const removedEvent = async (
+  row: UploadRow & { removedAt: Date }
+): Promise<AuditEvent> => ({
+  ...createAuditEvent(
+    {
+      actor: actorOf({ userId: row.uploadedBy, staff: false }),
+      target: { type: "brain_upload", id: row.id },
+      action: "brain.upload.removed",
+      detail: {
+        readers: row.readers,
+        ...(row.teamId === null ? {} : { teamId: row.teamId }),
+      },
+    },
+    "core"
+  ),
+  id: uuidFromHash(
+    await sha256Hex(JSON.stringify(["brain.upload.removed", row.id]))
+  ),
+  at: row.removedAt.toISOString(),
+});
+
+/**
+ * Completes the removal of `row`, marked removed and owed: the Brain takes
+ * the source out of use (safe to repeat: a key removed or erased already
+ * is left as it is), then the row is no longer owed and the removal's one
+ * event (`removedEvent`) is stored with it, in one batch, by the
+ * completion that cleared it. Throws when either step fails: the removal
+ * stays owed, for the clock (`completeOwedRemovals`). Nothing records a
+ * failure: a removal whose answer was lost may have happened, and is
+ * completed all the same.
+ */
+const completeRemoval = async (
+  env: Env,
+  row: UploadRow & { removedAt: Date }
+): Promise<void> => {
+  await removeSource(env, {
+    source: uploadSource(row.id),
+    readers: sourceReadersOf(row),
+  });
+  const db = drizzle(env.DB);
+  await auditedBatch(env, db, [
+    db
+      .update(brainUploads)
+      .set({ removalOwed: false })
+      .where(
+        and(eq(brainUploads.id, row.id), eq(brainUploads.removalOwed, true))
+      ),
+    outboxedEventWhere(db, await removedEvent(row), sql`changes() > 0`),
+  ]);
+};
+
+/**
+ * Whether `userId` may read the upload the statement is on, as `mayRead`
+ * decides it, in SQL: a member of the organization now, and, for a team's
+ * upload, of that team now.
+ */
+const readableBySql = (db: DrizzleD1Database, userId: string) =>
+  and(
+    exists(
+      db
+        .select({ one: sql`1` })
+        .from(members)
+        .where(currentMembership(userId))
+    ),
+    or(
+      eq(brainUploads.readers, "everyone"),
+      and(
+        eq(brainUploads.readers, "team"),
+        // Named whole: inside the subquery a bare team_id would be the
+        // member row's.
+        sql`EXISTS (SELECT 1 FROM team_members
+          WHERE team_members.team_id = brain_uploads.team_id
+            AND team_members.user_id = ${userId})`
+      )
+    )
+  );
+
+/**
+ * Removes the shared upload `row` as `member`, its uploader who may still
+ * read it (`deletionOf`): out of use in the Brain for everyone for good,
+ * its history kept. First, in one statement, the row is marked removed,
+ * owed, and its file's name cleared, only while it is still theirs to
+ * remove (they uploaded it, may read it now, and it is in use), so a
+ * removal is never lost from core's record once the Brain may have it.
+ * Then it is completed (`completeRemoval`); one that fails is completed by
+ * the clock. From the mark on, core answers it as removed to everyone.
+ */
+const removeUpload = async (
+  env: Env,
+  member: Member,
+  row: UploadRow
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  const now = new Date();
+  await db
+    .update(brainUploads)
+    .set({ removedAt: now, removalOwed: true, name: null, updatedAt: now })
+    .where(
+      and(
+        eq(brainUploads.id, row.id),
+        isNull(brainUploads.removedAt),
+        eq(brainUploads.uploadedBy, member.userId),
+        readableBySql(db, member.userId)
+      )
+    );
+  const [marked] = await db
+    .select()
+    .from(brainUploads)
+    .where(eq(brainUploads.id, row.id));
+  // Not theirs to remove any more (they left its team meanwhile), or gone:
+  // as an upload nobody made. Marked already, by their removal at once
+  // with this one: completed alike.
+  if (
+    marked?.removedAt === null ||
+    marked?.removedAt === undefined ||
+    marked.uploadedBy !== member.userId
+  ) {
+    throw brainUploadErrors.create("brain.upload_not_found");
+  }
+  if (marked.removalOwed) {
+    await completeRemoval(env, { ...marked, removedAt: marked.removedAt });
+  }
+};
+
+/**
+ * Completes every removal still owed (`completeRemoval`), oldest first,
+ * each on its own: one that fails is logged with its upload's id and its
+ * error's name, and the run goes on to the rest, so it never holds up a
+ * newer one; it is tried again at the clock's next run. The clock runs it
+ * each minute. Unbounded, as `retryErasures` beside it: what is owed is
+ * only a removal whose completion failed, and a run that overlaps the next
+ * (or starts over after an interruption) repeats nothing, as a completion
+ * is safe to repeat and stores its one event once.
+ */
+export const completeOwedRemovals = async (env: Env): Promise<void> => {
+  const owed = await drizzle(env.DB)
+    .select()
+    .from(brainUploads)
+    // As the partial index on owed removals is written, so it is used.
+    .where(sql.raw("removal_owed = 1"))
+    .orderBy(asc(brainUploads.removedAt));
+  for (const row of owed) {
+    if (row.removedAt === null) {
+      continue;
+    }
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one removal at a time
+      await completeRemoval(env, { ...row, removedAt: row.removedAt });
+    } catch (error) {
+      log.warn("brain.upload.removal_owed", {
+        uploadId: row.id,
+        errorName: errorName(error),
+      });
+    }
+  }
+};
+
+/**
+ * Forgets the row of the upload `uploadId`, erased in the Brain, with
+ * `brain.upload.deleted`, once however many deletes ran at once. Its
+ * uploader's removal of it, if one is still owed (`completeRemoval`), is
+ * recorded first, in the same batch: its one event, as a completion
+ * would store it, so the row going never leaves a removal unaudited; D1
+ * runs one batch at a time, so the two never both store it. The row is
+ * forgotten only as it was read: should its uploader have marked it
+ * removed since, it is read again and forgotten as it is then (once more
+ * at most: a row is marked removed once).
+ */
+const forgetErased = async (
+  env: Env,
+  actor: ReturnType<typeof actorOf>,
+  uploadId: string
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  const target = { type: "brain_upload", id: uploadId };
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- read again only if it changed
+    const [row] = await db
+      .select()
+      .from(brainUploads)
+      .where(eq(brainUploads.id, uploadId));
+    if (row === undefined) {
+      // Forgotten by another delete at once with this one, which recorded it.
+      return;
+    }
+    const { removedAt } = row;
+    const forgetting = db
+      .delete(brainUploads)
+      .where(
+        and(
+          eq(brainUploads.id, uploadId),
+          removedAt === null
+            ? isNull(brainUploads.removedAt)
+            : eq(brainUploads.removedAt, removedAt)
+        )
+      )
+      .returning({ id: brainUploads.id });
+    // Only by the delete that took the row: two at once record it once.
+    const deleted = outboxedIfChanged(db, {
+      actor,
+      target,
+      action: "brain.upload.deleted",
+      detail: {
+        readers: row.readers,
+        ...(removedAt === null ? {} : { removed: true }),
+      },
+    });
+    let forgotten: readonly unknown[];
+    if (removedAt === null) {
+      // oxlint-disable-next-line no-await-in-loop -- read again only if it changed
+      [forgotten] = await auditedBatch(env, db, [forgetting, deleted]);
+    } else {
+      // oxlint-disable-next-line no-await-in-loop -- read again only if it changed
+      const owed = await removedEvent({ ...row, removedAt });
+      // oxlint-disable-next-line no-await-in-loop -- read again only if it changed
+      [, forgotten] = await auditedBatch(env, db, [
+        outboxedEventWhere(
+          db,
+          owed,
+          sql`EXISTS (SELECT 1 FROM brain_uploads
+            WHERE id = ${uploadId} AND removal_owed = 1)`
+        ),
+        forgetting,
+        deleted,
+      ]);
+    }
+    if (forgotten.length > 0) {
+      return;
+    }
+  }
+};
+
+/**
+ * Deletes the upload `uploadId` as `person` may (`deletionOf`): removes
+ * it (`removeUpload`), or erases it for good. Anyone else who may read it
+ * is refused, audited, as `brain.upload_not_allowed`.
+ *
+ * Erasing: its key erased in the Brain, every version, then its row
+ * forgotten, with `brain.upload.deleted`, once however many deletes ran
+ * at once. An erasure that failed is recorded
+ * (`brain.upload.delete_failed`) and leaves the upload as it was, to
+ * delete again: the erasure is safe to repeat.
  *
  * An upload for its uploader alone may be the file of a document they
  * shared in the onboarding (onboarding/documents.ts), whose ID it shares:
@@ -718,18 +1027,23 @@ export const deleteBrainUpload = async (
   const db = drizzle(env.DB);
   const actor = actorOf(person);
   const target = { type: "brain_upload", id: row.id };
-  if (!mayDelete(member, row)) {
-    // A shared upload, asked of by one of its readers who isn't an admin:
-    // its uploader or anyone else may read it, and only an admin erases.
+  const deletion = deletionOf(member, row);
+  if (deletion === null) {
+    // A shared upload, asked of by one of its readers who isn't its
+    // uploader or an admin.
     await auditedBatch(env, db, [
       outboxed(db, {
         actor,
         target,
         action: "brain.upload.refused",
-        detail: { reason: "admin_only", readers: row.readers },
+        detail: { reason: "not_allowed", readers: row.readers },
       }),
     ]);
-    throw brainUploadErrors.create("brain.upload_admin_only");
+    throw brainUploadErrors.create("brain.upload_not_allowed");
+  }
+  if (deletion === "remove") {
+    await removeUpload(env, member, row);
+    return;
   }
   // One event, of how it ended, written before the person is answered.
   try {
@@ -756,16 +1070,7 @@ export const deleteBrainUpload = async (
     ]);
     throw error;
   }
-  await auditedBatch(env, db, [
-    db.delete(brainUploads).where(eq(brainUploads.id, row.id)),
-    // Only by the delete that took the row: two at once record it once.
-    outboxedIfChanged(db, {
-      actor,
-      target,
-      action: "brain.upload.deleted",
-      detail: { readers: row.readers },
-    }),
-  ]);
+  await forgetErased(env, actor, row.id);
 };
 
 /** How many shared uploads one page of an admin's listing holds. */
@@ -779,9 +1084,10 @@ const sharedAfterSchema = z.strictObject({
 /**
  * For an admin: a page of the uploads shared with a team or everyone,
  * newest first, after `afterInput` (where the page before ended): each by
- * who may read it, who uploaded it and when, and by its file's name when
- * they may read it, so they can erase one they may not read. Never an upload one person alone may read,
- * and never any text. Refused (`role.forbidden`) for anyone else. Each
+ * who may read it, who uploaded it and when, when its uploader removed
+ * it, and by its file's name when they may read it (never once removed),
+ * so they can erase one they may not read. Never an upload one person
+ * alone may read, and never any text. Refused (`role.forbidden`) for anyone else. Each
  * page asked is audited once, with how many it listed.
  */
 export const sharedUploadsFor = async (
@@ -846,6 +1152,7 @@ export const sharedUploadsFor = async (
       teamName,
       uploaderName,
       uploadedAt: upload.createdAt.toISOString(),
+      removedAt: upload.removedAt?.toISOString() ?? null,
     })),
     next:
       rows.length > sharedPageSize && last !== undefined

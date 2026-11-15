@@ -123,6 +123,27 @@ export const currentVersions = sqliteTable("current_versions", {
 });
 
 /**
+ * A source taken out of use for good, its history kept (removal.ts): its
+ * key, as the erasure ledger names it too, and the version that was
+ * current then, if any. It has no current version, so nothing reads it,
+ * and an add to its key is refused while this row is there. An erasure
+ * that hides that version clears `version_row`, and one of the key
+ * deletes the row (erasure.ts).
+ */
+export const removedSources = sqliteTable(
+  "removed_sources",
+  {
+    source: text().primaryKey(),
+    /** The SHA-256 of the source's key, in hex. */
+    subject: text().notNull(),
+    versionRow: integer("version_row")
+      .unique()
+      .references(() => sourceVersions.row),
+  },
+  (table) => [index("removed_sources_subject_idx").on(table.subject)]
+);
+
+/**
  * The changes each source was added with: a key its producer gives each
  * change (an upstream revision, a message id, an id minted before the
  * first try), and the version the add answered with. The same key again
@@ -367,6 +388,13 @@ export const workItems = sqliteTable(
     index("work_items_parked_idx")
       .on(table.parkedAt, table.id)
       .where(sql.raw("parked_at IS NOT NULL")),
+    // Every item about a key, of any kind, waiting or running: what an
+    // erasure deletes for each source whose current version it hides
+    // (erasure.ts `hideVersions`). Without it each such delete reads the
+    // whole queue, so a group's erasure costs its sources times the
+    // queue: 50,000 sources with an item each took 56 s in workerd, past
+    // a Durable Object request's 30 s of CPU, every retry alike.
+    index("work_items_key_idx").on(table.key),
     check("work_items_priority", sql.raw("priority BETWEEN 0 AND 4")),
   ]
 );
@@ -650,7 +678,13 @@ export const unembeddable = sqliteTable(
     model: text().notNull(),
     hash: text().notNull(),
   },
-  (table) => [primaryKey({ columns: [table.model, table.hash] })]
+  (table) => [
+    primaryKey({ columns: [table.model, table.hash] }),
+    // A text's passages in every model, as a version that stops being
+    // current or is erased lets go of them (files.ts `releaseVectors`),
+    // without reading the whole table for each such version.
+    index("unembeddable_hash_idx").on(table.hash),
+  ]
 );
 
 // Exports and restores (exports.ts, restore.ts). An export writes what a
@@ -821,9 +855,11 @@ export const entities = sqliteTable(
  * A memory (contract.ts `Memory`). Its lineage is the source it rests on
  * (`source:` and the source's key) or its writer (`writer:` and their
  * id); `lineage_order` orders a lineage's memories, the version number
- * for a source's, 0 for a writer's, then `row`. `value_key` is what
- * one-value attributes compare: the value folded, or the related entity's
- * id.
+ * for a source's, 0 for a writer's, then `row`. `value_key` is what a
+ * newer memory of its lineage must match to end it (remember.ts
+ * `valueKeyFor`): for an attribute, the value folded or the related
+ * entity's id; filed under none, a SHA-256 of the statement folded, its
+ * type, speaker and value, and the related entity's id.
  */
 export const memories = sqliteTable(
   "memories",

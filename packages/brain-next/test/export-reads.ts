@@ -83,12 +83,14 @@ export interface Asked {
   questions: readonly string[];
   /** The moment memories are read as of: past every write, so both stores read alike. */
   asOf: Date;
+  /** Keys whose state (`keyState`) is read too: free, held or erased, whoever asks. */
+  keys?: readonly string[];
 }
 
 /** Every public read of memories and entities `asked` names, by a key each, comparable. */
 export const everyRead = async (
   store: Store,
-  { readers, entities, names, emails, questions, asOf }: Asked
+  { readers, entities, names, emails, questions, asOf, keys = [] }: Asked
 ): Promise<Record<string, unknown>> => {
   const reads: [string, () => Promise<unknown>][] = readers.flatMap(
     (reader, index): [string, () => Promise<unknown>][] => [
@@ -144,6 +146,9 @@ export const everyRead = async (
       ]),
     ]
   );
+  for (const key of keys) {
+    reads.push([`key ${key}`, async () => await store.keyState(key)]);
+  }
   const answered: Record<string, unknown> = {};
   for (const [key, read] of reads) {
     // oxlint-disable-next-line no-await-in-loop -- one read at a time

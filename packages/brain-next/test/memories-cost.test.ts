@@ -3,7 +3,7 @@ import type {
   NewMemory,
   Reader,
 } from "@grasp-os/brain-next/contract";
-import { reset, runInDurableObject } from "cloudflare:test";
+import { reset } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -14,6 +14,7 @@ import {
 } from "../src/contract.ts";
 import { foldName } from "../src/entities.ts";
 import { audience, fact, readerOf, word } from "./entity-helpers.ts";
+import { countRowsRead } from "./rows-read.ts";
 
 // What reading memories costs the store, against what the question is not
 // about. Statements over memories (memories.ts `memoriesSql`) and the
@@ -31,46 +32,11 @@ import { audience, fact, readerOf, word } from "./entity-helpers.ts";
 // their exact names (linking.ts `linkedByName`): what it reads is the
 // same however many names the store holds.
 
-/** Rows the store's SQL read, counted at the store itself. */
-interface Counter {
-  rows: () => number;
-  reset: () => void;
-}
-
-/** The counters of the stores of this file, by their object's id. */
-const counters = new Map<string, Counter>();
-
 /** The shared store, from empty storage, its SQL's reads counted. */
 const countedStore = async () => {
   await reset();
   const stub = env.BRAIN_STORE.getByName("brain");
-  // The store woken and its SQL wrapped once: every cursor its statements
-  // open is kept, and their rows read summed when asked.
-  await runInDurableObject(stub, (_instance, state) => {
-    const { sql } = state.storage;
-    const cursors: SqlStorageCursor<Record<string, SqlStorageValue>>[] = [];
-    const exec = sql.exec.bind(sql);
-    Object.defineProperty(sql, "exec", {
-      value: (...args: Parameters<typeof sql.exec>) => {
-        const cursor = exec(...args);
-        cursors.push(cursor);
-        return cursor;
-      },
-    });
-    counters.set(stub.id.toString(), {
-      rows: () => cursors.reduce((sum, cursor) => sum + cursor.rowsRead, 0),
-      reset: () => {
-        cursors.length = 0;
-      },
-    });
-  });
-  /** The rows `ask` has the store's SQL read. */
-  const rowsReadBy = async (ask: () => Promise<unknown>): Promise<number> => {
-    const counter = counters.get(stub.id.toString());
-    counter?.reset();
-    await ask();
-    return counter?.rows() ?? Number.NaN;
-  };
+  const rowsReadBy = await countRowsRead(stub);
   return { stub, rowsReadBy };
 };
 
@@ -283,6 +249,111 @@ describe("what reading memories costs", () => {
 
     expect(grown.map((rows) => flat(alone, rows))).toStrictEqual([true, true]);
   });
+
+  it("judges a restatement by one seek, however many memories of the same words its lineage holds about other entities", async () => {
+    const { stub, rowsReadBy } = await countedStore();
+    const group = "alike-readers";
+    const reader = readerOf("alike-reader", group);
+    const said = "works from Delft";
+    const { entities } = await add(
+      stub,
+      group,
+      [{ key: "c", kind: "customer", names: ["Delftco"] }],
+      [fact("c", said), fact("c", said)]
+    );
+    /** `count` memories of the same words, one an entity of its own, in the same lineage. */
+    const alike = async (count: number) => {
+      for (let start = 0; start < count; start += 100) {
+        const keys = Array.from({ length: 100 }, (_, index) => `a${index}`);
+        // oxlint-disable-next-line no-await-in-loop -- one add at a time
+        await add(
+          stub,
+          group,
+          keys.map((key, index) => ({
+            key,
+            kind: "customer",
+            names: [`Other${start + index}`],
+          })),
+          keys.map((key) => fact(key, said))
+        );
+      }
+    };
+    const ask = async () =>
+      await stub.readMemories({
+        entity: entities.c ?? "",
+        reader,
+        history: true,
+      });
+    const rows = [await rowsReadBy(ask)];
+    let have = 0;
+    for (const size of [1000, 5000]) {
+      // oxlint-disable-next-line no-await-in-loop -- one size at a time
+      await alike(size - have);
+      have = size;
+      // oxlint-disable-next-line no-await-in-loop -- one size at a time
+      rows.push(await rowsReadBy(ask));
+    }
+    const [alone, ...grown] = rows;
+
+    expect(grown.map((read) => flat(alone ?? 0, read))).toStrictEqual([
+      true,
+      true,
+    ]);
+  }, 120_000);
+
+  it("judges a restatement by its key, however many other facts its lineage holds about the same entity", async () => {
+    const { stub, rowsReadBy } = await countedStore();
+    const group = "restated-readers";
+    const reader = readerOf("restated-reader", group);
+    const said = "Acme ships through Brightwater";
+    // A fact said twice by one writer about one customer: the earlier is
+    // ended by the restatement, judged by its key.
+    const { entities } = await add(
+      stub,
+      group,
+      [{ key: "c", kind: "customer", names: ["Acme"] }],
+      [fact("c", said), fact("c", said)]
+    );
+    const acme = entities.c ?? "";
+    /** Other facts of the same writer about the same customer, each worded its own way, a hundred an add. */
+    const otherFacts = async (from: number, to: number) => {
+      for (let start = from; start < to; start += 100) {
+        // oxlint-disable-next-line no-await-in-loop -- one add at a time
+        await add(
+          stub,
+          group,
+          [{ key: "c", id: acme, kind: "customer", names: [] }],
+          Array.from({ length: 100 }, (_, index) =>
+            fact("c", `Acme note ${start + index}`)
+          )
+        );
+      }
+    };
+    // Recall by the one word only the fact and its restatement hold: the
+    // two are found and each judged, every other fact of the customer left
+    // unread unless judging reads them.
+    const ask = async () =>
+      await stub.recall({
+        question: "brightwater",
+        reader,
+        budget: { tokens: 4000 },
+      });
+    const rows = [await rowsReadBy(ask)];
+    let have = 0;
+    for (const size of [500, 2000]) {
+      // oxlint-disable-next-line no-await-in-loop -- one size at a time
+      await otherFacts(have, size);
+      have = size;
+      // oxlint-disable-next-line no-await-in-loop -- one size at a time
+      rows.push(await rowsReadBy(ask));
+    }
+    const [alone, ...grown] = rows;
+
+    expect(grown.map((read) => flat(alone ?? 0, read))).toStrictEqual([
+      true,
+      true,
+    ]);
+  }, 120_000);
 
   it("walks from a named entity without reading other memories or names, readable or hidden", async () => {
     const { stub, rowsReadBy } = await countedStore();

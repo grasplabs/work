@@ -30,6 +30,14 @@ export type KeyState = "free" | "held" | "erased";
 export const erasedSource = "The Brain refused it: what this adds was erased";
 
 /**
+ * What an add to a removed source says (`Brain.removeSource`): it is out
+ * of use for good, its key closed while its history is kept, and the add
+ * is never tried again. Said only to the producer that adds it, which
+ * compares it whole.
+ */
+export const removedSource = "The Brain refused it: what this adds was removed";
+
+/**
  * What an add says whose change was added before with other text or
  * readers: nothing changed, and the version that change made stays. Said
  * only to the producer that adds it, which compares it whole.
@@ -1336,6 +1344,10 @@ export const sourceErasureSchema = z.strictObject({
 });
 export type SourceErasure = z.infer<typeof sourceErasureSchema>;
 
+/** A source to take out of use, keeping its history (`Brain.removeSource`). */
+export const sourceRemovalSchema = z.strictObject({ source: sourceIdSchema });
+export type SourceRemoval = z.infer<typeof sourceRemovalSchema>;
+
 /**
  * Whether `source` may be in `group`: its key is the group's, "/" and
  * more, so no source joins a group its key isn't under.
@@ -1644,7 +1656,14 @@ export interface VectorsFound {
 // the one before, which stays as history; a memory of another lineage
 // that says something else makes the fact contested: both stay current
 // and are read together, each with its source. A memory with no listed
-// attribute never ends or contests another.
+// attribute never contests another, and ends only an earlier one of its
+// lineage that it restates: the same statement as search folds text
+// (case, accents, spacing and a final full stop aside, every sign kept),
+// about the same entity, in the same speaker's word, of the same type,
+// related entity and value. So the same fact said twice by one source or
+// writer is one
+// current memory, the earlier kept as history, merged only for readers of
+// the later one.
 //
 // Who may read a memory: those in the reader set its caller gives
 // (`access`, as a source's), and, when it rests on a source version, only
@@ -1691,8 +1710,9 @@ export interface AttributeRule {
 /**
  * Every attribute a memory may be filed under, per kind of entity: the
  * fixed list. A memory about something not listed has no attribute
- * (`attribute` left out): it is kept and found, and never ends or
- * contests another.
+ * (`attribute` left out): it is kept and found, never contests another,
+ * and ends only an earlier memory of its lineage it restates word for
+ * word.
  */
 export const entityAttributes = {
   person: {
@@ -2683,7 +2703,8 @@ export interface Brain {
   /**
    * What this store has of the key `source`, whoever may read it: `erased`
    * when an erasure closed it, `held` when a version of it is kept
-   * (current or history), `free` when it was never given it. For the host
+   * (current or history) or it was removed (`removeSource`), `free` when
+   * it was never given it. For the host
    * only, before it keeps a source in another store (one person's own):
    * a key lives in one store. A person's own store erased whole holds
    * nothing: `free`.
@@ -2814,6 +2835,19 @@ export interface Brain {
    * time it is repeated (`SourceErased`).
    */
   eraseSource: (request: SourceErasure) => Promise<SourceErased | undefined>;
+  /**
+   * Takes a source out of use for good and keeps its history (removal.ts):
+   * from when it returns, nothing of it is found, listed or read by
+   * anyone, history and memories drawn from it included, and nothing new
+   * is drawn from it. Its versions, memories and files stay, and nothing
+   * is written to the ledger. Its key is closed: an add to it, a retry of
+   * an earlier change included, is refused (`removedSource`), and nothing
+   * puts it back in use. An export holds it removed, and a restore brings
+   * it back so. `eraseSource` still erases it for good. Covers the key's
+   * own source alone, never a group's members. Safe to repeat, and
+   * answers alike whatever there was.
+   */
+  removeSource: (request: SourceRemoval) => Promise<void>;
   /**
    * Erases `person`'s own store whole, the one place what only they may
    * read is kept: everything it holds, and from then on every call is

@@ -417,6 +417,13 @@ const hideVersions = (
     key,
     listed
   );
+  // A removed source stays removed, its key closed, but its mark no
+  // longer names a version that is going (removal.ts).
+  sql.exec(
+    `UPDATE removed_sources SET version_row = NULL
+    WHERE version_row IN (SELECT value FROM json_each(?))`,
+    listed
+  );
   // Their vector codes leave the scan now, as a replaced version's do:
   // a code the scan may pick must be of a current version, or hidden ones
   // nearer the question would take every candidate and leave a reader's
@@ -461,9 +468,24 @@ const rowsOf = (sql: SqlStorage, source: string): number[] =>
 /**
  * The sources an erasure of the key whose subject is `subject` covers:
  * the source of that key, and each added in it as a group. `apply` hides
- * each in turn, in its one transaction: a group's erasure costs time
- * linear in its sources (about 370 ms per 1,000 one-version sources in
- * workerd), and its deleting is the tick's, a bounded batch at a time.
+ * each in turn, in its one transaction, so no reader sees a group part
+ * hidden, and a call cut off hides and records nothing: its caller keeps
+ * the erasure owed and repeats it. Its deleting is the tick's, a bounded
+ * batch at a time.
+ *
+ * So a group's erasure costs time linear in what it hides, each row found
+ * by an index (erasure-cost.test.ts holds it): in local workerd on a
+ * laptop, 3.0 s for a call erasing 50,000 one-chunk sources with an item
+ * queued for each, its first delete batch included (GRA-1812). That
+ * excludes vectors: hiding a version also reads its chunks' vector codes
+ * (`removeVectorsOf`), so a source of many chunks with codes costs more.
+ * A call has a Durable Object request's 30 s of CPU: some 500,000 such
+ * sources. A replay applies the entry as the store starts, within the
+ * 30 s the store may be held, but a step may start the entry's read just
+ * before its own time is up (`replayStepMs`), and that read may take
+ * `ledgerWaitMs`, leaving the apply about 10 s: some 200,000 sources.
+ * Past that, the store is reset and the next start begins at that entry
+ * with a fresh budget. Measured on a laptop, not on Cloudflare.
  */
 const sourcesOf = (sql: SqlStorage, subject: string): string[] =>
   sql
@@ -594,7 +616,12 @@ const apply = (
   );
   const stopped: string[] = [];
   let sources = 0;
+  // Its key, if it was removed, even before any version was added: the
+  // erasure closes it now, and no plain key outlives what it named.
+  sql.exec("DELETE FROM removed_sources WHERE subject = ?", entry.subject);
   for (const source of sourcesOf(sql, entry.subject)) {
+    // Each added in it as a group, likewise.
+    sql.exec("DELETE FROM removed_sources WHERE source = ?", source);
     const rows = rowsOf(sql, source);
     sources += rows.length > 0 ? 1 : 0;
     if (hideVersions(sql, source, rows, key)) {
@@ -985,13 +1012,15 @@ export const erasuresUnfinished = (sql: SqlStorage): number =>
 
 /**
  * How many sources keep versions no erasure hid but have no current
- * version, so no one can read them (`hideVersions`): a count, never which.
+ * version, so no one can read them (`hideVersions`), apart from those
+ * removed on purpose (removal.ts): a count, never which.
  */
 export const sourcesWithoutCurrent = (sql: SqlStorage): number =>
   sql
     .exec<{ count: number }>(
       `SELECT count(DISTINCT source) AS count FROM source_versions
       WHERE source NOT IN (SELECT source FROM current_versions)
+        AND source NOT IN (SELECT source FROM removed_sources)
         AND row NOT IN (SELECT version_row FROM erasing_versions)`
     )
     .one().count;

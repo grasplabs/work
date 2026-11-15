@@ -77,10 +77,10 @@ import { heldNothing } from "./skill-needs.ts";
 //   team (permissions.ts), and its recall holds nothing any member
 //   couldn't read at the source, whoever called. A chat's code (and its
 //   `searchBrain` tool) reads as the person the chat is for, their teams
-//   alone (`personal: false`), only in their own chat in Grasp in a turn
-//   they started (`RecallCaller.reach`), where what it gets stays theirs;
-//   anywhere else (a chat app's direct message, which the app keeps too;
-//   a turn a schedule or an event woke) as the company alone, as the
+//   alone (`personal: false`), only in their own chat, in Grasp or their
+//   direct message on a chat app, in a turn they started
+//   (`RecallCaller.reach`); anywhere else (a turn a schedule or an event
+//   woke) as the company alone, as the
 //   recall before the question reads there (GRA-1820, turn-recall.ts).
 //   The person is always the one the call acts for
 //   (`onBehalfOf`, set by core from the session or the run, never by the
@@ -106,8 +106,9 @@ export interface RecallCaller {
   readonly permissionId: PermissionId | null;
   /**
    * For a chat's code and its `searchBrain` alone: `teams` reads its
-   * person's teams and the company, only in their own chat in Grasp in a
-   * turn they started (agent-brain.ts); absent, it reads the company
+   * person's teams and the company, only in their own chat, in Grasp or
+   * their direct message, in a turn they started (agent-brain.ts);
+   * absent, it reads the company
    * alone, wherever else it is called. Set by core from where the call is
    * made, never by the code. An App's and a workflow's reach is their
    * grant's (`recallFor`), whatever this says.

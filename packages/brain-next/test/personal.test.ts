@@ -1543,6 +1543,21 @@ const leavingWork: Record<string, (who: string) => Promise<void>> = {
     await noAlarm(who);
     await own(who).eraseSource({ source: kept.source, reason: "deleted" });
   },
+  // The full vectors of its current version's passages, once embedded,
+  // go to the sweep (removal.ts).
+  removeSource: async (who) => {
+    const kept = await add(own(who), "To remove", theirs(who));
+    await tick(who);
+    await inStore((sql) => {
+      sql.exec(
+        `INSERT INTO vector_files (model, hash, written_at, unheld)
+        SELECT 'm@1', hash, ?, 0 FROM chunks WHERE hash IS NOT NULL`,
+        Date.now()
+      );
+    }, who);
+    await noAlarm(who);
+    await own(who).removeSource({ source: kept.source });
+  },
   // A tick that deletes an erased version lets its file go to the sweep.
   work: async (who) => {
     const kept = await add(own(who), "Erased, then swept", theirs(who));
@@ -2511,6 +2526,61 @@ describe("a group in a person's own store", () => {
     await own().eraseSource({ source: group, reason: "deleted" });
 
     await expect(groupEntries()).resolves.toHaveLength(1);
+  });
+
+  // GRA-1812, threat 1: an erasure cut off as it hides its group (a reset
+  // past its CPU, a failure) has hidden and recorded nothing, so no turn
+  // reads as erased that isn't, and none is half gone; its repeat is the
+  // one erasure.
+  it("hides no turn of a group whose erasure is cut off part-way, and its repeat hides them all with one entry", async () => {
+    const group = newGroup();
+    const turns = await Promise.all(
+      ["1", "2", "3"].map(
+        async (key) => await addIn(group, key, `Bandicoot turn ${key}`)
+      )
+    );
+    // The second turn's hiding fails, once the first's is done.
+    await inStore((sql) => {
+      sql.exec(`CREATE TRIGGER cut_off BEFORE INSERT ON erasing_versions
+        WHEN EXISTS (SELECT 1 FROM erasing_versions)
+        BEGIN SELECT RAISE(ABORT, 'Cut off by the test'); END`);
+    });
+
+    await expect(
+      called(own().eraseSource({ source: group, reason: "deleted" }))
+    ).rejects.toThrow(/Cut off by the test/u);
+    const afterCutOff = {
+      found: await foundFor("Bandicoot"),
+      states: await Promise.all(
+        turns.map(async ({ source }) => await own().keyState(source))
+      ),
+      entries: await groupEntries(),
+    };
+    await inStore((sql) => {
+      sql.exec("DROP TRIGGER cut_off");
+    });
+    await own().eraseSource({ source: group, reason: "deleted" });
+
+    const foundAfter = await foundFor("Bandicoot");
+    const entriesAfter = await groupEntries();
+    const sources = turns.map(({ source }) => source);
+    expect({
+      afterCutOff: {
+        ...afterCutOff,
+        found: sources.filter((source) => afterCutOff.found.includes(source)),
+      },
+      afterRepeat: {
+        found: sources.filter((source) => foundAfter.includes(source)),
+        entries: entriesAfter.length,
+      },
+    }).toStrictEqual({
+      afterCutOff: {
+        found: sources,
+        states: ["held", "held", "held"],
+        entries: [],
+      },
+      afterRepeat: { found: [], entries: 1 },
+    });
   });
 
   // Threat 10: an older copy of the store comes back.
