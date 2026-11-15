@@ -1653,7 +1653,11 @@ export interface VectorsFound {
 // the one before, which stays as history; a memory of another lineage
 // that says something else makes the fact contested: both stay current
 // and are read together, each with its source. A memory with no listed
-// attribute never ends or contests another.
+// attribute never ends or contests another. A memory resting on a version
+// before its source's current one ends at that version's add when the
+// current version no longer says its quote, word for word as search folds
+// words, and is current again if a later version says it again; never for
+// a thread (`NewSource.thread`) or a source kept whole (quotes.ts).
 //
 // Who may read a memory: those in the reader set its caller gives
 // (`access`, as a source's), and, when it rests on a source version, only
