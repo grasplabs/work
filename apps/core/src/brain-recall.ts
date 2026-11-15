@@ -16,9 +16,10 @@ import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
 import { skillErrors } from "@grasp-os/shared/skills";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { z } from "zod";
+import type { z } from "zod";
 
-import { appendAuditEvent } from "./audit-outbox.ts";
+import { appendAuditEvent, auditedIdOf } from "./audit-outbox.ts";
+import { inHostBrainWords, inHostWords } from "./brain-audited.ts";
 import { storedTeamsOf } from "./brain-grant-teams.ts";
 import {
   codeCardAs,
@@ -150,14 +151,6 @@ const grantTeamsOf = async (
     throw permissionErrors.create("permission.denied", { action: "brain" });
   }
   return teams;
-};
-
-/** `error` in the function host's words, which carry nothing of the call. */
-const inHostWords = (error: unknown): unknown => {
-  if (isExpectedError(error) && error.code === "permission.person_inactive") {
-    return functionErrors.create("permission.unavailable");
-  }
-  return error;
 };
 
 /**
@@ -435,25 +428,13 @@ export interface EntitiesCaller extends Omit<RecallCaller, "keep"> {
   readonly appUsers?: () => Promise<AppId | undefined>;
 }
 
-/** An id as the audit log may name it: a well-formed one, never what code sent instead. */
-const idOf = (value: unknown): string | null => {
-  const id = z.uuid().safeParse(value);
-  return id.success ? id.data : null;
-};
-
 /** The entity `input` asks for, as the audit log may name it. */
 const askedEntityOf = (input: unknown): string | null =>
-  idOf(
+  auditedIdOf(
     typeof input === "object" && input !== null
       ? Reflect.get(input, "entity")
       : undefined
   );
-
-/** `error` in the function host's words: a request the Brain refused as one it isn't. */
-const inHostEntityWords = (error: unknown): unknown =>
-  isExpectedError(error) && error.code === "brain.request_invalid"
-    ? functionErrors.create("permission.invalid_args")
-    : inHostWords(error);
 
 /** A memory as code is handed it (`BrainMemory`): what it says, never who wrote or confirmed it. */
 const codeMemoryOf = (memory: CardMemory) =>
@@ -601,7 +582,7 @@ export const entitiesCallFor = async (
     );
     read = await readFor(env, caller, operation, input);
   } catch (error) {
-    const refused = inHostEntityWords(error);
+    const refused = inHostBrainWords(error);
     await audit({
       refused: isExpectedError(refused) ? refused.code : "internal.unexpected",
     });

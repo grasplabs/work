@@ -79,7 +79,10 @@ import { DurableObject, env } from "cloudflare:workers";
 import { z } from "zod";
 
 import { embedInProcess } from "../../../packages/embed/test/test-models.ts";
+import { addMember, removeMember } from "../src/app-members.ts";
 import { organizationId } from "../src/auth/auth.ts";
+import { memberOf } from "../src/auth/identity.ts";
+import * as appWrites from "../src/brain-app-writes.ts";
 import { BrainMemoriesRpc } from "../src/brain-memories-rpc.ts";
 import * as brainMemories from "../src/brain-memories.ts";
 import * as coreBrain from "../src/brain-next.ts";
@@ -100,7 +103,9 @@ import * as instructionFiles from "../src/instruction-files.ts";
 import { shippedSkills } from "../src/shipped-skills.ts";
 import * as skillShares from "../src/skill-shares.ts";
 import { ageOwnErasure } from "./brain-next-own-store.ts";
+import { appOf as writingAppOf } from "./brain-writing-app.ts";
 import { noProducers } from "./no-producers.ts";
+import { person as orgMember } from "./sealed-apps.ts";
 import { holding, holdsNothing } from "./stored-skills.ts";
 
 /** The reader a probe calls as, and what they may not see. */
@@ -6311,7 +6316,10 @@ const coreAppWrites = {
           await coreBrain.forgetForAppAs(
             env,
             as,
-            unchecked(crypto.randomUUID()),
+            {
+              app: unchecked(crypto.randomUUID()),
+              change: `app:${crypto.randomUUID()}`,
+            },
             {
               memory,
             }
@@ -6371,6 +6379,216 @@ const coreAppWrites = {
     ];
   },
 } satisfies Record<CoreAppMember, Probe>;
+
+// An App's code's writes, as core gates them (brain-app-writes.ts,
+// GRA-1883): whose App memories a call reads (`appUsersReadBy`), and the
+// write itself (`appWriteFor`). Each through a real App whose code
+// remembers, sealed and bound, planted once a pass (`writingAppFixture`):
+// one the reader uses, one they don't (as a workflow's user who isn't the
+// App's is), and one they were taken off. Whose App memories a call reads
+// is never told apart from an App no one made; a write's refusal and its
+// audit event hold no marker of what it was asked to say.
+
+/**
+ * Three Apps whose code remembers (brain-writing-app.ts), each sealed,
+ * current and bound to its own grant to read the Brain, sealed once for
+ * the file (a seal compiles the App): `used`, shared with each reader;
+ * `unused`, never; `left`, shared with each reader and taken off them.
+ */
+const plantWritingApps = async () => {
+  const [admin, owner] = await Promise.all([
+    orgMember("admin"),
+    orgMember("builder"),
+  ]);
+  const [used, unused, left] = await Promise.all([
+    writingAppOf(owner, admin),
+    writingAppOf(owner, admin),
+    writingAppOf(owner, admin),
+  ]);
+  return { owner, used, unused, left };
+};
+
+let writingApps: ReturnType<typeof plantWritingApps> | undefined;
+
+/** Each reader's share of the writing Apps, by reader. */
+const writingShares = new Map<string, Promise<boolean>>();
+
+/**
+ * The writing Apps (`plantWritingApps`), planted again only once their
+ * rows are gone, and whether `probing`'s reader is shared with them: only
+ * a member who isn't an admin, as an admin uses every App.
+ */
+const writingAppFixture = async (probing: Probing) => {
+  const { personId } = probing;
+  let planted = await (writingApps ??= plantWritingApps());
+  const there = await env.DB.prepare("SELECT 1 AS one FROM apps WHERE id = ?")
+    .bind(planted.used.app)
+    .first();
+  if (there === null) {
+    writingApps = plantWritingApps();
+    writingShares.clear();
+    planted = await writingApps;
+  }
+  const { owner, used, unused, left } = planted;
+  const shared =
+    writingShares.get(personId) ??
+    (async () => {
+      const member = await memberOf(env.DB, personId);
+      if (member === undefined || member.role === "admin") {
+        return false;
+      }
+      for (const app of [used.app, left.app]) {
+        // oxlint-disable-next-line no-await-in-loop -- one share at a time
+        await addMember(env, owner, app, {
+          type: "person",
+          id: personId,
+          role: "user",
+        });
+      }
+      await removeMember(env, owner, left.app, {
+        type: "person",
+        id: personId,
+      });
+      return true;
+    })();
+  writingShares.set(personId, shared);
+  return { used, unused, left, shared: await shared };
+};
+
+/** How core names the caller of a write by `personId` in `app`, from `origin`. */
+const writeCallerOf = (
+  app: { app: string; permissionId: string },
+  personId: string,
+  origin: "page" | "agent" | "code_mode" | "workflow"
+): appWrites.AppWriteCaller => ({
+  app: unchecked(app.app),
+  origin,
+  authority: authoritySchema.parse({
+    subject: { type: "app", appId: app.app },
+    onBehalfOf: personId,
+    mode: "interactive",
+    appVersion: 1,
+  }),
+  context: { type: "app", appId: unchecked(app.app) },
+  permissionId: unchecked(app.permissionId),
+  actor: { type: "app", appId: unchecked(app.app), part: "server" },
+  key: `call-${crypto.randomUUID()}`,
+  builtInCall: false,
+});
+
+/** A fact an App's code says, of `statement`. */
+const said = (statement: string) => ({
+  about: { kind: "customer", names: [statement] },
+  statement,
+});
+
+/** The origins no App memory is read from or written for. */
+const elsewhere = ["agent", "code_mode", "workflow"] as const;
+
+const appWriteProbes = {
+  appUsersReadBy: async (probing) => {
+    const { personId } = probing;
+    const { used, unused, left, shared } = await writingAppFixture(probing);
+    const read = async (
+      name: string,
+      app: string,
+      origin: "page" | "agent" | "code_mode" | "workflow",
+      about?: Answer["about"]
+    ) =>
+      await answer(
+        name,
+        async () =>
+          await appWrites.appUsersReadBy(env, {
+            app: unchecked(app),
+            origin,
+            personId,
+          }),
+        about
+      );
+    return [
+      await read("an App no one made", crypto.randomUUID(), "page", "nothing"),
+      await read("the App they use, from its page", used.app, "page"),
+      ...(shared
+        ? [
+            await read(
+              "an App they don't use, as a workflow's user",
+              unused.app,
+              "page",
+              "hidden"
+            ),
+            await read(
+              "an App they were taken off",
+              left.app,
+              "page",
+              "hidden"
+            ),
+          ]
+        : []),
+      ...(await Promise.all(
+        elsewhere.map(
+          async (origin) =>
+            await read(
+              `the App they use, as ${origin}`,
+              used.app,
+              origin,
+              shared ? "hidden" : undefined
+            )
+        )
+      )),
+    ];
+  },
+  appWriteFor: async (probing) => {
+    const { personId, markers } = probing;
+    const { used, unused, left, shared } = await writingAppFixture(probing);
+    const marked = said(markedText(markers));
+    const write = async (
+      name: string,
+      caller: appWrites.AppWriteCaller,
+      input: unknown
+    ) =>
+      await answer(
+        name,
+        async () => await appWrites.appWriteFor(env, caller, "remember", input)
+      );
+    return [
+      // Written, of none of the markers: its answer holds ids alone.
+      await write(
+        "from the page of the App they use",
+        writeCallerOf(used, personId, "page"),
+        said(markers.map(twinOf).join(" "))
+      ),
+      ...(await Promise.all(
+        elsewhere.map(
+          async (origin) =>
+            await write(
+              `the markers, as ${origin}`,
+              writeCallerOf(used, personId, origin),
+              marked
+            )
+        )
+      )),
+      await write(
+        "the markers, not as a request",
+        writeCallerOf(used, personId, "page"),
+        { ...marked, readers: markers.join(" ") }
+      ),
+      ...(shared
+        ? [
+            await write(
+              "the markers, to an App they don't use",
+              writeCallerOf(unused, personId, "page"),
+              marked
+            ),
+            await write(
+              "the markers, to an App they were taken off",
+              writeCallerOf(left, personId, "page"),
+              marked
+            ),
+          ]
+        : []),
+    ];
+  },
+} satisfies Record<keyof typeof appWrites, Probe>;
 
 /** The person themselves, as brain-memories.ts takes a caller. */
 const personCaller = (personId: string): brainMemories.MemoryCaller => ({
@@ -9206,6 +9424,7 @@ export const brainSurfaces = [
   { name: "shares", module: skillShares, probes: shareProbes },
   { name: "memories", module: brainMemories, probes: memoriesProbes },
   { name: "memoriesRpc", module: BrainMemoriesRpc, probes: memoriesRpcProbes },
+  { name: "appWrites", module: appWrites, probes: appWriteProbes },
 ] as const satisfies readonly Surface[];
 
 /**

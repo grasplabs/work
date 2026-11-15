@@ -76,6 +76,7 @@ const served = async (
           permissionId,
           actor: caller.actor,
           key: context.idempotencyKey,
+          builtInCall: caller.builtInCall(),
         },
         method,
         args[0]

@@ -163,11 +163,13 @@ export interface BrainCard {
 /**
  * A fact an App remembers (`ctx.brain.remember`), in its own name: what
  * it says (`statement`, at most 1,000 characters), the attribute it is
- * filed under and its value (at most 200 characters), and the entity it
- * is about: one the App read from the Brain, by its `id` and `kind`; or
- * by its `kind`, its `names` and exact `identifiers`, the one an
- * identifier finds, or a new one. A person's `preference` or
- * `instruction` is only ever their own word, never an App's.
+ * filed under and its value (at most 500 characters), and the entity it
+ * is about. Pass an entity's `id` (and its `kind`) to file it on an
+ * entity the App read from the Brain. Without an `id`, give its `kind`,
+ * `names` and exact `identifiers`: an identifier links it only to an
+ * entity this App's own memories made, never to one someone else's
+ * memories name, and otherwise a new entity is made. A person's `preference` or `instruction` is only ever their own
+ * word, never an App's.
  */
 export interface BrainRemember {
   readonly about: {

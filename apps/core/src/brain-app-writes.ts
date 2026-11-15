@@ -1,5 +1,4 @@
-import { createAuditEvent } from "@grasp-os/shared/audit";
-import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
+import type { AuditActor } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { functionErrors } from "@grasp-os/shared/functions";
@@ -7,25 +6,16 @@ import type { AppId, PermissionId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
 import type { MemberRole } from "@grasp-os/shared/subject-members";
-import { drizzle } from "drizzle-orm/d1";
-import { z } from "zod";
 
 import { requireAppRole } from "./app-access.ts";
-import {
-  otherAppsReachedBy,
-  readerOf,
-  sourcesOf,
-  unreadableBy,
-} from "./app-provenance.ts";
+import { holdingsOf, readerOf, unreadableBy } from "./app-provenance.ts";
+import type { AppSources } from "./app-provenance.ts";
 import { loadRelease } from "./app-releases.ts";
 import { findApp } from "./apps.ts";
-import {
-  appendAuditEvent,
-  keepAuditEvent,
-  keepEvent,
-  uuidFromHash,
-} from "./audit-outbox.ts";
+import { appendAuditEvent, auditedIdOf } from "./audit-outbox.ts";
 import { memberOf } from "./auth/identity.ts";
+import { audited, inHostBrainWords } from "./brain-audited.ts";
+import type { MemoryCaller } from "./brain-audited.ts";
 import {
   forgetForAppAs,
   isCodeWriteRequest,
@@ -57,20 +47,27 @@ import type { InvocationOrigin } from "./resource-adapter.ts";
 //   everyone who uses the App: a page can hand on, as an argument, any
 //   row its person read, so which rows a call read can't be told apart.
 //   A table nobody reads holds nothing a call read. One only builders
-//   read refuses a call for someone who builds the App (admins build
-//   every App), and only them: no one else's call could read it.
+//   read refuses a call for someone who builds the App now, or did at any
+//   admission of this call (`builtInCall`: a builder taken off it
+//   mid-call read the table before), admins building every App; and only
+//   them: no one else's call could read it.
 // - Everything the App can reach is everyone's in the company: no
 //   personal connection, no collection not everyone reads, no team's part
-//   of the Brain, no other App, nothing that can't be placed
-//   (app-provenance.ts). A grant counts once given, revoked or not: the
-//   App may still hold what it read.
+//   of the Brain, no other App (app-provenance.ts `holdingsOf`, one walk
+//   of the graph for all of it and the person's role). A grant counts
+//   once given, revoked or not: the App may still hold what it read.
+//   What the walk can't place refuses too, in words of its own: it need
+//   not last.
 //
-// Audited with ids, counts and codes alone, never what a memory says: an
-// attempt before anything is written (a write the log can't take writes
-// nothing), then its outcome. A `done` is one event per change, its ID
-// from the change and its time the one the store recorded (when the
-// memory was learned, when it was retired), so a call made again, or a
-// write asked again after a lost reply, keeps the same event, whole.
+// Audited with ids, counts and codes alone, never what a memory says
+// (brain-audited.ts): a refusal of the checks above, one event; a write,
+// its attempt before anything is written (a write the log can't take
+// writes nothing), then its outcome. A `done` is one event per change,
+// its ID from the change the store recorded and its time the one it
+// recorded (when the memory was learned, when it was retired), so a call
+// made again, or a write asked again after a lost reply, keeps the same
+// event, whole. A forget of a memory another call retired answers the App
+// as a forget does, and is recorded as forgetting nothing.
 
 /** Who writes, as core resolved them: the App's binding's caller. */
 export interface AppWriteCaller {
@@ -82,20 +79,37 @@ export interface AppWriteCaller {
   readonly actor: AuditActor;
   /** The request's own key: the same each time the same call is made again. */
   readonly key: string;
+  /**
+   * Whether any admission of this call so far gave the person the App's
+   * builder role (`BindingCaller.builtInCall`).
+   */
+  readonly builtInCall: boolean;
 }
 
-/** The role in App `app` that member `personId` has now, as `requireAppRole` decides it: none for no role, or no longer a member. */
+/**
+ * The role in App `app` that member `personId` has now, as
+ * `requireAppRole` decides it (with `sources`, what the App may have
+ * read, when the caller read it already): none for no role, or no longer
+ * a member.
+ */
 const appRoleNow = async (
   env: Env,
   personId: string,
-  app: AppId
+  app: AppId,
+  sources?: AppSources
 ): Promise<MemberRole | undefined> => {
   const member = await memberOf(env.DB, personId);
   if (member === undefined) {
     return undefined;
   }
   try {
-    return await requireAppRole(env, member, await findApp(env, app), "user");
+    return await requireAppRole(
+      env,
+      member,
+      await findApp(env, app),
+      "user",
+      sources === undefined ? {} : { sources }
+    );
   } catch (error) {
     if (isExpectedError(error)) {
       return undefined;
@@ -169,21 +183,26 @@ const readersOf = ({ access, rules }: TableAccess): TableReaders => {
   return "fewer";
 };
 
-/** What `reachable` names first that not everyone may read, as a refusal names it. */
+/**
+ * What of `sources` not everyone may read, as a refusal names it: the
+ * first, of a kind that lasts (a connection, a collection, a team's part
+ * of the Brain), or what can't be placed.
+ */
 const unreadableReachOf = (
-  unreadable: readonly string[]
-): "connection" | "collection" | "team_brain" | "unresolved" | undefined => {
-  const [first] = unreadable;
+  sources: AppSources
+): "connection" | "collection" | "team_brain" | "unplaced" | undefined => {
+  // As someone in no team, who isn't an admin, reads: what everyone may.
+  const [first] = unreadableBy(sources, readerOf("", [], "user"));
   if (first === undefined) {
     return undefined;
+  }
+  if (sources.unresolved.includes(first)) {
+    return "unplaced";
   }
   if (first.startsWith("connection:")) {
     return "connection";
   }
-  if (first.startsWith("collection:")) {
-    return "collection";
-  }
-  return first.startsWith("brain:") ? "team_brain" : "unresolved";
+  return first.startsWith("collection:") ? "collection" : "team_brain";
 };
 
 /**
@@ -200,7 +219,10 @@ const writeRefusal = async (
       caller: origin,
     });
   }
-  const role = await appRoleNow(env, authority.onBehalfOf, app);
+  // One walk for all of it: the person's role, the App's sources and the
+  // Apps it reaches.
+  const { sources, otherApps } = await holdingsOf(env, app);
+  const role = await appRoleNow(env, authority.onBehalfOf, app, sources);
   if (role === undefined) {
     return functionErrors.create("permission.brain_write_not_user");
   }
@@ -211,29 +233,26 @@ const writeRefusal = async (
     throw new Error("An App's call names no version");
   }
   const release = await loadRelease(env, app, version);
+  const builds = role === "builder" || caller.builtInCall;
   for (const [table, access] of Object.entries(release.app.schema.tables)) {
     const readers = readersOf(access);
     if (readers === "fewer") {
       return functionErrors.create("permission.brain_write_table", { table });
     }
-    if (readers === "builders" && role === "builder") {
+    if (readers === "builders" && builds) {
       return functionErrors.create("permission.brain_write_builders_table", {
         table,
       });
     }
   }
-  const [sources, others] = await Promise.all([
-    sourcesOf(env, app),
-    otherAppsReachedBy(env, app),
-  ]);
-  // As someone in no team, who isn't an admin, reads: what everyone may.
-  const reach = unreadableReachOf(
-    unreadableBy(sources, readerOf("", [], "user"))
-  );
+  const reach = unreadableReachOf(sources);
+  if (reach === "unplaced") {
+    return functionErrors.create("permission.brain_write_unplaced");
+  }
   if (reach !== undefined) {
     return functionErrors.create("permission.brain_write_reach", { reach });
   }
-  if (others.length > 0) {
+  if (otherApps.length > 0) {
     return functionErrors.create("permission.brain_write_reach", {
       reach: "app",
     });
@@ -247,12 +266,6 @@ const actions: Readonly<Record<CodeWriteOperation, string>> = {
   forget: "brain.memory.forgotten",
 };
 
-/** An id as the audit log may name it: a well-formed one, never what code sent instead. */
-const idOf = (value: unknown): string | null => {
-  const id = z.uuid().safeParse(value);
-  return id.success ? id.data : null;
-};
-
 /** What the audit may name of a request: the memory it forgets, by id. */
 const askedOf = (
   operation: CodeWriteOperation,
@@ -260,26 +273,13 @@ const askedOf = (
 ): Record<string, string | null> =>
   operation === "forget"
     ? {
-        memory: idOf(
+        memory: auditedIdOf(
           typeof input === "object" && input !== null
             ? Reflect.get(input, "memory")
             : undefined
         ),
       }
     : {};
-
-/** `error` in the function host's words: a request the Brain refused as one it isn't. */
-const inHostWords = (error: unknown): unknown => {
-  if (!isExpectedError(error)) {
-    return error;
-  }
-  if (error.code === "brain.request_invalid") {
-    return functionErrors.create("permission.invalid_args");
-  }
-  return error.code === "permission.person_inactive"
-    ? functionErrors.create("permission.unavailable")
-    : error;
-};
 
 /**
  * `write` once, and once more when its reply was lost (an error no rule
@@ -297,12 +297,12 @@ const landed = async <T>(write: () => Promise<T>): Promise<T> => {
   }
 };
 
-/** What a write answers App code, its outcome's details, and the store's time for it. */
+/** What a write answers App code, its outcome's details, and what this call's change did. */
 interface Written {
   answer: Json;
   detail: Record<string, string | boolean | null>;
-  /** When the store recorded what the change did: its `done`'s time. */
-  at?: Date;
+  /** Only for what this call's change did: its `done`'s change and stored time. */
+  once?: { change: string; at: Date };
 }
 
 /** Makes `operation` for `caller`, checked already, under `change`. */
@@ -314,23 +314,33 @@ const writeFor = async (
   change: string
 ): Promise<Written> => {
   const person = caller.authority.onBehalfOf;
+  const as = { app: caller.app, change };
   if (operation === "remember") {
     const { memory, entity, learnedAt } = await landed(
-      async () =>
-        await rememberForAppAs(env, person, { app: caller.app, change }, input)
+      async () => await rememberForAppAs(env, person, as, input)
     );
     return {
       answer: { memory, entity },
       detail: { memory, entity },
-      at: learnedAt,
+      once: { change, at: learnedAt },
     };
   }
   const retired = await landed(
-    async () => await forgetForAppAs(env, person, caller.app, input)
+    async () => await forgetForAppAs(env, person, as, input)
   );
-  return retired === null
-    ? { answer: false, detail: { result: "nothing" } }
-    : { answer: true, detail: { result: "done" }, at: retired.retiredAt };
+  if (retired === null) {
+    return { answer: false, detail: { result: "nothing" } };
+  }
+  // Retired by another call (another person's, or another of theirs):
+  // forgotten for the App all the same, but nothing this call did.
+  if (retired.change !== change) {
+    return { answer: true, detail: { result: "nothing" } };
+  }
+  return {
+    answer: true,
+    detail: { result: "done" },
+    once: { change: retired.change, at: retired.retiredAt },
+  };
 };
 
 /**
@@ -349,18 +359,16 @@ export const appWriteFor = async (
   input: unknown
 ): Promise<Json> => {
   const action = actions[operation];
-  const entry = (
-    detail: Record<string, string | number | boolean | null>
-  ): AuditEntry => ({
+  const person = caller.authority.onBehalfOf;
+  const audit: MemoryCaller = {
+    person,
     actor: caller.actor,
-    action,
     target: { type: "app", id: caller.app },
-    detail: { onBehalfOf: caller.authority.onBehalfOf, ...detail },
-  });
+  };
   const asked = askedOf(operation, input);
   // One change per call and person: the same when the call is made again.
   const change = `app:${caller.app}/${await sha256Hex(
-    JSON.stringify([caller.authority.onBehalfOf, caller.key])
+    JSON.stringify([person, caller.key])
   )}`;
   try {
     // The input first, as a recall's: a caller with no grant and bad
@@ -381,50 +389,29 @@ export const appWriteFor = async (
       throw refusal;
     }
   } catch (error) {
-    const refused = inHostWords(error);
-    await appendAuditEvent(
-      env,
-      entry({
+    // Refused before anything was tried: one event.
+    const refused = inHostBrainWords(error);
+    await appendAuditEvent(env, {
+      actor: audit.actor,
+      action,
+      target: { type: "app", id: caller.app },
+      detail: {
+        onBehalfOf: person,
         ...asked,
         outcome: "refused",
         reason: isExpectedError(refused) ? refused.code : "internal.unexpected",
-      })
-    );
+      },
+    });
     throw refused;
   }
-  // Kept before anything is written: a write the log can't take writes
-  // nothing.
-  await appendAuditEvent(env, entry({ ...asked, outcome: "attempted" }));
-  const db = drizzle(env.DB);
-  let done: Written;
-  try {
-    done = await writeFor(env, caller, operation, input, change);
-  } catch (error) {
-    const refused = inHostWords(error);
-    await keepAuditEvent(
-      env,
-      db,
-      entry({
-        ...asked,
-        outcome: "refused",
-        reason: isExpectedError(refused) ? refused.code : "internal.unexpected",
-      })
-    );
-    throw refused;
-  }
-  const outcome = entry({ ...asked, outcome: "done", ...done.detail });
-  if (done.at === undefined) {
-    // Nothing changed (none of the App's to forget): one outcome a call.
-    await keepAuditEvent(env, db, outcome);
-    return done.answer;
-  }
-  // One `done` per change, whole: its ID from the change, its time what
-  // the store recorded, the rest the change's too, so the same call made
-  // again, after the first was drained, is the event the log holds.
-  await keepEvent(env, db, {
-    ...createAuditEvent(outcome, "core"),
-    id: uuidFromHash(await sha256Hex(JSON.stringify([action, change]))),
-    at: done.at.toISOString(),
-  });
-  return done.answer;
+  const written = await audited(
+    env,
+    audit,
+    action,
+    asked,
+    async () => await writeFor(env, caller, operation, input, change),
+    ({ detail }) => detail,
+    { refusedAs: inHostBrainWords, doneOnce: ({ once }) => once }
+  );
+  return written.answer;
 };

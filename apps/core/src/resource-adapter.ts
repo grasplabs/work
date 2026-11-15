@@ -140,6 +140,12 @@ export interface BindingCaller {
    * call writes to the Brain (resource-brain.ts).
    */
   readonly origin: InvocationOrigin;
+  /**
+   * Whether any admission of this invocation so far (`admit`) gave the
+   * person the App's builder role: what a builder read while they built
+   * it stays read once they no longer do.
+   */
+  readonly builtInCall: () => boolean;
   readonly authority: Authority;
   readonly context: WorkContext;
   readonly sources: InvocationSources;

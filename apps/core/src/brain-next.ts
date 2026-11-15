@@ -4896,22 +4896,26 @@ export const rememberForAppAs = async (
 
 /**
  * Retires one of App `app`'s own memories (`{ memory }`), as its code
- * reads, for the member `personId` (admitted to the App by the caller):
- * when the store retired it, the same time again for one it retired
- * before; null alike for none, another writer's (a person's, a source's,
- * another App's), one its code may not read and an expired one. Refused
- * once `personId` is no longer a member.
+ * reads, for the member `personId` (admitted to the App by the caller),
+ * under `change`, this one call's: when the store retired it and the
+ * change that did (`change`, the stored one: this call's when it was this
+ * call, another's for one retired before), the same on every repeat;
+ * null alike for none, another writer's (a person's, a source's, another
+ * App's), one its code may not read and an expired one. Refused once
+ * `personId` is no longer a member.
  */
 export const forgetForAppAs = async (
   env: BrainEnv & Pick<Env, "DB">,
   personId: string,
-  app: AppId,
+  { app, change }: { app: AppId; change: string },
   request: unknown
-): Promise<RetiredMemory | null> => {
+): Promise<{ retiredAt: Date; change: string | null } | null> => {
   const { memory } = checked(codeForgetSchema, request);
+  checked(changeSchema, change);
   const reader = await codeReaderOf(env, personId, "company", app);
+  let retired: RetiredMemory | null;
   try {
-    return await brain(env).retireMemory({
+    retired = await brain(env).retireMemory({
       memory,
       reader,
       writer: appWriterOf(app),
@@ -4919,4 +4923,15 @@ export const forgetForAppAs = async (
   } catch (error) {
     throw refusedAs(error);
   }
+  if (retired === null) {
+    return null;
+  }
+  // The store's pull request of GRA-1883 makes `retireMemory` take the
+  // caller's `change` and answer the one it stored: until it lands the
+  // store names none, and no forget is taken for the one that retired it.
+  const stored: unknown = Reflect.get(retired, "change");
+  return {
+    retiredAt: retired.retiredAt,
+    change: typeof stored === "string" ? stored : null,
+  };
 };

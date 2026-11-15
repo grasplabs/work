@@ -496,12 +496,15 @@ const reachedThroughCalls = async (
  */
 export const sourcesOfApps = async (
   env: Env,
-  apps: readonly AppId[]
+  apps: readonly AppId[],
+  /** The walk of `apps`, when the caller made it already (`holdingsOf`). */
+  walked?: ReadonlyMap<AppId, Reach>
 ): Promise<Map<AppId, AppSources>> => {
   const reach =
-    apps.length === 0
+    walked ??
+    (apps.length === 0
       ? new Map<AppId, Reach>()
-      : await reachedThroughCalls(env, apps);
+      : await reachedThroughCalls(env, apps));
   const all = [...new Set([...reach.values()].flatMap((of) => [...of.nodes]))];
   const allApps = all.filter((id) => !id.startsWith(workflowPrefix));
   const allWorkflows = all.flatMap((id) =>
@@ -639,20 +642,31 @@ export const sourcesOfApps = async (
 };
 
 /**
- * The other Apps whose data `app` may hold through grants on workflows
- * (`reachedThroughCalls`, every grant ever given, both ways each carries
- * data): what an App's Brain write is held to reach none of
- * (brain-app-writes.ts). One the walk can't place, or a walk past its
- * caps, is among `sourcesOf`'s `unresolved` instead.
+ * What `app` holds, from one walk of the graph (`reachedThroughCalls`,
+ * every grant ever given, both ways each carries data): the sources it
+ * may have read (`sourcesOf`), and the other Apps whose data it may hold
+ * through grants on workflows. What an App's Brain write is held to
+ * (brain-app-writes.ts), and its users' role read with it
+ * (`requireAppRole`'s `sources`). One the walk can't place, or a walk
+ * past its caps, is among `sources.unresolved`.
  */
-export const otherAppsReachedBy = async (
+export const holdingsOf = async (
   env: Env,
   app: AppId
-): Promise<string[]> => {
-  const reached = await reachedThroughCalls(env, [app]);
-  return [...(reached.get(app)?.nodes ?? [])].filter(
-    (id) => id !== app && !id.startsWith(workflowPrefix)
-  );
+): Promise<{ sources: AppSources; otherApps: string[] }> => {
+  const reach = await reachedThroughCalls(env, [app]);
+  const sources = await sourcesOfApps(env, [app], reach);
+  return {
+    sources: sources.get(app) ?? {
+      connections: [],
+      collections: [],
+      brainTeams: [],
+      unresolved: [],
+    },
+    otherApps: [...(reach.get(app)?.nodes ?? [])].filter(
+      (id) => id !== app && !id.startsWith(workflowPrefix)
+    ),
+  };
 };
 
 /** The sources `app` may have read, as they are now. */

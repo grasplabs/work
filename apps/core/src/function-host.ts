@@ -1980,14 +1980,9 @@ const brainWriteRefusals = {
     table: z.string(),
   }),
   "permission.brain_write_reach": z.strictObject({
-    reach: z.enum([
-      "connection",
-      "collection",
-      "team_brain",
-      "app",
-      "unresolved",
-    ]),
+    reach: z.enum(["connection", "collection", "team_brain", "app"]),
   }),
+  "permission.brain_write_unplaced": z.undefined(),
 } as const;
 
 const isBrainWriteRefusal = (

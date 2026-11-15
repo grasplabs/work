@@ -11,6 +11,8 @@ import type {
   Pack,
   PackItem,
   recallRequestSchema,
+  statementMaxLength,
+  valueMaxLength,
 } from "@grasp-os/brain-next/contract";
 import { expectTypeOf } from "vite-plus/test";
 import type { z } from "zod";
@@ -63,3 +65,9 @@ expectTypeOf<Request["asOf"]>().toEqualTypeOf<Date | undefined>();
 // Brain gives one, its ID, kind and earliest name.
 expectTypeOf<BrainEntityKind>().toEqualTypeOf<EntityKind>();
 expectTypeOf<Mutable<BrainEntity>>().toEqualTypeOf<Entity>();
+
+// What `BrainRemember` says of its bounds is the Brain's: a statement of
+// at most 1,000 characters and a value of at most 500. A change of either
+// fails here until its words say it too.
+expectTypeOf<typeof statementMaxLength>().toEqualTypeOf<1000>();
+expectTypeOf<typeof valueMaxLength>().toEqualTypeOf<500>();

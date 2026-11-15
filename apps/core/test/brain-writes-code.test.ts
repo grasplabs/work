@@ -1,31 +1,33 @@
-import type { FunctionResult } from "@grasp-os/shared/functions";
-import {
-  agentIdSchema,
-  chatIdSchema,
-  teamIdSchema,
-  workspaceIdSchema,
-} from "@grasp-os/shared/ids";
-import type { PermissionRequest } from "@grasp-os/shared/permissions";
-import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
-import { z } from "zod";
 
-import { callAppFunction, callPageFunction } from "../src/app-functions.ts";
-import { addMember } from "../src/app-members.ts";
-import { recallsTheBrain } from "../src/app-provenance.ts";
-import { appFor, appKind } from "../src/apps.ts";
-import { teamsOf } from "../src/auth/identity.ts";
+import { callAppFunction } from "../src/app-functions.ts";
+import { addMember, removeMember } from "../src/app-members.ts";
+import { holdingsOf, recallsTheBrain } from "../src/app-provenance.ts";
+import { appUsersReadBy, appWriteFor } from "../src/brain-app-writes.ts";
 import { memoriesAs, recallAs } from "../src/brain-next.ts";
-import { requireResourceRole } from "../src/permission-resources.ts";
-import { grantPermission, requestPermission } from "../src/permissions.ts";
-import { rollback } from "../src/publish.ts";
-import { approveResourceBinding } from "../src/resource-bindings.ts";
-import { testApp } from "./app-definitions.ts";
-import type { TableSpec } from "./app-definitions.ts";
-import { commitDefined } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
-import { appWith, person, seal } from "./sealed-apps.ts";
+import {
+  answerOf,
+  appOf,
+  byAgent,
+  eventsOf,
+  fact,
+  grant,
+  holdingFirst,
+  idsOf,
+  onPage,
+  published,
+  rememberedSchema,
+  requestOf,
+  signedIn,
+  someText,
+  statementsOf,
+  table,
+  teamOf,
+} from "./brain-writing-app.ts";
+import type { App, Member } from "./brain-writing-app.ts";
+import { failure as failureOf, person } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
 
@@ -51,341 +53,6 @@ import { connectDb } from "./test-env.ts";
 
 /** Signing people in, sealing and granting can be slow on CI. */
 const setUpTime = { timeout: 180_000 };
-
-type Member = Awaited<ReturnType<typeof person>>;
-
-const rolesOf = (by: Identity) => ({
-  app: async (named: string, role: "user" | "builder") =>
-    await appFor(env, by, named, role),
-  resource: async (
-    ref: Parameters<typeof requireResourceRole>[2],
-    needed: Parameters<typeof requireResourceRole>[3]
-  ) => {
-    await requireResourceRole(env, by, ref, needed);
-  },
-});
-
-/** A team of `members`, as core keeps one: its ID. */
-const teamOf = async (...members: Member[]): Promise<string> => {
-  const team = crypto.randomUUID();
-  await env.DB.batch([
-    env.DB.prepare(
-      "INSERT INTO teams (id, name, organization_id, created_at) VALUES (?, 'Accounts', 'organization', ?)"
-    ).bind(team, Date.now()),
-    ...members.map((member) =>
-      env.DB.prepare(
-        "INSERT INTO team_members (id, team_id, user_id, created_at) VALUES (?, ?, ?, ?)"
-      ).bind(crypto.randomUUID(), team, member.userId, Date.now())
-    ),
-  ]);
-  return team;
-};
-
-/** `member` as their session has them now, their teams included. */
-const signedIn = async (member: Member): Promise<Member> => ({
-  ...member,
-  teams: await teamsOf(env.DB, member.userId),
-});
-
-/**
- * An App whose action hands each Brain operation what it is given, as
- * JSON (`memories.ask`): `both` finds entities first, then remembers, so
- * a test can hold the call between its two requests. With `tables`.
- */
-const memoriesApp = (tables: Readonly<Record<string, TableSpec>> = {}) =>
-  testApp(
-    {
-      name: "Accounts",
-      tables,
-      permissions: [
-        'permission.brain({ operations: ["remember", "forget", "entities.get", "entities.find"] })',
-      ],
-    },
-    {
-      "server/memories.ts": `import { v } from "@grasp-os/sdk";
-import { action } from "@server/_generated/server";
-
-export const ask = action({
-  args: { operation: v.string(), input: v.string() },
-  handler: async (ctx, args) => {
-    const input = JSON.parse(args.input);
-    switch (args.operation) {
-      case "remember":
-        return await ctx.brain.remember(input);
-      case "forget":
-        return await ctx.brain.forget(input);
-      case "get":
-        return await ctx.brain.entities.get(input);
-      case "both":
-        await ctx.brain.entities.find({ kind: "customer" });
-        return await ctx.brain.remember(input);
-      default:
-        return await ctx.brain.entities.find(input);
-    }
-  },
-});
-`,
-    }
-  );
-
-/** A table of one field, read as `read` says, written by its readers. */
-const table = (
-  read: NonNullable<TableSpec["access"]>["read"],
-  rows?: NonNullable<NonNullable<TableSpec["access"]>["rows"]>["read"]
-): TableSpec => ({
-  fields: {
-    title: "v.string()",
-    team: "v.string().optional()",
-    assignee: "v.person().optional()",
-  },
-  access: {
-    read,
-    write: read,
-    ...(rows === undefined ? {} : { rows: { read: rows, write: rows } }),
-  },
-});
-
-/**
- * App `tables` of `owner`'s, sealed and current, its Brain declaration
- * bound by `admin` to its grant to read the Brain, naming `teams` if any.
- */
-const appOf = async (
-  owner: Member,
-  admin: Member,
-  {
-    tables,
-    teams,
-  }: { tables?: Readonly<Record<string, TableSpec>>; teams?: string[] } = {}
-) => {
-  const fixture = await appWith(memoriesApp(tables), "Accounts", owner);
-  const release = await seal(fixture);
-  await rollback(env, appKind, fixture.owner, fixture.app, 1);
-  const asked = await requestPermission(
-    env,
-    owner,
-    {
-      subject: { type: "app", appId: fixture.app },
-      object:
-        teams === undefined
-          ? { type: "platform" }
-          : {
-              type: "platform",
-              teams: teams.map((team) => teamIdSchema.parse(team)),
-            },
-      actions: ["brain"],
-      binding: `BRAIN_${unique().replaceAll(/\W/gu, "_").toUpperCase()}`,
-    } satisfies PermissionRequest,
-    rolesOf(owner)
-  );
-  await grantPermission(env, admin, asked.id, {
-    version: release.manifest.resourceVersion,
-  });
-  await approveResourceBinding(env, admin, {
-    app: fixture.app,
-    alias: "brain",
-    target: { kind: "brain", permissionId: asked.id },
-    reviewed: { version: 1 },
-  });
-  return fixture;
-};
-
-type App = Awaited<ReturnType<typeof appOf>>;
-
-/** Version `version` of `app`, with `tables`, sealed and made current. */
-const published = async (
-  app: App,
-  version: number,
-  tables: Readonly<Record<string, TableSpec>>
-): Promise<void> => {
-  await commitDefined(env, app.owner, app.app, memoriesApp(tables));
-  await seal(app, version);
-  await rollback(env, appKind, app.owner, app.app, version);
-};
-
-/** The call of `operation` with `input`, as a page sends it. */
-const requestOf = (
-  operation: string,
-  input: unknown,
-  idempotencyKey?: string
-): string =>
-  JSON.stringify({
-    reference: { name: "memories.ask", kind: "action" },
-    args: { operation, input: JSON.stringify(input) },
-    ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
-  });
-
-/** What `result` answered: its value, or its error's code and details. */
-const answerOf = (result: FunctionResult): unknown =>
-  result.ok ? result.value : { failed: result.error.code };
-
-/** What `operation` of `app`'s answers `by` on its page. */
-const onPage = async (
-  app: App,
-  by: Member,
-  operation: string,
-  input: unknown,
-  { key, on = env }: { key?: string; on?: Env } = {}
-): Promise<unknown> => {
-  const { result } = await callPageFunction(
-    on,
-    by,
-    app.app,
-    requestOf(operation, input, key),
-    Date.now() + 60_000
-  );
-  return answerOf(result);
-};
-
-/** What `operation` of `app`'s answers `by`'s chat's agent, or its Code Mode run. */
-const byAgent = async (
-  app: App,
-  by: Member,
-  operation: string,
-  input: unknown,
-  { codeMode = false } = {}
-): Promise<unknown> => {
-  const { result } = await callAppFunction(
-    env,
-    by,
-    app.app,
-    requestOf(operation, input),
-    Date.now() + 60_000,
-    undefined,
-    codeMode ? `session-${unique()}` : undefined,
-    {
-      agentId: agentIdSchema.parse(crypto.randomUUID()),
-      workspaceId: workspaceIdSchema.parse(crypto.randomUUID()),
-      chatId: chatIdSchema.parse(crypto.randomUUID()),
-    }
-  );
-  return answerOf(result);
-};
-
-/** A fact about a new customer `name`, as code remembers one. */
-const fact = (name: string) => ({
-  about: { kind: "customer", names: [name] },
-  attribute: "status",
-  value: "active",
-  statement: `${name} is active`,
-});
-
-/** Any text, as an expectation. */
-const someText: unknown = expect.any(String);
-
-const rememberedSchema = z.strictObject({
-  memory: z.uuid(),
-  entity: z.uuid(),
-});
-
-/** The statements of a card code read, or none. */
-const statementsOf = (card: unknown): string[] =>
-  card === null
-    ? []
-    : z
-        .object({
-          attributes: z.array(
-            z.object({ memories: z.array(z.object({ statement: z.string() })) })
-          ),
-        })
-        .parse(card)
-        .attributes.flatMap(({ memories }) =>
-          memories.map(({ statement }) => statement)
-        );
-
-/** The ids of a page of entities code found. */
-const idsOf = (page: unknown): string[] =>
-  z
-    .object({ entities: z.array(z.object({ id: z.string() })) })
-    .parse(page)
-    .entities.map(({ id }) => id);
-
-/** The audit events of `action` about `memory`, once `count` are kept. */
-const eventsOf = async (action: string, memory: string, count: number) =>
-  await vi.waitFor(
-    async () => {
-      const all = await allEvents();
-      const events = all.filter(
-        (event) =>
-          event.action === action &&
-          JSON.stringify(event.detail).includes(memory)
-      );
-      expect(events.length).toBeGreaterThanOrEqual(count);
-      return events;
-    },
-    { timeout: 10_000, interval: 50 }
-  );
-
-/** A grant as an admin's writes its row: what the provenance walk follows. */
-const grant = (
-  subjectType: "app" | "workflow",
-  subject: string,
-  objectType: "connection" | "workflow" | "app",
-  object: string,
-  actions: readonly string[],
-  status = "active"
-) =>
-  env.DB.prepare(
-    `INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id,
-      actions, binding, status, requested_by, requested_at, granted_by, granted_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'test', 0, 'test', 0)`
-  ).bind(
-    crypto.randomUUID(),
-    subjectType,
-    subject,
-    objectType,
-    object,
-    JSON.stringify(actions),
-    `GRANT_${unique().replaceAll(/\W/gu, "_").toUpperCase()}`,
-    status
-  );
-
-/**
- * `namespace` with the shared store's `method` waiting for `before` the
- * first time it is called, then answering as it would: a call held
- * between two of its requests, for a test to change what it runs on.
- */
-const holdingFirst = (
-  namespace: Env["BRAIN_STORE"],
-  method: string,
-  before: () => Promise<void>
-): Env["BRAIN_STORE"] => {
-  let first = true;
-  const stubOf = (stub: object): object =>
-    new Proxy(stub, {
-      get: (target, property): unknown => {
-        const value: unknown = Reflect.get(target, property);
-        if (typeof value !== "function") {
-          return value;
-        }
-        // An RPC stub's method takes no `bind`: it would be a remote call.
-        return async (...args: unknown[]): Promise<unknown> => {
-          if (property === method && first) {
-            first = false;
-            await before();
-          }
-          return await Reflect.apply(value, target, args);
-        };
-      },
-    });
-  const namespaceOf = (of: Env["BRAIN_STORE"]): Env["BRAIN_STORE"] =>
-    new Proxy(of, {
-      get: (target, property): unknown => {
-        if (property === "jurisdiction") {
-          return (jurisdiction: DurableObjectJurisdiction) =>
-            namespaceOf(target.jurisdiction(jurisdiction));
-        }
-        if (property === "getByName") {
-          return (name: string) => {
-            const stub = target.getByName(name);
-            return name === "brain" ? stubOf(stub) : stub;
-          };
-        }
-        const value: unknown = Reflect.get(target, property);
-        return typeof value === "function" ? value.bind(target) : value;
-      },
-    });
-  return namespaceOf(namespace);
-};
 
 describe("an App's code remembers and forgets for its users", setUpTime, () => {
   it("remembers for the App's users, read back through its own code; nothing else finds it; forgets only its own; and a call made again is one memory and one event", async () => {
@@ -698,10 +365,10 @@ describe("an App's code remembers and forgets for its users", setUpTime, () => {
       grant("workflow", workflow, "app", reached.app, ["call"]),
     ]);
 
-    const tried = async (app: App, by: Member = ada) =>
-      await onPage(app, by, "remember", fact(`Reachco ${unique()}`));
+    const tried = async (app: App) =>
+      await onPage(app, asAda, "remember", fact(`Reachco ${unique()}`));
     expect({
-      teamBrain: await tried(teamBrain, asAda),
+      teamBrain: await tried(teamBrain),
       mailbox: await tried(mailbox),
       reaching: await tried(reaching),
       reached: await tried(reached),
@@ -710,6 +377,271 @@ describe("an App's code remembers and forgets for its users", setUpTime, () => {
       mailbox: { failed: "permission.brain_write_reach" },
       reaching: { failed: "permission.brain_write_reach" },
       reached: { failed: "permission.brain_write_reach" },
+    });
+  });
+
+  it("records a forget as the one who forgot it, when they did: another's forget of it later forgets nothing", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const [bob, cara] = await Promise.all([person("user"), person("user")]);
+    const app = await appOf(ada, admin);
+    for (const { userId } of [bob, cara]) {
+      // oxlint-disable-next-line no-await-in-loop -- one share at a time
+      await addMember(env, ada, app.app, {
+        type: "person",
+        id: userId,
+        role: "user",
+      });
+    }
+    const written = rememberedSchema.parse(
+      await onPage(app, bob, "remember", fact(`Twice ${unique()}`))
+    );
+    const byBob = await onPage(app, bob, "forget", { memory: written.memory });
+    const byCara = await onPage(app, cara, "forget", {
+      memory: written.memory,
+    });
+    const outcomes = await eventsOf(
+      "brain.memory.forgotten",
+      written.memory,
+      4
+    );
+    const done = outcomes.filter(({ detail }) => detail?.outcome === "done");
+    const at = (who: string) =>
+      done.find(({ detail }) => detail?.onBehalfOf === who)?.at ?? "";
+    expect({
+      byBob,
+      byCara,
+      results: done
+        .map(({ detail }) => ({
+          who: detail?.onBehalfOf === bob.userId ? "bob" : "cara",
+          result: detail?.result,
+        }))
+        .toSorted((one, other) => one.who.localeCompare(other.who)),
+      // Cara's is her own event, at her own time, never Bob's.
+      caraAfterBob: at(cara.userId) > at(bob.userId),
+    }).toStrictEqual({
+      byBob: true,
+      byCara: true,
+      results: [
+        { who: "bob", result: "done" },
+        { who: "cara", result: "nothing" },
+      ],
+      caraAfterBob: true,
+    });
+  });
+
+  it("writes from an App shaped like a seeded one: a board its users read and write, a workflow that calls only back into it; and reads it back", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const bob = await person("user");
+    const app = await appOf(ada, admin, {
+      tables: { board: table("appMembers") },
+    });
+    await addMember(env, ada, app.app, {
+      type: "person",
+      id: bob.userId,
+      role: "user",
+    });
+    // Its workflow, as the walk sees its grants: the App starts it, and it
+    // calls the App's functions and nothing else.
+    const workflow = `workflow_${unique().replaceAll("-", "")}`;
+    await env.DB.batch([
+      grant("app", app.app, "workflow", workflow, ["start"]),
+      grant("workflow", workflow, "app", app.app, ["call"]),
+    ]);
+    const name = `Seedco ${unique()}`;
+    const written = rememberedSchema.parse(
+      await onPage(app, bob, "remember", fact(name))
+    );
+    const { otherApps } = await holdingsOf(env, app.app);
+    expect({
+      otherApps,
+      read: statementsOf(
+        await onPage(app, ada, "get", { entity: written.entity })
+      ),
+    }).toStrictEqual({ otherApps: [], read: [`${name} is active`] });
+  });
+
+  it("stops reading what the App remembered for someone taken off it, its history included", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const cara = await person("user");
+    const app = await appOf(ada, admin);
+    await addMember(env, ada, app.app, {
+      type: "person",
+      id: cara.userId,
+      role: "user",
+    });
+    const name = `Leaverco ${unique()}`;
+    const written = rememberedSchema.parse(
+      await onPage(app, ada, "remember", fact(name))
+    );
+    const learned = new Date().toISOString();
+    await onPage(app, ada, "forget", { memory: written.memory });
+    // History: as of before it was forgotten.
+    const before = statementsOf(
+      await onPage(app, cara, "get", { entity: written.entity, asOf: learned })
+    );
+    await removeMember(env, ada, app.app, { type: "person", id: cara.userId });
+    expect({
+      before,
+      after: await onPage(app, cara, "get", {
+        entity: written.entity,
+        asOf: learned,
+      }),
+      readsTheApps: await appUsersReadBy(env, {
+        app: app.app,
+        origin: "page",
+        personId: cara.userId,
+      }),
+    }).toStrictEqual({
+      before: [`${name} is active`],
+      after: { failed: "app.not_found" },
+      readsTheApps: undefined,
+    });
+  });
+
+  it("refuses someone who doesn't use the App, recording one refusal by ids; and a workflow's call, its outsider as one who can't reach the App", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const [bob, eve] = await Promise.all([person("user"), person("user")]);
+    const app = await appOf(ada, admin);
+    await addMember(env, ada, app.app, {
+      type: "person",
+      id: bob.userId,
+      role: "user",
+    });
+    const name = `Eveco ${unique()}`;
+    const refusal = await failureOf(async () => {
+      await appWriteFor(
+        env,
+        {
+          app: app.app,
+          origin: "page",
+          authority: {
+            subject: { type: "app", appId: app.app },
+            onBehalfOf: eve.userId,
+            mode: "interactive",
+            appVersion: 1,
+          },
+          context: { type: "app", appId: app.app },
+          permissionId: app.permissionId,
+          actor: { type: "app", appId: app.app, part: "server" },
+          key: `call-${unique()}`,
+          builtInCall: false,
+        },
+        "remember",
+        fact(name)
+      );
+    });
+    // A call as a workflow's step makes one: no page, no agent.
+    const asWorkflow = async (by: Member) => {
+      const { result } = await callAppFunction(
+        env,
+        by,
+        app.app,
+        requestOf("remember", fact(`Wfco ${unique()}`)),
+        Date.now() + 60_000
+      );
+      return answerOf(result);
+    };
+    const all = await allEvents();
+    const eves = all.filter(
+      ({ action, detail }) =>
+        action === "brain.memory.remembered" &&
+        detail?.onBehalfOf === eve.userId
+    );
+    expect({
+      refusal,
+      eves: eves.map(({ detail }) => detail),
+      said: JSON.stringify(eves).includes(name),
+      outsider: await asWorkflow(eve),
+      user: await asWorkflow(bob),
+    }).toStrictEqual({
+      refusal: "permission.brain_write_not_user",
+      eves: [
+        {
+          onBehalfOf: eve.userId,
+          outcome: "refused",
+          reason: "permission.brain_write_not_user",
+        },
+      ],
+      said: false,
+      outsider: { failed: "app.not_found" },
+      user: { failed: "permission.brain_write_caller" },
+    });
+  });
+
+  it("refuses a call held between its read and its write once its person is taken off the App, and writes nothing", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const bob = await person("user");
+    const app = await appOf(ada, admin);
+    await addMember(env, ada, app.app, {
+      type: "person",
+      id: bob.userId,
+      role: "user",
+    });
+    const reached = Promise.withResolvers<null>();
+    const held = Promise.withResolvers<null>();
+    const holding = holdingFirst(env.BRAIN_STORE, "findEntities", async () => {
+      reached.resolve(null);
+      await held.promise;
+    });
+    const name = `Goneco ${unique()}`;
+    const during = onPage(app, bob, "both", fact(name), {
+      on: { ...env, BRAIN_STORE: holding },
+    });
+    await reached.promise;
+    await removeMember(env, ada, app.app, { type: "person", id: bob.userId });
+    held.resolve(null);
+    expect({
+      during: await during,
+      found: idsOf(await onPage(app, ada, "find", { name })),
+    }).toStrictEqual({ during: { failed: "app.not_found" }, found: [] });
+  });
+
+  it("refuses a builder taken down to a user during the call, with a table only builders read: what they read as a builder stays read", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const carl = await person("builder");
+    const app = await appOf(ada, admin, {
+      tables: { plans: table("appBuilders") },
+    });
+    await addMember(env, ada, app.app, {
+      type: "person",
+      id: carl.userId,
+      role: "builder",
+    });
+    const reached = Promise.withResolvers<null>();
+    const held = Promise.withResolvers<null>();
+    const holding = holdingFirst(env.BRAIN_STORE, "findEntities", async () => {
+      reached.resolve(null);
+      await held.promise;
+    });
+    const name = `Demotedco ${unique()}`;
+    const during = onPage(app, carl, "both", fact(name), {
+      on: { ...env, BRAIN_STORE: holding },
+    });
+    await reached.promise;
+    await removeMember(env, ada, app.app, { type: "person", id: carl.userId });
+    await addMember(env, ada, app.app, {
+      type: "person",
+      id: carl.userId,
+      role: "user",
+    });
+    held.resolve(null);
+    expect({
+      during: await during,
+      // A new call as the user they are now writes.
+      after: rememberedSchema.safeParse(
+        await onPage(app, carl, "remember", fact(`Userco ${unique()}`))
+      ).success,
+      found: idsOf(await onPage(app, ada, "find", { name })),
+    }).toStrictEqual({
+      during: { failed: "permission.brain_write_builders_table" },
+      after: true,
+      found: [],
     });
   });
 });

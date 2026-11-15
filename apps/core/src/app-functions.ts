@@ -223,15 +223,19 @@ export const invocationFor = async (
   // meanwhile stops a call already running.
   // The roles the gate read last, which who calls is told (`people`).
   let admitted: WriterRoles | undefined;
+  // Whether any admission so far let them in as a builder.
+  let built = false;
   const authorize = async () => {
     await requireNotRevoked(env, app, release.manifest.resourceVersion);
     await stillAllowed?.();
     admitted = await functionRoles(env, by, app);
+    built ||= admitted.appBuilder;
     return admitted;
   };
   const bindings = resourceBindingsFor(env, {
     app,
     origin,
+    builtInCall: () => built,
     authority,
     context: { type: "app", appId: app },
     sources,

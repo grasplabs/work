@@ -14149,6 +14149,10 @@ msgstr "They'll find it under Workflows, and run it as it is now."
 msgid "Thinking"
 msgstr "Thinking"
 
+#: src/apps/resource-bindings.tsx
+msgid "This App can save memories in the Brain in its own name, which everyone who uses the App reads through it, and only through it, and it can take its own back."
+msgstr "This App can save memories in the Brain in its own name, which everyone who uses the App reads through it, and only through it, and it can take its own back."
+
 #: src/apps/app-data.tsx
 msgid "This App changed. Reload to see its current version."
 msgstr "This App changed. Reload to see its current version."
