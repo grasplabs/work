@@ -109,7 +109,12 @@ import type {
   CodeRunCall,
 } from "./agent-scope.ts";
 import { heldIn } from "./agent-skills.ts";
-import { builtNoteText, inOwnWords } from "./agent.ts";
+import {
+  builtNoteText,
+  inOwnWords,
+  resultRunId,
+  withheldResult,
+} from "./agent.ts";
 import type { QuestionBuilt, TurnContext, TurnResult } from "./agent.ts";
 import { turnAgent } from "./agents.ts";
 import { drainObjectOutbox, uuidFromHash } from "./audit-outbox.ts";
@@ -195,6 +200,7 @@ import {
   brainMemoryOf,
   brainMemoryPrefix,
   brainMemorySchema,
+  erasedSources,
   readableSources,
   withheldDetail,
 } from "./history-access.ts";
@@ -525,6 +531,17 @@ export type Answer = TurnResult & {
 const storedMessageSchema = z.custom<Message>(
   (value) => typeof value === "object" && value !== null && isMessage(value)
 );
+
+/**
+ * A step's result as the chat shows it once what its run read was erased
+ * (`#replaceErased`): the line the model gets in its place
+ * (`withheldResult`), which names no cause, its call, run and how it
+ * ended kept; any other message as it is.
+ */
+const withheldCopy = (message: Message): Message =>
+  message.role === "toolResult"
+    ? { ...message, content: [{ type: "text", text: withheldResult }] }
+    : message;
 
 /**
  * `shown` with the files its question carried, by its ID in `carried`;
@@ -3476,12 +3493,100 @@ export class Workspace extends DurableObject<Env> {
     if (audited) {
       this.#deliverAudit();
     }
+    // Whatever is unreadable now, newly or not (narrowed first, erased
+    // since; a check that failed before): if erased, what the chat shows of
+    // it goes too. A repeat replaces nothing more, and nothing is asked of
+    // the Brain for a chat whose unreadable sources hold none of its pins.
+    if (unreadable.length > 0) {
+      await this.#replaceErased(scope, unreadable);
+    }
     const withheld = new Set(unreadable);
     return new Set(
       rows.flatMap(({ runId, sourceId }) =>
         withheld.has(sourceId) ? [runId] : []
       )
     );
+  }
+
+  /**
+   * Replaces what the chat shows of each run resting on what an erasure
+   * took for good (history-access.ts `erasedSources`), of `sources` (all
+   * the chat's runs read when none are given): its result, in the chat's
+   * own copy, by the line the model gets in its place, so no read of the
+   * copy (the chat as its person opens it, core's reads of its
+   * transcript) holds it again (GRA-1807). A run only no longer readable
+   * keeps what it showed: its person saw it while they could. Answers the
+   * runs the chat may not show as stored: none once replaced; every run
+   * that read anything when the Brain can't be asked, shown withheld
+   * (`#shownAfter`) and rewritten by a later check. Asked again each
+   * time: an erasure is never undone, so a repeat replaces nothing more.
+   */
+  async #replaceErased(
+    scope: Omit<AgentScope, "runId">,
+    sources?: readonly string[]
+  ): Promise<ReadonlySet<string>> {
+    const { chatId } = scope;
+    const rows = this.#db
+      .select({
+        runId: chatRunSources.runId,
+        sourceId: chatRunSources.sourceId,
+      })
+      .from(chatRunSources)
+      .where(eq(chatRunSources.chatId, chatId))
+      .all();
+    let erased: Set<string>;
+    try {
+      erased = await erasedSources(
+        this.env,
+        scope.personId,
+        sources ?? [...new Set(rows.map(({ sourceId }) => sourceId))]
+      );
+    } catch (error) {
+      log.warn("agent.erased_check_failed", { chatId, ...errorFields(error) });
+      return new Set(rows.map(({ runId }) => runId));
+    }
+    const runs = [
+      ...new Set(
+        rows.flatMap(({ runId, sourceId }) =>
+          erased.has(sourceId) ? [runId] : []
+        )
+      ),
+    ];
+    if (runs.length > 0 && !this.#deleting.has(chatId)) {
+      this.#replaceResults(chatId, runs);
+    }
+    return new Set();
+  }
+
+  /**
+   * Replaces the stored result of each run in `runs` by `withheldCopy`,
+   * read again in the same transaction: one copied in since is replaced
+   * too, and one replaced already is left as it is.
+   */
+  #replaceResults(chatId: ChatId, runs: readonly string[]): void {
+    this.ctx.storage.transactionSync(() => {
+      const rows = this.#db
+        .select({ id: chatMessages.id, message: chatMessages.message })
+        .from(chatMessages)
+        .where(
+          and(
+            eq(chatMessages.chatId, chatId),
+            sql`json_extract(${chatMessages.message}, '$.details.runId') IN (SELECT value FROM json_each(${JSON.stringify(runs)}))`
+          )
+        )
+        .all();
+      for (const row of rows) {
+        const stored = storedMessageSchema.parse(JSON.parse(row.message));
+        const replaced = JSON.stringify(withheldCopy(stored));
+        if (stored.role === "toolResult" && replaced !== row.message) {
+          this.#db
+            .update(chatMessages)
+            .set({ message: replaced })
+            .where(eq(chatMessages.id, row.id))
+            .run();
+        }
+      }
+    });
   }
 
   /**
@@ -4195,17 +4300,22 @@ export class Workspace extends DurableObject<Env> {
    * it is now, then an update on every change (chat-watch.ts). Returns the
    * ID `unwatch` drops it by; one that can't be reached drops itself.
    */
-  watch(
+  async watch(
     chatId: unknown,
     personId: string,
     after: unknown,
     listener: ChatListener
-  ): string {
-    const { id } = this.#ownChat(chatId, personId);
+  ): Promise<string> {
     const since = afterSchema.safeParse(after);
     if (!since.success) {
       throw agentErrors.create("agent.invalid_request");
     }
+    // What an erasure took is replaced before anything of the chat is shown.
+    const masked = await this.#replaceErased(
+      this.#scopeOf(this.#ownChat(chatId, personId))
+    );
+    // Read again after the await: the chat may have gone meanwhile.
+    const { id } = this.#ownChat(chatId, personId);
     let watching = 0;
     for (const watchers of this.#watchers.values()) {
       watching += watchers.size;
@@ -4225,7 +4335,10 @@ export class Workspace extends DurableObject<Env> {
     const watchers = this.#watchers.get(id) ?? new Map<string, ChatWatch>();
     watchers.set(watchId, watch);
     this.#watchers.set(id, watchers);
-    watch.push(this.#shownAfter(id, since.data ?? 0), this.#toolEvents(id));
+    watch.push(
+      this.#shownAfter(id, since.data ?? 0, masked),
+      this.#toolEvents(id)
+    );
     return watchId;
   }
 
@@ -4471,8 +4584,16 @@ export class Workspace extends DurableObject<Env> {
     this.#changed(chatId);
   }
 
-  /** The chat's messages stored after the one with ID `after`, as shown. */
-  #shownAfter(chatId: ChatId, after: number): ChatMessage[] {
+  /**
+   * The chat's messages stored after the one with ID `after`, as shown:
+   * the result of each run in `masked` as its replacement would read
+   * (`#replaceErased`).
+   */
+  #shownAfter(
+    chatId: ChatId,
+    after: number,
+    masked: ReadonlySet<string> = new Set()
+  ): ChatMessage[] {
     const asking = this.#asksIn(chatId);
     const carried = this.#filesAfter(chatId, after);
     return this.#db
@@ -4482,10 +4603,14 @@ export class Workspace extends DurableObject<Env> {
       .orderBy(asc(chatMessages.id))
       .all()
       .flatMap(({ id, message, createdAt, thinkingMs, built, agentId }) => {
+        const stored = storedMessageSchema.parse(JSON.parse(message));
+        const run = resultRunId(stored);
         const shown = withFiles(
           chatMessageOf(
             id,
-            storedMessageSchema.parse(JSON.parse(message)),
+            run !== undefined && masked.has(run)
+              ? withheldCopy(stored)
+              : stored,
             createdAt,
             thinkingMs,
             asking,
