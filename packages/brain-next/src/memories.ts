@@ -193,7 +193,7 @@ const rivalSql = `
  * without seeing a rival never ranks first for a reader who sees it. A
  * memory it was made over that its writer retired since still decides
  * this by whether the reader may read it: a reader who never could learns
- * nothing from its retirement (Nick, on #2261).
+ * nothing from its retirement.
  */
 const confirmationSql = `(
   SELECT json_object('by', confirmed.person, 'at', confirmed.at, 'row', confirmed.row)

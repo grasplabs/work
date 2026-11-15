@@ -74,7 +74,7 @@ export const mentionedSql = (entity: string, learnedBy?: string): string => {
  * its source's current version's, the version not hidden by an erasure.
  * So everyone who may read an add with those readers may read it too.
  *
- * A memory its writer retired counts here (Nick, on #2261), unlike for
+ * A memory its writer retired counts here, unlike for
  * every read (memories.ts `retiredSql`): a new mention with the same name
  * or identifier links to the entity a forgotten memory named
  * (`linkedBy`, linking.ts `linkedByName`), rather than making a second

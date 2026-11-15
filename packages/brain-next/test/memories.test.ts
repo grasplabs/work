@@ -864,7 +864,7 @@ describe("who may read a memory", () => {
 
   // Threat 1 for confirmations: a rival a reader could never read keeps a
   // confirmation made over it from counting for them, retired or not, so
-  // its retirement tells them nothing (Nick, on #2261).
+  // its retirement tells them nothing.
   it("never counts a confirmation made over a rival a reader can't read, before or after that rival is retired, as of any moment", async () => {
     const [mine, theirs] = [unique("group"), unique("group")];
     const [first, second] = [unique("w"), unique("w")];
