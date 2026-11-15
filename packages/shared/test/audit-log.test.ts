@@ -49,6 +49,10 @@ describe("audit event types", () => {
     ).toStrictEqual(["action", "action", "action", "action", "action", "read"]);
   });
 
+  it("files a person's run results taken out of use in the Brain, once they lost the workflow, as an action", () => {
+    expect(typeOf("brain.run_sources.removed")).toBe("action");
+  });
+
   it("files what was captured from a connection, and its erasure when it is disconnected, as actions", () => {
     expect(
       [

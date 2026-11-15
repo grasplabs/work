@@ -3,6 +3,7 @@ import {
   recallBudgetMax,
 } from "@grasp-os/brain-next/contract";
 import type { AuditEvent } from "@grasp-os/shared/audit";
+import type { AuditFilter } from "@grasp-os/shared/audit-log";
 import { appIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import type { Authority } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -39,7 +40,8 @@ import { appWorkflowStarts } from "../src/workflow-start-intents.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { standInBinding, standInLive } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
-import { outcome, unique } from "./sign-in.ts";
+import { mockIdp } from "./idp.ts";
+import { outcome, signedInApi, unique } from "./sign-in.ts";
 import { granted, person } from "./workflow-calls.ts";
 import {
   builder,
@@ -64,6 +66,8 @@ import {
 // - Regaining the role brings old results back.
 // - A cut-off at any step leaves the removal undone or unaudited, or
 //   audits it twice.
+
+const idp = mockIdp();
 
 /** A word nothing else holds. */
 const word = (): string => `w${crypto.randomUUID().replaceAll("-", "")}`;
@@ -1181,6 +1185,38 @@ describe("a person's run results once they lose the workflow", () => {
       ],
       healthy: { inUse: 0, owed: 0, runs: 1 },
       removed: [{ personId: healthy.userId, runs: 1 }],
+    });
+  });
+
+  it("are found by an admin searching the audit log for actions, and for the removal's action", async () => {
+    const [owner, user] = await Promise.all([builder(), builder("user")]);
+    const id = await sharedWorkflow(owner, word(), user);
+    await endedRun(user, id);
+    await handOverNow();
+    await unshared(owner, id, user);
+    await removeLostRunSources(env);
+    // In the log, as the clock's drain takes it there.
+    await allEvents();
+    const { api } = await signedInApi(idp, "admin");
+    const found = async (filter: AuditFilter) => {
+      const { records } = await api.audit.search({
+        targetType: "workflow_resource",
+        targetId: id,
+        ...filter,
+      });
+      return records
+        .map(({ event }) => event?.action)
+        .filter((action) => action === "brain.run_sources.removed");
+    };
+
+    expect({
+      actions: await found({ type: "action" }),
+      byAction: await found({ action: "brain.run_sources" }),
+      reads: await found({ type: "read" }),
+    }).toStrictEqual({
+      actions: ["brain.run_sources.removed"],
+      byAction: ["brain.run_sources.removed"],
+      reads: [],
     });
   });
 });
