@@ -13,6 +13,7 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 
+import { eraseMemoriesPerBatch } from "../src/erasure.ts";
 import type { BrainStore } from "../src/store.ts";
 import { exportSettled, restoredAfterLoss, tick } from "./export-reads.ts";
 import { copyOf, kill, restore } from "./store-copy.ts";
@@ -580,6 +581,136 @@ describe("a writer's erasure", () => {
     }).toStrictEqual({ stuckOnly: [stuck], failed: "failed", after: [] });
   });
 
+  it("puts memories that failed to delete behind the others, so more of them than a batch holds never keep a deletable one from going", async () => {
+    const group = unique("g");
+    const writer = app();
+    const name = word();
+    const stuck = eraseMemoriesPerBatch + 1;
+    for (let start = 0; start < stuck; start += 100) {
+      // oxlint-disable-next-line no-await-in-loop -- one add at a time
+      await remember(
+        group,
+        [{ key: "c", kind: "customer", names: [`${name} Stuck`] }],
+        Array.from({ length: Math.min(100, stuck - start) }, (_, index) =>
+          said("c", `stuck ${start + index}`, { kind: "writer", writer })
+        )
+      );
+    }
+    const { memories } = await remember(
+      group,
+      [{ key: "c", kind: "customer", names: [`${name} Free`] }],
+      [said("c", `${name} free`, { kind: "writer", writer })]
+    );
+    const [free] = memories;
+    await runInDurableObject(shared(), (_instance, state) => {
+      state.storage.sql.exec(
+        `CREATE TRIGGER test_stuck_many BEFORE DELETE ON memories
+        WHEN old.statement LIKE 'stuck %' BEGIN
+          SELECT RAISE(ABORT, 'stuck by the test');
+        END`
+      );
+    });
+    const held = async () =>
+      await runInDurableObject(shared(), (_instance, state) =>
+        state.storage.sql
+          .exec<{ stuck: number; free: number }>(
+            `SELECT count(*) - count(nullif(id, ?2)) AS free,
+                count(nullif(id, ?2)) AS stuck
+              FROM memories WHERE writer = ?1`,
+            writer,
+            free ?? ""
+          )
+          .one()
+      );
+    try {
+      // The call's batch: the first 1,000 stuck ones, which fail and are
+      // counted. The tick's: the one stuck one never tried and the free
+      // one first, then the counted ones.
+      await shared().eraseWriter({
+        writer,
+        reason: "deleted",
+        change: "reset",
+      });
+      await tick(shared());
+      await expect(held()).resolves.toStrictEqual({ stuck, free: 0 });
+    } finally {
+      await runInDurableObject(shared(), (_instance, state) => {
+        state.storage.sql.exec("DROP TRIGGER test_stuck_many");
+      });
+      await tick(shared());
+      await tick(shared());
+    }
+  });
+
+  it("shows no failure for a tick in which every memory was deleted, though its batch had to be taken one at a time", async () => {
+    const group = unique("g");
+    const writer = app();
+    const name = word();
+    const { memories } = await remember(
+      group,
+      [{ key: "c", kind: "customer", names: [`${name} Pair`] }],
+      ["first", "second"].map((which) =>
+        said("c", `${name} ${which}`, { kind: "writer", writer })
+      )
+    );
+    const [first, second] = memories;
+    // The first can't be deleted once the second's names are gone, as they
+    // are in a batch of both (names first, then memories); deleted alone,
+    // the first goes before the second's names do.
+    await holdDeletes(true);
+    await shared().eraseWriter({ writer, reason: "deleted", change: "reset" });
+    await runInDurableObject(shared(), (_instance, state) => {
+      state.storage.sql.exec(
+        `CREATE TRIGGER test_pair BEFORE DELETE ON memories
+        WHEN old.id = '${first ?? ""}' AND NOT EXISTS (
+          SELECT 1 FROM entity_names
+          JOIN memories AS other ON other.row = entity_names.memory
+          WHERE other.id = '${second ?? ""}'
+        ) BEGIN
+          SELECT RAISE(ABORT, 'held by the test');
+        END`
+      );
+    });
+    await holdDeletes(false);
+    try {
+      await tick(shared());
+      const overview = await shared().workOverview();
+      expect({
+        failed: overview.stepsFailed.erase,
+        held: await heldOf(writer, `${name} Pair`),
+      }).toStrictEqual({ failed: null, held: { memories: 0, names: 0 } });
+    } finally {
+      await runInDurableObject(shared(), (_instance, state) => {
+        state.storage.sql.exec("DROP TRIGGER IF EXISTS test_pair");
+      });
+    }
+  });
+
+  it("refuses a change asked again for another reason, and changes nothing", async () => {
+    const writer = app();
+    await remember(
+      unique("g"),
+      [{ key: "c", kind: "customer", names: [`${word()} Reason`] }],
+      [said("c", "for a reason", { kind: "writer", writer })]
+    );
+    const erased = await shared().eraseWriter({
+      writer,
+      reason: "deleted",
+      change: "reset",
+    });
+    await expect(
+      (async () =>
+        await shared().eraseWriter({
+          writer,
+          reason: "retention",
+          change: "reset",
+        }))()
+    ).rejects.toThrow("that change erased this writer for another reason");
+    await expect(
+      shared().eraseWriter({ writer, reason: "deleted", change: "reset" })
+    ).resolves.toStrictEqual(erased);
+  });
+
   it("is the shared store's alone", async () => {
     const person = unique("p");
     const own = env.BRAIN_STORE.getByName(`person:${person}`);
@@ -612,59 +743,62 @@ describe("a writer's erasure", () => {
       const erasure = typeof key === "string" ? key : "";
       // The store as the release before left it: `erasures` without a
       // writer's kind, its count or its change, memories without the writer's subject or
-      // the retiring change, the last three migrations not yet run, and a row
+      // the retiring change, the last four migrations not yet run, and a row
       // that points at the erasure.
       const before: Copy = {
-        tables: now.tables.map((table) => {
-          switch (table.name) {
-            case "erasures": {
-              return {
-                ...table,
-                created: table.created
-                  .replace(", 'writer'", "")
-                  .replace(/,\s*`memories` integer/u, "")
-                  .replace(/,\s*`change` text/u, ""),
-                // Earlier tests' writers' erasures: the release before had none.
-                rows: table.rows
-                  .filter(({ kind }) => kind !== "writer")
-                  .map((row) => without(row, "memories", "change")),
-              };
+        // The table of memories that failed to delete is the release's own.
+        tables: now.tables
+          .filter(({ name }) => name !== "memory_erase_failures")
+          .map((table) => {
+            switch (table.name) {
+              case "erasures": {
+                return {
+                  ...table,
+                  created: table.created
+                    .replace(", 'writer'", "")
+                    .replace(/,\s*`memories` integer/u, "")
+                    .replace(/,\s*`change` text/u, ""),
+                  // Earlier tests' writers' erasures: the release before had none.
+                  rows: table.rows
+                    .filter(({ kind }) => kind !== "writer")
+                    .map((row) => without(row, "memories", "change")),
+                };
+              }
+              case "memories": {
+                return {
+                  ...table,
+                  created: table.created
+                    .replace(/,\s*`writer_subject` text/u, "")
+                    .replace(/,\s*`retired_change` text/u, ""),
+                  rows: table.rows.map((row) =>
+                    without(row, "writer_subject", "retired_change")
+                  ),
+                };
+              }
+              case "erased_versions": {
+                return {
+                  ...table,
+                  rows: [
+                    ...table.rows,
+                    { erasure, subject: "a".repeat(64), version: 1 },
+                  ],
+                };
+              }
+              case "__drizzle_migrations": {
+                return {
+                  ...table,
+                  rows: table.rows
+                    .toSorted(
+                      (a, b) => Number(a.created_at) - Number(b.created_at)
+                    )
+                    .slice(0, -4),
+                };
+              }
+              default: {
+                return table;
+              }
             }
-            case "memories": {
-              return {
-                ...table,
-                created: table.created
-                  .replace(/,\s*`writer_subject` text/u, "")
-                  .replace(/,\s*`retired_change` text/u, ""),
-                rows: table.rows.map((row) =>
-                  without(row, "writer_subject", "retired_change")
-                ),
-              };
-            }
-            case "erased_versions": {
-              return {
-                ...table,
-                rows: [
-                  ...table.rows,
-                  { erasure, subject: "a".repeat(64), version: 1 },
-                ],
-              };
-            }
-            case "__drizzle_migrations": {
-              return {
-                ...table,
-                rows: table.rows
-                  .toSorted(
-                    (a, b) => Number(a.created_at) - Number(b.created_at)
-                  )
-                  .slice(0, -3),
-              };
-            }
-            default: {
-              return table;
-            }
-          }
-        }),
+          }),
         others: now.others.filter(
           (made) =>
             !made.includes("memories_writer_idx") &&
@@ -676,9 +810,9 @@ describe("a writer's erasure", () => {
       ).not.toContain("writer");
 
       await restore(shared(), before);
-      await expect(
-        shared().erasureStatus({ kind: "source", source })
-      ).resolves.toMatchObject({ state: "erased" });
+      await expect(shared().erasureStatus({ source })).resolves.toMatchObject({
+        state: "erased",
+      });
       await expect(
         shared().eraseWriter({
           writer: app(),

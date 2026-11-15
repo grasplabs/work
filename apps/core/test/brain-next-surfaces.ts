@@ -1488,7 +1488,7 @@ const sharedOnly = (): Env["BRAIN_STORE"] =>
  */
 const erasedBefore = async (personId: string): Promise<string> => {
   await Promise.allSettled([
-    coreBrain.erasePerson(env, { personId, reason: "withdrawn" }),
+    coreBrain.erasePerson(env, { personId, reason: "person_erased" }),
   ]);
   await ageOwnErasure(personId);
   return personId;
@@ -2351,13 +2351,16 @@ export const coreProbes = {
     const erase = async (
       name: string,
       personId: string,
-      reason: ErasureReason = "person_erased",
-      about?: Answer["about"]
+      about?: Answer["about"],
+      reason: unknown = "person_erased"
     ) =>
       await answer(
         name,
         async () => {
-          await coreBrain.erasePerson(env, { personId, reason });
+          await coreBrain.erasePerson(env, {
+            personId,
+            reason: unchecked(reason),
+          });
         },
         about
       );
@@ -2372,16 +2375,14 @@ export const coreProbes = {
       await erase(
         "someone with nothing",
         await erasedBefore(stranger()),
-        "withdrawn",
         "nothing"
       ),
       await erase(
         "someone with marked sources",
         await erasedBefore(holder),
-        "withdrawn",
         "hidden"
       ),
-      await erase("the same erasure again", holder, "withdrawn", "hidden"),
+      await erase("the same erasure again", holder, "hidden"),
       await erase("no person", ""),
       await erase(
         "a person named by the markers, too long",
@@ -2390,7 +2391,8 @@ export const coreProbes = {
       await erase(
         "a reason named by the markers",
         stranger(),
-        unchecked(markers.join(" "))
+        undefined,
+        markers.join(" ")
       ),
     ];
   },
@@ -2868,22 +2870,18 @@ export const coreProbes = {
       )),
     ];
   },
+  // A source's key alone: a person's erasure is read from core's own
+  // record of it (brain-report.ts), never from the Brain.
   brainErasureForStaff: async ({ markers }) => {
-    const look = async (
-      name: string,
-      lookup: unknown,
-      about?: Answer["about"],
-      like?: string
-    ) =>
+    const look = async (name: string, key: unknown, about?: Answer["about"]) =>
       await answer(
         name,
         async () =>
           await coreBrain.brainErasureForStaff(
             { ...env, BRAIN_STORE: sharedOnly() },
-            unchecked(lookup)
+            unchecked(key)
           ),
-        about,
-        like
+        about
       );
     const holder = stranger();
     const kept = missingSource();
@@ -2903,44 +2901,18 @@ export const coreProbes = {
       reason: "deleted",
     });
     return [
-      await look(
-        "a source no one added",
-        { kind: "source", key: keyOf(missingSource()) },
-        "nothing"
-      ),
+      await look("a source no one added", keyOf(missingSource()), "nothing"),
       await look(
         "someone else's marked source, never erased",
-        { kind: "source", key: keyOf(kept) },
+        keyOf(kept),
         "hidden"
       ),
+      await look("an erased marked source", keyOf(erased)),
+      await look("a key of the markers", `upload:${markers.join(" ")}`),
       await look(
-        "someone with nothing",
-        { kind: "person", id: stranger() },
-        "nothing",
-        "person"
+        "a key of the markers, too long",
+        markers.join("").repeat(300)
       ),
-      await look(
-        "someone with marked sources, never erased",
-        { kind: "person", id: holder },
-        "hidden",
-        "person"
-      ),
-      await look("an erased marked source", {
-        kind: "source",
-        key: keyOf(erased),
-      }),
-      await look("a key of the markers", {
-        kind: "source",
-        key: `upload:${markers.join(" ")}`,
-      }),
-      await look("an id of the markers, too long", {
-        kind: "person",
-        id: markers.join("").repeat(300),
-      }),
-      await look("a kind named by the markers", {
-        kind: markers.join(" "),
-        id: stranger(),
-      }),
     ];
   },
   // Each of someone else's own skills, asked of as the reader's own,
@@ -7632,8 +7604,9 @@ export const storeProbes = {
         },
         about
       );
-    // The shared store keeps nothing for one person alone: the holder's
-    // marked source is their team's.
+    // The shared store keeps nothing for one person alone, so it refuses
+    // to erase a person: only their own store is erased, whole. The
+    // holder's marked source is their team's, not theirs.
     const holder = stranger();
     await store().addSource({
       source: keyOf(missingSource()),
@@ -7641,25 +7614,21 @@ export const storeProbes = {
       text: markedText(markers),
       access: { kind: "audience", group: `team:${holder}` },
     });
+    const owner = stranger();
     return [
-      await erase(
-        "someone with nothing",
-        { person: stranger(), reason: "withdrawn" },
-        "nothing"
-      ),
-      await erase(
-        "someone whose team holds marked sources",
-        { person: holder, reason: "withdrawn" },
-        "hidden"
-      ),
-      await erase(
-        "the same erasure again",
-        { person: holder, reason: "withdrawn" },
-        "hidden"
-      ),
+      await erase("refused, for someone whose team holds marked sources", {
+        person: holder,
+        reason: "person_erased",
+      }),
+      await answer("a person's own store, erased by its person", async () => {
+        await personalStore(owner).erasePerson({
+          person: owner,
+          reason: "person_erased",
+        });
+      }),
       await erase("a person named by the markers, too long", {
         person: markers.join("").repeat(300),
-        reason: "withdrawn",
+        reason: "person_erased",
       }),
       await erase("a reason named by the markers", {
         person: stranger(),
@@ -7667,7 +7636,7 @@ export const storeProbes = {
       }),
       await erase("an unknown field", {
         person: stranger(),
-        reason: "withdrawn",
+        reason: "person_erased",
         extra: markers.join(" "),
       }),
     ];
@@ -7749,14 +7718,12 @@ export const storeProbes = {
     const look = async (
       name: string,
       request: unknown,
-      about?: Answer["about"],
-      like?: string
+      about?: Answer["about"]
     ) =>
       await answer(
         name,
         async () => await store().erasureStatus(unchecked(request)),
-        about,
-        like
+        about
       );
     const holder = stranger();
     const kept = keyOf(missingSource());
@@ -7796,54 +7763,33 @@ export const storeProbes = {
         async () => await personalStore(owner).erasureStatus(unchecked(request))
       );
     return [
-      await askOwn(
-        "a person's own store holding marked sources, of its person",
-        {
-          kind: "person",
-          person: owner,
-        }
-      ),
       await askOwn("a person's own store, of its erased marked source", {
-        kind: "source",
         source: ownErased,
       }),
       await askOwn("a person's own store, of a key of the markers", {
-        kind: "source",
         source: `upload:${markers.join(" ")}`,
       }),
       await look(
         "a source no one added",
-        { kind: "source", source: keyOf(missingSource()) },
+        { source: keyOf(missingSource()) },
         "nothing"
       ),
       await look(
         "someone else's marked source, never erased",
-        { kind: "source", source: kept },
+        { source: kept },
         "hidden"
       ),
-      await look(
-        "someone with nothing",
-        { kind: "person", person: stranger() },
-        "nothing",
-        "person"
-      ),
-      await look(
-        "someone with marked sources, never erased",
-        { kind: "person", person: holder },
-        "hidden",
-        "person"
-      ),
-      await look("an erased marked source", {
-        kind: "source",
-        source: erased,
+      // A person is no entry of the ledger: a lookup naming one is
+      // refused.
+      await look("someone whose team holds marked sources, refused", {
+        person: holder,
       }),
+      await look("an erased marked source", { source: erased }),
       await look("a key of the markers", {
-        kind: "source",
         source: `upload:${markers.join(" ")}`,
       }),
       await look("an unknown field", {
-        kind: "person",
-        person: stranger(),
+        source: keyOf(missingSource()),
         extra: markers.join(" "),
       }),
     ];

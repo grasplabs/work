@@ -17,7 +17,7 @@ import type {
 } from "@grasp-os/brain-next/contract";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { DurableObject, env } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { packAcross } from "../src/across.ts";
@@ -1662,8 +1662,7 @@ describe("whether something was erased, asked of a person's own store", () => {
   it("refuses, and makes nothing, while it was never written", async () => {
     const who = `person-${crypto.randomUUID()}`;
     const asked = await Promise.allSettled([
-      statusOf(own(who), { kind: "person", person: who }),
-      statusOf(own(who), { kind: "source", source: "test:never" }),
+      statusOf(own(who), { source: "test:never" }),
     ]);
 
     expect({
@@ -1675,34 +1674,27 @@ describe("whether something was erased, asked of a person's own store", () => {
     }).toStrictEqual({
       refused: [
         "Error: The Brain refused it: only the shared store takes this",
-        "Error: The Brain refused it: only the shared store takes this",
       ],
       tables: [],
       alarm: null,
     });
   });
 
-  it("refuses for a source of its own it erased, and for its person", async () => {
+  it("refuses for a source of its own it erased", async () => {
     const who = `person-${crypto.randomUUID()}`;
     const { source } = await add(own(who), "Marker of their own", theirs(who));
     await own(who).eraseSource({ source, reason: "deleted" });
 
-    await expect(
-      statusOf(own(who), { kind: "source", source })
-    ).rejects.toThrow(/only the shared store takes this/u);
-    await expect(
-      statusOf(own(who), { kind: "person", person: who })
-    ).rejects.toThrow(/only the shared store takes this/u);
+    await expect(statusOf(own(who), { source })).rejects.toThrow(
+      /only the shared store takes this/u
+    );
   });
 
   it("refuses once it was erased whole, and makes nothing again", async () => {
     const { source } = await add(own(), "Marker of their own", theirs());
     await eraseWhole();
 
-    await expect(statusOf(own(), { kind: "source", source })).rejects.toThrow(
-      /only the shared store takes this/u
-    );
-    await expect(statusOf(own(), { kind: "person", person })).rejects.toThrow(
+    await expect(statusOf(own(), { source })).rejects.toThrow(
       /only the shared store takes this/u
     );
     await expect(tablesOf(own())).resolves.toStrictEqual([]);
@@ -1711,8 +1703,7 @@ describe("whether something was erased, asked of a person's own store", () => {
   it("refuses the question when its name says no one's", async () => {
     await expect(
       statusOf(env.BRAIN_STORE.getByName(`Person:${person}`), {
-        kind: "person",
-        person,
+        source: "test:never",
       })
     ).rejects.toThrow(/name doesn't say whose it is/u);
   });
@@ -2329,6 +2320,70 @@ describe("a group in a person's own store", () => {
 
     await expect(own().keyState(group)).resolves.toBe("erased");
     await expect(own().keyState(`${group}/2`)).resolves.toBe("free");
+  });
+
+  // Only a person's own store reads its entries as it replays them (for
+  // the mark of a group), so only here can a slow bucket hold a step.
+  it("stops a step of its replay whose reads are slow once its time is up, keeping what it applied, and the next step goes on", async () => {
+    const kept = await add(own(), "Answered once through", theirs());
+    const copy = await copyOf(own());
+    const entries = 15;
+    for (let erased = 0; erased < entries; erased += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- in order
+      await own().eraseSource({
+        source: `test:${crypto.randomUUID()}`,
+        reason: "deleted",
+      });
+    }
+    await restore(own(), copy);
+    // Each read of the ledger takes 4 s, as the store's clock sees it: a
+    // step (10 s) starts three, so the first call is refused while the
+    // ledger is still being read.
+    const bucket = env.BRAIN_OBJECTS;
+    let reads = 0;
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
+    Reflect.set(env, "BRAIN_OBJECTS", {
+      head: async (key: string) => await bucket.head(key),
+      list: async (options: R2ListOptions) => await bucket.list(options),
+      put: async (key: string, value: string) => await bucket.put(key, value),
+      delete: async (keys: string | string[]) => {
+        await bucket.delete(keys);
+      },
+      get: async (key: string) => {
+        if (key.includes("/erasures/")) {
+          reads += 1;
+          vi.setSystemTime(Date.now() + 4000);
+        }
+        return await bucket.get(key);
+      },
+    });
+    try {
+      const read = async () =>
+        await own()
+          .readVersion({ ...kept, reader: me() })
+          .then((version) => version?.text, String);
+      const first = await read();
+      const afterFirst = reads;
+      const second = await read();
+
+      expect({
+        first,
+        stoppedPart: afterFirst < entries,
+        second,
+        // Each entry read once: what a step applied isn't read again.
+        reads,
+      }).toStrictEqual({
+        first:
+          "Error: The Brain is applying its erasure ledger after a restore, so it answers nothing yet: try again shortly",
+        stoppedPart: true,
+        second: "Answered once through",
+        reads: entries,
+      });
+    } finally {
+      Reflect.set(env, "BRAIN_OBJECTS", bucket);
+      vi.useRealTimers();
+      await kill(own());
+    }
   });
 
   // ...and only a key an add named as a group: an erased key alone closes

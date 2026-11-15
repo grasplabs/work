@@ -158,39 +158,3 @@ export const eraseMemoriesOfSource = (
     ),
   ];
 };
-
-/**
- * Deletes the memories and extraction marks resting on the versions the
- * person's erasure `erasure` hid (`erased_versions`): what it covered of
- * sources others read too. Answers the sets of readers they named.
- */
-export const eraseMemoriesHiddenBy = (
-  sql: SqlStorage,
-  erasure: string
-): number[] => {
-  const marks = sql
-    .exec<{ readers: string }>(
-      `DELETE FROM memory_extractions
-      WHERE (subject, version) IN (
-        SELECT subject, version FROM erased_versions WHERE erasure = ?
-      )
-      RETURNING readers`,
-      erasure
-    )
-    .toArray()
-    .map(({ readers }) => readers);
-  return [
-    ...setsOf(sql, marks),
-    ...deleteMemories(
-      sql,
-      rowsOf(
-        sql,
-        `SELECT memories.row AS row FROM erased_versions
-        JOIN memories ON memories.subject = erased_versions.subject
-          AND memories.version = erased_versions.version
-        WHERE erased_versions.erasure = ?`,
-        erasure
-      )
-    ),
-  ];
-};
