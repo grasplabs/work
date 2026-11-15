@@ -1996,8 +1996,12 @@ describe("exports and restores", () => {
         memories: [status("churned")],
       });
       await expect(
-        shared().retireMemory({ memory: churned.memories[0] ?? "", reader })
-      ).resolves.toBe("done");
+        shared().retireMemory({
+          memory: churned.memories[0] ?? "",
+          reader,
+          writer: person,
+        })
+      ).resolves.not.toBeNull();
       // Another team's customer, hidden from the first.
       const globex = await shared().addMemories({
         change: "globex",
@@ -2220,7 +2224,11 @@ describe("exports and restores", () => {
         ).rejects.toThrow("restoring an export");
         await expect(
           called(
-            shared().retireMemory({ memory: made.memories[0] ?? "", reader })
+            shared().retireMemory({
+              memory: made.memories[0] ?? "",
+              reader,
+              writer: person,
+            })
           )
         ).rejects.toThrow("restoring an export");
       } finally {

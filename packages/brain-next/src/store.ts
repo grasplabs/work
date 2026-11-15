@@ -79,6 +79,7 @@ import type {
   NewMemories,
   ReadableMemoriesRequest,
   RetireRequest,
+  RetiredMemory,
   AskModel,
   ChangeRequest,
   CurrentRequest,
@@ -2115,20 +2116,24 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       : [];
   }
 
-  /** Retires one of the reader's own memories (memories.ts). */
-  async retireMemory(request: RetireRequest): Promise<MemoryChangeOutcome> {
-    const { memory, reader } = checked(retireRequestSchema, request);
+  /** Retires one of the writer's own memories the reader may read (memories.ts). */
+  async retireMemory(request: RetireRequest): Promise<RetiredMemory | null> {
+    const { memory, reader, writer } = checked(retireRequestSchema, request);
     this.#mayRead(reader);
     return await this.#changing(async () => {
       if (!(await this.#readable())) {
-        return "nothing";
+        return null;
       }
       return this.ctx.storage.transactionSync(() => {
         // Refused while a restore runs, as an add is (restoring.ts).
         if (isRestoring(this.ctx.storage.sql)) {
           throw new Error(restoringNow);
         }
-        return retireMemory(this.ctx.storage.sql, { id: memory, reader });
+        return retireMemory(this.ctx.storage.sql, {
+          id: memory,
+          reader,
+          writer,
+        });
       });
     });
   }
