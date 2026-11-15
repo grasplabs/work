@@ -322,17 +322,16 @@ export type ChatPlace = z.infer<typeof chatPlaceSchema>;
  * The App chat `chat` worked on last, as its work names it (`chatWork` in
  * drafts.ts: the latest of the subjects its agent wrote or its Build it
  * made), for its instruction file; null when that is a workflow, or it
- * worked on nothing. Only in the person's own chat in Grasp: a shared
- * thread is read by all in it, and a chat app keeps a direct message's
- * answer where its admins and compliance exports read it, as it does for
- * their own file (GRA-1821). Only its App's builders get its file,
- * checked at each turn (instruction-files.ts).
+ * worked on nothing. Only in a chat of the person's own, in Grasp or
+ * their direct message on a chat app: a shared thread is read by all in
+ * it. Only its App's builders get its file, checked at each turn
+ * (instruction-files.ts).
  */
 const lastAppOf = async (
   env: Env,
-  { id, via, thread }: Pick<Chat, "id" | "via" | "thread">
+  { id, thread }: Pick<Chat, "id" | "thread">
 ): Promise<string | null> => {
-  if (thread !== null || via !== "web") {
+  if (thread !== null) {
     return null;
   }
   const [last] = await chatWork(env, id);
@@ -342,8 +341,8 @@ const lastAppOf = async (
 /**
  * Where a chat's agent works, for its instruction files: never a person's
  * own file, nor an App's, where others read the answer (a chat others
- * share); in a chat of theirs, the App it worked on last (`lastAppOf`)
- * when it is their own chat in Grasp, and their own file only in a turn
+ * share); in a chat of theirs, the App it worked on last (`lastAppOf`),
+ * and their own file only in a turn
  * whose answer reaches them alone (`personal`, `answersAlone`): the one
  * gate their own recall and skills take too.
  */
@@ -853,18 +852,16 @@ const outputOf = (
 
 /**
  * Whether a turn of `chat` answers its person alone, so its recall may
- * hold what only they may read (their own store): only in their own chat
- * in Grasp, in a turn they started. A chat for a thread others share
- * (`thread`) is read by all of them, however few the platform says it
- * holds.
- *
- * A chat app's direct message is the person's one chat there (`thread`
- * null), which only a message the platform itself names one-to-one
- * reaches (`askThrough`, place `direct`). It is left out here while the
- * decision on it is open (GRA-1821): the chat app keeps the answer too,
- * where its admins and compliance exports read it, so a person's own
- * content would leave Grasp. Were it decided yes, this is the one place
- * that changes: drop `via === "web"`.
+ * hold what only they may read (their own store): only in a chat of
+ * theirs that no thread others share is in, in a turn they started.
+ * Their own chat in Grasp, and their direct message on a chat app (their
+ * one chat there, `thread` null), which only a message the platform
+ * itself names one-to-one reaches (`askThrough`, place `direct`): the
+ * person and the agent alone (GRA-1821, decided 15 November 2026: the
+ * agent there behaves as in their own chat in Grasp). The chat
+ * app keeps that answer too, where its admins and compliance exports
+ * read it. A chat for a thread others share (`thread`) is read by all of
+ * them, however few the platform says it holds.
  *
  * A turn a schedule or an event woke (`unattended`) wasn't theirs to
  * start, and acts on what woke it: an event's words, from anyone, steer
@@ -874,9 +871,9 @@ const outputOf = (
  * there because they asked for it; a woken turn adds none they didn't.
  */
 const answersAlone = (
-  { via, thread }: Pick<Chat, "via" | "thread">,
+  { thread }: Pick<Chat, "thread">,
   unattended: boolean
-): boolean => via === "web" && thread === null && !unattended;
+): boolean => thread === null && !unattended;
 
 /** A turn's rows `turnForBrain` reads at a time, back from its answer. */
 const turnRowsPerRead = 20;
@@ -888,11 +885,10 @@ const turnRowsPerRead = 20;
  * capture's `attended`).
  */
 const handsTurnsOver = ({
-  via,
   thread,
   restricted,
-}: Pick<Chat, "via" | "thread" | "restricted">): boolean =>
-  answersAlone({ via, thread }, false) && !restricted;
+}: Pick<Chat, "thread" | "restricted">): boolean =>
+  answersAlone({ thread }, false) && !restricted;
 
 /**
  * The one rule for which of `personId`'s chats Grasp's own surfaces show
@@ -2182,9 +2178,9 @@ export class Workspace extends DurableObject<Env> {
     }: { unattended?: boolean; turn?: boolean } = {}
   ): Omit<AgentScope, "runId"> {
     const { personId, agentId, via } = chat;
-    // A turn whose answer reaches its person alone (`answersAlone`): the
-    // only scope their own skills steer (`AgentScope.ownChat`). A chat
-    // app's direct message is not one, until GRA-1821 decides it may be.
+    // A turn whose answer reaches its person alone (`answersAlone`), in
+    // Grasp or their direct message on a chat app: the only scope their
+    // own skills steer (`AgentScope.ownChat`).
     const ownChat = turn && answersAlone(chat, unattended);
     const workspaceId = workspaceIdSchema.parse(this.ctx.id.name);
     return {

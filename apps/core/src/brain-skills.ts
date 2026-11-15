@@ -160,8 +160,8 @@ const personOf = (by: Authority): string =>
  * How far the skills read for a chat go, as recall's reach (brain-next.ts
  * `Reach`): `person` where what they shape reaches the person alone (their
  * own attended chat), with their own skills and their teams'; `teams` in
- * the rest of their own conversation (a turn nobody asked for, a chat
- * app's direct message), with their teams' but never their own; and
+ * the rest of their own conversation (a turn nobody asked for), with
+ * their teams' but never their own; and
  * `company` where others read the answer too (a thread or channel they
  * share), with Grasp's and the company's alone, as such a conversation
  * recalls nothing of a team either.

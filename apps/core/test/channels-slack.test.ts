@@ -8,11 +8,12 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import { addSource, rememberAs } from "../src/brain-next.ts";
 import { confirmAction, startAction } from "../src/channels/cards.tsx";
 import { channelResponse } from "../src/channels/door.ts";
 import type { ChannelMessage } from "../src/channels/door.ts";
 import { say } from "../src/channels/words.ts";
-import { personalWorkspaceId } from "../src/chats-rpc.ts";
+import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
 import {
   channelConversations,
   channelAccounts,
@@ -20,9 +21,11 @@ import {
 } from "../src/db/core/schema.ts";
 import { workspace } from "../src/durable-objects.ts";
 import { says } from "./agent-chat.ts";
+import { requestGranted } from "./apps.ts";
 import { chatIdsOf } from "./code-step-trace.ts";
 import { slackApp, slackPostedUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
+import { saveInstructions } from "./instruction-saves.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 import {
@@ -251,6 +254,9 @@ const slackSawIn = async (channel: string) => {
 };
 
 const refused = { status: 401, text: "Unauthorized", handed: [] };
+
+/** A word no other text holds. */
+const marker = (): string => `m${unique()}`;
 
 /** The titles of a person's chats in Grasp, as their list shows them. */
 const listedFor = async (
@@ -644,6 +650,118 @@ describe("a linked person's question in Slack", () => {
           // Nothing is ever pushed for it either.
         })
       ),
+    });
+  });
+});
+
+describe("a linked person's direct message in Slack", () => {
+  it("is their own chat, as in Grasp: their own sources, memories, instruction file and skills, which no channel or group DM gets", async () => {
+    // A direct message is the person's own chat (GRA-1821): only one
+    // Slack names a direct message both ways (`im`, a `D…` channel) is
+    // one, and Slack's channels and group DMs never reach a turn at all.
+    await requestGranted(idp, await signedInApi(idp, "admin"), {
+      subject: { type: "agent", agentId: chatAgentId },
+      object: { type: "platform" },
+      actions: ["brain"],
+      binding: "BRAIN",
+    });
+    const { slackUser, userId, api } = await linkedPerson();
+    const provider = await fakeProvider(says("Noted."));
+    const [depot, own, ownWord, file] = [
+      marker(),
+      marker(),
+      marker(),
+      marker(),
+    ];
+    await addSource(env, {
+      source: { producer: "upload", id: crypto.randomUUID() },
+      change: crypto.randomUUID(),
+      text: `Depot ${depot} keeps the person's own note ${own}`,
+      readers: { kind: "owner", personId: userId },
+    });
+    const statement = `Depot ${depot} keeps the person's own memory ${ownWord}`;
+    await rememberAs(env, userId, {
+      change: crypto.randomUUID(),
+      about: { kind: "customer", names: [`Depot ${depot}`] },
+      type: "fact",
+      statement,
+      quote: statement,
+    });
+    await saveInstructions(
+      api,
+      { scope: "person", personId: userId },
+      `Call me ${file}.`
+    );
+    const skill = `depot-${unique()}`;
+    await api.skills.save(
+      `---\nname: ${skill}\ndescription: Look up a depot\n---\n\nThe steps.\n`
+    );
+    /** What of theirs reached the model for what they posted in `place`. */
+    const sentFor = async (place: {
+      channel?: string;
+      channelType?: string;
+    }) => {
+      const before = provider.requests.length;
+      const message = messageFrom(slackUser, place);
+      message.event.text = `What about depot ${depot}?`;
+      await post(message, { caught: false });
+      const sent = JSON.stringify(
+        provider.requests.slice(before).map(({ body }) => body)
+      );
+      return {
+        answered: provider.requests.length > before,
+        own: sent.includes(own),
+        ownMemory: sent.includes(ownWord),
+        file: sent.includes(file),
+        ownSkill: sent.includes(`- ${skill} (person`),
+      };
+    };
+
+    /** What reached the model for `place`, and the lines posted there. */
+    const answeredIn = async (place: {
+      channel: string;
+      channelType: string;
+    }) => {
+      const sent = await sentFor(place);
+      const posted = await slackSawIn(place.channel);
+      return {
+        ...sent,
+        lines: posted.map(({ method, fields }) => ({
+          method,
+          text: fields.text,
+        })),
+      };
+    };
+    const elsewhere = [
+      await answeredIn({
+        channel: `C${unique().toUpperCase()}`,
+        channelType: "channel",
+      }),
+      await answeredIn({
+        channel: `C${unique().toUpperCase()}`,
+        channelType: "mpim",
+      }),
+    ];
+    const direct = await sentFor({});
+
+    // Told it answers only in a direct message, and nothing else.
+    const none = {
+      answered: false,
+      own: false,
+      ownMemory: false,
+      file: false,
+      ownSkill: false,
+      lines: [{ method: "chat.postMessage", text: say("privateOnly", "en") }],
+    };
+    expect({ elsewhere, direct }).toStrictEqual({
+      elsewhere: [none, none],
+      direct: {
+        answered: true,
+        own: true,
+        ownMemory: true,
+        file: true,
+        ownSkill: true,
+      },
     });
   });
 });

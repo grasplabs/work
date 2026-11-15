@@ -21,6 +21,8 @@ import { sortRequest } from "./request-sorting.ts";
 import { countAnswered, countSignal } from "./signals.ts";
 import type { ChannelSignal } from "./signals.ts";
 import {
+  answerDecides,
+  heardFrom,
   heardRequest,
   keepCardsOf,
   settleRequest,
@@ -119,10 +121,17 @@ const takenIn = async (
     if (requestId === null) {
       return;
     }
+    // Whether he answered is asked only where the outcome rests on it.
     const sorted =
       answer === undefined
         ? null
-        : await sortRequest(env, { userId, platform, message: text, answer });
+        : await sortRequest(env, {
+            userId,
+            platform,
+            message: text,
+            answer,
+            judge: answerDecides(ended.ended, heardFrom(ended.calls)),
+          });
     await settleRequest(env, requestId, { ...ended, sorted });
   };
   const rate =

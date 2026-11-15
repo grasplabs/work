@@ -378,7 +378,7 @@ const storesAddressed = async (
 };
 
 describe("a chat's code reading the Brain's entities", setUpTime, () => {
-  it("reads its person's team's and the company's in their own chat but never their own, only the company's in a chat app's direct message, and none in a shared thread", async () => {
+  it("reads its person's team's and the company's in their own chat, in Grasp or a chat app's direct message, but never their own, and none in a shared thread", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInWithRole(idp, "user");
     const team = await teamOf(person.userId);
@@ -463,7 +463,8 @@ describe("a chat's code reading the Brain's entities", setUpTime, () => {
     }).toStrictEqual({
       // Their teams' and the company's, as its recall; never their own.
       ownChat: { own: false, team: true, company: true },
-      direct: { company: true, own: false, team: false },
+      // Their direct message is their own chat too (GRA-1821): the same.
+      direct: { company: true, own: false, team: true },
       // A thread others share gets no Brain at all (agent-apis.ts).
       thread: { company: false, own: false, team: false },
     });
@@ -649,7 +650,7 @@ describe("a chat's code reading the Brain's entities", setUpTime, () => {
     });
   });
 
-  it("addresses only the shared store from its code's reads, in its person's own chat asked or woken and in a direct message", async () => {
+  it("addresses only the shared store from its code's reads, in its person's own chat asked or woken and in their direct message", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInWithRole(idp, "user");
     const team = await teamOf(person.userId);
@@ -692,6 +693,7 @@ describe("a chat's code reading the Brain's entities", setUpTime, () => {
         read: await returnedIn(woken.stub, woken.chat.id),
       },
       direct: {
+        own: inDirect.all.includes(own),
         byCode: inDirect.byCode,
         read: await returnedIn(direct.stub, directChat),
       },
@@ -703,7 +705,12 @@ describe("a chat's code reading the Brain's entities", setUpTime, () => {
       },
       // A turn nobody started reads as the company alone.
       woken: { byCode: ["brain"], read: "Returned:\n[]" },
-      direct: { byCode: ["brain"], read: "Returned:\n[]" },
+      // Their direct message is their own chat (GRA-1821): as asked.
+      direct: {
+        own: true,
+        byCode: ["brain"],
+        read: `Returned:\n${JSON.stringify([`found ${teamName}: ${teamStatement}`])}`,
+      },
     });
   });
 
