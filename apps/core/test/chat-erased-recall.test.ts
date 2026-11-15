@@ -213,6 +213,71 @@ const refusingErasedOf = (namespace: object): object =>
     },
   });
 
+/**
+ * A new member's Teams direct message whose first turn's code recalled a
+ * marked company source: `ask` asks it again, `narrow` narrows the source
+ * to a team they aren't in, `erase` erases it for good; `before` is
+ * whether the Workspace object held the marker after the first turn.
+ */
+const teamsDirect = async () => {
+  const admin = await signedInApi(idp, "admin");
+  const person = await signedInApi(idp, "user");
+  const agentId = crypto.randomUUID();
+  await requestGranted(idp, admin, {
+    subject: { type: "agent", agentId },
+    object: { type: "platform" },
+    actions: ["brain"],
+    binding: "BRAIN",
+  });
+  const depot = word();
+  const marker = word();
+  const text = `${depot} ${marker}`;
+  const source = await added(text, { kind: "everyone" });
+  const asked = { question: depot, budget: { tokens: 800 } };
+  await fakeProvider(
+    codeStep(
+      `export default async (self, env) => { const pack = await env.brain.recall(${JSON.stringify(asked)}); return pack.items.map(({ text }) => text).join(" | "); };`
+    ),
+    says("Noted."),
+    says("Ok."),
+    says("Ok.")
+  );
+  const stub = workspace(env, personalWorkspaceId(person.userId));
+  const ask = async (question: string) =>
+    await stub.askThrough(
+      person.userId,
+      agentId,
+      "teams",
+      question,
+      undefined,
+      { kind: "direct" }
+    );
+  await ask("Please look that up.");
+  const narrow = async () => {
+    await brainOf(inJurisdiction(env, env.BRAIN_STORE)).addSource({
+      source: `upload:${source.id}`,
+      change: crypto.randomUUID(),
+      text,
+      access: { kind: "audience", group: `team:${crypto.randomUUID()}` },
+    });
+  };
+  const erase = async () => {
+    await eraseSource(env, {
+      source,
+      readers: { kind: "everyone" },
+      reason: "deleted",
+    });
+  };
+  return {
+    stub,
+    marker,
+    ask,
+    narrow,
+    erase,
+    before: await objectHolds(stub, marker),
+  };
+};
+
 /** Whether the provider's requests so far carried `text`. */
 const sentSoFar = (provider: FakeProvider, text: string): boolean =>
   JSON.stringify(provider.requests.map(({ body }) => body)).includes(text);
@@ -307,51 +372,55 @@ describe("what a chat shows of what it read from the Brain", () => {
   );
 
   it(
-    "replaces what a Teams direct message's code read of an erased source at its next turn, never opened in Grasp",
+    "replaces what a Teams direct message's code read of an erased source at its next turn, never opened in Grasp, also once it was withheld for being narrowed before, or the Brain couldn't be asked the turn before",
     slow,
     async () => {
-      const admin = await signedInApi(idp, "admin");
-      const person = await signedInApi(idp, "user");
-      const agentId = crypto.randomUUID();
-      await requestGranted(idp, admin, {
-        subject: { type: "agent", agentId },
-        object: { type: "platform" },
-        actions: ["brain"],
-        binding: "BRAIN",
-      });
-      const depot = word();
-      const marker = word();
-      const source = await added(`${depot} ${marker}`, { kind: "everyone" });
-      const asked = { question: depot, budget: { tokens: 800 } };
-      await fakeProvider(
-        codeStep(
-          `export default async (self, env) => { const pack = await env.brain.recall(${JSON.stringify(asked)}); return pack.items.map(({ text }) => text).join(" | "); };`
-        ),
-        says("Noted."),
-        says("Ok.")
-      );
-      const stub = workspace(env, personalWorkspaceId(person.userId));
-      const ask = async (text: string) =>
-        await stub.askThrough(
-          person.userId,
-          agentId,
-          "teams",
-          text,
-          undefined,
-          { kind: "direct" }
-        );
-      await ask("Please look that up.");
-      const before = await objectHolds(stub, marker);
-      await eraseSource(env, {
-        source,
-        readers: { kind: "everyone" },
-        reason: "deleted",
-      });
-      await ask("Thanks, and what else is new?");
+      const erased = await teamsDirect();
+      await erased.erase();
+      await erased.ask("Thanks, and what else is new?");
+      const erasedAfter = await objectHolds(erased.stub, erased.marker);
 
-      expect({ before, after: await objectHolds(stub, marker) }).toStrictEqual({
-        before: true,
-        after: false,
+      // Withheld for being narrowed first, which keeps it; erased after.
+      const narrowed = await teamsDirect();
+      await narrowed.narrow();
+      await narrowed.ask("Thanks, and what else is new?");
+      const narrowedAfter = await objectHolds(narrowed.stub, narrowed.marker);
+      await narrowed.erase();
+      await narrowed.ask("And anything else?");
+      const narrowedErasedAfter = await objectHolds(
+        narrowed.stub,
+        narrowed.marker
+      );
+
+      // The Brain can't be asked what was erased at the first turn after.
+      const away = await teamsDirect();
+      await away.erase();
+      const restore = await setObjectEnv(away.stub, {
+        BRAIN_STORE: refusingErasedOf(env.BRAIN_STORE),
+      });
+      try {
+        await away.ask("Thanks, and what else is new?");
+      } finally {
+        await restore();
+      }
+      const awayAfter = await objectHolds(away.stub, away.marker);
+      await away.ask("And anything else?");
+      const backAfter = await objectHolds(away.stub, away.marker);
+
+      expect({
+        before: [erased.before, narrowed.before, away.before],
+        erasedAfter,
+        narrowedAfter,
+        narrowedErasedAfter,
+        awayAfter,
+        backAfter,
+      }).toStrictEqual({
+        before: [true, true, true],
+        erasedAfter: false,
+        narrowedAfter: true,
+        narrowedErasedAfter: false,
+        awayAfter: true,
+        backAfter: false,
       });
     }
   );

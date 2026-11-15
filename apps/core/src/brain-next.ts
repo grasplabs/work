@@ -2437,7 +2437,7 @@ const sourceRefsSchema = z.array(sourceRefSchema);
 /**
  * Of `sources` and `memories` a chat of the member `personId`'s once
  * read, those an erasure took for good (`erasedOf`), whoever may read
- * them now, each once: for core to replace what the chat shows of them
+ * them now, in the order given: for core to replace what the chat shows of them
  * (history-access.ts `erasedSources`). Never one whose readers only
  * changed, a retired memory or an older version: the chat keeps showing
  * those. Each source is asked of the shared store, whose ledger an
@@ -2490,23 +2490,9 @@ export const erasedForGoodAs = async (
     ),
     ...inOwn.memories.map((memory) => memoryKeyOf({ store: "own", memory })),
   ]);
-  const once = new Set<string>();
-  const first = (key: string): boolean => {
-    if (once.has(key)) {
-      return false;
-    }
-    once.add(key);
-    return true;
-  };
   return {
-    sources: refs.filter((ref) => {
-      const key = sourceKeyOf(ref);
-      return closed.has(key) && first(`source:${key}`);
-    }),
-    memories: places.filter((place) => {
-      const key = memoryKeyOf(place);
-      return gone.has(key) && first(`memory:${key}`);
-    }),
+    sources: refs.filter((ref) => closed.has(sourceKeyOf(ref))),
+    memories: places.filter((place) => gone.has(memoryKeyOf(place))),
   };
 };
 

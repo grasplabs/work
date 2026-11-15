@@ -1093,7 +1093,9 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * (contract.ts): a memory this store holds no row of was deleted by
    * one, as nothing else deletes a memory (forget.ts), and an id is never
    * used again; one an erasure of its writer covers is hidden until the
-   * tick deletes it (memories.ts `unerasedSql`). A person's own store
+   * tick deletes it (memories.ts `unerasedSql`). So a memory a restore
+   * took the store back to before answers erased too, and the chat copies
+   * of it are replaced for good: it fails closed. A person's own store
    * never written holds no key and no memory.
    */
   async erasedOf(request: ErasedRequest): Promise<Erased> {

@@ -3496,7 +3496,12 @@ export class Workspace extends DurableObject<Env> {
     });
     if (audited) {
       this.#deliverAudit();
-      // Newly unreadable: if erased, what the chat shows of it goes too.
+    }
+    // Whatever is unreadable now, newly or not (narrowed first, erased
+    // since; a check that failed before): if erased, what the chat shows of
+    // it goes too. A repeat replaces nothing more, and nothing is asked of
+    // the Brain for a chat whose unreadable sources hold none of its pins.
+    if (unreadable.length > 0) {
       await this.#replaceErased(scope, unreadable);
     }
     const withheld = new Set(unreadable);
