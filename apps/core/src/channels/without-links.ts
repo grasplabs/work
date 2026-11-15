@@ -271,9 +271,6 @@ const inTime = (text: string): string =>
     )
     .join("\n");
 
-/** A citation of what the chat read (`citedIn` in chat-messages.ts). */
-const citation = /^grasp:note\/[\w-]{1,128}$/u;
-
 /** Nodes that show nothing of their own and are taken out. */
 const cutNodes: ReadonlySet<Nodes["type"]> = new Set([
   "html",
@@ -336,14 +333,10 @@ const writtenOut = (node: Nodes): string | undefined => {
 
 /**
  * Cleans `parent`'s children in place: a link becomes its words, an image
- * its alt text, and what shows nothing of its own goes; a citation stays
- * where `citations` are kept. Whether anything was taken, and the
- * children kept, to clean in turn.
+ * its alt text, and what shows nothing of its own goes. Whether anything
+ * was taken, and the children kept, to clean in turn.
  */
-const cleanChildren = (
-  parent: Parent,
-  citations: boolean
-): { changed: boolean; kept: Nodes[] } => {
+const cleanChildren = (parent: Parent): { changed: boolean; kept: Nodes[] } => {
   let changed = false;
   const kept: Nodes[] = [];
   const pending: Nodes[] = [];
@@ -354,10 +347,7 @@ const cleanChildren = (
       keep(kept, { type: "text", value: words });
     } else if (cutNodes.has(node.type)) {
       changed = true;
-    } else if (
-      (node.type === "link" && !(citations && citation.test(node.url))) ||
-      node.type === "linkReference"
-    ) {
+    } else if (node.type === "link" || node.type === "linkReference") {
       changed = true;
       pushAll(pending, childrenOf(node));
     } else if (node.type === "image" || node.type === "imageReference") {
@@ -376,8 +366,7 @@ const cleanChildren = (
  * whole, changed, or kept as it is.
  */
 const cleanBlock = (
-  block: Root["children"][number],
-  citations: boolean
+  block: Root["children"][number]
 ): "cut" | "changed" | "kept" => {
   if (cutNodes.has(block.type)) {
     return "cut";
@@ -390,7 +379,7 @@ const cleanBlock = (
     parent = parents.pop()
   ) {
     if (hasChildren(parent)) {
-      const cleaned = cleanChildren(parent, citations);
+      const cleaned = cleanChildren(parent);
       changed ||= cleaned.changed;
       pushAll(parents, cleaned.kept);
     }
@@ -439,7 +428,7 @@ const written = (
  * `source` cleaned once: each block nothing was taken from as it is, each
  * other one written again, or gone; `undefined` when nothing was taken.
  */
-const cleanOnce = (source: string, citations: boolean): string | undefined => {
+const cleanOnce = (source: string): string | undefined => {
   const { children } = parseMarkdown(source);
   let cleaned = "";
   let from = 0;
@@ -450,7 +439,7 @@ const cleanOnce = (source: string, citations: boolean): string | undefined => {
     if (start === undefined || end === undefined) {
       throw new Error("A block without a place in the answer");
     }
-    const outcome = cleanBlock(block, citations);
+    const outcome = cleanBlock(block);
     if (outcome === "kept") {
       continue;
     }
@@ -465,11 +454,11 @@ const cleanOnce = (source: string, citations: boolean): string | undefined => {
 };
 
 /** `text` cleaned until a parse takes nothing more; empty if it can't be. */
-const settled = (text: string, citations: boolean): string => {
+const settled = (text: string): string => {
   let current = inTime(text);
   try {
     for (let round = 0; round < rounds; round += 1) {
-      const next = cleanOnce(current, citations);
+      const next = cleanOnce(current);
       if (next === undefined) {
         return current;
       }
@@ -483,18 +472,10 @@ const settled = (text: string, citations: boolean): string => {
 };
 
 /**
- * The agent's own words in a chat app, as they are stored and shown in
- * Grasp: no link or image, its citations of what the chat read kept.
- * Empty when they can't be placed.
+ * The agent's own words in a chat app, as they are stored, shown in Grasp
+ * and posted: no link or image. Empty when they can't be placed.
  */
-export const withoutLinks = (text: string): string => settled(text, true);
-
-/**
- * Stored words (`withoutLinks`) as a chat app shows them: a citation too
- * as its words, as the sources under the answer stand for them.
- */
-export const shownWithoutLinks = (text: string): string =>
-  settled(text, false).trim();
+export const withoutLinks = (text: string): string => settled(text).trim();
 
 /**
  * `shown` words as Teams gets them, in an Adaptive Card's `TextBlock`,
@@ -579,7 +560,7 @@ const stillOpen = (tail: string): boolean => {
 
 /**
  * Of an answer being written (`partial`), what a chat app shows of it so
- * far: the whole partial cleaned as the answer is (`shownWithoutLinks`),
+ * far: the whole partial cleaned as the answer is (`withoutLinks`),
  * every time, so each update is as inert as the answer. Only to keep it
  * from flickering, a link, image or tag still open in the paragraph being
  * written is held back until it closes or the paragraph ends: the person
@@ -599,5 +580,5 @@ export const streamedWithoutLinks = (partial: string): string => {
       break;
     }
   }
-  return shownWithoutLinks(partial.slice(0, held));
+  return withoutLinks(partial.slice(0, held));
 };

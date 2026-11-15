@@ -19,7 +19,6 @@ import type { WorkspaceStub } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import type { Idp } from "./idp.ts";
-import { collectionWithNote, readCollection } from "./knowledge.ts";
 import { fakeProviderFor } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
 import { signedInApi, signedInWithRole } from "./sign-in.ts";
@@ -194,16 +193,16 @@ export const chatsWith = (idp: Idp) => {
    */
   const grantedChat = async (code: string) => {
     const admin = await signedInApi(idp, "admin");
-    const { collectionId } = await collectionWithNote(admin.api, {
+    const { id: app } = await admin.api.apps.create({
       name: `Handbook ${crypto.randomUUID()}`,
-      access: "everyone",
     });
     const chat = await newChat(codeStep(code), says("Done."));
-    const permission = await requestGranted(
-      idp,
-      admin,
-      readCollection(chat.agent, collectionId, "HANDBOOK")
-    );
+    const permission = await requestGranted(idp, admin, {
+      subject: chat.agent,
+      object: { type: "app", appId: app },
+      actions: ["read"],
+      binding: "HANDBOOK",
+    });
     return {
       ...chat,
       revoke: async () => {

@@ -2,7 +2,6 @@ import {
   Actions,
   Button,
   Card,
-  CardLink,
   CardText,
   Field,
   Fields,
@@ -42,9 +41,6 @@ export const maxWritesOnCard = 10;
 
 /** The most values one held write shows; more are confirmed in Grasp. */
 export const maxValuesPerWrite = 10;
-
-/** The most sources under an answer. */
-export const maxSources = 10;
 
 /** The longest a title, a label or a link may be on a card, in characters. */
 const maxTitleChars = 200;
@@ -113,12 +109,6 @@ const ownLink = (url: string): string => {
   return address;
 };
 
-/**
- * Characters that end a link's label early on some platform (`]` in
- * Markdown, `|` and `>` in Slack's links), taken out of a label.
- */
-const linkBreakers = /[[\]<>|]/gu;
-
 /** The card as each adapter takes it. */
 const cardOf = (element: unknown): CardElement => {
   const card = toCardElement(element);
@@ -128,19 +118,11 @@ const cardOf = (element: unknown): CardElement => {
   return card;
 };
 
-/** A source an answer was given from: a document the person can open. */
-export interface AnswerSource {
-  title: string;
-  url: string;
-}
-
 /** An answer, as a chat app shows it. */
 export interface AnswerCard {
   locale: ChannelLocale;
   /** The answer, in Markdown. */
   text: string;
-  /** What it was answered from, numbered in this order. */
-  sources: readonly AnswerSource[];
   /** The chat in Grasp, where the whole answer is, where Grasp has one. */
   chatUrl?: string;
   /**
@@ -149,44 +131,6 @@ export interface AnswerCard {
    */
   rate?: string | undefined;
 }
-
-/** `sources` as numbered links, within half a card's room for outside text. */
-const listedSources = (sources: readonly AnswerSource[], room: Room) =>
-  sources.slice(0, maxSources).map((source, index) => {
-    const title = fit(
-      source.title.replaceAll(linkBreakers, ""),
-      maxTitleChars,
-      room
-    );
-    const address = linkable(source.url);
-    const url =
-      address !== null && sizeOf(address) <= room.left ? address : null;
-    if (url !== null) {
-      room.left -= sizeOf(url);
-    }
-    return { label: `${index + 1}. ${title.text}`, url, key: `${index}` };
-  });
-
-/** The numbered sources under an answer, if it has any. */
-const SourcesSection = ({
-  locale,
-  listed,
-}: {
-  locale: ChannelLocale;
-  listed: ReturnType<typeof listedSources>;
-}) =>
-  listed.length === 0 ? null : (
-    <Section>
-      <CardText style="bold">{say("sources", locale)}</CardText>
-      {listed.map(({ label, url, key }) =>
-        url === null ? (
-          <CardText key={key}>{label}</CardText>
-        ) : (
-          <CardLink key={key} label={label} url={url} />
-        )
-      )}
-    </Section>
-  );
 
 /** A thumb on an answer, by the request it is for (stephen-requests.ts). */
 export const helpfulAction = "answer.helpful";
@@ -212,40 +156,29 @@ const RateButtons = ({
       ];
 
 /**
- * An answer with its numbered sources, labelled as made by AI where the
- * platform has a label for it (Teams). Text past what the platform takes
- * is cut, and the card links to the chat in Grasp.
+ * An answer, labelled as made by AI where the platform has a label for it
+ * (Teams). Text past what the platform takes is cut, and the card links
+ * to the chat in Grasp.
  */
 export const answerCard = ({
   locale,
   text,
-  sources,
   chatUrl,
   rate,
 }: AnswerCard): PostableCard => {
-  // The sources take at most half the room, so a long answer keeps the
-  // rest; a source whose address no longer fits is named without a link.
-  const sourcesRoom: Room = { left: outsideBytes / 2 };
-  const listed = listedSources(sources, sourcesRoom);
-  const room: Room = {
-    left: outsideBytes - (outsideBytes / 2 - sourcesRoom.left),
-  };
-  const answer = fit(text, Number.POSITIVE_INFINITY, room);
-  // Grasp has what the card leaves out: the rest of the answer, or the
-  // sources past the first few.
-  const whole = answer.whole && sources.length <= maxSources;
+  const answer = fit(text, Number.POSITIVE_INFINITY, { left: outsideBytes });
+  const open = answer.whole ? undefined : chatUrl;
   const card = (
     <Card>
       <CardText>{answer.text}</CardText>
       {answer.whole ? null : (
         <CardText style="muted">{say("answerTooLong", locale)}</CardText>
       )}
-      {SourcesSection({ locale, listed })}
-      {whole && rate === undefined ? null : (
+      {open === undefined && rate === undefined ? null : (
         <Actions>
           {RateButtons({ locale, rate })}
-          {whole || chatUrl === undefined ? null : (
-            <LinkButton url={ownLink(chatUrl)}>
+          {open === undefined ? null : (
+            <LinkButton url={ownLink(open)}>
               {say("openInGrasp", locale)}
             </LinkButton>
           )}

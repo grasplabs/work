@@ -14,6 +14,11 @@ import m0011 from './0011_groups.sql';
 import m0012 from './0012_read_at.sql';
 import m0013 from './0013_entity_indexes.sql';
 import m0014 from './0014_erasure_counts.sql';
+import m0015 from './0015_writer_erasure.sql';
+import m0016 from './0016_writer_erasure_kind.sql';
+import m0017 from './0017_writer_erasure_change.sql';
+import m0018 from './0018_writer_erase_failures.sql';
+import m0019 from './0019_writer_erase_sweep.sql';
 
   export default {
     journal,
@@ -32,7 +37,12 @@ m0010,
 m0011,
 m0012,
 m0013,
-m0014
+m0014,
+m0015,
+m0016,
+m0017,
+m0018,
+m0019
     }
   }
   

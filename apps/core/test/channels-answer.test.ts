@@ -4,15 +4,11 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
+import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
-import { codeStep, keptAnswersOf, pausedReply, says } from "./agent-chat.ts";
-import { requestGranted } from "./apps.ts";
+import { keptAnswersOf, pausedReply, says } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
-import { readCollection } from "./knowledge.ts";
 import { fakeProvider } from "./model-provider.ts";
-import { clientOrigin } from "./sign-in-config.ts";
-import { signedInApi, unique } from "./sign-in.ts";
 import {
   member,
   memberAnsweredBy,
@@ -28,10 +24,9 @@ import {
 // A member's Teams message answered by the organization's agent in their
 // own Teams chat in Grasp (src/channels/answer.ts): the turn runs in their
 // own Workspace object, with the model provider faked behind connect, and the
-// answer, with its sources, goes back through connect to the fake Bot
-// Connector (test/bot-connector-fake.ts): once, on one card, never
-// streamed, without the links, images and HTML the model wrote
-// (src/channels/without-links.ts).
+// answer goes back through connect to the fake Bot Connector
+// (test/bot-connector-fake.ts) on one card, without the links, images and
+// HTML the model wrote (src/channels/without-links.ts).
 
 const idp = mockIdp();
 
@@ -67,58 +62,25 @@ const answersIn = async (conversation: string): Promise<string[]> => {
 };
 
 describe("a member's question", setUpTime, () => {
-  it("is answered in their own Teams chat, with the documents it cites", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
-      name: `Handbook ${unique()}`,
-      access: "everyone",
-    });
-    const saved = await admin.api.knowledge.saveDocument({
-      collectionId,
-      path: "leave.md",
-      text: "# Parental leave\n\nParental leave lasts sixteen weeks.",
-      ifVersion: 0,
-    });
-    await requestGranted(
-      idp,
-      admin,
-      readCollection(
-        { type: "agent", agentId: chatAgentId },
-        collectionId,
-        `H${unique()}`.toUpperCase()
-      )
-    );
+  it("is answered in their own Teams chat, labelled as made by AI", async () => {
     const { userId, teams } = await member(
       idp,
-      codeStep(
-        `export default async (self, env) => (await env.knowledge.read(${JSON.stringify(saved.id)})).text;`
-      ),
-      says(
-        `Leave lasts sixteen weeks [Parental leave](grasp:note/${saved.id}).`
-      )
+      says("Leave lasts sixteen weeks.")
     );
 
     await post(messageFrom(teams, { text: "How long is parental leave?" }));
 
     const chats = await chatsOf(userId);
     expect(chats).toMatchObject([{ title: "Microsoft Teams", via: "teams" }]);
-    // The answer, on one card with its sources.
+    // The answer, on its card.
     const answers = await answersIn(teams.conversation);
     const answer = answers.join("\n");
     expect({
       answered: answer.includes("Leave lasts sixteen weeks"),
-      noteLinks: answer.includes("grasp:note"),
-      source: answer.includes("1. Parental leave"),
-      sourceLink: answer.includes(
-        `${clientOrigin}/knowledge/${collectionId}?doc=${saved.id}`
-      ),
       // Labelled as made by AI, as Teams shows it.
       aiLabel: answer.includes("AIGeneratedContent"),
     }).toStrictEqual({
       answered: true,
-      noteLinks: false,
-      source: true,
-      sourceLink: true,
       aiLabel: true,
     });
   });
@@ -143,7 +105,7 @@ describe("a member's question", setUpTime, () => {
     expect(annChats).toHaveLength(1);
     expect(boChats).toHaveLength(1);
     expect(annChats[0]?.id).not.toBe(boChats[0]?.id);
-    // Each answer, by its words.
+    // Each answer, by its words: not the thumbs that follow a streamed one.
     const said = async (conversation: string) => {
       const answers = await answersIn(conversation);
       return answers.flatMap((answer) =>

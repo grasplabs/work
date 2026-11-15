@@ -5,7 +5,6 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   inSlack,
   inTeams,
-  shownWithoutLinks,
   streamedWithoutLinks,
   withoutLinks,
 } from "../src/channels/without-links.ts";
@@ -117,8 +116,8 @@ describe("Stephen's own words in a chat app", () => {
         "# Head h\n\n- item l\n\n| a | b |\n| - | - |\n| c | d |",
       ],
       [
-        'A citation [doc](grasp:note/doc-1 "a quote") stays, [x](grasp:note/../evil) and [y](grasp:note/a?x=1) not.',
-        'A citation [doc](grasp:note/doc-1 "a quote") stays, x and y not.',
+        'A note [doc](grasp:note/doc-1 "a quote"), [x](grasp:note/../evil) and [y](grasp:note/a?x=1) too.',
+        "A note doc, x and y too.",
       ],
       [
         "[the site](https://evil.com) or <https://evil.com>",
@@ -213,7 +212,7 @@ describe("Stephen's own words in a chat app", () => {
       "[a](<https://evil.com>)[b]",
     ];
     const kept = probes.map(withoutLinks);
-    const shown = kept.map(shownWithoutLinks);
+    const shown = kept.map(withoutLinks);
     expect({
       linking: kept.flatMap(linking),
       shownLinking: shown.flatMap(linking),
@@ -312,7 +311,7 @@ describe("Stephen's own words in a chat app", () => {
       linking: [],
       teamsLinkSyntax: [],
       addresses: [],
-      last: shownWithoutLinks(withoutLinks(answer)),
+      last: withoutLinks(answer),
     });
   });
 });

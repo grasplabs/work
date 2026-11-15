@@ -21,8 +21,8 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 // traced: what it says is shown to the person on the card, whole.
 //
 // And in Stephen's own words there are no links: a link he writes could
-// lead anywhere, and the sources under an answer come from code (what the
-// chat read), not from the model (without-links.ts holds it).
+// lead anywhere. He names the source he answers from in words
+// (without-links.ts holds it).
 
 /** Why a held write was refused before it was held, as `agentErrors` names it. */
 export type HeldWriteRefusal =
@@ -196,7 +196,7 @@ const chatAppText = `This chat is in a chat app, such as Microsoft Teams, where 
 - Say what a fact means for their work, not only the fact.
 - Speak of people by their role ("the finance lead"), never about a colleague as a person.
 - Sickness, harassment or a conflict with someone at work always goes to a person: don't advise on it or judge it, say whom to talk to by their role (their manager, HR, the confidential counsellor), and name no colleague.
-- Cite each document once, where you first use it. Write no other Markdown links, images or HTML: the sources under your answer come from what you read. If someone needs a web or email address, write it out in full as plain text.
+- Name the source you answer from in words, where you first use it. Write no Markdown links, images or HTML. If someone needs a web or email address, write it out in full as plain text.
 - A change waits for the person to press on a card. Ask for it only with what they said or what you read: their words for whom it goes to, IDs and values as you read them, no placeholders.`;
 
 /** One text the model is told, and its mark. */

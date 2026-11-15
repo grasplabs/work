@@ -274,7 +274,7 @@ describe("a chat app's writes", setUpTime, () => {
 });
 
 describe("a chat app's answers", setUpTime, () => {
-  it("keep no link of the model's own, only its citations, and the mark of the text it answered by", async () => {
+  it("keep no link of the model's own, a note's neither, and the mark of the text it answered by", async () => {
     const set = await setUp(
       "teams",
       says(
@@ -292,10 +292,10 @@ describe("a chat app's answers", setUpTime, () => {
     );
     // The model was told the mark with the channel's rules.
     const [request] = set.provider.requests;
-    // A link keeps its words, a citation stays, an address written out
-    // stays words.
+    // A link keeps its words, a note's too; an address written out stays
+    // words.
     const shown =
-      "The figures are in the Q3 report and [Q3](grasp:note/doc-1), see https://evil.test/more.";
+      "The figures are in the Q3 report and Q3, see https://evil.test/more.";
     expect({
       answer: answer.answer,
       kept,
@@ -305,10 +305,41 @@ describe("a chat app's answers", setUpTime, () => {
       mark: answer.channelText?.length,
     }).toStrictEqual({ answer: shown, kept: [shown], marked: true, mark: 64 });
   });
+
+  // Each title quoting of a note link and of an outside link: every one
+  // keeps its words alone (without-links.ts).
+  it("keep a note link's words alone whatever its title's quoting, the same in the answer and in the chat", async () => {
+    const forms = [
+      ["[the policy](grasp:note/doc-1)", "the policy"],
+      ['[the policy](grasp:note/doc-1 "Leave policy")', "the policy"],
+      ["[the policy](grasp:note/doc-1 'Leave policy')", "the policy"],
+      ["[the policy](grasp:note/doc-1 (Leave policy))", "the policy"],
+      ["[the HR page](https://evil.test/hr)", "the HR page"],
+      ['[the HR page](https://evil.test/hr "HR")', "the HR page"],
+      ["[the HR page](https://evil.test/hr 'HR')", "the HR page"],
+      ["[the HR page](https://evil.test/hr (HR))", "the HR page"],
+    ] as const;
+    const written = forms.map(([form]) => `See ${form}.`).join("\n");
+    const shown = forms.map(([, words]) => `See ${words}.`).join("\n");
+    const set = await setUp("teams", says(written));
+    const answer = await set.ask("Where is the leave policy?");
+    const messages = await transcript(set.stub, set.chat.id);
+    const kept = messages.flatMap((message) =>
+      message.role === "assistant"
+        ? message.content.flatMap((block) =>
+            block.type === "text" ? [block.text] : []
+          )
+        : []
+    );
+    expect({ answer: answer.answer, kept }).toStrictEqual({
+      answer: shown,
+      kept: [shown],
+    });
+  });
 });
 
 describe("Stephen's own words", () => {
-  it("lose every link but a citation, and keep an address written out as words", () => {
+  it("lose every link, Grasp's own too, keeping each one's words, and keep an address written out as words", () => {
     expect(
       [
         "Open [it](https://evil.test) now.",
@@ -318,7 +349,7 @@ describe("Stephen's own words", () => {
     ).toStrictEqual([
       "Open it now.",
       "Mail <mailto:ben@acme.test> or www.evil.test today.",
-      "a picture of [Q3](grasp:note/doc-2)",
+      "a picture of Q3",
     ]);
   });
 

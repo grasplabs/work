@@ -28,18 +28,18 @@ import {
 } from "./stephen-requests.ts";
 import type { Settled } from "./stephen-requests.ts";
 import { teamsAdapter } from "./teams.ts";
-import { inSlack, inTeams, shownWithoutLinks } from "./without-links.ts";
+import { inSlack, inTeams, withoutLinks } from "./without-links.ts";
 import { channelLocales, languageOf, say } from "./words.ts";
 import type { ChannelLocale } from "./words.ts";
 import { postOffers } from "./workflow-offers.ts";
 
 // A member's message answered by the organization's agent, in the
 // person's own chat for that platform in their own Workspace (`via`, the
-// platform's name), found or made on their first message, with what it
-// cited; the answer goes back to the conversation they wrote in. The door
-// has already checked who wrote (door.ts), so the Workspace takes its word.
-// Asked in a group chat or channel, it is their one chat for that thread,
-// and its agent reads only what everyone in it may (knowledge/access.ts).
+// platform's name), found or made on their first message; the answer goes
+// back to the conversation they wrote in. The door has already checked who
+// wrote (door.ts), so the Workspace takes its word. Asked in a group chat
+// or channel, it is their one chat for that thread, and its agent reads
+// only what everyone in it may.
 //
 // While the turn runs, the platform shows Stephen typing, sent again every
 // few seconds, as a typing indicator lasts only that long. The answer is
@@ -346,7 +346,8 @@ const postedOn = (platform: string, shown: string): string =>
 
 /**
  * One question asked in the person's chat for `platform`, and its answer
- * posted whole, on one card with its sources, once it is done.
+ * on one card with its thumbs: written into it as the model writes it in a
+ * Teams direct message, otherwise posted whole once it is done.
  */
 const answerOne = async (
   env: Env,
@@ -414,7 +415,6 @@ const answerOne = async (
       chatId: null,
       ended: endOfLine[line],
       calls: [],
-      cited: false,
     });
     await deliver(say(line, locale));
     return;
@@ -422,11 +422,10 @@ const answerOne = async (
   stopTyping();
   const { chatId, answer, calls } = asked;
   const answered = answer.outcome === "answered";
-  // As kept (without-links.ts), a citation as its words: what the
-  // request is sorted by; posted as the platform takes it.
-  const final = shownWithoutLinks(answer.answer);
+  // As kept (without-links.ts): what the request is sorted by; posted as
+  // the platform takes it.
+  const final = withoutLinks(answer.answer);
   const posted = postedOn(platform, final);
-  const cited = answer.cited.length > 0;
   if (!answered || final === "") {
     log.warn("channel.turn_failed", { platform, outcome: answer.outcome });
     await countSignal(env, platform, "failed");
@@ -434,7 +433,6 @@ const answerOne = async (
       chatId,
       ended: endOfTurn(answer.outcome),
       calls,
-      cited,
     });
     await deliver(say("failed", locale));
     return;
@@ -445,10 +443,10 @@ const answerOne = async (
   // own; never kept from it by a card after the answer that couldn't be
   // posted (`quietly`).
   if (requestId !== null) {
-    await heardRequest(env, requestId, { calls, cited });
+    await heardRequest(env, requestId, { calls });
   }
   const recorded = async () => {
-    await settle({ chatId, ended: "answered", calls, cited }, final);
+    await settle({ chatId, ended: "answered", calls }, final);
   };
   // The starts the turn offered, each on its card, under the answer, each
   // kept with this request so a press on it is this request's.
@@ -461,16 +459,12 @@ const answerOne = async (
   };
   const origin = signInConfig(env)?.origin;
   if (origin === undefined) {
-    await deliver(answerCard({ locale, text: posted, sources: [], rate }));
+    await deliver(answerCard({ locale, text: posted, rate }));
     await timed();
     await offers();
     await recorded();
     return;
   }
-  const sources = answer.cited.map(({ title, collectionId, documentId }) => ({
-    title,
-    url: `${origin}/knowledge/${encodeURIComponent(collectionId)}?doc=${encodeURIComponent(documentId)}`,
-  }));
   const chatUrl = `${origin}/?chat=${encodeURIComponent(chatId)}`;
   // Without their own Microsoft 365 he answered from what the company
   // shared alone: once a day, he offers to connect it, in their direct
@@ -511,7 +505,7 @@ const answerOne = async (
       })
     );
   });
-  await deliver(answerCard({ locale, text: posted, sources, chatUrl, rate }));
+  await deliver(answerCard({ locale, text: posted, chatUrl, rate }));
   await timed();
   await held();
   await offers();

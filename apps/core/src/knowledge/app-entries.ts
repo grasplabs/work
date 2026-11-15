@@ -27,11 +27,11 @@ import type { Reader } from "./access.ts";
 // source the App is granted counts from the next read.
 //
 // The lookup is made only when a read can reach the collection: not for
-// a reader who may read no Apps collection, not for an App or agent without a
-// permission to read the Apps collection (only agents are given one:
-// permissions.ts `requireCollection`; an App granted it before counts it
-// as a source that doesn't resolve, app-provenance.ts, so the App reaches
-// nobody but its owner and admins), and not for those who may open
+// a reader who may read no Apps collection, not for an App or agent (none
+// is granted a collection since the Brain replaced Knowledge; an App
+// granted it before counts it as a source that doesn't resolve,
+// app-provenance.ts, so the App reaches nobody but its owner and admins),
+// and not for those who may open
 // every App (admins), who find every entry but a removed App's
 // (app-removal.ts): a removed App's row stays, so every entry's App
 // exists, and its entry is read by nobody.
