@@ -18,9 +18,12 @@ import type { WorkContext } from "../src/restricted.ts";
 /**
  * A new chat in the workspace of `agent`, where it works: an agent works
  * only in its own workspace's chats, so the workspace is named after it.
+ * `personId`'s, whom its agent acts for: what is held in it is listed in
+ * Grasp for them alone (`pendingActions.list`).
  */
 export const newChat = async (
-  of: PermissionSubjectInput | Authority
+  of: PermissionSubjectInput | Authority,
+  personId = "person-1"
 ): Promise<Extract<WorkContext, { type: "chat" }>> => {
   const subject = "subject" in of ? of.subject : of;
   // Anyone else's chat is in a workspace of its own, which no agent's is.
@@ -29,7 +32,7 @@ export const newChat = async (
   );
   const { id } = await workspace(env, workspaceId).createChat(
     "Chat",
-    "person-1",
+    personId,
     subject.type === "agent" ? subject.agentId : "nobody"
   );
   return { type: "chat", workspaceId, chatId: id };

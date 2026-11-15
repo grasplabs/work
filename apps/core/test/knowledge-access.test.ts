@@ -544,8 +544,8 @@ describe("restricted mode", setUpTime, () => {
 
   it("holds a chat's actions with a restricted-data warning for good once it read restricted data", async () => {
     const { admin, subject, sensitive, ordinary, mail } = await setUp();
-    const chat = await newChat(subject);
-    const otherChat = await newChat(subject);
+    const chat = await newChat(subject, admin.userId);
+    const otherChat = await newChat(subject, admin.userId);
     const bindings = await envOf(actingFor(subject, admin.userId), chat);
 
     // Reading ordinary Knowledge changes nothing.
@@ -617,7 +617,7 @@ describe("restricted mode", setUpTime, () => {
     ];
     const results = await Promise.all(
       reads.map(async (read) => {
-        const chat = await newChat(subject);
+        const chat = await newChat(subject, admin.userId);
         const bindings = await envOf(actingFor(subject, admin.userId), chat);
         await outcome(read(readerIn(bindings)));
         await sendMail(bindings);

@@ -8,6 +8,7 @@ import { withheldResult } from "../src/agent.ts";
 import { chatOf, codeResults, codeStep, model, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
+import { heldFor } from "./held-in-connect.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection, mailWithSearch } from "./mail-connection.ts";
 import { fakeProvider } from "./model-provider.ts";
@@ -734,7 +735,7 @@ describe("a chat's connections", setUpTime, () => {
     await chat.stub.ask(teams.id, { text: asked, model });
     await chat.ask(asked);
 
-    const waiting = await person.api.pendingActions.list();
+    const waiting = await heldFor(person);
     const fromTeams = waiting.find(
       ({ context }) => context.type === "chat" && context.chatId === teams.id
     );
