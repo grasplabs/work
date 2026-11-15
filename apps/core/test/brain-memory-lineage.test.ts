@@ -3,7 +3,6 @@ import { brainErrors } from "@grasp-os/brain/contract";
 import type { MemoryLineage } from "@grasp-os/brain/contract";
 import { memoriesList } from "@grasp-os/brain/memories";
 import { brainMemories } from "@grasp-os/brain/schema";
-import type { CollectionInput } from "@grasp-os/shared/knowledge";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
@@ -14,6 +13,7 @@ import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { seedMemory } from "./knowledge-purge.ts";
 import { newTeam, seed as seedKnowledge } from "./knowledge.ts";
+import type { CollectionInput } from "./knowledge.ts";
 import { callAuth, signedInApi, unique } from "./sign-in.ts";
 
 // Inspecting a Brain memory record's lineage, and its correction (GRA-298,

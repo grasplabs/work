@@ -1,10 +1,10 @@
 import { brainErrors } from "@grasp-os/brain/contract";
 import { turnMemoryLimits } from "@grasp-os/brain/memories";
-import type { CollectionInput } from "@grasp-os/shared/knowledge";
 import { describe, expect, it } from "vite-plus/test";
 
 import { mockIdp } from "./idp.ts";
 import { newTeam, seed } from "./knowledge.ts";
+import type { CollectionInput } from "./knowledge.ts";
 import { callAuth, signedInApi, unique } from "./sign-in.ts";
 
 // The Brain's shared memory as a deployment still holds it until the

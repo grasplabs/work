@@ -1,9 +1,10 @@
-import type { CollectionInput, KnowledgeApi } from "@grasp-os/shared/knowledge";
+import type { KnowledgeApi } from "@grasp-os/shared/knowledge";
 import type { Role } from "@grasp-os/shared/roles";
 import { describe, expect, it } from "vite-plus/test";
 
 import { mockIdp } from "./idp.ts";
 import { newTeam, seed } from "./knowledge.ts";
+import type { CollectionInput } from "./knowledge.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
 // Knowledge through the API people use, until the cutover removes it:

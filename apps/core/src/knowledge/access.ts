@@ -473,17 +473,3 @@ export const noteProvenance = async (
   });
   return provenance;
 };
-
-/**
- * Whether `person` may change a collection they can read: its owner and
- * admins always; anyone who can read a team or personal collection. A
- * collection for everyone is read by everyone but changed only by its
- * owner and admins.
- */
-export const canWrite = (
-  person: Pick<Identity, "userId" | "role">,
-  collection: { owner: string; access: string }
-): boolean =>
-  collection.access !== "everyone" ||
-  collection.owner === person.userId ||
-  person.role === "admin";

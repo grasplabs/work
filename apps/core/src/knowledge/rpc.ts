@@ -28,12 +28,7 @@ import {
   history,
   listDocuments,
 } from "@grasp-os/brain/documents";
-import {
-  decideEntityMatch,
-  entitiesFor,
-  entityMatchProposals,
-  entitySources,
-} from "@grasp-os/brain/entities";
+import { entitiesFor, entitySources } from "@grasp-os/brain/entities";
 import {
   lessonLineage,
   lessonsFor,
@@ -55,8 +50,6 @@ import type {
   Collection,
   DocumentPage,
   DocumentRead,
-  EntityMatch,
-  EntityMatchDecision,
   FollowResult,
   HistoryOptions,
   HistoryPage,
@@ -67,7 +60,6 @@ import type {
   ReadOptions,
   SearchOptions,
   SearchResults,
-  SkillCollections,
 } from "@grasp-os/shared/knowledge";
 
 import { CoreRpcTarget } from "../rpc-target.ts";
@@ -76,7 +68,6 @@ import type { SessionCheck } from "../session-check.ts";
 import type { Reader } from "./access.ts";
 import { catalog } from "./catalog.ts";
 import { listCollections } from "./collection-rules.ts";
-import { skillCollections } from "./grasp-skills.ts";
 import { brainOf } from "./ports.ts";
 
 /**
@@ -155,28 +146,6 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
   async memoriesLineage(input: MemoriesLineageInput): Promise<MemoryLineage> {
     return await this.#asReader(
       async (reader) => await memoriesLineage(brainOf(this.#env), reader, input)
-    );
-  }
-
-  // Entity matches (GRA-1080), as the signed-in person alone reads them
-  // (`#asReader`: never a reader a request names). The Brain asks the
-  // recall grant first and records each call, a read or an audited
-  // decision. Grasp's staff never get here: the session's full-access
-  // check refuses them before either call. Nothing here reaches a model,
-  // and neither takes a name to look for: a filter on a name would make
-  // probing targeted.
-
-  async entityMatches(options?: unknown): Promise<EntityMatch[]> {
-    return await this.#asReader(
-      async (reader) =>
-        await entityMatchProposals(brainOf(this.#env), reader, options)
-    );
-  }
-
-  async decideEntityMatch(input: unknown): Promise<EntityMatchDecision> {
-    return await this.#asReader(
-      async (reader) =>
-        await decideEntityMatch(brainOf(this.#env), reader, input)
     );
   }
 
@@ -284,13 +253,6 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
   async follow(documentId: string): Promise<FollowResult> {
     return await this.#asReader(
       async (reader) => await follow(brainOf(this.#env), reader, documentId)
-    );
-  }
-
-  async skillCollections(): Promise<SkillCollections> {
-    return await withPerson(
-      this.#check,
-      async (person) => await skillCollections(this.#env, person)
     );
   }
 }

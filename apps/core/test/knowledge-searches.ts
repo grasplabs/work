@@ -1,9 +1,10 @@
 /** What the tests of Knowledge search share (knowledge-search*.test.ts). */
-import type { CollectionInput, KnowledgeApi } from "@grasp-os/shared/knowledge";
+import type { KnowledgeApi } from "@grasp-os/shared/knowledge";
 import type { Role } from "@grasp-os/shared/roles";
 
 import type { Idp } from "./idp.ts";
 import { seed } from "./knowledge.ts";
+import type { CollectionInput } from "./knowledge.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
 /**

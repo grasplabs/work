@@ -55,7 +55,7 @@ import {
 // made it, a Personal collection they once had among them) is deleted
 // with every version, section, link, transcript and search row, and so
 // are their Brain memories, command receipts, outcomes and lessons
-// (memories.ts). One batch, with its audit event, which counts them.
+// (memories.ts), and every entity match they decided. One batch, with its audit event, which counts them.
 // Collections they own that others read too are the company's, and stay.
 //
 // The host forgets the files it keeps as the purged collections' documents
@@ -329,6 +329,11 @@ const purgePersonal = async <C>(
               holds
             )
           ),
+        // Every match they decided, whatever its evidence: who decided is
+        // theirs, and a decision of theirs goes with them (GRA-1911).
+        db
+          .delete(brainEntityMatches)
+          .where(and(eq(brainEntityMatches.decidedBy, input.userId), holds)),
         db
           .delete(sections)
           .where(and(inArray(sections.documentId, inCollection), holds)),

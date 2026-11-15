@@ -180,7 +180,7 @@ type Row = typeof blueprints.$inferSelect;
 
 /**
  * The owner of the collections the built-ins declare: nobody's, open to
- * everyone, changed by admins only (`canWrite` in knowledge).
+ * everyone. Nothing writes into them any more (GRA-1911).
  */
 const releaseOwner = "grasp";
 

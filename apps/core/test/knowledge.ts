@@ -1,6 +1,8 @@
 import { ensureCollection } from "@grasp-os/brain/collections";
 import type { CommandReceipt } from "@grasp-os/brain/contract";
 import { writeVersion } from "@grasp-os/brain/documents";
+import { runLinking, sourceKey } from "@grasp-os/brain/entities";
+import type { DocumentSummary } from "@grasp-os/brain/knowledge";
 import {
   memoriesProposeChange,
   memoriesPublish,
@@ -9,13 +11,7 @@ import { collections } from "@grasp-os/brain/schema";
 import { actorOf } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { collectionIdSchema } from "@grasp-os/shared/ids";
-import { collectionInputSchema } from "@grasp-os/shared/knowledge";
-import type {
-  Collection,
-  CollectionInput,
-  DocumentSummary,
-  KnowledgeApi,
-} from "@grasp-os/shared/knowledge";
+import type { Collection, KnowledgeApi } from "@grasp-os/shared/knowledge";
 import type {
   PermissionRequest,
   PermissionSubjectInput,
@@ -66,6 +62,16 @@ type Signed = { whoami: () => Promise<Identity> } | { session: string };
 const identityOf = async (signed: Signed): Promise<Identity> =>
   "whoami" in signed ? await signed.whoami() : await whoami(signed.session);
 
+/** A collection a test plants, as a person once created one. */
+export interface CollectionInput {
+  name: string;
+  description?: string;
+  access: "me" | "teams" | "everyone";
+  /** The teams that read it, for `teams` access. */
+  teams?: string[];
+  sensitive?: boolean;
+}
+
 /** A document's next version, as a test writes one. */
 interface SeededSave {
   collectionId: string;
@@ -85,7 +91,12 @@ export const seed = (signed: Signed) => ({
   /** A collection they own, with its teams in core's database. */
   createCollection: async (input: CollectionInput): Promise<Collection> => {
     const person = await identityOf(signed);
-    const parsed = collectionInputSchema.parse(input);
+    const parsed = {
+      description: "",
+      teams: [],
+      sensitive: false,
+      ...input,
+    };
     const row = {
       id: collectionIdSchema.parse(crypto.randomUUID()),
       name: parsed.name,
@@ -108,7 +119,6 @@ export const seed = (signed: Signed) => ({
       ...row,
       teams: parsed.teams,
       createdAt: row.createdAt.toISOString(),
-      writable: true,
     };
   },
   /** A document's next version, or its first, by them. */
@@ -163,6 +173,31 @@ export const seed = (signed: Signed) => ({
       options
     ),
 });
+
+/**
+ * Links document `documentId`'s version 1 as the removed linking job did,
+ * with an extractor that names `name` wherever the text does.
+ */
+export const linkedNaming = async (
+  documentId: string,
+  name: string
+): Promise<void> => {
+  const brain = brainOf(env);
+  await runLinking(
+    {
+      ...brain,
+      ports: {
+        ...brain.ports,
+        extractEntities: async (text) =>
+          await Promise.resolve({
+            entities: text.includes(name) ? [{ kind: "person", name }] : [],
+          }),
+      },
+    },
+    { source: sourceKey({ kind: "document", id: documentId }), version: 1 },
+    { do: async (_name, _config, run) => await run() }
+  );
+};
 
 /** The name of the collection `ownCollectionOf` keeps a person's notes in. */
 const ownNotes = "Own notes";

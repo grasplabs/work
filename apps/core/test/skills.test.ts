@@ -1,14 +1,11 @@
 import { ensureCollection } from "@grasp-os/brain/collections";
 import { writeVersion } from "@grasp-os/brain/documents";
+import { collectionIdSchema } from "@grasp-os/shared/ids";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  clientSkillsCollectionId,
-  graspSkillsCollectionId,
-} from "../src/knowledge/grasp-skills.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
 import { shippedSkills } from "../src/shipped-skills.ts";
 import { requestGranted } from "./apps.ts";
@@ -17,19 +14,20 @@ import { mockIdp } from "./idp.ts";
 import { readCollection, seed } from "./knowledge.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
-// Skills in Knowledge: the Grasp skills, as releases synced them into
-// their collection before Grasp's skills moved to the Brain, and the
-// client's own. These tests start from the ways that can fail: someone,
-// an admin too, changes a Grasp skill through a save, a restore or a
-// purge; a copy lands outside the client's skills, is made by someone who
-// can't write them, overwrites a skill the client already has, or copies
-// something that isn't a Grasp skill; and the catalog leaves out one of
-// the two collections.
-//
-// The tests of a file share their storage, so each copy test copies a
-// skill of its own.
+// Skills in Knowledge, as a deployment holds them until the cutover
+// removes it: the Grasp skills, as releases synced them before Grasp's
+// skills moved to the Brain, and the client's own. Nothing writes either
+// any more (GRA-1911). These tests start from the ways the reads can fail:
+// the catalog leaves out one of the two collections, or lists one to an
+// agent that wasn't granted it.
 
 const idp = mockIdp();
+
+/** The Grasp skills' collection, as releases synced it: under this ID alone. */
+const graspSkillsCollectionId = collectionIdSchema.parse("grasp-skills");
+
+/** The client's skills collection, as an admin's first visit made it. */
+const clientSkillsCollectionId = collectionIdSchema.parse("skills");
 
 /** Signing people in can be slow on CI. */
 const setUpTime = { timeout: 60_000 };
@@ -51,6 +49,27 @@ const graspSkills = shippedSkills.map(({ name, text }) => ({
   path: `${name}/SKILL.md`,
   text,
 }));
+
+/**
+ * The client's skills collection as a deployment holds it: made by the
+ * admin `ownerId` before nothing in core wrote Knowledge any more.
+ */
+const clientSkillsInKnowledge = async (ownerId: string): Promise<void> => {
+  await ensureCollection(
+    brainOf(env),
+    {
+      id: clientSkillsCollectionId,
+      name: "Our skills",
+      description: "The company's own skills: how we do things here.",
+      owner: ownerId,
+      access: "everyone",
+      sensitive: false,
+      source: "here",
+      createdAt: new Date(),
+    },
+    { type: "person", userId: ownerId }
+  );
+};
 
 /**
  * The Grasp skills' collection as releases synced it into Knowledge:
@@ -109,17 +128,11 @@ const graspDocument = async (person: Person, path: string) => {
 };
 
 describe("the skill catalog", setUpTime, () => {
-  it("lists both collections, the Grasp skills and the client's, and the skills in each", async () => {
+  it("lists both collections, the Grasp skills and the client's, and the skills in each, as a deployment holds them", async () => {
     const admin = await personOf("admin");
     const user = await personOf("user");
     const document = await graspDocument(admin, "write-board-page/SKILL.md");
-    const both = {
-      grasp: graspSkillsCollectionId,
-      client: clientSkillsCollectionId,
-    };
-    await expect(admin.api.knowledge.skillCollections()).resolves.toStrictEqual(
-      both
-    );
+    await clientSkillsInKnowledge(admin.userId);
     const shipped = await admin.api.knowledge.getDocument(document.id);
     // A copy in the client's skills, as an admin made one before nothing
     // in core wrote Knowledge any more.
@@ -130,9 +143,6 @@ describe("the skill catalog", setUpTime, () => {
       ifVersion: 0,
     });
 
-    await expect(user.api.knowledge.skillCollections()).resolves.toStrictEqual(
-      both
-    );
     const catalog = await user.api.knowledge.catalog();
     const ids = new Set<string>([
       graspSkillsCollectionId,
@@ -154,7 +164,7 @@ describe("the skill catalog", setUpTime, () => {
     const admin = await personOf("admin");
     const agent = { type: "agent" as const, agentId: `agent-${unique()}` };
     await graspSkillsInKnowledge();
-    await admin.api.knowledge.skillCollections();
+    await clientSkillsInKnowledge(admin.userId);
     const name = `ours-${unique()}`;
     const ours = await seed(admin.api).saveDocument({
       collectionId: clientSkillsCollectionId,

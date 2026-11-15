@@ -38,7 +38,7 @@ import type {
 } from "@grasp-os/brain/knowledge";
 import { z } from "zod";
 
-import { collectionIdSchema, identifierSchema } from "./ids.ts";
+import { collectionIdSchema } from "./ids.ts";
 import type { CollectionId, DocumentId } from "./ids.ts";
 
 // Knowledge: Markdown documents with typed frontmatter, in collections. A
@@ -85,57 +85,6 @@ export const readOnlySources: ReadonlySet<CollectionSource> = new Set([
   "apps",
 ]);
 
-/** Most teams one collection is shared with. */
-export const collectionMaxTeams = 50;
-
-/** A new collection, as a person creates it. */
-export const collectionInputSchema = z
-  .strictObject({
-    name: z.string().trim().min(1).max(100),
-    /** When to use it: what agents see before they look inside. */
-    description: z.string().trim().max(1024).default(""),
-    access: collectionAccessSchema,
-    /** The teams that may read it; only for `teams` access. */
-    teams: z
-      .array(identifierSchema)
-      .max(collectionMaxTeams)
-      .default([])
-      .transform((teams) => [...new Set(teams)]),
-    /** Marks a team collection's content as sensitive for the model gateway. */
-    sensitive: z.boolean().default(false),
-  })
-  .superRefine(({ access, teams, sensitive }, context) => {
-    if (access === "teams" && teams.length === 0) {
-      context.addIssue({
-        code: "custom",
-        path: ["teams"],
-        message: "A team collection needs at least one team",
-      });
-    }
-    if (access === "admins") {
-      context.addIssue({
-        code: "custom",
-        path: ["access"],
-        message: "Only the platform makes a collection for admins",
-      });
-    }
-    if (access !== "teams" && teams.length > 0) {
-      context.addIssue({
-        code: "custom",
-        path: ["teams"],
-        message: "Only a team collection has teams",
-      });
-    }
-    if (sensitive && access !== "teams") {
-      context.addIssue({
-        code: "custom",
-        path: ["sensitive"],
-        message: "Only a team collection can be marked sensitive",
-      });
-    }
-  });
-export type CollectionInput = z.input<typeof collectionInputSchema>;
-
 /**
  * A collection a built-in blueprint asks for (its `blueprint.json`), by an
  * ID of its own, the same in every deployment, which no collection a
@@ -167,21 +116,6 @@ export interface Collection {
   source: CollectionSource;
   /** ISO 8601. */
   createdAt: string;
-  /**
-   * Whether the person who asked may change it: save and restore its
-   * documents. Always `false` for an App or agent reading it.
-   */
-  writable: boolean;
-}
-
-/**
- * Where skills are: the Grasp skills, which ship with each release and
- * only Grasp changes, and the client's own, which its admins write. `null`
- * while one doesn't exist yet.
- */
-export interface SkillCollections {
-  grasp: CollectionId | null;
-  client: CollectionId | null;
 }
 
 /** A collection, as the catalog lists it. */
@@ -336,21 +270,6 @@ export interface KnowledgeApi {
     lessonId: string;
     expectedRevision: number;
   }) => Promise<void>;
-  /**
-   * Entities of different collections the person reads that may be one
-   * (GRA-1080): of one kind and name, worked out from what they read now,
-   * never kept, and never merged. A collection they can't read is never a
-   * side, nor shapes what they see.
-   */
-  entityMatches: (options?: EntityMatchesOptions) => Promise<EntityMatch[]>;
-  /**
-   * Decides whether two entities are one: by a person who reads both
-   * sides, `same` only with a document they read as evidence, audited. It
-   * rewrites no ID, and shows only to readers of both sides.
-   */
-  decideEntityMatch: (
-    input: EntityMatchDecisionInput
-  ) => Promise<EntityMatchDecision>;
   /** Retires a shared record, by its publisher or an admin (GRA-298). */
   memoriesRetire: (
     input: MemoriesRetireInput,
@@ -362,11 +281,6 @@ export interface KnowledgeApi {
   read: KnowledgeTools["read"];
   /** A document's links and backlinks, and for a skill, its files. */
   follow: KnowledgeTools["follow"];
-  /**
-   * The Grasp skills and the client's skills collections, creating the
-   * client's when an admin asks and it doesn't exist yet.
-   */
-  skillCollections: () => Promise<SkillCollections>;
 }
 
 /**

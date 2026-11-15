@@ -1,4 +1,8 @@
 import { stillDeletingAtMostMs } from "@grasp-os/brain-next/contract";
+import {
+  decideEntityMatch,
+  entityMatchProposals,
+} from "@grasp-os/brain/entities";
 import { recordOutcome } from "@grasp-os/brain/outcomes";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
@@ -37,7 +41,7 @@ import { consentCode } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { answering, answeringWith, holdAlarm } from "./interview-link.ts";
 import { holding, rememberAs } from "./knowledge-purge.ts";
-import { ownCollectionOf, seed } from "./knowledge.ts";
+import { linkedNaming, ownCollectionOf, seed } from "./knowledge.ts";
 import { runMinuteTasks } from "./maintenance.ts";
 import { onboardingLog } from "./onboarding-log.ts";
 import {
@@ -124,6 +128,16 @@ const inKnowledge = async (documentId: string): Promise<number> => {
     .bind(documentId)
     .first<{ count: number }>();
   return row?.count ?? 0;
+};
+
+/** How many entity matches `userId` decided, as Knowledge keeps them. */
+const matchesDecidedBy = async (userId: string) => {
+  const row = await env.KNOWLEDGE.prepare(
+    "SELECT count(*) AS n FROM brain_entity_matches WHERE decided_by = ?"
+  )
+    .bind(userId)
+    .first<{ n: number }>();
+  return row?.n;
 };
 
 /** WebVTT captions saying `text`: a file the extractor reads. */
@@ -1294,6 +1308,74 @@ describe("erasing a person", () => {
       uploads: 0,
       answered: { answer: "About two hundred.", answeredBy: null },
     });
+  });
+
+  it("erases every entity match they decided, though its evidence is in documents everyone reads, and keeps another's", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = await signedInApi(idp, "builder");
+    const other = await signedInApi(idp, "user");
+    const brain = brainOf(env);
+    /** A pair of one name in two everyone collections, linked, with a proof: what a decision rests on. */
+    const pairOf = async (name: string) => {
+      const ids: string[] = [];
+      for (const label of ["Sales", "Support"]) {
+        // oxlint-disable-next-line no-await-in-loop -- one collection at a time
+        const { id: collectionId } = await seed(admin.api).createCollection({
+          name: `${label} ${unique()}`,
+          access: "everyone",
+        });
+        // oxlint-disable-next-line no-await-in-loop -- one save at a time
+        const saved = await seed(admin.api).saveDocument({
+          collectionId,
+          path: "note.md",
+          text: `# Calls\n${name} called.`,
+          ifVersion: 0,
+        });
+        // oxlint-disable-next-line no-await-in-loop -- one link at a time
+        await linkedNaming(saved.id, name);
+        ids.push(collectionId);
+      }
+      const proof = await seed(admin.api).saveDocument({
+        collectionId: ids[0] ?? "",
+        path: "proof.md",
+        text: "# Proof\nBoth calls were one person.",
+        ifVersion: 0,
+      });
+      return proof.id;
+    };
+    /** Decides `name`'s pair `same` as `who`, as today's Brain kept a decision. */
+    const decide = async (who: typeof person, name: string, proof: string) => {
+      const reader = {
+        type: "person" as const,
+        person: await who.api.whoami(),
+      };
+      const proposals = await entityMatchProposals(brain, reader);
+      const pair = proposals.find((match) => match.name === name);
+      const [a = "", b = ""] = pair?.entities.map(({ id }) => id) ?? [];
+      await decideEntityMatch(brain, reader, {
+        entities: [a, b],
+        decision: "same",
+        evidence: { documentId: proof, version: 1 },
+      });
+    };
+    const theirs = `Rosa ${unique()}`;
+    const kept = `Mila ${unique()}`;
+    await decide(person, theirs, await pairOf(theirs));
+    await decide(other, kept, await pairOf(kept));
+    const before = await matchesDecidedBy(person.userId);
+    await admin.api.members.remove(person.userId);
+
+    const erased = await admin.api.members.erase(
+      person.userId,
+      String(person.person.name)
+    );
+
+    expect({
+      before,
+      done: typeof erased.completedAt,
+      theirs: await matchesDecidedBy(person.userId),
+      others: await matchesDecidedBy(other.userId),
+    }).toStrictEqual({ before: 1, done: "string", theirs: 0, others: 1 });
   });
 
   it("forgets their uploads into the Brain for themselves alone once the Brain erased them, and keeps what they uploaded for a team", async () => {

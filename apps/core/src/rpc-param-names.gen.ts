@@ -266,9 +266,7 @@ export const rpcParamNames: ParamNames = {
   "KnowledgeRpc": {
     "backlinks": ["documentId","options"],
     "catalog": [],
-    "decideEntityMatch": ["input"],
     "entities": ["input"],
-    "entityMatches": ["options"],
     "entitySources": ["input"],
     "follow": ["documentId"],
     "getDocument": ["documentId","version"],
@@ -288,7 +286,6 @@ export const rpcParamNames: ParamNames = {
     "relations": ["input"],
     "relationsExplain": ["input"],
     "search": ["query","options"],
-    "skillCollections": [],
   },
   "MembersRpc": {
     "erase": ["userId","name"],

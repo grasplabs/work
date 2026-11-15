@@ -1,12 +1,13 @@
 import { pendingGraceMs } from "@grasp-os/brain/payloads";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
-import type { CollectionInput, KnowledgeApi } from "@grasp-os/shared/knowledge";
+import type { KnowledgeApi } from "@grasp-os/shared/knowledge";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { mockIdp } from "./idp.ts";
 import { seed } from "./knowledge.ts";
+import type { CollectionInput } from "./knowledge.ts";
 import { runMinuteTasks } from "./maintenance.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
