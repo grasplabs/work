@@ -225,7 +225,7 @@ test("someone removes a line of theirs and takes out what was written from it, a
   await field.fill("You send it to Kim.");
   await field.press("Enter");
   await expect(page.getByText(changed)).toBeVisible();
-  await page.getByRole("button", { name: "Yes, that’s correct" }).click();
+  await page.getByRole("button", { name: "The rest is correct" }).click();
   await expect(
     page.getByRole("heading", { name: "Thank you, Ria." })
   ).toBeVisible();
