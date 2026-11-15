@@ -12,7 +12,9 @@ import type {
   Access,
   AskModel,
   Embedders,
+  ErasedMemory,
   HandOvers,
+  NewMemory,
   Reader,
 } from "@grasp-os/brain-next/contract";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
@@ -1625,6 +1627,8 @@ const leavingNone = [
   "confirmMemory",
   // Cards likewise: read whole in their call (cards.ts).
   "erasePerson",
+  // One read of which keys and memories an erasure took.
+  "erasedOf",
   // The shared store's alone: a person's own store refuses it.
   "eraseWriter",
   "erasureStatus",
@@ -2649,4 +2653,132 @@ describe("a group in a person's own store", () => {
       await expect(groupEntries()).resolves.toHaveLength(1);
     }
   );
+});
+
+/** A memory resting on version `version` of `source`. */
+const drawnFrom = ({
+  source,
+  version,
+}: {
+  source: string;
+  version: number;
+}): NewMemory["basis"] => ({
+  kind: "source",
+  source,
+  version,
+  quote: "Bilby",
+});
+
+describe("what an erasure took for good, asked of a person's own store", () => {
+  beforeEach(() => {
+    person = `person-${crypto.randomUUID()}`;
+  });
+
+  /**
+   * A memory of this test's person's about `name`, resting on `basis`, as
+   * a host pins it when it is handed over (`ErasedMemory`).
+   */
+  const memoryOn = async (
+    name: string,
+    basis: NewMemory["basis"]
+  ): Promise<ErasedMemory> => {
+    const {
+      memories: [memory = ""],
+      entities: { c: entity = "" },
+    } = await own().addMemories({
+      change: crypto.randomUUID(),
+      access: theirs(),
+      entities: [{ key: "c", kind: "customer", names: [name] }],
+      memories: [
+        {
+          about: "c",
+          type: "fact",
+          statement: `${name} is a customer`,
+          speaker: { kind: "internal", person },
+          basis,
+        },
+      ],
+    });
+    const { memories } = await own().readMemories({ entity, reader: me() });
+    const held = memories.find(({ id }) => id === memory);
+    return {
+      memory,
+      source: held?.source?.source ?? null,
+      writer: held?.writer ?? null,
+      learnedAt: held?.learnedAt.getTime() ?? 0,
+    };
+  };
+
+  // GRA-1807: the host replaces what a chat showed of what an erasure
+  // took, as the ledger says it, and never of what is only kept from
+  // readers, nor of what a storage brought back from an older copy lacks.
+  it("answers the keys erased, under an erased group too, and the memories resting on one, from the ledger alone, also once an older copy of the store comes back: never a kept key, a retired memory, or one it doesn't hold", async () => {
+    const kept = await add(own(), "Bilby kept", theirs());
+    const erased = await add(own(), "Bilby erased", theirs());
+    const group = newGroup();
+    const turn = await addIn(group, "1", "Bilby turn");
+    const onKept = await memoryOn("Bilby Kept", drawnFrom(kept));
+    const onErased = await memoryOn("Bilby Erased", drawnFrom(erased));
+    const onTurn = await memoryOn("Bilby Turn", drawnFrom(turn));
+    const retired = await memoryOn("Bilby Retired", {
+      kind: "writer",
+      writer: person,
+    });
+    await own().retireMemory({
+      memory: retired.memory,
+      reader: me(),
+      writer: person,
+      change: crypto.randomUUID(),
+    });
+    // A backup from before the erasures, and a memory it doesn't hold.
+    const copy = await copyOf(own());
+    const later = await memoryOn("Bilby Later", {
+      kind: "writer",
+      writer: person,
+    });
+    await own().eraseSource({ source: erased.source, reason: "deleted" });
+    await own().eraseSource({ source: group, reason: "deleted" });
+    // What erasures hid, deleted.
+    await tick();
+    await tick();
+    const never: ErasedMemory = {
+      memory: crypto.randomUUID(),
+      source: null,
+      writer: null,
+      learnedAt: 0,
+    };
+    const asked = {
+      sources: [kept.source, erased.source, `${group}/1`, `${group}/2`],
+      memories: [onKept, onErased, onTurn, retired, later, never, onErased],
+    };
+    const now = await own().erasedOf(asked);
+    await restore(own(), copy);
+
+    const expected = {
+      sources: [erased.source, `${group}/1`, `${group}/2`],
+      memories: [onErased.memory, onTurn.memory],
+    };
+    expect({ now, restored: await own().erasedOf(asked) }).toStrictEqual({
+      now: expected,
+      restored: expected,
+    });
+  });
+
+  it("answers everything asked once it was erased whole, also once an older copy of the store comes back", async () => {
+    const { source } = await add(own(), "Numbat", theirs());
+    const memory = await memoryOn("Numbat", { kind: "writer", writer: person });
+    const copy = await copyOf(own());
+    await eraseWhole();
+    const erased = await own().erasedOf({
+      sources: [source],
+      memories: [memory],
+    });
+    await restore(own(), copy);
+
+    const all = { sources: [source], memories: [memory.memory] };
+    expect({
+      erased,
+      restored: await own().erasedOf({ sources: [source], memories: [memory] }),
+    }).toStrictEqual({ erased: all, restored: all });
+  });
 });

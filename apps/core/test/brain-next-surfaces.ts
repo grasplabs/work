@@ -54,6 +54,7 @@ import type {
   NewMemory,
   ChunkRef,
   EmbedModel,
+  ErasedMemory,
   ErasureReason,
   Embedders,
   HandOvers,
@@ -528,6 +529,20 @@ const missingSource = (): SourceRef => ({
 
 /** `source`'s key in the store, as core names it (core's brain-next.ts). */
 const keyOf = ({ producer, id }: SourceRef): string => `${producer}:${id}`;
+
+/** `memory` as a host pins it for the store, resting on `source` or on no one's. */
+const storePin = (
+  memory: string,
+  source: string | null,
+  writer: string | null = null
+): ErasedMemory => ({ memory, source, writer, learnedAt: Date.now() });
+
+/** What a pinned memory rests on: `source`, and no writer. */
+const pinBasis = (source: SourceRef | null): coreBrain.MemoryBasis => ({
+  source,
+  writer: null,
+  learnedAt: Date.now(),
+});
 
 /**
  * A supplier everyone in the company may read of, named in a writer's
@@ -1988,6 +2003,94 @@ export const coreProbes = {
       ),
     ];
   },
+  // What an erasure took of what a chat once read, for core alone to
+  // replace what the chat shows: ids it was given back, never what they
+  // held, whoever may read them; refused for someone who isn't a member.
+  erasedForGoodAs: async (probing) => {
+    const { personId, hiddenVersions, markers } = probing;
+    const fixture = await recallFixture(probing);
+    // It answers the caller's own ids back: what it tells is which of
+    // them, by their places in what was asked.
+    const ask = async (
+      name: string,
+      sources: readonly SourceRef[],
+      memories: readonly coreBrain.PinnedMemory[],
+      as = personId
+    ) =>
+      await answer(name, async () => {
+        const erased = await coreBrain.erasedForGoodAs(env, as, {
+          sources,
+          memories,
+        });
+        return {
+          sources: sources.map((asked) =>
+            erased.sources.some(
+              ({ producer, id }) =>
+                producer === asked.producer && id === asked.id
+            )
+          ),
+          memories: memories.map((asked) =>
+            erased.memories.some(
+              ({ store: kind, memory }) =>
+                kind === asked.store && memory === asked.memory
+            )
+          ),
+        };
+      });
+    // Each as a pin holds it, resting on a hidden source or no one's.
+    const hiddenMemories: coreBrain.PinnedMemory[] = [
+      {
+        store: "shared",
+        memory: fixture.hiddenMemory,
+        basis: pinBasis(hiddenVersions[0]?.source ?? null),
+      },
+      {
+        store: "shared",
+        memory: fixture.drawnMemory,
+        basis: pinBasis(hiddenVersions[1]?.source ?? null),
+      },
+      { store: "own", memory: fixture.othersOwnMemory, basis: pinBasis(null) },
+    ];
+    return [
+      await ask(
+        "the hidden sources and memories",
+        hiddenVersions.map(({ source }) => source),
+        hiddenMemories
+      ),
+      await ask(
+        "what no one added",
+        [missingSource()],
+        [
+          {
+            store: "shared",
+            memory: crypto.randomUUID(),
+            basis: pinBasis(null),
+          },
+        ]
+      ),
+      await ask(
+        "as someone who isn't a member",
+        hiddenVersions.map(({ source }) => source),
+        hiddenMemories,
+        stranger()
+      ),
+      await ask(
+        "a source and a writer named by the markers",
+        [{ producer: "upload", id: markers.join(" ") }],
+        [
+          {
+            store: "shared",
+            memory: crypto.randomUUID(),
+            basis: {
+              source: { producer: "upload", id: markers.join(" ") },
+              writer: `app:${markers.join("")}`,
+              learnedAt: 0,
+            },
+          },
+        ]
+      ),
+    ];
+  },
   // Which memories a chat once handed over may be sent again: each hidden
   // one (another group's, one resting on a source the reader may not
   // read, someone else's own, named in either store) as one no one holds.
@@ -3336,6 +3439,17 @@ export const coreProbes = {
           coreBrain.sourceTextProblem(oversizedText(markers))
         )
     ),
+  ],
+  // Pure: a memory's place as one string, from what the caller names
+  // alone, so no markers.
+  memoryKeyOf: async () => [
+    await answer("a memory's place", async () => {
+      await Promise.resolve();
+      return coreBrain.memoryKeyOf({
+        store: "shared",
+        memory: crypto.randomUUID(),
+      });
+    }),
   ],
   // Pure: a skill's key as a run keeps it, from what the caller names
   // alone (a name it gives comes back as given), so no markers.
@@ -6505,6 +6619,57 @@ export const storeProbes = {
             unchecked({ versions: [], reader, extra: markers.join(" ") })
           )
       ),
+    ];
+  },
+  // What an erasure took for good, for core alone, whoever reads it: ids
+  // it was asked, and nothing of what they held.
+  erasedOf: async (probing) => {
+    const { markers, hiddenVersions } = probing;
+    const fixture = await recallFixture(probing);
+    // It answers the caller's own ids back: what it tells is which of
+    // them, by their places in what was asked.
+    const ask = async (
+      name: string,
+      request: { sources: string[]; memories: ErasedMemory[]; extra?: string }
+    ) =>
+      await answer(name, async () => {
+        const erased = await store().erasedOf(unchecked(request));
+        return {
+          sources: request.sources.map((key) => erased.sources.includes(key)),
+          memories: request.memories.map(({ memory }) =>
+            erased.memories.includes(memory)
+          ),
+        };
+      });
+    const hiddenKeys = hiddenVersions.map(({ source }) => keyOf(source));
+    return [
+      await ask("the hidden sources and memories", {
+        sources: hiddenKeys,
+        memories: [
+          storePin(fixture.hiddenMemory, hiddenKeys[0] ?? null),
+          storePin(fixture.drawnMemory, hiddenKeys[1] ?? null),
+          storePin(fixture.othersOwnMemory, null),
+        ],
+      }),
+      await ask("what no one added", {
+        sources: [keyOf(missingSource())],
+        memories: [storePin(crypto.randomUUID(), keyOf(missingSource()))],
+      }),
+      await ask("a key and a writer named by the markers", {
+        sources: [`upload:${markers.join(" ")}`],
+        memories: [
+          storePin(
+            crypto.randomUUID(),
+            `upload:${markers.join(" ")}`,
+            `app:${markers.join("")}`
+          ),
+        ],
+      }),
+      await ask("a request with an unknown field", {
+        sources: [],
+        memories: [],
+        extra: markers.join(" "),
+      }),
     ];
   },
   // Which memories the reader may still read: each hidden one (another
