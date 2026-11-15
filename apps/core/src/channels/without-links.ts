@@ -1,119 +1,285 @@
 import { parseMarkdown, stringifyMarkdown } from "chat";
-import type { InlineCode, Nodes, Root, Text } from "chat";
-import { LinkifyIt } from "linkify-it";
-import type { Match } from "linkify-it";
-import tlds from "tlds";
+import type { Nodes, Root, Text } from "chat";
 
-// The agent's own words in a chat app hold no address (GRA-1914): a link
-// the model writes could lead the person anywhere, and carry what it read
-// out in the address, when the person clicks it or when Teams or Slack
-// fetches it for a preview. Text the model read can steer what it writes,
-// so the rule it is given (stephen-rules.ts) holds nothing on its own:
-// this holds it, whatever the model writes.
+// The agent's own words in a chat app hold no link or image (GRA-1914): a
+// link the model writes could lead the person anywhere, and an image, or
+// a link a platform previews, is fetched with no click at all, carrying
+// what the model read out in its address. Text the model read can steer
+// what it writes, so the rule it is given (stephen-rules.ts) holds nothing
+// on its own: this holds it, whatever the model writes.
 //
-// Teams and Slack each read the text again with their own renderer, and
-// link more than any one parser's tree shows (a bare domain, an address
-// hidden behind an escape), so what is checked is the text a person sees:
-// no address anywhere in it, whatever syntax is around it. Without an
-// address, no link, image or HTML can lead anywhere. Parsed with the Chat
-// SDK's own parser, the one its Teams and Slack adapters render with:
-// - a link keeps its words, an image its alt text, a reference keeps its
-//   words; raw HTML, definitions and footnotes are cut;
-// - an address in what a block shows (linkify-it, with every top-level
-//   domain) is cut; across formatting, the block becomes plain text;
-// - a bare email address stays: it leads nowhere a click doesn't show;
-// - code shows as it is written, so it stays as it is written;
-// - a citation of what the chat read stays: code turns it into the
-//   answer's sources (`citedIn` in chat-messages.ts).
-// A block nothing was cut from keeps the model's own bytes; one something
-// was cut from is written again from its tree. The result is parsed
-// again, until a parse finds nothing to cut. Fails closed: an answer the
-// parser can't take (it throws on nesting thousands deep), or one that
-// doesn't settle in {@link rounds}, is cut whole.
+// It holds it by structure, not by recognising addresses: what Markdown
+// and HTML make into a link or an image is taken out, on the Chat SDK's
+// own parser, the one its Teams and Slack adapters render with. A link
+// keeps its words, an image its alt text; HTML, definitions and footnotes
+// go. An address written out in words stays words: a platform may still
+// make it clickable, and nothing fetches it (answer.ts posts with
+// previews off), so it is a link the person sees whole before following.
+// Each platform's own link and mention syntax is taken out where the
+// answer is posted (`inTeams`, `inSlack`).
+//
+// A block nothing was taken from keeps the model's own bytes; one
+// something was taken from is written again from its tree. The result is
+// parsed again until a parse takes nothing more. Fails closed: an answer
+// the parser throws on (nesting thousands deep), or one that doesn't
+// settle in {@link rounds}, is cut whole.
 
 /**
- * Rounds of parse, cut and write before an answer counts as one that
- * can't be placed. A block written again holds no link, image or HTML, and
- * escapes the brackets it kept, so the second round finds nothing in any
- * answer we know of.
+ * Rounds of parse and write before an answer counts as one that can't be
+ * placed. A block written again holds no link or image and escapes what
+ * its words keep of their syntax, so the second round takes nothing in
+ * any answer we know of.
  */
 const rounds = 4;
 
-// The Chat SDK's parser takes time with the square of some inputs, so an
-// answer that would take it that long is cut whole before it is parsed,
-// as markdown-it guards its own parser (`maxNesting`). Measured on it,
-// within these bounds the worst answer of 64 KB we know cleans in about a
-// second; no answer a person reads in a chat app comes near them.
+// The Chat SDK's parser takes time with the square of some paragraphs:
+// for each `]`, `*`, `_` or `~` it reads, it looks back over the ones
+// before (32 KB of `]` takes it 11 s), and it looks for an address from
+// each character of an unbroken run (64 KB of `+`: seconds). The budget is
+// 30 ms of parsing for any one paragraph; measured in workerd, these
+// bounds keep its worst shape (labels nested 256 deep) at 25 ms. A
+// paragraph past them is given to the parser escaped, as plain text, so
+// it shows as written and nothing in it is a link, emphasis or code. Code
+// isn't parsed for these, so it doesn't count.
 
-/**
- * The most `]`, `*`, `_` or `~` an answer may hold: for each it reads, the
- * parser looks back over all it read before (64 KB of `]` takes it a
- * minute).
- */
-const mostClosers = 512;
+/** The most `]`, `*`, `_` or `~` one paragraph may hold, unescaped. */
+const mostClosers = 256;
 
-/** What the parser looks back from (`mostClosers`). */
-const closer = /[\]*_~]/gu;
-
-/**
- * The longest run of what an address is made of, with no break, an answer
- * may hold: the parser looks for an address from each of its characters
- * (64 KB of `+` takes it seconds).
- */
+/** The longest unbroken run of what an address is made of. */
 const longestRun = 4096;
+
+/** A character the parser looks back from, unescaped. */
+const closer = /(?<!\\)[\]*_~]/gu;
 
 /** A run longer than {@link longestRun}. */
 const tooLongRun = new RegExp(`[\\w.+-]{${longestRun + 1}}`, "u");
 
-/** Whether the parser's time on `text` would grow with its square. */
-const tooCostly = (text: string): boolean => {
-  if (tooLongRun.test(text)) {
-    return true;
-  }
-  let count = 0;
-  for (const _ of text.matchAll(closer)) {
-    count += 1;
-    if (count > mostClosers) {
-      return true;
-    }
-  }
-  return false;
+/** ASCII punctuation, which a backslash escapes; and an escape already made. */
+const punctuation = /\\[!-/:-@[-`{-~]|[!-/:-@[-`{-~]/gu;
+
+/**
+ * A line that opens a fenced code block: what stands before its fence (a
+ * quote's markers, a list item's indent), the fence, and its info.
+ */
+const fenceOpening = /^(?<prefix>[\s>]*)(?<fence>`{3,}|~{3,})(?<info>[^\n]*)$/u;
+
+/** A line that can close a fenced code block: its indent, and its fence. */
+const fenceClosing = /^[>\s]*?(?<indent> *)(?<fence>`{3,}|~{3,})\s*$/u;
+
+/** A bullet item with words in it, which breaks off any paragraph. */
+const bulletItem = /^[\s>]*[-*+]\s+\S/u;
+
+/** A heading, which breaks off any paragraph. */
+const heading = /^[\s>]*#{1,6}(?:\s|$)/u;
+
+/** An ordered item, which breaks off a paragraph only in a list or at 1. */
+const orderedItem = /^[\s>]*(?<number>\d{1,9})[.)]\s+\S/u;
+
+/** A table's delimiter row, as GFM reads one: cells of dashes. */
+const delimiterRow = /^[\s>]*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$/u;
+
+/** How many cells a table row has, as GFM counts them. */
+const cellsOf = (line: string): number =>
+  line
+    .trim()
+    .replace(/^\|/u, "")
+    .replace(/(?<!\\)\|$/u, "")
+    .split(/(?<!\\)\|/u).length;
+
+/** Whether the lines of one paragraph would take the parser too long. */
+const tooCostly = (lines: readonly string[]): boolean => {
+  const text = lines.join("\n");
+  return (
+    tooLongRun.test(text) || [...text.matchAll(closer)].length > mostClosers
+  );
 };
 
-/** What a client would link, as markdown-it links it, with every top-level domain. */
-const linkify = new LinkifyIt({
-  fuzzyLink: true,
-  fuzzyEmail: true,
-  fuzzyIP: true,
-}).tlds(tlds);
+/** `line` with every unescaped ASCII punctuation character escaped. */
+const escaped = (line: string): string =>
+  line.replaceAll(punctuation, (found) =>
+    found.length === 2 ? found : `\\${found}`
+  );
 
-/** A bare email address, which stays: a click opens a draft, nothing more. */
-const isBareEmail = (match: Match): boolean =>
-  match.schema === "mailto:" && !/^mailto:/iu.test(match.raw);
+/** A fenced code block being read: its fence and what stands before it. */
+interface Fence {
+  fence: string;
+  prefix: string;
+}
 
-/** The addresses in `text` that are cut. */
-const addressesIn = (text: string): Match[] =>
-  linkify.match(text)?.filter((match) => !isBareEmail(match)) ?? [];
+/**
+ * The fence `line` opens, if it opens one: a backtick fence's info holds
+ * no backtick.
+ */
+const opens = (line: string): Fence | undefined => {
+  const { prefix, fence, info } = fenceOpening.exec(line)?.groups ?? {};
+  if (prefix === undefined || fence === undefined) {
+    return undefined;
+  }
+  return fence.startsWith("`") && (info ?? "").includes("`")
+    ? undefined
+    : { fence, prefix };
+};
 
-/** A citation of what the chat read (`citedIn`): it stays. */
+/**
+ * Whether `line` closes `open`: its fence, at most three spaces further in
+ * than the fence it closes, as the parser takes one.
+ */
+const closes = (line: string, open: Fence): boolean => {
+  const { indent, fence } = fenceClosing.exec(line)?.groups ?? {};
+  return (
+    indent !== undefined &&
+    fence !== undefined &&
+    indent.length <= open.prefix.replaceAll(">", "").length + 3 &&
+    fence.startsWith(open.fence.slice(0, 1)) &&
+    fence.length >= open.fence.length
+  );
+};
+
+/** Lines read as one: a paragraph outside code, or a code block. */
+interface Group {
+  code: boolean;
+  lines: string[];
+}
+
+/** How far a read of an answer's lines has come (`paragraphsOf`). */
+interface Reading {
+  groups: Group[];
+  fence: Fence | undefined;
+  /**
+   * A code block read as ended before the parser may end it: a line that
+   * would close it opens nothing.
+   */
+  left: Fence | undefined;
+  afterBlank: boolean;
+  inList: boolean;
+  inTable: boolean;
+  previous: string;
+}
+
+/** Starts a new group in `reading`. */
+const startGroup = (reading: Reading, code: boolean): void => {
+  reading.groups.push({ code, lines: [] });
+};
+
+/** Adds `line` to the group being read. */
+const addLine = (reading: Reading, line: string): void => {
+  reading.groups.at(-1)?.lines.push(line);
+};
+
+/**
+ * Reads `line` as code, if it is: inside a code block, which ends at its
+ * closing fence or where its container (a quote, a list item) does, or a
+ * line that opens one.
+ */
+const readCode = (reading: Reading, line: string): boolean => {
+  const { fence } = reading;
+  if (fence !== undefined) {
+    if (line.trim() === "" || line.startsWith(fence.prefix)) {
+      addLine(reading, line);
+      if (closes(line, fence)) {
+        reading.fence = undefined;
+        startGroup(reading, false);
+      }
+      return true;
+    }
+    reading.left = fence;
+    reading.fence = undefined;
+    startGroup(reading, false);
+  }
+  if (reading.left !== undefined && closes(line, reading.left)) {
+    reading.left = undefined;
+    addLine(reading, line);
+    return true;
+  }
+  const opened = opens(line);
+  if (opened === undefined) {
+    return false;
+  }
+  reading.left = undefined;
+  reading.fence = opened;
+  startGroup(reading, true);
+  addLine(reading, line);
+  return true;
+};
+
+/**
+ * Reads `line` as prose: it starts a paragraph of its own where it breaks
+ * off the one before however that one ends (a blank line before it, a
+ * bullet item, a heading, a table's row), or an ordered item in a list.
+ */
+const readProse = (reading: Reading, line: string): void => {
+  const blank = line.trim() === "";
+  const ordered = orderedItem.exec(line)?.groups?.number;
+  const bullet = bulletItem.test(line);
+  const breaks =
+    blank ||
+    reading.afterBlank ||
+    reading.inTable ||
+    heading.test(line) ||
+    bullet ||
+    (ordered !== undefined && (reading.inList || Number(ordered) === 1));
+  if (breaks) {
+    startGroup(reading, false);
+    if (!blank) {
+      reading.inList =
+        bullet ||
+        ordered !== undefined ||
+        (reading.inList && /^\s/u.test(line));
+    }
+  }
+  addLine(reading, line);
+  // Each row after a table's delimiter is read on its own.
+  reading.inTable = blank
+    ? false
+    : reading.inTable ||
+      (reading.previous.includes("|") &&
+        delimiterRow.test(line) &&
+        cellsOf(line) === cellsOf(reading.previous));
+  reading.afterBlank = blank;
+  reading.previous = line;
+};
+
+/** The lines of `text`, each paragraph outside code one group (`inTime`). */
+const paragraphsOf = (text: string): Group[] => {
+  const reading: Reading = {
+    groups: [{ code: false, lines: [] }],
+    fence: undefined,
+    left: undefined,
+    afterBlank: true,
+    inList: false,
+    inTable: false,
+    previous: "",
+  };
+  for (const line of text.split("\n")) {
+    if (!readCode(reading, line)) {
+      readProse(reading, line);
+    }
+  }
+  return reading.groups;
+};
+
+/**
+ * `text` as the parser may take it in time: each paragraph outside code
+ * that would take it too long, escaped. Lines are grouped as the parser's
+ * paragraphs or coarser, never finer, so a paragraph is never counted in
+ * parts; code it doesn't parse for these isn't counted.
+ */
+const inTime = (text: string): string =>
+  paragraphsOf(text)
+    .flatMap(({ code, lines }) =>
+      !code && tooCostly(lines) ? lines.map(escaped) : lines
+    )
+    .join("\n");
+
+/** A citation of what the chat read (`citedIn` in chat-messages.ts). */
 const citation = /^grasp:note\/[\w-]{1,128}$/u;
 
-/** A code block's opening fence. */
-const fence = /^(?:`{3}|~{3})/u;
-
-/** Nodes that show nothing of their own and are cut. */
+/** Nodes that show nothing of their own and are taken out. */
 const cutNodes: ReadonlySet<Nodes["type"]> = new Set([
   "html",
   "definition",
   "footnoteDefinition",
   "footnoteReference",
-]);
-
-/** Nodes whose children are the words a block shows. */
-const blockText: ReadonlySet<Nodes["type"]> = new Set([
-  "paragraph",
-  "heading",
-  "tableCell",
 ]);
 
 type Parent = Extract<Nodes, { children: unknown }>;
@@ -123,6 +289,13 @@ const hasChildren = (node: Nodes): node is Parent => "children" in node;
 /** `node`'s children, none for a leaf. */
 const childrenOf = (node: Nodes): readonly Nodes[] =>
   hasChildren(node) ? node.children : [];
+
+/** Pushes `nodes` on `pending` so the first of them is popped first. */
+const pushAll = (pending: Nodes[], nodes: readonly Nodes[]): void => {
+  for (const node of nodes.toReversed()) {
+    pending.push(node);
+  }
+};
 
 /** Gives `parent` the children `kept`, in place. */
 const keepChildren = (parent: Parent, kept: readonly Nodes[]): void => {
@@ -134,269 +307,110 @@ const keepChildren = (parent: Parent, kept: readonly Nodes[]): void => {
   }
 };
 
-/** Pushes `nodes` on `pending` so the first of them is popped first. */
-const pushAll = (pending: Nodes[], nodes: readonly Nodes[]): void => {
-  for (const node of nodes.toReversed()) {
-    pending.push(node);
+/** Keeps `node`, as one text with any text kept right before it. */
+const keep = (kept: Nodes[], node: Nodes): void => {
+  const last = kept.at(-1);
+  if (node.type === "text" && last?.type === "text") {
+    kept[kept.length - 1] = { type: "text", value: last.value + node.value };
+  } else {
+    kept.push(node);
   }
-};
-
-/** One stretch of what a block shows, and the node it comes from. */
-interface Shown {
-  node: Text | InlineCode | undefined;
-  from: number;
-  to: number;
-}
-
-/** What a block's words show, in order, and where each node's part is. */
-const shownIn = (block: Parent): { text: string; parts: Shown[] } => {
-  let text = "";
-  const parts: Shown[] = [];
-  const pending: Nodes[] = [];
-  pushAll(pending, childrenOf(block));
-  for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
-    if (node.type === "text" || node.type === "inlineCode") {
-      parts.push({
-        node,
-        from: text.length,
-        to: text.length + node.value.length,
-      });
-      text += node.value;
-    } else if (node.type === "break") {
-      text += "\n";
-    } else {
-      pushAll(pending, childrenOf(node));
-    }
-  }
-  return { text, parts };
-};
-
-/** Where an address stands in a text. */
-interface Span {
-  index: number;
-  lastIndex: number;
-}
-
-/**
- * `text` without `matches`, each with the spaces before it, or after it
- * where nothing is before it.
- */
-const without = (text: string, matches: readonly Span[]): string => {
-  let left = text;
-  for (const { index, lastIndex } of matches.toReversed()) {
-    const before = left.slice(0, index).trimEnd();
-    const after = left.slice(lastIndex);
-    left = `${before}${before === "" ? after.trimStart() : after}`;
-  }
-  return left;
 };
 
 /**
- * Cuts every address from what `block` shows: from the text it stands in,
- * or, for one that runs across nodes, by making the block plain text. One
- * inside a code span stays. Whether anything was cut.
+ * The words of link `node` when they are its address, written out
+ * (`https://…`, `www.…`, `hr@acme.com`, `<https://…>`): words that stay
+ * words, which a platform may show as a link the person sees whole.
  */
-const cutAddresses = (block: Parent): boolean => {
-  const { text, parts } = shownIn(block);
-  const matches = addressesIn(text);
-  if (matches.length === 0) {
-    return false;
-  }
-  const cuts = new Map<Text, Span[]>();
-  for (const match of matches) {
-    const part = parts.find(
-      ({ from, to }) => from <= match.index && match.lastIndex <= to
-    );
-    if (part?.node?.type === "inlineCode") {
-      continue;
-    }
-    if (part?.node === undefined) {
-      // Across nodes: nothing to cut it from, so the block shows its words
-      // as plain text, every address cut.
-      keepChildren(block, [{ type: "text", value: without(text, matches) }]);
-      return true;
-    }
-    const span = {
-      index: match.index - part.from,
-      lastIndex: match.lastIndex - part.from,
-    };
-    cuts.set(part.node, [...(cuts.get(part.node) ?? []), span]);
-  }
-  for (const [node, inNode] of cuts) {
-    node.value = without(node.value, inNode);
-  }
-  return cuts.size > 0;
-};
-
-/**
- * The address of a bare email address the parser made a link of
- * (`<hr@acme.com>` or `hr@acme.com`), which stays, as its text.
- */
-const bareEmailOf = (node: Nodes): string | undefined => {
-  if (node.type !== "link") {
-    return undefined;
-  }
-  const [words, ...more] = node.children;
-  if (
-    words?.type !== "text" ||
-    more.length > 0 ||
-    node.url !== `mailto:${words.value}`
-  ) {
-    return undefined;
-  }
-  const [match, ...others] = linkify.match(words.value) ?? [];
-  const whole =
-    match !== undefined &&
-    others.length === 0 &&
-    isBareEmail(match) &&
-    match.index === 0 &&
-    match.lastIndex === words.value.length;
-  return whole ? words.value : undefined;
-};
-
-/**
- * Whether link `node`'s words are its address (`<https://…>`, or one the
- * parser found written out, `www.…`), which goes with it.
- */
-const wordsAreAddress = (node: Nodes): boolean => {
-  if (node.type !== "link") {
-    return false;
-  }
-  const [words, ...more] = node.children;
-  return (
+const writtenOut = (node: Nodes): string | undefined => {
+  const [words, ...more] = childrenOf(node);
+  return node.type === "link" &&
     words?.type === "text" &&
     more.length === 0 &&
     [words.value, `http://${words.value}`, `mailto:${words.value}`].includes(
       node.url
     )
-  );
+    ? words.value
+    : undefined;
 };
-
-/**
- * Keeps `node`, as one text with the text kept right before it. After an
- * address cut whole (`closing`), the spaces before it go, as they do for
- * one cut from a text (`without`), or the spaces after it at the start.
- */
-const keep = (kept: Nodes[], node: Nodes, closing = false): void => {
-  const last = kept.at(-1);
-  if (node.type !== "text") {
-    kept.push(node);
-  } else if (last?.type === "text") {
-    const before = closing ? last.value.trimEnd() : last.value;
-    const value = before === "" ? node.value.trimStart() : node.value;
-    kept[kept.length - 1] = { type: "text", value: before + value };
-  } else {
-    const value =
-      closing && last === undefined ? node.value.trimStart() : node.value;
-    kept.push({ type: "text", value });
-  }
-};
-
-/** Whether `node` is a link that leads somewhere: all but a citation. */
-const leads = (node: Nodes): boolean =>
-  (node.type === "link" && !citation.test(node.url)) ||
-  node.type === "linkReference";
 
 /**
  * Cleans `parent`'s children in place: a link becomes its words, an image
- * its alt text, and what shows nothing of its own goes. Whether anything
- * changed, and the children kept, to clean in turn.
+ * its alt text, and what shows nothing of its own goes; a citation stays
+ * where `citations` are kept. Whether anything was taken, and the
+ * children kept, to clean in turn.
  */
-const cleanChildren = (parent: Parent): { changed: boolean; kept: Nodes[] } => {
+const cleanChildren = (
+  parent: Parent,
+  citations: boolean
+): { changed: boolean; kept: Nodes[] } => {
   let changed = false;
-  let closing = false;
   const kept: Nodes[] = [];
   const pending: Nodes[] = [];
   pushAll(pending, childrenOf(parent));
   for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
-    const email = bareEmailOf(node);
-    if (wordsAreAddress(node) && email === undefined) {
-      changed = true;
-      closing = true;
-      continue;
-    }
-    if (email !== undefined) {
-      keep(kept, { type: "text", value: email }, closing);
+    const words = writtenOut(node);
+    if (words !== undefined) {
+      keep(kept, { type: "text", value: words });
     } else if (cutNodes.has(node.type)) {
       changed = true;
-      continue;
-    } else if (leads(node)) {
+    } else if (
+      (node.type === "link" && !(citations && citation.test(node.url))) ||
+      node.type === "linkReference"
+    ) {
       changed = true;
       pushAll(pending, childrenOf(node));
     } else if (node.type === "image" || node.type === "imageReference") {
       changed = true;
-      keep(kept, { type: "text", value: node.alt ?? "" }, closing);
+      keep(kept, { type: "text", value: node.alt ?? "" });
     } else {
-      keep(kept, node, closing);
+      keep(kept, node);
     }
-    closing = false;
-  }
-  const last = kept.at(-1);
-  if (closing && last?.type === "text") {
-    kept[kept.length - 1] = { type: "text", value: last.value.trimEnd() };
   }
   keepChildren(parent, kept);
   return { changed, kept };
 };
 
 /**
- * Whether code block `code` of `source` has to be written again: code
- * shows as it is written, unless it was indented, which a platform that
- * doesn't take indented code shows as text; so an indented one holding
- * an address is written again, fenced.
- */
-const unfenced = (code: Nodes, source: string): boolean => {
-  if (code.type !== "code") {
-    return false;
-  }
-  const at = code.position?.start.offset;
-  const fenced = at !== undefined && fence.test(source.slice(at));
-  return !fenced && addressesIn(code.value).length > 0;
-};
-
-/**
- * Cleans `block`, a top-level block of `source`, in place: whether it was
- * cut whole, changed, or kept as it is.
+ * Cleans `block`, a top-level block, in place: whether it was taken
+ * whole, changed, or kept as it is.
  */
 const cleanBlock = (
   block: Root["children"][number],
-  source: string
+  citations: boolean
 ): "cut" | "changed" | "kept" => {
   if (cutNodes.has(block.type)) {
     return "cut";
   }
   let changed = false;
-  const blocks: Parent[] = [];
   const parents: Nodes[] = [block];
   for (
     let parent = parents.pop();
     parent !== undefined;
     parent = parents.pop()
   ) {
-    changed ||= unfenced(parent, source);
-    if (!hasChildren(parent)) {
-      continue;
+    if (hasChildren(parent)) {
+      const cleaned = cleanChildren(parent, citations);
+      changed ||= cleaned.changed;
+      pushAll(parents, cleaned.kept);
     }
-    if (blockText.has(parent.type)) {
-      blocks.push(parent);
-    }
-    const cleaned = cleanChildren(parent);
-    changed ||= cleaned.changed;
-    pushAll(parents, cleaned.kept);
-  }
-  for (const words of blocks) {
-    changed = cutAddresses(words) || changed;
   }
   return changed ? "changed" : "kept";
 };
 
 /**
- * How a block cleaned of something is written again. An `@` in its text
- * is written as it is, not escaped: the escape would only keep a bare
- * email address from showing as one, which it may, and Teams and Slack
- * would show the backslash.
+ * The parser's escapes of what could start an address written out (`@`,
+ * `.`, `:`), which only keep it from being read as a link it may be
+ * read as: written as they are, as Teams and Slack would show the
+ * backslash.
  */
-const written = (block: Root["children"][number]): string =>
+const addressEscape: ReadonlySet<string> = new Set(["@", ".", ":"]);
+
+/** `block` written again, with `code` writing its code blocks. */
+const written = (
+  block: Root["children"][number],
+  code?: (value: string) => string
+): string =>
   stringifyMarkdown(
     { type: "root", children: [block] },
     {
@@ -405,22 +419,27 @@ const written = (block: Root["children"][number]): string =>
       handlers: {
         text: (node: Text, _parent, state, info) => {
           const { unsafe } = state;
-          state.unsafe = unsafe.filter(({ character }) => character !== "@");
+          state.unsafe = unsafe.filter(
+            ({ character }) => !addressEscape.has(character)
+          );
           try {
             return state.safe(node.value, info);
           } finally {
             state.unsafe = unsafe;
           }
         },
+        ...(code === undefined
+          ? {}
+          : { code: (node: { value: string }) => code(node.value) }),
       },
     }
   ).trimEnd();
 
 /**
- * `source` cleaned once: each block nothing was cut from as it is, each
- * other one written again, or gone; `undefined` when nothing was cut.
+ * `source` cleaned once: each block nothing was taken from as it is, each
+ * other one written again, or gone; `undefined` when nothing was taken.
  */
-const cleanOnce = (source: string): string | undefined => {
+const cleanOnce = (source: string, citations: boolean): string | undefined => {
   const { children } = parseMarkdown(source);
   let cleaned = "";
   let from = 0;
@@ -431,7 +450,7 @@ const cleanOnce = (source: string): string | undefined => {
     if (start === undefined || end === undefined) {
       throw new Error("A block without a place in the answer");
     }
-    const outcome = cleanBlock(block, source);
+    const outcome = cleanBlock(block, citations);
     if (outcome === "kept") {
       continue;
     }
@@ -445,22 +464,16 @@ const cleanOnce = (source: string): string | undefined => {
   return cut ? `${cleaned}${source.slice(from)}`.trimEnd() : undefined;
 };
 
-/**
- * The agent's own words in a chat app, without links or addresses: what
- * is streamed, posted and stored. Empty when they can't be placed.
- */
-export const withoutLinks = (text: string): string => {
-  if (tooCostly(text)) {
-    return "";
-  }
-  let current = text;
+/** `text` cleaned until a parse takes nothing more; empty if it can't be. */
+const settled = (text: string, citations: boolean): string => {
+  let current = inTime(text);
   try {
     for (let round = 0; round < rounds; round += 1) {
-      const next = cleanOnce(current);
+      const next = cleanOnce(current, citations);
       if (next === undefined) {
         return current;
       }
-      current = next;
+      current = inTime(next);
     }
   } catch {
     // The parser can't take it (its own recursion, on nesting thousands
@@ -470,35 +483,74 @@ export const withoutLinks = (text: string): string => {
 };
 
 /**
- * Syntax that may open a link, an image, HTML, a code span, an escape or
- * a character reference, which a later chunk may still close.
+ * The agent's own words in a chat app, as they are stored and shown in
+ * Grasp: no link or image, its citations of what the chat read kept.
+ * Empty when they can't be placed.
  */
-const openSyntax = /[\\`[<!&]/u;
+export const withoutLinks = (text: string): string => settled(text, true);
 
 /**
- * Of an answer being written (`partial`), the part of its cleaned words
- * that is final, as far as can be told: its complete blocks, and of the
- * last one, the words before any syntax that may open a link a later
- * chunk closes (`openSyntax`), and before its last word, which may still
- * grow into an address. So the first half of a link split over two
- * chunks never shows; the words shown are cleaned on their own too, and
- * are none if they don't hold.
+ * Stored words (`withoutLinks`) as a chat app shows them: a citation too
+ * as its words, as the sources under the answer stand for them.
  */
-export const settledWithoutLinks = (partial: string): string => {
-  const cleaned = withoutLinks(partial);
-  let last: number | undefined;
+export const shownWithoutLinks = (text: string): string =>
+  settled(text, false).trim();
+
+/**
+ * `shown` words as Teams gets them, in an Adaptive Card's `TextBlock`,
+ * which reads one link form only, `[words](address)`, and shows code as
+ * text: wherever its `](` still stands (in code, or escaped), it is
+ * broken, so none can be read as a link.
+ */
+export const inTeams = (shown: string): string => shown.replaceAll("](", "] (");
+
+/** A code block as Slack shows one: a closed fence of three backticks. */
+const slackCode = (value: string): string => `\`\`\`\n${value}\n\`\`\``;
+
+/** Whether `block` holds a code block Slack wouldn't show as code. */
+const unfencedCode = (block: Nodes, source: string): boolean => {
+  const pending: Nodes[] = [block];
+  for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
+    if (node.type === "code") {
+      const fenced = source.slice(
+        node.position?.start.offset,
+        node.position?.end.offset
+      );
+      if (!/^```\n[\s\S]*\n```$/u.test(fenced)) {
+        return true;
+      }
+    }
+    pushAll(pending, childrenOf(node));
+  }
+  return false;
+};
+
+/**
+ * `shown` words as Slack gets them, as `mrkdwn` text: each code block a
+ * closed fence of three backticks, the only one Slack shows as code, and
+ * `&`, `<` and `>` escaped, Slack's control characters, so nothing the
+ * model wrote is a Slack link, mention or channel (`<…>`).
+ */
+export const inSlack = (shown: string): string => {
+  let fenced = shown;
   try {
-    last = parseMarkdown(cleaned).children.at(-1)?.position?.start.offset;
+    const { children } = parseMarkdown(shown);
+    let out = "";
+    let from = 0;
+    for (const block of children) {
+      if (unfencedCode(block, shown)) {
+        out += shown.slice(from, block.position?.start.offset);
+        out += written(block, slackCode);
+        from = block.position?.end.offset ?? shown.length;
+      }
+    }
+    fenced = `${out}${shown.slice(from)}`;
   } catch {
-    return "";
+    // Shown words parsed once already; if not now, they go as they are,
+    // escaped below all the same.
   }
-  if (last === undefined) {
-    return "";
-  }
-  const tail = cleaned.slice(last);
-  const open = tail.search(openSyntax);
-  const closed = open === -1 ? tail : tail.slice(0, open);
-  const settled =
-    `${cleaned.slice(0, last)}${closed.slice(0, closed.search(/\S*$/u))}`.trimEnd();
-  return withoutLinks(settled) === settled ? settled : "";
+  return fenced
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
 };

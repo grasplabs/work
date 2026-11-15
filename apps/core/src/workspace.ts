@@ -111,7 +111,7 @@ import type {
   CodeRunCall,
 } from "./agent-scope.ts";
 import { heldIn } from "./agent-skills.ts";
-import { builtNoteText, inOwnWords, ownWordsOf, textOf } from "./agent.ts";
+import { builtNoteText, inOwnWords, ownWordsOf } from "./agent.ts";
 import type { QuestionBuilt, TurnContext, TurnResult } from "./agent.ts";
 import { turnAgent } from "./agents.ts";
 import { drainObjectOutbox, uuidFromHash } from "./audit-outbox.ts";
@@ -126,7 +126,7 @@ import {
   turnCheckOf,
 } from "./channels/stephen-rules.ts";
 import type { HeldWriteRefusal, TurnCheck } from "./channels/stephen-rules.ts";
-import { settledWithoutLinks, withoutLinks } from "./channels/without-links.ts";
+import { withoutLinks } from "./channels/without-links.ts";
 import { questionText } from "./chat-agent.ts";
 import {
   audienceMaxMembers,
@@ -143,7 +143,6 @@ import type {
 } from "./chat-harness.ts";
 import {
   chatMessageOf,
-  citedIn,
   noteLinksOf,
   partialOf,
   shownBuiltSchema,
@@ -243,15 +242,6 @@ interface LiveTurn {
   calls?: ToolCall[];
   /** The last response it kept: its answer, once it ends. */
   answer?: number;
-  /** Tells a chat platform's asker the turn's words so far (`turnWords`). */
-  onText?: () => void;
-  /**
-   * Each answer the turn kept, as a chat platform shows it (`shownWords`),
-   * and the model's text of the one being written: what its stream holds,
-   * only when its asker streams.
-   */
-  said?: string[];
-  writing?: string;
   /**
    * What its model requests read from the provider's prompt cache, of all
    * the prompt tokens they sent, recorded once the turn ends.
@@ -263,65 +253,6 @@ interface LiveTurn {
  * A question for a chat's agent, the model to answer it with, and how hard
  * that model thinks first (`ChatQuestion`).
  */
-/**
- * How often a chat platform is told an answer's text so far: Teams shows
- * an update about once a second, and each is a call back to the door.
- */
-const textEveryMs = 300;
-
-/**
- * `tell`, called at most every {@link textEveryMs}, and once more at the
- * end of a window that asked for more: what it tells is read as it is
- * called, so what came in between is never told late.
- */
-const throttled = (tell: () => unknown) => {
-  let last = Number.NEGATIVE_INFINITY;
-  let gone = false;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  // A caller that went away stops being told; the turn goes on.
-  const send = async (): Promise<void> => {
-    last = Date.now();
-    try {
-      await tell();
-    } catch {
-      gone = true;
-    }
-  };
-  return (): void => {
-    if (gone) {
-      return;
-    }
-    const wait = last + textEveryMs - Date.now();
-    if (wait <= 0) {
-      void send();
-      return;
-    }
-    timer ??= setTimeout(() => {
-      timer = undefined;
-      if (!gone) {
-        void send();
-      }
-    }, wait);
-  };
-};
-
-/** Words as a chat platform shows them: a citation as its words (`citedIn`). */
-const shownWords = (text: string): string =>
-  citedIn(text, () => false).text.trim();
-
-/**
- * A turn's words as its stream shows them: each answer it kept (`said`),
- * then of the one being written (`partial`, the model's text so far) what
- * is settled of it without links (`settledWithoutLinks`). Each holds the
- * one before it, unless a later chunk changed what was settled (a
- * definition further down) or an answer was kept late: the stream then
- * stops, and the answer is posted whole (channels/answer.ts).
- */
-const turnWords = (said: readonly string[], partial = ""): string =>
-  [...said, shownWords(settledWithoutLinks(partial))]
-    .filter((words) => words !== "")
-    .join("\n\n");
-
 /**
  * A chat others share on a chat platform, as its door names it: the Chat
  * SDK's thread, whether it is a group chat or a channel, and who is in it
@@ -1857,8 +1788,7 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * Asks `text` in `personId`'s own chat on chat platform `via`, and waits
-   * for the answer, telling `onText`, if given, the answer's text so far as
-   * the model writes it, at most every {@link textEveryMs}: the chat is the person's one chat there, found by its
+   * for the answer: the chat is the person's one chat there, found by its
    * channel, or made on their first message, audited as theirs. Asked
    * with the deployment's default model, the first it allows, as Grasp's
    * own app starts with. Like `ask`, it takes its caller's word for who
@@ -1876,15 +1806,8 @@ export class Workspace extends DurableObject<Env> {
     agentId: string,
     via: string,
     text: string,
-    onText: ((text: string) => unknown) | undefined,
     place: ChatPlace
-  ): Promise<{
-    chatId: string;
-    answer: Answer;
-    calls: ToolCall[];
-    /** The turn's words, as its stream ends with them (`turnWords`). */
-    words: string;
-  }> {
+  ): Promise<{ chatId: string; answer: Answer; calls: ToolCall[] }> {
     const platform = chatPlatformSchema.parse(via);
     const parsedPlace = permissionErrors.parse(
       "permission.context_invalid",
@@ -1937,13 +1860,11 @@ export class Workspace extends DurableObject<Env> {
       );
     }
     const calls: ToolCall[] = [];
-    const said: string[] = [];
-    const answer = await this.#turn(chat, { text, model }, false, {
-      onText,
+    return {
+      chatId: chat.id,
+      answer: await this.#turn(chat, { text, model }, false, { calls }),
       calls,
-      said,
-    });
-    return { chatId: chat.id, answer, calls, words: turnWords(said) };
+    };
   }
 
   /**
@@ -2001,15 +1922,10 @@ export class Workspace extends DurableObject<Env> {
     unattended: boolean,
     {
       started,
-      onText,
       calls,
-      said,
     }: {
       started?: () => void;
-      onText?: (text: string) => unknown;
       calls?: ToolCall[];
-      /** Gets each answer the turn keeps, as a chat platform shows it. */
-      said?: string[];
     } = {}
   ): Promise<Answer> {
     const parsed = questionSchema.safeParse(question);
@@ -2123,14 +2039,6 @@ export class Workspace extends DurableObject<Env> {
       delete live.unstarted;
       started?.();
       this.#changed(chat.id);
-      if (onText !== undefined) {
-        live.said = said ?? [];
-        live.writing = "";
-        // Cleaned as it is sent, not as each chunk arrives.
-        live.onText = throttled(
-          async () => await onText(turnWords(live.said ?? [], live.writing))
-        );
-      }
       const end = await this.#runTurn({
         turnId: live.id,
         scope,
@@ -2815,18 +2723,15 @@ export class Workspace extends DurableObject<Env> {
           live.cache.cacheReadTokens += message.usage.cacheRead;
         }
       }
-      const kept = via === "web" ? message : inOwnWords(message);
       const id = this.#keep(
         chatId,
-        kept,
+        via === "web" ? message : inOwnWords(message),
         keptWith(message, turnAgentId, { files, thinkingMs, built })
       );
-      if (kept.role === "assistant") {
+      if (message.role === "assistant") {
         answer = id;
         if (live !== undefined) {
           live.answer = id;
-          live.said?.push(shownWords(textOf(kept)));
-          live.writing = "";
         }
       }
     }
@@ -2846,11 +2751,6 @@ export class Workspace extends DurableObject<Env> {
       this.#partials.delete(chatId);
     } else {
       this.#partials.set(chatId, partial);
-      const live = this.#turns.get(chatId);
-      if (live?.onText !== undefined) {
-        live.writing = textOf(partial);
-        live.onText();
-      }
     }
     this.#changed(chatId);
   }
@@ -4675,7 +4575,7 @@ export class Workspace extends DurableObject<Env> {
               // Whose it is, so the page names the agent writing it.
               agentId:
                 this.#turns.get(chatId)?.agentId ?? this.#chat(chatId).agentId,
-              // A chat platform's shows as its answers are kept (`inOwnWords`).
+              // A chat platform's as its answers are kept (`inOwnWords`).
               ...partialOf(
                 this.#chat(chatId).via === "web" ? partial : ownWordsOf(partial)
               ),

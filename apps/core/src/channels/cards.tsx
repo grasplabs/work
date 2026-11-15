@@ -141,8 +141,8 @@ export interface AnswerCard {
   text: string;
   /** What it was answered from, numbered in this order. */
   sources: readonly AnswerSource[];
-  /** The chat in Grasp, where the whole answer is. */
-  chatUrl: string;
+  /** The chat in Grasp, where the whole answer is, where Grasp has one. */
+  chatUrl?: string;
   /**
    * The request the answer is for (stephen-requests.ts), where the person
    * can rate it with a thumb: Helpful or Not helpful.
@@ -244,42 +244,11 @@ export const answerCard = ({
       {whole && rate === undefined ? null : (
         <Actions>
           {RateButtons({ locale, rate })}
-          {whole ? null : (
+          {whole || chatUrl === undefined ? null : (
             <LinkButton url={ownLink(chatUrl)}>
               {say("openInGrasp", locale)}
             </LinkButton>
           )}
-        </Actions>
-      )}
-    </Card>
-  );
-  return { card: cardOf(card), aiGenerated: true };
-};
-
-/**
- * The numbered sources of an answer the person saw streamed as text, sent
- * right after it, labelled as made by AI like the answer; with the link to
- * the chat in Grasp when there are more sources than a card lists.
- */
-export const sourcesCard = ({
-  locale,
-  sources,
-  chatUrl,
-  rate,
-}: Omit<AnswerCard, "text">): PostableCard => {
-  const listed = listedSources(sources, { left: outsideBytes });
-  const more = sources.length > maxSources;
-  const card = (
-    <Card>
-      {SourcesSection({ locale, listed })}
-      {!more && rate === undefined ? null : (
-        <Actions>
-          {RateButtons({ locale, rate })}
-          {more ? (
-            <LinkButton url={ownLink(chatUrl)}>
-              {say("openInGrasp", locale)}
-            </LinkButton>
-          ) : null}
         </Actions>
       )}
     </Card>

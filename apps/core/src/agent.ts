@@ -883,11 +883,11 @@ export const textOf = (message: AssistantMessage | undefined): string =>
     .join("");
 
 /**
- * `message`, an answer, with no links in its text, as a chat platform's
- * chat keeps and shows the agent's own words, and sends them to the model
- * again (`withoutLinks`). Its text is cleaned whole, as the answer is
- * shown and posted whole (`textOf`), so a link split over two of its text
- * blocks is cut too: the text stands where its first block stood.
+ * `message`, an answer, without links in its text, as a chat platform's
+ * chat keeps and shows the agent's own words (`withoutLinks`). Its text is
+ * cleaned whole, as the answer is posted whole (`textOf`), so a link split
+ * over two of its text blocks goes too: the text stands where its first
+ * block stood.
  */
 export const ownWordsOf = (message: AssistantMessage): AssistantMessage => {
   const text = withoutLinks(textOf(message));

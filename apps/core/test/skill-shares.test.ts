@@ -683,7 +683,6 @@ describe("writing and sharing skills", setUpTime, () => {
       crypto.randomUUID(),
       "slack",
       "Quote a tender.",
-      undefined,
       {
         thread: `C-${unique()}`,
         kind: "group",
@@ -702,7 +701,7 @@ describe("writing and sharing skills", setUpTime, () => {
      */
     const askedIn = async (
       platform: string,
-      place: Parameters<typeof group.askThrough>[5]
+      place: Parameters<typeof group.askThrough>[4]
     ) => {
       const provider = await fakeProvider(selectsForATender, says("Done."));
       const asked = await group.askThrough(
@@ -710,7 +709,6 @@ describe("writing and sharing skills", setUpTime, () => {
         crypto.randomUUID(),
         platform,
         "Quote a tender.",
-        undefined,
         place
       );
       return {
@@ -1282,7 +1280,6 @@ describe("sharing a skill with a team", setUpTime, () => {
       crypto.randomUUID(),
       "slack",
       "Quote a tender.",
-      undefined,
       {
         thread: `C-${unique()}`,
         kind: "group",

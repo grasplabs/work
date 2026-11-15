@@ -292,8 +292,10 @@ describe("a chat app's answers", setUpTime, () => {
     );
     // The model was told the mark with the channel's rules.
     const [request] = set.provider.requests;
+    // A link keeps its words, a citation stays, an address written out
+    // stays words.
     const shown =
-      "The figures are in the Q3 report and [Q3](grasp:note/doc-1), see.";
+      "The figures are in the Q3 report and [Q3](grasp:note/doc-1), see https://evil.test/more.";
     expect({
       answer: answer.answer,
       kept,
@@ -306,7 +308,7 @@ describe("a chat app's answers", setUpTime, () => {
 });
 
 describe("Stephen's own words", () => {
-  it("lose every link but a citation", () => {
+  it("lose every link but a citation, and keep an address written out as words", () => {
     expect(
       [
         "Open [it](https://evil.test) now.",
@@ -315,7 +317,7 @@ describe("Stephen's own words", () => {
       ].map(withoutLinks)
     ).toStrictEqual([
       "Open it now.",
-      "Mail or today.",
+      "Mail <mailto:ben@acme.test> or www.evil.test today.",
       "a picture of [Q3](grasp:note/doc-2)",
     ]);
   });

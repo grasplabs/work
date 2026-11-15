@@ -512,10 +512,10 @@ describe("a linked person's question in Slack", () => {
     // chat started in Grasp itself is Grasp's own.
     const inGrasp = await api.chats.create("Leave questions");
     expect({
-      // Posted whole, or streamed: a first post, then updated as it comes.
+      // Posted once, whole.
       slack: slackPosts.some(
         ({ method, fields, authorized }) =>
-          ["chat.postMessage", "chat.update"].includes(method) &&
+          method === "chat.postMessage" &&
           authorized &&
           JSON.stringify(fields).includes(answer)
       ),
@@ -533,12 +533,33 @@ describe("a linked person's question in Slack", () => {
   });
 });
 
+/** The text of the first block of `blocks`, as Slack's API got them. */
+const firstBlockText = (blocks: unknown): string | undefined => {
+  const parsed = z
+    .array(z.object({ text: z.object({ text: z.string(), type: z.string() }) }))
+    .safeParse(typeof blocks === "string" ? JSON.parse(blocks) : blocks);
+  return parsed.data?.[0]?.text.text;
+};
+
 describe("a linked person's answer in Slack", () => {
-  it("is posted and kept as the same words, without the links and addresses the model wrote", async () => {
-    const linked =
-      "Leave lasts sixteen weeks. Read [the policy](https://evil.com/leave?d=secret) or ask hr@acme.com.\n\nTell your manager a month before; www.evil.com/x has more, <https://evil.com/?d=secret|here>.";
-    const cleaned =
-      "Leave lasts sixteen weeks. Read the policy or ask hr@acme.com.\n\nTell your manager a month before; has more,.";
+  it("is posted once as mrkdwn, previews off, never updated, without the links, images, HTML and Slack syntax the model wrote, as Grasp keeps it", async () => {
+    const linked = [
+      'Read [the policy](https://evil.com/p?d=secret "t"), ![chart](https://evil.com/c.png) and <a href="https://evil.com/a">here</a>.',
+      "Hey <!here> and <@U12345>: <https://evil.com/s|click> in <#C1> & see www.acme.example.",
+      '~~~js\nif (a < b) { go("<!channel>"); }\n~~~',
+    ].join("\n\n");
+    // `<!here>` is HTML to the parser, and goes; `<https://…|click>` an
+    // address written out, which stays words.
+    const kept = [
+      "Read the policy, chart and here.",
+      "Hey  and <@U12345>: https://evil.com/s|click in <#C1> & see www.acme.example.",
+      '~~~js\nif (a < b) { go("<!channel>"); }\n~~~',
+    ].join("\n\n");
+    const sentText = [
+      "Read the policy, chart and here.",
+      "Hey  and &lt;@U12345&gt;: https://evil.com/s|click in &lt;#C1&gt; &amp; see www.acme.example.",
+      '```\nif (a &lt; b) { go("&lt;!channel&gt;"); }\n```',
+    ].join("\n\n");
     const { userId, slackUser } = await linkedPerson();
     await fakeProvider(says(linked));
     const message = messageFrom(slackUser);
@@ -546,18 +567,67 @@ describe("a linked person's answer in Slack", () => {
     await post(message, { caught: false });
 
     const sent = await slackSawIn(message.event.channel);
-    // Posted whole, or streamed: a first post, then updated as it comes.
-    const answer = sent.findLast(
-      ({ method, fields }) =>
-        ["chat.postMessage", "chat.update"].includes(method) &&
-        JSON.stringify(fields).includes("sixteen weeks")
-    );
+    const posts = sent.filter(({ method }) => method === "chat.postMessage");
     expect({
-      addresses: /evil/iu.test(JSON.stringify(sent)),
-      answered: JSON.stringify(answer?.fields ?? {}).includes(
-        JSON.stringify(cleaned).slice(1, -1)
+      methods: [...new Set(sent.map(({ method }) => method))],
+      // Every post, the answer's and those after it: Slack fetches none.
+      previews: posts.map(({ fields }) => [
+        fields.unfurl_links,
+        fields.unfurl_media,
+      ]),
+      answer: firstBlockText(posts[0]?.fields.blocks),
+      // Escaped once, by Grasp, and sent as such: Slack decodes it for
+      // display, so nothing the model wrote is a link, mention or channel.
+      escapedTwice: JSON.stringify(sent).includes("&amp;lt;"),
+      linked: ["evil.com/p", "c.png", "evil.com/a"].filter((found) =>
+        JSON.stringify(sent).includes(found)
       ),
       kept: await keptAnswersOf(userId),
-    }).toStrictEqual({ addresses: false, answered: true, kept: [[cleaned]] });
+    }).toStrictEqual({
+      methods: ["chat.postMessage"],
+      previews: posts.map(() => ["false", "false"]),
+      answer: sentText,
+      escapedTwice: false,
+      linked: [],
+      kept: [[kept]],
+    });
+  });
+
+  it("is posted, not withheld, when it is long and ordinary: code, a bold list, a table", async () => {
+    const longCode = `\`\`\`py\n${Array.from(
+      { length: 250 },
+      (_, at) => `x_${at} = data["*"][${at}]  # ~${at}`
+    ).join("\n")}\n\`\`\``;
+    const boldList = Array.from(
+      { length: 130 },
+      (_, at) => `- **Item ${at}**: _done_`
+    ).join("\n");
+    const table = `| **Name** | **State** |\n|---|---|\n${Array.from(
+      { length: 40 },
+      (_, at) => `| **Row ${at}** | _ok_ |`
+    ).join("\n")}`;
+    const { userId, slackUser } = await linkedPerson();
+    await fakeProvider(says(boldList), says(table), says(longCode));
+    const answered: string[] = [];
+    for (const asked of ["List them.", "Tabulate them.", "Show the code."]) {
+      const message = messageFrom(slackUser);
+      message.event.text = asked;
+      // oxlint-disable-next-line no-await-in-loop -- one question after the other
+      await post(message, { caught: false });
+      // oxlint-disable-next-line no-await-in-loop -- one question after the other
+      const sent = await slackSawIn(message.event.channel);
+      answered.push(firstBlockText(sent[0]?.fields.blocks) ?? "");
+    }
+    expect({
+      list: answered[0]?.startsWith("- *Item 0*: _done_"),
+      table: answered[1]?.startsWith("| *Name* | *State* |"),
+      code: answered[2]?.startsWith('```\nx_0 = data["*"][0]'),
+      kept: await keptAnswersOf(userId),
+    }).toStrictEqual({
+      list: true,
+      table: true,
+      code: true,
+      kept: [[boldList, table, longCode]],
+    });
   });
 });

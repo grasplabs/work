@@ -284,12 +284,6 @@ export interface ChannelMessage {
   kept?: string;
   /** Where they asked: their direct message, or a chat others share. */
   place: ChannelPlace;
-  /**
-   * Sends `send` once the platform has the reply as it stands: on Teams,
-   * after a streamed answer's last words, which Microsoft's SDK sends only
-   * once the message's handler has returned.
-   */
-  afterward: (send: () => Promise<unknown>) => void;
 }
 
 /** What takes a member's message on from the door. */
@@ -990,9 +984,6 @@ const slackResponse = async (
   const takeOn = handoff ?? answerInChat(env);
   chat.onDirectMessage(async (thread, message) => {
     await keepConversation(env, "slack", thread.id, userId);
-    // Slack takes a reply whole, no stream: it has it once the handler
-    // posted it, so what comes after goes right after, in order.
-    const later: (() => Promise<unknown>)[] = [];
     await takeOn({
       platform: "slack",
       userId,
@@ -1000,14 +991,7 @@ const slackResponse = async (
       message,
       acts: reach.acts,
       place: direct,
-      afterward: (send) => {
-        later.push(send);
-      },
     });
-    for (const send of later) {
-      // oxlint-disable-next-line no-await-in-loop -- in the order they were asked for
-      await send();
-    }
   });
   return await chat.webhooks.slack(
     new Request(request.url, {
@@ -1103,10 +1087,6 @@ export const channelResponse = async (
     concurrency: "queue",
   });
   const takeOn = handoff ?? answerInChat(env);
-  const later: (() => Promise<unknown>)[] = [];
-  const afterward = (send: () => Promise<unknown>): void => {
-    later.push(send);
-  };
   chat.onDirectMessage(async (thread, message) => {
     // Only what the door itself took for a direct message: never one it
     // read as a group chat or channel, whatever the SDK makes of it.
@@ -1128,7 +1108,6 @@ export const channelResponse = async (
       acts: acts ?? false,
       kept,
       place,
-      afterward,
     });
   });
   onPresses(env, chat, {
@@ -1166,7 +1145,6 @@ export const channelResponse = async (
       acts: acts ?? false,
       kept,
       place,
-      afterward,
     });
   });
   // Answered at once: the platform gives up on a webhook long before an
@@ -1191,10 +1169,6 @@ export const channelResponse = async (
       }),
       { waitUntil: background }
     );
-    for (const send of later) {
-      // oxlint-disable-next-line no-await-in-loop -- in the order they were asked for
-      await send();
-    }
   };
   background(handled());
   return new Response(null, { status: 200 });

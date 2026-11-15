@@ -207,14 +207,9 @@ const directMessageOf = async (
   const provider = await fakeProvider(...replies);
   const stub = workspace(env, personalWorkspaceId(personId));
   const ask = async (text: string) => {
-    const { chatId } = await stub.askThrough(
-      personId,
-      agentId,
-      "teams",
-      text,
-      undefined,
-      { kind: "direct" }
-    );
+    const { chatId } = await stub.askThrough(personId, agentId, "teams", text, {
+      kind: "direct",
+    });
     return chatId;
   };
   return { provider, stub, ask };
@@ -422,7 +417,6 @@ describe("a chat's code reading the Brain's entities", setUpTime, () => {
         agentId,
         "teams",
         word(),
-        undefined,
         sharedThread
           ? {
               thread: `19:${unique()}@thread.v2`,
