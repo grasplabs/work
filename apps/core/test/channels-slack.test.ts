@@ -12,16 +12,19 @@ import { confirmAction, startAction } from "../src/channels/cards.tsx";
 import { channelResponse } from "../src/channels/door.ts";
 import type { ChannelMessage } from "../src/channels/door.ts";
 import { say } from "../src/channels/words.ts";
+import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import {
   channelConversations,
   channelAccounts,
   channelLinks,
 } from "../src/db/core/schema.ts";
+import { workspace } from "../src/durable-objects.ts";
 import { says } from "./agent-chat.ts";
+import { chatIdsOf } from "./code-step-trace.ts";
 import { slackApp, slackPostedUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
-import { signedInApi, unique } from "./sign-in.ts";
+import { outcome, signedInApi, unique } from "./sign-in.ts";
 import {
   memberAnsweredBy,
   messageFrom as teamsMessageFrom,
@@ -249,10 +252,12 @@ const slackSawIn = async (channel: string) => {
 
 const refused = { status: 401, text: "Unauthorized", handed: [] };
 
-/** Which app each of a person's listed chats came through. */
-const viaOf = async (api: Awaited<ReturnType<typeof linkedPerson>>["api"]) => {
+/** The titles of a person's chats in Grasp, as their list shows them. */
+const listedFor = async (
+  api: Awaited<ReturnType<typeof linkedPerson>>["api"]
+) => {
   const listed = await api.chats.list();
-  return listed.map(({ via }) => via).toSorted();
+  return listed.map(({ title }) => title);
 };
 
 describe("a request Slack didn't sign for the client's app", () => {
@@ -490,7 +495,7 @@ describe("a press on a card in Slack", () => {
 });
 
 describe("a linked person's question in Slack", () => {
-  it("gets the same answer as the same question in Teams, in their own Slack chat, which their list says came through Slack", async () => {
+  it("gets the same answer as the same question in Teams, in a conversation no list in Grasp shows", async () => {
     const answer = "Parental leave lasts sixteen weeks.";
     const { slackUser, api } = await linkedPerson();
     // One provider for the organization: it answers both chats.
@@ -508,9 +513,9 @@ describe("a linked person's question in Slack", () => {
     const teamsAnswer = JSON.stringify(
       activities.filter(({ type }) => type === "message")
     );
-    // Each person's list says which app their chat came through, and a
-    // chat started in Grasp itself is Grasp's own.
-    const inGrasp = await api.chats.create("Leave questions");
+    // A conversation in a chat app is never a chat in Grasp: each
+    // person's list holds only what they started in Grasp itself.
+    await api.chats.create("Leave questions");
     expect({
       // Posted whole, or streamed: a first post, then updated as it comes.
       slack: slackPosts.some(
@@ -520,15 +525,61 @@ describe("a linked person's question in Slack", () => {
           JSON.stringify(fields).includes(answer)
       ),
       teams: teamsAnswer.includes(answer),
-      created: inGrasp.via,
-      listedForSlackPerson: await viaOf(api),
-      listedForTeamsPerson: await viaOf(inTeams.api),
+      listedForSlackPerson: await listedFor(api),
+      listedForTeamsPerson: await listedFor(inTeams.api),
     }).toStrictEqual({
       slack: true,
       teams: true,
-      created: "web",
-      listedForSlackPerson: ["slack", "web"],
-      listedForTeamsPerson: ["teams"],
+      listedForSlackPerson: ["Leave questions"],
+      listedForTeamsPerson: [],
+    });
+  });
+
+  it("goes on with what was said before, in a conversation whose address answers as a chat that doesn't exist", async () => {
+    const badge = `badge-${unique()}`;
+    const { slackUser, api, userId } = await linkedPerson();
+    const provider = await fakeProvider(says("Noted."), says(`It's ${badge}.`));
+    const channel = `D${unique().toUpperCase()}`;
+    const told = messageFrom(slackUser, { channel });
+    told.event.text = `My badge is ${badge}.`;
+    await post(told, { caught: false });
+    const asked = messageFrom(slackUser, { channel });
+    asked.event.text = `What is my badge? ${unique()}`;
+    await post(asked, { caught: false });
+
+    const [conversation] = await chatIdsOf(
+      workspace(env, personalWorkspaceId(userId)),
+      userId
+    );
+    if (conversation === undefined) {
+      throw new Error("Expected the Slack conversation to be kept");
+    }
+    const answering = provider.requests
+      .map(({ body }) => JSON.stringify(body))
+      .filter(
+        (body) =>
+          body.includes(asked.event.text) &&
+          !body.includes("You sort one message a person sent to Stephen")
+      );
+    expect({
+      remembered:
+        answering.length > 0 && answering.every((body) => body.includes(badge)),
+      listed: await listedFor(api),
+      opened: await outcome(api.chats.summary(conversation.id)),
+      followed: await outcome(
+        api.chats.watch(conversation.id, null, () => {
+          // Nothing is ever pushed for it.
+        })
+      ),
+    }).toStrictEqual({
+      remembered: true,
+      listed: [],
+      opened: await outcome(api.chats.summary(crypto.randomUUID())),
+      followed: await outcome(
+        api.chats.watch(crypto.randomUUID(), null, () => {
+          // Nothing is ever pushed for it either.
+        })
+      ),
     });
   });
 });

@@ -12,18 +12,24 @@ import {
   AlertTitle,
 } from "@grasp-os/ui/components/alert";
 import { Button } from "@grasp-os/ui/components/button";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 import { MessageSquareIcon } from "lucide-react";
+import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
+import { Confirmed } from "../confirmed.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { forgetChatLink } from "./chat-link.ts";
-import { SettingsBody, SettingsSection } from "./settings-parts.tsx";
+import {
+  SettingsBody,
+  SettingsRow,
+  SettingsSection,
+} from "./settings-parts.tsx";
 import { WhereStephen } from "./where-stephen.tsx";
 
 // Settings › Security › Chat apps: the person's accounts on chat platforms
@@ -31,7 +37,10 @@ import { WhereStephen } from "./where-stephen.tsx";
 // link a chat sent them, waiting for them to confirm it. Confirming is a
 // press here, never opening the link (chat apps open links to preview
 // them), and the card says whose account it is, by the platform's own
-// name for it, so a link someone forwarded doesn't pass for theirs.
+// name for it, so a link someone forwarded doesn't pass for theirs. And
+// deleting what Grasp keeps of their conversations with Stephen there,
+// which no page of Grasp shows as a chat (GRA-1919): this is where the
+// person erases them.
 
 /**
  * What the section shows: where to reach Stephen, the linked accounts,
@@ -216,6 +225,52 @@ const AccountRow = ({ account }: { account: ChannelAccount }) => {
   );
 };
 
+/**
+ * Deleting what Grasp keeps of every conversation the person had with
+ * Stephen in a chat app (`channelAccounts.forgetConversations`), and how
+ * many it deleted.
+ */
+const ForgetConversations = () => {
+  const { t } = useLingui();
+  const { busy, failure, run } = useCoreAction();
+  const [deleted, setDeleted] = useState<number>();
+  return (
+    <SettingsRow
+      description={t`Grasp keeps what you say to Stephen in a chat app, so he can follow the conversation and learn from it.`}
+      label={t`Your conversations in chat apps`}
+    >
+      <div className="flex flex-col items-end gap-1">
+        <Confirmed
+          busy={busy}
+          button={t`Delete`}
+          confirm={t`Delete for good`}
+          description={t`Grasp deletes what it keeps of every conversation you had with Stephen in a chat app, and what your Brain kept from them. He starts afresh the next time you write. The messages stay in the chat app itself. This can't be undone.`}
+          label={t`Delete your conversations in chat apps`}
+          onConfirm={() => {
+            void (async () => {
+              await run(async ({ channelAccounts }) => {
+                setDeleted(await channelAccounts.forgetConversations());
+              });
+            })();
+          }}
+          title={t`Delete your conversations in chat apps?`}
+        />
+        <p aria-live="polite" className="text-muted-foreground">
+          {deleted === undefined ? null : (
+            <Plural
+              _0="No conversations to delete."
+              one="# conversation deleted."
+              other="# conversations deleted."
+              value={deleted}
+            />
+          )}
+        </p>
+        <ErrorText>{failure}</ErrorText>
+      </div>
+    </SettingsRow>
+  );
+};
+
 /** The link waiting for the person, as core read it. */
 const PendingLink = ({
   pending,
@@ -271,6 +326,7 @@ export const ChatAccountsSection = ({
           <AccountRow account={account} key={account.id} />
         ))
       )}
+      <ForgetConversations />
     </SettingsSection>
   );
 };

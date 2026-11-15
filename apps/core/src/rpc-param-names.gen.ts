@@ -132,6 +132,7 @@ export const rpcParamNames: ParamNames = {
     "versions": ["source","before"],
   },
   "ChannelAccountsRpc": {
+    "forgetConversations": [],
     "link": ["secret"],
     "list": [],
     "preview": ["secret"],

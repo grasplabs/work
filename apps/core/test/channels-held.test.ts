@@ -12,6 +12,7 @@ import { say } from "../src/channels/words.ts";
 import { chatAgentId } from "../src/chats-rpc.ts";
 import { codeStep, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
+import { heldFor } from "./held-in-connect.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { signedInApi, unique } from "./sign-in.ts";
@@ -146,7 +147,7 @@ describe("a Teams turn that holds writes", setUpTime, () => {
       })
     );
 
-    const waiting = await person.api.pendingActions.list();
+    const waiting = await heldFor(person);
     const { activities } = await reached(person.teams.conversation);
     const messages = activities
       .filter(({ type }) => type === "message")
@@ -160,11 +161,15 @@ describe("a Teams turn that holds writes", setUpTime, () => {
       answer: answer?.includes("Both mails wait for you"),
       more,
       waiting: waiting.length,
+      // Decided on the card: Grasp's own list, which links each to its
+      // chat, shows none of a conversation no page of Grasp opens.
+      listedInGrasp: await person.api.pendingActions.list(),
       sent: await mail.did(),
     }).toStrictEqual({
       answer: true,
       more: [],
       waiting: 2,
+      listedInGrasp: [],
       // Nothing went out: the card asks first.
       sent: { calls: 0, sent: [] },
     });

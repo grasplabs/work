@@ -516,6 +516,41 @@ const withRestricted = async (
   );
 };
 
+/**
+ * `waiting` without what was held in a chat Grasp doesn't show `userId`
+ * (`Workspace.graspChatsAmong`, asked of each chat's own object): a chat
+ * app's conversation, whose writes are decided on their card there, and
+ * which no page of Grasp opens or links to.
+ */
+const shownInGrasp = async (
+  env: Env,
+  userId: string,
+  waiting: PendingAction[]
+): Promise<PendingAction[]> => {
+  const inChats = Map.groupBy(
+    waiting.flatMap(({ context }) =>
+      context.type === "chat" ? [context] : []
+    ),
+    ({ workspaceId }) => workspaceId
+  );
+  const shownIn = await Promise.all(
+    [...inChats].map(async ([workspaceId, contexts]) => {
+      const ids = [...new Set(contexts.map(({ chatId }) => chatId))];
+      const among = await workspace(env, workspaceId).graspChatsAmong(
+        userId,
+        ids
+      );
+      return among.map((chatId) => `${workspaceId} ${chatId}`);
+    })
+  );
+  const shown = new Set(shownIn.flat());
+  return waiting.filter(
+    ({ context }) =>
+      context.type !== "chat" ||
+      shown.has(`${context.workspaceId} ${context.chatId}`)
+  );
+};
+
 /** A signed-in person's held actions, over `/rpc`. */
 export class PendingActionsRpc
   extends CoreRpcTarget
@@ -538,7 +573,11 @@ export class PendingActionsRpc
       const waiting = await this.#env.CONNECT.listPendingActions(
         await personOf(this.#env, person)
       );
-      return await withRestricted(this.#env, person.userId, waiting);
+      return await withRestricted(
+        this.#env,
+        person.userId,
+        await shownInGrasp(this.#env, person.userId, waiting)
+      );
     });
   }
 

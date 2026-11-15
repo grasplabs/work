@@ -472,6 +472,10 @@ msgstr "{days, plural, one {heute gestartete Läufe} other {in den letzten # Tag
 msgid "{days, plural, one {The last # day} other {The last # days}}"
 msgstr "{days, plural, one {Der letzte Tag} other {Die letzten # Tage}}"
 
+#: src/settings/chat-accounts.tsx
+msgid "{deleted, plural, =0 {No conversations to delete.} one {# conversation deleted.} other {# conversations deleted.}}"
+msgstr "{deleted, plural, =0 {Keine Unterhaltungen zum Löschen.} one {# Unterhaltung gelöscht.} other {# Unterhaltungen gelöscht.}}"
+
 #: src/routes/_shell.settings.security.tsx
 msgid "{devices, plural, one {Signed in on # device. Sign out any you do not recognise.} other {Signed in on # devices. Sign out any you do not recognise.}}"
 msgstr "{devices, plural, one {Auf # Gerät angemeldet. Melden Sie jedes ab, das Sie nicht kennen.} other {Auf # Geräten angemeldet. Melden Sie jedes ab, das Sie nicht kennen.}}"
@@ -4545,6 +4549,7 @@ msgstr "Definition"
 #: src/chat/chat-more.tsx
 #: src/chat/delete-chat-dialog.tsx
 #: src/projects/project-view.tsx
+#: src/settings/chat-accounts.tsx
 #: src/settings/event-sources.tsx
 #: src/settings/teams.tsx
 msgid "Delete"
@@ -4580,6 +4585,7 @@ msgstr "{projectName} löschen?"
 #: src/apps/app-remove.tsx
 #: src/brain/skills-page.tsx
 #: src/brain/sources-page.tsx
+#: src/settings/chat-accounts.tsx
 msgid "Delete for good"
 msgstr "Endgültig löschen"
 
@@ -4630,6 +4636,14 @@ msgstr "Diesen Upload löschen?"
 #: src/workflows/delete-workflow.tsx
 msgid "Delete this workflow"
 msgstr "Diesen Workflow löschen"
+
+#: src/settings/chat-accounts.tsx
+msgid "Delete your conversations in chat apps"
+msgstr "Ihre Unterhaltungen in Chat-Apps löschen"
+
+#: src/settings/chat-accounts.tsx
+msgid "Delete your conversations in chat apps?"
+msgstr "Ihre Unterhaltungen in Chat-Apps löschen?"
 
 #: src/interview/closed.tsx
 msgid "Delete your interview?"
@@ -6175,6 +6189,10 @@ msgstr "Grasp konnte diese Frage nicht an das Modell stellen. Versuchen Sie es e
 msgid "Grasp couldn't remove its own access at these apps. Until someone removes it there, it may still work."
 msgstr "Grasp konnte seinen eigenen Zugriff bei diesen Apps nicht entfernen. Bis jemand ihn dort entfernt, funktioniert er womöglich noch."
 
+#: src/settings/chat-accounts.tsx
+msgid "Grasp deletes what it keeps of every conversation you had with Stephen in a chat app, and what your Brain kept from them. He starts afresh the next time you write. The messages stay in the chat app itself. This can't be undone."
+msgstr "Grasp löscht, was es von jeder Unterhaltung aufbewahrt, die Sie mit Stephen in einer Chat-App geführt haben, und was Ihr Brain daraus behalten hat. Wenn Sie das nächste Mal schreiben, beginnt er von vorn. Die Nachrichten bleiben in der Chat-App selbst. Das lässt sich nicht rückgängig machen."
+
 #: src/dashboard/outcome-card.tsx
 msgid "Grasp doesn't know where this came from, so it can't be resolved here."
 msgstr "Grasp weiß nicht, woher dies kam, daher kann es hier nicht geklärt werden."
@@ -6230,6 +6248,10 @@ msgstr "Grasp selbst"
 #: src/settings/erasures.tsx
 msgid "Grasp keeps no copy of it, so type it in full."
 msgstr "Grasp bewahrt keine Kopie davon auf, geben Sie sie also vollständig ein."
+
+#: src/settings/chat-accounts.tsx
+msgid "Grasp keeps what you say to Stephen in a chat app, so he can follow the conversation and learn from it."
+msgstr "Grasp bewahrt auf, was Sie Stephen in einer Chat-App schreiben, damit er der Unterhaltung folgen und daraus lernen kann."
 
 #: src/brain/work-knowledge.tsx
 msgid "Grasp knows nothing about this work in its own words yet."
@@ -15158,10 +15180,6 @@ msgctxt "highest end of a rating of the interview"
 msgid "Very good"
 msgstr "Sehr gut"
 
-#: src/chat/chat-window.tsx
-msgid "via {app}"
-msgstr "über {app}"
-
 #: src/connections/source-badge.tsx
 msgid "Via Composio"
 msgstr "Über Composio"
@@ -16698,6 +16716,10 @@ msgstr "Der Name Ihres Unternehmens in Grasp. Ein Admin ändert ihn."
 #: src/routes/_shell.settings.billing.tsx
 msgid "Your company’s VAT number, as invoices show it."
 msgstr "Die USt-IdNr. Ihres Unternehmens, wie sie auf Rechnungen steht."
+
+#: src/settings/chat-accounts.tsx
+msgid "Your conversations in chat apps"
+msgstr "Ihre Unterhaltungen in Chat-Apps"
 
 #: src/brain/memories-page.tsx
 msgid "Your correction is kept as your own word, for you alone, and shown beside what the Brain holds. What others read stays as it is."

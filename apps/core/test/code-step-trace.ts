@@ -95,6 +95,24 @@ const requestShape = (body: unknown) => {
  * drained first. `redact` takes out of all of it what the test may not
  * print.
  */
+/**
+ * Every chat `personId`'s Workspace keeps, whichever channel it came
+ * through, as its table holds them: a chat app's conversation is in no
+ * list a person reads (`Workspace.chats`).
+ */
+export const chatIdsOf = async (
+  stub: WorkspaceStub,
+  personId: string
+): Promise<{ id: string }[]> =>
+  await runInDurableObject(stub, (_instance, state) =>
+    state.storage.sql
+      .exec<{ id: string }>(
+        "SELECT id FROM chats WHERE person_id = ?",
+        personId
+      )
+      .toArray()
+  );
+
 export const codeStepTrace = async (
   stub: WorkspaceStub,
   personId: string,
@@ -110,7 +128,7 @@ export const codeStepTrace = async (
     redact: (text: string) => string;
   }
 ): Promise<unknown> => {
-  const listed = await stub.chats(personId);
+  const listed = await chatIdsOf(stub, personId);
   const made = listed.filter(({ id }) => !chatsBefore.has(id));
   await runInDurableObject(
     stub,
