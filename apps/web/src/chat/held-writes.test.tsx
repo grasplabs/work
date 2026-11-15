@@ -94,6 +94,13 @@ interface Held {
   actions?: readonly PendingAction[];
   /** Each decision of these holds or actions fails with its error. */
   refusing?: Record<string, Error>;
+  /**
+   * Each decision of these fails with its error before it is taken: the
+   * write still waits, as connect leaves an action it refused to take.
+   */
+  refusingBefore?: Record<string, Error>;
+  /** Each decision of these waits for its promise before it is taken. */
+  waiting?: Record<string, Promise<unknown>>;
 }
 
 /** A chat's held writes, with a way to open another chat in the same place. */
@@ -123,12 +130,19 @@ const shown = async ({
   calls = { "chat-1": [held] },
   actions = [],
   refusing = {},
+  refusingBefore = {},
+  waiting: slow = {},
 }: Held = {}) => {
   const confirmed: { chatId: string; id: string; requestHash: string }[] = [];
   const declined: { chatId: string; id: string }[] = [];
   const decided = new Set<string>();
   /** Decides `id`: ended either way, refused when `refusing` says so. */
-  const decide = (id: string): void => {
+  const decide = async (id: string): Promise<void> => {
+    await slow[id];
+    const before = refusingBefore[id];
+    if (before !== undefined) {
+      throw before;
+    }
     decided.add(id);
     const refusal = refusing[id];
     if (refusal !== undefined) {
@@ -159,24 +173,22 @@ const shown = async ({
       ): Promise<void> => {
         await Promise.resolve();
         confirmed.push({ chatId, id, requestHash });
-        decide(id);
+        await decide(id);
       },
       declineHeldCall: async (chatId: string, id: string): Promise<void> => {
         await Promise.resolve();
         declined.push({ chatId, id });
-        decide(id);
+        await decide(id);
       },
     },
     pendingActions: {
       list: async (): Promise<PendingAction[]> =>
         await Promise.resolve(actions.filter(({ id }) => !decided.has(id))),
       confirm: async (id: string): Promise<void> => {
-        await Promise.resolve();
-        decide(id);
+        await decide(id);
       },
       decline: async (id: string): Promise<void> => {
-        await Promise.resolve();
-        decide(id);
+        await decide(id);
       },
     },
   };
@@ -355,6 +367,71 @@ describe("a write to an App held for the person", () => {
     expect({ cards: cards(), said: alerted() }).toStrictEqual({
       cards: [],
       said: `mail.send on Outlook didn't go through.${failure.message}`,
+    });
+  });
+
+  it("reads the list again for each of two writes decided at once, so neither stays", async () => {
+    const second: HeldAppCall = {
+      ...held,
+      id: "held-2",
+      function: "notes.archive",
+    };
+    const first = Promise.withResolvers<boolean>();
+    const later = Promise.withResolvers<boolean>();
+    await shown({
+      calls: { "chat-1": [held, second] },
+      waiting: { [held.id]: first.promise, [second.id]: later.promise },
+    });
+    // Both pressed before either is decided; the first ends, the list is
+    // read again, then the second ends.
+    const buttons = [
+      "Confirm notes.create in Notes",
+      "Confirm notes.archive in Notes",
+    ].map((label) => document.querySelector(`button[aria-label="${label}"]`));
+    await act(async () => {
+      for (const button of buttons) {
+        if (button instanceof HTMLButtonElement) {
+          button.click();
+        }
+      }
+      await Promise.resolve();
+    });
+    first.resolve(true);
+    await settled();
+    later.resolve(true);
+    await settled();
+
+    expect(cards()).toStrictEqual([]);
+  });
+
+  it("says why one of the writes Reject all declined didn't go through, though Reject all is gone", async () => {
+    const refusal = permissionErrors.create("permission.denied");
+    const second: HeldAppCall = {
+      ...held,
+      id: "held-2",
+      function: "notes.archive",
+    };
+    const third: HeldAppCall = {
+      ...held,
+      id: "held-3",
+      function: "notes.restore",
+    };
+    await shown({
+      calls: { "chat-1": [held, second, third] },
+      refusingBefore: { [third.id]: refusal },
+    });
+    const all = [...document.querySelectorAll("button")].find(
+      (button) => button.textContent === "Reject all"
+    );
+    await act(async () => {
+      all?.click();
+      await Promise.resolve();
+    });
+    await settled();
+
+    expect({ cards: cards(), said: alerted() }).toStrictEqual({
+      cards: ["notes.restore in Notes"],
+      said: `notes.restore in Notes didn't go through.${refusal.message}`,
     });
   });
 });

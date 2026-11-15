@@ -622,11 +622,30 @@ const RejectAll = ({
   chatId: string;
   actions: readonly PendingAction[];
   calls: readonly HeldAppCall[];
-  onDecided: () => void;
+  /**
+   * Told once the rejections settled, with why the first refused one
+   * failed: what it rejected may still wait, but this row goes once fewer
+   * than two do, so only the list can say why.
+   */
+  onDecided: (failed?: DecisionFailed) => void;
 }) => {
-  const { busy, failure, run } = useCoreAction();
+  const { busy, run } = useCoreAction();
   const router = useRouter();
+  const { t } = useLingui();
   const count = actions.length + calls.length;
+  // Each write as its own card names it (`useHeldName`, and the App card's).
+  const names = [
+    ...actions.map((action) => {
+      const title = action.description?.title ?? action.action;
+      const connection = action.connectionName ?? action.connectionId;
+      return t`${title} on ${connection}`;
+    }),
+    ...calls.map((call) => {
+      const fn = call.function;
+      const app = call.appName ?? call.appId;
+      return t`${fn} in ${app}`;
+    }),
+  ];
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
       <p className="text-muted-foreground">
@@ -640,26 +659,34 @@ const RejectAll = ({
         disabled={busy}
         onClick={() => {
           void (async () => {
-            await run(async (session) => {
-              // Every rejection settles before the list is read again, so
-              // none still running is shown as waiting; then the first
-              // refusal says why.
-              const outcomes = await Promise.allSettled([
-                ...actions.map(async ({ id }) => {
-                  await session.pendingActions.decline(id);
-                }),
-                ...calls.map(async ({ id }) => {
-                  await session.chats.declineHeldCall(chatId, id);
-                }),
-              ]);
-              const refused = outcomes.find(
-                (outcome) => outcome.status === "rejected"
-              );
-              if (refused !== undefined) {
-                throw refused.reason;
+            let failed: DecisionFailed | undefined;
+            let firstRefused = -1;
+            await run(
+              async (session) => {
+                // Every rejection settles before the list is read again, so
+                // none still running is shown as waiting; then the first
+                // refusal says why.
+                const outcomes = await Promise.allSettled([
+                  ...actions.map(async ({ id }) => {
+                    await session.pendingActions.decline(id);
+                  }),
+                  ...calls.map(async ({ id }) => {
+                    await session.chats.declineHeldCall(chatId, id);
+                  }),
+                ]);
+                firstRefused = outcomes.findIndex(
+                  (outcome) => outcome.status === "rejected"
+                );
+                const refused = outcomes[firstRefused];
+                if (refused?.status === "rejected") {
+                  throw refused.reason;
+                }
+              },
+              (reason) => {
+                failed = { what: names[firstRefused] ?? "", reason };
               }
-            });
-            onDecided();
+            );
+            onDecided(failed);
             // Each rejection is noted in the chat: its place in the list moves.
             await router.invalidate();
           })();
@@ -669,7 +696,6 @@ const RejectAll = ({
       >
         <Trans>Reject all</Trans>
       </Button>
-      <ErrorText>{failure}</ErrorText>
     </div>
   );
 };
@@ -720,9 +746,9 @@ const ChatHeldWrites = ({
           actions={held.actions}
           calls={held.calls}
           chatId={chatId}
-          onDecided={() => {
-            setFailed(undefined);
-            setReads(reads + 1);
+          onDecided={(failure) => {
+            setFailed(failure);
+            setReads((read) => read + 1);
           }}
         />
       ) : null}
@@ -733,7 +759,7 @@ const ChatHeldWrites = ({
           key={call.id}
           onDecided={(failure) => {
             setFailed(failure);
-            setReads(reads + 1);
+            setReads((read) => read + 1);
           }}
         />
       ))}
@@ -743,7 +769,7 @@ const ChatHeldWrites = ({
           key={action.id}
           onDecided={(failure) => {
             setFailed(failure);
-            setReads(reads + 1);
+            setReads((read) => read + 1);
           }}
         />
       ))}
