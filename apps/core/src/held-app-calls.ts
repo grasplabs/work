@@ -190,16 +190,22 @@ const shownOf = async (env: Env, row: HeldAppCallRow): Promise<HeldAppCall> => {
   };
 };
 
-/** The App writes held for `person` in their chat `chatId`, oldest first. */
+/** The App writes held for `person` in their chat `chatId`, oldest first, a page after `after` (`Workspace.heldAppCalls`). */
 export const heldAppCallsOf = async (
   env: Env,
   person: Pick<Identity, "userId">,
-  chatId: string
+  chatId: string,
+  after?: unknown
 ): Promise<HeldAppCall[]> => {
   const rows = await workspace(
     env,
     personalWorkspaceId(person.userId)
-  ).heldAppCalls(chatId, person.userId, Date.now());
+  ).heldAppCalls(
+    chatId,
+    person.userId,
+    Date.now(),
+    typeof after === "string" ? after : undefined
+  );
   return await Promise.all(rows.map(async (row) => await shownOf(env, row)));
 };
 

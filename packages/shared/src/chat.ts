@@ -1087,6 +1087,9 @@ export interface ChatSubscriptionApi {
   release: () => Promise<void>;
 }
 
+/** The most held App calls one page of `ChatsApi.heldCalls` lists. */
+export const heldAppCallsPage = 50;
+
 /**
  * A write to an App the chat's agent asked for after the chat used
  * something only its person may read, held until that person confirms
@@ -1226,9 +1229,10 @@ export interface ChatsApi {
   /**
    * The writes to Apps the chat's agent asked for after the chat used
    * something only the person can read, which wait for them, oldest
-   * first.
+   * first, at most {@link heldAppCallsPage} a page: a full page goes on
+   * `after` its last one's `id`.
    */
-  heldCalls: (chatId: string) => Promise<HeldAppCall[]>;
+  heldCalls: (chatId: string, after?: string) => Promise<HeldAppCall[]>;
   /**
    * Confirms the chat's held App call `id` for exactly the request whose
    * SHA-256 is `requestHash`, and runs it once, as the agent acting for

@@ -56,8 +56,14 @@ import { workspace } from "./durable-objects.ts";
 //   in a marked chat, what a read on a shared connection is asked with
 //   (a CRM search for recalled text) still leaves Grasp at once, allowed
 //   and audited by connect: GRA-1928.
-// - Building an App or a workflow writes a draft its builders read:
-//   GRA-1918.
+// - A query of an App (`env.apps.call`, a query) runs at once: what it is
+//   asked with can reach the App's error log (a live App's `console`
+//   lines and thrown errors that quote it: server-logs.ts,
+//   app-error-log.ts), which its builders and their agents read. Like a
+//   read on a shared connection, allowed: GRA-1928.
+// - Building an App or a workflow writes a draft its builders read, and
+//   asking for an App's npm packages (`env.build.resolveDependencies`)
+//   keeps a `purpose` they read: GRA-1918.
 
 /** What a chat handed over that only its person may read. */
 export type PrivateRead = "recall" | "connection";

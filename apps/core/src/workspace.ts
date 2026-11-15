@@ -21,6 +21,7 @@ import {
   chatPlanSchema,
   chatPlatformSchema,
   chatToolEventsKept,
+  heldAppCallsPage,
 } from "@grasp-os/shared/chat";
 import type {
   ChatChannel,
@@ -88,6 +89,7 @@ import {
   isNotNull,
   isNull,
   ne,
+  or,
   sql,
 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/durable-sqlite";
@@ -1928,15 +1930,28 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * The App writes held for `personId` in their chat `chatId` that still
-   * wait, oldest first: none past their day.
+   * wait, oldest first, a page of at most `heldAppCallsPage`: none past
+   * their day. A full page goes on `after` its last one's ID; an ID that
+   * names no hold of the chat starts from the first.
    */
   async heldAppCalls(
     chatId: unknown,
     personId: string,
-    now: number
+    now: number,
+    after?: string
   ): Promise<HeldAppCallRow[]> {
     const chat = this.#ownChat(chatId, personId);
     await this.#lapseHeldAppCalls(chat.id, now);
+    const from =
+      after === undefined
+        ? undefined
+        : this.#db
+            .select({ id: heldAppCalls.id, heldAt: heldAppCalls.heldAt })
+            .from(heldAppCalls)
+            .where(
+              and(eq(heldAppCalls.id, after), eq(heldAppCalls.chatId, chat.id))
+            )
+            .get();
     return this.#db
       .select()
       .from(heldAppCalls)
@@ -1944,10 +1959,20 @@ export class Workspace extends DurableObject<Env> {
         and(
           eq(heldAppCalls.chatId, chat.id),
           eq(heldAppCalls.personId, personId),
-          eq(heldAppCalls.status, "waiting")
+          eq(heldAppCalls.status, "waiting"),
+          from === undefined
+            ? undefined
+            : or(
+                gt(heldAppCalls.heldAt, from.heldAt),
+                and(
+                  eq(heldAppCalls.heldAt, from.heldAt),
+                  gt(heldAppCalls.id, from.id)
+                )
+              )
         )
       )
-      .orderBy(asc(heldAppCalls.heldAt))
+      .orderBy(asc(heldAppCalls.heldAt), asc(heldAppCalls.id))
+      .limit(heldAppCallsPage)
       .all()
       .map((row) => heldAppCallRowOf(row));
   }

@@ -1,5 +1,6 @@
 import { personalBrainOf } from "@grasp-os/brain-next/contract";
 import { agentErrors } from "@grasp-os/shared/agent";
+import { heldAppCallsPage } from "@grasp-os/shared/chat";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -1029,6 +1030,150 @@ describe("what a chat writes for others once it used something only its person m
         confirmed: "permission.context_invalid",
         ran: true,
         ended: "ok",
+      });
+    }
+  );
+
+  it(
+    "is marked by an App's answer when what the App may read can't be placed (a kind of source no longer served), and an already marked chat still holds its write after reading an App",
+    slow,
+    async () => {
+      const builder = await signedInApi(idp, "builder");
+      const unplaced = await liveNotes(builder);
+      // A Knowledge collection grant left from before: unresolved.
+      await env.DB.prepare(
+        `INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id,
+          actions, binding, status, requested_by, requested_at, granted_by, granted_at)
+         VALUES (?, 'app', ?, 'collection', ?, '["read"]', ?, 'active', 'test', 0, 'test', 0)`
+      )
+        .bind(
+          crypto.randomUUID(),
+          unplaced.app,
+          crypto.randomUUID(),
+          `OLD_${unique().toUpperCase().replaceAll("-", "_")}`
+        )
+        .run();
+      /** Reads `unplaced`'s notes, then writes `title` to the chat's own App. */
+      const readsThenWrites =
+        (title: string) => (app: string, release: Release) => [
+          codeStep(
+            `export default async (self, env) => {
+              await env.apps.call(${JSON.stringify(unplaced.app)}, new Blob([${JSON.stringify(
+                callOf(unplaced.release, "notes.titles", {})
+              )}]).stream());
+              return await env.apps.call(${JSON.stringify(app)}, new Blob([${JSON.stringify(
+                callOf(release, "notes.create", { title })
+              )}]).stream());
+            };`
+          ),
+          says("Done."),
+        ];
+      const fresh = await notesChat(readsThenWrites(`unplaced-${unique()}`), {
+        builder,
+      });
+      await requestGranted(idp, builder, {
+        subject: fresh.chats.agent,
+        object: { type: "app", appId: unplaced.app },
+        actions: ["read"],
+        binding: "OLD",
+      });
+      await fresh.ask(`Copy the ${word()} note.`);
+      // Marked already (a recalled own source), then the same read and write.
+      const depot = word();
+      const marked = await notesChat(readsThenWrites(`marked-${unique()}`), {
+        builder,
+      });
+      await requestGranted(idp, builder, {
+        subject: marked.chats.agent,
+        object: { type: "app", appId: unplaced.app },
+        actions: ["read"],
+        binding: "OLD",
+      });
+      await ownSource(builder.userId, `Depot ${depot} opens at seven.`);
+      await marked.ask(`When does depot ${depot} open? Copy the note.`);
+
+      expect({
+        fresh: await answers(fresh.chats.stub, fresh.chat.id),
+        freshTitles: await fresh.titles(),
+        marked: await answers(marked.chats.stub, marked.chat.id),
+        markedTitles: await marked.titles(),
+      }).toStrictEqual({
+        fresh: ["held"],
+        freshTitles: [],
+        marked: ["held"],
+        markedTitles: [],
+      });
+    }
+  );
+
+  it("runs a hold confirmed twice at once exactly once", slow, async () => {
+    const notes = await heldNote();
+    const { title, titles } = notes;
+    const tries = await Promise.all([
+      confirmedAsShown(notes),
+      confirmedAsShown(notes),
+    ]);
+    const after = await titles();
+
+    expect({
+      tries: tries.toSorted(),
+      written: after.filter((each) => each === title),
+    }).toStrictEqual({
+      tries: ["agent.held_call_not_found", "ok"],
+      written: [title],
+    });
+  });
+
+  it(
+    "lists every waiting hold of a chat, oldest first, page after page",
+    slow,
+    async () => {
+      const notes = await heldNote();
+      const { person, chats, chat, app, held } = notes;
+      const now = Date.now();
+      // More holds than a page, held after the first one, in order.
+      const requests = Array.from(
+        { length: heldAppCallsPage },
+        (_, at) => `{"at":${at + 1}}`
+      );
+      const hashes = await Promise.all(
+        requests.map(async (request) => await sha256Hex(request))
+      );
+      for (const [at, request] of requests.entries()) {
+        // oxlint-disable-next-line no-await-in-loop -- held one after another
+        await chats.stub.holdAppCall(
+          chat.id,
+          person.userId,
+          {
+            agentId: chats.agent.agentId,
+            appId: app,
+            function: "notes.create",
+            kind: "mutation",
+            request,
+            requestHash: hashes[at] ?? "",
+          },
+          now + at + 1
+        );
+      }
+      const first = await person.api.chats.heldCalls(chat.id);
+      const second = await person.api.chats.heldCalls(
+        chat.id,
+        first.at(-1)?.id
+      );
+      const ids = [...first, ...second].map(({ id }) => id);
+
+      expect({
+        first: first.length,
+        second: second.length,
+        once: new Set(ids).size,
+        oldestFirst: ids[0] === held.id,
+        lastHeld: second.at(-1)?.request,
+      }).toStrictEqual({
+        first: heldAppCallsPage,
+        second: 1,
+        once: heldAppCallsPage + 1,
+        oldestFirst: true,
+        lastHeld: `{"at":${heldAppCallsPage}}`,
       });
     }
   );

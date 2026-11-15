@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { heldAppCallsPage } from "@grasp-os/shared/chat";
 import type { HeldAppCall } from "@grasp-os/shared/chat";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
@@ -53,16 +54,28 @@ const settled = async (): Promise<void> => {
   });
 };
 
-/** The chat's held writes against a core holding `held` until it is decided. */
-const shown = async () => {
+/**
+ * The chat's held writes against a core holding `holds` (`held` alone by
+ * default) until one is decided, a page of `heldAppCallsPage` at a time.
+ */
+const shown = async (holds: readonly HeldAppCall[] = [held]) => {
   const confirmed: { chatId: string; id: string; requestHash: string }[] = [];
   const declined: { chatId: string; id: string }[] = [];
   const session = {
     chats: {
-      heldCalls: async (): Promise<HeldAppCall[]> =>
-        await Promise.resolve(
-          confirmed.length + declined.length === 0 ? [held] : []
-        ),
+      heldCalls: async (
+        _chatId: string,
+        after?: string
+      ): Promise<HeldAppCall[]> => {
+        const waiting = confirmed.length + declined.length === 0 ? holds : [];
+        const from =
+          after === undefined
+            ? 0
+            : waiting.findIndex(({ id }) => id === after) + 1;
+        return await Promise.resolve(
+          waiting.slice(from, from + heldAppCallsPage)
+        );
+      },
       confirmHeldCall: async (
         chatId: string,
         id: string,
@@ -163,5 +176,18 @@ describe("a write to an App held for the person", () => {
       confirmed: [],
       declined: [{ chatId: "chat-1", id: "held-1" }],
     });
+  });
+
+  it("shows every hold of the chat, however many pages they take", async () => {
+    const holds = Array.from({ length: heldAppCallsPage + 1 }, (_, at) => ({
+      ...held,
+      id: `held-${at}`,
+      function: `notes.create${at}`,
+    }));
+    await shown(holds);
+
+    expect(
+      document.querySelectorAll('article[aria-label^="notes.create"]')
+    ).toHaveLength(heldAppCallsPage + 1);
   });
 });

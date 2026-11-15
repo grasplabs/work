@@ -53,18 +53,23 @@ const requestKindSchema = z.looseObject({
  * Marks the chat of `scope` (private-reads.ts) before App `app`'s answer is
  * handed over when the App may read through a person's own connection
  * (their mailbox, their drive: `sourcesOf`, through what it calls too),
- * as connect lets it for the person it acts for; or through a connection
- * connect no longer names, failing closed.
+ * as connect lets it for the person it acts for; or through anything
+ * `sourcesOf` can't place (a connection connect no longer names, an App
+ * past the walk's bounds, a kind of source no longer served), failing
+ * closed. A chat marked already is left as it is, without the walk.
  */
 const markIfReadsPrivate = async (
   env: Env,
   scope: AgentScope,
   app: AppId
 ): Promise<void> => {
+  if (await mustConfirmForOthers(env, scope)) {
+    return;
+  }
   const { connections, unresolved } = await sourcesOf(env, app);
   if (
     connections.some(({ ownerUserId }) => ownerUserId !== null) ||
-    unresolved.some((source) => source.startsWith("connection:"))
+    unresolved.length > 0
   ) {
     await markPrivateRead(env, scope, "connection");
   }

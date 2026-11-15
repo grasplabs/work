@@ -673,10 +673,10 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     });
   }
 
-  async heldCalls(chatId: string): Promise<HeldAppCall[]> {
+  async heldCalls(chatId: string, after?: string): Promise<HeldAppCall[]> {
     return await withPerson(
       this.#check,
-      async (person) => await heldAppCallsOf(this.#env, person, chatId)
+      async (person) => await heldAppCallsOf(this.#env, person, chatId, after)
     );
   }
 

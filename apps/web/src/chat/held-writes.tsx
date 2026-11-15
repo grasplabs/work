@@ -1,3 +1,4 @@
+import { heldAppCallsPage } from "@grasp-os/shared/chat";
 import type { HeldAppCall } from "@grasp-os/shared/chat";
 import type {
   ActionDescription,
@@ -42,6 +43,25 @@ type Held =
   | { state: "ready"; actions: PendingAction[]; calls: HeldAppCall[] };
 
 /**
+ * Every App write held in chat `chatId`, oldest first: page after page
+ * (`heldAppCallsPage` each), until one comes back short.
+ */
+const heldCallsOf = async (
+  session: Session,
+  chatId: string
+): Promise<HeldAppCall[]> => {
+  const calls: HeldAppCall[] = [];
+  let page = await session.chats.heldCalls(chatId);
+  calls.push(...page);
+  while (page.length === heldAppCallsPage) {
+    // oxlint-disable-next-line no-await-in-loop -- each page after the last
+    page = await session.chats.heldCalls(chatId, page.at(-1)?.id);
+    calls.push(...page);
+  }
+  return calls;
+};
+
+/**
  * The person's held writes from chat `chatId`, newest first. Outside the
  * component, as the React Compiler can't compile `try`.
  */
@@ -54,7 +74,7 @@ const readHeld = async (
       async (session) =>
         await Promise.all([
           session.pendingActions.list(),
-          session.chats.heldCalls(chatId),
+          heldCallsOf(session, chatId),
         ])
     );
     return {
