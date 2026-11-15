@@ -856,6 +856,11 @@ export const memories = sqliteTable(
     index("memories_version_idx").on(table.source, table.version),
     index("memories_subject_idx").on(table.subject, table.version),
     index("memories_readers_idx").on(table.readers),
+    // A source's memories in the order they were added (with the row the
+    // index holds): what a re-check pages through (recheck.ts), so a page
+    // is the next rows read, and a memory added while one runs comes after
+    // where it is.
+    index("memories_source_idx").on(table.source),
   ]
 );
 
@@ -954,10 +959,11 @@ export const memoryExtractions = sqliteTable(
 /**
  * A re-check's judgment (recheck.ts) that version `version` of the source
  * memory `memory` rests on no longer holds its quote: the memory is out
- * from `at`, and only while that version is its source's current one,
- * for those who may read it (memories.ts `outSql`). Nothing is written
- * to the memory itself: `retired_at` stays its writer's. Deleted with the
- * memory, and with the version it judged against.
+ * from `at`, while `version` is the latest version of its source a
+ * re-check finished (`memory_rechecked`), at or before its current one,
+ * for readers of that version (memories.ts `judgedAtSql`). Nothing is
+ * written to the memory itself: `retired_at` stays its writer's. Deleted
+ * with the memory, and with the version it judged against.
  */
 export const memoryRechecks = sqliteTable(
   "memory_rechecks",
@@ -975,6 +981,28 @@ export const memoryRechecks = sqliteTable(
     primaryKey({ columns: [table.memory, table.version] }),
     index("memory_rechecks_version_idx").on(table.source, table.version),
     index("memory_rechecks_subject_idx").on(table.subject, table.version),
+  ]
+);
+
+/**
+ * A version of a source whose re-check finished (recheck.ts): the latest
+ * of a source is the version whose judgments count (`memory_rechecks`).
+ * Written by a re-check's last page with its judgments, never changed;
+ * `at` is when, as the store stamps writes (memories.ts `stampWrite`), so
+ * an export holds those of before it started. Deleted with the version.
+ */
+export const memoryRechecked = sqliteTable(
+  "memory_rechecked",
+  {
+    source: text().notNull(),
+    through: integer().notNull(),
+    /** The SHA-256 of `source`, as `memories.subject`. */
+    subject: text().notNull(),
+    at: integer().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.source, table.through] }),
+    index("memory_rechecked_subject_idx").on(table.subject, table.through),
   ]
 );
 

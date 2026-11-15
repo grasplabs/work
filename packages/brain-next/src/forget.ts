@@ -112,9 +112,16 @@ export const eraseMemoriesOn = (
   if (version === undefined) {
     return [];
   }
-  // What re-checks judged against it, of memories resting on other versions.
+  // What re-checks judged against it, of memories resting on other
+  // versions, and its mark of being re-checked: a source's erasure
+  // deletes every version, so every mark goes with them.
   sql.exec(
     "DELETE FROM memory_rechecks WHERE source = ? AND version = ?",
+    version.source,
+    version.version
+  );
+  sql.exec(
+    "DELETE FROM memory_rechecked WHERE source = ? AND through = ?",
     version.source,
     version.version
   );
@@ -151,6 +158,7 @@ export const eraseMemoriesOfSource = (
   subject: string
 ): number[] => {
   sql.exec("DELETE FROM memory_rechecks WHERE subject = ?", subject);
+  sql.exec("DELETE FROM memory_rechecked WHERE subject = ?", subject);
   const marks = sql
     .exec<{ readers: string }>(
       "DELETE FROM memory_extractions WHERE subject = ? RETURNING readers",
@@ -179,6 +187,13 @@ export const eraseMemoriesHiddenBy = (
   sql.exec(
     `DELETE FROM memory_rechecks
     WHERE (subject, version) IN (
+      SELECT subject, version FROM erased_versions WHERE erasure = ?
+    )`,
+    erasure
+  );
+  sql.exec(
+    `DELETE FROM memory_rechecked
+    WHERE (subject, through) IN (
       SELECT subject, version FROM erased_versions WHERE erasure = ?
     )`,
     erasure

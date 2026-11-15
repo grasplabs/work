@@ -20,7 +20,9 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { enqueueRecheck, recheckPage } from "../src/recheck.ts";
 import type { BrainStore } from "../src/store.ts";
+import { kill } from "./store-copy.ts";
 
 type Store = DurableObjectStub<BrainStore>;
 
@@ -423,7 +425,7 @@ describe("re-checking memories when their source changes", () => {
     expect(statesOf(now, added.memories)).toStrictEqual(["current", "current"]);
   });
 
-  it("counts a judgment only while its version is current: a narrower version between puts nothing out for a reader who never could read it", async () => {
+  it("counts a judgment for readers of its version while it is the latest re-checked: a narrower version between puts nothing out for a reader who never could read it", async () => {
     const wide = unique("wide");
     const narrow = unique("narrow");
     const name = unique("Soylent");
@@ -470,13 +472,20 @@ describe("re-checking memories when their source changes", () => {
     await tick();
     const whileNarrow = await seenBy(both);
     const between = await moment(both);
-    // A version for `wide` again says it.
+    // A version for `wide` again says it: until its re-check is done, the
+    // narrow version's judgment counts for its readers alone.
     await shared().addSource({
       source,
       change: crypto.randomUUID(),
       text: `${line}. Again.`,
       access: audience(wide),
     });
+    const waiting = {
+      wideOnly: await seenBy(wideOnly),
+      both: statesOf(await read(added.entity, both, { history: true }), [
+        memory,
+      ]),
+    };
     await tick();
     const asOfBetween = statesOf(
       await read(added.entity, both, { asOf: between }),
@@ -489,10 +498,23 @@ describe("re-checking memories when their source changes", () => {
         ended: whileNarrow.endedAt !== null,
         readable: whileNarrow.readable,
       },
+      waiting,
       wideOnly: await seenBy(wideOnly),
       both: await seenBy(both),
       asOfBetween,
     }).toStrictEqual({
+      // Before the wide version's re-check: a reader who never could read
+      // the narrow one reads as in a store without it; its reader keeps
+      // the memory out.
+      waiting: {
+        wideOnly: {
+          state: ["current"],
+          endedAt: null,
+          readable: [memory],
+          found: [added.entity],
+        },
+        both: ["ended"],
+      },
       // A reader of the narrow version, while it is current, reads it out.
       whileNarrow: { state: ["ended"], ended: true, readable: [] },
       // Once it isn't, its judgment counts for no one: as in a store that
@@ -512,6 +534,167 @@ describe("re-checking memories when their source changes", () => {
       },
       asOfBetween: ["current"],
     });
+  });
+
+  it("keeps a memory out while a newer version that drops its quote too waits for its re-check", async () => {
+    const group = unique("g");
+    const reader = readerOf(unique("p"), group);
+    const name = unique("Tyrell");
+    const source = unique("doc");
+    const line = `${name} pays by card`;
+    const ref = await addVersion(`${line}.`, group, source);
+    const added = await add(
+      audience(group),
+      [customer(name)],
+      [fact(`${line}.`, { kind: "source", ...ref, quote: line })]
+    );
+    const [memory = ""] = added.memories;
+    const stateOf = async () => ({
+      state: statesOf(await read(added.entity, reader, { history: true }), [
+        memory,
+      ]),
+      readable: await shared().readableMemories({
+        memories: [memory],
+        reader,
+      }),
+    });
+    await addVersion(`Gone. ${unique("x")}`, group, source);
+    await tick();
+    const judged = await stateOf();
+    await addVersion(`Still gone. ${unique("x")}`, group, source);
+    const waiting = await stateOf();
+    await tick();
+
+    expect({ judged, waiting, after: await stateOf() }).toStrictEqual({
+      judged: { state: ["ended"], readable: [] },
+      waiting: { state: ["ended"], readable: [] },
+      after: { state: ["ended"], readable: [] },
+    });
+  });
+
+  it("counts a re-check's judgments only once its last page is done, and goes on from its page after the store stops", async () => {
+    const group = unique("g");
+    const reader = readerOf(unique("p"), group);
+    const name = unique("Umbrella");
+    const source = unique("doc");
+    const said = `${name} renews in March`;
+    const ref = await addVersion(`${said}.`, group, source);
+    // More memories than a page: two pages.
+    const ids: string[] = [];
+    for (let start = 0; start <= recheckPage; start += 100) {
+      // oxlint-disable-next-line no-await-in-loop -- one add at a time
+      const added = await add(
+        audience(group),
+        [customer(name)],
+        Array.from({ length: 100 }, (_, index) =>
+          fact(`${name} fact ${start + index}.`, {
+            kind: "source",
+            ...ref,
+            quote: said,
+          })
+        )
+      );
+      ids.push(...added.memories);
+    }
+    const dropped = `Nothing of it. ${unique("x")}`;
+    await addVersion(dropped, group, source);
+    // The second page's read of the text is held, and the store stops
+    // while it is.
+    const hold = { reads: 0, reached: false, released: false };
+    const real = env.BRAIN_OBJECTS;
+    const bucket = {
+      head: async (key: string) => await real.head(key),
+      list: async (options?: R2ListOptions) => await real.list(options),
+      put: async (
+        key: string,
+        value: ArrayBuffer | ArrayBufferView | string,
+        options?: R2PutOptions
+      ) => await real.put(key, value, options),
+      delete: async (keys: string | string[]) => {
+        await real.delete(keys);
+      },
+      get: async (key: string) => {
+        const object = await real.get(key);
+        const text = object === null ? null : await object.text();
+        if (text === dropped) {
+          hold.reads += 1;
+          if (hold.reads === 2) {
+            hold.reached = true;
+            await until(() => hold.released, "the test to release the read");
+          }
+        }
+        return text === null
+          ? null
+          : { text: async () => await Promise.resolve(text) };
+      },
+    };
+    await runInDurableObject(shared(), (instance) => {
+      Reflect.set(instance, "env", { ...env, BRAIN_OBJECTS: bucket });
+    });
+    const ticking = tick().catch(() => "stopped");
+    await until(() => hold.reached, "the second page to read the version");
+    // The first page judged, the last not done: nothing counts yet.
+    /** How many of `ids` `reader` may read, at most a request's worth at a time. */
+    const readableCount = async () => {
+      const [first, rest] = await Promise.all(
+        [ids.slice(0, recheckPage), ids.slice(recheckPage)].map(
+          async (memories) =>
+            await shared().readableMemories({ memories, reader })
+        )
+      );
+      return (first?.length ?? 0) + (rest?.length ?? 0);
+    };
+    const midway = await readableCount();
+    await kill(shared());
+    hold.released = true;
+    await ticking;
+    await tick();
+    await tick();
+
+    expect({ midway, after: await readableCount() }).toStrictEqual({
+      midway: ids.length,
+      after: 0,
+    });
+  }, 60_000);
+
+  it("keeps a source's mark when an item of an earlier version runs late, and erases it with its source", async () => {
+    const group = unique("g");
+    const reader = readerOf(unique("p"), group);
+    const name = unique("Hooli");
+    const source = unique("doc");
+    const line = `${name} pays by card`;
+    const ref = await addVersion(`${line}.`, group, source);
+    const added = await add(
+      audience(group),
+      [customer(name)],
+      [fact(`${line}.`, { kind: "source", ...ref, quote: line })]
+    );
+    const second = await addVersion(`Gone. ${unique("x")}`, group, source);
+    await addVersion(`Gone again. ${unique("x")}`, group, source);
+    await tick();
+    // An item for the second version, as one left from before would be.
+    await runInDurableObject(shared(), (_instance, state) => {
+      enqueueRecheck(state.storage, source, second.version);
+    });
+    await tick();
+    const late = await shared().readableMemories({
+      memories: added.memories,
+      reader,
+    });
+    await shared().eraseSource({ source, reason: "deleted" });
+    await tick();
+    const marks = await runInDurableObject(
+      shared(),
+      (_instance, state) =>
+        state.storage.sql
+          .exec<{ count: number }>(
+            "SELECT count(*) AS count FROM memory_rechecked WHERE source = ?",
+            source
+          )
+          .one().count
+    );
+
+    expect({ late, marks }).toStrictEqual({ late: [], marks: 0 });
   });
 
   it("brings a memory back once a newer version says its quote again, and puts it out again when the next one drops it", async () => {

@@ -29,6 +29,7 @@ import {
   exportLineSchema,
   extractionLineSchema,
   recheckLineSchema,
+  recheckedLineSchema,
   isStale,
   manifestFile,
   manifestPartsOf,
@@ -46,6 +47,7 @@ import type {
   ExportLine,
   ExtractionLine,
   RecheckLine,
+  RecheckedLine,
   Held,
   Manifest,
   MemoriesLine,
@@ -61,6 +63,7 @@ import {
 } from "./files.ts";
 import { lineageOfSource, lineageOfWriter } from "./memories.ts";
 import { readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
+import { enqueueRecheck } from "./recheck.ts";
 import { planOf, restatementOf, valueKeyFor } from "./remember.ts";
 import { memoriesWrittenSinceSql, restoreFailedSql } from "./restoring.ts";
 import { indexMemoryWords, indexWords } from "./words.ts";
@@ -398,6 +401,10 @@ const partLineSchema = z.union([
     ({ source }) => sourceIdSchema.safeParse(source).success,
     { message: "Not a re-check to restore" }
   ),
+  recheckedLineSchema.refine(
+    ({ source }) => sourceIdSchema.safeParse(source).success,
+    { message: "Not a re-check's mark to restore" }
+  ),
   changeLineSchema,
 ]);
 type PartLine = z.infer<typeof partLineSchema>;
@@ -676,6 +683,28 @@ const lineageOf = (line: MemoryLine): string =>
     : lineageOfWriter(line.writer);
 
 /**
+ * Puts `source` on the queue to be re-checked against its current version
+ * (recheck.ts `enqueueRecheck`, which asks whether it holds a memory of an
+ * earlier one, and keeps one item a source). In the caller's transaction.
+ */
+const recheckAgainstCurrent = (
+  storage: DurableObjectStorage,
+  source: string
+): void => {
+  const [current] = storage.sql
+    .exec<{ version: number }>(
+      `SELECT source_versions.version AS version FROM current_versions
+      JOIN source_versions ON source_versions.row = current_versions.version_row
+      WHERE current_versions.source = ?`,
+      source
+    )
+    .toArray();
+  if (current !== undefined) {
+    enqueueRecheck(storage, source, current.version);
+  }
+};
+
+/**
  * Writes the memory `line` back as it was (above), with its words and the
  * names it gave the entities it mentions, in one transaction, unless the
  * store holds it already (a run of this restore before) or it rests on a
@@ -744,6 +773,12 @@ const restoreMemory = async (
       if (entity !== undefined) {
         keepNames(sql, entity, row, names, identifiers);
       }
+    }
+    // Drawn from a version before its source's current one: re-checked
+    // against it, as a re-check waiting when the export was taken isn't
+    // in it (recheck.ts). One item a source.
+    if (line.source !== null) {
+      recheckAgainstCurrent(storage, line.source);
     }
   });
 };
@@ -862,6 +897,32 @@ const restoreRecheck = async (
 };
 
 /**
+ * Writes the mark of a version `line`'s source was re-checked through
+ * back, unless the store doesn't hold that version; once. In one
+ * transaction.
+ */
+const restoreRechecked = async (
+  storage: DurableObjectStorage,
+  line: RecheckedLine
+): Promise<void> => {
+  const subject = await subjectOf(line.source);
+  storage.transactionSync(() => {
+    const { sql } = storage;
+    if (!holdsVersion(sql, line.source, subject, line.through)) {
+      return;
+    }
+    sql.exec(
+      `INSERT OR IGNORE INTO memory_rechecked (source, through, subject, at)
+      VALUES (?, ?, ?, ?)`,
+      line.source,
+      line.through,
+      subject,
+      line.at
+    );
+  });
+};
+
+/**
  * Writes the change key `line` back, once, only when it answered memories
  * and this restore wrote every one of them (the store held none before
  * it): so a change key in a bundle never answers for what it didn't bring
@@ -910,6 +971,8 @@ const restoreMemoriesLine = async (
     await restoreExtraction(storage, db, line);
   } else if (line.kind === "recheck") {
     await restoreRecheck(storage, line);
+  } else if (line.kind === "rechecked") {
+    await restoreRechecked(storage, line);
   } else {
     restoreChange(storage, line);
   }
@@ -962,6 +1025,9 @@ const restsOn = (
     line.kind === "recheck"
   ) {
     return { source: line.source, version: line.version };
+  }
+  if (line.kind === "rechecked") {
+    return { source: line.source, version: line.through };
   }
   if (line.kind === "memory" && line.source !== null && line.version !== null) {
     return { source: line.source, version: line.version };

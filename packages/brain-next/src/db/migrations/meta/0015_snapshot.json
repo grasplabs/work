@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "f4d6d4d4-a461-42f0-833e-7876e6670c98",
+  "id": "aba0617c-b5ce-451f-908c-614b466bae47",
   "prevId": "19cd9d80-c60c-4473-8d33-8192da5eab32",
   "tables": {
     "chunks": {
@@ -1139,6 +1139,13 @@
             "readers"
           ],
           "isUnique": false
+        },
+        "memories_source_idx": {
+          "name": "memories_source_idx",
+          "columns": [
+            "source"
+          ],
+          "isUnique": false
         }
       },
       "foreignKeys": {
@@ -1440,6 +1447,61 @@
             "readers"
           ],
           "name": "memory_extractions_source_version_readers_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "memory_rechecked": {
+      "name": "memory_rechecked",
+      "columns": {
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "through": {
+          "name": "through",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "subject": {
+          "name": "subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "at": {
+          "name": "at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "memory_rechecked_subject_idx": {
+          "name": "memory_rechecked_subject_idx",
+          "columns": [
+            "subject",
+            "through"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "memory_rechecked_source_through_pk": {
+          "columns": [
+            "source",
+            "through"
+          ],
+          "name": "memory_rechecked_source_through_pk"
         }
       },
       "uniqueConstraints": {},

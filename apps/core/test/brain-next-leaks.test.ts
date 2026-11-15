@@ -2366,7 +2366,6 @@ describe(
       await workBrain(env, new Date(), noProducers);
       await version(twinA, said(nameA), ownTeam, false);
       await version(twinB, `${said(nameB)} `, ownTeam, false);
-      await workBrain(env, new Date(), noProducers);
 
       /** What the outsider reads of a twin, its name and ids set aside. */
       const twinAsOutsider = async (entity: string, name: string) => {
@@ -2398,6 +2397,13 @@ describe(
           recalled: recalled.items.map(({ text }) => text),
         }).replaceAll(name, "NAME");
       };
+      // Before the newest versions' re-checks: the narrow version's
+      // judgment counts for its readers alone.
+      const twinWaiting = {
+        a: await twinAsOutsider(entityA, nameA),
+        b: await twinAsOutsider(entityB, nameB),
+      };
+      await workBrain(env, new Date(), noProducers);
       const customers = await entitiesAs(env, outsider, { kind: "customer" });
       const holderReads = async (entity: string) => {
         const page = await memoriesAs(env, holder, {
@@ -2429,6 +2435,7 @@ describe(
       );
 
       expect({
+        twinWaiting: twinWaiting.a,
         twin: await twinAsOutsider(entityA, nameA),
         both: [entityA, entityB].every((id) => textOf(customers).includes(id)),
         holder: {
@@ -2437,7 +2444,9 @@ describe(
         },
         findings,
       }).toStrictEqual({
-        // Exactly what the outsider reads of the twin that never had it.
+        // Exactly what the outsider reads of the twin that never had it,
+        // before the newest re-check as after.
+        twinWaiting: twinWaiting.b,
         twin: await twinAsOutsider(entityB, nameB),
         both: true,
         holder: {

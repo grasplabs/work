@@ -13,107 +13,87 @@ import type { WorkDefinition } from "./work.ts";
 // Re-checking memories when their source changes (the plan, "Dreaming"):
 // an item of the work queue per source, keyed by it, put on the queue as
 // a newer version becomes current, so a newer version waiting replaces an
-// older one's item. It reads the version's text and judges each memory
+// older one's item. It reads the version's text and judges every memory
 // drawn from an earlier version: one whose quote the text no longer
 // holds, word for word as extraction checks a quote (quotes.ts), is
 // recorded as out against that version (`memory_rechecks`). In code,
 // never by a model, so text in the source can neither keep a memory
 // alive nor put one out.
 //
-// A judgment is the version's, not the memory's: it counts only while
-// that version is its source's current one, for those who may read it
-// (memories.ts `outSql`), and then the memory is read as a retired one
-// is: history, and nothing to any other read. So a version that says the
-// quote again brings the memory back, and a reader who may not read the
+// Its judgments count once it has finished: its last page marks the
+// version re-checked (`memory_rechecked`), in the transaction of its own
+// judgments, and only the judgments of the latest version so marked count (memories.ts `judgedAtSql`), for readers of
+// that version. Until then the judgments of the version re-checked
+// before count as they did, for its readers: a memory out stays out while
+// a newer version waits for its turn, and a reader who may not read the
 // version judged against is answered as by a store that never held it.
 // The memory itself is never written: `retired_at` stays its writer's.
 //
-// A page of memories a run, in their order (version, then row), the next
-// page put back on the queue (`WorkContext.again`), so no step grows with
-// the source's history: each reads the version's text once, indexed, and
-// at most `recheckPage` memories. Memories a later version's extraction
-// mark already ends for everyone who may read them are passed over: they
-// are history whatever the text says. It asks no model, so it takes
-// nothing from the model's rate limit, and it reads only the memories of
-// its own source (`memories_version_idx`), never the store.
+// A page of the source's memories a run, in the order they were added
+// (`memories_source_idx`), the next page put back on the queue
+// (`WorkContext.again`), so no step grows with the source's history: each
+// reads at most `recheckPage` memories and the version's text once,
+// indexed. A memory added while it runs comes after where it is, so it
+// reaches it; its last page asks again, in its transaction, that none is
+// left behind it. It asks no model.
 
 /**
- * The most memories one run judges: what bounds a step, never what is
+ * The most memories one run reads: what bounds a step, never what is
  * judged, as the next page follows on the queue.
  */
 export const recheckPage = 500;
 
-/** What an item carries: the source, the version judged against, and where the last page ended. */
+/** What an item carries: the source, the version judged against, and the last memory read (its row). */
 const payloadSchema = z.strictObject({
   source: sourceIdSchema,
   version: versionSchema,
-  after: z
-    .strictObject({ version: versionSchema, row: z.int().positive() })
-    .optional(),
+  after: z.int().positive().optional(),
 });
 type Payload = z.infer<typeof payloadSchema>;
 
-/** A memory of a page: its row, version, quote and readers (`reader_sets.key`). */
+/** A memory of a page: its row, version and quote. */
 interface Held extends Record<string, SqlStorageValue> {
   row: number;
   version: number;
   quote: string | null;
-  readers: string;
+}
+
+/** `?1` the source, `?2` the last row read, `?3` the page's size: its next memories, in order. */
+const pageSql = `
+SELECT row, version, quote FROM memories
+WHERE source = ?1 AND row > ?2
+ORDER BY row
+LIMIT ?3`;
+
+/** What a page asks `judge` to write. */
+interface Judging {
+  source: string;
+  version: number;
+  /** The memories it found out. */
+  rows: readonly number[];
+  /** Whether the page read the source's last memory. */
+  last: boolean;
+  /** The last row it read. */
+  through: number;
 }
 
 /**
- * `?1` the source, `?2` the version judged against, `?3` and `?4` where
- * the last page ended (version, row), `?5` the page's size: the source's
- * memories of earlier versions after that place, in order, at most `?5`,
- * in two exact seeks of `memories_version_idx` (source, version, row):
- * the rest of the version the last page ended in, then the versions
- * after it. One seek of a row value reads that version's rows from its
- * start.
- */
-const pageSql = [
-  `SELECT row, version, quote, readers FROM memories
-  WHERE source = ?1 AND version = ?3 AND row > ?4 AND version < ?2
-  ORDER BY row
-  LIMIT ?5`,
-  `SELECT row, version, quote, readers FROM memories
-  WHERE source = ?1 AND version > ?3 AND version < ?2
-  ORDER BY version, row
-  LIMIT ?5`,
-];
-
-/**
- * `?1` the source, `?2` the version judged against and `?3` its set of
- * readers (`reader_sets.id`), `?4` a memory's readers (`reader_sets.key`):
- * the latest version up to `?2`, not under erasure and of exactly the
- * judged version's readers, marked extracted for exactly those (memories.ts
- * `extractedSql`). It ends every memory of those readers drawn from an
- * earlier version, for every reader who may read it now, so they are
- * passed over. Read from the latest down: the first that holds.
- */
-const markedSql = `
-SELECT marked.version AS version FROM memory_extractions AS marked
-CROSS JOIN source_versions AS extracted
-  ON extracted.source = marked.source AND extracted.version = marked.version
-WHERE marked.source = ?1 AND marked.version <= ?2 AND marked.readers = ?4
-  AND extracted.reader_set = ?3
-  AND extracted.row NOT IN (SELECT version_row FROM erasing_versions)
-ORDER BY marked.version DESC
-LIMIT 1`;
-
-/**
- * Records the memories `rows` of `source` out against `version`, in one
- * transaction that first asks again whether `version` is still current
- * and not being erased: so nothing is judged against a text a newer
- * version, or an erasure, replaced while it was read. "superseded" when
- * it no longer is, written nothing; else how many it recorded, all at one
- * stamp (`stampWrite`). A judgment recorded already stays as it was.
+ * Records `rows` out against `version`, and, on the last page, the source
+ * re-checked through it, in one transaction that first asks again whether
+ * `version` is still current and not being erased, so nothing is judged
+ * against a text a newer version or an erasure replaced while it was
+ * read; and, on the last page, whether a memory of an earlier version was
+ * added past `through` since, which makes it a page like any other.
+ * "superseded" when the version no longer is current, written nothing;
+ * "marked" once the source is marked; else "judged". All at one stamp
+ * (`stampWrite`); a judgment or a mark recorded already stays as it
+ * was, and the latest mark of a source is its highest, so it never goes
+ * back.
  */
 const judge = (
   storage: DurableObjectStorage,
-  source: string,
-  version: number,
-  rows: readonly number[]
-): number | "superseded" =>
+  { source, version, rows, last, through }: Judging
+): "marked" | "judged" | "superseded" =>
   storage.transactionSync(() => {
     const { sql } = storage;
     if (currentOf(sql, source, version) === undefined) {
@@ -123,31 +103,55 @@ const judge = (
     if (isRestoring(sql)) {
       throw new WorkError("restoring");
     }
-    if (rows.length === 0) {
-      return 0;
+    const finished =
+      last &&
+      sql
+        .exec(
+          // From the last row read on (`memories_source_idx`): `+` keeps
+          // the planner off the version's index, which would read every
+          // earlier memory of the source.
+          `SELECT 1 FROM memories
+          WHERE source = ? AND row > ? AND +version < ? LIMIT 1`,
+          source,
+          through,
+          version
+        )
+        .toArray().length === 0;
+    if (rows.length === 0 && !finished) {
+      return "judged";
     }
+    const stamp = stampWrite(sql);
     // Each row checked again in the same statement: still of this source,
-    // before this version.
-    return sql
-      .exec(
-        `INSERT OR IGNORE INTO memory_rechecks (memory, source, version, subject, at)
-        SELECT m.row, m.source, ?3, m.subject, ?4 FROM memories AS m
-        WHERE m.row IN (SELECT value FROM json_each(?1))
-          AND m.source = ?2 AND m.version < ?3
-        RETURNING memory`,
-        JSON.stringify(rows),
-        source,
-        version,
-        stampWrite(sql)
-      )
-      .toArray().length;
+    // before this version. Sought by its row, one each (CROSS JOIN keeps
+    // the planner from walking the source's memories instead).
+    sql.exec(
+      `INSERT OR IGNORE INTO memory_rechecks (memory, source, version, subject, at)
+      SELECT m.row, m.source, ?3, m.subject, ?4 FROM json_each(?1) AS listed
+      CROSS JOIN memories AS m ON m.row = listed.value
+      WHERE m.source = ?2 AND m.version < ?3`,
+      JSON.stringify(rows),
+      source,
+      version,
+      stamp
+    );
+    if (!finished) {
+      return "judged";
+    }
+    sql.exec(
+      `INSERT OR IGNORE INTO memory_rechecked (source, through, subject, at)
+      SELECT ?1, ?2, subject, ?3 FROM source_subjects WHERE source = ?1`,
+      source,
+      version,
+      stamp
+    );
+    return "marked";
   });
 
 const recheckWork: WorkDefinition<Payload> = defineWork({
   kind: "recheck",
   payload: payloadSchema,
   run: async (payload, context) => {
-    const { source, version, after } = payload;
+    const { source, version, after = 0 } = payload;
     const { storage } = context;
     const { sql } = storage;
     const found = currentOf(sql, source, version);
@@ -158,54 +162,31 @@ const recheckWork: WorkDefinition<Payload> = defineWork({
     if (isRestoring(sql)) {
       throw new WorkError("restoring");
     }
-    const page: Held[] = [];
-    for (const statement of pageSql) {
-      page.push(
-        ...sql
-          .exec<Held>(
-            statement,
-            source,
-            version,
-            after?.version ?? 0,
-            after?.row ?? 0,
-            recheckPage - page.length
-          )
-          .toArray()
-      );
-    }
-    // The latest extraction mark of each set of readers the page holds:
-    // a memory of an earlier version is history already.
-    const marked = new Map<string, number>();
-    for (const readers of new Set(page.map((held) => held.readers))) {
-      const [latest] = sql
-        .exec<{ version: number }>(
-          markedSql,
-          source,
-          version,
-          found.readerSet,
-          readers
-        )
-        .toArray();
-      marked.set(readers, latest?.version ?? 0);
-    }
-    const judged = page.flatMap(({ row, quote, readers, version: of }) =>
-      quote !== null && of >= (marked.get(readers) ?? 0) ? [{ row, quote }] : []
+    const page = sql.exec<Held>(pageSql, source, after, recheckPage).toArray();
+    const judged = page.flatMap(({ row, quote, version: of }) =>
+      of < version && quote !== null ? [{ row, quote }] : []
     );
-    let out: number | "superseded" = 0;
+    let out: number[] = [];
     if (judged.length > 0) {
       const text = await textOf(context, found.file);
+      // The current version's file gone: what it works on can't be read.
       if (text === null) {
-        return;
+        throw new WorkError("unreadable");
       }
       const index = quoteIndexOf(text);
-      out = judge(
-        storage,
-        source,
-        version,
-        judged.flatMap(({ row, quote }) => (index.holds(quote) ? [] : [row]))
+      out = judged.flatMap(({ row, quote }) =>
+        index.holds(quote) ? [] : [row]
       );
     }
-    if (out === "superseded") {
+    const through = page.at(-1)?.row ?? after;
+    const outcome = judge(storage, {
+      source,
+      version,
+      rows: out,
+      last: page.length < recheckPage,
+      through,
+    });
+    if (outcome === "superseded") {
       log.info("brain.recheck_superseded", { version });
       return;
     }
@@ -214,40 +195,53 @@ const recheckWork: WorkDefinition<Payload> = defineWork({
       version,
       read: page.length,
       checked: judged.length,
-      out,
+      out: out.length,
     });
-    const last = page.at(-1);
-    if (page.length === recheckPage && last !== undefined) {
-      context.keep({
-        source,
-        version,
-        after: { version: last.version, row: last.row },
-      });
+    if (outcome === "judged") {
+      context.keep({ source, version, after: through });
       context.again(1);
     }
   },
 });
 
+/** Whether an item of `source` waits or runs for `version` already. */
+const queuedFor = (sql: SqlStorage, source: string, version: number): boolean =>
+  sql
+    .exec<{ payload: string }>(
+      "SELECT payload FROM work_items WHERE kind = ? AND key = ?",
+      recheckWork.kind,
+      source
+    )
+    .toArray()
+    .some(
+      ({ payload }) =>
+        payloadSchema.safeParse(JSON.parse(payload)).data?.version === version
+    );
+
 /**
  * Puts `source`'s memories on the queue to be checked against its version
- * `version`, now current, in place of an item of the source still
- * waiting, when it holds a memory drawn from an earlier version. Run it in
- * the transaction that makes the version current.
+ * `version`, now current, when it holds a memory drawn from an earlier
+ * version: in place of an item of the source still waiting for another
+ * version, and never over one that waits or runs for this one, which keeps
+ * its place and reaches every memory added since. Run it in the
+ * transaction that makes the version current, adds such a memory, or
+ * restores one.
  */
 export const enqueueRecheck = (
   storage: DurableObjectStorage,
   source: SourceId,
   version: number
 ): void => {
+  const { sql } = storage;
   const drawnBefore =
-    storage.sql
+    sql
       .exec(
         "SELECT 1 FROM memories WHERE source = ? AND version < ? LIMIT 1",
         source,
         version
       )
       .toArray().length > 0;
-  if (drawnBefore) {
+  if (drawnBefore && !queuedFor(sql, source, version)) {
     enqueueWork(storage, recheckWork, {
       key: source,
       payload: { source, version },

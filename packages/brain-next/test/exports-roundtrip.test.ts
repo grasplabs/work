@@ -47,7 +47,8 @@ const features = [
   "a confirmation",
   "a retirement",
   "an extraction mark",
-  "a memory out of its source's current version",
+  "a memory a re-check put out",
+  "a re-check still waiting as the export starts",
   "an entity linked by its id",
   "an entity linked by its email",
   "more names for one entity from one memory than one entity of an add takes",
@@ -338,6 +339,23 @@ const operate = async (series: Series, operation: number): Promise<void> => {
   }
 };
 
+/**
+ * Ticks `store` until no re-check waits: at most 10 ticks, each 10 minutes
+ * on, past any wait after a failure (one that ran while a restore did).
+ */
+const rechecked = async (store: Store): Promise<void> => {
+  for (let ticks = 0; ticks < 10; ticks += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+    const { waiting, running } = await store.workOverview();
+    if (running === 0 && !waiting.some(({ kind }) => kind === "recheck")) {
+      return;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+    await tick(store, (ticks + 1) * 10 * 60_000);
+  }
+  throw new Error("A re-check still waits after 10 ticks");
+};
+
 /** How many of each feature the store holds now. */
 const featuresHeld = async (): Promise<Record<string, number>> =>
   await runInDurableObject(shared(), (_instance, state) => {
@@ -386,11 +404,11 @@ const featuresHeld = async (): Promise<Record<string, number>> =>
       "an extraction mark": count(
         "SELECT count(*) AS count FROM memory_extractions"
       ),
-      "a memory out of its source's current version": count(
-        `SELECT count(*) AS count FROM memory_rechecks AS judged
-      JOIN current_versions ON current_versions.source = judged.source
-      JOIN source_versions ON source_versions.row = current_versions.version_row
-        AND source_versions.version = judged.version`
+      "a re-check still waiting as the export starts": count(
+        "SELECT count(*) AS count FROM work_items WHERE kind = 'recheck'"
+      ),
+      "a memory a re-check put out": count(
+        "SELECT count(*) AS count FROM memory_rechecks"
       ),
       "an entity linked by its email": count(
         `SELECT count(*) AS count FROM (
@@ -436,6 +454,27 @@ const madeBy = async (seed: number) => {
     // oxlint-disable-next-line no-await-in-loop -- a tick at a time
     await tick(shared());
   }
+  // A newer version of each source that says the quote again, its
+  // re-check still waiting as the export starts: a restore puts it on the
+  // queue again, so the memories put out come back there as here, and a
+  // restore that lost it would keep them out.
+  for (const drawnFrom of sources) {
+    drawnFrom.versions += 1;
+    // oxlint-disable-next-line no-await-in-loop -- one source at a time
+    await shared()
+      .addSource({
+        source: drawnFrom.source,
+        change: `${drawnFrom.versions}`,
+        text: `words of ${drawnFrom.source}, ${drawnFrom.versions}`,
+        access: pick(series.accesses),
+      })
+      .catch((error: unknown) => {
+        // An erased source takes no version.
+        if (!String(error).includes("efused")) {
+          throw error;
+        }
+      });
+  }
   const held = await featuresHeld();
   for (const feature of features) {
     if ((held[feature] ?? 0) > 0) {
@@ -478,16 +517,22 @@ describe("a company's export, round trip", () => {
           made.add(feature);
         }
         // oxlint-disable-next-line no-await-in-loop -- one store at a time
-        const before = await everyRead(shared(), store.asked);
-        // oxlint-disable-next-line no-await-in-loop -- one store at a time
         const { id } = await shared().startExport("test");
         // oxlint-disable-next-line no-await-in-loop -- one store at a time
         const exported = await exportSettled(shared, id);
+        // What the store reads once the re-checks waiting as the export
+        // started are done: the export holds none of their work.
+        // oxlint-disable-next-line no-await-in-loop -- one store at a time
+        await rechecked(shared());
+        // oxlint-disable-next-line no-await-in-loop -- one store at a time
+        const before = await everyRead(shared(), store.asked);
         const restored =
           exported === "done"
             ? // oxlint-disable-next-line no-await-in-loop -- one store at a time
               await restoredAfterLoss(shared, id, empty)
             : undefined;
+        // oxlint-disable-next-line no-await-in-loop -- one store at a time
+        await rechecked(shared());
         // oxlint-disable-next-line no-await-in-loop -- one store at a time
         const after = await everyRead(shared(), store.asked);
         const differ = differences(before, after);

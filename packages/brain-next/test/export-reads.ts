@@ -36,11 +36,11 @@ const noEmbedders: Embedders = {
   },
 };
 
-/** One tick of `store`, as the host's clock gives it. */
-export const tick = async (store: Store): Promise<void> => {
+/** One tick of `store`, as the host's clock gives it, `ahead` milliseconds on. */
+export const tick = async (store: Store, ahead = 0): Promise<void> => {
   await store.work({
     ask: quietAsk,
-    at: new Date(),
+    at: new Date(Date.now() + ahead),
     embedders: noEmbedders,
     handOvers: noHandOvers,
     contextTokens: null,

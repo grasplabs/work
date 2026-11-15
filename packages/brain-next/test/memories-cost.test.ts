@@ -5,7 +5,7 @@ import type {
 } from "@grasp-os/brain-next/contract";
 import { reset, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 
 import {
   questionMaxLength,
@@ -636,37 +636,59 @@ describe("what reading memories costs", () => {
   it("re-checks a source's history a page a step, no step reading more as its versions and memories grow", async () => {
     const { stub, largestReadBy } = await countedStore();
     const group = `seen-${crypto.randomUUID()}`;
+    const reader = readerOf("reader", group);
     const source = `doc-${crypto.randomUUID()}`;
     const name = word();
     const said = `${name} renews in March`;
-    /** A newer version of the source, that still says it. */
-    const version = async () =>
+    /** A newer version of the source: it says `said`, and `own`, which the next one no longer does. */
+    const version = async (own = word()) =>
       await stub.addSource({
         source,
         change: crypto.randomUUID(),
-        text: `${said}. ${word()}`,
+        text: `${said}. ${own}.`,
         access: audience(group),
       });
+    const kept: string[] = [];
+    const gone: string[] = [];
     /**
-     * A version and 150 memories drawn from it, a hundred an add: so pages
-     * of `recheckPage` end inside a version.
+     * A version and 150 memories drawn from it, a hundred an add, so pages
+     * of `recheckPage` end inside a version: a hundred on what every later
+     * version says, fifty on what only this one says.
      */
     const drawn = async () => {
-      const ref = await version();
-      for (const count of [100, 50]) {
+      const own = `${name} ${word()}`;
+      const ref = await version(own);
+      for (const [count, quote, ids] of [
+        [100, said, kept],
+        [50, own, gone],
+      ] as const) {
         // oxlint-disable-next-line no-await-in-loop -- one add at a time
-        await add(
+        const added = await add(
           stub,
           group,
           [{ key: "c", kind: "customer", names: [name] }],
           Array.from({ length: count }, () =>
             fact("c", `${name} ${word()}`, {
               speaker: { kind: "outside" },
-              basis: { kind: "source", ...ref, quote: said },
+              basis: { kind: "source", ...ref, quote },
             })
           )
         );
+        ids.push(...added.memories);
       }
+    };
+    /** How many of `ids` the reader may read, a request's worth at a time. */
+    const readable = async (ids: readonly string[]): Promise<number> => {
+      let count = 0;
+      for (let start = 0; start < ids.length; start += recheckPage) {
+        // oxlint-disable-next-line no-await-in-loop -- one request at a time
+        const page = await stub.readableMemories({
+          memories: ids.slice(start, start + recheckPage),
+          reader,
+        });
+        count += page.length;
+      }
+      return count;
     };
     let clock = Date.now();
     const tick = async () => {
@@ -694,11 +716,7 @@ describe("what reading memories costs", () => {
       });
     };
     const sizes = [1500, 4500, 9000];
-    const steps: {
-      size: number;
-      largest: number;
-      reads: number[];
-    }[] = [];
+    const steps: { largest: number; kept: number; gone: number }[] = [];
     let have = 0;
     for (const size of sizes) {
       for (; have < size; have += 150) {
@@ -708,41 +726,34 @@ describe("what reading memories costs", () => {
       // Everything put on the queue so far done first.
       // oxlint-disable-next-line no-await-in-loop -- one size at a time
       await tick();
-      const reads: number[] = [];
-      const spy = vi.spyOn(console, "info").mockImplementation((line) => {
-        if (
-          typeof line === "object" &&
-          line !== null &&
-          Reflect.get(line, "event") === "brain.recheck"
-        ) {
-          reads.push(Number(Reflect.get(line, "read")));
-        }
+      // oxlint-disable-next-line no-await-in-loop -- one size at a time
+      const largest = await largestReadBy(async () => {
+        await version();
+        await tick();
       });
-      try {
+      steps.push({
+        largest,
         // oxlint-disable-next-line no-await-in-loop -- one size at a time
-        const largest = await largestReadBy(async () => {
-          await version();
-          await tick();
-        });
-        steps.push({ size, largest, reads });
-      } finally {
-        spy.mockRestore();
-      }
+        kept: await readable(kept),
+        // oxlint-disable-next-line no-await-in-loop -- one size at a time
+        gone: await readable(gone),
+      });
     }
     const [first] = steps;
 
     expect(
-      steps.map(({ size, largest, reads }) => ({
-        // Every memory judged once, a page a step, none twice or skipped
-        // where a page ends inside a version.
-        all: reads.reduce((sum, read) => sum + read, 0) === size,
-        pages: reads.length >= Math.ceil(size / recheckPage),
-        page: reads.every((read) => read <= recheckPage),
-        // No statement reads more as the history grows.
-        flat: flat(first?.largest ?? 0, largest),
+      steps.map((step, index) => ({
+        // Every memory judged, wherever its page ended: what every
+        // version says stays, what only its own said is out.
+        kept: step.kept === ((sizes[index] ?? 0) * 2) / 3,
+        gone: step.gone,
+        // No statement reads more as the history grows: about a page at
+        // most (a page's rows, and the judgments' seek of each).
+        flat: flat(first?.largest ?? 0, step.largest),
+        page: step.largest <= 2 * recheckPage,
       }))
     ).toStrictEqual(
-      sizes.map(() => ({ all: true, pages: true, page: true, flat: true }))
+      sizes.map(() => ({ kept: true, gone: 0, flat: true, page: true }))
     );
     // 9,000 memories over 60 versions, a hundred an add, take their time.
   }, 120_000);

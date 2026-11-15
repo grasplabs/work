@@ -101,27 +101,39 @@ export const retiredSql = (alias: string, at: string): string =>
   `(${alias}.retired_at IS NOT NULL AND ${alias}.retired_at <= ${at})`;
 
 /**
- * Whether a re-check (recheck.ts) judged, by the moment `at` (an
- * expression; any time when none), that its source's current version no
- * longer holds the quote of the memory `alias`: a judgment of a version
- * counts only while that version is current, and not under erasure. So
- * a version that says the quote again ends it, and a judgment of a
- * version a newer one replaced counts for no one, as in a store that
- * never held that version. Who it counts for is no one but those who may
- * read that version: it is the source's current version, and a memory
- * resting on a version is visible only to readers of its source's
- * current version (`visibleSql`), so every statement that asks this of a
- * memory it shows has checked it already. Out, a memory is read as a
- * retired one is (`droppedSql`), its writer's `retired_at` untouched.
+ * When a re-check (recheck.ts) judged that its source no longer holds the
+ * quote of the memory `alias`, as a statement of one row or none: the
+ * judgment of version V counts while V is the latest version of its
+ * source whose re-check finished (`memory_rechecked`), at or before its
+ * current one, and only for a reader who may read V (`versionVisibleSql`),
+ * judged by the moment `at` (an expression; any time when none). So a
+ * newer version's finished re-check replaces it for everyone, one that
+ * says the quote again bringing the memory back, and a reader who may not
+ * read V is answered as by a store that never held it. The one fragment
+ * every read of it uses: `outSql`, `endedAtSql`.
  */
-export const outSql = (alias: string, at?: string): string => `EXISTS (
-    SELECT 1 FROM memory_rechecks AS judged
-    JOIN current_versions ON current_versions.source = judged.source
-    JOIN source_versions AS judging ON judging.row = current_versions.version_row
-    WHERE judged.memory = ${alias}.row AND judging.version = judged.version
-      ${at === undefined ? "" : `AND judged.at <= ${at}`}
-      AND judging.row NOT IN (SELECT version_row FROM erasing_versions)
-  )`;
+const judgedAtSql = (alias: string, at?: string): string => `
+  SELECT judged.at AS at FROM memory_rechecks AS judged
+  WHERE judged.memory = ${alias}.row
+    AND judged.version = (
+      SELECT max(finished.through) FROM memory_rechecked AS finished
+      WHERE finished.source = judged.source
+    )
+    ${at === undefined ? "" : `AND judged.at <= ${at}`}
+    AND judged.version <= (
+      SELECT latest.version FROM current_versions
+      JOIN source_versions AS latest ON latest.row = current_versions.version_row
+      WHERE current_versions.source = judged.source
+    )
+    AND ${versionVisibleSql("judged.source", "judged.version")}`;
+
+/**
+ * Whether the memory `alias` is out of its source (`judgedAtSql`) for the
+ * reader by the moment `at`: read then as a retired one is (`droppedSql`),
+ * its writer's `retired_at` untouched.
+ */
+export const outSql = (alias: string, at?: string): string =>
+  `EXISTS (${judgedAtSql(alias, at)})`;
 
 /**
  * Whether the memory `alias` gives nothing but history by the moment
@@ -213,13 +225,7 @@ const extractedSql = (alias: string): string => `
  */
 export const endedAtSql = `max(m.learned_at, (SELECT min(at) FROM (
   SELECT m.retired_at AS at WHERE m.retired_at IS NOT NULL AND m.retired_at <= ?4
-  UNION ALL
-  SELECT judged.at AS at FROM memory_rechecks AS judged
-  JOIN current_versions ON current_versions.source = judged.source
-  JOIN source_versions AS judging ON judging.row = current_versions.version_row
-  WHERE judged.memory = m.row AND judging.version = judged.version
-    AND judged.at <= ?4
-    AND judging.row NOT IN (SELECT version_row FROM erasing_versions)
+  UNION ALL${judgedAtSql("m", "?4")}
   UNION ALL${newerSql("m", "?4", validSql, true)}
   UNION ALL${extractedSql("m")}
 )))`;
@@ -712,20 +718,22 @@ const heldOfRow = ({ source, version, id }: MemoryRow): HeldMemory => ({
 });
 
 /**
- * `?1` the confirmations' rows (JSON), `?2` the moment read at: the
- * memories each was made over, but those their writer retired by then,
- * which an answer rests on no more (a forgotten memory gives nothing to a
- * read but history, `retiredSql`). Whether the confirmation counts still
+ * `?1` the confirmations' rows (JSON), `?2` and `?3` the reader
+ * (`readableSql`), `?4` the moment read at: the memories each was made
+ * over, but those their writer retired by then or that are out of their
+ * source for the reader, which an answer rests on no more (a forgotten
+ * memory gives nothing to a read but history, `droppedSql`). Whether the confirmation counts still
  * turns on whether the reader may read each (`confirmationSql`), so a
  * reader who loses access to a retired one later keeps an earlier read
  * that says it was confirmed (Known on #2261).
  */
 const overruledSql = `
+WITH ${readableSql}
 SELECT DISTINCT m.source AS source, m.version AS version, m.id AS memory
 FROM json_each(?1) AS asked
 CROSS JOIN memory_confirmed_over AS over ON over.confirmation = asked.value
 CROSS JOIN memories AS m ON m.row = over.memory
-WHERE NOT ${droppedSql("m", "?2")}`;
+WHERE NOT ${droppedSql("m", "?4")}`;
 
 /**
  * `readMemories`, with every memory what the page says rests on
@@ -779,7 +787,13 @@ export const readMemoriesHeld = (
             source: string | null;
             version: number | null;
             memory: string;
-          }>(overruledSql, JSON.stringify(confirmations), learned)
+          }>(
+            overruledSql,
+            JSON.stringify(confirmations),
+            reader.person,
+            JSON.stringify(reader.groups),
+            learned
+          )
           .toArray()
           .map(({ source, version, memory }) => ({ source, version, memory }));
   return {

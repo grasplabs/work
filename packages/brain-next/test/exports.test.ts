@@ -2184,6 +2184,72 @@ describe("exports and restores", () => {
       }).toStrictEqual({ after: before, out: [true] });
     });
 
+    it("puts a re-check still waiting as the export starts on the queue again when restoring, so a memory it brings back isn't kept out (GRA-1752)", async () => {
+      await putBack(shared(), emptyShared);
+      const group = `team:${unique()}`;
+      const source = `test:${unique()}`;
+      await add(shared(), source, "Acme renews in March", team(group));
+      const added = await shared().addMemories({
+        change: "drawn",
+        access: team(group),
+        entities: [customer()],
+        memories: [
+          renewal("March", {
+            kind: "source",
+            source,
+            version: 1,
+            quote: "renews in March",
+          }),
+        ],
+      });
+      // Out against the second version; the third says it again, its
+      // re-check still waiting as the export starts.
+      await add(shared(), source, "Acme pays late", team(group), "2");
+      await tick(shared());
+      await add(
+        shared(),
+        source,
+        "Acme renews in March again",
+        team(group),
+        "3"
+      );
+      const reader = readerOf(`person:${unique()}`, [group]);
+      const readOf = async () => {
+        const page = await shared().readMemories({
+          entity: added.entities.c ?? "",
+          reader,
+          history: true,
+        });
+        return {
+          ended: page.memories.map(({ endedAt }) => endedAt !== null),
+          readable: await shared().readableMemories({
+            memories: added.memories,
+            reader,
+          }),
+        };
+      };
+      const waiting = await readOf();
+
+      await exportedAndRestored();
+      // The restored store's queue, past the wait of an item that ran
+      // while the restore did.
+      for (let ticks = 1; ticks <= 3; ticks += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+        await shared().work({
+          ask: quietAsk,
+          at: new Date(Date.now() + ticks * 10 * 60_000),
+          embedders: noEmbedders,
+          handOvers: noHandOvers,
+          contextTokens: null,
+        });
+      }
+
+      expect({ waiting, after: await readOf() }).toStrictEqual({
+        waiting: { ended: [true], readable: [] },
+        after: { ended: [false], readable: added.memories },
+      });
+    });
+
     it("leaves out a memory drawn from a source erased after the export was made: not in the store, and in no file left in the bucket (threats 2, 3)", async () => {
       await putBack(shared(), emptyShared);
       const group = `team:${unique()}`;
