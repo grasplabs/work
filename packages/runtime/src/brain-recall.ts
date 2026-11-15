@@ -90,7 +90,9 @@ export interface BrainSkillText {
 
 // Entities, beside recall: an App's action (`ctx.brain.entities`) and a
 // workflow's step (`ctx.brain.<alias>.entities`) read the entities and
-// memories everyone in the company may read.
+// memories everyone in the company may read; an App's action reads what
+// its own code remembered too (`ctx.brain.remember`), for someone who
+// uses the App.
 
 /** What kind of thing an entity is. */
 export type BrainEntityKind =
@@ -156,6 +158,29 @@ export interface BrainCard {
   }[];
   readonly notes: readonly BrainMemory[];
   readonly next: string | null;
+}
+
+/**
+ * A fact an App remembers (`ctx.brain.remember`), in its own name: what
+ * it says (`statement`, at most 1,000 characters), the attribute it is
+ * filed under and its value (at most 500 characters), and the entity it
+ * is about. Pass an entity's `id` (and its `kind`) to file it on an
+ * entity the App read from the Brain. Without an `id`, give its `kind`,
+ * `names` and exact `identifiers`: an identifier links it only to an
+ * entity this App's own memories made, never to one someone else's
+ * memories name, and otherwise a new entity is made. A person's `preference` or `instruction` is only ever their own
+ * word, never an App's.
+ */
+export interface BrainRemember {
+  readonly about: {
+    readonly kind: BrainEntityKind;
+    readonly id?: string;
+    readonly names?: readonly string[];
+    readonly identifiers?: readonly BrainIdentifier[];
+  };
+  readonly attribute?: string;
+  readonly value?: string;
+  readonly statement: string;
 }
 
 /** Entities to find (`entities.find`): of a kind, by a whole name, or by an exact identifier. */
