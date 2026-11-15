@@ -9,12 +9,14 @@ import { brainOf } from "./ports.ts";
 // in the Brain's bucket, written before nothing could export any more. Each
 // holds every version of the company's documents, so they are deleted as
 // they always were (`expireExports`, packages/brain's exports.ts): a
-// complete one once its download window is over, and at once once a purge
-// ran after it began, as it may hold what that purge erased. Nothing writes
-// an export any more, so one left running is stopped here, and its files
-// deleted with the rest. A delete R2 refuses throws: the clock records the
-// failure and the next run tries again. The cutover removes this with the
-// bucket's `exports/` prefix.
+// complete one once its download window is over, and one a purge ran
+// after it began, as it may hold what that purge erased, at the clock's
+// next minute after that purge: the purge, a person's erasure's included,
+// doesn't wait for it. Nothing writes an export any more, so one left
+// running is stopped here, and its files deleted with the rest. A delete
+// R2 refuses throws: the clock records the failure and tries again every
+// minute until it is done. The cutover removes this with the bucket's
+// `exports/` prefix.
 
 /** Why an export left running when exports stopped was failed. */
 const stopped = "knowledge.export_stopped";

@@ -1,5 +1,5 @@
 import type { ErasedFiles, OnErase } from "@grasp-os/brain/purge";
-import { and, asc, count, eq, inArray, or, sql } from "drizzle-orm";
+import { and, asc, count, eq, inArray, lt, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -9,20 +9,33 @@ import { inList } from "../db/d1.ts";
 // What is left of the files once uploaded into Knowledge: the uploads a
 // Knowledge purge reaches (`uploadErasure`), which it forgets, deleting
 // their originals from R2, and those left unended, which the clock forgets
-// (`sweepLeftUploads`). Nothing uploads into Knowledge any more, so
-// nothing is still storing an original or saving an upload's text: the
-// purge forgets an upload whatever state it was left in. An original's
-// delete is recorded (`upload_cleanups`) in the batch that forgets its
-// upload, then done before the purge's step ends: every one due, page
-// after page, and an R2 refusal fails the step, so the purge is run again
-// and its rerun deletes what is left. Nothing reads as erased before it is.
+// (`sweepLeftUploads`). Nothing uploads into Knowledge any more: the purge
+// forgets an upload whatever state it was left in. An original's delete is
+// recorded (`upload_cleanups`) in the batch that forgets its upload, then
+// done, every one due, page after page; an R2 refusal fails the purge's
+// step, or the clock's run, and its rerun deletes what is left. Nothing
+// reads as erased before it is.
+//
+// Only an upload unchanged for `storingMs` counts as left behind, and only
+// an original recorded at least that long ago is due: an upload the
+// release before this one was still taking as it was replaced may yet
+// store its original, and deleting its key first would leave that object
+// with no row or record to delete it by. One recorded sooner is deleted by
+// the clock's next run past it.
+
+/**
+ * How long after an upload is recorded its original may still be being
+ * stored, by a release still taking uploads: far more than storing 10 MB
+ * takes.
+ */
+const storingMs = 10 * 60_000;
 
 /** Originals deleted at once: R2 deletes up to 1,000 keys in one call. */
 export const cleanupsPerPage = 100;
 
 /**
- * Deletes every original recorded for deleting whose upload is gone or
- * failed, a page at a time, clearing each page's records once R2 has
+ * Deletes every original recorded for deleting at least `storingMs` ago
+ * whose upload is gone or failed, a page at a time, clearing each page's records once R2 has
  * deleted them. Throws when R2 or the database refuses: the records stay,
  * for the purge run again.
  */
@@ -34,7 +47,10 @@ const cleanUpOriginals = async (env: Env): Promise<void> => {
       .select({ key: uploadCleanups.key })
       .from(uploadCleanups)
       .where(
-        sql`NOT EXISTS (SELECT 1 FROM ${uploads} WHERE ${uploads.id} = ${uploadCleanups.uploadId} AND ${uploads.status} != 'failed')`
+        and(
+          lt(uploadCleanups.createdAt, new Date(Date.now() - storingMs)),
+          sql`NOT EXISTS (SELECT 1 FROM ${uploads} WHERE ${uploads.id} = ${uploadCleanups.uploadId} AND ${uploads.status} != 'failed')`
+        )
       )
       .orderBy(asc(uploadCleanups.key))
       .limit(cleanupsPerPage);
@@ -88,14 +104,18 @@ const forgetUploads = async (env: Env, scope: ErasedFiles): Promise<void> => {
 
 /**
  * Every minute (the clock), until the cutover removes Knowledge: forgets
- * the uploads that never ended (nothing finishes one any more), recording
+ * the uploads that never ended and haven't changed for `storingMs`
+ * (nothing finishes one any more), recording
  * their originals for deleting, then deletes every original due, those a
  * failure recorded before uploads stopped among them. Throws while R2 or
  * the database refuses: the clock records it and tries again.
  */
 export const sweepLeftUploads = async (env: Env): Promise<void> => {
   const db = drizzle(env.DB);
-  const unended = inArray(uploads.status, ["pending", "extracting", "saving"]);
+  const unended = and(
+    inArray(uploads.status, ["pending", "extracting", "saving"]),
+    lt(uploads.updatedAt, new Date(Date.now() - storingMs))
+  );
   await db.batch([
     db
       .insert(uploadCleanups)

@@ -93,8 +93,9 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   // (src/knowledge/uploads.ts). Nothing uploads into Knowledge.
   { name: "knowledge.uploads", period: "minute", run: sweepLeftUploads },
   // Today's Brain's exports written before nothing could export any more:
-  // their files deleted once due, or at once once a purge ran after them
-  // (src/knowledge/export-expiry.ts). No export is written.
+  // their files deleted once due, and those a purge ran after at the next
+  // minute, retried while R2 refuses (src/knowledge/export-expiry.ts). No
+  // export is written.
   { name: "brain.exports", period: "minute", run: expireBrainExports },
   // Knowledge payloads no version refers to, past their grace: what a
   // Knowledge save that failed staged (packages/brain's payloads.ts). A

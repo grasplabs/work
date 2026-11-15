@@ -36,11 +36,13 @@ const uploadKept = async (uploadId: string): Promise<boolean> =>
     .bind(uploadId)
     .first()) !== null;
 
-/** How an upload into Knowledge was left: its state, and where it was saved. */
+/** How an upload into Knowledge was left: its state, where it was saved, and when it last changed. */
 interface LeftAs {
   path: string;
   status: "pending" | "extracting" | "saving" | "ready" | "failed";
   documentId: string | null;
+  /** When it was recorded and last changed: an hour ago unless given. */
+  at?: number;
 }
 
 /**
@@ -50,12 +52,11 @@ interface LeftAs {
 const leftUpload = async (
   person: { userId: string },
   collectionId: string,
-  { path, status, documentId }: LeftAs
+  { path, status, documentId, at = Date.now() - 60 * 60_000 }: LeftAs
 ): Promise<string> => {
   const uploadId = crypto.randomUUID();
   const bytes = new TextEncoder().encode(`The file ${path}`);
   await env.FILES.put(originalKey(collectionId, uploadId), bytes);
-  const at = Date.now() - 60 * 60_000;
   await env.DB.prepare(
     `INSERT INTO uploads (id, collection_id, path, media_type, bytes, sha256,
        uploaded_by, actor, status, document_id, version, created_at, updated_at)
@@ -409,16 +410,29 @@ describe("a Knowledge purge of documents saved from uploads", () => {
 });
 
 describe("uploads into Knowledge left behind", () => {
-  it("are forgotten by the clock, their originals deleted, a failure's recorded cleanup too, and tried again while R2 refuses", async () => {
+  it("are forgotten by the clock once unchanged for a while, their originals deleted, a failure's recorded cleanup too, and tried again while R2 refuses", async () => {
     const admin = await signedInApi(idp, "admin");
     const { id: collectionId } = await admin.api.knowledge.createCollection({
       name: `Files ${unique()}`,
       access: "everyone",
     });
-    const pending = await leftUpload(admin, collectionId, {
-      path: "Pending.xlsx",
+    const left = await Promise.all(
+      (["pending", "extracting", "saving"] as const).map(
+        async (status) =>
+          await leftUpload(admin, collectionId, {
+            path: `${status}.xlsx`,
+            status,
+            documentId: null,
+          })
+      )
+    );
+    // Taken a moment ago by the release before, which may yet store its
+    // original: left alone.
+    const fresh = await leftUpload(admin, collectionId, {
+      path: "Fresh.xlsx",
       status: "pending",
       documentId: null,
+      at: Date.now(),
     });
     // A failure that recorded its original's delete, cut short before R2
     // deleted it.
@@ -432,6 +446,7 @@ describe("uploads into Knowledge left behind", () => {
     )
       .bind(originalKey(collectionId, failed), failed, Date.now() - 60 * 60_000)
       .run();
+    const swept = [...left, failed];
     const refusing = new Proxy(env.FILES, {
       get: (target, property) => {
         if (property === "delete") {
@@ -447,13 +462,19 @@ describe("uploads into Knowledge left behind", () => {
       },
     });
     await runMinuteTasks({ FILES: refusing });
-    const whileRefused = await storedOf(collectionId, [pending, failed]);
+    const whileRefused = await storedOf(collectionId, swept);
     await runMinuteTasks();
 
     expect({
       whileRefused,
-      stored: await storedOf(collectionId, [pending, failed]),
-      kept: await uploadKept(pending),
-    }).toStrictEqual({ whileRefused: 2, stored: 0, kept: false });
+      stored: await storedOf(collectionId, swept),
+      kept: await Promise.all(left.map(uploadKept)),
+      fresh: [await uploadKept(fresh), await storedOf(collectionId, [fresh])],
+    }).toStrictEqual({
+      whileRefused: 4,
+      stored: 0,
+      kept: [false, false, false],
+      fresh: [true, 1],
+    });
   });
 });
