@@ -995,6 +995,50 @@ describe("re-checking memories when their source changes", () => {
     }).toStrictEqual({ rechecksBefore: 2, erased: [], later: [] });
   });
 
+  it("re-checks a newer version of a source that has no current version left, its last one erased alone", async () => {
+    const group = unique("g");
+    const reader = readerOf(unique("p"), group);
+    const name = unique("Prestige");
+    const source = unique("doc");
+    const line = `${name} pays by card`;
+    const ref = await addVersion(`${line}.`, group, source);
+    const added = await add(
+      audience(group),
+      [customer(name)],
+      [fact(`${line}.`, { kind: "source", ...ref, quote: line })]
+    );
+    const second = await addVersion(`Without. ${unique("x")}`, group, source);
+    // The second version erased alone, the current one: an erasure that
+    // lists it, which the next tick carries out, leaving the source with
+    // no current version.
+    await runInDurableObject(shared(), (_instance, state) => {
+      const { sql } = state.storage;
+      const key = `held-${crypto.randomUUID()}`;
+      sql.exec(
+        `INSERT INTO erasures (key, kind, subject, reason, erased_at, confirmed)
+        VALUES (?, 'person', ?, 'withdrawn', ?, 1)`,
+        key,
+        crypto.randomUUID(),
+        Date.now()
+      );
+      sql.exec(
+        `INSERT INTO erasing_versions (version_row, erasure)
+        SELECT row, ? FROM source_versions WHERE source = ? AND version = ?`,
+        key,
+        source,
+        second.version
+      );
+      sql.exec("DELETE FROM current_versions WHERE source = ?", source);
+    });
+    await tick();
+    await addVersion(`Still without. ${unique("x")}`, group, source);
+    await tick();
+
+    await expect(
+      shared().readableMemories({ memories: added.memories, reader })
+    ).resolves.toStrictEqual([]);
+  });
+
   it("brings a memory back once a newer version says its quote again, and puts it out again when the next one drops it", async () => {
     const group = unique("g");
     const reader = readerOf(unique("p"), group);

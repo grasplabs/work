@@ -385,10 +385,11 @@ const record = (
       set: { versionRow: row },
     })
     .run();
+  // What was drawn from an earlier version is checked against this one,
+  // whether or not a version was current before it (recheck.ts): a memory
+  // whose quote it no longer holds is out.
+  enqueueRecheck(storage, added.source, version);
   if (replaced !== undefined) {
-    // What was drawn from an earlier version is checked against this one:
-    // a memory whose quote it no longer holds is retired (recheck.ts).
-    enqueueRecheck(storage, added.source, version);
     // Their full vectors too, once no current chunk holds their text: the
     // sweep checks and deletes (files.ts).
     releaseVectors(

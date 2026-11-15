@@ -354,7 +354,6 @@ export const keepMissingSubjects = async (
  * and a set of readers (recheck.ts `dropRechecksOf`). Answers the keys of
  * the work it took, for what is under way on them to stop; none when the
  * current version was not among them.
-
  */
 const hideVersions = (
   sql: SqlStorage,
