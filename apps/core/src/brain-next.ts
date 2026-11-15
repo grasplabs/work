@@ -1684,6 +1684,24 @@ export const erasePerson = async (
 };
 
 /**
+ * Erases every memory `writer` wrote in the shared store, learned up to
+ * now (the Brain's `eraseWriter`): for an App whose data is reset or whose
+ * store is deleted, `app:<id>`, as core names its code's writer. Hidden
+ * from every read once it returns, recorded in the Brain's ledger so a
+ * restore can't bring them back; what the writer adds afterwards is kept.
+ * Answers when it was recorded and how many memories it covered, the same
+ * on every repeat of `change` (one per store deletion, one per data reset
+ * request), which erases nothing more: what one audit event of it says. A
+ * call that throws must be repeated, with the same change, until it
+ * answers.
+ */
+export const eraseWriter = async (
+  env: BrainEnv,
+  erased: { writer: string; reason: ErasureReason; change: string }
+): Promise<Awaited<ReturnType<Brain["eraseWriter"]>>> =>
+  await brain(env).eraseWriter(erased);
+
+/**
  * Whether a person's erasure asked for at `askedAt` has had their own store
  * answer that it is still deleting for longer than the Brain allows
  * (`stillDeletingAtMostMs`: two graces and an item's time): then it is
@@ -4045,6 +4063,9 @@ export const forgetAs = async (
       memory: id,
       reader,
       writer: reader.person,
+      // Their own store holds only their own word, so one forget of a
+      // memory is theirs: a retry is the same change.
+      change: `forget:${id}`,
     });
     return retired === null ? "nothing" : "done";
   } catch (error) {
@@ -4529,6 +4550,7 @@ export const correctAs = async (
         memory: read.id,
         reader,
         writer: reader.person,
+        change: `correct:${change}`,
       });
     }
   } catch (error) {

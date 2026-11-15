@@ -731,6 +731,7 @@ describe("entities, as a workflow reads them", setUpTime, () => {
       memory: inHerWord.memory,
       reader: { person: ada.userId, groups: ["company"] },
       writer: ada.userId,
+      change: "retire",
     });
 
     expect({

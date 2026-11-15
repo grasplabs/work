@@ -12,7 +12,13 @@ import type {
   Identifier,
   Reader,
 } from "./contract.ts";
-import { readMoment, restingOn, retiredSql, visibleSql } from "./memories.ts";
+import {
+  readMoment,
+  restingOn,
+  retiredSql,
+  unerasedSql,
+  visibleSql,
+} from "./memories.ts";
 import type { HeldMemory } from "./memories.ts";
 import { readableSql } from "./reader-sets.ts";
 import { foldForSearch } from "./words.ts";
@@ -71,7 +77,9 @@ export const mentionedSql = (entity: string, learnedBy?: string): string => {
  * Whether the memory `alias` is read by exactly the set of readers whose
  * key (`reader_sets.key`) is `?3`:
  * its own set is it, and, resting on a version, so are the version's and
- * its source's current version's, the version not hidden by an erasure.
+ * its source's current version's, the version not hidden by an erasure;
+ * and no erasure of its writer since it was learned (memories.ts
+ * `unerasedSql`), so nothing links to an entity by what an erasure took.
  * So everyone who may read an add with those readers may read it too.
  *
  * A memory its writer retired counts here, unlike for
@@ -85,6 +93,7 @@ export const mentionedSql = (entity: string, learnedBy?: string): string => {
  */
 export const coveredSql = (alias: string): string => `(
   ${alias}.readers = ?3
+  AND ${unerasedSql(alias)}
   AND (${alias}.source IS NULL OR EXISTS (
     SELECT 1 FROM source_versions AS based
     JOIN current_versions ON current_versions.source = based.source

@@ -190,7 +190,6 @@ export const DataChanges = ({
 
 const objectNames = {
   connection: msg`A connection`,
-  collection: msg`A collection`,
   workflow: msg`A workflow`,
   app: msg`Another App`,
   platform: msg`Grasp itself`,

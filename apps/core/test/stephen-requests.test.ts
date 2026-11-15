@@ -323,7 +323,7 @@ describe("a request a card's press belongs to", setUpTime, () => {
       // The answer is in and its card is up; the sorting is still running
       // when the person confirms, and the change fails.
       // oxlint-disable-next-line no-await-in-loop -- in the order a turn runs
-      await heardRequest(env, id, { calls, cited: false });
+      await heardRequest(env, id, { calls });
       // oxlint-disable-next-line no-await-in-loop -- in the order a turn runs
       await keepCardsOf(env, id, [`write:${id}`]);
       // oxlint-disable-next-line no-await-in-loop -- in the order a turn runs
@@ -337,7 +337,6 @@ describe("a request a card's press belongs to", setUpTime, () => {
         chatId: "chat-1",
         ended: "answered",
         calls,
-        cited: false,
         sorted: { topicId: null, questionId: null, answered: true },
       });
     }

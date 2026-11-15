@@ -343,6 +343,7 @@ const retired: Change = async ({ memory, group }) => {
     memory,
     reader: { person: writer, groups: [group] },
     writer,
+    change: "retire",
   });
 };
 
@@ -863,6 +864,7 @@ describe("a chat's code reading the Brain's entities", setUpTime, () => {
           memory: memory ?? "",
           reader: { person: by, groups: ["company"] },
           writer: by,
+          change: "retire",
         });
       };
       await retire(firstWriter, first.memories[0]);
@@ -986,6 +988,7 @@ describe("a chat's code reading the Brain's entities", setUpTime, () => {
       memory: wrong.memories[0] ?? "",
       reader: { person: wrongWriter, groups: ["company"] },
       writer: wrongWriter,
+      change: "retire",
     });
     const turn = await chat.ask(word()).then(() => "answered", String);
     const [first, fresh] = await codeResults(chat.stub, chat.chat.id);

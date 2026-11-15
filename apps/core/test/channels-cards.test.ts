@@ -7,10 +7,10 @@ import { z } from "zod";
 
 import {
   answerCard,
+  ratingCard,
   cancelAction,
   confirmAction,
   heldWritesCard,
-  maxSources,
   maxValuesPerWrite,
   maxWritesOnCard,
   pressOf,
@@ -254,8 +254,7 @@ const everyCard = channelLocales.flatMap((locale) => [
     name: `answer (${locale})`,
     card: answerCard({
       locale,
-      text: "You have a call with Jan at 10:00. [Source 1]",
-      sources: [{ title: "Calls.docx", url: `${grasp}/knowledge/calls` }],
+      text: "You have a call with Jan at 10:00.",
       chatUrl: `${grasp}/chat/1`,
     }),
   },
@@ -264,12 +263,12 @@ const everyCard = channelLocales.flatMap((locale) => [
     card: answerCard({
       locale,
       text: heavy(200_000),
-      sources: Array.from({ length: maxSources + 5 }, (_, index) => ({
-        title: heavy(5000),
-        url: `${grasp}/knowledge/${index}/${"a".repeat(2000)}`,
-      })),
       chatUrl: `${grasp}/chat/${"a".repeat(2000)}`,
     }),
+  },
+  {
+    name: `rating (${locale})`,
+    card: ratingCard({ locale, rate: crypto.randomUUID() }),
   },
   {
     name: `one held write (${locale})`,
@@ -412,34 +411,12 @@ describe("Stephen's cards in Teams", () => {
     });
   });
 
-  it("links an answer's sources only to https addresses, numbered", () => {
-    const { texts } = inTeams(
-      answerCard({
-        locale: "fr",
-        text: "Voici la réponse.",
-        sources: [
-          { title: "Calls [draft]", url: `${grasp}/knowledge/calls` },
-          { title: "Trap", url: ["javascript", "alert(1)"].join(":") },
-        ],
-        chatUrl: `${grasp}/chat/1`,
-      })
-    );
-
-    expect(texts).toStrictEqual([
-      "Voici la réponse.",
-      "Sources",
-      `[1. Calls draft](${grasp}/knowledge/calls)`,
-      "2. Trap",
-    ]);
-  });
-
   it("cuts an answer too long for Teams and links to the whole of it in Grasp", () => {
     const text = "Ein langer Satz über die Rechnungen. ".repeat(2000);
     const { texts, actions } = inTeams(
       answerCard({
         locale: "de",
         text,
-        sources: [],
         chatUrl: `${grasp}/chat/1`,
       })
     );
@@ -454,25 +431,6 @@ describe("Stephen's cards in Teams", () => {
       says: true,
       links: [{ title: "In Grasp öffnen", url: `${grasp}/chat/1` }],
     });
-  });
-
-  it("links to the answer in Grasp when it lists only some of its sources", () => {
-    const { texts, actions } = inTeams(
-      answerCard({
-        locale: "en",
-        text: "Here is the answer.",
-        sources: Array.from({ length: maxSources + 1 }, (_, index) => ({
-          title: `Doc ${index + 1}`,
-          url: `${grasp}/knowledge/${index}`,
-        })),
-        chatUrl: `${grasp}/chat/1`,
-      })
-    );
-
-    expect({
-      listed: texts.filter((text) => text.startsWith("[")).length,
-      links: actions.map(({ url }) => url),
-    }).toStrictEqual({ listed: maxSources, links: [`${grasp}/chat/1`] });
   });
 
   it("presses only what a card of held writes carries", () => {
