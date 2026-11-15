@@ -12,6 +12,7 @@ import {
   isSourceText,
   erasedSource,
   removedSource,
+  removalsMax,
   changeReused,
   listPageMax,
   erasureReasons,
@@ -398,6 +399,7 @@ const newSourceSchema = z.strictObject({
 
 /** The most characters of a question `recallAs` takes, as the Brain's contract says. */
 export { questionMaxLength as recallQuestionMaxLength } from "@grasp-os/brain-next/contract";
+export { removalsMax } from "@grasp-os/brain-next/contract";
 
 /** A question as the Brain takes one (`recallRequestSchema`). */
 const questionSchema = wellFormedString().max(questionMaxLength);
@@ -1620,7 +1622,7 @@ const sourceRemovalSchema = z.strictObject({
 
 /**
  * Takes `source` out of use for good and keeps its history (the Brain's
- * `removeSource`): from when it returns, nothing of it is found, listed
+ * `removeSources`): from when it returns, nothing of it is found, listed
  * or read by anyone, what was drawn from it included, and nothing new is
  * drawn from it; its key is closed, so an add to it is refused
  * (`brain.source_removed`), and nothing puts it back in use. An export
@@ -1636,7 +1638,27 @@ export const removeSource = async (
   const { source, readers } = checked(sourceRemovalSchema, removed);
   const store =
     readers.kind === "owner" ? ownBrain(env, readers.personId) : brain(env);
-  await store.removeSource({ source: sourceKeyOf(source) });
+  await store.removeSources({ sources: [sourceKeyOf(source)] });
+};
+
+const ownRemovalSchema = z.strictObject({
+  personId: idSchema,
+  sources: z.array(sourceRefSchema).min(1).max(removalsMax),
+});
+
+/**
+ * Takes `sources`, each one `personId`'s alone, out of use in their own
+ * store, as `removeSource` takes one, all in one call and one transaction
+ * of the store (up to `removalsMax`). Safe to repeat.
+ */
+export const removeOwnSources = async (
+  env: BrainEnv,
+  removed: { personId: string; sources: readonly SourceRef[] }
+): Promise<void> => {
+  const { personId, sources } = checked(ownRemovalSchema, removed);
+  await ownBrain(env, personId).removeSources({
+    sources: sources.map((source) => sourceKeyOf(source)),
+  });
 };
 
 const ownGroupErasureSchema = z.strictObject({

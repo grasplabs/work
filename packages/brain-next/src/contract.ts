@@ -30,7 +30,7 @@ export type KeyState = "free" | "held" | "erased";
 export const erasedSource = "The Brain refused it: what this adds was erased";
 
 /**
- * What an add to a removed source says (`Brain.removeSource`): it is out
+ * What an add to a removed source says (`Brain.removeSources`): it is out
  * of use for good, its key closed while its history is kept, and the add
  * is never tried again. Said only to the producer that adds it, which
  * compares it whole.
@@ -1242,7 +1242,7 @@ export type HandOverRequest = z.infer<typeof handOverRequestSchema>;
 /**
  * Why a hand-over was refused for good: what it adds was erased (its key
  * is closed, or its one reader's erasure began), or removed (its key is
- * closed, its history kept: `Brain.removeSource`), the host's answer can't
+ * closed, its history kept: `Brain.removeSources`), the host's answer can't
  * be added (no readers, a text that isn't one), or its text is past a
  * source's bound with nothing smaller to keep.
  */
@@ -1350,8 +1350,18 @@ export const sourceErasureSchema = z.strictObject({
 });
 export type SourceErasure = z.infer<typeof sourceErasureSchema>;
 
-/** A source to take out of use, keeping its history (`Brain.removeSource`). */
-export const sourceRemovalSchema = z.strictObject({ source: sourceIdSchema });
+/**
+ * The most sources one removal takes (`Brain.removeSources`): its keys
+ * are removed in one transaction, each a few indexed statements, so one
+ * call's work stays small whatever a caller has to remove; a caller with
+ * more sends a page after the other.
+ */
+export const removalsMax = 100;
+
+/** Sources to take out of use, keeping their history (`Brain.removeSources`). */
+export const sourceRemovalSchema = z.strictObject({
+  sources: z.array(sourceIdSchema).min(1).max(removalsMax),
+});
 export type SourceRemoval = z.infer<typeof sourceRemovalSchema>;
 
 /**
@@ -2709,7 +2719,7 @@ export interface Brain {
   /**
    * What this store has of the key `source`, whoever may read it: `erased`
    * when an erasure closed it, `held` when a version of it is kept
-   * (current or history) or it was removed (`removeSource`), `free` when
+   * (current or history) or it was removed (`removeSources`), `free` when
    * it was never given it. For the host
    * only, before it keeps a source in another store (one person's own):
    * a key lives in one store. A person's own store erased whole holds
@@ -2842,18 +2852,19 @@ export interface Brain {
    */
   eraseSource: (request: SourceErasure) => Promise<SourceErased | undefined>;
   /**
-   * Takes a source out of use for good and keeps its history (removal.ts):
-   * from when it returns, nothing of it is found, listed or read by
-   * anyone, history and memories drawn from it included, and nothing new
-   * is drawn from it. Its versions, memories and files stay, and nothing
-   * is written to the ledger. Its key is closed: an add to it, a retry of
-   * an earlier change included, is refused (`removedSource`), and nothing
-   * puts it back in use. An export holds it removed, and a restore brings
-   * it back so. `eraseSource` still erases it for good. Covers the key's
+   * Takes sources out of use for good and keeps their history (removal.ts),
+   * up to `removalsMax` at once, all in one transaction: from when it
+   * returns, nothing of them is found, listed or read by anyone, history
+   * and memories drawn from them included, and nothing new is drawn from
+   * them. Their versions, memories and files stay, and nothing is written
+   * to the ledger. Each key is closed: an add to it, a retry of an earlier
+   * change included, is refused (`removedSource`), and nothing puts it
+   * back in use. An export holds them removed, and a restore brings them
+   * back so. `eraseSource` still erases one for good. Covers each key's
    * own source alone, never a group's members. Safe to repeat, and
    * answers alike whatever there was.
    */
-  removeSource: (request: SourceRemoval) => Promise<void>;
+  removeSources: (request: SourceRemoval) => Promise<void>;
   /**
    * Erases `person`'s own store whole, the one place what only they may
    * read is kept: everything it holds, and from then on every call is

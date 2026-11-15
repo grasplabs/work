@@ -586,7 +586,7 @@ describe("exports and restores", () => {
       // marked removed, as its history.
       await add(shared(), removedKey, "kept words", team(group), "1");
       await add(shared(), removedKey, "removed words", team(group), "2");
-      await shared().removeSource({ source: removedKey });
+      await shared().removeSources({ sources: [removedKey] });
       await shared().addInstructions({
         source: instructions,
         change: "1",
@@ -1294,12 +1294,12 @@ describe("exports and restores", () => {
         `test:${unique()}`,
       ];
       // Removed before its first add landed: a mark with no version.
-      await shared().removeSource({ source: before });
+      await shared().removeSources({ sources: [before] });
       // Removed with its history: a version marked removed.
       await add(shared(), after, "kept words", team(group));
-      await shared().removeSource({ source: after });
+      await shared().removeSources({ sources: [after] });
       // Removed before any add, then erased: the erasure closes it alone.
-      await shared().removeSource({ source: erased });
+      await shared().removeSources({ sources: [erased] });
       await shared().eraseSource({ source: erased, reason: "deleted" });
       const { id } = await shared().startExport("test");
       await settled(shared(), id);
@@ -1362,7 +1362,7 @@ describe("exports and restores", () => {
     it("is erased once the ledger erases a key it holds as removed before any version, its files deleted", async () => {
       await putBack(shared(), emptyShared);
       const removed = `test:${unique()}`;
-      await shared().removeSource({ source: removed });
+      await shared().removeSources({ sources: [removed] });
       const { id } = await shared().startExport("test");
       const written = await settled(shared(), id);
       await shared().eraseSource({ source: removed, reason: "deleted" });

@@ -1,4 +1,4 @@
-import { eraseOwnGroup, eraseSource, removeSource } from "./brain-next.ts";
+import { eraseOwnGroup, eraseSource, removeOwnSources } from "./brain-next.ts";
 import type { SourceReaders, SourceRef } from "./brain-next.ts";
 
 // What core hands the Brain comes from an origin core keeps (an upload, a
@@ -32,6 +32,27 @@ export const runSource = (runId: string): SourceRef => ({
   producer: "run",
   id: runId,
 });
+
+/** The most runs one call of `removeRunSources` takes. */
+export { removalsMax as runRemovalsMax } from "./brain-next.ts";
+
+/**
+ * Takes the sources of the runs `runIds` (at most `runRemovalsMax`), each
+ * one `personId`'s alone, out of use in their own store for good, their
+ * history kept, in one call (`removeOwnSources`). A run whose key holds
+ * nothing yet has it closed all the same, so a hand-over still under way
+ * for it is refused. Safe to repeat.
+ */
+export const removeRunSources = async (
+  env: Pick<Env, "BRAIN_STORE" | "DURABLE_OBJECT_JURISDICTION">,
+  personId: string,
+  runIds: readonly string[]
+): Promise<void> => {
+  await removeOwnSources(env, {
+    personId,
+    sources: runIds.map((id) => runSource(id)),
+  });
+};
 
 /** Whether `id` can stand in a chat's key: never holding "/", which parts it. */
 const isKeyPart = (id: string): boolean => id !== "" && !id.includes("/");
@@ -155,35 +176,14 @@ export const eraseCaptures = async (
 /** Why sources are erased, as the Brain's ledger records it. */
 type ErasureReason = Parameters<typeof eraseSource>[1]["reason"];
 
-/** How many calls to the Brain one caller has under way at once. */
-const callsAtOnce = 8;
-
-/**
- * Runs `call` for each of `items`, a few at a time, until one fails: then
- * throws its error once those under way with it settled, and starts none
- * after them. For calls safe to repeat, so whoever retries passes them all
- * again.
- */
-const aFewAtATime = async <T>(
-  items: readonly T[],
-  call: (item: T) => Promise<void>
-): Promise<void> => {
-  for (let at = 0; at < items.length; at += callsAtOnce) {
-    // oxlint-disable-next-line no-await-in-loop -- a few at a time
-    const settled = await Promise.allSettled(
-      items.slice(at, at + callsAtOnce).map(call)
-    );
-    const failed = settled.find((each) => each.status === "rejected");
-    if (failed !== undefined) {
-      throw failed.reason;
-    }
-  }
-};
+/** How many erasures one caller has under way at once. */
+const erasingAtOnce = 8;
 
 /**
  * Erases `sources` for `reason`, each with the readers its producer adds
  * it with (which say whose own store it may be in), a few at a time, until
- * one fails (`aFewAtATime`). Safe to repeat: a source erased before is
+ * one fails: then throws its error once those under way with it settled,
+ * and starts none after them. Safe to repeat: a source erased before is
  * erased again alike, so whoever retries passes them all again.
  */
 export const eraseSources = async (
@@ -191,28 +191,16 @@ export const eraseSources = async (
   sources: readonly { source: SourceRef; readers: SourceReaders }[],
   reason: ErasureReason
 ): Promise<void> => {
-  await aFewAtATime(sources, async ({ source, readers }) => {
-    await eraseSource(env, { source, readers, reason });
-  });
-};
-
-/**
- * Takes the sources of the runs `runIds`, each one `personId`'s alone, out
- * of use in their own store, for good, their history kept
- * (`removeSource`), a few at a time, until one fails (`aFewAtATime`). A
- * run whose key holds nothing yet has it closed all the same, so a
- * hand-over still under way for it is refused. Safe to repeat: a source
- * removed before is left as it is.
- */
-export const removeRunSources = async (
-  env: Pick<Env, "BRAIN_STORE" | "DURABLE_OBJECT_JURISDICTION">,
-  personId: string,
-  runIds: readonly string[]
-): Promise<void> => {
-  await aFewAtATime(runIds, async (runId) => {
-    await removeSource(env, {
-      source: runSource(runId),
-      readers: { kind: "owner", personId },
-    });
-  });
+  for (let at = 0; at < sources.length; at += erasingAtOnce) {
+    // oxlint-disable-next-line no-await-in-loop -- a few at a time
+    const settled = await Promise.allSettled(
+      sources.slice(at, at + erasingAtOnce).map(async ({ source, readers }) => {
+        await eraseSource(env, { source, readers, reason });
+      })
+    );
+    const failed = settled.find((each) => each.status === "rejected");
+    if (failed !== undefined) {
+      throw failed.reason;
+    }
+  }
 };

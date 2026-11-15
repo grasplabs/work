@@ -352,7 +352,7 @@ describe("a person's own export", () => {
         },
       })),
     });
-    await own(person).removeSource({ source: removed });
+    await own(person).removeSources({ sources: [removed] });
 
     const id = await start(person);
     await settled(person);

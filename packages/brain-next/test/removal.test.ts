@@ -169,8 +169,8 @@ describe("removing a source and keeping its history", () => {
     };
     const before = await readsOf(removing, removing.reader);
     const overviewBefore = await shared().workOverview();
-    await shared().removeSource({ source: removing.source });
-    await shared().removeSource({ source: removing.source });
+    await shared().removeSources({ sources: [removing.source] });
+    await shared().removeSources({ sources: [removing.source] });
     await tick(shared());
     const overviewAfter = await shared().workOverview();
 
@@ -232,7 +232,7 @@ describe("removing a source and keeping its history", () => {
         })
     );
     await until(() => write.held, "the add to write its file");
-    await shared().removeSource({ source });
+    await shared().removeSources({ sources: [source] });
     write.released = true;
     const raced = await racing;
     const added = async (change: string) =>
@@ -323,7 +323,7 @@ describe("removing a source and keeping its history", () => {
       reason: "deleted",
       change: crypto.randomUUID(),
     });
-    await shared().removeSource({ source: removing.source });
+    await shared().removeSources({ sources: [removing.source] });
     await tick(shared());
     const { id } = await shared().startExport("test");
     const exported = await exportSettled(shared, id);
@@ -386,7 +386,7 @@ describe("removing a source and keeping its history", () => {
       words: removing.words,
       entity: crypto.randomUUID(),
     };
-    await shared().removeSource({ source: removing.source });
+    await shared().removeSources({ sources: [removing.source] });
     const { id } = await shared().startExport("test");
     const exported = await exportSettled(shared, id);
     const restored = await restoredAfterLoss(shared, id, empty);

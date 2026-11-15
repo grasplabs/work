@@ -6503,10 +6503,10 @@ export const brainHandOvers = sqliteTable(
 /**
  * Whose run results the new Brain holds, by workflow (src/brain-run-sources.ts):
  * one row per person and workflow a run of theirs was handed over for, in
- * their own store. When they lose the workflow's role, the clock marks the
- * row revoked and owed, then the Brain takes those runs' sources out of use
- * (history kept), then the removal is no longer owed and its one event is
- * stored. A work record for the clock alone: no read of the Brain reads it.
+ * their own store (not one an App started). When they lose the workflow's
+ * role, the clock marks the row revoked and owed, then the Brain takes those
+ * runs' sources out of use a page at a time (history kept), then the
+ * removal is no longer owed and its one event is stored. A work record for the clock alone: no read of the Brain reads it.
  */
 export const brainRunSources = sqliteTable(
   "brain_run_sources",
@@ -6523,6 +6523,11 @@ export const brainRunSources = sqliteTable(
     removalOwed: integer("removal_owed", { mode: "boolean" })
       .notNull()
       .default(false),
+    /**
+     * The last run, by ID, whose source the owed removal took out of use
+     * so far: the next page goes on after it. Null before its first page.
+     */
+    removedThrough: text("removed_through"),
   },
   (table) => [
     primaryKey({ columns: [table.personId, table.workflowId] }),

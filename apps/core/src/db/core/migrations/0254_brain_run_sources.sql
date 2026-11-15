@@ -5,6 +5,7 @@ CREATE TABLE `brain_run_sources` (
 	`revoked_at` integer,
 	`runs` integer,
 	`removal_owed` integer DEFAULT false NOT NULL,
+	`removed_through` text,
 	PRIMARY KEY(`person_id`, `workflow_id`)
 );
 --> statement-breakpoint

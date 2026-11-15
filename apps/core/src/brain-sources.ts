@@ -30,7 +30,11 @@ import type {
   Producers,
   SourceRef,
 } from "./brain-next.ts";
-import { holdsWorkflowSql, runSourceInUse } from "./brain-run-sources.ts";
+import {
+  appStarted,
+  holdsWorkflowSql,
+  runSourceInUse,
+} from "./brain-run-sources.ts";
 import { brainHandOvers, workflowStartReceipts } from "./db/core/schema.ts";
 import { workspace } from "./durable-objects.ts";
 import { personalWorkspaceId } from "./personal-workspace.ts";
@@ -54,7 +58,10 @@ import { evidenceOf } from "./workflows/run-evidence.ts";
 //   result only while that person still holds the workflow's role, and so
 //   does the Brain: nothing is handed over for a person who no longer
 //   holds it (skipped `no_role`), and what was is taken out of use once
-//   they lose it (brain-run-sources.ts, GRA-1829). A run that
+//   they lose it (brain-run-sources.ts, GRA-1829). A run an App started
+//   for its person is shown on the App's page to whoever uses the App, so
+//   the workflow's role decides nothing of it: it is handed over as on its
+//   own, and its App's rule for taking it out of use is GRA-1926. A run that
 //   recalled from the Brain (its recall evidence, run-evidence.ts) hands
 //   over only how it ended, never what it returned: the Brain never holds
 //   a second copy of what it recalled, which would outlive that source
@@ -123,12 +130,16 @@ const runOfId = async (env: Env, id: string): Promise<Handed> => {
   }
   // Only while its person still holds the workflow, as the run page shows
   // its result: a hand-over that read the role before they lost it is of a
-  // run their revocation covers (brain-run-sources.ts).
-  const [held] = await drizzle(env.DB).all<{ held: number }>(
-    sql`SELECT ${holdsWorkflowSql(row.principalId, row.workflowResourceId)} AS held`
-  );
-  if (held?.held !== 1) {
-    return { kind: "gone", skipped: "no_role" };
+  // run their revocation covers (brain-run-sources.ts). Not for a run an
+  // App started for them, whose result its App shows them whether or not
+  // they hold the workflow.
+  if (!(await appStarted(env, row.id))) {
+    const [held] = await drizzle(env.DB).all<{ held: number }>(
+      sql`SELECT ${holdsWorkflowSql(row.principalId, row.workflowResourceId)} AS held`
+    );
+    if (held?.held !== 1) {
+      return { kind: "gone", skipped: "no_role" };
+    }
   }
   const receipt = await drizzle(env.DB)
     .select({ detailsRemovedAt: workflowStartReceipts.detailsRemovedAt })

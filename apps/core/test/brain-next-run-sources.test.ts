@@ -1,14 +1,20 @@
-import { recallBudgetMax } from "@grasp-os/brain-next/contract";
+import {
+  personalBrainOf,
+  recallBudgetMax,
+} from "@grasp-os/brain-next/contract";
 import type { AuditEvent } from "@grasp-os/shared/audit";
+import { appIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
+import type { Authority } from "@grasp-os/shared/permissions";
+import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import { organizationId } from "../src/auth/auth.ts";
 import { memberOf } from "../src/auth/identity.ts";
-import { runSource } from "../src/brain-next-origins.ts";
+import { runRemovalsMax, runSource } from "../src/brain-next-origins.ts";
 import {
   listVersionsAs,
   readSourceVersionAs,
@@ -23,14 +29,18 @@ import {
   teamMembers,
   teams,
 } from "../src/db/core/schema.ts";
+import { inJurisdiction } from "../src/durable-objects.ts";
 import {
   shareWorkflowResource,
   unshareWorkflowResource,
 } from "../src/workflow-members.ts";
 import { deleteWorkflowResource } from "../src/workflow-resources.ts";
+import { appWorkflowStarts } from "../src/workflow-start-intents.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
+import { standInBinding, standInLive } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
-import { outcome } from "./sign-in.ts";
+import { outcome, unique } from "./sign-in.ts";
+import { granted, person } from "./workflow-calls.ts";
 import {
   builder,
   definitionOf,
@@ -243,17 +253,34 @@ const forwarded = (target: object, property: string | symbol): unknown => {
   };
 };
 
-/** The Brain's store binding, every `removeSource` of it failing, as a store out of reach. */
-const removalsFailing = (): Env["BRAIN_STORE"] => {
+/**
+ * The Brain's store binding, its removals recorded (the keys of each call,
+ * in order) and every one after the first `through` failing, as a store
+ * that goes out of reach part-way.
+ */
+const removalsFailingAfter = (
+  through: number
+): { binding: Env["BRAIN_STORE"]; calls: string[][] } => {
+  const calls: string[][] = [];
   const stubOf = (stub: object): object =>
     new Proxy(stub, {
-      get: (target, property) =>
-        property === "removeSource"
-          ? async () => {
-              await Promise.resolve();
-              throw new Error("The Brain is out of reach");
-            }
-          : forwarded(target, property),
+      get: (target, property) => {
+        if (property !== "removeSources") {
+          return forwarded(target, property);
+        }
+        return async (request: { sources: string[] }) => {
+          if (calls.length >= through) {
+            await Promise.resolve();
+            throw new Error("The Brain is out of reach");
+          }
+          calls.push(request.sources);
+          const removeSources: unknown = Reflect.get(target, property);
+          if (typeof removeSources !== "function") {
+            throw new TypeError("The store removes nothing");
+          }
+          await Reflect.apply(removeSources, target, [request]);
+        };
+      },
     });
   const namespaceOf = (namespace: Env["BRAIN_STORE"]): Env["BRAIN_STORE"] =>
     new Proxy(namespace, {
@@ -268,8 +295,49 @@ const removalsFailing = (): Env["BRAIN_STORE"] => {
         return forwarded(target, property);
       },
     });
-  return namespaceOf(env.BRAIN_STORE);
+  return { binding: namespaceOf(env.BRAIN_STORE), calls };
 };
+
+/** The Brain's store binding, every removal failing, as a store out of reach. */
+const removalsFailing = (): Env["BRAIN_STORE"] =>
+  removalsFailingAfter(0).binding;
+
+/**
+ * `count` more runs of run `runId`'s person and workflow, created when it
+ * was, each with its own start receipt, as so many runs that ended would
+ * be: copied row by row from it, a new ID each. Their IDs.
+ */
+const copiesOf = async (runId: string, count: number): Promise<string[]> => {
+  const ids = Array.from({ length: count }, () => crypto.randomUUID());
+  const copy = async (table: string, fresh: readonly string[]) => {
+    const { results } = await env.DB.prepare(
+      "SELECT name FROM pragma_table_info(?)"
+    )
+      .bind(table)
+      .all<{ name: string }>();
+    const columns = results.map(({ name }) => name);
+    const values = columns.map((name) =>
+      fresh.includes(name) ? "ids.value" : `copied.${name}`
+    );
+    return env.DB.prepare(
+      `INSERT INTO ${table} (${columns.join(", ")})
+      SELECT ${values.join(", ")} FROM ${table} AS copied, json_each(?) AS ids
+      WHERE copied.id = ?`
+    ).bind(JSON.stringify(ids), runId);
+  };
+  await env.DB.batch([
+    await copy("workflow_start_receipts", ["id", "idempotency_key"]),
+    await copy("workflow_resource_runs", ["id"]),
+  ]);
+  return ids;
+};
+
+/** What `personId`'s own store has of run `runId`'s key. */
+const keyStateOf = async (personId: string, runId: string) =>
+  await personalBrainOf(
+    inJurisdiction(env, env.BRAIN_STORE),
+    personId
+  ).keyState(`run:${runId}`);
 
 /**
  * Core's database, its next batch that clears a removal owed failing
@@ -301,6 +369,77 @@ const completionFailing = (how: "failed" | "lost"): D1Database => {
     dump: async () => await real.dump(),
     withSession: (constraint) => real.withSession(constraint),
   };
+};
+
+/**
+ * An App of `owner`'s that starts workflow `workflowId`, granted by
+ * `admin`, used by `user`, who holds no role in the workflow: `start`
+ * starts a run for `user` as the App's code does, and answers its ID.
+ */
+const appStartingFor = async (
+  owner: Identity,
+  admin: Identity,
+  workflowId: string,
+  user: Identity
+) => {
+  const app = appIdSchema.parse(crypto.randomUUID());
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO apps (id, name, description, owner_id, created_at) VALUES (?, 'Starter', '', ?, ?)"
+    ).bind(app, owner.userId, Date.now()),
+    env.DB.prepare(
+      "INSERT INTO app_versions (app_id, version, tree, files, author_id, message, created_at, approved) VALUES (?, 1, 'tree', 0, ?, 'Version', ?, 1)"
+    ).bind(app, owner.userId, Date.now()),
+    env.DB.prepare(
+      "INSERT INTO app_members (app_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'user', ?, ?)"
+    ).bind(app, user.userId, owner.userId, Date.now()),
+  ]);
+  await standInBinding(app, "flow", workflowId, owner);
+  await granted(owner, admin, {
+    subject: { type: "app", appId: app },
+    object: {
+      type: "workflow",
+      workflowId: workflowResourceIdSchema.parse(workflowId),
+    },
+    actions: ["start"],
+    binding: `START_${unique().toUpperCase().replaceAll("-", "_")}`,
+  });
+  // Out, so someone who only uses it may.
+  await standInLive(app);
+  const authority: Authority = {
+    subject: { type: "app", appId: app },
+    onBehalfOf: user.userId,
+    mode: "interactive",
+    appVersion: 1,
+  };
+  return {
+    start: async (): Promise<string> => {
+      const { runId } = await appWorkflowStarts(env, authority, null).start(
+        "flow",
+        { who: "Ada" },
+        unique()
+      );
+      if (runId === null) {
+        throw new Error("The start admitted no run");
+      }
+      return runId;
+    },
+  };
+};
+
+/** Waits until core's record of run `runId` says it ended. */
+const endedInRecords = async (runId: string): Promise<void> => {
+  await vi.waitFor(
+    async () => {
+      const row = await env.DB.prepare(
+        "SELECT ended_at AS endedAt FROM workflow_resource_runs WHERE id = ?"
+      )
+        .bind(runId)
+        .first<{ endedAt: number | null }>();
+      expect(row?.endedAt, "the run never ended").not.toBeNull();
+    },
+    { timeout: 30_000, interval: 100 }
+  );
 };
 
 describe("a person's run results once they lose the workflow", () => {
@@ -718,6 +857,216 @@ describe("a person's run results once they lose the workflow", () => {
         { personId: user.userId, runs: 1 },
         { personId: user.userId, runs: 2 },
       ],
+    });
+  });
+
+  it("are taken out of use a page at a time across ticks when they are more than one tick does, and recorded once", async () => {
+    const [owner, user] = await Promise.all([builder(), builder("user")]);
+    const secret = word();
+    const id = await sharedWorkflow(owner, secret, user);
+    const runId = await endedRun(user, id);
+    await handOverNow();
+    // Two and a half pages of runs in all, one page a tick.
+    const copies = await copiesOf(runId, 2 * runRemovalsMax + 49);
+    await unshared(owner, id, user);
+
+    const ticks: { owed: number | undefined; removals: number }[] = [];
+    for (let tick = 0; tick < 3; tick += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one tick after another
+      await removeLostRunSources(env, new Date(), 1);
+      // oxlint-disable-next-line no-await-in-loop -- one tick after another
+      const row = await rowOf(user.userId, id);
+      ticks.push({
+        owed: row?.owed,
+        // oxlint-disable-next-line no-await-in-loop -- one tick after another
+        removals: await removalCountOf(id),
+      });
+    }
+
+    expect({
+      ticks,
+      recalls: await recalls(user.userId, secret, runId),
+      closed: [
+        await keyStateOf(user.userId, copies[0] ?? ""),
+        await keyStateOf(user.userId, copies.at(-1) ?? ""),
+      ],
+      removed: await removedOf(id),
+    }).toStrictEqual({
+      ticks: [
+        { owed: 1, removals: 0 },
+        { owed: 1, removals: 0 },
+        { owed: 0, removals: 1 },
+      ],
+      recalls: false,
+      closed: ["held", "held"],
+      removed: [{ personId: user.userId, runs: copies.length + 1 }],
+    });
+  });
+
+  it("go on from the last page kept when the store fails part-way, never sending it again", async () => {
+    const [owner, user] = await Promise.all([builder(), builder("user")]);
+    const id = await sharedWorkflow(owner, word(), user);
+    const runId = await endedRun(user, id);
+    await handOverNow();
+    const copies = await copiesOf(runId, 2 * runRemovalsMax + 9);
+    await unshared(owner, id, user);
+
+    // One page goes through, then the store is out of reach.
+    const partWay = removalsFailingAfter(1);
+    await removeLostRunSources({ ...env, BRAIN_STORE: partWay.binding });
+    const afterFailure = await rowOf(user.userId, id);
+    const recovering = removalsFailingAfter(Number.POSITIVE_INFINITY);
+    await removeLostRunSources({ ...env, BRAIN_STORE: recovering.binding });
+    const first = new Set(partWay.calls.flat());
+    const resent = recovering.calls.flat();
+
+    expect({
+      afterFailure,
+      firstPage: first.size,
+      sentAgain: resent.filter((key) => first.has(key)).length,
+      sentInAll: new Set([...first, ...resent]).size,
+      removals: await removalCountOf(id),
+    }).toStrictEqual({
+      afterFailure: { inUse: 0, owed: 1, runs: copies.length + 1 },
+      firstPage: runRemovalsMax,
+      sentAgain: 0,
+      sentInAll: copies.length + 1,
+      removals: 1,
+    });
+  });
+
+  it("let a small revocation finish at its first tick beside a large one under way", async () => {
+    const [owner, many, few] = await Promise.all([
+      builder(),
+      builder("user"),
+      builder("user"),
+    ]);
+    const secret = word();
+    const id = await sharedWorkflow(owner, secret, many, few);
+    const [manyRun, fewRun] = await Promise.all([
+      endedRun(many, id),
+      endedRun(few, id),
+    ]);
+    await handOverNow();
+    await copiesOf(manyRun, 3 * runRemovalsMax);
+    await unshared(owner, id, many);
+    // The large one begins first, and is older.
+    await removeLostRunSources(env, new Date(), 1);
+    await unshared(owner, id, few);
+
+    await removeLostRunSources(env, new Date(), 1);
+
+    expect({
+      few: {
+        row: await rowOf(few.userId, id),
+        recalls: await recalls(few.userId, secret, fewRun),
+      },
+      many: await rowOf(many.userId, id),
+      removed: await removedOf(id),
+    }).toStrictEqual({
+      few: { row: { inUse: 0, owed: 0, runs: 1 }, recalls: false },
+      many: { inUse: 0, owed: 1, runs: 3 * runRemovalsMax + 1 },
+      removed: [{ personId: few.userId, runs: 1 }],
+    });
+  });
+
+  it("are recorded once when a hand-over that read the role before the loss ends after the loss was marked", async () => {
+    const [owner, user] = await Promise.all([builder(), builder("user")]);
+    const secret = word();
+    const id = await sharedWorkflow(owner, secret, user);
+    const earlierRun = await endedRun(user, id);
+    await handOverNow();
+    const lateRun = await endedRun(user, id);
+    const core = producersOf(env);
+    let marked = false;
+    // Its add lands with the role held; before its ending batch, the role
+    // is lost and the clock's task marks and completes the removal.
+    const endingLate: Producers = {
+      attempt: async (source) => {
+        const attempt = await core.attempt(source);
+        if (source.id !== lateRun) {
+          return attempt;
+        }
+        return {
+          ...attempt,
+          ended: async (ending) => {
+            if (!marked) {
+              marked = true;
+              await unshared(owner, id, user);
+              await removeLostRunSources(env);
+            }
+            await attempt.ended(ending);
+          },
+        };
+      },
+    };
+
+    await handOverNow(endingLate);
+    await removeLostRunSources(env);
+    await removeLostRunSources(env);
+
+    expect({
+      marked,
+      endings: await endingsFor(lateRun),
+      recalls: [
+        await recalls(user.userId, secret, earlierRun),
+        await recalls(user.userId, secret, lateRun),
+      ],
+      removed: await removedOf(id),
+    }).toStrictEqual({
+      marked: true,
+      endings: ["brain.source.handed_over"],
+      recalls: [false, false],
+      removed: [{ personId: user.userId, runs: 2 }],
+    });
+  });
+
+  it("leave the result of a run an App started for someone who uses the App and holds no role in the workflow, while a run they started follows the role", async () => {
+    const [ada, admin, bob] = await Promise.all([
+      person("builder"),
+      person("admin"),
+      person("user"),
+    ]);
+    const secret = word();
+    const workflow = await published(
+      ada,
+      definitionOf([], { value: { status: secret } })
+    );
+    const app = await appStartingFor(ada, admin, workflow.id, bob);
+    const appRun = await app.start();
+    await endedInRecords(appRun);
+    // And a run Bob started himself while the workflow was shared with him.
+    await shareWorkflowResource(env, ada, workflow.id, {
+      type: "person",
+      id: bob.userId,
+      role: "user",
+    });
+    const ownRun = await endedRun(bob, workflow.id);
+    await unshared(ada, workflow.id, bob);
+
+    await handOverNow();
+    await removeLostRunSources(env);
+
+    expect({
+      endings: {
+        app: await endingsFor(appRun),
+        own: await endingsFor(ownRun),
+      },
+      recalls: {
+        app: await recalls(bob.userId, secret, appRun),
+        own: await recalls(bob.userId, secret, ownRun),
+      },
+      row: await rowOf(bob.userId, workflow.id),
+      removed: await removedOf(workflow.id),
+    }).toStrictEqual({
+      endings: {
+        app: ["brain.source.handed_over"],
+        own: ["brain.source.handover_skipped:no_role"],
+      },
+      recalls: { app: true, own: false },
+      // The App's run puts no row of the workflow's role in use.
+      row: null,
+      removed: [],
     });
   });
 });
