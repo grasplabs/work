@@ -348,7 +348,8 @@ describe("Stephen's own words", () => {
       ].map(withoutLinks)
     ).toStrictEqual([
       "Open it now.",
-      "Mail <mailto:ben@acme.test> or www.evil.test today.",
+      // Written as the address alone, once.
+      "Mail mailto:ben@acme.test or www.evil.test today.",
       "a picture of Q3",
     ]);
   });

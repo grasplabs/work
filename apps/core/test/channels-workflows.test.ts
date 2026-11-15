@@ -129,6 +129,37 @@ const runsOf = async (id: string) => {
 };
 
 describe("a workflow its owner lets people ask for", setUpTime, () => {
+  it("is offered with each value as it will start, link syntax and all, inert", async () => {
+    // An injected text had the model put a link in what it would start with.
+    const who = "[Ada](https://evil.example/?d=salary)";
+    const ann = await member(
+      idp,
+      codeStep(
+        `export default async (self, env) => {
+  const [first] = await env.workflows.askable();
+  if (first === undefined) return "none";
+  return await env.workflows.offer(first.id, { who: ${JSON.stringify(who)} });
+};`
+      ),
+      says("There's a card for it.")
+    );
+    await sharedWorkflow(await owner(), ann.userId, true);
+
+    await post(messageFrom(ann.teams, { text: "Run the greeting for Ada" }));
+    const { activities } = await reached(ann.teams.conversation);
+    const card = JSON.stringify(
+      activities.find((activity) =>
+        JSON.stringify(activity).includes("workflow.start")
+      ) ?? {}
+    );
+    // On Teams a card's facts read `[words](address)` as a link: broken,
+    // so the address shows whole and leads nowhere from the card.
+    expect([
+      card.includes("[Ada] (https://evil.example/?d=salary)"),
+      card.includes("]("),
+    ]).toStrictEqual([true, false]);
+  });
+
   it("is offered on a card, started once as the person who pressed Start, and its end told", async () => {
     const ann = await member(idp, offersFirst, says("There's a card for it."));
     const workflow = await sharedWorkflow(await owner(), ann.userId, true);

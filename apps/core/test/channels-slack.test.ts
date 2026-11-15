@@ -12,14 +12,17 @@ import { confirmAction, startAction } from "../src/channels/cards.tsx";
 import { channelResponse } from "../src/channels/door.ts";
 import type { ChannelMessage } from "../src/channels/door.ts";
 import { say } from "../src/channels/words.ts";
+import { chatAgentId } from "../src/chats-rpc.ts";
 import {
   channelConversations,
   channelAccounts,
   channelLinks,
 } from "../src/db/core/schema.ts";
-import { keptAnswersOf, says } from "./agent-chat.ts";
+import { codeStep, keptAnswersOf, says } from "./agent-chat.ts";
+import { requestGranted } from "./apps.ts";
 import { slackApp, slackPostedUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
+import { mailConnection } from "./mail-connection.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 import {
@@ -597,6 +600,10 @@ describe("a linked person's question in Slack", () => {
   });
 });
 
+/** `text` without the escapes of a chunk sent as plain text (without-links.ts). */
+const unescaped = (text = ""): string =>
+  text.replaceAll(/\\(?=[!-/:-@[-`{-~])/gu, "");
+
 /** The text of the first block of `blocks`, as Slack's API got them. */
 const firstBlockText = (blocks: unknown): string | undefined => {
   const parsed = z
@@ -660,6 +667,9 @@ describe("a linked person's answer in Slack", () => {
   });
 
   it("is posted, not withheld, when it is long and ordinary: code, a bold list, a table", async () => {
+    // The bold list holds 780 of the characters the parser takes time on,
+    // in one chunk between blank lines, past the 256 one chunk may hold
+    // (without-links.ts): it goes as escaped plain text, the same words.
     const longCode = `\`\`\`py\n${Array.from(
       { length: 250 },
       (_, at) => `x_${at} = data["*"][${at}]  # ~${at}`
@@ -684,16 +694,67 @@ describe("a linked person's answer in Slack", () => {
       const sent = await slackSawIn(message.event.channel);
       answered.push(firstBlockText(sent[0]?.fields.blocks) ?? "");
     }
+    const [kept] = await keptAnswersOf(userId);
     expect({
-      list: answered[0]?.startsWith("- *Item 0*: _done_"),
+      // Cut to what a card takes, as any long answer is.
+      list: unescaped(answered[0]).startsWith(
+        "- **Item 0**: _done_\n- **Item 1**: _done_"
+      ),
       table: answered[1]?.startsWith("| *Name* | *State* |"),
       code: answered[2]?.startsWith('```\nx_0 = data["*"][0]'),
-      kept: await keptAnswersOf(userId),
+      kept: [unescaped(kept?.[0]), kept?.[1], kept?.[2]],
     }).toStrictEqual({
       list: true,
       table: true,
       code: true,
-      kept: [[boldList, table, longCode]],
+      kept: [boldList, table, longCode],
     });
+  });
+});
+
+describe("a linked person's held write in Slack", () => {
+  it("shows on its card each value as it will be sent, Slack's own syntax escaped", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const mail = await mailConnection([], ["MAIL_SEND"]);
+    const binding = `MAIL${unique()}`.toUpperCase();
+    await requestGranted(idp, admin, {
+      subject: { type: "agent", agentId: chatAgentId },
+      object: { type: "connection", connectionId: mail.id },
+      actions: ["MAIL_SEND"],
+      binding,
+    });
+    // An injected mail had the model put a link and a mention in what it
+    // would send.
+    const subject = "<https://evil.example/?d=salary|Agenda> for <!here> & co";
+    const { slackUser } = await linkedPerson();
+    await fakeProvider(
+      codeStep(
+        `export default async (self, env) => { await env.connections.call(${JSON.stringify(binding)}, "MAIL_SEND", ${JSON.stringify({ to: "ben@acme.test", subject })}); return "held"; };`
+      ),
+      says("It waits for you to confirm it.")
+    );
+    const message = messageFrom(slackUser);
+    message.event.text = "Mail ben@acme.test the agenda.";
+    await post(message, { caught: false });
+
+    const sent = await slackSawIn(message.event.channel);
+    const card = JSON.stringify(
+      sent.find(({ fields }) => JSON.stringify(fields).includes(confirmAction))
+        ?.fields ?? {}
+    );
+    // Escaped once, as Slack decodes it for display: shown in full,
+    // nothing of it a link or a mention.
+    expect({
+      shown: card.includes(
+        "&lt;https://evil.example/?d=salary|Agenda&gt; for &lt;!here&gt; &amp; co"
+      ),
+      raw: card.includes("<https://evil.example") || card.includes("<!here>"),
+      previews: sent
+        .filter(({ method }) => method === "chat.postMessage")
+        .every(
+          ({ fields }) =>
+            fields.unfurl_links === "false" && fields.unfurl_media === "false"
+        ),
+    }).toStrictEqual({ shown: true, raw: false, previews: true });
   });
 });

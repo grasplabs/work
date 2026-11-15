@@ -292,6 +292,22 @@ describe("a member's answer with links the model wrote", setUpTime, () => {
     });
   });
 
+  it("is kept and posted as the same words when the answer starts indented, which would be code until trimmed", async () => {
+    const { userId, teams } = await member(
+      idp,
+      says("    [the form](https://evil.example/?d=1) is due Friday.")
+    );
+
+    await post(messageFrom(teams, { text: "When is the form due?" }));
+
+    const shown = "the form is due Friday.";
+    const cards = await cardTextsIn(teams.conversation);
+    expect({
+      card: cards.findLast((text) => text.includes("Friday")),
+      kept: await keptAnswersOf(userId),
+    }).toStrictEqual({ card: shown, kept: [[shown]] });
+  });
+
   it("shows in Grasp's own view of the chat, while the model still writes, only what it keeps", async () => {
     // Paused once the paragraph with the link, the image and the HTML is
     // written, before the next.

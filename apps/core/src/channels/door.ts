@@ -100,6 +100,7 @@ import type { ConnectedTeamsAdapter } from "./teams-adapter.ts";
 import { teamsAdapter, verifiedTeamsRequest } from "./teams.ts";
 import type { TeamsKeys } from "./teams.ts";
 import { inDirectory, teamsMembers, writerOf } from "./who.ts";
+import { inertInMessage } from "./without-links.ts";
 import { channelLocales, say } from "./words.ts";
 import type { ChannelLocale } from "./words.ts";
 import { pressOffer } from "./workflow-offers.ts";
@@ -717,7 +718,14 @@ const onPresses = (
       threadId: event.threadId,
       locale,
     });
-    await event.thread.post(pressSaid(pressed.line, locale, pressed.workflow));
+    // The workflow's name as the line shows it, inert (without-links.ts).
+    await event.thread.post(
+      pressSaid(
+        pressed.line,
+        locale,
+        inertInMessage(platform)(pressed.workflow ?? "")
+      )
+    );
   });
 };
 

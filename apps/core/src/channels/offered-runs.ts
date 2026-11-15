@@ -4,6 +4,7 @@ import { drizzle } from "drizzle-orm/d1";
 
 import { chatWorkflowOffers } from "../db/core/schema.ts";
 import { teamsAdapter } from "./teams.ts";
+import { inertInMessage } from "./without-links.ts";
 import { channelLocales, say } from "./words.ts";
 import type { ChannelLocale } from "./words.ts";
 
@@ -70,7 +71,10 @@ export const tellOfferedRunEnd = async (
       // oxlint-disable-next-line no-await-in-loop -- at most one per run
       await adapter.postMessage(
         offer.threadId,
-        say(line, localeOf(offer.locale), { workflow: offer.workflowName })
+        // The workflow's name as the line shows it, inert (without-links.ts).
+        say(line, localeOf(offer.locale), {
+          workflow: inertInMessage("teams")(offer.workflowName),
+        })
       );
     }
   } catch (error) {

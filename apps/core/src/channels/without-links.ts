@@ -36,20 +36,26 @@ const rounds = 4;
 // for each `]`, `*`, `_` or `~` it reads, it looks back over the ones
 // before (32 KB of `]` takes it 11 s), and it looks for an address from
 // each character of an unbroken run (64 KB of `+`: seconds). The budget is
-// 30 ms of parsing for any one paragraph; measured in workerd, these
-// bounds keep its worst shape (labels nested 256 deep) at 25 ms. A
-// paragraph past them is given to the parser escaped, as plain text, so
-// it shows as written and nothing in it is a link, emphasis or code. Code
-// isn't parsed for these, so it doesn't count.
+// 30 ms of parsing for any one chunk of an answer between blank lines,
+// which a paragraph never crosses, so a chunk holds whole paragraphs and
+// is never counted in parts. Measured in workerd, with 256 of those
+// characters in one chunk, its worst shape (images nested 256 deep) takes
+// 23 ms, and 512 take 83 ms; flat `a]` or `a\\]`, emphasis and lines of
+// `a]` indented under one paragraph take 2 to 6 ms at 256. A chunk past
+// the bounds is given to the parser escaped, as plain text: it shows the
+// same words, and nothing in it is a link, emphasis or code. Every one of
+// those characters counts, escaped or not: counting more only escapes a
+// chunk that didn't need it. Only fenced code the parser certainly reads
+// as code isn't counted (`chunksOf`).
 
-/** The most `]`, `*`, `_` or `~` one paragraph may hold, unescaped. */
+/** The most `]`, `*`, `_` or `~` one chunk may hold. */
 const mostClosers = 256;
 
 /** The longest unbroken run of what an address is made of. */
 const longestRun = 4096;
 
-/** A character the parser looks back from, unescaped. */
-const closer = /(?<!\\)[\]*_~]/gu;
+/** A character the parser looks back from. */
+const closer = /[\]*_~]/gu;
 
 /** A run longer than {@link longestRun}. */
 const tooLongRun = new RegExp(`[\\w.+-]{${longestRun + 1}}`, "u");
@@ -57,36 +63,16 @@ const tooLongRun = new RegExp(`[\\w.+-]{${longestRun + 1}}`, "u");
 /** ASCII punctuation, which a backslash escapes; and an escape already made. */
 const punctuation = /\\[!-/:-@[-`{-~]|[!-/:-@[-`{-~]/gu;
 
-/**
- * A line that opens a fenced code block: what stands before its fence (a
- * quote's markers, a list item's indent), the fence, and its info.
- */
-const fenceOpening = /^(?<prefix>[\s>]*)(?<fence>`{3,}|~{3,})(?<info>[^\n]*)$/u;
+/** A line that opens a fenced code block at the margin: its fence, and its info. */
+const fenceAtMargin = /^(?<fence>`{3,}|~{3,})(?<info>[^\n]*)$/u;
 
-/** A line that can close a fenced code block: its indent, and its fence. */
-const fenceClosing = /^[>\s]*?(?<indent> *)(?<fence>`{3,}|~{3,})\s*$/u;
+/** A line that closes a fenced code block: its fence alone, at most three spaces in. */
+const fenceClosing = /^ {0,3}(?<fence>`{3,}|~{3,})[ \t]*$/u;
 
-/** A bullet item with words in it, which breaks off any paragraph. */
-const bulletItem = /^[\s>]*[-*+]\s+\S/u;
+/** A line that may open HTML, inside which a fence is no fence. */
+const htmlLine = /^ {0,3}</mu;
 
-/** A heading, which breaks off any paragraph. */
-const heading = /^[\s>]*#{1,6}(?:\s|$)/u;
-
-/** An ordered item, which breaks off a paragraph only in a list or at 1. */
-const orderedItem = /^[\s>]*(?<number>\d{1,9})[.)]\s+\S/u;
-
-/** A table's delimiter row, as GFM reads one: cells of dashes. */
-const delimiterRow = /^[\s>]*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$/u;
-
-/** How many cells a table row has, as GFM counts them. */
-const cellsOf = (line: string): number =>
-  line
-    .trim()
-    .replace(/^\|/u, "")
-    .replace(/(?<!\\)\|$/u, "")
-    .split(/(?<!\\)\|/u).length;
-
-/** Whether the lines of one paragraph would take the parser too long. */
+/** Whether one chunk of lines would take the parser too long. */
 const tooCostly = (lines: readonly string[]): boolean => {
   const text = lines.join("\n");
   return (
@@ -94,178 +80,75 @@ const tooCostly = (lines: readonly string[]): boolean => {
   );
 };
 
-/** `line` with every unescaped ASCII punctuation character escaped. */
+/** `line` with every ASCII punctuation character escaped, once. */
 const escaped = (line: string): string =>
   line.replaceAll(punctuation, (found) =>
     found.length === 2 ? found : `\\${found}`
   );
 
-/** A fenced code block being read: its fence and what stands before it. */
-interface Fence {
-  fence: string;
-  prefix: string;
-}
-
-/**
- * The fence `line` opens, if it opens one: a backtick fence's info holds
- * no backtick.
- */
-const opens = (line: string): Fence | undefined => {
-  const { prefix, fence, info } = fenceOpening.exec(line)?.groups ?? {};
-  if (prefix === undefined || fence === undefined) {
-    return undefined;
-  }
-  return fence.startsWith("`") && (info ?? "").includes("`")
-    ? undefined
-    : { fence, prefix };
-};
-
-/**
- * Whether `line` closes `open`: its fence, at most three spaces further in
- * than the fence it closes, as the parser takes one.
- */
-const closes = (line: string, open: Fence): boolean => {
-  const { indent, fence } = fenceClosing.exec(line)?.groups ?? {};
-  return (
-    indent !== undefined &&
-    fence !== undefined &&
-    indent.length <= open.prefix.replaceAll(">", "").length + 3 &&
-    fence.startsWith(open.fence.slice(0, 1)) &&
-    fence.length >= open.fence.length
-  );
-};
-
-/** Lines read as one: a paragraph outside code, or a code block. */
-interface Group {
+/** Lines read as one: a chunk between blank lines, or a fenced code block. */
+interface Chunk {
   code: boolean;
   lines: string[];
 }
 
-/** How far a read of an answer's lines has come (`paragraphsOf`). */
-interface Reading {
-  groups: Group[];
-  fence: Fence | undefined;
-  /**
-   * A code block read as ended before the parser may end it: a line that
-   * would close it opens nothing.
-   */
-  left: Fence | undefined;
-  afterBlank: boolean;
-  inList: boolean;
-  inTable: boolean;
-  previous: string;
-}
-
-/** Starts a new group in `reading`. */
-const startGroup = (reading: Reading, code: boolean): void => {
-  reading.groups.push({ code, lines: [] });
-};
-
-/** Adds `line` to the group being read. */
-const addLine = (reading: Reading, line: string): void => {
-  reading.groups.at(-1)?.lines.push(line);
-};
-
 /**
- * Reads `line` as code, if it is: inside a code block, which ends at its
- * closing fence or where its container (a quote, a list item) does, or a
- * line that opens one.
+ * The lines of `text` in chunks: what stands between blank lines, and
+ * fenced code the parser certainly reads as code, which is all it skips.
+ * A fence counts as code only at the margin, where nothing it stands in
+ * (a list item, a quote) can end it, and only in an answer with no line
+ * that may open HTML, inside which a fence is no fence: anything less
+ * certain counts as prose, which only counts more.
  */
-const readCode = (reading: Reading, line: string): boolean => {
-  const { fence } = reading;
-  if (fence !== undefined) {
-    if (line.trim() === "" || line.startsWith(fence.prefix)) {
-      addLine(reading, line);
-      if (closes(line, fence)) {
-        reading.fence = undefined;
-        startGroup(reading, false);
+const chunksOf = (text: string): Chunk[] => {
+  const lines = text.split("\n");
+  const fences = !htmlLine.test(text);
+  const chunks: Chunk[] = [{ code: false, lines: [] }];
+  let fence: string | undefined;
+  for (const line of lines) {
+    const chunk = chunks.at(-1);
+    if (chunk === undefined) {
+      break;
+    }
+    if (fence !== undefined) {
+      chunk.lines.push(line);
+      const closing = fenceClosing.exec(line)?.groups?.fence;
+      if (
+        closing !== undefined &&
+        closing.startsWith(fence.slice(0, 1)) &&
+        closing.length >= fence.length
+      ) {
+        fence = undefined;
+        chunks.push({ code: false, lines: [] });
       }
-      return true;
+      continue;
     }
-    reading.left = fence;
-    reading.fence = undefined;
-    startGroup(reading, false);
+    const { fence: opening, info = "" } =
+      (fences ? fenceAtMargin.exec(line)?.groups : undefined) ?? {};
+    if (
+      opening !== undefined &&
+      !(opening.startsWith("`") && info.includes("`"))
+    ) {
+      fence = opening;
+      chunks.push({ code: true, lines: [line] });
+      continue;
+    }
+    if (line.trim() === "") {
+      chunks.push({ code: false, lines: [line] }, { code: false, lines: [] });
+      continue;
+    }
+    chunk.lines.push(line);
   }
-  if (reading.left !== undefined && closes(line, reading.left)) {
-    reading.left = undefined;
-    addLine(reading, line);
-    return true;
-  }
-  const opened = opens(line);
-  if (opened === undefined) {
-    return false;
-  }
-  reading.left = undefined;
-  reading.fence = opened;
-  startGroup(reading, true);
-  addLine(reading, line);
-  return true;
+  return chunks;
 };
 
 /**
- * Reads `line` as prose: it starts a paragraph of its own where it breaks
- * off the one before however that one ends (a blank line before it, a
- * bullet item, a heading, a table's row), or an ordered item in a list.
- */
-const readProse = (reading: Reading, line: string): void => {
-  const blank = line.trim() === "";
-  const ordered = orderedItem.exec(line)?.groups?.number;
-  const bullet = bulletItem.test(line);
-  const breaks =
-    blank ||
-    reading.afterBlank ||
-    reading.inTable ||
-    heading.test(line) ||
-    bullet ||
-    (ordered !== undefined && (reading.inList || Number(ordered) === 1));
-  if (breaks) {
-    startGroup(reading, false);
-    if (!blank) {
-      reading.inList =
-        bullet ||
-        ordered !== undefined ||
-        (reading.inList && /^\s/u.test(line));
-    }
-  }
-  addLine(reading, line);
-  // Each row after a table's delimiter is read on its own.
-  reading.inTable = blank
-    ? false
-    : reading.inTable ||
-      (reading.previous.includes("|") &&
-        delimiterRow.test(line) &&
-        cellsOf(line) === cellsOf(reading.previous));
-  reading.afterBlank = blank;
-  reading.previous = line;
-};
-
-/** The lines of `text`, each paragraph outside code one group (`inTime`). */
-const paragraphsOf = (text: string): Group[] => {
-  const reading: Reading = {
-    groups: [{ code: false, lines: [] }],
-    fence: undefined,
-    left: undefined,
-    afterBlank: true,
-    inList: false,
-    inTable: false,
-    previous: "",
-  };
-  for (const line of text.split("\n")) {
-    if (!readCode(reading, line)) {
-      readProse(reading, line);
-    }
-  }
-  return reading.groups;
-};
-
-/**
- * `text` as the parser may take it in time: each paragraph outside code
- * that would take it too long, escaped. Lines are grouped as the parser's
- * paragraphs or coarser, never finer, so a paragraph is never counted in
- * parts; code it doesn't parse for these isn't counted.
+ * `text` as the parser may take it in time: each chunk outside code that
+ * would take it too long, escaped (`mostClosers`).
  */
 const inTime = (text: string): string =>
-  paragraphsOf(text)
+  chunksOf(text)
+    .filter(({ lines }) => lines.length > 0)
     .flatMap(({ code, lines }) =>
       !code && tooCostly(lines) ? lines.map(escaped) : lines
     )
@@ -314,21 +197,54 @@ const keep = (kept: Nodes[], node: Nodes): void => {
   }
 };
 
+/** Nodes whose children are the words a block shows. */
+const blockText: ReadonlySet<Nodes["type"]> = new Set([
+  "paragraph",
+  "heading",
+  "tableCell",
+]);
+
 /**
- * The words of link `node` when they are its address, written out
- * (`https://…`, `www.…`, `hr@acme.com`, `<https://…>`): words that stay
- * words, which a platform may show as a link the person sees whole.
+ * The words of link `node` when they are its address (`https://…`,
+ * `www.…`, `hr@acme.com`): words that stay words, which a platform may
+ * show as a link the person sees whole. `rewrite` when the answer wrote
+ * them as more than the address (`<https://…>`, `[https://…](https://…)`):
+ * its block is written again with the address alone, shown once.
  */
-const writtenOut = (node: Nodes): string | undefined => {
+const writtenOut = (
+  node: Nodes,
+  source: string
+): { words: string; rewrite: boolean } | undefined => {
   const [words, ...more] = childrenOf(node);
-  return node.type === "link" &&
-    words?.type === "text" &&
-    more.length === 0 &&
-    [words.value, `http://${words.value}`, `mailto:${words.value}`].includes(
+  if (
+    node.type !== "link" ||
+    words?.type !== "text" ||
+    more.length > 0 ||
+    ![words.value, `http://${words.value}`, `mailto:${words.value}`].includes(
       node.url
     )
-    ? words.value
-    : undefined;
+  ) {
+    return undefined;
+  }
+  const start = node.position?.start.offset;
+  const end = node.position?.end.offset;
+  return {
+    words: words.value,
+    // An address the parser found in text has no place of its own.
+    rewrite: start !== undefined && source.slice(start, end) !== words.value,
+  };
+};
+
+/** `kept` with the spaces at its ends trimmed, where something was taken. */
+const trimEnds = (kept: Nodes[]): void => {
+  const first = kept.at(0);
+  if (first?.type === "text") {
+    kept[0] = { type: "text", value: first.value.trimStart() };
+  }
+  const last = kept.at(-1);
+  if (last?.type === "text") {
+    kept[kept.length - 1] = { type: "text", value: last.value.trimEnd() };
+  }
 };
 
 /**
@@ -336,15 +252,19 @@ const writtenOut = (node: Nodes): string | undefined => {
  * its alt text, and what shows nothing of its own goes. Whether anything
  * was taken, and the children kept, to clean in turn.
  */
-const cleanChildren = (parent: Parent): { changed: boolean; kept: Nodes[] } => {
+const cleanChildren = (
+  parent: Parent,
+  source: string
+): { changed: boolean; kept: Nodes[] } => {
   let changed = false;
   const kept: Nodes[] = [];
   const pending: Nodes[] = [];
   pushAll(pending, childrenOf(parent));
   for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
-    const words = writtenOut(node);
-    if (words !== undefined) {
-      keep(kept, { type: "text", value: words });
+    const address = writtenOut(node, source);
+    if (address !== undefined) {
+      changed ||= address.rewrite;
+      keep(kept, { type: "text", value: address.words });
     } else if (cutNodes.has(node.type)) {
       changed = true;
     } else if (node.type === "link" || node.type === "linkReference") {
@@ -357,6 +277,10 @@ const cleanChildren = (parent: Parent): { changed: boolean; kept: Nodes[] } => {
       keep(kept, node);
     }
   }
+  // What was taken leaves no space at a block's ends.
+  if (changed && blockText.has(parent.type)) {
+    trimEnds(kept);
+  }
   keepChildren(parent, kept);
   return { changed, kept };
 };
@@ -366,7 +290,8 @@ const cleanChildren = (parent: Parent): { changed: boolean; kept: Nodes[] } => {
  * whole, changed, or kept as it is.
  */
 const cleanBlock = (
-  block: Root["children"][number]
+  block: Root["children"][number],
+  source: string
 ): "cut" | "changed" | "kept" => {
   if (cutNodes.has(block.type)) {
     return "cut";
@@ -379,7 +304,7 @@ const cleanBlock = (
     parent = parents.pop()
   ) {
     if (hasChildren(parent)) {
-      const cleaned = cleanChildren(parent);
+      const cleaned = cleanChildren(parent, source);
       changed ||= cleaned.changed;
       pushAll(parents, cleaned.kept);
     }
@@ -439,7 +364,7 @@ const cleanOnce = (source: string): string | undefined => {
     if (start === undefined || end === undefined) {
       throw new Error("A block without a place in the answer");
     }
-    const outcome = cleanBlock(block);
+    const outcome = cleanBlock(block, source);
     if (outcome === "kept") {
       continue;
     }
@@ -455,14 +380,16 @@ const cleanOnce = (source: string): string | undefined => {
 
 /** `text` cleaned until a parse takes nothing more; empty if it can't be. */
 const settled = (text: string): string => {
-  let current = inTime(text);
+  // Trimmed before each parse, never after the last: an indented line at
+  // the start is code to the parser, and trimmed after, a link.
+  let current = inTime(text.trim());
   try {
     for (let round = 0; round < rounds; round += 1) {
       const next = cleanOnce(current);
       if (next === undefined) {
         return current;
       }
-      current = inTime(next);
+      current = inTime(next.trim());
     }
   } catch {
     // The parser can't take it (its own recursion, on nesting thousands
@@ -475,7 +402,7 @@ const settled = (text: string): string => {
  * The agent's own words in a chat app, as they are stored, shown in Grasp
  * and posted: no link or image. Empty when they can't be placed.
  */
-export const withoutLinks = (text: string): string => settled(text).trim();
+export const withoutLinks = (text: string): string => settled(text);
 
 /**
  * `shown` words as Teams gets them, in an Adaptive Card's `TextBlock`,
@@ -484,6 +411,10 @@ export const withoutLinks = (text: string): string => settled(text).trim();
  * broken, so none can be read as a link.
  */
 export const inTeams = (shown: string): string => shown.replaceAll("](", "] (");
+
+/** `text` with Slack's control characters escaped, as Slack decodes them. */
+const slackEscaped = (text: string): string =>
+  text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 
 /** A code block as Slack shows one: a closed fence of three backticks. */
 const slackCode = (value: string): string => `\`\`\`\n${value}\n\`\`\``;
@@ -530,11 +461,20 @@ export const inSlack = (shown: string): string => {
     // Shown words parsed once already; if not now, they go as they are,
     // escaped below all the same.
   }
-  return fenced
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
+  return slackEscaped(fenced);
 };
+
+/**
+ * A value the model wrote, as a card on `platform` shows it (a held write's
+ * title, fields and values, an offered start's): exactly what will be
+ * sent, nothing cut, with the platform's own link and mention syntax made
+ * inert: on Teams no `](` a card reads as a link, on Slack its control
+ * characters escaped.
+ */
+export const inertOn =
+  (platform: string) =>
+  (text: string): string =>
+    platform === "slack" ? slackEscaped(text) : inTeams(text);
 
 /** The start of the paragraph being written: after the last blank line. */
 const lastBlankLine = /\n[ \t]*\n(?![\s\S]*\n[ \t]*\n)/u;
@@ -582,3 +522,16 @@ export const streamedWithoutLinks = (partial: string): string => {
   }
   return withoutLinks(partial.slice(0, held));
 };
+
+/**
+ * A name a line embeds (a workflow's, which the agent may have written),
+ * as a plain message on `platform` shows it: on Slack its control
+ * characters escaped; on Teams, whose message text renders HTML and
+ * `[words](address)`, no `<` that opens a tag and no `](`.
+ */
+export const inertInMessage =
+  (platform: string) =>
+  (text: string): string =>
+    platform === "slack"
+      ? slackEscaped(text)
+      : inTeams(text).replaceAll("<", "&lt;");

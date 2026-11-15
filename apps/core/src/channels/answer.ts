@@ -16,7 +16,7 @@ import {
 } from "./connect-own.ts";
 import type { Conversation } from "./connect-own.ts";
 import type { ChannelHandoff, ChannelMessage } from "./door.ts";
-import { checkOf, turnHeldWrites } from "./held.ts";
+import { checkOf, inertView, turnHeldWrites } from "./held.ts";
 import { sortRequest } from "./request-sorting.ts";
 import { countAnswered, countSignal } from "./signals.ts";
 import type { ChannelSignal } from "./signals.ts";
@@ -313,11 +313,13 @@ const cardInto = (thread: Thread, onFirst: () => void) => {
       if (writing.sent === undefined) {
         return false;
       }
+      // A line the turn ended in goes on a card too: card to card.
+      const last = typeof content === "string" ? draftCard(content) : content;
       for (let tried = 0; tried < lastTries; tried += 1) {
         // oxlint-disable-next-line no-await-in-loop -- tried in turn
         await waitUntil(writing.nextAt);
         // oxlint-disable-next-line no-await-in-loop -- tried in turn
-        if (await send(content)) {
+        if (await send(last)) {
           return true;
         }
       }
@@ -451,7 +453,12 @@ const answerOne = async (
   // The starts the turn offered, each on its card, under the answer, each
   // kept with this request so a press on it is this request's.
   const offers = quietly("offers", async () => {
-    await postOffers(env, thread, { chatId, userId, requestId }, locale);
+    await postOffers(
+      env,
+      thread,
+      { chatId, userId, requestId, platform },
+      locale
+    );
   });
   // Timed to the answer the person has, as they wait for it.
   const timed = async () => {
@@ -499,7 +506,7 @@ const answerOne = async (
     await thread.post(
       heldWritesCard({
         locale,
-        writes,
+        writes: writes.map((write) => inertView(platform, write)),
         ...(check === undefined ? {} : { check }),
         openUrl: chatUrl,
       })
