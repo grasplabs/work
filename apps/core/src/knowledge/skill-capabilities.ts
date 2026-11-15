@@ -22,9 +22,6 @@ const objectIdOf = (object: Permission["object"]): string | undefined => {
   if (object.type === "connection") {
     return object.connectionId;
   }
-  if (object.type === "collection") {
-    return object.collectionId;
-  }
   if (object.type === "workflow") {
     return object.workflowId;
   }

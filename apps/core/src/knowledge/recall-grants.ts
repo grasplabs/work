@@ -1,29 +1,11 @@
 import { brainErrors } from "@grasp-os/brain/contract";
-import type { Authority } from "@grasp-os/shared/permissions";
 
-import { grantedPermissions } from "../permissions.ts";
+import { grantedPermissions, hasBrainGrant } from "../permissions.ts";
 import type { Reader } from "./access.ts";
 
 // Who may recall, as core decides it: Knowledge's `recall` port
 // (ports.ts). A person recalls what they may read; an App, run or agent
 // only under an active `brain` grant, from the collections it was granted.
-
-/**
- * Whether `authority` holds an active `brain` grant, read now: what an
- * App, run or agent needs to recall. A chat asks it before its turn, to
- * offer the brain at all and recall for the question (workspace.ts,
- * agent.ts), and recall asks it again as it reads.
- */
-export const hasBrainGrant = async (
-  env: Env,
-  authority: Authority
-): Promise<boolean> => {
-  const granted = await grantedPermissions(env, authority);
-  return granted.some(
-    ({ object, actions }) =>
-      object.type === "platform" && actions.includes("brain")
-  );
-};
 
 /** Refuses, as `brain.denied`, an App, run or agent without a `brain` grant. */
 export const requireRecall = async (

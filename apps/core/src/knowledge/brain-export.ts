@@ -105,7 +105,9 @@ export const coreExport = (env: Env): OnExport => ({
                 collectionIds.length === 0
                   ? undefined
                   : and(
-                      eq(permissions.objectType, "collection"),
+                      // A kind the platform no longer serves (permissions.ts
+                      // `servedSql`), kept in the export as it was granted.
+                      sql`${permissions.objectType} = 'collection'`,
                       inList(permissions.objectId, collectionIds)
                     )
               ),
