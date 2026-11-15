@@ -3821,8 +3821,9 @@ describe(
       const ann = await teamsMember(idp, says("Noted."), says("Noted."));
       const ben = await memberAnsweredBy(idp, ann.provider);
       const [inGroup, inDirect] = [`d${unique()}`, `d${unique()}`];
-      /** One memory everyone may read about `depot`, by its id. */
+      /** One memory everyone may read about `depot`: its id and statement. */
       const companyMemory = async (depot: string) => {
+        const statement = `Depot ${depot} opens at ${markerWord()}`;
         const { memories } = await brainOf(
           inJurisdiction(env, env.BRAIN_STORE)
         ).addMemories({
@@ -3833,7 +3834,7 @@ describe(
             {
               about: "c",
               type: "fact",
-              statement: `Depot ${depot} opens at ${markerWord()}`,
+              statement,
               speaker: { kind: "system" },
               basis: { kind: "writer", writer: "crm" },
             },
@@ -3843,7 +3844,7 @@ describe(
         if (memory === undefined) {
           throw new TypeError("Expected the memory added");
         }
-        return memory;
+        return { memory, statement };
       };
       const ownStatement = `Depot ${inDirect} keeps Ann's own memory ${markerWord()}`;
       const { memory: own } = await rememberAs(env, ann.userId, {
@@ -3853,10 +3854,9 @@ describe(
         statement: ownStatement,
         quote: ownStatement,
       });
-      const [groupCompany, directCompany] = [
-        await companyMemory(inGroup),
-        await companyMemory(inDirect),
-      ];
+      const groupMemory = await companyMemory(inGroup);
+      const { memory: directCompany } = await companyMemory(inDirect);
+      const groupCompany = groupMemory.memory;
       const withBen = newGroup();
       await onGroupRoster(withBen, [
         { person: ann.teams },
@@ -3874,7 +3874,12 @@ describe(
         };
       };
 
+      const beforeGroup = ann.provider.requests.length;
       await post(mentionIn(ann.teams, withBen, `What about depot ${inGroup}?`));
+      // Handed over as the company reads it: what the group turn sent.
+      const groupRecalled = JSON.stringify(
+        ann.provider.requests.slice(beforeGroup).map(({ body }) => body)
+      ).includes(groupMemory.statement);
       const afterGroup = await used();
       await post(
         messageFrom(ann.teams, { text: `What about depot ${inDirect}?` })
@@ -3882,9 +3887,11 @@ describe(
       const { directCompany: company, own: ownUsed } = await used();
 
       expect({
+        groupRecalled,
         afterGroup,
         afterDirect: { company, own: ownUsed },
       }).toStrictEqual({
+        groupRecalled: true,
         afterGroup: { groupCompany: false, directCompany: false, own: false },
         afterDirect: { company: true, own: true },
       });

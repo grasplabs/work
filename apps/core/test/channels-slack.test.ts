@@ -667,24 +667,41 @@ describe("a linked person's direct message in Slack", () => {
       };
     };
 
+    /** What reached the model for `place`, and the lines posted there. */
+    const answeredIn = async (place: {
+      channel: string;
+      channelType: string;
+    }) => {
+      const sent = await sentFor(place);
+      const posted = await slackSawIn(place.channel);
+      return {
+        ...sent,
+        lines: posted.map(({ method, fields }) => ({
+          method,
+          text: fields.text,
+        })),
+      };
+    };
     const elsewhere = [
-      await sentFor({
+      await answeredIn({
         channel: `C${unique().toUpperCase()}`,
         channelType: "channel",
       }),
-      await sentFor({
+      await answeredIn({
         channel: `C${unique().toUpperCase()}`,
         channelType: "mpim",
       }),
     ];
     const direct = await sentFor({});
 
+    // Told it answers only in a direct message, and nothing else.
     const none = {
       answered: false,
       own: false,
       ownMemory: false,
       file: false,
       ownSkill: false,
+      lines: [{ method: "chat.postMessage", text: say("privateOnly", "en") }],
     };
     expect({ elsewhere, direct }).toStrictEqual({
       elsewhere: [none, none],

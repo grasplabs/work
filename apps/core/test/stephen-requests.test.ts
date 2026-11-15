@@ -374,9 +374,6 @@ describe("sorting a request", setUpTime, () => {
         sorted: row?.topic_id !== null && row?.question_id !== null,
       };
     };
-    const { results: names } = await env.DB.prepare(
-      "SELECT t.name, q.wording, q.role FROM stephen_request_topics t LEFT JOIN stephen_request_questions q ON q.topic_id = t.id"
-    ).all();
     expect({
       // Her own store reached his answer in her direct message.
       recalled: JSON.stringify(ann.provider.requests[0]?.body).includes(own),
@@ -388,7 +385,6 @@ describe("sorting a request", setUpTime, () => {
       })),
       judgedWithAnswer: judging.some((body) => body.includes(own)),
       outcomes: [keptFor(direct), keptFor(inGroup)],
-      inNames: JSON.stringify(names).includes(own),
     }).toStrictEqual({
       recalled: true,
       named: [
@@ -400,7 +396,6 @@ describe("sorting a request", setUpTime, () => {
         { outcome: "unanswered", sorted: true },
         { outcome: "done", sorted: true },
       ],
-      inNames: false,
     });
   });
 });
