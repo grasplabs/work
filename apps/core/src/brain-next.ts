@@ -115,6 +115,7 @@ import type {
   BrainWithoutMeaningReason,
 } from "@grasp-os/shared/brain-report";
 import { brainSourceErrors, firstLineOf } from "@grasp-os/shared/brain-sources";
+import { withinTime } from "@grasp-os/shared/deadline";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { instructionFileErrors } from "@grasp-os/shared/instruction-files";
 import type { InstructionFileRef } from "@grasp-os/shared/instruction-files";
@@ -133,13 +134,19 @@ import {
   ownStoresTotals,
 } from "./brain-own-stores.ts";
 import type { OwnStoreHealth } from "./brain-own-stores.ts";
-import { inJurisdiction } from "./durable-objects.ts";
-import { embedInBulk, embedderModel, questionVectorOf } from "./embedder.ts";
+import { inJurisdiction, workspace } from "./durable-objects.ts";
+import {
+  embedInBulk,
+  embedderModel,
+  questionVectorMs,
+  questionVectorOf,
+} from "./embedder.ts";
 import { promptTextOf } from "./instructions-text.ts";
 import { parseModelRef } from "./model-catalog.ts";
 import { brainSpendByPurpose, spendMonth } from "./model-spend.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
 import { organizationTimeZone } from "./organization.ts";
+import { personalWorkspaceId } from "./personal-workspace.ts";
 import { shippedSkills } from "./shipped-skills.ts";
 import { skillCards, skillCardsKept } from "./skill-cards.ts";
 import type { SkillCardText } from "./skill-cards.ts";
@@ -417,8 +424,9 @@ export interface Recall {
   budget: { tokens: number };
   /**
    * Whether the pack may hold what only this person may read, from their
-   * own store: only where the answer reaches them alone (their own web
-   * chat, an agent's direct message with them). Apps, workflows and the
+   * own store: only where the answer reaches them alone (their own chat in
+   * Grasp, in a turn they started; a chat app's direct message is kept by
+   * the chat app too, so it reads as the company). Apps, workflows and the
    * SDK pass `false`, so what is theirs alone never reaches App data or
    * anyone else; then their own store is never addressed.
    */
@@ -954,6 +962,18 @@ const meaningOf = async (
 };
 
 /**
+ * What a recall reads as: the person, with their own store (`person`),
+ * only with `personal` and not `company`: where its answer reaches them
+ * alone; their teams; or the company.
+ */
+const reachOf = ({ personal, company = false }: Recall): Reach => {
+  if (company) {
+    return "company";
+  }
+  return personal ? "person" : "teams";
+};
+
+/**
  * The Brain's request of a recall by the member `personId`, as core counts
  * them now: the question checked as the Brain checks it before the
  * embedder sees any of it, and embedded while their reader is read. With
@@ -964,13 +984,11 @@ const meaningOf = async (
 const recallRequestAs = async (
   env: BrainEnv & Pick<Env, "DB" | "EMBEDDER">,
   personId: string,
-  { question: asked, budget, asOf, personal, company = false, teams }: Recall
+  recall: Recall
 ): Promise<RecallRequest> => {
+  const { question: asked, budget, asOf, teams } = recall;
   const question = checked(questionSchema, asked);
-  let reach: Reach = personal ? "person" : "teams";
-  if (company) {
-    reach = "company";
-  }
+  const reach = reachOf(recall);
   const [reader, meaning] = await Promise.all([
     readerOf(env, personId, reach, teams),
     // As of a moment the Brain never searches by meaning: nothing to embed.
@@ -989,17 +1007,27 @@ const recallRequestAs = async (
  * What every store `request`'s reader may read from finds for it, by
  * `finding` (`find`, or `findPassages` for passages alone): the shared
  * store, and their own when the reader names them (`ownBrainOf`), the
- * shared store first, as ties go to the store given first.
+ * shared store first, as ties go to the store given first. With `used`,
+ * each store is given the reader's use of its own memories (`usedOf`).
  */
 const findingsOf = async (
   env: BrainEnv,
   request: RecallRequest,
-  finding: "find" | "findPassages"
+  finding: "find" | "findPassages",
+  used?: Used
 ): Promise<Finding[]> => {
   const own = ownBrainOf(env, request.reader);
   return await Promise.all([
-    brain(env)[finding](request),
-    ...(own === undefined ? [] : [own[finding](request)]),
+    brain(env)[finding](
+      used === undefined ? request : { ...request, used: used.shared }
+    ),
+    ...(own === undefined
+      ? []
+      : [
+          own[finding](
+            used === undefined ? request : { ...request, used: used.own }
+          ),
+        ]),
   ]);
 };
 
@@ -1027,6 +1055,46 @@ const storesOf = (findings: readonly Finding[]): Map<string, MemoryStore> =>
     )
   );
 
+/** A person's use of memories, per store (`usedOf`), for its requests. */
+type Used = Record<MemoryStore, NonNullable<RecallRequest["used"]>>;
+
+/**
+ * When `personId` last used each memory they used, at or before `until`:
+ * when a recall as them last handed it over in their own chat, as their
+ * Workspace keeps it with the run (workspace.ts `memoriesUsed`), per
+ * store, for each store's recall to rank by (the contract's `used`), so a
+ * memory they never use fades among equals and is never dropped. Their
+ * own use alone, and only in the requests: no store keeps it. Read
+ * alongside the question's embedding, within the same bound
+ * (`questionVectorMs`), so it adds no wait to a recall that has one. A
+ * ranking hint: a lookup that fails or is slow leaves the recall unranked
+ * by use, logged by the error's name alone, never failed.
+ */
+const usedOf = async (
+  env: Pick<Env, "WORKSPACES" | "DURABLE_OBJECT_JURISDICTION">,
+  personId: string,
+  until: Date
+): Promise<Used> => {
+  const used: Used = { own: [], shared: [] };
+  try {
+    const uses = await withinTime(
+      async () =>
+        await workspace(env, personalWorkspaceId(personId)).memoriesUsed(
+          until.getTime()
+        ),
+      questionVectorMs
+    );
+    for (const { store, memory, at } of uses) {
+      used[store].push({ memory, at: new Date(at) });
+    }
+  } catch (error) {
+    log.warn("brain.recall.without_use", {
+      error: error instanceof Error ? error.name : "unknown",
+    });
+  }
+  return used;
+};
+
 /**
  * A pack of what the member `personId` may read for `question`, as core
  * counts them now, within `budget.tokens` (the Brain's estimate,
@@ -1047,12 +1115,21 @@ const storesOf = (findings: readonly Finding[]): Map<string, MemoryStore> =>
  * (`recallPassagesAs`).
  */
 export const recallAs = async (
-  env: BrainEnv & Pick<Env, "DB" | "EMBEDDER">,
+  env: BrainEnv & Pick<Env, "DB" | "EMBEDDER" | "WORKSPACES">,
   personId: string,
   recall: Recall
 ): Promise<RecalledPack> => {
-  const request = await recallRequestAs(env, personId, recall);
-  const findings = await findingsOf(env, request, "find");
+  // Ranked by their use only where the answer reaches them alone: a
+  // recall as their teams or the company (a channel, a thread, a chat
+  // app, a turn they didn't start, code) is ordered as for anyone, and
+  // their Workspace isn't asked.
+  const [request, used] = await Promise.all([
+    recallRequestAs(env, personId, recall),
+    reachOf(recall) === "person"
+      ? usedOf(env, personId, recall.asOf ?? new Date())
+      : undefined,
+  ]);
+  const findings = await findingsOf(env, request, "find", used);
   const { items, memories, contested, notFound, truncated } = packAcross(
     request.question,
     request.budget.tokens,

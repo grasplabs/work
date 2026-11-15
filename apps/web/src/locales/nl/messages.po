@@ -1499,6 +1499,10 @@ msgstr "Een gast heeft een bericht geschreven"
 msgid "A JSON value"
 msgstr "Een JSON-waarde"
 
+#: src/interview/transcript.tsx
+msgid "A line of mine, removed."
+msgstr "Een beurt van mij, verwijderd."
+
 #: src/workflows/requests/request-plan.tsx
 msgid "A look-up"
 msgstr "Een opzoeking"
@@ -3332,8 +3336,10 @@ msgstr "Uitvoeren kan niet: {unread}"
 #: src/drafts/draft-history.tsx
 #: src/drafts/sharing.tsx
 #: src/inbox/item-detail.tsx
+#: src/interview/transcript.tsx
 #: src/link-confirmation.tsx
 #: src/onboarding/document-drop.tsx
+#: src/onboarding/forget-kickoff.tsx
 #: src/onboarding/place-picker.tsx
 #: src/projects/file-item-dialog.tsx
 #: src/projects/project-dialog.tsx
@@ -5856,9 +5862,25 @@ msgstr "Voor het team {team}"
 msgid "For whom"
 msgstr "Voor wie"
 
+#: src/onboarding/forget-kickoff.tsx
+msgid "Forget it"
+msgstr "Vergeet het"
+
+#: src/onboarding/forget-kickoff.tsx
+msgid "Forget our first conversation"
+msgstr "Ons eerste gesprek vergeten"
+
+#: src/onboarding/forget-kickoff.tsx
+msgid "Forget our first conversation?"
+msgstr "Ons eerste gesprek vergeten?"
+
 #: src/brain/memories-page.tsx
 msgid "Forgotten, kept as history"
 msgstr "Vergeten, bewaard als geschiedenis"
+
+#: src/onboarding/forget-kickoff.tsx
+msgid "Forgotten. Nothing of our first conversation is kept."
+msgstr "Vergeten. Er is niets meer van ons eerste gesprek bewaard."
 
 #: src/connections/groups.ts
 msgctxt "kind of app"
@@ -6707,6 +6729,10 @@ msgstr "{name} kon ik niet lezen. Voeg het opnieuw toe, of als pdf."
 #: src/onboarding/setup-steps.tsx
 msgid "I couldn’t read this one"
 msgstr "Deze kon ik niet lezen"
+
+#: src/onboarding/forget-kickoff.tsx
+msgid "I delete what was said and everything I took from it: what I know about your company from it, and what your Brain learned from it. I then know less about your company, which can put off the day your Grasp opens. This can’t be undone."
+msgstr "Ik verwijder wat er gezegd is en alles wat ik eruit heb gehaald: wat ik daardoor over jullie bedrijf weet, en wat jullie Brain ervan heeft geleerd. Ik weet dan minder over jullie bedrijf, waardoor de dag waarop jullie Grasp opengaat later kan worden. Dit kan niet ongedaan worden gemaakt."
 
 #: src/onboarding/about-story.tsx
 msgid "I do every interview myself. Here’s what that sounds like."
@@ -9917,6 +9943,10 @@ msgstr "Onze e-mail kwam niet aan bij {names}. Stuur hun link zelf via Links om 
 msgid "Our first conversation gave me the big picture. Now I need the details."
 msgstr "Ons eerste gesprek gaf me het grote plaatje. Nu heb ik de details nodig."
 
+#: src/onboarding/forget-kickoff.tsx
+msgid "Our first conversation is deleted. I’m still erasing what I took from it, and I finish that by myself."
+msgstr "Ons eerste gesprek is verwijderd. Ik ben nog bezig te wissen wat ik eruit heb gehaald, en dat maak ik zelf af."
+
 #: src/apps/resource-bindings.tsx
 #: src/chat/thread.tsx
 msgid "Output"
@@ -10890,6 +10920,7 @@ msgstr "Opnieuw laden"
 #: src/apps/data-model-changes.tsx
 #: src/apps/field-editor.tsx
 #: src/connections/tool-permissions.tsx
+#: src/interview/transcript.tsx
 #: src/onboarding/document-drop.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/ai-providers.tsx
@@ -10949,6 +10980,10 @@ msgstr "{what} uit het brein verwijderen?"
 msgid "Remove {when}, for {person}"
 msgstr "{when}, voor {person}, verwijderen"
 
+#: src/interview/transcript.tsx
+msgid "Remove {who}’s line: {words}"
+msgstr "Beurt van {who} verwijderen: {words}"
+
 #: src/brain/brain-article/kern.tsx
 #: src/brain/forget.tsx
 msgid "Remove from the brain"
@@ -10989,6 +11024,14 @@ msgstr "Het zoeken verwijderen"
 #: src/brain/brain-article/kern.tsx
 msgid "Remove this from the brain"
 msgstr "Dit uit het brein verwijderen"
+
+#: src/interview/transcript.tsx
+msgid "Remove this line?"
+msgstr "Deze beurt verwijderen?"
+
+#: src/interview/transcript.tsx
+msgid "Remove your line: {words}"
+msgstr "Je beurt verwijderen: {words}"
 
 #: src/settings/erasures.tsx
 msgid "Removed"
@@ -11031,6 +11074,10 @@ msgstr "Verwijderd op {date} · e-mail gewist"
 #: src/settings/erasures.tsx
 msgid "Removed people"
 msgstr "Verwijderde mensen"
+
+#: src/interview/transcript.tsx
+msgid "Removed."
+msgstr "Verwijderd."
 
 #: src/chat/chat-menus.tsx
 #: src/chat/chat-more.tsx
@@ -13737,6 +13784,10 @@ msgstr "De interviews zijn nog niet gepland. Je plant ze aan het eind van je onb
 #: src/workflows/traces.tsx
 msgid "The latest runs, newest first."
 msgstr "De laatste runs, nieuwste eerst."
+
+#: src/interview/transcript.tsx
+msgid "The line is deleted now, and so is what I marked in it. What I wrote down from it is in what I read back to you at the end: take it out there, and it is deleted for good when our conversation is finished. This can’t be undone."
+msgstr "De beurt wordt nu verwijderd, net als wat ik erin heb gemarkeerd. Wat ik eruit heb opgeschreven, staat in wat ik je aan het eind voorlees: haal het daar weg, dan wordt het voorgoed verwijderd zodra ons gesprek klaar is. Dit kan niet ongedaan worden gemaakt."
 
 #: src/pages/page-links.ts
 msgid "The link wasn't opened."

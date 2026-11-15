@@ -1,3 +1,5 @@
+import { erasedFact } from "@grasp-os/shared/interview-links";
+import { readBackParts } from "@grasp-os/shared/interview-story";
 import type { StephenTurn } from "@grasp-os/shared/interview-turn";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -14,6 +16,7 @@ import {
   ticked,
   withFactToggled,
   withLine,
+  withoutLine,
 } from "./progress.ts";
 
 // From the prototype's `data/interviews.ts` (`takeTurn`), which these steps
@@ -35,6 +38,108 @@ const said = withLine(
   withLine(freshProgress, { from: "stephen", text: "What do you do first?" }),
   { from: "person", text: "I open the invoice in Exact.", typed: true }
 );
+
+describe("a line they remove", () => {
+  it("keeps its place and nothing of it, and a turn under way puts no marks on it", () => {
+    const marked = withLine(said, {
+      from: "person",
+      text: "Then I book it.",
+      typed: true,
+      marks: [{ quote: "book it", tag: "step" }],
+      file: "booking.pdf",
+    });
+    const removed = withoutLine(marked, 1);
+    // The turn answering it comes back after it was removed.
+    const after = afterTurn(
+      removed,
+      turn({
+        facts: [
+          { tag: "system", text: "Exact.", record: "Exact.", quote: "Exact" },
+        ],
+      }),
+      { answered: 1 }
+    );
+    expect(after.lines).toStrictEqual([
+      { from: "stephen", text: "What do you do first?" },
+      { from: "person", text: "", removed: true },
+      {
+        from: "person",
+        text: "Then I book it.",
+        typed: true,
+        marks: [{ quote: "book it", tag: "step" }],
+        file: "booking.pdf",
+      },
+    ]);
+  });
+});
+
+describe("a statement erased", () => {
+  it("numbers what is written down next past the highest id held, gaps and all", () => {
+    const held = {
+      ...said,
+      facts: [
+        {
+          id: "f2",
+          tag: "step" as const,
+          text: "Open it.",
+          record: "Open it.",
+        },
+        {
+          id: "f7",
+          tag: "step" as const,
+          text: "Sign it.",
+          record: "Sign it.",
+        },
+      ],
+    };
+    const after = afterTurn(
+      held,
+      turn({
+        facts: [
+          { tag: "step", text: "You book it.", record: "Book it.", quote: "" },
+          { tag: "step", text: "You file it.", record: "File it.", quote: "" },
+        ],
+      }),
+      { answered: 1 }
+    );
+    expect(after.facts.map(({ id }) => id)).toStrictEqual([
+      "f2",
+      "f7",
+      "f8",
+      "f9",
+    ]);
+  });
+
+  it("keeps its id taken, and is read back nowhere", () => {
+    const held = {
+      ...said,
+      facts: [
+        erasedFact({
+          id: "f1",
+          tag: "step" as const,
+          text: "You open it.",
+          record: "Open it.",
+        }),
+        { id: "f2", tag: "handoff" as const, text: "Sam.", record: "Sam." },
+      ],
+    };
+    const after = afterTurn(
+      held,
+      turn({
+        facts: [
+          { tag: "step", text: "You book it.", record: "Book it.", quote: "" },
+        ],
+      }),
+      { answered: 1 }
+    );
+    expect({
+      ids: after.facts.map(({ id }) => id),
+      read: readBackParts(after.facts).flatMap(({ facts }) =>
+        facts.map(({ id }) => id)
+      ),
+    }).toStrictEqual({ ids: ["f1", "f2", "f3"], read: ["f2", "f3"] });
+  });
+});
 
 describe("a turn of Stephen's", () => {
   it("marks his quotes on the line it answered, writes each fact down once, and moves on", () => {

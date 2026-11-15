@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   interviewFactSchema,
   interviewSecretSchema,
+  isErased,
 } from "./interview-links.ts";
 import type { InterviewFact } from "./interview-links.ts";
 import type { FactTag } from "./interview-turn.ts";
@@ -209,7 +210,8 @@ export interface ReadBackPart {
  * back to add something, only what is new or changed is.
  */
 export const readBackParts = (facts: InterviewFact[]): ReadBackPart[] => {
-  const open = facts.filter(({ agreed }) => agreed !== true);
+  // One erased is read back nowhere: nothing of it is left to read.
+  const open = facts.filter((fact) => fact.agreed !== true && !isErased(fact));
   const parts: ReadBackPart[] = readBackGroups.flatMap((group) => {
     const own = open.filter(
       (fact) => fact.pin === undefined && groupOf[fact.tag] === group
