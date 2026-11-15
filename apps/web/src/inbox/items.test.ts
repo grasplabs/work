@@ -2,7 +2,6 @@
 import type { PendingAction, UnknownOutcome } from "@grasp-os/shared/connect";
 import {
   appIdSchema,
-  collectionIdSchema,
   connectionIdSchema,
   permissionIdSchema,
   runIdSchema,
@@ -85,8 +84,8 @@ const request: Permission = {
   id: permissionIdSchema.parse("request-1"),
   subject: { type: "app", appId: app },
   object: {
-    type: "collection",
-    collectionId: collectionIdSchema.parse("invoices"),
+    type: "connection",
+    connectionId: connectionIdSchema.parse("invoices"),
   },
   actions: ["read"],
   binding: "invoices",
