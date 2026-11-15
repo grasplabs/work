@@ -292,6 +292,12 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // (person-erasure.ts, brain-sources.ts `endHandOversOf`), also one whose
   // item the queue parked for good.
   "core.brain_hand_overs": { erased: "brain_sources" },
+  // Whose run results the Brain holds by workflow, and when each was taken
+  // out of use as they lost it (brain-run-sources.ts): IDs and a count, as
+  // the runs themselves are the company's.
+  "core.brain_run_sources": {
+    company: "whose run results it took out of use, by workflow (D3)",
+  },
   // A person's own Brain store's health, keyed by the SHA-256 of their ID:
   // removed once the Brain's erasure erased their store (brain-next.ts
   // `erasePerson`).
@@ -617,6 +623,7 @@ export const reviewedPersonColumns: Readonly<
   "core.blueprints": ["marked_by"],
   "core.brain_gap_states": ["answered_by"],
   "core.business_store_members": ["added_by", "member_id", "member_type"],
+  "core.brain_run_sources": ["person_id"],
   "core.brain_uploads": ["uploaded_by"],
   "core.business_stores": ["closing_owner", "owner_id"],
   "core.channel_accounts": ["platform_user_id", "user_id"],

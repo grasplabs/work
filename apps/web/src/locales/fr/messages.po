@@ -13001,6 +13001,10 @@ msgstr "Planification arrêtée"
 msgid "Stopped someone visiting an App"
 msgstr "A retiré à quelqu’un l’accès visiteur à une application"
 
+#: src/activity/audit-words.ts
+msgid "Stopped the Brain using someone's workflow results, as they lost the workflow"
+msgstr "A cessé d'utiliser dans le Brain les résultats de workflow d'une personne, car elle a perdu le workflow"
+
 #: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
 msgid "Stopped."

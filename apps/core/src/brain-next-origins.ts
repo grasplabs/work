@@ -1,4 +1,4 @@
-import { eraseOwnGroup, eraseSource } from "./brain-next.ts";
+import { eraseOwnGroup, eraseSource, removeOwnSources } from "./brain-next.ts";
 import type { SourceReaders, SourceRef } from "./brain-next.ts";
 
 // What core hands the Brain comes from an origin core keeps (an upload, a
@@ -32,6 +32,27 @@ export const runSource = (runId: string): SourceRef => ({
   producer: "run",
   id: runId,
 });
+
+/** The most runs one call of `removeRunSources` takes. */
+export { removalsMax as runRemovalsMax } from "./brain-next.ts";
+
+/**
+ * Takes the sources of the runs `runIds` (at most `runRemovalsMax`), each
+ * one `personId`'s alone, out of use in their own store for good, their
+ * history kept, in one call (`removeOwnSources`). A run whose key holds
+ * nothing yet has it closed all the same, so a hand-over still under way
+ * for it is refused. Safe to repeat.
+ */
+export const removeRunSources = async (
+  env: Pick<Env, "BRAIN_STORE" | "DURABLE_OBJECT_JURISDICTION">,
+  personId: string,
+  runIds: readonly string[]
+): Promise<void> => {
+  await removeOwnSources(env, {
+    personId,
+    sources: runIds.map((id) => runSource(id)),
+  });
+};
 
 /** Whether `id` can stand in a chat's key: never holding "/", which parts it. */
 const isKeyPart = (id: string): boolean => id !== "" && !id.includes("/");

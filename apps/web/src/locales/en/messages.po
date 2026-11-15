@@ -13001,6 +13001,10 @@ msgstr "Stopped schedule"
 msgid "Stopped someone visiting an App"
 msgstr "Stopped someone visiting an App"
 
+#: src/activity/audit-words.ts
+msgid "Stopped the Brain using someone's workflow results, as they lost the workflow"
+msgstr "Stopped the Brain using someone's workflow results, as they lost the workflow"
+
 #: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
 msgid "Stopped."

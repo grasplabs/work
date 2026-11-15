@@ -12,6 +12,7 @@ import {
   isSourceText,
   erasedSource,
   removedSource,
+  removalsMax,
   changeReused,
   listPageMax,
   erasureReasons,
@@ -402,6 +403,7 @@ const newSourceSchema = z.strictObject({
 
 /** The most characters of a question `recallAs` takes, as the Brain's contract says. */
 export { questionMaxLength as recallQuestionMaxLength } from "@grasp-os/brain-next/contract";
+export { removalsMax } from "@grasp-os/brain-next/contract";
 
 /** A question as the Brain takes one (`recallRequestSchema`). */
 const questionSchema = wellFormedString().max(questionMaxLength);
@@ -1651,7 +1653,7 @@ const sourceRemovalSchema = z.strictObject({
 
 /**
  * Takes `source` out of use for good and keeps its history (the Brain's
- * `removeSource`): from when it returns, nothing of it is found, listed
+ * `removeSources`): from when it returns, nothing of it is found, listed
  * or read by anyone, what was drawn from it included, and nothing new is
  * drawn from it; its key is closed, so an add to it is refused
  * (`brain.source_removed`), and nothing puts it back in use. An export
@@ -1667,7 +1669,27 @@ export const removeSource = async (
   const { source, readers } = checked(sourceRemovalSchema, removed);
   const store =
     readers.kind === "owner" ? ownBrain(env, readers.personId) : brain(env);
-  await store.removeSource({ source: sourceKeyOf(source) });
+  await store.removeSources({ sources: [sourceKeyOf(source)] });
+};
+
+const ownRemovalSchema = z.strictObject({
+  personId: idSchema,
+  sources: z.array(sourceRefSchema).min(1).max(removalsMax),
+});
+
+/**
+ * Takes `sources`, each one `personId`'s alone, out of use in their own
+ * store, as `removeSource` takes one, all in one call and one transaction
+ * of the store (up to `removalsMax`). Safe to repeat.
+ */
+export const removeOwnSources = async (
+  env: BrainEnv,
+  removed: { personId: string; sources: readonly SourceRef[] }
+): Promise<void> => {
+  const { personId, sources } = checked(ownRemovalSchema, removed);
+  await ownBrain(env, personId).removeSources({
+    sources: sources.map((source) => sourceKeyOf(source)),
+  });
 };
 
 const ownGroupErasureSchema = z.strictObject({
@@ -3448,14 +3470,16 @@ export type Handed =
 /**
  * Why a noted source is not handed over after all, one of a fixed set:
  * its record restricted since, deleted or gone, its details past their
- * retention, its reader no longer a member, or nothing of it to keep (a
- * question of no words).
+ * retention, its reader no longer a member, its reader no longer holding
+ * the role it was read under (a run's person, its workflow), or nothing of
+ * it to keep (a question of no words).
  */
 export type HandOverSkip =
   | "restricted"
   | "deleted"
   | "past_retention"
   | "not_a_member"
+  | "no_role"
   | "no_text";
 
 /** How a hand-over that did something ended: added, or refused for good. */
@@ -3515,9 +3539,18 @@ const closeKey = async (
   });
 };
 
-/** Whether `error` is core's refusal of an add an erasure closed (`addSource`). */
-const isErasedRefusal = (error: unknown): boolean =>
-  brainSourceErrors.codeOf(error) === "brain.source_erased";
+/**
+ * How a hand-over is refused for good when its add was refused for a
+ * closed key (`addSource`): `erased` when an erasure closed it, `removed`
+ * when a removal did (`removeSource`); undefined for any other error.
+ */
+const closedRefusalOf = (error: unknown): "erased" | "removed" | undefined => {
+  const code = brainSourceErrors.codeOf(error);
+  if (code === "brain.source_erased") {
+    return "erased";
+  }
+  return code === "brain.source_removed" ? "removed" : undefined;
+};
 
 /**
  * Refuses the hand-over `attempt` is at for `reason`: recorded first,
@@ -3553,7 +3586,8 @@ const refuse = async (
  * - its text, or its `whenTooLarge` when the text is past a source's
  *   bound as given or as indexed (`fitsSourceText`); refused as
  *   `too_large` when neither fits;
- * - refused as `erased` when what it adds was erased: final.
+ * - refused as `erased` when what it adds was erased, and as `removed`
+ *   when it was removed (`removeSource`): final.
  *
  * Each records its outcome, which ends the noted hand-over: once, as a
  * repeat of an attempt that ended it records nothing (`HandOverAttempt`).
@@ -3611,10 +3645,11 @@ const handOver = async (
       ...(handed.group === undefined ? {} : { group: handed.group }),
     }));
   } catch (error) {
-    if (!isErasedRefusal(error)) {
+    const closed = closedRefusalOf(error);
+    if (closed === undefined) {
       throw error;
     }
-    return await refused("erased");
+    return await refused(closed);
   }
   if (
     readers.data.kind === "owner" &&

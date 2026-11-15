@@ -46,60 +46,76 @@ export const refuseRemoved = (sql: SqlStorage, source: string): void => {
 };
 
 /**
- * Takes `source` out of use for good, keeping its history (above), in one
- * transaction: whether it was removed by this call, so its caller stops
- * work under way on it. A key already removed, or erased (closed and
- * holding nothing), is left as it is; one that holds nothing yet is
- * closed all the same, so an add that began before the removal never
- * lands after it. Refused while a restore runs, as an add is: a restore
- * could otherwise point the source at a current version after it.
+ * Takes `source` (its key's SHA-256 `subject`) out of use, in the caller's
+ * transaction: whether it was in use or open until now.
  */
-export const removeSource = async (
+const removedNow = (
+  sql: SqlStorage,
+  source: string,
+  subject: string
+): boolean => {
+  if (isRemoved(sql, source) || isErased(sql, subject)) {
+    return false;
+  }
+  const current =
+    sql
+      .exec<{ version_row: number }>(
+        "SELECT version_row FROM current_versions WHERE source = ?",
+        source
+      )
+      .toArray()
+      .at(0)?.version_row ?? null;
+  if (current !== null) {
+    removeVectorsOf(sql, current);
+    sql.exec("DELETE FROM current_versions WHERE source = ?", source);
+    // Their full vectors too, once no current chunk holds their text:
+    // the sweep checks and deletes (files.ts).
+    releaseVectors(
+      sql,
+      JSON.stringify(
+        sql
+          .exec<{ hash: string }>(
+            "SELECT hash FROM chunks WHERE version_row = ? AND hash IS NOT NULL",
+            current
+          )
+          .toArray()
+          .map(({ hash }) => hash)
+      )
+    );
+  }
+  sql.exec("DELETE FROM work_items WHERE key = ?", source);
+  sql.exec(
+    "INSERT INTO removed_sources (source, subject, version_row) VALUES (?, ?, ?)",
+    source,
+    subject,
+    current
+  );
+  return true;
+};
+
+/**
+ * Takes each of `sources` out of use for good, keeping its history
+ * (above), all in one transaction: those removed by this call, so its
+ * caller stops work under way on them. A key already removed, or erased
+ * (closed and holding nothing), is left as it is; one that holds nothing
+ * yet is closed all the same, so an add that began before the removal
+ * never lands after it. Refused while a restore runs, as an add is: a
+ * restore could otherwise point a source at a current version after it.
+ */
+export const removeSources = async (
   storage: DurableObjectStorage,
-  source: string
-): Promise<boolean> => {
-  const subject = await subjectOf(source);
+  sources: readonly string[]
+): Promise<string[]> => {
+  const subjects = await Promise.all(
+    sources.map(async (source) => await subjectOf(source))
+  );
   return storage.transactionSync(() => {
     const { sql } = storage;
     if (isRestoring(sql)) {
       throw new Error(restoringNow);
     }
-    if (isRemoved(sql, source) || isErased(sql, subject)) {
-      return false;
-    }
-    const current =
-      sql
-        .exec<{ version_row: number }>(
-          "SELECT version_row FROM current_versions WHERE source = ?",
-          source
-        )
-        .toArray()
-        .at(0)?.version_row ?? null;
-    if (current !== null) {
-      removeVectorsOf(sql, current);
-      sql.exec("DELETE FROM current_versions WHERE source = ?", source);
-      // Their full vectors too, once no current chunk holds their text:
-      // the sweep checks and deletes (files.ts).
-      releaseVectors(
-        sql,
-        JSON.stringify(
-          sql
-            .exec<{ hash: string }>(
-              "SELECT hash FROM chunks WHERE version_row = ? AND hash IS NOT NULL",
-              current
-            )
-            .toArray()
-            .map(({ hash }) => hash)
-        )
-      );
-    }
-    sql.exec("DELETE FROM work_items WHERE key = ?", source);
-    sql.exec(
-      "INSERT INTO removed_sources (source, subject, version_row) VALUES (?, ?, ?)",
-      source,
-      subject,
-      current
+    return sources.filter((source, index) =>
+      removedNow(sql, source, subjects[index] ?? "")
     );
-    return true;
   });
 };

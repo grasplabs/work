@@ -14,6 +14,7 @@ import { sweepAppVisitors } from "./app-visitors.ts";
 import { drainWebhookDeliveries } from "./app-webhooks.ts";
 import { auditLog } from "./audit-log.ts";
 import { workBrain } from "./brain-next.ts";
+import { removeLostRunSources } from "./brain-run-sources.ts";
 import { producersOf, relayHandOvers } from "./brain-sources.ts";
 import { completeOwedRemovals } from "./brain-uploads.ts";
 import { sweepChannelLinks } from "./channels/accounts.ts";
@@ -79,6 +80,15 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   // What core noted to hand over to the new Brain, put on its work queue
   // (src/brain-hand-overs.ts, src/brain-sources.ts).
   { name: "brain.hand_overs", period: "minute", run: relayHandOvers },
+  // Run results of people who lost their workflow, taken out of use in the
+  // new Brain (src/brain-run-sources.ts).
+  {
+    name: "brain.run_sources",
+    period: "minute",
+    run: async (env) => {
+      await removeLostRunSources(env);
+    },
+  },
   { name: "members.disconnects", period: "minute", run: retryDisconnects },
   { name: "members.erasures", period: "minute", run: retryErasures },
   // Shared uploads their uploaders removed, whose removal from the Brain,
