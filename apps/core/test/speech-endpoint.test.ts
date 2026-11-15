@@ -62,9 +62,12 @@ const askedSchema = z.object({
 
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
-/** A line no other test says, so the cache and the provider have never seen it. */
+/**
+ * A line no other test says, so the cache and the provider have never seen
+ * it: each digit a letter of its own, so two lines never become the same.
+ */
 const newLine = (): string =>
-  `Hello there, ${unique().replaceAll(/\d/gu, "x")}.`;
+  `Hello there, ${unique().replaceAll(/\d/gu, (digit) => "ghijklmnop".charAt(Number(digit)))}.`;
 
 /**
  * An onboarding running since yesterday, with one person whose link is
