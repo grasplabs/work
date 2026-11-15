@@ -129,8 +129,33 @@ export const interviewLineSchema = z.strictObject({
   file: z.string().max(interviewLimits.file).optional(),
   /** How Stephen said his line. */
   tone: z.enum(voiceTags).optional(),
+  /**
+   * Removed by the person whose interview it is (GRA-1897): its words, its
+   * marks and its file's name are gone, and it keeps only its place, so
+   * the conversation's positions stay where they were.
+   */
+  removed: z.literal(true).optional(),
 });
 export type InterviewLine = z.output<typeof interviewLineSchema>;
+
+/** A line as an interview keeps it: one removed holds nothing but who said it. */
+const keptLineSchema = interviewLineSchema.refine(
+  (line) =>
+    line.removed !== true ||
+    (line.text === "" &&
+      line.marks === undefined &&
+      line.file === undefined &&
+      line.typed === undefined &&
+      line.tone === undefined),
+  "A removed line holds nothing"
+);
+
+/** `line` removed: who said it, and nothing of what (`removed`). */
+export const removedLine = (line: InterviewLine): InterviewLine => ({
+  from: line.from,
+  text: "",
+  removed: true,
+});
 
 /** One thing Stephen understood, as he reads it back. */
 export const interviewFactSchema = z.strictObject({
@@ -162,7 +187,7 @@ export const interviewProgressSchema = z.strictObject({
   person: z.enum(personStates),
   told: z.boolean(),
   mode: z.enum(["talk", "type"]).nullable(),
-  lines: z.array(interviewLineSchema).max(interviewLimits.lines),
+  lines: z.array(keptLineSchema).max(interviewLimits.lines),
   facts: z
     .array(interviewFactSchema)
     .max(interviewLimits.facts)

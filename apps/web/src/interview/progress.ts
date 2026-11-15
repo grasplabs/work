@@ -1,4 +1,4 @@
-import { interviewLimits } from "@grasp-os/shared/interview-links";
+import { interviewLimits, removedLine } from "@grasp-os/shared/interview-links";
 import type {
   InterviewFact,
   InterviewLine,
@@ -183,7 +183,8 @@ export const afterTurn = (
     .filter(({ quote }) => quote !== "")
     .map(({ quote, tag }) => ({ quote, tag }));
   const lines = progress.lines.map((line, at) =>
-    at === answered && marks.length > 0
+    // A line they removed meanwhile takes no marks: it holds nothing.
+    at === answered && marks.length > 0 && line.removed !== true
       ? {
           ...line,
           marks: [...(line.marks ?? []), ...marks].slice(
@@ -241,6 +242,21 @@ export const afterTurn = (
     wants: turn.wants,
   };
 };
+
+/**
+ * `progress` with the line `at` removed by them (GRA-1897): its words, its
+ * marks and its file's name gone, its place kept, so a turn under way
+ * still finds the line it answers.
+ */
+export const withoutLine = (
+  progress: InterviewProgress,
+  at: number
+): InterviewProgress => ({
+  ...progress,
+  lines: progress.lines.map((line, each) =>
+    each === at ? removedLine(line) : line
+  ),
+});
 
 /** A line of the read-back, put right by them: their words, at once, also for the record until Stephen has heard of it. */
 export const withFactText = (

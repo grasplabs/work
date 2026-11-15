@@ -5,7 +5,9 @@ import { kickoffVisionFields } from "@grasp-os/shared/kickoff";
 import type { KickoffView } from "@grasp-os/shared/kickoff";
 
 import {
+  eraseOnboardingRecords,
   keepOnboardingRecords,
+  onboardingRecordsHeld,
   onboardingRecordsOf,
   retireOnboardingRecords,
 } from "../brain-records.ts";
@@ -33,7 +35,11 @@ import { ownId, recordOf } from "./brain-intake.ts";
 // - The store gives them, under its brain lock, from its kickoff as it is
 //   then: two saves at once, or an answer beside a save, leave the newest
 //   transcript's records; one after a purge forgot the kickoff
-//   (kickoff-erasure.ts) gives nothing.
+//   (kickoff-erasure.ts), or the admin deleted it, gives nothing.
+// - The admin deleting the kickoff erases every record it gave, retired
+//   ones too (`eraseKickoffRecords`): the store does it under its brain
+//   lock, after the kickoff is gone, and before keeping anything a newer
+//   kickoff gives.
 // - A team is a team record by the name the sponsor gave it; a roster team
 //   of the same name is the same team (`brain.read` joins them).
 
@@ -42,6 +48,26 @@ export const kickoffSourceId = "src-kickoff";
 
 /** The kinds of the onboarding's ids (`onb-<kind>-…`) for what the kickoff gives the brain. */
 const kinds = { vision: "vis", team: "kt", count: "kc" } as const;
+
+/** What every record the kickoff ever gave starts with, after `onb-`, whichever transcript. */
+const everyKind = Object.values(kinds).map((kind) => `${kind}-`);
+
+/**
+ * How many records the kickoff gave the brain, retired ones too: what
+ * deleting it takes (`eraseKickoffRecords`).
+ */
+export const kickoffRecordsHeld = async (env: Env): Promise<number> =>
+  await onboardingRecordsHeld(env, everyKind);
+
+/**
+ * Erases every record the kickoff gave the brain, of every transcript,
+ * retired ones too (a retired vision still holds its words): what the
+ * admin deleting the kickoff takes with it. Only ever called by the
+ * store, under its brain lock, once its kickoff is gone, so nothing keeps
+ * one again. Returns how many it erased.
+ */
+export const eraseKickoffRecords = async (env: Env): Promise<number> =>
+  await eraseOnboardingRecords(env, everyKind);
 
 /** Whether `id` is a team the kickoff named, as its record. */
 export const isKickoffTeam = (id: string): boolean =>
@@ -190,9 +216,7 @@ export const keepKickoffRecords = async (
   const current = Object.values(kinds).map(
     (kind) => `${onboardingIdPrefix}${kindOf(kind, tag)}-`
   );
-  await retireOnboardingRecords(
-    env,
-    Object.values(kinds).map((kind) => `${kind}-`),
-    (id) => current.some((prefix) => id.startsWith(prefix))
+  await retireOnboardingRecords(env, everyKind, (id) =>
+    current.some((prefix) => id.startsWith(prefix))
   );
 };

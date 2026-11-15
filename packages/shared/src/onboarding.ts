@@ -253,6 +253,8 @@ export interface OnboardingView {
   agreed: boolean;
   /** Grasp paused the interviews: no link opens and none goes out. */
   paused: boolean;
+  /** Whether the kickoff is in: what the admin can delete (`deleteKickoff`). */
+  kickoff: boolean;
   /**
    * The sponsor's first name, when the kickoff named them; null before it
    * is in, or when it did not. The one word of the kickoff the admin sees.
@@ -452,6 +454,12 @@ export interface OnboardingApi
   links: () => Promise<LinkToSend[]>;
   /** The admin took these people's links to send: they are new no more. */
   linksTaken: (people: string[]) => Promise<void>;
+  /**
+   * Deletes the kickoff for good, and everything drawn from it: what the
+   * admin's onboarding, Stephen and the brain knew of it. Asked again, it
+   * finishes what a failed delete left.
+   */
+  deleteKickoff: () => Promise<void>;
 }
 
 /** Why the onboarding refused something. */
@@ -459,6 +467,8 @@ export const onboardingErrors = defineErrorFamily({
   "onboarding.invalid": "That isn't something the onboarding takes.",
   "onboarding.staff_only": "Only Grasp's staff do that.",
   "onboarding.no_roster": "Add who works where first.",
+  "onboarding.kickoff_unfinished":
+    "The kickoff is deleted, but not all that was drawn from it is erased yet. Delete it again to finish.",
   "onboarding.past": "The interviews can't start in the past.",
   "onboarding.no_link": "That person has no link out yet.",
   "onboarding.not_found": "Nobody on the list by that id.",

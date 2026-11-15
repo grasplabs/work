@@ -14,6 +14,7 @@ import {
   ticked,
   withFactToggled,
   withLine,
+  withoutLine,
 } from "./progress.ts";
 
 // From the prototype's `data/interviews.ts` (`takeTurn`), which these steps
@@ -35,6 +36,40 @@ const said = withLine(
   withLine(freshProgress, { from: "stephen", text: "What do you do first?" }),
   { from: "person", text: "I open the invoice in Exact.", typed: true }
 );
+
+describe("a line they remove", () => {
+  it("keeps its place and nothing of it, and a turn under way puts no marks on it", () => {
+    const marked = withLine(said, {
+      from: "person",
+      text: "Then I book it.",
+      typed: true,
+      marks: [{ quote: "book it", tag: "step" }],
+      file: "booking.pdf",
+    });
+    const removed = withoutLine(marked, 1);
+    // The turn answering it comes back after it was removed.
+    const after = afterTurn(
+      removed,
+      turn({
+        facts: [
+          { tag: "system", text: "Exact.", record: "Exact.", quote: "Exact" },
+        ],
+      }),
+      { answered: 1 }
+    );
+    expect(after.lines).toStrictEqual([
+      { from: "stephen", text: "What do you do first?" },
+      { from: "person", text: "", removed: true },
+      {
+        from: "person",
+        text: "Then I book it.",
+        typed: true,
+        marks: [{ quote: "book it", tag: "step" }],
+        file: "booking.pdf",
+      },
+    ]);
+  });
+});
 
 describe("a turn of Stephen's", () => {
   it("marks his quotes on the line it answered, writes each fact down once, and moves on", () => {

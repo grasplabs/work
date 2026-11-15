@@ -1503,6 +1503,10 @@ msgstr "Ein JSON-Wert"
 msgid "A Knowledge search from {about} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
 msgstr "Eine Wissenssuche aus {about} hat {searches, plural, one {einmal} other {#-mal}} nichts gefunden, bei {askers, plural, one {# fragenden Person} other {# fragenden Personen}}."
 
+#: src/interview/transcript.tsx
+msgid "A line of mine, removed."
+msgstr "Ein Satz von mir, entfernt."
+
 #: src/workflows/requests/request-plan.tsx
 msgid "A look-up"
 msgstr "Ein Nachschlagen"
@@ -3336,8 +3340,10 @@ msgstr "Ausführen nicht möglich: {unread}"
 #: src/drafts/draft-history.tsx
 #: src/drafts/sharing.tsx
 #: src/inbox/item-detail.tsx
+#: src/interview/transcript.tsx
 #: src/link-confirmation.tsx
 #: src/onboarding/document-drop.tsx
+#: src/onboarding/forget-kickoff.tsx
 #: src/onboarding/place-picker.tsx
 #: src/projects/file-item-dialog.tsx
 #: src/projects/project-dialog.tsx
@@ -5860,6 +5866,22 @@ msgstr "Für das Team {team}"
 msgid "For whom"
 msgstr "Für wen"
 
+#: src/onboarding/forget-kickoff.tsx
+msgid "Forget it"
+msgstr "Vergessen"
+
+#: src/onboarding/forget-kickoff.tsx
+msgid "Forget our first conversation"
+msgstr "Unser erstes Gespräch vergessen"
+
+#: src/onboarding/forget-kickoff.tsx
+msgid "Forget our first conversation?"
+msgstr "Unser erstes Gespräch vergessen?"
+
+#: src/onboarding/forget-kickoff.tsx
+msgid "Forgotten. Nothing of our first conversation is kept."
+msgstr "Vergessen. Von unserem ersten Gespräch ist nichts mehr gespeichert."
+
 #: src/connections/groups.ts
 msgctxt "kind of app"
 msgid "Forms and surveys"
@@ -6712,6 +6734,10 @@ msgstr "{name} konnte ich nicht lesen. Fügen Sie es noch einmal hinzu, oder als
 msgid "I couldn’t read this one"
 msgstr "Diese konnte ich nicht lesen"
 
+#: src/onboarding/forget-kickoff.tsx
+msgid "I delete what was said and everything I took from it: what I know about your company from it, and what your Brain learned from it. This can’t be undone."
+msgstr "Ich lösche, was gesagt wurde, und alles, was ich daraus entnommen habe: was ich dadurch über Ihr Unternehmen weiß und was Ihr Brain daraus gelernt hat. Das lässt sich nicht rückgängig machen."
+
 #: src/onboarding/about-story.tsx
 msgid "I do every interview myself. Here’s what that sounds like."
 msgstr "Jedes Interview führe ich selbst. So klingt das."
@@ -7363,6 +7389,10 @@ msgstr "Ihre URL nimmt nichts mehr an, und kein Workflow startet mehr bei ihren 
 #: src/workflows/item-test.tsx
 msgid "Its version"
 msgstr "Seine Version"
+
+#: src/interview/transcript.tsx
+msgid "Its words are deleted for good, and so is what I marked in them. What I wrote down from it stays in what I read back to you at the end, where you can take it out. This can’t be undone."
+msgstr "Die Worte werden endgültig gelöscht, ebenso das, was ich darin markiert habe. Was ich daraus notiert habe, bleibt in dem, was ich Ihnen am Ende vorlese; dort können Sie es herausnehmen. Das lässt sich nicht rückgängig machen."
 
 #: src/brain/brain-article/team-work.tsx
 msgid "Its work"
@@ -10894,6 +10924,7 @@ msgstr "Neu laden"
 #: src/apps/data-model-changes.tsx
 #: src/apps/field-editor.tsx
 #: src/connections/tool-permissions.tsx
+#: src/interview/transcript.tsx
 #: src/onboarding/document-drop.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/ai-providers.tsx
@@ -10994,6 +11025,14 @@ msgstr "Suche entfernen"
 msgid "Remove this from the brain"
 msgstr "Dies aus dem Gehirn entfernen"
 
+#: src/interview/transcript.tsx
+msgid "Remove this line"
+msgstr "Diesen Satz entfernen"
+
+#: src/interview/transcript.tsx
+msgid "Remove this line?"
+msgstr "Diesen Satz entfernen?"
+
 #: src/settings/erasures.tsx
 msgid "Removed"
 msgstr "Entfernt"
@@ -11031,6 +11070,10 @@ msgstr "Entfernt am {date} · E-Mail gelöscht"
 #: src/settings/erasures.tsx
 msgid "Removed people"
 msgstr "Entfernte Personen"
+
+#: src/interview/transcript.tsx
+msgid "Removed."
+msgstr "Entfernt."
 
 #: src/chat/chat-menus.tsx
 #: src/chat/chat-more.tsx

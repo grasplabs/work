@@ -38,6 +38,7 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import {
   agreementsSchema,
   minTeamShown,
+  onboardingErrors,
   planSchema,
   remindAfterWorkingDays,
 } from "@grasp-os/shared/onboarding";
@@ -184,7 +185,11 @@ import type { TeamIntake } from "./brain-intake.ts";
 import { storedDocumentReadingSchema } from "./document-reading.ts";
 import { checkedSupport } from "./drawing-support.ts";
 import type { Support } from "./drawing-support.ts";
-import { keepKickoffRecords } from "./kickoff-records.ts";
+import {
+  eraseKickoffRecords,
+  keepKickoffRecords,
+  kickoffRecordsHeld,
+} from "./kickoff-records.ts";
 import {
   contextOf,
   kickoffBrief,
@@ -288,6 +293,14 @@ const kickoffOwedKey = "kickoff_records_owed";
  * day alone, so the records the purge rewrote still name it.
  */
 const kickoffSourceKey = "kickoff_source_at";
+
+/**
+ * Set when the admin deleted the kickoff and the brain's records it gave
+ * are still to be erased (`deleteKickoff`): set with the delete in one
+ * transaction, cleared once they are erased. Erased before any kickoff's
+ * records are kept, and by the alarm until done.
+ */
+const kickoffErasureOwedKey = "kickoff_records_erasure_owed";
 
 /** A piece of work's names, as a content purge reads and rewrites them. */
 export interface WorkNames {
@@ -874,6 +887,7 @@ export class Onboarding extends DurableObject<Env> {
           : progressOf(roster, this.#interviews(), this.#counts(), now),
       agreed: agreementsIn(row.agreements, flowAgreementsOf(row.flow)),
       paused: row.pausedAt !== null,
+      kickoff: this.kickoff().transcript !== null,
       sponsor: this.#sponsor(),
       context: this.#context(),
       waiting: roster === null ? 0 : this.#waiting(roster),
@@ -2017,6 +2031,16 @@ export class Onboarding extends DurableObject<Env> {
         progress: this.#forSpeaker(person.id, held),
       });
     }
+    const removing = await this.#removing(person.id, progress);
+    // Hashing let another save land: this one is an older copy now.
+    const current = this.#versionOf(person.id);
+    if (current !== version) {
+      return answered({
+        saved: false,
+        version: current ?? version,
+        progress: this.#forSpeaker(person.id, this.#held(person.id)),
+      });
+    }
     const next = link.version + 1;
     const [state] = this.#db
       .select()
@@ -2068,7 +2092,17 @@ export class Onboarding extends DurableObject<Env> {
       if (changed) {
         this.#admissionChanged(person, after.length > 0, lost, now);
       }
+      if (removing.lines > 0) {
+        // Only in the onboarding's own log, as a delete from the link is:
+        // its moment would tell the admin whose interview it was.
+        this.#queueLines(removing.gone);
+        this.#noted(person.id, "interview.line_removed", now);
+      }
     });
+    if (removing.gone.length > 0) {
+      // Whatever the cache doesn't take now waits for the alarm.
+      await this.forgetLinesNow();
+    }
     if (lost) {
       // What rested on a revision that no longer counts leaves the brain
       // now, or from the alarm until it does.
@@ -4159,6 +4193,11 @@ export class Onboarding extends DurableObject<Env> {
    * failure leaves them owed, for the alarm to keep.
    */
   async #keepOwedKickoffRecords(): Promise<void> {
+    // What a deleted kickoff gave goes first: a newer kickoff's records
+    // are kept only once it is gone, so the erasure never takes them.
+    if (!(await this.#eraseOwedKickoffRecords())) {
+      return;
+    }
     const owed = this.ctx.storage.kv.get(kickoffOwedKey);
     if (owed !== "replaced" && owed !== "answered") {
       return;
@@ -4185,6 +4224,29 @@ export class Onboarding extends DurableObject<Env> {
     await this.#withBrain(async () => {
       await this.#keepOwedKickoffRecords();
     });
+  }
+
+  /**
+   * Erases the brain's records of a kickoff the admin deleted, when owed
+   * (`kickoffErasureOwedKey`), under the brain lock it is called in.
+   * Whether none are owed any more: a failure leaves them owed, for the
+   * alarm, or the admin's delete asked again, to erase.
+   */
+  async #eraseOwedKickoffRecords(): Promise<boolean> {
+    if (this.ctx.storage.kv.get(kickoffErasureOwedKey) === undefined) {
+      return true;
+    }
+    try {
+      await eraseKickoffRecords(this.env);
+    } catch (error) {
+      log.error("onboarding.kickoff_erasure_owed", {
+        error: error instanceof Error ? error.name : "unknown",
+      });
+      await this.#alarmBy(Date.now() + purgeRetryMs);
+      return false;
+    }
+    this.ctx.storage.kv.delete(kickoffErasureOwedKey);
+    return true;
   }
 
   /** Notes that a purge reached, or rewrote, what the onboarding holds (`purgesKey`). */
@@ -4332,6 +4394,57 @@ export class Onboarding extends DurableObject<Env> {
       this.#deliverAudit();
       return await Promise.resolve(true);
     });
+  }
+
+  /**
+   * The admin deletes the kickoff for good (GRA-1897): its transcript,
+   * its file's name, its reading and the sponsor's answers, and every
+   * record it gave the brain, retired ones too. Whatever reads it reads
+   * nothing of it from then on: the admin's onboarding, Stephen's setup,
+   * every interview turn's brief and the brain. Under the brain lock, so
+   * no keep of its records lands between; the purge mark moves on first,
+   * so a staff save whose reading began before is refused
+   * (`saveKickoff`). One audit event, with how many records it takes,
+   * never a word of it. The records are erased right after (owed until
+   * they are: the alarm, or this asked again, finishes it); asked again,
+   * with nothing left, it changes nothing and records nothing. Throws
+   * `onboarding.kickoff_unfinished` while they are still owed. Whether there was anything to
+   * delete.
+   */
+  async deleteKickoff(by: AuditActor): Promise<boolean> {
+    const deleted = await this.#withBrain(async () => {
+      const records = await kickoffRecordsHeld(this.env);
+      const [row] = this.#db.select({ id: kickoff.id }).from(kickoff).all();
+      // Gone already, its records owed by an earlier delete: that one's
+      // event stands, and only its erasure is left to finish.
+      const owed = this.ctx.storage.kv.get(kickoffErasureOwedKey) !== undefined;
+      if (row === undefined && (records === 0 || owed)) {
+        return false;
+      }
+      this.ctx.storage.transactionSync(() => {
+        this.#purged();
+        this.#db.delete(kickoff).run();
+        // Nothing names its source any more, nor is owed of it.
+        this.ctx.storage.kv.delete(kickoffSourceKey);
+        this.ctx.storage.kv.delete(kickoffOwedKey);
+        this.ctx.storage.kv.put(kickoffErasureOwedKey, true);
+        this.#changed(by, "onboarding.kickoff.deleted", {
+          kickoff: row === undefined ? 0 : 1,
+          records,
+        });
+      });
+      this.#deliverAudit();
+      return true;
+    });
+    // Asked again after a failure, with the kickoff gone: what is owed is
+    // erased all the same.
+    const erased = await this.#withBrain(
+      async () => await this.#eraseOwedKickoffRecords()
+    );
+    if (!erased) {
+      throw onboardingErrors.create("onboarding.kickoff_unfinished");
+    }
+    return deleted;
   }
 
   /**
@@ -7099,6 +7212,44 @@ export class Onboarding extends DurableObject<Env> {
       JSON.parse(stored.progress)
     );
     return parsed.success ? parsed.data : null;
+  }
+
+  /**
+   * The lines a save of `progress` removes of `person`'s interview as kept
+   * (GRA-1897): how many, and the stored keys of the voice's among them,
+   * which the speech cache may keep, hashed before anything is written,
+   * to go with the save.
+   */
+  async #removing(
+    person: string,
+    progress: InterviewProgress
+  ): Promise<{ lines: number; gone: string[] }> {
+    const held = this.#storedProgress(person);
+    const removed = (held?.lines ?? []).filter(
+      (line, at) =>
+        line.removed !== true && progress.lines[at]?.removed === true
+    );
+    const voiced = removed
+      .filter(({ from, text }) => from === "stephen" && text !== "")
+      .map(({ text }) => text);
+    const said = this.#saidIn(person, held);
+    return {
+      lines: removed.length,
+      gone:
+        voiced.length === 0 || said === null
+          ? []
+          : await spokenKeysOf({ ...said, texts: voiced }),
+    };
+  }
+
+  /** The version of `person`'s link as kept now; null without one. */
+  #versionOf(person: string): number | null {
+    const [row] = this.#db
+      .select({ version: links.version })
+      .from(links)
+      .where(eq(links.person, person))
+      .all();
+    return row?.version ?? null;
   }
 
   /** The interviewer's lines and the facts read back in someone's interview; none before a save. */

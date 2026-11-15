@@ -1,7 +1,19 @@
 import type { InterviewLine } from "@grasp-os/shared/interview-links";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@grasp-os/ui/components/alert-dialog";
+import { Button } from "@grasp-os/ui/components/button";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
-import { useEffect, useRef } from "react";
+import { XIcon } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 import { Marked, Own } from "./talk.tsx";
 import { useInterviewWords } from "./words.ts";
@@ -11,21 +23,97 @@ import { useInterviewWords } from "./words.ts";
 // Stephen on the left and them on the right, with what he marked in their
 // words. It is no panel: it floats at the right side with nothing around
 // it, fades in and away, and follows the newest line. It scrolls in
-// itself; the page around it never does.
+// itself; the page around it never does. Each line can be removed, by
+// them alone, once confirmed (GRA-1897): only they read what was said,
+// so only they can say which words should go.
 
 export const transcriptId = "interview-transcript";
+
+/** Removes a line of the transcript, once confirmed: it can't be undone. */
+const RemoveLine = ({
+  at,
+  onRemove,
+}: {
+  at: number | null;
+  onRemove: (at: number | null) => void;
+}) => {
+  const { t } = useLingui();
+  return (
+    <AlertDialog
+      onOpenChange={(open) => {
+        if (!open) {
+          onRemove(null);
+        }
+      }}
+      open={at !== null}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t`Remove this line?`}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t`Its words are deleted for good, and so is what I marked in them. What I wrote down from it stays in what I read back to you at the end, where you can take it out. This can’t be undone.`}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t`Cancel`}</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={() => {
+              onRemove(at);
+            }}
+            variant="destructive"
+          >
+            {t`Remove`}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+};
+
+/** One line, as it was said; one removed, as removed. */
+const Line = ({
+  line,
+  names,
+}: {
+  line: InterviewLine;
+  names: ReturnType<typeof useInterviewWords>["tag"];
+}) => {
+  const { t } = useLingui();
+  if (line.removed === true) {
+    return (
+      <p className="text-muted-foreground min-w-0 flex-1 text-sm italic">
+        {line.from === "stephen" ? t`A line of mine, removed.` : t`Removed.`}
+      </p>
+    );
+  }
+  return line.from === "stephen" ? (
+    <p className="min-w-0 flex-1 text-sm leading-relaxed">
+      <span className="sr-only">Stephen: </span>
+      {line.text}
+    </p>
+  ) : (
+    <Own className="min-w-0 flex-1">
+      <span className="sr-only">{t`You:`} </span>
+      <Marked marks={line.marks ?? []} names={names} text={line.text} />
+    </Own>
+  );
+};
 
 export const Transcript = ({
   open,
   alone,
   lines,
+  onRemove,
 }: {
   open: boolean;
   /** The stage made way for it: it is what a screen reader hears the conversation from. */
   alone: boolean;
   lines: InterviewLine[];
+  /** Removes the line at its place, for good. */
+  onRemove: (at: number) => void;
 }) => {
   const { t } = useLingui();
+  const [removing, setRemoving] = useState<number | null>(null);
   const names = useInterviewWords().tag;
   const list = useRef<HTMLDivElement>(null);
   const count = lines.length;
@@ -62,29 +150,40 @@ export const Transcript = ({
           ) : null}
           {lines.map((line, at) => (
             <li
-              className={cn(line.from === "stephen" && "pr-6")}
+              className={cn(
+                "group/line flex items-start gap-1",
+                line.from === "stephen" ? "pr-6" : "flex-row-reverse"
+              )}
               // The conversation only grows: a line's place is what it is.
               key={at}
             >
-              {line.from === "stephen" ? (
-                <p className="text-sm leading-relaxed">
-                  <span className="sr-only">Stephen: </span>
-                  {line.text}
-                </p>
-              ) : (
-                <Own>
-                  <span className="sr-only">{t`You:`} </span>
-                  <Marked
-                    marks={line.marks ?? []}
-                    names={names}
-                    text={line.text}
-                  />
-                </Own>
+              <Line line={line} names={names} />
+              {line.removed === true ? null : (
+                <Button
+                  aria-label={t`Remove this line`}
+                  className="flex-none"
+                  onClick={() => {
+                    setRemoving(at);
+                  }}
+                  size="icon-xs"
+                  variant="ghost"
+                >
+                  <XIcon />
+                </Button>
               )}
             </li>
           ))}
         </ol>
       </div>
+      <RemoveLine
+        at={removing}
+        onRemove={(at) => {
+          setRemoving(null);
+          if (at !== null) {
+            onRemove(at);
+          }
+        }}
+      />
     </aside>
   );
 };
