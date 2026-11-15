@@ -129,8 +129,33 @@ export const interviewLineSchema = z.strictObject({
   file: z.string().max(interviewLimits.file).optional(),
   /** How Stephen said his line. */
   tone: z.enum(voiceTags).optional(),
+  /**
+   * Removed by the person whose interview it is (GRA-1897): its words, its
+   * marks and its file's name are gone, and it keeps only its place, so
+   * the conversation's positions stay where they were.
+   */
+  removed: z.literal(true).optional(),
 });
 export type InterviewLine = z.output<typeof interviewLineSchema>;
+
+/** A line as an interview keeps it: one removed holds nothing but who said it. */
+const keptLineSchema = interviewLineSchema.refine(
+  (line) =>
+    line.removed !== true ||
+    (line.text === "" &&
+      line.marks === undefined &&
+      line.file === undefined &&
+      line.typed === undefined &&
+      line.tone === undefined),
+  "A removed line holds nothing"
+);
+
+/** `line` removed: who said it, and nothing of what (`removed`). */
+export const removedLine = (line: InterviewLine): InterviewLine => ({
+  from: line.from,
+  text: "",
+  removed: true,
+});
 
 /** One thing Stephen understood, as he reads it back. */
 export const interviewFactSchema = z.strictObject({
@@ -154,6 +179,51 @@ export const interviewFactSchema = z.strictObject({
 export type InterviewFact = z.output<typeof interviewFactSchema>;
 
 /**
+ * A fact as an interview keeps it: one erased (`erasedFact`) keeps its id
+ * and place, so no id is ever given to another, and holds no words.
+ */
+const keptFactSchema = interviewFactSchema
+  .extend({ text: z.string().trim().max(interviewLimits.fact) })
+  .refine(
+    (fact) =>
+      fact.text === ""
+        ? fact.out === true && fact.record === "" && fact.pin === undefined
+        : true,
+    "An erased fact holds nothing"
+  );
+
+/**
+ * `fact`, taken out and then erased for good (GRA-1897): its id, its kind
+ * and that it is out, nothing of what it said.
+ */
+export const erasedFact = (fact: InterviewFact): InterviewFact => ({
+  id: fact.id,
+  tag: fact.tag,
+  text: "",
+  record: "",
+  out: true,
+});
+
+/** What a fact's id holds: `f` and its number. */
+const factNumber = /^f(?<number>\d+)$/u;
+
+/**
+ * The id the next fact written down in `facts` gets: one past the
+ * highest, so no id is given twice, whatever was erased or left out.
+ */
+export const nextFactId = (facts: readonly InterviewFact[]): string => {
+  const highest = Math.max(
+    0,
+    ...facts.map(({ id }) => Number(factNumber.exec(id)?.groups?.number ?? 0))
+  );
+  return `f${highest + 1}`;
+};
+
+/** Whether `fact` was erased (`erasedFact`): it is read out and counted nowhere. */
+export const isErased = (fact: InterviewFact): boolean =>
+  fact.out === true && fact.text === "";
+
+/**
  * Where someone's interview is, as their page keeps it and sends it to be
  * kept. Checked item by item: a save with anything else in it, or more of
  * it than an interview holds, is refused whole.
@@ -162,9 +232,9 @@ export const interviewProgressSchema = z.strictObject({
   person: z.enum(personStates),
   told: z.boolean(),
   mode: z.enum(["talk", "type"]).nullable(),
-  lines: z.array(interviewLineSchema).max(interviewLimits.lines),
+  lines: z.array(keptLineSchema).max(interviewLimits.lines),
   facts: z
-    .array(interviewFactSchema)
+    .array(keptFactSchema)
     .max(interviewLimits.facts)
     .refine(
       (facts) => new Set(facts.map(({ id }) => id)).size === facts.length,

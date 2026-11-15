@@ -58,11 +58,16 @@ test("a builder makes an App from what they want done, shares it with their team
     name: "Here's what Grasp will make",
   });
   await expect(plan.getByText(appPlanned)).toBeVisible(agentTurn);
-  // Build it lands on the App at once, being set up while the chat
-  // beside it builds it.
+  // Build it lands on the App at once, its bar naming it, while the chat
+  // beside it builds it. The calm "Setting up" between is not waited for
+  // here: the stack's model builds the App in about a second, so it can be
+  // gone between two of the assertion's looks. Its page test proves it
+  // (app-workspace.test.tsx).
   await plan.getByRole("button", { name: "Build it" }).click();
   await expect(page).toHaveURL(/\/apps\/[^/?]+$/u);
-  await expect(page.getByText(`Setting up ${appPlanned}…`)).toBeVisible(built);
+  await expect(
+    page.getByRole("heading", { level: 1, name: appPlanned })
+  ).toBeAttached(built);
   const app = new URL(page.url()).pathname.split("/").at(-1) ?? "";
 
   // The chat read how an App is written, wrote it, and said so.

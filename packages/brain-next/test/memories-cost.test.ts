@@ -244,6 +244,46 @@ describe("what reading memories costs", () => {
     // Adding 20,000 memories, a hundred an add, takes its time.
   }, 120_000);
 
+  it("ranks by the reader's use without reading more rows for a longer use list", async () => {
+    const { stub, rowsReadBy } = await countedStore();
+    const group = `seen-${crypto.randomUUID()}`;
+    const reader = readerOf("reader", group);
+    const name = word();
+    const { memories } = await add(
+      stub,
+      group,
+      [{ key: "c", kind: "customer", names: [name] }],
+      [
+        fact("c", `${name} is a customer`),
+        fact("c", `${name} pays by ${name} invoice`),
+      ]
+    );
+    const at = new Date();
+    // The reader's whole use: one of the memories asked about, and many
+    // others, never found here (GRA-1753: the list is uncut).
+    const used = (others: number) => [
+      { memory: memories[0] ?? "", at },
+      ...Array.from({ length: others }, () => ({
+        memory: crypto.randomUUID(),
+        at,
+      })),
+    ];
+    const rowsWith = async (others: number) =>
+      await rowsReadBy(
+        async () =>
+          await stub.find({
+            question: name,
+            reader,
+            budget: { tokens: 20_000 },
+            used: used(others),
+          })
+      );
+    const alone = await rowsWith(0);
+    const grown = [await rowsWith(1000), await rowsWith(20_000)];
+
+    expect(grown.map((rows) => flat(alone, rows))).toStrictEqual([true, true]);
+  });
+
   it("walks from a named entity without reading other memories or names, readable or hidden", async () => {
     const { stub, rowsReadBy } = await countedStore();
     const group = `seen-${crypto.randomUUID()}`;

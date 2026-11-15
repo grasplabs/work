@@ -1,6 +1,10 @@
 import { STARTING_ORG_RULES } from "@grasp-os/shared/admin/onboarding-admin";
 import type { OrgRules } from "@grasp-os/shared/admin/onboarding-admin";
-import { addWorkingDays, dayOf } from "@grasp-os/shared/admin/org-record";
+import {
+  addDays,
+  addWorkingDays,
+  dayOf,
+} from "@grasp-os/shared/admin/org-record";
 import type {
   DrawnWork,
   Told,
@@ -10,9 +14,11 @@ import { createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditDetailValue } from "@grasp-os/shared/audit";
 import { randomToken, sha256Hex } from "@grasp-os/shared/encoding";
 import {
+  erasedFact,
   factRevision,
   interviewPagePath,
   interviewProgressSchema,
+  isErased,
   participationNotice,
 } from "@grasp-os/shared/interview-links";
 import type {
@@ -38,6 +44,7 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import {
   agreementsSchema,
   minTeamShown,
+  onboardingErrors,
   planSchema,
   remindAfterWorkingDays,
 } from "@grasp-os/shared/onboarding";
@@ -141,6 +148,7 @@ import {
   interviewSettings,
   interviews,
   linesToForget,
+  spokenKeys,
   linkCodes,
   documents,
   kickoff,
@@ -184,7 +192,11 @@ import type { TeamIntake } from "./brain-intake.ts";
 import { storedDocumentReadingSchema } from "./document-reading.ts";
 import { checkedSupport } from "./drawing-support.ts";
 import type { Support } from "./drawing-support.ts";
-import { keepKickoffRecords } from "./kickoff-records.ts";
+import {
+  eraseKickoffRecords,
+  keepKickoffRecords,
+  kickoffRecordsHeld,
+} from "./kickoff-records.ts";
 import {
   contextOf,
   kickoffBrief,
@@ -206,8 +218,6 @@ import {
   takingPart,
 } from "./rules.ts";
 import type { InterviewState, TeamCount } from "./rules.ts";
-import { anyLanguage, spokenKeysOf } from "./spoken-lines.ts";
-import type { SaidIn } from "./spoken-lines.ts";
 import { interviewBrief, setupView } from "./stephen-setup.ts";
 import {
   checksFor,
@@ -275,6 +285,14 @@ const storeName = "onboarding";
 const purgesKey = "purges";
 
 /**
+ * The KV key of the number the last key queued to go from the voice's
+ * cache was given (`#queueLines`): store-wide, and it only grows, so a
+ * row of `forget_lines` never carries a number it carried before, and a
+ * take-out deletes a row only as it read it (`forgetLinesNow`).
+ */
+const queuedKey = "forget_lines_queued";
+
+/**
  * The brain's records of the kickoff still owed (kickoff-records.ts):
  * `replaced` when a new kickoff's records must also retire the last
  * one's, `answered` when only an answer changed it. Set with the kickoff
@@ -288,6 +306,14 @@ const kickoffOwedKey = "kickoff_records_owed";
  * day alone, so the records the purge rewrote still name it.
  */
 const kickoffSourceKey = "kickoff_source_at";
+
+/**
+ * Set when the admin deleted the kickoff and the brain's records it gave
+ * are still to be erased (`deleteKickoff`): set with the delete in one
+ * transaction, cleared once they are erased. Erased before any kickoff's
+ * records are kept, and by the alarm until done.
+ */
+const kickoffErasureOwedKey = "kickoff_records_erasure_owed";
 
 /** A piece of work's names, as a content purge reads and rewrites them. */
 export interface WorkNames {
@@ -528,6 +554,12 @@ export interface TranscriptionSessionNote {
 
 /** How a line said on someone's link is counted: `link:<person>`. */
 const linkWho = "link:";
+
+/**
+ * What an admin's voice counts and notes under (speech.ts): `admin:` and
+ * their user ID.
+ */
+export const adminWho = "admin:";
 
 /**
  * The key what is heard for `who` is counted under, beside what is said
@@ -814,11 +846,43 @@ const noCounts: InterviewCounts = {
   interviewer: null,
 };
 
+/** The statements of `progress` taken out in the read-back and not erased yet. */
+const takenOut = (progress: InterviewProgress): InterviewFact[] =>
+  progress.facts.filter((fact) => fact.out === true && !isErased(fact));
+
+/** `progress` with every statement taken out erased (`erasedFact`), each in its place. */
+const withTakenOutErased = (
+  progress: InterviewProgress
+): InterviewProgress => ({
+  ...progress,
+  facts: progress.facts.map((fact) =>
+    fact.out === true ? erasedFact(fact) : fact
+  ),
+});
+
+/**
+ * Whether `progress` brings back what `held` holds erased: a line they
+ * removed, or the words of a statement erased (or the statement gone).
+ */
+const bringsBack = (
+  held: InterviewProgress,
+  progress: InterviewProgress
+): boolean =>
+  held.lines.some(
+    (line, at) => line.removed === true && progress.lines[at]?.removed !== true
+  ) ||
+  held.facts.some(
+    (fact) =>
+      isErased(fact) &&
+      !progress.facts.some((each) => each.id === fact.id && isErased(each))
+  );
+
 const countsOf = (progress: InterviewProgress): InterviewCounts => ({
   state: progress.person,
   phase: progress.phase,
   facts: progress.facts.filter(({ out }) => out !== true).length,
-  out: progress.facts.filter(({ out }) => out === true).length,
+  // One erased counts nowhere.
+  out: takenOut(progress).length,
   confirmed: progress.confirmed,
   rating: progress.rating ?? null,
   typed: progress.mode === "type",
@@ -874,6 +938,7 @@ export class Onboarding extends DurableObject<Env> {
           : progressOf(roster, this.#interviews(), this.#counts(), now),
       agreed: agreementsIn(row.agreements, flowAgreementsOf(row.flow)),
       paused: row.pausedAt !== null,
+      kickoff: this.#kickoffState(),
       sponsor: this.#sponsor(),
       context: this.#context(),
       waiting: roster === null ? 0 : this.#waiting(roster),
@@ -892,6 +957,17 @@ export class Onboarding extends DurableObject<Env> {
         (unconfirmed.people.has(person.id) ||
           unconfirmed.teams.has(person.team))
     ).length;
+  }
+
+  /** Whether the kickoff is kept, or deleted with its records still being erased (`kickoffErasureOwedKey`). */
+  #kickoffState(): OnboardingView["kickoff"] {
+    const [row] = this.#db.select({ id: kickoff.id }).from(kickoff).all();
+    if (row !== undefined) {
+      return "in";
+    }
+    return this.ctx.storage.kv.get(kickoffErasureOwedKey) === undefined
+      ? null
+      : "erasing";
   }
 
   /** What the admin's onboarding knows of the company from the kickoff: read without its transcript. */
@@ -973,12 +1049,10 @@ export class Onboarding extends DurableObject<Env> {
     { confirmed = true }: { confirmed?: boolean } = {}
   ): Promise<OnboardingView> {
     const fresh = await this.#freshCodes(roster);
-    const lines = await this.#lineKeysOf(this.#leaving(roster));
     const said = this.ctx.storage.transactionSync(() => {
       const before = this.#roster();
       const { removed, erased } = this.#writeRoster(roster, fresh, {
         late: false,
-        lines,
       });
       if (confirmed) {
         this.#confirmed(before, roster);
@@ -996,7 +1070,7 @@ export class Onboarding extends DurableObject<Env> {
     this.#deliverAudit();
     this.ctx.waitUntil(this.#armLinks());
     if (said.length > 0) {
-      await this.#afterForget(said);
+      await this.#afterForget();
     }
     return this.view();
   }
@@ -1099,26 +1173,16 @@ export class Onboarding extends DurableObject<Env> {
    * passed, starts now, its lead first (`#lateTeams`). The company's admin
    * replaces the whole list, so for them no team is new that way;
    * whoever moved, or is new, in a team with a map is asked about its work
-   * (`#askNewcomers`). Returns how many left, and what was said in the
-   * interviews of whoever left (`#erase`), for `#afterForget`.
+   * (`#askNewcomers`). Returns how many left, and whose interviews it
+   * erased (`#erase`), for `#afterForget`.
    */
-  /** Who has an interview here and isn't on `roster`: whose `#writeRoster` erases. */
-  #leaving(roster: Roster): string[] {
-    const kept = new Set(roster.people.map(({ id }) => id));
-    return this.#db
-      .select({ person: interviews.person })
-      .from(interviews)
-      .all()
-      .map(({ person }) => person)
-      .filter((person) => !kept.has(person));
-  }
 
   #writeRoster(
     roster: Roster,
     fresh: readonly { person: string; linkId: string; mark: string }[],
-    { late, lines }: { late: boolean; lines: ReadonlyMap<string, string[]> },
+    { late }: { late: boolean },
     now: string = new Date().toISOString()
-  ): { removed: number; erased: (SaidIn | null)[] } {
+  ): { removed: number; erased: string[] } {
     const kept = new Set(roster.people.map((person) => person.id));
     const before = this.#roster();
     const gone = this.#db
@@ -1197,10 +1261,10 @@ export class Onboarding extends DurableObject<Env> {
         this.#db.delete(askedAbout).where(eq(askedAbout.person, person)).run();
       }
     }
-    const erased: (SaidIn | null)[] = [];
+    const erased: string[] = [];
     for (const person of new Set([...gone, ...stale])) {
-      this.#queueLines(lines.get(person) ?? []);
-      erased.push(this.#erase(person));
+      this.#erase(person);
+      erased.push(person);
       // Off the list, they take part in nothing: no mark of theirs stays,
       // their withdrawal's neither.
       this.#db
@@ -1618,16 +1682,16 @@ export class Onboarding extends DurableObject<Env> {
           .where(eq(links.person, person))
           .run();
         this.#purged();
-        // Unlike `rewriteInterview`, no line of the voice's is queued to go
-        // from the speech cache: it can't be read out of what doesn't parse.
-        // Those lines expire from the cache within a month, the residual
-        // #1206 states for the cache.
+        // Everything the voice said in it goes from the speech cache, as
+        // said (`#queueSpokenOf`).
+        this.#queueSpokenOf(person);
         this.#changed(by, "onboarding.interview.purged", { unreadable: 1 });
       });
       return true;
     });
     if (rewritten) {
       this.#deliverAudit();
+      await this.forgetLinesNow();
       await this.#armDrawing();
     }
     return rewritten;
@@ -1652,17 +1716,6 @@ export class Onboarding extends DurableObject<Env> {
     by: AuditActor
   ): Promise<boolean> {
     const checked = interviewProgressSchema.parse(after);
-    // The voice's lines the purge changed, as the cache may keep them,
-    // with their sound: hashed now, queued by the rewrite itself.
-    const said = this.#saidIn(person, before);
-    const kept = new Set(this.#saidIn(person, checked)?.texts);
-    const gone =
-      said === null
-        ? []
-        : await spokenKeysOf({
-            ...said,
-            texts: said.texts.filter((text) => !kept.has(text)),
-          });
     // Each fact's revision as rewritten, as a save would compute it.
     const revisions = new Map(
       await Promise.all(
@@ -1678,7 +1731,7 @@ export class Onboarding extends DurableObject<Env> {
       return this.#rewriteInterview(
         person,
         before,
-        { progress: checked, revisions, lines: gone },
+        { progress: checked, revisions },
         by
       );
     });
@@ -1697,8 +1750,6 @@ export class Onboarding extends DurableObject<Env> {
     after: {
       progress: InterviewProgress;
       revisions: ReadonlyMap<string, string>;
-      /** The stored keys of the voice's lines it took out of the cache. */
-      lines: readonly string[];
     },
     by: AuditActor
   ): boolean {
@@ -1760,14 +1811,12 @@ export class Onboarding extends DurableObject<Env> {
         .set({ version: sql`${links.version} + 1` })
         .where(eq(links.person, person))
         .run();
-      // The lines said with the purged words go from the cache too, from
+      // Everything the voice said in it goes from the cache, as said, from
       // the alarm until done (`forgetLinesNow`).
-      this.#queueLines(after.lines);
+      const lines = this.#queueSpokenOf(person);
       // A drawing read what they said before: it keeps nothing.
       this.#purged();
-      this.#changed(by, "onboarding.interview.purged", {
-        lines: after.lines.length,
-      });
+      this.#changed(by, "onboarding.interview.purged", { lines });
     });
     this.#deliverAudit();
     return true;
@@ -1989,15 +2038,6 @@ export class Onboarding extends DurableObject<Env> {
     progress: InterviewProgress,
     now: string = new Date().toISOString()
   ): Promise<LinkAnswer<InterviewSaved>> {
-    // Each fact's revision, from the save alone, before anything here is
-    // read: what an approval must name for the fact to count.
-    const revisions = new Map(
-      await Promise.all(
-        progress.facts.map(
-          async (fact) => [fact.id, await factRevision(fact)] as const
-        )
-      )
-    );
     const found = this.#onLink(secretMark, now, "save");
     if (!found.ok) {
       return found;
@@ -2017,6 +2057,18 @@ export class Onboarding extends DurableObject<Env> {
         progress: this.#forSpeaker(person.id, held),
       });
     }
+    const erasing = await this.#erasing(person.id, progress);
+    // A copy that brings back a line they removed is an older one, whichever
+    // tab sends it; and hashing let another save land: an older copy now.
+    const current = this.#versionOf(person.id);
+    if (erasing === "unremoved" || current !== version) {
+      return answered({
+        saved: false,
+        version: current ?? version,
+        progress: this.#forSpeaker(person.id, this.#held(person.id)),
+      });
+    }
+    const { progress: keeping, revisions } = erasing;
     const next = link.version + 1;
     const [state] = this.#db
       .select()
@@ -2031,7 +2083,7 @@ export class Onboarding extends DurableObject<Env> {
     // (GRA-329), never what the page says it agreed to: an edit, or a fact
     // taken out, stops counting until it is approved as it is now.
     const before = this.#admittedKeys(person.id);
-    const after = this.#admittedKeys(person.id, progress, revisions);
+    const after = this.#admittedKeys(person.id, keeping, revisions);
     const lost = before.some((key) => !after.includes(key));
     const changed = admissionKey(before) !== admissionKey(after);
     this.ctx.storage.transactionSync(() => {
@@ -2041,7 +2093,7 @@ export class Onboarding extends DurableObject<Env> {
         .where(eq(links.person, person.id))
         .run();
       const kept = {
-        progress: JSON.stringify(progress),
+        progress: JSON.stringify(keeping),
         updatedAt: now,
         revisions: JSON.stringify(Object.fromEntries(revisions)),
       };
@@ -2068,11 +2120,15 @@ export class Onboarding extends DurableObject<Env> {
       if (changed) {
         this.#admissionChanged(person, after.length > 0, lost, now);
       }
+      this.#keepErased(person.id, erasing, now);
     });
+    // What it queued goes from the cache now; whatever the cache doesn't
+    // take waits for the alarm.
+    await this.forgetLinesNow();
     if (lost) {
       // What rested on a revision that no longer counts leaves the brain
       // now, or from the alarm until it does.
-      this.ctx.waitUntil(this.#afterForget([]));
+      this.ctx.waitUntil(this.#afterForget());
     } else if (changed) {
       this.ctx.waitUntil(this.#alarmBy(Date.parse(now) + drawAfterMs));
     }
@@ -2244,9 +2300,8 @@ export class Onboarding extends DurableObject<Env> {
     if (held.withdrawnAt !== null) {
       return answered({ withdrawn: true, at: held.withdrawnAt });
     }
-    const lines = await this.#lineKeysOf([person.id]);
-    const said = this.ctx.storage.transactionSync(() => {
-      this.#queueLines(lines.get(person.id) ?? []);
+    this.ctx.storage.transactionSync(() => {
+      this.#queueSpokenOf(person.id);
       this.#db
         .update(participations)
         .set({ withdrawnAt: now })
@@ -2254,12 +2309,11 @@ export class Onboarding extends DurableObject<Env> {
         .run();
       this.#admissionChanged(person, false, true, now);
       this.#noted(person.id, "interview.withdrawn", now);
-      return this.#saidIn(person.id);
     });
     // Final, with no undo (GRA-329): every output it was in is erased, the
-    // brain's records now or from the alarm until they are, and the lines
-    // of the interviewer's voice that read it back.
-    await this.#afterForget([said]);
+    // brain's records now or from the alarm until they are, and everything
+    // the interviewer's voice said in it.
+    await this.#afterForget();
     return answered({ withdrawn: true, at: now });
   }
 
@@ -3135,23 +3189,15 @@ export class Onboarding extends DurableObject<Env> {
     if (link.keyMark === null || link.keyMark !== keyMark) {
       return refused("interview.elsewhere");
     }
-    const lines = await this.#lineKeysOf([person.id]);
-    const said = this.ctx.storage.transactionSync(() => {
-      const forgotten = this.#forget(
-        person.id,
-        now,
-        "interview.deleted",
-        interviewee,
-        lines
-      );
+    this.ctx.storage.transactionSync(() => {
+      this.#forget(person.id, now, "interview.deleted", interviewee);
       this.#db
         .update(links)
         .set({ deletedAt: now, version: link.version + 1 })
         .where(eq(links.person, person.id))
         .run();
-      return forgotten;
     });
-    await this.#afterForget([said]);
+    await this.#afterForget();
     return answered({ deleted: true });
   }
 
@@ -3170,28 +3216,20 @@ export class Onboarding extends DurableObject<Env> {
       return false;
     }
     const now = new Date().toISOString();
-    const lines = await this.#lineKeysOf([person]);
-    const said = this.ctx.storage.transactionSync(() => {
-      const forgotten = this.#forget(
-        person,
-        now,
-        "interview.new_start",
-        whoIs(by),
-        lines
-      );
+    this.ctx.storage.transactionSync(() => {
+      this.#forget(person, now, "interview.new_start", whoIs(by));
       this.#db
         .update(links)
         .set({ keyMark: null, deletedAt: null, version: link.version + 1 })
         .where(eq(links.person, person))
         .run();
       this.#changed(by, "onboarding.interview.restarted", {});
-      return forgotten;
     });
     this.#deliverAudit();
     // The new start is made: failing it now would have the same command,
     // given again, start anew a second time and take what was said since.
     try {
-      await this.#afterForget([said]);
+      await this.#afterForget();
     } catch (error) {
       log.error("onboarding.after_forget_failed", {
         error: error instanceof Error ? error.name : "unknown",
@@ -3410,12 +3448,31 @@ export class Onboarding extends DurableObject<Env> {
    * Whom a line said on someone's link is for, from the device it is on,
    * while their interview may be saved: `link:<person>`, the key its
    * voice is counted under (`countVoice`), and the seconds said under it
-   * today. Counted within the link's limit, as every call on it.
+   * today. Counted within the link's limit, as every call on it. The
+   * line asked for is noted by its cache key (`stored`) in this same call,
+   * so no erasure lands between finding the link open and the note
+   * (`#noteSpoken`).
    */
   speechOnLink(
     secretMark: string,
     keyMark: string,
+    stored: string,
+    budget: number,
     now: string = new Date().toISOString()
+  ): LinkAnswer<{ who: string; said: number }> {
+    const found = this.#voiceOnLink(secretMark, keyMark, now);
+    if (found.ok) {
+      const { who, said } = found.value;
+      this.#noteSpoken(who, stored, said < budget);
+    }
+    return found;
+  }
+
+  /** `speechOnLink`'s checks, noting nothing: whom the link's voice is for, and what was said under it today. */
+  #voiceOnLink(
+    secretMark: string,
+    keyMark: string,
+    now: string
   ): LinkAnswer<{ who: string; said: number }> {
     const found = this.#onLink(secretMark, now, "save");
     if (!found.ok) {
@@ -3432,6 +3489,62 @@ export class Onboarding extends DurableObject<Env> {
     }
     const who = `${linkWho}${person.id}`;
     return answered({ who, said: this.voiceSaid(who, now) });
+  }
+
+  /**
+   * The seconds of voice said for the admin `who` today, noting the line
+   * asked for, by its cache key (`stored`), as it is (`#noteSpoken`).
+   */
+  speechForAdmin(who: string, stored: string, budget: number): number {
+    const said = this.voiceSaid(who);
+    this.#noteSpoken(who, stored, said < budget);
+    return said;
+  }
+
+  /**
+   * Notes that the voice was asked to say, for `who`, the text whose cache
+   * key is `stored` (speech-cache.ts `storedKeyOf`: a hash, never the
+   * words): what erasing anything of theirs takes out of the cache, as
+   * said, a sentence or a story at a time (GRA-1897). Only for a line
+   * that may be said (`sayable`): one past the day's budget is said only
+   * from the cache, where a line said before, and noted then, is kept.
+   */
+  #noteSpoken(who: string, stored: string, sayable: boolean): void {
+    if (sayable) {
+      this.#db
+        .insert(spokenKeys)
+        .values({ who, key: stored })
+        .onConflictDoNothing()
+        .run();
+    }
+  }
+
+  /**
+   * Whether the line `stored` is still noted as said for `who`: false once
+   * something of theirs was erased since it was asked for, so a line the
+   * voice said meanwhile is taken out again (speech.ts).
+   */
+  stillNoted(who: string, stored: string): boolean {
+    return (
+      this.#db
+        .select({ key: spokenKeys.key })
+        .from(spokenKeys)
+        .where(and(eq(spokenKeys.who, who), eq(spokenKeys.key, stored)))
+        .all().length > 0
+    );
+  }
+
+  /**
+   * Takes everything the voice said for the admin `user` out of the cache,
+   * as erasing them as a person does (person-erasure.ts). Otherwise their
+   * notes are bounded by their voice budget (an hour of new speech a
+   * day) and go with the kickoff's deletion.
+   */
+  async forgetSpokenForAdmin(user: string): Promise<void> {
+    this.ctx.storage.transactionSync(() => {
+      this.#queueSpokenBy(eq(spokenKeys.who, `${adminWho}${user}`));
+    });
+    await this.forgetLinesNow();
   }
 
   /** Seconds of voice said for `who` today. */
@@ -3471,7 +3584,7 @@ export class Onboarding extends DurableObject<Env> {
     keyMark: string,
     now: string = new Date().toISOString()
   ): LinkAnswer<{ who: string; heard: number; person: string }> {
-    const found = this.speechOnLink(secretMark, keyMark, now);
+    const found = this.#voiceOnLink(secretMark, keyMark, now);
     if (!found.ok) {
       return found;
     }
@@ -3671,8 +3784,7 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * Notes what one turn of an interview ran on: the text that spoke, its
    * interviewer and language, kept with the interview of the link's
-   * person, so the lines of its voice can be found again when the
-   * interview goes (`#saidIn`). The turn checked the link and the device
+   * person. The turn checked the link and the device
    * first (`turnContext`).
    */
   turnRan(
@@ -4159,6 +4271,11 @@ export class Onboarding extends DurableObject<Env> {
    * failure leaves them owed, for the alarm to keep.
    */
   async #keepOwedKickoffRecords(): Promise<void> {
+    // What a deleted kickoff gave goes first: a newer kickoff's records
+    // are kept only once it is gone, so the erasure never takes them.
+    if (!(await this.#eraseOwedKickoffRecords())) {
+      return;
+    }
     const owed = this.ctx.storage.kv.get(kickoffOwedKey);
     if (owed !== "replaced" && owed !== "answered") {
       return;
@@ -4185,6 +4302,29 @@ export class Onboarding extends DurableObject<Env> {
     await this.#withBrain(async () => {
       await this.#keepOwedKickoffRecords();
     });
+  }
+
+  /**
+   * Erases the brain's records of a kickoff the admin deleted, when owed
+   * (`kickoffErasureOwedKey`), under the brain lock it is called in.
+   * Whether none are owed any more: a failure leaves them owed, for the
+   * alarm, or the admin's delete asked again, to erase.
+   */
+  async #eraseOwedKickoffRecords(): Promise<boolean> {
+    if (this.ctx.storage.kv.get(kickoffErasureOwedKey) === undefined) {
+      return true;
+    }
+    try {
+      await eraseKickoffRecords(this.env);
+    } catch (error) {
+      log.error("onboarding.kickoff_erasure_owed", {
+        error: error instanceof Error ? error.name : "unknown",
+      });
+      await this.#alarmBy(Date.now() + purgeRetryMs);
+      return false;
+    }
+    this.ctx.storage.kv.delete(kickoffErasureOwedKey);
+    return true;
   }
 
   /** Notes that a purge reached, or rewrote, what the onboarding holds (`purgesKey`). */
@@ -4332,6 +4472,63 @@ export class Onboarding extends DurableObject<Env> {
       this.#deliverAudit();
       return await Promise.resolve(true);
     });
+  }
+
+  /**
+   * The admin deletes the kickoff for good (GRA-1897): its transcript,
+   * its file's name, its reading and the sponsor's answers, and every
+   * record it gave the brain, retired ones too. Whatever reads it reads
+   * nothing of it from then on: the admin's onboarding, Stephen's setup,
+   * every interview turn's brief and the brain. Under the brain lock, so
+   * no keep of its records lands between; the purge mark moves on first,
+   * so a staff save whose reading began before is refused
+   * (`saveKickoff`). One audit event, with how many records it takes,
+   * never a word of it. The records are erased right after (owed until
+   * they are: the alarm, or this asked again, finishes it); asked again,
+   * with nothing left, it changes nothing and records nothing. Throws
+   * `onboarding.kickoff_unfinished` while they are still owed. Whether there was anything to
+   * delete.
+   */
+  async deleteKickoff(by: AuditActor): Promise<boolean> {
+    const deleted = await this.#withBrain(async () => {
+      const records = await kickoffRecordsHeld(this.env);
+      const [row] = this.#db.select({ id: kickoff.id }).from(kickoff).all();
+      // Gone already, its records owed by an earlier delete: that one's
+      // event stands, and only its erasure is left to finish.
+      const owed = this.ctx.storage.kv.get(kickoffErasureOwedKey) !== undefined;
+      if (row === undefined && (records === 0 || owed)) {
+        return false;
+      }
+      this.ctx.storage.transactionSync(() => {
+        this.#purged();
+        this.#db.delete(kickoff).run();
+        // Nothing names its source any more, nor is owed of it.
+        this.ctx.storage.kv.delete(kickoffSourceKey);
+        this.ctx.storage.kv.delete(kickoffOwedKey);
+        this.ctx.storage.kv.put(kickoffErasureOwedKey, true);
+        // What the voice said on the admins' onboarding may have quoted it
+        // (the sponsor, what the company does): all of it goes from the
+        // cache, said anew when asked.
+        this.#queueSpokenBy(like(spokenKeys.who, `${adminWho}%`));
+        this.#changed(by, "onboarding.kickoff.deleted", {
+          kickoff: row === undefined ? 0 : 1,
+          records,
+        });
+      });
+      this.#deliverAudit();
+      return true;
+    });
+    // Whatever the cache doesn't take now waits for the alarm.
+    await this.forgetLinesNow();
+    // Asked again after a failure, with the kickoff gone: what is owed is
+    // erased all the same.
+    const erased = await this.#withBrain(
+      async () => await this.#eraseOwedKickoffRecords()
+    );
+    if (!erased) {
+      throw onboardingErrors.create("onboarding.kickoff_unfinished");
+    }
+    return deleted;
   }
 
   /**
@@ -4649,25 +4846,17 @@ export class Onboarding extends DurableObject<Env> {
     if (link === undefined) {
       return false;
     }
-    const lines = await this.#lineKeysOf([person]);
-    const said = this.ctx.storage.transactionSync(() => {
-      const forgotten = this.#forget(
-        person,
-        now,
-        "interview.deleted",
-        whoIs(by),
-        lines
-      );
+    this.ctx.storage.transactionSync(() => {
+      this.#forget(person, now, "interview.deleted", whoIs(by));
       this.#db
         .update(links)
         .set({ deletedAt: now, version: link.version + 1 })
         .where(eq(links.person, person))
         .run();
       this.#changed(by, "onboarding.interview.deleted", {});
-      return forgotten;
     });
     this.#deliverAudit();
-    await this.#afterForget([said]);
+    await this.#afterForget();
     return true;
   }
 
@@ -4777,6 +4966,14 @@ export class Onboarding extends DurableObject<Env> {
         });
       }
       await this.forgetLinesNow();
+      try {
+        await this.eraseTakenOutAfterClose();
+      } catch (error) {
+        log.error("onboarding.taken_out_unerased", {
+          error: error instanceof Error ? error.name : "unknown",
+        });
+        await this.#alarmBy(Date.now() + purgeRetryMs);
+      }
       await this.keepKickoffRecordsNow();
       await this.#drainAudit();
       await this.releaseDue();
@@ -5187,6 +5384,8 @@ export class Onboarding extends DurableObject<Env> {
    * the admin's update fall due by the day.
    */
   async #armLinks(): Promise<void> {
+    // Paused or not, links waiting or not: the erasure at the close runs.
+    await this.#armErasure();
     const roster = this.#roster();
     const { plan } = this.#row();
     if (roster === null || plan === null || !this.isOpen()) {
@@ -5208,6 +5407,36 @@ export class Onboarding extends DurableObject<Env> {
       .map((moment) => Date.parse(moment))
       .filter((moment) => moment > now);
     await this.#alarmBy(Math.min(now + linkCheckMs, ...moments));
+  }
+
+  /**
+   * Sets the alarm for the erasure at the close (`eraseTakenOutAfterClose`)
+   * while any interview kept still holds a statement taken out with its
+   * words: for the start of the day after the close, or, past it, a
+   * moment from now, so a run that failed or skipped one is tried again.
+   * Nothing taken out left, nothing is set.
+   */
+  async #armErasure(): Promise<void> {
+    const { plan } = this.#row();
+    if (plan === null || !this.#anyTakenOut()) {
+      return;
+    }
+    const closed = Date.parse(`${addDays(closesOn(plan), 1)}T00:00:00.000Z`);
+    await this.#alarmBy(Math.max(closed, Date.now() + purgeRetryMs));
+  }
+
+  /** Whether any interview kept holds a statement taken out, with its words. */
+  #anyTakenOut(): boolean {
+    // Only those that hold one taken out at all are read.
+    return this.#db
+      .select({ person: interviews.person })
+      .from(interviews)
+      .where(sql`instr(${interviews.progress}, '"out":true') > 0`)
+      .all()
+      .some(({ person }) => {
+        const held = this.#storedProgress(person);
+        return held !== null && takenOut(held).length > 0;
+      });
   }
 
   /**
@@ -7029,31 +7258,22 @@ export class Onboarding extends DurableObject<Env> {
 
   /**
    * Removes what someone said, where their interview stood and every
-   * drawing it was in (`#erase`), and notes why. Returns what was said
-   * in it, for its lines kept to go too (`#afterForget`).
+   * drawing it was in (`#erase`), and notes why.
    */
-  #forget(
-    person: string,
-    now: string,
-    what: string,
-    by: string,
-    lines: ReadonlyMap<string, string[]>
-  ): SaidIn | null {
-    this.#queueLines(lines.get(person) ?? []);
-    const said = this.#erase(person);
+  #forget(person: string, now: string, what: string, by: string): void {
+    this.#erase(person);
     this.#noted(person, what, now, by);
-    return said;
   }
 
   /**
    * Removes someone's interview, in the transaction it is called in: what
    * they said and agreed to, where it stood, and every drawing it was in (`#forgetDrawings`). From then on nothing
    * they agreed to counts (`#agreedAt` is null), which is how the brain's
-   * records resting on them are found (`#toPurge`). Returns what was said
-   * in it, as its lines may have been kept.
+   * records resting on them are found (`#toPurge`). Everything the voice
+   * was asked to say in it goes from the cache (`#queueSpokenOf`).
    */
-  #erase(person: string): SaidIn | null {
-    const said = this.#saidIn(person);
+  #erase(person: string): void {
+    this.#queueSpokenOf(person);
     this.#forgetDrawings(person);
     this.#db.delete(interviews).where(eq(interviews.person, person)).run();
     this.#db
@@ -7082,7 +7302,6 @@ export class Onboarding extends DurableObject<Env> {
     // goes with it. A referral names nobody else: whom it names is worked
     // out from the roster only as it is made (`#referOne`).
     this.#db.delete(referrals).where(eq(referrals.person, person)).run();
-    return said;
   }
 
   /** `person`'s interview as stored, or null when there is none or it doesn't parse. */
@@ -7101,37 +7320,166 @@ export class Onboarding extends DurableObject<Env> {
     return parsed.success ? parsed.data : null;
   }
 
-  /** The interviewer's lines and the facts read back in someone's interview; none before a save. */
-  #saidIn(
+  /**
+   * What a save of `progress` erases of `person`'s interview as kept
+   * (GRA-1897), or "unremoved" when it brings back a line they removed or
+   * the words of a statement erased. The lines it removes, by how many;
+   * once the interview is completed, the statements they took out in the
+   * read-back, erased in the copy kept (`progress`, `erasedFact`: each
+   * keeps its id and place, so no id is given again), by id; and each
+   * kept fact's revision. Either takes everything the voice said in the
+   * interview out of the cache (`#keepErased`). Until it is completed, a
+   * statement taken out can be put back.
+   */
+  async #erasing(
     person: string,
-    held: InterviewProgress | null = this.#storedProgress(person)
-  ): SaidIn | null {
-    if (held === null) {
-      return null;
+    progress: InterviewProgress
+  ): Promise<
+    | {
+        progress: InterviewProgress;
+        revisions: Map<string, string>;
+        lines: number;
+        dropped: string[];
+      }
+    | "unremoved"
+  > {
+    const held = this.#storedProgress(person);
+    if (held !== null && bringsBack(held, progress)) {
+      return "unremoved";
     }
-    const progress = held;
-    const [settings] = this.#db
-      .select()
-      .from(interviewSettings)
-      .where(eq(interviewSettings.person, person))
-      .all();
-    const speakers = [
-      ...new Set(
-        [settings?.interviewer, progress.interviewer].flatMap((each) =>
-          each === undefined ? [] : [each]
+    const removed = (held?.lines ?? []).filter(
+      (line, at) =>
+        line.removed !== true && progress.lines[at]?.removed === true
+    );
+    // Erased now: taken out of an interview completed, or erased by the
+    // page itself as it completed, each with its words as last held.
+    const heldFacts = new Map(
+      (held?.facts ?? []).map((fact) => [fact.id, fact])
+    );
+    const out = [
+      ...(progress.person === "completed" ? takenOut(progress) : []),
+      ...progress.facts.flatMap((fact) => {
+        const was = heldFacts.get(fact.id);
+        return isErased(fact) && was !== undefined && !isErased(was)
+          ? [was]
+          : [];
+      }),
+    ];
+    const keeping =
+      progress.person === "completed" ? withTakenOutErased(progress) : progress;
+    return {
+      progress: keeping,
+      // Each fact's revision as kept, from the save alone: what an
+      // approval must name for the fact to count.
+      revisions: new Map(
+        await Promise.all(
+          keeping.facts.map(
+            async (fact) => [fact.id, await factRevision(fact)] as const
+          )
         )
       ),
-    ];
-    return {
-      texts: [
-        ...progress.lines
-          .filter(({ from }) => from === "stephen")
-          .map(({ text }) => text),
-        ...progress.facts.map(({ text }) => text),
-      ],
-      speakers: speakers.length > 0 ? speakers : ["stephen", "claire"],
-      languages: settings === undefined ? anyLanguage : [settings.locale],
+      lines: removed.length,
+      dropped: out.map(({ id }) => id),
     };
+  }
+
+  /**
+   * Once the interviews closed (`closesOn`), nobody can finish one any
+   * more: what was taken out of each in the read-back is erased, as
+   * completing it erases it (`#erasing`). Run by the alarm, which is set
+   * for it while anything taken out is left (`#armErasure`), paused or
+   * not, and sets it again a moment later while anything is left, as
+   * after a failure. Each interview is read and written in one
+   * transaction.
+   * Returns how many it erased in.
+   */
+  async eraseTakenOutAfterClose(
+    now: string = new Date().toISOString()
+  ): Promise<number> {
+    const { plan } = this.#row();
+    if (plan === null || dayOf(now) <= closesOn(plan)) {
+      return 0;
+    }
+    let erased = 0;
+    for (const person of this.interviewPeople()) {
+      // Read and written in one transaction: nothing lands between.
+      erased += this.ctx.storage.transactionSync(() => {
+        const held = this.#storedProgress(person);
+        const dropped = held === null ? [] : takenOut(held).map(({ id }) => id);
+        if (held === null || dropped.length === 0) {
+          return 0;
+        }
+        const revisions = this.#revisionsOf(person);
+        for (const id of dropped) {
+          revisions.delete(id);
+        }
+        this.#db
+          .update(interviews)
+          .set({
+            progress: JSON.stringify(withTakenOutErased(held)),
+            revisions: JSON.stringify(Object.fromEntries(revisions)),
+          })
+          .where(eq(interviews.person, person))
+          .run();
+        // A device's copy, with the words, is older from now on.
+        this.#db
+          .update(links)
+          .set({ version: sql`${links.version} + 1` })
+          .where(eq(links.person, person))
+          .run();
+        this.#keepErased(person, { lines: 0, dropped }, now);
+        return 1;
+      });
+    }
+    if (erased > 0) {
+      await this.forgetLinesNow();
+    }
+    return erased;
+  }
+
+  /**
+   * Keeps what a save erases (`#erasing`), in the transaction it is called
+   * in: the approvals of the statements dropped, which are digests of
+   * their words; and everything the voice said in the interview, to go
+   * from the cache (`#queueSpokenOf`; a line being said as it goes is
+   * taken out once kept, speech.ts `keepUnlessErased`). Nothing drawn
+   * reads a line or a statement taken out, so no drawing is touched. A
+   * removed line is noted only in the onboarding's own log, as a delete
+   * from the link is: in the audit log its moment would tell the admin
+   * whose interview it was.
+   */
+  #keepErased(
+    person: string,
+    erasing: { lines: number; dropped: string[] },
+    now: string
+  ): void {
+    if (erasing.dropped.length > 0) {
+      this.#db
+        .delete(approvals)
+        .where(
+          and(
+            eq(approvals.person, person),
+            inList(approvals.fact, erasing.dropped)
+          )
+        )
+        .run();
+    }
+    if (erasing.lines > 0 || erasing.dropped.length > 0) {
+      this.#queueSpokenOf(person);
+    }
+    if (erasing.lines > 0) {
+      this.#noted(person, "interview.line_removed", now);
+    }
+  }
+
+  /** The version of `person`'s link as kept now; null without one. */
+  #versionOf(person: string): number | null {
+    const [row] = this.#db
+      .select({ version: links.version })
+      .from(links)
+      .where(eq(links.person, person))
+      .all();
+    return row?.version ?? null;
   }
 
   /**
@@ -7193,29 +7541,45 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * The stored keys of the voice's lines of each of `persons`' interviews,
-   * as they stand: hashed before anything is erased, so the erasing
-   * transaction keeps them waiting itself (`#queueLines`, GRA-329).
+   * Queues every text the voice was asked to say in `person`'s interview
+   * to go from the cache (`#noteSpoken`), and forgets having said them, in
+   * the transaction it is called in. A request for speech holds only its
+   * text, never which line or statement it voices, so anything erased of
+   * an interview takes all of its speech out: a cache, said again when
+   * asked.
    */
-  async #lineKeysOf(persons: Iterable<string>): Promise<Map<string, string[]>> {
-    const keys = new Map<string, string[]>();
-    for (const person of persons) {
-      const said = this.#saidIn(person);
-      if (said !== null) {
-        // oxlint-disable-next-line no-await-in-loop -- one interview's lines at a time
-        keys.set(person, await spokenKeysOf(said));
-      }
-    }
-    return keys;
+  #queueSpokenOf(person: string): number {
+    return this.#queueSpokenBy(eq(spokenKeys.who, `${linkWho}${person}`));
+  }
+
+  /**
+   * Queues the keys noted (`#noteSpoken`) for whoever `who` matches, and
+   * forgets them, in the transaction it is called in. Returns how many.
+   */
+  #queueSpokenBy(who: SQL): number {
+    const keys = this.#db
+      .delete(spokenKeys)
+      .where(who)
+      .returning({ key: spokenKeys.key })
+      .all()
+      .map(({ key }) => key);
+    this.#queueLines(keys);
+    return keys.length;
   }
 
   /** Keeps the voice's lines `keys` waiting to go, in the transaction it is called in. */
   #queueLines(keys: readonly string[]): void {
     for (const key of keys) {
+      // A number never given before (`queuedKey`), on a new row and on
+      // one queued again: a take-out already under way for the key, which
+      // read it with another, leaves it to be asked once more.
+      const held = this.ctx.storage.kv.get(queuedKey);
+      const queued = (typeof held === "number" ? held : 0) + 1;
+      this.ctx.storage.kv.put(queuedKey, queued);
       this.#db
         .insert(linesToForget)
-        .values({ key })
-        .onConflictDoNothing()
+        .values({ key, queued })
+        .onConflictDoUpdate({ target: linesToForget.key, set: { queued } })
         .run();
     }
   }
@@ -7228,18 +7592,10 @@ export class Onboarding extends DurableObject<Env> {
    * (`#armDrawing`): the brain's records rest on someone gone until they
    * are out, and the lines wait by their stored keys, hashes, never what
    * was said (`linesToForget`, GRA-329), queued by the erasing transaction
-   * itself; any line said after they were hashed is queued here.
+   * itself (`#erase`); one the voice says as it goes is taken out once
+   * kept (speech.ts `keepUnlessErased`).
    */
-  async #afterForget(said: readonly (SaidIn | null)[]): Promise<void> {
-    const each = await Promise.all(
-      said.map(async (lines) =>
-        lines === null ? [] : await spokenKeysOf(lines)
-      )
-    );
-    const keys = each.flat();
-    this.ctx.storage.transactionSync(() => {
-      this.#queueLines(keys);
-    });
+  async #afterForget(): Promise<void> {
     await this.#armDrawing();
     try {
       await this.purgeBrain();
@@ -7253,8 +7609,8 @@ export class Onboarding extends DurableObject<Env> {
 
   /**
    * Takes the voice's lines kept by `stored` (hashes) out of the cache, now
-   * or from the alarm until done: a line the voice said while a content
-   * purge landed (speech.ts, `keepUnlessPurged`).
+   * or from the alarm until done: a line the voice said while what it
+   * was said for was erased (speech.ts, `keepUnlessErased`).
    */
   async forgetSpoken(stored: readonly string[]): Promise<void> {
     this.ctx.storage.transactionSync(() => {
@@ -7283,30 +7639,48 @@ export class Onboarding extends DurableObject<Env> {
     let gone = 0;
     for (let tries = 0; tries < Onboarding.#triesPerCall; tries += 1) {
       const page = this.#db
-        .select({ key: linesToForget.key })
+        .select({ key: linesToForget.key, queued: linesToForget.queued })
         .from(linesToForget)
         .orderBy(asc(linesToForget.key))
         .limit(Onboarding.#linesPerTry)
-        .all()
-        .map(({ key }) => key);
+        .all();
       if (page.length === 0) {
         return gone;
       }
       try {
         // oxlint-disable-next-line no-await-in-loop -- one page at a time
-        await forgetStored(this.env, page);
+        await forgetStored(
+          this.env,
+          page.map(({ key }) => key)
+        );
       } catch (error) {
         log.error("onboarding.lines_unforgotten", {
           error: error instanceof Error ? error.name : "unknown",
         });
+        // oxlint-disable-next-line no-await-in-loop -- once, as it stops
+        await this.#alarmBy(Date.now() + purgeRetryMs);
         return gone;
       }
-      this.#db
-        .delete(linesToForget)
-        .where(inList(linesToForget.key, page))
-        .run();
+      // Each as read: one queued again meanwhile is asked once more.
+      this.ctx.storage.transactionSync(() => {
+        for (const { key, queued } of page) {
+          this.#db
+            .delete(linesToForget)
+            .where(
+              and(
+                eq(linesToForget.key, key),
+                queued === null
+                  ? isNull(linesToForget.queued)
+                  : eq(linesToForget.queued, queued)
+              )
+            )
+            .run();
+        }
+      });
       gone += page.length;
     }
+    // More than one call takes: the alarm takes the rest.
+    await this.#alarmBy(Date.now() + purgeRetryMs);
     return gone;
   }
 

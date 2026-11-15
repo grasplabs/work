@@ -349,6 +349,13 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
     });
   }
 
+  async deleteKickoff(): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      await onboardingStore(this.#env).deleteKickoff(actorOf(person));
+    });
+  }
+
   async choices(): Promise<SetupChoices> {
     return await withPerson(this.#check, async (person) => {
       requireAdmin(person);
