@@ -4,7 +4,7 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { queryMaxScannedEntries } from "@grasp-os/shared/store-limits";
 import { runDurableObjectAlarm } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { callAppFunction, evaluateAppQuery } from "../src/app-functions.ts";
@@ -13,7 +13,6 @@ import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { rollback } from "../src/publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
-import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { boundIn } from "./app-definitions.ts";
 import { commitDefined } from "./apps.ts";
 import { appWith, person, queryReference, seal } from "./sealed-apps.ts";
@@ -25,6 +24,7 @@ import {
   requestsApp,
   rolesOf,
   runIds,
+  settled,
   startedRuns,
 } from "./sealed-workflow-starts-harness.ts";
 import { unique } from "./sign-in.ts";
@@ -104,18 +104,10 @@ describe("a sealed App's functions", { timeout: 120_000 }, () => {
     )
       .bind(app)
       .all<{ id: string; principal_id: string }>();
-    const outputs = await vi.waitFor(
-      async () => {
-        const runs = await Promise.all(
-          receipts.map(
-            async ({ id }) => await resourceRunFor(env, admin, workflow.id, id)
-          )
-        );
-        expect(runs.every(({ endedAt }) => endedAt !== null)).toBeTruthy();
-        return runs.map(({ result: output }) => output);
-      },
-      { timeout: 30_000, interval: 100 }
+    const runs = await Promise.all(
+      receipts.map(async ({ id }) => await settled(admin, workflow.id, id))
     );
+    const outputs = runs.map(({ result: output }) => output);
     expect({
       started: started.ok ? started.value : started.error.code,
       submitted: submitted.ok,
@@ -195,6 +187,14 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
       { type: "person", person: owner },
       workflow.id,
       { expected: 1, args: { who: "Owner" }, key: `key-${unique()}` }
+    );
+    // Every run ended before any is listed: a page read twice, as the
+    // first page and as a live list's ended page below, then says the
+    // same of each run, however soon or late the engine ends it.
+    await Promise.all(
+      [first, second, carols, direct.id].map(
+        async (id) => await settled(admin, workflow.id, id)
+      )
     );
 
     const references = {
