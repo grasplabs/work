@@ -203,7 +203,13 @@ import {
 import { chatWork } from "./drafts.ts";
 import { callObject, chatSession } from "./durable-objects.ts";
 import { dropHeldStarts } from "./held-starts.ts";
-import { readableSources, withheldDetail } from "./history-access.ts";
+import {
+  brainMemoryOf,
+  brainMemoryPrefix,
+  brainMemorySchema,
+  readableSources,
+  withheldDetail,
+} from "./history-access.ts";
 import { instructionFilesFor } from "./instruction-files.ts";
 import type { InstructionContext } from "./instruction-files.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
@@ -652,24 +658,6 @@ const runReadsSchema = z
   .array(z.string().min(1).max(runReadMaxLength))
   .max(auditProvenanceMaxItems);
 
-/**
- * The prefix of the pin of a memory a recall as the person handed over
- * (history-access.ts `brainMemoryRead`): what counts as their use of it
- * (`memory_uses`). A recall as the company pins under another, and counts
- * as nobody's use.
- */
-const memoryPinPrefix = "brain-memory:";
-
-/**
- * A memory's place as `memory_uses` keeps it: its store, and its id, a
- * UUID as the Brain's are (its `memoryIdSchema`), which its recall takes
- * only so: a row that isn't one is never handed to it.
- */
-const memoryUseSchema = z.strictObject({
-  store: z.enum(["own", "shared"]),
-  memory: z.uuid(),
-});
-
 /** A memory this person used, by its store and id, and when they last did. */
 export interface MemoryUse {
   store: "own" | "shared";
@@ -678,30 +666,13 @@ export interface MemoryUse {
 }
 
 /**
- * The memory `source` pins as one a recall as the person handed over,
- * if it is one (`memoryPinPrefix`, then its store and id as JSON); none
- * for any other source, or a pin that doesn't name a memory's place.
+ * The memory `source` pins as one a recall as the person handed over
+ * (history-access.ts `brainMemoryOf`, under `brainMemoryPrefix`): what
+ * counts as their use of it (`memory_uses`). A recall as the company pins
+ * under another prefix, and counts as nobody's use.
  */
-const memoryUseOf = (
-  source: string
-): z.infer<typeof memoryUseSchema> | undefined => {
-  if (!source.startsWith(memoryPinPrefix)) {
-    return undefined;
-  }
-  try {
-    const parsed = z
-      .tuple([z.unknown(), z.unknown()])
-      .safeParse(JSON.parse(source.slice(memoryPinPrefix.length)));
-    if (!parsed.success) {
-      return undefined;
-    }
-    const [store, memory] = parsed.data;
-    const place = memoryUseSchema.safeParse({ store, memory });
-    return place.success ? place.data : undefined;
-  } catch {
-    return undefined;
-  }
-};
+const memoryUseOf = (source: string) =>
+  brainMemoryOf(source, brainMemoryPrefix);
 
 /** Most documents one read hands a chat's code: a page of hits or links. */
 const givenMaxPerRead = 1000;
@@ -3614,7 +3585,7 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * Keeps `sources` with run `runId`, each once, and, of the memories a
-   * recall as its person handed over among them (`memoryPinPrefix`), when
+   * recall as its person handed over among them (`memoryUseOf`), when
    * they last used each (`memory_uses`), in one transaction.
    */
   #keepRunSources(
@@ -3663,8 +3634,18 @@ export class Workspace extends DurableObject<Env> {
       .where(lte(memoryUses.usedAt, new Date(until)))
       .all()
       .flatMap(({ store, memory, usedAt }) => {
-        const place = memoryUseSchema.safeParse({ store, memory });
-        return place.success ? [{ ...place.data, at: usedAt.getTime() }] : [];
+        // A row is a pin's place: read back by the same rule
+        // (history-access.ts `brainMemorySchema`).
+        const place = brainMemorySchema.safeParse([store, memory]);
+        return place.success
+          ? [
+              {
+                store: place.data[0],
+                memory: place.data[1],
+                at: usedAt.getTime(),
+              },
+            ]
+          : [];
       });
   }
 

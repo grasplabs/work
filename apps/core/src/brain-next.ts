@@ -423,8 +423,9 @@ export interface Recall {
   budget: { tokens: number };
   /**
    * Whether the pack may hold what only this person may read, from their
-   * own store: only where the answer reaches them alone (their own web
-   * chat, an agent's direct message with them). Apps, workflows and the
+   * own store: only where the answer reaches them alone (their own chat in
+   * Grasp, in a turn they started; a chat app's direct message is kept by
+   * the chat app too, so it reads as the company). Apps, workflows and the
    * SDK pass `false`, so what is theirs alone never reaches App data or
    * anyone else; then their own store is never addressed.
    */
