@@ -131,7 +131,7 @@ describe("in a group chat", setUpTime, () => {
     ]);
   });
 
-  it("starts from the company's and the agent's instruction files, and never a person's, the asker's own included, in a group or a direct message", async () => {
+  it("starts from the company's and the agent's instruction files in a group, never a person's, the asker's own included, and adds her own in her direct message", async () => {
     const admin = await signedInApi(idp, "admin");
     const ann = await member(idp, says("In private."), says("In the group."));
     const u = unique();
@@ -155,14 +155,15 @@ describe("in a group chat", setUpTime, () => {
       );
     };
     expect({ direct: told(0), group: told(1) }).toStrictEqual({
-      // Her direct message isn't hers alone while GRA-1821 is open: the
-      // chat app keeps its answer too (workspace.ts, `answersAlone`).
-      direct: [`Company ${u}`, `Agent ${u}`],
+      // Her direct message is her own chat, as in Grasp (GRA-1821,
+      // workspace.ts `answersAlone`); a group chat is read by all in it,
+      // though its roster holds her alone.
+      direct: [`Company ${u}`, `Agent ${u}`, `Ann's ${u}`],
       group: [`Company ${u}`, `Agent ${u}`],
     });
   });
 
-  it("gives an App's file to its builder in their own chat in Grasp, never in their direct message", async () => {
+  it("gives an App's file to its builder in their own chat, in Grasp and in their direct message", async () => {
     const provider = await fakeProvider(
       says("Hi."),
       says("Still here."),
@@ -200,8 +201,8 @@ describe("in a group chat", setUpTime, () => {
       direct: { via: direct.via, toldApp: told(1) },
       web: told(2),
     }).toStrictEqual({
-      // While GRA-1821 is open: the chat app keeps the answer too.
-      direct: { via: "teams", toldApp: false },
+      // Her direct message is her own chat, as in Grasp (GRA-1821).
+      direct: { via: "teams", toldApp: true },
       web: true,
     });
   });

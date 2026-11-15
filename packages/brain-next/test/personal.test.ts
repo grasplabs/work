@@ -1545,6 +1545,21 @@ const leavingWork: Record<string, (who: string) => Promise<void>> = {
     await noAlarm(who);
     await own(who).eraseSource({ source: kept.source, reason: "deleted" });
   },
+  // The full vectors of its current version's passages, once embedded,
+  // go to the sweep (removal.ts).
+  removeSource: async (who) => {
+    const kept = await add(own(who), "To remove", theirs(who));
+    await tick(who);
+    await inStore((sql) => {
+      sql.exec(
+        `INSERT INTO vector_files (model, hash, written_at, unheld)
+        SELECT 'm@1', hash, ?, 0 FROM chunks WHERE hash IS NOT NULL`,
+        Date.now()
+      );
+    }, who);
+    await noAlarm(who);
+    await own(who).removeSource({ source: kept.source });
+  },
   // A tick that deletes an erased version lets its file go to the sweep.
   work: async (who) => {
     const kept = await add(own(who), "Erased, then swept", theirs(who));

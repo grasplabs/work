@@ -23,9 +23,11 @@ import { z } from "zod";
 import {
   exportFileNameSchema,
   instructionsMaxLength,
+  removedSource,
   restoringNow,
 } from "../src/contract.ts";
 import {
+  exportFormat,
   exportPartBytes,
   manifestSchema as storeManifestSchema,
 } from "../src/exports.ts";
@@ -132,6 +134,7 @@ const lineSchema = z.object({
   version: z.number(),
   access: z.unknown(),
   current: z.boolean(),
+  removed: z.boolean(),
   indexed: z.boolean(),
   changes: z.array(z.string()),
   text: z.string(),
@@ -172,15 +175,27 @@ const linesOf = async (store: Store, id: string): Promise<Line[]> => {
 const of = (lines: readonly Line[], sources: readonly string[]) =>
   lines
     .filter(({ source }) => sources.includes(source))
-    .map(({ source, version, current, text, access, indexed, changes }) => ({
-      source,
-      version,
-      current,
-      text,
-      access,
-      indexed,
-      changes,
-    }))
+    .map(
+      ({
+        source,
+        version,
+        current,
+        removed,
+        text,
+        access,
+        indexed,
+        changes,
+      }) => ({
+        source,
+        version,
+        current,
+        removed,
+        text,
+        access,
+        indexed,
+        changes,
+      })
+    )
     .toSorted((a, b) =>
       a.source === b.source
         ? a.version - b.version
@@ -571,12 +586,18 @@ describe("exports and restores", () => {
     // export this is: it refuses it (personal.test.ts).
     it("holds every version a group may read, with its readers and history, and nothing no one known may read (threats 4, 5)", async () => {
       const teamSource = `test:${unique()}`;
+      const removedKey = `test:${unique()}`;
       const nobodys = `test:${unique()}`;
       const instructions = `instructions:${unique()}`;
       const group = `team:${unique()}`;
       await add(shared(), teamSource, "first words", team(group));
       await add(shared(), teamSource, "second words", team(group), "2");
       await add(shared(), nobodys, "nobody's words", { kind: "none" });
+      // Removed (removal.ts): held by the version that was current then,
+      // marked removed, as its history.
+      await add(shared(), removedKey, "kept words", team(group), "1");
+      await add(shared(), removedKey, "removed words", team(group), "2");
+      await shared().removeSource({ source: removedKey });
       await shared().addInstructions({
         source: instructions,
         change: "1",
@@ -590,12 +611,15 @@ describe("exports and restores", () => {
       });
       const lines = await linesOf(shared(), id);
 
-      expect(of(lines, [teamSource, nobodys, instructions])).toStrictEqual(
+      expect(
+        of(lines, [teamSource, removedKey, nobodys, instructions])
+      ).toStrictEqual(
         [
           {
             source: teamSource,
             version: 1,
             current: false,
+            removed: false,
             text: "first words",
             access: team(group),
             indexed: true,
@@ -605,7 +629,28 @@ describe("exports and restores", () => {
             source: teamSource,
             version: 2,
             current: true,
+            removed: false,
             text: "second words",
+            access: team(group),
+            indexed: true,
+            changes: ["2"],
+          },
+          {
+            source: removedKey,
+            version: 1,
+            current: false,
+            removed: false,
+            text: "kept words",
+            access: team(group),
+            indexed: true,
+            changes: ["1"],
+          },
+          {
+            source: removedKey,
+            version: 2,
+            current: false,
+            removed: true,
+            text: "removed words",
             access: team(group),
             indexed: true,
             changes: ["2"],
@@ -614,6 +659,7 @@ describe("exports and restores", () => {
             source: instructions,
             version: 1,
             current: true,
+            removed: false,
             text: "the company's instructions",
             access: team(group),
             indexed: false,
@@ -1250,6 +1296,98 @@ describe("exports and restores", () => {
       });
     });
 
+    it("closes again after a restore a key removed before any version was added under it, and one removed with its history, and leaves one erased since to the ledger", async () => {
+      await putBack(shared(), emptyShared);
+      const group = `team:${unique()}`;
+      const [before, after, erased] = [
+        `test:${unique()}`,
+        `test:${unique()}`,
+        `test:${unique()}`,
+      ];
+      // Removed before its first add landed: a mark with no version.
+      await shared().removeSource({ source: before });
+      // Removed with its history: a version marked removed.
+      await add(shared(), after, "kept words", team(group));
+      await shared().removeSource({ source: after });
+      // Removed before any add, then erased: the erasure closes it alone.
+      await shared().removeSource({ source: erased });
+      await shared().eraseSource({ source: erased, reason: "deleted" });
+      const { id } = await shared().startExport("test");
+      await settled(shared(), id);
+      // The keys its removal lines name, read from its parts as downloaded.
+      const manifest = z
+        .looseObject({ parts: z.array(z.looseObject({ file: z.string() })) })
+        .parse(
+          JSON.parse(
+            (await shared().exportFile({ id, file: "manifest.json" })) ?? ""
+          )
+        );
+      const bodies = await Promise.all(
+        manifest.parts.map(
+          async ({ file }) => (await shared().exportFile({ id, file })) ?? ""
+        )
+      );
+      const removalLines = bodies
+        .flatMap((body) => body.trimEnd().split("\n"))
+        .map((line) =>
+          z.looseObject({ kind: z.string().optional() }).parse(JSON.parse(line))
+        )
+        .filter(({ kind }) => kind === "removal");
+      await putBack(shared(), emptyShared);
+      await shared().startRestore(id, "test");
+      const done = await restoreSettled(id);
+      const added = async (source: string) => {
+        try {
+          await shared().addSource({
+            source,
+            change: unique(),
+            text: "new words",
+            access: team(group),
+          });
+          return "added";
+        } catch (error) {
+          return error instanceof Error ? error.message : String(error);
+        }
+      };
+
+      expect({
+        done: done?.state,
+        keys: await Promise.all(
+          [before, after].map(async (key) => await shared().keyState(key))
+        ),
+        adds: await Promise.all([before, after].map(added)),
+        // The erasure was in the ledger the restored store replays.
+        erasedKey: await shared().keyState(erased),
+        // The key removed before any version; the other is marked on its
+        // version's line; the erased one is in no line at all.
+        removalLines,
+      }).toStrictEqual({
+        done: "done",
+        keys: ["held", "held"],
+        adds: [removedSource, removedSource],
+        erasedKey: "erased",
+        removalLines: [{ kind: "removal", source: before }],
+      });
+    });
+
+    it("is erased once the ledger erases a key it holds as removed before any version, its files deleted", async () => {
+      await putBack(shared(), emptyShared);
+      const removed = `test:${unique()}`;
+      await shared().removeSource({ source: removed });
+      const { id } = await shared().startExport("test");
+      const written = await settled(shared(), id);
+      await shared().eraseSource({ source: removed, reason: "deleted" });
+      const erased = await shared().exportStatus({ id });
+      await tick(shared());
+      await tick(shared());
+
+      expect({
+        written: written?.state,
+        erased: erased?.state,
+        files: await keysUnder(`exports/${id}/`),
+      }).toStrictEqual({ written: "done", erased: "erased", files: [] });
+    });
+
     it("restores when each version's text was read, so no earlier read replaces it after a restore; a version that never said restores with none", async () => {
       await putBack(shared(), emptyShared);
       const group = `team:${unique()}`;
@@ -1605,7 +1743,7 @@ describe("exports and restores", () => {
         bytes: 1,
       };
       const manifest = storeManifestSchema.safeParse({
-        format: 2,
+        format: exportFormat,
         id: crypto.randomUUID(),
         deployment: "test",
         scope: "company",
@@ -2557,7 +2695,8 @@ describe("exports and restores", () => {
         }
       };
       // As an older release wrote it (format 1, versions only), and as a
-      // newer one might (format 3, with what this one doesn't know).
+      // newer one might (a format past this one's, with what this one
+      // doesn't know).
       const refusedOlder = await refusalOf({
         ...older,
         format: 1,
@@ -2565,7 +2704,7 @@ describe("exports and restores", () => {
       });
       const refusedNewer = await refusalOf({
         ...manifest,
-        format: 3,
+        format: exportFormat + 1,
         somethingNew: true,
       });
       const held = await inStore(
@@ -2589,7 +2728,7 @@ describe("exports and restores", () => {
 
       expect({
         older: refusedOlder.includes(
-          "made by an older release and holds no memories"
+          "made by an older release, which this one can't restore"
         ),
         newer: refusedNewer.includes("made by a newer release"),
         held,
@@ -2640,7 +2779,7 @@ describe("exports and restores", () => {
       const older = await copied((manifest) => ({ ...manifest, format: 1 }));
       const newer = await copied((manifest) => ({
         ...manifest,
-        format: 3,
+        format: exportFormat + 1,
         somethingNew: true,
       }));
       const holding = await copied((manifest) => manifest, true);
