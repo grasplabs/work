@@ -356,7 +356,6 @@ describe(pendingAsk, () => {
     id,
     role: "assistant",
     text: "",
-    citations: [],
     code: [],
     tools: [],
     asked,

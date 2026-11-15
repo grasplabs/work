@@ -65,7 +65,6 @@ const failedWith = (failures: readonly unknown[]): ChatMessage[] =>
       id: index * 2 + 2,
       role: "assistant",
       text: "",
-      citations: [],
       code: [],
       tools: [],
       end: "failed",

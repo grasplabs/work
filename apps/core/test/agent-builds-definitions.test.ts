@@ -19,7 +19,7 @@ import {
 } from "./agent-builds-harness.ts";
 import { codeResults, codeStep, says } from "./agent-chat.ts";
 import { definedWith, redefined } from "./app-definitions.ts";
-import { commitApp, published, release } from "./apps.ts";
+import { commitApp, published, release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdpWith } from "./idp.ts";
 import { notesFiles } from "./notes-client-app.ts";
@@ -77,7 +77,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
   it("changes a definition whose table holds records, says what each change does to them, and records each change", async () => {
     // Version 1: the Notes App, current, with a note in its store, and an
     // answer its definition kept for a category it no longer has.
-    const { builder, chat, grant } = await setUp([
+    const { builder, chat } = await setUp([
       codeStep(`export default async (self, env) => {
         const [app] = (await env.apps.list()).filter(({ name }) => name === "Notes");
         const steps = {};
@@ -123,7 +123,6 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       { name: "notes.create", kind: "mutation" },
       { title: "Plan" }
     );
-    await grant();
 
     await chat.ask("Give the notes a category");
 
@@ -163,7 +162,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
   });
 
   it("removes what the definition holds with the definition tools, recording each by its table or alias", async () => {
-    const { builder, chat, grant } = await setUp([
+    const { builder, chat } = await setUp([
       codeStep(`export default async (self, env) => {
         const [app] = (await env.apps.list()).filter(({ name }) => name === "Notes");
         const define = async (operation) => {
@@ -184,7 +183,6 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     ]);
     const { id: app } = await builder.api.apps.create({ name: "Notes" });
     await release(builder, app, notesFiles);
-    await grant();
 
     await chat.ask("Start the data model over");
 
@@ -220,7 +218,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
   });
 
   it("saves a new App's first write with the definition it gets, so its draft reads and previews whole", async () => {
-    const { chat, grant } = await setUp(
+    const { chat } = await setUp(
       [
         codeStep(`export default async (self, env) => {
         ${findApp}
@@ -233,7 +231,6 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       "builder",
       true
     );
-    await grant();
 
     await chat.ask("Build a desk");
 
@@ -251,7 +248,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
   });
 
   it("plans a definition change from the version people use, and asks again for an answer a skipped version had", async () => {
-    const { builder, chat, grant } = await setUp([
+    const { builder, chat } = await setUp([
       codeStep(`export default async (self, env) => {
         const [app] = (await env.apps.list()).filter(({ name }) => name === "Notes");
         const indexed = await env.build.define(app.id, { op: "addIndex", table: "notes", name: "by_title", fields: ["title"] });
@@ -278,7 +275,6 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     // A builder's draft over version 2: the agent changes what they
     // began.
     await draftOver(builder, app, 2);
-    await grant();
 
     await chat.ask("Index the notes by title");
 
@@ -298,7 +294,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
   });
 
   it("renames a field a version that ran had, after a rollback to one without it too, by its stable ID", async () => {
-    const { builder, chat, grant } = await setUp([
+    const { builder, chat } = await setUp([
       codeStep(`export default async (self, env) => {
         const [app] = (await env.apps.list()).filter(({ name }) => name === "Notes");
         return await env.build.define(app.id, { op: "renameField", table: "notes", field: "nickname", name: "displayName" });
@@ -323,7 +319,6 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     // A builder's draft over version 2 still: the agent changes what they
     // began.
     await draftOver(builder, app, 2);
-    await grant();
 
     await chat.ask("Call the nickname a display name");
 
@@ -336,7 +331,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
   });
 
   it("keeps a draft's answer for a field whose type the version people use doesn't have yet, whatever that version answered", async () => {
-    const { builder, chat, grant } = await setUp([
+    const { builder, chat } = await setUp([
       codeStep(`export default async (self, env) => {
         const [app] = (await env.apps.list()).filter(({ name }) => name === "Notes");
         const changed = await env.build.define(app.id, { op: "changeField", table: "notes", field: "category", type: 'v.string().default("general")', answer: "general" });
@@ -358,7 +353,6 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         answer: null,
       })
     );
-    await grant();
 
     await chat.ask("Make the category required");
 
@@ -405,7 +399,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
 
   it("keeps no change that leaves a file as the base has it", async () => {
     const ledger = `const [app] = (await env.apps.list()).filter(({ name }) => name === "Ledger");`;
-    const { existing, chat, grant } = await setUp([
+    const { existing, chat } = await setUp([
       codeStep(`export default async (self, env) => {
         ${ledger}
         const steps = [];
@@ -416,7 +410,6 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       };`),
       says("Nothing changed."),
     ]);
-    await grant();
 
     await chat.ask("Try some notes");
 
@@ -437,12 +430,18 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
 
   it("builds for whoever builds, as them, with no permission of its own, and never past what they may do", async () => {
     const resultOf = async (role: "admin" | "user", granted: boolean) => {
-      const { chat, grant } = await setUp(
-        (existing) => [codeStep(writeAndCall(existing)), says("Done.")],
+      const { admin, chat, existing } = await setUp(
+        (app) => [codeStep(writeAndCall(app)), says("Done.")],
         role
       );
       if (granted) {
-        await grant();
+        // The most an agent could hold on the App: reading and writing it.
+        await requestGranted(idp, admin, {
+          subject: chat.agent,
+          object: { type: "app", appId: existing },
+          actions: ["read", "write"],
+          binding: "LEDGER",
+        });
       }
       await chat.ask("Build something");
       const [result] = await codeResults(chat.stub, chat.chat.id);
@@ -470,7 +469,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     await published(shared);
     const { id: unshared } = await other.api.apps.create({ name: "Other" });
     await published(unshared);
-    const { person, chat, grant } = await setUp([
+    const { person, chat } = await setUp([
       codeStep(
         tryEach({
           shared: `await env.build.write(${JSON.stringify(shared)}, { "a.md": "a" }, { revision: (await env.build.files(${JSON.stringify(shared)})).revision })`,
@@ -481,7 +480,6 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       ),
       says("No."),
     ]);
-    await grant();
     // They use the shared App's pages, but don't build it.
     await other.api.apps.members.add(shared, {
       type: "person",
