@@ -17,7 +17,6 @@ import {
 } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
-import { linkFormsKept, linkFormsWritten } from "./link-forms.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { mailControlUrl } from "./mail-server.ts";
 import type { ToolkitServer } from "./mail-server.ts";
@@ -306,8 +305,23 @@ describe("a chat app's answers", setUpTime, () => {
     }).toStrictEqual({ answer: shown, kept: [shown], marked: true, mark: 64 });
   });
 
-  it("keep of every form of link only its words, the same in the answer and in the chat it is kept in", async () => {
-    const set = await setUp("teams", says(linkFormsWritten));
+  // Each title quoting of a note link and of an outside link, as main
+  // posted them before the cutover (`shownText` over `withoutLinks`): the
+  // PR body's table.
+  it("keep a note link's words alone whatever its title's quoting, the same in the answer and in the chat", async () => {
+    const forms = [
+      ["[the policy](grasp:note/doc-1)", "the policy"],
+      ['[the policy](grasp:note/doc-1 "Leave policy")', "the policy"],
+      ["[the policy](grasp:note/doc-1 'Leave policy')", "the policy"],
+      ["[the policy](grasp:note/doc-1 (Leave policy))", "the policy"],
+      ["[the HR page](https://evil.test/hr)", "the HR page"],
+      ['[the HR page](https://evil.test/hr "HR")', "the HR page"],
+      ["[the HR page](https://evil.test/hr 'HR')", "[the HR page]( 'HR')"],
+      ["[the HR page](https://evil.test/hr (HR))", "[the HR page]( (HR))"],
+    ] as const;
+    const written = forms.map(([form]) => `See ${form}.`).join("\n");
+    const shown = forms.map(([, words]) => `See ${words}.`).join("\n");
+    const set = await setUp("teams", says(written));
     const answer = await set.ask("Where is the leave policy?");
     const messages = await transcript(set.stub, set.chat.id);
     const kept = messages.flatMap((message) =>
@@ -317,10 +331,10 @@ describe("a chat app's answers", setUpTime, () => {
           )
         : []
     );
-    expect({
-      answer: answer.answer.trim(),
-      kept: kept.map((text) => text.trim()),
-    }).toStrictEqual({ answer: linkFormsKept, kept: [linkFormsKept] });
+    expect({ answer: answer.answer, kept }).toStrictEqual({
+      answer: shown,
+      kept: [shown],
+    });
   });
 });
 

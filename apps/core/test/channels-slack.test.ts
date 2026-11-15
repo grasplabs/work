@@ -20,11 +20,6 @@ import {
 import { says } from "./agent-chat.ts";
 import { slackApp, slackPostedUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
-import {
-  linkFormsAddresses,
-  linkFormsCode,
-  linkFormsWritten,
-} from "./link-forms.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 import {
@@ -494,27 +489,37 @@ describe("a press on a card in Slack", () => {
   });
 });
 
-/** What of an answer's links and code a chat app's post got wrong. */
-const seen = (posted: string) => ({
+/** What of an answer's note and outside links a chat app's post got wrong. */
+const seenOfLinks = (posted: string) => ({
   words: [
-    "the policy",
-    "the handbook",
-    "the HR page",
-    "the intranet",
-    "Q3 say",
+    "plain,",
+    "double,",
+    "single,",
+    "parenthesised,",
+    "outside,",
+    "outside double",
+    "outside single",
   ].filter((words) => !posted.includes(words)),
-  addresses: linkFormsAddresses.filter((address) => posted.includes(address)),
-  code: linkFormsCode.filter((code) => !posted.includes(code)),
+  addresses: ["grasp:", "doc-", "evil.test"].filter((address) =>
+    posted.includes(address)
+  ),
 });
 
 describe("a linked person's question in Slack", () => {
-  it("shows every form of link in an answer as its words alone, in Slack and in Teams, and code as written", async () => {
+  // A note link, as Grasp's answers cited a Knowledge document, in each
+  // way a title may be quoted, and an outside link in each too: as main
+  // posted them before the cutover, each note link shows its words alone
+  // and no address reaches either app.
+  it("shows a note link as its words in Slack and in Teams, whatever its title's quoting, and no address", async () => {
     const { slackUser } = await linkedPerson();
-    const provider = await fakeProvider(
-      says(linkFormsWritten),
-      says(linkFormsWritten)
-    );
-    const question = "Where is the leave policy?";
+    const written = [
+      "Leave lasts sixteen weeks: [plain](grasp:note/doc-1),",
+      "[double](grasp:note/doc-2 \"Leave policy\"), [single](grasp:note/doc-3 'Leave policy'),",
+      "[parenthesised](grasp:note/doc-4 (Leave policy)), [outside](https://evil.test/hr),",
+      "[outside double](https://evil.test/hr \"HR\") and [outside single](https://evil.test/hr 'HR').",
+    ].join(" ");
+    const provider = await fakeProvider(says(written), says(written));
+    const question = "How long is parental leave?";
     const fromSlack = messageFrom(slackUser);
     fromSlack.event.text = question;
     await post(fromSlack, { caught: false });
@@ -532,11 +537,11 @@ describe("a linked person's question in Slack", () => {
       activities.filter(({ type }) => type === "message")
     );
     expect({
-      slack: seen(slackPosted),
-      teams: seen(teamsPosted),
+      slack: seenOfLinks(slackPosted),
+      teams: seenOfLinks(teamsPosted),
     }).toStrictEqual({
-      slack: { words: [], addresses: [], code: [] },
-      teams: { words: [], addresses: [], code: [] },
+      slack: { words: [], addresses: [] },
+      teams: { words: [], addresses: [] },
     });
   });
 
