@@ -35,6 +35,7 @@ import {
   brainGrantRead,
   brainMemoryRead,
   brainVersionRead,
+  recalledMemoryPin,
 } from "./history-access.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
 import { markPrivateRead } from "./private-reads.ts";
@@ -478,7 +479,9 @@ export const recallForTurn = async (
       ),
     ];
     const memories = pack.memories.map((memory) =>
-      reads.personal ? brainMemoryRead(memory) : brainCompanyMemoryRead(memory)
+      reads.personal
+        ? brainMemoryRead(recalledMemoryPin(memory))
+        : brainCompanyMemoryRead(recalledMemoryPin(memory))
     );
     const call = {
       method: turnRecallMethod,

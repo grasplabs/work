@@ -265,6 +265,7 @@
   "@grasp-os/core test/chat-agent.test.ts": 1.5,
   "@grasp-os/core test/chat-app-writes.test.ts": 4.5,
   "@grasp-os/core test/chat-connections.test.ts": 12.3,
+  "@grasp-os/core test/chat-erased-recall.test.ts": 4.7,
   "@grasp-os/core test/chat-files.test.ts": 3.7,
   "@grasp-os/core test/chat-history.test.ts": 1.7,
   "@grasp-os/core test/chat-private-writes.test.ts": 19.6,
