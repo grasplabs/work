@@ -41,7 +41,6 @@ import type {
   PurgePlan,
   PurgeResult,
   PurgeStatus,
-  ExportStatus,
   ReadOptions,
   RestoreInput,
   SaveInput,
@@ -498,24 +497,6 @@ export interface KnowledgeApi {
    * Audited.
    */
   finishPurge: (purgeId: string) => Promise<PurgeStatus>;
-  /**
-   * What an export of the company's Brain would hold, with a token to
-   * confirm it with (GRA-1192): admins only, never staff. Audited.
-   */
-  prepareBrainExport: () => Promise<{
-    collections: number;
-    documents: number;
-    token: string;
-    expiresAt: string;
-  }>;
-  /**
-   * Begins the export `prepareBrainExport` returned `token` for: its files
-   * are written by core's clock, and downloaded by this admin for a day
-   * (`/api/brain/export?id=…&file=…`).
-   */
-  startBrainExport: (token: string) => Promise<{ exportId: string }>;
-  /** Where export `exportId` stands, and its files once complete. */
-  brainExportStatus: (exportId: string) => Promise<ExportStatus>;
 }
 
 /**
@@ -619,7 +600,6 @@ export type {
   PurgeReason,
   PurgeResult,
   PurgeStatus,
-  ExportStatus,
   ReadOptions,
   RestoreInput,
   SaveInput,
