@@ -3214,7 +3214,9 @@ describe("memories a person never uses fade for them", setUpTime, () => {
         personId: eve.userId,
         runId,
       },
-      memories.map((memory) => brainMemoryRead({ store: "shared", memory }))
+      memories.map((memory) =>
+        brainMemoryRead({ store: "shared", memory, basis: null })
+      )
     );
 
     const uses = await chats.stub.memoriesUsed(Date.now());

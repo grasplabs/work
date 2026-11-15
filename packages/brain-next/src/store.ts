@@ -157,6 +157,7 @@ import {
   storeErasedKey,
   subjectOf,
   subjectsOver,
+  writerSubjectOf,
   keepMissingSubjects,
   replayMemoryErasures,
   ledgerPrefix,
@@ -191,7 +192,7 @@ import {
   readableMemories,
   readMemories,
   retireMemory,
-  unerasedSql,
+  writerErasedAfterSql,
 } from "./memories.ts";
 import { rebuildMissingSets } from "./reader-sets.ts";
 import {
@@ -1090,56 +1091,78 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
 
   /**
    * What an erasure took for good of the keys and memories asked
-   * (contract.ts): a memory this store holds no row of was deleted by
-   * one, as nothing else deletes a memory (forget.ts), and an id is never
-   * used again; one an erasure of its writer covers is hidden until the
-   * tick deletes it (memories.ts `unerasedSql`). So a memory a restore
-   * took the store back to before answers erased too, and the chat copies
-   * of it are replaced for good: it fails closed. A person's own store
-   * never written holds no key and no memory.
+   * (contract.ts), from the erasure ledger alone: what this store has
+   * applied of it (`erasures`), which a lost storage reads again before
+   * it answers (`#ready`). Never from whether it holds a memory: a
+   * storage lost or brought back from an older copy lacks memories nobody
+   * erased, which a restore puts back by their own ids. A person's own
+   * store never written holds no ledger: nothing was erased in it that its
+   * shared store's ledger doesn't hold too, but a key under an erased
+   * group of theirs, which it answers once it is written again.
    */
   async erasedOf(request: ErasedRequest): Promise<Erased> {
     const asked = checked(erasedRequestSchema, request);
     const sources = [...new Set(asked.sources)];
-    const memories = [...new Set(asked.memories)];
+    const seen = new Set<string>();
+    const memories = asked.memories.filter(({ memory }) => {
+      if (seen.has(memory)) {
+        return false;
+      }
+      seen.add(memory);
+      return true;
+    });
     if (await this.#erasedWhole()) {
-      return { sources, memories };
+      return { sources, memories: memories.map(({ memory }) => memory) };
     }
     await this.#ready();
     if (!this.#schema) {
-      return { sources: [], memories };
+      return { sources: [], memories: [] };
     }
-    const rows = this.ctx.storage.sql
-      .exec<{ id: string; source: string | null; kept: number }>(
-        `SELECT m.id AS id, m.source AS source, ${unerasedSql("m")} AS kept
-        FROM memories AS m WHERE m.id IN (SELECT value FROM json_each(?))`,
-        JSON.stringify(memories)
-      )
-      .toArray();
-    // Hidden by an erasure of its writer: as good as deleted.
-    const held = new Map(
-      rows.flatMap(({ id, source, kept }) =>
-        kept === 1 ? [[id, source] as const] : []
-      )
-    );
+    const { sql } = this.ctx.storage;
+    // What a restore brings back isn't in place yet: asked again later.
+    if (isRestoring(sql)) {
+      throw new Error(restoringNow);
+    }
     const keys = [
       ...new Set([
         ...sources,
-        ...[...held.values()].flatMap((source) => source ?? []),
+        ...memories.flatMap(({ source }) => source ?? []),
       ]),
     ];
-    const found = await Promise.all(
-      keys.map(async (key) => ((await this.#keyErased(key)) ? [key] : []))
-    );
+    const writers = [
+      ...new Set(memories.flatMap(({ writer }) => writer ?? [])),
+    ];
+    const [found, subjects] = await Promise.all([
+      Promise.all(
+        keys.map(async (key) => ((await this.#keyErased(key)) ? [key] : []))
+      ),
+      Promise.all(
+        writers.map(
+          async (writer) => [writer, await writerSubjectOf(writer)] as const
+        )
+      ),
+    ]);
     const closed = new Set(found.flat());
+    const subjectOfWriter = new Map(subjects);
+    /** Whether an erasure of `writer` came after the store learned a memory of it at `at`. */
+    const writerErased = (writer: string, at: number): boolean =>
+      sql
+        .exec(
+          `SELECT 1 FROM erasures AS gone
+          WHERE ${writerErasedAfterSql("gone", "?1", "?2")} LIMIT 1`,
+          subjectOfWriter.get(writer) ?? "",
+          at
+        )
+        .toArray().length > 0;
     return {
       sources: sources.filter((key) => closed.has(key)),
-      memories: memories.filter((id) => {
-        const source = held.get(id);
-        return (
-          !held.has(id) || (typeof source === "string" && closed.has(source))
-        );
-      }),
+      memories: memories
+        .filter(
+          ({ source, writer, learnedAt }) =>
+            (source !== null && closed.has(source)) ||
+            (writer !== null && writerErased(writer, learnedAt))
+        )
+        .map(({ memory }) => memory),
     };
   }
 

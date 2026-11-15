@@ -529,6 +529,13 @@ const missingSource = (): SourceRef => ({
 /** `source`'s key in the store, as core names it (core's brain-next.ts). */
 const keyOf = ({ producer, id }: SourceRef): string => `${producer}:${id}`;
 
+/** What a pinned memory rests on: `source`, and no writer. */
+const pinBasis = (source: SourceRef | null): coreBrain.MemoryBasis => ({
+  source,
+  writer: null,
+  learnedAt: Date.now(),
+});
+
 /**
  * A supplier everyone in the company may read of, named in a writer's
  * word: an entity a surface shows. Its id and name.
@@ -1999,7 +2006,7 @@ export const coreProbes = {
     const ask = async (
       name: string,
       sources: readonly SourceRef[],
-      memories: readonly coreBrain.StoredMemoryPlace[],
+      memories: readonly coreBrain.PinnedMemory[],
       as = personId
     ) =>
       await answer(name, async () => {
@@ -2022,10 +2029,19 @@ export const coreProbes = {
           ),
         };
       });
-    const hiddenMemories: coreBrain.StoredMemoryPlace[] = [
-      { store: "shared", memory: fixture.hiddenMemory },
-      { store: "shared", memory: fixture.drawnMemory },
-      { store: "own", memory: fixture.othersOwnMemory },
+    // Each as a pin holds it, resting on a hidden source or no one's.
+    const hiddenMemories: coreBrain.PinnedMemory[] = [
+      {
+        store: "shared",
+        memory: fixture.hiddenMemory,
+        basis: pinBasis(hiddenVersions[0]?.source ?? null),
+      },
+      {
+        store: "shared",
+        memory: fixture.drawnMemory,
+        basis: pinBasis(hiddenVersions[1]?.source ?? null),
+      },
+      { store: "own", memory: fixture.othersOwnMemory, basis: pinBasis(null) },
     ];
     return [
       await ask(
@@ -2036,7 +2052,13 @@ export const coreProbes = {
       await ask(
         "what no one added",
         [missingSource()],
-        [{ store: "shared", memory: crypto.randomUUID() }]
+        [
+          {
+            store: "shared",
+            memory: crypto.randomUUID(),
+            basis: pinBasis(null),
+          },
+        ]
       ),
       await ask(
         "as someone who isn't a member",
@@ -2045,9 +2067,19 @@ export const coreProbes = {
         stranger()
       ),
       await ask(
-        "a source named by the markers",
+        "a source and a writer named by the markers",
         [{ producer: "upload", id: markers.join(" ") }],
-        []
+        [
+          {
+            store: "shared",
+            memory: crypto.randomUUID(),
+            basis: {
+              source: { producer: "upload", id: markers.join(" ") },
+              writer: `app:${markers.join("")}`,
+              learnedAt: 0,
+            },
+          },
+        ]
       ),
     ];
   },

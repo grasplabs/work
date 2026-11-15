@@ -57,6 +57,7 @@ import type {
   ContestedCursor,
   Entity,
   EntitiesCursor,
+  ErasedMemory,
   ErasureReason,
   Embedders,
   EntityKind,
@@ -2411,42 +2412,88 @@ export const readableMemoriesAs = async (
 };
 
 /**
- * Of `keys` and `ids` (memories), those an erasure took for good in
- * `store` (`erasedOf`), asked in parts as long as the store takes.
+ * What a memory rests on, as a chat pinned it when a recall handed it
+ * over: the source it was drawn from, its writer, and when the store
+ * learned it (ms). What the erasure ledger names, so an erasure of it is
+ * told by them alone (`erasedForGoodAs`), never by whether the store
+ * holds the memory now.
+ */
+export interface MemoryBasis {
+  source: SourceRef | null;
+  writer: string | null;
+  learnedAt: number;
+}
+
+/** A memory a chat was handed, with what it rests on (`MemoryBasis`). */
+export interface PinnedMemory extends StoredMemoryPlace {
+  basis: MemoryBasis;
+}
+
+const pinnedMemoriesSchema = z.array(
+  z.strictObject({
+    store: memoryStoreSchema,
+    memory: memoryIdSchema,
+    basis: z.strictObject({
+      source: sourceRefSchema.nullable(),
+      writer: z.string().min(1).nullable(),
+      learnedAt: z.int().nonnegative(),
+    }),
+  })
+);
+
+/**
+ * Of `keys` and `memories`, those an erasure took for good in `store`
+ * (`erasedOf`): one call, or one per part as long as the store takes.
  */
 const erasedIn = async (
   store: Brain,
   keys: readonly string[],
-  ids: readonly string[]
+  memories: readonly ErasedMemory[]
 ): Promise<{ sources: string[]; memories: string[] }> => {
-  const [sources, memories] = await Promise.all([
-    checkedInParts(keys, async (part) => {
-      const erased = await store.erasedOf({ sources: part, memories: [] });
-      return erased.sources;
-    }),
-    checkedInParts(ids, async (part) => {
-      const erased = await store.erasedOf({ sources: [], memories: part });
-      return erased.memories;
-    }),
-  ]);
-  return { sources, memories };
+  const parts = Math.max(
+    Math.ceil(keys.length / readableCheckMax),
+    Math.ceil(memories.length / readableCheckMax)
+  );
+  const answered = await Promise.all(
+    Array.from(
+      { length: parts },
+      async (_, at) =>
+        await store.erasedOf({
+          sources: keys.slice(
+            at * readableCheckMax,
+            (at + 1) * readableCheckMax
+          ),
+          memories: memories.slice(
+            at * readableCheckMax,
+            (at + 1) * readableCheckMax
+          ),
+        })
+    )
+  );
+  return {
+    sources: answered.flatMap((erased) => erased.sources),
+    memories: answered.flatMap((erased) => erased.memories),
+  };
 };
 
 const sourceRefsSchema = z.array(sourceRefSchema);
 
 /**
  * Of `sources` and `memories` a chat of the member `personId`'s once
- * read, those an erasure took for good (`erasedOf`), whoever may read
- * them now, in the order given: for core to replace what the chat shows of them
- * (history-access.ts `erasedSources`). Never one whose readers only
- * changed, a retired memory or an older version: the chat keeps showing
- * those. Each source is asked of the shared store, whose ledger an
- * erasure from a person's own store closes too, then of their own store
- * those it doesn't call erased (a key under an erased group of theirs: a
- * deleted chat's turns); each memory of the store its place names.
- * Refused once they are no longer a member, as their own store is named
- * for them alone. Throws what a store throws: the caller then shows none
- * of what it would replace. For the server only, as `addSource`.
+ * read, those an erasure took for good, as the erasure ledger says it
+ * (`erasedOf`), whoever may read them now, in the order given: for core
+ * to replace what the chat shows of them (history-access.ts
+ * `erasedSources`). Never one whose readers only changed, a retired
+ * memory, an older version, nor a memory a lost storage lacks: the chat
+ * keeps showing those. Sources and the shared memories are asked of the
+ * shared store, whose ledger an erasure from a person's own store closes
+ * too, in one call; then, in one more, their own store: the sources it
+ * didn't call erased (a key under an erased group of theirs: a deleted
+ * chat's turns) and the memories of their own. Refused once they are no
+ * longer a member, as their own store is named for them alone. Throws
+ * what a store throws (one restoring an export refuses): the caller then
+ * shows none of what it would replace. For the server only, as
+ * `addSource`.
  */
 export const erasedForGoodAs = async (
   env: BrainEnv & Pick<Env, "DB">,
@@ -2456,12 +2503,12 @@ export const erasedForGoodAs = async (
     memories,
   }: {
     sources: readonly SourceRef[];
-    memories: readonly StoredMemoryPlace[];
+    memories: readonly PinnedMemory[];
   }
 ): Promise<{ sources: SourceRef[]; memories: StoredMemoryPlace[] }> => {
   const refs = checked(sourceRefsSchema, sources);
-  const places = checked(memoryPlacesSchema, memories);
-  if (refs.length === 0 && places.length === 0) {
+  const pins = checked(pinnedMemoriesSchema, memories);
+  if (refs.length === 0 && pins.length === 0) {
     return { sources: [], memories: [] };
   }
   const own = ownBrainOf(env, await readerOf(env, personId, "person"));
@@ -2469,17 +2516,25 @@ export const erasedForGoodAs = async (
     throw new Error("A member reads as a person");
   }
   const keys = [...new Set(refs.map((ref) => sourceKeyOf(ref)))];
-  const idsIn = (store: MemoryStore): string[] => [
-    ...new Set(
-      places.flatMap((place) => (place.store === store ? [place.memory] : []))
-    ),
-  ];
-  const shared = await erasedIn(brain(env), keys, idsIn("shared"));
+  const askedIn = (store: MemoryStore): ErasedMemory[] =>
+    pins.flatMap(({ store: kind, memory, basis }) =>
+      kind === store
+        ? [
+            {
+              memory,
+              source: basis.source === null ? null : sourceKeyOf(basis.source),
+              writer: basis.writer,
+              learnedAt: basis.learnedAt,
+            },
+          ]
+        : []
+    );
+  const shared = await erasedIn(brain(env), keys, askedIn("shared"));
   const closed = new Set(shared.sources);
   const inOwn = await erasedIn(
     own,
     keys.filter((key) => !closed.has(key)),
-    idsIn("own")
+    askedIn("own")
   );
   for (const key of inOwn.sources) {
     closed.add(key);
@@ -2492,7 +2547,9 @@ export const erasedForGoodAs = async (
   ]);
   return {
     sources: refs.filter((ref) => closed.has(sourceKeyOf(ref))),
-    memories: places.filter((place) => gone.has(memoryKeyOf(place))),
+    memories: pins.flatMap(({ store, memory }) =>
+      gone.has(memoryKeyOf({ store, memory })) ? [{ store, memory }] : []
+    ),
   };
 };
 

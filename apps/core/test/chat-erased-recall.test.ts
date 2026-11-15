@@ -278,6 +278,91 @@ const teamsDirect = async () => {
   };
 };
 
+/** A row of a table. */
+type Row = Record<string, SqlStorageValue>;
+
+/** Tables another table of the store makes itself (the word indexes' pages). */
+const madeByAnother = /^(?:sqlite_|(?:chunk|memory)_(?:words|stems)_)/u;
+
+/** Kills `stub`'s object, as a crash or a restore restarts it. */
+const kill = async (stub: DurableObjectStub): Promise<void> => {
+  try {
+    await runInDurableObject(stub, (_instance, state) => {
+      state.abort("Killed by the test");
+    });
+  } catch {
+    // The kill ends the call it was made in.
+  }
+};
+
+/**
+ * `personId`'s own store's storage lost, its bucket and ledger kept, as
+ * a lost Durable Object storage leaves it; `putBack` restores the copy
+ * taken before, as a restore from a backup does.
+ */
+const ownStorageLost = async (personId: string) => {
+  // A fresh stub for each call: one an object was killed through is broken.
+  const stub = () =>
+    inJurisdiction(env, env.BRAIN_STORE).getByName(`person:${personId}`);
+  const copy = await runInDurableObject(stub(), async (_instance, state) => {
+    const { sql } = state.storage;
+    const tables = sql
+      .exec<{ name: string; sql: string }>(
+        `SELECT name, sql FROM sqlite_master WHERE type = 'table'
+        AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\'`
+      )
+      .toArray()
+      .filter(({ name }) => !madeByAnother.test(name))
+      .map(({ name, sql: created }) => ({
+        name,
+        created,
+        rows: sql
+          .exec<Row>(
+            created.startsWith("CREATE VIRTUAL TABLE")
+              ? `SELECT rowid AS rowid, * FROM "${name}"`
+              : `SELECT * FROM "${name}"`
+          )
+          .toArray(),
+      }));
+    const others = sql
+      .exec<{ sql: string | null }>(
+        "SELECT sql FROM sqlite_master WHERE type IN ('index', 'trigger') ORDER BY type"
+      )
+      .toArray()
+      .flatMap(({ sql: created }) => (created === null ? [] : [created]));
+    await state.storage.deleteAll();
+    return { tables, others };
+  });
+  await kill(stub());
+  const putBack = async (): Promise<void> => {
+    await runInDurableObject(stub(), async (_instance, state) => {
+      await state.storage.deleteAll();
+      const { sql } = state.storage;
+      state.storage.transactionSync(() => {
+        sql.exec("PRAGMA defer_foreign_keys = ON");
+        for (const { created } of copy.tables) {
+          sql.exec(created);
+        }
+        for (const { name, rows } of copy.tables) {
+          for (const row of rows) {
+            const columns = Object.keys(row);
+            sql.exec(
+              `INSERT INTO "${name}" (${columns.map((column) => `"${column}"`).join(", ")})
+              VALUES (${columns.map(() => "?").join(", ")})`,
+              ...Object.values(row)
+            );
+          }
+        }
+        for (const created of copy.others) {
+          sql.exec(created);
+        }
+      });
+    });
+    await kill(stub());
+  };
+  return { putBack };
+};
+
 /** Whether the provider's requests so far carried `text`. */
 const sentSoFar = (provider: FakeProvider, text: string): boolean =>
   JSON.stringify(provider.requests.map(({ body }) => body)).includes(text);
@@ -533,6 +618,58 @@ describe("what a chat shows of what it read from the Brain", () => {
       }).toStrictEqual({
         forgotten: { shown: true, sent: false },
         drawn: { before: true, results: [withheldResult], held: false },
+      });
+    }
+  );
+
+  it(
+    "rewrites nothing while the person's own store has lost its storage, as a turn and an open find what it recalled missing, and still shows it once the store is restored",
+    slow,
+    async () => {
+      const chats = await recallingChats(says("Noted."), says("Ok."));
+      const personId = chats.person.userId;
+      const depot = word();
+      const statement = `Depot ${depot} is ${word()}`;
+      await rememberAs(env, personId, {
+        change: crypto.randomUUID(),
+        about: { kind: "customer", names: [`Depot ${depot}`] },
+        attribute: "status",
+        value: "open",
+        type: "fact",
+        statement,
+        quote: statement,
+      });
+      await chats.ask(`What is the status of depot ${depot}?`);
+      const shownBefore = resultsOf(
+        await opened(chats.person, chats.chat.id)
+      ).some((text) => text.includes(statement));
+      const lost = await ownStorageLost(personId);
+      // A turn finds it unreadable and withholds it; nothing was erased.
+      const sentWhileLost = await chats.sendsNext(statement);
+      const whileLost = {
+        shown: resultsOf(await opened(chats.person, chats.chat.id)).some(
+          (text) => text.includes(statement)
+        ),
+        held: await objectHolds(chats.stub, statement),
+      };
+      await lost.putBack();
+      const restored = {
+        shown: resultsOf(await opened(chats.person, chats.chat.id)).some(
+          (text) => text.includes(statement)
+        ),
+        held: await objectHolds(chats.stub, statement),
+      };
+
+      expect({
+        shownBefore,
+        sentWhileLost,
+        whileLost,
+        restored,
+      }).toStrictEqual({
+        shownBefore: true,
+        sentWhileLost: false,
+        whileLost: { shown: true, held: true },
+        restored: { shown: true, held: true },
       });
     }
   );

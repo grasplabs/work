@@ -2235,12 +2235,27 @@ export type ReadableMemoriesRequest = z.infer<
 >;
 
 /**
+ * A memory to ask whether an erasure took it (`Brain.erasedOf`), with what
+ * it rests on as a host read it when it was handed over: the key of the
+ * source it was drawn from, or its writer, and when the store learned it.
+ * What decides is the erasure ledger alone, which outlives a lost storage:
+ * never whether the store holds the memory now.
+ */
+export const erasedMemorySchema = z.strictObject({
+  memory: memoryIdSchema,
+  source: sourceIdSchema.nullable(),
+  writer: principalSchema.nullable(),
+  learnedAt: z.int().nonnegative(),
+});
+export type ErasedMemory = z.infer<typeof erasedMemorySchema>;
+
+/**
  * Keys and memories to ask whether an erasure took them for good
- * (`Brain.erasedOf`): what a host once read itself, by key and by id.
+ * (`Brain.erasedOf`): what a host once read itself.
  */
 export const erasedRequestSchema = z.strictObject({
   sources: z.array(sourceIdSchema).max(readableCheckMax),
-  memories: z.array(memoryIdSchema).max(readableCheckMax),
+  memories: z.array(erasedMemorySchema).max(readableCheckMax),
 });
 export type ErasedRequest = z.infer<typeof erasedRequestSchema>;
 
@@ -2983,15 +2998,17 @@ export interface Brain {
    */
   readableMemories: (request: ReadableMemoriesRequest) => Promise<MemoryId[]>;
   /**
-   * Of the keys and memories asked, those an erasure took for good,
-   * whoever may read them, in the order asked and each once: a key as
-   * `keyState` answers `erased`; a memory this store no longer holds, one
-   * an erasure of its writer covers (`eraseWriter`), or one resting on a
-   * key so erased. Never a retired memory, nor a key
-   * whose readers only changed: those are kept. For the host only, which
-   * asks of what it once read itself, to replace what a chat showed of
-   * it. Ids alone, never text or readers. A person's own store erased
-   * whole answers all of it: it holds nothing.
+   * Of the keys and memories asked, those an erasure took for good, as
+   * the erasure ledger alone says it, whoever may read them, in the order
+   * asked and each once: a key as `keyState` answers `erased`; a memory
+   * whose source's key is so erased, or whose writer was erased after the
+   * store learned it (`eraseWriter`). Never a retired memory, a key whose
+   * readers only changed, nor a memory only because the store doesn't
+   * hold it now: a lost storage, until a restore puts it back, lacks what
+   * was never erased. For the host only, which asks of what it once read
+   * itself, to replace what a chat showed of it. Ids alone, never text or
+   * readers. A person's own store erased whole answers all of it; a store
+   * restoring an export refuses (`restoringNow`).
    */
   erasedOf: (request: ErasedRequest) => Promise<Erased>;
   /**
