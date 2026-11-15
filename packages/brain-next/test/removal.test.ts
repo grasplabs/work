@@ -298,6 +298,86 @@ describe("removing a source and keeping its history", () => {
     });
   });
 
+  it("keeps a removed source and a writer's erasure apart through the company's export: the source comes back removed, its memories kept and hidden, the writer's memories stay erased, and erasing the source after takes its memories", async () => {
+    await restore(shared(), empty);
+    const removing = await teamSource();
+    const writer = `writer-${crypto.randomUUID()}`;
+    const said = word();
+    // A writer's memory about the same customer, then that writer erased.
+    await shared().addMemories({
+      change: crypto.randomUUID(),
+      access: removing.access,
+      entities: [{ key: "c", kind: "customer", id: removing.entity }],
+      memories: [
+        {
+          about: "c",
+          type: "fact",
+          statement: `Client said ${said}`,
+          speaker: { kind: "system" },
+          basis: { kind: "writer", writer },
+        },
+      ],
+    });
+    const writerErased = await shared().eraseWriter({
+      writer,
+      reason: "deleted",
+      change: crypto.randomUUID(),
+    });
+    await shared().removeSource({ source: removing.source });
+    await tick(shared());
+    const { id } = await shared().startExport("test");
+    const exported = await exportSettled(shared, id);
+    const restored = await restoredAfterLoss(shared, id, empty);
+    const writerMemories = async () =>
+      await runInDurableObject(
+        shared(),
+        (_store, state) =>
+          state.storage.sql
+            .exec<{ count: number }>(
+              "SELECT count(*) AS count FROM memories WHERE writer = ?",
+              writer
+            )
+            .one().count
+      );
+    const afterRestore = {
+      rows: await rowsOf(removing.source),
+      writerMemories: await writerMemories(),
+      memories: await shared().readMemories({
+        entity: removing.entity,
+        reader: removing.reader,
+        history: true,
+      }),
+    };
+    await shared().eraseSource({ source: removing.source, reason: "deleted" });
+    await tick(shared());
+
+    expect({
+      writerErased: writerErased.memories,
+      exported,
+      restored,
+      afterRestore: {
+        ...afterRestore,
+        memories: afterRestore.memories.memories.map(
+          ({ statement }) => statement
+        ),
+      },
+      erased: await rowsOf(removing.source),
+    }).toStrictEqual({
+      // The writer's one memory was there, and its erasure took it.
+      writerErased: 1,
+      exported: "done",
+      restored: "done",
+      afterRestore: {
+        // Its versions, its memories and its mark, as before the export.
+        rows: { versions: 2, memories: 2, removed: 1 },
+        writerMemories: 0,
+        // Read by no one: hidden as the removed source is.
+        memories: [],
+      },
+      erased: { versions: 0, memories: 0, removed: 0 },
+    });
+  });
+
   it("brings a removed source back removed from the company's export, and erases it for good after", async () => {
     await restore(shared(), empty);
     const removing = await teamSource();
