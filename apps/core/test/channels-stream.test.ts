@@ -1,13 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { chatAgentId } from "../src/chats-rpc.ts";
-import { codeStep, pausedReply, says } from "./agent-chat.ts";
-import { requestGranted } from "./apps.ts";
+import { pausedReply, says } from "./agent-chat.ts";
 import { botConnectorStreamsUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
-import { readCollection, seed } from "./knowledge.ts";
-import { clientOrigin } from "./sign-in-config.ts";
-import { signedInApi, unique } from "./sign-in.ts";
 import {
   member,
   messageFrom,
@@ -42,38 +37,9 @@ const streamedIn = async (conversation: string) => {
 };
 
 describe("a member's answer", setUpTime, () => {
-  it("streams in order, then ends as the whole answer with its sources", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const { id: collectionId } = await seed(admin.api).createCollection({
-      name: `Handbook ${unique()}`,
-      access: "everyone",
-    });
-    const saved = await seed(admin.api).saveDocument({
-      collectionId,
-      path: "leave.md",
-      text: "# Parental leave\n\nParental leave lasts sixteen weeks.",
-      ifVersion: 0,
-    });
-    await requestGranted(
-      idp,
-      admin,
-      readCollection(
-        { type: "agent", agentId: chatAgentId },
-        collectionId,
-        `S${unique()}`.toUpperCase()
-      )
-    );
-    const { reply, release } = pausedReply(
-      says(`${answer} [Parental leave](grasp:note/${saved.id})`),
-      40
-    );
-    const { teams } = await member(
-      idp,
-      codeStep(
-        `export default async (self, env) => (await env.knowledge.read(${JSON.stringify(saved.id)})).text;`
-      ),
-      reply
-    );
+  it("streams in order, then ends as the whole answer", async () => {
+    const { reply, release } = pausedReply(says(answer), 40);
+    const { teams } = await member(idp, reply);
 
     const posting = post(messageFrom(teams, { text: "How does leave work?" }));
     // Its first words show while the model still writes.
@@ -94,21 +60,15 @@ describe("a member's answer", setUpTime, () => {
     }
     const { activities } = await reached(teams.conversation);
     const messages = activities.filter(({ type }) => type === "message");
-    const [whole, sources] = messages.map((each) => JSON.stringify(each));
+    const [whole] = messages.map((each) => JSON.stringify(each));
     expect({
       text: messages[0]?.text,
       final: whole?.includes('"streamType":"final"'),
       aiLabel: whole?.includes("AIGeneratedContent"),
-      source: sources?.includes("1. Parental leave"),
-      sourceLink: sources?.includes(
-        `${clientOrigin}/knowledge/${collectionId}?doc=${saved.id}`
-      ),
     }).toStrictEqual({
-      text: `${answer} Parental leave`,
+      text: answer,
       final: true,
       aiLabel: true,
-      source: true,
-      sourceLink: true,
     });
   });
 

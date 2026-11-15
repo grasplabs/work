@@ -1,6 +1,5 @@
 import type {
   BrainSourceRef,
-  ChangeOptions,
   EntitiesListInput,
   EntitySourcesInput,
   EntitySummary,
@@ -8,7 +7,6 @@ import type {
   RelationsExplainInput,
   RelationsExplanation,
   RelationsGetInput,
-  MemoriesRetireInput,
   CommandReceipt,
   MemoriesGetInput,
   MemoriesLineageInput,
@@ -37,7 +35,6 @@ import {
 import {
   memoriesGet,
   memoriesList,
-  memoriesRetire,
   receiptsGet,
 } from "@grasp-os/brain/memories";
 import { memoriesLineage } from "@grasp-os/brain/memory-lineage";
@@ -54,7 +51,6 @@ import type {
   HistoryOptions,
   HistoryPage,
   KnowledgeApi,
-  KnowledgeCatalog,
   KnowledgeRead,
   ListDocumentsOptions,
   ReadOptions,
@@ -66,7 +62,6 @@ import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
 import type { Reader } from "./access.ts";
-import { catalog } from "./catalog.ts";
 import { listCollections } from "./collection-rules.ts";
 import { brainOf } from "./ports.ts";
 
@@ -90,17 +85,6 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     return await withPerson(
       this.#check,
       async (person) => await run({ type: "person", person })
-    );
-  }
-
-  /** Retires a shared record its publisher or an admin no longer wants used (GRA-298). */
-  async memoriesRetire(
-    input: MemoriesRetireInput,
-    options: ChangeOptions
-  ): Promise<CommandReceipt> {
-    return await this.#asReader(
-      async (reader) =>
-        await memoriesRetire(brainOf(this.#env), reader, input, options)
     );
   }
 
@@ -231,12 +215,6 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     return await this.#asReader(
       async (reader) =>
         await relationsExplain(brainOf(this.#env), reader, input)
-    );
-  }
-
-  async catalog(): Promise<KnowledgeCatalog> {
-    return await this.#asReader(
-      async (reader) => await catalog(brainOf(this.#env), reader)
     );
   }
 

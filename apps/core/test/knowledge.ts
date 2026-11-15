@@ -12,10 +12,6 @@ import { actorOf } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { collectionIdSchema } from "@grasp-os/shared/ids";
 import type { Collection, KnowledgeApi } from "@grasp-os/shared/knowledge";
-import type {
-  PermissionRequest,
-  PermissionSubjectInput,
-} from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
@@ -23,6 +19,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { collectionTeams } from "../src/db/core/schema.ts";
+import type { Reader } from "../src/knowledge/access.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
 import { callAuth, unique, whoami } from "./sign-in.ts";
 
@@ -272,18 +269,6 @@ export const collectionWithNote = async (
   return { collectionId: collection.id, noteId: note.id };
 };
 
-/** A permission to read a collection, under `binding`. */
-export const readCollection = (
-  subject: PermissionSubjectInput,
-  collectionId: string,
-  binding = "HANDBOOK"
-): PermissionRequest => ({
-  subject,
-  object: { type: "collection", collectionId },
-  actions: ["read"],
-  binding,
-});
-
 /**
  * A permission stored as it is, past the checks a request and a grant
  * make, as a bug or an old record could leave one: active by default, for
@@ -292,7 +277,7 @@ export const readCollection = (
  */
 export const storedGrant = async (
   subject: { type: "app" | "agent"; id: string },
-  object: { type: "collection" | "connection"; id: string },
+  object: { type: "collection" | "connection" | "platform"; id: string },
   actions: string[],
   binding: string,
   status: "active" | "requested" = "active"
@@ -392,3 +377,8 @@ export const storeTextUnderneath = async (
     ).bind(key, documentId),
   ];
 };
+
+/** `person`'s reader of Knowledge, as their own session's calls read it. */
+export const asPerson = async (person: {
+  api: { whoami: () => Promise<Identity> };
+}): Promise<Reader> => ({ type: "person", person: await person.api.whoami() });

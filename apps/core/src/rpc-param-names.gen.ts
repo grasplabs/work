@@ -143,7 +143,6 @@ export const rpcParamNames: ParamNames = {
     "attachFile": ["chatId","file"],
     "build": ["chatId","build"],
     "cancel": ["chatId"],
-    "cited": ["chatId","messageId"],
     "connectionRequests": ["chatId"],
     "create": ["title","agentId","make"],
     "denyConnection": ["chatId","id"],
@@ -265,7 +264,6 @@ export const rpcParamNames: ParamNames = {
   },
   "KnowledgeRpc": {
     "backlinks": ["documentId","options"],
-    "catalog": [],
     "entities": ["input"],
     "entitySources": ["input"],
     "follow": ["documentId"],
@@ -279,7 +277,6 @@ export const rpcParamNames: ParamNames = {
     "memoriesGet": ["input"],
     "memoriesLineage": ["input"],
     "memoriesList": ["input"],
-    "memoriesRetire": ["input","options"],
     "read": ["documentId","options"],
     "recall": ["input"],
     "receiptsGet": ["input"],

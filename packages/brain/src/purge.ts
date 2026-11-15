@@ -48,14 +48,16 @@ import {
 // erasure): the one purge left (GRA-1911). Core runs it only from a
 // person's erasure (its person-erasure.ts), never on anyone's request;
 // the purge of terms an admin could run went with decision B of the
-// cutover, as nothing reads Knowledge any more and the whole database
-// goes with the package.
+// cutover: nothing writes Knowledge any more, and the whole database goes
+// with the package.
 //
 // Every collection only the person reads (`access` "me", theirs: whatever
 // made it, a Personal collection they once had among them) is deleted
 // with every version, section, link, transcript and search row, and so
 // are their Brain memories, command receipts, outcomes and lessons
-// (memories.ts), and every entity match they decided. One batch, with its audit event, which counts them.
+// (memories.ts), and every entity match they decided, in one batch. Its
+// audit event counts the collections, documents and versions, and their
+// memories and receipts (`personCounts`); the rest it deletes uncounted.
 // Collections they own that others read too are the company's, and stay.
 //
 // The host forgets the files it keeps as the purged collections' documents

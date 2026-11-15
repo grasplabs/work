@@ -6,7 +6,7 @@ import { z } from "zod";
 
 import { appHost } from "../src/durable-objects.ts";
 import { requestGranted } from "./apps.ts";
-import { newTeam, readCollection, seed } from "./knowledge.ts";
+import { newTeam } from "./knowledge.ts";
 import { apiOf, referenceTo } from "./notes-client-app.ts";
 import {
   mockSessionIdp,
@@ -180,30 +180,28 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     const opened = await openedApp();
     const admin = await personApi("admin");
     const member = await personApi("user");
-    const team = await newTeam(admin, [member]);
-    const { id: collection } = await seed(admin.api).createCollection({
-      name: `HR ${unique()}`,
-      access: "teams",
-      teams: [team],
-      sensitive: false,
+    const team = await newTeam(admin, [member, opened.builder]);
+    // What the App recalls of the team's Brain only its people may read.
+    await requestGranted(idp, opened.builder, {
+      subject: { type: "app", appId: opened.app },
+      object: { type: "platform", teams: [team] },
+      actions: ["brain"],
+      binding: `BRAIN_${unique().toUpperCase().replaceAll("-", "_")}`,
     });
-    await requestGranted(
-      idp,
-      opened.builder,
-      readCollection(
-        { type: "app", appId: opened.app },
-        collection,
-        `HR_${unique().toUpperCase()}`
-      )
-    );
+    // Connections opened since they joined the team: each reads them in it.
+    const [asBuilder, asMember] = await Promise.all([
+      openRpc(opened.builder.session),
+      openRpc(member.session),
+    ]);
     // Shared with them as a person, never with the team.
-    await opened.builder.api.apps.members.add(opened.app, {
+    await asBuilder.core.authenticate().apps.members.add(opened.app, {
       type: "person",
       id: member.userId,
       role: "user",
     });
-    const { lease } = await member.api.pages.open(opened.app);
-    const follower = await followedList(opened, member.api.pages, lease);
+    const { pages } = asMember.core.authenticate();
+    const { lease } = await pages.open(opened.app);
+    const follower = await followedList(opened, pages, lease);
 
     await callAuth("/organization/remove-team-member", admin.session, {
       teamId: team,

@@ -1,4 +1,3 @@
-import { ensureCollection } from "@grasp-os/brain/collections";
 import { compilerVersion } from "@grasp-os/compiler";
 import { definitionText } from "@grasp-os/runtime/definition";
 import type { AppDefinition } from "@grasp-os/runtime/definition";
@@ -72,7 +71,6 @@ import {
   permissions,
 } from "./db/core/schema.ts";
 import { appMemoryPath } from "./knowledge/memory-files.ts";
-import { brainOf } from "./knowledge/ports.ts";
 import {
   declarableOf,
   declaredRequests,
@@ -177,12 +175,6 @@ import {
 // creating asks for permissions, which staff never do for a client.
 
 type Row = typeof blueprints.$inferSelect;
-
-/**
- * The owner of the collections the built-ins declare: nobody's, open to
- * everyone. Nothing writes into them any more (GRA-1911).
- */
-const releaseOwner = "grasp";
 
 /** A copy's AGENTS.md in place of its blueprint's (see above). */
 const copiedMemory = (name: string): string =>
@@ -1199,9 +1191,8 @@ const deleteReplacedTrees = async (
  * isn't there, or changed if its name, description, code or what it
  * declares each App created from it asks for differ from what's stored,
  * in one audited batch, so installing it again writes nothing. The
- * collections it declares are created first, in Knowledge's database,
- * each only if it isn't there yet, and audited only then, and so are the
- * catalog contracts its workflows bind, in core's. Apps created
+ * catalog contracts its workflows bind are published first, each only if
+ * its key isn't taken yet, and audited only then. Apps created
  * from it earlier keep their code and their permissions. The trees of its
  * earlier releases are deleted once its row names the new one.
  *
@@ -1304,26 +1295,6 @@ export const installBuiltinBlueprint = async (
         ),
       ]
     : [];
-  // The collections its copies ask for, before anything asks for them:
-  // each is created once, by the first install that declares it, and
-  // shared by every App created from a blueprint that names it. Nothing
-  // deletes such a collection once created.
-  for (const collection of builtin.collections) {
-    // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
-    await ensureCollection(
-      brainOf(env),
-      {
-        ...collection,
-        owner: releaseOwner,
-        access: "everyone",
-        sensitive: false,
-        source: "here",
-        createdAt: now,
-      },
-      { type: "system" },
-      { builtin: builtin.id }
-    );
-  }
   // The contracts its workflows bind, before any copy publishes one: each
   // published once, by the first install that ships it, and never changed.
   for (const contract of builtin.contracts) {

@@ -572,12 +572,13 @@ export const auditOutboxRejected = sqliteTable(
  * and revoke columns ever change.
  *
  * The object is stored by type: a connection is `object_id`, with
- * `resource` naming one resource in it or null for all of it; a collection
- * is `object_id`; a workflow is its workflow resource's ID in `object_id`;
- * an App is its ID in `object_id`: an agent's, to call its functions,
- * with `resource` null; a workflow's, to call one of them, with that
- * function's stable ID in `resource`. `actions` is a JSON array of action
- * names.
+ * `resource` naming one resource in it or null for all of it; a workflow
+ * is its workflow resource's ID in `object_id`; an App is its ID in
+ * `object_id`: an agent's, to call its functions, with `resource` null; a
+ * workflow's, to call one of them, with that function's stable ID in
+ * `resource`. `actions` is a JSON array of action names. Rows of kinds
+ * the platform removed (a store's, a Knowledge collection's) may remain,
+ * which every read takes as not there (`servedSql` in permissions.ts).
  */
 export const permissions = sqliteTable(
   "permissions",
@@ -588,7 +589,7 @@ export const permissions = sqliteTable(
     }).notNull(),
     subjectId: text("subject_id").notNull(),
     objectType: text("object_type", {
-      enum: ["connection", "collection", "workflow", "app", "platform"],
+      enum: ["connection", "workflow", "app", "platform"],
     }).notNull(),
     objectId: text("object_id").notNull(),
     resource: text(),

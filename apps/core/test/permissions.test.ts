@@ -25,7 +25,6 @@ import { grantReviewed, outlook, reviewedOf } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { actingFor, connectionIn, envOf, reached } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
-import { seed } from "./knowledge.ts";
 import {
   runMinuteTasks,
   waitingInOutbox,
@@ -406,7 +405,6 @@ describe("permissions", () => {
         { ...finance, resource: "ceo@acme.test" },
         // One mailbox isn't the whole connection.
         { type: "connection", connectionId: finance.connectionId },
-        { type: "collection", collectionId: "c" },
       ].map(
         async (object) =>
           await outcome(
@@ -422,7 +420,6 @@ describe("permissions", () => {
     );
     expect(checks).toStrictEqual([
       "ok",
-      "permission.denied",
       "permission.denied",
       "permission.denied",
     ]);
@@ -446,7 +443,7 @@ describe("permissions", () => {
     );
   });
 
-  it("build an env with a stub for each active grant, its Knowledge tools, and nothing else", async () => {
+  it("build an env with a stub for each active grant, and nothing else", async () => {
     const admin = await permissionApi("admin");
     const app = await newApp(admin.api);
     const grant = async (request: PermissionRequest) => {
@@ -457,26 +454,20 @@ describe("permissions", () => {
     await admin.api.permissions.request(outlook(app.appId, "ASKED"));
     const gone = await grant(outlook(app.appId, "GONE"));
     await admin.api.permissions.revoke(gone.id);
-    const policies = await seed(admin.api).createCollection({
-      name: `Policies ${unique()}`,
-      access: "everyone",
-    });
-    await grant({
-      subject: app,
-      object: { type: "collection", collectionId: policies.id },
-      actions: ["read"],
-      binding: "POLICIES",
-    });
+    // A grant to read a Knowledge collection, left from before the Brain
+    // replaced Knowledge: no stub, and no Knowledge tools either.
+    await env.DB.prepare(
+      `INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id,
+        actions, binding, status, requested_by, requested_at, granted_by, granted_at)
+       VALUES (?, 'app', ?, 'collection', 'policies', '["read"]', 'POLICIES', 'active', 'test', 0, 'test', 0)`
+    )
+      .bind(crypto.randomUUID(), app.appId)
+      .run();
     const other = await newApp(admin.api);
     await grant(outlook(other.appId, "SOMEONE_ELSES"));
 
     const bindings = await envOf(actingFor(app, admin.userId));
-    // With a collection to read, the Knowledge tools across all of them.
-    expect(Object.keys(bindings)).toStrictEqual([
-      "OUTLOOK",
-      "POLICIES",
-      "KNOWLEDGE",
-    ]);
+    expect(Object.keys(bindings)).toStrictEqual(["OUTLOOK"]);
   });
 
   it("leave a name out of the env once the platform takes it, and keep the rest", async () => {
@@ -514,12 +505,6 @@ describe("permissions", () => {
       { ...outlook(app.appId), actions: ["mail.list", "mail.list"] },
       {
         subject: app,
-        object: { type: "collection", collectionId: "c" },
-        actions: ["delete"],
-        binding: "C",
-      },
-      {
-        subject: app,
         object: { type: "workflow", workflowId: "w" },
         actions: ["write"],
         binding: "W",
@@ -533,47 +518,42 @@ describe("permissions", () => {
     expect(refused).toStrictEqual(requests.map(() => "permission.invalid"));
   });
 
-  // An App and a workflow only read a collection (their stubs have no
-  // write): `write` would be granted and give them nothing.
-  it("let only an agent write a collection", async () => {
+  // Knowledge is gone (GRA-1735): no subject is granted a collection, to
+  // read or to write, however the request names one.
+  it("are refused for a Knowledge collection, for any subject", async () => {
     const admin = await permissionApi("admin");
-    const { id: collectionId } = await seed(admin.api).createCollection({
-      name: `Notes ${unique()}`,
-      access: "everyone",
-    });
     const flow = await admin.api.workflowResources.create(`notes-${unique()}`);
-    const subjects: Record<string, PermissionSubjectInput> = {
-      app: await newApp(admin.api),
-      workflow: { type: "workflow", workflowId: flow.id },
-      agent: { type: "agent", agentId: `agent-${crypto.randomUUID()}` },
-    };
-    const ask = async (
-      subject: PermissionSubjectInput,
-      actions: string[]
-    ): Promise<string> =>
-      await outcome(
-        admin.api.permissions.request({
-          subject,
-          object: { type: "collection", collectionId },
-          actions,
-          binding: actions.includes("write") ? "NOTES_WRITE" : "NOTES",
-        })
-      );
-    const asked: Record<string, { write: string; read: string }> = {};
-    for (const [name, subject] of Object.entries(subjects)) {
-      asked[name] = {
-        // oxlint-disable-next-line no-await-in-loop -- one at a time
-        write: await ask(subject, ["read", "write"]),
-        // oxlint-disable-next-line no-await-in-loop -- as above
-        read: await ask(subject, ["read"]),
-      };
-    }
-
-    expect(asked).toStrictEqual({
-      app: { write: "permission.invalid", read: "ok" },
-      workflow: { write: "permission.invalid", read: "ok" },
-      agent: { write: "ok", read: "ok" },
-    });
+    const subjects: PermissionSubjectInput[] = [
+      await newApp(admin.api),
+      { type: "workflow", workflowId: flow.id },
+      { type: "agent", agentId: `agent-${crypto.randomUUID()}` },
+    ];
+    const refused = await Promise.all(
+      subjects.flatMap((subject) =>
+        [["read"], ["read", "write"]].map(
+          async (actions) =>
+            await outcome(
+              admin.api.permissions.request(
+                // SAFETY: a request the type rules out, as a client could send it.
+                // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+                {
+                  subject,
+                  object: { type: "collection", collectionId: "handbook" },
+                  actions,
+                  binding: "HANDBOOK",
+                } as never
+              )
+            )
+        )
+      )
+    );
+    const held = await env.DB.prepare(
+      "SELECT count(*) AS n FROM permissions WHERE object_type = 'collection' AND object_id = 'handbook'"
+    ).first<{ n: number }>();
+    expect([refused, held?.n]).toStrictEqual([
+      subjects.flatMap(() => ["permission.invalid", "permission.invalid"]),
+      0,
+    ]);
   });
 
   // An App's store is its own: nothing else holds a grant on it, and it
@@ -621,79 +601,111 @@ describe("permissions", () => {
     ]);
   });
 
-  // Grants on a store, left from before each App's store was its own, stay
-  // until a later release removes them with their audit events: until
-  // then nothing lists or decides one, and nothing fails over one.
-  it("leave a grant on a store, left from before, unlisted and undecided", async () => {
-    const admin = await permissionApi("admin");
-    const app = await newApp(admin.api);
-    const store = await storeOfNewApp(env, await admin.api.whoami());
-    const left = crypto.randomUUID();
-    await env.DB.prepare(
-      `INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id,
-        actions, binding, status, requested_by, requested_at, granted_by, granted_at)
-       VALUES (?, 'app', ?, 'store', ?, '["notes.list"]', 'NOTES', 'requested', 'test', 0, NULL, NULL)`
-    )
-      .bind(left, app.appId, store)
-      .run();
-    const listed = await admin.api.permissions.list();
-    expect({
-      listed: listed.some(({ id }) => id === left),
-      granted: await outcome(admin.api.permissions.grant(left, { version: 1 })),
-    }).toStrictEqual({ listed: false, granted: "permission.not_found" });
-  });
+  // Grants of a kind the platform removed (on a store, left from before
+  // each App's store was its own; on a Knowledge collection, from before
+  // the Brain replaced Knowledge) stay until a later release removes them
+  // with their audit events: until then nothing lists or decides one, and
+  // nothing fails over one.
+  it.each([
+    ["a store", "store"],
+    ["a Knowledge collection", "collection"],
+  ] as const)(
+    "leave a grant on %s, left from before, unlisted and undecided",
+    async (_kind, objectType) => {
+      const admin = await permissionApi("admin");
+      const app = await newApp(admin.api);
+      const object =
+        objectType === "store"
+          ? await storeOfNewApp(env, await admin.api.whoami())
+          : "handbook";
+      const left = crypto.randomUUID();
+      await env.DB.prepare(
+        `INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id,
+          actions, binding, status, requested_by, requested_at, granted_by, granted_at)
+         VALUES (?, 'app', ?, ?, ?, '["read"]', 'NOTES', 'requested', 'test', 0, NULL, NULL)`
+      )
+        .bind(left, app.appId, objectType, object)
+        .run();
+      const listed = await admin.api.permissions.list();
+      expect({
+        listed: listed.some(({ id }) => id === left),
+        granted: await outcome(
+          admin.api.permissions.grant(left, { version: 1 })
+        ),
+        revoked: await outcome(admin.api.permissions.revoke(left)),
+      }).toStrictEqual({
+        listed: false,
+        granted: "permission.not_found",
+        revoked: "permission.not_found",
+      });
+    }
+  );
 
-  // Hidden, a leftover store grant would still hold its binding name, and
-  // nobody could revoke it to free the name: a request under that name
-  // revokes it in its own batch, audited with why.
-  it("free a binding name a leftover grant on a store holds, revoking it audited", async () => {
-    const admin = await permissionApi("admin");
-    const app = await newApp(admin.api);
-    const store = await storeOfNewApp(env, await admin.api.whoami());
-    const left = crypto.randomUUID();
-    await env.DB.prepare(
-      `INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id,
-        actions, binding, status, requested_by, requested_at, granted_by, granted_at)
-       VALUES (?, 'app', ?, 'store', ?, '["notes.list"]', 'OUTLOOK', 'active', 'test', 0, 'test', 0)`
-    )
-      .bind(left, app.appId, store)
-      .run();
+  // Hidden, a leftover grant would still hold its binding name, and nobody
+  // could revoke it to free the name: a request under that name revokes it
+  // in its own batch, audited with why.
+  it.each([
+    ["a store", "store"],
+    ["a Knowledge collection", "collection"],
+  ] as const)(
+    "free a binding name a leftover grant on %s holds, revoking it audited",
+    async (_kind, objectType) => {
+      const admin = await permissionApi("admin");
+      const app = await newApp(admin.api);
+      const object =
+        objectType === "store"
+          ? await storeOfNewApp(env, await admin.api.whoami())
+          : "handbook";
+      const left = crypto.randomUUID();
+      await env.DB.prepare(
+        `INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id,
+          actions, binding, status, requested_by, requested_at, granted_by, granted_at)
+         VALUES (?, 'app', ?, ?, ?, '["read"]', 'OUTLOOK', 'active', 'test', 0, 'test', 0)`
+      )
+        .bind(left, app.appId, objectType, object)
+        .run();
 
-    const requested = await outcome(
-      admin.api.permissions.request(outlook(app.appId))
-    );
-    const row = await env.DB.prepare(
-      "SELECT status, revoked_by AS revokedBy FROM permissions WHERE id = ?"
-    )
-      .bind(left)
-      .first<{ status: string; revokedBy: string | null }>();
-    const events = await allEvents();
-    const revoked = events.filter(
-      ({ action, target }) =>
-        action === "permission.revoked" && target?.id === left
-    );
-    const { userId } = await admin.api.whoami();
+      const requested = await outcome(
+        admin.api.permissions.request(outlook(app.appId))
+      );
+      const row = await env.DB.prepare(
+        "SELECT status, revoked_by AS revokedBy FROM permissions WHERE id = ?"
+      )
+        .bind(left)
+        .first<{ status: string; revokedBy: string | null }>();
+      const events = await allEvents();
+      const revoked = events.filter(
+        ({ action, target }) =>
+          action === "permission.revoked" && target?.id === left
+      );
+      const { userId } = await admin.api.whoami();
 
-    expect({
-      requested,
-      row,
-      revoked: revoked.map(({ actor, detail }) => ({
-        actor,
-        reason: detail?.reason,
-        binding: detail?.binding,
-      })),
-    }).toStrictEqual({
-      requested: "ok",
-      row: { status: "revoked", revokedBy: userId },
-      revoked: [
-        {
-          actor: { type: "person", userId },
-          reason: "binding kind removed",
-          binding: "OUTLOOK",
-        },
-      ],
-    });
-  });
+      expect({
+        requested,
+        row,
+        revoked: revoked.map(({ actor, detail }) => ({
+          actor,
+          reason: detail?.reason,
+          binding: detail?.binding,
+          objectType: detail?.objectType,
+          objectId: detail?.objectId,
+        })),
+      }).toStrictEqual({
+        requested: "ok",
+        row: { status: "revoked", revokedBy: userId },
+        revoked: [
+          {
+            actor: { type: "person", userId },
+            reason: "binding kind removed",
+            binding: "OUTLOOK",
+            // Which one it was, as a served kind's names its object.
+            objectType,
+            objectId: object,
+          },
+        ],
+      });
+    }
+  );
 
   it("are refused for an App that isn't in the registry", async () => {
     const admin = await permissionApi("admin");

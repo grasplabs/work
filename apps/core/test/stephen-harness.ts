@@ -24,15 +24,17 @@
  * gives the hard rules, quality and speed, and the run's identity pins
  * what the numbers depend on.
  */
+import { brainOf } from "@grasp-os/brain-next/contract";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import type { CompanyToolClass } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { workspaceIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
 
-import { workspace } from "../src/durable-objects.ts";
+import { inJurisdiction, workspace } from "../src/durable-objects.ts";
 import { model, setObjectEnv } from "./agent-chat.ts";
 import { grantReviewed } from "./apps.ts";
 import { eventsAfterWithHead, logHead } from "./audit-events.ts";
@@ -64,7 +66,6 @@ import {
   googleRegister,
   googleTeamDrive,
   graphTable,
-  grantedCollections,
   leaveRows,
   lisaDrive,
   lisaEvents,
@@ -74,7 +75,6 @@ import {
   sheetRows,
   stephenBudget,
   stephenClock,
-  stephenCollections,
   stephenDocuments,
   stephenMemory,
   stephenPeople,
@@ -89,7 +89,7 @@ import type {
 } from "./fixtures/stephen-world.ts";
 import type { Idp } from "./idp.ts";
 import { saveInstructions } from "./instruction-saves.ts";
-import { newTeam, readCollection, seed } from "./knowledge.ts";
+import { newTeam } from "./knowledge.ts";
 import { mailControlUrl, mailServerUrl } from "./mail-server.ts";
 import { answeringProvider } from "./model-provider.ts";
 import { acmeTenant, signInConfig } from "./sign-in-config.ts";
@@ -158,10 +158,10 @@ export interface StephenCompany {
   people: Record<StephenPersona, Person>;
   /** Lisa's mailbox, as Graph or Gmail and the connector name it. */
   mailbox: string;
-  /** Each collection's ID, by key. */
-  collections: Map<string, string>;
   /** Each team's ID, by key. */
   teams: Map<StephenTeam, string>;
+  /** The text of each of Noordkade's documents, by its source in the Brain. */
+  sources: Map<string, string>;
   /** The connections Lisa's agent is granted: her own, and the company's. */
   connections: { own: string; company: string };
   /** Each persona's Workspace object and the agent its grants are for. */
@@ -347,20 +347,14 @@ const granted = async (
   await grantReviewed(admin.api, id);
 };
 
-/** Grants `agentId` reading the collection `key`. */
-export const grantCollection = async (
-  company: Pick<StephenCompany, "admin" | "collections">,
-  agentId: string,
-  key: string
-): Promise<void> => {
-  await granted(
-    company.admin,
-    readCollection(
-      { type: "agent", agentId },
-      held(company.collections, key),
-      `STEPHEN_${key.toUpperCase()}`
-    )
-  );
+/** Grants `agentId` reading the Brain, as its person may. */
+const grantBrain = async (admin: Person, agentId: string): Promise<void> => {
+  await granted(admin, {
+    subject: { type: "agent", agentId },
+    object: { type: "platform" },
+    actions: ["brain"],
+    binding: "BRAIN",
+  });
 };
 
 /** Puts the register, the budget and the files on Graph: Lisa's OneDrive, and Excel's workbooks. */
@@ -495,25 +489,21 @@ export const setUpStephenCompany = async (
     // oxlint-disable-next-line no-await-in-loop -- one team at a time
     teams.set(team, await newTeam(admin, members));
   }
-  const collections = new Map<string, string>();
-  for (const [key, { name, description, team }] of Object.entries(
-    stephenCollections
-  )) {
-    // oxlint-disable-next-line no-await-in-loop -- one collection at a time
-    const created = await seed(admin.api).createCollection(
-      team === undefined
-        ? { name, description, access: "everyone" }
-        : { name, description, access: "teams", teams: [held(teams, team)] }
-    );
-    collections.set(key, created.id);
-  }
-  for (const { collection, path, text } of Object.values(stephenDocuments)) {
-    // oxlint-disable-next-line no-await-in-loop -- saves in order
-    await seed(admin.api).saveDocument({
-      collectionId: held(collections, collection),
-      path,
+  // Noordkade's documents in the Brain, as uploads shared with their
+  // readers are: the handbook with everyone, a team's notes with the team.
+  const sources = new Map<string, string>();
+  for (const { reader, text } of Object.values(stephenDocuments)) {
+    const source = `upload:${crypto.randomUUID()}`;
+    sources.set(source, text);
+    // oxlint-disable-next-line no-await-in-loop -- one source at a time
+    await brainOf(inJurisdiction(env, env.BRAIN_STORE)).addSource({
+      source,
+      change: crypto.randomUUID(),
       text,
-      ifVersion: 0,
+      access: {
+        kind: "audience",
+        group: reader === "company" ? "company" : `team:${held(teams, reader)}`,
+      },
     });
   }
   // Lisa's own account, and the company's. She signs in with Entra, so
@@ -557,10 +547,8 @@ export const setUpStephenCompany = async (
     );
     const id = workspaceIdSchema.parse(crypto.randomUUID());
     placed.set(persona, { stub: workspace(env, id), agentId: id });
-    for (const key of grantedCollections) {
-      // oxlint-disable-next-line no-await-in-loop -- one grant at a time
-      await grantCollection({ admin, collections }, id, key);
-    }
+    // oxlint-disable-next-line no-await-in-loop -- one person at a time
+    await grantBrain(admin, id);
   }
   const places: StephenCompany["places"] = {
     lisa: held(placed, "lisa"),
@@ -599,8 +587,8 @@ export const setUpStephenCompany = async (
     admin,
     people,
     mailbox,
-    collections,
     teams,
+    sources,
     connections,
     places,
     clock,
@@ -620,14 +608,14 @@ export interface StephenBreak {
   sabotage?: { method: string; url: string; body: unknown };
   /**
    * An admin's mistake made first, which the platform otherwise stops a
-   * turn short of: HR's collection granted to the person's agent and the
-   * person put in HR's team, or Lisa's agent granted more of her own
+   * turn short of: the person put in HR's team, whose notes the Brain
+   * then lets them read, or Lisa's agent granted more of her own
    * mailbox, under a binding of its own, with the class of those actions
    * turned on for her team unless it names none. It stays for the rest of
    * the run.
    */
   mistake?:
-    | { collection: string; team: StephenTeam }
+    | { team: StephenTeam }
     | { binding: string; actions: string[]; toolClass?: CompanyToolClass };
 }
 
@@ -638,8 +626,7 @@ const makeMistake = async (
   mistake: NonNullable<StephenBreak["mistake"]>
 ): Promise<void> => {
   const { agentId } = company.places[persona];
-  if ("collection" in mistake) {
-    await grantCollection(company, agentId, mistake.collection);
+  if ("team" in mistake) {
     const added = await callAuth(
       "/organization/add-team-member",
       company.admin.session,
@@ -790,6 +777,49 @@ const modelReadOf = (requests: readonly { body: unknown }[]): string =>
     .map(({ text }) => text)
     .join("\n");
 
+/**
+ * A pin of a passage of the Brain a recall handed a run (history-access.ts),
+ * and its version as JSON: `[producer, id, version]`.
+ */
+const passagePin = /^brain-(?:team-|company-)?version:(?<version>.+)$/u;
+
+const pinnedVersionSchema = z.tuple([z.string(), z.string(), z.int()]);
+
+/**
+ * The text of each of Noordkade's documents whose passages chat `chatId`'s
+ * recalls handed the model, as its pins name them: what its answer can
+ * name as its source.
+ */
+const recalledIn = async (
+  company: Pick<StephenCompany, "sources">,
+  stub: ReturnType<typeof workspace>,
+  chatId: string
+): Promise<string[]> => {
+  const pins = await runInDurableObject(stub, (_object, state) =>
+    state.storage.sql
+      .exec<{ source: string }>(
+        "SELECT DISTINCT source_id AS source FROM chat_run_sources WHERE chat_id = ?",
+        chatId
+      )
+      .toArray()
+      .map(({ source }) => source)
+  );
+  const sources = new Set(
+    pins.flatMap((pin) => {
+      const version = passagePin.exec(pin)?.groups?.version;
+      if (version === undefined) {
+        return [];
+      }
+      const [producer, id] = pinnedVersionSchema.parse(JSON.parse(version));
+      return [`${producer}:${id}`];
+    })
+  );
+  return [...sources].flatMap((source) => {
+    const text = company.sources.get(source);
+    return text === undefined ? [] : [text];
+  });
+};
+
 /** One case, asked in a new chat of its person's, and what it did. */
 const observeCase = async (
   company: StephenCompany,
@@ -839,7 +869,7 @@ const observeCase = async (
   const started = performance.now();
   let answer = "";
   let failure: string | undefined;
-  let cited: string[] = [];
+  let recalled: string[] = [];
   try {
     const asked = place.stub.ask(chat.id, {
       text: item.text,
@@ -851,7 +881,7 @@ const observeCase = async (
     }
     const reply = await asked;
     ({ answer } = reply);
-    cited = reply.cited.map(({ documentId }) => documentId);
+    recalled = await recalledIn(company, place.stub, chat.id);
     if (reply.outcome !== "answered") {
       failure = `${reply.outcome}: ${reply.error ?? ""}`;
     }
@@ -878,7 +908,7 @@ const observeCase = async (
         )
         .map(({ action, input }) => ({ action, input: inputOf(input) })),
       modelRead: modelReadOf(sent.requests.slice(firstRequest)),
-      cited,
+      recalled,
     },
     context,
     latencyMs,
@@ -1074,7 +1104,7 @@ export const runStephenEval = async (
     const hard = brokenRules(seen, item, context);
     const fails =
       seen.error === undefined
-        ? item.checks.flatMap((check) => check(seen, context) ?? [])
+        ? item.checks.flatMap((check) => check(seen, context, item) ?? [])
         : [`error: ${seen.error}`];
     const verdict =
       judge && breaker === undefined

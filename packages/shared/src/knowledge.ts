@@ -1,6 +1,5 @@
 import type {
   BrainSourceRef,
-  ChangeOptions,
   CommandReceipt,
   EntitiesListInput,
   EntitySourcesInput,
@@ -8,7 +7,6 @@ import type {
   MemoriesGetInput,
   MemoriesLineageInput,
   MemoriesListInput,
-  MemoriesRetireInput,
   MemoryPack,
   MemoryLineage,
   MemoryPage,
@@ -24,7 +22,6 @@ import type {
 } from "@grasp-os/brain/contract";
 import type {
   BacklinkPage,
-  CollectionSearchOptions,
   DocumentPage,
   DocumentRead,
   FollowResult,
@@ -38,8 +35,7 @@ import type {
 } from "@grasp-os/brain/knowledge";
 import { z } from "zod";
 
-import { collectionIdSchema } from "./ids.ts";
-import type { CollectionId, DocumentId } from "./ids.ts";
+import type { CollectionId } from "./ids.ts";
 
 // Knowledge: Markdown documents with typed frontmatter, in collections. A
 // save never overwrites: it adds a version, and names the version it was
@@ -85,23 +81,6 @@ export const readOnlySources: ReadonlySet<CollectionSource> = new Set([
   "apps",
 ]);
 
-/**
- * A collection a built-in blueprint asks for (its `blueprint.json`), by an
- * ID of its own, the same in every deployment, which no collection a
- * person creates has (theirs are UUIDs): the install creates it, open to
- * everyone and changed by admins, if it isn't there yet, and every App
- * created from a blueprint that names it shares it, such as the Playbook.
- */
-export const declaredCollectionSchema = z.strictObject({
-  id: collectionIdSchema.refine(
-    (id) => /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u.test(id) && id.length <= 64,
-    "Lowercase letters, digits and single hyphens, starting with a letter"
-  ),
-  name: z.string().trim().min(1).max(100),
-  description: z.string().trim().max(1024).default(""),
-});
-export type DeclaredCollection = z.infer<typeof declaredCollectionSchema>;
-
 /** A collection, as the API returns it. */
 export interface Collection {
   id: CollectionId;
@@ -118,83 +97,11 @@ export interface Collection {
   createdAt: string;
 }
 
-/** A collection, as the catalog lists it. */
-export interface CatalogCollection {
-  id: CollectionId;
-  name: string;
-  /** When to use it, cut to fit the catalog. */
-  description: string;
-  sensitive: boolean;
-}
-
-/** A skill, as the catalog lists it: read it with `read(documentId)`. */
-export interface CatalogSkill {
-  documentId: DocumentId;
-  collectionId: CollectionId;
-  name: string;
-  /** When to use it, cut to fit the catalog. */
-  description: string;
-}
-
-/**
- * What an agent always has in context: the collections it may read and the
- * skills in them, within a fixed size. `truncated` when some didn't fit;
- * `search` still finds those.
- */
-export interface KnowledgeCatalog {
-  collections: CatalogCollection[];
-  skills: CatalogSkill[];
-  truncated: boolean;
-}
-
-/**
- * Knowledge as an agent uses it, across every collection it may read: a
- * small catalog always in context, then search, read and follow on demand.
- * Each of those three is recorded in the audit log, and returns where what
- * it read came from; the catalog, which only names what may be read, isn't.
- */
-export interface KnowledgeTools {
-  /** The readable collections and their skills, sized for always-on context. */
-  catalog: () => Promise<KnowledgeCatalog>;
-  /** Sections that match `query`, best first, with snippets. */
-  search: (query: string, options?: SearchOptions) => Promise<SearchResults>;
-  /** A document, or one section of it (a search hit's `section`). */
-  read: (documentId: string, options?: ReadOptions) => Promise<KnowledgeRead>;
-  /** A document's links and backlinks, and for a skill, its files. */
-  follow: (documentId: string) => Promise<FollowResult>;
-}
-
 /**
  * What a signed-in person reaches in Knowledge. Every call checks the
  * session and what the person may see and change, on the server, and
  * every read of documents is recorded in the audit log.
  */
-/** How many entity match proposals to show. */
-export interface EntityMatchesOptions {
-  limit?: number;
-}
-
-/** Entities of different collections that may be one, on their name alone. */
-export interface EntityMatch {
-  kind: string;
-  name: string;
-  basis: "name";
-  entities: { id: string; collectionIds: string[]; sources: number }[];
-}
-
-/** A decision on two entities, and the evidence for `same`. */
-export interface EntityMatchDecisionInput {
-  entities: [string, string];
-  decision: "same" | "different";
-  evidence?: { documentId: string; version: number };
-}
-
-/** A decision as recorded. */
-export interface EntityMatchDecision {
-  entities: [string, string];
-  decision: "same" | "different";
-}
-
 export interface KnowledgeApi {
   /** The collections the person may read. */
   listCollections: () => Promise<Collection[]>;
@@ -270,58 +177,13 @@ export interface KnowledgeApi {
     lessonId: string;
     expectedRevision: number;
   }) => Promise<void>;
-  /** Retires a shared record, by its publisher or an admin (GRA-298). */
-  memoriesRetire: (
-    input: MemoriesRetireInput,
-    options: ChangeOptions
-  ) => Promise<CommandReceipt>;
-  /** The collections the person may read and their skills, as an agent's. */
-  catalog: KnowledgeTools["catalog"];
-  /** A document, or one section of it. */
-  read: KnowledgeTools["read"];
+  /** A document, or one section of it (a search hit's `section`). */
+  read: (documentId: string, options?: ReadOptions) => Promise<KnowledgeRead>;
   /** A document's links and backlinks, and for a skill, its files. */
-  follow: KnowledgeTools["follow"];
+  follow: (documentId: string) => Promise<FollowResult>;
 }
 
-/**
- * One collection, as an App or agent holds it through a permission to read
- * it: `await env.HANDBOOK.getDocument(id)`. It reads that collection only,
- * and only while the person the App or agent acts for may read it too.
- * Reading restricted data puts the chat, App or run it works in in
- * restricted mode, before the data is returned. Every read is recorded in
- * the audit log.
- */
-export interface CollectionReader {
-  /** A page of the collection's documents, in path order. */
-  listDocuments: (options?: ListDocumentsOptions) => Promise<DocumentPage>;
-  /** The current version, or `version`. */
-  getDocument: (documentId: string, version?: number) => Promise<DocumentRead>;
-  history: (
-    documentId: string,
-    options?: HistoryOptions
-  ) => Promise<HistoryPage>;
-  /** A page of the documents that link to this one, in path order. */
-  backlinks: (
-    documentId: string,
-    options?: ListDocumentsOptions
-  ) => Promise<BacklinkPage>;
-  /** Sections of the collection that match `query`, best first. */
-  search: (
-    query: string,
-    options?: CollectionSearchOptions
-  ) => Promise<SearchResults>;
-  /** A document, or one section of it. */
-  read: KnowledgeTools["read"];
-  /** A document's links and backlinks, and for a skill, its files. */
-  follow: KnowledgeTools["follow"];
-  /**
-   * The Brain's recall (brain-api.ts) over this collection only: a filter
-   * naming another is refused as not found.
-   */
-  recall: (input: RecallInput) => Promise<MemoryPack>;
-}
-
-// The Brain's documents, versions and search, as the Brain defines
+// The Brain's documents, versions, search and purge, as the Brain defines
 // them (@grasp-os/brain/knowledge).
 export {
   builtinDocumentTypeSchema,

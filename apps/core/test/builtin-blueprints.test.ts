@@ -6,8 +6,7 @@ import {
   readDefinition,
 } from "@grasp-os/runtime/definition";
 import { appLimits } from "@grasp-os/shared/app-limits";
-import { collectionIdSchema, appIdSchema } from "@grasp-os/shared/ids";
-import type { CollectionId } from "@grasp-os/shared/ids";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import type {
   DeclaredPermission,
   Authority,
@@ -38,7 +37,7 @@ import { buildPages } from "../src/pages.ts";
 import { appOf } from "./app-definitions.ts";
 import { commitApp, grantReviewed, racingDb } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
-import { collectionWithNote, storedGrant } from "./knowledge.ts";
+import { storedGrant } from "./knowledge.ts";
 import { fakeProvider, testModel } from "./model-provider.ts";
 import { configuredLimits } from "./quota-limits.ts";
 import { calledAs } from "./sealed-apps.ts";
@@ -189,12 +188,12 @@ const helloActions = (
     .filter(({ target }) => target?.id === "hello")
     .map(({ action }) => action);
 
-/** A permission to read the collection `collectionId`. */
-const notesOf = (collectionId: CollectionId): DeclaredPermission => ({
-  object: { type: "collection", collectionId },
-  actions: ["read"],
+/** A permission to read the platform's statistics. */
+const statistics: DeclaredPermission = {
+  object: { type: "platform" },
+  actions: ["statistics"],
   binding: "NOTES",
-});
+};
 
 /**
  * A permission to invite guests: one that changes things, so a version no
@@ -526,39 +525,6 @@ describe("the built-in blueprints", () => {
     await reinstall();
   });
 
-  it("create the collections they declare once, open to everyone", async () => {
-    const id = collectionIdSchema.parse(`greetings-${unique()}`);
-    const declared = releaseWith({
-      collections: [{ id, name: "Greetings", description: "Said hello." }],
-    });
-    const events = await auditedDuring(async () => {
-      await expect(install(declared)).resolves.toBeTruthy();
-      await expect(install(declared)).resolves.toBeTruthy();
-    });
-    const collection = await env.KNOWLEDGE.prepare(
-      "SELECT name, owner, access, source FROM collections WHERE id = ?"
-    )
-      .bind(id)
-      .first();
-    expect({
-      collection,
-      created: events.filter(
-        ({ action, target }) =>
-          action === "knowledge.collection.created" && target?.id === id
-      ).length,
-    }).toStrictEqual({
-      collection: {
-        name: "Greetings",
-        owner: "grasp",
-        access: "everyone",
-        source: "here",
-      },
-      created: 1,
-    });
-
-    await reinstall();
-  });
-
   it("are recorded once when two installs race to change them", async () => {
     await reinstall();
     const changed = changedHello().blueprints.find(({ id }) => id === "hello");
@@ -656,11 +622,7 @@ describe("the built-in blueprints", () => {
     await reinstall();
     const admin = await signedInApi(idp, "admin");
     const builder = await signedInApi(idp, "builder");
-    const { collectionId } = await collectionWithNote(admin.api, {
-      name: `Declared ${unique()}`,
-      access: "everyone",
-    });
-    const declared = notesOf(collectionId);
+    const declared = statistics;
     const declaring = releaseWith({ permissions: [declared] });
     // Another release: every isolate installs it again.
     await expect(fingerprintOf(declaring)).resolves.not.toBe(
@@ -1239,13 +1201,8 @@ describe("the built-in blueprints", () => {
   });
 
   it("are installed again as blueprints, with no App of the previous install left, by the first install after the migrations that make them records", async () => {
-    const admin = await signedInApi(idp, "admin");
     const builder = await signedInApi(idp, "builder");
-    const { collectionId } = await collectionWithNote(admin.api, {
-      name: `Migrated ${unique()}`,
-      access: "everyone",
-    });
-    const declared = notesOf(collectionId);
+    const declared = statistics;
     const declaring = releaseWith({ permissions: [declared] });
     // As the previous releases left a deployment: the built-in an App owned
     // by Grasp, with a version and its own request, no blueprint row (the
@@ -1263,8 +1220,8 @@ describe("the built-in blueprints", () => {
     ]);
     await storedGrant(
       { type: "app", id: previous },
-      { type: "collection", id: collectionId },
-      ["read"],
+      { type: "platform", id: "platform" },
+      ["statistics"],
       "NOTES",
       "requested"
     );
@@ -1273,8 +1230,8 @@ describe("the built-in blueprints", () => {
     });
     const kept = await storedGrant(
       { type: "app", id: other },
-      { type: "collection", id: collectionId },
-      ["read"],
+      { type: "platform", id: "platform" },
+      ["statistics"],
       "NOTES",
       "requested"
     );

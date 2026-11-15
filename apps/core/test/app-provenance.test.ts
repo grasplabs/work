@@ -6,27 +6,20 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { sourcesOfApps } from "../src/app-provenance.ts";
-import { mayRead } from "../src/knowledge/access.ts";
 import { outlook, published, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam, readCollection, seed, storedGrant } from "./knowledge.ts";
+import { newTeam, storedGrant } from "./knowledge.ts";
 import { mailConnection } from "./mail-connection.ts";
-import {
-  auditedDuring,
-  firstVersion,
-  outcome,
-  signedInApi,
-  unique,
-} from "./sign-in.ts";
+import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
 
 // Provenance on sharing: an App keeps what it reads, so sharing it must
 // reach nobody who couldn't read that where it comes from. The ways this
 // could go wrong, tried below: sharing an App that read someone's mailbox
-// or a sensitive collection with someone who can't read it, directly or
-// through a team; the App keeping its data after its grant is revoked;
-// someone joining a team after the App was shared with it; and a source
-// the App is granted after it was shared.
+// with someone who can't read it, directly or through a team; the App
+// keeping its data after its grant is revoked; and a source the App is
+// granted after it was shared. Who reads a team's Brain content an App
+// read: app-provenance-teams.test.ts.
 
 const idp = mockIdp();
 
@@ -65,38 +58,6 @@ const grantConnection = async (
     object: { type: "connection", connectionId },
   });
 
-/** A collection for `team`'s people, and `app` granted to read it. */
-const collectionFor = async (
-  admin: Person,
-  owner: Person,
-  app: string,
-  team: string,
-  sensitive = false
-): Promise<string> => {
-  const { id } = await seed(admin.api).createCollection({
-    name: `HR ${unique()}`,
-    access: "teams",
-    teams: [team],
-    sensitive,
-  });
-  await requestGranted(
-    idp,
-    owner,
-    readCollection(
-      { type: "app", appId: app },
-      id,
-      `HR_${unique().toUpperCase()}`
-    )
-  );
-  return id;
-};
-
-/**
- * A team as large as a whole department: sharing with it still answers,
- * naming exactly the people who can't read what the App read.
- */
-const teamSize = 120;
-
 /** Apps enough that checking each on its own would add up. */
 const manyApps = 30;
 
@@ -122,60 +83,6 @@ const shareRefusal = async (
     return details;
   }
 };
-
-/** The same reads, by Knowledge and by `mayRead`. */
-const same = (reads: boolean[]) => ({ knowledge: reads, mayRead: reads });
-
-describe("who reads a collection the App read", () => {
-  it("is decided just as Knowledge decides who reads it", async () => {
-    const admin = await personApi("admin");
-    const [member, outsider] = await Promise.all([
-      personApi("user"),
-      personApi("user"),
-    ]);
-    const team = await newTeam(admin, [member]);
-    // Everyone's, a team's that its owner isn't in, and someone's own.
-    const made = await Promise.all([
-      seed(admin.api).createCollection({
-        name: `All ${unique()}`,
-        access: "everyone",
-      }),
-      seed(admin.api).createCollection({
-        name: `Team ${unique()}`,
-        access: "teams",
-        teams: [team],
-      }),
-      seed(member.api).createCollection({
-        name: `Mine ${unique()}`,
-        access: "me",
-      }),
-    ]);
-    const decided = async (person: Person) => {
-      const [listed, { teams }] = await Promise.all([
-        person.api.knowledge.listCollections(),
-        person.api.whoami(),
-      ]);
-      const reader = {
-        userId: person.userId,
-        teamIds: teams.map(({ id }) => id),
-        admin: false,
-      };
-      return {
-        knowledge: made.map(({ id }) => listed.some((one) => one.id === id)),
-        mayRead: made.map(({ access, owner, teams: teamIds }) =>
-          mayRead(reader, { access, owner, teamIds })
-        ),
-      };
-    };
-    await expect(
-      Promise.all([admin, member, outsider].map(decided))
-    ).resolves.toStrictEqual([
-      same([true, true, false]),
-      same([true, true, true]),
-      same([true, false, false]),
-    ]);
-  });
-});
 
 describe("sharing an App", () => {
   it("is refused, with why, when the App read a mailbox they can't read, and audited", async () => {
@@ -226,29 +133,25 @@ describe("sharing an App", () => {
     ).resolves.toBe("ok");
   });
 
-  it("is refused for the people of a team who can't read a collection the App read", async () => {
-    const admin = await personApi("admin");
-    const owner = await personApi("builder");
-    const [anna, ben] = await Promise.all([
-      personApi("user"),
+  it("is refused for an App granted a Knowledge collection before the Brain, whoever reads it", async () => {
+    const [owner, anna] = await Promise.all([
+      personApi("builder"),
       personApi("user"),
     ]);
-    const hr = await newTeam(admin, [owner, anna]);
-    const everyone = await newTeam(admin, [anna, ben]);
     const app = await newApp(owner);
-    const collection = await collectionFor(admin, owner, app, hr, true);
+    await storedGrant(
+      { type: "app", id: app },
+      { type: "collection", id: "handbook" },
+      ["read"],
+      "HANDBOOK"
+    );
 
     await expect(
-      Promise.all([
-        shareRefusal(owner, app, { type: "person", id: anna.userId }),
-        shareRefusal(owner, app, { type: "team", id: everyone }),
-        shareRefusal(owner, app, { type: "person", id: ben.userId }),
-      ])
-    ).resolves.toStrictEqual([
-      "ok",
-      { sources: [`collection:${collection}`], people: [ben.userId] },
-      { sources: [`collection:${collection}`], people: [ben.userId] },
-    ]);
+      shareRefusal(owner, app, { type: "person", id: anna.userId })
+    ).resolves.toStrictEqual({
+      sources: ["collection:handbook"],
+      people: [anna.userId],
+    });
   });
 
   it("stays refused once the App's grant is revoked: it may still hold what it read", async () => {
@@ -322,179 +225,6 @@ describe("sharing an App", () => {
       shareRefusal(owner, app, { type: "person", id: anna.userId })
     ).resolves.toBe("ok");
     await expect(anna.api.apps.get(app)).resolves.toMatchObject({ id: app });
-  });
-
-  it("stops reaching someone once the App is granted what they can't read, or they join a team it reaches", async () => {
-    const admin = await personApi("admin");
-    const owner = await personApi("builder");
-    const [anna, ben] = await Promise.all([
-      personApi("user"),
-      personApi("user"),
-    ]);
-    const hr = await newTeam(admin, [owner, anna]);
-    const shared = await newTeam(admin, [anna]);
-    const app = await newApp(owner);
-    await collectionFor(admin, owner, app, hr, true);
-    await owner.api.apps.members.add(app, {
-      type: "team",
-      id: shared,
-      role: "user",
-    });
-    const opens = async (person: Person) =>
-      await outcome(person.api.apps.get(app));
-
-    // Ben joins the team the App is shared with, but can't read HR.
-    await env.DB.prepare(
-      "INSERT INTO team_members (id, team_id, user_id, created_at) VALUES (?, ?, ?, ?)"
-    )
-      .bind(crypto.randomUUID(), shared, ben.userId, Date.now())
-      .run();
-    await expect(Promise.all([opens(anna), opens(ben)])).resolves.toStrictEqual(
-      ["ok", "app.unreadable"]
-    );
-
-    // Then the App is granted the owner's mailbox, which Anna can't read.
-    await grantConnection(owner, app, await mailboxOf(owner));
-    await expect(
-      Promise.all([
-        opens(anna),
-        outcome(
-          firstVersion(
-            async (onVersion) =>
-              await anna.api.pages.watchVersion(app, onVersion)
-          )
-        ),
-        opens(owner),
-        opens(admin),
-      ])
-    ).resolves.toStrictEqual(["app.unreadable", "app.unreadable", "ok", "ok"]);
-  });
-
-  it("stops reaching someone once a collection the App read no longer lets them read it", async () => {
-    const admin = await personApi("admin");
-    const owner = await personApi("builder");
-    const anna = await personApi("user");
-    const [readers, others] = await Promise.all([
-      newTeam(admin, [anna]),
-      newTeam(admin, []),
-    ]);
-    const app = await newApp(owner);
-    // Not sensitive: every collection the App read counts.
-    const collection = await collectionFor(admin, owner, app, readers);
-    await owner.api.apps.members.add(app, {
-      type: "person",
-      id: anna.userId,
-      role: "user",
-    });
-    await expect(outcome(anna.api.apps.get(app))).resolves.toBe("ok");
-
-    await env.DB.prepare(
-      "UPDATE collection_teams SET team_id = ? WHERE collection_id = ?"
-    )
-      .bind(others, collection)
-      .run();
-    await expect(outcome(anna.api.apps.get(app))).resolves.toBe(
-      "app.unreadable"
-    );
-  });
-
-  it("leaves out of a project's page and counts an App shared with it that someone in it may no longer read", async () => {
-    const admin = await personApi("admin");
-    const owner = await personApi("builder");
-    const anna = await personApi("user");
-    const [readers, others] = await Promise.all([
-      newTeam(admin, [anna]),
-      newTeam(admin, []),
-    ]);
-    const app = await newApp(owner);
-    const collection = await collectionFor(admin, owner, app, readers);
-    const { id: project } = await owner.api.projects.create({
-      name: `Project ${unique()}`,
-    });
-    await owner.api.projects.addMember(project, {
-      type: "person",
-      id: anna.userId,
-      role: "user",
-    });
-    await owner.api.projects.file(project, {
-      item: { type: "app", id: app },
-      share: true,
-    });
-    const listed = async (who: Person) => {
-      const page = await who.api.projects.get(project);
-      return { apps: page.items.length, counted: page.counts.apps };
-    };
-    const before = await listed(anna);
-
-    // The collection the App read is now another team's alone.
-    await env.DB.prepare(
-      "UPDATE collection_teams SET team_id = ? WHERE collection_id = ?"
-    )
-      .bind(others, collection)
-      .run();
-
-    expect({
-      before,
-      anna: await listed(anna),
-      opens: await outcome(anna.api.apps.get(app)),
-      owner: await listed(owner),
-    }).toStrictEqual({
-      before: { apps: 1, counted: 1 },
-      anna: { apps: 0, counted: 0 },
-      opens: "app.unreadable",
-      owner: { apps: 1, counted: 1 },
-    });
-  });
-
-  it("checks a large team's people at once, but not those no longer in the organization", async () => {
-    const admin = await personApi("admin");
-    const owner = await personApi("builder");
-    const team = await newTeam(admin, []);
-    const readers = await newTeam(admin, []);
-    const app = await newApp(owner);
-    await collectionFor(admin, owner, app, readers);
-    const now = Date.now();
-    const people = Array.from({ length: teamSize }, () => `member-${unique()}`);
-    const [cannot, removed] = people;
-    await env.DB.batch(
-      people.flatMap((id) => [
-        env.DB.prepare(
-          "INSERT INTO users (id, name, email, email_verified, created_at, updated_at) VALUES (?, 'Member', ?, 1, ?, ?)"
-        ).bind(id, `${id}@acme.test`, now, now),
-        env.DB.prepare(
-          "INSERT INTO members (id, organization_id, user_id, role, created_at) VALUES (?, 'organization', ?, 'user', ?)"
-        ).bind(`membership-${id}`, id, now),
-        env.DB.prepare(
-          "INSERT INTO team_members (id, team_id, user_id, created_at) VALUES (?, ?, ?, ?)"
-        ).bind(`team-${id}`, team, id, now),
-        // All but two of them read the collection too.
-        ...(id === cannot || id === removed
-          ? []
-          : [
-              env.DB.prepare(
-                "INSERT INTO team_members (id, team_id, user_id, created_at) VALUES (?, ?, ?, ?)"
-              ).bind(`readers-${id}`, readers, id, now),
-            ]),
-      ])
-    );
-    const shareWithTeam = async () =>
-      await shareRefusal(owner, app, { type: "team", id: team });
-
-    const before = await shareWithTeam();
-    await env.DB.batch([
-      env.DB.prepare(
-        "INSERT INTO member_removals (organization_id, user_id, removed_at) VALUES ('organization', ?, ?)"
-      ).bind(removed, now),
-      env.DB.prepare(
-        "INSERT INTO team_members (id, team_id, user_id, created_at) VALUES (?, ?, ?, ?)"
-      ).bind(`readers-${cannot}`, readers, cannot, now),
-    ]);
-    const after = await shareWithTeam();
-    expect({
-      before: before === "ok" ? before : new Set(before.people),
-      // The one removed can't read it, and reaches nothing anyway.
-      after,
-    }).toStrictEqual({ before: new Set([cannot, removed]), after: "ok" });
   });
 
   it("hides the App's permissions from someone it reaches once it read what they can't", async () => {
