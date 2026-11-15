@@ -295,7 +295,6 @@ export const rpcParamNames: ParamNames = {
     "receiptsGet": ["input"],
     "relations": ["input"],
     "relationsExplain": ["input"],
-    "remember": ["input","options"],
     "restoreVersion": ["input"],
     "saveDocument": ["input"],
     "search": ["query","options"],
