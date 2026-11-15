@@ -2183,6 +2183,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
             {
               storage: this.ctx.storage,
               db: this.#db,
+              bucket: this.#bucket,
               shared: this.#kind.kind === "shared",
             },
             adding
