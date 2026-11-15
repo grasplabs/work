@@ -1,9 +1,6 @@
-import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
-import { isExpectedError } from "@grasp-os/shared/errors";
-import { drizzle } from "drizzle-orm/d1";
-import { z } from "zod";
-
-import { appendAuditEvent, keepAuditEvent } from "./audit-outbox.ts";
+import { auditedIdOf } from "./audit-outbox.ts";
+import { audited } from "./brain-audited.ts";
+import type { MemoryCaller } from "./brain-audited.ts";
 import { confirmAs, correctAs, forgetAs, rememberAs } from "./brain-next.ts";
 import type {
   Correction,
@@ -25,15 +22,7 @@ import type {
 // through core's outbox, which never fails the call: a memory that was
 // written always reaches the caller, to show and undo.
 
-/** Who calls, as core resolved them, never as the input says. */
-export interface MemoryCaller {
-  /** The member it acts for, as core verified them. */
-  readonly person: string;
-  /** How the audit log names who acted. */
-  readonly actor: AuditActor;
-  /** What the audit event is about: the chat. */
-  readonly target?: AuditEntry["target"];
-}
+export type { MemoryCaller } from "./brain-audited.ts";
 
 type Detail = Record<string, string | number | boolean | null>;
 
@@ -51,56 +40,6 @@ const fieldOf = (value: unknown, name: string): unknown =>
 /** `value` if it is a string, else null. */
 const stringOf = (value: unknown): string | null =>
   typeof value === "string" ? value : null;
-
-/** A memory's id as the audit log may name it: a well-formed id, never what a caller sent instead. */
-const idOf = (value: unknown): string | null => {
-  const id = z.uuid().safeParse(value);
-  return id.success ? id.data : null;
-};
-
-/**
- * Runs `call` for `caller` as `action`: its attempt (`attempt`, ids only)
- * kept in the audit log before it runs, then what `detailOf` says of its
- * result, or the code it was refused with.
- */
-const audited = async <T>(
-  env: Env,
-  caller: MemoryCaller,
-  action: string,
-  attempt: Detail,
-  call: () => Promise<T>,
-  detailOf: (result: T) => Detail
-): Promise<T> => {
-  const entry = (detail: Detail): AuditEntry => ({
-    actor: caller.actor,
-    action,
-    ...(caller.target === undefined ? {} : { target: caller.target }),
-    detail: { onBehalfOf: caller.person, ...detail },
-  });
-  await appendAuditEvent(env, entry({ ...attempt, outcome: "attempted" }));
-  const db = drizzle(env.DB);
-  let result: T;
-  try {
-    result = await call();
-  } catch (error) {
-    await keepAuditEvent(
-      env,
-      db,
-      entry({
-        ...attempt,
-        outcome: "refused",
-        reason: isExpectedError(error) ? error.code : "internal.unexpected",
-      })
-    );
-    throw error;
-  }
-  await keepAuditEvent(
-    env,
-    db,
-    entry({ ...attempt, outcome: "done", ...detailOf(result) })
-  );
-  return result;
-};
 
 /**
  * Saves what `caller`'s person said as their own memory, readable by them
@@ -137,7 +76,7 @@ export const forgetFor = async (
     env,
     caller,
     "brain.memory.forgotten",
-    { memory: idOf(memory) },
+    { memory: auditedIdOf(memory) },
     async () => await forgetAs(env, caller.person, memory),
     (outcome) => ({ result: outcome })
   );
@@ -147,7 +86,7 @@ const placeOf = (memory: unknown) => {
   const store = fieldOf(memory, "store");
   return {
     store: store === "own" || store === "shared" ? store : null,
-    memory: idOf(fieldOf(memory, "memory")),
+    memory: auditedIdOf(fieldOf(memory, "memory")),
   };
 };
 
@@ -188,7 +127,7 @@ export const correctFor = async (
     "brain.memory.corrected",
     {
       ...placeOf(fieldOf(correction, "wrong")),
-      change: idOf(fieldOf(correction, "change")),
+      change: auditedIdOf(fieldOf(correction, "change")),
     },
     async () => await correctAs(env, caller.person, correction),
     (saved): Detail =>

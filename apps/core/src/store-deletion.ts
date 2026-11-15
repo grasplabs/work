@@ -6,6 +6,7 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
+import { eraseDeletedStoresMemories } from "./app-memory-erasure.ts";
 import {
   auditedBatch,
   outboxedEventWhere,
@@ -66,16 +67,38 @@ export const storeDeletedEvent = async (
     source: "core",
   });
 
+/** Whether core's inventory shows `store` deleted. */
+export const inventoriedDeleted = async (
+  env: Env,
+  store: StoreId
+): Promise<boolean> => {
+  const row = await drizzle(env.DB)
+    .select({ deletedAt: businessStores.deletedAt })
+    .from(businessStores)
+    .where(eq(businessStores.id, store))
+    .get();
+  return row?.deletedAt !== null && row?.deletedAt !== undefined;
+};
+
 /**
  * Marks `store`'s inventory row deleted as `mark` says, and stores its
  * `store.deleted` event in the same batch, unless the row was marked
- * already: repeating it changes nothing.
+ * already: repeating it changes nothing. First, while the row isn't
+ * marked, erases what its App's code remembered (app-memory-erasure.ts),
+ * so the store never reads as deleted before those memories are gone; a
+ * failure throws, and the next attempt (core's, or the store's alarm)
+ * erases again under the same change, nothing more. A call already
+ * running can still remember afterwards what it read before: the next
+ * erasure of the App erases that, not this one.
  */
 export const recordStoreDeleted = async (
   env: Env,
   store: StoreId,
   mark: StoreDeletionMark
 ): Promise<void> => {
+  if (!(await inventoriedDeleted(env, store))) {
+    await eraseDeletedStoresMemories(env, store, mark.deletedBy);
+  }
   const db = drizzle(env.DB);
   const { deletedAt } = mark;
   const event = await storeDeletedEvent(store, mark);
@@ -89,17 +112,4 @@ export const recordStoreDeleted = async (
     // A deterministic event (above), which `outboxedIfChanged` can't make.
     outboxedEventWhere(db, event, sql`changes() > 0`),
   ]);
-};
-
-/** Whether core's inventory shows `store` deleted. */
-export const inventoriedDeleted = async (
-  env: Env,
-  store: StoreId
-): Promise<boolean> => {
-  const row = await drizzle(env.DB)
-    .select({ deletedAt: businessStores.deletedAt })
-    .from(businessStores)
-    .where(eq(businessStores.id, store))
-    .get();
-  return row?.deletedAt !== null && row?.deletedAt !== undefined;
 };

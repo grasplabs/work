@@ -35,6 +35,7 @@ export type {
   BrainPackItem,
   BrainPermission,
   BrainRecall,
+  BrainRemember,
   BrainSkill,
   BrainSkillText,
   BrainCard,
