@@ -2876,6 +2876,7 @@ describe(
         holder,
         teamMate,
         admin: admin.userId,
+        teamId,
         group,
         sharedWord,
         markers,
@@ -2966,6 +2967,36 @@ describe(
       await expect(
         foundOnceRemoved("an admin, once it was removed", "admin", reading)
       ).resolves.toStrictEqual({ findings: [], prompted: [] });
+    });
+
+    it("gives an uploader who left the team nothing of their team's upload through any surface, and no way to remove it from the team", async () => {
+      const shared = await teamUploadToRemove();
+      await leave(shared.teamId, shared.holder);
+      const findings = await findingsOf(
+        "the uploader, once they left the team",
+        {
+          personId: shared.holder,
+          reader: { person: shared.holder, groups: [] },
+          personal: true,
+          sharedWord: shared.sharedWord,
+          markers: Object.values(shared.markers),
+          hiddenVersions: everyVersionOf(shared.source),
+          // Asked of, a new version and a delete among them, as an upload
+          // nobody made.
+          hiddenUploads: [shared.source.id],
+          hiddenInstructionFiles: [],
+          instructionGroups: ["company"],
+        },
+        shared.markers
+      );
+
+      expect({
+        findings,
+        // Still the team's: nothing the former member asked removed it.
+        teamMate: asUnreadable(
+          await readsOfTeamSource(shared, shared.teamMate)
+        ),
+      }).toStrictEqual({ findings: [], teamMate: [] });
     });
 
     it("answers what a person's erasure hides as erased to them while it is still under way, though its source stays current for their team", async () => {

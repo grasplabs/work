@@ -60,10 +60,11 @@ import type { WorkContext } from "./work.ts";
 // nothing else) and those no one is known to read (a set with no one in it:
 // an admin is not a reader of it), and every version of a source whose
 // current version is such or that has none (no one else may read its
-// history), left out in the statement that selects them. A removed source
-// (removal.ts) is held by the version that was current when it was removed,
-// as if that were current, and that version is marked `removed`, so a
-// restore brings it back removed; and the skills
+// history), left out in the statement that selects them. In the company's
+// export, a removed source (removal.ts) is held by the version that was
+// current when it was removed, as if that were current, and that version is
+// marked `removed`, so a restore brings it back removed; a person's own
+// export leaves it out, as no one reads it; and the skills
 // Grasp ships (contract.ts `shippedSkillsPrefix`), which each release adds
 // again. It holds the company's instruction files and its own skills. Of
 // memories and extraction marks, those one group reads (the shared store
@@ -487,7 +488,9 @@ const keyOf = (id: string): string => `export:${id}`;
  * The versions an export selects. `unreadable` is every set one person
  * alone, or no one known, may read.
  */
-const selectedSql = `source_versions.reader_set NOT IN (SELECT id FROM unreadable)
+const selectedSqlOf = (
+  scope: ExportScope["kind"]
+): string => `source_versions.reader_set NOT IN (SELECT id FROM unreadable)
   AND substr(source_versions.source, 1, ${shippedSkillsPrefix.length})
     != '${shippedSkillsPrefix}'
   AND (EXISTS (
@@ -495,12 +498,18 @@ const selectedSql = `source_versions.reader_set NOT IN (SELECT id FROM unreadabl
     JOIN source_versions AS current ON current.row = now.version_row
     WHERE now.source = source_versions.source
       AND current.reader_set NOT IN (SELECT id FROM unreadable)
-  ) OR EXISTS (
+  )${
+    // A person's own export hands them what they may read: a source
+    // removed from their store is read by no one, them included.
+    scope === "company"
+      ? ` OR EXISTS (
     SELECT 1 FROM removed_sources AS gone
     JOIN source_versions AS was ON was.row = gone.version_row
     WHERE gone.source = source_versions.source
       AND was.reader_set NOT IN (SELECT id FROM unreadable)
-  ))`;
+  )`
+      : ""
+  })`;
 
 /** A version, as a run selects it for a part. */
 interface Selected extends Record<string, SqlStorageValue> {
@@ -575,7 +584,7 @@ LEFT JOIN current_versions ON current_versions.source = source_versions.source
 LEFT JOIN removed_sources ON removed_sources.source = source_versions.source
 WHERE source_versions.row > ?1 AND source_versions.row <= ?2
   AND source_versions.row NOT IN (SELECT version_row FROM erasing_versions)
-  AND ${selectedSql}
+  AND ${selectedSqlOf(scope)}
 ORDER BY source_versions.row
 LIMIT ?3`;
 

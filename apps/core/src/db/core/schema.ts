@@ -6439,9 +6439,18 @@ export const brainUploads = sqliteTable(
     /**
      * When its uploader removed it, a shared one (only they remove):
      * out of use in the Brain for good, its history kept, until an admin
-     * erases it (brain-uploads.ts). Null while it is in use.
+     * erases it (brain-uploads.ts). Null while it is in use. Written first,
+     * before the Brain is asked, with `removalOwed`.
      */
     removedAt: timestamp("removed_at"),
+    /**
+     * Whether the removal is still owed: the Brain's removal not yet known
+     * to have returned, or its event not yet stored. The clock completes it
+     * (`completeOwedRemovals`).
+     */
+    removalOwed: integer("removal_owed", { mode: "boolean" })
+      .notNull()
+      .default(false),
   },
   (table) => [
     check(

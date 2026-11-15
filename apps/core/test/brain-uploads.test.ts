@@ -20,6 +20,7 @@ import {
   removeSource,
   workBrain,
 } from "../src/brain-next.ts";
+import { completeOwedRemovals } from "../src/brain-uploads.ts";
 import {
   auditOutboxRejected,
   brainUploads,
@@ -217,6 +218,54 @@ const failNextBucketPut = async (): Promise<void> => {
   });
 };
 
+/**
+ * A team's upload, shared by its uploader with a team-mate, for a removal
+ * that is held part-way: what the tests of an owed removal remove.
+ */
+const sharedToRemove = async () => {
+  const [uploader, mate] = await Promise.all([
+    signedInApi(idp, "user"),
+    signedInApi(idp, "user"),
+  ]);
+  const teamId = await teamOf(uploader, mate);
+  const minutes = word();
+  const { source } = await uploader.api.brainSources.upload(
+    fileOf(`Board minutes ${minutes}`, "Board.vtt"),
+    teamReaders(teamId),
+    crypto.randomUUID()
+  );
+  return { uploader, mate, teamId, minutes, source };
+};
+
+/** The trigger that fails core's record of a completed removal, once set. */
+const heldCompletion = "brain_uploads_test_holds_completion";
+
+/** What core and the Brain say of an upload whose removal is owed or done. */
+const removalOf = async ({
+  mate,
+  minutes,
+  source,
+}: Awaited<ReturnType<typeof sharedToRemove>>) => {
+  const [row] = await rowsWith(source.id);
+  const events = await eventsOf(source.id);
+  return {
+    row:
+      row === undefined
+        ? undefined
+        : {
+            removed: row.removedAt !== null,
+            owed: row.removalOwed,
+            name: row.name,
+          },
+    mateFinds: await found(mate, minutes),
+    mateSees: await mate.api.brainSources.uploadOf(source.id),
+    removed: events
+      .filter(({ action }) => action === "brain.upload.removed")
+      .map(({ at }) => at === row?.removedAt?.toISOString()),
+    failed: events.filter(({ action }) => action.endsWith("_failed")).length,
+  };
+};
+
 describe("uploading a file straight into the Brain", () => {
   it(
     "keeps an upload for only me to its uploader: nobody else, an admin included, reads, finds or acts on it",
@@ -364,15 +413,16 @@ describe("uploading a file straight into the Brain", () => {
   );
 
   it(
-    "lets a team's members find a team's upload, and stops once they leave the team, from the next question on",
+    "lets a team's members find a team's upload, and stops once they leave the team, from the next question on, its uploader too, who can then neither reach nor remove it",
     slow,
     async () => {
-      const [uploader, mate, outsider] = await Promise.all([
+      const [uploader, mate, stayer, outsider] = await Promise.all([
+        signedInApi(idp, "user"),
         signedInApi(idp, "user"),
         signedInApi(idp, "user"),
         signedInApi(idp, "admin"),
       ]);
-      const teamId = await teamOf(uploader, mate);
+      const teamId = await teamOf(uploader, mate, stayer);
       const minutes = word();
       const { source } = await uploader.api.brainSources.upload(
         fileOf(`Board minutes ${minutes}`),
@@ -383,17 +433,31 @@ describe("uploading a file straight into the Brain", () => {
         found: await found(mate, minutes),
         info: await mate.api.brainSources.uploadOf(source.id),
       };
+      const uploaderBefore = await uploader.api.brainSources.uploadOf(
+        source.id
+      );
       const outsiderFound = await found(outsider, minutes);
       await leave(teamId, mate);
+      await leave(teamId, uploader);
+      const missing = crypto.randomUUID();
+      // Every way they could ask of it, a delete among them, as of an
+      // upload nobody made: it takes nothing from the team.
+      const uploaderAfter = await askedOf(uploader, source.id);
+      const [row] = await rowsWith(source.id);
 
       expect({
         asMember,
+        uploaderBefore: uploaderBefore?.deletes,
         outsider: outsiderFound,
         afterLeaving: {
           found: await found(mate, minutes),
           read: await readAs(mate, source),
           info: await mate.api.brainSources.uploadOf(source.id),
         },
+        uploaderAfter,
+        uploaderFinds: await found(uploader, minutes),
+        stayerFinds: await found(stayer, minutes),
+        removed: row?.removedAt ?? null,
       }).toStrictEqual({
         asMember: {
           found: [source.id],
@@ -404,8 +468,13 @@ describe("uploading a file straight into the Brain", () => {
             deletes: null,
           },
         },
+        uploaderBefore: "remove",
         outsider: [],
         afterLeaving: { found: [], read: null, info: null },
+        uploaderAfter: await askedOf(uploader, missing),
+        uploaderFinds: [],
+        stayerFinds: [source.id],
+        removed: null,
       });
     }
   );
@@ -1043,6 +1112,181 @@ describe("uploading a file straight into the Brain", () => {
           "brain.upload.refused",
         ],
         reasons: ["removed", "removed", "id_taken"],
+      });
+    }
+  );
+
+  it(
+    "completes a removal whose record failed after the Brain took it, by the clock, with its one event",
+    slow,
+    async () => {
+      const removing = await sharedToRemove();
+      await env.DB.exec(
+        `CREATE TRIGGER ${heldCompletion} BEFORE UPDATE OF removal_owed ON brain_uploads WHEN OLD.removal_owed = 1 AND NEW.removal_owed = 0 BEGIN SELECT RAISE(ABORT, 'held by the test'); END`
+      );
+      let refused: unknown;
+      let owed: unknown;
+      try {
+        refused = await outcome(async () => {
+          await removing.uploader.api.brainSources.deleteUpload(
+            removing.source.id
+          );
+        });
+        await completeOwedRemovals(env);
+        owed = await removalOf(removing);
+      } finally {
+        await env.DB.exec(`DROP TRIGGER IF EXISTS ${heldCompletion}`);
+      }
+      await completeOwedRemovals(env);
+      await completeOwedRemovals(env);
+
+      expect({ refused, owed, done: await removalOf(removing) }).toStrictEqual({
+        refused: { refused: "internal.unexpected" },
+        // Out of use in the Brain, and owed in core: no event yet, and
+        // none that says it failed.
+        owed: {
+          row: { removed: true, owed: true, name: null },
+          mateFinds: [],
+          mateSees: null,
+          removed: [],
+          failed: 0,
+        },
+        done: {
+          row: { removed: true, owed: false, name: null },
+          mateFinds: [],
+          mateSees: null,
+          // One event, at the time its uploader removed it.
+          removed: [true],
+          failed: 0,
+        },
+      });
+    }
+  );
+
+  it(
+    "keeps a removal the Brain failed owed, its upload gone from core, and completes it by the clock once the Brain takes it",
+    slow,
+    async () => {
+      const removing = await sharedToRemove();
+      const held = "removed_sources_test_holds";
+      await runInDurableObject(sharedStore(), (_store, state) => {
+        state.storage.sql.exec(
+          `CREATE TRIGGER ${held} BEFORE INSERT ON removed_sources BEGIN SELECT RAISE(ABORT, 'held by the test'); END`
+        );
+      });
+      let refused: unknown;
+      let owed: Awaited<ReturnType<typeof removalOf>> | undefined;
+      try {
+        refused = await outcome(async () => {
+          await removing.uploader.api.brainSources.deleteUpload(
+            removing.source.id
+          );
+        });
+        await completeOwedRemovals(env);
+        owed = await removalOf(removing);
+      } finally {
+        await runInDurableObject(sharedStore(), (_store, state) => {
+          state.storage.sql.exec(`DROP TRIGGER IF EXISTS ${held}`);
+        });
+      }
+      const asUploader = await removing.uploader.api.brainSources.uploadOf(
+        removing.source.id
+      );
+      await completeOwedRemovals(env);
+
+      expect({
+        refused,
+        owed: { ...owed, mateFinds: undefined },
+        asUploader,
+        done: await removalOf(removing),
+      }).toStrictEqual({
+        refused: { refused: "internal.unexpected" },
+        // Gone from core at once; the Brain answers as before until it
+        // takes the removal (the PR's Known gaps).
+        owed: {
+          row: { removed: true, owed: true, name: null },
+          mateFinds: undefined,
+          mateSees: null,
+          removed: [],
+          failed: 0,
+        },
+        asUploader: null,
+        done: {
+          row: { removed: true, owed: false, name: null },
+          mateFinds: [],
+          mateSees: null,
+          removed: [true],
+          failed: 0,
+        },
+      });
+    }
+  );
+
+  it(
+    "records nothing failed for a removal the Brain took whose answer was lost, and completes it by the clock with its one event",
+    slow,
+    async () => {
+      const removing = await sharedToRemove();
+      // The store's removal runs and commits, and its answer is lost on
+      // the way back: once, for this call alone.
+      const original: unknown = await runInDurableObject(
+        sharedStore(),
+        (instance) => {
+          const prototype: unknown = Reflect.getPrototypeOf(instance);
+          if (prototype === null || typeof prototype !== "object") {
+            throw new TypeError("The store has no class");
+          }
+          const taken: unknown = Reflect.get(prototype, "removeSource");
+          if (typeof taken !== "function") {
+            throw new TypeError("The store removes nothing");
+          }
+          Reflect.set(
+            prototype,
+            "removeSource",
+            async function lost(this: object, request: unknown) {
+              Reflect.set(prototype, "removeSource", taken);
+              await Reflect.apply(taken, this, [request]);
+              throw new Error("The answer was lost, by the test");
+            }
+          );
+          return taken;
+        }
+      );
+      let refused: unknown;
+      try {
+        refused = await outcome(async () => {
+          await removing.uploader.api.brainSources.deleteUpload(
+            removing.source.id
+          );
+        });
+      } finally {
+        await runInDurableObject(sharedStore(), (instance) => {
+          Reflect.set(
+            Object.getPrototypeOf(instance),
+            "removeSource",
+            original
+          );
+        });
+      }
+      const lost = await removalOf(removing);
+      await completeOwedRemovals(env);
+
+      expect({ refused, lost, done: await removalOf(removing) }).toStrictEqual({
+        refused: { refused: "internal.unexpected" },
+        lost: {
+          row: { removed: true, owed: true, name: null },
+          mateFinds: [],
+          mateSees: null,
+          removed: [],
+          failed: 0,
+        },
+        done: {
+          row: { removed: true, owed: false, name: null },
+          mateFinds: [],
+          mateSees: null,
+          removed: [true],
+          failed: 0,
+        },
       });
     }
   );
