@@ -17,6 +17,7 @@ import {
 } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
+import { linkFormsKept, linkFormsWritten } from "./link-forms.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { mailControlUrl } from "./mail-server.ts";
 import type { ToolkitServer } from "./mail-server.ts";
@@ -303,6 +304,23 @@ describe("a chat app's answers", setUpTime, () => {
       ),
       mark: answer.channelText?.length,
     }).toStrictEqual({ answer: shown, kept: [shown], marked: true, mark: 64 });
+  });
+
+  it("keep of every form of link only its words, the same in the answer and in the chat it is kept in", async () => {
+    const set = await setUp("teams", says(linkFormsWritten));
+    const answer = await set.ask("Where is the leave policy?");
+    const messages = await transcript(set.stub, set.chat.id);
+    const kept = messages.flatMap((message) =>
+      message.role === "assistant"
+        ? message.content.flatMap((block) =>
+            block.type === "text" ? [block.text] : []
+          )
+        : []
+    );
+    expect({
+      answer: answer.answer.trim(),
+      kept: kept.map((text) => text.trim()),
+    }).toStrictEqual({ answer: linkFormsKept, kept: [linkFormsKept] });
   });
 });
 

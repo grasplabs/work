@@ -20,6 +20,11 @@ import {
 import { says } from "./agent-chat.ts";
 import { slackApp, slackPostedUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
+import {
+  linkFormsAddresses,
+  linkFormsCode,
+  linkFormsWritten,
+} from "./link-forms.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 import {
@@ -489,7 +494,52 @@ describe("a press on a card in Slack", () => {
   });
 });
 
+/** What of an answer's links and code a chat app's post got wrong. */
+const seen = (posted: string) => ({
+  words: [
+    "the policy",
+    "the handbook",
+    "the HR page",
+    "the intranet",
+    "Q3 say",
+  ].filter((words) => !posted.includes(words)),
+  addresses: linkFormsAddresses.filter((address) => posted.includes(address)),
+  code: linkFormsCode.filter((code) => !posted.includes(code)),
+});
+
 describe("a linked person's question in Slack", () => {
+  it("shows every form of link in an answer as its words alone, in Slack and in Teams, and code as written", async () => {
+    const { slackUser } = await linkedPerson();
+    const provider = await fakeProvider(
+      says(linkFormsWritten),
+      says(linkFormsWritten)
+    );
+    const question = "Where is the leave policy?";
+    const fromSlack = messageFrom(slackUser);
+    fromSlack.event.text = question;
+    await post(fromSlack, { caught: false });
+    const inTeams = await memberAnsweredBy(idp, provider);
+    await postToTeams(teamsMessageFrom(inTeams.teams, { text: question }));
+
+    const slackSaw = await slackSawIn(fromSlack.event.channel);
+    const slackPosted = JSON.stringify(
+      slackSaw.filter(({ method }) =>
+        ["chat.postMessage", "chat.update"].includes(method)
+      )
+    );
+    const { activities } = await reached(inTeams.teams.conversation);
+    const teamsPosted = JSON.stringify(
+      activities.filter(({ type }) => type === "message")
+    );
+    expect({
+      slack: seen(slackPosted),
+      teams: seen(teamsPosted),
+    }).toStrictEqual({
+      slack: { words: [], addresses: [], code: [] },
+      teams: { words: [], addresses: [], code: [] },
+    });
+  });
+
   it("gets the same answer as the same question in Teams, in their own Slack chat, which their list says came through Slack", async () => {
     // A link of Grasp's own and one outside it, as a model may write them:
     // each app shows only their words, as no sources follow the answer.

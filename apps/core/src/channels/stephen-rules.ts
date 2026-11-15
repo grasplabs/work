@@ -1,4 +1,6 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { parseMarkdown } from "chat";
+import type { Link, Nodes } from "chat";
 
 // What the prototype learned about acting safely in a chat app, on work's
 // agent (GRA-719). In the prototype Stephen's turn checked every value
@@ -184,31 +186,80 @@ export const heldWriteRefusal = (
   return untraced ? "agent.write_untraced" : undefined;
 };
 
-/** A Markdown link: its label, and where it leads. */
-const markdownLink =
-  /(?<image>!?)\[(?<label>[^\]]*)\]\((?<to>[^)\s]*)(?:\s+"[^"]*")?\)/gu;
+/** A part of Stephen's words to replace: where, in the text, and with what. */
+interface Cut {
+  start: number;
+  end: number;
+  with: string;
+}
 
-/** One Markdown link, whole, as `markdownLink` finds it. */
-const oneLink = new RegExp(`^${markdownLink.source}$`, "u");
-
-/** What a Markdown link leaves of itself in Stephen's own words: its label. */
-const linkLeft = (whole: string): string =>
-  oneLink.exec(whole)?.groups?.label ?? "";
-
-/**
- * An address written out, or between angle brackets, with the spaces
- * before it, so dropping it leaves no gap.
- */
-const bareLink =
-  /[ \t]*<?\b(?:https?:\/\/|www\.|mailto:)(?:[^\s<>)]*[^\s<>).,;:!?'"])?>?/giu;
+/** Spaces and tabs before `at` in `text`: where a dropped address's gap starts. */
+const gapBefore = (text: string, at: number): number => {
+  let start = at;
+  while (start > 0 && (text[start - 1] === " " || text[start - 1] === "\t")) {
+    start -= 1;
+  }
+  return start;
+};
 
 /**
- * Stephen's own words without links: a Markdown link, `grasp:` ones too,
- * keeps its label, and an address written out is dropped. A chat app
- * shows no sources under the answer, so nothing is kept for them.
+ * Whether `link` is an address written as its own words: an autolink
+ * (`<https://…>`, `<mailto:…>`), or a bare one GFM reads as a link
+ * (`https://…`, `www.…`, an email address).
  */
-export const withoutLinks = (text: string): string =>
-  text.replaceAll(markdownLink, linkLeft).replaceAll(bareLink, "");
+const isAddress = (link: Link, words: string): boolean =>
+  [words, `mailto:${words}`, `http://${words}`].includes(link.url);
+
+/**
+ * What Stephen's words in `text` lose, as the Markdown parser reads them
+ * (`node` and what it holds): each link and link reference its words
+ * alone, an image its alt text, an address written as its own words and
+ * a link reference's definition nothing. Code holds no links, so stays.
+ */
+const cutsOf = (node: Nodes, text: string): Cut[] => {
+  const start = node.position?.start.offset;
+  const end = node.position?.end.offset;
+  if (start === undefined || end === undefined) {
+    return [];
+  }
+  if (node.type === "link" || node.type === "linkReference") {
+    const first = node.children.at(0)?.position?.start.offset;
+    const last = node.children.at(-1)?.position?.end.offset;
+    const words =
+      first === undefined || last === undefined ? "" : text.slice(first, last);
+    return node.type === "link" && isAddress(node, words)
+      ? [{ start: gapBefore(text, start), end, with: "" }]
+      : [{ start, end, with: words }];
+  }
+  if (node.type === "image" || node.type === "imageReference") {
+    return [{ start, end, with: node.alt ?? "" }];
+  }
+  if (node.type === "definition") {
+    return [{ start, end, with: "" }];
+  }
+  return "children" in node
+    ? node.children.flatMap((child) => cutsOf(child, text))
+    : [];
+};
+
+/**
+ * Stephen's own words without links, as CommonMark and GFM read them (the
+ * Chat SDK's parser, as the chat apps' adapters read his answers): every
+ * link, `grasp:` ones too, keeps only its words, an address written out is
+ * dropped, and code is left as it is written. A chat app shows no sources
+ * under the answer, so nothing is kept for them. Only what is cut changes:
+ * the rest stays as written.
+ */
+export const withoutLinks = (text: string): string => {
+  const cuts = cutsOf(parseMarkdown(text), text).toSorted(
+    (one, other) => other.start - one.start
+  );
+  let kept = text;
+  for (const cut of cuts) {
+    kept = `${kept.slice(0, cut.start)}${cut.with}${kept.slice(cut.end)}`;
+  }
+  return kept;
+};
 
 /**
  * How Stephen answers in a chat app, after the agent's own instructions.
