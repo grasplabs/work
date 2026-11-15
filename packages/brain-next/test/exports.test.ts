@@ -2018,10 +2018,13 @@ describe("exports and restores", () => {
       const source = `test:${unique()}`;
       const word = `w${unique().replaceAll("-", "")}`;
       await add(shared(), source, `Acme renews in March ${word}`, team(group));
+      // Still quoting the first, so only the extraction mark ends its
+      // memory: a restore judges no quote yet (quotes.ts), so an out
+      // memory would read current after it until its next version.
       await add(
         shared(),
         source,
-        `Acme renews in April ${word}`,
+        `Acme renews in April ${word}. It renews in March no more.`,
         team(group),
         "2"
       );
