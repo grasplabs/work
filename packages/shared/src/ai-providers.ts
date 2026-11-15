@@ -504,7 +504,7 @@ export interface AiPlatformUse {
   feature: AiPlatformFeature;
   /**
    * The provider, and where it runs; none when the deployment does it
-   * itself (document conversion, while Grasp has no key for its provider).
+   * itself (document conversion: every upload is read on the deployment).
    */
   provider: { id: AiProviderId; label: string; whereItRuns: string } | null;
 }

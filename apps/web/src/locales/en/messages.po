@@ -1499,10 +1499,6 @@ msgstr "A guest wrote a message"
 msgid "A JSON value"
 msgstr "A JSON value"
 
-#: src/dashboard/signals.tsx
-msgid "A Knowledge search from {about} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
-msgstr "A Knowledge search from {about} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
-
 #: src/workflows/requests/request-plan.tsx
 msgid "A look-up"
 msgstr "A look-up"
@@ -6136,10 +6132,6 @@ msgstr "Grasp checks what it takes to connect it. You find it under Requested."
 #: src/settings/ai-providers.tsx
 msgid "Grasp converts uploaded documents on this deployment: nothing is sent out."
 msgstr "Grasp converts uploaded documents on this deployment: nothing is sent out."
-
-#: src/settings/ai-providers.tsx
-msgid "Grasp converts uploaded PDFs with {whereItRuns}, using Grasp's own key. Files in sensitive collections are converted on this deployment and never sent out."
-msgstr "Grasp converts uploaded PDFs with {whereItRuns}, using Grasp's own key. Files in sensitive collections are converted on this deployment and never sent out."
 
 #: src/chat/failure.ts
 msgid "Grasp could not be reached. Try again."
@@ -14765,10 +14757,6 @@ msgstr "Type what is missing, or yes"
 #: src/interview/page.tsx
 msgid "Type your answer"
 msgstr "Type your answer"
-
-#: src/dashboard/signals.tsx
-msgid "Unanswered question"
-msgstr "Unanswered question"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "Under 5"

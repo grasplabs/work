@@ -10,7 +10,6 @@ import { Await, Link } from "@tanstack/react-router";
 import {
   CircleDollarSignIcon,
   ClockIcon,
-  SearchXIcon,
   TriangleAlertIcon,
   UndoIcon,
 } from "lucide-react";
@@ -51,7 +50,6 @@ export const signalKindLooks: Record<
   waiting_for_person: { icon: ClockIcon, name: msg`Waiting for a person` },
   correction: { icon: UndoIcon, name: msg`Often corrected` },
   cost_per_run: { icon: CircleDollarSignIcon, name: msg`Model cost` },
-  unanswered_question: { icon: SearchXIcon, name: msg`Unanswered question` },
 };
 
 /** A duration in whole days, or hours under a day, as words. */
@@ -168,26 +166,14 @@ const ImprovementRow = ({
       </SignalRow>
     );
   }
-  if (signal.kind === "cost_per_run") {
-    const { runs } = signal.evidence;
-    const cost = dollars(signal.value, i18n.locale);
-    return (
-      <SignalRow kind="cost_per_run">
-        <Trans>
-          {about} cost {cost} a run in model calls, over{" "}
-          <Plural one="# run" other="# runs" value={runs} /> in{" "}
-          <Plural one="the last day" other="the last # days" value={days} />.
-        </Trans>
-      </SignalRow>
-    );
-  }
-  const { searches, askers } = signal.evidence;
+  const { runs } = signal.evidence;
+  const cost = dollars(signal.value, i18n.locale);
   return (
-    <SignalRow kind="unanswered_question">
+    <SignalRow kind="cost_per_run">
       <Trans>
-        A Knowledge search from {about} found nothing{" "}
-        <Plural one="once" other="# times" value={searches} />, by{" "}
-        <Plural one="# asker" other="# askers" value={askers} />.
+        {about} cost {cost} a run in model calls, over{" "}
+        <Plural one="# run" other="# runs" value={runs} /> in{" "}
+        <Plural one="the last day" other="the last # days" value={days} />.
       </Trans>
     </SignalRow>
   );

@@ -9,7 +9,6 @@ import { canBuild, isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 
 import type { AppsRpc } from "./apps-rpc.ts";
-import type { KnowledgeSignalsRpc } from "./knowledge/signals-rpc.ts";
 import type { OnboardingRpc } from "./onboarding/rpc.ts";
 import type { SignalsRpc } from "./signals-rpc.ts";
 import type { WorkflowsRpc } from "./workflows/rpc.ts";
@@ -26,7 +25,6 @@ export interface BoardReportSources {
   onboarding: OnboardingRpc;
   workflows: WorkflowsRpc;
   signals: SignalsRpc;
-  knowledgeSignals: KnowledgeSignalsRpc;
   apps: AppsRpc;
 }
 
@@ -66,13 +64,12 @@ const partOf = async <T>(
 };
 
 /**
- * How many signals of each kind the person reads: every improvement
- * signal for admins, each App's they build for builders (an App
- * whose signals core refuses them left out), and their own collections'.
- * Null when they read none.
+ * How many improvement signals of each kind the person reads: every one
+ * for admins, each App's they build for builders (an App whose signals
+ * core refuses them left out). Null when they read none.
  */
 const signalCounts = async (
-  { signals, knowledgeSignals, apps }: BoardReportSources,
+  { signals, apps }: BoardReportSources,
   person: Identity
 ): Promise<SignalCount[] | null> => {
   const improvement = async () => {
@@ -89,18 +86,14 @@ const signalCounts = async (
     );
     return each.filter((read) => read !== undefined);
   };
-  const [improved, knowledge] = await Promise.all([
-    improvement(),
-    orNone(knowledgeSignals.list()),
-  ]);
-  if (improved.length === 0 && knowledge === undefined) {
+  const improved = await improvement();
+  if (improved.length === 0) {
     return null;
   }
   const counts = new Map<SignalCount["kind"], number>();
-  const kinds = [
-    ...improved.flatMap(({ signals: listed }) => listed),
-    ...(knowledge?.signals ?? []),
-  ].map(({ kind }) => kind);
+  const kinds = improved
+    .flatMap(({ signals: listed }) => listed)
+    .map(({ kind }) => kind);
   for (const kind of kinds) {
     counts.set(kind, (counts.get(kind) ?? 0) + 1);
   }
