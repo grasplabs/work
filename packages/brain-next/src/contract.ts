@@ -1653,11 +1653,19 @@ export interface VectorsFound {
 // the one before, which stays as history; a memory of another lineage
 // that says something else makes the fact contested: both stay current
 // and are read together, each with its source. A memory with no listed
-// attribute never ends or contests another. A memory resting on a version
-// before its source's current one ends at that version's add when the
-// current version no longer says its quote, word for word as search folds
-// words, and is current again if a later version says it again; never for
-// a thread (`NewSource.thread`) or a source kept whole (quotes.ts).
+// attribute never contests another, and ends only an earlier one of its
+// lineage that it restates: the same statement as search folds text
+// (case, accents, spacing and a final full stop aside, every sign kept),
+// about the same entity, in the same speaker's word, of the same type,
+// related entity and value. So the same fact said twice by one source or
+// writer is one
+// current memory, the earlier kept as history, merged only for readers of
+// the later one.
+// A memory resting on a version before its source's current one ends at
+// that version's add when the current version no longer says its quote,
+// word for word as search folds words, and is current again if a later
+// version says it again; never for a thread (`NewSource.thread`) or a
+// source kept whole (quotes.ts).
 //
 // Who may read a memory: those in the reader set its caller gives
 // (`access`, as a source's), and, when it rests on a source version, only
@@ -1704,8 +1712,9 @@ export interface AttributeRule {
 /**
  * Every attribute a memory may be filed under, per kind of entity: the
  * fixed list. A memory about something not listed has no attribute
- * (`attribute` left out): it is kept and found, and never ends or
- * contests another.
+ * (`attribute` left out): it is kept and found, never contests another,
+ * and ends only an earlier memory of its lineage it restates word for
+ * word.
  */
 export const entityAttributes = {
   person: {

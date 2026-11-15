@@ -8,6 +8,7 @@ import type {
   AttributeRule,
   NewMemory,
   newMemoriesSchema,
+  Speaker,
 } from "./contract.ts";
 import {
   foldIdentifier,
@@ -34,7 +35,7 @@ import {
 import type { CurrentTexts, Written } from "./quotes.ts";
 import { accessOfKey, readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
 import { isRestoring } from "./restoring.ts";
-import { indexMemoryWords } from "./words.ts";
+import { foldForSearch, indexMemoryWords } from "./words.ts";
 import type { WordMemo } from "./words.ts";
 
 // Adding memories (contract.ts `addMemories`): checked whole first, then
@@ -254,41 +255,109 @@ interface Into {
   subjects: ReadonlyMap<string, string>;
   /** Each writer the add names, by the SHA-256 of its lineage, as the ledger names it. */
   writers: ReadonlyMap<string, string>;
+  /** Each memory's restatement key, by its place in the add (`restatementOf`). */
+  restatements: readonly string[];
   learnedAt: number;
   memo: WordMemo;
 }
 
+/** Spacing, as a statement is compared: any run of it is one space. */
+const spacing = /\s+/gu;
+
+/** A statement's end as a sentence ends it, which saying it again may drop or add. */
+const sentenceEnd = /[.!]+$/u;
+
 /**
- * What one-value attributes compare a memory by, under its attribute's
- * `rule`: its `value` folded, or the id of the entity a relation relates
- * to (`object`); none without an attribute. For an add and a restore
- * (restore.ts) alike.
+ * A statement as a restatement compares it: folded as search folds text
+ * (words.ts `foldForSearch`: case, accents and Unicode's forms), its
+ * spacing one space, and a final `.` or `!` taken off. Every other sign
+ * stays, so "-5%" and "5%", "$5M" and "€5M", "> 100" and "< 100",
+ * "1,500" and "1.500", "C++" and "C#" are never the same fact.
+ */
+const statementKeyOf = (statement: string): string =>
+  foldForSearch(statement)
+    .replaceAll(spacing, " ")
+    .trim()
+    .replace(sentenceEnd, "");
+
+/** Whose word a memory is, as a restatement compares it: its kind, and the person or agent. */
+const speakerKeyOf = (speaker: Speaker): [string, string | null] => {
+  if (speaker.kind === "internal") {
+    return [speaker.kind, speaker.person];
+  }
+  if (speaker.kind === "agent") {
+    return [speaker.kind, speaker.agent];
+  }
+  return [speaker.kind, null];
+};
+
+/**
+ * What a memory filed under no attribute is a restatement of another by:
+ * the SHA-256 of its type, whose word it is, its value folded and its
+ * statement as a restatement compares it (`statementKeyOf`), so the index
+ * holds a fixed length whatever the statement's. Hashed before a
+ * transaction.
+ */
+export const restatementOf = async ({
+  type,
+  speaker,
+  value,
+  statement,
+}: {
+  type: string;
+  speaker: Speaker;
+  value: string | null;
+  statement: string;
+}): Promise<string> =>
+  await hashOf(
+    encoder.encode(
+      JSON.stringify([
+        type,
+        speakerKeyOf(speaker),
+        foldName(value ?? ""),
+        statementKeyOf(statement),
+      ])
+    )
+  );
+
+/**
+ * What a newer memory of its lineage must match to end it (memories.ts
+ * `newerSql`), under its attribute's `rule`. One-value attributes, and
+ * many-value ones per value, compare its `value` folded, or the id of the
+ * entity a relation relates to (`object`). A memory filed under no
+ * attribute is a restatement of another when it says the same of the
+ * same related entity, in the same speaker's word (`restatementOf`, then
+ * the entity's id): so the
+ * same fact said again by its source or its writer ends what it said
+ * before, kept as history, and anything worded otherwise never does. For
+ * an add and a restore (restore.ts) alike.
  */
 export const valueKeyFor = (
   rule: AttributeRule | undefined,
-  value: string | null,
-  object: string | null
+  {
+    value,
+    object,
+    restatement,
+  }: { value: string | null; object: string | null; restatement: string }
 ): string | null => {
   if (rule === undefined) {
-    return null;
+    return `${restatement}:${object ?? ""}`;
   }
   return rule.relation === undefined ? foldName(value ?? "") : object;
 };
 
-/**
- * What one-value attributes compare a memory by: its value folded, or the
- * id of the entity a relation relates to; none without an attribute.
- */
+/** What a newer memory of its lineage must match to end `memory` (`valueKeyFor`). */
 const valueKeyOf = (
-  { ids }: Into,
+  { ids, restatements }: Into,
   memory: NewMemory,
-  plan: Planned
+  plan: Planned,
+  index: number
 ): string | null =>
-  valueKeyFor(
-    plan.rule,
-    memory.value ?? null,
-    plan.object === undefined ? null : (ids[plan.object] ?? null)
-  );
+  valueKeyFor(plan.rule, {
+    value: memory.value ?? null,
+    object: plan.object === undefined ? null : (ids[plan.object] ?? null),
+    restatement: restatements[index] ?? "",
+  });
 
 /** The SHA-256 of `source`, which the add hashed before its transaction. */
 const subjectOfSource = (
@@ -400,7 +469,7 @@ const writeMemory = (
       memory.attribute ?? null,
       plan.object === undefined ? null : (rows[plan.object] ?? null),
       memory.value ?? null,
-      valueKeyOf(into, memory, plan),
+      valueKeyOf(into, memory, plan, index),
       plan.rule?.values === "one" ? 1 : 0,
       memory.type,
       memory.statement,
@@ -469,6 +538,8 @@ export interface AddHashes {
   hash: string;
   subjects: ReadonlyMap<string, string>;
   writers: ReadonlyMap<string, string>;
+  /** Each memory's restatement key (`restatementOf`), in the add's order. */
+  restatements: readonly string[];
 }
 
 /** `adding`'s change key, content and sources, hashed: what its write needs, made before it. */
@@ -497,6 +568,12 @@ export const hashesOf = async (adding: Adding): Promise<AddHashes> => {
       )
     )
   );
+  const restatements = await Promise.all(
+    adding.memories.map(
+      async ({ type, speaker, value, statement }) =>
+        await restatementOf({ type, speaker, value: value ?? null, statement })
+    )
+  );
   const writers = new Map(
     await Promise.all(
       [
@@ -508,7 +585,7 @@ export const hashesOf = async (adding: Adding): Promise<AddHashes> => {
       ].map(async (writer) => [writer, await writerSubjectOf(writer)] as const)
     )
   );
-  return { key, hash, subjects, writers };
+  return { key, hash, subjects, writers, restatements };
 };
 
 /**
@@ -523,7 +600,7 @@ export const hashesOf = async (adding: Adding): Promise<AddHashes> => {
 export const writeAdd = (
   { storage, db, shared }: Omit<RememberStore, "bucket">,
   adding: Adding,
-  { key, hash, subjects, writers }: AddHashes,
+  { key, hash, subjects, writers, restatements }: AddHashes,
   texts: CurrentTexts = new Map()
 ): AddedMemories => {
   const planned = planOf(adding);
@@ -566,6 +643,7 @@ export const writeAdd = (
       shared,
       subjects,
       writers,
+      restatements,
       learnedAt: stampWrite(sql),
       memo: new Map(),
     };

@@ -31,8 +31,10 @@ import { termsOf } from "./words.ts";
 // about an entity, each of one lineage (the source it rests on, or its
 // writer), never written over. What is current is read, never stored: a
 // memory is ended by a newer one of its lineage about the same entity and
-// one-value attribute (or the same value, for one of many), counted only
-// when the reader may read the newer one, so a reader is told what a
+// one-value attribute (or the same value, for one of many), or, filed
+// under no attribute, by a newer one of its lineage that restates it
+// (remember.ts `valueKeyFor`), counted only when the reader may read the
+// newer one, so a reader is told what a
 // store without the memories hidden from them would tell; or by its
 // writer retiring it, the one change ever written to a memory; or, for a
 // memory resting on a version before its source's current one, by that
@@ -175,14 +177,16 @@ const outSql = (alias: string, at: string): string => `
  * The newer memories of `alias`'s lineage that end it, by the order of
  * its lineage (a later version's, or a later row of the same), about the
  * same entity and attribute and, for an attribute of many values, the
- * same value, each learned by `learned` and started by `valid` (its world
- * start, or when it was learned), and neither retired nor out by
- * `learned`: a retired memory ends nothing, so forgetting a newer value
- * makes the one before current again; nor does one whose quote left its
- * source (quotes.ts), so a source that says "Anna", then "Bob", then
- * "Anna" again, with no memory drawn from the last, has Anna current
- * again. None for a memory with no attribute. `visible` keeps to those
- * the reader may read.
+ * same value; for a memory filed under no attribute, a restatement of it
+ * (remember.ts `valueKeyFor`): each learned by `learned` and started by
+ * `valid` (its world start, or when it was learned), and neither retired
+ * nor out by `learned`: a retired memory ends nothing, so forgetting a
+ * newer value makes the one before current again; nor does one whose
+ * quote left its source (quotes.ts), so a source that says "Anna", then
+ * "Bob", then "Anna" again, with no memory drawn from the last, has Anna
+ * current again. `visible` keeps to those the reader may read, so a
+ * restatement merges what one says twice only for a reader of the newer:
+ * nobody reads a memory they couldn't before.
  */
 const newerSql = (
   alias: string,
@@ -192,7 +196,10 @@ const newerSql = (
 ): string => {
   // Two seeks, one for each kind of attribute, never an OR between them:
   // an OR kept `value_key` out of the index (`memories_lineage_value_idx`),
-  // so a memory of many values read every memory of its lineage.
+  // so a memory of many values read every memory of its lineage. The
+  // second compares the attribute with IS, which the index takes as it
+  // takes =, so one filed under none (one_value 0, attribute null) seeks
+  // its restatements the same way.
   const rest = `
     AND (newer.lineage_order > ${alias}.lineage_order
       OR (newer.lineage_order = ${alias}.lineage_order AND newer.row > ${alias}.row))
@@ -211,7 +218,7 @@ const newerSql = (
   SELECT ${startSql("newer")} AS at FROM memories AS newer
   WHERE ${alias}.one_value = 0
     AND newer.entity = ${alias}.entity
-    AND newer.attribute = ${alias}.attribute
+    AND newer.attribute IS ${alias}.attribute
     AND newer.lineage = ${alias}.lineage
     AND newer.value_key = ${alias}.value_key${rest}`;
 };
