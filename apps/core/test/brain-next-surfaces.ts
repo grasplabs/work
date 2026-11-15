@@ -7071,19 +7071,17 @@ export const storeProbes = {
       await add("for a group", { kind: "audience", group: stranger() }),
       await add(
         "too much text",
-        { kind: "owner", person: stranger() },
+        strangers(),
         text.padEnd(instructionsMaxLength + 1, " x")
       ),
+      // Owner access until GRA-1904: the shared store takes an instruction
+      // file of whitespace, which a restore of its export then refuses.
       await add("no text", { kind: "owner", person: stranger() }, " "),
-      await add(
-        "half a surrogate pair",
-        { kind: "owner", person: stranger() },
-        `${text}\uD800`
-      ),
+      await add("half a surrogate pair", strangers(), `${text}\uD800`),
       await add("an unknown kind", unchecked({ kind: "everyone" })),
       await add(
         "a source named by the markers, too long",
-        { kind: "owner", person: stranger() },
+        strangers(),
         text,
         text.repeat(300)
       ),

@@ -1695,13 +1695,19 @@ describe(
       }).toStrictEqual({ waiting: 600, afterErasure: 0 });
     });
 
-    it("leaves no plain source key for a source erased before it was added", async () => {
+    // Core still erases every person in the shared store too, until
+    // GRA-1903 removes that path.
+    it("leaves no plain person id once a person is erased, nor a source key for a source erased before it was added", async () => {
+      const leaver = await person();
       const never = newSource();
 
+      await erasePersonShared({ personId: leaver, reason: "person_erased" });
       await eraseShared(never, "deleted");
       await tickUntilErased();
 
-      await expect(tablesHolding([never.id])).resolves.toStrictEqual([]);
+      await expect(tablesHolding([leaver, never.id])).resolves.toStrictEqual(
+        []
+      );
     });
   }
 );
