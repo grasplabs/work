@@ -2,13 +2,16 @@ import type { FunctionResult } from "@grasp-os/shared/functions";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
+import { expect, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { appFor, appKind } from "../src/apps.ts";
+import type { Acting } from "../src/auth/identity.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { rollback } from "../src/publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
+import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { boundIn, testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
 import { activeBinding } from "./apps.ts";
@@ -117,6 +120,22 @@ export const runIds = (result: FunctionResult): string[] =>
         .parse(result.value)
         .items.map(({ run }) => run.runId)
     : [result.error.code];
+
+/**
+ * Run `runId` of workflow `workflowId` once it has ended, as `by` reads
+ * it. An ended run never changes again, so what any read says of it
+ * (its status, its finish time) is the same however soon or late the
+ * engine ended it.
+ */
+export const settled = async (by: Acting, workflowId: string, runId: string) =>
+  await vi.waitFor(
+    async () => {
+      const run = await resourceRunFor(env, by, workflowId, runId);
+      expect(run.endedAt).not.toBeNull();
+      return run;
+    },
+    { timeout: 30_000, interval: 100 }
+  );
 
 /** "ok", or a refusal's code and words. */
 export const refusalOf = (result: FunctionResult) =>

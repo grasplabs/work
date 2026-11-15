@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import type { BrainBucket } from "./bucket.ts";
-import { erasureReasons } from "./contract.ts";
+import { erasureReasons, refusalPrefix } from "./contract.ts";
 import type {
   ErasureReason,
   ErasureStatus,
@@ -9,33 +9,38 @@ import type {
 } from "./contract.ts";
 import { hashOf, releaseVectors } from "./files.ts";
 import {
-  eraseMemoriesHiddenBy,
+  deleteMemories,
   eraseMemoriesOfSource,
   eraseMemoriesOn,
 } from "./forget.ts";
-import { readerSetKeyOf } from "./reader-sets.ts";
+import {
+  erasedBySql,
+  lineageOfWriter,
+  nextStamp,
+  raiseStamp,
+} from "./memories.ts";
 import { removeVectorsOf, repackBlocks } from "./vectors.ts";
 
 // Erasure: what goes for good, apart from ordinary removal. A new version
 // of a source ends the one before as history, readable as it was; an
 // erasure leaves nothing. It covers one source (`eraseSource`: every
 // version, and every version of each source added in its key as a group,
-// as a chat's turns are in a person's own store) or what one person alone
-// may read (`erasePerson`), and reaches
-// every place content is: versions, chunks, their words and stems, vector
-// codes and the packed blocks they were in, change keys, queued work, and
-// the files in R2, which the sweep deletes once no version holds them
+// as a chat's turns are in a person's own store), or what one writer wrote
+// (`eraseWriter`: every memory of its lineage learned before the erasure),
+// and reaches every place content is: versions, chunks, their words and stems, vector codes and
+// the packed blocks they were in, change keys, queued work, and the files
+// in R2, which the sweep deletes once no version holds them
 // (files.ts: its grace and its in-doubt rule hold for them as for any).
 //
+// What only one person may read has no erasure here: the shared store
+// refuses it as it is added (store.ts `#mayKeep`), and a person's own
+// store, which holds only theirs, is erased whole (below).
+//
 // One ledger records every erasure: an object per erasure in the Brain's
-// bucket (`erasures/`), whose key says when, the kind, the reason, and
-// the SHA-256 of the source's key or the person's id. A person's erasure
-// names exactly what it hid, the versions by number under each source's
-// SHA-256, in parts of at most `ledgerPartVersions` (objects of their own
-// under the entry's key, `<key>/0000` on), written before the entry
-// itself, whose body says how many parts there are: an entry in the
-// bucket is whole. No content, no plain id. Entries are never deleted: a
-// copy of the store of any age can come back.
+// bucket (`erasures/`), whose key says when, the kind, the reason, and the
+// SHA-256 of the source's key or of the writer's lineage (`writer:<id>`).
+// No content, no plain id. Entries are never
+// deleted: a copy of the store of any age can come back.
 //
 // The order, so a crash serves nothing erased, and an erasure that
 // returned is never lost:
@@ -45,10 +50,8 @@ import { removeVectorsOf, repackBlocks } from "./vectors.ts";
 //    history leaves out, their vector codes out of the scan, their change
 //    keys gone, and, where a source's current version is among them, its
 //    current pointer and queued work.
-//    A person's erasure works out what it covers here, in the same
-//    transaction, so nothing added meanwhile slips between.
-// 2. The ledger entry is written, its parts first, and the erasure
-//    confirmed: only then does the erasure return. If R2 fails or doesn't
+// 2. The ledger entry is written, and the erasure confirmed: only then
+//    does the erasure return. If R2 fails or doesn't
 //    answer, the erasure fails to its caller, who must try again until it
 //    returns (the same entry is written again, nothing new); and every
 //    tick tries to write each unconfirmed entry until it is in
@@ -66,40 +69,55 @@ import { removeVectorsOf, repackBlocks } from "./vectors.ts";
 // After a restore (an older copy of the store coming back, its record of
 // erasures with it) the store, as it starts and before it answers
 // anything, reads the ledger after the last entry its copy holds and
-// applies what it lacks, literally: a source's entry hides every version
-// of that source and closes its key; a person's hides the versions it
-// names, nothing worked out again from the older copy's readers. It does
-// so a bounded step at a time (`replayStep`), each entry in its own
-// transaction, so a long replay goes on where the last step stopped. Until
+// applies what it lacks: a source's entry hides every version of that
+// source and closes its key. It does so a bounded step at a time
+// (`replayStep`), each entry in its own transaction, so a long replay
+// goes on where the last step stopped. Until
 // it is through, and while it can't read the ledger, the store answers
 // nothing but its overview (store.ts).
 //
 // An erased source's key stays closed: an add to it is refused, checked
 // again in the transaction that would record it (sources.ts), and so is
-// an add naming it as its group, whatever the add's own key. So is an
-// add for a person alone that began before that person's erasure and
-// lands after it. What is added for them after the erasure is new and
-// kept.
+// an add naming it as its group, whatever the add's own key.
 //
 // Memories go with what they rest on (forget.ts): those drawn from a
 // version are hidden with it (memories.ts reads none whose version an
 // erasure holds) and deleted with it, and again by the replay at start
-// (`replayMemoryErasures`). No memory only one person may read is in the
-// shared store, and a person's own store is erased whole. An entity no
+// (`replayMemoryErasures`). An entity no
 // memory mentions any more goes with them, its names and identifiers
 // with it.
 //
+// A writer's erasure (an App's memories when its data is reset or its
+// store deleted) covers the memories of the writer's lineage learned
+// before it, and nothing else: no source, and no memory of anyone else, on
+// the same entity or not. Its record is the hide: every statement that
+// reads, counts, links or exports a memory asks that no erasure of its
+// writer came after it was learned (memories.ts `unerasedSql`), so one row
+// hides them all at once, however many, also those an older copy of the
+// store comes back with; then they are deleted a batch at a time
+// (`eraseWriterBatch`), by the call and then the tick. Its time is a write
+// stamp of the store's memories, and the store's stamp is raised to it
+// wherever it is applied, so what the writer adds afterwards is learned
+// after it and kept: the writer is never closed, as a source's key is. It
+// is asked under the caller's change, whose SHA-256 its record and its
+// entry's body keep with how many memories it covered: the same change is
+// the same erasure, answered as recorded, also after a replay; another
+// change is another erasure. An export holding a memory of the writer
+// learned before it is stale (exports.ts `namedSql`), and a restore of an
+// export writes none it covers, also once a restore is under way when the
+// erasure lands (restore.ts `passesOverMemory`).
+//
 // Nothing an erasure answers depends on what it found: it is recorded
-// and answers alike for a source or person that held nothing.
+// and answers alike for a source that held nothing.
 //
 // What an erasure deletes never frees a name for what comes after it: a
 // source's next version is numbered past every one erased (sources.ts),
 // and a queued item's id is never used twice (migration 0006), so a late
 // vector put, a citation or a handler settling under an old name never
 // reaches new content. Reads that wait for a file ask again, after it,
-// whether the version may still be read (sources.ts). And no plain key or
-// id outlives what it named: a source's key leaves `source_subjects` with
-// its last version, and an erased person's set of readers goes with theirs.
+// whether the version may still be read (sources.ts). And no plain key
+// outlives what it named: a source's key leaves `source_subjects` with its
+// last version, and a set of readers goes with the last row naming it.
 
 /** The parts of the store an erasure works with. */
 export interface ErasureStore {
@@ -113,19 +131,20 @@ export interface ErasureStore {
   readonly groups: boolean;
 }
 
-/** What is erased: a source, or what a person alone may read. */
-type ErasureKind = "source" | "person";
-
-/** What a person's erasure hid: each version by number, under its source's subject. */
-type Hidden = (readonly [subject: string, version: number])[];
+/** What is erased: a source, or what a writer wrote. */
+type ErasureKind = "source" | "writer";
 
 /** An erasure, as the ledger holds it. */
 interface LedgerEntry {
   kind: ErasureKind;
-  /** The SHA-256 of the source's key or the person's id, in hex. */
+  /** The SHA-256 of the source's key, or of the writer's lineage, in hex. */
   subject: string;
   reason: ErasureReason;
-  /** When, in milliseconds. */
+  /**
+   * When, in milliseconds. A writer's erasure's is a write stamp of the
+   * store's memories (memories.ts `stampWrite`): it covers those learned
+   * before it, and every write after it is stamped later.
+   */
   at: number;
 }
 
@@ -152,17 +171,11 @@ const confirmPerTick = 100;
 const confirmTickMs = 30_000;
 
 /**
- * Most versions one part of a person's entry names: about 75 bytes each,
- * so a part is at most some 75 KB, far inside any limit of R2 or of a
- * value the store keeps, however many versions an erasure hides.
- */
-export const ledgerPartVersions = 1000;
-
-/**
- * Most objects of the ledger one step of a replay reads (`replayStep`): a
- * person's entry and each of its parts; a source's entry is read from its
- * key alone, no read. Entries are read one at a time, an entry's parts six
- * at a time. A first guess, well inside the step's time.
+ * Most entries of the ledger one step of a replay reads (`replayStep`):
+ * in a person's own store, each source entry, for its mark of a group
+ * (`groupBody`); in the shared store, which holds no group, each writer's
+ * entry, for its change and count (`WriterBody`). One at a time. A first
+ * guess, well inside the step's time.
  */
 export const replayReadsPerStep = 200;
 
@@ -179,9 +192,6 @@ const ledgerPageSize = 1000;
  */
 const replayStepMs = 10_000;
 
-/** Most reads of the ledger in flight at once, in all of a step. */
-const readsAtOnce = 6;
-
 const timeOf = (at: number): string => String(at).padStart(timeDigits, "0");
 
 /** `entry`'s key in the ledger. */
@@ -189,13 +199,24 @@ const ledgerKeyOf = ({ at, kind, reason, subject }: LedgerEntry): string =>
   `${ledgerPrefix}${timeOf(at)}-${kind}-${reason}-${subject}`;
 
 const ledgerKeyPattern =
-  /^erasures\/(?<at>\d{15})-(?<kind>source|person)-(?<reason>[a-z_]+)-(?<subject>[0-9a-f]{64})$/u;
+  /^erasures\/(?<at>\d{15})-(?<kind>source|writer)-(?<reason>[a-z_]+)-(?<subject>[0-9a-f]{64})$/u;
+
+/**
+ * A person's entry, or one of its parts (`<key>/0000` on), as the shared
+ * store wrote them until it refused what only one person may read
+ * (GRA-1822): a replay passes over them. Nothing released holds one, and
+ * a store written since holds nothing such an entry hid; one restored
+ * from before keeps what it hid (GRA-1903). Removed once staging's Brain
+ * is reset (GRA-1907).
+ */
+const personEntryPattern =
+  /^erasures\/\d{15}-person-[a-z_]+-[0-9a-f]{64}(?:\/\d+)?$/u;
 
 const isReason = (reason: string): reason is ErasureReason =>
   erasureReasons.some((known) => known === reason);
 
 const isKind = (kind: string): kind is ErasureKind =>
-  kind === "source" || kind === "person";
+  kind === "source" || kind === "writer";
 
 /** The entry `key` names: none for a key the ledger never writes. */
 const entryOf = (key: string): LedgerEntry | undefined => {
@@ -214,62 +235,6 @@ const entryOf = (key: string): LedgerEntry | undefined => {
   return { at: Number(at), kind, reason, subject };
 };
 
-/**
- * Whether `key` is a part of an entry: the entry's key, "/" and digits.
- */
-const isPartKey = (key: string): boolean => {
-  const slash = key.lastIndexOf("/");
-  return (
-    /^\d+$/u.test(key.slice(slash + 1)) &&
-    entryOf(key.slice(0, slash)) !== undefined
-  );
-};
-
-const subjectPattern = /^[0-9a-f]{64}$/u;
-
-/** A part of a person's entry, as the ledger holds it. */
-const partOf = (body: string): Hidden => {
-  const parsed: unknown = JSON.parse(body);
-  if (!Array.isArray(parsed)) {
-    throw new TypeError("Not a part of an erasure");
-  }
-  return parsed.map((pair: unknown) => {
-    if (
-      !Array.isArray(pair) ||
-      pair.length !== 2 ||
-      typeof pair[0] !== "string" ||
-      !subjectPattern.test(pair[0]) ||
-      !Number.isSafeInteger(pair[1])
-    ) {
-      throw new TypeError("Not a part of an erasure");
-    }
-    return [pair[0], Number(pair[1])] as const;
-  });
-};
-
-/** How many parts a person's entry's body says it has. */
-const partsOf = (body: string): number => {
-  const parsed: unknown = JSON.parse(body);
-  const parts: unknown =
-    typeof parsed === "object" && parsed !== null
-      ? Reflect.get(parsed, "parts")
-      : undefined;
-  if (typeof parts !== "number" || !Number.isSafeInteger(parts) || parts < 0) {
-    throw new TypeError("Not an erasure");
-  }
-  return parts;
-};
-
-/** The key of part `index` of the entry `key`. */
-const partKeyOf = (key: string, index: number): string =>
-  `${key}/${String(index).padStart(4, "0")}`;
-
-/** `items` in slices of at most `size`. */
-const slicesOf = <T>(items: readonly T[], size: number): T[][] =>
-  Array.from({ length: Math.ceil(items.length / size) }, (_, index) =>
-    items.slice(index * size, (index + 1) * size)
-  );
-
 /** Thrown when a step of a replay is out of time: no new read starts. */
 class OutOfTimeError extends Error {
   constructor() {
@@ -278,33 +243,18 @@ class OutOfTimeError extends Error {
   }
 }
 
-/**
- * `run` over `items`, `readsAtOnce` at a time, in order, starting none
- * once `stopAt` is past (throws `OutOfTimeError`).
- */
-const fewAtATime = async <T, R>(
-  items: readonly T[],
-  stopAt: number,
-  run: (item: T) => Promise<R>
-): Promise<R[]> => {
-  const done: R[] = [];
-  for (const slice of slicesOf(items, readsAtOnce)) {
-    if (Date.now() >= stopAt) {
-      throw new OutOfTimeError();
-    }
-    // oxlint-disable-next-line no-await-in-loop -- a few at a time
-    for (const result of await Promise.all(slice.map(run))) {
-      done.push(result);
-    }
-  }
-  return done;
-};
-
 const encoder = new TextEncoder();
 
-/** The ledger's name for a source's key or a person's id. */
+/** The ledger's name for a source's key. */
 export const subjectOf = async (id: string): Promise<string> =>
   await hashOf(encoder.encode(id));
+
+/**
+ * The ledger's name for a writer: the SHA-256 of its lineage
+ * (`writer:<id>`), as each of its memories keeps it (`writer_subject`).
+ */
+export const writerSubjectOf = async (writer: string): Promise<string> =>
+  await subjectOf(lineageOfWriter(writer));
 
 /**
  * Whether the source whose key's subject is `subject` was erased: its
@@ -401,51 +351,6 @@ export const keepGroup = (sql: SqlStorage, subject: string): void => {
 };
 
 /**
- * Where the store's record of erasures is now: an add notes it as it
- * begins, so an erasure recorded after that is known by its place, not by
- * a clock (`isPersonErasedSince`).
- */
-export const erasuresSoFar = (sql: SqlStorage): number =>
-  sql
-    .exec<{ last: number }>(
-      "SELECT coalesce(max(rowid), 0) AS last FROM erasures"
-    )
-    .one().last;
-
-/**
- * Whether the person whose id's subject is `subject` was erased since
- * `soFar` (`erasuresSoFar`): an add for them alone that began then is
- * refused, as it may have missed the erasure (sources.ts).
- */
-export const isPersonErasedSince = (
-  sql: SqlStorage,
-  subject: string,
-  soFar: number
-): boolean =>
-  sql
-    .exec(
-      `SELECT 1 FROM erasures
-      WHERE kind = 'person' AND subject = ? AND rowid > ? LIMIT 1`,
-      subject,
-      soFar
-    )
-    .toArray().length > 0;
-
-/**
- * The highest version of the source whose key's subject is `subject` that
- * an erasure of a person deleted: an add numbers the next one past it
- * (sources.ts), so a version's number is never used twice. A source's own
- * erasure closes its key, so none of its versions is added again.
- */
-export const lastErasedVersion = (sql: SqlStorage, subject: string): number =>
-  sql
-    .exec<{ version: number | null }>(
-      "SELECT max(version) AS version FROM erased_versions WHERE subject = ?",
-      subject
-    )
-    .one().version ?? 0;
-
-/**
  * Keeps `source`'s subject, and its group's (`group`, null for none), as
  * its first version is recorded, in the caller's transaction.
  */
@@ -498,13 +403,6 @@ export const keepMissingSubjects = async (
  * delete, their change keys gone, and, when the source's current version
  * is among them, the source no longer current and its queued work gone.
  * Answers whether it was.
- *
- * The versions it leaves are kept as they are, and no other becomes
- * current: history never becomes recall. So a replay after a restore,
- * where the older copy's current version was the erased person's own and
- * a team's version came before it, leaves that team version stored with
- * no current version, which no one can read; the overview counts such
- * sources (`sourcesWithoutCurrent`), so they are never out of sight.
  */
 const hideVersions = (
   sql: SqlStorage,
@@ -550,20 +448,12 @@ const hideVersions = (
   return current;
 };
 
-/** The rows of `source`'s versions, those numbered `versions` if given. */
-const rowsOf = (
-  sql: SqlStorage,
-  source: string,
-  versions?: readonly number[]
-): number[] =>
+/** The rows of `source`'s versions. */
+const rowsOf = (sql: SqlStorage, source: string): number[] =>
   sql
     .exec<{ row: number }>(
-      versions === undefined
-        ? "SELECT row FROM source_versions WHERE source = ?1"
-        : `SELECT row FROM source_versions WHERE source = ?1
-          AND version IN (SELECT value FROM json_each(?2))`,
-      source,
-      ...(versions === undefined ? [] : [JSON.stringify(versions)])
+      "SELECT row FROM source_versions WHERE source = ?",
+      source
     )
     .toArray()
     .map(({ row }) => row);
@@ -600,36 +490,8 @@ const sourcesOf = (sql: SqlStorage, subject: string): string[] =>
     .map(({ source }) => source);
 
 /**
- * What a person's erasure covers, as it will hide it: every version only
- * `person` may read, and every version of each source whose current
- * version is such. Run in the transaction that records the erasure, so
- * nothing recorded before it escapes and nothing recorded after it is in.
- */
-const coveredFor = (sql: SqlStorage, person: string): Hidden =>
-  sql
-    .exec<{ subject: string; version: number }>(
-      `WITH theirs AS (
-        SELECT id FROM reader_sets WHERE key = ?1
-      ),
-      whole AS (
-        SELECT source_versions.source AS source FROM source_versions
-        JOIN current_versions ON current_versions.version_row = source_versions.row
-        WHERE source_versions.reader_set IN (SELECT id FROM theirs)
-      )
-      SELECT source_subjects.subject AS subject, source_versions.version AS version
-      FROM source_versions
-      JOIN source_subjects ON source_subjects.source = source_versions.source
-      WHERE source_versions.source IN (SELECT source FROM whole)
-        OR source_versions.reader_set IN (SELECT id FROM theirs)
-      ORDER BY subject, version`,
-      readerSetKeyOf({ kind: "owner", person })
-    )
-    .toArray()
-    .map(({ subject, version }) => [subject, version] as const);
-
-/**
- * Deletes the set of readers `readerSet` once nothing points at it: an
- * erased person's id goes with their last version.
+ * Deletes the set of readers `readerSet` once nothing points at it: the
+ * principals it names go with the last row naming it.
  */
 const dropUnusedReaderSet = (sql: SqlStorage, readerSet: number): void => {
   const [used] = sql
@@ -656,62 +518,102 @@ const dropUnusedReaderSet = (sql: SqlStorage, readerSet: number): void => {
 };
 
 /**
- * Applies the erasure `key` (`entry`, and for a person what it hid): the
- * store's record of it, and everything it covers hidden. Run it in one
- * transaction. Safe to repeat. Answers the sources whose current version
- * it hid, whose work under way is to stop, and how many sources it found
- * a version of to hide, which the record keeps (`erasures.sources`).
+ * What a writer's erasure's ledger entry holds besides its key: the
+ * SHA-256 of the change it was asked under, and how many memories it
+ * covered as it was first applied. So a replay records it as it was, and
+ * the same change answers the same, also after a restore of an older copy.
+ */
+const writerBodySchema = z.strictObject({
+  change: z.string().regex(/^[0-9a-f]{64}$/u),
+  memories: z.int().nonnegative(),
+});
+type WriterBody = z.infer<typeof writerBodySchema>;
+
+/**
+ * Applies a writer's erasure `key` (`entry`), asked under the change whose
+ * SHA-256 is `change`: its record, which is the hide (memories.ts
+ * `unerasedSql`: every memory of the writer learned before it, from this
+ * statement on), kept with how many memories it covered (`memories`, as
+ * its entry says on a replay; else counted now: those learned before it
+ * that no earlier erasure of the writer had); and the store's stamp raised
+ * to its time, so whatever is learned after it, also in an older copy it
+ * is replayed into, is stamped later and kept. Costs a count of the
+ * writer's memories when it counts; nothing is written per memory.
+ */
+const applyWriter = (
+  sql: SqlStorage,
+  key: string,
+  entry: LedgerEntry,
+  confirmed: boolean,
+  { change, memories }: { change: string; memories?: number }
+): void => {
+  const count =
+    memories ??
+    sql
+      .exec<{ count: number }>(
+        `SELECT count(*) AS count FROM memories AS m
+        WHERE m.writer_subject = ?1 AND m.learned_at < ?2
+          AND NOT EXISTS (
+            SELECT 1 FROM erasures AS gone WHERE ${erasedBySql("m", "gone")}
+          )`,
+        entry.subject,
+        entry.at
+      )
+      .one().count;
+  sql.exec(
+    `INSERT OR IGNORE INTO erasures
+      (key, kind, subject, reason, erased_at, confirmed, memories, change)
+    VALUES (?, 'writer', ?, ?, ?, ?, ?, ?)`,
+    key,
+    entry.subject,
+    entry.reason,
+    entry.at,
+    confirmed ? 1 : 0,
+    count,
+    change
+  );
+  raiseStamp(sql, entry.at);
+};
+
+/**
+ * Applies the erasure `key` (`entry`): the store's record of it, and
+ * everything it covers hidden. Run it in one transaction. Safe to repeat.
+ * Answers the sources whose current version it hid, whose work under way
+ * is to stop, and how many sources it found a version of to hide, which
+ * the record keeps (`erasures.sources`); for a writer's, none
+ * (`applyWriter`, with its change, and on a replay its count).
  */
 const apply = (
   sql: SqlStorage,
   key: string,
   entry: LedgerEntry,
-  hidden: Hidden | null,
-  confirmed: boolean
+  confirmed: boolean,
+  writer?: { change: string; memories?: number }
 ): { stopped: string[]; sources: number } => {
+  if (entry.kind === "writer") {
+    if (writer === undefined) {
+      throw new Error("A writer's erasure names its change");
+    }
+    applyWriter(sql, key, entry, confirmed, writer);
+    return { stopped: [], sources: 0 };
+  }
   sql.exec(
     `INSERT OR IGNORE INTO erasures
       (key, kind, subject, reason, erased_at, confirmed)
-    VALUES (?, ?, ?, ?, ?, ?)`,
+    VALUES (?, 'source', ?, ?, ?, ?)`,
     key,
-    entry.kind,
     entry.subject,
     entry.reason,
     entry.at,
     confirmed ? 1 : 0
   );
-  // What it hid, kept a row a version, a slice a statement, so no value
-  // grows with how much it hid.
-  for (const slice of slicesOf(hidden ?? [], ledgerPartVersions)) {
-    sql.exec(
-      `INSERT OR IGNORE INTO erased_versions (erasure, subject, version)
-      SELECT ?, value ->> 0, value ->> 1 FROM json_each(?)`,
-      key,
-      JSON.stringify(slice)
-    );
-  }
-  const bySubject = new Map<string, number[] | undefined>();
-  if (hidden === null) {
-    bySubject.set(entry.subject, undefined);
-  } else {
-    for (const [subject, version] of hidden) {
-      const versions = bySubject.get(subject);
-      if (versions === undefined) {
-        bySubject.set(subject, [version]);
-      } else {
-        versions.push(version);
-      }
-    }
-  }
   const stopped: string[] = [];
   let sources = 0;
-  for (const [subject, versions] of bySubject) {
-    for (const source of sourcesOf(sql, subject)) {
-      const rows = rowsOf(sql, source, versions);
-      sources += rows.length > 0 ? 1 : 0;
-      if (hideVersions(sql, source, rows, key)) {
-        stopped.push(source);
-      }
+  for (const source of sourcesOf(sql, entry.subject)) {
+    const rows = rowsOf(sql, source);
+    sources += rows.length > 0 ? 1 : 0;
+    if (hideVersions(sql, source, rows, key)) {
+      stopped.push(source);
     }
   }
   // The first count of `key` stands: applied again (a replay), the
@@ -837,23 +739,214 @@ export const eraseBatch = (storage: DurableObjectStorage): Erased => {
   }
 };
 
-/** A ledger entry recorded but not yet written (`confirmPending`). */
-const unconfirmed = "confirmed = 0";
+/**
+ * Most memories one batch of a writer's erasure deletes, with their
+ * names, confirmations and words (`eraseWriterBatch`), in one
+ * transaction. Measured in local workerd on a laptop: a call erasing a
+ * writer's 1,000 memories (each with two names, an identifier, a relation
+ * and a person's confirmation), its count and this one batch with it, took
+ * 91 to 100 ms against 4 to 11 ms for one memory, over three runs. The
+ * bound is the 30 s of CPU a Durable Object request gets, for the call and
+ * for the tick alike: far inside it. Not measured on Cloudflare.
+ */
+export const eraseMemoriesPerBatch = 1000;
+
+/**
+ * The memories a writer's erasure hides, still to delete: each erasure of
+ * a writer, then its memories learned before it, by the writer's index.
+ */
+const hiddenByWritersSql = `SELECT 1 FROM erasures AS gone
+CROSS JOIN memories AS m ON ${erasedBySql("m", "gone")}
+WHERE gone.kind = 'writer'`;
+
+/**
+ * `?1` the writer's subject, `?2` the erasure's time, `?3`/`?4` where its
+ * sweep is (`swept_learned_at`, `swept_row`), `?5` how many: the next
+ * memories it hides, in the order of the writer's index (a range of
+ * `memories_writer_idx`, the row as its last column), each with whether it
+ * failed to delete before (`memory_erase_failures`, by its key).
+ */
+const sweepSql = `SELECT m.row AS row, m.learned_at AS learned_at,
+  EXISTS (SELECT 1 FROM memory_erase_failures AS failed WHERE failed.memory = m.row) AS failed
+FROM memories AS m
+WHERE m.writer_subject = ?1 AND m.learned_at < ?2
+  AND (m.learned_at, m.row) > (?3, ?4)
+ORDER BY m.learned_at, m.row
+LIMIT ?5`;
+
+/**
+ * `?1` how many: the memories that failed to delete, those that failed
+ * least often first (`memory_erase_failures_order_idx`).
+ */
+const failedSql = `SELECT memory AS row FROM memory_erase_failures
+ORDER BY failures, memory LIMIT ?1`;
+
+/** How a batch of a writer's erasure went: an error's name, if a memory is left that failed. */
+export interface WriterBatch {
+  failed: string | null;
+}
+
+/** `error`'s name alone: never its message, which may name what it held. */
+const nameOf = (error: unknown): string =>
+  error instanceof Error ? error.name : "unknown";
+
+/** A writer's erasure, as its sweep reads it. */
+interface Sweeping extends Record<string, SqlStorageValue> {
+  key: string;
+  subject: string;
+  at: number;
+  swept_at: number | null;
+  swept_row: number | null;
+}
+
+/**
+ * Deletes up to `eraseMemoriesPerBatch` of the memories writers' erasures
+ * hide (forget.ts `deleteMemories`: their names, entities nothing else
+ * mentions, confirmations of them and made over them, their words), and
+ * the sets of readers left unused, in one transaction.
+ *
+ * Which ones, without reading what failed before: each erasure's sweep
+ * goes on where it stopped (`sweptLearnedAt`, `sweptRow`), at most a
+ * batch's worth of the memories it hides in all, and takes those that
+ * never failed; then the memories that failed, those that failed least
+ * often first, through their own index. What an erasure hides is fixed
+ * once it is applied: what the writer adds is stamped after it (every add
+ * takes `stampWrite`, after the store's stamp, which the erasure raised to
+ * its time); a restore of an export passes over every memory an erasure
+ * covers, also one that lands while the restore runs (restore.ts
+ * `passesOverMemory`); and an older copy of the store comes back with its
+ * own sweeps, its erasures replayed from none. So its sweep reads each
+ * memory once, and a tick reads about a batch's worth however many failed
+ * behind it.
+ *
+ * A batch that fails is deleted again a memory a transaction; each that
+ * fails then is counted (`memory_erase_failures`), and retried after the
+ * others from then on, so a batch's worth of them never holds the rest
+ * back. A memory left stays hidden, as all of them are until deleted
+ * (memories.ts `unerasedSql`). The sweeps move on only after, so a cut-off
+ * batch takes the same memories again. Answers a failure only when a
+ * memory that failed is left.
+ */
+export const eraseWriterBatch = (
+  storage: DurableObjectStorage
+): WriterBatch => {
+  const { sql } = storage;
+  /** `rows` deleted in one transaction, with their counts of failures: its error's name, if it failed. */
+  const deleted = (rows: readonly number[]): string | null => {
+    try {
+      storage.transactionSync(() => {
+        sql.exec(
+          `DELETE FROM memory_erase_failures
+          WHERE memory IN (SELECT value FROM json_each(?))`,
+          JSON.stringify(rows)
+        );
+        for (const readerSet of new Set(deleteMemories(sql, rows))) {
+          dropUnusedReaderSet(sql, readerSet);
+        }
+      });
+      return null;
+    } catch (error) {
+      return nameOf(error);
+    }
+  };
+  const fresh = new Set<number>();
+  const swept: [key: string, at: number, row: number][] = [];
+  let read = 0;
+  for (const erasure of sql
+    .exec<Sweeping>(
+      `SELECT key, subject, erased_at AS at, swept_learned_at AS swept_at,
+        swept_row FROM erasures WHERE kind = 'writer'
+      ORDER BY subject, erased_at`
+    )
+    .toArray()) {
+    if (read >= eraseMemoriesPerBatch) {
+      break;
+    }
+    const next = sql
+      .exec<{ row: number; learned_at: number; failed: number }>(
+        sweepSql,
+        erasure.subject,
+        erasure.at,
+        erasure.swept_at ?? -1,
+        erasure.swept_row ?? -1,
+        eraseMemoriesPerBatch - read
+      )
+      .toArray();
+    read += next.length;
+    for (const { row, failed } of next) {
+      if (failed === 0) {
+        fresh.add(row);
+      }
+    }
+    const last = next.at(-1);
+    if (last !== undefined) {
+      swept.push([erasure.key, last.learned_at, last.row]);
+    }
+  }
+  const batch = [
+    ...new Set([
+      ...fresh,
+      ...(fresh.size < eraseMemoriesPerBatch
+        ? sql
+            .exec<{ row: number }>(
+              failedSql,
+              eraseMemoriesPerBatch - fresh.size
+            )
+            .toArray()
+            .map(({ row }) => row)
+        : []),
+    ]),
+  ];
+  let failed: string | null = null;
+  if (batch.length > 0 && deleted(batch) !== null) {
+    for (const row of batch) {
+      const name = deleted([row]);
+      if (name !== null) {
+        failed ??= name;
+        sql.exec(
+          `INSERT INTO memory_erase_failures (memory, failures) VALUES (?1, 1)
+          ON CONFLICT (memory) DO UPDATE SET failures = failures + 1`,
+          row
+        );
+      }
+    }
+  }
+  storage.transactionSync(() => {
+    for (const [key, at, row] of swept) {
+      sql.exec(
+        "UPDATE erasures SET swept_learned_at = ?, swept_row = ? WHERE key = ?",
+        at,
+        row,
+        key
+      );
+    }
+  });
+  return { failed };
+};
+
+/**
+ * A ledger entry recorded but not yet written (`confirmPending`): a
+ * source's or a writer's; a person's row the shared store recorded until
+ * GRA-1903 is never written, nor waited for.
+ */
+const unconfirmed = "confirmed = 0 AND kind IN ('source', 'writer')";
 
 /**
  * Whether the tick has an erasure's work to do: versions an erasure hid
- * still to delete (`eraseBatch`), or a ledger entry still to write
- * (`confirmPending`).
+ * still to delete (`eraseBatch`), memories a writer's erasure hid
+ * (`eraseWriterBatch`), or a ledger entry still to write
+ * (`confirmPending`). A seek per writer's erasure.
  */
 export const erasureDue = (sql: SqlStorage): boolean =>
   sql
     .exec(
       `SELECT 1 WHERE EXISTS (SELECT 1 FROM erasing_versions)
+        OR EXISTS (${hiddenByWritersSql})
         OR EXISTS (SELECT 1 FROM erasures WHERE ${unconfirmed})`
     )
     .toArray().length > 0;
 /**
- * Whether the source or person whose subject is `subject` was erased, as
+ * Whether the source whose key's subject is `subject` was erased, as
  * this store's record of the ledger holds it (contract.ts
  * `ErasureStatus`), in one statement: `erased` once every erasure of it
  * is confirmed in the ledger and none still hides versions this store's
@@ -867,7 +960,6 @@ export const erasureDue = (sql: SqlStorage): boolean =>
  */
 export const erasureStatusOf = (
   sql: SqlStorage,
-  kind: ErasureKind,
   subject: string
 ): Exclude<ErasureStatus, { state: "unavailable" }> => {
   const { erasures, unfinished, at } = sql
@@ -879,8 +971,7 @@ export const erasureStatusOf = (
           )
         ), 0) AS unfinished,
         max(erased_at) AS at
-      FROM erasures WHERE kind = ? AND subject = ?`,
-      kind,
+      FROM erasures WHERE kind = 'source' AND subject = ?`,
       subject
     )
     .one();
@@ -892,11 +983,18 @@ export const erasureStatusOf = (
     : { state: "erased", at: new Date(at) };
 };
 
-/** How many erasures still hide versions the tick has to delete. */
+/**
+ * How many erasures still hide versions, or a writer's memories, the tick
+ * has to delete.
+ */
 export const erasuresUnfinished = (sql: SqlStorage): number =>
   sql
     .exec<{ count: number }>(
-      "SELECT count(DISTINCT erasure) AS count FROM erasing_versions"
+      `SELECT (SELECT count(DISTINCT erasure) FROM erasing_versions)
+        + (SELECT count(*) FROM erasures AS gone
+          WHERE gone.kind = 'writer' AND EXISTS (
+            SELECT 1 FROM memories AS m WHERE ${erasedBySql("m", "gone")}
+          )) AS count`
     )
     .one().count;
 
@@ -914,15 +1012,15 @@ export const sourcesWithoutCurrent = (sql: SqlStorage): number =>
     .one().count;
 
 /**
- * The erasures the store applied, as its record of the ledger keeps them:
- * counts only, by kind, written to the ledger or not yet, and by reason;
- * never which, when, or the SHA-256 the ledger names one by. One pass
- * over the record, a row an erasure.
+ * The erasures of sources and of writers the store applied, as its record
+ * of the ledger keeps them: counts only, by kind, written to the ledger or
+ * not yet, and by reason; never which, when, or the SHA-256 the ledger
+ * names one by. One pass over the record, a row an erasure.
  */
 export const erasuresOverview = (sql: SqlStorage): ErasuresOverview => {
   const overview: ErasuresOverview = {
     source: { written: 0, unwritten: 0 },
-    person: { written: 0, unwritten: 0 },
+    writer: { written: 0, unwritten: 0 },
     byReason: { deleted: 0, retention: 0, person_erased: 0, withdrawn: 0 },
   };
   const counts = sql.exec<{
@@ -932,10 +1030,10 @@ export const erasuresOverview = (sql: SqlStorage): ErasuresOverview => {
     count: number;
   }>(
     `SELECT kind, reason, confirmed, count(*) AS count FROM erasures
-    GROUP BY kind, reason, confirmed`
+    WHERE kind IN ('source', 'writer') GROUP BY kind, reason, confirmed`
   );
   for (const { kind, reason, confirmed, count } of counts) {
-    const of = kind === "person" ? overview.person : overview.source;
+    const of = kind === "writer" ? overview.writer : overview.source;
     if (confirmed === 1) {
       of.written += count;
     } else {
@@ -970,41 +1068,31 @@ const inTime = async <T>(promise: Promise<T>): Promise<T> => {
 /** An erasure the store recorded, as its ledger entry is written. */
 interface Recorded extends Record<string, SqlStorageValue> {
   key: string;
-  kind: string;
 }
 
 /**
- * Writes `recorded`'s ledger entry, a person's parts first and then the
- * entry, each write within `ledgerWaitMs`, and confirms it: throws if R2
- * fails. Written again, it is the same.
+ * Writes `recorded`'s ledger entry within `ledgerWaitMs`, and confirms
+ * it: throws if R2 fails. Written again, it is the same.
  */
 const confirm = async (
   { storage, bucket, groups }: ErasureStore,
-  { key, kind }: Recorded
+  { key }: Recorded
 ): Promise<void> => {
-  const named = entryOf(key)?.subject;
+  const named = entryOf(key);
   let body =
     groups &&
-    kind === "source" &&
-    named !== undefined &&
-    isKnownGroup(storage.sql, named)
+    named?.kind === "source" &&
+    isKnownGroup(storage.sql, named.subject)
       ? groupBody
       : "";
-  if (kind === "person") {
-    const hidden = storage.sql
-      .exec<{ subject: string; version: number }>(
-        `SELECT subject, version FROM erased_versions WHERE erasure = ?
-        ORDER BY subject, version`,
+  if (named?.kind === "writer") {
+    const { change, memories } = storage.sql
+      .exec<{ change: string | null; memories: number | null }>(
+        "SELECT change, memories FROM erasures WHERE key = ?",
         key
       )
-      .toArray()
-      .map(({ subject, version }) => [subject, version] as const);
-    const parts = slicesOf(hidden, ledgerPartVersions);
-    for (const [index, part] of parts.entries()) {
-      // oxlint-disable-next-line no-await-in-loop -- in order, each in its time
-      await inTime(bucket.put(partKeyOf(key, index), JSON.stringify(part)));
-    }
-    body = JSON.stringify({ parts: parts.length });
+      .one();
+    body = JSON.stringify(writerBodySchema.parse({ change, memories }));
   }
   await inTime(bucket.put(key, body));
   storage.sql.exec("UPDATE erasures SET confirmed = 1 WHERE key = ?", key);
@@ -1021,7 +1109,7 @@ export const confirmPending = async (store: ErasureStore): Promise<void> => {
   const stopAt = Date.now() + confirmTickMs;
   const pending = store.storage.sql
     .exec<Recorded>(
-      `SELECT key, kind FROM erasures WHERE ${unconfirmed}
+      `SELECT key FROM erasures WHERE ${unconfirmed}
       ORDER BY key LIMIT ?`,
       confirmPerTick
     )
@@ -1047,45 +1135,38 @@ const nextAt = (sql: SqlStorage): number => {
 };
 
 /**
- * Erases `id`, a source's key or a person's id, for `reason` (above):
- * recorded and hidden, `stop` told at once of the sources whose current
- * version it hid (their work under way is to stop, whatever happens
- * next), then the ledger entry, then one batch deleted. Returns only once
- * its entry is in the ledger. Repeated after a failure: a source's is the
- * same erasure, written now; for a person, each erasure of them recorded
- * and not yet written is written first, from what it recorded
- * (`erased_versions`), however much the tick deleted meanwhile, and then
- * the call erases as a first one does, as of now. A source erased before
- * answers at once. Answers, for a source, how many sources its erasure
- * covered (`apply`), the same however often it is repeated: what its
- * latest record counted (none for one recorded before records counted).
+ * Erases the source whose key is `source`, for `reason` (above): recorded
+ * and hidden, `stop` told at once of the sources whose current version it
+ * hid (their work under way is to stop, whatever happens next), then the
+ * ledger entry, then one batch deleted. Returns only once its entry is in
+ * the ledger. Repeated after a failure, it is the same erasure, written
+ * now; a source erased before answers at once. Answers how many sources
+ * its erasure covered (`apply`), the same however often it is repeated:
+ * what its latest record counted (none for one recorded before records
+ * counted).
  */
 export const erase = async (
   store: ErasureStore,
-  kind: ErasureKind,
-  id: string,
+  source: string,
   reason: ErasureReason,
   stop: (sources: string[]) => void,
   { asGroup = false }: { asGroup?: boolean } = {}
 ): Promise<number> => {
   const { storage } = store;
   const { sql } = storage;
-  const subject = await subjectOf(id);
-  // A source's erasure recorded before is the same erasure: its key was
-  // closed then, so nothing was added to the source since. One not yet
-  // written first, so a repeat after a failed write writes it.
-  const before =
-    kind === "source"
-      ? sql
-          .exec<Recorded & { confirmed: number }>(
-            `SELECT key, kind, confirmed FROM erasures
-            WHERE kind = 'source' AND subject = ?
-            ORDER BY confirmed, key LIMIT 1`,
-            subject
-          )
-          .toArray()
-          .at(0)
-      : undefined;
+  const subject = await subjectOf(source);
+  // Its erasure recorded before is the same erasure: its key was closed
+  // then, so nothing was added to the source since. One not yet written
+  // first, so a repeat after a failed write writes it.
+  const before = sql
+    .exec<Recorded & { confirmed: number }>(
+      `SELECT key, confirmed FROM erasures
+      WHERE kind = 'source' AND subject = ?
+      ORDER BY confirmed, key LIMIT 1`,
+      subject
+    )
+    .toArray()
+    .at(0);
   // Erased before as its key alone, now said to be a group's: a second
   // entry records it as one (the ledger is never rewritten), marked
   // (`confirm`), so a replay keeps it a group's too.
@@ -1107,42 +1188,20 @@ export const erase = async (
   if (before?.confirmed === 1 && !markingGroup) {
     return counted();
   }
-  // A person's erasures recorded and not yet written (a call that failed)
-  // are written first, from what they recorded, so none is left behind a
-  // call that answers; then this call records its own, as of now, so it
-  // covers what was added for them since, whatever the tick did meanwhile.
-  try {
-    for (const pending of kind === "person"
-      ? sql
-          .exec<Recorded>(
-            `SELECT key, kind FROM erasures
-            WHERE kind = 'person' AND subject = ? AND confirmed = 0
-            ORDER BY key`,
-            subject
-          )
-          .toArray()
-      : []) {
-      // oxlint-disable-next-line no-await-in-loop -- in order, oldest first
-      await confirm(store, pending);
-    }
-  } catch {
-    throw new Error(notRecorded);
-  }
   let recorded: Recorded | undefined = markingGroup ? undefined : before;
   if (recorded === undefined) {
     const hid = storage.transactionSync(() => {
       const at = nextAt(sql);
-      const entry: LedgerEntry = { kind, subject, reason, at };
+      const entry: LedgerEntry = { kind: "source", subject, reason, at };
       const key = ledgerKeyOf(entry);
-      const hidden = kind === "person" ? coveredFor(sql, id) : null;
       // Said to be a group's: kept as one, so its entry is marked
       // (`confirm`) and keys under it are refused from now on.
-      if (asGroup && store.groups && kind === "source") {
+      if (asGroup && store.groups) {
         keepGroup(sql, subject);
       }
-      return { key, stopped: apply(sql, key, entry, hidden, false).stopped };
+      return { key, stopped: apply(sql, key, entry, false).stopped };
     });
-    recorded = { key: hid.key, kind };
+    recorded = { key: hid.key };
     stop(hid.stopped);
   }
   try {
@@ -1157,24 +1216,125 @@ export const erase = async (
   } catch {
     // Hidden and recorded: the tick deletes the rest, and shows a failure.
   }
-  return kind === "source" ? counted() : 0;
+  return counted();
+};
+
+/** What a writer's erasure answers: when it was recorded, and how many memories it covered then. */
+export interface WriterErasureRecord {
+  /** In milliseconds: the entry's time (`LedgerEntry.at`). */
+  at: number;
+  memories: number;
+}
+
+/** What a repeat of a change that erased the writer for another reason is told. */
+const otherReason = `${refusalPrefix} that change erased this writer for another reason`;
+
+/** The writer's erasure asked under the change whose SHA-256 is `change`, as the store's record holds it. */
+const erasureByChange = (
+  sql: SqlStorage,
+  subject: string,
+  change: string
+): (WriterErasureRecord & { reason: string }) | undefined =>
+  sql
+    .exec<{ at: number; memories: number | null; reason: string }>(
+      `SELECT erased_at AS at, memories, reason FROM erasures
+      WHERE kind = 'writer' AND subject = ? AND change = ?`,
+      subject,
+      change
+    )
+    .toArray()
+    .map(({ at, memories, reason }) => ({
+      at,
+      memories: memories ?? 0,
+      reason,
+    }))
+    .at(0);
+
+/**
+ * Erases every memory `writer` wrote (its lineage, `writer:<writer>`)
+ * learned up to now, for `reason`, under the caller's `change`: recorded,
+ * which hides them all at once (`applyWriter`), then its ledger entry
+ * written, then a batch of them deleted; the tick deletes the rest.
+ * Returns only once its entry is in the ledger. What the writer adds
+ * afterwards is new and kept: an erasure covers what was learned before
+ * its time, never the writer.
+ *
+ * The same change again (a retry, after a lost answer, a failed write of
+ * its entry, a restart, or a restore of an older copy, whose replay
+ * records it from its entry) is that erasure: its entry written if it
+ * isn't yet, its time and count answered as recorded, and nothing more
+ * erased, also what the writer added in between; asked for another
+ * reason, it is refused. Another change is another erasure, as of now.
+ * Answers alike whatever the writer held.
+ */
+export const eraseWriter = async (
+  store: ErasureStore,
+  {
+    writer,
+    reason,
+    change,
+  }: { writer: string; reason: ErasureReason; change: string }
+): Promise<WriterErasureRecord> => {
+  const { storage } = store;
+  const { sql } = storage;
+  const subject = await writerSubjectOf(writer);
+  // As the ledger keeps it: no plain key in an entry.
+  const changed = await subjectOf(change);
+  const recorded = storage.transactionSync(() => {
+    const before = erasureByChange(sql, subject, changed);
+    if (before !== undefined) {
+      return before;
+    }
+    // A stamp of the store's memories, and past every entry's time.
+    const at = Math.max(nextAt(sql), nextStamp(sql));
+    const entry: LedgerEntry = { kind: "writer", subject, reason, at };
+    apply(sql, ledgerKeyOf(entry), entry, false, { change: changed });
+    return erasureByChange(sql, subject, changed);
+  });
+  if (recorded === undefined) {
+    throw new Error("The Brain did not record the erasure");
+  }
+  if (recorded.reason !== reason) {
+    throw new Error(otherReason);
+  }
+  try {
+    // Each of the writer's not yet written, the oldest first: this one
+    // among them, or one an earlier call recorded.
+    for (const pending of sql
+      .exec<Recorded>(
+        `SELECT key FROM erasures
+        WHERE kind = 'writer' AND subject = ? AND confirmed = 0
+        ORDER BY key`,
+        subject
+      )
+      .toArray()) {
+      // oxlint-disable-next-line no-await-in-loop -- in order, oldest first
+      await confirm(store, pending);
+    }
+  } catch {
+    // Recorded and hidden: the tick writes its entry; the caller, told,
+    // tries again. Nothing of R2's error: it may name the key.
+    throw new Error(notRecorded);
+  }
+  try {
+    eraseWriterBatch(storage);
+  } catch {
+    // Hidden and recorded: the tick deletes the rest, and shows a failure.
+  }
+  return { at: recorded.at, memories: recorded.memories };
 };
 
 /**
  * Where a replay reads the ledger from: after the last entry this copy of
- * the store holds, and after that entry's parts. That is part of the
- * store, so it is exactly what this copy has applied: on an ordinary start
- * the listing finds nothing new; after a restore the copy's mark is as old
- * as the copy, and the listing finds everything erased since. Keys only
- * grow (`nextAt`), so every entry a copy lacks sorts after all of its own.
+ * the store holds. That is part of the store, so it is exactly what this
+ * copy has applied: on an ordinary start the listing finds nothing new;
+ * after a restore the copy's mark is as old as the copy, and the listing
+ * finds everything erased since. Keys only grow (`nextAt`), so every
+ * entry a copy lacks sorts after all of its own.
  */
-const replayStart = (sql: SqlStorage): string | undefined => {
-  const last = sql
-    .exec<{ key: string | null }>("SELECT max(key) AS key FROM erasures")
-    .one().key;
-  // A part's key is the entry's, "/" and digits: "~" sorts after them all.
-  return last === null ? undefined : `${last}/~`;
-};
+const replayStart = (sql: SqlStorage): string | undefined =>
+  sql.exec<{ key: string | null }>("SELECT max(key) AS key FROM erasures").one()
+    .key ?? undefined;
 
 /** What one step of a replay did, and whether the ledger holds more. */
 export interface Replayed {
@@ -1202,82 +1362,54 @@ const textOf = async (bucket: BrainBucket, key: string): Promise<string> =>
   );
 
 /**
- * What a person's entry `key` hid: its body, then its parts by their
- * computed keys (so where a page of the listing ends among them doesn't
- * matter), a few at a time, none started once `stopAt` is past. An entry
- * is read whole, however many parts it has, past the step's read budget:
- * it is as big as the erasure's own transaction was. A known limit: at
- * about 1 s a read, an entry of more than roughly 90 parts can't be read
- * within one step, and the store stays `replaying` until the bucket is
- * faster; the overview shows it, and it is never unsafe. Answers it with
- * the reads it took.
+ * Whether the entry `key` marks a group's erasure (`groupBody`), read
+ * within `stopAt` (throws `OutOfTimeError` once it is past).
  */
-const readPerson = async (
+const readGroupMark = async (
   bucket: BrainBucket,
   key: string,
   stopAt: number
-): Promise<{ hidden: Hidden; reads: number }> => {
+): Promise<boolean> => {
   if (Date.now() >= stopAt) {
     throw new OutOfTimeError();
   }
-  const parts = partsOf(await textOf(bucket, key));
-  const read = await fewAtATime(
-    Array.from({ length: parts }, (_, index) => partKeyOf(key, index)),
-    stopAt,
-    async (partKey) => partOf(await textOf(bucket, partKey))
-  );
-  return { hidden: read.flat(), reads: 1 + parts };
+  return isGroupBody(await textOf(bucket, key));
 };
 
-/** What a replay read of an entry: what a person's hid, whether a source's was a group's. */
-interface EntryRead {
-  hidden: Hidden | null;
-  group: boolean;
-  reads: number;
-}
-
 /**
- * Whether a replay reads `entry`'s objects: a person's always; a
- * source's in a store that may hold groups, for its mark (`groupBody`).
+ * Whether a replay reads `entry`'s body: a source's in a store that may
+ * hold groups, for its mark (`groupBody`); a writer's always, for its
+ * change and count (`WriterBody`).
  */
 const readsEntry = (entry: LedgerEntry, groups: boolean): boolean =>
-  entry.kind === "person" || groups;
+  entry.kind === "writer" || groups;
 
-/** What a replay reads of `entry` (`readsEntry`), within `stopAt`. */
-const readEntry = async (
+/**
+ * A writer's entry's body (`WriterBody`), read within `stopAt` (throws
+ * `OutOfTimeError` once it is past). One that doesn't parse throws: only
+ * the store writes the ledger.
+ */
+const readWriterBody = async (
   bucket: BrainBucket,
   key: string,
-  entry: LedgerEntry,
-  groups: boolean,
   stopAt: number
-): Promise<EntryRead> => {
-  if (entry.kind === "person") {
-    const { hidden, reads } = await readPerson(bucket, key, stopAt);
-    return { hidden, group: false, reads };
-  }
-  if (!readsEntry(entry, groups)) {
-    return { hidden: null, group: false, reads: 0 };
-  }
+): Promise<WriterBody> => {
   if (Date.now() >= stopAt) {
     throw new OutOfTimeError();
   }
-  return {
-    hidden: null,
-    group: isGroupBody(await textOf(bucket, key)),
-    reads: 1,
-  };
+  return writerBodySchema.parse(JSON.parse(await textOf(bucket, key)));
 };
 
 /**
  * One step of a replay: lists one page of the ledger after the store's
- * mark and applies, in order, the entries in it the store lacks,
- * literally (above), each in its own transaction and recorded as
- * confirmed. A source's entry takes no read in the shared store, and one
- * in a person's own (its body: whether it was a group's); a person's is
- * read with its parts, at most `readsAtOnce` reads in flight. It stops after
- * `replayReadsPerStep` reads, or once `replayStepMs` is past, starting no
- * new read; an entry it didn't finish reading is read again by the next
- * step, which goes on after the last entry applied. Run it while the store
+ * mark and applies, in order, the entries in it the store lacks (above),
+ * each in its own transaction and recorded as confirmed. A source's entry
+ * takes no read in the shared store, and one in a person's own (its body:
+ * whether it was a group's); a writer's one (its body: its change and
+ * count). It stops after `replayReadsPerStep` reads,
+ * or once `replayStepMs` is past, starting no new read; an entry it
+ * didn't read is read by the next step, which goes on after the last
+ * entry applied. Run it while the store
  * takes nothing else. Throws when R2 fails or doesn't answer in time,
  * keeping what it applied.
  *
@@ -1296,7 +1428,7 @@ export const replayStep = async ({
   const stopped: string[] = [];
   let reads = 0;
   // Where the listing goes on, in memory only: past a page that held no
-  // entry to apply (orphan parts of an entry never written), never past
+  // entry to apply (a person's entries, `personEntryPattern`), never past
   // an entry not applied, so the store's mark moves with what it applied.
   let startAfter = replayStart(sql);
   for (;;) {
@@ -1310,7 +1442,7 @@ export const replayStep = async ({
     let applied = 0;
     for (const { key } of page.objects) {
       const entry = entryOf(key);
-      if (entry === undefined && !isPartKey(key)) {
+      if (entry === undefined && !personEntryPattern.test(key)) {
         // A key this release can't read (a later release's, kept through a
         // rollback): never passed, so nothing after it is skipped.
         throw new Error("A key of the erasure ledger can't be read");
@@ -1326,25 +1458,32 @@ export const replayStep = async ({
         ) {
           return { stopped, more: true };
         }
-        let what: EntryRead;
-        try {
-          // oxlint-disable-next-line no-await-in-loop -- in order, one entry at a time
-          what = await readEntry(bucket, key, entry, groups, stopAt);
-        } catch (error) {
-          if (error instanceof OutOfTimeError) {
-            return { stopped, more: true };
+        let group = false;
+        let writer: WriterBody | undefined;
+        if (readsEntry(entry, groups)) {
+          try {
+            if (entry.kind === "writer") {
+              // oxlint-disable-next-line no-await-in-loop -- in order, one entry at a time
+              writer = await readWriterBody(bucket, key, stopAt);
+            } else {
+              // oxlint-disable-next-line no-await-in-loop -- in order, one entry at a time
+              group = await readGroupMark(bucket, key, stopAt);
+            }
+          } catch (error) {
+            if (error instanceof OutOfTimeError) {
+              return { stopped, more: true };
+            }
+            throw error;
           }
-          throw error;
+          reads += 1;
         }
-        reads += what.reads;
-        const { hidden, group } = what;
         for (const source of storage.transactionSync(() => {
           // Kept as a group's before it applies: keys under it refused,
           // though the copy restored predates the group's first add.
           if (group) {
             keepGroup(sql, entry.subject);
           }
-          return apply(sql, key, entry, hidden, true).stopped;
+          return apply(sql, key, entry, true, writer).stopped;
         })) {
           stopped.push(source);
         }
@@ -1456,13 +1595,12 @@ export const deleteStoreObjects = async (
 };
 
 /**
- * Replays on memories what the erasures the store recorded since it last
- * did covered, as the store starts, in one transaction: a person's (the
- * memories on the versions it hid) and a source's (every memory drawn
- * from it). So an erasure an older
- * release recorded, which knew no memories (an admin's rollback), reaches
- * them after the roll forward; one this release applied finds nothing
- * more. Only those above the mark (`memory_erasure_replay`) are read, and
+ * Replays on memories what the erasures of sources the store recorded
+ * since it last did covered (a writer's needs none: its record hides what
+ * it covers, and the tick deletes it, `eraseWriterBatch`), as the store starts, in one transaction:
+ * every memory drawn from each. So an erasure an older release recorded,
+ * which knew no memories (an admin's rollback), reaches them after the
+ * roll forward; one this release applied finds nothing more. Only those above the mark (`memory_erasure_replay`) are read, and
  * the mark moves past them, so a start with none recorded since reads one
  * row. (The mark orders by `erasures`' rowid: a column of its own would
  * be null on every row an older release writes.) Answers how many it
@@ -1476,37 +1614,36 @@ export const replayMemoryErasures = (sql: SqlStorage): number => {
       )
       .toArray()
       .at(0)?.through ?? 0;
+  // The mark moves past every row recorded since, a source's or not: a
+  // person's, which the shared store recorded until GRA-1903, covers
+  // nothing here.
+  const last = sql
+    .exec<{ rowid: number | null }>(
+      "SELECT max(rowid) AS rowid FROM erasures WHERE rowid > ?",
+      through
+    )
+    .one().rowid;
+  if (last === null) {
+    return 0;
+  }
   const recorded = sql
-    .exec<{
-      rowid: number;
-      key: string;
-      kind: string;
-      subject: string;
-    }>(
-      `SELECT rowid, key, kind, subject FROM erasures
-      WHERE rowid > ? ORDER BY rowid`,
+    .exec<{ subject: string }>(
+      `SELECT subject FROM erasures
+      WHERE rowid > ? AND kind = 'source' ORDER BY rowid`,
       through
     )
     .toArray();
-  const last = recorded.at(-1);
-  if (last === undefined) {
-    return 0;
-  }
   const sets: number[] = [];
-  for (const { key, kind, subject } of recorded) {
-    if (kind === "person") {
-      sets.push(...eraseMemoriesHiddenBy(sql, key));
-    } else {
-      // The source's, and those of each source added in it as a group.
-      for (const { source } of sql
-        .exec<{ source: string }>(
-          `SELECT ?1 AS source UNION
-          SELECT subject AS source FROM source_subjects WHERE group_subject = ?1`,
-          subject
-        )
-        .toArray()) {
-        sets.push(...eraseMemoriesOfSource(sql, source));
-      }
+  for (const { subject } of recorded) {
+    // The source's, and those of each source added in it as a group.
+    for (const { source } of sql
+      .exec<{ source: string }>(
+        `SELECT ?1 AS source UNION
+        SELECT subject AS source FROM source_subjects WHERE group_subject = ?1`,
+        subject
+      )
+      .toArray()) {
+      sets.push(...eraseMemoriesOfSource(sql, source));
     }
   }
   for (const readerSet of new Set(sets)) {
@@ -1515,7 +1652,7 @@ export const replayMemoryErasures = (sql: SqlStorage): number => {
   sql.exec(
     `INSERT INTO memory_erasure_replay (id, through) VALUES (1, ?1)
     ON CONFLICT (id) DO UPDATE SET through = ?1`,
-    last.rowid
+    last
   );
   return recorded.length;
 };

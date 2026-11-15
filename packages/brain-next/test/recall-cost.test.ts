@@ -47,9 +47,11 @@ const countedStore = async () => {
   return { stub, rowsReadBy };
 };
 
-const reader: Reader = { person: "reader", groups: [] };
-const own: Access = { kind: "owner", person: "reader" };
-const someoneElse: Access = { kind: "owner", person: "someone-else" };
+// Groups only one person is in: the shared store keeps nothing one
+// person's alone.
+const reader: Reader = { person: "reader", groups: ["team:reader"] };
+const own: Access = { kind: "audience", group: "team:reader" };
+const someoneElse: Access = { kind: "audience", group: "team:someone-else" };
 
 /** Hidden sources, and passages in each. */
 const hiddenSources = 6;

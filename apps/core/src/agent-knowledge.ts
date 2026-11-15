@@ -11,11 +11,6 @@ import type {
   Provenance,
   SearchResults,
 } from "@grasp-os/shared/knowledge";
-import {
-  questionWindowDays,
-  unreadDays,
-} from "@grasp-os/shared/knowledge-signals";
-import type { KnowledgeSignals } from "@grasp-os/shared/knowledge-signals";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
 
 import {
@@ -34,7 +29,6 @@ import type { Reader } from "./knowledge/access.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
 import { catalog } from "./knowledge/catalog.ts";
 import { brainOf } from "./knowledge/ports.ts";
-import { agentKnowledgeSignals } from "./knowledge/signals.ts";
 
 // Knowledge for a chat's code: `await env.knowledge.search("leave policy")`.
 // The agent's Knowledge tools (knowledge/tools.ts), read as the chat's
@@ -228,47 +222,6 @@ export class KnowledgeApi
       }
     );
   }
-
-  /**
-   * The usage signals of the collections the chat's person owns, for the
-   * agent to bring up with them: only of collections it may read, none of
-   * a sensitive one (knowledge/signals.ts), so there's no source to record
-   * with the chat. Recorded as the chat's call, as the catalog is.
-   */
-  async signals(): Promise<KnowledgeSignals> {
-    const scope = this.ctx.props;
-    await requireOpenRun(this.env, scope, "knowledge.signals");
-    return await auditedCall(
-      this.env,
-      scope,
-      {
-        method: "knowledge.signals",
-        detailOf: (found: KnowledgeSignals) => ({
-          signals: found.signals.length,
-        }),
-      },
-      async () =>
-        await readAsDelegate(
-          this.env,
-          chatAuthority(scope),
-          chatContext(scope),
-          undefined,
-          async (reader) => {
-            const found = await agentKnowledgeSignals(
-              this.env,
-              reader,
-              scope.personId
-            );
-            await recordRunReads(
-              this.env,
-              scope,
-              found.signals.map(({ collection }) => collection.id)
-            );
-            return found;
-          }
-        )
-    );
-  }
 }
 
 /** The types `env.knowledge` returns, as the model reads them. */
@@ -311,32 +264,7 @@ interface KnowledgeHit {
   section: number;
   headings: string[];
   snippet: string;
-}
-
-/**
- * What the person should look at in a collection they own, computed daily.
- * A question's words are never kept: only a key that the same words share.
- */
-type KnowledgeSignal = { id: string; collection: { id: string; name: string } } & (
-  | {
-      kind: "unanswered_question";
-      /** Searches by others in the last ${questionWindowDays} days that found nothing, in the collection or closest to it. */
-      value: number;
-      evidence: { queryKey: string; searches: number; askers: number; terms: number; lastAt: string };
-    }
-  | {
-      kind: "unread_document";
-      /** Days since it changed; nobody read it for \`evidence.days\` days (${unreadDays}) either. */
-      value: number;
-      evidence: { document: { id: string; path: string; title: string }; updatedAt: string; days: number };
-    }
-  | {
-      kind: "overdue_review";
-      /** Days past its review date. */
-      value: number;
-      evidence: { document: { id: string; path: string; title: string }; reviewDate: string };
-    }
-);`;
+}`;
 
 /** What the model reads of `env.knowledge`. */
 const knowledgeDeclaration = `/**
@@ -374,8 +302,6 @@ knowledge: {
     truncated: boolean;
     provenance: Provenance;
   }>;
-  /** For your person: questions nothing answered, unread and overdue documents in collections they own that you may read. Bring them up when it helps. */
-  signals(): Promise<{ computedAt: string | null; signals: KnowledgeSignal[] }>;
 };`;
 
 /** `env.knowledge`. */

@@ -83,6 +83,7 @@ export const first = "Hi, I'm Stephen, an AI. What do you do most?";
 export const back = "Welcome back. What do you do first with an invoice?";
 export const readBack = "Thank you. Let me read back what I wrote down.";
 export const changed = "I put that right. Is that correct?";
+export const adding = "Of course. What would you like to add?";
 
 /** What Stephen answers each thing that happens, as the models would. */
 export const answerTo = (asked: InterviewTurnRequest): StephenTurn => {
@@ -108,7 +109,10 @@ export const answerTo = (asked: InterviewTurnRequest): StephenTurn => {
         ],
       });
     }
-    case "add":
+    case "add": {
+      // Back to add something: he asks what, before anything is written down.
+      return turnOf({ say: adding, phase: "steps", wants: "answer" });
+    }
     case "answer":
     case "file":
     case "nudge": {

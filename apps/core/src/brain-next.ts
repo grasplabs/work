@@ -107,13 +107,13 @@ import type {
   BrainAction,
   BrainActionOutcome,
   BrainErasureAnswer,
-  BrainErasureLookup,
   BrainReport,
   BrainSearchWay,
   BrainStep,
   BrainWithoutMeaningReason,
 } from "@grasp-os/shared/brain-report";
 import { brainSourceErrors, firstLineOf } from "@grasp-os/shared/brain-sources";
+import { withinTime } from "@grasp-os/shared/deadline";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { instructionFileErrors } from "@grasp-os/shared/instruction-files";
 import type { InstructionFileRef } from "@grasp-os/shared/instruction-files";
@@ -132,13 +132,19 @@ import {
   ownStoresTotals,
 } from "./brain-own-stores.ts";
 import type { OwnStoreHealth } from "./brain-own-stores.ts";
-import { inJurisdiction } from "./durable-objects.ts";
-import { embedInBulk, embedderModel, questionVectorOf } from "./embedder.ts";
+import { inJurisdiction, workspace } from "./durable-objects.ts";
+import {
+  embedInBulk,
+  embedderModel,
+  questionVectorMs,
+  questionVectorOf,
+} from "./embedder.ts";
 import { promptTextOf } from "./instructions-text.ts";
 import { parseModelRef } from "./model-catalog.ts";
 import { brainSpendByPurpose, spendMonth } from "./model-spend.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
 import { organizationTimeZone } from "./organization.ts";
+import { personalWorkspaceId } from "./personal-workspace.ts";
 import { shippedSkills } from "./shipped-skills.ts";
 import { skillCards, skillCardsKept } from "./skill-cards.ts";
 import type { SkillCardText } from "./skill-cards.ts";
@@ -416,8 +422,9 @@ export interface Recall {
   budget: { tokens: number };
   /**
    * Whether the pack may hold what only this person may read, from their
-   * own store: only where the answer reaches them alone (their own web
-   * chat, an agent's direct message with them). Apps, workflows and the
+   * own store: only where the answer reaches them alone (their own chat in
+   * Grasp, in a turn they started; a chat app's direct message is kept by
+   * the chat app too, so it reads as the company). Apps, workflows and the
    * SDK pass `false`, so what is theirs alone never reaches App data or
    * anyone else; then their own store is never addressed.
    */
@@ -949,6 +956,18 @@ const meaningOf = async (
 };
 
 /**
+ * What a recall reads as: the person, with their own store (`person`),
+ * only with `personal` and not `company`: where its answer reaches them
+ * alone; their teams; or the company.
+ */
+const reachOf = ({ personal, company = false }: Recall): Reach => {
+  if (company) {
+    return "company";
+  }
+  return personal ? "person" : "teams";
+};
+
+/**
  * The Brain's request of a recall by the member `personId`, as core counts
  * them now: the question checked as the Brain checks it before the
  * embedder sees any of it, and embedded while their reader is read. With
@@ -959,13 +978,11 @@ const meaningOf = async (
 const recallRequestAs = async (
   env: BrainEnv & Pick<Env, "DB" | "EMBEDDER">,
   personId: string,
-  { question: asked, budget, asOf, personal, company = false, teams }: Recall
+  recall: Recall
 ): Promise<RecallRequest> => {
+  const { question: asked, budget, asOf, teams } = recall;
   const question = checked(questionSchema, asked);
-  let reach: Reach = personal ? "person" : "teams";
-  if (company) {
-    reach = "company";
-  }
+  const reach = reachOf(recall);
   const [reader, meaning] = await Promise.all([
     readerOf(env, personId, reach, teams),
     // As of a moment the Brain never searches by meaning: nothing to embed.
@@ -984,17 +1001,27 @@ const recallRequestAs = async (
  * What every store `request`'s reader may read from finds for it, by
  * `finding` (`find`, or `findPassages` for passages alone): the shared
  * store, and their own when the reader names them (`ownBrainOf`), the
- * shared store first, as ties go to the store given first.
+ * shared store first, as ties go to the store given first. With `used`,
+ * each store is given the reader's use of its own memories (`usedOf`).
  */
 const findingsOf = async (
   env: BrainEnv,
   request: RecallRequest,
-  finding: "find" | "findPassages"
+  finding: "find" | "findPassages",
+  used?: Used
 ): Promise<Finding[]> => {
   const own = ownBrainOf(env, request.reader);
   return await Promise.all([
-    brain(env)[finding](request),
-    ...(own === undefined ? [] : [own[finding](request)]),
+    brain(env)[finding](
+      used === undefined ? request : { ...request, used: used.shared }
+    ),
+    ...(own === undefined
+      ? []
+      : [
+          own[finding](
+            used === undefined ? request : { ...request, used: used.own }
+          ),
+        ]),
   ]);
 };
 
@@ -1022,6 +1049,46 @@ const storesOf = (findings: readonly Finding[]): Map<string, MemoryStore> =>
     )
   );
 
+/** A person's use of memories, per store (`usedOf`), for its requests. */
+type Used = Record<MemoryStore, NonNullable<RecallRequest["used"]>>;
+
+/**
+ * When `personId` last used each memory they used, at or before `until`:
+ * when a recall as them last handed it over in their own chat, as their
+ * Workspace keeps it with the run (workspace.ts `memoriesUsed`), per
+ * store, for each store's recall to rank by (the contract's `used`), so a
+ * memory they never use fades among equals and is never dropped. Their
+ * own use alone, and only in the requests: no store keeps it. Read
+ * alongside the question's embedding, within the same bound
+ * (`questionVectorMs`), so it adds no wait to a recall that has one. A
+ * ranking hint: a lookup that fails or is slow leaves the recall unranked
+ * by use, logged by the error's name alone, never failed.
+ */
+const usedOf = async (
+  env: Pick<Env, "WORKSPACES" | "DURABLE_OBJECT_JURISDICTION">,
+  personId: string,
+  until: Date
+): Promise<Used> => {
+  const used: Used = { own: [], shared: [] };
+  try {
+    const uses = await withinTime(
+      async () =>
+        await workspace(env, personalWorkspaceId(personId)).memoriesUsed(
+          until.getTime()
+        ),
+      questionVectorMs
+    );
+    for (const { store, memory, at } of uses) {
+      used[store].push({ memory, at: new Date(at) });
+    }
+  } catch (error) {
+    log.warn("brain.recall.without_use", {
+      error: error instanceof Error ? error.name : "unknown",
+    });
+  }
+  return used;
+};
+
 /**
  * A pack of what the member `personId` may read for `question`, as core
  * counts them now, within `budget.tokens` (the Brain's estimate,
@@ -1042,12 +1109,21 @@ const storesOf = (findings: readonly Finding[]): Map<string, MemoryStore> =>
  * (`recallPassagesAs`).
  */
 export const recallAs = async (
-  env: BrainEnv & Pick<Env, "DB" | "EMBEDDER">,
+  env: BrainEnv & Pick<Env, "DB" | "EMBEDDER" | "WORKSPACES">,
   personId: string,
   recall: Recall
 ): Promise<RecalledPack> => {
-  const request = await recallRequestAs(env, personId, recall);
-  const findings = await findingsOf(env, request, "find");
+  // Ranked by their use only where the answer reaches them alone: a
+  // recall as their teams or the company (a channel, a thread, a chat
+  // app, a turn they didn't start, code) is ordered as for anyone, and
+  // their Workspace isn't asked.
+  const [request, used] = await Promise.all([
+    recallRequestAs(env, personId, recall),
+    reachOf(recall) === "person"
+      ? usedOf(env, personId, recall.asOf ?? new Date())
+      : undefined,
+  ]);
+  const findings = await findingsOf(env, request, "find", used);
   const { items, memories, contested, notFound, truncated } = packAcross(
     request.question,
     request.budget.tokens,
@@ -1456,9 +1532,11 @@ const sourceErasureSchema = z.strictObject({
   asGroup: z.literal(true).optional(),
 });
 
+// Only an admin's erasure of a person: a withdrawal erases what is
+// withdrawn as its source (`eraseSource`), and the person stays a member.
 const personErasureSchema = z.strictObject({
   personId: idSchema,
-  reason: z.enum(erasureReasons),
+  reason: z.literal("person_erased"),
 });
 
 /**
@@ -1567,18 +1645,14 @@ export const eraseOwnGroup = async (
 };
 
 /**
- * Erases what only `personId` may read, added up to now: their own
- * sources' every version (their uploads, chats and runs, their
- * instruction file), and, in a source others read now, the versions that
- * were theirs alone. Content added for them later is new. Safe to repeat.
- * For an admin's erasure of a person (`person_erased`), or a person's
- * withdrawal (`withdrawn`).
- *
- * In the shared store, and, for `person_erased` alone, then their own
- * store, whole: deleted for good, it holds nothing and takes nothing from
- * then on. A withdrawal never touches their own store: they stay a
- * member, and what they withdraw (an interview) is erased as its source
- * (`eraseSource`).
+ * Erases what only `personId` may read, for an admin's erasure of the
+ * person (`person_erased`): their own store, whole, the one place it is
+ * kept (their uploads, chats and runs, their instruction file, their
+ * memories, every version). Deleted for good, it holds nothing and takes
+ * nothing from then on. Safe to repeat. The shared store has nothing of
+ * theirs to erase: it refuses whatever only one person may read as it is
+ * added, and what they wrote for a team or everyone is not theirs alone,
+ * so it stays.
  *
  * Answers `erased` once it is all done, or `still_deleting` while their
  * own store waits out the time an add under way has to write a file
@@ -1591,13 +1665,9 @@ export const eraseOwnGroup = async (
  */
 export const erasePerson = async (
   env: BrainEnv & Pick<Env, "DB">,
-  erased: { personId: string; reason: ErasureReason }
+  erased: { personId: string; reason: "person_erased" }
 ): Promise<"erased" | "still_deleting"> => {
   const { personId, reason } = checked(personErasureSchema, erased);
-  await brain(env).erasePerson({ person: personId, reason });
-  if (reason !== "person_erased") {
-    return "erased";
-  }
   try {
     await ownBrain(env, personId).erasePerson({ person: personId, reason });
   } catch (error) {
@@ -1612,6 +1682,24 @@ export const erasePerson = async (
   await forgetOwnStoreHealth(env, personId);
   return "erased";
 };
+
+/**
+ * Erases every memory `writer` wrote in the shared store, learned up to
+ * now (the Brain's `eraseWriter`): for an App whose data is reset or whose
+ * store is deleted, `app:<id>`, as core names its code's writer. Hidden
+ * from every read once it returns, recorded in the Brain's ledger so a
+ * restore can't bring them back; what the writer adds afterwards is kept.
+ * Answers when it was recorded and how many memories it covered, the same
+ * on every repeat of `change` (one per store deletion, one per data reset
+ * request), which erases nothing more: what one audit event of it says. A
+ * call that throws must be repeated, with the same change, until it
+ * answers.
+ */
+export const eraseWriter = async (
+  env: BrainEnv,
+  erased: { writer: string; reason: ErasureReason; change: string }
+): Promise<Awaited<ReturnType<Brain["eraseWriter"]>>> =>
+  await brain(env).eraseWriter(erased);
 
 /**
  * Whether a person's erasure asked for at `askedAt` has had their own store
@@ -3616,7 +3704,6 @@ export const brainStaffReport = async (
       erasing: overview.erasing,
       sourcesWithoutCurrent: overview.sourcesWithoutCurrent,
       source: overview.erasures.source,
-      person: overview.erasures.person,
       byReason: overview.erasures.byReason,
     },
     stepsFailed: stepsFailedOf(overview.stepsFailed),
@@ -3661,14 +3748,13 @@ export const actOnBrainForStaff = async (
 };
 
 /**
- * Whether what Grasp's staff named (brain-report.ts) is erased, as the
- * Brain's shared store's record of its ledger says: a source, by the
- * Brain's key for it, or a person, by their id, each hashed by the store
- * as its ledger names it. The answer is the store's alone, field by field:
- * a state, and for `erased` when. Never a person's own store: a staff path
- * addresses no personal object (GRA-1762), so a person's erasure is read
- * with core's own record of it (brain-report.ts). A source's answer is the
- * shared ledger's alone: that its key was closed there. `eraseSource`
+ * Whether the source Grasp's staff named (brain-report.ts), by the
+ * Brain's key for it, is erased, as the Brain's shared store's record of
+ * its ledger says, hashed by the store as its ledger names it. The answer
+ * is the store's alone, field by field: a state, and for `erased` when.
+ * Never a person's own store: a staff path addresses no personal object
+ * (GRA-1762), and a person's erasure is read from core's own record of it
+ * alone (brain-report.ts). The answer is that the key was closed there. `eraseSource`
  * closes a source its owner keeps in their own store there first, hidden
  * and recorded in that store's ledger, and in the shared store only once
  * that returned, so the shared ledger never says erased while a copy can
@@ -3679,13 +3765,9 @@ export const actOnBrainForStaff = async (
  */
 export const brainErasureForStaff = async (
   env: BrainEnv,
-  lookup: BrainErasureLookup
+  source: string
 ): Promise<BrainErasureAnswer> => {
-  const status = await brain(env).erasureStatus(
-    lookup.kind === "source"
-      ? { kind: "source", source: lookup.key }
-      : { kind: "person", person: lookup.id }
-  );
+  const status = await brain(env).erasureStatus({ source });
   return status.state === "erased"
     ? { state: "erased", at: status.at.toISOString() }
     : { state: status.state };
@@ -3977,10 +4059,15 @@ export const forgetAs = async (
   const id = checked(memoryIdSchema, memory);
   const reader = await personReaderOf(env, personId);
   try {
-    return await ownBrain(env, reader.person).retireMemory({
+    const retired = await ownBrain(env, reader.person).retireMemory({
       memory: id,
       reader,
+      writer: reader.person,
+      // Their own store holds only their own word, so one forget of a
+      // memory is theirs: a retry is the same change.
+      change: `forget:${id}`,
     });
+    return retired === null ? "nothing" : "done";
   } catch (error) {
     throw erasedAs(error);
   }
@@ -4459,7 +4546,12 @@ export const correctAs = async (
   try {
     await own.confirmMemory({ memory: saved.memory, reader });
     if (wrong.store === "own" && read.writer === reader.person) {
-      await own.retireMemory({ memory: read.id, reader });
+      await own.retireMemory({
+        memory: read.id,
+        reader,
+        writer: reader.person,
+        change: `correct:${change}`,
+      });
     }
   } catch (error) {
     throw erasedAs(error);

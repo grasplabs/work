@@ -333,6 +333,16 @@ const unchecked = (value: unknown): never =>
 /** Someone none of the harness's readers is. */
 const stranger = (): string => `stranger-${crypto.randomUUID()}`;
 
+/**
+ * Readers of the shared store none of the harness's readers is among: a
+ * group of a stranger's. The shared store keeps nothing for one person
+ * alone (it refuses it), so someone else's content there is a group's.
+ */
+const strangers = (): Access => ({
+  kind: "audience",
+  group: `team:${stranger()}`,
+});
+
 /** A source's text holding every marker. */
 const markedText = (markers: readonly string[]): string =>
   `Withheld ${markers.join(" ")}`;
@@ -1478,7 +1488,7 @@ const sharedOnly = (): Env["BRAIN_STORE"] =>
  */
 const erasedBefore = async (personId: string): Promise<string> => {
   await Promise.allSettled([
-    coreBrain.erasePerson(env, { personId, reason: "withdrawn" }),
+    coreBrain.erasePerson(env, { personId, reason: "person_erased" }),
   ]);
   await ageOwnErasure(personId);
   return personId;
@@ -2341,13 +2351,16 @@ export const coreProbes = {
     const erase = async (
       name: string,
       personId: string,
-      reason: ErasureReason = "person_erased",
-      about?: Answer["about"]
+      about?: Answer["about"],
+      reason: unknown = "person_erased"
     ) =>
       await answer(
         name,
         async () => {
-          await coreBrain.erasePerson(env, { personId, reason });
+          await coreBrain.erasePerson(env, {
+            personId,
+            reason: unchecked(reason),
+          });
         },
         about
       );
@@ -2362,16 +2375,14 @@ export const coreProbes = {
       await erase(
         "someone with nothing",
         await erasedBefore(stranger()),
-        "withdrawn",
         "nothing"
       ),
       await erase(
         "someone with marked sources",
         await erasedBefore(holder),
-        "withdrawn",
         "hidden"
       ),
-      await erase("the same erasure again", holder, "withdrawn", "hidden"),
+      await erase("the same erasure again", holder, "hidden"),
       await erase("no person", ""),
       await erase(
         "a person named by the markers, too long",
@@ -2380,8 +2391,60 @@ export const coreProbes = {
       await erase(
         "a reason named by the markers",
         stranger(),
-        unchecked(markers.join(" "))
+        undefined,
+        markers.join(" ")
       ),
+    ];
+  },
+  // No reader: core names the writer (an App's own id). What it answers is
+  // a time and a count; nothing of what was erased.
+  eraseWriter: async ({ markers }) => {
+    const writer = `app:${stranger()}`;
+    await store().addMemories({
+      change: crypto.randomUUID(),
+      access: strangers(),
+      entities: [{ key: "c", kind: "customer", names: [markedText(markers)] }],
+      memories: [
+        {
+          about: "c",
+          type: "fact",
+          statement: markedText(markers),
+          speaker: { kind: "system" },
+          basis: { kind: "writer", writer },
+        },
+      ],
+    });
+    const erase = async (name: string, erased: unknown) =>
+      await answer(
+        name,
+        async () => await coreBrain.eraseWriter(env, unchecked(erased))
+      );
+    return [
+      await erase("a writer with marked memories", {
+        writer,
+        reason: "deleted",
+        change: "reset",
+      }),
+      await erase("the same erasure again", {
+        writer,
+        reason: "deleted",
+        change: "reset",
+      }),
+      await erase("a change named by the markers", {
+        writer,
+        reason: "deleted",
+        change: markers.join(" "),
+      }),
+      await erase("a writer named by the markers, too long", {
+        writer: markers.join("").repeat(300),
+        reason: "deleted",
+        change: "reset",
+      }),
+      await erase("a reason named by the markers", {
+        writer,
+        reason: markers.join(" "),
+        change: "reset",
+      }),
     ];
   },
   // Queuing hand-overs has no reader: whatever it is handed, it answers
@@ -2807,22 +2870,18 @@ export const coreProbes = {
       )),
     ];
   },
+  // A source's key alone: a person's erasure is read from core's own
+  // record of it (brain-report.ts), never from the Brain.
   brainErasureForStaff: async ({ markers }) => {
-    const look = async (
-      name: string,
-      lookup: unknown,
-      about?: Answer["about"],
-      like?: string
-    ) =>
+    const look = async (name: string, key: unknown, about?: Answer["about"]) =>
       await answer(
         name,
         async () =>
           await coreBrain.brainErasureForStaff(
             { ...env, BRAIN_STORE: sharedOnly() },
-            unchecked(lookup)
+            unchecked(key)
           ),
-        about,
-        like
+        about
       );
     const holder = stranger();
     const kept = missingSource();
@@ -2842,44 +2901,18 @@ export const coreProbes = {
       reason: "deleted",
     });
     return [
-      await look(
-        "a source no one added",
-        { kind: "source", key: keyOf(missingSource()) },
-        "nothing"
-      ),
+      await look("a source no one added", keyOf(missingSource()), "nothing"),
       await look(
         "someone else's marked source, never erased",
-        { kind: "source", key: keyOf(kept) },
+        keyOf(kept),
         "hidden"
       ),
+      await look("an erased marked source", keyOf(erased)),
+      await look("a key of the markers", `upload:${markers.join(" ")}`),
       await look(
-        "someone with nothing",
-        { kind: "person", id: stranger() },
-        "nothing",
-        "person"
+        "a key of the markers, too long",
+        markers.join("").repeat(300)
       ),
-      await look(
-        "someone with marked sources, never erased",
-        { kind: "person", id: holder },
-        "hidden",
-        "person"
-      ),
-      await look("an erased marked source", {
-        kind: "source",
-        key: keyOf(erased),
-      }),
-      await look("a key of the markers", {
-        kind: "source",
-        key: `upload:${markers.join(" ")}`,
-      }),
-      await look("an id of the markers, too long", {
-        kind: "person",
-        id: markers.join("").repeat(300),
-      }),
-      await look("a kind named by the markers", {
-        kind: markers.join(" "),
-        id: stranger(),
-      }),
     ];
   },
   // Each of someone else's own skills, asked of as the reader's own,
@@ -4171,12 +4204,17 @@ const firstChunksOf = (versions: Probing["hiddenVersions"]): ChunkRef[] =>
  * What the vector probes search with: a question, the reader's own chunks
  * at vectors of their own (found every time, so a hidden code that took a
  * place or moved a score would show), and a model holding those alone,
- * whose answer is what the reader gets when nothing hidden is stored.
+ * whose answer is what the reader gets when nothing hidden is stored. The
+ * reader's own chunks are in the shared store for a group only they are
+ * in, the scene's `reader`: the shared store keeps nothing for one person
+ * alone.
  */
-const vectorScene = async (reader: Reader & { person: string }) => {
+const vectorScene = async (probed: Reader & { person: string }) => {
   const question = randomVector();
+  const alone = `team:${stranger()}`;
+  const reader: Reader = { ...probed, groups: [...probed.groups, alone] };
   const own = await chunkedSource(
-    { kind: "owner", person: reader.person },
+    { kind: "audience", group: alone },
     3,
     "The reader's own"
   );
@@ -4202,7 +4240,7 @@ const vectorScene = async (reader: Reader & { person: string }) => {
       reader: as,
       limit: vectorSearchLimitMax,
     });
-  return { question, ownCoded, modelWith, search };
+  return { question, ownCoded, modelWith, search, reader };
 };
 
 /** `model` as the host's embedder names it: its name, and its build after the last `@`. */
@@ -4222,11 +4260,11 @@ const embedModelOf = ({ name }: VectorModel): EmbedModel => {
  * same. And what the vector way refuses, each with the markers in it.
  */
 const meaningProbes = async ({
-  reader,
+  reader: probed,
   markers,
   hiddenVersions,
 }: Probing): Promise<Answer[]> => {
-  const { question, modelWith } = await vectorScene(reader);
+  const { question, modelWith, reader } = await vectorScene(probed);
   const words = markedText(markers);
   const nothing = await modelWith();
   const hidden = await modelWith(
@@ -5059,10 +5097,25 @@ const memoryProbes = {
           await store().retireMemory({
             memory,
             reader: { ...probing.reader, person: writer },
+            writer,
+            change: "retire",
           }),
         about
       );
     return [
+      // Another writer's memory the reader may read, retired by an App's
+      // code (a reader of no person): answered as one no one added.
+      await answer(
+        "another writer's memory, as an App's code",
+        async () =>
+          await store().retireMemory({
+            memory: fixture.seenMemory,
+            reader: { person: null, groups: probing.reader.groups },
+            writer: `app:${stranger()}`,
+            change: "retire",
+          }),
+        "hidden"
+      ),
       await retire(
         "a memory no one added",
         crypto.randomUUID(),
@@ -6173,7 +6226,10 @@ export const storeProbes = {
           await store().addSource({ source, change, text: as, access })
       );
     return [
-      await add("for someone else", { kind: "owner", person: stranger() }),
+      await add("for someone else alone, which the shared store refuses", {
+        kind: "owner",
+        person: stranger(),
+      }),
       await add("for a group", { kind: "audience", group: stranger() }),
       await add("for nobody", { kind: "none" }),
       await add("an unknown kind", unchecked({ kind: "everyone" })),
@@ -6186,11 +6242,7 @@ export const storeProbes = {
         "a field the kind hasn't",
         unchecked({ kind: "none", person: markers.join("") })
       ),
-      await add(
-        "too much text",
-        { kind: "owner", person: stranger() },
-        oversizedText(markers)
-      ),
+      await add("too much text", strangers(), oversizedText(markers)),
       await answer(
         "an unknown field",
         async () =>
@@ -6206,17 +6258,11 @@ export const storeProbes = {
       ),
       await add(
         "a source named by the markers, too long",
-        { kind: "owner", person: stranger() },
+        strangers(),
         text,
         text.repeat(300)
       ),
-      await add(
-        "no change",
-        { kind: "owner", person: stranger() },
-        text,
-        keyOf(missingSource()),
-        ""
-      ),
+      await add("no change", strangers(), text, keyOf(missingSource()), ""),
     ];
   },
   // A number, never text: a change the reader may not read answers as
@@ -6871,7 +6917,7 @@ export const storeProbes = {
     const words = markedText(markers);
     const nothing = await modelWith();
     const tailFiller = await chunkedSource(
-      { kind: "owner", person: stranger() },
+      strangers(),
       rescoredMost + 44,
       words
     );
@@ -6880,7 +6926,7 @@ export const storeProbes = {
       placedAt(tailFiller, question)
     );
     const blockFiller = await chunkedSource(
-      { kind: "owner", person: stranger() },
+      strangers(),
       vectorBlockSize,
       words
     );
@@ -6967,7 +7013,7 @@ export const storeProbes = {
   // marker.
   repackVectors: async ({ markers }) => {
     const words = markedText(markers);
-    const access: Access = { kind: "owner", person: stranger() };
+    const access = strangers();
     // One block, of two sources: the first replaced leaves half of it
     // removed.
     const replaced = await chunkedSource(access, 600, words);
@@ -7043,23 +7089,22 @@ export const storeProbes = {
     }
     return [
       ...ownFiles,
-      await add("for someone else", { kind: "owner", person: stranger() }),
+      await add("for someone else alone, which the shared store refuses", {
+        kind: "owner",
+        person: stranger(),
+      }),
       await add("for a group", { kind: "audience", group: stranger() }),
       await add(
         "too much text",
-        { kind: "owner", person: stranger() },
+        strangers(),
         text.padEnd(instructionsMaxLength + 1, " x")
       ),
-      await add("no text", { kind: "owner", person: stranger() }, " "),
-      await add(
-        "half a surrogate pair",
-        { kind: "owner", person: stranger() },
-        `${text}\uD800`
-      ),
+      await add("no text", strangers(), " "),
+      await add("half a surrogate pair", strangers(), `${text}\uD800`),
       await add("an unknown kind", unchecked({ kind: "everyone" })),
       await add(
         "a source named by the markers, too long",
-        { kind: "owner", person: stranger() },
+        strangers(),
         text,
         text.repeat(300)
       ),
@@ -7384,7 +7429,7 @@ export const storeProbes = {
       source: marked,
       change: crypto.randomUUID(),
       text: markedText(markers),
-      access: { kind: "owner", person: stranger() },
+      access: strangers(),
     });
     return [
       await erase(
@@ -7437,7 +7482,7 @@ export const storeProbes = {
       source: marked,
       change: crypto.randomUUID(),
       text: markedText(markers),
-      access: { kind: "owner", person: stranger() },
+      access: strangers(),
     });
     return [
       await over(
@@ -7484,6 +7529,68 @@ export const storeProbes = {
       }),
     ];
   },
+  // No reader either: the host names the writer. Its answer is a time and
+  // a count, alike for a writer with marked memories and one with none.
+  eraseWriter: async ({ markers }) => {
+    const erase = async (name: string, request: unknown) =>
+      await answer(
+        name,
+        async () => await store().eraseWriter(unchecked(request))
+      );
+    const writer = `app:${stranger()}`;
+    await store().addMemories({
+      change: crypto.randomUUID(),
+      access: strangers(),
+      entities: [{ key: "c", kind: "customer", names: [markedText(markers)] }],
+      memories: [
+        {
+          about: "c",
+          type: "fact",
+          statement: markedText(markers),
+          speaker: { kind: "system" },
+          basis: { kind: "writer", writer },
+        },
+      ],
+    });
+    return [
+      await erase("a writer who wrote nothing", {
+        writer: `app:${stranger()}`,
+        reason: "deleted",
+        change: "reset",
+      }),
+      await erase("a writer with marked memories", {
+        writer,
+        reason: "deleted",
+        change: "reset",
+      }),
+      await erase("the same erasure again", {
+        writer,
+        reason: "deleted",
+        change: "reset",
+      }),
+      await erase("a change named by the markers", {
+        writer,
+        reason: "deleted",
+        change: markers.join(" "),
+      }),
+      await erase("a writer named by the markers, too long", {
+        writer: markers.join("").repeat(300),
+        reason: "deleted",
+        change: "reset",
+      }),
+      await erase("a reason named by the markers", {
+        writer,
+        reason: markers.join(" "),
+        change: "reset",
+      }),
+      await erase("an unknown field", {
+        writer,
+        reason: "deleted",
+        change: "reset",
+        extra: markers.join(" "),
+      }),
+    ];
+  },
   erasePerson: async ({ markers }) => {
     const erase = async (
       name: string,
@@ -7497,32 +7604,31 @@ export const storeProbes = {
         },
         about
       );
+    // The shared store keeps nothing for one person alone, so it refuses
+    // to erase a person: only their own store is erased, whole. The
+    // holder's marked source is their team's, not theirs.
     const holder = stranger();
     await store().addSource({
       source: keyOf(missingSource()),
       change: crypto.randomUUID(),
       text: markedText(markers),
-      access: { kind: "owner", person: holder },
+      access: { kind: "audience", group: `team:${holder}` },
     });
+    const owner = stranger();
     return [
-      await erase(
-        "someone with nothing",
-        { person: stranger(), reason: "withdrawn" },
-        "nothing"
-      ),
-      await erase(
-        "someone with marked sources",
-        { person: holder, reason: "withdrawn" },
-        "hidden"
-      ),
-      await erase(
-        "the same erasure again",
-        { person: holder, reason: "withdrawn" },
-        "hidden"
-      ),
+      await erase("refused, for someone whose team holds marked sources", {
+        person: holder,
+        reason: "person_erased",
+      }),
+      await answer("a person's own store, erased by its person", async () => {
+        await personalStore(owner).erasePerson({
+          person: owner,
+          reason: "person_erased",
+        });
+      }),
       await erase("a person named by the markers, too long", {
         person: markers.join("").repeat(300),
-        reason: "withdrawn",
+        reason: "person_erased",
       }),
       await erase("a reason named by the markers", {
         person: stranger(),
@@ -7530,7 +7636,7 @@ export const storeProbes = {
       }),
       await erase("an unknown field", {
         person: stranger(),
-        reason: "withdrawn",
+        reason: "person_erased",
         extra: markers.join(" "),
       }),
     ];
@@ -7612,14 +7718,12 @@ export const storeProbes = {
     const look = async (
       name: string,
       request: unknown,
-      about?: Answer["about"],
-      like?: string
+      about?: Answer["about"]
     ) =>
       await answer(
         name,
         async () => await store().erasureStatus(unchecked(request)),
-        about,
-        like
+        about
       );
     const holder = stranger();
     const kept = keyOf(missingSource());
@@ -7630,7 +7734,7 @@ export const storeProbes = {
         source,
         change: crypto.randomUUID(),
         text: markedText(markers),
-        access: { kind: "owner", person: holder },
+        access: { kind: "audience", group: `team:${holder}` },
       });
     }
     await store().eraseSource({ source: erased, reason: "deleted" });
@@ -7659,54 +7763,33 @@ export const storeProbes = {
         async () => await personalStore(owner).erasureStatus(unchecked(request))
       );
     return [
-      await askOwn(
-        "a person's own store holding marked sources, of its person",
-        {
-          kind: "person",
-          person: owner,
-        }
-      ),
       await askOwn("a person's own store, of its erased marked source", {
-        kind: "source",
         source: ownErased,
       }),
       await askOwn("a person's own store, of a key of the markers", {
-        kind: "source",
         source: `upload:${markers.join(" ")}`,
       }),
       await look(
         "a source no one added",
-        { kind: "source", source: keyOf(missingSource()) },
+        { source: keyOf(missingSource()) },
         "nothing"
       ),
       await look(
         "someone else's marked source, never erased",
-        { kind: "source", source: kept },
+        { source: kept },
         "hidden"
       ),
-      await look(
-        "someone with nothing",
-        { kind: "person", person: stranger() },
-        "nothing",
-        "person"
-      ),
-      await look(
-        "someone with marked sources, never erased",
-        { kind: "person", person: holder },
-        "hidden",
-        "person"
-      ),
-      await look("an erased marked source", {
-        kind: "source",
-        source: erased,
+      // A person is no entry of the ledger: a lookup naming one is
+      // refused.
+      await look("someone whose team holds marked sources, refused", {
+        person: holder,
       }),
+      await look("an erased marked source", { source: erased }),
       await look("a key of the markers", {
-        kind: "source",
         source: `upload:${markers.join(" ")}`,
       }),
       await look("an unknown field", {
-        kind: "person",
-        person: stranger(),
+        source: keyOf(missingSource()),
         extra: markers.join(" "),
       }),
     ];

@@ -21,9 +21,8 @@ import {
 import { installShippedSkills } from "./brain-skills.ts";
 import { errorResponse } from "./errors.ts";
 
-// Exports of the Brain and their restore, over core's own site (GRA-1755),
-// shaped as today's export of Knowledge is (knowledge/brain-export.ts): a
-// signed-in person's request from core's own pages, never another site's,
+// Exports of the Brain and their restore, over core's own site (GRA-1755):
+// a signed-in person's request from core's own pages, never another site's,
 // and every file an attachment never cached.
 //
 // - `POST /api/brain/exports`: starts an export of the company's Brain,

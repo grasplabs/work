@@ -17,7 +17,7 @@ import type {
 } from "@grasp-os/brain-next/contract";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { DurableObject, env } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { packAcross } from "../src/across.ts";
@@ -26,6 +26,7 @@ import {
   brainOf,
   erasedSource,
   fileGraceMs,
+  onlyInOwnStore,
   personalBrainOf,
   recallBudgetMax,
   vectorModelNameOf,
@@ -659,39 +660,138 @@ describe("a person's own store", () => {
     await expect(tablesOf(own())).resolves.toStrictEqual([]);
   });
 
-  it("is the only store that keeps their instruction file: the shared one refuses it, and keeps nothing of it", async () => {
+  it("is the only store that keeps what its person alone may read: the shared one refuses a source, an instruction file and memories, in words naming no one, and keeps nothing of them", async () => {
+    const source = `test:${crypto.randomUUID()}`;
     const file = `instructions:person:${person}`;
-    const adding = {
-      source: file,
-      change: "1",
-      text: "Call me by my first name",
+    const text = `Marker ${crypto.randomUUID()} of their own`;
+    const sourceAdd = { source, change: "1", text, access: theirs() };
+    const fileAdd = { ...sourceAdd, source: file };
+    const memoriesAdd = {
+      change: crypto.randomUUID(),
       access: theirs(),
+      entities: [{ key: "c", kind: "customer" as const, names: ["Acme"] }],
+      memories: [
+        {
+          about: "c",
+          type: "fact" as const,
+          statement: text,
+          speaker: { kind: "internal" as const, person },
+          basis: { kind: "writer" as const, writer: person },
+        },
+      ],
     };
 
     const inShared = await Promise.allSettled([
-      called(shared().addInstructions(adding)),
+      called(shared().addSource(sourceAdd)),
+      called(shared().addInstructions(fileAdd)),
+      called(shared().addMemories(memoriesAdd)),
     ]);
-    await own().addInstructions(adding);
-    const ownReads = await called(
-      own().readCurrent({ sources: [file], reader: readerOf(person) })
+    await own().addSource(sourceAdd);
+    await own().addInstructions(fileAdd);
+    await own().addMemories(memoriesAdd);
+    const readsOf = async (store: Store) => {
+      const current = await called(
+        store.readCurrent({ sources: [source, file], reader: me() })
+      );
+      const { items } = await called(
+        store.recall({ question: text, reader: me(), budget: whole })
+      );
+      return {
+        current: current.map((version) => version.text),
+        found: items.map((item) => item.source),
+      };
+    };
+
+    expect({
+      refused: inShared.map((outcome) =>
+        outcome.status === "rejected" ? String(outcome.reason) : "kept"
+      ),
+      sharedKeys: [
+        await called(shared().keyState(source)),
+        await called(shared().keyState(file)),
+      ],
+      shared: await readsOf(shared()),
+      own: await readsOf(own()),
+    }).toStrictEqual({
+      refused: [0, 1, 2].map(() => `Error: ${onlyInOwnStore}`),
+      sharedKeys: ["free", "free"],
+      shared: { current: [], found: [] },
+      own: { current: [text, text], found: [source] },
+    });
+    expect(onlyInOwnStore).not.toContain(person);
+  });
+
+  // A shared source never becomes one person's own in the shared store:
+  // the readers it was first added for stay, and its versions with them.
+  it("refuses, in the shared store, a version of a shared source for one person alone, and keeps the shared one current", async () => {
+    const team: Access = {
+      kind: "audience",
+      group: `team:${crypto.randomUUID()}`,
+    };
+    const teamReader: Reader = { person: null, groups: [team.group] };
+    const kept = await add(shared(), "Kept for the team", team);
+
+    const narrowed = await Promise.allSettled([
+      called(
+        shared().addSource({
+          source: kept.source,
+          change: "2",
+          text: "Now theirs alone",
+          access: theirs(),
+        })
+      ),
+    ]);
+
+    const teamReads = await called(
+      shared().readCurrent({ sources: [kept.source], reader: teamReader })
     );
 
     expect({
-      refused: inShared.map(
-        (outcome) =>
-          outcome.status === "rejected" &&
-          /kept in that person's own store/u.test(String(outcome.reason))
+      refused: narrowed.map((outcome) =>
+        outcome.status === "rejected" ? String(outcome.reason) : "kept"
       ),
-      sharedKey: await called(shared().keyState(file)),
-      sharedReads: await called(
-        shared().readCurrent({ sources: [file], reader: readerOf(person) })
+      team: teamReads.map(({ version, text }) => ({ version, text })),
+      theirs: await called(
+        shared().readCurrent({ sources: [kept.source], reader: me() })
       ),
-      ownReads: ownReads.map(({ text }) => text),
     }).toStrictEqual({
-      refused: [true],
-      sharedKey: "free",
-      sharedReads: [],
-      ownReads: ["Call me by my first name"],
+      refused: [`Error: ${onlyInOwnStore}`],
+      team: [{ version: 1, text: "Kept for the team" }],
+      theirs: [],
+    });
+  });
+
+  // Whether a listed source is its reader's alone follows from the store
+  // that listed it: their own store's are, the shared store's never.
+  it("lists its sources as its person's alone, and the shared store lists none so", async () => {
+    const team: Access = {
+      kind: "audience",
+      group: `team:${crypto.randomUUID()}`,
+    };
+    const prefix = `test:${crypto.randomUUID()}:`;
+    const addUnder = async (store: Store, access: Access) =>
+      await store.addSource({
+        source: `${prefix}${crypto.randomUUID()}`,
+        change: "1",
+        text: "Listed",
+        access,
+      });
+    const theirsKept = await addUnder(own(), theirs());
+    const teamKept = await addUnder(shared(), team);
+    const reader: Reader = { person, groups: [team.group] };
+    const listedBy = async (store: Store) => {
+      const { sources } = await called(
+        store.listSources({ reader, prefixes: [prefix] })
+      );
+      return sources.map(({ source, personal }) => ({ source, personal }));
+    };
+
+    expect({
+      own: await listedBy(own()),
+      shared: await listedBy(shared()),
+    }).toStrictEqual({
+      own: [{ source: theirsKept.source, personal: true }],
+      shared: [{ source: teamKept.source, personal: false }],
     });
   });
 
@@ -802,18 +902,35 @@ describe("a person's own store", () => {
   });
 
   // Threat 8: recall across two stores leaks nothing and loses nothing.
-  // The same content twice in the shared store: once for one reader, all
-  // of it there (one store); once for another, split between the shared
-  // store and that reader's own (two stores). Each reader's half of the
+  // The same content twice: once for one reader, all of it in the shared
+  // store (one store), its private half for a group only they are in, as
+  // the shared store keeps nothing one person alone may read; once for
+  // another, split between the shared store and that reader's own (two
+  // stores). Recall ranks a passage by its own words, never by who may
+  // read it, so the two halves rank alike. Each reader's half of the
   // shared store is hidden from the other, with more no one reads. Their
   // packs must be the same, source names aside.
   it("packs what it and the shared store find as one store holding both would", async () => {
     const random = seeded(1762);
-    const one = {
-      reader: { person: `one-${person}`, groups: [`one-${person}`] },
+    /** A reader, what they alone read here by, and their sources' prefix. */
+    interface Setup {
+      reader: Reader & { person: string };
+      alone: Access;
+      prefix: string;
+    }
+    const one: Setup = {
+      reader: {
+        person: `one-${person}`,
+        groups: [`one-${person}`, `alone-one-${person}`],
+      },
+      alone: { kind: "audience", group: `alone-one-${person}` },
       prefix: "a",
     };
-    const two = { reader: { person, groups: [`two-${person}`] }, prefix: "b" };
+    const two: Setup = {
+      reader: { person, groups: [`two-${person}`] },
+      alone: theirs(),
+      prefix: "b",
+    };
     const nobody: Access = { kind: "audience", group: `nobody-${person}` };
     const vectors = new Map<string, number[]>();
     const vectorOf = (key: string): number[] => {
@@ -833,7 +950,7 @@ describe("a person's own store", () => {
     );
     /** Adds the corpus for `setup`, its private half to `privately`. */
     const addAll = async (
-      setup: typeof one,
+      setup: Setup,
       privately: Store,
       change: string,
       only: (index: number) => boolean
@@ -842,7 +959,7 @@ describe("a person's own store", () => {
         if (only(index)) {
           const ownedHere = index % 2 === 0;
           const access: Access = ownedHere
-            ? { kind: "owner", person: setup.reader.person }
+            ? setup.alone
             : { kind: "audience", group: setup.reader.groups[0] ?? "" };
           const store = ownedHere ? privately : shared();
           const source = `${setup.prefix}:${String(index).padStart(2, "0")}`;
@@ -880,7 +997,7 @@ describe("a person's own store", () => {
             change,
             text: longTextOf(ownedHere ? 0 : 1),
             access: ownedHere
-              ? { kind: "owner", person: setup.reader.person }
+              ? setup.alone
               : { kind: "audience", group: setup.reader.groups[0] ?? "" },
           });
         })
@@ -1493,6 +1610,8 @@ const leavingNone = [
   "confirmMemory",
   // Cards likewise: read whole in their call (cards.ts).
   "erasePerson",
+  // The shared store's alone: a person's own store refuses it.
+  "eraseWriter",
   "erasureStatus",
   "exportFile",
   "exportStatus",
@@ -1543,8 +1662,7 @@ describe("whether something was erased, asked of a person's own store", () => {
   it("refuses, and makes nothing, while it was never written", async () => {
     const who = `person-${crypto.randomUUID()}`;
     const asked = await Promise.allSettled([
-      statusOf(own(who), { kind: "person", person: who }),
-      statusOf(own(who), { kind: "source", source: "test:never" }),
+      statusOf(own(who), { source: "test:never" }),
     ]);
 
     expect({
@@ -1556,34 +1674,27 @@ describe("whether something was erased, asked of a person's own store", () => {
     }).toStrictEqual({
       refused: [
         "Error: The Brain refused it: only the shared store takes this",
-        "Error: The Brain refused it: only the shared store takes this",
       ],
       tables: [],
       alarm: null,
     });
   });
 
-  it("refuses for a source of its own it erased, and for its person", async () => {
+  it("refuses for a source of its own it erased", async () => {
     const who = `person-${crypto.randomUUID()}`;
     const { source } = await add(own(who), "Marker of their own", theirs(who));
     await own(who).eraseSource({ source, reason: "deleted" });
 
-    await expect(
-      statusOf(own(who), { kind: "source", source })
-    ).rejects.toThrow(/only the shared store takes this/u);
-    await expect(
-      statusOf(own(who), { kind: "person", person: who })
-    ).rejects.toThrow(/only the shared store takes this/u);
+    await expect(statusOf(own(who), { source })).rejects.toThrow(
+      /only the shared store takes this/u
+    );
   });
 
   it("refuses once it was erased whole, and makes nothing again", async () => {
     const { source } = await add(own(), "Marker of their own", theirs());
     await eraseWhole();
 
-    await expect(statusOf(own(), { kind: "source", source })).rejects.toThrow(
-      /only the shared store takes this/u
-    );
-    await expect(statusOf(own(), { kind: "person", person })).rejects.toThrow(
+    await expect(statusOf(own(), { source })).rejects.toThrow(
       /only the shared store takes this/u
     );
     await expect(tablesOf(own())).resolves.toStrictEqual([]);
@@ -1592,8 +1703,7 @@ describe("whether something was erased, asked of a person's own store", () => {
   it("refuses the question when its name says no one's", async () => {
     await expect(
       statusOf(env.BRAIN_STORE.getByName(`Person:${person}`), {
-        kind: "person",
-        person,
+        source: "test:never",
       })
     ).rejects.toThrow(/name doesn't say whose it is/u);
   });
@@ -2210,6 +2320,70 @@ describe("a group in a person's own store", () => {
 
     await expect(own().keyState(group)).resolves.toBe("erased");
     await expect(own().keyState(`${group}/2`)).resolves.toBe("free");
+  });
+
+  // Only a person's own store reads its entries as it replays them (for
+  // the mark of a group), so only here can a slow bucket hold a step.
+  it("stops a step of its replay whose reads are slow once its time is up, keeping what it applied, and the next step goes on", async () => {
+    const kept = await add(own(), "Answered once through", theirs());
+    const copy = await copyOf(own());
+    const entries = 15;
+    for (let erased = 0; erased < entries; erased += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- in order
+      await own().eraseSource({
+        source: `test:${crypto.randomUUID()}`,
+        reason: "deleted",
+      });
+    }
+    await restore(own(), copy);
+    // Each read of the ledger takes 4 s, as the store's clock sees it: a
+    // step (10 s) starts three, so the first call is refused while the
+    // ledger is still being read.
+    const bucket = env.BRAIN_OBJECTS;
+    let reads = 0;
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
+    Reflect.set(env, "BRAIN_OBJECTS", {
+      head: async (key: string) => await bucket.head(key),
+      list: async (options: R2ListOptions) => await bucket.list(options),
+      put: async (key: string, value: string) => await bucket.put(key, value),
+      delete: async (keys: string | string[]) => {
+        await bucket.delete(keys);
+      },
+      get: async (key: string) => {
+        if (key.includes("/erasures/")) {
+          reads += 1;
+          vi.setSystemTime(Date.now() + 4000);
+        }
+        return await bucket.get(key);
+      },
+    });
+    try {
+      const read = async () =>
+        await own()
+          .readVersion({ ...kept, reader: me() })
+          .then((version) => version?.text, String);
+      const first = await read();
+      const afterFirst = reads;
+      const second = await read();
+
+      expect({
+        first,
+        stoppedPart: afterFirst < entries,
+        second,
+        // Each entry read once: what a step applied isn't read again.
+        reads,
+      }).toStrictEqual({
+        first:
+          "Error: The Brain is applying its erasure ledger after a restore, so it answers nothing yet: try again shortly",
+        stoppedPart: true,
+        second: "Answered once through",
+        reads: entries,
+      });
+    } finally {
+      Reflect.set(env, "BRAIN_OBJECTS", bucket);
+      vi.useRealTimers();
+      await kill(own());
+    }
   });
 
   // ...and only a key an add named as a group: an erased key alone closes

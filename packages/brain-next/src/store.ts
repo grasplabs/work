@@ -35,10 +35,12 @@ import {
   newInstructionsSchema,
   newMemoriesSchema,
   newSourceSchema,
+  onlyInOwnStore,
   ownExportFileRequestSchema,
   ownExportRequestSchema,
   ownExportStartSchema,
   personErasureSchema,
+  writerErasureSchema,
   readableMemoriesRequestSchema,
   readableRequestSchema,
   recallRequestSchema,
@@ -78,6 +80,7 @@ import type {
   NewMemories,
   ReadableMemoriesRequest,
   RetireRequest,
+  RetiredMemory,
   AskModel,
   ChangeRequest,
   CurrentRequest,
@@ -103,6 +106,8 @@ import type {
   StoreKind,
   NewSource,
   PersonErasure,
+  WriterErasure,
+  WriterErased,
   RecallRequest,
   Pack,
   RestoreStatus,
@@ -136,6 +141,8 @@ import {
   deleteStoreObjects,
   erase,
   eraseBatch,
+  eraseWriter,
+  eraseWriterBatch,
   erasureStatusOf,
   erasuresOverview,
   erasureDue,
@@ -332,13 +339,6 @@ const notInstructions =
   "The Brain refused it: an instruction file or a skill is added with addInstructions";
 const onlyInstructions =
   "The Brain refused it: addInstructions takes only an instruction file's or a skill's key";
-/**
- * What the shared store answers memories or an instruction file only one
- * person may read: they are kept only in that person's own store.
- */
-const sharedNotOwn =
-  "The Brain refused it: what only one person may read is kept in that person's own store";
-
 /** What a read of memories under an attribute it can't have answers. */
 const noSuchAttribute =
   "The Brain refused it: the attribute is not one the entity's kind has";
@@ -409,7 +409,9 @@ const hasSchema = (sql: SqlStorage): boolean =>
  * One class, two kinds of store, told apart by the object's name alone
  * (contract.ts `storeKindOf`):
  *
- * - The shared store (`brainOf`): what more than one person may read.
+ * - The shared store (`brainOf`): what more than one person may read. It
+ *   refuses what only one person may read (`#mayKeep`, `onlyInOwnStore`),
+ *   whoever calls, so none of it is ever there.
  * - A person's own store (`personalBrainOf`, named by their id): what
  *   only they may read. It keeps nothing anyone else may read, answers no
  *   other reader, keeps its files under a prefix of its own (bucket.ts),
@@ -676,13 +678,22 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     }
   }
 
-  /** Refuses `access` on a person's own store unless it is that person's alone. */
+  /**
+   * Refuses `access` on a person's own store unless it is that person's
+   * alone, and on the shared store when it is one person's alone
+   * (`onlyInOwnStore`): what only one person may read is kept only where
+   * they alone can reach it, whoever calls. Every add checks it first,
+   * before it reads or writes anything.
+   */
   #mayKeep(access: Access): void {
     if (
       this.#kind.kind === "person" &&
       (access.kind !== "owner" || access.person !== this.#kind.person)
     ) {
       throw new Error(notTheirsAlone);
+    }
+    if (this.#kind.kind === "shared" && access.kind === "owner") {
+      throw new Error(onlyInOwnStore);
     }
   }
 
@@ -852,12 +863,6 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       throw new Error(onlyInstructions);
     }
     this.#mayKeep(adding.access);
-    // A person's own instruction file or skill lies only in their own
-    // store: never in the shared one, which the company's export carries
-    // and their erasure doesn't take whole.
-    if (this.#kind.kind === "shared" && adding.access.kind === "owner") {
-      throw new Error(sharedNotOwn);
-    }
     return await this.#changing(async () => {
       await this.#readyToWrite();
       return await this.#unlessErasedMeanwhile(async () => {
@@ -1079,7 +1084,9 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     const asked = checked(sourceListRequestSchema, request);
     this.#mayRead(asked.reader);
     return (await this.#readable())
-      ? listSources(this.ctx.storage.sql, asked)
+      ? listSources(this.ctx.storage.sql, asked, {
+          personal: this.#kind.kind === "person",
+        })
       : { sources: [], more: false };
   }
 
@@ -1126,7 +1133,6 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       await this.#readyToWrite();
       const covered = await erase(
         this.#erasures,
-        "source",
         source,
         reason,
         (stopped) => {
@@ -1139,22 +1145,37 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   }
 
   /**
-   * Erases what only one person may read (erasure.ts), as `eraseSource`
-   * erases a source. A person's own store erases itself whole, and only
-   * for that person (`#eraseWhole`).
+   * Erases this person's own store whole (`#eraseWhole`), and only for
+   * that person. The shared store refuses, before it reads or makes
+   * anything: it keeps nothing only one person may read (`#mayKeep`), so
+   * it has nothing of a person's to erase.
    */
   async erasePerson(request: PersonErasure): Promise<void> {
     const { person, reason } = checked(personErasureSchema, request);
+    this.#ownOnly(person);
+    await this.#eraseWhole(reason);
+  }
+
+  /**
+   * Erases every memory a writer wrote, learned up to now (erasure.ts
+   * `eraseWriter`), as `eraseSource` erases a source: recorded in the
+   * ledger and hidden before it returns, deleted by its tick if not at
+   * once. The shared store's alone: a writer's memories (an App's) are
+   * kept nowhere else.
+   */
+  async eraseWriter(request: WriterErasure): Promise<WriterErased> {
+    const { writer, reason, change } = checked(writerErasureSchema, request);
     if (this.#kind.kind === "person") {
-      if (person !== this.#kind.person) {
-        throw new Error(notTheirs);
-      }
-      await this.#eraseWhole(reason);
-      return;
+      throw new Error(sharedOnly);
     }
-    await this.#ready();
-    await erase(this.#erasures, "person", person, reason, (sources) => {
-      stopWorkOn(this.#work, sources);
+    return await this.#changing(async () => {
+      await this.#readyToWrite();
+      const { at, memories } = await eraseWriter(this.#erasures, {
+        writer,
+        reason,
+        change,
+      });
+      return { erasedAt: new Date(at), memories };
     });
   }
 
@@ -1257,9 +1278,9 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   }
 
   /**
-   * Whether a source or a person was erased, from this store's record of
-   * its ledger alone (erasure.ts `erasureStatusOf`, by the SHA-256 the
-   * ledger names it by). A read: it changes nothing and leaves no work.
+   * Whether a source was erased, from this store's record of its ledger
+   * alone (erasure.ts `erasureStatusOf`, by the SHA-256 the ledger names
+   * it by). A read: it changes nothing and leaves no work.
    * `unavailable` while the ledger can't be read or is being replayed (the
    * gate `#ready` throws for, answered instead).
    *
@@ -1279,17 +1300,15 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     if (this.#kind.kind === "person") {
       throw new Error(sharedOnly);
     }
-    const lookup = checked(erasureLookupSchema, request);
-    const subject = await subjectOf(
-      lookup.kind === "source" ? lookup.source : lookup.person
-    );
+    const { source } = checked(erasureLookupSchema, request);
+    const subject = await subjectOf(source);
     // Through, the shared store's schema is made (`#start`); the gate,
     // then the record, with no await between.
     const ledger = await this.#ledgerStep();
     if (ledger !== "through") {
       return { state: "unavailable" };
     }
-    return erasureStatusOf(this.ctx.storage.sql, lookup.kind, subject);
+    return erasureStatusOf(this.ctx.storage.sql, subject);
   }
 
   /**
@@ -1619,7 +1638,8 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
 
   /**
    * One batch of the versions erasures hid, each deleted with everything
-   * it holds in a transaction of its own (erasure.ts `eraseBatch`), so a
+   * it holds in a transaction of its own (erasure.ts `eraseBatch`), and one
+   * of the memories writers' erasures hid (`eraseWriterBatch`), so a
    * failure or a stop leaves it hidden and whole. First in the tick but
    * the ledger, so the files it lets go are swept the same tick when due.
    * A version that fails goes behind the others and is tried again; the
@@ -1627,13 +1647,29 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * parked: an erasure must finish.
    */
   #erase(at: Date): void {
+    let failed = false;
     try {
-      const { failed } = eraseBatch(this.ctx.storage);
-      this.#stepsFailed.erase = failed ? { at, reason: "failed" } : null;
+      ({ failed } = eraseBatch(this.ctx.storage));
     } catch {
       // Nothing of the error is kept: the batch stays to do.
-      this.#stepsFailed.erase = { at, reason: "failed" };
+      failed = true;
     }
+    // Then a batch of the memories writers' erasures hid, on its own, so a
+    // failure of either never holds the other back (erasure.ts
+    // `eraseWriterBatch`). What it fails to delete stays hidden from every
+    // read (memories.ts `unerasedSql`) and is tried again next tick.
+    let writers: string | null;
+    try {
+      writers = eraseWriterBatch(this.ctx.storage).failed;
+    } catch (error) {
+      writers = error instanceof Error ? error.name : "unknown";
+    }
+    if (writers !== null) {
+      // Its name alone: an error's words may be the database's own.
+      log.error("brain.writer_erasure_failed", { error: writers });
+    }
+    this.#stepsFailed.erase =
+      failed || writers !== null ? { at, reason: "failed" } : null;
   }
 
   /**
@@ -1834,7 +1870,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       words: "current",
       erasures: {
         source: { written: 0, unwritten: 0 },
-        person: { written: 0, unwritten: 0 },
+        writer: { written: 0, unwritten: 0 },
         byReason: { deleted: 0, retention: 0, person_erased: 0, withdrawn: 0 },
       },
       recall: recallOverviewOf(this.#recallCounts),
@@ -2017,10 +2053,6 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   async addMemories(memories: NewMemories): Promise<AddedMemories> {
     const adding = checked(newMemoriesSchema, memories);
     this.#mayKeep(adding.access);
-    // Content only one person may read lies only in their own store.
-    if (this.#kind.kind === "shared" && adding.access.kind === "owner") {
-      throw new Error(sharedNotOwn);
-    }
     if (adding.reader !== undefined) {
       this.#mayRead(adding.reader);
     }
@@ -2118,20 +2150,28 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       : [];
   }
 
-  /** Retires one of the reader's own memories (memories.ts). */
-  async retireMemory(request: RetireRequest): Promise<MemoryChangeOutcome> {
-    const { memory, reader } = checked(retireRequestSchema, request);
+  /** Retires one of the writer's own memories the reader may read (memories.ts). */
+  async retireMemory(request: RetireRequest): Promise<RetiredMemory | null> {
+    const { memory, reader, writer, change } = checked(
+      retireRequestSchema,
+      request
+    );
     this.#mayRead(reader);
     return await this.#changing(async () => {
       if (!(await this.#readable())) {
-        return "nothing";
+        return null;
       }
       return this.ctx.storage.transactionSync(() => {
         // Refused while a restore runs, as an add is (restoring.ts).
         if (isRestoring(this.ctx.storage.sql)) {
           throw new Error(restoringNow);
         }
-        return retireMemory(this.ctx.storage.sql, { id: memory, reader });
+        return retireMemory(this.ctx.storage.sql, {
+          id: memory,
+          reader,
+          writer,
+          change,
+        });
       });
     });
   }

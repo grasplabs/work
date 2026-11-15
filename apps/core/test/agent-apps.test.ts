@@ -6,7 +6,6 @@ import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
 import { release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { readCollection } from "./knowledge.ts";
 import type { ProviderReply } from "./model-provider.ts";
 import { notesFiles } from "./notes-client-app.ts";
 import { signedInApi } from "./sign-in.ts";
@@ -41,13 +40,8 @@ const setUp = async (
   const person =
     personRole === undefined ? builder : await signedInApi(idp, personRole);
   const chat = await chatOf(person.userId, ...script(app));
-  /** Grants the agent reading the Apps collection, and the App. */
+  /** Grants the agent reading the App. */
   const grant = async () => {
-    await requestGranted(
-      idp,
-      admin,
-      readCollection(chat.agent, "apps", "APP_LIBRARY")
-    );
     await requestGranted(idp, admin, {
       subject: chat.agent,
       object: { type: "app", appId: app },

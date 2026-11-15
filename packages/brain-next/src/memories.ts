@@ -18,8 +18,12 @@ import type {
   MemoryId,
   PersonReader,
   Reader,
+  RecallRequest,
+  RetiredMemory,
   SourceVersionRef,
 } from "./contract.ts";
+import { byWordsFound } from "./order.ts";
+import type { MemoryOrder } from "./order.ts";
 import { readableSql } from "./reader-sets.ts";
 import { termsOf } from "./words.ts";
 
@@ -77,14 +81,53 @@ const readableKeysSql = `SELECT key FROM reader_sets
     WHERE id IN (SELECT reader_set FROM readable)`;
 
 /**
+ * Whether the row `erasure` of `erasures` is an erasure of the writer
+ * whose lineage's SHA-256 is `subject` made after the moment `at` (SQL
+ * expressions): one seek of `erasures_writer_idx`, however often the
+ * writer was erased. The one rule of what a writer's erasure covers.
+ */
+export const writerErasedAfterSql = (
+  erasure: string,
+  subject: string,
+  at: string
+): string =>
+  `(${erasure}.kind = 'writer' AND ${erasure}.subject = ${subject}
+    AND ${erasure}.erased_at > ${at})`;
+
+/** Whether the row `erasure` of `erasures` covers the memory `memory` (`writerErasedAfterSql`). */
+export const erasedBySql = (memory: string, erasure: string): string =>
+  writerErasedAfterSql(
+    erasure,
+    `${memory}.writer_subject`,
+    `${memory}.learned_at`
+  );
+
+/**
+ * Whether no erasure of the memory `alias`'s writer came after it was
+ * learned (erasure.ts `eraseWriter`): a writer's erasure hides, from the
+ * statement that records it on, every memory of that writer learned
+ * before it, until the tick deletes them, also those an older copy of the
+ * store comes back with (a restore of an export writes none: restore.ts
+ * `passesOverMemory`); what the writer adds afterwards is learned after it.
+ * Asked of every memory a statement may read, count, link or export.
+ */
+export const unerasedSql = (alias: string): string => `(
+  ${alias}.writer_subject IS NULL OR NOT EXISTS (
+    SELECT 1 FROM erasures AS gone WHERE ${erasedBySql(alias, "gone")}
+  )
+)`;
+
+/**
  * The conditions under which the memory `alias` is visible to the reader:
  * in its set of readers, and, resting on a version, in that version's and
- * its source's current version's, that version not hidden by an erasure.
+ * its source's current version's, that version not hidden by an erasure;
+ * and no erasure of its writer since it was learned (`unerasedSql`).
  */
 export const visibleSql = (alias: string): string => `(
   ${alias}.readers IN (${readableKeysSql})
   AND (${alias}.source IS NULL
     OR ${versionVisibleSql(`${alias}.source`, `${alias}.version`)})
+  AND ${unerasedSql(alias)}
 )`;
 
 /**
@@ -335,7 +378,7 @@ const latestStamp = (sql: SqlStorage): number =>
     .at(0)?.latest ?? 0;
 
 /** The stamp the next write gets (`stampWrite`), not yet kept. */
-const nextStamp = (sql: SqlStorage): number =>
+export const nextStamp = (sql: SqlStorage): number =>
   Math.max(Date.now(), latestStamp(sql)) + 1;
 
 /** `stamp` kept as the latest a write was given. */
@@ -362,6 +405,18 @@ export const stampWrite = (sql: SqlStorage): number => {
 };
 
 /**
+ * Keeps `at` as the latest stamp if it is later, in the caller's
+ * transaction: a writer's erasure (erasure.ts), so every write after it,
+ * also after a replay of it into an older copy of the store, is stamped
+ * after it. Never lowers it.
+ */
+export const raiseStamp = (sql: SqlStorage, at: number): void => {
+  if (at > latestStamp(sql)) {
+    keepStamp(sql, at);
+  }
+};
+
+/**
  * The moment a read of now is given: now, or the latest stamp if later,
  * so it sees every write made before it; what its cursor carries. If the
  * clock goes back, reads keep to the latest stamp until it catches up:
@@ -379,8 +434,8 @@ export const lineageOfWriter = (writer: string): string => `writer:${writer}`;
 export const lineageOfSource = (source: string): string => `source:${source}`;
 
 /** A date of a memory, from its milliseconds. */
-const dateOf = (at: number | null): Date | null =>
-  at === null ? null : new Date(at);
+export const dateOf = (at: number | null | undefined): Date | null =>
+  at === null || at === undefined ? null : new Date(at);
 
 /** A confirmation as `confirmationSql` builds it. */
 const confirmationSchema = z.strictObject({
@@ -996,56 +1051,158 @@ export const confirmMemory = (
 };
 
 /**
- * Retires the memory `id` if its lineage is the reader's person's own (as
- * writer), the reader may read it, it is not retired, and it is in its
- * world time now: current, or ended by a newer memory of its lineage,
- * which a person forgets as well, so it never becomes current again when
- * the newer one is retired too. One they already retired answers `done`
- * again (contract.ts `retireMemory`).
+ * Retires the memory `id` if its lineage is `writer`'s own, the reader may
+ * read it, it is not retired, and it is in its world time now: current, or
+ * ended by a newer memory of its lineage, which a writer forgets as well,
+ * so it never becomes current again when the newer one is retired too.
+ * Answers when it was retired and by which change (`change`, kept with
+ * it), as recorded: one this writer already retired answers its recorded
+ * time and change again, never new ones, whatever change the call names,
+ * so a retry answers what the first try did and another call learns it
+ * wasn't the one (contract.ts `retireMemory`). Null alike
+ * for no such memory, another writer's (retired or not), one the reader
+ * may not read and one that expired before it was retired.
  */
 export const retireMemory = (
   sql: SqlStorage,
-  { id, reader }: { id: string; reader: PersonReader }
-): MemoryChangeOutcome => {
+  {
+    id,
+    reader,
+    writer,
+    change,
+  }: { id: string; reader: Reader; writer: string; change: string }
+): RetiredMemory | null => {
   const asked = [
     id,
     reader.person,
     JSON.stringify(reader.groups),
-    lineageOfWriter(reader.person),
+    lineageOfWriter(writer),
     readMoment(sql),
   ];
   const stamp = nextStamp(sql);
-  const retired = sql.exec(
-    `WITH ${readableSql}
-    UPDATE memories AS m SET retired_at = ?6
-    WHERE m.id = ?1 AND m.lineage = ?4 AND m.retired_at IS NULL
-      AND (m.valid_from IS NULL OR m.valid_from <= ?5)
-      AND (m.valid_until IS NULL OR m.valid_until > ?5)
-      AND ${visibleSql("m")}`,
-    ...asked,
-    stamp
-  );
-  retired.toArray();
-  if (retired.rowsWritten > 0) {
-    keepStamp(sql, stamp);
-    return "done";
-  }
-  // Retired already, by this writer, and the reader may read it: a retry.
-  const again = sql
-    .exec(
+  const [retired] = sql
+    .exec<{ retired_at: number; retired_change: string | null }>(
       `WITH ${readableSql}
-      SELECT 1 FROM memories AS m
+      UPDATE memories AS m SET retired_at = ?6, retired_change = ?7
+      WHERE m.id = ?1 AND m.lineage = ?4 AND m.retired_at IS NULL
+        AND (m.valid_from IS NULL OR m.valid_from <= ?5)
+        AND (m.valid_until IS NULL OR m.valid_until > ?5)
+        AND ${visibleSql("m")}
+      RETURNING retired_at, retired_change`,
+      ...asked,
+      stamp,
+      change
+    )
+    .toArray();
+  if (retired !== undefined) {
+    keepStamp(sql, stamp);
+    return {
+      retiredAt: new Date(retired.retired_at),
+      change: retired.retired_change,
+    };
+  }
+  // Retired already, by this writer, and the reader may read it: a retry
+  // or another call, answered with the time and change recorded then.
+  const [again] = sql
+    .exec<{ retired_at: number; retired_change: string | null }>(
+      `WITH ${readableSql}
+      SELECT m.retired_at, m.retired_change FROM memories AS m
       WHERE m.id = ?1 AND m.lineage = ?4 AND m.retired_at <= ?5
         AND ${visibleSql("m")}`,
       ...asked
     )
     .toArray();
-  return again.length > 0 ? "done" : "nothing";
+  return again === undefined
+    ? null
+    : { retiredAt: new Date(again.retired_at), change: again.retired_change };
 };
 
 /**
- * `?1` the question's telling terms (JSON, words.ts `Term`): the memories
- * that hold any, in any form, with how many they hold so and as written.
+ * The reader's use (the request's `used`) as recall cuts by it: each
+ * memory's id to the latest moment they used it, in milliseconds.
+ */
+export type UsedAt = ReadonlyMap<string, number>;
+
+/** `used` as recall cuts by it (`UsedAt`): the latest use of each memory. */
+export const usedAtOf = (used: RecallRequest["used"] = []): UsedAt => {
+  const latest = new Map<string, number>();
+  for (const { memory, at } of used) {
+    latest.set(memory, Math.max(latest.get(memory) ?? 0, at.getTime()));
+  }
+  return latest;
+};
+
+/**
+ * What a statement returns of each candidate it judged instead of the
+ * memory itself, so the store orders and cuts them (`cutMemories`):
+ * `rows` as `memoriesSql`'s `outer` gives them, and what the way scores
+ * them by besides.
+ */
+export const candidatesOuter = (score = ""): string => `
+SELECT row, id, confirmation IS NOT NULL AS confirmed, learned_at${score}
+FROM rows`;
+
+/** A candidate as `candidatesOuter` returns it. */
+export interface CandidateRow extends Record<string, SqlStorageValue> {
+  row: number;
+  id: string;
+  confirmed: number;
+  learned_at: number;
+}
+
+/** `candidate` as `byFreshness` (order.ts) orders it, with the reader's use. */
+export const orderOf = (
+  { id, confirmed, learned_at: learnedAt }: CandidateRow,
+  used: UsedAt
+): MemoryOrder => ({
+  confirmed: confirmed === 1,
+  learnedAt,
+  usedAt: used.get(id) ?? null,
+  id,
+});
+
+/**
+ * `?1` the rows of memories a cut chose (JSON): those of them the reader
+ * may read that are current as of `?4`, judged again here, in the same
+ * statement as they are read (`memoriesSql`): never trusted from the
+ * statement that chose them.
+ */
+const chosenSql = memoriesSql({
+  base: `SELECT m.row FROM json_each(?1) AS asked
+    CROSS JOIN memories AS m ON m.row = asked.value`,
+  filter: "judged.is_current = 1",
+  order: "m.row",
+});
+
+/**
+ * The memories of `chosen` (rows, in their order) the reader may read and
+ * that are current as of `at`, read whole, in that order: a cut's second
+ * statement, after the one that judged and chose them (`candidatesOuter`).
+ * Run in the same synchronous step as that one, with no await between, so
+ * both read one snapshot; and judged again all the same, so one that is
+ * not readable or current gives nothing.
+ */
+export const chosenMemories = (
+  sql: SqlStorage,
+  chosen: readonly number[],
+  reader: Reader,
+  at: number
+): MemoryRow[] => {
+  if (chosen.length === 0) {
+    return [];
+  }
+  const read = new Map(
+    memoryRows(sql, chosenSql, JSON.stringify(chosen), reader, at, -1).map(
+      (row) => [row.row, row]
+    )
+  );
+  return chosen.flatMap((row) => read.get(row) ?? []);
+};
+
+/**
+ * `?1` the question's telling terms (JSON, words.ts `Term`): the current
+ * memories the reader may read that hold any, in any form, with how many
+ * they hold so and as written, as candidates (`candidatesOuter`).
  */
 const wordsSql = memoriesSql({
   prelude: `found AS MATERIALIZED (
@@ -1069,8 +1226,8 @@ matched AS MATERIALIZED (
   joins: "\nJOIN matched ON matched.row = m.row",
   columns: ", matched.words AS words, matched.exact AS exact",
   filter: "judged.is_current = 1",
-  order: `matched.words DESC, matched.exact DESC, confirmation IS NULL,
-  m.learned_at DESC, m.id DESC`,
+  order: "m.row",
+  outer: candidatesOuter(", words, exact"),
 });
 
 /**
@@ -1080,17 +1237,24 @@ matched AS MATERIALIZED (
 export interface MemoryFound extends Memory {
   words: number;
   exact: number;
+  usedAt: Date | null;
 }
 
 /**
  * The current memories the reader may read, as of `at` (milliseconds),
- * that hold the question's telling words in any form, best first: more
- * of them, then more of them as written, then confirmed, then newer. At
- * most `limit` (`recallLimit` by default). For recall's words way: each
- * memory is scored on its own words alone, never on how often a word is
- * in what the reader may not read. Synchronous, so it reads the same
- * snapshot as the rest of a recall. It takes one moment, `at`: what the
- * store learned and the dates a fact is true are judged at the same one.
+ * that hold the question's telling words in any form, best first, as
+ * order.ts `byWordsFound` orders them: more of them, then more of them as
+ * written, then confirmed, fresher for the reader (`used`), newer. At
+ * most `recallLimit`, cut in that order. For
+ * recall's words way: each memory is scored on its own words alone, never
+ * on how often a word is in what the reader may not read.
+ *
+ * Two statements: the first judges every memory that holds a word and
+ * returns only what it is ordered by; the store orders and cuts them; the
+ * second reads the chosen whole (`chosenMemories`). Synchronous, with no
+ * await between them, so both read the same snapshot as the rest of a
+ * recall. It takes one moment, `at`: what the store learned and the dates
+ * a fact is true are judged at the same one.
  */
 export const memoriesByWords = (
   sql: SqlStorage,
@@ -1098,24 +1262,47 @@ export const memoriesByWords = (
     question,
     reader,
     at,
-    limit = recallLimit,
-  }: { question: string; reader: Reader; at: number; limit?: number }
+    used = new Map(),
+  }: {
+    question: string;
+    reader: Reader;
+    at: number;
+    used?: UsedAt;
+  }
 ): MemoryFound[] => {
   const { telling } = termsOf(question);
   if (telling.length === 0) {
     return [];
   }
-  return memoryRowsAt(
+  const candidates = sql
+    .exec<CandidateRow & { words: number; exact: number }>(
+      wordsSql,
+      JSON.stringify(telling),
+      reader.person,
+      JSON.stringify(reader.groups),
+      at,
+      -1,
+      ...Array.from<null>({ length: bindingsBeforeValid + 1 }).fill(null)
+    )
+    .toArray()
+    .map((candidate) => ({
+      ...orderOf(candidate, used),
+      row: candidate.row,
+      words: candidate.words,
+      exact: candidate.exact,
+    }))
+    .toSorted(byWordsFound)
+    .slice(0, recallLimit);
+  const counts = new Map(candidates.map((found) => [found.row, found]));
+  return chosenMemories(
     sql,
-    wordsSql,
-    null,
-    JSON.stringify(telling),
+    candidates.map(({ row }) => row),
     reader,
-    at,
-    limit
+    at
   ).map((row) => ({
     ...memoryOf(row),
-    words: Number(row.words),
-    exact: Number(row.exact),
+    words: counts.get(row.row)?.words ?? 0,
+    exact: counts.get(row.row)?.exact ?? 0,
+    usedAt: dateOf(used.get(row.id)),
   }));
 };

@@ -702,7 +702,7 @@ const ModelSpend = ({ report }: { report: BrainReport }) => {
  */
 const Ledger = ({ report }: { report: BrainReport }) => {
   const { ledger } = report;
-  const unwritten = ledger.source.unwritten + ledger.person.unwritten;
+  const { unwritten } = ledger.source;
   return (
     <Collapsible defaultOpen={unwritten > 0}>
       <Section
@@ -715,7 +715,7 @@ const Ledger = ({ report }: { report: BrainReport }) => {
         title="Erasures"
       >
         <SectionRow
-          description="Erased sources and people, whole, with their ledger entry written."
+          description="Erased sources, whole, with their ledger entry written."
           label="In the ledger"
         >
           <span className="flex items-center gap-3">
@@ -725,7 +725,7 @@ const Ledger = ({ report }: { report: BrainReport }) => {
               </Badge>
             ) : null}
             <span className="tabular-nums">
-              {`${whole(ledger.source.written)} ${plural(ledger.source.written, "source", "sources")}, ${whole(ledger.person.written)} ${plural(ledger.person.written, "person", "people")}`}
+              {`${whole(ledger.source.written)} ${plural(ledger.source.written, "source", "sources")}`}
             </span>
           </span>
         </SectionRow>

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "8be12142-6b3b-478c-80bf-980e10d7645c",
+  "id": "25016359-d8fb-468e-820c-2fd5d38de94a",
   "prevId": "19cd9d80-c60c-4473-8d33-8192da5eab32",
   "tables": {
     "chunks": {
@@ -520,6 +520,13 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "memories": {
+          "name": "memories",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -1018,6 +1025,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "writer_subject": {
+          "name": "writer_subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "lineage": {
           "name": "lineage",
           "type": "text",
@@ -1063,6 +1077,13 @@
         "retired_at": {
           "name": "retired_at",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "retired_change": {
+          "name": "retired_change",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -1137,6 +1158,14 @@
           "name": "memories_readers_idx",
           "columns": [
             "readers"
+          ],
+          "isUnique": false
+        },
+        "memories_writer_idx": {
+          "name": "memories_writer_idx",
+          "columns": [
+            "writer_subject",
+            "learned_at"
           ],
           "isUnique": false
         }
@@ -1891,15 +1920,7 @@
           "autoincrement": false
         }
       },
-      "indexes": {
-        "unembeddable_hash_idx": {
-          "name": "unembeddable_hash_idx",
-          "columns": [
-            "hash"
-          ],
-          "isUnique": false
-        }
-      },
+      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {
         "unembeddable_model_hash_pk": {
@@ -2513,13 +2534,6 @@
           ],
           "isUnique": false,
           "where": "parked_at IS NOT NULL"
-        },
-        "work_items_key_idx": {
-          "name": "work_items_key_idx",
-          "columns": [
-            "key"
-          ],
-          "isUnique": false
         }
       },
       "foreignKeys": {},

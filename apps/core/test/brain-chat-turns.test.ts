@@ -1366,3 +1366,49 @@ describe("a turn whose note keeps failing", () => {
     });
   });
 });
+
+describe("a turn delivered again", () => {
+  it("is noted once however often its capture is delivered, before a drain or after it took the first", async () => {
+    const { person, stub, chatId, ask } = await chatter(says("Noted."));
+    const head = await allEvents();
+    await ask(`Note this ${word()}?`);
+    const [first] = await vi.waitFor(
+      async () => {
+        const noted = await notedEvents(person.userId, chatId);
+        expect(noted, "the turn was noted").toHaveLength(1);
+        return noted;
+      },
+      { timeout: 15_000, interval: 100 }
+    );
+    const answerId = Number(first?.target?.id.split("/").at(-1));
+    const capture = { outcome: "answered", answerId, attended: true } as const;
+    // Delivered again after the drain took the first, twice at once, as a
+    // call retried and a capture whose retire failed deliver it.
+    await Promise.all([
+      stub.captureTurn(chatId, capture),
+      stub.captureTurn(chatId, capture),
+    ]);
+    // And again while the log is out of reach: the outbox keeps it once.
+    const putBack = await auditLogOutOfReach(stub);
+    await stub.captureTurn(chatId, capture);
+    await stub.captureTurn(chatId, capture);
+    const outbox = await outboxOf(stub);
+    const held = outbox.filter(
+      ({ action }) => action === "chat.turn_noted"
+    ).length;
+    await putBack();
+    await runInDurableObject(stub, async (_, state) => {
+      await drainObjectOutbox(env, state.storage.sql, loneNotesPerDrain);
+    });
+    const after = await allEvents();
+
+    expect({
+      held,
+      noted: await notedEvents(person.userId, chatId),
+      gaps: after
+        .slice(head.length)
+        .filter(({ action }) => action === "audit.gap").length,
+      left: await outboxLeft(stub),
+    }).toStrictEqual({ held: 1, noted: [first], gaps: 0, left: 0 });
+  });
+});

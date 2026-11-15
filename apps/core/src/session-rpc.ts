@@ -16,8 +16,6 @@ import { DraftsRpc } from "./drafts-rpc.ts";
 import { HeldStartsRpc } from "./held-starts-rpc.ts";
 import { InstructionsRpc } from "./instructions-rpc.ts";
 import { KnowledgeRpc } from "./knowledge/rpc.ts";
-import { KnowledgeSignalsRpc } from "./knowledge/signals-rpc.ts";
-import { UploadsRpc } from "./knowledge/uploads-rpc.ts";
 import { MembersRpc } from "./members.ts";
 import { ModelsRpc } from "./models-rpc.ts";
 import { NotificationsRpc } from "./notifications.ts";
@@ -66,9 +64,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #brainSources: BrainSourcesRpc;
   readonly #skills: SkillsRpc;
   readonly #brainMemories: BrainMemoriesRpc;
-  readonly #knowledgeSignals: KnowledgeSignalsRpc;
   readonly #instructions: InstructionsRpc;
-  readonly #uploads: UploadsRpc;
   readonly #permissions: PermissionsRpc;
   readonly #resourceBindings: ResourceBindingsRpc;
   readonly #connections: ConnectionsRpc;
@@ -116,9 +112,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#brainSources = new BrainSourcesRpc(env, full);
     this.#skills = new SkillsRpc(env, full);
     this.#brainMemories = new BrainMemoriesRpc(env, full);
-    this.#knowledgeSignals = new KnowledgeSignalsRpc(env, full);
     this.#instructions = new InstructionsRpc(env, full);
-    this.#uploads = new UploadsRpc(env, full);
     this.#permissions = new PermissionsRpc(env, full);
     this.#resourceBindings = new ResourceBindingsRpc(env, full);
     this.#connections = new ConnectionsRpc(env, full);
@@ -164,7 +158,6 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
       onboarding: this.#onboarding,
       workflows: this.#workflows,
       signals: this.#signals,
-      knowledgeSignals: this.#knowledgeSignals,
       apps: this.#apps,
     });
   }
@@ -229,16 +222,8 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     return this.#brainMemories;
   }
 
-  get knowledgeSignals(): KnowledgeSignalsRpc {
-    return this.#knowledgeSignals;
-  }
-
   get instructions(): InstructionsRpc {
     return this.#instructions;
-  }
-
-  get uploads(): UploadsRpc {
-    return this.#uploads;
   }
 
   get permissions(): PermissionsRpc {
