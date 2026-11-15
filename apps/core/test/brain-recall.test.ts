@@ -1,7 +1,7 @@
 import type { MemoryPack, RecallInput } from "@grasp-os/brain/contract";
 import { recall } from "@grasp-os/brain/recall";
 import { d1BrainStore } from "@grasp-os/brain/recall-store";
-import type { KnowledgeApi, PurgeInput } from "@grasp-os/shared/knowledge";
+import type { KnowledgeApi } from "@grasp-os/shared/knowledge";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -9,6 +9,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { brainOf } from "../src/knowledge/ports.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { seed } from "./knowledge.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
 // The Brain's recall (knowledge/recall.ts), through the boundaries callers
@@ -58,11 +59,11 @@ const collectionSaying = async (
   access: "everyone" | "me",
   text: string
 ) => {
-  const { id: collectionId } = await owner.knowledge.createCollection({
+  const { id: collectionId } = await seed(owner).createCollection({
     name: `Handbook ${unique()}`,
     access,
   });
-  const document = await owner.knowledge.saveDocument({
+  const document = await seed(owner).saveDocument({
     collectionId,
     path: "onboarding.md",
     text,
@@ -89,7 +90,7 @@ describe("the Brain's recall", setUpTime, () => {
       `# Onboarding\n\n## Owner\nJan owns ${word}.`
     );
     const first = await admin.knowledge.recall({ query: word });
-    await admin.knowledge.saveDocument({
+    await seed(admin).saveDocument({
       collectionId,
       path: "onboarding.md",
       text: `# Onboarding\n\n## Owner\nPriya owns ${word} now.`,
@@ -127,50 +128,6 @@ describe("the Brain's recall", setUpTime, () => {
       locator: ["Onboarding", "Onboarding", "Owner"],
     });
   });
-
-  it(
-    "keeps a pinned version only as its text was pinned, though the same version was pinned again after a purge",
-    setUpTime,
-    async () => {
-      const admin = await personOf("admin");
-      const word = rareWord();
-      const term = rareWord();
-      const { collectionId, documentId } = await collectionSaying(
-        admin,
-        "everyone",
-        `# Onboarding\n\n${word} ${term}`
-      );
-      const reader = {
-        type: "person" as const,
-        person: await admin.api.whoami(),
-      };
-      const store = d1BrainStore(brainOf(env));
-      const ref = { collectionId, documentId, version: 1 };
-      const [before] = await store.pinsOf(reader, [ref]);
-      // Rewrites version 1 in place, without the term.
-      const purge: PurgeInput = {
-        type: "content",
-        documentIds: [documentId],
-        terms: [term],
-        reason: "erasure_request",
-      };
-      const plan = await admin.knowledge.preparePurge(purge);
-      await admin.knowledge.purge(purge, plan.token);
-      const [after] = await store.pinsOf(reader, [ref]);
-      const pins = [before, after].filter((pin) => pin !== undefined);
-      const both = await outcome(store.requireDocumentsReadable(reader, pins));
-
-      expect({
-        rewritten: before?.text !== after?.text,
-        unchanged: await store.unchangedPins(reader, pins),
-        both,
-      }).toStrictEqual({
-        rewritten: true,
-        unchanged: [after],
-        both: "brain.not_found",
-      });
-    }
-  );
 
   it("finds a question's section by its words, the one holding most of them first", async () => {
     const admin = await personOf("admin");

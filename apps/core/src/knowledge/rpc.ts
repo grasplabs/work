@@ -26,13 +26,7 @@ import {
   history,
   listDocuments,
 } from "@grasp-os/brain/documents";
-import type { Writer } from "@grasp-os/brain/documents";
-import {
-  decideEntityMatch,
-  entitiesFor,
-  entityMatchProposals,
-  entitySources,
-} from "@grasp-os/brain/entities";
+import { entitiesFor, entitySources } from "@grasp-os/brain/entities";
 import {
   lessonLineage,
   lessonsFor,
@@ -44,185 +38,32 @@ import {
   receiptsGet,
 } from "@grasp-os/brain/memories";
 import { memoriesLineage } from "@grasp-os/brain/memory-lineage";
-import { finishPurgeById, preparePurge, purge } from "@grasp-os/brain/purge";
-import type { OnErase } from "@grasp-os/brain/purge";
-import { purgeStatus } from "@grasp-os/brain/purge-ledger";
 import { recall } from "@grasp-os/brain/recall";
 import { relationsExplain, relationsFor } from "@grasp-os/brain/relations";
 import { search } from "@grasp-os/brain/search";
 import { follow, read } from "@grasp-os/brain/tools";
-import { knowledgeErrors, purgeInputSchema } from "@grasp-os/shared/knowledge";
 import type {
   BacklinkPage,
   Collection,
-  CollectionInput,
-  CopySkillInput,
   DocumentPage,
   DocumentRead,
-  DocumentSummary,
-  EntityMatch,
-  EntityMatchDecision,
   FollowResult,
   HistoryOptions,
   HistoryPage,
   KnowledgeApi,
   KnowledgeRead,
   ListDocumentsOptions,
-  PurgeInput,
-  PurgePlan,
-  PurgeResult,
-  PurgeStatus,
   ReadOptions,
-  RestoreInput,
-  SaveInput,
   SearchOptions,
   SearchResults,
-  SkillCollections,
 } from "@grasp-os/shared/knowledge";
-import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
-import type { Identity } from "@grasp-os/shared/rpc";
-import { and, eq, isNull } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
-import { z } from "zod";
 
-import { gapAnswerErasure } from "../brain-gaps.ts";
-import { brainRecordErasure } from "../brain-records.ts";
-import { personErasures } from "../db/core/schema.ts";
-import { documentReadingErasure } from "../onboarding/document-erasure.ts";
-import {
-  drawingErasure,
-  interviewErasure,
-} from "../onboarding/interview-erasure.ts";
-import { kickoffErasure } from "../onboarding/kickoff-erasure.ts";
-import { staffTextErasure } from "../onboarding/staff-text-erasure.ts";
 import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
 import type { Reader } from "./access.ts";
-import { createCollection, listCollections } from "./collection-rules.ts";
-import { copySkill, skillCollections } from "./grasp-skills.ts";
-import { personWriter, restoreVersion, saveDocument } from "./person-writes.ts";
+import { listCollections } from "./collection-rules.ts";
 import { brainOf } from "./ports.ts";
-import { uploadErasure } from "./uploads.ts";
-
-/** The copies of people's words in core's own tables, as `OnErase` reaches them. */
-type Copies = Pick<OnErase, "rewrite" | "forgetActor">;
-
-/** `copies` as one: each rewritten and forgotten in turn. */
-const allOf = (copies: readonly Copies[]): Copies => ({
-  rewrite: async (by, rewrite, between) => {
-    for (const [index, each] of copies.entries()) {
-      if (index > 0) {
-        // oxlint-disable-next-line no-await-in-loop -- the purge's hold renewed between tables
-        await between?.();
-      }
-      // oxlint-disable-next-line no-await-in-loop -- one table after another
-      await each.rewrite(by, rewrite);
-    }
-  },
-  forgetActor: async (by, userId) => {
-    for (const each of copies) {
-      // oxlint-disable-next-line no-await-in-loop -- one table after another
-      await each.forgetActor(by, userId);
-    }
-  },
-});
-
-/**
- * What a purge reaches of core's own copies (purge.ts `OnErase`): the
- * brain's gap answers and records, the kickoff, the interviews and staff's
- * own text, the originals of uploaded files, and the
- * onboarding's readings of the documents shared in it with what was drawn
- * from them.
- */
-export const coreErasure = (env: Env): OnErase => ({
-  ...allOf([
-    // The kickoff first: once it is gone, nothing gives the brain its
-    // words again while the records are rewritten.
-    kickoffErasure(env),
-    // The interviews' words, and what was drawn from them, before the
-    // brain's records: an intake after reads them as the purge left
-    // them, and one before gave the brain words its records step then
-    // rewrites. Each intake runs under the onboarding's brain lock, as
-    // each of these does.
-    interviewErasure(env),
-    drawingErasure(env),
-    // Staff's own notes and Stephen's setup: a purge of terms only, never
-    // one naming a document (it has no `forgetDocuments`).
-    staffTextErasure(env),
-    gapAnswerErasure(env),
-    brainRecordErasure(env),
-    // A reading names no person: there is no one to forget in it.
-    {
-      ...documentReadingErasure(env),
-      forgetActor: async () => {
-        // Nothing to forget.
-      },
-    },
-  ]),
-  ...uploadErasure(env),
-  // No copy core keeps is a Knowledge document's by its place: the
-  // onboarding's readings were the one, and their files are uploads in
-  // the Brain since GRA-1889 (onboarding/document-erasure.ts).
-  forgetDocuments: async () => {
-    // Nothing to forget.
-  },
-  // Nothing of core's writes a document's text back after a purge: the
-  // Apps collection's entries were the one, made from each App, and core
-  // indexes Apps there no more.
-  requireRewritable: async () => {
-    // Nothing to require.
-  },
-});
-
-/** A purge's ID, as a purge answers it. */
-const purgeIdSchema = z.uuid();
-
-/**
- * Refuses a purge to anyone but an admin (not Grasp staff, who reach a
- * purge only through the admin they help): Knowledge's purge takes no
- * roles, so core checks before it, as the person who purges.
- */
-const purgerOf = (person: Identity): Writer => {
-  if (person.staff || !isAdmin(person.role)) {
-    throw roleErrors.create("role.forbidden");
-  }
-  return personWriter(person);
-};
-
-/**
- * Refuses a personal purge of anyone nobody is erasing now: it takes
- * everything only they read (purge.ts), which is theirs alone, admins'
- * included, while they are a member. Only their erasure runs one
- * (person-erasure.ts), so this lets one through while it is unfinished,
- * for an admin to finish by hand; before anything is counted, read or
- * recorded. A content purge is not a person's: it passes.
- */
-const requireErasing = async (env: Env, input: PurgeInput): Promise<void> => {
-  // Read as the purge reads it (purge.ts), so no shape it takes for a
-  // person's slips past.
-  const purging = knowledgeErrors.parse(
-    "knowledge.invalid",
-    purgeInputSchema,
-    input
-  );
-  if (purging.type !== "personal") {
-    return;
-  }
-  const erasing = await drizzle(env.DB)
-    .select({ userId: personErasures.userId })
-    .from(personErasures)
-    .where(
-      and(
-        eq(personErasures.userId, purging.userId),
-        isNull(personErasures.completedAt)
-      )
-    )
-    .get();
-  if (erasing === undefined) {
-    throw knowledgeErrors.create("knowledge.purge_not_erasing");
-  }
-};
 
 /**
  * Knowledge for a signed-in person over `/rpc`. Like the session API, it
@@ -292,38 +133,9 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     );
   }
 
-  // Entity matches (GRA-1080), as the signed-in person alone reads them
-  // (`#asReader`: never a reader a request names). The Brain asks the
-  // recall grant first and records each call, a read or an audited
-  // decision. Grasp's staff never get here: the session's full-access
-  // check refuses them before either call. Nothing here reaches a model,
-  // and neither takes a name to look for: a filter on a name would make
-  // probing targeted.
-
-  async entityMatches(options?: unknown): Promise<EntityMatch[]> {
-    return await this.#asReader(
-      async (reader) =>
-        await entityMatchProposals(brainOf(this.#env), reader, options)
-    );
-  }
-
-  async decideEntityMatch(input: unknown): Promise<EntityMatchDecision> {
-    return await this.#asReader(
-      async (reader) =>
-        await decideEntityMatch(brainOf(this.#env), reader, input)
-    );
-  }
-
   async listCollections(): Promise<Collection[]> {
     return await this.#asReader(
       async (reader) => await listCollections(this.#env, reader)
-    );
-  }
-
-  async createCollection(input: CollectionInput): Promise<Collection> {
-    return await withPerson(
-      this.#check,
-      async (person) => await createCollection(this.#env, person, input)
     );
   }
 
@@ -347,13 +159,6 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     );
   }
 
-  async saveDocument(input: SaveInput): Promise<DocumentSummary> {
-    return await withPerson(
-      this.#check,
-      async (person) => await saveDocument(this.#env, person, input)
-    );
-  }
-
   async history(
     documentId: string,
     options?: HistoryOptions
@@ -361,13 +166,6 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     return await this.#asReader(
       async (reader) =>
         await history(brainOf(this.#env), reader, documentId, options)
-    );
-  }
-
-  async restoreVersion(input: RestoreInput): Promise<DocumentSummary> {
-    return await withPerson(
-      this.#check,
-      async (person) => await restoreVersion(this.#env, person, input)
     );
   }
 
@@ -434,75 +232,5 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     return await this.#asReader(
       async (reader) => await follow(brainOf(this.#env), reader, documentId)
     );
-  }
-
-  async skillCollections(): Promise<SkillCollections> {
-    return await withPerson(
-      this.#check,
-      async (person) => await skillCollections(this.#env, person)
-    );
-  }
-
-  async copySkill(input: CopySkillInput): Promise<DocumentSummary> {
-    return await withPerson(
-      this.#check,
-      async (person) => await copySkill(this.#env, person, input)
-    );
-  }
-
-  async preparePurge(input: PurgeInput): Promise<PurgePlan> {
-    return await withPerson(this.#check, async (person) => {
-      const by = purgerOf(person);
-      await requireErasing(this.#env, input);
-      return await preparePurge(
-        brainOf(this.#env),
-        by,
-        input,
-        coreErasure(this.#env)
-      );
-    });
-  }
-
-  async purgeStatus(purgeId: string): Promise<PurgeStatus> {
-    return await withPerson(this.#check, async (person) => {
-      purgerOf(person);
-      return await purgeStatus(
-        brainOf(this.#env),
-        knowledgeErrors.parse("knowledge.invalid", purgeIdSchema, purgeId)
-      );
-    });
-  }
-
-  async finishPurge(purgeId: string): Promise<PurgeStatus> {
-    return await withPerson(
-      this.#check,
-      async (person) =>
-        await finishPurgeById(
-          brainOf(this.#env),
-          purgerOf(person),
-          knowledgeErrors.parse("knowledge.invalid", purgeIdSchema, purgeId)
-        )
-    );
-  }
-
-  async purge(
-    input: PurgeInput,
-    token: string,
-    options?: { fresh?: boolean }
-  ): Promise<PurgeResult> {
-    return await withPerson(this.#check, async (person) => {
-      const by = purgerOf(person);
-      await requireErasing(this.#env, input);
-      return await purge(
-        brainOf(this.#env),
-        by,
-        input,
-        token,
-        coreErasure(this.#env),
-        // Only a boolean: a client's value is checked here, as Cap'n
-        // Web checks no types.
-        { fresh: options?.fresh === true }
-      );
-    });
   }
 }

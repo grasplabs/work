@@ -1,7 +1,7 @@
 import type { BrainRecordInput } from "@grasp-os/shared/brain-records";
-import { kickoffErrors, visionFields } from "@grasp-os/shared/kickoff";
+import { visionFields } from "@grasp-os/shared/kickoff";
 import type { VisionField } from "@grasp-os/shared/kickoff";
-import type { PurgeInput } from "@grasp-os/shared/knowledge";
+import { purgedMarker } from "@grasp-os/shared/knowledge";
 import type { RosterInput } from "@grasp-os/shared/onboarding";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -13,7 +13,7 @@ import { onboardingStore } from "../src/onboarding/store.ts";
 import { adminKickoff } from "./admin-kickoff.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
-import { answeringProvider, fakeProvider } from "./model-provider.ts";
+import { fakeProvider } from "./model-provider.ts";
 import { auditedDuring, signedInApi, unique } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
 
@@ -1051,120 +1051,6 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
     ).toStrictEqual((kept.reading?.teams ?? []).map(({ name }) => name));
   });
 
-  it("refuses a transcript whose reading began before a content purge, so its words never come back", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const staff = adminKickoff();
-    const term = `Zq${unique()}`;
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
-      name: `Purged ${unique()}`,
-      access: "everyone",
-    });
-    const document = await admin.api.knowledge.saveDocument({
-      collectionId,
-      path: "note.md",
-      text: `# Note\n${term} was named.`,
-      ifVersion: 0,
-    });
-    const input: PurgeInput = {
-      type: "content",
-      documentIds: [document.id],
-      terms: [term],
-      reason: "erasure_request",
-    };
-    const before = await onboardingStore(env).kickoff();
-    // The model reads the transcript naming the term; the purge runs
-    // while it does.
-    const { promise: reading, resolve: read } =
-      Promise.withResolvers<boolean>();
-    const { promise: asked, resolve: ask } = Promise.withResolvers<boolean>();
-    await answeringProvider(async () => {
-      ask(true);
-      await reading;
-      return {
-        text: JSON.stringify({
-          ...kickoffReading,
-          teams: [{ name: "Legal", does: term, people: 3 }],
-        }),
-        inputTokens: 900,
-        outputTokens: 300,
-      };
-    });
-    /** The save, as its code: `saved`, or why it was refused. */
-    const saving = async (): Promise<string> => {
-      try {
-        await staff.saveKickoff({
-          locale: "en",
-          transcript: { text: `${kickoffTranscript}\nAnna (CEO): ${term}.` },
-        });
-        return "saved";
-      } catch (error) {
-        return kickoffErrors.codeOf(error) ?? String(error);
-      }
-    };
-    const saved = saving();
-    await asked;
-    const plan = await admin.api.knowledge.preparePurge(input);
-    await admin.api.knowledge.purge(input, plan.token);
-    read(true);
-    const after = await onboardingStore(env).kickoff();
-
-    expect({
-      saved: await saved,
-      // The kickoff as it was before: the save kept nothing.
-      same: after.transcript?.at === before.transcript?.at,
-    }).toStrictEqual({ saved: "kickoff.purged", same: true });
-  });
-
-  it("forgets the kickoff a content purge reaches, so no answer after gives the brain its words again", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const member = await signedInApi(idp, "user");
-    const staff = adminKickoff();
-    const term = `Zq${unique()}`;
-    await bringInKickoff({ pain: `Clients wait for ${term}.` });
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
-      name: `Purged ${unique()}`,
-      access: "everyone",
-    });
-    const document = await admin.api.knowledge.saveDocument({
-      collectionId,
-      path: "note.md",
-      text: `# Note\n${term} was named.`,
-      ifVersion: 0,
-    });
-    const input: PurgeInput = {
-      type: "content",
-      documentIds: [document.id],
-      terms: [term],
-      reason: "erasure_request",
-    };
-    const plan = await admin.api.knowledge.preparePurge(input);
-    // An answer at the same time as the purge, then two after it, as
-    // Greptile's case: another field, then the pain.
-    const [during] = await Promise.allSettled([
-      staff.answerKickoff("goals", "Faster closing."),
-      admin.api.knowledge.purge(input, plan.token),
-    ]);
-    const answered = await Promise.allSettled([
-      staff.answerKickoff("goals", "Faster closing."),
-      staff.answerKickoff("pain", "Late reports."),
-    ]);
-    const read = await member.api.brain.read();
-    const kickoff = await onboardingStore(env).kickoff();
-
-    expect({
-      during: during.status === "fulfilled" || during.status === "rejected",
-      kickoff: kickoff.transcript,
-      answered: answered.map(({ status }) => status),
-      holds: JSON.stringify(read).includes(term),
-    }).toStrictEqual({
-      during: true,
-      kickoff: null,
-      // Nothing to answer: the kickoff is gone.
-      answered: ["rejected", "rejected"],
-      holds: false,
-    });
-  });
-
   it("keeps the kickoff's records once their write failed, from the store's alarm", async () => {
     const member = await signedInApi(idp, "user");
     const staff = adminKickoff();
@@ -1197,63 +1083,22 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
     }).toStrictEqual({ answered: true, before: false, after: true });
   });
 
-  it("still names the kickoff as the source of its records after a purge forgot it", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const member = await signedInApi(idp, "user");
-    const term = `Zq${unique()}`;
-    await bringInKickoff({ pain: `Clients wait for ${term}.` });
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
-      name: `Purged ${unique()}`,
-      access: "everyone",
-    });
-    const document = await admin.api.knowledge.saveDocument({
-      collectionId,
-      path: "note.md",
-      text: `# Note\n${term} was named.`,
-      ifVersion: 0,
-    });
-    const input: PurgeInput = {
-      type: "content",
-      documentIds: [document.id],
-      terms: [term],
-      reason: "erasure_request",
-    };
-    const plan = await admin.api.knowledge.preparePurge(input);
-    await admin.api.knowledge.purge(input, plan.token);
-    const read = await member.api.brain.read();
-    const kickoff = await onboardingStore(env).kickoff();
-
-    expect({
-      kickoff: kickoff.transcript,
-      cites: read.vision?.sourceId,
-      // Earlier tests' interviews are sources too: the kickoff's alone here.
-      source: read.sources
-        .filter(({ id }) => id === "src-kickoff")
-        .map(({ id, title }) => ({ id, title })),
-      holds: JSON.stringify(read).includes(term),
-    }).toStrictEqual({
-      kickoff: null,
-      cites: "src-kickoff",
-      source: [{ id: "src-kickoff", title: "Kickoff" }],
-      holds: false,
-    });
-  });
-
-  it("joins no two teams a purge left named the same", async () => {
+  it("joins no two teams an earlier release's purge left named the same", async () => {
     const admin = await signedInApi(idp, "admin");
     const store = onboardingStore(env);
-    const [first, second] = [`Zq${unique()}`, `Zq${unique()}`];
-    // The kickoff names one team, an admin's record another: after the
-    // purge, both are "Legal (removed)".
+    // The kickoff names one team, an admin's record another, as a term
+    // purge of an earlier release left both: "Legal (removed)".
     await bringInKickoff();
     const { reading } = await store.kickoff();
     await store.saveKickoff(
       {
-        transcript: `${kickoffTranscript}\nAnna (CEO): Legal ${first}.`,
+        transcript: `${kickoffTranscript}\nAnna (CEO): Legal ${purgedMarker}.`,
         fileName: null,
         reading: {
           ...(reading ?? { fields: {}, ask: {}, teams: [] }),
-          teams: [{ name: `Legal ${first}`, does: "Contracts", people: 3 }],
+          teams: [
+            { name: `Legal ${purgedMarker}`, does: "Contracts", people: 3 },
+          ],
         },
       },
       { type: "system" },
@@ -1271,30 +1116,14 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
       {
         type: "team",
         id: `${source}-team`,
-        name: `Legal ${second}`,
+        name: `Legal ${purgedMarker}`,
         sourceId: source,
       },
     ]);
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
-      name: `Purged ${unique()}`,
-      access: "everyone",
-    });
-    const document = await admin.api.knowledge.saveDocument({
-      collectionId,
-      path: "note.md",
-      text: `# Note\n${first} and ${second} were named.`,
-      ifVersion: 0,
-    });
-    const input: PurgeInput = {
-      type: "content",
-      documentIds: [document.id],
-      terms: [first, second],
-      reason: "erasure_request",
-    };
-    const plan = await admin.api.knowledge.preparePurge(input);
-    await admin.api.knowledge.purge(input, plan.token);
     const { teams } = await admin.api.brain.read();
-    const removed = teams.filter(({ name }) => name.includes("(removed)"));
+    const removed = teams.filter(
+      ({ name }) => name === `Legal ${purgedMarker}`
+    );
 
     expect(
       removed

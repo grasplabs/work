@@ -5,19 +5,20 @@ import type {
 } from "@grasp-os/brain/contract";
 import { remember } from "@grasp-os/brain/memories";
 import { rebuildSearchIndex } from "@grasp-os/brain/search-erasure";
-import type { PurgeInput } from "@grasp-os/shared/knowledge";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 
 import { emailHashOf, emailKeyVersion } from "../src/erased-people.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
+import { purgeFromKnowledge } from "../src/person-erasure.ts";
 import type { Idp } from "./idp.ts";
-import { ownCollectionOf } from "./knowledge.ts";
-import { openRpc, signedInApi, unique } from "./sign-in.ts";
+import { ownCollectionOf, seed } from "./knowledge.ts";
+import { signedInApi, unique } from "./sign-in.ts";
 
-// What the tests of purging personal data from Knowledge share
-// (knowledge-purge*.test.ts). Each test file signs its people in through
+// What the tests of purging a person from Knowledge share
+// (knowledge-purge*.test.ts): the purge a person's erasure runs in its
+// `brain` area (person-erasure.ts `purgeFromKnowledge`). Each test file signs its people in through
 // its own mocked IdP: `mockIdp()` registers hooks, so it can't be called
 // here.
 
@@ -26,11 +27,6 @@ export const setUpTime = { timeout: 60_000 };
 
 /** A person signed in, with their API. */
 export type Person = Awaited<ReturnType<typeof signedInApi>>;
-
-export const newAgent = () => ({
-  type: "agent" as const,
-  agentId: `agent-${unique()}`,
-});
 
 export const hexOf = (text: string): string =>
   [...new TextEncoder().encode(text)]
@@ -118,8 +114,7 @@ export const holding = async (term: string): Promise<string[]> => {
  * `userId` removed by `admin`, and their erasure begun and not yet run:
  * the rows `erasePerson` (person-erasure.ts) writes before its steps run,
  * its own name, email hash and every area pending, which its steps would
- * then finish. What lets a personal purge of them run (rpc.ts
- * `requireErasing`) while the test drives the purge itself.
+ * then finish, while the test drives one area itself.
  */
 export const erasing = async (admin: Person, userId: string): Promise<void> => {
   // Removing someone removed already is safe: it finishes what is left.
@@ -143,14 +138,18 @@ export const erasing = async (admin: Person, userId: string): Promise<void> => {
   ]);
 };
 
-/** Prepares `input` as `admin` and confirms it with the token. */
-export const purged = async (admin: Person, input: PurgeInput) => {
-  if (input.type === "personal") {
-    await erasing(admin, input.userId);
-  }
-  const plan = await admin.api.knowledge.preparePurge(input);
-  const result = await admin.api.knowledge.purge(input, plan.token);
-  return { plan, result };
+/**
+ * Purges `userId` from Knowledge as `admin` asked, once their erasure is
+ * begun, as the erasure's `brain` area does, on a core that sees
+ * `coreEnv`: what it removed.
+ */
+export const purged = async (
+  admin: Person,
+  userId: string,
+  coreEnv: Env = env
+) => {
+  await erasing(admin, userId);
+  return await purgeFromKnowledge(coreEnv, admin.userId, userId);
 };
 
 interface KnowledgeHooks {
@@ -163,10 +162,10 @@ interface KnowledgeHooks {
 }
 
 /**
- * `person`'s API on a connection whose core sees the Knowledge database
- * through `hooks`: something happening at a chosen point of a purge.
+ * Core's bindings with the Knowledge database seen through `hooks`:
+ * something happening at a chosen point of a purge.
  */
-export const apiWith = async (person: Person, hooks: KnowledgeHooks) => {
+export const envWith = (hooks: KnowledgeHooks): Env => {
   const real = env.KNOWLEDGE;
   const knowledge: D1Database = {
     prepare: (query) => {
@@ -184,10 +183,7 @@ export const apiWith = async (person: Person, hooks: KnowledgeHooks) => {
     dump: async () => await real.dump(),
     withSession: (constraint) => real.withSession(constraint),
   };
-  const { core } = await openRpc(person.session, {
-    coreEnv: { ...env, KNOWLEDGE: knowledge },
-  });
-  return await core.authenticate();
+  return { ...env, KNOWLEDGE: knowledge };
 };
 
 /**
@@ -225,7 +221,7 @@ export const saveOver = async (
 ) => {
   const { documents } = await person.api.knowledge.listDocuments(collectionId);
   const current = documents.find((document) => document.path === path);
-  return await person.api.knowledge.saveDocument({
+  return await seed(person.api).saveDocument({
     collectionId,
     path,
     text,
@@ -241,7 +237,7 @@ const member = (value: object, key: string | symbol): unknown => {
 };
 
 /**
- * `person`'s API on a connection that adds up the rows each batch writes
+ * Core's bindings with a Knowledge database that adds up the rows each batch writes
  * (as `countingWrites`), and runs `beforeRead` once, as a personal purge
  * first reads what the search index holds of the collection: a change
  * made after the purge listed the collection's versions, as it reads
@@ -249,13 +245,10 @@ const member = (value: object, key: string | symbol): unknown => {
  * and parameters, as a platform's refusal would. `rebuilds` counts the
  * rebuilds of the whole index it ran.
  */
-export const watchingPurge = async (
-  person: Person,
-  {
-    beforeRead,
-    refuseRead = false,
-  }: { beforeRead?: () => Promise<void>; refuseRead?: boolean } = {}
-) => {
+export const watchingPurge = ({
+  beforeRead,
+  refuseRead = false,
+}: { beforeRead?: () => Promise<void>; refuseRead?: boolean } = {}) => {
   const real = env.KNOWLEDGE;
   const written = { rows: 0, rebuilds: 0 };
   let pending = beforeRead;
@@ -309,10 +302,7 @@ export const watchingPurge = async (
     dump: async () => await real.dump(),
     withSession: (constraint) => real.withSession(constraint),
   };
-  const { core } = await openRpc(person.session, {
-    coreEnv: { ...env, KNOWLEDGE: knowledge },
-  });
-  return { api: core.authenticate(), written };
+  return { coreEnv: { ...env, KNOWLEDGE: knowledge }, written };
 };
 
 /**
@@ -341,12 +331,12 @@ export const rememberAs = async (person: Person, text: string) =>
   );
 
 /**
- * `person`'s API on a platform that refuses secure deletes, as a remote
+ * Core's bindings on a platform that refuses secure deletes, as a remote
  * one may (search-erasure.ts), on which the purge's index rebuild also
  * fails once. The index's secure deletes are turned off first: a
  * delete's terms then stay in the index's pages until it is rebuilt.
  */
-export const rebuildFailingOnce = async (person: Person) => {
+export const rebuildFailingOnce = async (): Promise<Env> => {
   await env.KNOWLEDGE.batch([
     env.KNOWLEDGE.prepare(
       "INSERT INTO search_words (search_words, rank) VALUES ('secure-delete', 0)"
@@ -358,7 +348,7 @@ export const rebuildFailingOnce = async (person: Person) => {
   let refuseNext = false;
   let failNext = false;
   let failed = false;
-  return await apiWith(person, {
+  return envWith({
     prepare: (query) => {
       if (query.includes("'secure-delete'")) {
         refuseNext = true;
@@ -397,61 +387,4 @@ export const purgesWith = (idp: Idp) => {
   };
 
   return { leaverWith };
-};
-
-/** The page directory's entry for `word` joined with さん, as hex. */
-export const entryOf = (word: string) => `${hexOf(`0${word}`)}E3`;
-
-/**
- * A word whose token joined with さん heads a page of the words index, as
- * a document holds it, with its plain twin in another document: its
- * directory entry is the plain word and the first byte of さ, which the
- * word's own key can't find (search-erasure.ts). `entriesLeft` counts
- * that entry. Letters only: a word with a digit is held to a stricter
- * check of its own.
- */
-export const joinedWordHeadingAPage = async (admin: Person, before = "") => {
-  const handbook = await admin.api.knowledge.createCollection({
-    name: "Handbook",
-    access: "everyone",
-  });
-  const stem = `zq${lettersOf(Math.floor(Math.random() * 26 ** 6), 6)}`;
-  const words = Array.from(
-    { length: 2000 },
-    (_, at) => `${stem}${lettersOf(at, 3)}`
-  );
-  const joined = await saveOver(
-    admin,
-    handbook.id,
-    "joined.md",
-    `# Words\n${words.map((word) => `${before}${word}さん`).join(" ")}`
-  );
-  // The stem alone first: one term more before the pairs, so pages, which
-  // fill a pair at a time here, begin on a joined word.
-  await saveOver(
-    admin,
-    handbook.id,
-    "plain.md",
-    `# Words\n${stem} ${words.join(" ")}`
-  );
-  await env.KNOWLEDGE.prepare(
-    "INSERT INTO search_words (search_words) VALUES ('optimize')"
-  ).run();
-  const { results } = await env.KNOWLEDGE.prepare(
-    "SELECT hex(term) AS entry FROM search_words_idx WHERE hex(term) LIKE ?"
-  )
-    .bind(`${hexOf(`0${stem}`)}%E3`)
-    .all<{ entry: string }>();
-  const word = words.find((one) =>
-    results.some(({ entry }) => entry === entryOf(one))
-  );
-  const entriesLeft = async () => {
-    const left = await env.KNOWLEDGE.prepare(
-      "SELECT count(*) AS n FROM search_words_idx WHERE hex(term) = ?"
-    )
-      .bind(entryOf(word ?? ""))
-      .first<{ n: number }>();
-    return left?.n;
-  };
-  return { joined, word, entriesLeft };
 };
