@@ -113,14 +113,7 @@ import type { QuestionBuilt, TurnContext, TurnResult } from "./agent.ts";
 import { turnAgent } from "./agents.ts";
 import { drainObjectOutbox } from "./audit-outbox.ts";
 import { memberRole } from "./auth/identity.ts";
-import {
-  drainCaptures,
-  eraseCaptured,
-  turnEventId,
-  turnOutcome,
-  turnSource,
-} from "./brain-capture.ts";
-import type { CaptureStore, TurnFacts } from "./brain-capture.ts";
+import { eraseCaptured } from "./brain-capture.ts";
 import { loneNotesPerDrain } from "./brain-hand-overs.ts";
 import { chatTurnSource, eraseChat } from "./brain-next-origins.ts";
 import { skillsFor, skillsReachOf } from "./brain-skills.ts";
@@ -694,9 +687,6 @@ const maxWatchers = 50;
  */
 const auditRetryMs = { first: 5000, most: 15 * 60 * 1000 };
 
-/** How long the alarm waits before delivering turns' outcomes again. */
-const captureRetryMs = 60 * 1000;
-
 /** Most chats a person keeps: delete one to make another. */
 export const maxChatsPerPerson = 500;
 
@@ -969,13 +959,10 @@ export class Workspace extends DurableObject<Env> {
    */
   readonly #sent = new Set<Promise<unknown>>();
 
-  /** The deliveries of capture intents under way (`#deliverCaptures`). */
-  readonly #delivering = new Set<Promise<void>>();
-
   /**
-   * Set once its person's erasure began (`erasePerson`): from then on no
-   * capture of a turn is delivered to the Brain, so none lands after the
-   * erasure took out what the Brain held of their chats.
+   * Set once its person's erasure began (`erasePerson`): from then on
+   * nothing more is told in their chats (`#note`), so nothing lands after
+   * the erasure.
    */
   #erasing = false;
 
@@ -1606,18 +1593,19 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * Keeps the capture intent of a turn of the chat its ChatSession settled
-   * (chat-harness.ts), as its outcome for the Brain: once, by the turn's
-   * event ID, however often it is delivered; none in a chat in restricted
-   * mode, or one gone or being deleted. Whose turn it was is the chat's,
-   * never the caller's. Delivered soon, the alarm set first so a delivery
-   * cut short is tried again (brain-capture.ts).
+   * Notes a turn of the chat its ChatSession settled (chat-harness.ts) for
+   * its person's own Brain (GRA-1805), by its event (`chat.turn_noted`: a
+   * note; whether it is kept is the hand-over's to record,
+   * `brain.source.*`): an answered turn they asked there and then, in a
+   * chat whose turns go there. None in a chat gone or being deleted.
+   * Whose turn it was is the chat's, never the caller's; the hand-over
+   * reads the chat again as it runs. Delivered at least once: a turn
+   * noted again is one hand-over (brain-hand-overs.ts).
    */
   captureTurn(chatId: ChatId, capture: TurnCapture): void {
     const chat = this.#db
       .select({
         personId: chats.personId,
-        agentId: chats.agentId,
         via: chats.via,
         thread: chats.thread,
         restricted: chats.restricted,
@@ -1625,67 +1613,27 @@ export class Workspace extends DurableObject<Env> {
       .from(chats)
       .where(eq(chats.id, chatId))
       .get();
+    const { answerId } = capture;
     if (
       chat === undefined ||
       this.#deleting.has(chatId) ||
-      this.isChatRestricted(chatId) !== false
+      !capture.attended ||
+      capture.outcome !== "answered" ||
+      answerId === null ||
+      !handsTurnsOver(chat)
     ) {
       return;
     }
-    const facts: TurnFacts = {
-      chatId,
-      turnId: capture.turnId,
-      personId: chat.personId,
-      agentId: chat.agentId,
-      audience: capture.audience,
-      outcome: capture.outcome,
-      answerId: capture.answerId,
-      model: capture.model,
-      occurredAt: new Date().toISOString(),
-    };
-    const { answerId } = capture;
-    const kept = this.ctx.storage.transactionSync(() => {
-      const noted = this.#db
-        .insert(brainCaptureIntents)
-        .values({
-          eventId: turnEventId(facts),
-          evidenceId: chatId,
-          facts: JSON.stringify(facts),
-          createdAt: new Date(),
-        })
-        .onConflictDoNothing({ target: brainCaptureIntents.eventId })
-        .returning({ seq: brainCaptureIntents.seq })
-        .all();
-      // The turn for its person's own Brain (GRA-1805), noted by this
-      // event (a note: whether it is kept is the hand-over's to record,
-      // `brain.source.*`), in the same transaction, once a turn as
-      // delivered: an
-      // answered turn they asked there and then, in a chat whose turns go
-      // there. The hand-over reads the chat again as it runs.
-      if (
-        noted.length === 0 ||
-        !capture.attended ||
-        capture.outcome !== "answered" ||
-        answerId === null ||
-        !handsTurnsOver(chat)
-      ) {
-        return false;
-      }
-      this.#outboxEntry({
-        actor: { type: "system" },
-        action: "chat.turn_noted",
-        target: {
-          type: "chat_turn",
-          id: chatTurnSource(chat.personId, chatId, answerId).id,
-        },
-        detail: { workspace: this.ctx.id.name ?? null },
-      });
-      return true;
+    this.#outboxEntry({
+      actor: { type: "system" },
+      action: "chat.turn_noted",
+      target: {
+        type: "chat_turn",
+        id: chatTurnSource(chat.personId, chatId, answerId).id,
+      },
+      detail: { workspace: this.ctx.id.name ?? null },
     });
-    if (kept) {
-      this.#deliverAudit();
-    }
-    this.ctx.waitUntil(this.#captureSoon());
+    this.#deliverAudit();
   }
 
   /**
@@ -1774,83 +1722,6 @@ export class Workspace extends DurableObject<Env> {
       }
       before = last.id;
     }
-  }
-
-  async #captureSoon(): Promise<void> {
-    await this.#alarmBy(Date.now() + captureRetryMs);
-    await this.#deliverCaptures();
-  }
-
-  /** Delivers the turns' pending intents; the alarm tries again if any are left. */
-  async #deliverCaptures(): Promise<void> {
-    if (this.#erasing) {
-      return;
-    }
-    const delivering = (async () => {
-      if (await drainCaptures(this.env, this.#captures())) {
-        await this.#alarmBy(Date.now() + captureRetryMs);
-      }
-    })();
-    this.#delivering.add(delivering);
-    try {
-      await delivering;
-    } finally {
-      this.#delivering.delete(delivering);
-    }
-  }
-
-  /** This object's store of its turns' capture intents (brain-capture.ts). */
-  #captures(): CaptureStore {
-    const db = this.#db;
-    return {
-      source: turnSource(this.ctx.id.name ?? this.ctx.id.toString()),
-      pending: async (limit) =>
-        await Promise.resolve(
-          db
-            .select({
-              seq: brainCaptureIntents.seq,
-              eventId: brainCaptureIntents.eventId,
-              evidenceId: brainCaptureIntents.evidenceId,
-              facts: brainCaptureIntents.facts,
-              attempts: brainCaptureIntents.attempts,
-            })
-            .from(brainCaptureIntents)
-            .where(eq(brainCaptureIntents.state, "pending"))
-            .orderBy(
-              asc(brainCaptureIntents.attempts),
-              asc(brainCaptureIntents.seq)
-            )
-            .limit(limit)
-            .all()
-        ),
-      settled: async (seq) => {
-        db.delete(brainCaptureIntents)
-          .where(eq(brainCaptureIntents.seq, seq))
-          .run();
-        await Promise.resolve();
-      },
-      failed: async (seq, code, dead) => {
-        db.update(brainCaptureIntents)
-          .set({
-            attempts: sql`${brainCaptureIntents.attempts} + 1`,
-            lastError: code,
-            ...(dead ? { state: "dead" as const } : {}),
-          })
-          .where(eq(brainCaptureIntents.seq, seq))
-          .run();
-        await Promise.resolve();
-      },
-      outcomeOf: async ({ facts }) =>
-        await turnOutcome(this.env, facts, (chatId) => {
-          const id = chatIdSchema.safeParse(chatId);
-          // A chat being deleted has its captures erased (`deleteChat`).
-          return (
-            id.success &&
-            !this.#deleting.has(id.data) &&
-            this.isChatRestricted(id.data) === false
-          );
-        }),
-    };
   }
 
   /** Sets the alarm to go at `time` at the latest, never later than it was. */
@@ -2135,8 +2006,7 @@ export class Workspace extends DurableObject<Env> {
         agent
       );
       // Refuses a model the deployment or its rules don't allow before
-      // anything is kept or shown as started, and names the model the
-      // turn's capture records. The chat's object admits it again for its
+      // anything is kept or shown as started. The chat's object admits it again for its
       // turn, as it sets up a turn a restart cut short on its own, with
       // nobody here to admit it; and every request by the rules then.
       // The agent's own model, where an admin gave it one the organization
@@ -2145,7 +2015,7 @@ export class Workspace extends DurableObject<Env> {
         context.agentModel,
         parsed.data.model
       );
-      const { model } = await models(this.env).agent(
+      await models(this.env).agent(
         {
           model: asked,
           effort: parsed.data.effort,
@@ -2177,11 +2047,7 @@ export class Workspace extends DurableObject<Env> {
         personal,
         readsBrain: await hasBrainGrant(this.env, authority),
         context,
-        capture: {
-          model: model.id,
-          audience: audience === undefined ? null : [...audience.members],
-          attended: !unattended,
-        },
+        capture: { attended: !unattended },
       });
       if (end.stopped !== undefined) {
         throw turnStopError(end.stopped);
@@ -2444,7 +2310,6 @@ export class Workspace extends DurableObject<Env> {
   override async alarm(): Promise<void> {
     // Audit events the log didn't take yet go first: a turn may run long.
     await this.#drainAudit(loneNotesPerDrain);
-    await this.#deliverCaptures();
     while (this.#sent.size > 0) {
       // oxlint-disable-next-line no-await-in-loop -- until none is left, as more may start
       await Promise.all(this.#sent);
@@ -4256,11 +4121,8 @@ export class Workspace extends DurableObject<Env> {
       );
       // Nor any workflow start its agent asked its person to confirm.
       await dropHeldStarts(this.env, { chatId: id });
-      // What the Brain captured of its turns goes before it does: should
-      // that fail, the chat stays (brain-capture.ts). After any delivery
-      // under way, as for a person's erasure: one that records the chat's
-      // after this finds it being deleted, and takes it back.
-      await Promise.allSettled(this.#delivering);
+      // What today's Brain captured of its turns goes before it does:
+      // should that fail, the chat stays (brain-capture.ts).
       await eraseCaptured(this.env, [id]);
       // And what its agent kept, the transcript the model reads with it:
       // erased for good, so nothing told it meanwhile is kept.
@@ -4344,15 +4206,14 @@ export class Workspace extends DurableObject<Env> {
     if (this.#turns.size > 0) {
       throw agentErrors.create("agent.busy");
     }
-    // No capture of their turns reaches the Brain from now on: none
-    // pending is delivered, and any delivery under way ends before the
-    // Brain's copies of their chats are erased, so nothing lands after.
+    // Nothing more is told in their chats from now on, and the capture
+    // intents kept for today's Brain go: nothing delivers them any more.
     this.#erasing = true;
     this.#db
       .delete(brainCaptureIntents)
       .where(eq(brainCaptureIntents.state, "pending"))
       .run();
-    await Promise.allSettled([...this.#sent, ...this.#delivering]);
+    await Promise.allSettled(this.#sent);
     const held = this.#db.select({ id: chats.id }).from(chats).all();
     const ids = held.map(({ id }) => id);
     if (ids.length > 0) {

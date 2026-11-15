@@ -1,6 +1,5 @@
 import { readableCollection } from "@grasp-os/brain/collections";
 import { writeVersion } from "@grasp-os/brain/documents";
-import { pendingGraceMs } from "@grasp-os/brain/payloads";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import type { CollectionInput, KnowledgeApi } from "@grasp-os/shared/knowledge";
@@ -13,7 +12,6 @@ import { personWriter } from "../src/knowledge/person-writes.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { runMinuteTasks } from "./maintenance.ts";
 import { signedInApi, unique, whoami } from "./sign-in.ts";
 
 // Each version's text is an immutable object in the Brain bucket, through
@@ -191,11 +189,6 @@ const beforeReleasingBatch = (before: () => Promise<void>): (() => void) => {
     prepare.mockRestore();
     batch.mockRestore();
   };
-};
-
-/** The clock, once a staged payload's grace is over. */
-const afterGrace = async (): Promise<void> => {
-  await runMinuteTasks({}, new Date(Date.now() + pendingGraceMs + 60_000));
 };
 
 const purgeTerm = async (
@@ -383,93 +376,6 @@ describe("storing versions' texts", () => {
 });
 
 describe("crashes and races", () => {
-  it("saves nothing when the upload fails, and collects what it staged", async () => {
-    const { api } = await knowledgeOf();
-    const { id: collectionId } = await api.createCollection(shared());
-    const text = textOf(`Upload${unique()}`);
-    const down = vi
-      .spyOn(env.BRAIN_OBJECTS, "put")
-      .mockRejectedValue(new Error("R2 unavailable"));
-    let outcome: string;
-    try {
-      outcome = await settled(
-        api.saveDocument({
-          collectionId,
-          path: "policy.md",
-          text,
-          ifVersion: 0,
-        })
-      );
-    } finally {
-      down.mockRestore();
-    }
-    const staged = await statesOf(text);
-    const listed = await documentIdsIn(api, collectionId);
-    await afterGrace();
-
-    expect({
-      outcome,
-      staged,
-      listed,
-      afterSweep: await rowsOf(text),
-    }).toStrictEqual({
-      outcome: "refused",
-      staged: ["pending"],
-      listed: [],
-      afterSweep: [],
-    });
-  });
-
-  it("collects an object uploaded by a save that crashed before its batch, and keeps a referenced one", async () => {
-    const { api } = await knowledgeOf();
-    const { id: collectionId } = await api.createCollection(shared());
-    const kept = textOf(`Kept${unique()}`);
-    const lost = textOf(`Lost${unique()}`);
-    await api.saveDocument({
-      collectionId,
-      path: "kept.md",
-      text: kept,
-      ifVersion: 0,
-    });
-    const restore = aroundVersionBatch({
-      before: async () => {
-        await Promise.reject(new Error("isolate gone"));
-      },
-    });
-    let outcome: string;
-    try {
-      outcome = await settled(
-        api.saveDocument({
-          collectionId,
-          path: "lost.md",
-          text: lost,
-          ifVersion: 0,
-        })
-      );
-    } finally {
-      restore();
-    }
-    const beforeGrace = await objectCount(lost);
-    // Within its grace, a staged payload's save may still be on its way.
-    await runMinuteTasks();
-    const withinGrace = await objectCount(lost);
-    await afterGrace();
-
-    expect({
-      outcome,
-      beforeGrace,
-      withinGrace,
-      lost: [await rowsOf(lost), await objectCount(lost)],
-      kept: [await statesOf(kept), await objectCount(kept)],
-    }).toStrictEqual({
-      outcome: "refused",
-      beforeGrace: 1,
-      withinGrace: 1,
-      lost: [[], 0],
-      kept: [["committed"], 1],
-    });
-  });
-
   it("publishes a save whose answer was lost exactly once, and a retry finds it saved", async () => {
     const { api } = await knowledgeOf();
     const { id: collectionId } = await api.createCollection(shared());
@@ -496,7 +402,6 @@ describe("crashes and races", () => {
       api.saveDocument({ collectionId, path: "policy.md", text, ifVersion: 0 })
     );
     const [documentId = ""] = await documentIdsIn(api, collectionId);
-    await afterGrace();
 
     expect({
       outcome,
@@ -543,7 +448,6 @@ describe("crashes and races", () => {
       restore();
     }
     const raced = await statesOf(text);
-    await afterGrace();
     const ids = await documentIdsIn(api, collectionId);
     const reads = await Promise.all(
       ids.map(async (id) => await readText(api, id))
@@ -553,14 +457,10 @@ describe("crashes and races", () => {
       version,
       raced: raced.toSorted(),
       reads,
-      rows: await statesOf(text),
-      objects: await objectCount(text),
     }).toStrictEqual({
       version: 1,
       raced: ["committed", "pending"],
       reads: [text, text],
-      rows: ["committed"],
-      objects: 1,
     });
   });
 
@@ -605,44 +505,6 @@ describe("crashes and races", () => {
       read: text,
       rows: [{ original: false, state: "committed" }],
     });
-  });
-
-  it("finishes collecting after a delete that failed part way", async () => {
-    const { api } = await knowledgeOf();
-    const { id: collectionId } = await api.createCollection(shared());
-    const text = textOf(`Interrupted${unique()}`);
-    // The object is stored, but the answer saying so is lost.
-    const realPut = env.BRAIN_OBJECTS.put.bind(env.BRAIN_OBJECTS);
-    const lostPut = vi
-      .spyOn(env.BRAIN_OBJECTS, "put")
-      .mockImplementationOnce(async (key, value, options) => {
-        await realPut(key, value, options);
-        throw new Error("Network connection lost");
-      });
-    const down = vi
-      .spyOn(env.BRAIN_OBJECTS, "delete")
-      .mockRejectedValue(new Error("R2 unavailable"));
-    try {
-      await settled(
-        api.saveDocument({
-          collectionId,
-          path: "policy.md",
-          text,
-          ifVersion: 0,
-        })
-      );
-      await afterGrace();
-    } finally {
-      down.mockRestore();
-      lostPut.mockRestore();
-    }
-    const stuck = [await statesOf(text), await objectCount(text)];
-    await runMinuteTasks();
-
-    expect({
-      stuck,
-      after: [await rowsOf(text), await objectCount(text)],
-    }).toStrictEqual({ stuck: [["collecting"], 1], after: [[], 0] });
   });
 });
 

@@ -56,7 +56,6 @@ import type {
   TurnOutcome,
 } from "./agent.ts";
 import { memberOf } from "./auth/identity.ts";
-import type { TurnFacts } from "./brain-capture.ts";
 import { readThinkingBrain } from "./brain-rpc.ts";
 import {
   chatAgent,
@@ -147,10 +146,6 @@ export interface TurnRequest {
   context: TurnContext;
   /** What the turn's capture for the Brain records besides how it ended. */
   capture: {
-    /** The model the Workspace admitted. */
-    model: string;
-    /** A shared chat's members as the turn read for them; null for one's own. */
-    audience: string[] | null;
     /**
      * Whether its person asked it there and then: never so for a turn
      * something woke (`Workspace.askUnattended`).
@@ -159,12 +154,15 @@ export interface TurnRequest {
   };
 }
 
-/** What a turn's capture for the Brain holds, as its ChatSession delivers it. */
-export type TurnCapture = Pick<
-  TurnFacts,
-  "turnId" | "outcome" | "answerId" | "model" | "audience"
-> &
-  Pick<TurnRequest["capture"], "attended">;
+/**
+ * What a turn's capture for the Brain holds, as its ChatSession delivers
+ * it: how it ended, the message it answered with, if any, and whether its
+ * person asked it there and then (`Workspace.captureTurn`).
+ */
+export type TurnCapture = {
+  outcome: TurnOutcome;
+  answerId: number | null;
+} & Pick<TurnRequest["capture"], "attended">;
 
 /** Why a turn stopped before it answered, when no model said so. */
 export type TurnStop = "history_revoked" | "person_inactive" | "unreadable";
@@ -938,11 +936,8 @@ export class ChatHarness {
       turn.request = JSON.stringify({ ...request, context: { skills: [] } });
       if (end !== undefined && end.stopped === undefined) {
         const owed: TurnCapture = {
-          turnId,
           outcome: end.outcome,
           answerId: turn.answerId,
-          model: request.capture.model,
-          audience: request.capture.audience,
           // A request kept before it said is no one's there and then.
           attended: request.capture.attended,
         };
@@ -1728,11 +1723,8 @@ export class ChatHarness {
       if (turn.ended && turn.captureOwed && request !== undefined) {
         // Owed, so there: the seed is never used.
         const owed = await tx.doc(CaptureDoc, request.turnId, {
-          turnId: request.turnId,
           outcome: "answered",
           answerId,
-          model: request.capture.model,
-          audience: request.capture.audience,
           // A request kept before it said is no one's there and then.
           attended: request.capture.attended,
         });
