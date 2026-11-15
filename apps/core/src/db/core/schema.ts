@@ -5836,10 +5836,10 @@ export const brainRecords = sqliteTable(
     body: text().notNull(),
     addedAt: timestamp("added_at").notNull(),
     /**
-     * When a Knowledge content purge last rewrote `body` (brain-records.ts
-     * `brainRecordErasure`): the record is the company's as purged from
-     * then on, and the same id sent again is left as it is, never its
-     * words put back.
+     * When an earlier release's Knowledge term purge last rewrote `body`:
+     * the record is the company's as purged from then on, and the same id
+     * sent again is left as it is, never its words put back
+     * (brain-records.ts `keepRecords`). Nothing sets it any more.
      */
     purgedAt: timestamp("purged_at"),
     /**
