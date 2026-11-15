@@ -265,6 +265,7 @@ describe("what a skill needs", setUpTime, () => {
       chats.agent.agentId,
       "slack",
       "Mail the board.",
+      undefined,
       {
         thread: `C-${unique()}`,
         kind: "group",

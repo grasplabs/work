@@ -1061,6 +1061,41 @@ describe("the weekly summary", setUpTime, () => {
     });
   });
 
+  it("goes in Teams with what a new need is called, which a model wrote, inert in its message text", async () => {
+    const owner = await memberAnsweredBy(
+      idp,
+      await fakeProvider(says("Hello.")),
+      "admin"
+    );
+    // Their chat with Stephen, which the summary goes to.
+    await post(messageFrom(owner.teams, { text: "Hi" }));
+    const monday = weekOf(await companyDay(env));
+    const wording =
+      "[Leave](https://evil.com/l?d=1) <img src=https://evil.com/i.png>";
+    await seed(
+      dayFrom(monday, -3),
+      people(5, {
+        ...(await named(wording)),
+        outcome: "notPossible",
+        tools: [],
+      })
+    );
+    await owner.api.stephenRequests.setSummary("teams");
+
+    await sendStephenSummaries(env, new Date(`${monday}T10:00:00Z`));
+
+    const { activities } = await reached(owner.teams.conversation);
+    const summary = JSON.stringify(activities.at(-1));
+    // Teams' message text renders `[words](address)` and HTML: the name
+    // shows whole, and is neither.
+    expect({
+      shown: summary.includes(
+        "[Leave] (https://evil.com/l?d=1) &lt;img src=https://evil.com/i.png>"
+      ),
+      linkOrTag: summary.includes("](") || summary.includes("<img"),
+    }).toStrictEqual({ shown: true, linkOrTag: false });
+  });
+
   it("goes only to who is still an admin asking for it as it is sent, and sums up the week it was queued for", async () => {
     const stays = await signedInApi(idp, "admin");
     const demoted = await signedInApi(idp, "admin");

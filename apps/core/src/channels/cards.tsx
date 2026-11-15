@@ -191,22 +191,31 @@ export const answerCard = ({
 
 /**
  * An answer still being written, as its card shows it until the answer
- * is whole (answer.ts): its words so far, labelled as made by AI. Text
- * past what the platform takes is cut.
+ * is whole (answer.ts): its words so far, labelled as made by AI, and
+ * whether they fit. Text past what the platform takes is cut.
  */
-export const draftCard = (text: string): PostableCard => {
-  const { text: shown } = fit(text, Number.POSITIVE_INFINITY, {
+export const draftCard = (
+  text: string
+): { posted: PostableCard; whole: boolean } => {
+  const { text: shown, whole } = fit(text, Number.POSITIVE_INFINITY, {
     left: outsideBytes,
   });
-  return {
-    card: cardOf(
-      <Card>
-        <CardText>{shown}</CardText>
-      </Card>
-    ),
-    aiGenerated: true,
-  };
+  const card = (
+    <Card>
+      <CardText>{shown}</CardText>
+    </Card>
+  );
+  return { posted: { card: cardOf(card), aiGenerated: true }, whole };
 };
+
+/** One of Stephen's lines on a card of its own. */
+export const lineCard = (line: string): PostableCard => ({
+  card: cardOf(
+    <Card>
+      <CardText>{line}</CardText>
+    </Card>
+  ),
+});
 
 /** Where a held write is: waiting for the press, or as the press ran it. */
 export type WriteState =

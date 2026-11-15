@@ -87,10 +87,12 @@ import {
   cancelAction,
   confirmAction,
   helpfulAction,
+  lineCard,
   notHelpfulAction,
   signInCard,
   startAction,
 } from "./cards.tsx";
+import { inertInMessage } from "./inert.ts";
 import { pressCard } from "./press.ts";
 import { isSetUp } from "./set-up.ts";
 import { countSignal } from "./signals.ts";
@@ -100,7 +102,6 @@ import type { ConnectedTeamsAdapter } from "./teams-adapter.ts";
 import { teamsAdapter, verifiedTeamsRequest } from "./teams.ts";
 import type { TeamsKeys } from "./teams.ts";
 import { inDirectory, teamsMembers, writerOf } from "./who.ts";
-import { inertInMessage } from "./without-links.ts";
 import { channelLocales, say } from "./words.ts";
 import type { ChannelLocale } from "./words.ts";
 import { pressOffer } from "./workflow-offers.ts";
@@ -718,14 +719,14 @@ const onPresses = (
       threadId: event.threadId,
       locale,
     });
-    // The workflow's name as the line shows it, inert (without-links.ts).
-    await event.thread.post(
-      pressSaid(
-        pressed.line,
-        locale,
-        inertInMessage(platform)(pressed.workflow ?? "")
-      )
+    // The workflow's name, which the model may have written, inert
+    // (inert.ts); on Slack on a card, where no mention in it resolves.
+    const line = pressSaid(
+      pressed.line,
+      locale,
+      inertInMessage(platform)(pressed.workflow ?? "")
     );
+    await event.thread.post(platform === "slack" ? lineCard(line) : line);
   });
 };
 

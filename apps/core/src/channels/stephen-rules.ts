@@ -21,8 +21,8 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 // traced: what it says is shown to the person on the card, whole.
 //
 // And in Stephen's own words there are no links: a link he writes could
-// lead anywhere. He names the source he answers from in words
-// (without-links.ts holds it).
+// lead anywhere. He names the source he answers from in words; what he
+// writes all the same shows as written and leads nowhere (inert.ts).
 
 /** Why a held write was refused before it was held, as `agentErrors` names it. */
 export type HeldWriteRefusal =

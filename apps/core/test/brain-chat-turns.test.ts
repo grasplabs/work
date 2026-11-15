@@ -699,6 +699,7 @@ describe("a person's chat turn", () => {
       chatAgentId,
       "teams",
       `Direct ${marker}?`,
+      undefined,
       { kind: "direct" }
     );
     await stub.askThrough(
@@ -706,6 +707,7 @@ describe("a person's chat turn", () => {
       chatAgentId,
       "slack",
       `Shared ${marker}?`,
+      undefined,
       {
         thread: `C${crypto.randomUUID()}`,
         kind: "group",

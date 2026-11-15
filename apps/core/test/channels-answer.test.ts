@@ -1,13 +1,14 @@
-import type { ChatUpdate } from "@grasp-os/shared/chat";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import { inTeams } from "../src/channels/inert.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
 import { keptAnswersOf, pausedReply, says } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
+import { attacks, ordinary } from "./inert-answers.ts";
 import { fakeProvider } from "./model-provider.ts";
 import {
   member,
@@ -25,8 +26,8 @@ import {
 // own Teams chat in Grasp (src/channels/answer.ts): the turn runs in their
 // own Workspace object, with the model provider faked behind connect, and the
 // answer goes back through connect to the fake Bot Connector
-// (test/bot-connector-fake.ts) on one card, without the links, images and
-// HTML the model wrote (src/channels/without-links.ts).
+// (test/bot-connector-fake.ts) on one card, the model's words as written,
+// with every link form Teams reads broken (src/channels/inert.ts).
 
 const idp = mockIdp();
 
@@ -180,21 +181,10 @@ describe("a turn that can't answer", setUpTime, () => {
   });
 });
 
-/** An answer the model was steered into writing links, an image and HTML in. */
-const linked = [
-  'Read [the policy](https://evil.com/p?d=secret "t"), ![chart](https://evil.com/c.png) and <a href="https://evil.com/a">here</a>.',
-  "Code: `[x](https://evil.com/x)`; ask hr@acme.example or see www.acme.example.",
-].join("\n\n");
-
-/** `linked` as Grasp keeps it: links as their words, the image as its alt. */
-const kept = [
-  "Read the policy, chart and here.",
-  "Code: `[x](https://evil.com/x)`; ask hr@acme.example or see www.acme.example.",
-].join("\n\n");
-
 /** What a Teams activity carries that these tests read. */
 const activitySchema = z
   .object({
+    text: z.string().optional(),
     attachments: z
       .array(
         z
@@ -234,29 +224,18 @@ const cardTextsIn = async (conversation: string): Promise<string[]> => {
   );
 };
 
-/** The stream kinds Teams was sent in `conversation`, if any. */
-const streamedIn = async (conversation: string): Promise<string[]> => {
-  const activities = await activitiesIn(conversation);
-  return activities.flatMap(({ entities = [] }) =>
-    entities.flatMap(({ streamType }) =>
-      streamType === undefined ? [] : [streamType]
-    )
-  );
-};
+/** Where a card's text would still read as a link, a reference or a definition. */
+const linkForm = /\]\(|\]\[|\]:/u;
 
 describe("a member's answer with links the model wrote", setUpTime, () => {
-  it("ends on one card, never in Teams' own stream, without them, in a private chat and a group chat, as Grasp keeps it", async () => {
-    const ann = await member(idp, says(linked), says(linked));
+  it("is only ever a card showing them as written, every link form broken, in a private chat and a group chat, and kept as written", async () => {
+    const ann = await member(idp, says(attacks), says(attacks));
     const group = newGroup();
     await onGroupRoster(group, [{ person: ann.teams }]);
 
     await post(messageFrom(ann.teams, { text: "How does leave work?" }));
     await post(mentionIn(ann.teams, group, "How does leave work?"));
 
-    const all = JSON.stringify([
-      await reached(ann.teams.conversation),
-      await reached(group),
-    ]);
     const answers = async (conversation: string) => {
       const texts = await cardTextsIn(conversation);
       return texts.filter((text) => text.startsWith("Read"));
@@ -265,83 +244,43 @@ describe("a member's answer with links the model wrote", setUpTime, () => {
       await answers(ann.teams.conversation),
       await answers(group),
     ];
+    const activities = [
+      ...(await activitiesIn(ann.teams.conversation)),
+      ...(await activitiesIn(group)),
+    ];
     expect({
-      // No stream of Teams' own.
-      streamed: [
-        ...(await streamedIn(ann.teams.conversation)),
-        ...(await streamedIn(group)),
-      ],
-      // Its card as it ends: in the private chat, it was written into it
-      // as the model wrote, every update cleaned too (channels-stream).
-      cards: [inPrivate.at(-1), inGroup.at(-1)],
-      inertWhileWritten: [...inPrivate, ...inGroup].every(
-        (text) => !text.includes("](") && !text.includes("evil.com/p")
+      // Never Teams' own stream, nor message text, which renders HTML,
+      // images and links: only the card's `TextBlock`, which reads no
+      // HTML or images.
+      streamed: activities.some(({ entities = [] }) =>
+        entities.some(({ streamType }) => streamType !== undefined)
       ),
-      // Nothing the model linked, showed or marked up, in any form Teams
-      // reads; the code's own words stay, with no link form left.
-      linked: ["evil.com/p", "c.png", "evil.com/a", "<a ", "]("].filter(
-        (found) => all.includes(found)
+      inText: activities.some(
+        ({ text }) => text?.includes("evil.com") === true
+      ),
+      // The card as it ends: the model's words, each link form broken.
+      cards: [inPrivate.at(-1), inGroup.at(-1)],
+      // Nothing posted, the cards updated while written included, holds
+      // a form a card reads as a link.
+      linkForms: [...inPrivate, ...inGroup].filter((text) =>
+        linkForm.test(text)
       ),
       kept: await keptAnswersOf(ann.userId),
     }).toStrictEqual({
-      streamed: [],
-      cards: [kept.replace("](", "] ("), kept.replace("](", "] (")],
-      inertWhileWritten: true,
-      linked: [],
-      kept: [[kept], [kept]],
+      streamed: false,
+      inText: false,
+      cards: [inTeams(attacks), inTeams(attacks)],
+      linkForms: [],
+      kept: [[attacks], [attacks]],
     });
   });
 
-  it("is kept and posted as the same words when the answer starts indented, which would be code until trimmed", async () => {
-    const { userId, teams } = await member(
-      idp,
-      says("    [the form](https://evil.example/?d=1) is due Friday.")
-    );
+  it("keeps an ordinary answer's words and formatting, nothing escaped", async () => {
+    const { teams } = await member(idp, says(ordinary));
 
-    await post(messageFrom(teams, { text: "When is the form due?" }));
+    await post(messageFrom(teams, { text: "How does leave work?" }));
 
-    const shown = "the form is due Friday.";
     const cards = await cardTextsIn(teams.conversation);
-    expect({
-      card: cards.findLast((text) => text.includes("Friday")),
-      kept: await keptAnswersOf(userId),
-    }).toStrictEqual({ card: shown, kept: [[shown]] });
-  });
-
-  it("shows in Grasp's own view of the chat, while the model still writes, only what it keeps", async () => {
-    // Paused once the paragraph with the link, the image and the HTML is
-    // written, before the next.
-    const { reply, release } = pausedReply(
-      says(linked),
-      linked.indexOf("\n\nCode")
-    );
-    const { userId, teams } = await member(idp, reply);
-    const posting = post(messageFrom(teams, { text: "How does leave work?" }));
-    await expect
-      .poll(async () => await chatsOf(userId), { timeout: 15_000 })
-      .toHaveLength(1);
-    const [chat] = await chatsOf(userId);
-    const shown = Promise.withResolvers<string>();
-    await workspace(env, personalWorkspaceId(userId)).watch(
-      chat?.id,
-      userId,
-      null,
-      async (update: ChatUpdate) => {
-        if ((update.partial?.text ?? "") !== "") {
-          shown.resolve(update.partial?.text ?? "");
-        }
-        await Promise.resolve();
-      }
-    );
-    const partial = await shown.promise;
-    release();
-    await posting;
-    expect({
-      partial,
-      streamed: await streamedIn(teams.conversation),
-    }).toStrictEqual({
-      partial: "Read the policy, chart and here.",
-      streamed: [],
-    });
+    expect(cards.findLast((text) => text.includes("Leave"))).toBe(ordinary);
   });
 });

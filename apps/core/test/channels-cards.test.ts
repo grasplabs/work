@@ -268,11 +268,11 @@ const everyCard = channelLocales.flatMap((locale) => [
   },
   {
     name: `answer being written (${locale})`,
-    card: draftCard("You have a call with Jan"),
+    card: draftCard("You have a call with Jan").posted,
   },
   {
     name: `largest answer being written (${locale})`,
-    card: draftCard(heavy(200_000)),
+    card: draftCard(heavy(200_000)).posted,
   },
   {
     name: `one held write (${locale})`,

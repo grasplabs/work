@@ -16,7 +16,6 @@ import { z } from "zod";
 import { docsSection } from "./agent-docs.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import type { ChannelText } from "./channels/stephen-rules.ts";
-import { withoutLinks } from "./channels/without-links.ts";
 import { describeRun, runCode, sourceHash } from "./code-mode.ts";
 import type { CodeRun } from "./code-mode.ts";
 import type { CodeRunStatus } from "./code-run-statuses.ts";
@@ -881,32 +880,3 @@ export const textOf = (message: AssistantMessage | undefined): string =>
   (message?.content ?? [])
     .flatMap((block) => (block.type === "text" ? [block.text] : []))
     .join("");
-
-/**
- * `message`, an answer, without links in its text, as a chat platform's
- * chat keeps and shows the agent's own words (`withoutLinks`, or `clean`).
- * Its text is cleaned whole, as the answer is posted whole (`textOf`), so
- * a link split over two of its text blocks goes too: the text stands
- * where its first block stood.
- */
-export const ownWordsOf = (
-  message: AssistantMessage,
-  clean: (text: string) => string = withoutLinks
-): AssistantMessage => {
-  const text = clean(textOf(message));
-  let placed = false;
-  const content: AssistantMessage["content"] = [];
-  for (const block of message.content) {
-    if (block.type !== "text") {
-      content.push(block);
-    } else if (!placed) {
-      placed = true;
-      content.push({ ...block, text });
-    }
-  }
-  return { ...message, content };
-};
-
-/** `message` in the agent's own words (`ownWordsOf`), if it is an answer. */
-export const inOwnWords = (message: Message): Message =>
-  message.role === "assistant" ? ownWordsOf(message) : message;

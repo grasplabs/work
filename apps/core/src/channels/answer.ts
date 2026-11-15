@@ -8,7 +8,7 @@ import { z } from "zod";
 import { signInConfig } from "../auth/config.ts";
 import { chatAgentId, personalWorkspaceId } from "../chats-rpc.ts";
 import { workspace } from "../durable-objects.ts";
-import { answerCard, draftCard, heldWritesCard } from "./cards.tsx";
+import { answerCard, draftCard, heldWritesCard, lineCard } from "./cards.tsx";
 import {
   offerConnectOwn,
   ownMicrosoftNeed,
@@ -17,6 +17,7 @@ import {
 import type { Conversation } from "./connect-own.ts";
 import type { ChannelHandoff, ChannelMessage } from "./door.ts";
 import { checkOf, inertView, turnHeldWrites } from "./held.ts";
+import { inTeams, inertOn } from "./inert.ts";
 import { sortRequest } from "./request-sorting.ts";
 import { countAnswered, countSignal } from "./signals.ts";
 import type { ChannelSignal } from "./signals.ts";
@@ -30,7 +31,6 @@ import {
 } from "./stephen-requests.ts";
 import type { Settled } from "./stephen-requests.ts";
 import { teamsAdapter } from "./teams.ts";
-import { inSlack, inTeams, withoutLinks } from "./without-links.ts";
 import { channelLocales, languageOf, say } from "./words.ts";
 import type { ChannelLocale } from "./words.ts";
 import { postOffers } from "./workflow-offers.ts";
@@ -45,7 +45,7 @@ import { postOffers } from "./workflow-offers.ts";
 //
 // While the turn runs, the platform shows Stephen typing, sent again every
 // few seconds, as a typing indicator lasts only that long. The answer is
-// on one card, without the links the model wrote (without-links.ts). In a
+// on one card, the model's words as written, made inert (inert.ts). In a
 // Teams direct message it is written into that card as the model writes
 // it: posted once there are words to show, then the same card updated in
 // place, never a second message and never Teams' own stream, whose
@@ -246,16 +246,18 @@ interface Writing {
   backOff: number;
   /** Whether the turn ended: no update after it but the last. */
   ended: boolean;
+  /** Whether the card shows all it can: no update after it but the last. */
+  full: boolean;
 }
 
 /**
  * The card an answer is written into as the model writes it, in `thread`
- * (a Teams direct message): `onText` takes the words so far, as the
- * workspace cleaned them (`streamedWithoutLinks`); the card is posted at
- * the first words and updated in place with the latest, one update at a
- * time and at most every {@link updateEveryMs}. An update Teams refuses
- * leaves the card as it was and holds the next one back, longer each
- * time. `end` makes the card what the turn ended in (the answer, or a
+ * (a Teams direct message): `onText` takes the model's words so far, and
+ * the card, inert at every update (`inTeams`), is posted at the first
+ * words and updated in place with the latest, one update at a time and at
+ * most every {@link updateEveryMs}, until it shows all a card can. An
+ * update Teams refuses leaves the card as it was and holds the next one
+ * back, longer each time. `end` makes the card what the turn ended in (the answer, or a
  * line), and says whether it did: if it couldn't, or nothing was posted,
  * the caller posts that whole, once.
  */
@@ -268,6 +270,7 @@ const cardInto = (thread: Thread, onFirst: () => void) => {
     nextAt: 0,
     backOff: updateEveryMs,
     ended: false,
+    full: false,
   };
   /** Posts or updates the card as `content`: whether Teams took it. */
   const send = async (content: Parameters<Thread["post"]>[0]) => {
@@ -298,9 +301,11 @@ const cardInto = (thread: Thread, onFirst: () => void) => {
         if (writing.ended || text === writing.shown) {
           continue;
         }
+        const draft = draftCard(inTeams(text));
         // oxlint-disable-next-line no-await-in-loop -- one update at a time
-        if (await send(draftCard(inTeams(text)))) {
+        if (await send(draft.posted)) {
           writing.shown = text;
+          writing.full = !draft.whole;
         }
       }
     } finally {
@@ -309,7 +314,7 @@ const cardInto = (thread: Thread, onFirst: () => void) => {
   };
   return {
     onText: (text: string): void => {
-      if (writing.ended || text === "") {
+      if (writing.ended || writing.full || text === "") {
         return;
       }
       writing.pending = text;
@@ -323,7 +328,7 @@ const cardInto = (thread: Thread, onFirst: () => void) => {
         return false;
       }
       // A line the turn ended in goes on a card too: card to card.
-      const last = typeof content === "string" ? draftCard(content) : content;
+      const last = typeof content === "string" ? lineCard(content) : content;
       for (let tried = 0; tried < lastTries; tried += 1) {
         // oxlint-disable-next-line no-await-in-loop -- tried in turn
         await waitUntil(writing.nextAt);
@@ -350,10 +355,6 @@ const cardIn = (
   platform === "teams" && place.kind === "direct" && "isDM" in thread
     ? cardInto(thread, onFirst)
     : undefined;
-
-/** Shown words as `platform` gets them: its own link and mention syntax taken out. */
-const postedOn = (platform: string, shown: string): string =>
-  platform === "slack" ? inSlack(shown) : inTeams(shown);
 
 /**
  * One question asked in the person's chat for `platform`, and its answer
@@ -407,8 +408,8 @@ const answerOne = async (
       chatAgentId,
       platform,
       text,
-      place.kind === "direct" ? place : { thread: thread.id, ...place },
-      card?.onText
+      card?.onText,
+      place.kind === "direct" ? place : { thread: thread.id, ...place }
     );
   } catch (error) {
     stopTyping();
@@ -433,10 +434,9 @@ const answerOne = async (
   stopTyping();
   const { chatId, answer, calls } = asked;
   const answered = answer.outcome === "answered";
-  // As kept (without-links.ts): what the request is sorted by; posted as
-  // the platform takes it.
-  const final = withoutLinks(answer.answer);
-  const posted = postedOn(platform, final);
+  const final = answer.answer.trim();
+  // As the platform shows it, inert (inert.ts).
+  const posted = inertOn(platform)(final);
   if (!answered || final === "") {
     log.warn("channel.turn_failed", { platform, outcome: answer.outcome });
     await countSignal(env, platform, "failed");

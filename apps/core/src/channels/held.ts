@@ -9,7 +9,7 @@ import { activeMember, organizationId } from "../auth/auth.ts";
 import { personOf } from "../connections.ts";
 import { members, users } from "../db/core/schema.ts";
 import type { HeldWriteView, ReadCheck } from "./cards.tsx";
-import { inertOn } from "./without-links.ts";
+import { inertOn } from "./inert.ts";
 
 // A turn's held writes, as its chat platform's card shows them (cards.tsx
 // `heldWritesCard`): the writes the chat's agent had connect hold in this
@@ -149,10 +149,10 @@ export const checkOf = (sources: readonly string[]): ReadCheck | undefined =>
 
 /**
  * `view` as a card on `platform` shows it: its title, labels and values,
- * which the model wrote, each exactly as it will be sent, nothing cut,
- * with the platform's own link and mention syntax made inert
- * (`inertOn`), so the card shows where a value leads, and no value leads
- * anywhere from the card.
+ * which the model wrote, as they will be sent, nothing cut, with the
+ * platform's own link and mention syntax made inert (`inertOn`: on Teams
+ * a space after a `]` a link would go on from), so the card shows where a
+ * value leads, and no value leads anywhere from the card.
  */
 export const inertView = (
   platform: string,

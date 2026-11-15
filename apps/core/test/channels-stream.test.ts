@@ -2,6 +2,8 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import { inTeams } from "../src/channels/inert.ts";
+import { say } from "../src/channels/words.ts";
 import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
 import { keptAnswersOf, pausedReply, says } from "./agent-chat.ts";
@@ -20,13 +22,13 @@ import {
 // An answer written into a member's private Teams chat as the model
 // writes its words (src/channels/answer.ts): one Adaptive Card, posted
 // once there are words to show and then updated in place, never a second
-// message and never Teams' own stream. Every update is the answer so far
-// cleaned as the whole answer is (src/channels/without-links.ts), so no
-// update holds a link, an image or HTML the model wrote, wherever a chunk
-// ends; the last is the whole answer, as Grasp keeps it. An update Teams
-// refuses leaves the card as it was; a turn that fails ends the card as
-// Stephen's line, on a card. Each step waits for what the card shows, never
-// on the clock: the model's stream stops at each pause until let go.
+// message and never Teams' own stream. Every update is the model's words
+// so far with each link form a card reads broken (src/channels/inert.ts),
+// so no update leads anywhere, wherever a chunk ends; the last is the
+// whole answer, kept as the model wrote it. An update Teams refuses
+// leaves the card as it was; a turn that fails ends the card as Stephen's
+// line, on a card. Each step waits for what the card shows, never on the
+// clock: the model's stream stops at each pause until let go.
 
 const idp = mockIdp();
 
@@ -121,42 +123,31 @@ const pausesAt = (points: readonly number[]) =>
     };
   });
 
-/** Where an address, a link form the card reads, or HTML would show. */
-const linking = /evil\.com|\]\(|<a |<img|!\[/u;
+/** Where a card's text would still read as a link, a reference or a definition. */
+const linkForm = /\]\(|\]\[|\]:/u;
 
 /** Consecutive repeats of `words` taken out: what the card showed in turn. */
 const inTurn = (words: readonly string[]): string[] =>
   words.filter((each, at) => each !== words[at - 1]);
 
 describe("an answer written into its card", setUpTime, () => {
-  it("is one card updated in place, showing at each chunk's end only words it keeps, the last update whole and as Grasp keeps it", async () => {
+  it("is one card updated in place, no link form standing at any chunk's end, the last update whole, and kept as written", async () => {
     const answer = [
-      'Leave lasts [sixteen weeks](https://evil.com/leave?d=secret "t") in all. ![chart](https://evil.com/c.png) and <a href="https://evil.com/a">the form</a>.',
-      "Ask [your lead] first.",
-      "[your lead]: https://evil.com/lead",
+      'Leave lasts [sixteen weeks](https://evil.com/leave?d=secret "t") in all.',
+      "Ask [your lead][lead] first.",
+      "[lead]: https://evil.com/lead",
     ].join("\n\n");
-    const kept =
-      "Leave lasts sixteen weeks in all. chart and the form.\n\nAsk your lead first.";
-    // Mid-label, mid-address, mid-image, mid-tag, and before a reference's
-    // late definition; and what the card shows at each: a link, image or
-    // tag still open is held back until it closes.
+    // Mid-label, right after a label's `]`, mid-address, inside a
+    // reference, and before its definition's `:`: the card shows the
+    // words so far, each link form broken.
     const stops = [
-      [answer.indexOf("weeks]"), "Leave lasts"],
-      [answer.indexOf("evil.com/leave"), "Leave lasts"],
-      [
-        answer.indexOf("](https://evil.com/c.png"),
-        "Leave lasts sixteen weeks in all.",
-      ],
-      [
-        answer.indexOf('evil.com/a">'),
-        "Leave lasts sixteen weeks in all. chart and",
-      ],
-      [
-        answer.indexOf("[your lead]:"),
-        "Leave lasts sixteen weeks in all. chart and the form.\n\nAsk [your lead] first.",
-      ],
-    ] as const;
-    const pauses = pausesAt(stops.map(([at]) => at));
+      answer.indexOf("weeks]"),
+      answer.indexOf("](https://evil.com/leave") + 1,
+      answer.indexOf("evil.com/leave"),
+      answer.indexOf("][lead]") + 1,
+      answer.indexOf("]: https") + 1,
+    ];
+    const pauses = pausesAt(stops);
     const reply: ProviderReply = {
       ...says(answer),
       pause: pauses.map(({ pause }) => pause),
@@ -164,9 +155,9 @@ describe("an answer written into its card", setUpTime, () => {
     const { userId, teams } = await member(idp, reply);
 
     const posting = post(messageFrom(teams, { text: "How does leave work?" }));
-    for (const [index, [, words]] of stops.entries()) {
+    for (const [index, at] of stops.entries()) {
       // oxlint-disable-next-line no-await-in-loop -- chunk by chunk
-      await cardShows(teams.conversation, words);
+      await cardShows(teams.conversation, inTeams(answer.slice(0, at)));
       pauses[index]?.release();
     }
     await posting;
@@ -180,29 +171,72 @@ describe("an answer written into its card", setUpTime, () => {
       updatesOfIt: messages.slice(1).every(({ editOf }) => editOf === card?.id),
       shown: inTurn(messages.map(({ words }) => words)),
       streamed: messages.some(({ streamed }) => streamed),
-      linking: messages.filter(({ words }) => linking.test(words)),
+      linkForms: messages.filter(({ words }) => linkForm.test(words)),
       kept: await keptAnswersOf(userId),
     }).toStrictEqual({
       firstIsAPost: true,
       updatesOfIt: true,
-      shown: [...inTurn(stops.map(([, words]) => words)), kept],
+      shown: inTurn(
+        [...stops.map((at) => answer.slice(0, at)), answer].map(inTeams)
+      ),
       streamed: false,
-      linking: [],
-      kept: [[kept]],
+      linkForms: [],
+      kept: [[answer]],
     });
+  });
+
+  it("shows no more than a card takes while written, and ends as the card of a long answer", async () => {
+    const answer = "Leave lasts sixteen weeks. ".repeat(800);
+    // Past what one card takes (cards.tsx), and further on.
+    const pauses = pausesAt([18_000, 20_000]);
+    const { teams } = await member(idp, {
+      ...says(answer),
+      pause: pauses.map(({ pause }) => pause),
+    });
+
+    const posting = post(messageFrom(teams, { text: "How does leave work?" }));
+    await expect
+      .poll(
+        async () => {
+          const messages = await messagesIn(teams.conversation);
+          return messages.at(-1)?.words.endsWith("…");
+        },
+        { timeout: 15_000, message: "the card to show all it takes" }
+      )
+      .toBe(true);
+    for (const pause of pauses) {
+      pause.release();
+    }
+    await posting;
+
+    const messages = await messagesIn(teams.conversation);
+    const shown = inTurn(messages.map(({ words }) => words));
+    const { sent } = await reached(teams.conversation);
+    expect({
+      // The card as cut while written, and as the whole answer cut: the
+      // same words.
+      shown: shown.length,
+      cut: shown[0]?.endsWith("…"),
+      // The answer's own card, which says where the rest is.
+      tooLong: JSON.stringify(
+        sent.findLast(({ editOf }) => editOf === messages[0]?.id)?.activity
+      ).includes(say("answerTooLong", "en")),
+      posts: messages.filter(({ editOf }) => editOf === undefined).length,
+    }).toStrictEqual({ shown: 1, cut: true, tooLong: true, posts: 1 });
   });
 
   it("keeps its card as it was when Teams refuses an update, and still ends it whole", async () => {
     const answer =
       "Parental leave lasts sixteen weeks. You take it in one go, or in two parts.";
-    const [pause] = pausesAt([answer.indexOf("You take")]);
+    const at = answer.indexOf("You take");
+    const [pause] = pausesAt([at]);
     const { userId, teams } = await member(idp, {
       ...says(answer),
       pause: pause?.pause,
     });
 
     const posting = post(messageFrom(teams, { text: "How does leave work?" }));
-    await cardShows(teams.conversation, "Parental leave lasts sixteen weeks.");
+    await cardShows(teams.conversation, answer.slice(0, at));
     await providers().fetch(botConnectorEditsUrl, {
       method: "POST",
       body: JSON.stringify({ conversation: teams.conversation, count: 1 }),
@@ -217,7 +251,7 @@ describe("an answer written into its card", setUpTime, () => {
       posts: messages.filter(({ editOf }) => editOf === undefined).length,
       kept: await keptAnswersOf(userId),
     }).toStrictEqual({
-      shown: ["Parental leave lasts sixteen weeks.", answer],
+      shown: [answer.slice(0, at), answer],
       posts: 1,
       kept: [[answer]],
     });
@@ -227,14 +261,15 @@ describe("an answer written into its card", setUpTime, () => {
   it("posts the answer whole, once, when Teams refuses every try of its card's last update", async () => {
     const answer =
       "Parental leave lasts sixteen weeks. You take it in one go, or in two parts.";
-    const [pause] = pausesAt([answer.indexOf("You take")]);
+    const at = answer.indexOf("You take");
+    const [pause] = pausesAt([at]);
     const { teams } = await member(idp, {
       ...says(answer),
       pause: pause?.pause,
     });
 
     const posting = post(messageFrom(teams, { text: "How does leave work?" }));
-    await cardShows(teams.conversation, "Parental leave lasts sixteen weeks.");
+    await cardShows(teams.conversation, answer.slice(0, at));
     await providers().fetch(botConnectorEditsUrl, {
       method: "POST",
       body: JSON.stringify({ conversation: teams.conversation, count: 100 }),
@@ -248,7 +283,7 @@ describe("an answer written into its card", setUpTime, () => {
         editOf === undefined && words.startsWith("Parental")
     );
     expect(posts.map(({ words }) => words)).toStrictEqual([
-      "Parental leave lasts sixteen weeks.",
+      answer.slice(0, at),
       answer,
     ]);
   });
@@ -275,7 +310,7 @@ describe("an answer written into its card", setUpTime, () => {
     );
 
     const posting = post(messageFrom(teams, { text: "Look it up." }));
-    await cardShows(teams.conversation, "Let me look that up.");
+    await cardShows(teams.conversation, inTeams(words));
     pause?.release();
     await posting;
 
@@ -288,7 +323,7 @@ describe("an answer written into its card", setUpTime, () => {
         .map(({ words: shown }) => shown),
       last: [last?.card, last?.words],
     }).toStrictEqual({
-      posts: ["Let me look that up."],
+      posts: [inTeams(words)],
       last: [
         true,
         "Something went wrong, and I couldn't answer. Try again in a moment.",
@@ -306,6 +341,7 @@ describe("an answer written into its card", setUpTime, () => {
       chatAgentId,
       "teams",
       "What's on today?",
+      undefined,
       { kind: "direct" }
     );
     await expect

@@ -8,10 +8,12 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import { memberOf } from "../src/auth/identity.ts";
 import { addSource, rememberAs } from "../src/brain-next.ts";
 import { confirmAction, startAction } from "../src/channels/cards.tsx";
 import { channelResponse } from "../src/channels/door.ts";
 import type { ChannelMessage } from "../src/channels/door.ts";
+import { inertOn } from "../src/channels/inert.ts";
 import { say } from "../src/channels/words.ts";
 import { chatAgentId } from "../src/chats-rpc.ts";
 import {
@@ -19,11 +21,18 @@ import {
   channelAccounts,
   channelLinks,
 } from "../src/db/core/schema.ts";
+import { shareWorkflowResource } from "../src/workflow-members.ts";
+import {
+  createWorkflowResource,
+  setWorkflowAskable,
+} from "../src/workflow-resources.ts";
 import { codeStep, keptAnswersOf, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { slackApp, slackPostedUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
+import { attacks, ordinary } from "./inert-answers.ts";
 import { saveInstructions } from "./instruction-saves.ts";
+import { greetingOf } from "./json-workflow-apps.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { signedInApi, unique } from "./sign-in.ts";
@@ -35,6 +44,7 @@ import {
   watched,
 } from "./teams-door.ts";
 import { testBinding } from "./test-env.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // Slack as a door into core (src/channels/slack.ts, src/channels/door.ts),
 // from its threat model first: a request Slack didn't sign for this
@@ -497,72 +507,13 @@ describe("a press on a card in Slack", () => {
   });
 });
 
-/** What of an answer's note and outside links a chat app's post got wrong. */
-const seenOfLinks = (posted: string) => ({
-  words: [
-    "plain,",
-    "double,",
-    "single,",
-    "parenthesised,",
-    "outside,",
-    "outside double",
-    "outside single",
-  ].filter((words) => !posted.includes(words)),
-  addresses: ["grasp:", "doc-", "evil.test"].filter((address) =>
-    posted.includes(address)
-  ),
-});
-
 describe("a linked person's question in Slack", () => {
-  // A note link, as Grasp's answers cited a Knowledge document, in each
-  // way a title may be quoted, and an outside link in each too: as main
-  // posted them before the cutover, each note link shows its words alone
-  // and no address reaches either app.
-  it("shows a note link as its words in Slack and in Teams, whatever its title's quoting, and no address", async () => {
-    const { slackUser } = await linkedPerson();
-    const written = [
-      "Leave lasts sixteen weeks: [plain](grasp:note/doc-1),",
-      "[double](grasp:note/doc-2 \"Leave policy\"), [single](grasp:note/doc-3 'Leave policy'),",
-      "[parenthesised](grasp:note/doc-4 (Leave policy)), [outside](https://evil.test/hr),",
-      "[outside double](https://evil.test/hr \"HR\") and [outside single](https://evil.test/hr 'HR').",
-    ].join(" ");
-    const provider = await fakeProvider(says(written), says(written));
-    const question = "How long is parental leave?";
-    const fromSlack = messageFrom(slackUser);
-    fromSlack.event.text = question;
-    await post(fromSlack, { caught: false });
-    const inTeams = await memberAnsweredBy(idp, provider);
-    await postToTeams(teamsMessageFrom(inTeams.teams, { text: question }));
-
-    const slackSaw = await slackSawIn(fromSlack.event.channel);
-    const slackPosted = JSON.stringify(
-      slackSaw.filter(({ method }) =>
-        ["chat.postMessage", "chat.update"].includes(method)
-      )
-    );
-    const { activities } = await reached(inTeams.teams.conversation);
-    const teamsPosted = JSON.stringify(
-      activities.filter(({ type }) => type === "message")
-    );
-    expect({
-      slack: seenOfLinks(slackPosted),
-      teams: seenOfLinks(teamsPosted),
-    }).toStrictEqual({
-      slack: { words: [], addresses: [] },
-      teams: { words: [], addresses: [] },
-    });
-  });
-
   it("gets the same answer as the same question in Teams, in their own Slack chat, which their list says came through Slack", async () => {
-    // A link of Grasp's own and one outside it, as a model may write them:
-    // each app shows only their words, as no sources follow the answer.
-    const written =
-      "Parental leave lasts sixteen weeks, as [the leave policy](grasp:note/doc-1) and [the HR page](https://evil.test/leave) say.";
     const answer =
       "Parental leave lasts sixteen weeks, as the leave policy and the HR page say.";
     const { slackUser, api } = await linkedPerson();
     // One provider for the organization: it answers both chats.
-    const provider = await fakeProvider(says(written), says(written));
+    const provider = await fakeProvider(says(answer), says(answer));
     const question = "How long is parental leave?";
     const fromSlack = messageFrom(slackUser);
     fromSlack.event.text = question;
@@ -588,26 +539,18 @@ describe("a linked person's question in Slack", () => {
           JSON.stringify(fields).includes(answer)
       ),
       teams: teamsAnswer.includes(answer),
-      links: [JSON.stringify(slackPosts), teamsAnswer].flatMap((posted) =>
-        ["grasp:", "evil.test"].filter((link) => posted.includes(link))
-      ),
       created: inGrasp.via,
       listedForSlackPerson: await viaOf(api),
       listedForTeamsPerson: await viaOf(inTeams.api),
     }).toStrictEqual({
       slack: true,
       teams: true,
-      links: [],
       created: "web",
       listedForSlackPerson: ["slack", "web"],
       listedForTeamsPerson: ["teams"],
     });
   });
 });
-
-/** `text` without the escapes of a chunk sent as plain text (without-links.ts). */
-const unescaped = (text = ""): string =>
-  text.replaceAll(/\\(?=[!-/:-@[-`{-~])/gu, "");
 
 /** The text of the first block of `blocks`, as Slack's API got them. */
 const firstBlockText = (blocks: unknown): string | undefined => {
@@ -617,35 +560,20 @@ const firstBlockText = (blocks: unknown): string | undefined => {
   return parsed.data?.[0]?.text.text;
 };
 
+/** A `<` or `>`, or an `&` that starts none of Slack's three escapes. */
+const unescapedInSlack = /[<>]|&(?!amp;|lt;|gt;)/u;
+
 describe("a linked person's answer in Slack", () => {
-  it("is posted once as mrkdwn, previews off, never updated, without the links, images, HTML and Slack syntax the model wrote, as Grasp keeps it", async () => {
-    const linked = [
-      'Read [the policy](https://evil.com/p?d=secret "t"), ![chart](https://evil.com/c.png) and <a href="https://evil.com/a">here</a>.',
-      "Hey <!here> and <@U12345>: <https://evil.com/s|click> in <#C1> & see www.acme.example, @U0123ABCD.",
-      '~~~js\nif (a < b) { go("<!channel>"); }\n~~~',
-    ].join("\n\n");
-    // `<!here>` is HTML to the parser, and goes; `<https://…|click>` an
-    // address written out, which stays words; a bare `@U…` stays text, as
-    // the Slack adapter turns it into a mention only in a text post, never
-    // in a card's blocks.
-    const kept = [
-      "Read the policy, chart and here.",
-      "Hey  and <@U12345>: https://evil.com/s|click in <#C1> & see www.acme.example, @U0123ABCD.",
-      '~~~js\nif (a < b) { go("<!channel>"); }\n~~~',
-    ].join("\n\n");
-    const sentText = [
-      "Read the policy, chart and here.",
-      "Hey  and &lt;@U12345&gt;: https://evil.com/s|click in &lt;#C1&gt; &amp; see www.acme.example, @U0123ABCD.",
-      '```\nif (a &lt; b) { go("&lt;!channel&gt;"); }\n```',
-    ].join("\n\n");
+  it("is posted once, on a card, previews off, never updated, Slack's own syntax escaped, and kept as written", async () => {
     const { userId, slackUser } = await linkedPerson();
-    await fakeProvider(says(linked));
+    await fakeProvider(says(attacks));
     const message = messageFrom(slackUser);
     message.event.text = "How does leave work?";
     await post(message, { caught: false });
 
     const sent = await slackSawIn(message.event.channel);
     const posts = sent.filter(({ method }) => method === "chat.postMessage");
+    const answer = firstBlockText(posts[0]?.fields.blocks) ?? "";
     expect({
       methods: [...new Set(sent.map(({ method }) => method))],
       // Every post, the answer's and those after it: Slack fetches none.
@@ -653,67 +581,115 @@ describe("a linked person's answer in Slack", () => {
         fields.unfurl_links,
         fields.unfurl_media,
       ]),
-      answer: firstBlockText(posts[0]?.fields.blocks),
       // Escaped once, by Grasp, and sent as such: Slack decodes it for
-      // display, so nothing the model wrote is a link, mention or channel.
-      escapedTwice: JSON.stringify(sent).includes("&amp;lt;"),
-      linked: ["evil.com/p", "c.png", "evil.com/a"].filter((found) =>
-        JSON.stringify(sent).includes(found)
+      // display, so nothing the model wrote is a link, mention or
+      // broadcast; a bare `@U…` stays text, as the adapter makes a mention
+      // of one only in a text post, never in a card's blocks.
+      answer,
+      unescaped: [answer, String(posts[0]?.fields.text)].filter((text) =>
+        unescapedInSlack.test(text)
       ),
       kept: await keptAnswersOf(userId),
     }).toStrictEqual({
       methods: ["chat.postMessage"],
       previews: posts.map(() => ["false", "false"]),
-      answer: sentText,
-      escapedTwice: false,
-      linked: [],
-      kept: [[kept]],
+      answer: inertOn("slack")(attacks),
+      unescaped: [],
+      kept: [[attacks]],
     });
   });
 
-  it("is posted, not withheld, when it is long and ordinary: code, a bold list, a table", async () => {
-    // The bold list holds 780 of the characters the parser takes time on,
-    // in one chunk between blank lines, past the 256 one chunk may hold
-    // (without-links.ts): it goes as escaped plain text, the same words.
-    const longCode = `\`\`\`py\n${Array.from(
-      { length: 250 },
-      (_, at) => `x_${at} = data["*"][${at}]  # ~${at}`
-    ).join("\n")}\n\`\`\``;
-    const boldList = Array.from(
-      { length: 130 },
-      (_, at) => `- **Item ${at}**: _done_`
-    ).join("\n");
-    const table = `| **Name** | **State** |\n|---|---|\n${Array.from(
-      { length: 40 },
-      (_, at) => `| **Row ${at}** | _ok_ |`
-    ).join("\n")}`;
+  it("keeps an ordinary answer's words and formatting, nothing escaped but Slack's bold", async () => {
+    const { slackUser } = await linkedPerson();
+    await fakeProvider(says(ordinary));
+    const message = messageFrom(slackUser);
+    message.event.text = "How does leave work?";
+    await post(message, { caught: false });
+
+    const [first] = await slackSawIn(message.event.channel);
+    // Slack's own bold is one star, as its adapter writes it.
+    expect(firstBlockText(first?.fields.blocks)).toBe(
+      ordinary.replace("**Leave**", "*Leave*")
+    );
+  });
+});
+
+/** A builder's workflow shared with `userId`, open to asking Stephen. */
+const askableWorkflow = async (userId: string) => {
+  const builder = await signedInApi(idp, "builder");
+  const by = await memberOf(env.DB, builder.userId);
+  if (by === undefined) {
+    throw new Error("Expected the builder to be a member");
+  }
+  const workflow = await createWorkflowResource(env, by, `ask-${unique()}`);
+  await publishDefinition(env, by, workflow.id, greetingOf());
+  await shareWorkflowResource(env, by, workflow.id, {
+    type: "person",
+    id: userId,
+    role: "user",
+  });
+  await setWorkflowAskable(env, by, workflow.id, true);
+  return workflow;
+};
+
+/** A post's buttons, as Slack's API got its blocks. */
+const buttonsSchema = z.array(
+  z.looseObject({
+    elements: z
+      .array(z.looseObject({ action_id: z.string(), value: z.string() }))
+      .optional(),
+  })
+);
+
+/** The offer a start card posted to Slack carries. */
+const offerOf = (fields: Record<string, unknown>): string | undefined => {
+  const blocks = buttonsSchema.safeParse(
+    typeof fields.blocks === "string" ? JSON.parse(fields.blocks) : []
+  );
+  return (blocks.data ?? [])
+    .flatMap(({ elements = [] }) => elements)
+    .find(({ action_id: action }) => action === startAction)?.value;
+};
+
+describe("a workflow started from Slack", () => {
+  it("is said to have started on a card, where no mention in what it names resolves", async () => {
     const { userId, slackUser } = await linkedPerson();
-    await fakeProvider(says(boldList), says(table), says(longCode));
-    const answered: string[] = [];
-    for (const asked of ["List them.", "Tabulate them.", "Show the code."]) {
-      const message = messageFrom(slackUser);
-      message.event.text = asked;
-      // oxlint-disable-next-line no-await-in-loop -- one question after the other
-      await post(message, { caught: false });
-      // oxlint-disable-next-line no-await-in-loop -- one question after the other
-      const sent = await slackSawIn(message.event.channel);
-      answered.push(firstBlockText(sent[0]?.fields.blocks) ?? "");
-    }
-    const [kept] = await keptAnswersOf(userId);
-    expect({
-      // Cut to what a card takes, as any long answer is.
-      list: unescaped(answered[0]).startsWith(
-        "- **Item 0**: _done_\n- **Item 1**: _done_"
+    const workflow = await askableWorkflow(userId);
+    await fakeProvider(
+      codeStep(
+        `export default async (self, env) => {
+  const [first] = await env.workflows.askable();
+  return await env.workflows.offer(first.id, { who: "Ada" });
+};`
       ),
-      table: answered[1]?.startsWith("| *Name* | *State* |"),
-      code: answered[2]?.startsWith('```\nx_0 = data["*"][0]'),
-      kept: [unescaped(kept?.[0]), kept?.[1], kept?.[2]],
-    }).toStrictEqual({
-      list: true,
-      table: true,
-      code: true,
-      kept: [boldList, table, longCode],
-    });
+      says("There's a card for it.")
+    );
+    const message = messageFrom(slackUser);
+    message.event.text = "Run the greeting for Ada";
+    await post(message, { caught: false });
+    const offered = await slackSawIn(message.event.channel);
+    const offer = offered.map(({ fields }) => offerOf(fields)).find(Boolean);
+
+    await post(
+      pressFrom(slackUser, {
+        channel: message.event.channel,
+        actionId: startAction,
+        value: offer ?? "",
+      }),
+      { form: true }
+    );
+
+    const sent = await slackSawIn(message.event.channel);
+    const said = sent.at(-1);
+    expect([
+      said?.method,
+      firstBlockText(said?.fields.blocks),
+      said?.fields.unfurl_links,
+    ]).toStrictEqual([
+      "chat.postMessage",
+      say("started", "en", { workflow: workflow.name }),
+      "false",
+    ]);
   });
 });
 

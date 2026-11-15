@@ -472,6 +472,7 @@ describe("the agent remembering in a person's own chat", () => {
         agentId,
         "slack",
         said,
+        undefined,
         {
           thread: `C${unique()}`,
           kind: "group",
@@ -486,6 +487,7 @@ describe("the agent remembering in a person's own chat", () => {
         agentId,
         "teams",
         said,
+        undefined,
         { kind: "direct" }
       );
       const own = await stub.createChat("Questions", member.userId, agentId);

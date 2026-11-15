@@ -19,8 +19,8 @@ import { requireWorkflowRole } from "../workflow-resources.ts";
 import { acceptedInput, pinned, startWorkflow } from "../workflow-starts.ts";
 import { startOfferCard } from "./cards.tsx";
 import type { Conversation } from "./connect-own.ts";
+import { inertOn } from "./inert.ts";
 import { keepCardsOf, pressedStart } from "./stephen-requests.ts";
-import { inertOn } from "./without-links.ts";
 import type { ChannelLocale, LineName } from "./words.ts";
 
 // Workflows people start by asking Stephen in a chat app. A workflow's
@@ -214,8 +214,8 @@ export const postOffers = async (
   )) {
     // oxlint-disable-next-line no-await-in-loop -- in the order offered
     await thread.post(
-      // Each value exactly as the start will take it, what the model wrote
-      // inert (`inertOn`).
+      // Each value as the start will take it, what the model wrote inert
+      // (`inertOn`).
       startOfferCard({
         locale,
         offerId: offer.id,

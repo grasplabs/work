@@ -1041,6 +1041,7 @@ describe("what the recall before a question may reach", setUpTime, () => {
           agentId,
           platform,
           question,
+          undefined,
           shared === true
             ? {
                 thread: `C${unique()}`,
@@ -1111,6 +1112,7 @@ describe("what the recall before a question may reach", setUpTime, () => {
       agent.agentId,
       "slack",
       `What is the vault ${codeword} code?`,
+      undefined,
       {
         thread: `C${unique()}`,
         kind: "group",
@@ -1212,6 +1214,7 @@ describe("what the recall before a question may reach", setUpTime, () => {
         agentId,
         platform,
         question,
+        undefined,
         shared
           ? {
               thread: `C${unique()}`,
@@ -1312,7 +1315,7 @@ describe("what the recall before a question may reach", setUpTime, () => {
     };
     /** Ann asks in a group she and Ben are in, as its door does. */
     const inGroup = async (outsiders: boolean) =>
-      await stub.askThrough(ann.userId, agentId, "teams", question, {
+      await stub.askThrough(ann.userId, agentId, "teams", question, undefined, {
         thread: `19:${unique()}@thread.v2`,
         kind: "group",
         audience: { members: [ann.userId, ben.userId], outsiders },
@@ -1390,11 +1393,18 @@ describe("what the recall before a question may reach", setUpTime, () => {
       const provider = await fakeProvider(says("Noted."), says("Noted."));
       const thread = `19:${unique()}@thread.tacv2;messageid=${unique()}`;
       const ask = async (text: string) =>
-        await stub.askThrough(person.userId, agentId, "teams", text, {
-          thread,
-          kind: "channel",
-          audience: { members: [person.userId], outsiders: false },
-        });
+        await stub.askThrough(
+          person.userId,
+          agentId,
+          "teams",
+          text,
+          undefined,
+          {
+            thread,
+            kind: "channel",
+            audience: { members: [person.userId], outsiders: false },
+          }
+        );
       await ask(`What about depot ${depot}?`);
       const first = JSON.stringify(provider.requests.map(({ body }) => body));
       await change(source, depot);
@@ -1473,7 +1483,14 @@ describe("what the recall before a question may reach", setUpTime, () => {
         return requests.length === 3 ? says("Done.") : undefined;
       });
       const ask = async (text: string) =>
-        await stub.askThrough(person.userId, agentId, "teams", text, place);
+        await stub.askThrough(
+          person.userId,
+          agentId,
+          "teams",
+          text,
+          undefined,
+          place
+        );
       ({ chatId } = await ask(`What about depot ${depot}?`));
       const turn = await outcome(ask("?"));
       const [first = "", second = "", last] = provider.requests.map(
@@ -1573,11 +1590,18 @@ describe("what the recall before a question may reach", setUpTime, () => {
       await fakeProvider(says("Noted."), says("Ok."));
       const thread = `19:${unique()}@thread.v2`;
       const ask = async (text: string, unnamed: boolean) =>
-        await stub.askThrough(person.userId, agentId, "teams", text, {
-          thread,
-          kind: "group",
-          audience: { members: [person.userId], outsiders: unnamed },
-        });
+        await stub.askThrough(
+          person.userId,
+          agentId,
+          "teams",
+          text,
+          undefined,
+          {
+            thread,
+            kind: "group",
+            audience: { members: [person.userId], outsiders: unnamed },
+          }
+        );
       const { chatId } = await ask(`What about depot ${depot}?`, false);
       await change(source, depot);
       await ask("?", outsiders);
@@ -1668,6 +1692,7 @@ describe("what the recall before a question may reach", setUpTime, () => {
           agentId,
           "teams",
           text,
+          undefined,
           { kind: "direct" }
         );
       // A question the recall before it finds nothing for.
@@ -2145,6 +2170,7 @@ describe("the recall before a question hands over memories", setUpTime, () => {
         agentId,
         platform,
         question,
+        undefined,
         sharedThread
           ? {
               thread: `C${unique()}`,
@@ -3158,6 +3184,7 @@ describe("memories a person never uses fade for them", setUpTime, () => {
         agentId,
         "slack",
         topic,
+        undefined,
         inThread
           ? {
               thread: `C${unique()}`,
