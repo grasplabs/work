@@ -784,16 +784,18 @@ const interviewTeamOf = async (
  * The member `personId` as the Brain's reader: the person, their teams as
  * core counts them now, the staff-list team whose claims they read
  * (`interviewTeamOf`), and the company. Refused once they have no current
- * membership.
+ * membership. Without `interviews`, never the staff-list team: the
+ * onboarding's object isn't asked.
  */
 const personReaderOf = async (
   env: ReaderEnv,
-  personId: string
+  personId: string,
+  { interviews = true }: { interviews?: boolean } = {}
 ): Promise<PersonReader> => {
   const id = checked(idSchema, personId);
   const [member, interviewTeam] = await Promise.all([
     memberOf(env.DB, id),
-    interviewTeamOf(env, id),
+    interviews ? interviewTeamOf(env, id) : null,
   ]);
   if (member === undefined) {
     throw permissionErrors.create("permission.person_inactive");
@@ -836,18 +838,17 @@ const readerOf = async (
   reach: Reach,
   teams: readonly string[] = []
 ): Promise<Reader> => {
-  const { person, groups } = await personReaderOf(env, personId);
+  // What their interviews' team said (GRA-1741) is read as the person
+  // alone: never by code or an App acting as their teams or the company.
+  const { person, groups } = await personReaderOf(env, personId, {
+    interviews: reach === "person",
+  });
   switch (reach) {
     case "person": {
       return { person, groups };
     }
     case "teams": {
-      // What their interviews' team said (GRA-1741) is read as the person
-      // alone: never by code or an App acting as their teams.
-      return {
-        person: null,
-        groups: groups.filter((group) => !group.startsWith(interviewsPrefix)),
-      };
+      return { person: null, groups };
     }
     case "company": {
       // Of `teams`, those the person is in now: a group of theirs.
