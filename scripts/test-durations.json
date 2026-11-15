@@ -38,7 +38,7 @@
   "@grasp-os/brain-next test/quotes-cost.test.ts": 1.5,
   "@grasp-os/brain-next test/quotes-twins-pairs.test.ts": 57.2,
   "@grasp-os/brain-next test/quotes-twins.test.ts": 43.5,
-  "@grasp-os/brain-next test/quotes.test.ts": 0.6,
+  "@grasp-os/brain-next test/quotes.test.ts": 6.5,
   "@grasp-os/brain-next test/recall-cost.test.ts": 0.4,
   "@grasp-os/brain-next test/recall-counts.test.ts": 0.6,
   "@grasp-os/brain-next test/recall-memories.test.ts": 1,
