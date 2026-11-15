@@ -93,8 +93,8 @@ import { removeVectorsOf, repackBlocks } from "./vectors.ts";
 // the same entity or not. Its record is the hide: every statement that
 // reads, counts, links or exports a memory asks that no erasure of its
 // writer came after it was learned (memories.ts `unerasedSql`), so one row
-// hides them all at once, however many, also those a restore of an older
-// copy brings back; then they are deleted a batch at a time
+// hides them all at once, however many, also those an older copy of the
+// store comes back with; then they are deleted a batch at a time
 // (`eraseWriterBatch`), by the call and then the tick. Its time is a write
 // stamp of the store's memories, and the store's stamp is raised to it
 // wherever it is applied, so what the writer adds afterwards is learned
@@ -103,7 +103,9 @@ import { removeVectorsOf, repackBlocks } from "./vectors.ts";
 // entry's body keep with how many memories it covered: the same change is
 // the same erasure, answered as recorded, also after a replay; another
 // change is another erasure. An export holding a memory of the writer
-// learned before it is stale (exports.ts `namedSql`).
+// learned before it is stale (exports.ts `namedSql`), and a restore of an
+// export writes none it covers, also once a restore is under way when the
+// erasure lands (restore.ts `passesOverMemory`).
 //
 // Nothing an erasure answers depends on what it found: it is recorded
 // and answers alike for a source that held nothing.
@@ -793,10 +795,14 @@ interface Sweeping extends Record<string, SqlStorageValue> {
  * batch's worth of the memories it hides in all, and takes those that
  * never failed; then the memories that failed, those that failed least
  * often first, through their own index. What an erasure hides is fixed
- * once it is applied (what the writer adds is stamped after it, and a
- * restore never brings back a memory it hides: an export holding one is
- * stale), so its sweep reads each memory once, and a tick reads about a
- * batch's worth however many failed behind it.
+ * once it is applied: what the writer adds is stamped after it (every add
+ * takes `stampWrite`, after the store's stamp, which the erasure raised to
+ * its time); a restore of an export passes over every memory an erasure
+ * covers, also one that lands while the restore runs (restore.ts
+ * `passesOverMemory`); and an older copy of the store comes back with its
+ * own sweeps, its erasures replayed from none. So its sweep reads each
+ * memory once, and a tick reads about a batch's worth however many failed
+ * behind it.
  *
  * A batch that fails is deleted again a memory a transaction; each that
  * fails then is counted (`memory_erase_failures`), and retried after the

@@ -478,7 +478,8 @@ export const erasures = sqliteTable(
      * in the order of the writer's index (`memories_writer_idx`): the
      * moment learned and the row of the last one a batch took
      * (erasure.ts `eraseWriterBatch`), deleted or failed. Null before the
-     * first. What it hides is fixed once it is applied, so none lies
+     * first. What it hides is fixed once it is applied (erasure.ts
+     * `eraseWriterBatch`: no add or restore writes one it covers), so none lies
      * behind it unseen.
      */
     sweptLearnedAt: integer("swept_learned_at"),

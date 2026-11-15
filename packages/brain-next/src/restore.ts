@@ -58,7 +58,11 @@ import {
   isInDoubt,
   noteWrite,
 } from "./files.ts";
-import { lineageOfSource, lineageOfWriter } from "./memories.ts";
+import {
+  lineageOfSource,
+  lineageOfWriter,
+  writerErasedAfterSql,
+} from "./memories.ts";
 import { readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
 import { planOf, valueKeyFor } from "./remember.ts";
 import { memoriesWrittenSinceSql, restoreFailedSql } from "./restoring.ts";
@@ -654,20 +658,36 @@ const entityRowsOf = (
 
 /**
  * Whether the memory `line` is passed over: the store holds it already (a
- * run of this restore before), or it rests on a version the store doesn't
- * hold. In the caller's transaction.
+ * run of this restore before), it rests on a version the store doesn't
+ * hold, or it is a writer's (`writerSubject`, its lineage's SHA-256) that
+ * an erasure of that writer recorded since covers (memories.ts
+ * `writerErasedAfterSql`): an erasure that came while the restore ran,
+ * whose deletion may already have passed where this memory would go (its
+ * sweep, erasure.ts `eraseWriterBatch`), so it would stay for good. In the
+ * caller's transaction, so no erasure lands between the check and the
+ * write.
  */
 const passesOverMemory = (
   sql: SqlStorage,
   line: MemoryLine,
-  subject: string | null
+  subject: string | null,
+  writerSubject: string | null
 ): boolean =>
   sql.exec("SELECT 1 FROM memories WHERE id = ?", line.id).toArray().length >
     0 ||
   (line.source !== null &&
     (subject === null ||
       line.version === null ||
-      !holdsVersion(sql, line.source, subject, line.version)));
+      !holdsVersion(sql, line.source, subject, line.version))) ||
+  (writerSubject !== null &&
+    sql
+      .exec(
+        `SELECT 1 FROM erasures
+        WHERE ${writerErasedAfterSql("erasures", "?1", "?2")} LIMIT 1`,
+        writerSubject,
+        line.learnedAt
+      )
+      .toArray().length > 0);
 
 /** The lineage of the memory `line`: its writer's, or its source's. */
 const lineageOf = (line: MemoryLine): string =>
@@ -691,7 +711,7 @@ const restoreMemory = async (
     line.writer === null ? null : await writerSubjectOf(line.writer);
   storage.transactionSync(() => {
     const { sql } = storage;
-    if (passesOverMemory(sql, line, subject)) {
+    if (passesOverMemory(sql, line, subject, writerSubject)) {
       return;
     }
     const rows = entityRowsOf(sql, line);

@@ -106,8 +106,9 @@ export const erasedBySql = (memory: string, erasure: string): string =>
  * Whether no erasure of the memory `alias`'s writer came after it was
  * learned (erasure.ts `eraseWriter`): a writer's erasure hides, from the
  * statement that records it on, every memory of that writer learned
- * before it, until the tick deletes them, also those a restore of an older
- * copy brings back; what the writer adds afterwards is learned after it.
+ * before it, until the tick deletes them, also those an older copy of the
+ * store comes back with (a restore of an export writes none: restore.ts
+ * `passesOverMemory`); what the writer adds afterwards is learned after it.
  * Asked of every memory a statement may read, count, link or export.
  */
 export const unerasedSql = (alias: string): string => `(

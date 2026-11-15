@@ -711,6 +711,71 @@ describe("a writer's erasure", () => {
     ).resolves.toStrictEqual(erased);
   });
 
+  it("retries the memory that failed least often first, so one that can be deleted now goes though a batch's worth fail more often", async () => {
+    const group = unique("g");
+    const writer = app();
+    const name = word();
+    for (let start = 0; start < eraseMemoriesPerBatch; start += 100) {
+      // oxlint-disable-next-line no-await-in-loop -- one add at a time
+      await remember(
+        group,
+        [{ key: "c", kind: "customer", names: [`${name} Stuck`] }],
+        Array.from({ length: 100 }, (_, index) =>
+          said("c", `stuck ${start + index}`, { kind: "writer", writer })
+        )
+      );
+    }
+    // Added last: the highest row, behind every stuck one by its key.
+    await remember(
+      group,
+      [{ key: "c", kind: "customer", names: [`${name} Flaky`] }],
+      [said("c", "flaky", { kind: "writer", writer })]
+    );
+    const trigger = (called: string, statement: string) =>
+      `CREATE TRIGGER ${called} BEFORE DELETE ON memories
+      WHEN old.writer = '${writer}' AND old.statement LIKE '${statement}'
+      BEGIN SELECT RAISE(ABORT, 'held by the test'); END`;
+    await runInDurableObject(shared(), (_instance, state) => {
+      state.storage.sql.exec(trigger("test_order_stuck", "stuck %"));
+      state.storage.sql.exec(trigger("test_order_flaky", "flaky"));
+    });
+    const flakyHeld = async () =>
+      await runInDurableObject(
+        shared(),
+        (_instance, state) =>
+          state.storage.sql
+            .exec<{ count: number }>(
+              "SELECT count(*) AS count FROM memories WHERE writer = ? AND statement = 'flaky'",
+              writer
+            )
+            .one().count
+      );
+    try {
+      // The call: the 1,000 stuck ones fail once. The tick: the flaky one,
+      // never tried, fails once, and 999 stuck ones fail again.
+      await shared().eraseWriter({
+        writer,
+        reason: "deleted",
+        change: "reset",
+      });
+      await tick(shared());
+      await runInDurableObject(shared(), (_instance, state) => {
+        state.storage.sql.exec("DROP TRIGGER test_order_flaky");
+      });
+      // Now deletable, and among the two that failed once: in the next
+      // batch, ahead of the 998 that failed twice.
+      await tick(shared());
+      await expect(flakyHeld()).resolves.toBe(0);
+    } finally {
+      await runInDurableObject(shared(), (_instance, state) => {
+        state.storage.sql.exec("DROP TRIGGER IF EXISTS test_order_flaky");
+        state.storage.sql.exec("DROP TRIGGER IF EXISTS test_order_stuck");
+      });
+      await tick(shared());
+      await tick(shared());
+    }
+  });
+
   it("is the shared store's alone", async () => {
     const person = unique("p");
     const own = env.BRAIN_STORE.getByName(`person:${person}`);
@@ -907,6 +972,129 @@ describe("a writer's erasure", () => {
         statements: [`${name} new`, `${name} other`].toSorted(),
         held: 1,
       });
+    });
+
+    /** A memory of `writer`'s, about an entity of its own, in an add of its own (its own stamp). */
+    const rememberOne = async (
+      group: string,
+      writer: string,
+      statement: string
+    ): Promise<string> => {
+      const { memories } = await remember(
+        group,
+        [{ key: "c", kind: "customer", names: [`${statement} Holdings`] }],
+        [said("c", statement, { kind: "writer", writer })]
+      );
+      return memories[0] ?? "";
+    };
+
+    /** How many erasures still hide something the tick has to delete. */
+    const erasing = async (): Promise<number> => {
+      const overview = await shared().workOverview();
+      return overview.erasing;
+    };
+
+    /** Ticks until the restore of `id` is no longer running, at most 40, each `ahead` past now: its state. */
+    const restoredBy = async (id: string, ahead = 0): Promise<string> => {
+      let state = "running";
+      for (let ticks = 0; ticks < 40 && state === "running"; ticks += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+        await tick(shared(), new Date(Date.now() + ahead));
+        // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+        const status = await shared().restoreStatus(id);
+        state = status?.state ?? "none";
+      }
+      return state;
+    };
+
+    it("writes nothing an erasure covers when the erasure lands while a restore runs, also once the restore goes on from the start of a part", async () => {
+      const group = unique("g");
+      const writer = app();
+      const name = word();
+      // Three adds, three stamps: the restore writes them in that order.
+      const first = await rememberOne(group, writer, `${name} first`);
+      await rememberOne(group, writer, `${name} second`);
+      const third = await rememberOne(group, writer, `${name} third`);
+      const { id } = await shared().startExport("test");
+      await expect(exportSettled(shared, id)).resolves.toBe("done");
+
+      // The store's storage lost, its bucket kept; the restore held between
+      // the second line and the third, which its part writes again from the
+      // first once it goes on.
+      await restore(shared(), empty);
+      await runInDurableObject(shared(), (_instance, state) => {
+        state.storage.sql.exec(
+          `CREATE TRIGGER test_hold_restore BEFORE INSERT ON memories
+          WHEN NEW.id = '${third}' BEGIN
+            SELECT RAISE(ABORT, 'held by the test');
+          END`
+        );
+      });
+      await shared().startRestore(id, "test");
+      const has = async (memory: string) =>
+        await runInDurableObject(
+          shared(),
+          (_instance, state) =>
+            state.storage.sql
+              .exec("SELECT 1 FROM memories WHERE id = ?", memory)
+              .toArray().length > 0
+        );
+      let firstWritten = false;
+      for (let ticks = 0; ticks < 20 && !firstWritten; ticks += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+        await tick(shared());
+        // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+        firstWritten = await has(first);
+      }
+
+      // The erasure deletes the two written, and its sweep passes them.
+      await shared().eraseWriter({
+        writer,
+        reason: "deleted",
+        change: "reset",
+      });
+      await runInDurableObject(shared(), (_instance, state) => {
+        state.storage.sql.exec("DROP TRIGGER test_hold_restore");
+      });
+      // Past the part's backoff: it runs again from its first line.
+      const state = await restoredBy(id, 60 * 60 * 1000);
+      const held = await heldOf(writer, `${name} first Holdings`);
+      expect({
+        firstWritten,
+        state,
+        held: held.memories,
+        erasing: await erasing(),
+      }).toStrictEqual({
+        firstWritten: true,
+        state: "done",
+        held: 0,
+        erasing: 0,
+      });
+    });
+
+    it("writes nothing an erasure covers when an older export is restored after the erasure", async () => {
+      const group = unique("g");
+      const writer = app();
+      const name = word();
+      await rememberOne(group, writer, `${name} older`);
+      const { id } = await shared().startExport("test");
+      await expect(exportSettled(shared, id)).resolves.toBe("done");
+      await shared().eraseWriter({
+        writer,
+        reason: "deleted",
+        change: "reset",
+      });
+
+      // Its record of the export lost with the storage: the restore checks
+      // the export by its files and the ledger alone.
+      await restore(shared(), empty);
+      await shared().startRestore(id, "test");
+      await restoredBy(id);
+      const held = await heldOf(writer, `${name} older Holdings`);
+      expect({
+        held: held.memories,
+        erasing: await erasing(),
+      }).toStrictEqual({ held: 0, erasing: 0 });
     });
   });
 });
