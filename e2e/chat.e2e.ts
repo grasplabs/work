@@ -598,7 +598,7 @@ test("the chat on every other page carries on the open chat, which is the same c
 
   // On another page it is still open, on the same chat; a new chat starts
   // afresh.
-  await page.goto("/knowledge");
+  await page.goto("/projects");
   await expect(messages.getByRole("listitem").first()).toHaveText(question);
   await chat.getByRole("button", { name: "New chat" }).click();
   await expect(messages).toHaveCount(0);

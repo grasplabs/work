@@ -1,6 +1,5 @@
 import type { ViewedApp } from "@grasp-os/shared/apps";
 import type { CatalogTool } from "@grasp-os/shared/connect";
-import type { Collection } from "@grasp-os/shared/knowledge";
 import {
   bindingNameSchema,
   permissionMaxActions,
@@ -61,18 +60,15 @@ import { buildsApp } from "./app-role.ts";
 // Asking for a permission for an App's App outside chat, on its
 // Integrations tab (`permissions.request`), and the App's requests still
 // waiting for an admin. Core takes a request only from the App's builders,
-// never Grasp staff, and only for what the App may hold: a connection (by
-// the tools it may call) or a collection to read, under a name its code
-// reaches it by. A request allows nothing until an admin grants it, from
-// what they review; this page only asks. The connections and collections
-// offered are those the person sees; core refuses any the App can't hold
-// (a personal collection, a connection that isn't there) with its reason.
+// never Grasp staff, and only for what the App may hold: a connection, by
+// the tools it may call, under a name its code reaches it by. A request
+// allows nothing until an admin grants it, from what they review; this
+// page only asks. The connections offered are those the person sees; core
+// refuses any the App can't hold (a connection that isn't there) with its
+// reason.
 
 /** What a request names, as a client sends it. */
 type AskedObject = PermissionRequest["object"];
-
-/** What an App asks for: a connection's tools, or a collection to read. */
-type Kind = "connection" | "collection";
 
 /** A connection the person sees, with the name of its integration. */
 interface Connectable {
@@ -87,7 +83,6 @@ interface Connectable {
 /** What the dialog reads to ask from. */
 interface Askable {
   connections: Connectable[];
-  collections: Collection[];
 }
 
 /** What the section reads: the App's requests, and the names to show them by. */
@@ -109,10 +104,9 @@ const suggestedName = (label: string): string =>
     .slice(0, 64);
 
 const readAskable = async (session: Session): Promise<Askable> => {
-  const [listed, catalog, collections] = await Promise.all([
+  const [listed, catalog] = await Promise.all([
     session.connections.list(),
     session.connections.catalog(),
-    session.knowledge.listCollections(),
   ]);
   const connections = integrationsOf(catalog.entries, listed).flatMap(
     (integration) =>
@@ -129,7 +123,7 @@ const readAskable = async (session: Session): Promise<Askable> => {
           offered: connection.offeredTools,
         }))
   );
-  return { connections, collections };
+  return { connections };
 };
 
 /** How a request names what it asks for, by the names the person sees. */
@@ -145,8 +139,7 @@ const ObjectName = ({
     return found === undefined ? <Trans>A connection</Trans> : found.label;
   }
   if (object.type === "collection") {
-    const found = read.collections.find(({ id }) => id === object.collectionId);
-    return found === undefined ? <Trans>A collection</Trans> : found.name;
+    return <Trans>A collection</Trans>;
   }
   return <span className="font-mono text-xs">{object.type}</span>;
 };
@@ -234,7 +227,7 @@ const ToolChoice = ({
   );
 };
 
-/** Asking for a connection's tools or a collection, under a name. */
+/** Asking for a connection's tools, under a name. */
 const AskDialog = ({
   app,
   askable,
@@ -248,27 +241,18 @@ const AskDialog = ({
 }) => {
   const { t } = useLingui();
   const { busy, failure, run } = useCoreAction();
-  const [kind, setKind] = useState<Kind>("connection");
   const [target, setTarget] = useState<string | null>(null);
   const [tools, setTools] = useState<string[]>([]);
   const [binding, setBinding] = useState("");
-  const kindId = useId();
   const targetId = useId();
   const bindingId = useId();
   const connection = askable.connections.find(({ id }) => id === target);
-  const collection = askable.collections.find(({ id }) => id === target);
   const named = bindingNameSchema.safeParse(binding).success;
-  const object: AskedObject | undefined =
-    kind === "connection" && connection !== undefined
-      ? { type: "connection", connectionId: connection.id }
-      : undefined;
-  const collectionObject: AskedObject | undefined =
-    kind === "collection" && collection !== undefined
-      ? { type: "collection", collectionId: collection.id }
-      : undefined;
-  const asked = object ?? collectionObject;
-  const actions = kind === "collection" ? ["read"] : tools;
-  const ready = asked !== undefined && actions.length > 0 && named;
+  const asked: AskedObject | undefined =
+    connection === undefined
+      ? undefined
+      : { type: "connection", connectionId: connection.id };
+  const ready = asked !== undefined && tools.length > 0 && named;
   const ask = async (): Promise<void> => {
     if (asked === undefined) {
       return;
@@ -278,7 +262,7 @@ const AskDialog = ({
         await session.permissions.request({
           subject: { type: "app", appId: app },
           object: asked,
-          actions,
+          actions: tools,
           binding,
         })
     );
@@ -287,14 +271,10 @@ const AskDialog = ({
       onClose();
     }
   };
-  const kinds = [
-    { value: "connection", label: t`A connection` },
-    { value: "collection", label: t`A collection to read` },
-  ];
-  const targets =
-    kind === "connection"
-      ? askable.connections.map(({ id, label }) => ({ value: id, label }))
-      : askable.collections.map(({ id, name }) => ({ value: id, label: name }));
+  const targets = askable.connections.map(({ id, label }) => ({
+    value: id,
+    label,
+  }));
   const choose = (value: string): void => {
     setTarget(value);
     setTools([]);
@@ -323,40 +303,8 @@ const AskDialog = ({
           </DialogDescription>
         </DialogHeader>
         <Field>
-          <FieldLabel htmlFor={kindId}>
-            <Trans>What it needs</Trans>
-          </FieldLabel>
-          <Select
-            items={kinds}
-            onValueChange={(value: unknown) => {
-              if (value === "connection" || value === "collection") {
-                setKind(value);
-                setTarget(null);
-                setTools([]);
-                setBinding("");
-              }
-            }}
-            value={kind}
-          >
-            <SelectTrigger className="w-full" id={kindId}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {kinds.map((item) => (
-                <SelectItem key={item.value} value={item.value}>
-                  {item.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
-        <Field>
           <FieldLabel htmlFor={targetId}>
-            {kind === "connection" ? (
-              <Trans>Connection</Trans>
-            ) : (
-              <Trans>Collection</Trans>
-            )}
+            <Trans>Connection</Trans>
           </FieldLabel>
           <Select
             items={targets}
@@ -379,13 +327,13 @@ const AskDialog = ({
             </SelectContent>
           </Select>
         </Field>
-        {kind === "connection" && connection !== undefined ? (
+        {connection === undefined ? null : (
           <ToolChoice
             chosen={tools}
             connection={connection}
             onChange={setTools}
           />
-        ) : null}
+        )}
         <Field>
           <FieldLabel htmlFor={bindingId}>
             <Trans>Name in the App&apos;s code</Trans>

@@ -1,4 +1,3 @@
-import type { ChatCitedDocument } from "@grasp-os/shared/chat";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -19,7 +18,7 @@ import {
 import { Table } from "@grasp-os/ui/components/table";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { CheckIcon, CopyIcon, DownloadIcon } from "lucide-react";
-import { createContext, use, useState } from "react";
+import { useState } from "react";
 import type { ReactNode } from "react";
 import Markdown from "react-markdown";
 import type { Components, Options } from "react-markdown";
@@ -28,7 +27,7 @@ import remarkGfm from "remark-gfm";
 
 import { useCopy } from "../copy.ts";
 import { downloadText } from "../export/export-file.tsx";
-import { plainComponents, plainUrl } from "../knowledge/markdown.tsx";
+import { plainComponents } from "../markdown.tsx";
 import {
   cellsOf,
   codeOf,
@@ -38,7 +37,6 @@ import {
   textOf,
 } from "./answer-blocks.ts";
 import type { TableFormat } from "./answer-blocks.ts";
-import { CitedNote, citedNoteLink, CitedSpan } from "./cited-note.tsx";
 
 // The agent's answers, as the prototype renders them with Streamdown
 // (grasplabs/prototype `components/ai-elements/message.tsx`): a code block
@@ -226,76 +224,9 @@ const LeavingLink = ({
   );
 };
 
-/** No note cited. */
-const noneCited: readonly string[] = [];
-
-/**
- * The notes the answer being rendered cites. A context, not an argument to
- * its components: those stay the same from render to render, so a block
- * keeps its state (a menu open, a link's question, "Copied") as more of
- * the answer streams in, rather than being drawn anew.
- */
-const CitedNotes = createContext<readonly string[]>(noneCited);
-
-/** No source looked up. */
-const noSources: readonly ChatCitedDocument[] = [];
-
-/**
- * What core says the answer being rendered cites (`ChatCitedDocument`),
- * with the spans that cite each: a context, as `CitedNotes` is.
- */
-const CitedSources = createContext<readonly ChatCitedDocument[]>(noSources);
-
-/**
- * A link in an answer: to a note it cites, the note, here; to any other
- * note, its text alone, whatever the answer says; anywhere else, out of
- * Grasp, once the person says so.
- */
-const AnswerLink = ({
-  href,
-  at,
-  children,
-}: {
-  href?: string | undefined;
-  /** Where the link starts in the answer's Markdown. */
-  at?: number | undefined;
-  children?: ReactNode;
-}) => {
-  const cited = use(CitedNotes);
-  const sources = use(CitedSources);
-  const documentId =
-    href === undefined ? undefined : citedNoteLink.exec(href)?.groups?.id;
-  if (documentId === undefined) {
-    return <LeavingLink href={href}>{children}</LeavingLink>;
-  }
-  if (!cited.includes(documentId)) {
-    return <span>{children}</span>;
-  }
-  // The span core found at this link's place, citing this note.
-  const index = sources.findIndex(
-    (source) =>
-      source.documentId === documentId &&
-      source.spans.some((span) => span.at === at)
-  );
-  const source = sources[index];
-  const span = source?.spans.find((each) => each.at === at);
-  return source === undefined || span === undefined ? (
-    <CitedNote documentId={documentId}>{children}</CitedNote>
-  ) : (
-    <CitedSpan number={index + 1} quote={span.quote} source={source}>
-      {children}
-    </CitedSpan>
-  );
-};
-
 /** The answer's components: the plain ones, with these in their place. */
 const answerComponents: Components = {
-  ...plainComponents(noneCited, LeavingLink),
-  a: ({ node, href, children }) => (
-    <AnswerLink at={node?.position?.start.offset} href={href}>
-      {children}
-    </AnswerLink>
-  ),
+  ...plainComponents(LeavingLink),
   pre: ({ node, children }) => {
     const code = codeOf(node);
     return (
@@ -328,34 +259,24 @@ const writingPlugins: Options["rehypePlugins"] = [
 ];
 
 /**
- * An answer's Markdown; its links to the notes `cited` names open them,
- * each an inline citation where `sources` holds a span at its place.
- * While it is being `written`, each new word fades in where it lands.
+ * An answer's Markdown. While it is being `written`, each new word fades
+ * in where it lands.
  */
 export const AnswerMarkdown = ({
   text,
-  cited = noneCited,
-  sources = noSources,
   written = false,
 }: {
   text: string;
-  cited?: readonly string[];
-  sources?: readonly ChatCitedDocument[];
   written?: boolean;
 }) => (
-  <CitedSources value={sources}>
-    <CitedNotes value={cited}>
-      <div className="flex min-w-0 flex-col gap-3">
-        <Markdown
-          components={answerComponents}
-          rehypePlugins={written ? writingPlugins : rehypePlugins}
-          remarkPlugins={remarkPlugins}
-          skipHtml
-          urlTransform={plainUrl}
-        >
-          {text}
-        </Markdown>
-      </div>
-    </CitedNotes>
-  </CitedSources>
+  <div className="flex min-w-0 flex-col gap-3">
+    <Markdown
+      components={answerComponents}
+      rehypePlugins={written ? writingPlugins : rehypePlugins}
+      remarkPlugins={remarkPlugins}
+      skipHtml
+    >
+      {text}
+    </Markdown>
+  </div>
 );

@@ -60,21 +60,21 @@ describe("where a workflow stands", () => {
 });
 
 describe("the signals by kind", () => {
-  it("counts each kind there is, the most first, an unanswered question of either read as one kind", () => {
+  it("counts each kind there is, the most first, those with as many in the board's order", () => {
     expect(
       signalKinds([
         { kind: "correction" },
         { kind: "unanswered_question" },
         { kind: "failing_step" },
         { kind: "unanswered_question" },
-        { kind: "overdue_review" },
+        { kind: "cost_per_run" },
         { kind: "unanswered_question" },
       ])
     ).toStrictEqual([
       { kind: "unanswered_question", count: 3 },
       { kind: "failing_step", count: 1 },
       { kind: "correction", count: 1 },
-      { kind: "overdue_review", count: 1 },
+      { kind: "cost_per_run", count: 1 },
     ]);
     expect(signalKinds([])).toStrictEqual([]);
   });

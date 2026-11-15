@@ -56,11 +56,6 @@ msgstr "{0, plural, one {# chose qui y a été dite part avec.} other {# choses 
 msgid "{0, plural, one {# workflow keeps its numbers, which will say their source was removed.} other {# workflows keep their numbers, which will say their source was removed.}}"
 msgstr "{0, plural, one {# workflow garde ses chiffres, qui indiqueront que leur source a été retirée.} other {# workflows gardent leurs chiffres, qui indiqueront que leur source a été retirée.}}"
 
-#. placeholder {0}: cited.length
-#: src/chat/sources.tsx
-msgid "{0, plural, one {Based on # source} other {Based on # sources}}"
-msgstr "{0, plural, one {Basé sur # source} other {Basé sur # sources}}"
-
 #. placeholder {0}: held.length
 #: src/onboarding/send-plan-form.tsx
 msgid "{0, plural, one {The team you left out} other {The # teams you left out}}"
@@ -300,10 +295,6 @@ msgstr "{count, plural, one {# employé interrogé} other {# employés interrog�
 msgid "{count, plural, one {# entry} other {# entries}}"
 msgstr "{count, plural, one {# entrée} other {# entrées}}"
 
-#: src/routes/_shell.knowledge.index.tsx
-msgid "{count, plural, one {# file} other {# files}}"
-msgstr "{count, plural, one {# fichier} other {# fichiers}}"
-
 #: src/brain/brain.ts
 msgid "{count, plural, one {# gap still open. First: {question}} other {# gaps still open. First: {question}}}"
 msgstr "{count, plural, one {# lacune encore ouverte : {question}} other {# lacunes encore ouvertes. La première : {question}}}"
@@ -384,10 +375,6 @@ msgstr "{count, plural, one {# perte de temps} other {# pertes de temps}}"
 msgid "{count, plural, one {# tool allowed} other {# tools allowed}}"
 msgstr "{count, plural, one {# outil autorisé} other {# outils autorisés}}"
 
-#: src/knowledge/timeline.tsx
-msgid "{count, plural, one {# version} other {# versions}}"
-msgstr "{count, plural, one {# version} other {# versions}}"
-
 #: src/brain/brain.ts
 msgid "{count, plural, one {# wish} other {# wishes}}"
 msgstr "{count, plural, one {# souhait} other {# souhaits}}"
@@ -456,10 +443,6 @@ msgstr "{count, plural, other {# pas encore comptés}}"
 msgid "{count} of {reach} asked him"
 msgstr "{count} sur {reach} l’ont sollicité"
 
-#: src/routes/_shell.knowledge.index.tsx
-msgid "{count} or more files"
-msgstr "{count} fichiers ou plus"
-
 #: src/workflows/requests/request-summary.tsx
 msgid "{count} requests last week"
 msgstr "{count} demandes la semaine dernière"
@@ -493,10 +476,6 @@ msgstr "{days, plural, one {Le dernier jour} other {Les # derniers jours}}"
 msgid "{devices, plural, one {Signed in on # device. Sign out any you do not recognise.} other {Signed in on # devices. Sign out any you do not recognise.}}"
 msgstr "{devices, plural, one {Connecté sur # appareil. Déconnectez tout appareil que vous ne reconnaissez pas.} other {Connecté sur # appareils. Déconnectez tout appareil que vous ne reconnaissez pas.}}"
 
-#: src/dashboard/signals.tsx
-msgid "{doc} in {where} is {late, plural, one {# day} other {# days}} past its review date."
-msgstr "{doc} dans {where} a dépassé sa date de révision de {late, plural, one {# jour} other {# jours}}."
-
 #: src/onboarding/setup-steps.tsx
 msgid "{documentKinds}, and whatever explains how you work. Share what you have. Drafts are fine too."
 msgstr "{documentKinds}, et tout ce qui explique votre façon de travailler. Partagez ce que vous avez. Les brouillons conviennent aussi."
@@ -505,21 +484,9 @@ msgstr "{documentKinds}, et tout ce qui explique votre façon de travailler. Par
 msgid "{documentKinds}. Connect where they live, and I’ll only read what you share with me."
 msgstr "{documentKinds}. Connectez l’endroit où ils se trouvent, et je ne lirai que ce que vous partagez avec moi."
 
-#: src/knowledge/purge.tsx
-msgid "{documents, plural, one {# document purged} other {# documents purged}}"
-msgstr "{documents, plural, one {# document purgé} other {# documents purgés}}"
-
-#: src/knowledge/purge.tsx
-msgid "{documents, plural, one {# document rewritten} other {# documents rewritten}}"
-msgstr "{documents, plural, one {# document réécrit} other {# documents réécrits}}"
-
 #: src/brain/brain-atlas.ts
 msgid "{documents, plural, one {# document} other {# documents}}"
 msgstr "{documents, plural, one {# document} other {# documents}}"
-
-#: src/knowledge/purge.tsx
-msgid "{documents, plural, one {From every version of this collection's # file.} other {From every version of this collection's # files.}}"
-msgstr "{documents, plural, one {De chaque version du # fichier de cette collection.} other {De chaque version des # fichiers de cette collection.}}"
 
 #: src/brain/brain-atlas.ts
 msgid "{done, plural, one {# of them is drawn.} other {# of them are drawn.}}"
@@ -567,7 +534,6 @@ msgid "{file} removed"
 msgstr "{file} retiré"
 
 #. Earlier events on a timeline, folded away
-#: src/knowledge/timeline.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "{folded, plural, one {# earlier} other {# earlier}}"
 msgstr "{folded, plural, one {# antérieure} other {# antérieures}}"
@@ -709,21 +675,9 @@ msgstr "{lines, plural, one {# ligne} other {# lignes}}"
 msgid "{live} of {count}"
 msgstr "{live} sur {count}"
 
-#: src/knowledge/purge.tsx
-msgid "{longer, plural, one {A term is still in # longer word or address.} other {A term is still in # longer words or addresses.}}"
-msgstr "{longer, plural, one {Un terme reste dans # mot ou adresse plus long.} other {Un terme reste dans # mots ou adresses plus longs.}}"
-
 #: src/onboarding/setup-steps.tsx
 msgid "{mapped, plural, one {One piece of work is mapped and ready for you.} other {# pieces of work are mapped and ready for you.}}"
 msgstr "{mapped, plural, one {Une tâche est cartographiée et prête pour vous.} other {# tâches sont cartographiées et prêtes pour vous.}}"
-
-#: src/brain/brain-transcript.tsx
-msgid "{match} of {matches}"
-msgstr "{match} sur {matches}"
-
-#: src/knowledge/purge.tsx
-msgid "{memories, plural, one {# memory record redacted or deleted} other {# memory records redacted or deleted}}"
-msgstr "{memories, plural, one {# souvenir caviardé ou supprimé} other {# souvenirs caviardés ou supprimés}}"
 
 #: src/workflows/saved-ago.tsx
 msgid "{minutes, plural, one {Saved # min ago} other {Saved # min ago}}"
@@ -928,10 +882,6 @@ msgstr "{needs, plural, one {# vous attend} other {# vous attendent}}"
 msgid "{number} of {total}"
 msgstr "{number} sur {total}"
 
-#: src/knowledge/purge.tsx
-msgid "{occurrences, plural, one {# occurrence removed} other {# occurrences removed}}"
-msgstr "{occurrences, plural, one {# occurrence supprimée} other {# occurrences supprimées}}"
-
 #: src/brain/brain-atlas.ts
 msgid "{one} and {other} both name the same handover, each from their own side."
 msgstr "{one} et {other} citent le même passage de relais, chacun de son côté."
@@ -955,10 +905,6 @@ msgstr "{open, plural, one {# question ouverte} other {# questions ouvertes}}"
 #: src/onboarding/setup-steps.tsx
 msgid "{openCount, plural, =0 {Nothing needs you} =1 {Just one thing for you} other {# things for you}}"
 msgstr "{openCount, plural, =0 {Rien ne vous attend} =1 {Une seule chose pour vous} other {# choses pour vous}}"
-
-#: src/knowledge/purge.tsx
-msgid "{originals, plural, one {# uploaded original deleted} other {# uploaded originals deleted}}"
-msgstr "{originals, plural, one {# original importé supprimé} other {# originaux importés supprimés}}"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "{outCount, plural, one {The link that is out, as a list} other {The # links that are out, as a list}}"
@@ -1168,10 +1114,6 @@ msgstr "{status, select, drawn {{workflow} (cartographié)} designed {{workflow}
 msgid "{status, select, drawn {Drawn as a workflow} designed {Designed as a workflow} testing {Testing as a workflow} other {Running as a workflow}}"
 msgstr "{status, select, drawn {Workflow cartographié} designed {Workflow repensé} testing {Workflow en test} other {Workflow en production}}"
 
-#: src/knowledge/purge.tsx
-msgid "{still, plural, one {A search still finds a term in # place.} other {A search still finds a term in # places.}}"
-msgstr "{still, plural, one {Une recherche trouve encore un terme à # endroit.} other {Une recherche trouve encore un terme à # endroits.}}"
-
 #: src/dashboard/pile-cards.tsx
 msgid "{subject} gets this permission from now on."
 msgstr "{subject} obtient cette autorisation dès maintenant."
@@ -1327,14 +1269,6 @@ msgstr "{unseen} sur {total} citées, pas vues en usage"
 msgid "{used} of {of}"
 msgstr "{used} sur {of}"
 
-#: src/knowledge/purge.tsx
-msgid "{versions, plural, one {# version purged} other {# versions purged}}"
-msgstr "{versions, plural, one {# version purgée} other {# versions purgées}}"
-
-#: src/knowledge/purge.tsx
-msgid "{versions, plural, one {# version rewritten} other {# versions rewritten}}"
-msgstr "{versions, plural, one {# version réécrite} other {# versions réécrites}}"
-
 #: src/brain/sources-page.tsx
 msgid "{versions, plural, one {# version} other {# versions}}"
 msgstr "{versions, plural, one {# version} other {# versions}}"
@@ -1487,14 +1421,6 @@ msgstr "Une modification s’applique aux exécutions qui démarrent ensuite : c
 msgid "A collection"
 msgstr "Une collection"
 
-#: src/knowledge/new-collection.tsx
-msgid "A collection holds documents Grasp and its agents may read."
-msgstr "Une collection contient des documents que Grasp et ses agents peuvent lire."
-
-#: src/apps/app-access-requests.tsx
-msgid "A collection to read"
-msgstr "Une collection à lire"
-
 #: src/apps/app-access-requests.tsx
 #: src/apps/draft-changes.tsx
 msgid "A connection"
@@ -1536,11 +1462,6 @@ msgstr "Une équipe supprimée"
 msgid "A document or an image"
 msgstr "Un document ou une image"
 
-#: src/brain/memory-parts.tsx
-msgctxt "memory record kind"
-msgid "A fact"
-msgstr "Un fait"
-
 #: src/apps/data-model-changes.tsx
 msgid "A field of this kind can't be given a value here. Make it optional, or ask in the chat for a change in code."
 msgstr "Un champ de ce type ne peut pas recevoir de valeur ici. Rendez-le facultatif, ou demandez dans le chat une modification du code."
@@ -1553,10 +1474,6 @@ msgstr "Un fichier n'est téléchargé que lorsque vous le demandez, d'un clic."
 msgctxt "a webhook event: someone sent a form on one of the App's pages"
 msgid "A form is sent"
 msgstr "Un formulaire est envoyé"
-
-#: src/knowledge/purge.tsx
-msgid "A form spelled otherwise, or part of a longer word or address. Purge again with those forms as terms."
-msgstr "Une forme écrite autrement, ou une partie d’un mot ou d’une adresse plus long. Purgez à nouveau avec ces formes comme termes."
 
 #: src/connections/request-app-dialog.tsx
 msgid "A former member"
@@ -1586,11 +1503,6 @@ msgstr "Une valeur JSON"
 msgid "A Knowledge search from {about} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
 msgstr "Une recherche dans Connaissances depuis {about} n’a rien trouvé {searches, plural, one {une fois} other {# fois}}, pour {askers, plural, one {# personne} other {# personnes}}."
 
-#: src/brain/memory-parts.tsx
-msgctxt "memory record kind"
-msgid "A lesson"
-msgstr "Une leçon"
-
 #: src/workflows/requests/request-plan.tsx
 msgid "A look-up"
 msgstr "Une recherche"
@@ -1607,10 +1519,6 @@ msgstr "Un modèle que votre endpoint propose"
 msgctxt "under an amount on a dashboard chart"
 msgid "a month"
 msgstr "par mois"
-
-#: src/knowledge/new-document.tsx
-msgid "A name has no [, ], # or |, and no empty folders."
-msgstr "Un nom ne contient ni [, ], # ou |, ni dossier vide."
 
 #: src/inbox/items.ts
 msgid "A new advisory affects the packages of {name}"
@@ -1653,18 +1561,9 @@ msgstr "Une page s’est vu refuser les données de l’application"
 msgid "A page your team opens"
 msgstr "Une page que votre équipe ouvre"
 
-#: src/brain/memory-parts.tsx
-msgctxt "memory record kind"
-msgid "A preference"
-msgstr "Une préférence"
-
 #: src/pages/page-files.ts
 msgid "A preview keeps no files."
 msgstr "Un aperçu ne conserve aucun fichier."
-
-#: src/knowledge/new-collection.tsx
-msgid "A private collection: nobody else reads it, nor their agents."
-msgstr "Une collection privée : personne d’autre ne la lit, ni ses agents."
 
 #: src/projects/project-dialog.tsx
 msgid "A project groups apps and workflows for a process, a team or a goal. Putting something in it shares it with nobody."
@@ -1719,30 +1618,9 @@ msgstr "Une exécution de la version {version} a démarré pour vous"
 msgid "A schedule"
 msgstr "Une planification"
 
-#: src/knowledge/purge.tsx
-msgid "A search for part of a word still finds those. Go back and add each such form as a term of its own."
-msgstr "Une recherche d’une partie de mot les trouve encore. Revenez en arrière et ajoutez chaque forme comme terme à part entière."
-
-#: src/dashboard/signals.tsx
-msgid "A search in {where} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
-msgstr "Une recherche dans {where} n’a rien trouvé {searches, plural, one {une fois} other {# fois}}, pour {askers, plural, one {# personne} other {# personnes}}."
-
 #: src/connections/http-connections.tsx
 msgid "A secret in a header"
 msgstr "Un secret dans un en-tête"
-
-#: src/brain/lessons-view.tsx
-msgctxt "lesson scope"
-msgid "A shared chat"
-msgstr "Une conversation partagée"
-
-#: src/brain/share-record.tsx
-msgid "A shared chat with {people}"
-msgstr "Une discussion partagée avec {people}"
-
-#: src/brain/share-record.tsx
-msgid "A shared chat with only you in it"
-msgstr "Une discussion partagée où vous êtes seul"
 
 #: src/brain/skills-page.tsx
 msgid "A SKILL.md: a name of lowercase letters, digits and hyphens, and a description of when to use it, then the steps. Saving a skill of a name you have already makes its next version."
@@ -1858,11 +1736,6 @@ msgstr "À propos des équipes"
 #: src/brain/brain.ts
 msgid "About tools"
 msgstr "À propos des outils"
-
-#: src/brain/memory-page.tsx
-msgctxt "memory record state"
-msgid "Accepted"
-msgstr "Accepté"
 
 #: src/agents/agent-page.tsx
 #: src/drafts/share-with-team.tsx
@@ -2122,10 +1995,6 @@ msgctxt "note property: what a source added"
 msgid "Added"
 msgstr "Apports"
 
-#: src/brain/since-last-look.tsx
-msgid "Added {at}"
-msgstr "Ajouté {at}"
-
 #: src/activity/audit-words.ts
 msgid "Added a member to an App"
 msgstr "A ajouté un membre à une application"
@@ -2197,10 +2066,6 @@ msgstr "Ajusté : {goal}"
 msgid "Admin"
 msgstr "Admin"
 
-#: src/knowledge/collection-markers.tsx
-msgid "Admins"
-msgstr "Administrateurs"
-
 #: src/routes/_shell.settings.members.tsx
 msgid "Admins can change anyone's role, end their sessions and remove them, other admins included."
 msgstr "Les admins peuvent changer le rôle de chacun, mettre fin à ses sessions et le retirer, autres admins compris."
@@ -2249,10 +2114,6 @@ msgstr "Agents"
 #: src/agents/own-agents-admin.tsx
 msgid "Agents people make for themselves. Only their owner sees and asks them, and they do at most what Grasp may do for that person. You see how many each person has and what they cost, never what they are told."
 msgstr "Des agents que les personnes créent pour elles-mêmes. Seul leur propriétaire les voit et les interroge, et ils font au plus ce que Grasp peut faire pour cette personne. Vous voyez combien chacun en a et ce qu'ils coûtent, jamais ce qu'on leur dit."
-
-#: src/knowledge/new-collection.tsx
-msgid "Agents read this before they look inside."
-msgstr "Les agents lisent ceci avant de regarder à l’intérieur."
 
 #: src/dashboard/returns.ts
 msgctxt "workflow stage"
@@ -2497,11 +2358,6 @@ msgstr "Un événement sur une connexion"
 msgid "An event from a webhook source"
 msgstr "Un événement d’une source de webhook"
 
-#: src/brain/memory-parts.tsx
-msgctxt "memory record kind"
-msgid "An experience"
-msgstr "Une expérience"
-
 #: src/apps/app-webhooks.tsx
 msgid "An https address on the public internet, with no user name, password or IP address in it."
 msgstr "Une adresse https sur l'internet public, sans nom d'utilisateur, mot de passe ni adresse IP."
@@ -2569,10 +2425,6 @@ msgstr "Un autre lien attend une réponse, ou un lien vient d’être refusé. R
 #: src/onboarding/connect-steps.tsx
 msgid "Another platform"
 msgstr "Autre plateforme"
-
-#: src/knowledge/purge.tsx
-msgid "Another reason"
-msgstr "Une autre raison"
 
 #: src/brain/sources-page.tsx
 msgctxt "how search found a memory"
@@ -3186,10 +3038,6 @@ msgstr "Retour à {destination}"
 msgid "Back to how it began"
 msgstr "Revenir comme au début"
 
-#: src/knowledge/document.tsx
-msgid "Back to the current version"
-msgstr "Revenir à la version actuelle"
-
 #: src/inbox/item-detail.tsx
 msgid "Back to the list"
 msgstr "Retour à la liste"
@@ -3341,10 +3189,6 @@ msgstr "Fil d’Ariane"
 msgid "Briefcase"
 msgstr "Mallette"
 
-#: src/knowledge/frame.tsx
-msgid "Browse"
-msgstr "Parcourir"
-
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Brussels"
@@ -3379,10 +3223,6 @@ msgstr "A compilé des paquets approuvés"
 #: src/workflows/workflow-settings.tsx
 msgid "Business process"
 msgstr "Processus métier"
-
-#: src/brain/memory-page.tsx
-msgid "By {by}"
-msgstr "Par {by}"
 
 #: src/apps/app-data.tsx
 msgctxt "a change's source"
@@ -3454,10 +3294,6 @@ msgstr "Appelle {path} de {app}. Chaque exécution peut lire ou modifier ce que 
 msgid "Came in"
 msgstr "Reçue"
 
-#: src/brain/since-last-look.tsx
-msgid "Came in {at}"
-msgstr "Arrivé {at}"
-
 #: src/brain/brain.ts
 msgid "Came up in {source}"
 msgstr "Évoqué dans {source}"
@@ -3489,8 +3325,6 @@ msgstr "Impossible de proposer Exécuter : {unread}"
 #: src/brain/gap-actions.tsx
 #: src/brain/goals-editor.tsx
 #: src/brain/memories-page.tsx
-#: src/brain/remember-dialog.tsx
-#: src/brain/share-record.tsx
 #: src/brain/skills-page.tsx
 #: src/chat/answer-markdown.tsx
 #: src/chat/brain-questions.tsx
@@ -3502,9 +3336,6 @@ msgstr "Impossible de proposer Exécuter : {unread}"
 #: src/drafts/draft-history.tsx
 #: src/drafts/sharing.tsx
 #: src/inbox/item-detail.tsx
-#: src/knowledge/document.tsx
-#: src/knowledge/new-collection.tsx
-#: src/knowledge/new-document.tsx
 #: src/link-confirmation.tsx
 #: src/onboarding/document-drop.tsx
 #: src/onboarding/place-picker.tsx
@@ -3541,11 +3372,6 @@ msgstr "Annulé"
 msgctxt "status of a workflow run"
 msgid "Cancelled"
 msgstr "Annulée"
-
-#: src/brain/lessons-view.tsx
-msgctxt "lesson state"
-msgid "Candidate"
-msgstr "Candidate"
 
 #: src/apps/app-access-requests.tsx
 msgid "Capital letters, digits and underscores, starting with a letter, such as CRM."
@@ -3628,10 +3454,6 @@ msgstr "Modifier ce qui est à l'entreprise"
 msgid "Change the plan"
 msgstr "Modifier le plan"
 
-#: src/knowledge/purge.tsx
-msgid "Change the terms"
-msgstr "Modifier les termes"
-
 #: src/settings/stephen-settings.tsx
 msgid "Change their own"
 msgstr "Modifier ce qui est à eux"
@@ -3662,10 +3484,6 @@ msgstr "Modifié"
 msgctxt "a record's fields changed"
 msgid "Changed"
 msgstr "Modifié"
-
-#: src/brain/since-last-look.tsx
-msgid "Changed {at}"
-msgstr "Modifié {at}"
 
 #: src/activity/audit-words.ts
 msgid "Changed a chat"
@@ -3763,10 +3581,6 @@ msgstr "Des modifications envoyées par Grasp pour quelqu'un dont la réponse s'
 #: src/drafts/share-with-team.tsx
 msgid "Changes only you see"
 msgstr "Modifications que vous seul voyez"
-
-#: src/brain/since-last-look.tsx
-msgid "Changes since {when}"
-msgstr "Changements depuis {when}"
 
 #: src/apps/data-model-changes.tsx
 msgid "Changes who can see and change the records of {table}."
@@ -3957,20 +3771,9 @@ msgstr "Choisir votre liste du personnel"
 msgid "Choose…"
 msgstr "Choisir…"
 
-#: src/knowledge/new-collection.tsx
 #: src/settings/stephen-audience.tsx
 msgid "Chosen teams"
 msgstr "Équipes choisies"
-
-#. placeholder {0}: node.citedRevision
-#. placeholder {1}: node.record.revision
-#: src/brain/memory-page.tsx
-msgid "Cited at revision {0}; it is at revision {1} now."
-msgstr "Cité à la révision {0} ; il en est maintenant à la révision {1}."
-
-#: src/brain/memory-page.tsx
-msgid "Cites a source you no longer have access to"
-msgstr "Cite une source à laquelle vous n’avez plus accès"
 
 #: src/activity/audit-log.tsx
 msgid "Clear"
@@ -3981,7 +3784,6 @@ msgstr "Effacer"
 msgid "Clear {0}"
 msgstr "Effacer {0}"
 
-#: src/brain/brain-transcript.tsx
 #: src/settings/filter-menu.tsx
 msgid "Clear filters"
 msgstr "Effacer les filtres"
@@ -3996,8 +3798,6 @@ msgstr "Effacer les filtres"
 #: src/apps/resource-bindings.tsx
 #: src/brain/forget.tsx
 #: src/brain/memories-page.tsx
-#: src/brain/remember-dialog.tsx
-#: src/brain/share-record.tsx
 #: src/chat/chat-panel.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx
@@ -4008,10 +3808,6 @@ msgstr "Effacer les filtres"
 #: src/dashboard/widget-block.tsx
 #: src/drafts/draft-history.tsx
 #: src/drafts/share-with-team.tsx
-#: src/knowledge/frame.tsx
-#: src/knowledge/new-collection.tsx
-#: src/knowledge/new-document.tsx
-#: src/knowledge/purge.tsx
 #: src/onboarding/place-picker.tsx
 #: src/settings/erasures.tsx
 #: src/settings/stephen-settings.tsx
@@ -4028,7 +3824,6 @@ msgid "Close"
 msgstr "Fermer"
 
 #: src/brain/brain-nav.tsx
-#: src/knowledge/nav.tsx
 msgid "Close {name}"
 msgstr "Fermer {name}"
 
@@ -4079,31 +3874,9 @@ msgstr "Pièces"
 msgid "colleagues talked"
 msgstr "collègues ont parlé"
 
-#: src/apps/app-access-requests.tsx
-#: src/knowledge/document.tsx
-#: src/routes/_shell.knowledge.$collection.tsx
-msgid "Collection"
-msgstr "Collection"
-
 #: src/activity/pending.tsx
 msgid "Collection {collectionId}"
 msgstr "Collection {collectionId}"
-
-#: src/knowledge/purge.tsx
-msgid "Collection actions"
-msgstr "Actions de la collection"
-
-#: src/routes/_shell.knowledge.$collection.tsx
-msgid "Collection not found"
-msgstr "Collection introuvable"
-
-#: src/routes/_shell.knowledge.index.tsx
-msgid "Collections"
-msgstr "Collections"
-
-#: src/routes/_shell.knowledge.index.tsx
-msgid "Collections hold the documents Grasp and its agents may read. An admin shares them with you, or you add your own."
-msgstr "Les collections contiennent les documents que Grasp et ses agents peuvent lire. Un admin les partage avec vous, ou vous ajoutez les vôtres."
 
 #: src/chat/composer-menu.tsx
 #: src/chat/mentions.tsx
@@ -4126,11 +3899,6 @@ msgstr "Commerce"
 
 #: src/brain/brain.ts
 #: src/routes/_shell.settings.billing.tsx
-msgid "Company"
-msgstr "Entreprise"
-
-#: src/brain/memory-page.tsx
-msgctxt "memory record scope"
 msgid "Company"
 msgstr "Entreprise"
 
@@ -4175,11 +3943,6 @@ msgstr "Terminées"
 #: src/workflows/figures.tsx
 msgid "completed without a person"
 msgstr "terminées sans personne"
-
-#. placeholder {0}: episode.taskType
-#: src/brain/lessons-view.tsx
-msgid "Completed: {0}"
-msgstr "Terminé : {0}"
 
 #: src/dashboard/report.ts
 msgid "Completed: {completed}"
@@ -4426,16 +4189,6 @@ msgctxt "what the Brain remembers about something"
 msgid "Contact"
 msgstr "Contact"
 
-#: src/brain/brain-transcript.tsx
-msgctxt "heading: the headings of a document, as a table of contents"
-msgid "Contents"
-msgstr "Sommaire"
-
-#: src/brain/lessons-view.tsx
-msgctxt "lesson evidence"
-msgid "Contested"
-msgstr "Contestée"
-
 #: src/inbox/item-detail.tsx
 msgctxt "inbox item section"
 msgid "Context"
@@ -4506,10 +4259,6 @@ msgstr "Copier en Markdown"
 msgid "Copy code"
 msgstr "Copier le code"
 
-#: src/knowledge/copy-skill.tsx
-msgid "Copy into Our skills"
-msgstr "Copier dans Our skills"
-
 #: src/shown-once.tsx
 msgid "Copy it now: you won't see it again. Lost, it can only be replaced."
 msgstr "Copiez-le maintenant : vous ne le reverrez pas. Perdu, il ne peut qu'être remplacé."
@@ -4550,14 +4299,6 @@ msgstr "Copier l’URL de {name}"
 msgid "Copying didn't work"
 msgstr "La copie n’a pas fonctionné"
 
-#: src/brain/memory-page.tsx
-msgid "Correct it"
-msgstr "Corriger"
-
-#: src/brain/memory-page.tsx
-msgid "Corrected by"
-msgstr "Corrigé par"
-
 #: src/agents/agent-page.tsx
 msgid "Cost"
 msgstr "Coût"
@@ -4592,14 +4333,6 @@ msgstr "Comptées sur les workflows des applications que vous pouvez ouvrir ; le
 msgctxt "permission group"
 msgid "Create and change"
 msgstr "Créer et modifier"
-
-#: src/knowledge/new-collection.tsx
-msgid "Create collection"
-msgstr "Créer la collection"
-
-#: src/knowledge/new-document.tsx
-msgid "Create document"
-msgstr "Créer le document"
 
 #: src/apps/app-data-model.tsx
 msgid "Create table"
@@ -4744,7 +4477,6 @@ msgid "Decided on a held action"
 msgstr "A statué sur une action en attente"
 
 #: src/activity/type-labels.ts
-#: src/labels.ts
 #: src/routes/decisions.$decision.tsx
 msgid "Decision"
 msgstr "Décision"
@@ -4954,7 +4686,6 @@ msgid "Designed"
 msgstr "Repensé"
 
 #: src/activity/audit-log.tsx
-#: src/knowledge/document.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Details"
 msgstr "Détails"
@@ -5059,18 +4790,9 @@ msgstr "Déconnecté le {since}."
 msgid "Dismiss"
 msgstr "Fermer"
 
-#: src/dashboard/signals.tsx
-msgctxt "put a signal away until something new"
-msgid "Dismiss"
-msgstr "Ignorer"
-
 #: src/apps/app-workspace.tsx
 msgid "Dismiss the tip"
 msgstr "Fermer l’astuce"
-
-#: src/dashboard/signals.tsx
-msgid "Dismiss this signal about {name}"
-msgstr "Ignorer ce signal sur {name}"
 
 #: src/activity/audit-words.ts
 msgid "Dismissed a knowledge signal"
@@ -5092,14 +4814,6 @@ msgstr "Le faire plus tard"
 msgid "Do you have anything that explains how you work?"
 msgstr "Avez-vous quelque chose qui explique votre façon de travailler ?"
 
-#: src/labels.ts
-msgid "Document"
-msgstr "Document"
-
-#: src/routes/_shell.knowledge.$collection.tsx
-msgid "Document not found"
-msgstr "Document introuvable"
-
 #: src/agents/agent-documents.tsx
 #: src/brain/brain-log.tsx
 #: src/brain/brain.ts
@@ -5110,10 +4824,6 @@ msgstr "Documents"
 #: src/brain/sources-page.tsx
 msgid "Documents and workflow runs show here once they reach the Brain."
 msgstr "Les documents et les exécutions de workflows apparaissent ici dès qu'ils arrivent dans le cerveau."
-
-#: src/routes/_shell.knowledge.$collection.tsx
-msgid "Documents written here, and files uploaded to it, show up here for Grasp and its agents to read."
-msgstr "Les documents rédigés ici et les fichiers importés apparaissent ici pour que Grasp et ses agents les lisent."
 
 #: src/settings/stephen-settings.tsx
 msgid "Does things for people here"
@@ -5131,10 +4841,6 @@ msgstr "Domaine"
 #: src/apps/field-editor.tsx
 msgid "Don’t allow it while this record links to it"
 msgstr "Ne pas l’autoriser tant que cet enregistrement y est lié"
-
-#: src/knowledge/uploads.tsx
-msgid "Don’t upload interview recordings or their captions: interviews go through the interview flow."
-msgstr "N’importez pas d’enregistrements d’entretiens ni leurs sous-titres : les entretiens passent par le parcours d’entretien."
 
 #: src/apps/blueprints.tsx
 #: src/chat/thread.tsx
@@ -5197,7 +4903,6 @@ msgctxt "download a file"
 msgid "Download"
 msgstr "Télécharger"
 
-#: src/knowledge/uploads.tsx
 #: src/workflows/run-files.tsx
 msgid "Download {name}"
 msgstr "Télécharger {name}"
@@ -5260,7 +4965,6 @@ msgstr "Cartographié en workflow : {workflow}"
 msgid "Drive"
 msgstr "Lecteur"
 
-#: src/knowledge/uploads.tsx
 #: src/onboarding/document-drop.tsx
 msgid "Drop files here"
 msgstr "Déposez les fichiers ici"
@@ -5328,7 +5032,6 @@ msgid "Earlier"
 msgstr "Plus anciennes"
 
 #: src/brain/skills-page.tsx
-#: src/knowledge/document.tsx
 #: src/onboarding/setup-steps.tsx
 msgid "Edit"
 msgstr "Modifier"
@@ -5583,8 +5286,6 @@ msgstr "Tous les jours ouvrés à {time}"
 
 #: src/agents/agent-facts.tsx
 #: src/brain/sources-page.tsx
-#: src/knowledge/collection-markers.tsx
-#: src/knowledge/new-collection.tsx
 #: src/settings/stephen-audience.tsx
 msgid "Everyone"
 msgstr "Tout le monde"
@@ -5621,14 +5322,6 @@ msgstr "Tous ses membres · {shownRole}"
 #: src/settings/team-members-dialog.tsx
 msgid "Everyone in the organization is in this team."
 msgstr "Tout le monde dans l’organisation fait partie de cette équipe."
-
-#: src/knowledge/new-collection.tsx
-msgid "Everyone in the organization, and their agents."
-msgstr "Tout le monde dans l’organisation, et leurs agents."
-
-#: src/brain/share-record.tsx
-msgid "Everyone it is shared with, and their agents, read it as accepted. Yours stays as it is."
-msgstr "Tous ceux avec qui il est partagé, et leurs agents, le lisent comme accepté. Le vôtre reste tel quel."
 
 #: src/apps/access-view.tsx
 #: src/apps/draft-changes.tsx
@@ -5669,10 +5362,6 @@ msgstr "Tout, du premier échange avec un client jusqu’à l’argent sur le co
 #: src/workflows/business-process.tsx
 msgid "Everything from ordering from a supplier until their invoice is paid."
 msgstr "Tout, de la commande à un fournisseur jusqu’au paiement de sa facture."
-
-#: src/routes/_shell.knowledge.index.tsx
-msgid "Everything Grasp and its agents may read, in collections: your own, your teams' and your organization's. Agents read a document when they need it."
-msgstr "Tout ce que Grasp et ses agents peuvent lire, en collections : les vôtres, celles de vos équipes et celles de votre organisation. Les agents lisent un document quand ils en ont besoin."
 
 #: src/brain/brain.ts
 msgid "Everything Grasp learned about {company}, each fact traceable to the conversation, document or connection it came from."
@@ -5729,7 +5418,6 @@ msgid "Exit full screen"
 msgstr "Quitter le plein écran"
 
 #: src/brain/brain-nav.tsx
-#: src/knowledge/nav.tsx
 msgid "Expand the navigation"
 msgstr "Déplier la navigation"
 
@@ -5798,10 +5486,6 @@ msgctxt "thinking effort"
 msgid "Extra high"
 msgstr "Très élevé"
 
-#: src/knowledge/uploads.tsx
-msgid "Extracting"
-msgstr "Extraction"
-
 #: src/workflows/today-lanes.tsx
 msgctxt "a run that ended in failure"
 msgid "failed"
@@ -5809,7 +5493,6 @@ msgstr "échouée"
 
 #: src/chat/thread.tsx
 #: src/dashboard/runs-widget.tsx
-#: src/knowledge/uploads.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx
 #: src/workflows/traces.tsx
@@ -5836,11 +5519,6 @@ msgstr "En échec"
 msgctxt "workflow runs"
 msgid "Failed"
 msgstr "Échouées"
-
-#. placeholder {0}: episode.taskType
-#: src/brain/lessons-view.tsx
-msgid "Failed: {0}"
-msgstr "Échec : {0}"
 
 #: src/dashboard/report.ts
 msgid "Failed: {failed}"
@@ -5915,7 +5593,6 @@ msgid "Fields to search"
 msgstr "Champs à rechercher"
 
 #: src/brain/sources-page.tsx
-#: src/labels.ts
 msgid "File"
 msgstr "Fichier"
 
@@ -5930,7 +5607,6 @@ msgstr "Fichier {where} : {message}"
 
 #: src/apps/app-code.tsx
 #: src/inbox/items.ts
-#: src/routes/_shell.knowledge.$collection.tsx
 msgid "Files"
 msgstr "Fichiers"
 
@@ -5967,11 +5643,6 @@ msgstr "Filtrer"
 
 #: src/inbox/inbox-page.tsx
 msgctxt "inbox: filter button"
-msgid "Filter"
-msgstr "Filtrer"
-
-#: src/brain/brain-transcript.tsx
-msgctxt "open the filters"
 msgid "Filter"
 msgstr "Filtrer"
 
@@ -6075,7 +5746,6 @@ msgid "Flow"
 msgstr "Flux"
 
 #: src/brain/brain-nav.tsx
-#: src/knowledge/nav.tsx
 msgid "Fold the navigation"
 msgstr "Replier la navigation"
 
@@ -6254,10 +5924,6 @@ msgstr "D’une application"
 #: src/brain/memories-page.tsx
 msgid "From an upload, version {version}"
 msgstr "D’un import, version {version}"
-
-#: src/knowledge/purge.tsx
-msgid "From every version of the first {first} files of this collection; purge again for the rest."
-msgstr "De chaque version des {first} premiers fichiers de cette collection ; purgez à nouveau pour le reste."
 
 #: src/onboarding/place-picker.tsx
 msgid "From Google Drive. I read only the files you add."
@@ -6439,7 +6105,6 @@ msgstr "Grasp a ajouté un widget à votre tableau de bord."
 msgid "Grasp asks"
 msgstr "Grasp demande"
 
-#: src/chat/cited-note.tsx
 #: src/chat/global-chat.tsx
 #: src/core.ts
 #: src/guest/api.ts
@@ -6736,10 +6401,6 @@ msgstr "Invités"
 msgid "Half my Monday goes on invoices. Most miss an order number, so I’m emailing around to ask."
 msgstr "La moitié de mon lundi part dans les factures. La plupart n’ont pas de numéro de commande, alors j’écris à tout le monde pour demander."
 
-#: src/knowledge/new-document.tsx
-msgid "handbook/leave"
-msgstr "manuel/conges"
-
 #: src/activity/audit-words.ts
 msgid "Handed an email attachment to a run"
 msgstr "A transmis une pièce jointe d’e-mail à une exécution"
@@ -6873,7 +6534,6 @@ msgid "Hire-to-Retire"
 msgstr "Hire-to-Retire"
 
 #: src/apps/app-data.tsx
-#: src/knowledge/timeline.tsx
 msgid "History"
 msgstr "Historique"
 
@@ -7196,10 +6856,6 @@ msgstr "Dans la console d’administration Google, allez dans Applications, puis
 msgid "In the Netherlands the works council may need to agree before you turn this on."
 msgstr "Aux Pays-Bas, le comité d’entreprise doit peut-être donner son accord avant que vous l’activiez."
 
-#: src/routes/_shell.brain.$noteId.tsx
-msgid "In this conversation"
-msgstr "Dans cette conversation"
-
 #: src/brain/brain.ts
 msgctxt "note property: the drawn version of this workflow on the Workflows page"
 msgid "In Workflows"
@@ -7490,21 +7146,9 @@ msgstr "Il s’ouvre pour le membre qui l’a créé, les administrateurs et les
 msgid "It passes its checks."
 msgstr "Il passe ses vérifications."
 
-#: src/brain/memory-page.tsx
-msgid "It rests on nothing you can see."
-msgstr "Il ne repose sur rien que vous puissiez voir."
-
-#: src/brain/lessons-view.tsx
-msgid "It rests on turns you were not part of."
-msgstr "Il repose sur des échanges auxquels vous n'avez pas participé."
-
 #: src/apps/app-workspace.tsx
 msgid "It shows here as soon as there is something to see."
 msgstr "Il s’affiche ici dès qu’il y a quelque chose à voir."
-
-#: src/brain/remember-dialog.tsx
-msgid "It starts as proposed: Grasp uses it, and you can correct or retire it here."
-msgstr "Il commence comme proposé : Grasp l’utilise, et vous pouvez le corriger ou le retirer ici."
 
 #: src/workflows/workflow-triggers.tsx
 msgid "It starts no more runs. Runs it already started go on. This can't be undone."
@@ -7517,10 +7161,6 @@ msgstr "Il ne lance rien tant qu'un administrateur ne l'autorise pas à lancer c
 #: src/agents/new-agent.tsx
 msgid "It starts on, reaching nobody and with nothing it may do. You say who may ask it right after."
 msgstr "Il démarre activé, n'atteint personne et ne peut rien faire. Vous indiquez juste après qui peut l'interroger."
-
-#: src/knowledge/new-document.tsx
-msgid "It starts with its name as a heading; write the rest in the editor."
-msgstr "Il commence par son nom en titre ; écrivez la suite dans l’éditeur."
 
 #: src/interview/page.tsx
 msgid "It stays here for you to read. You can still delete it."
@@ -7585,14 +7225,6 @@ msgstr "Ça marche : {model} a répondu au test."
 #: src/onboarding/review-parts.tsx
 msgid "It’s done"
 msgstr "C’est fait"
-
-#: src/chat/cited-note.tsx
-msgid "It's gone, or you can't read it."
-msgstr "Elle n’existe plus, ou vous ne pouvez pas la lire."
-
-#: src/knowledge/uploads.tsx
-msgid "It's past the first {pageMaxLimit} files listed: open it from here."
-msgstr "Il se trouve après les {pageMaxLimit} premiers fichiers listés : ouvrez-le d’ici."
 
 #: src/brain/memories-page.tsx
 msgid "It's wrong"
@@ -7853,10 +7485,6 @@ msgstr "Clé : <0>{mask}</0>"
 msgid "Kind"
 msgstr "Type"
 
-#: src/brain/brain-transcript.tsx
-msgid "Kind of statement"
-msgstr "Type de propos"
-
 #: src/apps/field-editor.tsx
 msgid "Kinds of field"
 msgstr "Types de champ"
@@ -7864,13 +7492,6 @@ msgstr "Types de champ"
 #: src/agents/agent-page.tsx
 msgid "Kinds of work the company has turned on"
 msgstr "Types de travail que l'entreprise a activés"
-
-#: src/knowledge/frame.tsx
-#: src/knowledge/nav.tsx
-#: src/routes/_shell.knowledge.$collection.tsx
-#: src/routes/_shell.knowledge.index.tsx
-msgid "Knowledge"
-msgstr "Connaissances"
 
 #: src/routes/_shell.brain.$noteId.tsx
 msgctxt "tab: what Grasp knows about a piece of work"
@@ -8011,11 +7632,6 @@ msgstr "Laissé tel quel depuis le {date}"
 msgid "Legal hold: {hold}"
 msgstr "Conservation légale : {hold}"
 
-#: src/brain/memory-page.tsx
-msgctxt "the Brain's lessons from repeated failures"
-msgid "Lessons"
-msgstr "Leçons"
-
 #: src/settings/erasures.tsx
 msgid "Let {name}’s old address in again?"
 msgstr "Réadmettre l’ancienne adresse de {name} ?"
@@ -8032,7 +7648,6 @@ msgstr "A autorisé les visiteurs d’une application à utiliser l’une de ses
 msgid "Let an erased member's old address in again"
 msgstr "A réadmis l'ancienne adresse d'un membre effacé"
 
-#: src/knowledge/uploads.tsx
 #: src/onboarding/document-drop.tsx
 msgid "Let go to add them"
 msgstr "Relâchez pour les ajouter"
@@ -8148,7 +7763,6 @@ msgid "Links can't be opened here."
 msgstr "Les liens ne peuvent pas être ouverts ici."
 
 #: src/apps/field-editor.tsx
-#: src/knowledge/document.tsx
 msgid "Links to"
 msgstr "Renvoie à"
 
@@ -8200,7 +7814,6 @@ msgstr "Chargement"
 #: src/chat/thread.tsx
 #: src/drafts/share-with-team.tsx
 #: src/frame/page-states.tsx
-#: src/knowledge/nav.tsx
 msgid "Loading…"
 msgstr "Chargement…"
 
@@ -8445,13 +8058,6 @@ msgctxt "the Brain's memories page"
 msgid "Memories"
 msgstr "Souvenirs"
 
-#: src/brain/brain-nav.tsx
-#: src/brain/memory-page.tsx
-#: src/labels.ts
-#: src/routes/_shell.brain.tsx
-msgid "Memory"
-msgstr "Mémoire"
-
 #: src/chat/composer-menu.tsx
 msgid "Mention"
 msgstr "Mentionner"
@@ -8676,8 +8282,6 @@ msgstr "Ma version de l’App n’a pas démarré. Trouve pourquoi et corrige-le
 #: src/apps/app-settings.tsx
 #: src/apps/field-editor.tsx
 #: src/connections/http-connections.tsx
-#: src/knowledge/new-collection.tsx
-#: src/knowledge/new-document.tsx
 #: src/onboarding/interviews-progress.tsx
 #: src/projects/project-dialog.tsx
 #: src/routes/_shell.settings.profile.tsx
@@ -8809,14 +8413,6 @@ msgstr "Nouvel objectif du conseil"
 msgid "New chat"
 msgstr "Nouveau chat"
 
-#: src/knowledge/new-collection.tsx
-msgid "New collection"
-msgstr "Nouvelle collection"
-
-#: src/knowledge/new-document.tsx
-msgid "New document"
-msgstr "Nouveau document"
-
 #: src/apps/field-editor.tsx
 msgid "New field"
 msgstr "Nouveau champ"
@@ -8883,10 +8479,6 @@ msgstr "Suivante"
 #: src/routes/_shell.settings.billing.tsx
 msgid "Next invoice"
 msgstr "Prochaine facture"
-
-#: src/brain/brain-transcript.tsx
-msgid "Next match"
-msgstr "Résultat suivant"
 
 #: src/interview/words.ts
 msgid "Next person"
@@ -9029,11 +8621,6 @@ msgstr "Aucun événement ne correspond dans la partie la plus récente du journ
 msgid "No events match."
 msgstr "Aucun événement ne correspond."
 
-#: src/knowledge/nav.tsx
-#: src/routes/_shell.knowledge.index.tsx
-msgid "No files yet."
-msgstr "Pas encore de fichiers."
-
 #: src/brain/sources-page.tsx
 msgid "No first line"
 msgstr "Pas de première ligne"
@@ -9065,10 +8652,6 @@ msgstr "Pas encore de factures."
 msgid "No job written yet"
 msgstr "Aucune tâche décrite pour l'instant"
 
-#: src/brain/lessons-view.tsx
-msgid "No lessons yet"
-msgstr "Aucune leçon pour l'instant"
-
 #: src/apps/resource-bindings.tsx
 msgid "No longer declared"
 msgstr "Plus déclarées"
@@ -9084,10 +8667,6 @@ msgstr "N’est plus proposé"
 #: src/onboarding/setup-steps.tsx
 msgid "No longer where it was"
 msgstr "N’est plus là où il était"
-
-#: src/brain/brain-transcript.tsx
-msgid "No matches"
-msgstr "Aucun résultat"
 
 #: src/onboarding/setup-steps.tsx
 msgid "No Microsoft or Google? A staff list works too."
@@ -9132,10 +8711,6 @@ msgstr "Aucun enregistrement de cette table n'a cet ID."
 #: src/apps/app-data.tsx
 msgid "No records"
 msgstr "Aucun enregistrement"
-
-#: src/brain/memory-page.tsx
-msgid "No records yet"
-msgstr "Aucun souvenir pour l'instant"
 
 #: src/routes/_shell.workflows.requests.tsx
 msgid "No requests in {month}"
@@ -9307,14 +8882,6 @@ msgstr "Personne n'attend que vous décidiez d'un partage."
 msgid "Nobody matches."
 msgstr "Personne ne correspond."
 
-#: src/dashboard/signals.tsx
-msgid "Nobody read or changed {doc} in {where} in the last {days, plural, one {day} other {# days}}."
-msgstr "Personne n’a lu ni modifié {doc} dans {where} {days, plural, one {ces dernières 24 heures} other {ces # derniers jours}}."
-
-#: src/dashboard/signals.tsx
-msgid "Nobody reads it"
-msgstr "Personne ne le lit"
-
 #: src/apps/access-view.tsx
 msgid "Nobody sees the records in {table}, Sam included."
 msgstr "Personne ne voit les enregistrements de {table}, pas même Sam."
@@ -9423,7 +8990,6 @@ msgstr "Tous les choix n'ont pas pu être vérifiés : certains manquent peut-ê
 
 #: src/frame/page-states.tsx
 #: src/routes/_shell.integrations.$integration.tsx
-#: src/routes/_shell.knowledge.$collection.tsx
 #: src/routes/decisions.$decision.tsx
 msgid "Not found"
 msgstr "Introuvable"
@@ -9606,10 +9172,6 @@ msgstr "Rien trouvé"
 msgid "Nothing found."
 msgstr "Aucun résultat."
 
-#: src/brain/since-last-look.tsx
-msgid "Nothing has changed since {when}."
-msgstr "Rien n’a changé depuis {when}."
-
 #: src/dashboard/activity.tsx
 #: src/workflows/activity-bar.tsx
 #: src/workflows/traces.tsx
@@ -9623,10 +9185,6 @@ msgstr "Rien n’a encore été exécuté."
 #: src/onboarding/place-picker.tsx
 msgid "Nothing here"
 msgstr "Rien ici"
-
-#: src/brain/brain-transcript.tsx
-msgid "Nothing here matches the filter."
-msgstr "Rien ici ne correspond au filtre."
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Nothing here yet."
@@ -9667,10 +9225,6 @@ msgstr "Rien n’est envoyé ni modifié dans {connection}."
 #: src/projects/project-people.tsx
 msgid "Nothing is shared with the project, so they lose no access."
 msgstr "Rien n’est partagé avec le projet, donc ils ne perdent aucun accès."
-
-#: src/routes/_shell.knowledge.index.tsx
-msgid "Nothing matched."
-msgstr "Aucun résultat."
 
 #: src/workflows/workflow-status.tsx
 msgid "Nothing new starts until you resume it: a start is refused while it is paused. Runs already going carry on to their end."
@@ -9956,10 +9510,6 @@ msgstr "Dès que j’ai environ {threshold} % du tableau, votre équipe peut c
 msgid "Once it has a version, it can be copied."
 msgstr "Dès qu'elle a une version, elle peut être copiée."
 
-#: src/knowledge/purge.tsx
-msgid "One a line, up to {most}: a name, each other form of it, an email address. A term is removed as a whole word, in any case, so list joined forms as terms of their own."
-msgstr "Un par ligne, jusqu’à {most} : un nom, chacune de ses autres formes, une adresse e-mail. Un terme est supprimé comme mot entier, sans tenir compte de la casse : listez les formes accolées comme termes à part entière."
-
 #: src/agents/agent-form.tsx
 msgid "One line, such as: chases unpaid invoices."
 msgstr "Une ligne, par exemple : relance les factures impayées."
@@ -9992,17 +9542,9 @@ msgstr "Seuls les administrateurs peuvent modifier les équipes."
 msgid "Only an admin can remove an upload shared with a team or everyone. Ask an admin to remove it."
 msgstr "Seul un administrateur peut retirer un fichier importé partagé avec une équipe ou tout le monde. Demandez à un administrateur de le retirer."
 
-#: src/knowledge/new-collection.tsx
-msgid "Only an admin makes a collection for everyone or for teams."
-msgstr "Seul un administrateur crée une collection pour tout le monde ou pour des équipes."
-
 #: src/apps/app-settings.tsx
 msgid "Only an admin resets an App’s data: every record goes for good, and its current version runs again with no records."
 msgstr "Seul un administrateur réinitialise les données d'une App : tous les enregistrements disparaissent définitivement et sa version actuelle repart sans enregistrements."
-
-#: src/brain/brain-transcript.tsx
-msgid "Only highlighted turns"
-msgstr "Seulement les prises de parole surlignées"
 
 #: src/workflows/workflow-diagram.tsx
 msgid "Only if its condition holds"
@@ -10021,7 +9563,6 @@ msgid "Only mapped"
 msgstr "Seulement cartographié"
 
 #: src/brain/sources-page.tsx
-#: src/knowledge/new-collection.tsx
 msgid "Only me"
 msgstr "Moi seul"
 
@@ -10041,10 +9582,6 @@ msgstr "Seuls les administrateurs de l'entreprise le voient"
 #: src/onboarding/review-parts.tsx
 msgid "Only the first way"
 msgstr "Seulement la première façon"
-
-#: src/knowledge/collection-markers.tsx
-msgid "Only the owner"
-msgstr "Seulement le propriétaire"
 
 #: src/routes/decisions.$decision.tsx
 msgid "Only the people this decision is from can answer it."
@@ -10090,10 +9627,6 @@ msgstr "Vous seul"
 msgctxt "a source nobody else may read"
 msgid "Only you"
 msgstr "Vous seul"
-
-#: src/brain/remember-dialog.tsx
-msgid "Only you and your agents read it, until you share it."
-msgstr "Seuls vous et vos agents le lisez, jusqu’à ce que vous le partagiez."
 
 #: src/routes/_shell.settings.instructions.tsx
 msgid "Only you and your own chats read it, never a chat others share."
@@ -10159,8 +9692,6 @@ msgid "Open"
 msgstr "Ouvrir"
 
 #: src/brain/brain-nav.tsx
-#: src/knowledge/nav.tsx
-#: src/knowledge/uploads.tsx
 msgid "Open {name}"
 msgstr "Ouvrir {name}"
 
@@ -10332,7 +9863,6 @@ msgctxt "the settings an app offers itself"
 msgid "Options"
 msgstr "Options"
 
-#: src/knowledge/uploads.tsx
 #: src/onboarding/document-drop.tsx
 msgid "or choose them from your computer"
 msgstr "ou choisissez-les sur votre ordinateur"
@@ -10394,10 +9924,6 @@ msgstr "Notre e-mail n’est pas parvenu à {names}. Envoyez-leur vous-même leu
 #: src/onboarding/about-story.tsx
 msgid "Our first conversation gave me the big picture. Now I need the details."
 msgstr "Notre premier échange m’a donné une vue d’ensemble. J’ai maintenant besoin des détails."
-
-#: src/knowledge/copy-skill.tsx
-msgid "Our skills has a skill at {path} already: adapt that one."
-msgstr "Our skills a déjà un skill à {path} : adaptez celui-là."
 
 #: src/apps/resource-bindings.tsx
 #: src/chat/thread.tsx
@@ -10550,10 +10076,6 @@ msgstr "Passation"
 msgid "Paste the key from your provider's console. It is stored sealed and never shown again: only its first and last characters."
 msgstr "Collez la clé depuis la console de votre fournisseur. Elle est stockée scellée et n'est plus jamais affichée : seuls ses premiers et derniers caractères."
 
-#: src/knowledge/document.tsx
-msgid "Path"
-msgstr "Chemin"
-
 #: src/connections/http-connections.tsx
 msgid "Path prefixes it allows, one per line"
 msgstr "Préfixes de chemin autorisés, un par ligne"
@@ -10638,10 +10160,6 @@ msgstr "PDF, Word, Excel, PowerPoint ou texte"
 #: src/agents/agent-form.tsx
 msgid "Pen"
 msgstr "Stylo"
-
-#: src/knowledge/uploads.tsx
-msgid "Pending"
-msgstr "En attente"
 
 #: src/chat/mentions.tsx
 #: src/people/people-teams-picker.tsx
@@ -10861,17 +10379,9 @@ msgstr "Préférence"
 msgid "Press a line to change it, take out what is wrong, or type what is missing. What you leave in is what counts."
 msgstr "Appuyez sur une ligne pour la modifier, retirez ce qui est faux, ou tapez ce qui manque. Ce que vous laissez, c’est ce qui compte."
 
-#: src/knowledge/purge.tsx
-msgid "Preview the purge"
-msgstr "Prévisualiser la purge"
-
 #: src/pages/page-frame.tsx
 msgid "Preview: changes nothing, reads no real data"
 msgstr "Aperçu : ne modifie rien, ne lit aucune donnée réelle"
-
-#: src/brain/brain-transcript.tsx
-msgid "Previous match"
-msgstr "Résultat précédent"
 
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
@@ -10941,11 +10451,6 @@ msgctxt "a link Grasp proposed that nobody confirmed yet"
 msgid "Proposed"
 msgstr "Proposé"
 
-#: src/brain/memory-page.tsx
-msgctxt "memory record state"
-msgid "Proposed"
-msgstr "Proposé"
-
 #: src/activity/audit-words.ts
 msgid "Proposed packages"
 msgstr "A proposé des paquets"
@@ -10974,22 +10479,6 @@ msgctxt "business process"
 msgid "Purchase-to-Pay"
 msgstr "Purchase-to-Pay"
 
-#: src/knowledge/purge.tsx
-msgid "Purge for good"
-msgstr "Purger définitivement"
-
-#: src/knowledge/purge.tsx
-msgid "Purge more"
-msgstr "Purger davantage"
-
-#: src/knowledge/purge.tsx
-msgid "Purge personal data"
-msgstr "Purger des données personnelles"
-
-#: src/knowledge/purge.tsx
-msgid "Purge personal data from {collection}"
-msgstr "Purger des données personnelles de {collection}"
-
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Purpose"
@@ -11006,10 +10495,6 @@ msgstr "{name} déposé à la place {place}."
 #: src/interview/read-back.tsx
 msgid "Put back"
 msgstr "Remettre"
-
-#: src/knowledge/new-document.tsx
-msgid "Put it in folders with a slash, as in handbook/leave."
-msgstr "Rangez-le dans des dossiers avec une barre oblique, comme dans manuel/conges."
 
 #: src/settings/instruction-file.tsx
 msgid "Put my changes aside"
@@ -11197,10 +10682,6 @@ msgstr "A lu ce qui a changé sur une connexion"
 msgid "Read what could be improved"
 msgstr "A lu ce qui pourrait être amélioré"
 
-#: src/knowledge/collection-markers.tsx
-msgid "Read-only"
-msgstr "Lecture seule"
-
 #: src/onboarding/document-drop.tsx
 msgid "Reading"
 msgstr "Lecture"
@@ -11235,10 +10716,6 @@ msgstr "La lecture a échoué à répétition, vos déclencheurs n'y lancent don
 msgid "Reading people and teams…"
 msgstr "Lecture des personnes et des équipes…"
 
-#: src/knowledge/new-collection.tsx
-msgid "Reading the teams"
-msgstr "Lecture des équipes"
-
 #: src/chat/thread.tsx
 msgid "Reading the workspace"
 msgstr "Lecture de l’espace de travail"
@@ -11267,7 +10744,6 @@ msgstr "Lit"
 msgid "Reads your organization's people: names, emails and teams."
 msgstr "Lit les personnes de votre organisation : noms, e-mails et équipes."
 
-#: src/knowledge/uploads.tsx
 #: src/onboarding/setup-frame.tsx
 msgid "Ready"
 msgstr "Prêt"
@@ -11416,14 +10892,6 @@ msgstr "Libérer l’adresse…"
 msgid "Reload"
 msgstr "Recharger"
 
-#: src/brain/remember-dialog.tsx
-msgid "Remember it"
-msgstr "Le retenir"
-
-#: src/brain/remember-dialog.tsx
-msgid "Remember something"
-msgstr "Retenir quelque chose"
-
 #: src/agents/agent-documents.tsx
 #: src/agents/agent-wakes.tsx
 #: src/apps/app-webhooks.tsx
@@ -11490,7 +10958,6 @@ msgid "Remove {when}, for {person}"
 msgstr "Retirer {when}, pour {person}"
 
 #: src/brain/brain-article/kern.tsx
-#: src/brain/brain-transcript.tsx
 #: src/brain/forget.tsx
 msgid "Remove from the brain"
 msgstr "Retirer du cerveau"
@@ -11528,7 +10995,6 @@ msgid "Remove the search"
 msgstr "Supprimer la recherche"
 
 #: src/brain/brain-article/kern.tsx
-#: src/brain/brain-transcript.tsx
 msgid "Remove this from the brain"
 msgstr "Retirer ceci du cerveau"
 
@@ -11600,10 +11066,6 @@ msgstr "Remplacer la liaison de {alias}"
 #: src/settings/ai-providers.tsx
 msgid "Replace the key for {label}"
 msgstr "Remplacer la clé de {label}"
-
-#: src/knowledge/document.tsx
-msgid "Replace version {newerVersion} with mine"
-msgstr "Remplacer la version {newerVersion} par la mienne"
 
 #: src/activity/audit-words.ts
 msgid "Replaced a request for packages"
@@ -11722,21 +11184,12 @@ msgstr "Responsabilité"
 #: src/apps/app-settings.tsx
 #: src/apps/app-workspace.tsx
 #: src/drafts/draft-history.tsx
-#: src/knowledge/timeline.tsx
 msgid "Restore"
 msgstr "Restaurer"
 
 #: src/drafts/draft-history.tsx
 msgid "Restore this earlier state?"
 msgstr "Restaurer cet état antérieur ?"
-
-#: src/knowledge/timeline.tsx
-msgid "Restore version {number}"
-msgstr "Restaurer la version {number}"
-
-#: src/knowledge/timeline.tsx
-msgid "Restored version {restoredFrom}"
-msgstr "Version {restoredFrom} restaurée"
 
 #: src/chat/chat-markdown.ts
 #: src/chat/sources.tsx
@@ -11767,7 +11220,6 @@ msgid "Result: not measured yet"
 msgstr "Résultat : pas encore mesuré"
 
 #: src/brain/sources-page.tsx
-#: src/routes/_shell.knowledge.index.tsx
 msgid "Results"
 msgstr "Résultats"
 
@@ -11790,24 +11242,6 @@ msgstr "Retirer {name} pour {team} ?"
 #: src/brain/skills-page.tsx
 msgid "Retire {name}?"
 msgstr "Retirer {name} ?"
-
-#: src/brain/memory-page.tsx
-msgid "Retire it"
-msgstr "Retirer"
-
-#: src/brain/lessons-view.tsx
-msgid "Retire this lesson"
-msgstr "Retirer cette leçon"
-
-#: src/brain/lessons-view.tsx
-msgctxt "lesson state"
-msgid "Retired"
-msgstr "Retirée"
-
-#: src/brain/memory-page.tsx
-msgctxt "memory record state"
-msgid "Retired"
-msgstr "Retiré"
 
 #: src/chat/thread.tsx
 msgid "Retried"
@@ -11834,28 +11268,6 @@ msgstr "Examiner"
 #: src/inbox/item-detail.tsx
 msgid "Review and answer"
 msgstr "Examiner et répondre"
-
-#: src/knowledge/document.tsx
-msgid "Review by"
-msgstr "À relire avant le"
-
-#: src/dashboard/signals.tsx
-msgid "Review overdue"
-msgstr "Révision en retard"
-
-#. placeholder {0}: lesson.revision
-#. placeholder {0}: record.revision
-#. placeholder {0}: version.revision
-#: src/brain/lessons-view.tsx
-#: src/brain/memory-page.tsx
-msgid "Revision {0}"
-msgstr "Révision {0}"
-
-#. placeholder {0}: version.revision
-#. placeholder {1}: version.supersedes
-#: src/brain/lessons-view.tsx
-msgid "Revision {0}, after revision {1}"
-msgstr "Révision {0}, après la révision {1}"
 
 #: src/workflows/item-test.tsx
 msgid "Revision {draftRevision} on it"
@@ -11960,10 +11372,6 @@ msgstr "Reformuler"
 #: src/brain/goals-editor.tsx
 msgid "Reword {title}"
 msgstr "Reformuler {title}"
-
-#: src/brain/share-record.tsx
-msgid "Reword it for them if you like. It can't rest on documents they may not read."
-msgstr "Reformulez-le pour eux si vous le souhaitez. Il ne peut pas reposer sur des documents qu’ils ne peuvent pas lire."
 
 #: src/brain/goals-editor.tsx
 msgid "Reword the goal"
@@ -12262,7 +11670,6 @@ msgstr "Sam, comme tous ceux qui utilisent l’App, voit tous les enregistrement
 #: src/apps/field-editor.tsx
 #: src/brain/goals-editor.tsx
 #: src/brain/skills-page.tsx
-#: src/knowledge/document.tsx
 #: src/projects/project-dialog.tsx
 #: src/settings/instruction-file.tsx
 #: src/workflows/resource-params.tsx
@@ -12298,7 +11705,6 @@ msgid "Save link"
 msgstr "Enregistrer le lien"
 
 #: src/brain/memories-page.tsx
-#: src/brain/memory-page.tsx
 msgid "Save the correction"
 msgstr "Enregistrer la correction"
 
@@ -12423,10 +11829,6 @@ msgstr "Recherche dans {searched}"
 msgid "Search integrations"
 msgstr "Rechercher des intégrations"
 
-#: src/knowledge/nav.tsx
-msgid "Search Knowledge"
-msgstr "Rechercher dans Connaissances"
-
 #: src/routes/_shell.settings.members.tsx
 msgid "Search members"
 msgstr "Rechercher des membres"
@@ -12445,10 +11847,6 @@ msgstr "Rechercher des personnes et des équipes"
 msgid "Search people, teams and roles"
 msgstr "Rechercher des personnes, des équipes et des rôles"
 
-#: src/routes/_shell.knowledge.index.tsx
-msgid "Search reads every collection you may read. Try other words, or fewer."
-msgstr "La recherche parcourt toutes les collections que vous pouvez lire. Essayez d’autres mots, ou moins de mots."
-
 #: src/agents/agents-overview.tsx
 msgid "Search the agents"
 msgstr "Rechercher parmi les agents"
@@ -12464,10 +11862,6 @@ msgstr "Rechercher dans l’archive"
 #: src/brain/sources-page.tsx
 msgid "Search the Brain"
 msgstr "Chercher dans le cerveau"
-
-#: src/brain/brain-transcript.tsx
-msgid "Search the transcript"
-msgstr "Chercher dans la transcription"
 
 #: src/chat/chat-window.tsx
 msgid "Search your chats, and open one."
@@ -12613,8 +12007,6 @@ msgstr "L'envoyer quand"
 msgid "Send request"
 msgstr "Envoyer la demande"
 
-#: src/knowledge/collection-markers.tsx
-#: src/knowledge/new-collection.tsx
 #: src/workflows/resource-params.tsx
 msgid "Sensitive"
 msgstr "Sensible"
@@ -12762,10 +12154,6 @@ msgstr "Partager en tant que"
 msgid "Share changes"
 msgstr "Partager les modifications"
 
-#: src/brain/share-record.tsx
-msgid "Share it"
-msgstr "Le partager"
-
 #: src/workflows/requests/request-who.tsx
 msgid "Share of {name} who asked"
 msgstr "Part de {name} qui a demandé"
@@ -12774,17 +12162,9 @@ msgstr "Part de {name} qui a demandé"
 msgid "Share once it's ready"
 msgstr "Partagez-le dès qu’il est prêt"
 
-#: src/brain/share-record.tsx
-msgid "Share this record"
-msgstr "Partager cet enregistrement"
-
 #: src/brain/skills-page.tsx
 msgid "Share this version instead"
 msgstr "Partager plutôt cette version"
-
-#: src/brain/share-record.tsx
-msgid "Share with"
-msgstr "Partager avec"
 
 #: src/brain/skills-page.tsx
 msgid "Share with a team"
@@ -12822,11 +12202,6 @@ msgstr "Partagée avec"
 #: src/drafts/share-with-team.tsx
 msgid "Shared with {who}"
 msgstr "Partagé avec {who}"
-
-#: src/brain/memory-page.tsx
-msgctxt "memory records: others' that you read"
-msgid "Shared with you"
-msgstr "Partagés avec vous"
 
 #: src/brain/skills-page.tsx
 msgid "Shares waiting for you"
@@ -12888,9 +12263,7 @@ msgid "Show less"
 msgstr "Afficher moins"
 
 #: src/brain/memories-page.tsx
-#: src/brain/since-last-look.tsx
 #: src/brain/sources-page.tsx
-#: src/knowledge/nav.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/onboarding/place-picker.tsx
 #: src/projects/project-people.tsx
@@ -12930,10 +12303,6 @@ msgstr "Afficher la page de {title}"
 #: src/routes/_shell.workflows.index.tsx
 msgid "Show workflows"
 msgstr "Afficher les workflows"
-
-#: src/routes/_shell.knowledge.$collection.tsx
-msgid "Showing the first {pageMaxLimit} files."
-msgstr "Affichage des {pageMaxLimit} premiers fichiers."
 
 #: src/workflows/runs.tsx
 msgid "Showing the first {runsPageSize} runs of more."
@@ -13085,10 +12454,6 @@ msgstr "La connexion se fait chez {app}. Elle prend environ une minute."
 msgid "Signing out didn't work"
 msgstr "La déconnexion n'a pas abouti"
 
-#: src/brain/since-last-look.tsx
-msgid "Since you last looked"
-msgstr "Depuis votre dernière visite"
-
 #: src/workflows/files-and-apps.tsx
 msgid "Size"
 msgstr "Taille"
@@ -13100,10 +12465,6 @@ msgstr "Effectif modifié : {people}"
 #: src/brain/brain.ts
 msgid "Size changed to unknown"
 msgstr "Effectif modifié : inconnu"
-
-#: src/labels.ts
-msgid "Skill"
-msgstr "Skill"
 
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind: a skill someone asked to share with the company"
@@ -13137,10 +12498,6 @@ msgstr "Tout n’a pas été ajouté. Je peux lire les PDF, Word, Excel, PowerPo
 #: src/workflows/requests/request-parts.tsx
 msgid "Someone"
 msgstr "Quelqu’un"
-
-#: src/knowledge/purge.tsx
-msgid "Someone asked for their data to be erased"
-msgstr "Quelqu’un a demandé l’effacement de ses données"
 
 #: src/drafts/draft-history.tsx
 msgid "Someone changed it meanwhile. Look at its history again, then try again."
@@ -13184,10 +12541,6 @@ msgstr "Quelqu’un de votre organisation"
 #: src/apps/app-settings.tsx
 msgid "Someone it is no longer shared with"
 msgstr "Quelqu’un avec qui elle n’est plus partagée"
-
-#: src/knowledge/purge.tsx
-msgid "Someone left the organization"
-msgstr "Quelqu’un a quitté l’organisation"
 
 #: src/connections/connection-list.tsx
 msgid "Someone no longer here"
@@ -13257,13 +12610,8 @@ msgstr "Trier"
 msgid "Source"
 msgstr "Source"
 
-#: src/chat/cited-note.tsx
-msgid "Source {number}: {title}"
-msgstr "Source {number} : {title}"
-
 #: src/brain/brain.ts
 #: src/chat/chat-markdown.ts
-#: src/chat/sources.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Sources"
 msgstr "Sources"
@@ -13332,10 +12680,6 @@ msgstr "Lancer {name} ?"
 #: src/workflows/start-run.tsx
 msgid "Start a run"
 msgstr "Démarrer une exécution"
-
-#: src/knowledge/document.tsx
-msgid "Start again from version {newerVersion}"
-msgstr "Recommencer à partir de la version {newerVersion}"
 
 #: src/interview/sound-check.tsx
 msgid "Start by typing"
@@ -13416,7 +12760,6 @@ msgstr "État"
 msgid "Statement"
 msgstr "Affirmation"
 
-#: src/brain/brain-transcript.tsx
 #: src/brain/brain.ts
 msgid "Statements"
 msgstr "Affirmations"
@@ -13503,10 +12846,6 @@ msgstr "Stephen ne parle à personne tant que vous n’avez pas choisi le jour o
 #: src/routes/_shell.settings.billing.tsx
 msgid "Stephen’s requests"
 msgstr "Demandes à Stephen"
-
-#: src/knowledge/uploads.tsx
-msgid "Still being read. It shows in the file list once it's ready."
-msgstr "Lecture en cours. Il apparaîtra dans la liste des fichiers une fois prêt."
 
 #: src/interview/sound-check.tsx
 msgid "Still nothing? Turn your volume up, or check where your sound goes."
@@ -13617,11 +12956,6 @@ msgstr "Stripe n’est pas encore relié"
 msgid "Such as: look for invoices that are overdue and say which."
 msgstr "Par exemple : cherche les factures en retard et dis lesquelles."
 
-#: src/routes/_shell.brain.$noteId.tsx
-msgctxt "tab: an interview written up short"
-msgid "Summary"
-msgstr "Résumé"
-
 #: src/brain/memories-page.tsx
 msgctxt "a kind of thing the Brain remembers"
 msgid "Suppliers"
@@ -13636,11 +12970,6 @@ msgstr "Fournit"
 msgctxt "kind of app"
 msgid "Support"
 msgstr "Service client"
-
-#: src/brain/lessons-view.tsx
-msgctxt "lesson evidence"
-msgid "Supported"
-msgstr "Étayée"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Switch a team off and nobody in it gets a link."
@@ -13731,10 +13060,6 @@ msgstr "Reprendre la sienne"
 msgid "Takes out"
 msgstr "Retire"
 
-#: src/knowledge/purge.tsx
-msgid "Takes terms out of every version of the collection's documents, for good. You see what it would remove first."
-msgstr "Retire définitivement des termes de chaque version des documents de la collection. Vous voyez d’abord ce qui serait supprimé."
-
 #: src/connections/connect-dialog.tsx
 msgid "Taking long? <0>Try again</0>"
 msgstr "C’est long ? <0>Réessayer</0>"
@@ -13784,11 +13109,6 @@ msgctxt "filter: which team asked"
 msgid "Team"
 msgstr "Équipe"
 
-#: src/brain/memory-page.tsx
-msgctxt "memory record scope"
-msgid "Team"
-msgstr "Équipe"
-
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Team"
@@ -13823,8 +13143,6 @@ msgid "Team size unknown."
 msgstr "Taille de l’équipe inconnue."
 
 #: src/brain/brain.ts
-#: src/knowledge/collection-markers.tsx
-#: src/knowledge/new-collection.tsx
 #: src/people/people-teams-picker.tsx
 #: src/people/share-picker.tsx
 #: src/routes/_shell.settings.brain.tsx
@@ -13858,8 +13176,8 @@ msgid "Teams for {label}"
 msgstr "Équipes pour {label}"
 
 #: src/settings/teams.tsx
-msgid "Teams group the people who work together, so apps, Knowledge and workflows can be shared with a whole team at once."
-msgstr "Les équipes regroupent les personnes qui travaillent ensemble, pour partager les applications, les Connaissances et les workflows avec toute une équipe à la fois."
+msgid "Teams group the people who work together, so apps, skills and workflows can be shared with a whole team at once."
+msgstr "Les équipes regroupent les personnes qui travaillent ensemble, pour partager les applications, les skills et les workflows avec toute une équipe à la fois."
 
 #: src/onboarding/interviews-progress.tsx
 msgid "Teams under five people show only whether their lead talked, so nobody can be singled out."
@@ -13909,10 +13227,6 @@ msgstr "En test"
 msgctxt "files of an App"
 msgid "Tests"
 msgstr "Tests"
-
-#: src/knowledge/document.tsx
-msgid "Text"
-msgstr "Texte"
 
 #: src/apps/field-kinds.tsx
 msgctxt "a kind of field"
@@ -14436,14 +13750,6 @@ msgstr "Le lien n’a pas été ouvert."
 msgid "The link works until {until}."
 msgstr "Le lien fonctionne jusqu’au {until}."
 
-#: src/knowledge/new-collection.tsx
-msgid "The members of the teams you choose, and their agents."
-msgstr "Les membres des équipes que vous choisissez, et leurs agents."
-
-#: src/brain/brain-home.tsx
-msgid "The memory files, skills and uploads your agents read are in <0>Knowledge</0>."
-msgstr "Les fichiers mémoire, les skills et les fichiers importés que lisent vos agents se trouvent dans <0>Connaissances</0>."
-
 #: src/onboarding/setup-steps.tsx
 msgid "The message"
 msgstr "Le message"
@@ -14463,10 +13769,6 @@ msgstr "La migration {name} réécrit chaque enregistrement de {table} dès que 
 #: src/chat/failure.ts
 msgid "The model couldn't answer. Try again."
 msgstr "Le modèle n’a pas pu répondre. Réessayez."
-
-#: src/knowledge/new-collection.tsx
-msgid "The model gateway treats what agents read from it as sensitive."
-msgstr "La passerelle de modèles traite comme sensible ce que les agents y lisent."
 
 #: src/chat/failure.ts
 msgid "The model's answer came back in the wrong shape. Try again."
@@ -14491,10 +13793,6 @@ msgstr "La précédente"
 #: src/agents/agent-form.tsx
 msgid "The one the person asking picks"
 msgstr "Celui que choisit la personne qui pose la question"
-
-#: src/knowledge/new-collection.tsx
-msgid "The organization has no teams yet."
-msgstr "L’organisation n’a pas encore d’équipes."
 
 #: src/connections/http-connections.tsx
 msgid "The origin is https:// and a public host name, with nothing after it: https://api.example.com."
@@ -14654,10 +13952,6 @@ msgstr "l’équipe dans {field}"
 msgid "The team in {field}"
 msgstr "L’équipe dans {field}"
 
-#: src/knowledge/purge.tsx
-msgid "The terms also go from everyone's memory records, interviews and answers. How many of those hold them isn't counted or shown."
-msgstr "Les termes disparaissent aussi des souvenirs, entretiens et réponses de chacun. Combien en contiennent n'est ni compté ni affiché."
-
 #: src/settings/ai-providers.tsx
 msgid "The test didn't work. {model} didn't answer: {why}"
 msgstr "Le test n'a pas fonctionné. {model} n'a pas répondu : {why}"
@@ -14701,10 +13995,6 @@ msgstr "La chaîne entière n’a pas encore été vérifiée."
 #: src/settings/audit-chain.tsx
 msgid "The whole chain verified, through entry {entries}, on {time}."
 msgstr "Toute la chaîne est vérifiée, jusqu’à l’entrée {entries}, le {time}."
-
-#: src/brain/share-record.tsx
-msgid "The whole company"
-msgstr "Toute l’entreprise"
 
 #: src/connections/connection-list.tsx
 msgid "the whole connection"
@@ -14774,10 +14064,6 @@ msgstr "Il y a plus de personnes dans {signIn} que je ne peux en prendre : jusqu
 msgid "There are no changes to share."
 msgstr "Il n’y a aucune modification à partager."
 
-#: src/routes/_shell.knowledge.index.tsx
-msgid "There are no collections you can read yet."
-msgstr "Il n’y a encore aucune collection que vous pouvez lire."
-
 #: src/brain/goals-editor.tsx
 msgid "There are no workflows to link yet."
 msgstr "Il n’y a pas encore de workflows à lier."
@@ -14793,10 +14079,6 @@ msgstr "Il n’y a personne dans cette liste."
 #: src/chat/saved-memory.tsx
 msgid "There was nothing to undo: Grasp no longer uses this."
 msgstr "Il n’y avait rien à annuler : Grasp n’utilise plus ceci."
-
-#: src/brain/share-record.tsx
-msgid "There's nowhere to share it yet: you're in no team, and in no chat others share."
-msgstr "Il n’y a encore nulle part où le partager : vous n’êtes dans aucune équipe ni dans aucune discussion que d’autres partagent."
 
 #: src/tour/tour-script.ts
 msgid "These are your Apps. Each one is made for a team or a person, with its own pages, data and people, standing on your workflows."
@@ -14912,18 +14194,9 @@ msgstr "Ce navigateur est trop ancien"
 msgid "This browser is too old for App pages. Update it, or open this page in a current Chrome, Edge, Firefox or Safari."
 msgstr "Ce navigateur est trop ancien pour les pages d’applications. Mettez-le à jour ou ouvrez cette page dans une version récente de Chrome, Edge, Firefox ou Safari."
 
-#: src/knowledge/purge.tsx
-msgid "This can't be undone. Confirm by {until}, or prepare it again."
-msgstr "C’est irréversible. Confirmez avant {until}, ou préparez-la à nouveau."
-
 #: src/drafts/publish-errors.ts
 msgid "This changes the App's data in a way that needs a migration in code. Ask Grasp to write one, then share."
 msgstr "Cela modifie les données de l’App d’une façon qui demande une migration dans le code. Demandez à Grasp d’en écrire une, puis partagez."
-
-#: src/brain/memory-page.tsx
-msgctxt "memory record scope"
-msgid "This chat"
-msgstr "Cette conversation"
 
 #: src/settings/chat-accounts.tsx
 msgid "This chat account is linked to someone else. They need to unlink it first."
@@ -14949,14 +14222,6 @@ msgstr "Ce chat a atteint sa longueur maximale. Cliquez sur Terminer pour le clo
 msgid "This chat read restricted data: this may send it out"
 msgstr "Ce chat a lu des données restreintes : ceci peut les envoyer à l’extérieur"
 
-#: src/knowledge/new-document.tsx
-msgid "This collection has a document at {path} already."
-msgstr "Cette collection a déjà un document à {path}."
-
-#: src/routes/_shell.knowledge.$collection.tsx
-msgid "This collection has no files yet."
-msgstr "Cette collection n’a pas encore de fichier."
-
 #: src/onboarding/place-picker.tsx
 msgid "This connection needs to be connected again."
 msgstr "Cette connexion doit être rétablie."
@@ -14980,14 +14245,6 @@ msgstr "Ce déploiement n'autorise aucun modèle."
 #: src/routes/_shell.settings.security.tsx
 msgid "This device"
 msgstr "Cet appareil"
-
-#: src/knowledge/document.tsx
-msgid "This document changed since you opened it. Version {newerVersion} is below; your text is kept. Start again from it, or replace it with your text."
-msgstr "Ce document a changé depuis que vous l’avez ouvert. La version {newerVersion} figure ci-dessous ; votre texte est conservé. Repartez de celle-ci ou remplacez-la par votre texte."
-
-#: src/knowledge/markdown.tsx
-msgid "This document is empty."
-msgstr "Ce document est vide."
 
 #: src/brain/sources-page.tsx
 msgid "This file's text is too long for the Brain to keep. Split it into smaller files and upload those."
@@ -15098,10 +14355,6 @@ msgstr "La limite de ce mois pour l’IA de Grasp est atteinte. Votre administra
 #: src/settings/ai-providers.tsx
 msgid "This month’s limit of {limit} is reached: AI is stopped until next month, or until you switch to your own keys."
 msgstr "La limite de {limit} de ce mois est atteinte : l’IA est arrêtée jusqu’au mois prochain, ou jusqu’à ce que vous passiez à vos propres clés."
-
-#: src/chat/cited-note.tsx
-msgid "This note can't be opened"
-msgstr "Impossible d’ouvrir cette note"
 
 #: src/brain/memories-page.tsx
 msgid "This one is right"
@@ -15387,10 +14640,6 @@ msgstr "Outils à autoriser"
 msgid "Topic"
 msgstr "Sujet"
 
-#: src/brain/brain-transcript.tsx
-msgid "Topics"
-msgstr "Sujets"
-
 #: src/tour/tour-layer.tsx
 msgid "Tour of Grasp"
 msgstr "Visite de Grasp"
@@ -15399,14 +14648,8 @@ msgstr "Visite de Grasp"
 msgid "Track the month-end close"
 msgstr "Suivre la clôture mensuelle"
 
-#: src/brain/brain-markdown.ts
 #: src/interview/page.tsx
 #: src/interview/transcript.tsx
-msgid "Transcript"
-msgstr "Transcription"
-
-#: src/routes/_shell.brain.$noteId.tsx
-msgctxt "tab: the whole conversation word for word"
 msgid "Transcript"
 msgstr "Transcription"
 
@@ -15655,7 +14898,6 @@ msgid "Updating {name}…"
 msgstr "Mise à jour de {name}…"
 
 #: src/brain/sources-page.tsx
-#: src/knowledge/uploads.tsx
 msgid "Upload"
 msgstr "Importer"
 
@@ -15667,10 +14909,6 @@ msgstr "Fichier importé"
 #: src/brain/sources-page.tsx
 msgid "Upload a file"
 msgstr "Importer un fichier"
-
-#: src/knowledge/uploads.tsx
-msgid "Upload a PDF, Word or Excel file, or captions (.vtt)"
-msgstr "Importez un fichier PDF, Word ou Excel, ou des sous-titres (.vtt)"
 
 #: src/brain/sources-page.tsx
 msgid "Upload new version"
@@ -15689,7 +14927,6 @@ msgid "Uploaded to knowledge"
 msgstr "A téléversé dans les connaissances"
 
 #: src/brain/sources-page.tsx
-#: src/knowledge/uploads.tsx
 msgid "Uploading…"
 msgstr "Import en cours…"
 
@@ -15730,8 +14967,8 @@ msgid "Use Grasp’s AI"
 msgstr "Utiliser l’IA de Grasp"
 
 #: src/routes/_shell.settings.members.tsx
-msgid "Use the chat, Knowledge and the Apps shared with them"
-msgstr "Utiliser le chat, les Connaissances et les applications partagées avec eux"
+msgid "Use the chat, the Brain and the Apps shared with them"
+msgstr "Utiliser le chat, le Cerveau et les applications partagées avec eux"
 
 #: src/workflows/resource-params.tsx
 msgid "Use the default"
@@ -15756,10 +14993,6 @@ msgstr "A utilisé un outil connecté"
 #: src/activity/audit-words.ts
 msgid "Used an App's function as a visitor"
 msgstr "A utilisé une fonction d’une application en tant que visiteur"
-
-#: src/knowledge/document.tsx
-msgid "Used by"
-msgstr "Utilisé par"
 
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
@@ -15833,32 +15066,12 @@ msgid "Verify the chain"
 msgstr "Vérifier la chaîne"
 
 #: src/inbox/items.ts
-#: src/knowledge/document.tsx
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
 #: src/workflows/traces.tsx
 #: src/workflows/version-source.tsx
 msgid "Version"
 msgstr "Version"
-
-#. placeholder {0}: node.version
-#: src/brain/memory-page.tsx
-msgid "version {0}, the current one"
-msgstr "version {0}, l'actuelle"
-
-#. placeholder {0}: node.version
-#. placeholder {1}: node.currentVersion
-#: src/brain/memory-page.tsx
-msgid "version {0}; it is at version {1} now"
-msgstr "version {0} ; il en est maintenant à la version {1}"
-
-#: src/knowledge/timeline.tsx
-msgid "Version {number}"
-msgstr "Version {number}"
-
-#: src/knowledge/timeline.tsx
-msgid "Version {number}, current"
-msgstr "Version {number}, actuelle"
 
 #: src/brain/brain.ts
 #: src/brain/skills-page.tsx
@@ -16220,10 +15433,6 @@ msgctxt "the brainstem: every conversation, document and connection"
 msgid "What came in"
 msgstr "Ce qui est arrivé"
 
-#: src/knowledge/document.tsx
-msgid "What changed"
-msgstr "Ce qui a changé"
-
 #: src/apps/app-settings.tsx
 msgid "What changed, unpublished and published, which version is live, and going back to one."
 msgstr "Ce qui a changé, non publié et publié, quelle version est en ligne, et revenir à l’une d’elles."
@@ -16343,7 +15552,6 @@ msgid "What it did"
 msgstr "Ce qu’elle a fait"
 
 #: src/agents/new-agent.tsx
-#: src/brain/remember-dialog.tsx
 #: src/workflows/requests/request-table.tsx
 msgid "What it is"
 msgstr "Ce que c’est"
@@ -16373,29 +15581,13 @@ msgstr "À quoi elle sert"
 msgid "What it may do"
 msgstr "Ce qu’il peut faire"
 
-#: src/apps/app-access-requests.tsx
-msgid "What it needs"
-msgstr "Ce dont il a besoin"
-
-#: src/brain/memory-page.tsx
-msgid "What it rests on"
-msgstr "Ce sur quoi il repose"
-
 #: src/workflows/run-detail.tsx
 msgid "What it returned"
 msgstr "Ce qu’elle a renvoyé"
 
-#: src/brain/share-record.tsx
-msgid "What it says"
-msgstr "Ce qu’il dit"
-
 #: src/agents/agent-form.tsx
 msgid "What it should know and how it should work. Grasp's own rules always hold over these."
 msgstr "Ce qu’il doit savoir et comment il doit travailler. Les règles de Grasp priment toujours sur celles-ci."
-
-#: src/brain/memory-page.tsx
-msgid "What it should say"
-msgstr "Ce qu'il devrait dire"
 
 #: src/inbox/item-detail.tsx
 msgid "What it starts with"
@@ -16558,14 +15750,6 @@ msgstr "Ce qu’on lui demande à chaque fois"
 msgid "What to fix"
 msgstr "Ce qu'il faut corriger"
 
-#: src/brain/remember-dialog.tsx
-msgid "What to remember"
-msgstr "Ce qu’il faut retenir"
-
-#: src/knowledge/purge.tsx
-msgid "What to remove"
-msgstr "Ce qu’il faut supprimer"
-
 #: src/workflows/traces.tsx
 msgid "What to show of the traces"
 msgstr "Ce qu’il faut montrer des traces"
@@ -16611,10 +15795,6 @@ msgstr "Ce que nous faisons"
 msgid "What you agreed to is kept. Forgot something? This link works until {closes}."
 msgstr "Ce que vous avez validé est conservé. Vous avez oublié quelque chose ? Ce lien fonctionne jusqu’au {closes}."
 
-#: src/brain/memory-page.tsx
-msgid "What you and your agents remember, and what others share with you, shows here."
-msgstr "Ce dont vous et vos agents vous souvenez, et ce que d'autres partagent avec vous, apparaissent ici."
-
 #: src/brain/skills-page.tsx
 msgid "What you asked to share"
 msgstr "Ce que vous avez demandé à partager"
@@ -16639,10 +15819,6 @@ msgstr "Quand"
 #: src/workflows/trigger-description.ts
 msgid "When {account} reports an event"
 msgstr "Quand {account} signale un événement"
-
-#: src/brain/lessons-view.tsx
-msgid "When a task keeps failing the same way, the Brain notes it here as a lesson you can check."
-msgstr "Quand une tâche échoue sans cesse de la même manière, le Brain le note ici comme une leçon que vous pouvez vérifier."
 
 #: src/workflows/trigger-description.ts
 msgid "When an email arrives at its own address"
@@ -16675,10 +15851,6 @@ msgstr "Quand il travaille de lui-même"
 #: src/apps/field-editor.tsx
 msgid "When the linked record is deleted"
 msgstr "Quand l’enregistrement lié est supprimé"
-
-#: src/knowledge/new-collection.tsx
-msgid "When to use it"
-msgstr "Quand l’utiliser"
 
 #: src/apps/app-data-model.tsx
 msgid "When you publish"
@@ -16871,10 +16043,6 @@ msgstr "À qui il est destiné"
 msgid "Who leads it?"
 msgstr "Qui la dirige ?"
 
-#: src/knowledge/new-collection.tsx
-msgid "Who may read it"
-msgstr "Qui peut la lire"
-
 #: src/brain/sources-page.tsx
 msgctxt "a file uploaded into the Brain"
 msgid "Who may read it"
@@ -16925,7 +16093,6 @@ msgid "whoever added the row"
 msgstr "la personne qui a ajouté la ligne"
 
 #: src/apps/release-controls.tsx
-#: src/knowledge/purge.tsx
 #: src/workflows/requests/request-table.tsx
 msgid "Why"
 msgstr "Pourquoi"
@@ -17235,11 +16402,6 @@ msgctxt "what something known rests on: a document says it"
 msgid "Written"
 msgstr "Écrit"
 
-#. placeholder {0}: version.wording
-#: src/brain/lessons-view.tsx
-msgid "Written by a model: {0}"
-msgstr "Écrit par un modèle : {0}"
-
 #: src/brain/work-knowledge.tsx
 msgid "Written in a document"
 msgstr "Écrit dans un document"
@@ -17285,7 +16447,6 @@ msgstr "Oui : son hachage correspond et il est lié à l’événement précéde
 
 #: src/connections/connection-list.tsx
 #: src/drafts/draft-history.tsx
-#: src/knowledge/timeline.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
@@ -17391,10 +16552,6 @@ msgstr "Vous :"
 #: src/chat/answer-markdown.tsx
 msgid "You’re about to visit an external website."
 msgstr "Vous êtes sur le point de visiter un site externe."
-
-#: src/knowledge/document.tsx
-msgid "You're reading version {number}, saved {saved}. The current version is {current}."
-msgstr "Vous lisez la version {number}, enregistrée le {saved}. La version actuelle est la {current}."
 
 #: src/drafts/share-with-team.tsx
 msgid "You’re seeing your version."
@@ -17680,21 +16837,6 @@ msgid "Your workspace, who may do what in it, and your own account."
 msgstr "Votre espace de travail, qui peut y faire quoi, et votre propre compte."
 
 #: src/agents/agents-overview.tsx
-msgid "Yours"
-msgstr "Les vôtres"
-
-#: src/brain/lessons-view.tsx
-msgctxt "lesson scope"
-msgid "Yours"
-msgstr "La vôtre"
-
-#: src/brain/memory-page.tsx
-msgctxt "memory record scope"
-msgid "Yours"
-msgstr "Les vôtres"
-
-#: src/brain/memory-page.tsx
-msgctxt "memory records: the person's own"
 msgid "Yours"
 msgstr "Les vôtres"
 

@@ -1,4 +1,3 @@
-import type { KnowledgeSignal } from "@grasp-os/shared/knowledge-signals";
 import type { ImprovementSignal } from "@grasp-os/shared/signals";
 import type { WorkflowSummary } from "@grasp-os/shared/workflows";
 
@@ -51,8 +50,8 @@ export const byState = (
   return states;
 };
 
-/** Every kind of signal the board counts, improvement and Knowledge; an unanswered question is one kind for both. */
-export type SignalKind = ImprovementSignal["kind"] | KnowledgeSignal["kind"];
+/** Every kind of signal the board counts. */
+export type SignalKind = ImprovementSignal["kind"];
 
 /** The order kinds with as many signals come in: what a run waits or fails on first. */
 const kindOrder: readonly SignalKind[] = [
@@ -61,8 +60,6 @@ const kindOrder: readonly SignalKind[] = [
   "correction",
   "cost_per_run",
   "unanswered_question",
-  "unread_document",
-  "overdue_review",
 ];
 
 /** Counts of kinds, the most first, those with as many in the board's order. */

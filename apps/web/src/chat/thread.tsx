@@ -1,7 +1,6 @@
 import { definitionToolNames } from "@grasp-os/shared/chat";
 import type {
   ChatAgent,
-  ChatCitation,
   ChatCode,
   ChatMessage,
   ChatOutput,
@@ -79,7 +78,6 @@ import { recoveredSteps } from "./recovered.ts";
 import { SavedMemoryLine } from "./saved-memory.tsx";
 import { readingFileOf, signOf } from "./sign.ts";
 import type { WorkState } from "./sign.ts";
-import { AnswerCited, AnswerSources, useCitedDocuments } from "./sources.tsx";
 import { minutesAndSeconds, turnsOf, workedFor } from "./turns.ts";
 import { widgetLinesOf } from "./widget-lines.ts";
 
@@ -603,41 +601,6 @@ const Reasoning = ({
   );
 };
 
-/** The quiet row of actions under an answer, with what it cites when it cites any. */
-const ReplyActions = ({
-  cited,
-  children,
-}: {
-  cited?: { chatId: string; messageId: number };
-  children: ReactNode;
-}) => {
-  const sources = useCitedDocuments();
-  return cited === undefined ? (
-    <MessageActions>{children}</MessageActions>
-  ) : (
-    <AnswerSources cited={sources}>{children}</AnswerSources>
-  );
-};
-
-/** An answer's words, each span that cites a document an inline citation. */
-const ReplyText = ({
-  text,
-  citations,
-  written,
-}: {
-  text: string;
-  citations?: ChatCitation[];
-  /** Still being written: each new word fades in. */
-  written: boolean;
-}) => (
-  <AnswerMarkdown
-    cited={citations?.map(({ documentId }) => documentId)}
-    sources={useCitedDocuments()}
-    text={text}
-    written={written}
-  />
-);
-
 /** The calls the chat's code made, as the thread was given them. */
 const ChatTools = createContext<readonly ChatToolEvent[]>([]);
 
@@ -865,7 +828,6 @@ const Reply = ({
   card,
   sign,
   onRetry,
-  cited,
   compact,
 }: {
   reply: Omit<ChatPartial, "reasoning"> & {
@@ -873,8 +835,6 @@ const Reply = ({
     reasoning?: ChatReasoning;
     end?: Answer["end"];
     failure?: Answer["failure"];
-    /** A stored answer's citations; one being written has none. */
-    citations?: ChatCitation[];
   };
   results: ReadonlyMap<string, Result>;
   /** What the running code step has logged so far. */
@@ -889,15 +849,13 @@ const Reply = ({
   sign?: WorkState;
   /** Asks the last question again, offered under the last answer. */
   onRetry?: () => void;
-  /** A stored answer that cites documents: its chat and message, so its row of actions can open them. */
-  cited?: { chatId: string; messageId: number };
   /** In the chat dock: its answer at the dock's size. */
   compact: boolean;
 }) => {
   const { t } = useLingui();
   const answer = reply.text.trim();
   const quiet = writing || sign !== undefined;
-  const shown = (
+  return (
     <Message>
       {/* Its words set for reading; in the dock, at the dock's size. */}
       <MessageContent size={compact ? "default" : "reading"}>
@@ -917,11 +875,7 @@ const Reply = ({
         />
         {card}
         {answer === "" ? null : (
-          <ReplyText
-            citations={reply.citations}
-            text={reply.text}
-            written={writing}
-          />
+          <AnswerMarkdown text={reply.text} written={writing} />
         )}
         {reply.end === "cancelled" ? (
           <p className="text-muted-foreground">
@@ -940,23 +894,17 @@ const Reply = ({
           <GraspSign said={reply.text.length} state={sign} />
         )}
         {quiet || (answer === "" && onRetry === undefined) ? null : (
-          <ReplyActions cited={cited}>
+          <MessageActions>
             {answer === "" ? null : <CopyAnswer text={answer} />}
             {onRetry === undefined || reply.end === "failed" ? null : (
               <MessageAction label={t`Ask again`} onClick={onRetry}>
                 <RefreshCcwIcon />
               </MessageAction>
             )}
-          </ReplyActions>
+          </MessageActions>
         )}
       </MessageContent>
     </Message>
-  );
-  // Only an answer that cites documents asks core what it cites.
-  return cited === undefined ? (
-    shown
-  ) : (
-    <AnswerCited cited={cited}>{shown}</AnswerCited>
   );
 };
 
@@ -1311,11 +1259,6 @@ export const ChatThread = ({
           running={running}
           sign={
             shown === null && message === replies.at(-1) ? doing : undefined
-          }
-          cited={
-            message.citations.length === 0
-              ? undefined
-              : { chatId, messageId: message.id }
           }
           card={cardOf(message.id)}
           top={topOf(message.id)}
