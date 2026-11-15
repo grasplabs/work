@@ -142,6 +142,70 @@ test("someone has their interview by typing, carries on after stopping, and agre
   });
 });
 
+test("someone removes a line of theirs from the transcript, and it is kept removed and said to no one again", async ({
+  page,
+}) => {
+  const staff = await signInStaff();
+  const run = crypto.randomUUID().slice(0, 8);
+  const person = `ria-${run}`;
+  const link = await invited(staff, person, "Ria");
+  const asked = await answered(page);
+  // What each turn tells core they said, to look for the removed words in.
+  const told: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().endsWith("/api/interview/turn")) {
+      told.push(request.postData() ?? "");
+    }
+  });
+  const words = `Only Ria knows ${run}, in Exact.`;
+
+  await page.goto(link);
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByRole("button", { name: "Stephen", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Type instead, without sound" })
+    .click();
+  await expect(page.getByText(first)).toBeVisible();
+  const answer = page.getByLabel("Your answer");
+  await answer.fill(words);
+  await answer.press("Enter");
+  await expect(page.getByText(readBack)).toBeVisible();
+
+  // Their own line, in the transcript only they read, removed once confirmed.
+  await page.getByRole("button", { name: "Transcript" }).click();
+  const transcript = page.getByRole("complementary", { name: "Transcript" });
+  const theirs = transcript.getByRole("listitem").filter({ hasText: run });
+  await theirs.getByRole("button", { name: "Remove this line" }).click();
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Remove" })
+    .click();
+  await expect(transcript.getByText("Removed.")).toBeVisible();
+  await expect(transcript.getByText(run)).toHaveCount(0);
+
+  // Kept removed by core: after a reload, the transcript shows it removed.
+  await page.reload();
+  await page.getByRole("button", { name: "Transcript" }).click();
+  await expect(transcript.getByText("Removed.")).toBeVisible();
+  await page.getByRole("button", { name: "Transcript" }).click();
+
+  // The next turn, asked as they put a line of the read-back right, doesn't carry it.
+  const before = told.length;
+  await page
+    .getByRole("button", { name: "Change: You send it to Sam." })
+    .click();
+  const field = page.getByLabel("Change: You send it to Sam.");
+  await field.fill("You send it to Kim.");
+  await field.press("Enter");
+  await expect(page.getByText(changed)).toBeVisible();
+  expect(told.length).toBeGreaterThan(before);
+  expect({
+    shown: await page.getByText(run).count(),
+    told: told.slice(before).some((body) => body.includes(run)),
+    refused: asked.refused,
+  }).toStrictEqual({ shown: 0, told: false, refused: [] });
+});
+
 test("someone goes through the screens before the interview in Dutch, chooses Claire, and talks with her", async ({
   page,
 }) => {
