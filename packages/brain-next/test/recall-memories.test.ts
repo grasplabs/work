@@ -13,7 +13,6 @@ import type { Pack, Reader } from "@grasp-os/brain-next/contract";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { packAcross } from "../src/across.ts";
 import { foldName } from "../src/entities.ts";
 import { hubRelationsMax, stepsMax } from "../src/recall-memories.ts";
 import {
@@ -1271,119 +1270,211 @@ describe("recall through memories, the names a question holds", () => {
   );
 });
 
-// Fading (GRA-1753): the host tells `packAcross` when its reader last used
-// each memory found; a memory nobody uses keeps the moment it was learned
-// while used ones move ahead. Order only: nothing found is ever left out.
-/**
- * Two memories `group` may read that hold `topic` alike, about two
- * entities whose names no question here holds, the second learned
- * later; each also holds a word of its own.
- */
-const equalPair = async (group: string) => {
-  const [topic, older, newer] = [word(), word(), word()];
-  const { memories } = await remember(
-    audience(group),
-    [{ key: "a", kind: "customer", names: [word()] }],
-    [fact("a", `The ${topic} pallets go out on ${older}`)]
-  );
-  const { memories: later } = await remember(
-    audience(group),
-    [{ key: "b", kind: "customer", names: [word()] }],
-    [fact("b", `The ${topic} pallets go out on ${newer}`)]
-  );
-  return {
-    topic,
-    older: { id: memories[0] ?? "", word: older },
-    newer: { id: later[0] ?? "", word: newer },
-  };
-};
+// Fading (GRA-1753): the host passes when its reader last used each
+// memory (`used`); a memory nobody uses keeps the moment it was learned
+// while used ones move ahead, in the order each statement cuts its list
+// in. Order only: a use never finds, drops or reveals anything.
+
+/** The reader's use: each memory of `ids`, last used at `at`. */
+const usedAt = (at: Date, ...ids: string[]) =>
+  ids.map((memory) => ({ memory, at }));
 
 /**
- * Whether the pack `reader` gets for `question`, their use as `used`
- * says, holds both `upper` and `lower`, `upper` first.
+ * `count` memories `group` may read that hold `topic` alike, each about an
+ * entity of its own whose name no question here holds and with a word of
+ * its own, learned one after another: their ids and words, oldest first.
  */
-const ranksAbove = async (
+const equalMemories = async (group: string, topic: string, count = 2) => {
+  const added: { id: string; word: string }[] = [];
+  for (let at = 0; at < count; at += 1) {
+    const own = word();
+    // oxlint-disable-next-line no-await-in-loop -- learned one after another
+    const { memories } = await remember(
+      audience(group),
+      [{ key: "a", kind: "customer", names: [word()] }],
+      [fact("a", `The ${topic} pallets go out on ${own}`)]
+    );
+    added.push({ id: memories[0] ?? "", word: own });
+  }
+  return added;
+};
+
+/** The pack `reader` gets for `question`, their use as `used` says. */
+const packFor = async (
   reader: Reader,
   question: string,
-  [upper, lower]: readonly [string, string],
-  used: ReadonlyMap<string, Date> = new Map()
-): Promise<boolean> => {
-  const finding = await shared().find({
+  used: { memory: string; at: Date }[] = []
+): Promise<Pack> =>
+  await shared().recall({
     question,
     reader,
     budget: { tokens: 20_000 },
+    used,
   });
-  const pack = packAcross(question, 20_000, [finding], [used]);
+
+/** Whether `pack` holds both `upper` and `lower`, `upper` first. */
+const ranksAbove = (pack: Pack, upper: string, lower: string): boolean => {
   const placeOf = (id: string) =>
     pack.memories.findIndex(({ memory }) => memory === id);
   return placeOf(upper) >= 0 && placeOf(upper) < placeOf(lower);
 };
 
+/** Whether `pack` holds the memory `id`. */
+const holds = (pack: Pack, id: string): boolean =>
+  pack.memories.some(({ memory }) => memory === id);
+
 describe("memories a reader never uses fade", () => {
   it("ranks a memory the reader used above an equal one they never used, and still packs both", async () => {
     const group = unique("team");
     const reader = readerOf(unique("ann"), group);
-    const { topic, older, newer } = await equalPair(group);
+    const topic = word();
+    const [older, newer] = await equalMemories(group, topic);
+    const [olderId, newerId] = [older?.id ?? "", newer?.id ?? ""];
 
     expect({
-      unused: await ranksAbove(reader, topic, [newer.id, older.id]),
-      used: await ranksAbove(
-        reader,
-        topic,
-        [older.id, newer.id],
-        new Map([[older.id, new Date()]])
+      unused: ranksAbove(await packFor(reader, topic), newerId, olderId),
+      used: ranksAbove(
+        await packFor(reader, topic, usedAt(new Date(), olderId)),
+        olderId,
+        newerId
       ),
     }).toStrictEqual({ unused: true, used: true });
+  });
+
+  it("cuts the words way in fading order: a used old memory past the limit is found, and the unused old ones are cut", async () => {
+    const group = unique("team");
+    const reader = readerOf(unique("ann"), group);
+    const topic = word();
+    const added = await equalMemories(group, topic, recallLimit + 2);
+    const [oldest = "", second = "", third = ""] = added.map(({ id }) => id);
+    const newest = added.at(-1)?.id ?? "";
+
+    const before = await packFor(reader, topic);
+    const after = await packFor(reader, topic, usedAt(new Date(), oldest));
+
+    expect({
+      before: { oldest: holds(before, oldest), third: holds(before, third) },
+      after: {
+        oldestFirst: ranksAbove(after, oldest, newest),
+        second: holds(after, second),
+        third: holds(after, third),
+      },
+    }).toStrictEqual({
+      before: { oldest: false, third: true },
+      after: { oldestFirst: true, second: false, third: false },
+    });
+  });
+
+  it("cuts the entities way in fading order too: a used old fact of a named entity past the limit is found", async () => {
+    const group = unique("team");
+    const reader = readerOf(unique("ann"), group);
+    const name = word();
+    const ids: string[] = [];
+    for (let at = 0; at < recallLimit + 2; at += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- learned one after another
+      const { memories } = await remember(
+        audience(group),
+        [{ key: "a", kind: "customer", names: [name] }],
+        [fact("a", `Deliveries come on ${word()}`)]
+      );
+      ids.push(memories[0] ?? "");
+    }
+    const [oldest = ""] = ids;
+    /** Whether the entities way finds the oldest fact, the use as `used` says. */
+    const findsOldest = async (used: { memory: string; at: Date }[]) => {
+      const { memories } = await shared().find({
+        question: name,
+        reader,
+        budget: { tokens: 20_000 },
+        used,
+      });
+      return memories.entities.some(({ id }) => id === oldest);
+    };
+
+    expect({
+      unused: await findsOldest([]),
+      used: await findsOldest(usedAt(new Date(), oldest)),
+    }).toStrictEqual({ unused: false, used: true });
   });
 
   it("lets a memory learned after the last use rank above the one used", async () => {
     const group = unique("team");
     const reader = readerOf(unique("ann"), group);
-    const { topic, older, newer } = await equalPair(group);
+    const topic = word();
+    const [older, newer] = await equalMemories(group, topic);
 
     // Used before the newer one was learned: the newer is fresher.
-    await expect(
+    expect(
       ranksAbove(
-        reader,
-        topic,
-        [newer.id, older.id],
-        new Map([[older.id, new Date(0)]])
+        await packFor(reader, topic, usedAt(new Date(0), older?.id ?? "")),
+        newer?.id ?? "",
+        older?.id ?? ""
       )
-    ).resolves.toBeTruthy();
+    ).toBeTruthy();
   });
 
   it("never fades a confirmed memory below one that isn't, however recently that one was used", async () => {
     const group = unique("team");
     const person = unique("ann");
     const reader = readerOf(person, group);
-    const { topic, older, newer } = await equalPair(group);
+    const topic = word();
+    const [older, newer] = await equalMemories(group, topic);
     await shared().confirmMemory({
-      memory: older.id,
+      memory: older?.id ?? "",
       reader: { person, groups: [group] },
     });
 
-    await expect(
+    expect(
       ranksAbove(
-        reader,
-        topic,
-        [older.id, newer.id],
-        new Map([[newer.id, new Date()]])
+        await packFor(reader, topic, usedAt(new Date(), newer?.id ?? "")),
+        older?.id ?? "",
+        newer?.id ?? ""
       )
-    ).resolves.toBeTruthy();
+    ).toBeTruthy();
   });
 
   it("finds a faded memory first for a question about it", async () => {
     const group = unique("team");
     const reader = readerOf(unique("ann"), group);
-    const { topic, older, newer } = await equalPair(group);
+    const topic = word();
+    const [older, newer] = await equalMemories(group, topic);
 
-    await expect(
+    expect(
       ranksAbove(
-        reader,
-        `${topic} ${older.word}`,
-        [older.id, newer.id],
-        new Map([[newer.id, new Date()]])
+        await packFor(
+          reader,
+          `${topic} ${older?.word ?? ""}`,
+          usedAt(new Date(), newer?.id ?? "")
+        ),
+        older?.id ?? "",
+        newer?.id ?? ""
       )
-    ).resolves.toBeTruthy();
+    ).toBeTruthy();
+  });
+
+  it("answers a use of a memory the reader may not read exactly like a use of one that isn't there, and like no use", async () => {
+    const group = unique("team");
+    const reader = readerOf(unique("ann"), group);
+    const topic = word();
+    await equalMemories(group, topic, recallLimit + 1);
+    const [hidden] = await equalMemories(unique("hidden"), topic);
+    const now = new Date();
+
+    const none = await packFor(reader, topic);
+    const ofHidden = await packFor(
+      reader,
+      topic,
+      usedAt(now, hidden?.id ?? "")
+    );
+    const ofAbsent = await packFor(
+      reader,
+      topic,
+      usedAt(now, crypto.randomUUID())
+    );
+
+    expect({ ofHidden, ofAbsent }).toStrictEqual({
+      ofHidden: none,
+      ofAbsent: none,
+    });
   });
 });

@@ -1,5 +1,4 @@
 import { packAcross, sourcesAcross } from "@grasp-os/brain-next/across";
-import type { UsedAt } from "@grasp-os/brain-next/across";
 import {
   brainOf,
   contestedCursorSchema,
@@ -115,6 +114,7 @@ import type {
   BrainWithoutMeaningReason,
 } from "@grasp-os/shared/brain-report";
 import { brainSourceErrors, firstLineOf } from "@grasp-os/shared/brain-sources";
+import { withinTime } from "@grasp-os/shared/deadline";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { instructionFileErrors } from "@grasp-os/shared/instruction-files";
 import type { InstructionFileRef } from "@grasp-os/shared/instruction-files";
@@ -134,7 +134,12 @@ import {
 } from "./brain-own-stores.ts";
 import type { OwnStoreHealth } from "./brain-own-stores.ts";
 import { inJurisdiction, workspace } from "./durable-objects.ts";
-import { embedInBulk, embedderModel, questionVectorOf } from "./embedder.ts";
+import {
+  embedInBulk,
+  embedderModel,
+  questionVectorMs,
+  questionVectorOf,
+} from "./embedder.ts";
 import { promptTextOf } from "./instructions-text.ts";
 import { parseModelRef } from "./model-catalog.ts";
 import { brainSpendByPurpose, spendMonth } from "./model-spend.ts";
@@ -986,17 +991,27 @@ const recallRequestAs = async (
  * What every store `request`'s reader may read from finds for it, by
  * `finding` (`find`, or `findPassages` for passages alone): the shared
  * store, and their own when the reader names them (`ownBrainOf`), the
- * shared store first, as ties go to the store given first.
+ * shared store first, as ties go to the store given first. With `used`,
+ * each store is given the reader's use of its own memories (`usedOf`).
  */
 const findingsOf = async (
   env: BrainEnv,
   request: RecallRequest,
-  finding: "find" | "findPassages"
+  finding: "find" | "findPassages",
+  used?: Used
 ): Promise<Finding[]> => {
   const own = ownBrainOf(env, request.reader);
   return await Promise.all([
-    brain(env)[finding](request),
-    ...(own === undefined ? [] : [own[finding](request)]),
+    brain(env)[finding](
+      used === undefined ? request : { ...request, used: used.shared }
+    ),
+    ...(own === undefined
+      ? []
+      : [
+          own[finding](
+            used === undefined ? request : { ...request, used: used.own }
+          ),
+        ]),
   ]);
 };
 
@@ -1024,45 +1039,44 @@ const storesOf = (findings: readonly Finding[]): Map<string, MemoryStore> =>
     )
   );
 
+/** A person's use of memories, per store (`usedOf`), for its requests. */
+type Used = Record<MemoryStore, NonNullable<RecallRequest["used"]>>;
+
 /**
- * When `personId` last used each memory `findings` ranks (`findingsOf`'s
- * order), at or before `until`: when recall last handed it to them in one
- * of their own chats, as their Workspace keeps it with the run
- * (workspace.ts `memoriesUsed`), for `packAcross` to rank by, so a memory
- * they never use fades among equals and is never dropped. Their own use
- * alone, of what they were found alone: nobody else's use, and nothing
- * hidden from them, orders what they see. Nothing is asked when nothing
- * was found.
+ * When `personId` last used each memory they used, at or before `until`:
+ * when a recall as them last handed it over in their own chat, as their
+ * Workspace keeps it with the run (workspace.ts `memoriesUsed`), per
+ * store, for each store's recall to rank by (the contract's `used`), so a
+ * memory they never use fades among equals and is never dropped. Their
+ * own use alone, and only in the requests: no store keeps it. Read
+ * alongside the question's embedding, within the same bound
+ * (`questionVectorMs`), so it adds no wait to a recall that has one. A
+ * ranking hint: a lookup that fails or is slow leaves the recall unranked
+ * by use, logged by the error's name alone, never failed.
  */
-const usedAtOf = async (
+const usedOf = async (
   env: Pick<Env, "WORKSPACES" | "DURABLE_OBJECT_JURISDICTION">,
   personId: string,
-  findings: readonly Finding[],
   until: Date
-): Promise<UsedAt> => {
-  const places = findings.flatMap(({ memories }, at) =>
-    [...memories.words, ...memories.entities].map(
-      ({ id }): StoredMemoryPlace => ({
-        store: at === 0 ? "shared" : "own",
-        memory: id,
-      })
-    )
-  );
-  if (places.length === 0) {
-    return [];
-  }
-  const used = await workspace(env, personalWorkspaceId(personId)).memoriesUsed(
-    places,
-    until.getTime()
-  );
-  return findings.map((_, at) => {
-    const store = at === 0 ? "shared" : "own";
-    return new Map(
-      used
-        .filter((place) => place.store === store)
-        .map(({ memory, at: last }) => [memory, new Date(last)])
+): Promise<Used> => {
+  const used: Used = { own: [], shared: [] };
+  try {
+    const uses = await withinTime(
+      async () =>
+        await workspace(env, personalWorkspaceId(personId)).memoriesUsed(
+          until.getTime()
+        ),
+      questionVectorMs
     );
-  });
+    for (const { store, memory, at } of uses) {
+      used[store].push({ memory, at: new Date(at) });
+    }
+  } catch (error) {
+    log.warn("brain.recall.without_use", {
+      error: error instanceof Error ? error.name : "unknown",
+    });
+  }
+  return used;
 };
 
 /**
@@ -1089,13 +1103,15 @@ export const recallAs = async (
   personId: string,
   recall: Recall
 ): Promise<RecalledPack> => {
-  const request = await recallRequestAs(env, personId, recall);
-  const findings = await findingsOf(env, request, "find");
+  const [request, used] = await Promise.all([
+    recallRequestAs(env, personId, recall),
+    usedOf(env, personId, recall.asOf ?? new Date()),
+  ]);
+  const findings = await findingsOf(env, request, "find", used);
   const { items, memories, contested, notFound, truncated } = packAcross(
     request.question,
     request.budget.tokens,
-    findings,
-    await usedAtOf(env, personId, findings, request.asOf ?? new Date())
+    findings
   );
   const stores = storesOf(findings);
   return {

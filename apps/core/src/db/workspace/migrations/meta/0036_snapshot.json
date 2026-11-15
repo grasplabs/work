@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "fd305909-f157-4941-8966-9ef1e357ef1d",
+  "id": "14193d87-54f0-440b-a0aa-e1d19b726300",
   "prevId": "0ffa021e-2df8-4cdd-9989-c623882ed86a",
   "tables": {
     "audit_outbox": {
@@ -1103,7 +1103,8 @@
             "source_id",
             "pinned_at"
           ],
-          "isUnique": false
+          "isUnique": false,
+          "where": "source_id GLOB 'brain-memory:*'"
         }
       },
       "foreignKeys": {

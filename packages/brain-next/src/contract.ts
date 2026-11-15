@@ -400,6 +400,10 @@ export const withoutMeaningReasons = [
 ] as const;
 export type WithoutMeaningReason = (typeof withoutMeaningReasons)[number];
 
+/** A memory's id: the store's own, for citing it and retiring it. */
+export const memoryIdSchema = z.uuid();
+export type MemoryId = z.infer<typeof memoryIdSchema>;
+
 /**
  * A recall: a question, in the reader's words, the reader, how many tokens
  * the pack may hold (`tokensOf`), to read the past, the moment the
@@ -412,6 +416,16 @@ export type WithoutMeaningReason = (typeof withoutMeaningReasons)[number];
  * gave no vector it could use says why (`withoutMeaning`), for staff to
  * count (`RecallOverview`); never with a vector, nor as of a moment,
  * when there was no vector to miss.
+ *
+ * `used`: when the reader last used each memory of this store they used,
+ * as the host knows its own person's use (core: when recall last handed
+ * it to them in their own chat), at or before the moment asked. Ranks
+ * memories by freshness among equals (`FoundMemory.usedAt`), so one they
+ * never use fades; it only orders, never finds, drops or reveals: a
+ * memory the reader may not read, or that isn't there, is passed over
+ * alike. Kept in no store. The reader's whole use, uncut: it is looked up
+ * in memory for each memory a way judged, never read as rows, so a longer
+ * list costs recall no more rows.
  */
 export const recallRequestSchema = z
   .strictObject({
@@ -419,6 +433,14 @@ export const recallRequestSchema = z
     reader: readerSchema,
     budget: z.strictObject({ tokens: z.int().min(1).max(recallBudgetMax) }),
     asOf: z.date().optional(),
+    used: z
+      .array(
+        z.strictObject({
+          memory: memoryIdSchema,
+          at: z.date(),
+        })
+      )
+      .optional(),
     meaning: z
       .strictObject({ model: embedModelSchema, vector: vectorSchema })
       .optional(),
@@ -1794,10 +1816,6 @@ export const memoriesReadMax = 100;
 export const entityIdSchema = z.uuid();
 export type EntityId = z.infer<typeof entityIdSchema>;
 
-/** A memory's id: the store's own, for citing it and retiring it. */
-export const memoryIdSchema = z.uuid();
-export type MemoryId = z.infer<typeof memoryIdSchema>;
-
 /**
  * An exact identifier of an entity: an email address (compared without
  * case), or a reference in some system (`ref`), written with that
@@ -2449,6 +2467,11 @@ export interface FoundMemory extends Memory {
   words: number;
   exact: number;
   step: number;
+  /**
+   * When the reader last used it, as the request said (`used`), or null:
+   * with `learnedAt`, its freshness for them, which recall ranks by.
+   */
+  usedAt: Date | null;
   context: { position: number; text: string } | null;
 }
 

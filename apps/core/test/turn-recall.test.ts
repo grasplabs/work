@@ -3027,47 +3027,72 @@ describe("two recalls merged into one pack", setUpTime, () => {
 
 /**
  * Whether what `personId` recalls for `question` (`recallAs`, as their
- * teams may read) holds both `memories`, and the first above the second.
+ * teams may read, or as them with `personal`, as of `asOf` if given)
+ * holds both `memories`, and the first above the second.
  */
 const placeIn = async (
   personId: string,
   question: string,
-  memories: readonly [string, string]
+  [upper, lower]: readonly [string, string],
+  { personal = false, asOf }: { personal?: boolean; asOf?: Date } = {}
 ): Promise<{ first: boolean; both: boolean }> => {
   const pack = await recallAs(env, personId, {
     question,
     budget: { tokens: 20_000 },
-    personal: false,
+    personal,
+    ...(asOf === undefined ? {} : { asOf }),
   });
-  const [upper, lower] = memories.map((memory) =>
-    pack.memories.findIndex((each) => each.memory === memory)
-  );
+  const indexOf = (memory: string) =>
+    pack.memories.findIndex((each) => each.memory === memory);
   return {
-    first: upper !== undefined && lower !== undefined && upper < lower,
-    both: upper !== -1 && lower !== -1,
+    first: indexOf(upper) >= 0 && indexOf(upper) < indexOf(lower),
+    both: indexOf(upper) >= 0 && indexOf(lower) >= 0,
   };
 };
 
-// Fading (GRA-1753): a memory recall handed to a person in their own chat
-// is one they used, as the chat's run pinned it; among equals it ranks
-// above one they never used, for them alone. From the ways it can fail:
-// one person's use reorders another's recall; a faded memory is lost.
+/** A memory of `personId`'s own store, in their own word, `statement`. */
+const ownMemory = async (personId: string, statement: string) => {
+  const { memory } = await rememberAs(env, personId, {
+    change: crypto.randomUUID(),
+    about: { kind: "customer", names: [`Depot ${word()}`] },
+    type: "fact",
+    statement,
+    quote: statement,
+  });
+  return memory;
+};
+
+// Fading (GRA-1753): a memory a recall as the person handed over in their
+// own chat is one they used, as the chat's run pinned it; among equals it
+// ranks above one they never used, for them alone, in the shared store
+// and in their own. From the ways it can fail: one person's use reorders
+// another's recall; a recall of the past is ordered by a use that came
+// later; a faded memory is lost; a failed lookup fails the recall.
 describe("memories a person never uses fade for them", setUpTime, () => {
-  it("ranks the memory their chat used above an equal one, for them alone, and still finds the other first when asked about it", async () => {
+  it("ranks the memories their chat used above equal ones, shared and their own, for them alone and from then on, and still finds the others when asked about them", async () => {
     const admin = await signedInApi(idp, "admin");
     const [ada, bea] = await Promise.all([
       signedInWithRole(idp, "user"),
       signedInWithRole(idp, "user"),
     ]);
-    const [topic, monday, friday] = [word(), word(), word()];
-    // Two memories everyone may read that hold the topic alike, the second
-    // learned later, each also holding a word of its own.
+    const [topic, ownTopic, monday, friday] = [word(), word(), word(), word()];
+    // Two memories everyone may read that hold the topic alike, and two of
+    // Ada's own that hold hers, the second of each learned later; only the
+    // first of each holds the word her turn asks for.
     const [used = ""] = await rememberedAbout("company", `Depot ${word()}`, [
       { statement: `The ${topic} pallets go out on ${monday}` },
     ]);
     const [unused = ""] = await rememberedAbout("company", `Depot ${word()}`, [
       { statement: `The ${topic} pallets go out on ${friday}` },
     ]);
+    const ownUsed = await ownMemory(
+      ada.userId,
+      `The ${ownTopic} crates go out on ${monday}`
+    );
+    const ownUnused = await ownMemory(
+      ada.userId,
+      `The ${ownTopic} crates go out on ${friday}`
+    );
     const beaBefore = await placeIn(bea.userId, topic, [unused, used]);
     const chats = await personalChatsOf(ada.userId, says("Mondays."));
     await requestGranted(idp, admin, {
@@ -3077,24 +3102,57 @@ describe("memories a person never uses fade for them", setUpTime, () => {
       binding: "BRAIN",
     });
     const { ask } = await chats.newChat();
+    const beforeTurn = new Date();
 
-    // Only the first memory holds this word: the turn hands over that one.
     await ask(`${monday}?`);
 
     expect({
       handed: handedIn(chats.provider.requests[0]?.body)
         .memories.map(({ memory }) => memory)
-        .filter((memory) => memory === used || memory === unused),
+        .filter((memory) => [used, unused, ownUsed, ownUnused].includes(memory))
+        .toSorted(),
       ada: await placeIn(ada.userId, topic, [used, unused]),
+      adaOwn: await placeIn(ada.userId, ownTopic, [ownUsed, ownUnused], {
+        personal: true,
+      }),
+      adaBeforeTurn: await placeIn(ada.userId, topic, [unused, used], {
+        asOf: beforeTurn,
+      }),
       beaBefore,
       beaAfter: await placeIn(bea.userId, topic, [unused, used]),
       adaAsked: await placeIn(ada.userId, `${topic} ${friday}`, [unused, used]),
     }).toStrictEqual({
-      handed: [used],
+      handed: [used, ownUsed].toSorted(),
       ada: { first: true, both: true },
+      adaOwn: { first: true, both: true },
+      adaBeforeTurn: { first: true, both: true },
       beaBefore: { first: true, both: true },
       beaAfter: { first: true, both: true },
       adaAsked: { first: true, both: true },
     });
+  });
+
+  it("recalls without ranking by use when the lookup of what they used fails", async () => {
+    const cara = await signedInWithRole(idp, "user");
+    const topic = word();
+    const [older = ""] = await rememberedAbout("company", `Depot ${word()}`, [
+      { statement: `The ${topic} pallets go out early` },
+    ]);
+    const [newer = ""] = await rememberedAbout("company", `Depot ${word()}`, [
+      { statement: `The ${topic} pallets go out late` },
+    ]);
+    // Their Workspace can no longer read their pins.
+    await runInDurableObject(
+      workspace(env, personalWorkspaceId(cara.userId)),
+      (_instance, state) => {
+        state.storage.sql.exec(
+          "ALTER TABLE chat_run_sources RENAME TO chat_run_sources_gone"
+        );
+      }
+    );
+
+    await expect(
+      placeIn(cara.userId, topic, [newer, older])
+    ).resolves.toStrictEqual({ first: true, both: true });
   });
 });
