@@ -1128,14 +1128,10 @@ const extractWork: WorkDefinition<Payload> = defineWork({
     if (access === undefined) {
       throw new Error("The Brain holds readers it can't name");
     }
-    // Nobody may read it, nor anything drawn from it: no call. Nor for
-    // what one person alone may read in the shared store, which keeps no
-    // memory of theirs (remember.ts refuses it by the same rule): that
-    // person's own store draws from what it holds.
-    if (
-      access.kind === "none" ||
-      (context.owner === undefined && access.kind === "owner")
-    ) {
+    // Nobody may read it, nor anything drawn from it: no call. (What one
+    // person alone may read is never in the shared store, which refuses
+    // it: store.ts `#mayKeep`. Their own store draws from what it holds.)
+    if (access.kind === "none") {
       return;
     }
     // A restore under way adds nothing: no call is spent on what it would
