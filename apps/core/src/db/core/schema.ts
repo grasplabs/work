@@ -6501,6 +6501,44 @@ export const brainHandOvers = sqliteTable(
 );
 
 /**
+ * Whose run results the new Brain holds, by workflow (src/brain-run-sources.ts):
+ * one row per person and workflow a run of theirs was handed over for, in
+ * their own store. When they lose the workflow's role, the clock marks the
+ * row revoked and owed, then the Brain takes those runs' sources out of use
+ * (history kept), then the removal is no longer owed and its one event is
+ * stored. A work record for the clock alone: no read of the Brain reads it.
+ */
+export const brainRunSources = sqliteTable(
+  "brain_run_sources",
+  {
+    personId: text("person_id").notNull(),
+    workflowId: text("workflow_id").notNull(),
+    /** Whether a run of theirs was handed over since the last revocation. */
+    inUse: integer("in_use", { mode: "boolean" }).notNull().default(true),
+    /** When the last revocation was marked: the runs created by then are its. */
+    revokedAt: timestamp("revoked_at"),
+    /** How many runs that revocation covers, counted when it was marked. */
+    runs: integer(),
+    /** Whether that revocation's removal or its event is still owed. */
+    removalOwed: integer("removal_owed", { mode: "boolean" })
+      .notNull()
+      .default(false),
+  },
+  (table) => [
+    primaryKey({ columns: [table.personId, table.workflowId] }),
+    // What the clock checks each minute: the rows in use alone, and the
+    // removals still owed, oldest first. Each condition a literal, as the
+    // queries write it, so SQLite uses it.
+    index("brain_run_sources_in_use_idx")
+      .on(table.personId, table.workflowId)
+      .where(sql.raw("in_use = 1")),
+    index("brain_run_sources_owed_idx")
+      .on(table.revokedAt)
+      .where(sql.raw("removal_owed = 1")),
+  ]
+);
+
+/**
  * How each person's own store of the new Brain is doing, as its own alarm
  * last found it (src/brain-own-stores.ts): one row per store, written by
  * the store about itself when its tick ends, and removed once the person's

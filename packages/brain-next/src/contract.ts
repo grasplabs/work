@@ -1241,11 +1241,17 @@ export type HandOverRequest = z.infer<typeof handOverRequestSchema>;
 
 /**
  * Why a hand-over was refused for good: what it adds was erased (its key
- * is closed, or its one reader's erasure began), the host's answer can't
+ * is closed, or its one reader's erasure began), or removed (its key is
+ * closed, its history kept: `Brain.removeSource`), the host's answer can't
  * be added (no readers, a text that isn't one), or its text is past a
  * source's bound with nothing smaller to keep.
  */
-export const handOverRefusals = ["erased", "invalid", "too_large"] as const;
+export const handOverRefusals = [
+  "erased",
+  "removed",
+  "invalid",
+  "too_large",
+] as const;
 export type HandOverRefusal = (typeof handOverRefusals)[number];
 
 /**

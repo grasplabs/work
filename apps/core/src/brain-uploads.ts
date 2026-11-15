@@ -15,7 +15,7 @@ import type {
 } from "@grasp-os/shared/brain-sources";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
-import { errorName, log } from "@grasp-os/shared/log";
+import { log } from "@grasp-os/shared/log";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -67,6 +67,7 @@ import { brainUploads, members, teams, users } from "./db/core/schema.ts";
 import { ExtractorUnavailableError, localExtractor } from "./files/extract.ts";
 import { hasText, signatures } from "./files/upload-checks.ts";
 import { onboardingStore } from "./onboarding/store.ts";
+import { completeEachOwed } from "./owed-removals.ts";
 
 // Files a person uploads straight into the Brain, on Brain › Sources
 // (GRA-1824; its threat model is on the issue). The uploader chooses who
@@ -890,9 +891,9 @@ const removeUpload = async (
 
 /**
  * Completes every removal still owed (`completeRemoval`), oldest first,
- * each on its own: one that fails is logged with its upload's id and its
- * error's name, and the run goes on to the rest, so it never holds up a
- * newer one; it is tried again at the clock's next run. The clock runs it
+ * each on its own (`completeEachOwed`): one that fails is logged with its
+ * upload's id and its error's name, and the run goes on to the rest, so it
+ * never holds up a newer one; it is tried again at the clock's next run. The clock runs it
  * each minute. Unbounded, as `retryErasures` beside it: what is owed is
  * only a removal whose completion failed, and a run that overlaps the next
  * (or starts over after an interruption) repeats nothing, as a completion
@@ -905,20 +906,16 @@ export const completeOwedRemovals = async (env: Env): Promise<void> => {
     // As the partial index on owed removals is written, so it is used.
     .where(sql.raw("removal_owed = 1"))
     .orderBy(asc(brainUploads.removedAt));
-  for (const row of owed) {
-    if (row.removedAt === null) {
-      continue;
-    }
-    try {
-      // oxlint-disable-next-line no-await-in-loop -- one removal at a time
-      await completeRemoval(env, { ...row, removedAt: row.removedAt });
-    } catch (error) {
-      log.warn("brain.upload.removal_owed", {
-        uploadId: row.id,
-        errorName: errorName(error),
-      });
-    }
-  }
+  await completeEachOwed(
+    owed.flatMap(({ removedAt, ...row }) =>
+      removedAt === null ? [] : [{ ...row, removedAt }]
+    ),
+    async (row) => {
+      await completeRemoval(env, row);
+    },
+    "brain.upload.removal_owed",
+    ({ id }) => ({ uploadId: id })
+  );
 };
 
 /**

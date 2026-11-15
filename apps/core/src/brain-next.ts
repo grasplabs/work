@@ -3280,14 +3280,16 @@ export type Handed =
 /**
  * Why a noted source is not handed over after all, one of a fixed set:
  * its record restricted since, deleted or gone, its details past their
- * retention, its reader no longer a member, or nothing of it to keep (a
- * question of no words).
+ * retention, its reader no longer a member, its reader no longer holding
+ * the role it was read under (a run's person, its workflow), or nothing of
+ * it to keep (a question of no words).
  */
 export type HandOverSkip =
   | "restricted"
   | "deleted"
   | "past_retention"
   | "not_a_member"
+  | "no_role"
   | "no_text";
 
 /** How a hand-over that did something ended: added, or refused for good. */
@@ -3347,9 +3349,18 @@ const closeKey = async (
   });
 };
 
-/** Whether `error` is core's refusal of an add an erasure closed (`addSource`). */
-const isErasedRefusal = (error: unknown): boolean =>
-  brainSourceErrors.codeOf(error) === "brain.source_erased";
+/**
+ * How a hand-over is refused for good when its add was refused for a
+ * closed key (`addSource`): `erased` when an erasure closed it, `removed`
+ * when a removal did (`removeSource`); undefined for any other error.
+ */
+const closedRefusalOf = (error: unknown): "erased" | "removed" | undefined => {
+  const code = brainSourceErrors.codeOf(error);
+  if (code === "brain.source_erased") {
+    return "erased";
+  }
+  return code === "brain.source_removed" ? "removed" : undefined;
+};
 
 /**
  * Refuses the hand-over `attempt` is at for `reason`: recorded first,
@@ -3385,7 +3396,8 @@ const refuse = async (
  * - its text, or its `whenTooLarge` when the text is past a source's
  *   bound as given or as indexed (`fitsSourceText`); refused as
  *   `too_large` when neither fits;
- * - refused as `erased` when what it adds was erased: final.
+ * - refused as `erased` when what it adds was erased, and as `removed`
+ *   when it was removed (`removeSource`): final.
  *
  * Each records its outcome, which ends the noted hand-over: once, as a
  * repeat of an attempt that ended it records nothing (`HandOverAttempt`).
@@ -3443,10 +3455,11 @@ const handOver = async (
       ...(handed.group === undefined ? {} : { group: handed.group }),
     }));
   } catch (error) {
-    if (!isErasedRefusal(error)) {
+    const closed = closedRefusalOf(error);
+    if (closed === undefined) {
       throw error;
     }
-    return await refused("erased");
+    return await refused(closed);
   }
   if (
     readers.data.kind === "owner" &&
