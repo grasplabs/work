@@ -1,5 +1,5 @@
 import type { ErasedFiles, OnErase } from "@grasp-os/brain/purge";
-import { and, asc, count, eq, or, sql } from "drizzle-orm";
+import { and, asc, count, eq, inArray, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -8,7 +8,8 @@ import { inList } from "../db/d1.ts";
 
 // What is left of the files once uploaded into Knowledge: the uploads a
 // Knowledge purge reaches (`uploadErasure`), which it forgets, deleting
-// their originals from R2. Nothing uploads into Knowledge any more, so
+// their originals from R2, and those left unended, which the clock forgets
+// (`sweepLeftUploads`). Nothing uploads into Knowledge any more, so
 // nothing is still storing an original or saving an upload's text: the
 // purge forgets an upload whatever state it was left in. An original's
 // delete is recorded (`upload_cleanups`) in the batch that forgets its
@@ -81,6 +82,37 @@ const forgetUploads = async (env: Env, scope: ErasedFiles): Promise<void> => {
       )
       .onConflictDoNothing(),
     db.delete(uploads).where(where),
+  ]);
+  await cleanUpOriginals(env);
+};
+
+/**
+ * Every minute (the clock), until the cutover removes Knowledge: forgets
+ * the uploads that never ended (nothing finishes one any more), recording
+ * their originals for deleting, then deletes every original due, those a
+ * failure recorded before uploads stopped among them. Throws while R2 or
+ * the database refuses: the clock records it and tries again.
+ */
+export const sweepLeftUploads = async (env: Env): Promise<void> => {
+  const db = drizzle(env.DB);
+  const unended = inArray(uploads.status, ["pending", "extracting", "saving"]);
+  await db.batch([
+    db
+      .insert(uploadCleanups)
+      .select(
+        db
+          .select({
+            key: sql<string>`'knowledge/' || ${uploads.collectionId} || '/' || ${uploads.id}`.as(
+              "key"
+            ),
+            uploadId: uploads.id,
+            createdAt: uploads.createdAt,
+          })
+          .from(uploads)
+          .where(unended)
+      )
+      .onConflictDoNothing(),
+    db.delete(uploads).where(unended),
   ]);
   await cleanUpOriginals(env);
 };

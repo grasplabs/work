@@ -8,6 +8,7 @@ import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { erasing } from "./knowledge-purge.ts";
 import { ownCollectionOf } from "./knowledge.ts";
+import { runMinuteTasks } from "./maintenance.ts";
 import { openRpc, outcome, signedInApi, unique } from "./sign-in.ts";
 
 // A Knowledge purge and the files once uploaded into Knowledge: the
@@ -404,5 +405,55 @@ describe("a Knowledge purge of documents saved from uploads", () => {
       stored: await storedOf(collectionId, [uploadId, saving]),
       kept: [await uploadKept(uploadId), await uploadKept(saving)],
     }).toStrictEqual({ purged: "ok", stored: 0, kept: [false, false] });
+  });
+});
+
+describe("uploads into Knowledge left behind", () => {
+  it("are forgotten by the clock, their originals deleted, a failure's recorded cleanup too, and tried again while R2 refuses", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const { id: collectionId } = await admin.api.knowledge.createCollection({
+      name: `Files ${unique()}`,
+      access: "everyone",
+    });
+    const pending = await leftUpload(admin, collectionId, {
+      path: "Pending.xlsx",
+      status: "pending",
+      documentId: null,
+    });
+    // A failure that recorded its original's delete, cut short before R2
+    // deleted it.
+    const failed = await leftUpload(admin, collectionId, {
+      path: "Failed.xlsx",
+      status: "failed",
+      documentId: null,
+    });
+    await env.DB.prepare(
+      "INSERT INTO upload_cleanups (key, upload_id, created_at) VALUES (?, ?, ?)"
+    )
+      .bind(originalKey(collectionId, failed), failed, Date.now() - 60 * 60_000)
+      .run();
+    const refusing = new Proxy(env.FILES, {
+      get: (target, property) => {
+        if (property === "delete") {
+          return async () => {
+            await Promise.resolve();
+            throw new Error("R2 is out of reach");
+          };
+        }
+        const value: unknown = Reflect.get(target, property);
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+    await runMinuteTasks({ FILES: refusing });
+    const whileRefused = await storedOf(collectionId, [pending, failed]);
+    await runMinuteTasks();
+
+    expect({
+      whileRefused,
+      stored: await storedOf(collectionId, [pending, failed]),
+      kept: await uploadKept(pending),
+    }).toStrictEqual({ whileRefused: 2, stored: 0, kept: false });
   });
 });

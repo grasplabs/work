@@ -26,6 +26,7 @@ import { sweepGuestChats } from "./guests.ts";
 import { sweepHeldStartInputs } from "./held-starts.ts";
 import { expireBrainExports } from "./knowledge/export-expiry.ts";
 import { brainOf } from "./knowledge/ports.ts";
+import { sweepLeftUploads } from "./knowledge/uploads.ts";
 import { retryDisconnects } from "./members.ts";
 import { sweepModelUsage } from "./model-usage.ts";
 import { rescanPackages } from "./packages/rescan.ts";
@@ -87,6 +88,10 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "minute",
     run: retryAccessRevocations,
   },
+  // Uploads into Knowledge left unended, and the originals due for
+  // deleting, a failure's before uploads stopped among them
+  // (src/knowledge/uploads.ts). Nothing uploads into Knowledge.
+  { name: "knowledge.uploads", period: "minute", run: sweepLeftUploads },
   // Today's Brain's exports written before nothing could export any more:
   // their files deleted once due, or at once once a purge ran after them
   // (src/knowledge/export-expiry.ts). No export is written.
