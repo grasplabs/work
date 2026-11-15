@@ -8841,6 +8841,10 @@ msgstr "Nobody asked him anything yet."
 msgid "Nobody by that name"
 msgstr "Nobody by that name"
 
+#: src/brain/sources-page.tsx
+msgid "Nobody can find or read it from then on, you included, and it can't be brought back. The Brain keeps its history until an admin erases it."
+msgstr "Nobody can find or read it from then on, you included, and it can't be brought back. The Brain keeps its history until an admin erases it."
+
 #: src/agents/own-agents-admin.tsx
 msgid "Nobody can make one, and those people have don't answer until you turn this back on."
 msgstr "Nobody can make one, and those people have don't answer until you turn this back on."
@@ -9546,10 +9550,6 @@ msgstr "Only accounts of the tenant {tenantId}."
 #: src/settings/use-team-change.ts
 msgid "Only admins can change teams."
 msgstr "Only admins can change teams."
-
-#: src/brain/sources-page.tsx
-msgid "Only an admin can remove an upload shared with a team or everyone. Ask an admin to remove it."
-msgstr "Only an admin can remove an upload shared with a team or everyone. Ask an admin to remove it."
 
 #: src/apps/app-settings.tsx
 msgid "Only an admin resets an App’s data: every record goes for good, and its current version runs again with no records."
@@ -11048,6 +11048,10 @@ msgstr "Removed a webhook from an App"
 #: src/workflows/item-test.tsx
 msgid "Removed after a week"
 msgstr "Removed after a week"
+
+#: src/brain/sources-page.tsx
+msgid "Removed by its uploader, {removed}"
+msgstr "Removed by its uploader, {removed}"
 
 #: src/brain/brain.ts
 #: src/brain/forget.tsx
@@ -14965,8 +14969,8 @@ msgid "Uploading…"
 msgstr "Uploading…"
 
 #: src/brain/sources-page.tsx
-msgid "Uploads shared with a team or everyone. Only an admin can erase one, for everyone and for good. Its text isn't shown here."
-msgstr "Uploads shared with a team or everyone. Only an admin can erase one, for everyone and for good. Its text isn't shown here."
+msgid "Uploads shared with a team or everyone, those their uploader removed among them. Only an admin can erase one, for everyone and for good. Its text isn't shown here."
+msgstr "Uploads shared with a team or everyone, those their uploader removed among them. Only an admin can erase one, for everyone and for good. Its text isn't shown here."
 
 #: src/settings/event-sources.tsx
 msgid "URL of {name}"

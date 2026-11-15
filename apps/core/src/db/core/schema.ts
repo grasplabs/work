@@ -6435,12 +6435,33 @@ export const brainUploads = sqliteTable(
     version: integer().notNull().default(0),
     createdAt: timestamp("created_at").notNull(),
     updatedAt: timestamp("updated_at").notNull(),
+    /**
+     * When its uploader removed it, a shared one (only they remove):
+     * out of use in the Brain for good, its history kept, until an admin
+     * erases it (brain-uploads.ts). Null while it is in use. Written first,
+     * before the Brain is asked, with `removalOwed`.
+     */
+    removedAt: timestamp("removed_at"),
+    /**
+     * Whether the removal is still owed: the Brain's removal not yet known
+     * to have returned, or its event not yet stored. The clock completes it
+     * (`completeOwedRemovals`).
+     */
+    removalOwed: integer("removal_owed", { mode: "boolean" })
+      .notNull()
+      .default(false),
   },
   (table) => [
     check(
       "brain_uploads_team_named",
       sql`${table.readers} <> 'team' OR ${table.teamId} IS NOT NULL`
     ),
+    // The removals still owed, oldest first, for the clock to complete
+    // (brain-uploads.ts `completeOwedRemovals`): never the whole table. Its
+    // condition a literal, as the query writes it, so SQLite uses it.
+    index("brain_uploads_removal_owed_idx")
+      .on(table.removedAt)
+      .where(sql.raw("removal_owed = 1")),
   ]
 );
 

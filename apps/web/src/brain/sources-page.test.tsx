@@ -159,8 +159,12 @@ interface Faked {
   refusal?: string;
   /** Shows the page as an admin's. */
   admin?: boolean;
-  /** Answers that the person may not delete the handbook (a reader who isn't an admin). */
-  handbookNotDeletable?: boolean;
+  /**
+   * What the person's Delete of the handbook does, as core says: `erase`
+   * by default; `remove` for its uploader, it being shared; null for a
+   * reader who may not delete it, who may add no version either.
+   */
+  handbookDeletes?: "erase" | "remove" | null;
   /** Holds each search until it settles. */
   searched?: Promise<boolean>;
   /** Holds each read of a source's first version until it settles. */
@@ -200,7 +204,7 @@ const shown = async (
     versioning,
     deleting,
     admin = false,
-    handbookNotDeletable = false,
+    handbookDeletes = "erase",
     deleteAnswerLost = false,
     firstVersionRefused,
   }: Faked = {}
@@ -314,8 +318,8 @@ const shown = async (
         ? {
             source: handbook,
             readers: { kind: "team" as const, teamId: "t-1" },
-            mayAddVersion: !handbookNotDeletable,
-            mayDelete: !handbookNotDeletable,
+            mayAddVersion: handbookDeletes !== null,
+            deletes: handbookDeletes,
           }
         : null;
     },
@@ -333,6 +337,7 @@ const shown = async (
           teamName: "Payroll",
           uploaderName: "Ada",
           uploadedAt: "2026-11-10T09:00:00.000Z",
+          removedAt: null,
         },
         {
           source: unnamed,
@@ -341,6 +346,8 @@ const shown = async (
           teamName: null,
           uploaderName: "Grace",
           uploadedAt: "2026-11-09T09:00:00.000Z",
+          // Removed by its uploader: no name, and still listed to erase.
+          removedAt: "2026-11-11T09:00:00.000Z",
         },
       ];
       return {
@@ -1011,21 +1018,46 @@ describe(SourcesPage, () => {
     });
   });
 
-  it("tells a reader who isn't an admin that only an admin removes a shared upload, with no Delete to press", async () => {
-    await shown([], { handbookNotDeletable: true });
+  it("offers a shared upload's uploader a Delete that removes it for everyone, them included, saying so", async () => {
+    const { calls } = await shown([], { handbookDeletes: "remove" });
     await press("Handbook");
     await settle();
-    const opened = panel();
+    await press("Delete");
+    const told = document.body.textContent.includes(
+      "Nobody can find or read it from then on, you included, and it can't be brought back. The Brain keeps its history until an admin erases it."
+    );
+    // The dialog's own button, after the panel's of the same word.
+    const confirm = [...document.querySelectorAll("button")].findLast(
+      (button) => button.textContent.trim() === "Delete"
+    );
+    await act(async () => {
+      confirm?.click();
+      await Promise.resolve();
+    });
+    await settle();
 
     expect({
-      told: opened.includes(
-        "Only an admin can remove an upload shared with a team or everyone. Ask an admin to remove it."
-      ),
+      told,
+      calls: calls.filter((call) => call.startsWith("delete")),
+      closed: panel(),
+    }).toStrictEqual({
+      told: true,
+      calls: ["deleteUpload u-1"],
+      closed: "",
+    });
+  });
+
+  it("offers a reader who may not delete a shared upload no Delete, and no admin's listing", async () => {
+    await shown([], { handbookDeletes: null });
+    await press("Handbook");
+    await settle();
+
+    expect({
       deleteOffered: [...document.querySelectorAll("button")].some(
         (button) => button.textContent.trim() === "Delete"
       ),
       sharedListed: document.body.textContent.includes("Shared uploads"),
-    }).toStrictEqual({ told: true, deleteOffered: false, sharedListed: false });
+    }).toStrictEqual({ deleteOffered: false, sharedListed: false });
   });
 
   it("lists shared uploads for an admin, by name only if they may read it, team and uploader, and erases one for good", async () => {
@@ -1058,7 +1090,10 @@ describe(SourcesPage, () => {
         "An upload",
         "A deleted team",
         "Uploaded by Grace",
+        "Removed by its uploader",
       ].map((text) => sharedText.includes(text)),
+      // The one in use isn't marked removed.
+      removedMarks: sharedText.split("Removed by its uploader").length - 1,
       labels,
       after: ["Payroll.vtt", "An upload"].map((text) =>
         section("Shared uploads").includes(text)
@@ -1067,7 +1102,8 @@ describe(SourcesPage, () => {
         (call) => call.startsWith("sharedUploads") || call.startsWith("delete")
       ),
     }).toStrictEqual({
-      listed: [true, true, true, true, true, true],
+      listed: [true, true, true, true, true, true, true],
+      removedMarks: 1,
       labels: ["Erase Payroll.vtt for good", "Erase this upload for good"],
       after: [false, true],
       calls: ["sharedUploads", "deleteUpload u-3", "sharedUploads"],

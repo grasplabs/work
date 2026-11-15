@@ -123,6 +123,27 @@ export const currentVersions = sqliteTable("current_versions", {
 });
 
 /**
+ * A source taken out of use for good, its history kept (removal.ts): its
+ * key, as the erasure ledger names it too, and the version that was
+ * current then, if any. It has no current version, so nothing reads it,
+ * and an add to its key is refused while this row is there. An erasure
+ * that hides that version clears `version_row`, and one of the key
+ * deletes the row (erasure.ts).
+ */
+export const removedSources = sqliteTable(
+  "removed_sources",
+  {
+    source: text().primaryKey(),
+    /** The SHA-256 of the source's key, in hex. */
+    subject: text().notNull(),
+    versionRow: integer("version_row")
+      .unique()
+      .references(() => sourceVersions.row),
+  },
+  (table) => [index("removed_sources_subject_idx").on(table.subject)]
+);
+
+/**
  * The changes each source was added with: a key its producer gives each
  * change (an upstream revision, a message id, an id minted before the
  * first try), and the version the add answered with. The same key again
@@ -834,9 +855,11 @@ export const entities = sqliteTable(
  * A memory (contract.ts `Memory`). Its lineage is the source it rests on
  * (`source:` and the source's key) or its writer (`writer:` and their
  * id); `lineage_order` orders a lineage's memories, the version number
- * for a source's, 0 for a writer's, then `row`. `value_key` is what
- * one-value attributes compare: the value folded, or the related entity's
- * id.
+ * for a source's, 0 for a writer's, then `row`. `value_key` is what a
+ * newer memory of its lineage must match to end it (remember.ts
+ * `valueKeyFor`): for an attribute, the value folded or the related
+ * entity's id; filed under none, a SHA-256 of the statement folded, its
+ * type, speaker and value, and the related entity's id.
  */
 export const memories = sqliteTable(
   "memories",

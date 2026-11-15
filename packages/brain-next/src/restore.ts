@@ -20,9 +20,15 @@ import {
 import type { RestoreStatus } from "./contract.ts";
 import { enqueueEmbedding } from "./embedding.ts";
 import { keepNames } from "./entities.ts";
-import { keepSubject, subjectOf, writerSubjectOf } from "./erasure.ts";
+import {
+  isErased,
+  keepSubject,
+  subjectOf,
+  writerSubjectOf,
+} from "./erasure.ts";
 import {
   changeLineSchema,
+  removalLineSchema,
   confirmationLineSchema,
   dropPartsBeyond,
   exportKeyOf,
@@ -49,6 +55,7 @@ import type {
   Manifest,
   MemoriesLine,
   MemoryLine,
+  RemovalLine,
 } from "./exports.ts";
 import {
   fileKeyOf,
@@ -64,7 +71,7 @@ import {
   writerErasedAfterSql,
 } from "./memories.ts";
 import { readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
-import { planOf, valueKeyFor } from "./remember.ts";
+import { planOf, restatementOf, valueKeyFor } from "./remember.ts";
 import { memoriesWrittenSinceSql, restoreFailedSql } from "./restoring.ts";
 import { indexMemoryWords, indexWords } from "./words.ts";
 import type { WordMemo } from "./words.ts";
@@ -126,16 +133,18 @@ import type { WorkContext } from "./work.ts";
 // store shows less, never more. A restored source whose current version the
 // ledger left out keeps its history, which no one can read without a
 // current version (sources.ts `readVersion`); the overview counts such
-// sources (`sourcesWithoutCurrent`).
+// sources (`sourcesWithoutCurrent`). A source the export holds removed
+// comes back removed, as it was (removal.ts).
 
 /** What a restore refuses to start, and why: each a refusal (contract.ts `refusalPrefix`). */
 const refusals = {
   notEmpty: `${refusalPrefix} a restore goes only into a store that holds nothing`,
   running: `${refusalPrefix} a restore is under way`,
   notFound: `${refusalPrefix} no whole company export of this deployment has that id`,
-  // An export an older release made holds no memories: restored, it would
-  // read as whole without them (exports.ts `exportFormat`).
-  olderFormat: `${refusalPrefix} that export was made by an older release and holds no memories, so it can't be restored: make a new export`,
+  // An export an older release made lacks what this one keeps (memories,
+  // removals): restored, it would read as whole without them (exports.ts
+  // `exportFormat`).
+  olderFormat: `${refusalPrefix} that export was made by an older release, which this one can't restore: make a new export`,
   // One a newer release made may hold what this one doesn't know.
   newerFormat: `${refusalPrefix} that export was made by a newer release, which this one can't restore`,
   // An abandoned restore's export id is refused for good: the store it
@@ -403,6 +412,10 @@ const partLineSchema = z.union([
     { message: "Not an extraction mark to restore" }
   ),
   changeLineSchema,
+  removalLineSchema.refine(
+    ({ source }) => sourceIdSchema.safeParse(source).success,
+    { message: "Not a removal to restore" }
+  ),
 ]);
 type PartLine = z.infer<typeof partLineSchema>;
 
@@ -586,6 +599,17 @@ const restoreVersion = async (
     if (pointed && chunks.length > 0) {
       enqueueEmbedding(storage, line.source, line.version);
     }
+    // The version that was current when its source was removed: the
+    // source comes back removed, its key closed (removal.ts).
+    if (line.removed) {
+      sql.exec(
+        `INSERT INTO removed_sources (source, subject, version_row) VALUES (?, ?, ?)
+        ON CONFLICT (source) DO NOTHING`,
+        line.source,
+        subject,
+        row
+      );
+    }
     return true;
   });
 };
@@ -709,6 +733,7 @@ const restoreMemory = async (
   const subject = line.source === null ? null : await subjectOf(line.source);
   const writerSubject =
     line.writer === null ? null : await writerSubjectOf(line.writer);
+  const restatement = await restatementOf(line);
   storage.transactionSync(() => {
     const { sql } = storage;
     if (passesOverMemory(sql, line, subject, writerSubject)) {
@@ -740,7 +765,7 @@ const restoreMemory = async (
         line.attribute,
         line.object === null ? null : (rows.get(line.object) ?? null),
         line.value,
-        valueKeyFor(rule, line.value, line.object),
+        valueKeyFor(rule, { ...line, restatement }),
         rule?.values === "one" ? 1 : 0,
         line.type,
         line.statement,
@@ -890,6 +915,31 @@ const restoreChange = (
 };
 
 /**
+ * Closes again a key removed before any version was added under it
+ * (removal.ts): its mark, with no version, unless the ledger erased the
+ * key since (the erasure closes it, and no plain key outlives it) or it is
+ * marked already.
+ */
+const restoreRemoval = async (
+  storage: DurableObjectStorage,
+  line: RemovalLine
+): Promise<void> => {
+  const subject = await subjectOf(line.source);
+  storage.transactionSync(() => {
+    const { sql } = storage;
+    if (isErased(sql, subject)) {
+      return;
+    }
+    sql.exec(
+      `INSERT INTO removed_sources (source, subject, version_row) VALUES (?, ?, NULL)
+      ON CONFLICT (source) DO NOTHING`,
+      line.source,
+      subject
+    );
+  });
+};
+
+/**
  * Writes `line`, one of the memories' steps (exports.ts), back as it was,
  * unless it is passed over (above). A change key goes in as kept, once.
  */
@@ -904,6 +954,8 @@ const restoreMemoriesLine = async (
     restoreConfirmation(storage, line);
   } else if (line.kind === "extraction") {
     await restoreExtraction(storage, db, line);
+  } else if (line.kind === "removal") {
+    await restoreRemoval(storage, line);
   } else {
     restoreChange(storage, line);
   }
@@ -955,6 +1007,10 @@ const settleNow = (
 const heldBy = async (line: PartLine): Promise<Held | undefined> => {
   if (isVersionLine(line) || line.kind === "extraction") {
     return [await subjectOf(line.source), line.version];
+  }
+  // A key held with no version: version 0, as the export recorded it.
+  if (line.kind === "removal") {
+    return [await subjectOf(line.source), 0];
   }
   if (line.kind !== "memory") {
     return undefined;
