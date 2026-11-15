@@ -12,17 +12,8 @@ import {
 } from "../src/knowledge/grasp-skills.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
 import { shippedSkills } from "../src/shipped-skills.ts";
-import { requestGranted } from "./apps.ts";
-import { actingFor, envOf, knowledgeIn, newChat } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
-import { readCollection } from "./knowledge.ts";
-import {
-  auditedDuring,
-  outcome,
-  refusal,
-  signedInApi,
-  unique,
-} from "./sign-in.ts";
+import { auditedDuring, outcome, refusal, signedInApi } from "./sign-in.ts";
 
 // Skills in Knowledge: the Grasp skills, as releases synced them into
 // their collection before Grasp's skills moved to the Brain, and the
@@ -289,83 +280,5 @@ describe("copying a Grasp skill", setUpTime, () => {
       "knowledge.not_found",
       "knowledge.invalid",
     ]);
-  });
-});
-
-describe("the skill catalog", setUpTime, () => {
-  it("lists both collections, the Grasp skills and the client's, and the skills in each", async () => {
-    const admin = await personOf("admin");
-    const user = await personOf("user");
-    const document = await graspDocument(admin, "write-board-page/SKILL.md");
-    const both = {
-      grasp: graspSkillsCollectionId,
-      client: clientSkillsCollectionId,
-    };
-    await expect(admin.api.knowledge.skillCollections()).resolves.toStrictEqual(
-      both
-    );
-    const copy = await admin.api.knowledge.copySkill({
-      documentId: document.id,
-    });
-
-    await expect(user.api.knowledge.skillCollections()).resolves.toStrictEqual(
-      both
-    );
-    const catalog = await user.api.knowledge.catalog();
-    const ids = new Set<string>([
-      graspSkillsCollectionId,
-      clientSkillsCollectionId,
-    ]);
-    expect(
-      catalog.collections
-        .filter(({ id }) => ids.has(id))
-        .map(({ name }) => name)
-    ).toStrictEqual(["Grasp skills", "Our skills"]);
-    const listed = catalog.skills.map(({ documentId }) => documentId);
-    const graspListed = await graspDocuments(user);
-    expect(listed).toStrictEqual(
-      expect.arrayContaining([...graspListed.map(({ id }) => id), copy.id])
-    );
-  });
-
-  it("lists neither collection to an agent until it is granted each, like any collection", async () => {
-    const admin = await personOf("admin");
-    const agent = { type: "agent" as const, agentId: `agent-${unique()}` };
-    await graspSkillsInKnowledge();
-    await admin.api.knowledge.skillCollections();
-    const name = `ours-${unique()}`;
-    const ours = await admin.api.knowledge.saveDocument({
-      collectionId: clientSkillsCollectionId,
-      path: `${name}/SKILL.md`,
-      text: `---\nname: ${name}\ndescription: How we do it here.\n---\n# Ours`,
-      ifVersion: 0,
-    });
-    const grasp = await graspDocuments(admin);
-    const graspIds = grasp.map(({ id }) => id);
-    // The agent's Knowledge tools, which it has only once it may read a
-    // collection.
-    const toolsNow = async () =>
-      knowledgeIn(
-        await envOf(actingFor(agent, admin.userId), await newChat(agent))
-      );
-    const ungranted = await toolsNow();
-
-    await requestGranted(
-      idp,
-      admin,
-      readCollection(agent, graspSkillsCollectionId, "GRASP_SKILLS")
-    );
-    await requestGranted(
-      idp,
-      admin,
-      readCollection(agent, clientSkillsCollectionId, "SKILLS")
-    );
-
-    const granted = await toolsNow();
-    const catalog = await granted?.catalog();
-    expect(ungranted).toBeUndefined();
-    expect(catalog?.skills.map(({ documentId }) => documentId)).toStrictEqual(
-      expect.arrayContaining([...graspIds, ours.id])
-    );
   });
 });

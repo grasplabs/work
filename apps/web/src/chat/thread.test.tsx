@@ -181,7 +181,6 @@ describe(ChatThread, () => {
         id: 2,
         role: "assistant",
         text: "",
-        citations: [],
         code: [],
         tools: [
           {
@@ -227,7 +226,6 @@ describe(ChatThread, () => {
         id: 2,
         role: "assistant",
         text: "",
-        citations: [],
         code: [],
         tools: [
           {
@@ -270,7 +268,6 @@ describe(ChatThread, () => {
         id: 2,
         role: "assistant",
         text: "",
-        citations: [],
         code: [],
         tools: [
           {
@@ -325,7 +322,6 @@ describe(ChatThread, () => {
         id: 2,
         role: "assistant",
         text: "",
-        citations: [],
         code: [],
         tools: [
           {
@@ -399,7 +395,6 @@ describe(ChatThread, () => {
         id: 2,
         role: "assistant",
         text: "The desk is written.",
-        citations: [],
         code: [],
         tools: [],
         end: "done",
@@ -428,7 +423,6 @@ describe(ChatThread, () => {
         id: 2,
         role: "assistant",
         text: "Four.",
-        citations: [],
         code: [],
         tools: [],
         reasoning: { text: "Add two to two.", ms: 3400 },
@@ -457,7 +451,6 @@ describe(ChatThread, () => {
           id: 2,
           role: "assistant",
           text: "",
-          citations: [],
           code: [{ callId: "step", code: "await env.dashboard.makeWidget()" }],
           tools: [],
           end: "done",
@@ -505,7 +498,6 @@ describe(ChatThread, () => {
         id: 2,
         role: "assistant",
         text: "",
-        citations: [],
         code: [],
         tools: [
           {
@@ -578,7 +570,6 @@ describe(ChatThread, () => {
         id: 2,
         role: "assistant",
         text: "",
-        citations: [],
         code: [
           {
             callId: "call",
@@ -637,7 +628,6 @@ describe(ChatThread, () => {
         id: 2,
         role: "assistant",
         text: "Four, as **two** and two.",
-        citations: [],
         code: [],
         tools: [],
         end: "done",
@@ -676,7 +666,6 @@ describe(ChatThread, () => {
         id: 3,
         role: "assistant",
         text: "The weekly report takes most.",
-        citations: [],
         code: [],
         tools: [],
         end: "done",
@@ -728,7 +717,6 @@ const answerBy = (id: number, text: string, agentId?: string): ChatMessage => ({
   role: "assistant",
   ...(agentId === undefined ? {} : { agentId }),
   text,
-  citations: [],
   code: [],
   tools: [],
   end: "done",

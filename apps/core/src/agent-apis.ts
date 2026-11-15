@@ -9,7 +9,6 @@ import { buildApi } from "./agent-builds.ts";
 import { connectionsApi } from "./agent-connections.ts";
 import { dashboardApi } from "./agent-dashboard.ts";
 import { documentsOf, readAgentDocument } from "./agent-documents.ts";
-import { knowledgeApi } from "./agent-knowledge.ts";
 import { auditRefusal, auditToolCall, requireOpenRun } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { sharedSkillsApi, skillsApi } from "./agent-skills.ts";
@@ -273,7 +272,6 @@ const apiNameSchema = z
 /** The APIs a chat's code gets. */
 export const agentApis: readonly AgentApi[] = [
   chatApi,
-  knowledgeApi,
   connectionsApi,
   appsApi,
   buildApi,
@@ -288,14 +286,14 @@ export const agentApis: readonly AgentApi[] = [
 }));
 
 /**
- * What a chat others share gets of the agent's APIs: its chat, Knowledge,
- * read for everyone in it, and Grasp's and the company's skills, which
+ * What a chat others share gets of the agent's APIs: its chat, and
+ * Grasp's and the company's skills, which
  * every member may read, never its person's own. No connections, so nothing is read
  * from or written to anyone's own accounts, and nothing is held for a
  * person to confirm; no Apps, builds or workflows, which act
  * as the one person who asked; no brain, which reads as that person.
  */
-const sharedApiNames: ReadonlySet<string> = new Set(["chat", "knowledge"]);
+const sharedApiNames: ReadonlySet<string> = new Set(["chat"]);
 const sharedApis = [
   ...agentApis.filter(({ name }) => sharedApiNames.has(name)),
   sharedSkillsApi,
@@ -308,7 +306,7 @@ const withoutBrain = agentApis.filter(({ name }) => name !== "brain");
  * The APIs a chat's turn gets: a shared chat's (`sharedApis`), or all of
  * the agent's, but `env.brain` (and its `searchBrain` tool, agent-tools.ts)
  * only while its agent holds the brain permission, read before the turn:
- * the Brain refuses every read without it (knowledge/recall-grants.ts), so
+ * the Brain refuses every read without it (`hasBrainGrant`), so
  * the model is never offered a tool that would be refused.
  */
 export const apisFor = (

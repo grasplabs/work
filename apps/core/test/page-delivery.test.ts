@@ -1142,14 +1142,10 @@ describe("page delivery", { timeout: 60_000 }, () => {
     const builder = await personApi("builder");
     const app = await sampleApp(builder);
     const { generation: shown } = await admin.api.dataPolicy.read(app);
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
-      name: `Ledger ${crypto.randomUUID()}`,
-      access: "everyone",
-    });
     const { id: permission } = await builder.api.permissions.request({
       subject: { type: "app", appId: app },
-      object: { type: "collection", collectionId },
-      actions: ["read"],
+      object: { type: "platform" },
+      actions: ["statistics"],
       binding: "LEDGER",
     });
     await admin.api.permissions.grant(permission, { version: 1 });
@@ -1185,14 +1181,10 @@ describe("page delivery", { timeout: 60_000 }, () => {
     const builder = await personApi("builder");
     const user = await personApi("user");
     const app = await sampleApp(builder);
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
-      name: `Ledger ${crypto.randomUUID()}`,
-      access: "everyone",
-    });
     const request = {
       subject: { type: "app" as const, appId: app },
-      object: { type: "collection" as const, collectionId },
-      actions: ["read"],
+      object: { type: "platform" as const },
+      actions: ["statistics"],
       binding: "LEDGER",
     };
     await classifyAs(admin, app, "ordinary");
@@ -1280,17 +1272,13 @@ describe("page delivery", { timeout: 60_000 }, () => {
         await classifyAs(admin, app, "ordinary");
       })
     );
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
-      name: `Ledger ${crypto.randomUUID()}`,
-      access: "everyone",
-    });
 
     let permission = "";
     const events = await auditedDuring(async () => {
       ({ id: permission } = await builder.api.permissions.request({
         subject: { type: "app", appId: granted },
-        object: { type: "collection", collectionId },
-        actions: ["read"],
+        object: { type: "platform" },
+        actions: ["statistics"],
         binding: "LEDGER",
       }));
       await admin.api.permissions.grant(permission, { version: 1 });

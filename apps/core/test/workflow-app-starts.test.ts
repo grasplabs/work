@@ -48,7 +48,7 @@ import type { OpenStore } from "../src/data-stores.ts";
 import { appHost, workspace } from "../src/durable-objects.ts";
 import { hostFunctionCall } from "../src/function-host.ts";
 import type { HostedApp, Runner } from "../src/function-host.ts";
-import { createCollection } from "../src/knowledge/collection-rules.ts";
+import { brainGrantRead } from "../src/history-access.ts";
 import { defaultMaxAttempts } from "../src/outbox-delivery.ts";
 import type { OutboxConsumer } from "../src/outbox-delivery.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
@@ -1353,23 +1353,19 @@ const agentOf = async (
 };
 
 /**
- * A real chat of Bob's whose code read an everyone handbook, and its
- * agent, granted `write` on the fixture's App and `read` on the handbook
- * (`readId`).
+ * A real chat of Bob's whose code read the Brain, and its agent, granted
+ * `write` on the fixture's App and the Brain (`readId`), which the read
+ * rests on.
  */
 const chatThatRead = async (fx: Fixture) => {
   const { agent } = await agentOf(fx);
   const stub = workspace(env, agent.workspaceId);
   const created = { id: agent.chatId };
-  const handbook = await createCollection(env, fx.admin, {
-    name: `Handbook ${unique()}`,
-    access: "everyone",
-  });
   await runInDurableObject(stub, (_object, state) => {
     state.storage.sql.exec(
       "INSERT INTO chat_run_sources (chat_id, run_id, source_id, withheld_at) VALUES (?, 'run-1', ?, NULL)",
       created.id,
-      handbook.id
+      brainGrantRead
     );
   });
   const asked = await requestPermission(
@@ -1377,9 +1373,9 @@ const chatThatRead = async (fx: Fixture) => {
     fx.ada,
     {
       subject: { type: "agent", agentId: agent.agentId },
-      object: { type: "collection", collectionId: handbook.id },
-      actions: ["read"],
-      binding: "HANDBOOK",
+      object: { type: "platform" },
+      actions: ["brain"],
+      binding: "BRAIN",
     },
     rolesOf(fx.ada)
   );
@@ -1387,7 +1383,7 @@ const chatThatRead = async (fx: Fixture) => {
   return {
     agent,
     stub,
-    chat: { id: created.id, read: handbook.id },
+    chat: { id: created.id, read: brainGrantRead },
     readId: asked.id,
   };
 };
@@ -1558,8 +1554,8 @@ describe("what a start rechecks, and records", () => {
     const kept = await ranFor();
     await revokePermission(env, fx.admin, readId);
     const revoked = await ranFor();
-    // A concurrent turn of the chat sees the revoke and withholds the
-    // handbook, after the agent's call already took what it read.
+    // A concurrent turn of the chat sees the revoke and withholds what it
+    // read under the grant, after the agent's call already took it.
     await runInDurableObject(stub, (_object, state) => {
       state.storage.sql.exec(
         "UPDATE chat_run_sources SET withheld_at = ? WHERE chat_id = ?",

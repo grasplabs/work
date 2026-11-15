@@ -1272,7 +1272,6 @@ describe(AppWorkspace, () => {
             id: 2,
             role: "assistant",
             text: "",
-            citations: [],
             code: [],
             tools: [],
             planned: {
@@ -2285,7 +2284,6 @@ describe(AppWorkspace, () => {
                 id: 2,
                 role: "assistant",
                 text: "Invoices is set up.",
-                citations: [],
                 code: [],
                 tools: [],
                 end: "done",

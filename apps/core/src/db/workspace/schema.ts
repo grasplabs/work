@@ -184,13 +184,9 @@ export const chatSources = sqliteTable(
 
 /**
  * The Knowledge documents a chat's code was given, each once, with the
- * chat's last message when it first was (`givenAfter`, 0 before any): a
- * search's hits, a read's document, and what a follow resolved to a
- * document. What its answers may cite (`ChatCitation`): an answer stored
- * after that message. By message, not by clock, so an answer and a read
- * in the same millisecond keep their order. Written only for a code run
- * that is still open, with its sources (`recordSources` in workspace.ts);
- * at most `chatDocumentsMax` a chat, the oldest dropped.
+ * chat's last message when it first was (`givenAfter`). Nothing writes or
+ * reads it since a chat's code no longer reaches Knowledge (GRA-1735): a
+ * chat's rows go with it, and a later release drops the table.
  */
 export const chatDocuments = sqliteTable(
   "chat_documents",

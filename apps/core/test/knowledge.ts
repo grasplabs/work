@@ -1,12 +1,10 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { CollectionInput, KnowledgeApi } from "@grasp-os/shared/knowledge";
-import type {
-  PermissionRequest,
-  PermissionSubjectInput,
-} from "@grasp-os/shared/permissions";
+import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
 
+import type { Reader } from "../src/knowledge/access.ts";
 import { callAuth, unique } from "./sign-in.ts";
 
 const insertsVersion = /^insert into "versions"/iu;
@@ -112,18 +110,6 @@ export const collectionWithNote = async (
   return { collectionId: collection.id, noteId: note.id };
 };
 
-/** A permission to read a collection, under `binding`. */
-export const readCollection = (
-  subject: PermissionSubjectInput,
-  collectionId: string,
-  binding = "HANDBOOK"
-): PermissionRequest => ({
-  subject,
-  object: { type: "collection", collectionId },
-  actions: ["read"],
-  binding,
-});
-
 /**
  * A permission stored as it is, past the checks a request and a grant
  * make, as a bug or an old record could leave one: active by default, for
@@ -132,7 +118,7 @@ export const readCollection = (
  */
 export const storedGrant = async (
   subject: { type: "app" | "agent"; id: string },
-  object: { type: "collection" | "connection"; id: string },
+  object: { type: "collection" | "connection" | "platform"; id: string },
   actions: string[],
   binding: string,
   status: "active" | "requested" = "active"
@@ -232,3 +218,8 @@ export const storeTextUnderneath = async (
     ).bind(key, documentId),
   ];
 };
+
+/** `person`'s reader of Knowledge, as their own session's calls read it. */
+export const asPerson = async (person: {
+  api: { whoami: () => Promise<Identity> };
+}): Promise<Reader> => ({ type: "person", person: await person.api.whoami() });
