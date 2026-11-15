@@ -47,7 +47,6 @@ const firstUpdate: ChatUpdate = {
       id: 2,
       role: "assistant",
       text: answer,
-      citations: [],
       code: [],
       tools: [],
       end: "done",

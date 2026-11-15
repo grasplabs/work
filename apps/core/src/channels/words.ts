@@ -181,14 +181,6 @@ const lines = {
 
   // An answer.
 
-  /** The heading over an answer's numbered sources. */
-  sources: {
-    en: "Sources",
-    nl: "Bronnen",
-    de: "Quellen",
-    fr: "Sources",
-    es: "Fuentes",
-  },
   /** An answer cut to fit the platform. */
   answerTooLong: {
     en: "This answer is too long for this chat. Open it in Grasp to read all of it.",

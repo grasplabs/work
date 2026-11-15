@@ -750,7 +750,7 @@ export const appErrors = defineErrorFamily({
     "The App can only be made for a member or a team of the organization.",
   "app.integrations_full": "The App has as many integrations added as it may.",
   "app.share_unreadable":
-    "This App has read data they can't read where it comes from, such as someone else's mailbox or a collection they can't read, so it can't be shared with them.",
+    "This App has read data they can't read where it comes from, such as someone else's mailbox, so it can't be shared with them.",
   "app.unreadable":
     "This App has read data you can't read where it comes from, so it isn't open to you. Ask whoever shared it.",
   "app.blueprint_not_found": "There's no such blueprint.",

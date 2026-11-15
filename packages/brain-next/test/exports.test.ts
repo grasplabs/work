@@ -2103,6 +2103,7 @@ describe("exports and restores", () => {
           memory: churned.memories[0] ?? "",
           reader,
           writer: person,
+          change: "retire",
         })
       ).resolves.not.toBeNull();
       // Another team's customer, hidden from the first.
@@ -2331,6 +2332,7 @@ describe("exports and restores", () => {
               memory: made.memories[0] ?? "",
               reader,
               writer: person,
+              change: "retire",
             })
           )
         ).rejects.toThrow("restoring an export");

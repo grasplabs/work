@@ -2442,6 +2442,57 @@ export const coreProbes = {
       ),
     ];
   },
+  // No reader: core names the writer (an App's own id). What it answers is
+  // a time and a count; nothing of what was erased.
+  eraseWriter: async ({ markers }) => {
+    const writer = `app:${stranger()}`;
+    await store().addMemories({
+      change: crypto.randomUUID(),
+      access: strangers(),
+      entities: [{ key: "c", kind: "customer", names: [markedText(markers)] }],
+      memories: [
+        {
+          about: "c",
+          type: "fact",
+          statement: markedText(markers),
+          speaker: { kind: "system" },
+          basis: { kind: "writer", writer },
+        },
+      ],
+    });
+    const erase = async (name: string, erased: unknown) =>
+      await answer(
+        name,
+        async () => await coreBrain.eraseWriter(env, unchecked(erased))
+      );
+    return [
+      await erase("a writer with marked memories", {
+        writer,
+        reason: "deleted",
+        change: "reset",
+      }),
+      await erase("the same erasure again", {
+        writer,
+        reason: "deleted",
+        change: "reset",
+      }),
+      await erase("a change named by the markers", {
+        writer,
+        reason: "deleted",
+        change: markers.join(" "),
+      }),
+      await erase("a writer named by the markers, too long", {
+        writer: markers.join("").repeat(300),
+        reason: "deleted",
+        change: "reset",
+      }),
+      await erase("a reason named by the markers", {
+        writer,
+        reason: markers.join(" "),
+        change: "reset",
+      }),
+    ];
+  },
   // Queuing hand-overs has no reader: whatever it is handed, it answers
   // alike and says nothing of what it queues. What it puts on the queue
   // is worked by the next tick, which reads core's records for it.
@@ -5093,6 +5144,7 @@ const memoryProbes = {
             memory,
             reader: { ...probing.reader, person: writer },
             writer,
+            change: "retire",
           }),
         about
       );
@@ -5106,6 +5158,7 @@ const memoryProbes = {
             memory: fixture.seenMemory,
             reader: { person: null, groups: probing.reader.groups },
             writer: `app:${stranger()}`,
+            change: "retire",
           }),
         "hidden"
       ),
@@ -7553,6 +7606,68 @@ export const storeProbes = {
           },
           contextTokens: null,
         });
+      }),
+    ];
+  },
+  // No reader either: the host names the writer. Its answer is a time and
+  // a count, alike for a writer with marked memories and one with none.
+  eraseWriter: async ({ markers }) => {
+    const erase = async (name: string, request: unknown) =>
+      await answer(
+        name,
+        async () => await store().eraseWriter(unchecked(request))
+      );
+    const writer = `app:${stranger()}`;
+    await store().addMemories({
+      change: crypto.randomUUID(),
+      access: strangers(),
+      entities: [{ key: "c", kind: "customer", names: [markedText(markers)] }],
+      memories: [
+        {
+          about: "c",
+          type: "fact",
+          statement: markedText(markers),
+          speaker: { kind: "system" },
+          basis: { kind: "writer", writer },
+        },
+      ],
+    });
+    return [
+      await erase("a writer who wrote nothing", {
+        writer: `app:${stranger()}`,
+        reason: "deleted",
+        change: "reset",
+      }),
+      await erase("a writer with marked memories", {
+        writer,
+        reason: "deleted",
+        change: "reset",
+      }),
+      await erase("the same erasure again", {
+        writer,
+        reason: "deleted",
+        change: "reset",
+      }),
+      await erase("a change named by the markers", {
+        writer,
+        reason: "deleted",
+        change: markers.join(" "),
+      }),
+      await erase("a writer named by the markers, too long", {
+        writer: markers.join("").repeat(300),
+        reason: "deleted",
+        change: "reset",
+      }),
+      await erase("a reason named by the markers", {
+        writer,
+        reason: markers.join(" "),
+        change: "reset",
+      }),
+      await erase("an unknown field", {
+        writer,
+        reason: "deleted",
+        change: "reset",
+        extra: markers.join(" "),
       }),
     ];
   },

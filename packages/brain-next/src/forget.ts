@@ -1,5 +1,6 @@
 // What erasure deletes of memories (erasure.ts): the memories resting on
-// a version it deletes, or those only an erased person may read, each
+// a version it deletes, or drawn from a source it erases, or those a
+// writer's erasure hid (`deleteMemories`, a batch at a time), each
 // with its names and its confirmations; every confirmation made over one
 // of them, whole, so none shows to readers the erased memory once hid it
 // from; then each entity no memory mentions any more, so no name or
@@ -20,7 +21,10 @@ const setsOf = (sql: SqlStorage, keys: readonly string[]): number[] =>
         .map(({ id }) => id);
 
 /** `rows` of memories deleted whole: answers the sets of readers they named. */
-const deleteMemories = (sql: SqlStorage, rows: readonly number[]): number[] => {
+export const deleteMemories = (
+  sql: SqlStorage,
+  rows: readonly number[]
+): number[] => {
   if (rows.length === 0) {
     return [];
   }

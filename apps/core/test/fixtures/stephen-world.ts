@@ -298,54 +298,16 @@ export const budgetRows: string[][] = [
   ["Line 7", stephenForbidden[0], "48000"],
 ];
 
-/** Knowledge collections, by key, and who reads each. */
-export const stephenCollections: Record<
-  string,
-  { name: string; description: string; team?: StephenTeam }
-> = {
-  handbook: {
-    name: "Noordkade handbook",
-    description:
-      "How we work at Noordkade: complaints, leave, expenses, AI tools, who to ask.",
-  },
-  customerService: {
-    name: "Customer service",
-    description: "The customer service team's own notes.",
-    team: "customerService",
-  },
-  operations: {
-    name: "Operations",
-    description: "The operations team's own notes.",
-    team: "operations",
-  },
-  finance: {
-    name: "Finance",
-    description: "The finance team's own notes.",
-    team: "finance",
-  },
-  hr: {
-    name: "HR",
-    description: "Salaries and contracts.",
-    team: "hr",
-  },
-};
-
-/** The collections every persona's agent is granted: all but HR's. */
-export const grantedCollections = [
-  "handbook",
-  "customerService",
-  "operations",
-  "finance",
-];
-
-/** Noordkade's documents, by key. */
+/**
+ * Noordkade's documents, by key, each in the Brain for its readers: the
+ * handbook for everyone in the company, a team's notes for that team.
+ */
 export const stephenDocuments: Record<
   string,
-  { collection: string; path: string; text: string }
+  { reader: "company" | StephenTeam; text: string }
 > = {
   complaints: {
-    collection: "handbook",
-    path: "handbook/complaints.md",
+    reader: "company",
     text: `# Complaints
 
 ## How fast
@@ -356,8 +318,7 @@ Register a complaint in the CRM's complaint form, whichever channel it came in t
 `,
   },
   aiTools: {
-    collection: "handbook",
-    path: "handbook/ai-tools.md",
+    reader: "company",
     text: `# AI tools
 
 ## Which we may use
@@ -368,8 +329,7 @@ Copilot can't see the CRM, so every draft that mentions a client's file is check
 `,
   },
   leave: {
-    collection: "handbook",
-    path: "handbook/leave.md",
+    reader: "company",
     text: `# Leave
 
 ## Asking for leave
@@ -383,8 +343,7 @@ Operations reminds the team leads every week of leave still waiting for their ap
 `,
   },
   expenses: {
-    collection: "handbook",
-    path: "handbook/expenses.md",
+    reader: "company",
     text: `# Expenses
 
 ## Getting your money back
@@ -392,8 +351,7 @@ Mail the receipt to expenses@noordkade.example within a month, with what it was 
 `,
   },
   owners: {
-    collection: "handbook",
-    path: "handbook/who-to-ask.md",
+    reader: "company",
     text: `# Who to ask
 
 ## When the handbook doesn't say
@@ -405,8 +363,7 @@ Mail the receipt to expenses@noordkade.example within a month, with what it was 
 `,
   },
   csTools: {
-    collection: "customerService",
-    path: "customer-service/our-week.md",
+    reader: "customerService",
     text: `# Our week in customer service
 
 ## Applications
@@ -417,8 +374,7 @@ About 600 mails a week come into the shared inbox.
 `,
   },
   opsWeek: {
-    collection: "operations",
-    path: "server/our-week.md",
+    reader: "operations",
     text: `# Our week in operations
 
 ## Renewal letters
@@ -429,8 +385,7 @@ Yes: operations chases the team leads for leave every week.
 `,
   },
   financeWeek: {
-    collection: "finance",
-    path: "finance/our-week.md",
+    reader: "finance",
     text: `# Our week in finance
 
 ## Invoices
@@ -444,8 +399,7 @@ The weekly report's automation is still in testing; the COO decides when it goes
 `,
   },
   salaries: {
-    collection: "hr",
-    path: "hr/salaries.md",
+    reader: "hr",
     text: `# Salaries
 
 ## Customer service

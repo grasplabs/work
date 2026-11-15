@@ -1,8 +1,4 @@
-import {
-  collectionIdSchema,
-  chatIdSchema,
-  workflowResourceIdSchema,
-} from "@grasp-os/shared/ids";
+import { chatIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -10,6 +6,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import type { AgentScope } from "../src/agent-scope.ts";
 import { memberOf } from "../src/auth/identity.ts";
 import { confirmHeldStart, sweepHeldStartInputs } from "../src/held-starts.ts";
+import { brainGrantRead } from "../src/history-access.ts";
 import { shareWorkflowResource } from "../src/workflow-members.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { openTestRun, personalChatsOf } from "./agent-chat.ts";
@@ -595,26 +592,19 @@ describe("a chat's agent asking to start a workflow", setUpTime, () => {
     const chats = await personalChatsOf(person.userId);
     await grantStart(builder, chats.agent.agentId, workflow.id);
     const { chatId, inRun } = await chatOf(chats, person);
-    const { id: handbook } = await admin.api.knowledge.createCollection({
-      name: `Handbook ${unique()}`,
-      access: "everyone",
-      sensitive: false,
-    });
     const readId = await requestGranted(idp, builder, {
       subject: { type: "agent", agentId: chats.agent.agentId },
-      object: {
-        type: "collection",
-        collectionId: collectionIdSchema.parse(handbook),
-      },
-      actions: ["read"],
-      binding: `HANDBOOK_${unique().toUpperCase().replaceAll("-", "_")}`,
+      object: { type: "platform" },
+      actions: ["brain"],
+      binding: `BRAIN_${unique().toUpperCase().replaceAll("-", "_")}`,
     });
-    // What the chat had read before its agent asked.
+    // What the chat had read before its agent asked: the Brain, under that
+    // grant.
     await runInDurableObject(chats.stub, (_object, state) => {
       state.storage.sql.exec(
         "INSERT INTO chat_run_sources (chat_id, run_id, source_id, withheld_at) VALUES (?, 'run-1', ?, NULL)",
         chatId,
-        handbook
+        brainGrantRead
       );
     });
     /** A start the agent asks for under `key`, as its person confirms it. */
@@ -646,7 +636,7 @@ describe("a chat's agent asking to start a workflow", setUpTime, () => {
       // The agent's read of what its chat read revoked: its output, which
       // its input may have carried, never leaves it.
       revoked: { status: "failed", code: "brain.revoked" },
-      pinned: [{ source: handbook, chat: chatId }],
+      pinned: [{ source: brainGrantRead, chat: chatId }],
     });
   });
 

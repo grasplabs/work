@@ -1613,6 +1613,8 @@ const leavingNone = [
   "erasePerson",
   // One read of which keys and memories an erasure took.
   "erasedOf",
+  // The shared store's alone: a person's own store refuses it.
+  "eraseWriter",
   "erasureStatus",
   "exportFile",
   "exportStatus",
@@ -2634,7 +2636,12 @@ describe("what an erasure took for good, asked of a person's own store", () => {
       kind: "writer",
       writer: person,
     });
-    await own().retireMemory({ memory: retired, reader: me(), writer: person });
+    await own().retireMemory({
+      memory: retired,
+      reader: me(),
+      writer: person,
+      change: crypto.randomUUID(),
+    });
     await own().eraseSource({ source: erased.source, reason: "deleted" });
     await own().eraseSource({ source: group, reason: "deleted" });
     // What erasures hid, deleted.

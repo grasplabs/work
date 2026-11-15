@@ -24,7 +24,6 @@ import {
 } from "@grasp-os/shared/chat";
 import type {
   ChatChannel,
-  ChatCitedDocument,
   ChatFile,
   ChatFileType,
   ChatMake,
@@ -89,7 +88,6 @@ import {
   isNotNull,
   isNull,
   ne,
-  max,
   sql,
 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/durable-sqlite";
@@ -146,12 +144,7 @@ import type {
   TurnRequest,
   TurnStop,
 } from "./chat-harness.ts";
-import {
-  chatMessageOf,
-  noteLinksOf,
-  partialOf,
-  shownBuiltSchema,
-} from "./chat-messages.ts";
+import { chatMessageOf, partialOf, shownBuiltSchema } from "./chat-messages.ts";
 import type { ShownBuilt } from "./chat-messages.ts";
 import {
   saidOf,
@@ -213,11 +206,8 @@ import {
 } from "./history-access.ts";
 import { instructionFilesFor } from "./instruction-files.ts";
 import type { InstructionContext } from "./instruction-files.ts";
-import { readAsDelegate } from "./knowledge/binding.ts";
-import { cited } from "./knowledge/citations.ts";
-import { brainOf } from "./knowledge/ports.ts";
-import { hasBrainGrant } from "./knowledge/recall-grants.ts";
 import { inputTokens, modelSettings, models } from "./models.ts";
+import { hasBrainGrant } from "./permissions.ts";
 import type { WorkContext } from "./restricted.ts";
 
 export type Chat = typeof chats.$inferSelect;
@@ -246,8 +236,6 @@ interface LiveTurn {
    * and how each ended, never what they read. Only when its asker wants them.
    */
   calls?: ToolCall[];
-  /** The last response it kept: its answer, once it ends. */
-  answer?: number;
   /** Tells a chat platform's asker the answer's text so far. */
   onText?: (text: string) => unknown;
   /**
@@ -516,7 +504,7 @@ const turnQuestion = (
 
 /**
  * What an answer may hold, as the person sees it labelled: everything the
- * chat has read from (collections and connections), and whether it read
+ * chat has read from, and whether it read
  * restricted data, so the answer may carry sensitive content.
  */
 export interface AnswerProvenance {
@@ -524,15 +512,9 @@ export interface AnswerProvenance {
   restricted: boolean;
 }
 
-/**
- * A turn's result, labelled with what it may hold, with the documents its
- * answer cites: those its chat's code was given before it that it links
- * to, each while the chat's agent may still read it for its person
- * (`ChatCitedDocument`). A channel shows them as the answer's sources.
- */
+/** A turn's result, labelled with what it may hold. */
 export type Answer = TurnResult & {
   provenance: AnswerProvenance;
-  cited: ChatCitedDocument[];
   /**
    * In a chat that came through a chat platform: what the turn read, as a
    * held write's card says it on its check line (`turnCheckOf`), and the
@@ -651,7 +633,7 @@ export interface CodeRunOpening {
 
 /**
  * The sources one API call of a code run read from, as it records them:
- * a few collections or a connection, each an identifier.
+ * a connection, by its identifier.
  */
 const sourcesSchema = z.array(identifierSchema).max(auditProvenanceMaxItems);
 
@@ -685,24 +667,6 @@ export interface MemoryUse {
  */
 const memoryUseOf = (source: string) =>
   brainMemoryOf(source, brainMemoryPrefix);
-
-/** Most documents one read hands a chat's code: a page of hits or links. */
-const givenMaxPerRead = 1000;
-
-/**
- * The documents one read hands a chat's code, by ID: the first
- * {@link givenMaxPerRead}, as a read past them is still handed over (its
- * answers then cite no more of it).
- */
-const givenSchema = z
-  .array(identifierSchema)
-  .transform((ids) => ids.slice(0, givenMaxPerRead));
-
-/**
- * Most documents a chat keeps as given (`chatDocuments`): its answers may
- * cite those, the newest; an older one is dropped as a newer comes in.
- */
-export const chatDocumentsMax = 500;
 
 /**
  * How long Grasp holds a widget in hand at most (`claimWidget`): longer
@@ -1277,7 +1241,6 @@ export class Workspace extends DurableObject<Env> {
         id,
         message,
         createdAt,
-        message.role === "assistant" ? this.#givenBy(chatId)(id) : undefined,
         thinkingMs ?? null,
         message.role === "assistant" && this.#asksIn(chatId),
         built,
@@ -2128,7 +2091,6 @@ export class Workspace extends DurableObject<Env> {
       if (end.stopped !== undefined) {
         throw turnStopError(end.stopped);
       }
-      const { answer } = live;
       const result: TurnResult = {
         outcome: end.outcome,
         answer: via === "web" ? end.answer : withoutLinks(end.answer),
@@ -2140,8 +2102,6 @@ export class Workspace extends DurableObject<Env> {
           sources: this.#sources(chat.id),
           restricted: this.isChatRestricted(chat.id) === true,
         },
-        cited:
-          answer === undefined ? [] : await this.#citedOrNone(scope, answer),
         check: via === "web" ? null : turnCheckOf(live.reads),
         channelText: context.channel?.mark ?? null,
       };
@@ -2801,9 +2761,6 @@ export class Workspace extends DurableObject<Env> {
       );
       if (message.role === "assistant") {
         answer = id;
-        if (live !== undefined) {
-          live.answer = id;
-        }
       }
     }
     // With the messages: no await between, so they are stored together.
@@ -3204,7 +3161,6 @@ export class Workspace extends DurableObject<Env> {
     chatId: ChatId,
     runId: string,
     ids: readonly string[],
-    documentIds: readonly string[] = [],
     /** What the run's result rests on, if not `ids` (a connection call's grant). */
     runReads?: readonly string[]
   ): CodeRunAdmission["call"] {
@@ -3213,12 +3169,10 @@ export class Workspace extends DurableObject<Env> {
       return call;
     }
     const sources = sourcesSchema.parse(ids);
-    const given = givenSchema.parse(documentIds);
     const reads =
       runReads === undefined ? sources : runReadsSchema.parse(runReads);
     this.ctx.storage.transactionSync(() => {
       this.#keepSources(chatId, sources);
-      this.#keepGiven(chatId, given);
       // And with the run: what its result rests on (`#withheldRuns`).
       this.#keepRunSources(chatId, runId, reads);
     });
@@ -3296,39 +3250,6 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * Keeps `documentIds` as given to the chat's code: each once, after the
-   * chat's last message when it first was, then drops the oldest past
-   * {@link chatDocumentsMax}: given after an earlier message, or in an
-   * earlier read since the same one (insertion order, `rowid`).
-   */
-  #keepGiven(chatId: ChatId, documentIds: readonly string[]): void {
-    if (documentIds.length === 0) {
-      return;
-    }
-    const last = this.#db
-      .select({ id: max(chatMessages.id) })
-      .from(chatMessages)
-      .where(eq(chatMessages.chatId, chatId))
-      .get();
-    // The WHERE keeps SQLite from reading ON CONFLICT as a join.
-    this.#db
-      .insert(chatDocuments)
-      .select(
-        sql`SELECT ${chatId}, value, ${last?.id ?? 0} FROM json_each(${JSON.stringify([...new Set(documentIds)])}) WHERE true`
-      )
-      .onConflictDoNothing()
-      .run();
-    this.#db.run(
-      sql`DELETE FROM ${chatDocuments} WHERE ${chatDocuments.chatId} = ${chatId} AND ${chatDocuments.documentId} NOT IN (SELECT ${chatDocuments.documentId} FROM ${chatDocuments} WHERE ${chatDocuments.chatId} = ${chatId} ORDER BY ${chatDocuments.givenAfter} DESC, rowid DESC LIMIT ${chatDocumentsMax})`
-    );
-  }
-
-  /**
-   * Whether the chat's message `messageId` may cite a document: one given
-   * to the chat's code before it was stored (after an earlier message),
-   * that the chat still keeps.
-   */
-  /**
    * Whether the chat's agent is offered `askQuestions`: in Grasp's own
    * app, never in a chat app's chat (agent.ts), which can't show them.
    */
@@ -3339,111 +3260,6 @@ export class Workspace extends DurableObject<Env> {
       .where(eq(chats.id, chatId))
       .get();
     return chat?.via === "web";
-  }
-
-  #givenBy(
-    chatId: ChatId
-  ): (messageId: number) => (documentId: string) => boolean {
-    const given = new Map(
-      this.#db
-        .select({
-          documentId: chatDocuments.documentId,
-          givenAfter: chatDocuments.givenAfter,
-        })
-        .from(chatDocuments)
-        .where(eq(chatDocuments.chatId, chatId))
-        .all()
-        .map(({ documentId, givenAfter }) => [documentId, givenAfter])
-    );
-    return (messageId) => (documentId) => {
-      const givenAfter = given.get(documentId);
-      return givenAfter !== undefined && messageId > givenAfter;
-    };
-  }
-
-  /**
-   * The documents the chat's message `messageId` cites, as `personId`'s
-   * page shows them under it (`ChatsApi.cited`): only in their own chat.
-   */
-  async cited(
-    chatId: unknown,
-    personId: string,
-    messageId: unknown
-  ): Promise<ChatCitedDocument[]> {
-    const chat = this.#ownChat(chatId, personId);
-    const id = z.int().positive().safeParse(messageId);
-    if (!id.success) {
-      return [];
-    }
-    const workspaceId = workspaceIdSchema.parse(this.ctx.id.name);
-    const scope = {
-      workspaceId,
-      agentId: chat.agentId,
-      chatId: chat.id,
-      personId,
-    };
-    return await this.#cited(scope, id.data);
-  }
-
-  /**
-   * The documents the chat's answer `messageId` cites (`citedIn`), each
-   * looked up now as the chat's agent acting for its person, so one either
-   * may no longer read is left out; none for a message that isn't an
-   * answer, or one that cites nothing.
-   */
-  async #cited(
-    scope: Pick<AgentScope, "workspaceId" | "agentId" | "chatId" | "personId">,
-    messageId: number
-  ): Promise<ChatCitedDocument[]> {
-    const stored = this.#db
-      .select()
-      .from(chatMessages)
-      .where(
-        and(
-          eq(chatMessages.chatId, scope.chatId),
-          eq(chatMessages.id, messageId)
-        )
-      )
-      .get();
-    const links =
-      stored === undefined
-        ? []
-        : noteLinksOf(
-            storedMessageSchema.parse(JSON.parse(stored.message)),
-            this.#givenBy(scope.chatId)(stored.id)
-          );
-    if (links.length === 0) {
-      return [];
-    }
-    return await readAsDelegate(
-      this.env,
-      chatAuthority(scope),
-      chatContext(scope),
-      undefined,
-      async (reader) => await cited(brainOf(this.env), reader, links)
-    );
-  }
-
-  /**
-   * `#cited` for a turn that has answered: the answer is stored and shown
-   * by then, so documents that can't be looked up now (Knowledge's
-   * database, or what the agent may read, failing) leave the turn's result
-   * without any, and never fail an answered turn. The page asks again
-   * (`cited`).
-   */
-  async #citedOrNone(
-    scope: Pick<AgentScope, "workspaceId" | "agentId" | "chatId" | "personId">,
-    messageId: number
-  ): Promise<ChatCitedDocument[]> {
-    try {
-      return await this.#cited(scope, messageId);
-    } catch (error) {
-      log.warn("agent.cited_failed", {
-        chatId: scope.chatId,
-        ...errorFields(error),
-      });
-      return [];
-    }
   }
 
   /**
@@ -4777,7 +4593,6 @@ export class Workspace extends DurableObject<Env> {
     after: number,
     masked: ReadonlySet<string> = new Set()
   ): ChatMessage[] {
-    const givenBy = this.#givenBy(chatId);
     const asking = this.#asksIn(chatId);
     const carried = this.#filesAfter(chatId, after);
     return this.#db
@@ -4796,7 +4611,6 @@ export class Workspace extends DurableObject<Env> {
               ? withheldCopy(stored)
               : stored,
             createdAt,
-            givenBy(id),
             thinkingMs,
             asking,
             builtOf(built),

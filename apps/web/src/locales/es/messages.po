@@ -1418,11 +1418,6 @@ msgstr "Un cambio se aplica a las ejecuciones que empiezan después: las que ya 
 
 #: src/apps/app-access-requests.tsx
 #: src/apps/draft-changes.tsx
-msgid "A collection"
-msgstr "Una colección"
-
-#: src/apps/app-access-requests.tsx
-#: src/apps/draft-changes.tsx
 msgid "A connection"
 msgstr "Una conexión"
 
@@ -3875,10 +3870,6 @@ msgstr "Monedas"
 #: src/onboarding/interviews-progress.tsx
 msgid "colleagues talked"
 msgstr "compañeros han hablado"
-
-#: src/activity/pending.tsx
-msgid "Collection {collectionId}"
-msgstr "Colección {collectionId}"
 
 #: src/chat/composer-menu.tsx
 #: src/chat/mentions.tsx
@@ -15125,8 +15116,8 @@ msgid "Version {version} declares no binding to approve."
 msgstr "La versión {version} no declara ningún vínculo que aprobar."
 
 #: src/inbox/items.ts
-msgid "Version {version} of {name} is live, but nothing starts it until an admin approves what it reaches: each model, connection, store or collection it calls."
-msgstr "La versión {version} de {name} está en producción, pero nada la inicia hasta que un administrador apruebe a qué accede: cada modelo, conexión, almacén o colección que llama."
+msgid "Version {version} of {name} is live, but nothing starts it until an admin approves what it reaches: each model and connection it calls, and the Brain."
+msgstr "La versión {version} de {name} está en producción, pero nada la inicia hasta que un administrador apruebe a qué accede: cada modelo y conexión que llama, y el Brain."
 
 #: src/brain/sources-page.tsx
 msgid "Version {version}, added {added}"

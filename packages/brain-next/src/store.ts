@@ -40,6 +40,7 @@ import {
   ownExportRequestSchema,
   ownExportStartSchema,
   personErasureSchema,
+  writerErasureSchema,
   readableMemoriesRequestSchema,
   erasedRequestSchema,
   readableRequestSchema,
@@ -108,6 +109,8 @@ import type {
   StoreKind,
   NewSource,
   PersonErasure,
+  WriterErasure,
+  WriterErased,
   RecallRequest,
   Pack,
   RestoreStatus,
@@ -141,6 +144,8 @@ import {
   deleteStoreObjects,
   erase,
   eraseBatch,
+  eraseWriter,
+  eraseWriterBatch,
   erasureStatusOf,
   erasuresOverview,
   erasureDue,
@@ -186,6 +191,7 @@ import {
   readableMemories,
   readMemories,
   retireMemory,
+  unerasedSql,
 } from "./memories.ts";
 import { rebuildMissingSets } from "./reader-sets.ts";
 import {
@@ -1086,8 +1092,9 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * What an erasure took for good of the keys and memories asked
    * (contract.ts): a memory this store holds no row of was deleted by
    * one, as nothing else deletes a memory (forget.ts), and an id is never
-   * used again. A person's own store never written holds no key and no
-   * memory.
+   * used again; one an erasure of its writer covers is hidden until the
+   * tick deletes it (memories.ts `unerasedSql`). A person's own store
+   * never written holds no key and no memory.
    */
   async erasedOf(request: ErasedRequest): Promise<Erased> {
     const asked = checked(erasedRequestSchema, request);
@@ -1100,14 +1107,18 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     if (!this.#schema) {
       return { sources: [], memories };
     }
+    const rows = this.ctx.storage.sql
+      .exec<{ id: string; source: string | null; kept: number }>(
+        `SELECT m.id AS id, m.source AS source, ${unerasedSql("m")} AS kept
+        FROM memories AS m WHERE m.id IN (SELECT value FROM json_each(?))`,
+        JSON.stringify(memories)
+      )
+      .toArray();
+    // Hidden by an erasure of its writer: as good as deleted.
     const held = new Map(
-      this.ctx.storage.sql
-        .exec<{ id: string; source: string | null }>(
-          "SELECT id, source FROM memories WHERE id IN (SELECT value FROM json_each(?))",
-          JSON.stringify(memories)
-        )
-        .toArray()
-        .map(({ id, source }) => [id, source] as const)
+      rows.flatMap(({ id, source, kept }) =>
+        kept === 1 ? [[id, source] as const] : []
+      )
     );
     const keys = [
       ...new Set([
@@ -1208,6 +1219,29 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     const { person, reason } = checked(personErasureSchema, request);
     this.#ownOnly(person);
     await this.#eraseWhole(reason);
+  }
+
+  /**
+   * Erases every memory a writer wrote, learned up to now (erasure.ts
+   * `eraseWriter`), as `eraseSource` erases a source: recorded in the
+   * ledger and hidden before it returns, deleted by its tick if not at
+   * once. The shared store's alone: a writer's memories (an App's) are
+   * kept nowhere else.
+   */
+  async eraseWriter(request: WriterErasure): Promise<WriterErased> {
+    const { writer, reason, change } = checked(writerErasureSchema, request);
+    if (this.#kind.kind === "person") {
+      throw new Error(sharedOnly);
+    }
+    return await this.#changing(async () => {
+      await this.#readyToWrite();
+      const { at, memories } = await eraseWriter(this.#erasures, {
+        writer,
+        reason,
+        change,
+      });
+      return { erasedAt: new Date(at), memories };
+    });
   }
 
   /**
@@ -1669,7 +1703,8 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
 
   /**
    * One batch of the versions erasures hid, each deleted with everything
-   * it holds in a transaction of its own (erasure.ts `eraseBatch`), so a
+   * it holds in a transaction of its own (erasure.ts `eraseBatch`), and one
+   * of the memories writers' erasures hid (`eraseWriterBatch`), so a
    * failure or a stop leaves it hidden and whole. First in the tick but
    * the ledger, so the files it lets go are swept the same tick when due.
    * A version that fails goes behind the others and is tried again; the
@@ -1677,13 +1712,29 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * parked: an erasure must finish.
    */
   #erase(at: Date): void {
+    let failed = false;
     try {
-      const { failed } = eraseBatch(this.ctx.storage);
-      this.#stepsFailed.erase = failed ? { at, reason: "failed" } : null;
+      ({ failed } = eraseBatch(this.ctx.storage));
     } catch {
       // Nothing of the error is kept: the batch stays to do.
-      this.#stepsFailed.erase = { at, reason: "failed" };
+      failed = true;
     }
+    // Then a batch of the memories writers' erasures hid, on its own, so a
+    // failure of either never holds the other back (erasure.ts
+    // `eraseWriterBatch`). What it fails to delete stays hidden from every
+    // read (memories.ts `unerasedSql`) and is tried again next tick.
+    let writers: string | null;
+    try {
+      writers = eraseWriterBatch(this.ctx.storage).failed;
+    } catch (error) {
+      writers = error instanceof Error ? error.name : "unknown";
+    }
+    if (writers !== null) {
+      // Its name alone: an error's words may be the database's own.
+      log.error("brain.writer_erasure_failed", { error: writers });
+    }
+    this.#stepsFailed.erase =
+      failed || writers !== null ? { at, reason: "failed" } : null;
   }
 
   /**
@@ -1884,6 +1935,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       words: "current",
       erasures: {
         source: { written: 0, unwritten: 0 },
+        writer: { written: 0, unwritten: 0 },
         byReason: { deleted: 0, retention: 0, person_erased: 0, withdrawn: 0 },
       },
       recall: recallOverviewOf(this.#recallCounts),
@@ -2165,7 +2217,10 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
 
   /** Retires one of the writer's own memories the reader may read (memories.ts). */
   async retireMemory(request: RetireRequest): Promise<RetiredMemory | null> {
-    const { memory, reader, writer } = checked(retireRequestSchema, request);
+    const { memory, reader, writer, change } = checked(
+      retireRequestSchema,
+      request
+    );
     this.#mayRead(reader);
     return await this.#changing(async () => {
       if (!(await this.#readable())) {
@@ -2180,6 +2235,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
           id: memory,
           reader,
           writer,
+          change,
         });
       });
     });
