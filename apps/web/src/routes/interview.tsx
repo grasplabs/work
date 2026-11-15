@@ -1,3 +1,4 @@
+import { interviewPagePath } from "@grasp-os/shared/interview-links";
 import type { SignInOption } from "@grasp-os/shared/rpc";
 import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
 import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
@@ -152,7 +153,7 @@ const SignIn = ({
         <SignInOptions
           error={undefined}
           options={options}
-          returnTo={interviewPath}
+          returnTo={interviewPagePath}
         />
       </div>
     </Notice>
@@ -223,10 +224,7 @@ const Interview = () => {
   }
 };
 
-/** Where an interview link leads, and the sign-in sends them back to. */
-const interviewPath = "/interview";
-
-export const Route = createFileRoute(interviewPath)({
+export const Route = createFileRoute("/interview")({
   validateSearch: (search: Record<string, unknown>): { error?: string } =>
     signInErrorSearch(search),
   component: Interview,

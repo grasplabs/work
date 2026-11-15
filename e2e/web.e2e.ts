@@ -5,7 +5,7 @@ import { z } from "zod";
 
 import { callGate } from "./call-gate.ts";
 import { test } from "./csp.ts";
-import { endSession, peopleIn, signInTo } from "./people.ts";
+import { endSession, peopleIn, signInAs, signInTo } from "./people.ts";
 
 /**
  * How long the page may take to show what came of a connection that had to
@@ -54,10 +54,22 @@ test("shows a refusal with the request ID core answered it under, for the person
   );
 });
 
-test("an interview link nobody made can't be opened, and says nothing was saved", async ({
+test("an interview link nobody made asks to sign in first, then can't be opened, and says nothing was saved", async ({
+  context,
   page,
 }) => {
   await page.goto(`/interview#${"A".repeat(43)}`);
+  await expect(
+    page.getByRole("heading", { name: "Sign in to open your interview" })
+  ).toBeVisible();
+  const email = `person.${crypto.randomUUID()}@acme.test`;
+  await signInTo(context, {
+    userId: "",
+    email,
+    role: "user",
+    cookie: await signInAs(email),
+  });
+  await page.reload();
   await expect(
     page.getByRole("heading", { name: "This interview can't be opened" })
   ).toBeVisible();

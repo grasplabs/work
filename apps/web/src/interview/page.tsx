@@ -188,9 +188,9 @@ const InterviewFrame = ({
   children,
 }: {
   /**
-   * Whether the interview is open on this device, so what they say is
-   * kept: only then does the frame say "Saved". A link that can't be
-   * opened, or is open elsewhere, has kept nothing here.
+   * Whether the interview is open here, for the account it belongs to,
+   * so what they say is kept: only then does the frame say "Saved". A link
+   * that can't be opened has kept nothing here.
    */
   open?: boolean;
   /** Where the frame's top and bottom are measured, so the stage takes what is left. */
