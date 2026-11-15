@@ -93,9 +93,10 @@ interface AgentGap {
  * call then refuses and audits). That grant is recorded with the run
  * before anything is read (`brainGrantRead`), so what the run holds is
  * withheld once it is revoked. `ownChat`: the turn is its person's own
- * chat in Grasp, which they started (workspace.ts `answersAlone`): the
- * only place it reads past what the whole company may (turn-recall.ts
- * `readsAs`, GRA-1820).
+ * chat, in Grasp or their direct message on a chat app, which they
+ * started (workspace.ts `answersAlone`): the only place it reads past
+ * what the whole company may (turn-recall.ts `readsAs`, GRA-1820), and
+ * then as their teams, never their own store.
  */
 const brainCallerOf = async (
   env: Env,
@@ -369,7 +370,7 @@ const brainDeclaration = `/** The company's brain: the organization's own knowle
 brain: {
   /** What your person may read that answers \`question\` (at most 2,000 characters), within \`budget.tokens\` (1 to 32,000), cited by source, version and place: needs the brain permission. \`asOf\`, an ISO 8601 date-time with its offset, reads each source as it was then (for "on a day", that day's last millisecond). Quote the passages you answer from, with their sources. */
   recall(input: { question: string; budget: { tokens: number }; asOf?: string }): Promise<BrainPack>;
-  /** The entities it remembers things about (people, customers, projects and other things) that match: of a \`kind\`, by a whole \`name\` (case and accents aside), or an exact \`identifier\` (an email, or a reference such as \`crm:ACME-1\`); at least one. \`next\`, while more follow, is the \`after\` of the next page. Needs the brain permission. In your person's own chat in Grasp, what their teams and the whole company may read, never what only they may; anywhere else (a direct message on a chat app, a turn nobody started), what the whole company may read alone. */
+  /** The entities it remembers things about (people, customers, projects and other things) that match: of a \`kind\`, by a whole \`name\` (case and accents aside), or an exact \`identifier\` (an email, or a reference such as \`crm:ACME-1\`); at least one. \`next\`, while more follow, is the \`after\` of the next page. Needs the brain permission. In your person's own chat (in Grasp, or their direct message on a chat app), what their teams and the whole company may read, never what only they may; in a turn nobody started, what the whole company may read alone. */
   findEntities(input: { kind?: BrainEntityKind; name?: string; identifier?: { type: "email" | "ref"; value: string }; after?: string }): Promise<{ entities: BrainEntity[]; next: string | null }>;
   /** A page of what it remembers about one entity (its card), as now or as of \`asOf\` (ISO 8601 with its offset), after a page's \`next\`, read as \`findEntities\` reads: null for an entity there isn't or you may not see, alike. */
   getEntity(input: { entity: string; asOf?: string; after?: string }): Promise<BrainCard | null>;

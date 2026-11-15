@@ -3233,16 +3233,15 @@ describe(
       });
     });
 
-    it("puts a person's own content in no chat-app conversation, their direct message included, and answers that one to them alone", async () => {
+    it("puts a person's own content in no chat-app conversation others read, and in their direct message, their own chat, answers it to them alone", async () => {
       // Through Teams' door as Teams posts (channels/door.ts), each turn
       // answered by the fake provider behind connect, which keeps what
-      // reached it. A person's own source or memory reaches a model only in their
-      // own chat in Grasp: not in a thread others read, nor, while
-      // GRA-1821's decision is open, in their direct message, which the
-      // chat app keeps too (workspace.ts, `answersAlone`). A thread others
-      // read is never their own chat either: no instruction file of
-      // theirs, and none of their own chat's tools, their connections
-      // first.
+      // reached it. A person's own source, memory, skill or instruction
+      // file reaches a model only in their own chat: in Grasp, or their
+      // direct message, which the platform names one-to-one (GRA-1821,
+      // workspace.ts `answersAlone`). Never in a thread others read, even
+      // one whose roster holds them alone: no instruction file of theirs,
+      // and none of their own chat's tools, their connections first.
       await chatAgentReadsBrain();
       const depot = `d${unique()}`;
       const marker = markerWord();
@@ -3288,6 +3287,10 @@ describe(
         { scope: "person", personId: ann.userId },
         `Call me ${userMarker}.`
       );
+      const skill = `depot-${unique()}`;
+      await ann.api.skills.save(
+        `---\nname: ${skill}\ndescription: Look up a depot\n---\n\nThe steps.\n`
+      );
       const question = `What about depot ${depot}?`;
       const annsWorkspace = workspace(env, personalWorkspaceId(ann.userId));
       /** What a failure may print: the planted words taken out. */
@@ -3314,6 +3317,7 @@ describe(
           own: sent.includes(`Depot ${depot} keeps Ann's own note`),
           ownMemory: sent.includes(ownMemory),
           userMd: sent.includes(userMarker),
+          ownSkill: sent.includes(`- ${skill} (person`),
           connections: sent.includes(`held:${marker}`),
           ran,
           ...(ran
@@ -3384,16 +3388,18 @@ describe(
           own: false,
           ownMemory: false,
           userMd: false,
+          ownSkill: false,
           connections: false,
           ran: true,
         })),
-        // Her own chat on Teams: its tools; her own instruction file, her
-        // own memories and her own store's recall, not while GRA-1821 is
-        // open (workspace.ts, `answersAlone`).
+        // Her own chat on Teams, as in Grasp: its tools, her own
+        // instruction file, skills and memories, and her own store's
+        // recall (GRA-1821).
         inDirect: {
-          own: false,
-          ownMemory: false,
-          userMd: false,
+          own: true,
+          ownMemory: true,
+          userMd: true,
+          ownSkill: true,
           connections: true,
           ran: true,
         },
@@ -3403,13 +3409,13 @@ describe(
       });
     });
 
-    it("recalls only what the whole company may read in every conversation but a person's own chat in Grasp, and nothing while anyone unnamed is in it", async () => {
+    it("recalls only what the whole company may read in every conversation but a person's own chat, in Grasp or their direct message, and nothing while anyone unnamed is in it", async () => {
       // Through Teams' door as Teams posts (channels/door.ts): who is in a
       // group chat or channel comes from its roster, read for each
       // message. Ann asks in each; what reached the model tells what was
       // recalled. A team she and Ben are both in, and one of hers alone,
-      // are never recalled where others read the answer, nor in her
-      // direct message, which Teams keeps too (GRA-1820).
+      // are never recalled where others read the answer (GRA-1820); her
+      // direct message is her own chat, as in Grasp (GRA-1821).
       await chatAgentReadsBrain();
       const ann = await teamsMember(
         idp,
@@ -3549,18 +3555,26 @@ describe(
         afterGuestJoined: nothing,
         inMeeting: nothing,
         inMeetingById: nothing,
-        inDirect: companyOnly,
+        inDirect: {
+          answered: true,
+          annTeam: true,
+          both: true,
+          own: true,
+          company: true,
+        },
       });
     });
 
-    it("hands no memory of a person's own or of a team to a Teams direct message or a shared chat, on the first turn or when history is read again, and checks a company memory again as the company reads it", async () => {
+    it("hands no memory of a person's own or of a team to a shared chat, on the first turn or when history is read again, and checks a company memory again as the company reads it; their Teams direct message gets what their own chat in Grasp does", async () => {
       // Through Teams' door as Teams posts (channels/door.ts), as the test
       // above does for sources (GRA-1820), with memories (GRA-1864): her
       // own, her team's, and one the whole company may read, resting on a
       // company source whose own words no question here holds, so only the
       // memory can carry its marker. Then that source is narrowed to her
       // team: Ann may still read it, the company no longer may, and the
-      // next turn in her direct message must no longer carry it.
+      // next turn in the shared chat must no longer carry it. Her direct
+      // message is her own chat (GRA-1821): her memories, read as her,
+      // there and when history is read again.
       await chatAgentReadsBrain();
       const ann = await teamsMember(
         idp,
@@ -3679,20 +3693,207 @@ describe(
       }).toStrictEqual({
         found: [true, true],
         sharedFirst: { answered: true, own: false, team: false, company: true },
-        directFirst: { answered: true, own: false, team: false, company: true },
+        directFirst: { answered: true, own: true, team: true, company: true },
+        // Checked as her: she may still read what it rests on.
+        directAgain: { answered: true, own: true, team: true, company: true },
         // Withheld: the company no longer may read what it rests on.
-        directAgain: {
-          answered: true,
-          own: false,
-          team: false,
-          company: false,
-        },
         sharedAgain: {
           answered: true,
           own: false,
           team: false,
           company: false,
         },
+      });
+    });
+
+    it("reads the company alone in a turn something woke in a person's Teams direct message, though a turn they start there reads their own", async () => {
+      // A direct message is the person's own chat (GRA-1821) only in a
+      // turn they start: one a schedule or an event woke there
+      // (`askUnattended`) is steered by what woke it, so it reads as the
+      // company, as a woken turn in Grasp does (workspace.ts
+      // `answersAlone`). Its first turn there asks nothing the Brain holds,
+      // so the woken turn's history carries none of her own.
+      await chatAgentReadsBrain();
+      const ann = await teamsMember(
+        idp,
+        says("Hi."),
+        says("Noted."),
+        says("Noted.")
+      );
+      const depot = `d${unique()}`;
+      const [own, ownWord, file, company] = [
+        markerWord(),
+        markerWord(),
+        markerWord(),
+        markerWord(),
+      ];
+      await addSource(env, {
+        source: { producer: "upload", id: crypto.randomUUID() },
+        change: crypto.randomUUID(),
+        text: `Depot ${depot} keeps Ann's own note ${own}`,
+        readers: { kind: "owner", personId: ann.userId },
+      });
+      const ownStatement = `Depot ${depot} keeps Ann's own memory ${ownWord}`;
+      await rememberAs(env, ann.userId, {
+        change: crypto.randomUUID(),
+        about: { kind: "customer", names: [`Depot ${depot}`] },
+        type: "fact",
+        statement: ownStatement,
+        quote: ownStatement,
+      });
+      await saveInstructions(
+        ann.api,
+        { scope: "person", personId: ann.userId },
+        `Call me ${file}.`
+      );
+      const skill = `depot-${unique()}`;
+      await ann.api.skills.save(
+        `---\nname: ${skill}\ndescription: Look up a depot\n---\n\nThe steps.\n`
+      );
+      await brainOf(inJurisdiction(env, env.BRAIN_STORE)).addSource({
+        source: `upload:${crypto.randomUUID()}`,
+        change: crypto.randomUUID(),
+        text: `Depot ${depot} for everyone: ${company}`,
+        access: { kind: "audience", group: "company" },
+      });
+      const question = `What about depot ${depot}?`;
+      const annsWorkspace = workspace(env, personalWorkspaceId(ann.userId));
+      /** What reached the model of each of hers for what `ask` asked. */
+      const sentFor = async (ask: () => Promise<unknown>) => {
+        const before = ann.provider.requests.length;
+        await ask();
+        const sent = JSON.stringify(
+          ann.provider.requests.slice(before).map(({ body }) => body)
+        );
+        return {
+          answered: ann.provider.requests.length > before,
+          own: sent.includes(own),
+          ownMemory: sent.includes(ownWord),
+          file: sent.includes(file),
+          ownSkill: sent.includes(`- ${skill} (person`),
+          company: sent.includes(company),
+        };
+      };
+      await post(messageFrom(ann.teams, { text: "Hi." }));
+      const [direct] = await annsWorkspace.chats(ann.userId);
+      if (direct?.via !== "teams") {
+        throw new TypeError("Expected her direct message's chat");
+      }
+
+      const woken = await sentFor(
+        async () =>
+          await annsWorkspace.askUnattended(direct.id, {
+            text: question,
+            model: testModel,
+          })
+      );
+      const asked = await sentFor(
+        async () => await post(messageFrom(ann.teams, { text: question }))
+      );
+
+      expect({ woken, asked }).toStrictEqual({
+        woken: {
+          answered: true,
+          own: false,
+          ownMemory: false,
+          file: false,
+          ownSkill: false,
+          company: true,
+        },
+        asked: {
+          answered: true,
+          own: true,
+          ownMemory: true,
+          file: true,
+          ownSkill: true,
+          company: true,
+        },
+      });
+    });
+
+    it("counts the memories a person's Teams direct message handed over as theirs used, and none a group chat of theirs handed over", async () => {
+      // A memory a recall as the person hands over is one they used
+      // (workspace.ts `memory_uses`, by its `brain-memory:` pin), which
+      // ranks it for them alone: only where the answer reaches them alone,
+      // their direct message now too (GRA-1821). A group chat recalls as
+      // the company (`brain-company-memory:`), which counts no use.
+      await chatAgentReadsBrain();
+      const ann = await teamsMember(idp, says("Noted."), says("Noted."));
+      const ben = await memberAnsweredBy(idp, ann.provider);
+      const [inGroup, inDirect] = [`d${unique()}`, `d${unique()}`];
+      /** One memory everyone may read about `depot`: its id and statement. */
+      const companyMemory = async (depot: string) => {
+        const statement = `Depot ${depot} opens at ${markerWord()}`;
+        const { memories } = await brainOf(
+          inJurisdiction(env, env.BRAIN_STORE)
+        ).addMemories({
+          change: crypto.randomUUID(),
+          access: { kind: "audience", group: "company" },
+          entities: [{ key: "c", kind: "customer", names: [`Depot ${depot}`] }],
+          memories: [
+            {
+              about: "c",
+              type: "fact",
+              statement,
+              speaker: { kind: "system" },
+              basis: { kind: "writer", writer: "crm" },
+            },
+          ],
+        });
+        const [memory] = memories;
+        if (memory === undefined) {
+          throw new TypeError("Expected the memory added");
+        }
+        return { memory, statement };
+      };
+      const ownStatement = `Depot ${inDirect} keeps Ann's own memory ${markerWord()}`;
+      const { memory: own } = await rememberAs(env, ann.userId, {
+        change: crypto.randomUUID(),
+        about: { kind: "customer", names: [`Depot ${inDirect}`] },
+        type: "fact",
+        statement: ownStatement,
+        quote: ownStatement,
+      });
+      const groupMemory = await companyMemory(inGroup);
+      const { memory: directCompany } = await companyMemory(inDirect);
+      const groupCompany = groupMemory.memory;
+      const withBen = newGroup();
+      await onGroupRoster(withBen, [
+        { person: ann.teams },
+        { person: ben.teams },
+      ]);
+      const annsWorkspace = workspace(env, personalWorkspaceId(ann.userId));
+      /** Whether each memory counts as used by Ann now. */
+      const used = async () => {
+        const uses = await annsWorkspace.memoriesUsed(Date.now());
+        const ids = new Set(uses.map(({ memory }) => memory));
+        return {
+          groupCompany: ids.has(groupCompany),
+          directCompany: ids.has(directCompany),
+          own: ids.has(own),
+        };
+      };
+
+      const beforeGroup = ann.provider.requests.length;
+      await post(mentionIn(ann.teams, withBen, `What about depot ${inGroup}?`));
+      // Handed over as the company reads it: what the group turn sent.
+      const groupRecalled = JSON.stringify(
+        ann.provider.requests.slice(beforeGroup).map(({ body }) => body)
+      ).includes(groupMemory.statement);
+      const afterGroup = await used();
+      await post(
+        messageFrom(ann.teams, { text: `What about depot ${inDirect}?` })
+      );
+      const { directCompany: company, own: ownUsed } = await used();
+
+      expect({
+        groupRecalled,
+        afterGroup,
+        afterDirect: { company, own: ownUsed },
+      }).toStrictEqual({
+        groupRecalled: true,
+        afterGroup: { groupCompany: false, directCompany: false, own: false },
+        afterDirect: { company: true, own: true },
       });
     });
 
