@@ -7046,9 +7046,7 @@ export const storeProbes = {
         strangers(),
         text.padEnd(instructionsMaxLength + 1, " x")
       ),
-      // Owner access until GRA-1904: the shared store takes an instruction
-      // file of whitespace, which a restore of its export then refuses.
-      await add("no text", { kind: "owner", person: stranger() }, " "),
+      await add("no text", strangers(), " "),
       await add("half a surrogate pair", strangers(), `${text}\uD800`),
       await add("an unknown kind", unchecked({ kind: "everyone" })),
       await add(
