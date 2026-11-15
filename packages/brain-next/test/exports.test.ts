@@ -19,7 +19,10 @@ import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { exportFileNameSchema } from "../src/contract.ts";
+import {
+  exportFileNameSchema,
+  instructionsMaxLength,
+} from "../src/contract.ts";
 import {
   exportPartBytes,
   manifestSchema as storeManifestSchema,
@@ -516,6 +519,32 @@ const drawn = (source: string, statement: string): NewMemory => ({
 const textAt = async (key: string): Promise<string> => {
   const object = await env.BRAIN_OBJECTS.get(key);
   return (await object?.text()) ?? "";
+};
+
+/**
+ * Each part of the done export `id` rewritten by `edit`, its checksum and
+ * size in the manifest made to match: what a restore's own checks of a
+ * line, past the manifest's, must catch.
+ */
+const rewriteParts = async (
+  id: string,
+  edit: (body: string) => string
+): Promise<void> => {
+  const key = `exports/${id}/manifest.json`;
+  const manifest = storeManifestSchema.parse(JSON.parse(await textAt(key)));
+  const parts = await Promise.all(
+    manifest.parts.map(async (part) => {
+      const file = `exports/${id}/${part.file}`;
+      const body = edit(await textAt(file));
+      await env.BRAIN_OBJECTS.put(file, body);
+      return {
+        ...part,
+        sha256: await sha256(body),
+        bytes: new TextEncoder().encode(body).byteLength,
+      };
+    })
+  );
+  await env.BRAIN_OBJECTS.put(key, JSON.stringify({ ...manifest, parts }));
 };
 
 describe("exports and restores", () => {
@@ -1341,6 +1370,80 @@ describe("exports and restores", () => {
         restore: status?.state,
         held: await versionsHeld(),
       }).toStrictEqual({ exported: 2, restore: "done", held: 2 });
+    });
+
+    it("restores an emptied instruction file and skill as they were, each by the rule its add took it by", async () => {
+      await putBack(shared(), emptyShared);
+      const group = `team:${unique()}`;
+      const instructions = `instructions:${unique()}`;
+      const skill = `skill:company:${unique()}`;
+      // An emptied file is a version of its own: whitespace alone, or nothing.
+      for (const [source, text] of [
+        [instructions, "the company's instructions"],
+        [instructions, " \n\t"],
+        [skill, ""],
+      ] as const) {
+        // oxlint-disable-next-line no-await-in-loop -- one version at a time
+        await shared().addInstructions({
+          source,
+          change: unique(),
+          text,
+          access: team(group),
+        });
+      }
+      const { id } = await shared().startExport("test");
+      await settled(shared(), id);
+      await putBack(shared(), emptyShared);
+
+      await shared().startRestore(id, "test");
+      const status = await restoreSettled(id);
+      const reader = readerOf(unique(), [group]);
+      const first = await shared().readVersion({
+        source: instructions,
+        version: 1,
+        reader,
+      });
+      const current = await shared().readCurrent({
+        sources: [instructions, skill],
+        reader,
+      });
+      expect({
+        status: status?.state,
+        first: first?.text,
+        current: current.map(({ source, text }) => ({ source, text })),
+      }).toStrictEqual({
+        status: "done",
+        first: "the company's instructions",
+        current: [
+          { source: instructions, text: " \n\t" },
+          { source: skill, text: "" },
+        ],
+      });
+    });
+
+    it("fails a restore whose instruction file is longer than an add takes, and writes nothing of it (threat 8)", async () => {
+      await putBack(shared(), emptyShared);
+      const marker = unique();
+      await shared().addInstructions({
+        source: `instructions:${unique()}`,
+        change: "1",
+        text: marker,
+        access: team(`team:${unique()}`),
+      });
+      const { id } = await shared().startExport("test");
+      await settled(shared(), id);
+      // Within what a document's text may be, past an instruction file's.
+      await rewriteParts(id, (body) =>
+        body.replace(marker, "x".repeat(instructionsMaxLength + 1))
+      );
+      await putBack(shared(), emptyShared);
+      await shared().startRestore(id, "test");
+      const restore = await restoreSettled(id);
+
+      expect({
+        state: restore?.state,
+        held: await versionsHeld(),
+      }).toStrictEqual({ state: "failed", held: 0 });
     });
 
     it("restores into a store that holds only Grasp's own skills, which stay", async () => {
@@ -2613,25 +2716,11 @@ describe("exports and restores", () => {
       });
       const { id } = await shared().startExport("test");
       await settled(shared(), id);
-      // The memory's part made into an instruction to a group, its
-      // checksum and size made to match: an add refuses an instruction
-      // anyone but its writer may read.
-      const key = `exports/${id}/manifest.json`;
-      const manifest = storeManifestSchema.parse(JSON.parse(await textAt(key)));
-      const parts = await Promise.all(
-        manifest.parts.map(async (part) => {
-          const file = `exports/${id}/${part.file}`;
-          const written = await textAt(file);
-          const body = written.replace('"type":"fact"', '"type":"instruction"');
-          await env.BRAIN_OBJECTS.put(file, body);
-          return {
-            ...part,
-            sha256: await sha256(body),
-            bytes: new TextEncoder().encode(body).byteLength,
-          };
-        })
+      // The memory made into an instruction to a group: an add refuses an
+      // instruction anyone but its writer may read.
+      await rewriteParts(id, (body) =>
+        body.replace('"type":"fact"', '"type":"instruction"')
       );
-      await env.BRAIN_OBJECTS.put(key, JSON.stringify({ ...manifest, parts }));
       await putBack(shared(), emptyShared);
       await shared().startRestore(id, "test");
       const restore = await restoreSettled(id);
