@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "dc8140f5-a7e0-4286-b936-cfb9a025b5ea",
+  "id": "eaf76982-24e1-4d7b-bd14-559463051fc6",
   "prevId": "5c0933c0-7314-44d7-be0f-94bc2f9fe11e",
   "tables": {
     "approvals": {
@@ -184,8 +184,8 @@
           "notNull": true,
           "autoincrement": false
         },
-        "account": {
-          "name": "account",
+        "user_id": {
+          "name": "user_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -975,15 +975,15 @@
           "autoincrement": false,
           "default": 0
         },
-        "account": {
-          "name": "account",
+        "user_id": {
+          "name": "user_id",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
-        "sent_to": {
-          "name": "sent_to",
+        "sent_to_email": {
+          "name": "sent_to_email",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -998,10 +998,10 @@
         }
       },
       "indexes": {
-        "links_account_unique": {
-          "name": "links_account_unique",
+        "links_user_id_unique": {
+          "name": "links_user_id_unique",
           "columns": [
-            "account"
+            "user_id"
           ],
           "isUnique": true
         }

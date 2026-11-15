@@ -2598,7 +2598,7 @@ const sourceRefsSchema = z.array(sourceRefSchema);
  * `addSource`.
  */
 export const erasedForGoodAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   {
     sources,

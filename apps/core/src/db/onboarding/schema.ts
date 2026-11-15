@@ -153,7 +153,7 @@ export const links = sqliteTable("links", {
    * claims for them. None before it was opened, and again after a new
    * start or their erasure.
    */
-  account: text().unique(),
+  account: text("user_id").unique(),
   /**
    * The address, folded to lower case, the link (or a reminder carrying
    * it) was last sent to while it belonged to no account, or the one it
@@ -161,7 +161,7 @@ export const links = sqliteTable("links", {
    * a link no mail carried (the list's address counts then), and after
    * their erasure.
    */
-  sentTo: text("sent_to"),
+  sentTo: text("sent_to_email"),
   /**
    * When what the Brain holds of their interview was last decided
    * (`interviewDueSql`, store.ts): it is decided again while this differs.
@@ -677,7 +677,7 @@ export const brainInterviews = sqliteTable(
     source: text().primaryKey(),
     person: text().notNull(),
     /** The account that reads it. */
-    account: text().notNull(),
+    account: text("user_id").notNull(),
     /**
      * What it stands for (`#interviewWanted`, store.ts): the account and
      * each approved fact at its revision, so a mark that moved makes a new

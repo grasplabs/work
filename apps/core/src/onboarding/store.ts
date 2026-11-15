@@ -649,7 +649,7 @@ const agreedOf = (stored: string): Record<string, string> =>
 const admissionSql = (person: string): SQL =>
   sql`(SELECT CASE WHEN agreed_at IS NULL THEN NULL ELSE coalesce(started_at, '') || '|' || revocations END FROM interview_states WHERE person = ${person})`;
 
-/** An address as `links.sent_to` keeps it, and a sign-in's is compared. */
+/** An address as `links.sent_to_email` keeps it, and a sign-in's is compared. */
 const foldedAddress = (email: string): string => email.trim().toLowerCase();
 
 /**
@@ -675,8 +675,8 @@ export type OwedErasure =
  * (`#interviewWanted`), so a save that leaves that alone changes nothing.
  * NULL without an account or once core erased them.
  */
-const interviewDueSql = `CASE WHEN l.account IS NULL OR l.erased_at IS NOT NULL THEN NULL ELSE
-  l.account || '|' || l.version
+const interviewDueSql = `CASE WHEN l.user_id IS NULL OR l.erased_at IS NOT NULL THEN NULL ELSE
+  l.user_id || '|' || l.version
   || '|' || coalesce((SELECT p.withdrawn_at FROM participations p WHERE p.person = l.person), '-')
   || '|' || (SELECT count(*) || ':' || coalesce(max(a.at), '') FROM approvals a WHERE a.person = l.person)
   END`;

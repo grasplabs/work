@@ -131,7 +131,7 @@ export const sentToOf = async (person: string): Promise<string> => {
   const sent = await runInDurableObject(store, (_instance, state) =>
     state.storage.sql
       .exec<{ to: string | null }>(
-        'SELECT sent_to AS "to" FROM links WHERE person = ?',
+        'SELECT sent_to_email AS "to" FROM links WHERE person = ?',
         person
       )
       .toArray()
