@@ -310,9 +310,12 @@ describe("a memory whose quote left its source", () => {
       { name }
     );
     await version(source, `${text} More.`, group);
+    // A statement of its own: the same one again would end the first as
+    // a restatement.
     const late = await memoryOn(
       { source, version: first, quote, group },
-      { entity: drawn.entity }
+      { entity: drawn.entity },
+      { statement: `${name} renews in March.` }
     );
 
     expect({
