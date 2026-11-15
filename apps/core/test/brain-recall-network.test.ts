@@ -6,6 +6,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { portsOf } from "../src/knowledge/ports.ts";
 import { mockIdp } from "./idp.ts";
+import { seed as seedKnowledge } from "./knowledge.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
 // A recall's network route through core (GRA-307): a person's recall, as
@@ -35,7 +36,9 @@ describe("a person's recall through core", setUpTime, () => {
     const tool = `Personio ${unique()}`;
     const owns = stated("Anna", "owns", thing);
     const uses = stated(thing, "uses", tool);
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
+    const { id: collectionId } = await seedKnowledge(
+      admin.api
+    ).createCollection({
       name: `Handbook ${unique()}`,
       access: "everyone",
     });
@@ -65,7 +68,7 @@ describe("a person's recall through core", setUpTime, () => {
       ["stack.md", `# Stack\n${uses.evidence}`],
     ] as const) {
       // oxlint-disable-next-line no-await-in-loop -- each saved, then linked
-      const saved = await admin.api.knowledge.saveDocument({
+      const saved = await seedKnowledge(admin.api).saveDocument({
         collectionId,
         path,
         text,

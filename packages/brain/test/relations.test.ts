@@ -1,4 +1,3 @@
-import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { brainErrors, delegateCitesMax } from "../src/contract.ts";
@@ -16,7 +15,6 @@ import {
 } from "../src/entities.ts";
 import type { IndexStep } from "../src/indexing.ts";
 import { remember } from "../src/memories.ts";
-import { preparePurge, purge } from "../src/purge.ts";
 import {
   readRowsMax,
   relationsExplain,
@@ -25,7 +23,7 @@ import {
   relationsRead,
 } from "../src/relations.ts";
 import type { Caller, StartedJob } from "./host.ts";
-import { newCollection, noCopies, testHost, writerOf } from "./host.ts";
+import { newCollection, testHost, writerOf } from "./host.ts";
 
 // Typed, source-backed relations (GRA-306, its threat model), through the
 // Brain's own boundaries: a save, the linking job, and the read. The model
@@ -749,61 +747,6 @@ describe("typed relations", () => {
         validFrom,
       ])
     ).toStrictEqual([["Dana", "leads", null]]);
-  });
-
-  it("erase every relation a purged source stated, superseded ones included", async () => {
-    const name = `Finn ${word()}`;
-    const thing = `Expenses ${word()}`;
-    const said = (version: number) =>
-      `${name} owns ${thing}, version ${version}.`;
-    const answer = (version: number) => ({
-      entities: [
-        { kind: "person", name },
-        { kind: "thing", name: thing },
-      ],
-      relations: [
-        {
-          subject: name,
-          predicate: "owns",
-          object: thing,
-          evidence: said(version),
-        },
-      ],
-    });
-    const host = testHost(
-      modelOf({ [said(1)]: answer(1), [said(2)]: answer(2) })
-    );
-    const collection = await newCollection(host.brain, "Finance");
-    const saved = await savedAndLinked(
-      host,
-      collection,
-      "expenses.md",
-      said(1)
-    );
-    await savedAndLinked(host, collection, "expenses.md", said(2), 1);
-    const kept = async () => {
-      const row = await env.BRAIN.prepare(
-        "SELECT count(*) AS n FROM brain_assertions WHERE source = ?"
-      )
-        .bind(`doc:${saved.id}`)
-        .first<{ n: number }>();
-      return row?.n ?? -1;
-    };
-    const before = await kept();
-    const writer = writerOf("admin");
-    const input = {
-      type: "content",
-      documentIds: [saved.id],
-      terms: [name],
-      reason: "erasure_request",
-    };
-    const { token } = await preparePurge(host.brain, writer, input, noCopies);
-    await purge(host.brain, writer, input, token, noCopies);
-
-    expect({ before, after: await kept() }).toStrictEqual({
-      before: 2,
-      after: 0,
-    });
   });
 
   it("quote the source's own words, byte for byte, whatever case or spacing the extractor's copy has", async () => {

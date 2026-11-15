@@ -64,6 +64,7 @@ import {
   brainRecallCasesVersion,
 } from "./fixtures/brain-recall-cases.ts";
 import type { BrainRecallCase } from "./fixtures/brain-recall-cases.ts";
+import { seed as seedKnowledge } from "./knowledge.ts";
 
 /** Bumped with any change to how the harness runs or measures a recall. */
 export const brainRecallHarnessVersion = "2";
@@ -264,7 +265,7 @@ const forgetKeptRecalls = async (company: BrainCompany, repeat: number) => {
   if (collectionId === undefined) {
     throw new Error("The company has no private collection");
   }
-  await company.admin.api.knowledge.saveDocument({
+  await seedKnowledge(company.admin.api).saveDocument({
     collectionId,
     path: `hr/e02-repeat-${repeat}-${crypto.randomUUID()}.md`,
     text: `# Repeat ${repeat}\n\nA note between the experiment's repeats.`,

@@ -17,7 +17,8 @@ import { portsOf, brainOf } from "../src/knowledge/ports.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { seedMemory } from "./knowledge-purge.ts";
-import { asPerson, newTeam } from "./knowledge.ts";
+import { asPerson, newTeam, seed as seedKnowledge } from "./knowledge.ts";
+import type { CollectionInput } from "./knowledge.ts";
 import { callAuth, signedInApi, unique } from "./sign-in.ts";
 
 // Inspecting a Brain memory record's lineage, and its correction (GRA-298,
@@ -81,13 +82,11 @@ const seed = async (
 };
 
 /** A document holding a note, in a new collection of `owner`'s. */
-const documentIn = async (
-  owner: Person,
-  collection: Parameters<Person["api"]["knowledge"]["createCollection"]>[0]
-) => {
-  const { id: collectionId } =
-    await owner.api.knowledge.createCollection(collection);
-  const { id: documentId } = await owner.api.knowledge.saveDocument({
+const documentIn = async (owner: Person, collection: CollectionInput) => {
+  const { id: collectionId } = await seedKnowledge(owner.api).createCollection(
+    collection
+  );
+  const { id: documentId } = await seedKnowledge(owner.api).saveDocument({
     collectionId,
     path: "note.md",
     text: "# Note\nFloor 3 is quiet.",

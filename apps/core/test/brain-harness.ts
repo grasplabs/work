@@ -9,6 +9,7 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
+import { purgedMarker } from "@grasp-os/shared/knowledge";
 import { z } from "zod";
 
 import { usageRecorded } from "../src/model-usage.ts";
@@ -26,13 +27,18 @@ import {
 import type {
   BrainCollectionKey,
   BrainPersona,
+  BrainUpdate,
   BrainWindow,
 } from "./fixtures/brain-corpus.ts";
 import { brainAdmissionProbes, brainTasks } from "./fixtures/brain-tasks.ts";
 import type { BrainSplit, BrainTask } from "./fixtures/brain-tasks.ts";
 import type { Idp } from "./idp.ts";
 import { saveInstructions } from "./instruction-saves.ts";
-import { newTeam, ownCollectionOf } from "./knowledge.ts";
+import {
+  newTeam,
+  ownCollectionOf,
+  seed as seedKnowledge,
+} from "./knowledge.ts";
 import type { ProviderReply, SentRequest } from "./model-provider.ts";
 import { spentMicros } from "./model-usage.ts";
 import { signedInApi } from "./sign-in.ts";
@@ -198,7 +204,7 @@ export const setUpBrainCompany = async (idp: Idp): Promise<BrainCompany> => {
     brainCollections
   )) {
     // oxlint-disable-next-line no-await-in-loop -- one collection at a time
-    const created = await admin.api.knowledge.createCollection(
+    const created = await seedKnowledge(admin.api).createCollection(
       access.type === "team"
         ? {
             name,
@@ -219,7 +225,7 @@ export const setUpBrainCompany = async (idp: Idp): Promise<BrainCompany> => {
     brainDocuments
   )) {
     // oxlint-disable-next-line no-await-in-loop -- saves in order
-    const saved = await admin.api.knowledge.saveDocument({
+    const saved = await seedKnowledge(admin.api).saveDocument({
       collectionId: held(collections, collection),
       path,
       text,
@@ -248,7 +254,7 @@ export const setUpBrainCompany = async (idp: Idp): Promise<BrainCompany> => {
     // oxlint-disable-next-line no-await-in-loop -- one person at a time
     const personal = await ownCollectionOf(person);
     // oxlint-disable-next-line no-await-in-loop -- one person at a time
-    await person.api.knowledge.saveDocument({
+    await seedKnowledge(person.api).saveDocument({
       collectionId: personal,
       path: "USER.md",
       text: brainMemories[persona],
@@ -266,6 +272,27 @@ export const setUpBrainCompany = async (idp: Idp): Promise<BrainCompany> => {
   };
 };
 
+/**
+ * The text `update` saves over document `documentId`: its own, or, for a
+ * removal, the text as it stands with its terms taken out. The term purge
+ * went with the cutover (decision B): an admin edits a document instead.
+ */
+const textOfUpdate = async (
+  admin: BrainCompany["admin"],
+  documentId: string,
+  update: BrainUpdate
+): Promise<string> => {
+  if (update.type === "save") {
+    return update.text;
+  }
+  const { version } = await admin.api.knowledge.getDocument(documentId);
+  let { text } = version;
+  for (const term of update.terms) {
+    text = text.replaceAll(term, purgedMarker);
+  }
+  return text;
+};
+
 /** Applies the updates of `window`, as the admin who owns the corpus. */
 export const applyWindow = async (
   company: BrainCompany,
@@ -275,27 +302,16 @@ export const applyWindow = async (
   for (const update of brainUpdates.filter((each) => each.window === window)) {
     const document = held(company.documents, update.document);
     const { collection, path } = brainDocuments[update.document];
-    if (update.type === "save") {
-      // oxlint-disable-next-line no-await-in-loop -- in order
-      const saved = await admin.api.knowledge.saveDocument({
-        collectionId: held(company.collections, collection),
-        path,
-        text: update.text,
-        ifVersion: document.version,
-      });
-      document.version = saved.currentVersion;
-    } else {
-      const input = {
-        type: "content" as const,
-        documentIds: [document.id],
-        terms: update.terms,
-        reason: "erasure_request" as const,
-      };
-      // oxlint-disable-next-line no-await-in-loop -- in order
-      const { token } = await admin.api.knowledge.preparePurge(input);
-      // oxlint-disable-next-line no-await-in-loop -- in order
-      await admin.api.knowledge.purge(input, token);
-    }
+    // oxlint-disable-next-line no-await-in-loop -- in order
+    const text = await textOfUpdate(admin, document.id, update);
+    // oxlint-disable-next-line no-await-in-loop -- in order
+    const saved = await seedKnowledge(admin.api).saveDocument({
+      collectionId: held(company.collections, collection),
+      path,
+      text,
+      ifVersion: document.version,
+    });
+    document.version = saved.currentVersion;
   }
 };
 
