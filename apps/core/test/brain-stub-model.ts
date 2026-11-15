@@ -146,7 +146,7 @@ const callsText = (calls: unknown): string =>
  * The request's system prompt: Anthropic's `system`, or the system
  * messages of chat completions.
  */
-export const systemTextOf = (body: unknown): string =>
+const systemTextOf = (body: unknown): string =>
   [
     ...modelStrings(
       typeof body === "object" && body !== null && "system" in body

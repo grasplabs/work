@@ -1554,8 +1554,8 @@ describe("what a start rechecks, and records", () => {
     const kept = await ranFor();
     await revokePermission(env, fx.admin, readId);
     const revoked = await ranFor();
-    // A concurrent turn of the chat sees the revoke and withholds the
-    // handbook, after the agent's call already took what it read.
+    // A concurrent turn of the chat sees the revoke and withholds what it
+    // read under the grant, after the agent's call already took it.
     await runInDurableObject(stub, (_object, state) => {
       state.storage.sql.exec(
         "UPDATE chat_run_sources SET withheld_at = ? WHERE chat_id = ?",

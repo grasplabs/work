@@ -1,8 +1,10 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { CollectionInput, KnowledgeApi } from "@grasp-os/shared/knowledge";
+import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
 
+import type { Reader } from "../src/knowledge/access.ts";
 import { callAuth, unique } from "./sign-in.ts";
 
 const insertsVersion = /^insert into "versions"/iu;
@@ -216,3 +218,8 @@ export const storeTextUnderneath = async (
     ).bind(key, documentId),
   ];
 };
+
+/** `person`'s reader of Knowledge, as their own session's calls read it. */
+export const asPerson = async (person: {
+  api: { whoami: () => Promise<Identity> };
+}): Promise<Reader> => ({ type: "person", person: await person.api.whoami() });

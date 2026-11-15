@@ -1,7 +1,5 @@
 import type {
   BrainSourceRef,
-  ChangeOptions,
-  CommandOptions,
   CommandReceipt,
   EntitiesListInput,
   EntitySourcesInput,
@@ -9,9 +7,6 @@ import type {
   MemoriesGetInput,
   MemoriesLineageInput,
   MemoriesListInput,
-  MemoriesProposeChangeInput,
-  MemoriesPublishInput,
-  MemoriesRetireInput,
   MemoryPack,
   MemoryLineage,
   MemoryPage,
@@ -186,23 +181,6 @@ export interface SkillCollections {
   client: CollectionId | null;
 }
 
-/** Most shared chats `sharedChats` lists, the most recently active first. */
-export const sharedChatsMax = 50;
-
-/**
- * A chat others share that the person is in, which a memory record can be
- * published into (`memoriesPublish`, scope `session`): Grasp knows
- * everyone in it. Named by who else is in it, as platforms give Grasp no
- * name for a channel.
- */
-export interface SharedChat {
-  chatId: string;
-  /** The names of the others in it, as the organization knows them. */
-  others: string[];
-  /** When Grasp last saw who is in it (ISO 8601). */
-  updatedAt: string;
-}
-
 /**
  * What a signed-in person reaches in Knowledge. Every call checks the
  * session and what the person may see and change, on the server, and
@@ -333,33 +311,6 @@ export interface KnowledgeApi {
   decideEntityMatch: (
     input: EntityMatchDecisionInput
   ) => Promise<EntityMatchDecision>;
-  /**
-   * Publishes a record into a team's, the company's or a chat's memory,
-   * where the person may (GRA-298): retry-safe, as `remember`.
-   */
-  memoriesPublish: (
-    input: MemoriesPublishInput,
-    options: CommandOptions
-  ) => Promise<CommandReceipt>;
-  /**
-   * The chats others share that the person is in now and that a record
-   * can be published into: only those Grasp knows everyone in, most
-   * recently active first, at most `sharedChatsMax`.
-   */
-  sharedChats: () => Promise<SharedChat[]>;
-  /**
-   * Corrects one of the person's own records against the revision read,
-   * keeping its history (GRA-298).
-   */
-  memoriesProposeChange: (
-    input: MemoriesProposeChangeInput,
-    options: ChangeOptions
-  ) => Promise<CommandReceipt>;
-  /** Retires a shared record, by its publisher or an admin (GRA-298). */
-  memoriesRetire: (
-    input: MemoriesRetireInput,
-    options: ChangeOptions
-  ) => Promise<CommandReceipt>;
   /** A document, or one section of it (a search hit's `section`). */
   read: (documentId: string, options?: ReadOptions) => Promise<KnowledgeRead>;
   /** A document's links and backlinks, and for a skill, its files. */

@@ -1,7 +1,5 @@
 import type {
   BrainSourceRef,
-  ChangeOptions,
-  CommandOptions,
   EntitiesListInput,
   EntitySourcesInput,
   EntitySummary,
@@ -9,9 +7,6 @@ import type {
   RelationsExplainInput,
   RelationsExplanation,
   RelationsGetInput,
-  MemoriesProposeChangeInput,
-  MemoriesPublishInput,
-  MemoriesRetireInput,
   CommandReceipt,
   MemoriesGetInput,
   MemoriesLineageInput,
@@ -46,9 +41,6 @@ import {
 import {
   memoriesGet,
   memoriesList,
-  memoriesProposeChange,
-  memoriesPublish,
-  memoriesRetire,
   receiptsGet,
 } from "@grasp-os/brain/memories";
 import { memoriesLineage } from "@grasp-os/brain/memory-lineage";
@@ -85,7 +77,6 @@ import type {
   SaveInput,
   SearchOptions,
   SearchResults,
-  SharedChat,
   SkillCollections,
 } from "@grasp-os/shared/knowledge";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
@@ -110,7 +101,6 @@ import type { SessionCheck } from "../session-check.ts";
 import type { Reader } from "./access.ts";
 import { createCollection, listCollections } from "./collection-rules.ts";
 import { copySkill, skillCollections } from "./grasp-skills.ts";
-import { sharedChatsOf } from "./memory-publish.ts";
 import { personWriter, restoreVersion, saveDocument } from "./person-writes.ts";
 import { brainOf } from "./ports.ts";
 import { uploadErasure } from "./uploads.ts";
@@ -254,46 +244,6 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     return await withPerson(
       this.#check,
       async (person) => await run({ type: "person", person })
-    );
-  }
-
-  /** Publishes a record into a team's, the company's or a chat's memory (GRA-298). */
-  async memoriesPublish(
-    input: MemoriesPublishInput,
-    options: CommandOptions
-  ): Promise<CommandReceipt> {
-    return await this.#asReader(
-      async (reader) =>
-        await memoriesPublish(brainOf(this.#env), reader, input, options)
-    );
-  }
-
-  /** The shared chats the person is in that a record can be published into. */
-  async sharedChats(): Promise<SharedChat[]> {
-    return await this.#asReader(
-      async (reader) => await sharedChatsOf(this.#env, reader)
-    );
-  }
-
-  /** Corrects one of the person's own records, keeping its history (GRA-298). */
-  async memoriesProposeChange(
-    input: MemoriesProposeChangeInput,
-    options: ChangeOptions
-  ): Promise<CommandReceipt> {
-    return await this.#asReader(
-      async (reader) =>
-        await memoriesProposeChange(brainOf(this.#env), reader, input, options)
-    );
-  }
-
-  /** Retires a shared record its publisher or an admin no longer wants used (GRA-298). */
-  async memoriesRetire(
-    input: MemoriesRetireInput,
-    options: ChangeOptions
-  ): Promise<CommandReceipt> {
-    return await this.#asReader(
-      async (reader) =>
-        await memoriesRetire(brainOf(this.#env), reader, input, options)
     );
   }
 

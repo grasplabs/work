@@ -282,9 +282,6 @@ export const rpcParamNames: ParamNames = {
     "memoriesGet": ["input"],
     "memoriesLineage": ["input"],
     "memoriesList": ["input"],
-    "memoriesProposeChange": ["input","options"],
-    "memoriesPublish": ["input","options"],
-    "memoriesRetire": ["input","options"],
     "preparePurge": ["input"],
     "purge": ["input","token","options"],
     "purgeStatus": ["purgeId"],
@@ -296,7 +293,6 @@ export const rpcParamNames: ParamNames = {
     "restoreVersion": ["input"],
     "saveDocument": ["input"],
     "search": ["query","options"],
-    "sharedChats": [],
     "skillCollections": [],
   },
   "MembersRpc": {

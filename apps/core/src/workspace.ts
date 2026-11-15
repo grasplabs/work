@@ -616,7 +616,7 @@ export interface CodeRunOpening {
 
 /**
  * The sources one API call of a code run read from, as it records them:
- * a few collections or a connection, each an identifier.
+ * a connection, by its identifier.
  */
 const sourcesSchema = z.array(identifierSchema).max(auditProvenanceMaxItems);
 
