@@ -507,8 +507,9 @@ const answerOne = async (
       }
     } catch (error) {
       try {
+        // Not counted again: the answer's own failure is (`postIn`).
         await quietly("failed_line", async () => {
-          await postIn(env, platform, thread, say("failed", locale));
+          await thread.post(say("failed", locale));
         })();
         await held();
       } finally {

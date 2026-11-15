@@ -581,7 +581,7 @@ const answerFrom = (seed: number): string => {
       ).join("\n");
     }
     if (kind === "code") {
-      const lines = Array.from({ length: 2 + Math.floor(random() * 300) }, () =>
+      const lines = Array.from({ length: 2 + Math.floor(random() * 900) }, () =>
         pick(["    x = 1", "", "def f():", "\treturn x", "  # 注释 😀"])
       );
       return ["```py", ...lines, "```"].join("\n");
