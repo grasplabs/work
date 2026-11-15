@@ -23,6 +23,7 @@ import { testApp, withFiles } from "./app-definitions.ts";
 import type { TestSource } from "./app-definitions.ts";
 import { commitApp } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
+import { seed } from "./knowledge.ts";
 import {
   appModulesOf,
   kitModulesOf,
@@ -1142,7 +1143,7 @@ describe("page delivery", { timeout: 60_000 }, () => {
     const builder = await personApi("builder");
     const app = await sampleApp(builder);
     const { generation: shown } = await admin.api.dataPolicy.read(app);
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
+    const { id: collectionId } = await seed(admin.api).createCollection({
       name: `Ledger ${crypto.randomUUID()}`,
       access: "everyone",
     });
@@ -1185,7 +1186,7 @@ describe("page delivery", { timeout: 60_000 }, () => {
     const builder = await personApi("builder");
     const user = await personApi("user");
     const app = await sampleApp(builder);
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
+    const { id: collectionId } = await seed(admin.api).createCollection({
       name: `Ledger ${crypto.randomUUID()}`,
       access: "everyone",
     });
@@ -1280,7 +1281,7 @@ describe("page delivery", { timeout: 60_000 }, () => {
         await classifyAs(admin, app, "ordinary");
       })
     );
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
+    const { id: collectionId } = await seed(admin.api).createCollection({
       name: `Ledger ${crypto.randomUUID()}`,
       access: "everyone",
     });

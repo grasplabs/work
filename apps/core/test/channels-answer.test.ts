@@ -7,7 +7,7 @@ import { workspace } from "../src/durable-objects.ts";
 import { codeStep, pausedReply, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
-import { readCollection } from "./knowledge.ts";
+import { readCollection, seed } from "./knowledge.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { signedInApi, unique } from "./sign-in.ts";
@@ -62,11 +62,11 @@ const answersIn = async (conversation: string): Promise<string[]> => {
 describe("a member's question", setUpTime, () => {
   it("is answered in their own Teams chat, with the documents it cites", async () => {
     const admin = await signedInApi(idp, "admin");
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
+    const { id: collectionId } = await seed(admin.api).createCollection({
       name: `Handbook ${unique()}`,
       access: "everyone",
     });
-    const saved = await admin.api.knowledge.saveDocument({
+    const saved = await seed(admin.api).saveDocument({
       collectionId,
       path: "leave.md",
       text: "# Parental leave\n\nParental leave lasts sixteen weeks.",

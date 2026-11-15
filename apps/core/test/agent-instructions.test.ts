@@ -15,7 +15,7 @@ import { allEvents } from "./audit-events.ts";
 import { actingFor } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import { keptAgent, saveInstructions } from "./instruction-saves.ts";
-import { newTeam, storedGrant } from "./knowledge.ts";
+import { newTeam, seed, storedGrant } from "./knowledge.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
 // What a chat's agent reads before each question, and what its answer is
@@ -54,11 +54,11 @@ const manyReadable = async (
 ): Promise<string[]> =>
   await Promise.all(
     Array.from({ length: 40 }, async (_, index) => {
-      const { id } = await admin.api.knowledge.createCollection({
+      const { id } = await seed(admin.api).createCollection({
         name: `Team ${index} ${unique()}`,
         access: "everyone",
       });
-      await admin.api.knowledge.saveDocument({
+      await seed(admin.api).saveDocument({
         collectionId: id,
         path,
         text: text(index),
@@ -376,13 +376,13 @@ describe("a chat's instructions", setUpTime, () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInApi(idp, "user");
     const teamId = await newTeam(admin, [person]);
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
+    const { id: collectionId } = await seed(admin.api).createCollection({
       name: `Payroll ${unique()}`,
       access: "teams",
       teams: [teamId],
       sensitive: true,
     });
-    const skill = await admin.api.knowledge.saveDocument({
+    const skill = await seed(admin.api).saveDocument({
       collectionId,
       path: "pay/SKILL.md",
       text: "---\nname: run-payroll\ndescription: How we run payroll.\n---\n# Steps",

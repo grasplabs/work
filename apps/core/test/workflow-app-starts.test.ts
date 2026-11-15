@@ -48,7 +48,6 @@ import type { OpenStore } from "../src/data-stores.ts";
 import { appHost, workspace } from "../src/durable-objects.ts";
 import { hostFunctionCall } from "../src/function-host.ts";
 import type { HostedApp, Runner } from "../src/function-host.ts";
-import { createCollection } from "../src/knowledge/collection-rules.ts";
 import { defaultMaxAttempts } from "../src/outbox-delivery.ts";
 import type { OutboxConsumer } from "../src/outbox-delivery.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
@@ -76,6 +75,7 @@ import { storeOfNewApp } from "./app-stores.ts";
 import { racingDb, standInBinding, standInLive } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
+import { seed } from "./knowledge.ts";
 import { sleeping, woken } from "./runs.ts";
 import { outcome, unique } from "./sign-in.ts";
 import { applied } from "./store-schemas.ts";
@@ -1361,7 +1361,9 @@ const chatThatRead = async (fx: Fixture) => {
   const { agent } = await agentOf(fx);
   const stub = workspace(env, agent.workspaceId);
   const created = { id: agent.chatId };
-  const handbook = await createCollection(env, fx.admin, {
+  const handbook = await seed({
+    whoami: async () => await Promise.resolve(fx.admin),
+  }).createCollection({
     name: `Handbook ${unique()}`,
     access: "everyone",
   });

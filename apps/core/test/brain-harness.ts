@@ -99,7 +99,12 @@ import {
 import type { BrainSplit, BrainTask } from "./fixtures/brain-tasks.ts";
 import type { Idp } from "./idp.ts";
 import { saveInstructions } from "./instruction-saves.ts";
-import { newTeam, ownCollectionOf, readCollection } from "./knowledge.ts";
+import {
+  newTeam,
+  ownCollectionOf,
+  readCollection,
+  seed as seedKnowledge,
+} from "./knowledge.ts";
 import { answeringProvider } from "./model-provider.ts";
 import type { ProviderReply, SentRequest } from "./model-provider.ts";
 import { spentMicros, usageRows } from "./model-usage.ts";
@@ -539,7 +544,7 @@ export const setUpBrainCompany = async (idp: Idp): Promise<BrainCompany> => {
     brainCollections
   )) {
     // oxlint-disable-next-line no-await-in-loop -- one collection at a time
-    const created = await admin.api.knowledge.createCollection(
+    const created = await seedKnowledge(admin.api).createCollection(
       access.type === "team"
         ? {
             name,
@@ -560,7 +565,7 @@ export const setUpBrainCompany = async (idp: Idp): Promise<BrainCompany> => {
     brainDocuments
   )) {
     // oxlint-disable-next-line no-await-in-loop -- saves in order
-    const saved = await admin.api.knowledge.saveDocument({
+    const saved = await seedKnowledge(admin.api).saveDocument({
       collectionId: held(collections, collection),
       path,
       text,
@@ -589,7 +594,7 @@ export const setUpBrainCompany = async (idp: Idp): Promise<BrainCompany> => {
     // oxlint-disable-next-line no-await-in-loop -- one person at a time
     const personal = await ownCollectionOf(person);
     // oxlint-disable-next-line no-await-in-loop -- one person at a time
-    await person.api.knowledge.saveDocument({
+    await seedKnowledge(person.api).saveDocument({
       collectionId: personal,
       path: "USER.md",
       text: brainMemories[persona],
@@ -640,7 +645,7 @@ export const applyWindow = async (
     // oxlint-disable-next-line no-await-in-loop -- in order
     const text = await textOfUpdate(admin, document.id, update);
     // oxlint-disable-next-line no-await-in-loop -- in order
-    const saved = await admin.api.knowledge.saveDocument({
+    const saved = await seedKnowledge(admin.api).saveDocument({
       collectionId: held(company.collections, collection),
       path,
       text,
@@ -1256,7 +1261,7 @@ const changeState = async (
   }
   const person = company.people[place.persona];
   const personal = await ownCollectionOf(person);
-  await person.api.knowledge.saveDocument({
+  await seedKnowledge(person.api).saveDocument({
     collectionId: personal,
     path: `notes/control-${crypto.randomUUID()}.md`,
     text: "# Control\nChanged during a trial.",

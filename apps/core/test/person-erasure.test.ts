@@ -37,7 +37,7 @@ import { consentCode } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { answering, answeringWith, holdAlarm } from "./interview-link.ts";
 import { holding, rememberAs } from "./knowledge-purge.ts";
-import { ownCollectionOf } from "./knowledge.ts";
+import { ownCollectionOf, seed } from "./knowledge.ts";
 import { runMinuteTasks } from "./maintenance.ts";
 import { onboardingLog } from "./onboarding-log.ts";
 import {
@@ -108,7 +108,7 @@ const emailOf = async (userId: string): Promise<string | undefined> => {
 /** A note `who` keeps in a collection only they read. */
 const noteOf = async (who: Person, text: string) => {
   const personal = await ownCollectionOf(who);
-  return await who.api.knowledge.saveDocument({
+  return await seed(who.api).saveDocument({
     collectionId: personal,
     path: `notes/${crypto.randomUUID().slice(0, 8)}.md`,
     text,
@@ -1174,7 +1174,7 @@ describe("erasing a person", () => {
     // A document of theirs, in a collection only they read, saved twice:
     // two versions, each a payload in R2, with sections in the index.
     const theirs = await noteOf(person, `# Mine\n${marker} wrote this.`);
-    await person.api.knowledge.saveDocument({
+    await seed(person.api).saveDocument({
       collectionId: theirs.collectionId,
       path: theirs.path,
       text: `# Mine\n${marker} wrote this, and more.`,

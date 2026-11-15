@@ -17,6 +17,7 @@ import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { greetingOf } from "./json-workflow-apps.ts";
+import { seed } from "./knowledge.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 import { publishDefinition } from "./workflow-publishing.ts";
 
@@ -595,7 +596,7 @@ describe("a chat's agent asking to start a workflow", setUpTime, () => {
     const chats = await personalChatsOf(person.userId);
     await grantStart(builder, chats.agent.agentId, workflow.id);
     const { chatId, inRun } = await chatOf(chats, person);
-    const { id: handbook } = await admin.api.knowledge.createCollection({
+    const { id: handbook } = await seed(admin.api).createCollection({
       name: `Handbook ${unique()}`,
       access: "everyone",
       sensitive: false,

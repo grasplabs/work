@@ -54,7 +54,7 @@ import {
   distractorReaders,
   distractorTeams,
 } from "./fixtures/brain-distractors.ts";
-import { newTeam } from "./knowledge.ts";
+import { newTeam, seed as seedKnowledge } from "./knowledge.ts";
 import { openRpc } from "./sign-in.ts";
 
 /** Documents saved at once while loading: Knowledge orders their writes. */
@@ -118,7 +118,7 @@ export const loadDistractors = async (
       team.members.map((persona) => ({ userId: people[persona].userId }))
     );
     // oxlint-disable-next-line no-await-in-loop -- one collection at a time
-    const created = await admin.api.knowledge.createCollection({
+    const created = await seedKnowledge(admin.api).createCollection({
       name: team.name,
       description: team.description,
       access: "teams",
@@ -153,7 +153,7 @@ export const loadDistractors = async (
     digest = await chained(digest, document);
     documents += 1;
     batch.push(
-      admin.api.knowledge.saveDocument({
+      seedKnowledge(admin.api).saveDocument({
         collectionId: collectionOf(document.collection),
         path: document.path,
         text: document.text,

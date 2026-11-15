@@ -1,26 +1,17 @@
-import {
-  ensureCollection,
-  readableCollections,
-} from "@grasp-os/brain/collections";
+import { readableCollections } from "@grasp-os/brain/collections";
 import type { CollectionRow } from "@grasp-os/brain/collections";
-import { actorOf } from "@grasp-os/shared/audit";
 import { collectionIdSchema } from "@grasp-os/shared/ids";
-import {
-  collectionInputSchema,
-  knowledgeErrors,
-  readOnlySources,
-} from "@grasp-os/shared/knowledge";
-import type { Collection, CollectionSource } from "@grasp-os/shared/knowledge";
+import { knowledgeErrors, readOnlySources } from "@grasp-os/shared/knowledge";
+import type { Collection } from "@grasp-os/shared/knowledge";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, asc, eq } from "drizzle-orm";
+import { asc } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { organizationId } from "../auth/auth.ts";
-import { collectionTeams, teams } from "../db/core/schema.ts";
-import { inList, statementsWithin } from "../db/d1.ts";
-import { canCreate, canWrite } from "./access.ts";
+import { collectionTeams } from "../db/core/schema.ts";
+import { inList } from "../db/d1.ts";
+import { canWrite } from "./access.ts";
 import type { Reader } from "./access.ts";
-import { portsOf, brainOf } from "./ports.ts";
+import { brainOf } from "./ports.ts";
 
 // Core's rules for Knowledge's collections: who may create and change
 // which, the teams a collection is shared with (core's database), and the
@@ -114,73 +105,4 @@ export const listCollections = async (
       reader.type === "person" && isWritable(env, reader.person, row)
     )
   );
-};
-
-/** The IDs in `teamIds` that aren't teams of the organization. */
-const unknownTeams = async (env: Env, teamIds: string[]): Promise<string[]> => {
-  if (teamIds.length === 0) {
-    return [];
-  }
-  const found = await drizzle(env.DB)
-    .select({ id: teams.id })
-    .from(teams)
-    .where(
-      and(eq(teams.organizationId, organizationId), inList(teams.id, teamIds))
-    );
-  const known = new Set(found.map(({ id }) => id));
-  return teamIds.filter((id) => !known.has(id));
-};
-
-/**
- * Creates a collection `person` owns. People create collections written
- * here; the platform passes the `source` of the collections it fills
- * (uploads, Grasp's own, Apps').
- */
-export const createCollection = async (
-  env: Env,
-  person: Identity,
-  input: unknown,
-  source: CollectionSource = "here"
-): Promise<Collection> => {
-  const {
-    name,
-    description,
-    access,
-    teams: teamIds,
-    sensitive,
-  } = knowledgeErrors.parse("knowledge.invalid", collectionInputSchema, input);
-  if (!canCreate(person, access)) {
-    throw knowledgeErrors.create("knowledge.forbidden");
-  }
-  const unknown = await unknownTeams(env, teamIds);
-  if (unknown.length > 0) {
-    throw knowledgeErrors.create("knowledge.invalid", {
-      issues: unknown.map((id) => `teams: there's no team ${id}`),
-    });
-  }
-  const id = crypto.randomUUID();
-  const row: CollectionRow = {
-    id,
-    name,
-    description,
-    owner: person.userId,
-    access,
-    sensitive,
-    source,
-    createdAt: portsOf(env).clock(),
-  };
-  // The teams first, in core's database: should the collection then fail,
-  // they name a collection nobody has, which nothing reads.
-  const db = drizzle(env.DB);
-  const [first, ...rest] = statementsWithin(teamIds, (part) =>
-    db
-      .insert(collectionTeams)
-      .values(part.map((teamId) => ({ collectionId: row.id, teamId })))
-  );
-  if (first !== undefined) {
-    await db.batch([first, ...rest]);
-  }
-  // A new ID: created now, with its audit event.
-  await ensureCollection(brainOf(env), row, actorOf(person));
-  return toCollection(row, teamIds, isWritable(env, person, row));
 };

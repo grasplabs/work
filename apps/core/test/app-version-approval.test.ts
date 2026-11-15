@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { publishApp } from "./app-definitions.ts";
 import { grantReviewed, reviewedOf } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
+import { seed } from "./knowledge.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
 
 // An App's next version and what an admin granted the App. An approval
@@ -109,7 +110,7 @@ describe("An App's next version", { timeout: 60_000 }, () => {
   // After the identity provider's mock is in place (`mockIdp`).
   beforeEach(async () => {
     const admin = await personApi("admin");
-    ({ id: collectionId } = await admin.api.knowledge.createCollection({
+    ({ id: collectionId } = await seed(admin.api).createCollection({
       name: `Notes ${unique()}`,
       access: "everyone",
     }));

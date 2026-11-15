@@ -1,13 +1,34 @@
+import { ensureCollection } from "@grasp-os/brain/collections";
+import type { CommandReceipt } from "@grasp-os/brain/contract";
+import { writeVersion } from "@grasp-os/brain/documents";
+import {
+  memoriesProposeChange,
+  memoriesPublish,
+} from "@grasp-os/brain/memories";
+import { collections } from "@grasp-os/brain/schema";
+import { actorOf } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import type { CollectionInput, KnowledgeApi } from "@grasp-os/shared/knowledge";
+import { collectionIdSchema } from "@grasp-os/shared/ids";
+import { collectionInputSchema } from "@grasp-os/shared/knowledge";
+import type {
+  Collection,
+  CollectionInput,
+  DocumentSummary,
+  KnowledgeApi,
+} from "@grasp-os/shared/knowledge";
 import type {
   PermissionRequest,
   PermissionSubjectInput,
 } from "@grasp-os/shared/permissions";
+import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { callAuth, unique } from "./sign-in.ts";
+import { collectionTeams } from "../src/db/core/schema.ts";
+import { brainOf } from "../src/knowledge/ports.ts";
+import { callAuth, unique, whoami } from "./sign-in.ts";
 
 const insertsVersion = /^insert into "versions"/iu;
 
@@ -38,17 +59,121 @@ export const knowledgeRacing = (first: () => Promise<void>): D1Database => {
   };
 };
 
+/** Someone signed in: a session's API, or their session's cookie. */
+type Signed = { whoami: () => Promise<Identity> } | { session: string };
+
+/** Who `signed` is, as core knows them. */
+const identityOf = async (signed: Signed): Promise<Identity> =>
+  "whoami" in signed ? await signed.whoami() : await whoami(signed.session);
+
+/** A document's next version, as a test writes one. */
+interface SeededSave {
+  collectionId: string;
+  path: string;
+  text: string;
+  ifVersion: number;
+  message?: string;
+}
+
+/**
+ * Knowledge written as `signed`, the way today's Brain kept it before
+ * nothing in core wrote it any more (GRA-1911): straight through the
+ * package, as content a deployment still holds. No rule of who may write
+ * is checked: only what tests plant.
+ */
+export const seed = (signed: Signed) => ({
+  /** A collection they own, with its teams in core's database. */
+  createCollection: async (input: CollectionInput): Promise<Collection> => {
+    const person = await identityOf(signed);
+    const parsed = collectionInputSchema.parse(input);
+    const row = {
+      id: collectionIdSchema.parse(crypto.randomUUID()),
+      name: parsed.name,
+      description: parsed.description,
+      owner: person.userId,
+      access: parsed.access,
+      sensitive: parsed.sensitive,
+      source: "here" as const,
+      createdAt: new Date(),
+    };
+    if (parsed.teams.length > 0) {
+      await drizzle(env.DB)
+        .insert(collectionTeams)
+        .values(
+          parsed.teams.map((teamId) => ({ collectionId: row.id, teamId }))
+        );
+    }
+    await ensureCollection(brainOf(env), row, actorOf(person));
+    return {
+      ...row,
+      teams: parsed.teams,
+      createdAt: row.createdAt.toISOString(),
+      writable: true,
+    };
+  },
+  /** A document's next version, or its first, by them. */
+  saveDocument: async ({
+    collectionId,
+    path,
+    text,
+    ifVersion,
+    message,
+  }: SeededSave): Promise<DocumentSummary> => {
+    const person = await identityOf(signed);
+    const [collection] = await drizzle(env.KNOWLEDGE)
+      .select()
+      .from(collections)
+      .where(eq(collections.id, collectionId));
+    if (collection === undefined) {
+      throw new Error(`There's no collection ${collectionId} to seed`);
+    }
+    return await writeVersion(
+      brainOf(env),
+      { actor: actorOf(person), userId: person.userId },
+      {
+        collection,
+        path,
+        text,
+        ifVersion,
+        message: message ?? null,
+        restoredFrom: null,
+      }
+    );
+  },
+  /** A record they published into a shared scope, as today's Brain kept one. */
+  memoriesPublish: async (
+    input: unknown,
+    options: unknown
+  ): Promise<CommandReceipt> =>
+    await memoriesPublish(
+      brainOf(env),
+      { type: "person", person: await identityOf(signed) },
+      input,
+      options
+    ),
+  /** A correction of one of their own records, as today's Brain kept one. */
+  memoriesProposeChange: async (
+    input: unknown,
+    options: unknown
+  ): Promise<CommandReceipt> =>
+    await memoriesProposeChange(
+      brainOf(env),
+      { type: "person", person: await identityOf(signed) },
+      input,
+      options
+    ),
+});
+
 /** The name of the collection `ownCollectionOf` keeps a person's notes in. */
 const ownNotes = "Own notes";
 
 /**
- * A collection only `person` reads, made by them through Knowledge as
- * anyone can make one: the one named "Own notes" they made before, or a
+ * A collection only `person` reads, theirs (`seed`): the one named "Own notes" they made before, or a
  * new one. Returns its ID.
  */
 export const ownCollectionOf = async (person: {
   userId: string;
-  api: { knowledge: KnowledgeApi };
+  api: Signed & { knowledge: KnowledgeApi };
 }): Promise<string> => {
   const listed = await person.api.knowledge.listCollections();
   const made = listed.find(
@@ -58,7 +183,7 @@ export const ownCollectionOf = async (person: {
   if (made !== undefined) {
     return made.id;
   }
-  const { id } = await person.api.knowledge.createCollection({
+  const { id } = await seed(person.api).createCollection({
     name: ownNotes,
     access: "me",
   });
@@ -93,17 +218,17 @@ export const newTeam = async (
 
 /** A collection with one document, `note.md`, that links to itself. */
 export const collectionWithNote = async (
-  owner: { knowledge: KnowledgeApi },
+  owner: Signed,
   input: CollectionInput
 ) => {
-  const collection = await owner.knowledge.createCollection(input);
-  const note = await owner.knowledge.saveDocument({
+  const collection = await seed(owner).createCollection(input);
+  const note = await seed(owner).saveDocument({
     collectionId: collection.id,
     path: "note.md",
     text: "# Note\nSee [[note.md]] and [[other.md]].",
     ifVersion: 0,
   });
-  await owner.knowledge.saveDocument({
+  await seed(owner).saveDocument({
     collectionId: collection.id,
     path: "other.md",
     text: "# Other\nBack to [[note.md]].",

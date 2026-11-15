@@ -3,6 +3,7 @@ import { brainErrors } from "@grasp-os/brain/contract";
 import type { MemoryLineage } from "@grasp-os/brain/contract";
 import { memoriesList } from "@grasp-os/brain/memories";
 import { brainMemories } from "@grasp-os/brain/schema";
+import type { CollectionInput } from "@grasp-os/shared/knowledge";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
@@ -12,7 +13,7 @@ import { portsOf } from "../src/knowledge/ports.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { seedMemory } from "./knowledge-purge.ts";
-import { newTeam } from "./knowledge.ts";
+import { newTeam, seed as seedKnowledge } from "./knowledge.ts";
 import { callAuth, signedInApi, unique } from "./sign-in.ts";
 
 // Inspecting a Brain memory record's lineage, and its correction (GRA-298,
@@ -76,13 +77,11 @@ const seed = async (
 };
 
 /** A document holding a note, in a new collection of `owner`'s. */
-const documentIn = async (
-  owner: Person,
-  collection: Parameters<Person["api"]["knowledge"]["createCollection"]>[0]
-) => {
-  const { id: collectionId } =
-    await owner.api.knowledge.createCollection(collection);
-  const { id: documentId } = await owner.api.knowledge.saveDocument({
+const documentIn = async (owner: Person, collection: CollectionInput) => {
+  const { id: collectionId } = await seedKnowledge(owner.api).createCollection(
+    collection
+  );
+  const { id: documentId } = await seedKnowledge(owner.api).saveDocument({
     collectionId,
     path: "note.md",
     text: "# Note\nFloor 3 is quiet.",
@@ -150,13 +149,13 @@ describe("a memory record's lineage", setUpTime, () => {
       )
     );
     const correction = idOf(
-      await ada.api.knowledge.memoriesProposeChange(
+      await seedKnowledge(ada.api).memoriesProposeChange(
         { memoryId: first, statement: "Floor 4 is the quiet one." },
         { idempotencyKey: key(), expectedRevision: 1 }
       )
     );
     const stale = await codeOf(
-      ada.api.knowledge.memoriesProposeChange(
+      seedKnowledge(ada.api).memoriesProposeChange(
         { memoryId: first, statement: "Floor 5." },
         { idempotencyKey: key(), expectedRevision: 1 }
       )
@@ -480,7 +479,7 @@ describe("a memory record's lineage", setUpTime, () => {
     const mark = `m${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
     const publish = async (text: string, restsOnCited: boolean) =>
       idOf(
-        await ada.api.knowledge.memoriesPublish(
+        await seedKnowledge(ada.api).memoriesPublish(
           {
             scope: "team",
             scopeId: both,
@@ -867,7 +866,7 @@ describe(
         )
       );
       const correction = idOf(
-        await ada.api.knowledge.memoriesProposeChange(
+        await seedKnowledge(ada.api).memoriesProposeChange(
           {
             memoryId: first,
             statement: `Desk ${word}, by the window.`,

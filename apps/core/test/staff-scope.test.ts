@@ -12,6 +12,7 @@ import {
   publishedWorkflow,
 } from "./json-workflow-apps.ts";
 import type { Person } from "./json-workflow-apps.ts";
+import { seed } from "./knowledge.ts";
 import { acmeTenant, clientOrigin, signInConfig } from "./sign-in-config.ts";
 import {
   auditedDuring,
@@ -175,7 +176,7 @@ describe("a Grasp staff session, whatever its scope", () => {
       ),
       createApp: await outcome(api.apps.create({ name: "Staff's" })),
       collection: await outcome(
-        api.knowledge.createCollection({ name: "Staff's", access: "everyone" })
+        seed(api).createCollection({ name: "Staff's", access: "everyone" })
       ),
       brain: await outcome(api.brain.addRecords([])),
       page: await outcome(api.pages.open(app)),

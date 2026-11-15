@@ -277,9 +277,9 @@ const storeName = "onboarding";
 /** The deployment's onboarding store. */
 /**
  * The KV key of how often something was erased from what the onboarding
- * holds (`#purged`: the kickoff deleted, a line or statement of an
- * interview removed): what anything reading the kickoff or the interviews
- * to write from them later checks it still finds, or keeps nothing.
+ * holds (`#purged`: the kickoff deleted, `deleteKickoff`): what anything
+ * reading the kickoff or the interviews to write from them later checks
+ * it still finds, or keeps nothing.
  */
 const purgesKey = "purges";
 
@@ -1597,7 +1597,7 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /** Whose interviews are kept. */
-  interviewPeople(): string[] {
+  #interviewPeople(): string[] {
     return this.#db
       .select({ person: interviews.person })
       .from(interviews)
@@ -1610,7 +1610,7 @@ export class Onboarding extends DurableObject<Env> {
    * longer reads as one, as stored (its words are still in it); null when
    * none is kept. Never served otherwise.
    */
-  interviewStored(
+  #interviewStored(
     person: string
   ): { progress: InterviewProgress } | { unreadable: string } | null {
     const [row] = this.#db
@@ -3924,14 +3924,13 @@ export class Onboarding extends DurableObject<Env> {
     return true;
   }
 
-  /** Notes that something was erased from what the onboarding holds (`purgesKey`). */
+  /** Notes that the kickoff was deleted from what the onboarding holds (`purgesKey`). */
   #purged(): void {
     this.ctx.storage.kv.put(purgesKey, this.purgeMark() + 1);
   }
 
   /**
-   * How often something was erased from what the onboarding holds
-   * (`purgesKey`): what a save of the kickoff, or a drawing, takes as it
+   * How often the kickoff was deleted (`purgesKey`): what a save of the kickoff, or a drawing, takes as it
    * begins reading, and must still find as it keeps what it made.
    */
   purgeMark(): number {
@@ -3944,8 +3943,8 @@ export class Onboarding extends DurableObject<Env> {
    * them; the sponsor's answers stay, for they answer the company, not one
    * transcript. Then gives the brain what it holds (kickoff-records.ts).
    * Under the brain lock, as the kickoff's delete is (`deleteKickoff`): a
-   * save whose reading began before something was erased from the
-   * onboarding (`mark`, `purgeMark` as it began) is refused,
+   * save whose reading began before the kickoff was deleted (`mark`,
+   * `purgeMark` as it began) is refused,
    * `kickoff.purged`, so the erased words never come back with it. In the log and the audit log
    * without its words.
    */
@@ -5153,9 +5152,9 @@ export class Onboarding extends DurableObject<Env> {
     });
     this.ctx.storage.transactionSync(() => {
       // Their interview deleted meanwhile, or deleted and begun anew; or
-      // a document it had for context removed meanwhile; or something
-      // erased from what it was drawn from (`purgeMark`): drawn again
-      // without it, as the work is still due.
+      // a document it had for context removed meanwhile; or the kickoff
+      // deleted (`purgeMark`): drawn again without it, as the work is
+      // still due.
       if (this.#stale(began, purges) || this.#anyForgotten(shared)) {
         return;
       }
@@ -5329,8 +5328,8 @@ export class Onboarding extends DurableObject<Env> {
 
   /**
    * Whether what a drawing was drawn from changed since it `began` (an
-   * interview went, or went and began anew) or something was erased from
-   * it since (`purges`, `purgeMark` as it began): then it keeps nothing.
+   * interview went, or went and began anew) or the kickoff was deleted
+   * since (`purges`, `purgeMark` as it began): then it keeps nothing.
    */
   #stale(began: Map<string, string | null>, purges: number): boolean {
     return this.#goneSince(began).length > 0 || this.purgeMark() !== purges;
@@ -6267,7 +6266,7 @@ export class Onboarding extends DurableObject<Env> {
    * drawn takes the map with them: nothing drawn from it is kept.
    */
   async #mapTeam(teamId: string, at: string): Promise<void> {
-    // Before anything is read: whether anything is erased meanwhile.
+    // Before anything is read: whether the kickoff is deleted meanwhile.
     const purges = this.purgeMark();
     const roster = this.#roster();
     const team = roster?.teams.find(({ id }) => id === teamId);
@@ -6319,7 +6318,7 @@ export class Onboarding extends DurableObject<Env> {
       const now = this.#roster();
       const still = now?.teams.find(({ id }) => id === teamId);
       // The lead's interview deleted meanwhile, or deleted and begun anew;
-      // or something erased from what it was drawn from: drawn again.
+      // or the kickoff deleted meanwhile: drawn again.
       if (now === null || still === undefined || this.#stale(began, purges)) {
         return;
       }
@@ -6571,7 +6570,7 @@ export class Onboarding extends DurableObject<Env> {
    * stops on it.
    */
   #held(person: string): InterviewProgress | null {
-    const stored = this.interviewStored(person);
+    const stored = this.#interviewStored(person);
     return stored !== null && "progress" in stored ? stored.progress : null;
   }
 
@@ -6914,7 +6913,7 @@ export class Onboarding extends DurableObject<Env> {
       return 0;
     }
     let erased = 0;
-    for (const person of this.interviewPeople()) {
+    for (const person of this.#interviewPeople()) {
       // Read and written in one transaction: nothing lands between.
       erased += this.ctx.storage.transactionSync(() => {
         const held = this.#storedProgress(person);

@@ -1,7 +1,6 @@
 import type {
   BrainSourceRef,
   ChangeOptions,
-  CommandOptions,
   EntitiesListInput,
   EntitySourcesInput,
   EntitySummary,
@@ -9,8 +8,6 @@ import type {
   RelationsExplainInput,
   RelationsExplanation,
   RelationsGetInput,
-  MemoriesProposeChangeInput,
-  MemoriesPublishInput,
   MemoriesRetireInput,
   CommandReceipt,
   MemoriesGetInput,
@@ -45,8 +42,6 @@ import {
 import {
   memoriesGet,
   memoriesList,
-  memoriesProposeChange,
-  memoriesPublish,
   memoriesRetire,
   receiptsGet,
 } from "@grasp-os/brain/memories";
@@ -58,11 +53,8 @@ import { follow, read } from "@grasp-os/brain/tools";
 import type {
   BacklinkPage,
   Collection,
-  CollectionInput,
-  CopySkillInput,
   DocumentPage,
   DocumentRead,
-  DocumentSummary,
   EntityMatch,
   EntityMatchDecision,
   FollowResult,
@@ -73,11 +65,8 @@ import type {
   KnowledgeRead,
   ListDocumentsOptions,
   ReadOptions,
-  RestoreInput,
-  SaveInput,
   SearchOptions,
   SearchResults,
-  SharedChat,
   SkillCollections,
 } from "@grasp-os/shared/knowledge";
 
@@ -86,10 +75,8 @@ import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
 import type { Reader } from "./access.ts";
 import { catalog } from "./catalog.ts";
-import { createCollection, listCollections } from "./collection-rules.ts";
-import { copySkill, skillCollections } from "./grasp-skills.ts";
-import { sharedChatsOf } from "./memory-publish.ts";
-import { restoreVersion, saveDocument } from "./person-writes.ts";
+import { listCollections } from "./collection-rules.ts";
+import { skillCollections } from "./grasp-skills.ts";
 import { brainOf } from "./ports.ts";
 
 /**
@@ -112,35 +99,6 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     return await withPerson(
       this.#check,
       async (person) => await run({ type: "person", person })
-    );
-  }
-
-  /** Publishes a record into a team's, the company's or a chat's memory (GRA-298). */
-  async memoriesPublish(
-    input: MemoriesPublishInput,
-    options: CommandOptions
-  ): Promise<CommandReceipt> {
-    return await this.#asReader(
-      async (reader) =>
-        await memoriesPublish(brainOf(this.#env), reader, input, options)
-    );
-  }
-
-  /** The shared chats the person is in that a record can be published into. */
-  async sharedChats(): Promise<SharedChat[]> {
-    return await this.#asReader(
-      async (reader) => await sharedChatsOf(this.#env, reader)
-    );
-  }
-
-  /** Corrects one of the person's own records, keeping its history (GRA-298). */
-  async memoriesProposeChange(
-    input: MemoriesProposeChangeInput,
-    options: ChangeOptions
-  ): Promise<CommandReceipt> {
-    return await this.#asReader(
-      async (reader) =>
-        await memoriesProposeChange(brainOf(this.#env), reader, input, options)
     );
   }
 
@@ -228,13 +186,6 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     );
   }
 
-  async createCollection(input: CollectionInput): Promise<Collection> {
-    return await withPerson(
-      this.#check,
-      async (person) => await createCollection(this.#env, person, input)
-    );
-  }
-
   async listDocuments(
     collectionId: string,
     options?: ListDocumentsOptions
@@ -255,13 +206,6 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     );
   }
 
-  async saveDocument(input: SaveInput): Promise<DocumentSummary> {
-    return await withPerson(
-      this.#check,
-      async (person) => await saveDocument(this.#env, person, input)
-    );
-  }
-
   async history(
     documentId: string,
     options?: HistoryOptions
@@ -269,13 +213,6 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     return await this.#asReader(
       async (reader) =>
         await history(brainOf(this.#env), reader, documentId, options)
-    );
-  }
-
-  async restoreVersion(input: RestoreInput): Promise<DocumentSummary> {
-    return await withPerson(
-      this.#check,
-      async (person) => await restoreVersion(this.#env, person, input)
     );
   }
 
@@ -354,13 +291,6 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     return await withPerson(
       this.#check,
       async (person) => await skillCollections(this.#env, person)
-    );
-  }
-
-  async copySkill(input: CopySkillInput): Promise<DocumentSummary> {
-    return await withPerson(
-      this.#check,
-      async (person) => await copySkill(this.#env, person, input)
     );
   }
 }

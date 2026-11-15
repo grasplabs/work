@@ -6,7 +6,7 @@ import { z } from "zod";
 
 import { appHost } from "../src/durable-objects.ts";
 import { requestGranted } from "./apps.ts";
-import { newTeam, readCollection } from "./knowledge.ts";
+import { newTeam, readCollection, seed } from "./knowledge.ts";
 import { apiOf, referenceTo } from "./notes-client-app.ts";
 import {
   mockSessionIdp,
@@ -181,7 +181,7 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     const admin = await personApi("admin");
     const member = await personApi("user");
     const team = await newTeam(admin, [member]);
-    const { id: collection } = await admin.api.knowledge.createCollection({
+    const { id: collection } = await seed(admin.api).createCollection({
       name: `HR ${unique()}`,
       access: "teams",
       teams: [team],

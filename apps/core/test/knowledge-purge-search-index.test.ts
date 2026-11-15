@@ -17,7 +17,7 @@ import {
   watchingPurge,
 } from "./knowledge-purge.ts";
 import type { Person } from "./knowledge-purge.ts";
-import { ownCollectionOf } from "./knowledge.ts";
+import { ownCollectionOf, seed } from "./knowledge.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
 // Purging a person from Knowledge, as their erasure does (person-erasure.ts
@@ -52,7 +52,7 @@ const purgeCounted = async (
  * person's go, and its directory entry, made from its first word, stays.
  */
 const personsWordHeadingAPage = async (admin: Person) => {
-  const handbook = await admin.api.knowledge.createCollection({
+  const handbook = await seed(admin.api).createCollection({
     name: "Handbook",
     access: "everyone",
   });
@@ -88,7 +88,7 @@ const personsWordHeadingAPage = async (admin: Person) => {
 describe("a personal purge's search index", setUpTime, () => {
   it("writes no more to it however large the corpus, though the person's words are everyone's", async () => {
     const admin = await personOf("admin");
-    const handbook = await admin.api.knowledge.createCollection({
+    const handbook = await seed(admin.api).createCollection({
       name: "Handbook",
       access: "everyone",
     });
@@ -165,7 +165,7 @@ describe("a personal purge's search index", setUpTime, () => {
 
   it("rebuilds for a word next to a character it can't fold, and when run again after that fails", async () => {
     const admin = await personOf("admin");
-    const handbook = await admin.api.knowledge.createCollection({
+    const handbook = await seed(admin.api).createCollection({
       name: "Handbook",
       access: "everyone",
     });
@@ -219,7 +219,7 @@ describe("a personal purge's search index", setUpTime, () => {
 
   it("rebuilds when the collection changes while the purge reads it", async () => {
     const admin = await personOf("admin");
-    const handbook = await admin.api.knowledge.createCollection({
+    const handbook = await seed(admin.api).createCollection({
       name: "Handbook",
       access: "everyone",
     });

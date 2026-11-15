@@ -1,4 +1,3 @@
-import type { KnowledgeApi } from "@grasp-os/shared/knowledge";
 import { uploadTypes } from "@grasp-os/shared/uploads";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -7,7 +6,7 @@ import { cleanupsPerPage } from "../src/knowledge/uploads.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { purged } from "./knowledge-purge.ts";
-import { ownCollectionOf } from "./knowledge.ts";
+import { ownCollectionOf, seed } from "./knowledge.ts";
 import { runMinuteTasks } from "./maintenance.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
@@ -87,12 +86,12 @@ const leftUpload = async (
  * ready, its original stored.
  */
 const savedFromUpload = async (
-  person: { userId: string; api: { knowledge: KnowledgeApi } },
+  person: { userId: string; api: Parameters<typeof seed>[0] },
   collectionId: string,
   text: string
 ): Promise<{ uploadId: string; documentId: string; path: string }> => {
   const path = `Offices ${unique()}.xlsx`;
-  const saved = await person.api.knowledge.saveDocument({
+  const saved = await seed(person.api).saveDocument({
     collectionId,
     path,
     text,
@@ -298,7 +297,7 @@ describe("a person's purge of the files they uploaded into Knowledge", () => {
 describe("uploads into Knowledge left behind", () => {
   it("are forgotten by the clock once unchanged for a while, their originals deleted, a failure's recorded cleanup too, and tried again while R2 refuses", async () => {
     const admin = await signedInApi(idp, "admin");
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
+    const { id: collectionId } = await seed(admin.api).createCollection({
       name: `Files ${unique()}`,
       access: "everyone",
     });

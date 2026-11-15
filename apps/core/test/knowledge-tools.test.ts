@@ -18,7 +18,12 @@ import {
   newChat,
 } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
-import { collectionWithNote, newTeam, readCollection } from "./knowledge.ts";
+import {
+  collectionWithNote,
+  newTeam,
+  readCollection,
+  seed,
+} from "./knowledge.ts";
 import {
   auditedDuring,
   openRpc,
@@ -78,7 +83,7 @@ const save = async (
   path: string,
   text: string
 ): Promise<string> => {
-  const { id } = await person.knowledge.saveDocument({
+  const { id } = await seed(person).saveDocument({
     collectionId,
     path,
     text,
@@ -130,7 +135,7 @@ describe("an agent's Knowledge tools", setUpTime, () => {
   it("find one section of a long document and read it, without the rest", async () => {
     const admin = await personOf("admin");
     const agent = newAgent();
-    const { id: collectionId } = await admin.knowledge.createCollection({
+    const { id: collectionId } = await seed(admin).createCollection({
       name: `Handbook ${unique()}`,
       access: "everyone",
     });
@@ -196,7 +201,7 @@ describe("an agent's Knowledge tools", setUpTime, () => {
     const admin = await personOf("admin");
     const agent = newAgent();
     const word = `kwartaal${unique().replaceAll(/\d/gu, "")}`;
-    const { id: collectionId } = await admin.knowledge.createCollection({
+    const { id: collectionId } = await seed(admin).createCollection({
       name: `Reports ${unique()}`,
       access: "everyone",
     });
@@ -248,7 +253,7 @@ describe("an agent's Knowledge tools", setUpTime, () => {
   it("follow a document's links and backlinks, and a skill to its files", async () => {
     const admin = await personOf("admin");
     const agent = newAgent();
-    const { id: collectionId } = await admin.knowledge.createCollection({
+    const { id: collectionId } = await seed(admin).createCollection({
       name: `Skills ${unique()}`,
       access: "everyone",
     });
@@ -354,7 +359,7 @@ describe("an agent's Knowledge tools", setUpTime, () => {
   it("say when a skill has more files than a follow returns", async () => {
     const admin = await personOf("admin");
     const agent = newAgent();
-    const { id: collectionId } = await admin.knowledge.createCollection({
+    const { id: collectionId } = await seed(admin).createCollection({
       name: `Big skill ${unique()}`,
       access: "everyone",
     });
@@ -396,7 +401,7 @@ describe("an agent's Knowledge tools", setUpTime, () => {
   it("say when a document has more backlinks than a follow returns", async () => {
     const admin = await personOf("admin");
     const agent = newAgent();
-    const { id: collectionId } = await admin.knowledge.createCollection({
+    const { id: collectionId } = await seed(admin).createCollection({
       name: `Popular ${unique()}`,
       access: "everyone",
     });
@@ -438,19 +443,19 @@ describe("an agent's Knowledge tools", setUpTime, () => {
     const agent = newAgent();
     const teamId = await newTeam(admin, []);
     const [handbook, payroll, hidden] = await Promise.all([
-      admin.knowledge.createCollection({
+      seed(admin).createCollection({
         name: `Handbook ${unique()}`,
         description: "Policies and how we work.",
         access: "everyone",
       }),
-      admin.knowledge.createCollection({
+      seed(admin).createCollection({
         name: `Payroll ${unique()}`,
         description: "Salaries.",
         access: "teams",
         teams: [teamId],
         sensitive: true,
       }),
-      admin.knowledge.createCollection({
+      seed(admin).createCollection({
         name: `Hidden ${unique()}`,
         access: "everyone",
       }),
@@ -527,7 +532,7 @@ describe("an agent's Knowledge tools", setUpTime, () => {
   it("keep the catalog within its budget, however large the library", async () => {
     const admin = await personOf("admin");
     const agent = newAgent();
-    const { id: collectionId } = await admin.knowledge.createCollection({
+    const { id: collectionId } = await seed(admin).createCollection({
       name: `Library ${unique()}`,
       description: "d".repeat(1024),
       access: "everyone",

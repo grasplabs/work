@@ -10,7 +10,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { brainOf } from "../src/knowledge/ports.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam } from "./knowledge.ts";
+import { newTeam, seed } from "./knowledge.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
 // Entity matches across collections in core (GRA-1080): proposals and
@@ -61,13 +61,13 @@ describe("entity matches for the signed-in person", setUpTime, () => {
     // Reads both sides, but neither decided nor an admin.
     const colleague = await signedInApi(idp, "user");
     const name = `Rosa ${unique()}`;
-    const { id: open } = await admin.api.knowledge.createCollection({
+    const { id: open } = await seed(admin.api).createCollection({
       name: `Sales ${unique()}`,
       access: "everyone",
     });
     // A team's the member isn't in: hidden from them.
     const board = await newTeam(admin, [admin, colleague]);
-    const { id: hidden } = await admin.api.knowledge.createCollection({
+    const { id: hidden } = await seed(admin.api).createCollection({
       name: `Board ${unique()}`,
       access: "teams",
       teams: [board],
@@ -77,7 +77,7 @@ describe("entity matches for the signed-in person", setUpTime, () => {
       [hidden, `# Notes\n${name} joins the board.`],
     ] as const) {
       // oxlint-disable-next-line no-await-in-loop -- one save at a time
-      const saved = await admin.api.knowledge.saveDocument({
+      const saved = await seed(admin.api).saveDocument({
         collectionId,
         path: "note.md",
         text,
@@ -86,7 +86,7 @@ describe("entity matches for the signed-in person", setUpTime, () => {
       // oxlint-disable-next-line no-await-in-loop -- one link at a time
       await linked(saved.id, name);
     }
-    const proof = await admin.api.knowledge.saveDocument({
+    const proof = await seed(admin.api).saveDocument({
       collectionId: hidden,
       path: "proof.md",
       text: "# Proof\nBoth notes are about one person.",

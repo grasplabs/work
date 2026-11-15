@@ -38,7 +38,7 @@ import { buildPages } from "../src/pages.ts";
 import { appOf } from "./app-definitions.ts";
 import { commitApp, grantReviewed, racingDb } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
-import { collectionWithNote, storedGrant } from "./knowledge.ts";
+import { collectionWithNote, seed, storedGrant } from "./knowledge.ts";
 import { fakeProvider, testModel } from "./model-provider.ts";
 import { configuredLimits } from "./quota-limits.ts";
 import { calledAs } from "./sealed-apps.ts";
@@ -544,7 +544,7 @@ describe("the built-in blueprints", () => {
       .first();
     const save = async (person: typeof admin) =>
       await outcome(
-        person.api.knowledge.saveDocument({
+        seed(person.api).saveDocument({
           collectionId: id,
           path: `hello-${unique()}.md`,
           text: "# Hello",

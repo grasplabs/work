@@ -14,7 +14,7 @@ import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { actingFor, collectionIn, envOf } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam, readCollection } from "./knowledge.ts";
+import { newTeam, readCollection, seed } from "./knowledge.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
 // The Brain's recall (knowledge/recall.ts), through the boundaries callers
@@ -69,11 +69,11 @@ const collectionSaying = async (
   access: "everyone" | "me",
   text: string
 ) => {
-  const { id: collectionId } = await owner.knowledge.createCollection({
+  const { id: collectionId } = await seed(owner).createCollection({
     name: `Handbook ${unique()}`,
     access,
   });
-  const document = await owner.knowledge.saveDocument({
+  const document = await seed(owner).saveDocument({
     collectionId,
     path: "onboarding.md",
     text,
@@ -115,7 +115,7 @@ describe("the Brain's recall", setUpTime, () => {
       `# Onboarding\n\n## Owner\nJan owns ${word}.`
     );
     const first = await admin.knowledge.recall({ query: word });
-    await admin.knowledge.saveDocument({
+    await seed(admin).saveDocument({
       collectionId,
       path: "onboarding.md",
       text: `# Onboarding\n\n## Owner\nPriya owns ${word} now.`,
@@ -402,12 +402,12 @@ describe("the Brain's recall", setUpTime, () => {
     const agent = newAgent();
     const word = rareWord();
     const team = await newTeam(admin, [admin]);
-    const { id: collectionId } = await admin.knowledge.createCollection({
+    const { id: collectionId } = await seed(admin).createCollection({
       name: `Team ${unique()}`,
       access: "teams",
       teams: [team],
     });
-    await admin.knowledge.saveDocument({
+    await seed(admin).saveDocument({
       collectionId,
       path: "plan.md",
       text: `# Plan\n${word}`,

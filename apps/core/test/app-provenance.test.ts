@@ -9,7 +9,7 @@ import { sourcesOfApps } from "../src/app-provenance.ts";
 import { mayRead } from "../src/knowledge/access.ts";
 import { outlook, published, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam, readCollection, storedGrant } from "./knowledge.ts";
+import { newTeam, readCollection, seed, storedGrant } from "./knowledge.ts";
 import { mailConnection } from "./mail-connection.ts";
 import {
   auditedDuring,
@@ -73,7 +73,7 @@ const collectionFor = async (
   team: string,
   sensitive = false
 ): Promise<string> => {
-  const { id } = await admin.api.knowledge.createCollection({
+  const { id } = await seed(admin.api).createCollection({
     name: `HR ${unique()}`,
     access: "teams",
     teams: [team],
@@ -136,16 +136,16 @@ describe("who reads a collection the App read", () => {
     const team = await newTeam(admin, [member]);
     // Everyone's, a team's that its owner isn't in, and someone's own.
     const made = await Promise.all([
-      admin.api.knowledge.createCollection({
+      seed(admin.api).createCollection({
         name: `All ${unique()}`,
         access: "everyone",
       }),
-      admin.api.knowledge.createCollection({
+      seed(admin.api).createCollection({
         name: `Team ${unique()}`,
         access: "teams",
         teams: [team],
       }),
-      member.api.knowledge.createCollection({
+      seed(member.api).createCollection({
         name: `Mine ${unique()}`,
         access: "me",
       }),

@@ -25,6 +25,7 @@ import { grantReviewed, outlook, reviewedOf } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { actingFor, connectionIn, envOf, reached } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
+import { seed } from "./knowledge.ts";
 import {
   runMinuteTasks,
   waitingInOutbox,
@@ -456,7 +457,7 @@ describe("permissions", () => {
     await admin.api.permissions.request(outlook(app.appId, "ASKED"));
     const gone = await grant(outlook(app.appId, "GONE"));
     await admin.api.permissions.revoke(gone.id);
-    const policies = await admin.api.knowledge.createCollection({
+    const policies = await seed(admin.api).createCollection({
       name: `Policies ${unique()}`,
       access: "everyone",
     });
@@ -536,7 +537,7 @@ describe("permissions", () => {
   // write): `write` would be granted and give them nothing.
   it("let only an agent write a collection", async () => {
     const admin = await permissionApi("admin");
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
+    const { id: collectionId } = await seed(admin.api).createCollection({
       name: `Notes ${unique()}`,
       access: "everyone",
     });

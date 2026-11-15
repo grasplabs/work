@@ -28,7 +28,12 @@ import {
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { collectionWithNote, newTeam, readCollection } from "./knowledge.ts";
+import {
+  collectionWithNote,
+  newTeam,
+  readCollection,
+  seed,
+} from "./knowledge.ts";
 import { fakeProvider } from "./model-provider.ts";
 import {
   callAuth,
@@ -131,11 +136,11 @@ describe("a chat's Knowledge", setUpTime, () => {
   it("answers a policy question from the document it read, and every read is recorded", async () => {
     const admin = await newAdmin();
     const person = await newPerson();
-    const { id: collectionId } = await admin.knowledge.createCollection({
+    const { id: collectionId } = await seed(admin).createCollection({
       name: `Handbook ${unique()}`,
       access: "everyone",
     });
-    const { id: documentId } = await admin.knowledge.saveDocument({
+    const { id: documentId } = await seed(admin).saveDocument({
       collectionId,
       path: "leave.md",
       text: leave,
@@ -413,29 +418,29 @@ describe("a chat's Knowledge", setUpTime, () => {
   it("cites in an answer only the notes its chat's code was given before it, each once, never one read after it", async () => {
     const admin = await newAdmin();
     const person = await signedInApi(idp, "user");
-    const { id: collectionId } = await admin.knowledge.createCollection({
+    const { id: collectionId } = await seed(admin).createCollection({
       name: `Handbook ${unique()}`,
       access: "everyone",
     });
-    const { id: read } = await admin.knowledge.saveDocument({
+    const { id: read } = await seed(admin).saveDocument({
       collectionId,
       path: "leave.md",
       text: leave,
       ifVersion: 0,
     });
     // In a collection the agent may read, but nothing hands it over.
-    const { id: unread } = await admin.knowledge.saveDocument({
+    const { id: unread } = await seed(admin).saveDocument({
       collectionId,
       path: "travel.md",
       text: "# Travel\n\nBook trains.",
       ifVersion: 0,
     });
     // In a collection the agent was never granted.
-    const { id: hidden } = await admin.knowledge.createCollection({
+    const { id: hidden } = await seed(admin).createCollection({
       name: `Board ${unique()}`,
       access: "everyone",
     });
-    const { id: secret } = await admin.knowledge.saveDocument({
+    const { id: secret } = await seed(admin).saveDocument({
       collectionId: hidden,
       path: "minutes.md",
       text: "# Minutes\n\nLeave stays as it is.",
@@ -529,11 +534,11 @@ describe("a chat's Knowledge", setUpTime, () => {
     const admin = await newAdmin();
     const person = await newPerson();
     const teamId = await newTeam(admin, [person]);
-    const { id: handbook } = await admin.knowledge.createCollection({
+    const { id: handbook } = await seed(admin).createCollection({
       name: `Handbook ${unique()}`,
       access: "everyone",
     });
-    const { id: plans } = await admin.knowledge.createCollection({
+    const { id: plans } = await seed(admin).createCollection({
       name: `Plans ${unique()}`,
       access: "teams",
       teams: [teamId],
@@ -560,7 +565,7 @@ describe("a chat's Knowledge", setUpTime, () => {
         },
       ].map(
         async (document) =>
-          await admin.knowledge.saveDocument({ ...document, ifVersion: 0 })
+          await seed(admin).saveDocument({ ...document, ifVersion: 0 })
       )
     );
     const ids = [leaveDoc?.id, travel?.id, plan?.id, rules?.id];
@@ -646,11 +651,11 @@ describe("a chat's Knowledge", setUpTime, () => {
   it("answers when the documents its answer cites can't be looked up, and the page finds them once they can", async () => {
     const admin = await newAdmin();
     const person = await signedInApi(idp, "user");
-    const { id: collectionId } = await admin.knowledge.createCollection({
+    const { id: collectionId } = await seed(admin).createCollection({
       name: `Handbook ${unique()}`,
       access: "everyone",
     });
-    const { id: documentId } = await admin.knowledge.saveDocument({
+    const { id: documentId } = await seed(admin).saveDocument({
       collectionId,
       path: "leave.md",
       text: leave,
@@ -740,11 +745,11 @@ describe("a chat's Knowledge", setUpTime, () => {
         { name: "Plans", text: `# Route plan\n\nDeparts ${secret}.` },
         { name: "Handbook", text: `# Leave\n\nLeave lasts ${kept}.` },
       ].map(async ({ name, text }) => {
-        const { id: collectionId } = await admin.knowledge.createCollection({
+        const { id: collectionId } = await seed(admin).createCollection({
           name: `${name} ${unique()}`,
           access: "everyone",
         });
-        const { id: documentId } = await admin.knowledge.saveDocument({
+        const { id: documentId } = await seed(admin).saveDocument({
           collectionId,
           path: "doc.md",
           text,
@@ -847,11 +852,11 @@ describe("a chat's Knowledge", setUpTime, () => {
     const admin = await newAdmin();
     const person = await newPerson();
     const secret = `CANARY-${unique()}`;
-    const { id: collectionId } = await admin.knowledge.createCollection({
+    const { id: collectionId } = await seed(admin).createCollection({
       name: `Plans ${unique()}`,
       access: "everyone",
     });
-    const { id: documentId } = await admin.knowledge.saveDocument({
+    const { id: documentId } = await seed(admin).saveDocument({
       collectionId,
       path: "doc.md",
       text: `# Route plan\n\nDeparts ${secret}.`,
@@ -924,7 +929,7 @@ describe("a chat's Knowledge", setUpTime, () => {
     const readSecret = `READ-${unique()}`;
     const searchWord = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
     const foundSecret = `FOUND-${unique()}`;
-    const { id: collectionId } = await admin.knowledge.createCollection({
+    const { id: collectionId } = await seed(admin).createCollection({
       name: `Handbook ${unique()}`,
       access: "everyone",
     });
@@ -937,7 +942,7 @@ describe("a chat's Knowledge", setUpTime, () => {
         },
       ].map(
         async ({ path, text }) =>
-          await admin.knowledge.saveDocument({
+          await seed(admin).saveDocument({
             collectionId,
             path,
             text,
@@ -1005,12 +1010,12 @@ describe("a chat's Knowledge", setUpTime, () => {
     const person = await newPerson();
     const teamId = await newTeam(admin, [person]);
     const secret = `CANARY-${unique()}`;
-    const { id: collectionId } = await admin.knowledge.createCollection({
+    const { id: collectionId } = await seed(admin).createCollection({
       name: `Plans ${unique()}`,
       access: "teams",
       teams: [teamId],
     });
-    const { id: documentId } = await admin.knowledge.saveDocument({
+    const { id: documentId } = await seed(admin).saveDocument({
       collectionId,
       path: "plan.md",
       text: `# Route plan\n\nDeparts ${secret}.`,

@@ -15,6 +15,7 @@ import {
 import {
   newTeam,
   ownCollectionOf,
+  seed,
   storedVersionTexts as versionTexts,
 } from "./knowledge.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
@@ -46,7 +47,7 @@ describe("a personal purge", setUpTime, () => {
     const leaver = await personOf("user");
     const secret = `vanderzwaluw${unique()}`;
     const notes = await ownCollectionOf(leaver);
-    const { id: diary } = await leaver.api.knowledge.createCollection({
+    const { id: diary } = await seed(leaver.api).createCollection({
       name: `Diary ${unique()}`,
       access: "me",
     });
@@ -115,7 +116,7 @@ describe("a personal purge", setUpTime, () => {
       "notes.md",
       `# Notes\nWorking with ${secret}.`
     );
-    const { id: teamCollection } = await admin.api.knowledge.createCollection({
+    const { id: teamCollection } = await seed(admin.api).createCollection({
       name: `Team ${unique()}`,
       access: "teams",
       teams: [team],
@@ -128,7 +129,7 @@ describe("a personal purge", setUpTime, () => {
     );
     // Collections the person made and owns, for others to read too: the
     // company's, not theirs alone.
-    const { id: theirTeams } = await leaver.api.knowledge.createCollection({
+    const { id: theirTeams } = await seed(leaver.api).createCollection({
       name: `Handover ${unique()}`,
       access: "teams",
       teams: [team],
@@ -145,7 +146,7 @@ describe("a personal purge", setUpTime, () => {
       "handover.md",
       `# Handover\n${secret} hands over, done.`
     );
-    const { id: theirEveryone } = await leaver.api.knowledge.createCollection({
+    const { id: theirEveryone } = await seed(leaver.api).createCollection({
       name: `Handbook ${unique()}`,
       access: "everyone",
     });

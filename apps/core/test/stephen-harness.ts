@@ -89,7 +89,7 @@ import type {
 } from "./fixtures/stephen-world.ts";
 import type { Idp } from "./idp.ts";
 import { saveInstructions } from "./instruction-saves.ts";
-import { newTeam, readCollection } from "./knowledge.ts";
+import { newTeam, readCollection, seed } from "./knowledge.ts";
 import { mailControlUrl, mailServerUrl } from "./mail-server.ts";
 import { answeringProvider } from "./model-provider.ts";
 import { acmeTenant, signInConfig } from "./sign-in-config.ts";
@@ -500,7 +500,7 @@ export const setUpStephenCompany = async (
     stephenCollections
   )) {
     // oxlint-disable-next-line no-await-in-loop -- one collection at a time
-    const created = await admin.api.knowledge.createCollection(
+    const created = await seed(admin.api).createCollection(
       team === undefined
         ? { name, description, access: "everyone" }
         : { name, description, access: "teams", teams: [held(teams, team)] }
@@ -509,7 +509,7 @@ export const setUpStephenCompany = async (
   }
   for (const { collection, path, text } of Object.values(stephenDocuments)) {
     // oxlint-disable-next-line no-await-in-loop -- saves in order
-    await admin.api.knowledge.saveDocument({
+    await seed(admin.api).saveDocument({
       collectionId: held(collections, collection),
       path,
       text,

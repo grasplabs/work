@@ -11,6 +11,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { brainOf } from "../src/knowledge/ports.ts";
 import { mockIdp } from "./idp.ts";
 import { purged } from "./knowledge-purge.ts";
+import { seed } from "./knowledge.ts";
 import { runMinuteTasks } from "./maintenance.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
@@ -86,11 +87,11 @@ const holds = async (exportId: string, text: string): Promise<boolean> => {
 
 /** A document of the company's in a collection for everyone, holding `text`. */
 const companyDocument = async (admin: Person, text: string) => {
-  const handbook = await admin.api.knowledge.createCollection({
+  const handbook = await seed(admin.api).createCollection({
     name: `Handbook ${unique()}`,
     access: "everyone",
   });
-  return await admin.api.knowledge.saveDocument({
+  return await seed(admin.api).saveDocument({
     collectionId: handbook.id,
     path: "people.md",
     text,

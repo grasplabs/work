@@ -12,7 +12,7 @@ import { requestGranted } from "./apps.ts";
 import { botConnectorMembersUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { saveInstructions } from "./instruction-saves.ts";
-import { newTeam, readCollection } from "./knowledge.ts";
+import { newTeam, readCollection, seed } from "./knowledge.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { callAuth, signedInApi, unique } from "./sign-in.ts";
@@ -75,24 +75,24 @@ const handbookAndTeamNotes = async () => {
   const admin = await signedInApi(idp, "admin");
   const teamId = await newTeam(admin, []);
   const [handbook, team] = await Promise.all([
-    admin.api.knowledge.createCollection({
+    seed(admin.api).createCollection({
       name: `Handbook ${unique()}`,
       access: "everyone",
     }),
-    admin.api.knowledge.createCollection({
+    seed(admin.api).createCollection({
       name: `Bonus ${unique()}`,
       access: "teams",
       teams: [teamId],
     }),
   ]);
   const [lunch, bonus] = await Promise.all([
-    admin.api.knowledge.saveDocument({
+    seed(admin.api).saveDocument({
       collectionId: handbook.id,
       path: "lunch.md",
       text: "# Lunch\n\nLunch is served at noon.",
       ifVersion: 0,
     }),
-    admin.api.knowledge.saveDocument({
+    seed(admin.api).saveDocument({
       collectionId: team.id,
       path: "bonus.md",
       text: "# Bonus\n\nThe bonus pool is forty thousand.",

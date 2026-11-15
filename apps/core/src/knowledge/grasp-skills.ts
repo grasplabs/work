@@ -1,33 +1,16 @@
-import { allowedFor } from "@grasp-os/brain/authorize";
 import { ensureCollection } from "@grasp-os/brain/collections";
 import type { CollectionRow } from "@grasp-os/brain/collections";
-import {
-  readableDocument,
-  versionText,
-  writeVersion,
-} from "@grasp-os/brain/documents";
 import { collections } from "@grasp-os/brain/schema";
 import { actorOf } from "@grasp-os/shared/audit";
 import { collectionIdSchema } from "@grasp-os/shared/ids";
 import type { CollectionId } from "@grasp-os/shared/ids";
-import {
-  copySkillInputSchema,
-  documentTypeOf,
-  knowledgeErrors,
-} from "@grasp-os/shared/knowledge";
-import type {
-  DocumentSummary,
-  SkillCollections,
-} from "@grasp-os/shared/knowledge";
+import type { SkillCollections } from "@grasp-os/shared/knowledge";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { outboxed } from "../audit-outbox.ts";
-import { requireWritable } from "./collection-rules.ts";
-import { personWriter } from "./person-writes.ts";
-import { portsOf, brainOf } from "./ports.ts";
+import { brainOf } from "./ports.ts";
 
 // Skills in two collections, both in every person's catalog, and in an
 // agent's once it is granted read of each, as for any collection (agents
@@ -109,72 +92,4 @@ export const skillCollections = async (
       : null,
     client: client ? clientSkillsCollectionId : null,
   };
-};
-
-/**
- * Copies the Grasp skill `documentId`, at its current version, into the
- * client's skills at the same path, as `person`, through the save
- * pipeline: only by those who may change the client's skills (admins),
- * and `knowledge.conflict` when that path is taken there already.
- * `knowledge.invalid` for a document that isn't a Grasp skill;
- * `knowledge.not_found` for one `person` can't read. Recorded in the
- * audit log, with the version copied.
- */
-export const copySkill = async (
-  env: Env,
-  person: Identity,
-  input: unknown
-): Promise<DocumentSummary> => {
-  const { documentId } = knowledgeErrors.parse(
-    "knowledge.invalid",
-    copySkillInputSchema,
-    input
-  );
-  const db = drizzle(env.KNOWLEDGE);
-  const { document, collection } = await readableDocument(
-    db,
-    await allowedFor(portsOf(env), { type: "person", person }),
-    documentId
-  );
-  if (
-    collection.id !== graspSkillsCollectionId ||
-    documentTypeOf(document.type) !== "skill"
-  ) {
-    throw knowledgeErrors.create("knowledge.invalid", {
-      issues: ["documentId: not a Grasp skill"],
-    });
-  }
-  const target = await clientSkills(env, person);
-  if (!target) {
-    throw knowledgeErrors.create("knowledge.forbidden");
-  }
-  requireWritable(env, person, target);
-  // Versions never change once written (the Grasp skills are never
-  // purged), so this is the text of the version the document was at when
-  // read, whatever the sync wrote since.
-  const copied = await versionText(
-    brainOf(env),
-    db,
-    document.id,
-    document.currentVersion
-  );
-  if (copied === undefined) {
-    throw knowledgeErrors.create("knowledge.not_found");
-  }
-  return await writeVersion(brainOf(env), personWriter(person), {
-    collection: target,
-    path: document.path,
-    text: copied,
-    ifVersion: 0,
-    message: `Copied from Grasp skills, version ${document.currentVersion}`,
-    restoredFrom: null,
-    also: [
-      outboxed(db, {
-        actor: actorOf(person),
-        action: "knowledge.skill.copied",
-        target: { type: "document", id: document.id },
-        detail: { version: document.currentVersion, collectionId: target.id },
-      }),
-    ],
-  });
 };

@@ -13,7 +13,7 @@ import { emailHashOf, emailKeyVersion } from "../src/erased-people.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
 import { purgeFromKnowledge } from "../src/person-erasure.ts";
 import type { Idp } from "./idp.ts";
-import { ownCollectionOf } from "./knowledge.ts";
+import { ownCollectionOf, seed } from "./knowledge.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
 // What the tests of purging a person from Knowledge share
@@ -221,7 +221,7 @@ export const saveOver = async (
 ) => {
   const { documents } = await person.api.knowledge.listDocuments(collectionId);
   const current = documents.find((document) => document.path === path);
-  return await person.api.knowledge.saveDocument({
+  return await seed(person.api).saveDocument({
     collectionId,
     path,
     text,

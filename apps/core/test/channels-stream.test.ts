@@ -5,7 +5,7 @@ import { codeStep, pausedReply, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { botConnectorStreamsUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
-import { readCollection } from "./knowledge.ts";
+import { readCollection, seed } from "./knowledge.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 import {
@@ -44,11 +44,11 @@ const streamedIn = async (conversation: string) => {
 describe("a member's answer", setUpTime, () => {
   it("streams in order, then ends as the whole answer with its sources", async () => {
     const admin = await signedInApi(idp, "admin");
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
+    const { id: collectionId } = await seed(admin.api).createCollection({
       name: `Handbook ${unique()}`,
       access: "everyone",
     });
-    const saved = await admin.api.knowledge.saveDocument({
+    const saved = await seed(admin.api).saveDocument({
       collectionId,
       path: "leave.md",
       text: "# Parental leave\n\nParental leave lasts sixteen weeks.",

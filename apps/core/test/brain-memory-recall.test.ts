@@ -19,7 +19,7 @@ import type { WorkContext } from "../src/restricted.ts";
 import { requestGranted } from "./apps.ts";
 import { actingFor, newChat } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam } from "./knowledge.ts";
+import { newTeam, seed as seedKnowledge } from "./knowledge.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
 // Recall over the Brain's memory records (GRA-298, slice 3; the threat
@@ -301,7 +301,9 @@ describe("recalling the Brain's memory records", setUpTime, () => {
       scopeId: admin.userId,
       ownerId: admin.userId,
     });
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
+    const { id: collectionId } = await seedKnowledge(
+      admin.api
+    ).createCollection({
       name: `Handbook ${unique()}`,
       access: "everyone",
     });
@@ -337,13 +339,15 @@ describe("recalling the Brain's memory records", setUpTime, () => {
     const ben = await signedInApi(idp, "user");
     const adaOnly = await newTeam(admin, [ada]);
     const agent = await agentWithBrain(admin);
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
+    const { id: collectionId } = await seedKnowledge(
+      admin.api
+    ).createCollection({
       name: `Salaries ${unique()}`,
       access: "teams",
       teams: [adaOnly],
       sensitive: true,
     });
-    const { id: documentId } = await admin.api.knowledge.saveDocument({
+    const { id: documentId } = await seedKnowledge(admin.api).saveDocument({
       collectionId,
       path: "note.md",
       text: "# Note\nBands are reviewed in March.",
@@ -487,11 +491,13 @@ describe("recalling the Brain's memory records", setUpTime, () => {
   it("takes sections and records in turn within the budget, and says when it cut", async () => {
     const admin = await signedInApi(idp, "admin");
     const word = rareWord();
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
+    const { id: collectionId } = await seedKnowledge(
+      admin.api
+    ).createCollection({
       name: `Handbook ${unique()}`,
       access: "everyone",
     });
-    await admin.api.knowledge.saveDocument({
+    await seedKnowledge(admin.api).saveDocument({
       collectionId,
       path: "a.md",
       text: `# A\n${word} in a section.`,

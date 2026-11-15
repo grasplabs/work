@@ -487,7 +487,3 @@ export const canWrite = (
   collection.access !== "everyone" ||
   collection.owner === person.userId ||
   person.role === "admin";
-
-/** Whether `person` may create a collection with `access`. */
-export const canCreate = (person: Identity, access: string): boolean =>
-  access === "me" || person.role === "admin";

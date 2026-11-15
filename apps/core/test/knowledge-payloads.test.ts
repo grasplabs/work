@@ -1,19 +1,14 @@
-import { readableCollection } from "@grasp-os/brain/collections";
-import { writeVersion } from "@grasp-os/brain/documents";
 import { pendingGraceMs } from "@grasp-os/brain/payloads";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import type { CollectionInput, KnowledgeApi } from "@grasp-os/shared/knowledge";
 import { env } from "cloudflare:workers";
-import { sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { personWriter } from "../src/knowledge/person-writes.ts";
-import { brainOf } from "../src/knowledge/ports.ts";
 import { mockIdp } from "./idp.ts";
+import { seed } from "./knowledge.ts";
 import { runMinuteTasks } from "./maintenance.ts";
-import { signedInApi, unique, whoami } from "./sign-in.ts";
+import { signedInApi, unique } from "./sign-in.ts";
 
 // Each version's text is an immutable object in the Brain bucket, through
 // the API people use: what the bucket holds, what a read checks, and what
@@ -24,7 +19,7 @@ const idp = mockIdp();
 const knowledgeOf = async () => {
   const person = await signedInApi(idp, "admin");
   const api: KnowledgeApi = person.api.knowledge;
-  return { ...person, api };
+  return { ...person, api, seeded: seed(person.api) };
 };
 
 const shared = (): CollectionInput => ({
@@ -57,16 +52,6 @@ const statesOf = async (text: string): Promise<string[]> => {
   return rows.map(({ state }) => state);
 };
 
-/** The text of a document's version (its current one by default). */
-const readText = async (
-  api: KnowledgeApi,
-  documentId: string,
-  version?: number
-): Promise<string> => {
-  const { version: read } = await api.getDocument(documentId, version);
-  return read.text;
-};
-
 /** The IDs of a collection's documents. */
 const documentIdsIn = async (
   api: KnowledgeApi,
@@ -88,12 +73,6 @@ const objectsOf = async (text: string): Promise<string[]> => {
 const objectCount = async (text: string): Promise<number> => {
   const keys = await objectsOf(text);
   return keys.length;
-};
-
-/** The text of the object `key`, or undefined when there's none. */
-const storedText = async (key: string): Promise<string | undefined> => {
-  const object = await env.BRAIN_OBJECTS.get(key);
-  return await object?.text();
 };
 
 /** The code a promise was refused with. */
@@ -159,147 +138,18 @@ const afterGrace = async (): Promise<void> => {
 };
 
 describe("storing versions' texts", () => {
-  it("keeps each version's exact text in R2, under its hash, and lists without reading any", async () => {
-    const { api } = await knowledgeOf();
-    const { id: collectionId } = await api.createCollection(shared());
-    const v1 = textOf(`First${unique()}`);
-    const v2 = textOf(`Second${unique()}`);
-    const saved = await api.saveDocument({
-      collectionId,
-      path: "policy.md",
-      text: v1,
-      ifVersion: 0,
-    });
-    await api.saveDocument({
-      collectionId,
-      path: "policy.md",
-      text: v2,
-      ifVersion: 1,
-    });
-
-    const reads = vi.spyOn(env.BRAIN_OBJECTS, "get");
-    let listingReads: number;
-    try {
-      await api.listDocuments(collectionId);
-      await api.history(saved.id);
-      listingReads = reads.mock.calls.length;
-    } finally {
-      reads.mockRestore();
-    }
-    const { versions } = await api.history(saved.id);
-    const { version: earlier } = await api.getDocument(saved.id, 1);
-    const { version: current } = await api.getDocument(saved.id);
-    const [row] = await rowsOf(v1);
-
-    expect({
-      listingReads,
-      history: versions.map(({ number, sha256 }) => ({ number, sha256 })),
-      earlier: [earlier.text, earlier.sha256],
-      current: [current.text, current.sha256],
-      row: row?.state,
-      stored: await storedText(row?.key ?? ""),
-    }).toStrictEqual({
-      listingReads: 0,
-      history: [
-        { number: 2, sha256: await sha256Hex(v2) },
-        { number: 1, sha256: await sha256Hex(v1) },
-      ],
-      earlier: [v1, await sha256Hex(v1)],
-      current: [v2, await sha256Hex(v2)],
-      row: "committed",
-      stored: v1,
-    });
-  });
-
-  it("stores identical texts once, however many documents and versions hold them", async () => {
-    const { api } = await knowledgeOf();
-    const { id: collectionId } = await api.createCollection(shared());
-    const text = textOf(`Same${unique()}`);
-    const one = await api.saveDocument({
-      collectionId,
-      path: "one.md",
-      text,
-      ifVersion: 0,
-    });
-    await api.saveDocument({
-      collectionId,
-      path: "two.md",
-      text,
-      ifVersion: 0,
-    });
-    await api.restoreVersion({ documentId: one.id, version: 1, ifVersion: 1 });
-
-    expect({
-      rows: await statesOf(text),
-      objects: await objectCount(text),
-      restored: await readText(api, one.id),
-    }).toStrictEqual({ rows: ["committed"], objects: 1, restored: text });
-  });
-
-  it("never shares a payload across collections, so a save can't tell what exists where its writer can't read", async () => {
-    const { api } = await knowledgeOf();
-    const first = await api.createCollection(shared());
-    const second = await api.createCollection(shared());
-    const text = textOf(`Elsewhere${unique()}`);
-    for (const { id: collectionId } of [first, second]) {
-      // oxlint-disable-next-line no-await-in-loop -- one collection at a time
-      await api.saveDocument({
-        collectionId,
-        path: "same.md",
-        text,
-        ifVersion: 0,
-      });
-    }
-
-    expect({
-      rows: await statesOf(text),
-      objects: await objectCount(text),
-    }).toStrictEqual({ rows: ["committed", "committed"], objects: 2 });
-  });
-
-  it("uploads nothing for a save its last check refuses", async () => {
-    const person = await knowledgeOf();
-    const { id: collectionId } = await person.api.createCollection(shared());
-    const text = textOf(`Refused${unique()}`);
-    const identity = await whoami(person.session);
-    const collection = await readableCollection(
-      drizzle(env.KNOWLEDGE),
-      sql`1 = 1`,
-      collectionId
-    );
-    const outcome = await settled(
-      writeVersion(brainOf(env), personWriter(identity), {
-        collection,
-        path: "refused.md",
-        text,
-        ifVersion: 0,
-        message: null,
-        restoredFrom: null,
-        lastCheck: async () => {
-          await Promise.reject(new Error("context restricted"));
-        },
-      })
-    );
-
-    expect({
-      outcome,
-      rows: await rowsOf(text),
-      objects: await objectCount(text),
-    }).toStrictEqual({ outcome: "refused", rows: [], objects: 0 });
-  });
-
   it("refuses a version whose object is missing or isn't its text, and serves nothing of it", async () => {
-    const { api } = await knowledgeOf();
-    const { id: collectionId } = await api.createCollection(shared());
+    const { api, seeded } = await knowledgeOf();
+    const { id: collectionId } = await seeded.createCollection(shared());
     const tampered = textOf(`Tampered${unique()}`);
     const missing = textOf(`Missing${unique()}`);
-    const first = await api.saveDocument({
+    const first = await seeded.saveDocument({
       collectionId,
       path: "tampered.md",
       text: tampered,
       ifVersion: 0,
     });
-    const second = await api.saveDocument({
+    const second = await seeded.saveDocument({
       collectionId,
       path: "missing.md",
       text: missing,
@@ -314,14 +164,10 @@ describe("storing versions' texts", () => {
     expect({
       tampered: await codeOf(api.getDocument(first.id)),
       missing: await codeOf(api.getDocument(second.id)),
-      restore: await codeOf(
-        api.restoreVersion({ documentId: first.id, version: 1, ifVersion: 1 })
-      ),
       history: versions.length,
     }).toStrictEqual({
       tampered: "knowledge.unavailable",
       missing: "knowledge.unavailable",
-      restore: "knowledge.unavailable",
       history: 1,
     });
   });
@@ -329,8 +175,8 @@ describe("storing versions' texts", () => {
 
 describe("crashes and races", () => {
   it("saves nothing when the upload fails, and collects what it staged", async () => {
-    const { api } = await knowledgeOf();
-    const { id: collectionId } = await api.createCollection(shared());
+    const { api, seeded } = await knowledgeOf();
+    const { id: collectionId } = await seeded.createCollection(shared());
     const text = textOf(`Upload${unique()}`);
     const down = vi
       .spyOn(env.BRAIN_OBJECTS, "put")
@@ -338,7 +184,7 @@ describe("crashes and races", () => {
     let outcome: string;
     try {
       outcome = await settled(
-        api.saveDocument({
+        seeded.saveDocument({
           collectionId,
           path: "policy.md",
           text,
@@ -366,11 +212,11 @@ describe("crashes and races", () => {
   });
 
   it("collects an object uploaded by a save that crashed before its batch, and keeps a referenced one", async () => {
-    const { api } = await knowledgeOf();
-    const { id: collectionId } = await api.createCollection(shared());
+    const { seeded } = await knowledgeOf();
+    const { id: collectionId } = await seeded.createCollection(shared());
     const kept = textOf(`Kept${unique()}`);
     const lost = textOf(`Lost${unique()}`);
-    await api.saveDocument({
+    await seeded.saveDocument({
       collectionId,
       path: "kept.md",
       text: kept,
@@ -384,7 +230,7 @@ describe("crashes and races", () => {
     let outcome: string;
     try {
       outcome = await settled(
-        api.saveDocument({
+        seeded.saveDocument({
           collectionId,
           path: "lost.md",
           text: lost,
@@ -415,103 +261,9 @@ describe("crashes and races", () => {
     });
   });
 
-  it("publishes a save whose answer was lost exactly once, and a retry finds it saved", async () => {
-    const { api } = await knowledgeOf();
-    const { id: collectionId } = await api.createCollection(shared());
-    const text = textOf(`Lost answer${unique()}`);
-    const restore = aroundVersionBatch({
-      after: () => {
-        throw new Error("Network connection lost");
-      },
-    });
-    let outcome: string;
-    try {
-      outcome = await settled(
-        api.saveDocument({
-          collectionId,
-          path: "policy.md",
-          text,
-          ifVersion: 0,
-        })
-      );
-    } finally {
-      restore();
-    }
-    const retry = await codeOf(
-      api.saveDocument({ collectionId, path: "policy.md", text, ifVersion: 0 })
-    );
-    const [documentId = ""] = await documentIdsIn(api, collectionId);
-    await afterGrace();
-
-    expect({
-      outcome,
-      retry,
-      read: await readText(api, documentId),
-      rows: await statesOf(text),
-      objects: await objectCount(text),
-    }).toStrictEqual({
-      outcome: "refused",
-      retry: "knowledge.conflict",
-      read: text,
-      rows: ["committed"],
-      objects: 1,
-    });
-  });
-
-  it("commits one payload when two saves upload the same new text at once", async () => {
-    const { api } = await knowledgeOf();
-    const { id: collectionId } = await api.createCollection(shared());
-    const text = textOf(`Race${unique()}`);
-    // The other save uploads its own object, after this one staged, and
-    // commits first.
-    const restore = aroundVersionBatch({
-      before: async () => {
-        restore();
-        await api.saveDocument({
-          collectionId,
-          path: "other.md",
-          text,
-          ifVersion: 0,
-        });
-      },
-    });
-    let version: number;
-    try {
-      const saved = await api.saveDocument({
-        collectionId,
-        path: "this.md",
-        text,
-        ifVersion: 0,
-      });
-      version = saved.currentVersion;
-    } finally {
-      restore();
-    }
-    const raced = await statesOf(text);
-    await afterGrace();
-    const ids = await documentIdsIn(api, collectionId);
-    const reads = await Promise.all(
-      ids.map(async (id) => await readText(api, id))
-    );
-
-    expect({
-      version,
-      raced: raced.toSorted(),
-      reads,
-      rows: await statesOf(text),
-      objects: await objectCount(text),
-    }).toStrictEqual({
-      version: 1,
-      raced: ["committed", "pending"],
-      reads: [text, text],
-      rows: ["committed"],
-      objects: 1,
-    });
-  });
-
   it("finishes collecting after a delete that failed part way", async () => {
-    const { api } = await knowledgeOf();
-    const { id: collectionId } = await api.createCollection(shared());
+    const { seeded } = await knowledgeOf();
+    const { id: collectionId } = await seeded.createCollection(shared());
     const text = textOf(`Interrupted${unique()}`);
     // The object is stored, but the answer saying so is lost.
     const realPut = env.BRAIN_OBJECTS.put.bind(env.BRAIN_OBJECTS);
@@ -526,7 +278,7 @@ describe("crashes and races", () => {
       .mockRejectedValue(new Error("R2 unavailable"));
     try {
       await settled(
-        api.saveDocument({
+        seeded.saveDocument({
           collectionId,
           path: "policy.md",
           text,
