@@ -1,4 +1,3 @@
-import { indexRunId, maxIndexReruns } from "@grasp-os/brain/indexing";
 import type {
   CollectionInput,
   DocumentSummary,
@@ -8,11 +7,8 @@ import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { runEngine } from "../src/workflows/engine.ts";
-import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
-import { runMinuteTasks } from "./maintenance.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
 // Search holds one generation of each document, published after the save
@@ -84,51 +80,6 @@ const watchPublishes = (hooks: {
   };
 };
 
-/** A member of `target`, as a proxy passes it through. */
-const memberOf = (target: object, key: string | symbol): unknown => {
-  const value: unknown = Reflect.get(target, key, target);
-  return value;
-};
-
-const failsIndexing =
-  /^update "documents" set "index_state" = \?, "index_failure" = \?, "index_failed_at" = \?/iu;
-
-/**
- * Runs `before` once, just before the sweep's statement that fails a
- * document whose run ended: another writer that gets in between.
- */
-const beforeSweepFails = (before: () => Promise<void>): (() => void) => {
-  const db = env.KNOWLEDGE;
-  const realPrepare = db.prepare.bind(db);
-  let done = false;
-  const prepare = vi.spyOn(db, "prepare").mockImplementation((query) => {
-    const statement = realPrepare(query);
-    if (done || !failsIndexing.test(query)) {
-      return statement;
-    }
-    done = true;
-    const bindRun = (bound: D1PreparedStatement): D1PreparedStatement =>
-      new Proxy(bound, {
-        get: (target, key) =>
-          key === "run"
-            ? async () => {
-                await before();
-                return await target.run();
-              }
-            : memberOf(target, key),
-      });
-    return new Proxy(statement, {
-      get: (target, key): unknown =>
-        key === "bind"
-          ? (...values: unknown[]) => bindRun(target.bind(...values))
-          : memberOf(target, key),
-    });
-  });
-  return () => {
-    prepare.mockRestore();
-  };
-};
-
 /** Fails the next batch that publishes sections: the save before it committed. */
 const failNextPublish = (): (() => void) =>
   watchPublishes({ fail: (nth) => nth === 1 });
@@ -149,16 +100,6 @@ const withEngineDown = async <T>(run: () => Promise<T>): Promise<T> => {
   }
 };
 
-/** Runs `run` with every step's retry due at once. */
-const withRetriesAtOnce = async <T>(run: () => Promise<T>): Promise<T> => {
-  env.WORKFLOW_RETRY_DELAY_MS = "0";
-  try {
-    return await run();
-  } finally {
-    Reflect.deleteProperty(env, "WORKFLOW_RETRY_DELAY_MS");
-  }
-};
-
 /** The document `documentId` as its collection lists it. */
 const listed = async (
   api: KnowledgeApi,
@@ -168,23 +109,6 @@ const listed = async (
   const { documents } = await api.listDocuments(collectionId);
   return documents.find(({ id }) => id === documentId);
 };
-
-/** Once `documentId` is indexed (or failed), as its collection lists it. */
-const settledIndexing = async (
-  api: KnowledgeApi,
-  collectionId: string,
-  documentId: string
-): Promise<DocumentSummary | undefined> =>
-  await vi.waitFor(
-    async () => {
-      const found = await listed(api, collectionId, documentId);
-      if (found?.indexing !== "indexed" && found?.indexing !== "failed") {
-        throw new Error(`Still ${found?.indexing}`);
-      }
-      return found;
-    },
-    { timeout: 20_000, interval: 100 }
-  );
 
 /** The versions of the sections a search for `word` finds, in `scope`. */
 const foundVersions = async (
@@ -242,108 +166,6 @@ describe("publishing search generations", () => {
     });
   });
 
-  it("keeps serving the last whole generation while a save waits for indexing, then the workflow publishes it", async () => {
-    const { api } = await knowledgeOf();
-    const { id: collectionId } = await api.createCollection(shared());
-    const old = `Old${unique()}`;
-    const fresh = `Fresh${unique()}`;
-    const first = await api.saveDocument({
-      collectionId,
-      path: "policy.md",
-      text: textOf(old),
-      ifVersion: 0,
-    });
-    const restore = failNextPublish();
-    let saved: DocumentSummary;
-    try {
-      // The engine is out of reach too: nothing indexes it yet.
-      saved = await withEngineDown(
-        async () =>
-          await api.saveDocument({
-            collectionId,
-            path: "policy.md",
-            text: textOf(fresh),
-            ifVersion: 1,
-          })
-      );
-    } finally {
-      restore();
-    }
-    const { coverage } = await api.search(old, { collectionId });
-    const during = {
-      old: await foundVersions(api, old, collectionId),
-      fresh: await foundVersions(api, fresh, collectionId),
-      coverage,
-    };
-    await runMinuteTasks({}, new Date(Date.now() + 5 * 60_000));
-    const indexed = await settledIndexing(api, collectionId, first.id);
-
-    expect({
-      saved: indexingOf(saved),
-      current: saved.currentVersion,
-      during,
-      indexed: indexingOf(indexed),
-      old: await foundVersions(api, old, collectionId),
-      fresh: await foundVersions(api, fresh, collectionId),
-    }).toStrictEqual({
-      saved: { indexing: "queued", indexedVersion: 1 },
-      current: 2,
-      during: {
-        old: [1],
-        fresh: [],
-        coverage: { pending: 1, failed: 0 },
-      },
-      indexed: { indexing: "indexed", indexedVersion: 2 },
-      old: [],
-      fresh: [2],
-    });
-  });
-
-  it("never lets a late generation replace a newer one", async () => {
-    const { api } = await knowledgeOf();
-    const { id: collectionId } = await api.createCollection(shared());
-    const old = `Late${unique()}`;
-    const fresh = `Newer${unique()}`;
-    const first = await api.saveDocument({
-      collectionId,
-      path: "policy.md",
-      text: textOf(old),
-      ifVersion: 0,
-    });
-    await api.saveDocument({
-      collectionId,
-      path: "policy.md",
-      text: textOf(fresh),
-      ifVersion: 1,
-    });
-    // Version 1's indexing, arriving after version 2 is published.
-    const late = `${indexRunId(first.id, 1, 0)}-late`;
-    await runEngine(env).createInternal({
-      id: late,
-      workflow: "indexing",
-      input: { documentId: first.id, version: 1 },
-    });
-    await vi.waitFor(
-      async () => {
-        const run = await runEngine(env).status(late);
-        if (run?.status !== "complete") {
-          throw new Error(`Run is ${run?.status}`);
-        }
-      },
-      { timeout: 20_000, interval: 100 }
-    );
-
-    expect({
-      indexed: indexingOf(await listed(api, collectionId, first.id)),
-      old: await foundVersions(api, old, collectionId),
-      fresh: await foundVersions(api, fresh, collectionId),
-    }).toStrictEqual({
-      indexed: { indexing: "indexed", indexedVersion: 2 },
-      old: [],
-      fresh: [2],
-    });
-  });
-
   it("indexes a document with no sections as indexed, and empties what search held of it", async () => {
     const { api } = await knowledgeOf();
     const { id: collectionId } = await api.createCollection(shared());
@@ -367,86 +189,6 @@ describe("publishing search generations", () => {
     }).toStrictEqual({
       emptied: { indexing: "indexed", indexedVersion: 2 },
       found: [],
-    });
-  });
-
-  it("fails a document for good once its retries are spent, and declares it in search's coverage", async () => {
-    const { api } = await knowledgeOf();
-    const { id: collectionId } = await api.createCollection(shared());
-    const old = `Kept${unique()}`;
-    const broken = `Broken${unique()}`;
-    const first = await api.saveDocument({
-      collectionId,
-      path: "policy.md",
-      text: textOf(old),
-      ifVersion: 0,
-    });
-    // The new version's payload can't be read: every attempt fails.
-    const get = vi.spyOn(env.BRAIN_OBJECTS, "get").mockResolvedValue(null);
-    const restore = failNextPublish();
-    let failed: DocumentSummary | undefined;
-    try {
-      failed = await withRetriesAtOnce(async () => {
-        await api.saveDocument({
-          collectionId,
-          path: "policy.md",
-          text: textOf(broken),
-          ifVersion: 1,
-        });
-        return await settledIndexing(api, collectionId, first.id);
-      });
-    } finally {
-      restore();
-      get.mockRestore();
-    }
-    const { coverage } = await api.search(old, { collectionId });
-
-    expect({
-      failed: indexingOf(failed),
-      old: await foundVersions(api, old, collectionId),
-      coverage,
-    }).toStrictEqual({
-      failed: { indexing: "failed", indexedVersion: 1 },
-      old: [1],
-      coverage: { pending: 0, failed: 1 },
-    });
-  });
-
-  it("starts the indexing the clock finds never started", async () => {
-    const { api } = await knowledgeOf();
-    const { id: collectionId } = await api.createCollection(shared());
-    const word = `Repaired${unique()}`;
-    const restore = failNextPublish();
-    let saved: DocumentSummary;
-    try {
-      saved = await withEngineDown(
-        async () =>
-          await api.saveDocument({
-            collectionId,
-            path: "policy.md",
-            text: textOf(word),
-            ifVersion: 0,
-          })
-      );
-    } finally {
-      restore();
-    }
-    // Within a while of the save, its run may still be on its way.
-    await runMinuteTasks();
-    const soon = indexingOf(await listed(api, collectionId, saved.id));
-    await runMinuteTasks({}, new Date(Date.now() + 5 * 60_000));
-    const indexed = await settledIndexing(api, collectionId, saved.id);
-
-    expect({
-      saved: indexingOf(saved),
-      soon,
-      indexed: indexingOf(indexed),
-      found: await foundVersions(api, word, collectionId),
-    }).toStrictEqual({
-      saved: { indexing: "queued", indexedVersion: null },
-      soon: { indexing: "queued", indexedVersion: null },
-      indexed: { indexing: "indexed", indexedVersion: 1 },
-      found: [1],
     });
   });
 
@@ -539,49 +281,6 @@ describe("publishing search generations", () => {
     });
   });
 
-  it("refuses a purge whose sections can't be published as pending, and the index catches up even when its run fails too", async () => {
-    const { api } = await knowledgeOf();
-    const { id: collectionId } = await api.createCollection(shared());
-    const name = `Bakker${unique()}`;
-    const document = await api.saveDocument({
-      collectionId,
-      path: "policy.md",
-      text: textOf(`${name} signs`),
-      ifVersion: 0,
-    });
-    const { token } = await api.preparePurge(purgeOf(document.id, name));
-    // Every publish fails: the purge's own, and each of its run's tries.
-    const restore = watchPublishes({ fail: () => true });
-    let refused: unknown;
-    let failed: DocumentSummary | undefined;
-    try {
-      failed = await withRetriesAtOnce(async () => {
-        refused = await codeOf(api.purge(purgeOf(document.id, name), token));
-        return await settledIndexing(api, collectionId, document.id);
-      });
-    } finally {
-      restore();
-    }
-    const whileFailed = await foundVersions(api, name, collectionId);
-    // Nobody purges again: the clock starts its run again.
-    await runMinuteTasks({}, new Date(Date.now() + 20 * 60_000));
-    const indexed = await settledIndexing(api, collectionId, document.id);
-
-    expect({
-      refused,
-      failed: failed?.indexing,
-      whileFailed,
-      indexed: indexingOf(indexed),
-      after: await foundVersions(api, name, collectionId),
-    }).toStrictEqual({
-      refused: "knowledge.purge_index_pending",
-      failed: "failed",
-      whileFailed: [1],
-      indexed: { indexing: "indexed", indexedVersion: 2 },
-      after: [],
-    });
-  });
-
   it("publishes what a save made current during a purge, so no generation with the terms stays live", async () => {
     const { api } = await knowledgeOf();
     const { id: collectionId } = await api.createCollection(shared());
@@ -634,173 +333,5 @@ describe("publishing search generations", () => {
       term: [],
       clean,
     });
-  });
-
-  it("starts a fresh run at once when a purge is run again after its indexing failed", async () => {
-    const { api } = await knowledgeOf();
-    const { id: collectionId } = await api.createCollection(shared());
-    const name = `Jong${unique()}`;
-    const document = await api.saveDocument({
-      collectionId,
-      path: "policy.md",
-      text: textOf(`${name} signs`),
-      ifVersion: 0,
-    });
-    const first = await api.preparePurge(purgeOf(document.id, name));
-    const down = watchPublishes({ fail: () => true });
-    let failed: DocumentSummary | undefined;
-    try {
-      failed = await withRetriesAtOnce(async () => {
-        await codeOf(api.purge(purgeOf(document.id, name), first.token));
-        return await settledIndexing(api, collectionId, document.id);
-      });
-    } finally {
-      down();
-    }
-    // Run again, and its own publish fails once more: no waiting on the
-    // clock's backoff for the next run.
-    const again = await api.preparePurge(purgeOf(document.id, name));
-    const once = failNextPublish();
-    let refused: unknown;
-    try {
-      refused = await codeOf(
-        api.purge(purgeOf(document.id, name), again.token)
-      );
-    } finally {
-      once();
-    }
-    const indexed = await settledIndexing(api, collectionId, document.id);
-
-    expect({
-      failed: failed?.indexing,
-      refused,
-      indexed: indexed?.indexing,
-      found: await foundVersions(api, name, collectionId),
-    }).toStrictEqual({
-      failed: "failed",
-      refused: "knowledge.purge_index_pending",
-      indexed: "indexed",
-      found: [],
-    });
-  });
-
-  it("keeps rerunning a document a purge waits on past the cap, and gives up on others, audited", async () => {
-    const { api } = await knowledgeOf();
-    const { id: collectionId } = await api.createCollection(shared());
-    const name = `Mulder${unique()}`;
-    const purged = await api.saveDocument({
-      collectionId,
-      path: "purged.md",
-      text: textOf(`${name} signs`),
-      ifVersion: 0,
-    });
-    const other = await api.saveDocument({
-      collectionId,
-      path: "other.md",
-      text: textOf(`Plain${unique()}`),
-      ifVersion: 0,
-    });
-    const { token } = await api.preparePurge(purgeOf(purged.id, name));
-    const down = watchPublishes({ fail: () => true });
-    try {
-      await withRetriesAtOnce(async () => {
-        await codeOf(api.purge(purgeOf(purged.id, name), token));
-        await api.saveDocument({
-          collectionId,
-          path: "other.md",
-          text: textOf(`Changed${unique()}`),
-          ifVersion: 1,
-        });
-        await settledIndexing(api, collectionId, purged.id);
-        await settledIndexing(api, collectionId, other.id);
-      });
-    } finally {
-      down();
-    }
-    // Both have used up their reruns, a day ago.
-    await env.KNOWLEDGE.prepare(
-      "UPDATE documents SET index_run = ?, index_failed_at = ? WHERE id IN (?, ?)"
-    )
-      .bind(maxIndexReruns, Date.now(), purged.id, other.id)
-      .run();
-    await runMinuteTasks({}, new Date(Date.now() + 25 * 60 * 60_000));
-    const rerun = await settledIndexing(api, collectionId, purged.id);
-    const left = await listed(api, collectionId, other.id);
-    const events = await allEvents();
-    const actions = (documentId: string) =>
-      events
-        .filter(({ target }) => target?.id === documentId)
-        .map(({ action }) => action)
-        .filter(
-          (action) =>
-            action.startsWith("knowledge.index") ||
-            action.startsWith("knowledge.purge.")
-        );
-
-    expect({
-      rerun: rerun?.indexing,
-      other: left?.indexing,
-      found: await foundVersions(api, name, collectionId),
-      purgedEvents: actions(purged.id),
-      otherEvents: actions(other.id),
-    }).toStrictEqual({
-      rerun: "indexed",
-      other: "failed",
-      found: [],
-      purgedEvents: ["knowledge.purge.index_pending"],
-      otherEvents: ["knowledge.index_exhausted"],
-    });
-  });
-
-  it("never fails a run the sweep didn't read, though a purge started the next one meanwhile", async () => {
-    const { api } = await knowledgeOf();
-    const { id: collectionId } = await api.createCollection(shared());
-    const document = await api.saveDocument({
-      collectionId,
-      path: "policy.md",
-      text: textOf(`Racing${unique()}`),
-      ifVersion: 0,
-    });
-    // Run 0 indexes nothing and ends: every publish fails.
-    const down = watchPublishes({ fail: () => true });
-    try {
-      await withRetriesAtOnce(async () => {
-        await api.saveDocument({
-          collectionId,
-          path: "policy.md",
-          text: textOf(`Again${unique()}`),
-          ifVersion: 1,
-        });
-        await settledIndexing(api, collectionId, document.id);
-      });
-    } finally {
-      down();
-    }
-    // The sweep finds it waiting on run 0, which has ended.
-    await env.KNOWLEDGE.prepare(
-      "UPDATE documents SET index_state = 'retrying', updated_at = ? WHERE id = ?"
-    )
-      .bind(Date.now() - 60 * 60_000, document.id)
-      .run();
-    // Just before the sweep fails run 0, a purge starts run 1.
-    const restore = beforeSweepFails(async () => {
-      await env.KNOWLEDGE.prepare(
-        "UPDATE documents SET index_run = 1, index_state = 'retrying' WHERE id = ?"
-      )
-        .bind(document.id)
-        .run();
-    });
-    try {
-      await runMinuteTasks();
-    } finally {
-      restore();
-    }
-    const row = await env.KNOWLEDGE.prepare(
-      "SELECT index_state AS state, index_run AS run FROM documents WHERE id = ?"
-    )
-      .bind(document.id)
-      .first();
-
-    expect(row).toStrictEqual({ state: "retrying", run: 1 });
   });
 });

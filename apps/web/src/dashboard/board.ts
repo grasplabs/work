@@ -59,7 +59,6 @@ const kindOrder: readonly SignalKind[] = [
   "waiting_for_person",
   "correction",
   "cost_per_run",
-  "unanswered_question",
 ];
 
 /** Counts of kinds, the most first, those with as many in the board's order. */
