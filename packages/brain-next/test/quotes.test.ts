@@ -662,3 +662,33 @@ describe("the bound of what a version's add judges", () => {
     });
   });
 });
+
+describe("what judging against the current version rests on", () => {
+  // Main's rules (memories.ts `visibleSql`; erasure.ts hides a source
+  // whole): whoever may see a memory of a source may read its current
+  // version, and that version is never hidden alone. The second is pinned
+  // with the erasure above; a change to either reopens quotes.ts's design.
+  it("shows a memory only to a reader of its source's current version", async () => {
+    const wide = unique("wide");
+    const narrow = unique("narrow");
+    const wideOnly = readerOf(wide);
+    const both = readerOf(wide, narrow);
+    const source = unique("doc");
+    const name = unique("Acme");
+    const line = `${name} pays by card`;
+    const first = await version(source, `${line}.`, wide);
+    const { memory, entity } = await memoryOn(
+      { source, version: first, quote: line, group: wide },
+      { name }
+    );
+    await version(source, `${line}, narrowed.`, narrow);
+    const readable = async (reader: PersonReader) =>
+      await shared().readableMemories({ memories: [memory], reader });
+
+    expect({
+      wideOnly: await endOf(entity, memory, wideOnly),
+      wideOnlyReadable: await readable(wideOnly),
+      both: await endOf(entity, memory, both),
+    }).toStrictEqual({ wideOnly: "unread", wideOnlyReadable: [], both: null });
+  });
+});
