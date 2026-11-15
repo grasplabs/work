@@ -787,8 +787,8 @@ export const entities = sqliteTable(
  * for a source's, 0 for a writer's, then `row`. `value_key` is what a
  * newer memory of its lineage must match to end it (remember.ts
  * `valueKeyFor`): for an attribute, the value folded or the related
- * entity's id; filed under none, a SHA-256 of the statement as words,
- * its type and value, and the related entity's id.
+ * entity's id; filed under none, a SHA-256 of the statement folded, its
+ * type, speaker and value, and the related entity's id.
  */
 export const memories = sqliteTable(
   "memories",

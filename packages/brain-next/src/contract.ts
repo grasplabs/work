@@ -1618,9 +1618,11 @@ export interface VectorsFound {
 // that says something else makes the fact contested: both stay current
 // and are read together, each with its source. A memory with no listed
 // attribute never contests another, and ends only an earlier one of its
-// lineage that it restates: the same statement, word for word as search
-// folds words, about the same entity, of the same type, related entity
-// and value. So the same fact said twice by one source or writer is one
+// lineage that it restates: the same statement as search folds text
+// (case, accents, spacing and a final full stop aside, every sign kept),
+// about the same entity, in the same speaker's word, of the same type,
+// related entity and value. So the same fact said twice by one source or
+// writer is one
 // current memory, the earlier kept as history, merged only for readers of
 // the later one.
 //

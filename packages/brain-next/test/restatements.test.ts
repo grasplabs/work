@@ -323,4 +323,163 @@ describe("merging what one lineage says twice", () => {
       both: { recalled: [false, true], card: [false, true] },
     });
   });
+
+  /**
+   * The states, oldest first, of `statements` one writer says in turn of
+   * one customer, each its own add (`extra` for each), as a reader of
+   * them all reads them.
+   */
+  const saidInTurn = async (
+    statements: readonly string[],
+    extra: (index: number) => Partial<NewMemory> = () => ({}),
+    basisOf: (index: number) => NewMemory["basis"] = () => ({
+      kind: "writer",
+      writer: "one writer",
+    }),
+    group = unique("g")
+  ): Promise<string[]> => {
+    const reader = readerOf(unique("p"), group);
+    const name = unique("Initech");
+    const ids: string[] = [];
+    let entity = "";
+    for (const [index, statement] of statements.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one add after the other
+      const added = await add(
+        audience(group),
+        [
+          entity === ""
+            ? customer(name)
+            : { key: "c", id: entity, kind: "customer", names: [] },
+        ],
+        [
+          fact(statement, basisOf(index), {
+            speaker: { kind: "system" },
+            ...extra(index),
+          }),
+        ],
+        reader
+      );
+      ({ entity } = added);
+      ids.push(...added.memories);
+    }
+    return statesOf(await read(entity, reader, { history: true }), ids);
+  };
+
+  it("never merges two facts whose statements differ only by signs: minus, currency, comparison, digit separators, # and +", async () => {
+    const pairs = [
+      ["Margin is -5%.", "Margin is 5%."],
+      ["Contract worth $5M.", "Contract worth €5M."],
+      ["Price > 100.", "Price < 100."],
+      ["Is 1,500 EUR.", "Is 1.500 EUR."],
+      ["Acme uses C++.", "Acme uses C#."],
+    ];
+    const states = await Promise.all(
+      pairs.map(async (pair) => await saidInTurn(pair))
+    );
+
+    expect(states).toStrictEqual(pairs.map(() => ["current", "current"]));
+  });
+
+  it("merges what differs only by case, accents, Unicode's forms, spacing and a final full stop", async () => {
+    const pairs = [
+      ["Acme ships from Malmö.", "ACME SHIPS FROM MALMO"],
+      ["Acme  ships\tfrom Delft", "Acme ships from Delft!"],
+      // A composed é and an e with a combining accent.
+      ["Café opens at nine.", "Cafe\u0301 opens at nine."],
+    ];
+    const states = await Promise.all(
+      pairs.map(async (pair) => await saidInTurn(pair))
+    );
+
+    expect(states).toStrictEqual(pairs.map(() => ["ended", "current"]));
+  });
+
+  it("never merges the same words in someone else's word, by another writer, from another source, or one filed under an attribute", async () => {
+    const said = "Acme renews in March.";
+    const group = unique("g");
+    const source = unique("doc");
+    const ref = await addVersion(said, group, source);
+    const [speakers, writers, sources, filed] = await Promise.all([
+      // Within one source, an outside party then a colleague.
+      saidInTurn(
+        [said, said],
+        (index) => ({
+          speaker:
+            index === 0
+              ? { kind: "outside" }
+              : { kind: "internal", person: unique("colleague") },
+        }),
+        () => ({ kind: "source", ...ref, quote: said }),
+        group
+      ),
+      saidInTurn([said, said], undefined, (index) => ({
+        kind: "writer",
+        writer: `writer ${index}`,
+      })),
+      (async () => {
+        const other = await addVersion(said, group, unique("doc"));
+        return await saidInTurn(
+          [said, said],
+          undefined,
+          (index) => ({
+            kind: "source",
+            ...(index === 0 ? ref : other),
+            quote: said,
+          }),
+          group
+        );
+      })(),
+      saidInTurn([said, said], (index) =>
+        index === 0 ? { attribute: "renewal_date", value: "March" } : {}
+      ),
+    ]);
+
+    expect({ speakers, writers, sources, filed }).toStrictEqual({
+      speakers: ["current", "current"],
+      writers: ["current", "current"],
+      sources: ["current", "current"],
+      filed: ["current", "current"],
+    });
+  });
+
+  it("makes the earlier memory current again once its writer forgets the restatement", async () => {
+    const group = unique("g");
+    const person = unique("p");
+    const reader = readerOf(person, group);
+    const name = unique("Hooli");
+    const basis: NewMemory["basis"] = { kind: "writer", writer: person };
+    const said = fact(`${name} moved to Utrecht.`, basis, {
+      speaker: { kind: "internal", person },
+    });
+    const earlier = await add(audience(group), [customer(name)], [said]);
+    const later = await add(
+      audience(group),
+      [{ key: "c", id: earlier.entity, kind: "customer", names: [] }],
+      [said],
+      reader
+    );
+    const ids = [...earlier.memories, ...later.memories];
+    const merged = statesOf(
+      await read(earlier.entity, reader, { history: true }),
+      ids
+    );
+    const retired = await shared().retireMemory({
+      memory: later.memories[0] ?? "",
+      reader,
+      writer: person,
+    });
+
+    expect({
+      merged,
+      retired: retired !== null,
+      after: statesOf(
+        await read(earlier.entity, reader, { history: true }),
+        ids
+      ),
+    }).toStrictEqual({
+      merged: ["ended", "current"],
+      retired: true,
+      after: ["current", "ended"],
+    });
+  });
 });

@@ -36,6 +36,7 @@ import {
   erasePerson,
   listVersionsAs,
   memoriesAs,
+  readableMemoriesAs,
   readSourceVersionAs,
   recallAs,
   rememberAs,
@@ -2351,69 +2352,79 @@ describe(
       });
     });
 
-    it("gives no surface a merged restatement to a reader who may not read it, and its reader one current memory (GRA-1752)", async () => {
+    it("gives a reader of a memory alone that memory current when its restatement lands for a team they aren't in, and a reader of both one current (GRA-1752)", async () => {
       const [{ userId: holder }, { userId: outsider }] = await Promise.all([
         signedInWithRole(idp, "user"),
         signedInWithRole(idp, "user"),
       ]);
+      // The outsider and the holder share a team; the holder alone is in
+      // the other.
+      const sharedTeam = await newTeam(outsider, holder);
       const holdersTeam = await newTeam(holder);
-      const ownTeam = await newTeam(outsider);
-      const sharedWord = `s${unique()}`;
-      const markers = { "a merged restatement": markerWord() };
-      const marker = markers["a merged restatement"];
+      const name = `Merge${unique().replaceAll("-", "").slice(0, 10)}`;
       const said = {
         about: "c",
         type: "fact" as const,
-        statement: `${sharedWord} Customer ${marker} works from Delft.`,
+        statement: `${name} works from Delft.`,
         speaker: { kind: "system" as const },
         basis: { kind: "writer" as const, writer: holder },
       };
-      const access: Access = { kind: "audience", group: `team:${holdersTeam}` };
-      const holderReader = { person: holder, groups: [`team:${holdersTeam}`] };
-      const first = await brainStore().addMemories({
+      const earlier = await brainStore().addMemories({
         change: crypto.randomUUID(),
-        access,
-        entities: [{ key: "c", kind: "customer", names: [`${marker} Group`] }],
+        access: { kind: "audience", group: `team:${sharedTeam}` },
+        entities: [{ key: "c", kind: "customer", names: [`${name} Group`] }],
         memories: [said],
       });
-      // The same fact said again by the same writer: merged.
-      await brainStore().addMemories({
+      const entity = earlier.entities.c ?? "";
+      // The same fact said again by the same writer, for the holder's team.
+      const later = await brainStore().addMemories({
         change: crypto.randomUUID(),
-        access,
-        reader: holderReader,
-        entities: [
-          { key: "c", id: first.entities.c ?? "", kind: "customer", names: [] },
-        ],
-        memories: [said],
-      });
-      // The team's source it was said in, the probes' hidden version.
-      const told = await add(`${sharedWord} told ${marker}`, {
-        kind: "team",
-        teamId: holdersTeam,
-      });
-      const page = await memoriesAs(env, holder, {
-        entity: { store: "shared", id: first.entities.c ?? "" },
-      });
-      const findings = await findingsOf(
-        "the outsider, of a merged restatement",
-        {
-          personId: outsider,
-          reader: { person: outsider, groups: [`team:${ownTeam}`] },
-          personal: true,
-          sharedWord,
-          markers: [marker],
-          hiddenVersions: everyVersionOf(told),
-          hiddenInstructionFiles: [],
-          instructionGroups: ["company"],
+        access: { kind: "audience", group: `team:${holdersTeam}` },
+        reader: {
+          person: holder,
+          groups: [`team:${sharedTeam}`, `team:${holdersTeam}`],
         },
-        markers
-      );
+        entities: [{ key: "c", id: entity, kind: "customer", names: [] }],
+        memories: [said],
+      });
+      const ids = [...earlier.memories, ...later.memories];
+      /** What `personId` reads of the two through core: each one's state, and which they may read. */
+      const readBy = async (personId: string) => {
+        const page = await memoriesAs(env, personId, {
+          entity: { store: "shared", id: entity },
+        });
+        const readable = await readableMemoriesAs(
+          env,
+          personId,
+          ids.map((memory) => ({ store: "shared", memory }))
+        );
+        return ids.map((id) => {
+          const read = page.memories.find((memory) => memory.id === id);
+          let state = "unread";
+          if (read !== undefined) {
+            state = read.endedAt === null ? "current" : "ended";
+          }
+          return {
+            state,
+            readable: readable.some(({ memory }) => memory === id),
+          };
+        });
+      };
 
       expect({
-        // Its reader reads one current, the earlier as history.
-        holder: page.memories.map(({ endedAt }) => endedAt !== null),
-        findings,
-      }).toStrictEqual({ holder: [false, true], findings: [] });
+        outsider: await readBy(outsider),
+        holder: await readBy(holder),
+      }).toStrictEqual({
+        // As in a store without the restatement: the earlier, current.
+        outsider: [
+          { state: "current", readable: true },
+          { state: "unread", readable: false },
+        ],
+        holder: [
+          { state: "ended", readable: true },
+          { state: "current", readable: true },
+        ],
+      });
     });
 
     it("gives someone who isn't a member, or was one, nothing of the company's instruction files", async () => {

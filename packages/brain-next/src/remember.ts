@@ -7,6 +7,7 @@ import type {
   AttributeRule,
   NewMemory,
   newMemoriesSchema,
+  Speaker,
 } from "./contract.ts";
 import {
   foldIdentifier,
@@ -26,7 +27,7 @@ import {
 } from "./memories.ts";
 import { accessOfKey, readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
 import { isRestoring } from "./restoring.ts";
-import { indexMemoryWords, sequenceOf } from "./words.ts";
+import { foldForSearch, indexMemoryWords } from "./words.ts";
 import type { WordMemo } from "./words.ts";
 
 // Adding memories (contract.ts `addMemories`): checked whole first, then
@@ -246,18 +247,51 @@ interface Into {
   memo: WordMemo;
 }
 
+/** Spacing, as a statement is compared: any run of it is one space. */
+const spacing = /\s+/gu;
+
+/** A statement's end as a sentence ends it, which saying it again may drop or add. */
+const sentenceEnd = /[.!]+$/u;
+
+/**
+ * A statement as a restatement compares it: folded as search folds text
+ * (words.ts `foldForSearch`: case, accents and Unicode's forms), its
+ * spacing one space, and a final `.` or `!` taken off. Every other sign
+ * stays, so "-5%" and "5%", "$5M" and "€5M", "> 100" and "< 100",
+ * "1,500" and "1.500", "C++" and "C#" are never the same fact.
+ */
+const statementKeyOf = (statement: string): string =>
+  foldForSearch(statement)
+    .replaceAll(spacing, " ")
+    .trim()
+    .replace(sentenceEnd, "");
+
+/** Whose word a memory is, as a restatement compares it: its kind, and the person or agent. */
+const speakerKeyOf = (speaker: Speaker): [string, string | null] => {
+  if (speaker.kind === "internal") {
+    return [speaker.kind, speaker.person];
+  }
+  if (speaker.kind === "agent") {
+    return [speaker.kind, speaker.agent];
+  }
+  return [speaker.kind, null];
+};
+
 /**
  * What a memory filed under no attribute is a restatement of another by:
- * the SHA-256 of its type, its value folded and its statement word for
- * word as search folds words (words.ts `sequenceOf`), so the index holds a
- * fixed length whatever the statement's. Hashed before a transaction.
+ * the SHA-256 of its type, whose word it is, its value folded and its
+ * statement as a restatement compares it (`statementKeyOf`), so the index
+ * holds a fixed length whatever the statement's. Hashed before a
+ * transaction.
  */
 export const restatementOf = async ({
   type,
+  speaker,
   value,
   statement,
 }: {
   type: string;
+  speaker: Speaker;
   value: string | null;
   statement: string;
 }): Promise<string> =>
@@ -265,8 +299,9 @@ export const restatementOf = async ({
     encoder.encode(
       JSON.stringify([
         type,
+        speakerKeyOf(speaker),
         foldName(value ?? ""),
-        sequenceOf(statement).join(" "),
+        statementKeyOf(statement),
       ])
     )
   );
@@ -277,7 +312,8 @@ export const restatementOf = async ({
  * many-value ones per value, compare its `value` folded, or the id of the
  * entity a relation relates to (`object`). A memory filed under no
  * attribute is a restatement of another when it says the same of the
- * same related entity (`restatementOf`, then the entity's id): so the
+ * same related entity, in the same speaker's word (`restatementOf`, then
+ * the entity's id): so the
  * same fact said again by its source or its writer ends what it said
  * before, kept as history, and anything worded otherwise never does. For
  * an add and a restore (restore.ts) alike.
@@ -495,8 +531,8 @@ export const hashesOf = async (adding: Adding): Promise<AddHashes> => {
   );
   const restatements = await Promise.all(
     adding.memories.map(
-      async ({ type, value, statement }) =>
-        await restatementOf({ type, value: value ?? null, statement })
+      async ({ type, speaker, value, statement }) =>
+        await restatementOf({ type, speaker, value: value ?? null, statement })
     )
   );
   return { key, hash, subjects, restatements };

@@ -31,8 +31,10 @@ import { termsOf } from "./words.ts";
 // about an entity, each of one lineage (the source it rests on, or its
 // writer), never written over. What is current is read, never stored: a
 // memory is ended by a newer one of its lineage about the same entity and
-// one-value attribute (or the same value, for one of many), counted only
-// when the reader may read the newer one, so a reader is told what a
+// one-value attribute (or the same value, for one of many), or, filed
+// under no attribute, by a newer one of its lineage that restates it
+// (remember.ts `valueKeyFor`), counted only when the reader may read the
+// newer one, so a reader is told what a
 // store without the memories hidden from them would tell; or by its
 // writer retiring it, the one change ever written to a memory. A
 // time-bound one stops being current at its end (`validUntil`).
