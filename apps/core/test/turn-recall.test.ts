@@ -978,7 +978,7 @@ describe("a recall before a question that doesn't hand over", setUpTime, () => {
 });
 
 describe("what the recall before a question may reach", setUpTime, () => {
-  it("reads as the person only in their own chat in Grasp, in a turn they started, and as the company alone everywhere else", async () => {
+  it("reads as the person only in their own chat, in Grasp or their direct message, in a turn they started, and as the company alone everywhere else", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInWithRole(idp, "user");
     const depot = word();
@@ -1077,9 +1077,10 @@ describe("what the recall before a question may reach", setUpTime, () => {
       web: { own: true, team: true, company: true },
       // Not started by them: what the whole company may read alone.
       unattended: companyOnly,
-      // Kept by the chat app too, whoever reads it later: the company's.
-      slack: companyOnly,
-      teams: companyOnly,
+      // Their direct message is their own chat (GRA-1821), though the
+      // chat app keeps the answer too: as in Grasp.
+      slack: { own: true, team: true, company: true },
+      teams: { own: true, team: true, company: true },
       // Read by others (here only the person is on its roster): the
       // company's, never their team's or their own.
       thread: companyOnly,
@@ -1129,7 +1130,7 @@ describe("what the recall before a question may reach", setUpTime, () => {
     }).toStrictEqual({ answered: 1, marker: false });
   });
 
-  it("reads as the turn's place for what the chat's own search and code recall too: their teams only in their own chat in Grasp, the company alone elsewhere", async () => {
+  it("reads as the turn's place for what the chat's own search and code recall too: their teams only in their own chat, in Grasp or their direct message, the company alone elsewhere", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInWithRole(idp, "user");
     const teamId = crypto.randomUUID();
@@ -1238,8 +1239,9 @@ describe("what the recall before a question may reach", setUpTime, () => {
       // company's, never their own store (code never reads it).
       web: { own: false, team: true, company: true },
       unattended: companyOnly,
-      slack: companyOnly,
-      teams: companyOnly,
+      // Their direct message is their own chat too (GRA-1821): the same.
+      slack: { own: false, team: true, company: true },
+      teams: { own: false, team: true, company: true },
       // A thread others share offers no brain to the code at all.
       thread: { own: false, team: false, company: false },
     };
@@ -1635,7 +1637,7 @@ describe("what the recall before a question may reach", setUpTime, () => {
     });
   });
 
-  it("withholds what a chat's code or search recalled in a direct message once the whole company may no longer read it", async () => {
+  it("withholds what a chat's code or search recalled in a direct message once the person's teams may no longer read it, as in their own chat in Grasp", async () => {
     const admin = await signedInApi(idp, "admin");
     /**
      * In a new person's Teams direct message, code (`env.brain.recall`)
@@ -1706,22 +1708,40 @@ describe("what the recall before a question may reach", setUpTime, () => {
         resent: JSON.stringify(second).includes(marker),
       };
     };
+    /** A new version only a team the person isn't in may read. */
+    const narrowedAway = async (source: SourceRef, depot: string) => {
+      await narrowedToTeam(source, depot, crypto.randomUUID());
+    };
     const kept = { recalled: true, answered: true, resent: true };
     const withheld = { recalled: true, answered: true, resent: false };
+    // Their direct message is their own chat (GRA-1821): code there reads
+    // as their teams, as in Grasp, so what their team still may read stays.
     expect({
       code: {
         unchanged: await resentAfter("code", leftAlone),
-        narrowed: await resentAfter("code", narrowedToTeam),
+        toTheirTeam: await resentAfter("code", narrowedToTeam),
+        away: await resentAfter("code", narrowedAway),
         erased: await resentAfter("code", erasedWhole),
       },
       tool: {
         unchanged: await resentAfter("tool", leftAlone),
-        narrowed: await resentAfter("tool", narrowedToTeam),
+        toTheirTeam: await resentAfter("tool", narrowedToTeam),
+        away: await resentAfter("tool", narrowedAway),
         erased: await resentAfter("tool", erasedWhole),
       },
     }).toStrictEqual({
-      code: { unchanged: kept, narrowed: withheld, erased: withheld },
-      tool: { unchanged: kept, narrowed: withheld, erased: withheld },
+      code: {
+        unchanged: kept,
+        toTheirTeam: kept,
+        away: withheld,
+        erased: withheld,
+      },
+      tool: {
+        unchanged: kept,
+        toTheirTeam: kept,
+        away: withheld,
+        erased: withheld,
+      },
     });
   });
 
@@ -2113,7 +2133,7 @@ describe("the recall before a question hands over memories", setUpTime, () => {
     });
   });
 
-  it("hands a chat app's direct message and a thread others read only the memories the whole company may read", async () => {
+  it("hands a chat app's direct message the memories their own chat in Grasp gets, and a thread others read only those the whole company may read", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInWithRole(idp, "user");
     const { group } = await teamOf(person.userId);
@@ -2183,8 +2203,9 @@ describe("the recall before a question hands over memories", setUpTime, () => {
       thread: await sent("slack", true),
     }).toStrictEqual({
       web: { own: true, team: true, company: true },
-      // Outside their own chat, the company's alone (GRA-1820).
-      direct: { own: false, team: false, company: true },
+      // Their direct message is their own chat too (GRA-1821).
+      direct: { own: true, team: true, company: true },
+      // Read by others: the company's alone (GRA-1820).
       thread: { own: false, team: false, company: true },
     });
   });
@@ -3087,9 +3108,10 @@ const handedOrder = (
 // Fading (GRA-1753): a memory a recall as the person handed over in their
 // own chat is one they used, as their Workspace keeps it; among equals it
 // ranks above one they never used, for them alone, in the shared store
-// and in their own, and only where the answer reaches them alone. From
-// the ways it can fail: one person's use reorders another's recall, or a
-// recall others read (a channel, a chat app, a turn they didn't start); a
+// and in their own, and only where the answer reaches them alone (their
+// chat in Grasp, their direct message on a chat app). From the ways it
+// can fail: one person's use reorders another's recall, or a recall
+// others read (a channel, a group chat, a turn they didn't start); a
 // recall of the past is ordered by a use that came later; a faded memory
 // is lost; a failed lookup fails the recall.
 describe("memories a person never uses fade for them", setUpTime, () => {
@@ -3129,11 +3151,24 @@ describe("memories a person never uses fade for them", setUpTime, () => {
     const beforeTurn = new Date();
 
     await ask(`${monday}?`);
-    // The same question everywhere the answer reaches others: as the
-    // company, ordered as for someone who never used either memory.
-    const viaCompany = async (
+    // Her own reads, before any turn below records a use of its own.
+    const placed = {
+      ada: await placeIn(ada.userId, topic, [used, unused]),
+      adaOwn: await placeIn(ada.userId, ownTopic, [ownUsed, ownUnused]),
+      // Before its latest use, a memory ranks as one never used.
+      adaBeforeTurn: await placeIn(ada.userId, topic, [unused, used], {
+        asOf: beforeTurn,
+      }),
+      beaAfter: await placeIn(bea.userId, topic, [unused, used]),
+      adaAsked: await placeIn(ada.userId, `${topic} ${friday}`, [unused, used]),
+    };
+    // The same question in her direct message, her own chat too
+    // (GRA-1821): ordered by her use. Everywhere the answer reaches others,
+    // or a turn she didn't start: as the company, ordered as for someone
+    // who never used either memory.
+    const firstRequestOf = async (
       asked: (agentId: string) => Promise<unknown>
-    ): Promise<{ first: boolean; both: boolean }> => {
+    ): Promise<unknown> => {
       const agentId = crypto.randomUUID();
       await requestGranted(idp, admin, {
         subject: { type: "agent", agentId },
@@ -3143,7 +3178,7 @@ describe("memories a person never uses fade for them", setUpTime, () => {
       });
       const provider = await fakeProvider(says("Noted."));
       await asked(agentId);
-      return handedOrder(provider.requests[0]?.body, [unused, used]);
+      return provider.requests[0]?.body;
     };
     const through = (inThread: boolean) => async (agentId: string) =>
       await workspace(env, personalWorkspaceId(ada.userId)).askThrough(
@@ -3160,8 +3195,8 @@ describe("memories a person never uses fade for them", setUpTime, () => {
             }
           : { kind: "direct" }
       );
-    const chatApp = await viaCompany(through(false));
-    const channel = await viaCompany(through(true));
+    const direct = await firstRequestOf(through(false));
+    const channel = await firstRequestOf(through(true));
     const woken = await recallingChatOf(ada.userId, says("Noted."));
     await woken.stub.askUnattended(woken.chat.id, { text: topic, model });
 
@@ -3170,24 +3205,17 @@ describe("memories a person never uses fade for them", setUpTime, () => {
         .memories.map(({ memory }) => memory)
         .filter((memory) => [used, unused, ownUsed, ownUnused].includes(memory))
         .toSorted(),
-      ada: await placeIn(ada.userId, topic, [used, unused]),
-      adaOwn: await placeIn(ada.userId, ownTopic, [ownUsed, ownUnused]),
-      // Before its latest use, a memory ranks as one never used.
-      adaBeforeTurn: await placeIn(ada.userId, topic, [unused, used], {
-        asOf: beforeTurn,
-      }),
-      chatApp,
-      channel,
+      ...placed,
+      direct: handedOrder(direct, [used, unused]),
+      channel: handedOrder(channel, [unused, used]),
       woken: handedOrder(woken.provider.requests[0]?.body, [unused, used]),
       beaBefore,
-      beaAfter: await placeIn(bea.userId, topic, [unused, used]),
-      adaAsked: await placeIn(ada.userId, `${topic} ${friday}`, [unused, used]),
     }).toStrictEqual({
       handed: [used, ownUsed].toSorted(),
       ada: { first: true, both: true },
       adaOwn: { first: true, both: true },
       adaBeforeTurn: { first: true, both: true },
-      chatApp: { first: true, both: true },
+      direct: { first: true, both: true },
       channel: { first: true, both: true },
       woken: { first: true, both: true },
       beaBefore: { first: true, both: true },

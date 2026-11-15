@@ -391,10 +391,10 @@ type Reads = { personal: true } | { personal: false; company: true };
  * Whom a turn's recall reads as, or none when it may not recall at all
  * (GRA-1820, Nick's decision of 14 November 2026). Its person, their own
  * store and teams too, only where the answer reaches them alone: their
- * own chat in Grasp, in a turn they started (`personal`, workspace.ts
- * `answersAlone`). Anywhere else, a group chat or channel, their direct
- * message on a chat app (which the app keeps too), a turn a schedule or
- * an event woke, only what everyone in the company may read: no team's
+ * own chat, in Grasp or their direct message on a chat app, in a turn
+ * they started (`personal`, workspace.ts `answersAlone`, GRA-1821).
+ * Anywhere else, a group chat or channel, a turn a schedule or an event
+ * woke, only what everyone in the company may read: no team's
  * content and nothing of anyone's own, whoever reads the answer now or
  * later. In a chat others share, not even that while anyone Grasp can't
  * name as a member is in it (a guest, another company's people, a

@@ -36,10 +36,8 @@ import type { InstructionFile, InstructionFileVersion } from "./brain-next.ts";
 //
 // - a chat of the person's own: the company's, the acting agent's, the
 //   App's when the App the chat worked on last is one they build now
-//   (never several Apps', nor a workflow's: none has a file; and only in
-//   their own chat in Grasp, never a chat app's direct message while
-//   GRA-1821 is open), and, only in a turn whose answer reaches them
-//   alone (`personal`), their own;
+//   (never several Apps', nor a workflow's: none has a file), and, only
+//   in a turn whose answer reaches them alone (`personal`), their own;
 // - an agent in a shared channel: the company's and the agent's, never a
 //   person's, which others there would read through the agent;
 // - an AI step of a workflow: none, so a run does the same whoever's
@@ -47,10 +45,9 @@ import type { InstructionFile, InstructionFileVersion } from "./brain-next.ts";
 //
 // `personal` is the turn's one gate for a person's own content, as their
 // own recall and their own skills take it (workspace.ts, `answersAlone`):
-// their attended chat in Grasp. Not a turn nobody asked for there and
-// then (a wake-up, an event), which what woke it steers; nor, while
-// GRA-1821 is open, a chat app's direct message, which the chat app keeps
-// too, though the plan lists their file there.
+// their attended chat, in Grasp or their direct message on a chat app
+// (GRA-1821). Not a turn nobody asked for there and then (a wake-up, an
+// event), which what woke it steers.
 //
 // Shared files first, so the part many chats share comes first and stays
 // the same.
