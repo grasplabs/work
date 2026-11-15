@@ -8863,6 +8863,10 @@ msgstr "Noch hat ihn niemand etwas gefragt."
 msgid "Nobody by that name"
 msgstr "Niemand mit diesem Namen"
 
+#: src/brain/sources-page.tsx
+msgid "Nobody can find or read it from then on, you included, and it can't be brought back. The Brain keeps its history until an admin erases it."
+msgstr "Von da an kann niemand ihn finden oder lesen, auch du nicht, und er lässt sich nicht zurückholen. Das Brain behält seinen Verlauf, bis ein Admin ihn löscht."
+
 #: src/agents/own-agents-admin.tsx
 msgid "Nobody can make one, and those people have don't answer until you turn this back on."
 msgstr "Niemand kann einen erstellen, und vorhandene antworten nicht, bis du dies wieder einschaltest."
@@ -9568,10 +9572,6 @@ msgstr "Nur Konten des Tenants {tenantId}."
 #: src/settings/use-team-change.ts
 msgid "Only admins can change teams."
 msgstr "Nur Admins können Teams ändern."
-
-#: src/brain/sources-page.tsx
-msgid "Only an admin can remove an upload shared with a team or everyone. Ask an admin to remove it."
-msgstr "Nur ein Admin kann einen mit einem Team oder allen geteilten Upload entfernen. Bitte einen Admin, ihn zu entfernen."
 
 #: src/apps/app-settings.tsx
 msgid "Only an admin resets an App’s data: every record goes for good, and its current version runs again with no records."
@@ -11070,6 +11070,10 @@ msgstr "Hat einen Webhook aus einer App entfernt"
 #: src/workflows/item-test.tsx
 msgid "Removed after a week"
 msgstr "Nach einer Woche entfernt"
+
+#: src/brain/sources-page.tsx
+msgid "Removed by its uploader, {removed}"
+msgstr "Von der hochladenden Person entfernt, {removed}"
 
 #: src/brain/brain.ts
 #: src/brain/forget.tsx
@@ -14983,8 +14987,8 @@ msgid "Uploading…"
 msgstr "Wird hochgeladen…"
 
 #: src/brain/sources-page.tsx
-msgid "Uploads shared with a team or everyone. Only an admin can erase one, for everyone and for good. Its text isn't shown here."
-msgstr "Mit einem Team oder allen geteilte Uploads. Nur ein Admin kann einen löschen, für alle und endgültig. Sein Text wird hier nicht gezeigt."
+msgid "Uploads shared with a team or everyone, those their uploader removed among them. Only an admin can erase one, for everyone and for good. Its text isn't shown here."
+msgstr "Mit einem Team oder allen geteilte Uploads, auch die, die ihre hochladende Person entfernt hat. Nur ein Admin kann einen löschen, für alle und endgültig. Sein Text wird hier nicht gezeigt."
 
 #: src/settings/event-sources.tsx
 msgid "URL of {name}"

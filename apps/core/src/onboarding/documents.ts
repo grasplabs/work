@@ -153,7 +153,7 @@ const requireReadable = (name: string): keyof typeof uploadTypes => {
 /**
  * Erases the upload `id` as `person`, when they may: their own. Nothing
  * when there is none, or it is another person's alone, which only they
- * may delete (brain-uploads.ts `mayDelete`).
+ * may delete (brain-uploads.ts `deletionOf`).
  */
 const eraseFile = async (
   env: Env,

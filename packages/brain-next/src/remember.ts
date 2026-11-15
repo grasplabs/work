@@ -189,10 +189,11 @@ const entityRowsOf = (
 };
 
 /**
- * Whether this store holds the version and no erasure hides it, a refusal
- * (`why`) if not; in the shared store, a refusal too when one person alone
- * may read it: what is drawn from it is theirs alone, and lies only in
- * their own store.
+ * Whether this store holds the version, no erasure hides it and its source
+ * wasn't removed (removal.ts: nothing new is drawn from it), a refusal
+ * (`why`) if not, alike; in the shared store, a refusal too when one
+ * person alone may read it: what is drawn from it is theirs alone, and
+ * lies only in their own store.
  */
 const holdVersion = (
   { sql, shared }: { sql: SqlStorage; shared: boolean },
@@ -205,8 +206,9 @@ const holdVersion = (
       `SELECT reader_sets.key AS readers
       FROM source_versions
       JOIN reader_sets ON reader_sets.id = source_versions.reader_set
-      WHERE source = ? AND version = ?
-        AND row NOT IN (SELECT version_row FROM erasing_versions)`,
+      WHERE source = ?1 AND version = ?2
+        AND row NOT IN (SELECT version_row FROM erasing_versions)
+        AND NOT EXISTS (SELECT 1 FROM removed_sources WHERE source = ?1)`,
       source,
       version
     )
