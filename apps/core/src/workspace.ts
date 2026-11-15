@@ -4061,6 +4061,11 @@ export class Workspace extends DurableObject<Env> {
       .from(chats)
       .where(and(eq(chats.personId, personId), ne(chats.via, "web")))
       .all();
+    // A click while an earlier one deletes them: that one answers, and
+    // audits, for both.
+    if (conversations.some(({ id }) => this.#deleting.has(id))) {
+      throw agentErrors.create("agent.delete_under_way");
+    }
     const settled = await Promise.allSettled(
       conversations.map(
         async ({ id }) =>

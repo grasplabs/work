@@ -106,6 +106,36 @@ const connectOutOfReach = async (
   };
 };
 
+/**
+ * `userId`'s Workspace object with connect answering a deletion only
+ * once `until` settles: a delete under way for as long as a test needs.
+ * The returned function puts connect back.
+ */
+const connectWaiting = async (
+  userId: string,
+  until: Promise<unknown>,
+  onReach: () => void
+): Promise<() => Promise<void>> => {
+  const stub = workspace(env, personalWorkspaceId(userId));
+  const real: unknown = await runInDurableObject(stub, (instance) => {
+    const objectEnv = envOf(instance);
+    const was: unknown = Reflect.get(objectEnv, "CONNECT");
+    Reflect.set(objectEnv, "CONNECT", {
+      declineChatActions: async () => {
+        onReach();
+        await until;
+        return 0;
+      },
+    });
+    return was;
+  });
+  return async () => {
+    await runInDurableObject(stub, (instance) => {
+      Reflect.set(envOf(instance), "CONNECT", real);
+    });
+  };
+};
+
 /** What `userId` was recorded deleting of their chats, oldest first. */
 const deletionsBy = async (userId: string) => {
   const events = await allEvents();
@@ -456,6 +486,50 @@ describe("a conversation with the agent in Teams", setUpTime, () => {
     });
   });
 
+  it("is deleted once when asked again while its delete is under way, which says so, and recorded once", async () => {
+    const { api, userId, teams } = await member(idp, says("Noted."));
+    await post(messageFrom(teams, { text: "Hello." }));
+    const gate = Promise.withResolvers<boolean>();
+    // Set inside the Workspace object, read here: plain memory, no I/O.
+    const at = { connect: false };
+    const putBack = await connectWaiting(userId, gate.promise, () => {
+      at.connect = true;
+    });
+
+    const first = api.channelAccounts.forgetConversations();
+    // The first is at connect, past the Brain, before the second asks.
+    await vi.waitFor(
+      () => {
+        expect(at.connect).toBeTruthy();
+      },
+      { timeout: 15_000, interval: 20 }
+    );
+    const second = await outcome(api.channelAccounts.forgetConversations());
+    gate.resolve(true);
+    const deleted = await first;
+    await putBack();
+
+    await vi.waitFor(
+      async () => {
+        await expect(deletionsBy(userId)).resolves.toHaveLength(1);
+      },
+      { timeout: 15_000, interval: 200 }
+    );
+    const recorded = await deletionsBy(userId);
+    expect({ second, deleted, recorded }).toStrictEqual({
+      second: "agent.delete_under_way",
+      deleted: 1,
+      recorded: [
+        {
+          action: "chat.apps_deleted",
+          target: "person",
+          deleted: 1,
+          failed: 0,
+        },
+      ],
+    });
+  });
+
   it("isn't deleted while it is being answered, and says it is still being answered", async () => {
     const held = pausedReply(says("Almost."), 2);
     const { api, userId, teams, provider } = await member(idp, held.reply);
@@ -505,7 +579,7 @@ describe("a conversation with the agent in Teams", setUpTime, () => {
     }).toStrictEqual({
       waiting: 0,
       toldModel: true,
-      says: "A connection of the person's own can be granted only in a chat in Grasp, not in a chat app. Tell them to ask you in a chat in Grasp (Chat, in Grasp's sidebar), and grant it there.",
+      says: "A connection of the person's own can be granted only in a chat in Grasp, not in a chat app, and a grant there holds in that chat alone. Tell them to ask you in a chat in Grasp (Chat, in Grasp's sidebar), grant it there, and have the work done in that chat.",
     });
   });
 

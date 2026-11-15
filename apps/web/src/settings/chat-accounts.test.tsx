@@ -134,6 +134,20 @@ describe("Settings › Security › Chat apps › Your conversations in chat app
     }).toStrictEqual({ answering: true, deleted: false });
   });
 
+  it("says a delete is already under way, in the page's words, when one is", async () => {
+    await shown(async () => {
+      await Promise.resolve();
+      throw agentErrors.create("agent.delete_under_way");
+    });
+
+    await press("Delete");
+    await press("Delete for good");
+
+    expect(text()).toContain(
+      "Your conversations are already being deleted. Wait a moment, then look again."
+    );
+  });
+
   it("shows why core refused it otherwise", async () => {
     await shown(async () => {
       await Promise.resolve();

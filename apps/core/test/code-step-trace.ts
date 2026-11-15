@@ -85,6 +85,28 @@ const requestShape = (body: unknown) => {
 };
 
 /**
+ * Every chat `personId`'s Workspace keeps, whichever channel it came
+ * through, as its table holds them: a chat app's conversation is in no
+ * list a person reads (`Workspace.chats`). Only those that came through
+ * `via`, when given.
+ */
+export const chatIdsOf = async (
+  stub: WorkspaceStub,
+  personId: string,
+  via?: string
+): Promise<{ id: string }[]> =>
+  await runInDurableObject(stub, (_instance, state) =>
+    state.storage.sql
+      .exec<{ id: string }>(
+        via === undefined
+          ? "SELECT id FROM chats WHERE person_id = ?"
+          : "SELECT id FROM chats WHERE person_id = ? AND via = ?",
+        ...(via === undefined ? [personId] : [personId, via])
+      )
+      .toArray()
+  );
+
+/**
  * What `personId`'s turn did with its code step, for a failure to show.
  * Their chat the turn made (one not in `chatsBefore`); each of the turn's
  * model `requests`, whether its caller went away, which call made it and
@@ -95,24 +117,6 @@ const requestShape = (body: unknown) => {
  * drained first. `redact` takes out of all of it what the test may not
  * print.
  */
-/**
- * Every chat `personId`'s Workspace keeps, whichever channel it came
- * through, as its table holds them: a chat app's conversation is in no
- * list a person reads (`Workspace.chats`).
- */
-export const chatIdsOf = async (
-  stub: WorkspaceStub,
-  personId: string
-): Promise<{ id: string }[]> =>
-  await runInDurableObject(stub, (_instance, state) =>
-    state.storage.sql
-      .exec<{ id: string }>(
-        "SELECT id FROM chats WHERE person_id = ?",
-        personId
-      )
-      .toArray()
-  );
-
 export const codeStepTrace = async (
   stub: WorkspaceStub,
   personId: string,

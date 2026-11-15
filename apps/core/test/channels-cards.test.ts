@@ -13,6 +13,7 @@ import {
   heldWritesCard,
   maxValuesPerWrite,
   maxWritesOnCard,
+  piecesOf,
   pressOf,
   signInCard,
 } from "../src/channels/cards.tsx";
@@ -539,6 +540,106 @@ const sectionTexts = (postable: PostableCard): string[] => {
   walk(cardToBlockKit(postable.card));
   return texts;
 };
+
+/** A generator of the same numbers each run, from `seed` (Park–Miller). */
+const numbersFrom = (seed: number) => {
+  const modulus = 2_147_483_647;
+  let state = seed % modulus || 1;
+  return (): number => {
+    state = (state * 48_271) % modulus;
+    return state / modulus;
+  };
+};
+
+/**
+ * An answer as a model may write it, from `seed`: paragraphs of prose in
+ * Latin, CJK and emoji, indented list items, and fenced code with blank
+ * lines and indentation inside, some of each long enough to need cutting.
+ */
+const answerFrom = (seed: number): string => {
+  const random = numbersFrom(seed);
+  const pick = (choices: readonly string[]): string =>
+    choices[Math.floor(random() * choices.length)] ?? "";
+  const words = [
+    "invoice",
+    "Rechnung",
+    "請求書",
+    "發票",
+    "😀",
+    "👩‍💻",
+    "café",
+    "naïve",
+  ];
+  const sentence = () =>
+    `${Array.from({ length: 3 + Math.floor(random() * 30) }, () => pick(words)).join(" ")}${pick([".", "!", "?", "。"])}`;
+  const blocks = Array.from({ length: 1 + Math.floor(random() * 40) }, () => {
+    const kind = pick(["prose", "prose", "list", "code", "long"]);
+    if (kind === "list") {
+      return Array.from(
+        { length: 1 + Math.floor(random() * 4) },
+        (_, at) => `${"  ".repeat(at % 3)}- ${sentence()}`
+      ).join("\n");
+    }
+    if (kind === "code") {
+      const lines = Array.from({ length: 2 + Math.floor(random() * 300) }, () =>
+        pick(["    x = 1", "", "def f():", "\treturn x", "  # 注释 😀"])
+      );
+      return ["```py", ...lines, "```"].join("\n");
+    }
+    const sentences = kind === "long" ? 200 : 1 + Math.floor(random() * 8);
+    return `${pick(["", "  ", "\t"])}${Array.from({ length: sentences }, sentence).join(" ")}`;
+  });
+  return blocks.join(pick(["\n\n", "\n\n\n", "\n  \n"]));
+};
+
+/** What a section's text costs a card, in bytes as JSON. */
+const cardBytes = (text: string): number =>
+  new TextEncoder().encode(JSON.stringify(text)).length - 2;
+
+/** The fence lines a text holds, as the generator writes them. */
+const fenceLines = (text: string): number =>
+  text.split("\n").filter((line) => line.startsWith("```")).length;
+
+describe("an answer in pieces", () => {
+  it("keeps every character where it was, indentation and blank lines too, when it fits one message", () => {
+    const text =
+      "Here:\n\n```python\ndef f():\n    x = 1\n\n    return x\n```\n\n- a\n\n  - nested b";
+    expect(piecesOf(text, "en")).toStrictEqual([
+      { text, opens: "", closes: "" },
+    ]);
+  });
+
+  it("joins back to exactly the answer, each piece within a section and every fence closed in it, for answers of every kind", () => {
+    const broken: unknown[] = [];
+    let reopened = 0;
+    for (let seed = 1; seed <= 60; seed += 1) {
+      const text = answerFrom(seed);
+      const pieces = piecesOf(text, "en");
+      reopened += pieces.filter(({ opens }) => opens !== "").length;
+      const shown = pieces.map(
+        ({ opens, text: piece, closes }) => `${opens}${piece}${closes}`
+      );
+      const joined = pieces.map(({ text: piece }) => piece).join("");
+      const tooLarge = shown.filter(
+        (piece) => piece.length > 3000 || cardBytes(piece) > 16 * 1024
+      );
+      const unclosed = shown.filter((piece) => fenceLines(piece) % 2 !== 0);
+      if (joined !== text || tooLarge.length > 0 || unclosed.length > 0) {
+        broken.push({
+          seed,
+          same: joined === text,
+          tooLarge: tooLarge.length,
+          unclosed: unclosed.length,
+        });
+      }
+    }
+    // Cut inside fenced code too, so that is covered as well.
+    expect({ broken, cutInsideCode: reopened > 0 }).toStrictEqual({
+      broken: [],
+      cutInsideCode: true,
+    });
+  });
+});
 
 describe("Stephen's cards in Slack", () => {
   it("posts an answer too long for one message whole, across messages that each fit Teams and Slack, cut where a paragraph or sentence ends, its thumbs under the last", () => {

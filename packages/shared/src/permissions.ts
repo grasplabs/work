@@ -717,5 +717,5 @@ export const permissionErrors = defineErrorFamily({
   "permission.too_many_requests":
     "This chat already has too many connection requests waiting. Wait until the person decides them.",
   "permission.own_in_chat_app":
-    "A connection of the person's own can be granted only in a chat in Grasp, not in a chat app. Tell them to ask you in a chat in Grasp (Chat, in Grasp's sidebar), and grant it there.",
+    "A connection of the person's own can be granted only in a chat in Grasp, not in a chat app, and a grant there holds in that chat alone. Tell them to ask you in a chat in Grasp (Chat, in Grasp's sidebar), grant it there, and have the work done in that chat.",
 });

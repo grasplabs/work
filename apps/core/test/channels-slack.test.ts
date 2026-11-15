@@ -605,6 +605,27 @@ describe("a linked person's question in Slack", () => {
     });
   });
 
+  it("posts an answer with its indentation as the model wrote it, after a blank line too", async () => {
+    const answer =
+      "Here:\n\n```python\ndef f():\n    x = 1\n\n    return x\n```\n\n- a\n\n  - nested b";
+    const { slackUser } = await linkedPerson();
+    await fakeProvider(says(answer));
+    const asked = messageFrom(slackUser);
+    asked.event.text = "Show me f.";
+    await post(asked, { caught: false });
+
+    const posted = await slackSawIn(asked.event.channel);
+    const said = JSON.stringify(
+      posted.filter(({ method }) =>
+        ["chat.postMessage", "chat.update"].includes(method)
+      )
+    );
+    expect({
+      returnIndented: said.includes(String.raw`\n    return x`),
+      nestedIndented: said.includes(String.raw`\n  - nested b`),
+    }).toStrictEqual({ returnIndented: true, nestedIndented: true });
+  });
+
   it("goes on with what was said before, in a conversation whose address answers as a chat that doesn't exist", async () => {
     const badge = `badge-${unique()}`;
     const { slackUser, api, userId } = await linkedPerson();

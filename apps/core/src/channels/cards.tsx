@@ -10,6 +10,8 @@ import {
   toCardElement,
 } from "chat";
 import type { CardElement, PostableCard } from "chat";
+import type { Root, RootContent } from "mdast";
+import { fromMarkdown } from "mdast-util-from-markdown";
 import { z } from "zod";
 
 import { say } from "./words.ts";
@@ -167,66 +169,136 @@ const fitsSection = (piece: string): boolean =>
   piece.length <= sectionChars && sizeOf(piece) <= outsideBytes;
 
 /**
- * `units` joined by `joiner` into as few pieces as fit a section, in
- * order; a unit too long for one is cut by `smaller` first.
+ * A piece of an answer: `text`, exactly as the answer has it, so the
+ * pieces joined are the answer; and, for a cut inside fenced code, the
+ * fence's opening line it reopens with (`opens`) and the marker it closes
+ * with (`closes`), so each piece shows as code where it is code.
  */
-const packed = (
-  units: readonly string[],
-  joiner: string,
-  smaller: (unit: string) => string[]
-): string[] => {
-  const pieces: string[] = [];
-  let current = "";
-  for (const unit of units) {
-    const joined = current === "" ? unit : `${current}${joiner}${unit}`;
-    if (fitsSection(joined)) {
-      current = joined;
-      continue;
+export interface AnswerPiece {
+  text: string;
+  opens: string;
+  closes: string;
+}
+
+/** A fenced code block of an answer: where its code starts and it ends. */
+interface Fence {
+  /** Where its code starts, past its opening line. */
+  code: number;
+  end: number;
+  /** Its opening line, as written, with the line's end. */
+  opening: string;
+  /** What closes it: its opening's run of backticks or tildes. */
+  marker: string;
+}
+
+/** The fenced code blocks of `text`, as CommonMark reads it (mdast). */
+const fencesOf = (text: string): Fence[] => {
+  const fences: Fence[] = [];
+  const walk = (node: Root | RootContent): void => {
+    const start = node.position?.start.offset;
+    const end = node.position?.end.offset;
+    if (node.type === "code" && start !== undefined && end !== undefined) {
+      const line = text.slice(start, text.indexOf("\n", start) + 1 || end);
+      // Indented code has no fence, and nothing to close.
+      const marker = /^(?:`{3,}|~{3,})/u.exec(line.trimStart())?.[0];
+      if (marker !== undefined && line.endsWith("\n")) {
+        fences.push({ code: start + line.length, end, opening: line, marker });
+      }
     }
-    if (current !== "") {
-      pieces.push(current);
+    if ("children" in node) {
+      for (const child of node.children) {
+        walk(child);
+      }
     }
-    current = "";
-    if (fitsSection(unit)) {
-      current = unit;
-      continue;
-    }
-    const cut = smaller(unit);
-    current = cut.pop() ?? "";
-    pieces.push(...cut);
-  }
-  if (current !== "") {
-    pieces.push(current);
-  }
-  return pieces;
+  };
+  walk(fromMarkdown(text));
+  return fences;
 };
 
-/** Where a paragraph ends: a blank line. */
-const paragraphBreak = /\n[^\S\n]*\n\s*/u;
+/** Where a paragraph ends: a blank line, and any more after it. */
+const paragraphBreaks = /\n[^\S\n]*\n(?:[^\S\n]*\n)*/gu;
 
 /**
- * `text` in pieces that each fit a section, cut where a reader pauses:
- * between paragraphs, else between sentences (`Intl.Segmenter`, in the
- * person's language), else, for a sentence no section holds, between
- * characters (graphemes). Nothing is left out: only the white space where
- * it was cut.
+ * `text` in pieces that each fit a section, untouched when it fits one,
+ * cut where a reader pauses: after a paragraph's blank lines, else between
+ * sentences (`Intl.Segmenter`, in the person's language), else, for a
+ * sentence no section holds, between characters (graphemes). Every
+ * character stays where it was: the pieces' `text` joined is `text`. A cut
+ * inside fenced code closes the fence and reopens it in the next piece.
  */
-const piecesOf = (text: string, locale: ChannelLocale): string[] => {
-  const sentences = new Intl.Segmenter(locale, { granularity: "sentence" });
-  const graphemes = new Intl.Segmenter(locale, { granularity: "grapheme" });
-  const byCharacter = (sentence: string): string[] =>
-    packed(
-      Array.from(graphemes.segment(sentence), ({ segment }) => segment),
-      "",
-      (grapheme) => [grapheme]
-    );
-  const bySentence = (paragraph: string): string[] =>
-    packed(
-      Array.from(sentences.segment(paragraph), ({ segment }) => segment),
-      "",
-      byCharacter
-    ).map((piece) => piece.trim());
-  return packed(text.trim().split(paragraphBreak), "\n\n", bySentence);
+export const piecesOf = (
+  text: string,
+  locale: ChannelLocale
+): AnswerPiece[] => {
+  if (fitsSection(text)) {
+    return [{ text, opens: "", closes: "" }];
+  }
+  const fences = fencesOf(text);
+  const fenceAt = (cut: number) =>
+    fences.find(({ code, end }) => cut > code && cut < end);
+  const paragraphs = Array.from(
+    text.matchAll(paragraphBreaks),
+    (match) => match.index + match[0].length
+  );
+  const segmenters = (["sentence", "grapheme"] as const).map(
+    (granularity) => new Intl.Segmenter(locale, { granularity })
+  );
+  const pieces: AnswerPiece[] = [];
+  let start = 0;
+  let opens = "";
+  while (start < text.length) {
+    const from = start;
+    const opening = opens;
+    /** The piece from here to `cut`, if it fits a section. */
+    const pieceTo = (cut: number): AnswerPiece | undefined => {
+      const fence = fenceAt(cut);
+      const piece = text.slice(from, cut);
+      const closes =
+        fence === undefined
+          ? ""
+          : `${piece.endsWith("\n") ? "" : "\n"}${fence.marker}`;
+      return fitsSection(`${opening}${piece}${closes}`)
+        ? { text: piece, opens: opening, closes }
+        : undefined;
+    };
+    const last = pieceTo(text.length);
+    if (last !== undefined) {
+      pieces.push(last);
+      break;
+    }
+    // Where each kind of cut could fall, in the stretch a section holds.
+    const window = text.slice(from, from + sectionChars + 1);
+    const within = (cut: number) => cut > from && cut < from + window.length;
+    const cuts = [
+      paragraphs.filter(within),
+      ...segmenters.map((segmenter) =>
+        Array.from(
+          segmenter.segment(window),
+          ({ index }) => from + index
+        ).filter(within)
+      ),
+    ];
+    let found: { cut: number; piece: AnswerPiece } | undefined;
+    for (const candidates of cuts) {
+      for (const cut of candidates.toReversed()) {
+        const piece = pieceTo(cut);
+        if (piece !== undefined) {
+          found = { cut, piece };
+          break;
+        }
+      }
+      if (found !== undefined) {
+        break;
+      }
+    }
+    if (found === undefined) {
+      throw new Error("No piece of the answer fits a section");
+    }
+    pieces.push(found.piece);
+    start = found.cut;
+    opens = fenceAt(start)?.opening ?? "";
+  }
+  return pieces;
 };
 
 /**
@@ -242,15 +314,16 @@ export const answerCards = ({
 }: AnswerCard): PostableCard[] => {
   const cards: string[][] = [];
   let room = 0;
-  for (const piece of piecesOf(text, locale)) {
-    const cost = sizeOf(piece);
+  for (const { opens, text: piece, closes } of piecesOf(text, locale)) {
+    const shown = `${opens}${piece}${closes}`;
+    const cost = sizeOf(shown);
     const last = cards.at(-1);
     if (last === undefined || cost > room) {
-      cards.push([piece]);
+      cards.push([shown]);
       room = outsideBytes - cost;
       continue;
     }
-    last.push(piece);
+    last.push(shown);
     room -= cost;
   }
   return cards.map((pieces, at) => {

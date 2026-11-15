@@ -40,6 +40,11 @@ export const botConnectorFake = (bot: {
   const members: Record<string, unknown> = {};
   /** Conversations the bot was removed from: Teams refuses its posts there. */
   const uninstalled = new Set<string>();
+  /**
+   * Posts Teams fails once, by what their body holds: each one met is
+   * answered 502 and forgotten, so it is never refused twice.
+   */
+  const failing: { conversation: string; holding: string }[] = [];
 
   const membersPath =
     /\/v3\/conversations\/(?<conversation>[^/]+)\/members\/(?<member>[^/]+)$/u;
@@ -90,7 +95,19 @@ export const botConnectorFake = (bot: {
         { status: 403 }
       );
     }
-    const streamed = JSON.stringify(body).includes('"streamType":"streaming"');
+    const said = JSON.stringify(body);
+    const fails = failing.findIndex(
+      (each) =>
+        each.conversation === conversation && said.includes(each.holding)
+    );
+    if (fails !== -1) {
+      failing.splice(fails, 1);
+      return Response.json(
+        { error: { code: "ServiceError", message: "Try again later." } },
+        { status: 502 }
+      );
+    }
+    const streamed = said.includes('"streamType":"streaming"');
     if (streamed && unstreamed.has(conversation)) {
       return Response.json(
         { error: { code: "ContentStreamNotAllowed" } },
@@ -182,6 +199,10 @@ export const botConnectorFake = (bot: {
     /** Removes the bot from `conversation`, as uninstalling its app does. */
     uninstall: (conversation: string) => {
       uninstalled.add(conversation);
+    },
+    /** Teams fails, once, the next post in `conversation` holding `holding`. */
+    failOnce: (conversation: string, holding: string) => {
+      failing.push({ conversation, holding });
     },
     /** Adds to the roster, `<conversation> <user id>` to each member. */
     setMembers: (next: Record<string, unknown>) => {

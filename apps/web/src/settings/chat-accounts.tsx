@@ -229,15 +229,22 @@ const AccountRow = ({ account }: { account: ChannelAccount }) => {
 
 /**
  * How many of the person's conversations in chat apps were deleted, or
- * that one is still being answered, so none could go yet. Outside the
- * component, as the React Compiler can't compile `try`.
+ * why none could go yet: one is still being answered, or an earlier
+ * delete is under way. Outside the component, as the React Compiler
+ * can't compile `try`.
  */
-const forgotten = async (session: Session): Promise<number | "answering"> => {
+const forgotten = async (
+  session: Session
+): Promise<number | "answering" | "under_way"> => {
   try {
     return await session.channelAccounts.forgetConversations();
   } catch (error) {
-    if (agentErrors.codeOf(error) === "agent.conversation_answering") {
+    const code = agentErrors.codeOf(error);
+    if (code === "agent.conversation_answering") {
       return "answering";
+    }
+    if (code === "agent.delete_under_way") {
+      return "under_way";
     }
     throw error;
   }
@@ -251,7 +258,11 @@ const forgotten = async (session: Session): Promise<number | "answering"> => {
 const ForgetConversations = () => {
   const { t } = useLingui();
   const { busy, failure, run } = useCoreAction();
-  const [deleted, setDeleted] = useState<number | "answering">();
+  const [deleted, setDeleted] = useState<number | "answering" | "under_way">();
+  const refusals = {
+    answering: t`Stephen is still answering one of your conversations. Try again in a moment.`,
+    under_way: t`Your conversations are already being deleted. Wait a moment, then look again.`,
+  };
   return (
     <SettingsRow
       description={t`Grasp keeps what you say to Stephen in a chat app, so he can follow the conversation and learn from it.`}
@@ -283,9 +294,7 @@ const ForgetConversations = () => {
           ) : null}
         </p>
         <ErrorText>
-          {deleted === "answering"
-            ? t`Stephen is still answering one of your conversations. Try again in a moment.`
-            : failure}
+          {typeof deleted === "string" ? refusals[deleted] : failure}
         </ErrorText>
       </div>
     </SettingsRow>

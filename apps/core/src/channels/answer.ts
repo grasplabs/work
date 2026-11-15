@@ -496,10 +496,25 @@ const answerOne = async (
     );
   });
   if (!streamed) {
-    // Whole, in as many messages as it takes, in order.
-    for (const card of answerCards({ locale, text: final, rate })) {
-      // oxlint-disable-next-line no-await-in-loop -- in order
-      await postIn(env, platform, thread, card);
+    // Whole, in as many messages as it takes, in order. A part the
+    // platform refuses ends it with the line that something went wrong,
+    // and the held writes still get their card, which no page of Grasp
+    // shows, and the turn is still kept, before what posting threw.
+    try {
+      for (const card of answerCards({ locale, text: final, rate })) {
+        // oxlint-disable-next-line no-await-in-loop -- in order
+        await postIn(env, platform, thread, card);
+      }
+    } catch (error) {
+      try {
+        await quietly("failed_line", async () => {
+          await postIn(env, platform, thread, say("failed", locale));
+        })();
+        await held();
+      } finally {
+        await recorded();
+      }
+      throw error;
     }
     await timed();
     await held();

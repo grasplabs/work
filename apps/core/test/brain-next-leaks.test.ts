@@ -3775,8 +3775,8 @@ describe(
         };
       };
       await post(messageFrom(ann.teams, { text: "Hi." }));
-      // Her only chat: the direct message, which no list in Grasp shows.
-      const [direct] = await chatIdsOf(annsWorkspace, ann.userId);
+      // Her direct message in Teams, which no list in Grasp shows.
+      const [direct] = await chatIdsOf(annsWorkspace, ann.userId, "teams");
       if (direct === undefined) {
         throw new TypeError("Expected her direct message's chat");
       }
