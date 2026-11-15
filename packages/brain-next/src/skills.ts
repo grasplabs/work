@@ -78,6 +78,10 @@ export const skillFrontmatterOf = (
   return parsed.success ? parsed.data : null;
 };
 
+/** What `text` says after its frontmatter block: all of it when it has none. */
+export const skillBodyOf = (text: string): string =>
+  text.replace(frontmatterBlock, "");
+
 /** The card `text` declares in its frontmatter (`skillFrontmatterOf`), or null. */
 export const skillCardOf = (text: string): SkillCard | null => {
   const frontmatter = skillFrontmatterOf(text);

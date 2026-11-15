@@ -4,12 +4,14 @@ import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import type { Roster } from "@grasp-os/shared/onboarding";
 import { speechPath } from "@grasp-os/shared/voice";
 import type { SpeechRequestBody } from "@grasp-os/shared/voice";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { voiceBudgets } from "../src/onboarding/speech.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { storedKeyOf } from "../src/speech-cache.ts";
 import { secondsPerCharacter } from "./ai-providers-fake.ts";
 import { mockIdp } from "./idp.ts";
 import { onLink, participate } from "./interview-link.ts";
@@ -291,10 +293,29 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
     await again.body?.cancel();
     const fresh = await speak({ text: after, language: "en", link });
     const result = { again: again.status, new: await codeOf(fresh) };
+    // What was said is noted for its erasure (GRA-1897); a line refused is
+    // never said, and nothing of it is noted.
+    const noted = await runInDurableObject(
+      onboardingStore(env),
+      async (_instance, state) => {
+        const keys = [await storedKeyOf(before), await storedKeyOf(after)];
+        return keys.map(
+          (key) =>
+            state.storage.sql
+              .exec(
+                "SELECT key FROM spoken_keys WHERE who = ? AND key = ?",
+                `link:${person}`,
+                key
+              )
+              .toArray().length
+        );
+      }
+    );
 
-    expect(result).toStrictEqual({
+    expect({ ...result, noted }).toStrictEqual({
       again: 200,
       new: [429, "speech.limited"],
+      noted: [1, 0],
     });
     await expect(carrying(before)).resolves.toHaveLength(1);
     await expect(carrying(after)).resolves.toStrictEqual([]);

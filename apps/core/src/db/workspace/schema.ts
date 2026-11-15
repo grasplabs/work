@@ -227,6 +227,25 @@ export const chatRunSources = sqliteTable(
   ]
 );
 
+/**
+ * When this person last used each memory the Brain handed them: one row a
+ * memory, by the store it is in and that store's id for it, kept when a
+ * recall as them pins it (`brain-memory:`, history-access.ts) and moved
+ * on by each later one (workspace.ts `memoriesUsed`). Their own recall
+ * ranks memories by it (brain-next.ts `recallAs`), so one they never use
+ * fades. Theirs alone: no other person's recall reads it; erased with
+ * their Workspace. Outlives the chat that used it.
+ */
+export const memoryUses = sqliteTable(
+  "memory_uses",
+  {
+    store: text({ enum: ["own", "shared"] }).notNull(),
+    memory: text().notNull(),
+    usedAt: integer("used_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.store, table.memory] })]
+);
+
 // Unused since the App's one shared draft (drafts.ts) replaced each
 // chat's drafts and their previews: nothing reads or writes these, and a
 // chat's rows go with it. Kept so a roll back to the release before still
@@ -388,14 +407,10 @@ export const auditOutbox = sqliteTable("audit_outbox", {
 });
 
 /**
- * Settled turns' outcomes still owed to the Brain (src/brain-capture.ts),
- * each written in the same transaction as the turn's last message, so a
- * turn never settles without its capture. `facts` is what the turn's end
- * said (how it ended, its model, its answer), identifiers only; the
- * object delivers the rest from the chat when it delivers. Deleted once
- * the Brain has it, or once its chat is deleted; one the Brain refused for
- * good stays `dead`. `seq` only grows (AUTOINCREMENT): the Brain's cursor
- * of this object's turns.
+ * Settled turns' outcomes once owed to today's Brain, while core captured
+ * them. Nothing writes or delivers them any more; what is left is deleted
+ * with its chat or its person, and the table is dropped in a later
+ * release.
  */
 export const brainCaptureIntents = sqliteTable(
   "brain_capture_intents",
@@ -404,7 +419,7 @@ export const brainCaptureIntents = sqliteTable(
     eventId: text("event_id").notNull(),
     /** The chat the outcome rests on. */
     evidenceId: text("evidence_id").notNull(),
-    /** JSON: the turn's end, as `brain-capture.ts` reads it. */
+    /** JSON: the turn's end. */
     facts: text().notNull(),
     state: text({ enum: ["pending", "dead"] })
       .notNull()

@@ -688,7 +688,7 @@ describe("Settings › AI providers", () => {
     const { api } = fakeAiProviders({
       connected: [{ provider: "mistral" }],
       platform: [
-        { feature: "conversion", provider: openai },
+        { feature: "conversion", provider: null },
         { feature: "transcription", provider: openai },
         { feature: "speech", provider: elevenLabs },
       ],
@@ -698,9 +698,6 @@ describe("Settings › AI providers", () => {
     const section = [...document.querySelectorAll("section")].find(
       (each) =>
         each.querySelector("h2")?.textContent === "Grasp's own AI features"
-    );
-    expect(text()).toContain(
-      "Grasp converts uploaded PDFs with OpenAI, European Union, using Grasp's own key."
     );
     expect(text()).toContain(
       "Grasp transcribes interviews with OpenAI, European Union, using Grasp's own key."

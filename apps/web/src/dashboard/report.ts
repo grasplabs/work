@@ -18,7 +18,6 @@ import type { ExportFigure } from "../export/figure-tiles.tsx";
 import { formatDate } from "../format.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { byKindOrder } from "./board.ts";
-import type { SignalKind } from "./board.ts";
 import { signalKindLooks } from "./signals.tsx";
 
 // The weekly report, as the prototype's (`lib/report.ts`) where core has
@@ -280,16 +279,7 @@ const betterSection = (
   if (better.data === null) {
     return [];
   }
-  // Knowledge's own kinds, which core still counts until it stops keeping
-  // Knowledge, are left out: the dashboard no longer shows them. Knowledge's
-  // unanswered question has the same kind as an improvement signal's, so
-  // its count still comes in with that one: the counts carry no source to
-  // tell them apart.
-  const counts = byKindOrder(
-    better.data.filter((count): count is { kind: SignalKind; count: number } =>
-      Object.hasOwn(signalKindLooks, count.kind)
-    )
-  );
+  const counts = byKindOrder(better.data);
   if (counts.length === 0) {
     return [heading, i18n._(msg`Nothing to make better right now.`)];
   }

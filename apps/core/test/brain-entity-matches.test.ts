@@ -1,20 +1,23 @@
-import { settleMs } from "@grasp-os/brain/entities";
+import { runLinking, sourceKey } from "@grasp-os/brain/entities";
 import type {
   EntityMatch,
   EntityMatchDecisionInput,
   KnowledgeApi,
 } from "@grasp-os/shared/knowledge";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { env } from "cloudflare:workers";
+import { describe, expect, it } from "vite-plus/test";
 
+import { brainOf } from "../src/knowledge/ports.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
-import { runMinuteTasks } from "./maintenance.ts";
-import { answeringProvider } from "./model-provider.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
 // Entity matches across collections in core (GRA-1080): proposals and
-// decisions over the RPC, as the signed-in person. How it can
+// decisions over the RPC, as the signed-in person. Nothing links a
+// source's entities in the background any more: each case links its
+// documents as that job left them, through the Brain's own linking with
+// an extractor that names what the text does. How it can
 // fail, tried here at core's boundary (the Brain's own tests try every
 // rule, packages/brain/test/entities.test.ts):
 // - a member learns that a collection they can't read holds a name they
@@ -26,8 +29,30 @@ import { outcome, signedInApi, unique } from "./sign-in.ts";
 
 const idp = mockIdp();
 
-/** Signing people in and linking through the engine can be slow on CI. */
+/** Signing people in can be slow on CI. */
 const setUpTime = { timeout: 90_000 };
+
+/**
+ * Links document `documentId`'s version 1 as the removed linking job did,
+ * with an extractor that names `name` wherever the text does.
+ */
+const linked = async (documentId: string, name: string): Promise<void> => {
+  const brain = brainOf(env);
+  await runLinking(
+    {
+      ...brain,
+      ports: {
+        ...brain.ports,
+        extractEntities: async (text) =>
+          await Promise.resolve({
+            entities: text.includes(name) ? [{ kind: "person", name }] : [],
+          }),
+      },
+    },
+    { source: sourceKey({ kind: "document", id: documentId }), version: 1 },
+    { do: async (_name, _config, run) => await run() }
+  );
+};
 
 describe("entity matches for the signed-in person", setUpTime, () => {
   it("proposes a match only to a person who reads both collections, and lets only them decide it, audited", async () => {
@@ -52,12 +77,14 @@ describe("entity matches for the signed-in person", setUpTime, () => {
       [hidden, `# Notes\n${name} joins the board.`],
     ] as const) {
       // oxlint-disable-next-line no-await-in-loop -- one save at a time
-      await admin.api.knowledge.saveDocument({
+      const saved = await admin.api.knowledge.saveDocument({
         collectionId,
         path: "note.md",
         text,
         ifVersion: 0,
       });
+      // oxlint-disable-next-line no-await-in-loop -- one link at a time
+      await linked(saved.id, name);
     }
     const proof = await admin.api.knowledge.saveDocument({
       collectionId: hidden,
@@ -65,31 +92,14 @@ describe("entity matches for the signed-in person", setUpTime, () => {
       text: "# Proof\nBoth notes are about one person.",
       ifVersion: 0,
     });
-    // The model names her wherever the text does; anything else, nothing.
-    await answeringProvider((requests) => ({
-      text: JSON.stringify({
-        entities: JSON.stringify(requests.at(-1)?.body ?? "").includes(name)
-          ? [{ kind: "person", name }]
-          : [],
-      }),
-      inputTokens: 300,
-      outputTokens: 40,
-    }));
     const adminBrain: KnowledgeApi = admin.api.knowledge;
     const memberBrain: KnowledgeApi = member.api.knowledge;
     const hers = (matches: EntityMatch[]) =>
       matches.filter((match) => match.name === name);
-    const proposed = await vi.waitFor(
-      async () => {
-        await runMinuteTasks({}, new Date(Date.now() + settleMs + 60_000));
-        const [match] = hers(await adminBrain.entityMatches());
-        if (match === undefined) {
-          throw new Error("Not linked yet");
-        }
-        return match;
-      },
-      { timeout: 60_000, interval: 200 }
-    );
+    const [proposed] = hers(await adminBrain.entityMatches());
+    if (proposed === undefined) {
+      throw new Error("No match was proposed");
+    }
     const [first = "", second = ""] = proposed.entities.map(({ id }) => id);
     const decision: EntityMatchDecisionInput = {
       entities: [first, second],

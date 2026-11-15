@@ -24,6 +24,7 @@ import {
 import { release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { collectionWithNote } from "./knowledge.ts";
 import { fakeProvider } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
 import { signedInApi, unique } from "./sign-in.ts";
@@ -102,8 +103,8 @@ const definitionOf = (status = "done"): string =>
 
 /**
  * A chat of `role`'s person (a builder unless another is given) answered
- * by `replies`, with an App the builder released, and `grant`: the
- * agent's permission to build.
+ * by `replies`, with an App the builder released, and `grant`: a
+ * permission of the agent's own, to read a collection for everyone.
  */
 const setUp = async (
   replies: ProviderReply[],
@@ -115,12 +116,16 @@ const setUp = async (
   await release(builder, app, { "AGENTS.md": "# Ledger\n" });
   const person = role === "builder" ? builder : await signedInApi(idp, role);
   const chat = await chatOf(person.userId, ...replies);
+  const { collectionId } = await collectionWithNote(admin.api, {
+    name: `Handbook ${unique()}`,
+    access: "everyone",
+  });
   const grant = async (): Promise<string> =>
     await requestGranted(idp, admin, {
       subject: chat.agent,
-      object: { type: "collection", collectionId: "apps" },
+      object: { type: "collection", collectionId },
       actions: ["read"],
-      binding: "APP_LIBRARY",
+      binding: "HANDBOOK",
     });
   return { admin, builder, person, app, chat, grant };
 };

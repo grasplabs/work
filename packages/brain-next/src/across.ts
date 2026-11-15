@@ -10,7 +10,8 @@ import type {
   SourceList,
 } from "./contract.ts";
 import { exactsOf, foundIn } from "./exact.ts";
-import { byBytes, byNearness } from "./order.ts";
+import { byBytes, byFreshness, byNearness, byWordsFound } from "./order.ts";
+import type { MemoryOrder } from "./order.ts";
 import { fuse, packOf } from "./pack.ts";
 import type { Entry } from "./pack.ts";
 import { holdsTerm, sequenceOf, termsOf, wordsOf } from "./words.ts";
@@ -181,32 +182,45 @@ const byMeaning = (findings: readonly Finding[]): Entry[] =>
 /** A memory of the store `store`, as merged. */
 type MemoryOf = FoundMemory & { store: number };
 
+/** `memory` as order.ts `byFreshness` orders it. */
+const orderOf = ({
+  confirmed,
+  learnedAt,
+  usedAt,
+  id,
+}: FoundMemory): MemoryOrder => ({
+  confirmed: confirmed !== null,
+  learnedAt: learnedAt.getTime(),
+  usedAt: usedAt?.getTime() ?? null,
+  id,
+});
+
 /** A memory's key in the fused lists: its store's and its id. */
 const memoryKeyOf = ({ store, id }: MemoryOf): string =>
   `memory ${store} ${id}`;
 
 /**
- * After a way's own order: confirmed first, then newer, then by id, as
- * each store orders them (the contract's tie order), then by store.
+ * After a way's own order: order.ts `byFreshness`, the order each store
+ * cut its own lists in, then by store.
  */
 const byMemory = (a: MemoryOf, b: MemoryOf): number =>
-  Number(a.confirmed === null) - Number(b.confirmed === null) ||
-  b.learnedAt.getTime() - a.learnedAt.getTime() ||
-  byBytes(b.id, a.id) ||
-  a.store - b.store;
+  byFreshness(orderOf(a), orderOf(b)) || a.store - b.store;
 
 /**
  * The memory ways' lists, merged over the stores as one store's
  * statements order them (memories.ts, recall-memories.ts): by words, more
  * of the question's telling words first, then more as written; along
  * entities, the nearest step first; each then as `byMemory`, the first
- * `recallLimit` of all. A contested memory carries the other sides its
- * store found (an entity is one store's: sides are never across stores).
+ * `recallLimit` of all, the order each store cut its own in. A contested
+ * memory carries the other sides its store found (an entity is one
+ * store's: sides are never across stores).
  */
 const memoriesOf = (
   findings: readonly Finding[]
 ): { words: Entry[]; entities: Entry[] } => {
-  const tagged = (pick: (memories: Finding["memories"]) => FoundMemory[]) =>
+  const tagged = (
+    pick: (memories: Finding["memories"]) => FoundMemory[]
+  ): MemoryOf[] =>
     findings.flatMap((finding, store) =>
       pick(finding.memories).map((memory) => ({ ...memory, store }))
     );
@@ -242,7 +256,11 @@ const memoriesOf = (
   return {
     words: tagged(({ words }) => words)
       .toSorted(
-        (a, b) => b.words - a.words || b.exact - a.exact || byMemory(a, b)
+        (a, b) =>
+          byWordsFound(
+            { ...orderOf(a), words: a.words, exact: a.exact },
+            { ...orderOf(b), words: b.words, exact: b.exact }
+          ) || a.store - b.store
       )
       .slice(0, recallLimit)
       .map((memory) => entryOf(memory, "words")),

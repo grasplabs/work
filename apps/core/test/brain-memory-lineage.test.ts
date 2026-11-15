@@ -11,6 +11,7 @@ import type { Reader } from "../src/knowledge/access.ts";
 import { portsOf } from "../src/knowledge/ports.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { seedMemory } from "./knowledge-purge.ts";
 import { newTeam } from "./knowledge.ts";
 import { callAuth, signedInApi, unique } from "./sign-in.ts";
 
@@ -138,7 +139,8 @@ describe("a memory record's lineage", setUpTime, () => {
       access: "everyone",
     });
     const first = idOf(
-      await ada.api.knowledge.remember(
+      await seedMemory(
+        ada,
         {
           kind: "fact",
           text: `Quiet floor ${unique()}`,
@@ -786,7 +788,8 @@ describe(
       });
       const word = `quietfloor${unique().replaceAll("-", "")}`;
       const memoryId = idOf(
-        await ada.api.knowledge.remember(
+        await seedMemory(
+          ada,
           { kind: "fact", text: `Note ${word}`, sourceRefs: [cited] },
           { idempotencyKey: key() }
         )
@@ -857,7 +860,8 @@ describe(
       const word = `quietdesk${unique().replaceAll("-", "")}`;
       // Resting on nothing; its correction cites the team's document.
       const first = idOf(
-        await ada.api.knowledge.remember(
+        await seedMemory(
+          ada,
           { kind: "fact", text: `Desk ${word}` },
           { idempotencyKey: key() }
         )
