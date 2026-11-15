@@ -141,5 +141,5 @@ export const kickoffErrors = defineErrorFamily({
     "The conversation couldn't be read just now. Try again in a moment.",
   "kickoff.invalid": "That isn't something the kickoff takes.",
   "kickoff.purged":
-    "An admin purged words from the kickoff while this was being read. Bring the transcript in again.",
+    "Something was erased from the onboarding while this was being read, so nothing of it was kept. Bring the transcript in again.",
 });

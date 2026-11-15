@@ -577,14 +577,34 @@ export const auditOutbox = sqliteTable("audit_outbox", {
 });
 
 /**
- * The voice's lines of an interview that went, still to be taken out of
- * the cache (speech-cache.ts), by their stored keys: hashes, never what
- * was said. Each goes once the cache confirms it; the alarm tries what is
- * left again until none is (GRA-329).
+ * The voice's lines still to be taken out of the cache (speech-cache.ts),
+ * by their stored keys (`storedKeyOf`): hashes, never what was said. Each
+ * goes once the cache confirms it; the alarm tries what is left again
+ * until none is (GRA-329). `queued` counts each time a key is queued
+ * again: a row goes only as it was read before the cache was asked, so a
+ * key queued again meanwhile is asked once more (GRA-1897).
  */
 export const linesToForget = sqliteTable("forget_lines", {
   key: text().primaryKey(),
+  queued: integer(),
 });
+
+/**
+ * The voice cache's key (speech-cache.ts `storedKeyOf`: a hash, never the
+ * words) of every text the voice was asked to say for someone, as it was
+ * asked (GRA-1897): `who` as the voice counts them (`link:<person>` for an
+ * interview, `admin:<user>` for an admin's onboarding). What erasing
+ * anything of theirs takes out of the cache, whole: what was said, as
+ * said, a sentence or a story at a time.
+ */
+export const spokenKeys = sqliteTable(
+  "spoken_keys",
+  {
+    who: text().notNull(),
+    key: text().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.who, table.key] })]
+);
 
 /**
  * Mail the onboarding sends (mail-outbox.ts), each once, by its key: a mail
