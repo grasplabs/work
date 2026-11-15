@@ -2522,113 +2522,147 @@ describe(
       };
     };
 
-    it("answers a team's source as erased to each of its readers, and leaves it out of an export, while its erasure is still under way, as once it is done", async () => {
-      const erasing = await teamSourceToErase();
+    /** A team's source with memories drawn from two of its versions, as `teamSourceToErase` and `teamUploadToRemove` make it. */
+    interface TeamSource {
+      group: string;
+      sharedWord: string;
+      markers: Readonly<Record<string, string>>;
+      source: SourceRef;
+      key: string;
+      customer: string;
+      entity: string;
+    }
+
+    /**
+     * What `personId` gets of `team`'s source's versions, history,
+     * passages, memories and customer, through core and the store, each
+     * against what they get of what no one added.
+     */
+    const readsOfTeamSource = async (team: TeamSource, personId: string) => {
       const { group, sharedWord, markers, source, key, customer, entity } =
-        erasing;
+        team;
       const missing = newSource();
       const unknownEntity = crypto.randomUUID();
       const unknownWord = markerWord();
-      /**
-       * What `personId` gets of the source's versions, history, passages,
-       * memories and customer, through core and the store, each against
-       * what they get of what no one added.
-       */
-      const readsOf = async (personId: string) => {
-        const reader = { person: personId, groups: [group, "company"] };
-        const pack = await recallAs(env, personId, {
-          personal: true,
-          question: `${sharedWord} ${Object.values(markers).join(" ")}`,
-          budget: { tokens: recallBudgetMax },
-        });
-        return {
-          versions: await Promise.all(
-            [1, 2].map(
-              async (version) =>
-                await asIfNeverAdded(
-                  async (erased) =>
-                    await readSourceVersionAs(env, personId, {
-                      source: erased ? source : missing,
-                      version,
-                    })
-                )
-            )
-          ),
-          history: await asIfNeverAdded(
-            async (erased) =>
-              await listVersionsAs(env, personId, {
-                source: erased ? source : missing,
-              })
-          ),
-          // What it found: its "not found" holds the question's words.
-          recalled: markersIn(
-            [pack.items, pack.memories, pack.contested],
-            markers
-          ),
-          memories: await asIfNeverAdded(
-            async (erased) =>
-              await sharedStore().readMemories({
-                entity: erased ? entity : unknownEntity,
-                reader,
-                history: true,
-              })
-          ),
-          names: await asIfNeverAdded(
-            async (erased) =>
-              await sharedStore().readEntityNames({
-                entity: erased ? entity : unknownEntity,
-                reader,
-              })
-          ),
-          customer: await asIfNeverAdded(
-            async (erased) =>
-              await sharedStore().readEntity({
-                entity: erased ? entity : unknownEntity,
-                reader,
-              })
-          ),
-          byName: await asIfNeverAdded(
-            async (erased) =>
-              await sharedStore().findEntities({
-                reader,
-                name: `${sharedWord} ${erased ? customer : unknownWord}`,
-              })
-          ),
-          byReference: await asIfNeverAdded(
-            async (erased) =>
-              await sharedStore().findEntities({
-                reader,
-                identifier: {
-                  type: "ref",
-                  value: `ref:${erased ? customer : unknownWord}`,
-                },
-              })
-          ),
-          // Drawing from a version, as extraction does: refused alike.
-          drawing: await asIfNeverAdded(
-            async (erased) =>
-              await sharedStore().addMemories({
-                change: crypto.randomUUID(),
-                access: { kind: "audience", group },
-                entities: [{ key: "c", kind: "customer", names: ["Plain"] }],
-                memories: [
-                  {
-                    about: "c",
-                    type: "fact",
-                    statement: "Plain",
-                    speaker: { kind: "system" },
-                    basis: {
-                      kind: "source",
-                      source: erased ? key : `upload:${missing.id}`,
-                      version: 1,
-                      quote: sharedWord,
-                    },
+      const reader = { person: personId, groups: [group, "company"] };
+      const pack = await recallAs(env, personId, {
+        personal: true,
+        question: `${sharedWord} ${Object.values(markers).join(" ")}`,
+        budget: { tokens: recallBudgetMax },
+      });
+      return {
+        versions: await Promise.all(
+          [1, 2].map(
+            async (version) =>
+              await asIfNeverAdded(
+                async (erased) =>
+                  await readSourceVersionAs(env, personId, {
+                    source: erased ? source : missing,
+                    version,
+                  })
+              )
+          )
+        ),
+        history: await asIfNeverAdded(
+          async (erased) =>
+            await listVersionsAs(env, personId, {
+              source: erased ? source : missing,
+            })
+        ),
+        // What it found: its "not found" holds the question's words.
+        recalled: markersIn(
+          [pack.items, pack.memories, pack.contested],
+          markers
+        ),
+        memories: await asIfNeverAdded(
+          async (erased) =>
+            await sharedStore().readMemories({
+              entity: erased ? entity : unknownEntity,
+              reader,
+              history: true,
+            })
+        ),
+        names: await asIfNeverAdded(
+          async (erased) =>
+            await sharedStore().readEntityNames({
+              entity: erased ? entity : unknownEntity,
+              reader,
+            })
+        ),
+        customer: await asIfNeverAdded(
+          async (erased) =>
+            await sharedStore().readEntity({
+              entity: erased ? entity : unknownEntity,
+              reader,
+            })
+        ),
+        byName: await asIfNeverAdded(
+          async (erased) =>
+            await sharedStore().findEntities({
+              reader,
+              name: `${sharedWord} ${erased ? customer : unknownWord}`,
+            })
+        ),
+        byReference: await asIfNeverAdded(
+          async (erased) =>
+            await sharedStore().findEntities({
+              reader,
+              identifier: {
+                type: "ref",
+                value: `ref:${erased ? customer : unknownWord}`,
+              },
+            })
+        ),
+        // Drawing from a version, as extraction does: refused alike.
+        drawing: await asIfNeverAdded(
+          async (erased) =>
+            await sharedStore().addMemories({
+              change: crypto.randomUUID(),
+              access: { kind: "audience", group },
+              entities: [{ key: "c", kind: "customer", names: ["Plain"] }],
+              memories: [
+                {
+                  about: "c",
+                  type: "fact",
+                  statement: "Plain",
+                  speaker: { kind: "system" },
+                  basis: {
+                    kind: "source",
+                    source: erased ? key : `upload:${missing.id}`,
+                    version: 1,
+                    quote: sharedWord,
                   },
-                ],
-              })
-          ),
-        };
+                },
+              ],
+            })
+        ),
       };
+    };
+
+    /** What a source answers to its readers once nothing of it may be read: as if no one added it. */
+    const unreadable = {
+      versions: ["as if never added", "as if never added"],
+      history: "as if never added",
+      recalled: [],
+      memories: "as if never added",
+      names: "as if never added",
+      customer: "as if never added",
+      byName: "as if never added",
+      byReference: "as if never added",
+      drawing: "as if never added",
+    };
+
+    /** The reads of `read` that answered as unreadable (`unreadable`). */
+    const asUnreadable = (read: Readonly<Record<string, unknown>>): string[] =>
+      Object.entries(unreadable)
+        .filter(([name, got]) => textOf(read[name]) === textOf(got))
+        .map(([name]) => name);
+
+    it("answers a team's source as erased to each of its readers, and leaves it out of an export, while its erasure is still under way, as once it is done", async () => {
+      const erasing = await teamSourceToErase();
+      const { markers, source } = erasing;
+      const readsOf = async (personId: string) =>
+        await readsOfTeamSource(erasing, personId);
       /** What each of its readers gets. */
       const reads = async () => ({
         holder: await readsOf(erasing.holder),
@@ -2683,26 +2717,11 @@ describe(
       });
       await workBrain(env, new Date(), noProducers);
       const after = await reads();
-      const erased = {
-        versions: ["as if never added", "as if never added"],
-        history: "as if never added",
-        recalled: [],
-        memories: "as if never added",
-        names: "as if never added",
-        customer: "as if never added",
-        byName: "as if never added",
-        byReference: "as if never added",
-        drawing: "as if never added",
-      };
-      /** The reads of `read` that answered as erased. */
-      const asErased = (read: Readonly<Record<string, unknown>>): string[] =>
-        Object.entries(erased)
-          .filter(([name, got]) => textOf(read[name]) === textOf(got))
-          .map(([name]) => name);
+      const erased = unreadable;
 
       expect({
         // Before, each of them read it all: none of this holds by chance.
-        before: Object.values(before).map(asErased),
+        before: Object.values(before).map(asUnreadable),
         held,
         during,
         exportedDuring,
@@ -2784,6 +2803,169 @@ describe(
           reading
         )
       ).resolves.toStrictEqual({ held: true, findings: [], prompted: [] });
+    });
+
+    /**
+     * A team's upload, removed by its uploader's Delete (GRA-1877) through
+     * core's route: a version before its current one, both marked, and a
+     * memory drawn from each about a customer only they name, as
+     * `teamSourceToErase` makes it; its readers the uploader, a team-mate
+     * and an admin of the team. `removed` removes it, as many times as
+     * asked: once is the state every test below reads.
+     */
+    const teamUploadToRemove = async () => {
+      await answeringProvider(() => {});
+      const [uploader, { userId: teamMate }, admin] = await Promise.all([
+        signedInApi(idp, "user"),
+        signedInWithRole(idp, "user"),
+        signedInApi(idp, "admin"),
+      ]);
+      const holder = uploader.userId;
+      const teamId = await newTeam(holder, teamMate, admin.userId);
+      const group = `team:${teamId}`;
+      const sharedWord = `s${unique()}`;
+      const markers = {
+        "a version before the current one": markerWord(),
+        "the current version": markerWord(),
+        "a memory drawn from them": markerWord(),
+        "a customer only they name": markerWord(),
+      };
+      const file = (marker: string) => ({
+        name: "Minutes.vtt",
+        bytes: new TextEncoder().encode(
+          `WEBVTT\n\n00:00:00.000 --> 00:00:05.000\nMinutes ${sharedWord} ${marker}\n`
+        ),
+      });
+      const { source } = await uploader.api.brainSources.upload(
+        file(markers["a version before the current one"]),
+        { kind: "team", teamId },
+        crypto.randomUUID()
+      );
+      await uploader.api.brainSources.uploadVersion(
+        source.id,
+        file(markers["the current version"]),
+        crypto.randomUUID()
+      );
+      const key = `${source.producer}:${source.id}`;
+      const customer = markers["a customer only they name"];
+      const drawn = await sharedStore().addMemories({
+        change: crypto.randomUUID(),
+        access: { kind: "audience", group },
+        entities: [
+          {
+            key: "c",
+            kind: "customer",
+            names: [`${sharedWord} ${customer}`],
+            identifiers: [{ type: "ref", value: `ref:${customer}` }],
+          },
+        ],
+        memories: [1, 2].map((version) => ({
+          about: "c",
+          type: "fact" as const,
+          statement: `${sharedWord} ${markers["a memory drawn from them"]} ${version}`,
+          speaker: { kind: "system" as const },
+          basis: {
+            kind: "source" as const,
+            source: key,
+            version,
+            quote: sharedWord,
+          },
+        })),
+      });
+      return {
+        holder,
+        teamMate,
+        admin: admin.userId,
+        group,
+        sharedWord,
+        markers,
+        source,
+        key,
+        customer,
+        entity: drawn.entities.c ?? "",
+        removed: async () => {
+          await uploader.api.brainSources.deleteUpload(source.id);
+        },
+      };
+    };
+
+    it("answers a team's upload its uploader removed as never added to each of its readers, through core and the store", async () => {
+      const removing = await teamUploadToRemove();
+      const reads = async () => ({
+        holder: await readsOfTeamSource(removing, removing.holder),
+        teamMate: await readsOfTeamSource(removing, removing.teamMate),
+        admin: await readsOfTeamSource(removing, removing.admin),
+      });
+      const before = await reads();
+      await removing.removed();
+      // A tick, as the store's own work would run: nothing comes back.
+      await workBrain(env, new Date(), noProducers);
+      const after = await reads();
+
+      expect({
+        // Before, each of them read it all: none of this holds by chance.
+        before: Object.values(before).map(asUnreadable),
+        after,
+      }).toStrictEqual({
+        before: [[], [], []],
+        after: { holder: unreadable, teamMate: unreadable, admin: unreadable },
+      });
+    });
+
+    /**
+     * What `pass` finds through `among` (every surface by default) as one
+     * of the readers of a removed team upload (`teamUploadToRemove`), and
+     * every model prompt that carried its markers.
+     */
+    const foundOnceRemoved = async (
+      pass: string,
+      who: "holder" | "teamMate" | "admin",
+      among?: readonly [string, Probe][]
+    ) => {
+      const removing = await teamUploadToRemove();
+      await removing.removed();
+      const personId = removing[who];
+      const findings = await findingsOf(
+        pass,
+        {
+          personId,
+          reader: { person: personId, groups: [removing.group] },
+          personal: true,
+          sharedWord: removing.sharedWord,
+          markers: Object.values(removing.markers),
+          hiddenVersions: everyVersionOf(removing.source),
+          // Its uploader may no longer reach it at all; an admin may, to
+          // erase it (brain-uploads.test.ts).
+          hiddenUploads: who === "admin" ? [] : [removing.source.id],
+          hiddenInstructionFiles: [],
+          instructionGroups: ["company"],
+        },
+        removing.markers,
+        among === undefined ? {} : { among }
+      );
+      const carried = await Promise.all(
+        Object.values(removing.markers).map(carrying)
+      );
+      return { findings, prompted: carried.flat() };
+    };
+
+    it("gives a removed upload's uploader nothing of it through any surface", async () => {
+      await expect(
+        foundOnceRemoved("the uploader, once they removed it", "holder")
+      ).resolves.toStrictEqual({ findings: [], prompted: [] });
+    });
+
+    it("gives a team-mate and an admin of the team nothing of a removed upload through any surface that reads", async () => {
+      await expect(
+        foundOnceRemoved(
+          "a team-mate, once it was removed",
+          "teamMate",
+          reading
+        )
+      ).resolves.toStrictEqual({ findings: [], prompted: [] });
+      await expect(
+        foundOnceRemoved("an admin, once it was removed", "admin", reading)
+      ).resolves.toStrictEqual({ findings: [], prompted: [] });
     });
 
     it("answers what a person's erasure hides as erased to them while it is still under way, though its source stays current for their team", async () => {

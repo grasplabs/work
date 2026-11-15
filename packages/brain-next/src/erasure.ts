@@ -519,6 +519,13 @@ const hideVersions = (
     key,
     listed
   );
+  // A removed source stays removed, its key closed, but its mark no
+  // longer names a version that is going (removal.ts).
+  sql.exec(
+    `UPDATE removed_sources SET version_row = NULL
+    WHERE version_row IN (SELECT value FROM json_each(?))`,
+    listed
+  );
   // Their vector codes leave the scan now, as a replaced version's do:
   // a code the scan may pick must be of a current version, or hidden ones
   // nearer the question would take every candidate and leave a reader's
@@ -690,8 +697,17 @@ const apply = (
   }
   const stopped: string[] = [];
   let sources = 0;
+  if (entry.kind === "source") {
+    // Its key, if it was removed, even before any version was added: the
+    // erasure closes it now, and no plain key outlives what it named.
+    sql.exec("DELETE FROM removed_sources WHERE subject = ?", entry.subject);
+  }
   for (const [subject, versions] of bySubject) {
     for (const source of sourcesOf(sql, subject)) {
+      if (entry.kind === "source") {
+        // Each added in it as a group, likewise.
+        sql.exec("DELETE FROM removed_sources WHERE source = ?", source);
+      }
       const rows = rowsOf(sql, source, versions);
       sources += rows.length > 0 ? 1 : 0;
       if (hideVersions(sql, source, rows, key)) {
@@ -887,13 +903,15 @@ export const erasuresUnfinished = (sql: SqlStorage): number =>
 
 /**
  * How many sources keep versions no erasure hid but have no current
- * version, so no one can read them (`hideVersions`): a count, never which.
+ * version, so no one can read them (`hideVersions`), apart from those
+ * removed on purpose (removal.ts): a count, never which.
  */
 export const sourcesWithoutCurrent = (sql: SqlStorage): number =>
   sql
     .exec<{ count: number }>(
       `SELECT count(DISTINCT source) AS count FROM source_versions
       WHERE source NOT IN (SELECT source FROM current_versions)
+        AND source NOT IN (SELECT source FROM removed_sources)
         AND row NOT IN (SELECT version_row FROM erasing_versions)`
     )
     .one().count;

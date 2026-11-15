@@ -60,7 +60,10 @@ import type { WorkContext } from "./work.ts";
 // nothing else) and those no one is known to read (a set with no one in it:
 // an admin is not a reader of it), and every version of a source whose
 // current version is such or that has none (no one else may read its
-// history), left out in the statement that selects them; and the skills
+// history), left out in the statement that selects them. A removed source
+// (removal.ts) is held by the version that was current when it was removed,
+// as if that were current, and that version is marked `removed`, so a
+// restore brings it back removed; and the skills
 // Grasp ships (contract.ts `shippedSkillsPrefix`), which each release adds
 // again. It holds the company's instruction files and its own skills. Of
 // memories and extraction marks, those one group reads (the shared store
@@ -242,6 +245,11 @@ export const exportLineSchema = z.strictObject({
   access: accessSchema,
   /** Whether it was its source's current version. */
   current: z.boolean(),
+  /**
+   * Whether it was its source's current version when the source was
+   * removed (removal.ts): restored, the source comes back removed.
+   */
+  removed: z.boolean(),
   /** Whether its text is cut into chunks and indexed: an instruction file's isn't. */
   indexed: z.boolean(),
   /** The change keys its producer added it with. */
@@ -339,11 +347,12 @@ export type MemoriesLine =
 
 /**
  * The format of the exports this release writes, and the only one it
- * restores: format 2 holds memories, and an export of format 1 (versions
- * only) would come back as a Brain without them while reading as whole,
+ * restores: format 3 holds removed sources as removed (`removed`), and an
+ * export of an earlier format would come back without what it lacks
+ * (memories before format 2, removals before 3) while reading as whole,
  * so a restore refuses it (restore.ts) and the admin makes a new export.
  */
-export const exportFormat = 2;
+export const exportFormat = 3;
 
 /** An export's manifest, as written last. */
 export const manifestSchema = z.strictObject({
@@ -481,12 +490,17 @@ const keyOf = (id: string): string => `export:${id}`;
 const selectedSql = `source_versions.reader_set NOT IN (SELECT id FROM unreadable)
   AND substr(source_versions.source, 1, ${shippedSkillsPrefix.length})
     != '${shippedSkillsPrefix}'
-  AND EXISTS (
+  AND (EXISTS (
     SELECT 1 FROM current_versions AS now
     JOIN source_versions AS current ON current.row = now.version_row
     WHERE now.source = source_versions.source
       AND current.reader_set NOT IN (SELECT id FROM unreadable)
-  )`;
+  ) OR EXISTS (
+    SELECT 1 FROM removed_sources AS gone
+    JOIN source_versions AS was ON was.row = gone.version_row
+    WHERE gone.source = source_versions.source
+      AND was.reader_set NOT IN (SELECT id FROM unreadable)
+  ))`;
 
 /** A version, as a run selects it for a part. */
 interface Selected extends Record<string, SqlStorageValue> {
@@ -498,6 +512,7 @@ interface Selected extends Record<string, SqlStorageValue> {
   read_at: number | null;
   readers: string;
   current: number;
+  removed: number;
   indexed: number;
   changes: string;
   /** Its source's group's key as the ledger names it, if it was added in one. */
@@ -541,6 +556,14 @@ SELECT source_versions.row AS row, source_versions.source AS source,
     )),
     0
   ) AS current,
+  coalesce(
+    removed_sources.version_row = source_versions.row
+    OR (removed_sources.version_row > ?2 AND source_versions.row = (
+      SELECT max(before.row) FROM source_versions AS before
+      WHERE before.source = source_versions.source AND before.row <= ?2
+    )),
+    0
+  ) AS removed,
   EXISTS (SELECT 1 FROM chunks WHERE chunks.version_row = source_versions.row) AS indexed,
   (SELECT json_group_array(change) FROM source_changes
     WHERE source_changes.version_row = source_versions.row) AS changes,
@@ -549,6 +572,7 @@ SELECT source_versions.row AS row, source_versions.source AS source,
 FROM source_versions
 JOIN reader_sets ON reader_sets.id = source_versions.reader_set
 LEFT JOIN current_versions ON current_versions.source = source_versions.source
+LEFT JOIN removed_sources ON removed_sources.source = source_versions.source
 WHERE source_versions.row > ?1 AND source_versions.row <= ?2
   AND source_versions.row NOT IN (SELECT version_row FROM erasing_versions)
   AND ${selectedSql}
@@ -1428,6 +1452,7 @@ const linesOf = async (
         ...(version.read_at === null ? {} : { readAt: version.read_at }),
         access,
         current: version.current === 1,
+        removed: version.removed === 1,
         indexed: version.indexed === 1,
         changes: z.array(z.string()).parse(JSON.parse(version.changes)),
         text,

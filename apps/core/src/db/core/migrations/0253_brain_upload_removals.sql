@@ -1,0 +1,1 @@
+ALTER TABLE `brain_uploads` ADD `removed_at` integer;

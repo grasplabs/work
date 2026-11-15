@@ -45,6 +45,7 @@ import {
   restoringNow,
   retireRequestSchema,
   sourceErasureSchema,
+  sourceRemovalSchema,
   sourceIdSchema,
   sourceListRequestSchema,
   stillDeleting,
@@ -108,6 +109,7 @@ import type {
   RestoreStatus,
   SourceErased,
   SourceErasure,
+  SourceRemoval,
   SourceId,
   SourceList,
   SourceListRequest,
@@ -191,6 +193,7 @@ import {
 } from "./recall-counts.ts";
 import { find, findPassages, recall } from "./recall.ts";
 import { addMemories } from "./remember.ts";
+import { isRemoved, removeSource } from "./removal.ts";
 import { checkRestore, restoreStatus, startRestore } from "./restore.ts";
 import { isRestoring } from "./restoring.ts";
 import {
@@ -1064,8 +1067,10 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     ) {
       return "erased";
     }
+    // A removed key is held: closed, though it may hold no version.
     const held =
-      this.ctx.storage.sql
+      isRemoved(sql, key) ||
+      sql
         .exec("SELECT 1 FROM source_versions WHERE source = ? LIMIT 1", key)
         .toArray().length > 0;
     return held ? "held" : "free";
@@ -1135,6 +1140,24 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         { asGroup: asGroup === true }
       );
       return own ? { sources: covered } : undefined;
+    });
+  }
+
+  /**
+   * Takes a source out of use for good, keeping its history (removal.ts):
+   * work under way on it is stopped (work.ts `stopWorkOn`). A person's own
+   * store erased whole holds nothing to remove: done.
+   */
+  async removeSource(request: SourceRemoval): Promise<void> {
+    const { source } = checked(sourceRemovalSchema, request);
+    if (await this.#erasedWhole()) {
+      return;
+    }
+    await this.#changing(async () => {
+      await this.#readyToWrite();
+      if (await removeSource(this.ctx.storage, source)) {
+        stopWorkOn(this.#work, [source]);
+      }
     });
   }
 

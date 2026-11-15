@@ -21,6 +21,7 @@ import { z } from "zod";
 
 import { exportFileNameSchema } from "../src/contract.ts";
 import {
+  exportFormat,
   exportPartBytes,
   manifestSchema as storeManifestSchema,
 } from "../src/exports.ts";
@@ -127,6 +128,7 @@ const lineSchema = z.object({
   version: z.number(),
   access: z.unknown(),
   current: z.boolean(),
+  removed: z.boolean(),
   indexed: z.boolean(),
   changes: z.array(z.string()),
   text: z.string(),
@@ -167,15 +169,27 @@ const linesOf = async (store: Store, id: string): Promise<Line[]> => {
 const of = (lines: readonly Line[], sources: readonly string[]) =>
   lines
     .filter(({ source }) => sources.includes(source))
-    .map(({ source, version, current, text, access, indexed, changes }) => ({
-      source,
-      version,
-      current,
-      text,
-      access,
-      indexed,
-      changes,
-    }))
+    .map(
+      ({
+        source,
+        version,
+        current,
+        removed,
+        text,
+        access,
+        indexed,
+        changes,
+      }) => ({
+        source,
+        version,
+        current,
+        removed,
+        text,
+        access,
+        indexed,
+        changes,
+      })
+    )
     .toSorted((a, b) =>
       a.source === b.source
         ? a.version - b.version
@@ -529,6 +543,7 @@ describe("exports and restores", () => {
   describe("a company's export", { timeout: 60_000 }, () => {
     it("holds every version a group may read, with its readers and history, and nothing one person alone, or no one known, may read (threats 4, 5)", async () => {
       const teamSource = `test:${unique()}`;
+      const removedSource = `test:${unique()}`;
       const nobodys = `test:${unique()}`;
       const theirs = `test:${unique()}`;
       const wasTeams = `test:${unique()}`;
@@ -541,6 +556,11 @@ describe("exports and restores", () => {
       await add(shared(), theirs, "their own words", alone(person));
       await add(shared(), wasTeams, "a team's words", team(group));
       await add(shared(), wasTeams, "now theirs alone", alone(person), "2");
+      // Removed (removal.ts): held by the version that was current then,
+      // marked removed, as its history.
+      await add(shared(), removedSource, "kept words", team(group), "1");
+      await add(shared(), removedSource, "removed words", team(group), "2");
+      await shared().removeSource({ source: removedSource });
       await shared().addInstructions({
         source: instructions,
         change: "1",
@@ -555,13 +575,21 @@ describe("exports and restores", () => {
       const lines = await linesOf(shared(), id);
 
       expect(
-        of(lines, [teamSource, nobodys, theirs, wasTeams, instructions])
+        of(lines, [
+          teamSource,
+          removedSource,
+          nobodys,
+          theirs,
+          wasTeams,
+          instructions,
+        ])
       ).toStrictEqual(
         [
           {
             source: teamSource,
             version: 1,
             current: false,
+            removed: false,
             text: "first words",
             access: team(group),
             indexed: true,
@@ -571,7 +599,28 @@ describe("exports and restores", () => {
             source: teamSource,
             version: 2,
             current: true,
+            removed: false,
             text: "second words",
+            access: team(group),
+            indexed: true,
+            changes: ["2"],
+          },
+          {
+            source: removedSource,
+            version: 1,
+            current: false,
+            removed: false,
+            text: "kept words",
+            access: team(group),
+            indexed: true,
+            changes: ["1"],
+          },
+          {
+            source: removedSource,
+            version: 2,
+            current: false,
+            removed: true,
+            text: "removed words",
             access: team(group),
             indexed: true,
             changes: ["2"],
@@ -580,6 +629,7 @@ describe("exports and restores", () => {
             source: instructions,
             version: 1,
             current: true,
+            removed: false,
             text: "the company's instructions",
             access: team(group),
             indexed: false,
@@ -1522,7 +1572,7 @@ describe("exports and restores", () => {
         bytes: 1,
       };
       const manifest = storeManifestSchema.safeParse({
-        format: 2,
+        format: exportFormat,
         id: crypto.randomUUID(),
         deployment: "test",
         scope: "company",
@@ -2323,7 +2373,8 @@ describe("exports and restores", () => {
         }
       };
       // As an older release wrote it (format 1, versions only), and as a
-      // newer one might (format 3, with what this one doesn't know).
+      // newer one might (a format past this one's, with what this one
+      // doesn't know).
       const refusedOlder = await refusalOf({
         ...older,
         format: 1,
@@ -2331,7 +2382,7 @@ describe("exports and restores", () => {
       });
       const refusedNewer = await refusalOf({
         ...manifest,
-        format: 3,
+        format: exportFormat + 1,
         somethingNew: true,
       });
       const held = await inStore(
@@ -2355,7 +2406,7 @@ describe("exports and restores", () => {
 
       expect({
         older: refusedOlder.includes(
-          "made by an older release and holds no memories"
+          "made by an older release, which this one can't restore"
         ),
         newer: refusedNewer.includes("made by a newer release"),
         held,
@@ -2406,7 +2457,7 @@ describe("exports and restores", () => {
       const older = await copied((manifest) => ({ ...manifest, format: 1 }));
       const newer = await copied((manifest) => ({
         ...manifest,
-        format: 3,
+        format: exportFormat + 1,
         somethingNew: true,
       }));
       const holding = await copied((manifest) => manifest, true);

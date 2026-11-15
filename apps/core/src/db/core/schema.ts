@@ -6436,6 +6436,12 @@ export const brainUploads = sqliteTable(
     version: integer().notNull().default(0),
     createdAt: timestamp("created_at").notNull(),
     updatedAt: timestamp("updated_at").notNull(),
+    /**
+     * When its uploader removed it, a shared one (only they remove):
+     * out of use in the Brain for good, its history kept, until an admin
+     * erases it (brain-uploads.ts). Null while it is in use.
+     */
+    removedAt: timestamp("removed_at"),
   },
   (table) => [
     check(

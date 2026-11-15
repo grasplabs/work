@@ -121,16 +121,18 @@ import type { WorkContext } from "./work.ts";
 // store shows less, never more. A restored source whose current version the
 // ledger left out keeps its history, which no one can read without a
 // current version (sources.ts `readVersion`); the overview counts such
-// sources (`sourcesWithoutCurrent`).
+// sources (`sourcesWithoutCurrent`). A source the export holds removed
+// comes back removed, as it was (removal.ts).
 
 /** What a restore refuses to start, and why: each a refusal (contract.ts `refusalPrefix`). */
 const refusals = {
   notEmpty: `${refusalPrefix} a restore goes only into a store that holds nothing`,
   running: `${refusalPrefix} a restore is under way`,
   notFound: `${refusalPrefix} no whole company export of this deployment has that id`,
-  // An export an older release made holds no memories: restored, it would
-  // read as whole without them (exports.ts `exportFormat`).
-  olderFormat: `${refusalPrefix} that export was made by an older release and holds no memories, so it can't be restored: make a new export`,
+  // An export an older release made lacks what this one keeps (memories,
+  // removals): restored, it would read as whole without them (exports.ts
+  // `exportFormat`).
+  olderFormat: `${refusalPrefix} that export was made by an older release, which this one can't restore: make a new export`,
   // One a newer release made may hold what this one doesn't know.
   newerFormat: `${refusalPrefix} that export was made by a newer release, which this one can't restore`,
   // An abandoned restore's export id is refused for good: the store it
@@ -575,6 +577,17 @@ const restoreVersion = async (
         .toArray().length > 0;
     if (pointed && chunks.length > 0) {
       enqueueEmbedding(storage, line.source, line.version);
+    }
+    // The version that was current when its source was removed: the
+    // source comes back removed, its key closed (removal.ts).
+    if (line.removed) {
+      sql.exec(
+        `INSERT INTO removed_sources (source, subject, version_row) VALUES (?, ?, ?)
+        ON CONFLICT (source) DO NOTHING`,
+        line.source,
+        subject,
+        row
+      );
     }
     return true;
   });

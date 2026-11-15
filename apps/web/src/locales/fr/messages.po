@@ -8832,6 +8832,10 @@ msgstr "Personne ne lui a encore rien demandé."
 msgid "Nobody by that name"
 msgstr "Personne de ce nom"
 
+#: src/brain/sources-page.tsx
+msgid "Nobody can find or read it from then on, you included, and it can't be brought back. The Brain keeps its history until an admin erases it."
+msgstr "Dès lors, personne ne peut le trouver ni le lire, vous compris, et il ne peut pas être rétabli. Le Brain garde son historique jusqu'à ce qu'un administrateur l'efface."
+
 #: src/agents/own-agents-admin.tsx
 msgid "Nobody can make one, and those people have don't answer until you turn this back on."
 msgstr "Personne ne peut en créer, et ceux qui existent ne répondent plus jusqu'à ce que vous réactiviez ceci."
@@ -9537,10 +9541,6 @@ msgstr "Uniquement les comptes du locataire {tenantId}."
 #: src/settings/use-team-change.ts
 msgid "Only admins can change teams."
 msgstr "Seuls les administrateurs peuvent modifier les équipes."
-
-#: src/brain/sources-page.tsx
-msgid "Only an admin can remove an upload shared with a team or everyone. Ask an admin to remove it."
-msgstr "Seul un administrateur peut retirer un fichier importé partagé avec une équipe ou tout le monde. Demandez à un administrateur de le retirer."
 
 #: src/apps/app-settings.tsx
 msgid "Only an admin resets an App’s data: every record goes for good, and its current version runs again with no records."
@@ -11022,6 +11022,10 @@ msgstr "A retiré un webhook d'une application"
 #: src/workflows/item-test.tsx
 msgid "Removed after a week"
 msgstr "Supprimé au bout d’une semaine"
+
+#: src/brain/sources-page.tsx
+msgid "Removed by its uploader, {removed}"
+msgstr "Retiré par la personne qui l'a importé, {removed}"
 
 #: src/brain/brain.ts
 #: src/brain/forget.tsx
@@ -14931,8 +14935,8 @@ msgid "Uploading…"
 msgstr "Import en cours…"
 
 #: src/brain/sources-page.tsx
-msgid "Uploads shared with a team or everyone. Only an admin can erase one, for everyone and for good. Its text isn't shown here."
-msgstr "Fichiers importés partagés avec une équipe ou tout le monde. Seul un administrateur peut en effacer un, pour tous et définitivement. Son texte n'est pas affiché ici."
+msgid "Uploads shared with a team or everyone, those their uploader removed among them. Only an admin can erase one, for everyone and for good. Its text isn't shown here."
+msgstr "Fichiers importés partagés avec une équipe ou tout le monde, y compris ceux que la personne qui les a importés a retirés. Seul un administrateur peut en effacer un, pour tous et définitivement. Son texte n'est pas affiché ici."
 
 #: src/settings/event-sources.tsx
 msgid "URL of {name}"

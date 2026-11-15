@@ -14,7 +14,12 @@ import { z } from "zod";
 import { organizationId } from "../src/auth/auth.ts";
 import { brainExportsPath } from "../src/brain-next-exports.ts";
 import { uploadSource } from "../src/brain-next-origins.ts";
-import { addSource, eraseSource, workBrain } from "../src/brain-next.ts";
+import {
+  addSource,
+  eraseSource,
+  removeSource,
+  workBrain,
+} from "../src/brain-next.ts";
 import {
   auditOutboxRejected,
   brainUploads,
@@ -35,9 +40,11 @@ import { callAuth, routed, signedInApi } from "./sign-in.ts";
 // in, or everyone, as they choose, and never more; leaving a team hides
 // its uploads from the next question on; an upload someone may not read
 // answers exactly as one that doesn't exist, whatever they ask of it; a
-// new version is its uploader's alone and keeps its readers; a delete is
-// its uploader's, or an admin's for a shared one, and erases it for good
-// before core forgets it, so a failed erasure leaves it to delete again
+// new version is its uploader's alone and keeps its readers; a delete
+// erases it for good before core forgets it (its uploader's for one theirs
+// alone, an admin's for a shared one), or, its uploader's of one they
+// shared, removes it, its history kept and read by no one (GRA-1877), so a
+// failed erasure leaves it to delete again
 // and an add after the erasure is refused; the audit log names IDs, never
 // the file's name or words. Checks read what the person reads (a version,
 // a search), which hold whichever store keeps what only they may read.
@@ -168,6 +175,9 @@ const actionsOf = async (uploadId: string): Promise<string[]> => {
 /** The store that holds what more than one person may read. */
 const sharedStore = () => env.BRAIN_STORE.getByName("brain");
 
+/** That store, through the Brain's contract. */
+const sharedBrain = () => brainOf(inJurisdiction(env, env.BRAIN_STORE));
+
 /** How many events the drain has set aside as rejected (a conflict, say). */
 const rejectedCount = async (): Promise<number> => {
   const rows = await drizzle(env.DB).select().from(auditOutboxRejected);
@@ -251,7 +261,7 @@ describe("uploading a file straight into the Brain", () => {
             source,
             readers: me,
             mayAddVersion: true,
-            mayDelete: true,
+            deletes: "erase",
           },
         },
         other: {
@@ -391,7 +401,7 @@ describe("uploading a file straight into the Brain", () => {
             source,
             readers: teamReaders(teamId),
             mayAddVersion: false,
-            mayDelete: false,
+            deletes: null,
           },
         },
         outsider: [],
@@ -529,7 +539,7 @@ describe("uploading a file straight into the Brain", () => {
           source,
           readers: everyone,
           mayAddVersion: false,
-          mayDelete: false,
+          deletes: null,
         },
         byOther: { refused: "brain.upload_not_allowed" },
       });
@@ -647,7 +657,7 @@ describe("uploading a file straight into the Brain", () => {
       await uploader.api.brainSources.deleteUpload(ownUpload.source.id);
 
       expect({
-        adminSees: adminSees?.mayDelete,
+        adminSees: adminSees?.deletes,
         shared: {
           found: [await found(other, shared), await found(uploader, shared)],
           read: await readAs(uploader, sharedUpload.source),
@@ -663,7 +673,7 @@ describe("uploading a file straight into the Brain", () => {
           await uploader.api.brainSources.deleteUpload(ownUpload.source.id);
         }),
       }).toStrictEqual({
-        adminSees: true,
+        adminSees: "erase",
         shared: { found: [[], []], read: null, info: null },
         own: { found: [], read: null },
         again: { refused: "brain.upload_not_found" },
@@ -804,7 +814,7 @@ describe("uploading a file straight into the Brain", () => {
   );
 
   it(
-    "refuses a shared upload's delete to its uploader, changing nothing, and lets an admin outside the team erase it without its text in any reply",
+    "lets a shared upload's uploader remove it, out of use for everyone and them too with its history kept, refuses a team-mate, and lets an admin outside the team see it removed and erase it, never its text",
     slow,
     async () => {
       const [uploader, mate, admin, stranger] = await Promise.all([
@@ -814,76 +824,126 @@ describe("uploading a file straight into the Brain", () => {
         signedInApi(idp, "user"),
       ]);
       const teamId = await teamOf(uploader, mate);
-      const secret = word();
+      const [secret, later] = [word(), word()];
       const shared = await uploader.api.brainSources.upload(
         fileOf(`Payroll plan ${secret}`, "Payroll.vtt"),
         teamReaders(teamId),
         crypto.randomUUID()
       );
-      const own = await mate.api.brainSources.upload(
-        fileOf(`The mate's own ${word()}`, "Mine.vtt"),
-        me,
+      const { id } = shared.source;
+      await uploader.api.brainSources.uploadVersion(
+        id,
+        fileOf(`Payroll plan ${later}`, "Payroll 2.vtt"),
         crypto.randomUUID()
       );
       const missing = crypto.randomUUID();
+      /** How many versions of it the Brain keeps. */
+      const versionsKept = async () =>
+        await runInDurableObject(
+          sharedStore(),
+          (_store, state) =>
+            state.storage.sql
+              .exec<{ count: number }>(
+                "SELECT count(*) AS count FROM source_versions WHERE source = ?",
+                `upload:${id}`
+              )
+              .one().count
+        );
 
-      const uploaderSees = await uploader.api.brainSources.uploadOf(
-        shared.source.id
-      );
+      const [uploaderSees, mateSees] = await Promise.all([
+        uploader.api.brainSources.uploadOf(id),
+        mate.api.brainSources.uploadOf(id),
+      ]);
+      const sees = {
+        uploader: uploaderSees?.deletes,
+        mate: mateSees?.deletes,
+      };
       const refused = await outcome(async () => {
-        await uploader.api.brainSources.deleteUpload(shared.source.id);
+        await mate.api.brainSources.deleteUpload(id);
       });
-      const rowsAfterRefusal = await rowsWith(shared.source.id);
+      const rowsAfterRefusal = await rowsWith(id);
       const afterRefusal = {
         rows: rowsAfterRefusal.length,
-        mateFinds: await found(mate, secret),
+        mateFinds: await found(mate, later),
       };
-      const asStranger = await askedOf(stranger, shared.source.id);
-      const asAdminOfOwn = await askedOf(admin, own.source.id);
-      // The admin isn't in the team: the listing shows it without its
-      // name, and never its text.
+      await uploader.api.brainSources.deleteUpload(id);
+      const [row] = await rowsWith(id);
+      const removed = {
+        row:
+          row === undefined
+            ? undefined
+            : { name: row.name, removed: row.removedAt !== null },
+        versions: await versionsKept(),
+        found: [
+          await found(uploader, secret),
+          await found(uploader, later),
+          await found(mate, later),
+        ],
+        read: [
+          await readAs(uploader, shared.source, 1),
+          await readAs(mate, shared.source, 2),
+        ],
+        asUploader: await askedOf(uploader, id),
+        asMate: await askedOf(mate, id),
+        asStranger: await askedOf(stranger, id),
+      };
+      // The admin isn't in the team: the listing shows it removed, without
+      // its name, and never its text.
       const listing = await admin.api.brainSources.sharedUploads();
-      const listed = listing.uploads.find(
-        ({ source }) => source.id === shared.source.id
-      );
-      const adminSees = await admin.api.brainSources.uploadOf(shared.source.id);
-      await admin.api.brainSources.deleteUpload(shared.source.id);
-      const nonAdminListing = await outcome(
-        async () => await uploader.api.brainSources.sharedUploads()
-      );
-      const rowsAfterErase = await rowsWith(shared.source.id);
-      const events = await eventsOf(shared.source.id);
+      const listed = listing.uploads.find(({ source }) => source.id === id);
+      const adminSees = await admin.api.brainSources.uploadOf(id);
+      await admin.api.brainSources.deleteUpload(id);
+      await workBrain(env, new Date(), noProducers);
+      const rowsAfterErase = await rowsWith(id);
+      const events = await eventsOf(id);
+      const detailOf = (action: string) =>
+        events.find((event) => event.action === action)?.detail;
 
       expect({
-        uploaderSees: uploaderSees?.mayDelete,
+        sees,
         refused,
         afterRefusal,
-        asStranger,
-        asAdminOfOwn,
+        removed,
         listed:
-          listed === undefined ? undefined : { ...listed, uploadedAt: "" },
-        ownListed: listing.uploads.some(
-          ({ source }) => source.id === own.source.id
-        ),
+          listed === undefined
+            ? undefined
+            : {
+                ...listed,
+                uploadedAt: "",
+                removedAt: listed.removedAt === null ? null : "",
+              },
         adminSees,
-        textInReplies: [secret, "Payroll.vtt"].some((said) =>
+        textInReplies: [secret, later, "Payroll"].some((said) =>
           textOf([listing, adminSees]).includes(said)
         ),
         afterErase: {
           rows: rowsAfterErase.length,
-          mateFinds: await found(mate, secret),
-          mateSees: await mate.api.brainSources.uploadOf(shared.source.id),
+          versions: await versionsKept(),
+          key: await brainOf(inJurisdiction(env, env.BRAIN_STORE)).keyState(
+            `upload:${id}`
+          ),
         },
-        nonAdminListing,
-        refusedAs: events.find(
-          ({ action }) => action === "brain.upload.refused"
-        )?.detail,
+        actions: events.map(({ action }) => action),
+        details: {
+          refused: detailOf("brain.upload.refused"),
+          removed: detailOf("brain.upload.removed"),
+          deleted: detailOf("brain.upload.deleted"),
+        },
       }).toStrictEqual({
-        uploaderSees: false,
-        refused: { refused: "brain.upload_admin_only" },
-        afterRefusal: { rows: 1, mateFinds: [shared.source.id] },
-        asStranger: await askedOf(stranger, missing),
-        asAdminOfOwn: await askedOf(admin, missing),
+        sees: { uploader: "remove", mate: null },
+        refused: { refused: "brain.upload_not_allowed" },
+        afterRefusal: { rows: 1, mateFinds: [id] },
+        removed: {
+          // Its file's name goes from core's row: no one reads it.
+          row: { name: null, removed: true },
+          // Its history stays in the Brain, read by no one.
+          versions: 2,
+          found: [[], [], []],
+          read: [null, null],
+          asUploader: await askedOf(uploader, missing),
+          asMate: await askedOf(mate, missing),
+          asStranger: await askedOf(stranger, missing),
+        },
         listed: {
           source: shared.source,
           name: null,
@@ -891,18 +951,147 @@ describe("uploading a file straight into the Brain", () => {
           teamName: `Team ${teamId}`,
           uploaderName: String(uploader.person.name),
           uploadedAt: "",
+          removedAt: "",
         },
-        ownListed: false,
         adminSees: {
           source: shared.source,
           readers: teamReaders(teamId),
           mayAddVersion: false,
-          mayDelete: true,
+          deletes: "erase",
         },
         textInReplies: false,
-        afterErase: { rows: 0, mateFinds: [], mateSees: null },
-        nonAdminListing: { refused: "role.forbidden" },
-        refusedAs: { reason: "admin_only", readers: "team" },
+        afterErase: { rows: 0, versions: 0, key: "erased" },
+        actions: [
+          "brain.upload.added",
+          "brain.upload.added",
+          "brain.upload.refused",
+          "brain.upload.removed",
+          "brain.upload.deleted",
+        ],
+        details: {
+          refused: { reason: "not_allowed", readers: "team" },
+          removed: { readers: "team", teamId },
+          deleted: { readers: "team", removed: true },
+        },
+      });
+    }
+  );
+
+  it(
+    "refuses a new version or a retried first upload the Brain's removal lands before, as its key is closed, and records the removal once however often it is asked",
+    slow,
+    async () => {
+      const uploader = await signedInApi(idp, "user");
+      const uploadId = crypto.randomUUID();
+      const rota = word();
+      const first = fileOf(`Rota ${rota}`, "Rota.vtt");
+      const { source } = await uploader.api.brainSources.upload(
+        first,
+        everyone,
+        uploadId
+      );
+      // A delete's removal landed in the Brain between a new version's
+      // check of core's row and its add, before the row was marked.
+      await removeSource(env, { source, readers: { kind: "everyone" } });
+
+      const version = await outcome(
+        async () =>
+          await uploader.api.brainSources.uploadVersion(
+            uploadId,
+            fileOf(`Rota ${word()}`, "Rota 2.vtt"),
+            crypto.randomUUID()
+          )
+      );
+      const retried = await outcome(
+        async () =>
+          await uploader.api.brainSources.upload(first, everyone, uploadId)
+      );
+      const rowsKept = await rowsWith(uploadId);
+      const keptRow = rowsKept.length;
+      // Its uploader's delete finishes the removal; two at once mark it once.
+      await Promise.all([
+        uploader.api.brainSources.deleteUpload(uploadId),
+        uploader.api.brainSources.deleteUpload(uploadId).catch(() => null),
+      ]);
+      const afterRemoval = await outcome(
+        async () =>
+          await uploader.api.brainSources.upload(first, everyone, uploadId)
+      );
+      const events = await eventsOf(uploadId);
+
+      expect({
+        version,
+        retried,
+        keptRow,
+        afterRemoval,
+        found: await found(uploader, rota),
+        actions: events.map(({ action }) => action),
+        reasons: events.flatMap(({ detail }) =>
+          typeof detail?.reason === "string" ? [detail.reason] : []
+        ),
+      }).toStrictEqual({
+        version: { refused: "brain.upload_deleted" },
+        retried: { refused: "brain.upload_retry_refused" },
+        keptRow: 1,
+        afterRemoval: { refused: "brain.upload_retry_refused" },
+        found: [],
+        actions: [
+          "brain.upload.added",
+          "brain.upload.refused",
+          "brain.upload.refused",
+          "brain.upload.removed",
+          "brain.upload.refused",
+        ],
+        reasons: ["removed", "removed", "id_taken"],
+      });
+    }
+  );
+
+  it(
+    "brings a removed upload back removed when the Brain's store is restored, and erased again once an admin erased it",
+    slow,
+    async () => {
+      const [uploader, admin] = await Promise.all([
+        signedInApi(idp, "user"),
+        signedInApi(idp, "admin"),
+      ]);
+      const secret = word();
+      const { source } = await uploader.api.brainSources.upload(
+        fileOf(`Price list ${secret}`),
+        everyone,
+        crypto.randomUUID()
+      );
+      await uploader.api.brainSources.deleteUpload(source.id);
+      const key = `upload:${source.id}`;
+      const held = async () => ({
+        key: await sharedBrain().keyState(key),
+        found: await found(uploader, secret),
+        versions: await runInDurableObject(
+          sharedStore(),
+          (_store, state) =>
+            state.storage.sql
+              .exec<{ count: number }>(
+                "SELECT count(*) AS count FROM source_versions WHERE source = ?",
+                key
+              )
+              .one().count
+        ),
+      });
+      const copy = await copyOfStore();
+      await restoreStore(copy);
+      const restored = await held();
+      await admin.api.brainSources.deleteUpload(source.id);
+      await workBrain(env, new Date(), noProducers);
+      const erased = await held();
+      // A copy from before the erasure: the ledger erases it again.
+      await restoreStore(copy);
+      await workBrain(env, new Date(), noProducers);
+      const restoredAfterErasure = await held();
+
+      expect({ restored, erased, restoredAfterErasure }).toStrictEqual({
+        restored: { key: "held", found: [], versions: 1 },
+        erased: { key: "erased", found: [], versions: 0 },
+        restoredAfterErasure: { key: "erased", found: [], versions: 0 },
       });
     }
   );
@@ -1042,7 +1231,7 @@ describe("uploading a file straight into the Brain", () => {
         teamLeft: teamLeft.length,
         forTeam: shown(forTeam.source.id),
         forAll: shown(forAll.source.id),
-        opened: opened?.mayDelete,
+        opened: opened?.deletes,
         rows: rowsLeft.length,
         actions: await actionsOf(forTeam.source.id),
       }).toStrictEqual({
@@ -1050,7 +1239,7 @@ describe("uploading a file straight into the Brain", () => {
         teamLeft: 0,
         forTeam: { name: null, readers: teamReaders(teamId), teamName: null },
         forAll: { name: "Handbook.vtt", readers: everyone, teamName: null },
-        opened: true,
+        opened: "erase",
         rows: 0,
         actions: ["brain.upload.added", "brain.upload.deleted"],
       });
@@ -1212,7 +1401,7 @@ describe("uploading a file straight into the Brain", () => {
         rows: rows.length,
         mateBefore,
         versions: uploaderSees === null ? 0 : 1,
-        mayDelete: uploaderSees?.mayDelete,
+        deletes: uploaderSees?.deletes,
         mateAfter: [await found(mate, once), await readAs(mate, first.source)],
         actions: await actionsOf(uploadId),
       }).toStrictEqual({
@@ -1220,8 +1409,8 @@ describe("uploading a file straight into the Brain", () => {
         rows: 1,
         mateBefore: [uploadId],
         versions: 1,
-        // Its uploader asks an admin, who deletes it below.
-        mayDelete: false,
+        // Its uploader would remove it; an admin erases it, below.
+        deletes: "remove",
         mateAfter: [[], null],
         actions: [
           "brain.upload.added",
@@ -1261,7 +1450,7 @@ describe("uploading a file straight into the Brain", () => {
         failed,
         kept: kept.length,
         shown: shown?.source,
-        mayDelete: adminSees?.mayDelete,
+        deletes: adminSees?.deletes,
         retried,
         afterDelete: await rowsWith(uploadId),
         actions: await actionsOf(uploadId),
@@ -1269,7 +1458,7 @@ describe("uploading a file straight into the Brain", () => {
         failed: { refused: "internal.unexpected" },
         kept: 1,
         shown: { producer: "upload", id: uploadId },
-        mayDelete: true,
+        deletes: "erase",
         retried: { source: { producer: "upload", id: uploadId }, version: 1 },
         afterDelete: [],
         actions: [
