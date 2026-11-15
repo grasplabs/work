@@ -12,7 +12,13 @@ import type {
   Identifier,
   Reader,
 } from "./contract.ts";
-import { readMoment, restingOn, retiredSql, visibleSql } from "./memories.ts";
+import {
+  droppedSql,
+  outSql,
+  readMoment,
+  restingOn,
+  visibleSql,
+} from "./memories.ts";
 import type { HeldMemory } from "./memories.ts";
 import { readableSql } from "./reader-sets.ts";
 import { foldForSearch } from "./words.ts";
@@ -51,14 +57,14 @@ export const foldIdentifier = ({ type, value }: Identifier): string =>
 
 /**
  * An entity the reader may see: a memory they may read, its writer hasn't
- * retired (`retiredSql`), mentions it; with `learnedBy` (an expression,
+ * retired (`droppedSql`), mentions it; with `learnedBy` (an expression,
  * milliseconds), one learned and not retired by then.
  */
 export const mentionedSql = (entity: string, learnedBy?: string): string => {
   const kept =
     learnedBy === undefined
-      ? "AND m.retired_at IS NULL"
-      : `AND m.learned_at <= ${learnedBy} AND NOT ${retiredSql("m", learnedBy)}`;
+      ? `AND m.retired_at IS NULL AND NOT ${outSql("m")}`
+      : `AND m.learned_at <= ${learnedBy} AND NOT ${droppedSql("m", learnedBy)}`;
   return `(
   EXISTS (SELECT 1 FROM memories AS m
     WHERE m.entity = ${entity} ${kept} AND ${visibleSql("m")})
@@ -74,8 +80,8 @@ export const mentionedSql = (entity: string, learnedBy?: string): string => {
  * its source's current version's, the version not hidden by an erasure.
  * So everyone who may read an add with those readers may read it too.
  *
- * A memory its writer retired counts here, unlike for
- * every read (memories.ts `retiredSql`): a new mention with the same name
+ * A memory retired, or out of its source, counts here, unlike for
+ * every read (memories.ts `droppedSql`): a new mention with the same name
  * or identifier links to the entity a forgotten memory named
  * (`linkedBy`, linking.ts `linkedByName`), rather than making a second
  * one; merging and splitting entities is GRA-1857's. So an add that names
@@ -191,7 +197,7 @@ export const keepNames = (
 };
 
 /**
- * When the first memory the reader may read, not retired (`retiredSql`),
+ * When the first memory the reader may read, not retired (`droppedSql`),
  * that mentions the entity at `entity` was learned: null when there is
  * none, so they may not see it. What entities are ordered by, so where
  * one stands among those a reader sees depends only on what they may
@@ -201,11 +207,11 @@ export const keepNames = (
 const firstMentionSql = (entity: string): string => `(SELECT min(first) FROM (
   SELECT m.learned_at AS first FROM memories AS m
   WHERE m.entity = ${entity} AND m.learned_at <= ?9
-    AND NOT ${retiredSql("m", "?9")} AND ${visibleSql("m")}
+    AND NOT ${droppedSql("m", "?9")} AND ${visibleSql("m")}
   UNION ALL
   SELECT m.learned_at FROM memories AS m
   WHERE m.object = ${entity} AND m.learned_at <= ?9
-    AND NOT ${retiredSql("m", "?9")} AND ${visibleSql("m")}
+    AND NOT ${droppedSql("m", "?9")} AND ${visibleSql("m")}
 ))`;
 
 /**
@@ -251,7 +257,7 @@ found AS MATERIALIZED (
           AND entity_names.type = asked.value ->> 0
           AND entity_names.folded = asked.value ->> 1
           AND m.learned_at <= ?9
-          AND NOT ${retiredSql("m", "?9")}
+          AND NOT ${droppedSql("m", "?9")}
           AND ${visibleSql("m")}
       )
     )
@@ -265,7 +271,7 @@ LIMIT ?5`;
 /**
  * `?1` the entities asked (JSON rows), `?4` the moment read at: each
  * one's earliest name a memory the reader may read, learned and not
- * retired by then (`retiredSql`), gave (by when that memory was learned,
+ * retired by then (`droppedSql`), gave (by when that memory was learned,
  * then its id), with the source and
  * version that memory rests on (both null for a writer's word) and its
  * id (`[name, source, version, memory]`), or null.
@@ -277,7 +283,7 @@ SELECT asked.value AS entity, (
   FROM entity_names
   CROSS JOIN memories AS m ON m.row = entity_names.memory
   WHERE entity_names.entity = asked.value AND entity_names.type = 'name'
-    AND m.learned_at <= ?4 AND NOT ${retiredSql("m", "?4")}
+    AND m.learned_at <= ?4 AND NOT ${droppedSql("m", "?4")}
     AND ${visibleSql("m")}
   ORDER BY m.learned_at, m.id, entity_names.folded
   LIMIT 1
@@ -345,7 +351,7 @@ export const asSeen = (
  * `?1` the entities' rows (JSON), `?4` the moment read at, `?5` the names
  * and identifiers asked (JSON, each `[type, folded]`): the memories what
  * makes each one seen and found rests on. The first memory the reader may
- * read, learned and not retired by then (`retiredSql`), that mentions it
+ * read, learned and not retired by then (`droppedSql`), that mentions it
  * (by when it was learned, then its id: the one `firstMentionSql` stands
  * it by), and of each asked, the earliest such memory that gave it (one
  * of the rows `findSql` holds it by).
@@ -357,11 +363,11 @@ held AS (
       SELECT m.row AS row, m.learned_at AS learned, m.id AS id
       FROM memories AS m
       WHERE m.entity = asked.value AND m.learned_at <= ?4
-        AND NOT ${retiredSql("m", "?4")} AND ${visibleSql("m")}
+        AND NOT ${droppedSql("m", "?4")} AND ${visibleSql("m")}
       UNION ALL
       SELECT m.row, m.learned_at, m.id FROM memories AS m
       WHERE m.object = asked.value AND m.learned_at <= ?4
-        AND NOT ${retiredSql("m", "?4")} AND ${visibleSql("m")}
+        AND NOT ${droppedSql("m", "?4")} AND ${visibleSql("m")}
     ) AS mention
     ORDER BY mention.learned, mention.id
     LIMIT 1) AS row
@@ -372,7 +378,7 @@ held AS (
       WHERE entity_names.entity = asked.value
         AND entity_names.type = named.value ->> 0
         AND entity_names.folded = named.value ->> 1
-        AND m.learned_at <= ?4 AND NOT ${retiredSql("m", "?4")}
+        AND m.learned_at <= ?4 AND NOT ${droppedSql("m", "?4")}
         AND ${visibleSql("m")}
       ORDER BY m.learned_at, m.id
       LIMIT 1)
@@ -417,7 +423,7 @@ export const heldBy = (
  * learned), `?7` (that memory's id), `?8` (its type) and `?9` (folded),
  * `?10` the most to read: each name and identifier of the entity a
  * memory the reader may read, learned and not retired by then
- * (`retiredSql`), gave, once, as the first such memory wrote it, in that
+ * (`droppedSql`), gave, once, as the first such memory wrote it, in that
  * order.
  */
 const namesPageSql = `
@@ -432,7 +438,7 @@ given AS (
   FROM entity_names
   CROSS JOIN memories AS m ON m.row = entity_names.memory
   WHERE entity_names.entity = ?1 AND m.learned_at <= ?4
-    AND NOT ${retiredSql("m", "?4")} AND ${visibleSql("m")}
+    AND NOT ${droppedSql("m", "?4")} AND ${visibleSql("m")}
 )
 SELECT type, value, folded, learned, memory FROM given
 WHERE copy = 1

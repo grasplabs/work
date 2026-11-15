@@ -47,6 +47,7 @@ const features = [
   "a confirmation",
   "a retirement",
   "an extraction mark",
+  "a memory out of its source's current version",
   "an entity linked by its id",
   "an entity linked by its email",
   "more names for one entity from one memory than one entity of an add takes",
@@ -290,7 +291,9 @@ const newVersion = async ({ random, pick, sources, accesses }: Series) => {
   await shared().addSource({
     source: narrowed.source,
     change: `${narrowed.versions}`,
-    text: `words of ${narrowed.source}, ${narrowed.versions}`,
+    // A newer version no longer says the quote memories rest on
+    // ("words"): a re-check puts out those of earlier versions.
+    text: `nothing of ${narrowed.source}, ${narrowed.versions}`,
     access: random() < 0.4 ? { kind: "none" } : pick(accesses),
   });
 };
@@ -382,6 +385,12 @@ const featuresHeld = async (): Promise<Record<string, number>> =>
       ),
       "an extraction mark": count(
         "SELECT count(*) AS count FROM memory_extractions"
+      ),
+      "a memory out of its source's current version": count(
+        `SELECT count(*) AS count FROM memory_rechecks AS judged
+      JOIN current_versions ON current_versions.source = judged.source
+      JOIN source_versions ON source_versions.row = current_versions.version_row
+        AND source_versions.version = judged.version`
       ),
       "an entity linked by its email": count(
         `SELECT count(*) AS count FROM (

@@ -1,4 +1,3 @@
-import { withinTime } from "@grasp-os/shared/deadline";
 import { log } from "@grasp-os/shared/log";
 import { drizzle } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
@@ -30,15 +29,16 @@ import type {
   SourceId,
   Speaker,
 } from "./contract.ts";
-import { bucketCallMs } from "./embedding.ts";
-import { fileKeyOf, hashOf } from "./files.ts";
+import { currentOf, textOf } from "./current.ts";
+import { hashOf } from "./files.ts";
+import { quoteIndexOf } from "./quotes.ts";
+import type { QuoteIndex } from "./quotes.ts";
 import { accessOfKey } from "./reader-sets.ts";
 import { hashesOf, writeAdd } from "./remember.ts";
 import type { Adding } from "./remember.ts";
 import { isRestoring } from "./restoring.ts";
 import { dayOf, endOfDay, resolveWhen, whenSchema } from "./when.ts";
 import type { Resolved, When } from "./when.ts";
-import { sequenceOf } from "./words.ts";
 import {
   defineWork,
   enqueueWork,
@@ -279,20 +279,21 @@ const jsonOf = (answer: string): unknown => {
   }
 };
 
-/** The text the model saw, as the checks in code read it: its words, and the emails it writes. */
+/**
+ * The text the model saw, as the checks in code read it: its words, the
+ * whole version's, and the emails it writes.
+ */
 interface Seen {
+  piece: QuoteIndex;
   /**
-   * Its words in order, folded as search folds them (`sequenceOf`), each
-   * between two spaces: no word holds a space, so a run of words is in the
-   * text exactly when its words, so joined, are in this.
+   * The whole version: a quote must hold there too, as a re-check of the
+   * version reads it (recheck.ts), so a quote cut off where the piece is
+   * cut, or folded otherwise at its start, never passes here and fails
+   * there against the same text.
    */
-  words: string;
+  whole: QuoteIndex;
   emails: ReadonlySet<string>;
 }
-
-/** `text`'s words as `Seen` holds them. */
-export const wordsSeen = (text: string): string =>
-  ` ${sequenceOf(text).join(" ")} `;
 
 /** What separates an email from the text around it: spaces, brackets, quotes and list marks. */
 const emailBounds = /[\s<>()[\]{}"'`,;]+/u;
@@ -308,12 +309,6 @@ const emailsOf = (text: string): Set<string> =>
       .map((token) => token.replace(/[.:!?]+$/u, "").toLowerCase())
       .filter((token) => emailPattern.test(token))
   );
-
-/** Whether `quote` is in the text, word for word as the Brain folds words: at least one word. */
-export const isQuoted = (seen: Pick<Seen, "words">, quote: string): boolean => {
-  const run = sequenceOf(quote);
-  return run.length > 0 && seen.words.includes(` ${run.join(" ")} `);
-};
 
 /** Whether the text writes `email` as one of its own, compared without case. */
 const isWrittenEmail = (seen: Seen, email: string): boolean =>
@@ -336,7 +331,7 @@ const entityOf = (
   const names = [
     ...new Set(
       proposed.names.filter(
-        (name) => nameSchema.safeParse(name).success && isQuoted(seen, name)
+        (name) => nameSchema.safeParse(name).success && seen.piece.holds(name)
       )
     ),
   ].slice(0, namesPerEntityMax);
@@ -407,7 +402,8 @@ const resolvedIn = (
   when === null || when === undefined ? null : resolveWhen(when, said);
 
 /**
- * `proposed` as a memory to add, or none: its quote must be in the text
+ * `proposed` as a memory to add, or none: its quote must be in the piece
+ * the model read and in the whole version (`Seen`)
  * (the plan's check in code), and it is no preference or instruction, by
  * type or by attribute. Its value and dates are the checker call's to
  * judge, which is shown them (`checkOn`).
@@ -422,7 +418,12 @@ const memoryOf = (
   const instructs =
     !drawnTypes.has(proposed.type) ||
     instructingAttributes.has(proposed.attribute ?? "");
-  if (instructs || !kinds.has(proposed.about) || !isQuoted(seen, quote)) {
+  if (
+    instructs ||
+    !kinds.has(proposed.about) ||
+    !seen.piece.holds(quote) ||
+    !seen.whole.holds(quote)
+  ) {
     return undefined;
   }
   const dated = resolvedIn(proposed.date, drawing.said);
@@ -735,29 +736,6 @@ const checkOn = async (
   return true;
 };
 
-/**
- * The version `source` `version`, if it is its source's current one and
- * no erasure is under way of it: its file and reader set's key.
- */
-export const currentOf = (
-  sql: SqlStorage,
-  source: string,
-  version: number
-): { file: string; readers: string } | undefined =>
-  sql
-    .exec<{ file: string; readers: string }>(
-      `SELECT source_versions.file AS file, reader_sets.key AS readers
-      FROM current_versions
-      JOIN source_versions ON source_versions.row = current_versions.version_row
-      JOIN reader_sets ON reader_sets.id = source_versions.reader_set
-      WHERE current_versions.source = ? AND source_versions.version = ?
-        AND source_versions.row NOT IN (SELECT version_row FROM erasing_versions)`,
-      source,
-      version
-    )
-    .toArray()
-    .at(0);
-
 const encoder = new TextEncoder();
 
 /** The change key the memories of a piece of a version are added under: one per version and piece. */
@@ -779,28 +757,6 @@ const addedBefore = async (sql: SqlStorage, change: string): Promise<boolean> =>
       await hashOf(encoder.encode(change))
     )
     .toArray().length > 0;
-
-/** The text of `file`, or null when it is gone: within the bucket's time and the item's. */
-export const textOf = async (
-  { bucket, signal }: WorkContext,
-  file: string
-): Promise<string | null> => {
-  try {
-    return await withinTime(
-      async () => {
-        const object = await bucket.get(fileKeyOf(file));
-        return object === null ? null : await object.text();
-      },
-      bucketCallMs,
-      signal
-    );
-  } catch (error) {
-    if (error instanceof DOMException && error.name === "TimeoutError") {
-      throw new WorkError("timed_out");
-    }
-    throw error;
-  }
-};
 
 /** A piece of a version's text: from where, to where, and whether it is the last. */
 interface Piece {
@@ -1045,10 +1001,12 @@ const drawingOf = (payload: Payload): Drawing => ({
 const proposalOf = async (
   context: WorkContext,
   payload: Payload,
-  piece: Piece & { next: number }
+  piece: Piece & { next: number },
+  whole: string
 ): Promise<Checking> => {
   const seen: Seen = {
-    words: wordsSeen(piece.text),
+    piece: quoteIndexOf(piece.text),
+    whole: quoteIndexOf(whole),
     emails: emailsOf(piece.text),
   };
   const proposal = candidatesOf(
@@ -1164,7 +1122,7 @@ const extractWork: WorkDefinition<Payload> = defineWork({
         );
         cut = { next: piece.next, last: piece.last };
         if (!(await addedBefore(sql, change))) {
-          checking = await proposalOf(context, payload, piece);
+          checking = await proposalOf(context, payload, piece, whole);
           called = 1;
           context.keep({ ...payload, checking: checkingJsonOf(checking) });
         }

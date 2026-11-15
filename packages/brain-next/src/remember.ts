@@ -25,6 +25,7 @@ import {
   stampWrite,
 } from "./memories.ts";
 import { accessOfKey, readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
+import { enqueueRecheck } from "./recheck.ts";
 import { isRestoring } from "./restoring.ts";
 import { indexMemoryWords, sequenceOf } from "./words.ts";
 import type { WordMemo } from "./words.ts";
@@ -240,57 +241,73 @@ interface Into {
   shared: boolean;
   /** Each source the add names, by its SHA-256 as the erasure ledger names it. */
   subjects: ReadonlyMap<string, string>;
+  /** Each memory's restatement key, by its place in the add (`restatementOf`). */
+  restatements: readonly string[];
   learnedAt: number;
   memo: WordMemo;
 }
 
-/** What `valueKeyFor` keys a memory by: its filing, type and statement. */
-export interface Keyed {
-  value: string | null;
-  /** The id of the entity it relates to, if any. */
-  object: string | null;
+/**
+ * What a memory filed under no attribute is a restatement of another by:
+ * the SHA-256 of its type, its value folded and its statement word for
+ * word as search folds words (words.ts `sequenceOf`), so the index holds a
+ * fixed length whatever the statement's. Hashed before a transaction.
+ */
+export const restatementOf = async ({
+  type,
+  value,
+  statement,
+}: {
   type: string;
+  value: string | null;
   statement: string;
-}
+}): Promise<string> =>
+  await hashOf(
+    encoder.encode(
+      JSON.stringify([
+        type,
+        foldName(value ?? ""),
+        sequenceOf(statement).join(" "),
+      ])
+    )
+  );
 
 /**
  * What a newer memory of its lineage must match to end it (memories.ts
  * `newerSql`), under its attribute's `rule`. One-value attributes, and
  * many-value ones per value, compare its `value` folded, or the id of the
  * entity a relation relates to (`object`). A memory filed under no
- * attribute is a restatement of another when it says the same, word for
- * word as search folds words (words.ts `sequenceOf`), of the same type,
- * related entity and value: so the same fact said again by its source or
- * its writer ends what it said before, kept as history, and anything
- * worded otherwise never does. For an add and a restore (restore.ts)
- * alike.
+ * attribute is a restatement of another when it says the same of the
+ * same related entity (`restatementOf`, then the entity's id): so the
+ * same fact said again by its source or its writer ends what it said
+ * before, kept as history, and anything worded otherwise never does. For
+ * an add and a restore (restore.ts) alike.
  */
 export const valueKeyFor = (
   rule: AttributeRule | undefined,
-  { value, object, type, statement }: Keyed
+  {
+    value,
+    object,
+    restatement,
+  }: { value: string | null; object: string | null; restatement: string }
 ): string | null => {
   if (rule === undefined) {
-    return JSON.stringify([
-      type,
-      object,
-      foldName(value ?? ""),
-      sequenceOf(statement).join(" "),
-    ]);
+    return `${restatement}:${object ?? ""}`;
   }
   return rule.relation === undefined ? foldName(value ?? "") : object;
 };
 
 /** What a newer memory of its lineage must match to end `memory` (`valueKeyFor`). */
 const valueKeyOf = (
-  { ids }: Into,
+  { ids, restatements }: Into,
   memory: NewMemory,
-  plan: Planned
+  plan: Planned,
+  index: number
 ): string | null =>
   valueKeyFor(plan.rule, {
     value: memory.value ?? null,
     object: plan.object === undefined ? null : (ids[plan.object] ?? null),
-    type: memory.type,
-    statement: memory.statement,
+    restatement: restatements[index] ?? "",
   });
 
 /** The SHA-256 of `source`, which the add hashed before its transaction. */
@@ -388,7 +405,7 @@ const writeMemory = (
       memory.attribute ?? null,
       plan.object === undefined ? null : (rows[plan.object] ?? null),
       memory.value ?? null,
-      valueKeyOf(into, memory, plan),
+      valueKeyOf(into, memory, plan, index),
       plan.rule?.values === "one" ? 1 : 0,
       memory.type,
       memory.statement,
@@ -447,6 +464,8 @@ export interface AddHashes {
   key: string;
   hash: string;
   subjects: ReadonlyMap<string, string>;
+  /** Each memory's restatement key (`restatementOf`), in the add's order. */
+  restatements: readonly string[];
 }
 
 /** `adding`'s change key, content and sources, hashed: what its write needs, made before it. */
@@ -475,7 +494,44 @@ export const hashesOf = async (adding: Adding): Promise<AddHashes> => {
       )
     )
   );
-  return { key, hash, subjects };
+  const restatements = await Promise.all(
+    adding.memories.map(
+      async ({ type, value, statement }) =>
+        await restatementOf({ type, value: value ?? null, statement })
+    )
+  );
+  return { key, hash, subjects, restatements };
+};
+
+/**
+ * Puts each source the add draws a memory from a version before its
+ * current one on the queue to be re-checked against the current one
+ * (recheck.ts): a memory is out while its source's current version lacks
+ * its quote, however late it was added.
+ */
+const recheckOlder = (storage: DurableObjectStorage, adding: Adding): void => {
+  const cited = new Map<string, number>();
+  for (const { basis } of adding.memories) {
+    if (basis.kind === "source") {
+      cited.set(
+        basis.source,
+        Math.min(cited.get(basis.source) ?? basis.version, basis.version)
+      );
+    }
+  }
+  for (const [source, earliest] of cited) {
+    const [current] = storage.sql
+      .exec<{ version: number }>(
+        `SELECT source_versions.version AS version FROM current_versions
+        JOIN source_versions ON source_versions.row = current_versions.version_row
+        WHERE current_versions.source = ?`,
+        source
+      )
+      .toArray();
+    if (current !== undefined && earliest < current.version) {
+      enqueueRecheck(storage, source, current.version);
+    }
+  }
 };
 
 /**
@@ -487,7 +543,7 @@ export const hashesOf = async (adding: Adding): Promise<AddHashes> => {
 export const writeAdd = (
   { storage, db, shared }: RememberStore,
   adding: Adding,
-  { key, hash, subjects }: AddHashes
+  { key, hash, subjects, restatements }: AddHashes
 ): AddedMemories => {
   const planned = planOf(adding);
   const { sql } = storage;
@@ -528,6 +584,7 @@ export const writeAdd = (
       readers,
       shared,
       subjects,
+      restatements,
       learnedAt: stampWrite(sql),
       memo: new Map(),
     };
@@ -537,6 +594,7 @@ export const writeAdd = (
     if (adding.extracted !== undefined) {
       markExtracted(sql, adding.extracted, into);
     }
+    recheckOlder(storage, adding);
     const answer: AddedMemories = {
       memories,
       entities: Object.fromEntries(

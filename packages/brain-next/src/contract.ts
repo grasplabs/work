@@ -1596,8 +1596,9 @@ export interface VectorsFound {
 //
 // Re-checked when its source changes: a memory drawn from an earlier
 // version of a source whose quote its current version no longer holds is
-// retired, through the work queue, as its writer would retire it; it
-// stays history and gives nothing to any other read.
+// out, through the work queue, while that version is current and only for
+// those who may read it; out, it is read as a retired one is: history,
+// and nothing to any other read.
 //
 // Who may read a memory: those in the reader set its caller gives
 // (`access`, as a source's), and, when it rests on a source version, only
@@ -1875,6 +1876,12 @@ export type NewEntity = z.input<typeof newEntitySchema>;
  * the quote of it the memory rests on (its lineage is the source); or a
  * writer (the person, agent or App writing it, as the host names them),
  * with what was said when there is a quote (its lineage is the writer).
+ *
+ * A source's quote must be in that version word for word, as the Brain
+ * folds words (quotes.ts), as extraction checks it: the store doesn't
+ * check it as it adds, and a re-check of a newer version (recheck.ts)
+ * judges the memory by it, so a quote that isn't in its own version is
+ * out as soon as a newer version is judged.
  */
 export const memoryBasisSchema = z.discriminatedUnion("kind", [
   z.strictObject({
@@ -2238,8 +2245,8 @@ export type EntitiesRequest = z.input<typeof entitiesRequestSchema>;
 /**
  * A page of entities, by when the first memory the reader may read that
  * mentions each was learned, then id; whether more follow, and where to
- * go on from. A retired memory (by its writer, or by a re-check of its
- * source) gives nothing to a find: no
+ * go on from. A retired memory (by its writer), or one out of its source
+ * (a re-check), gives nothing to a find: no
  * mention, no name or identifier asked.
  */
 export interface EntityPage {
@@ -2866,11 +2873,12 @@ export interface Brain {
   listContested: (request: ContestedRequest) => Promise<ContestedPage>;
   /**
    * Of the memories asked for, by id, those the reader may read now (as
-   * `readMemories` decides who may read one) and not retired (by their
-   * writer, or by a re-check of their source), in the order asked and each once: what a host checks before
-   * it sends again a memory it once recalled (a chat's earlier recall).
-   * Each left out alike, whether it doesn't exist, was erased, rests on a
-   * version the reader may no longer read, or was retired. One ended by a
+   * `readMemories` decides who may read one), not retired by their writer
+   * and not out of their source's current version (a re-check), in the
+   * order asked and each once: what a host checks before it sends again a
+   * memory it once recalled (a chat's earlier recall). Each left out
+   * alike, whether it doesn't exist, was erased, rests on a version the
+   * reader may no longer read, was retired, or is out. One ended by a
    * newer memory of its lineage, or whose time is over, stays: as a
    * source's older version stays readable once a newer one is added.
    */

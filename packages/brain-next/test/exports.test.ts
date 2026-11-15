@@ -2134,6 +2134,52 @@ describe("exports and restores", () => {
       });
     });
 
+    it("brings back a re-check's judgment, so a memory out of its source's current version stays out from the same moment (GRA-1752)", async () => {
+      await putBack(shared(), emptyShared);
+      const group = `team:${unique()}`;
+      const source = `test:${unique()}`;
+      await add(shared(), source, "Acme renews in March", team(group));
+      const judgedOne = await shared().addMemories({
+        change: "drawn",
+        access: team(group),
+        entities: [customer()],
+        memories: [
+          renewal("March", {
+            kind: "source",
+            source,
+            version: 1,
+            quote: "renews in March",
+          }),
+        ],
+      });
+      // A newer version no longer says it: the re-check puts it out.
+      await add(shared(), source, "Acme pays late", team(group), "2");
+      await tick(shared());
+      const reader = readerOf(`person:${unique()}`, [group]);
+      const readOf = async () => {
+        const page = await shared().readMemories({
+          entity: judgedOne.entities.c ?? "",
+          reader,
+          history: true,
+        });
+        return {
+          memories: page.memories,
+          readable: await shared().readableMemories({
+            memories: judgedOne.memories,
+            reader,
+          }),
+        };
+      };
+      const before = await readOf();
+
+      await exportedAndRestored();
+
+      expect({
+        after: await readOf(),
+        out: before.memories.map(({ endedAt }) => endedAt !== null),
+      }).toStrictEqual({ after: before, out: [true] });
+    });
+
     it("leaves out a memory drawn from a source erased after the export was made: not in the store, and in no file left in the bucket (threats 2, 3)", async () => {
       await putBack(shared(), emptyShared);
       const group = `team:${unique()}`;

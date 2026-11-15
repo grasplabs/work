@@ -46,7 +46,7 @@ import type { WorkContext } from "./work.ts";
 // a run in the order of its rows: memories, each with the entities it
 // mentions by their ids and the names and identifiers it gave them;
 // confirmations, by the ids of the memories they name; extraction marks;
-// and the change keys of adds of memories (as the store keeps them,
+// re-checks' judgments, by the ids of their memories; and the change keys of adds of memories (as the store keeps them,
 // hashed). Nothing names a row: a restore makes new ones, in the same
 // order, so what that order decides (a writer's latest memory, the latest
 // confirmation) comes back as it was. What it takes is what the store had
@@ -315,6 +315,19 @@ export const extractionLineSchema = z.strictObject({
 });
 export type ExtractionLine = z.infer<typeof extractionLineSchema>;
 
+/**
+ * A line of a re-check's judgment (recheck.ts): the memory, by id, out
+ * against a version of its source, and when.
+ */
+export const recheckLineSchema = z.strictObject({
+  kind: z.literal("recheck"),
+  memory: memoryIdSchema,
+  source: z.string(),
+  version: z.int().positive(),
+  at: z.int().nonnegative(),
+});
+export type RecheckLine = z.infer<typeof recheckLineSchema>;
+
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/u);
 
 /**
@@ -335,6 +348,7 @@ export type MemoriesLine =
   | MemoryLine
   | ConfirmationLine
   | ExtractionLine
+  | RecheckLine
   | ChangeLine;
 
 /**
@@ -569,6 +583,7 @@ export const memoryPhases = [
   "memories",
   "confirmations",
   "extractions",
+  "rechecks",
   "changes",
 ] as const;
 
@@ -674,6 +689,15 @@ WHERE marked.rowid > ?1 AND marked.at <= ?4
   AND ${exportedReadersSql(scope, "marked.readers")}
   AND ${writtenVersionSql("marked.subject", "marked.version")}
 ORDER BY marked.rowid
+LIMIT ?3`,
+  // A judgment goes with its memory and the version it judged against.
+  rechecks: `SELECT judged.rowid AS row, m.id AS memory, judged.source AS source,
+  judged.version AS version, judged.subject AS subject, judged.at AS at
+FROM memory_rechecks AS judged
+JOIN memories AS m ON m.row = judged.memory
+WHERE judged.rowid > ?1 AND judged.at <= ?4 AND ${exportedMemorySql(scope, "m")}
+  AND ${writtenVersionSql("judged.subject", "judged.version")}
+ORDER BY judged.rowid
 LIMIT ?3`,
   // A change goes with its memories: only one that answered some, each
   // held by the export (a restore writes it only when it restored them
@@ -803,6 +827,16 @@ const memoriesLineOf = (
       version: row.version,
       at: row.at,
       access: exportedAccessOf(scope, row.readers),
+    });
+    return { line, held: [textOf(row.subject), line.version] };
+  }
+  if (phase === "rechecks") {
+    const line = recheckLineSchema.parse({
+      kind: "recheck",
+      memory: row.memory,
+      source: row.source,
+      version: row.version,
+      at: row.at,
     });
     return { line, held: [textOf(row.subject), line.version] };
   }

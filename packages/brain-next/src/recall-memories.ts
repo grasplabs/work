@@ -7,7 +7,7 @@ import {
   memoriesSql,
   memoryOf,
   memoryRows,
-  retiredSql,
+  droppedSql,
   visibleSql,
 } from "./memories.ts";
 import type { MemoryRow } from "./memories.ts";
@@ -119,7 +119,7 @@ const namedBy = (question: string): Named => {
  * `?1` the question's forms (JSON, `Named.forms`), `?4` the moment, `?5`
  * its identifiers (JSON, each `[type, folded]`): the entities a memory the
  * reader may read, learned and not retired by then (memories.ts
- * `retiredSql`: a forgotten memory names nothing, as for a find), gives a
+ * `droppedSql`: a forgotten memory names nothing, as for a find), gives a
  * name the question holds as whole words, or one of its identifiers.
  *
  * A name the question holds is a run of one form's words, so each run is
@@ -172,7 +172,7 @@ held AS MATERIALIZED (
 SELECT DISTINCT held.entity AS entity
 FROM held
 CROSS JOIN memories AS m ON m.row = held.memory
-WHERE m.learned_at <= ?4 AND NOT ${retiredSql("m", "?4")}
+WHERE m.learned_at <= ?4 AND NOT ${droppedSql("m", "?4")}
   AND ${visibleSql("m")}`;
 
 /**

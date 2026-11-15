@@ -1,6 +1,7 @@
 // What erasure deletes of memories (erasure.ts): the memories resting on
 // a version it deletes, or those only an erased person may read, each
-// with its names and its confirmations; every confirmation made over one
+// with its names, its confirmations and its re-checks' judgments, and
+// every judgment made against a version it deletes; every confirmation made over one
 // of them, whole, so none shows to readers the erased memory once hid it
 // from; then each entity no memory mentions any more, so no name or
 // identifier outlives the last memory that gave it. Run in the caller's
@@ -59,6 +60,10 @@ const deleteMemories = (sql: SqlStorage, rows: readonly number[]): number[] => {
     "DELETE FROM entity_names WHERE memory IN (SELECT value FROM json_each(?))",
     listed
   );
+  sql.exec(
+    "DELETE FROM memory_rechecks WHERE memory IN (SELECT value FROM json_each(?))",
+    listed
+  );
   // Their words and stems go with them (migration 0008's trigger).
   sql.exec(
     "DELETE FROM memories WHERE row IN (SELECT value FROM json_each(?))",
@@ -107,6 +112,12 @@ export const eraseMemoriesOn = (
   if (version === undefined) {
     return [];
   }
+  // What re-checks judged against it, of memories resting on other versions.
+  sql.exec(
+    "DELETE FROM memory_rechecks WHERE source = ? AND version = ?",
+    version.source,
+    version.version
+  );
   const marks = sql
     .exec<{ readers: string }>(
       `DELETE FROM memory_extractions WHERE source = ? AND version = ?
@@ -139,6 +150,7 @@ export const eraseMemoriesOfSource = (
   sql: SqlStorage,
   subject: string
 ): number[] => {
+  sql.exec("DELETE FROM memory_rechecks WHERE subject = ?", subject);
   const marks = sql
     .exec<{ readers: string }>(
       "DELETE FROM memory_extractions WHERE subject = ? RETURNING readers",
@@ -164,6 +176,13 @@ export const eraseMemoriesHiddenBy = (
   sql: SqlStorage,
   erasure: string
 ): number[] => {
+  sql.exec(
+    `DELETE FROM memory_rechecks
+    WHERE (subject, version) IN (
+      SELECT subject, version FROM erased_versions WHERE erasure = ?
+    )`,
+    erasure
+  );
   const marks = sql
     .exec<{ readers: string }>(
       `DELETE FROM memory_extractions

@@ -5,7 +5,7 @@ import type {
 } from "@grasp-os/brain-next/contract";
 import { reset, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
   questionMaxLength,
@@ -13,6 +13,7 @@ import {
   valueMaxLength,
 } from "../src/contract.ts";
 import { foldName } from "../src/entities.ts";
+import { recheckPage } from "../src/recheck.ts";
 import { audience, fact, readerOf, word } from "./entity-helpers.ts";
 
 // What reading memories costs the store, against what the question is not
@@ -36,6 +37,8 @@ import { audience, fact, readerOf, word } from "./entity-helpers.ts";
 /** Rows the store's SQL read, counted at the store itself. */
 interface Counter {
   rows: () => number;
+  /** The most rows one statement read. */
+  largest: () => number;
   reset: () => void;
 }
 
@@ -61,6 +64,7 @@ const countedStore = async () => {
     });
     counters.set(stub.id.toString(), {
       rows: () => cursors.reduce((sum, cursor) => sum + cursor.rowsRead, 0),
+      largest: () => Math.max(0, ...cursors.map(({ rowsRead }) => rowsRead)),
       reset: () => {
         cursors.length = 0;
       },
@@ -73,7 +77,16 @@ const countedStore = async () => {
     await ask();
     return counter?.rows() ?? Number.NaN;
   };
-  return { stub, rowsReadBy };
+  /** The most rows one statement `ask` has the store's SQL run read. */
+  const largestReadBy = async (
+    ask: () => Promise<unknown>
+  ): Promise<number> => {
+    const counter = counters.get(stub.id.toString());
+    counter?.reset();
+    await ask();
+    return counter?.largest() ?? Number.NaN;
+  };
+  return { stub, rowsReadBy, largestReadBy };
 };
 
 type Store = Awaited<ReturnType<typeof countedStore>>["stub"];
@@ -618,6 +631,120 @@ describe("what reading memories costs", () => {
       true,
     ]);
     // Adding 20,000 memories, a hundred an add, takes its time.
+  }, 120_000);
+
+  it("re-checks a source's history a page a step, no step reading more as its versions and memories grow", async () => {
+    const { stub, largestReadBy } = await countedStore();
+    const group = `seen-${crypto.randomUUID()}`;
+    const source = `doc-${crypto.randomUUID()}`;
+    const name = word();
+    const said = `${name} renews in March`;
+    /** A newer version of the source, that still says it. */
+    const version = async () =>
+      await stub.addSource({
+        source,
+        change: crypto.randomUUID(),
+        text: `${said}. ${word()}`,
+        access: audience(group),
+      });
+    /**
+     * A version and 150 memories drawn from it, a hundred an add: so pages
+     * of `recheckPage` end inside a version.
+     */
+    const drawn = async () => {
+      const ref = await version();
+      for (const count of [100, 50]) {
+        // oxlint-disable-next-line no-await-in-loop -- one add at a time
+        await add(
+          stub,
+          group,
+          [{ key: "c", kind: "customer", names: [name] }],
+          Array.from({ length: count }, () =>
+            fact("c", `${name} ${word()}`, {
+              speaker: { kind: "outside" },
+              basis: { kind: "source", ...ref, quote: said },
+            })
+          )
+        );
+      }
+    };
+    let clock = Date.now();
+    const tick = async () => {
+      clock = Math.max(clock + 60_000, Date.now());
+      await stub.work({
+        ask: async () => {
+          await Promise.resolve();
+          return { kind: "refused" };
+        },
+        at: new Date(clock),
+        embedders: {
+          model: null,
+          embed: async () => {
+            await Promise.resolve();
+            return { kind: "unavailable" };
+          },
+        },
+        handOvers: {
+          handOver: async () => {
+            await Promise.resolve();
+            return { kind: "nothing" };
+          },
+        },
+        contextTokens: null,
+      });
+    };
+    const sizes = [1500, 4500, 9000];
+    const steps: {
+      size: number;
+      largest: number;
+      reads: number[];
+    }[] = [];
+    let have = 0;
+    for (const size of sizes) {
+      for (; have < size; have += 150) {
+        // oxlint-disable-next-line no-await-in-loop -- one add at a time
+        await drawn();
+      }
+      // Everything put on the queue so far done first.
+      // oxlint-disable-next-line no-await-in-loop -- one size at a time
+      await tick();
+      const reads: number[] = [];
+      const spy = vi.spyOn(console, "info").mockImplementation((line) => {
+        if (
+          typeof line === "object" &&
+          line !== null &&
+          Reflect.get(line, "event") === "brain.recheck"
+        ) {
+          reads.push(Number(Reflect.get(line, "read")));
+        }
+      });
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one size at a time
+        const largest = await largestReadBy(async () => {
+          await version();
+          await tick();
+        });
+        steps.push({ size, largest, reads });
+      } finally {
+        spy.mockRestore();
+      }
+    }
+    const [first] = steps;
+
+    expect(
+      steps.map(({ size, largest, reads }) => ({
+        // Every memory judged once, a page a step, none twice or skipped
+        // where a page ends inside a version.
+        all: reads.reduce((sum, read) => sum + read, 0) === size,
+        pages: reads.length >= Math.ceil(size / recheckPage),
+        page: reads.every((read) => read <= recheckPage),
+        // No statement reads more as the history grows.
+        flat: flat(first?.largest ?? 0, largest),
+      }))
+    ).toStrictEqual(
+      sizes.map(() => ({ all: true, pages: true, page: true, flat: true }))
+    );
+    // 9,000 memories over 60 versions, a hundred an add, take their time.
   }, 120_000);
 
   it("links an add's names without reading other names or memories, readable or hidden", async () => {

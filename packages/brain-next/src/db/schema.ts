@@ -952,6 +952,33 @@ export const memoryExtractions = sqliteTable(
 );
 
 /**
+ * A re-check's judgment (recheck.ts) that version `version` of the source
+ * memory `memory` rests on no longer holds its quote: the memory is out
+ * from `at`, and only while that version is its source's current one,
+ * for those who may read it (memories.ts `outSql`). Nothing is written
+ * to the memory itself: `retired_at` stays its writer's. Deleted with the
+ * memory, and with the version it judged against.
+ */
+export const memoryRechecks = sqliteTable(
+  "memory_rechecks",
+  {
+    memory: integer()
+      .notNull()
+      .references(() => memories.row),
+    source: text().notNull(),
+    version: integer().notNull(),
+    /** The SHA-256 of `source`, as `memories.subject`. */
+    subject: text().notNull(),
+    at: integer().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.memory, table.version] }),
+    index("memory_rechecks_version_idx").on(table.source, table.version),
+    index("memory_rechecks_subject_idx").on(table.subject, table.version),
+  ]
+);
+
+/**
  * An add of memories, by the SHA-256 of its change key (no plain key is
  * kept), with the SHA-256 of what it added and what it answered (ids
  * only): the same change again answers the same.

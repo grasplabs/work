@@ -915,6 +915,75 @@ describe("extracting memories", () => {
     });
   });
 
+  it("keeps a quote only when the whole version holds it too, so a sentence longer than a piece cut mid-word never draws what a re-check of the same text puts out", async () => {
+    const token = unique("t");
+    const name = unique("Wonka");
+    const group = unique("g");
+    const later = unique("g");
+    const source = unique("doc");
+    // One sentence, no full stop, far longer than a piece: each piece is
+    // cut where it no longer fits, inside a long word.
+    const text = Array.from({ length: 60 }, (_, index) =>
+      index % 5 === 0
+        ? name
+        : `${token}x${"abcdefghij".charAt(index % 10).repeat(24)}`
+    ).join(" ");
+    // The model quotes each piece's first and last two words as it reads
+    // them: the last cut off where the piece is.
+    answers.set(token, (request) => {
+      const words = request.input.trim().split(/\s+/u);
+      const quotes =
+        request.purpose === "brain.extract"
+          ? [words.slice(0, 2).join(" "), words.slice(-2).join(" ")]
+          : [];
+      return answering({
+        entities: [{ key: "c", kind: "customer", names: [name] }],
+        memories: quotes.map((quote, index) => ({
+          about: "c",
+          type: "fact",
+          statement: `${name} says ${index}.`,
+          quote,
+        })),
+      })(request);
+    });
+    await added(text, audience(group), { extract: fromOutside(), source });
+    const window =
+      2 * (tokensOf(proposeInstructions) + tokensOf(checkInstructions) + 200);
+    for (let round = 0; round < 10; round += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one piece a tick at most
+      await tick(1, window);
+    }
+    const reader = { person: unique("p"), groups: [group, later] };
+    const [entity] = await entitiesNamed(reader, name);
+    const drawn =
+      entity === undefined ? [] : await memoriesAbout(entity.id, reader);
+    // The same text again, as a version for more readers: re-checked.
+    await added(text, audience(later), { source });
+    await tick();
+    const after =
+      entity === undefined ? [] : await memoriesAbout(entity.id, reader, true);
+
+    expect({
+      pieces:
+        calls.filter(
+          ({ purpose, input }) =>
+            purpose === "brain.extract" && input.includes(token)
+        ).length > 1,
+      drawn: drawn.length > 0,
+      // Every memory drawn is still current against the same text.
+      stillCurrent: after
+        .filter(({ id }) => drawn.some((memory) => memory.id === id))
+        .every(({ endedAt }) => endedAt === null),
+      count: after.length,
+    }).toStrictEqual({
+      pieces: true,
+      drawn: true,
+      stillCurrent: true,
+      count: drawn.length,
+    });
+    // Ten ticks of the queue, a piece each.
+  }, 30_000);
+
   it("reads all of a long version a piece at a time, and ends what an earlier version said only once its last piece is read", async () => {
     const token = unique("t");
     const name = unique("Tyrell");
@@ -934,7 +1003,7 @@ describe("extracting memories", () => {
       // (recheck.ts) leaves it current and only the newer version's mark
       // can end it: the model, asked of the newer version, proposes only
       // what is new.
-      const found = ["invoices", "deliveries"].filter(
+      const found = ["invoices", "pricing", "deliveries"].filter(
         (about) =>
           request.input.includes(complaint(about)) &&
           (about === "deliveries" || !request.input.includes("Sentence"))
@@ -951,13 +1020,20 @@ describe("extracting memories", () => {
         ),
       })(request);
     });
-    await added(`${token}: ${complaint("invoices")}.`, audience(group), {
-      extract: fromOutside(),
-      source,
-    });
+    await added(
+      `${token}: ${complaint("invoices")}. ${complaint("pricing")}.`,
+      audience(group),
+      { extract: fromOutside(), source }
+    );
     await tick();
+    const [entity] = await entitiesNamed(reader, name);
+    const first = new Map(
+      (entity === undefined ? [] : await memoriesAbout(entity.id, reader)).map(
+        ({ id, value }) => [value, id]
+      )
+    );
     // A newer version far longer than a piece: the complaint about
-    // deliveries only at its end.
+    // deliveries only at its end, the one about pricing no longer in it.
     const filler = Array.from(
       { length: 40 },
       (_, index) => `Sentence ${index} of ${token} says nothing to keep.`
@@ -997,11 +1073,18 @@ describe("extracting memories", () => {
         .slice(1)
         .every((values) => values.includes("invoices")),
       now: read.map(({ value }) => value),
+      // The complaint the newer version no longer says is out; the one it
+      // still says, ended by its mark, stays readable history.
+      readable: await shared().readableMemories({
+        memories: [first.get("invoices") ?? "", first.get("pricing") ?? ""],
+        reader,
+      }),
     }).toStrictEqual({
       pieces: true,
       allReadOnce: true,
       before: true,
       now: ["deliveries"],
+      readable: [first.get("invoices")],
     });
   });
 

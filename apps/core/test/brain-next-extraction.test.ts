@@ -133,7 +133,7 @@ describe("extracting memories through core", () => {
     });
   });
 
-  it("retires a drawn memory once a newer version, not drawn from, no longer says it, asking no model", async () => {
+  it("puts a drawn memory out once a newer version, not drawn from, no longer says it, asking no model", async () => {
     const name = `Umbrella${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
     const teamId = crypto.randomUUID();
     const upload = { producer: "upload" as const, id: crypto.randomUUID() };

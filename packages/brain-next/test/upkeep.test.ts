@@ -1,9 +1,10 @@
 // Upkeep of memories (GRA-1752; the threat model is on the issue),
 // through the store's own methods: the same fact said again by one
 // lineage merges into one current memory, the earlier kept as history,
-// only for readers of the later one; and a memory whose quote a newer
-// version of its source no longer holds is retired by the queue, in code,
-// asking no model. Every test has its own people, groups, sources and
+// only for readers of the later one; and a memory whose quote its
+// source's current version no longer holds is out, judged by the queue
+// in code, asking no model, while that version is current and only for
+// its readers. Every test has its own people, groups, sources and
 // names, and asserts by memory id, so what other tests left in the
 // shared store is hidden from it.
 import type {
@@ -291,7 +292,7 @@ describe("merging what one lineage says twice", () => {
 });
 
 describe("re-checking memories when their source changes", () => {
-  it("retires a memory whose quote a newer version no longer holds, keeping it as history and asking no model", async () => {
+  it("puts out a memory whose quote a newer version no longer holds, keeping it as history and asking no model", async () => {
     const group = unique("g");
     const reader = readerOf(unique("p"), group);
     const name = unique("Initech");
@@ -333,9 +334,9 @@ describe("re-checking memories when their source changes", () => {
         reader,
       }),
       kept: statesOf(await read(added.entity, reader), [kept]),
-      // Only the retired memory named the buyer: no find gives it now.
+      // Only the memory put out named the buyer: no find gives it now.
       found: found.entities,
-      // As of before it was retired, it was current; now it is history.
+      // As of before it was put out, it was current; now it is history.
       before: statesOf(await read(buyer, reader, { asOf: before }), [gone]),
       after: statesOf(await read(buyer, reader, { history: true }), [gone]),
       calls: calls.length - called,
@@ -349,7 +350,7 @@ describe("re-checking memories when their source changes", () => {
     });
   });
 
-  it("retires nothing against a version a newer one replaced while its text was read, and checks the newer one", async () => {
+  it("puts nothing out against a version a newer one replaced while its text was read, and checks the newer one", async () => {
     const group = unique("g");
     const reader = readerOf(unique("p"), group);
     const name = unique("Globex");
@@ -420,5 +421,126 @@ describe("re-checking memories when their source changes", () => {
     const now = await read(added.entity, reader, { history: true });
 
     expect(statesOf(now, added.memories)).toStrictEqual(["current", "current"]);
+  });
+
+  it("counts a judgment only while its version is current: a narrower version between puts nothing out for a reader who never could read it", async () => {
+    const wide = unique("wide");
+    const narrow = unique("narrow");
+    const name = unique("Soylent");
+    const source = unique("doc");
+    const line = `${name} pays by card`;
+    const ref = await shared().addSource({
+      source,
+      change: crypto.randomUUID(),
+      text: `${line}. More.`,
+      access: audience(wide),
+    });
+    const added = await add(
+      audience(wide),
+      [customer(name)],
+      [fact(`${line}.`, { kind: "source", ...ref, quote: line })]
+    );
+    const [memory = ""] = added.memories;
+    const wideOnly = readerOf(unique("p"), wide);
+    const both = readerOf(unique("p"), wide, narrow);
+    /** What `reader` reads of the memory now: its state, its end, whether readable and found. */
+    const seenBy = async (reader: PersonReader) => {
+      const history = await read(added.entity, reader, { history: true });
+      const found = await shared().findEntities({
+        reader,
+        name: `${name} Group`,
+      });
+      return {
+        state: statesOf(history, [memory]),
+        endedAt: history.get(memory)?.endedAt ?? null,
+        readable: await shared().readableMemories({
+          memories: [memory],
+          reader,
+        }),
+        found: found.entities.map(({ id }) => id),
+      };
+    };
+    // A version for `narrow` alone drops the line, and is judged.
+    await shared().addSource({
+      source,
+      change: crypto.randomUUID(),
+      text: `Nothing of it. ${unique("x")}`,
+      access: audience(narrow),
+    });
+    await tick();
+    const whileNarrow = await seenBy(both);
+    const between = await moment(both);
+    // A version for `wide` again says it.
+    await shared().addSource({
+      source,
+      change: crypto.randomUUID(),
+      text: `${line}. Again.`,
+      access: audience(wide),
+    });
+    await tick();
+    const asOfBetween = statesOf(
+      await read(added.entity, both, { asOf: between }),
+      [memory]
+    );
+
+    expect({
+      whileNarrow: {
+        state: whileNarrow.state,
+        ended: whileNarrow.endedAt !== null,
+        readable: whileNarrow.readable,
+      },
+      wideOnly: await seenBy(wideOnly),
+      both: await seenBy(both),
+      asOfBetween,
+    }).toStrictEqual({
+      // A reader of the narrow version, while it is current, reads it out.
+      whileNarrow: { state: ["ended"], ended: true, readable: [] },
+      // Once it isn't, its judgment counts for no one: as in a store that
+      // never held it, the memory is current, readable and named, with no
+      // end in its history.
+      wideOnly: {
+        state: ["current"],
+        endedAt: null,
+        readable: [memory],
+        found: [added.entity],
+      },
+      both: {
+        state: ["current"],
+        endedAt: null,
+        readable: [memory],
+        found: [added.entity],
+      },
+      asOfBetween: ["current"],
+    });
+  });
+
+  it("brings a memory back once a newer version says its quote again, and puts it out again when the next one drops it", async () => {
+    const group = unique("g");
+    const reader = readerOf(unique("p"), group);
+    const name = unique("Cyberdyne");
+    const source = unique("doc");
+    const line = `${name} ships from Delft`;
+    const ref = await addVersion(`${line}.`, group, source);
+    const added = await add(
+      audience(group),
+      [customer(name)],
+      [fact(`${line}.`, { kind: "source", ...ref, quote: line })]
+    );
+    const states: string[] = [];
+    for (const text of [
+      `Moved. ${unique("x")}`,
+      `${line}.`,
+      `Gone. ${unique("x")}`,
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- one version after the other
+      await addVersion(text, group, source);
+      // oxlint-disable-next-line no-await-in-loop -- one version after the other
+      await tick();
+      // oxlint-disable-next-line no-await-in-loop -- one version after the other
+      const now = await read(added.entity, reader, { history: true });
+      states.push(...statesOf(now, added.memories));
+    }
+
+    expect(states).toStrictEqual(["ended", "current", "ended"]);
   });
 });

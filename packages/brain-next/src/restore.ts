@@ -28,6 +28,7 @@ import {
   exportFormat,
   exportLineSchema,
   extractionLineSchema,
+  recheckLineSchema,
   isStale,
   manifestFile,
   manifestPartsOf,
@@ -44,6 +45,7 @@ import type {
   ConfirmationLine,
   ExportLine,
   ExtractionLine,
+  RecheckLine,
   Held,
   Manifest,
   MemoriesLine,
@@ -59,7 +61,7 @@ import {
 } from "./files.ts";
 import { lineageOfSource, lineageOfWriter } from "./memories.ts";
 import { readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
-import { planOf, valueKeyFor } from "./remember.ts";
+import { planOf, restatementOf, valueKeyFor } from "./remember.ts";
 import { memoriesWrittenSinceSql, restoreFailedSql } from "./restoring.ts";
 import { indexMemoryWords, indexWords } from "./words.ts";
 import type { WordMemo } from "./words.ts";
@@ -392,6 +394,10 @@ const partLineSchema = z.union([
       sourceIdSchema.safeParse(source).success && access.kind === "audience",
     { message: "Not an extraction mark to restore" }
   ),
+  recheckLineSchema.refine(
+    ({ source }) => sourceIdSchema.safeParse(source).success,
+    { message: "Not a re-check to restore" }
+  ),
   changeLineSchema,
 ]);
 type PartLine = z.infer<typeof partLineSchema>;
@@ -681,6 +687,7 @@ const restoreMemory = async (
   line: MemoryLine
 ): Promise<void> => {
   const subject = line.source === null ? null : await subjectOf(line.source);
+  const restatement = await restatementOf(line);
   storage.transactionSync(() => {
     const { sql } = storage;
     if (passesOverMemory(sql, line, subject)) {
@@ -712,7 +719,7 @@ const restoreMemory = async (
         line.attribute,
         line.object === null ? null : (rows.get(line.object) ?? null),
         line.value,
-        valueKeyFor(rule, line),
+        valueKeyFor(rule, { ...line, restatement }),
         rule?.values === "one" ? 1 : 0,
         line.type,
         line.statement,
@@ -828,6 +835,33 @@ const restoreExtraction = async (
 };
 
 /**
+ * Writes the re-check's judgment `line` back, unless the store doesn't
+ * hold its memory or the version it judged against; once per memory and
+ * version. In one transaction.
+ */
+const restoreRecheck = async (
+  storage: DurableObjectStorage,
+  line: RecheckLine
+): Promise<void> => {
+  const subject = await subjectOf(line.source);
+  storage.transactionSync(() => {
+    const { sql } = storage;
+    if (!holdsVersion(sql, line.source, subject, line.version)) {
+      return;
+    }
+    sql.exec(
+      `INSERT OR IGNORE INTO memory_rechecks (memory, source, version, subject, at)
+      SELECT row, source, ?2, subject, ?3 FROM memories
+      WHERE id = ?1 AND source = ?4 AND version < ?2`,
+      line.memory,
+      line.version,
+      line.at,
+      line.source
+    );
+  });
+};
+
+/**
  * Writes the change key `line` back, once, only when it answered memories
  * and this restore wrote every one of them (the store held none before
  * it): so a change key in a bundle never answers for what it didn't bring
@@ -874,6 +908,8 @@ const restoreMemoriesLine = async (
     restoreConfirmation(storage, line);
   } else if (line.kind === "extraction") {
     await restoreExtraction(storage, db, line);
+  } else if (line.kind === "recheck") {
+    await restoreRecheck(storage, line);
   } else {
     restoreChange(storage, line);
   }
@@ -920,7 +956,11 @@ const settleNow = (
 const restsOn = (
   line: PartLine
 ): { source: string; version: number } | undefined => {
-  if (isVersionLine(line) || line.kind === "extraction") {
+  if (
+    isVersionLine(line) ||
+    line.kind === "extraction" ||
+    line.kind === "recheck"
+  ) {
     return { source: line.source, version: line.version };
   }
   if (line.kind === "memory" && line.source !== null && line.version !== null) {

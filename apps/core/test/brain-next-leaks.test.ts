@@ -31,9 +31,12 @@ import {
   brainExportFile,
   brainExportStatus,
   brainStaffReport,
+  entitiesAs,
   eraseSource,
   erasePerson,
   listVersionsAs,
+  memoriesAs,
+  readableMemoriesAs,
   readSourceVersionAs,
   recallAs,
   rememberAs,
@@ -2239,6 +2242,210 @@ describe(
         holderReads: [0, 1],
         promptCount: 3,
         mixed: [],
+        findings: [],
+      });
+    });
+
+    it("answers a reader of a source's versions around a narrower one as if it never was, and gives no one a memory a re-check put out or a merged restatement they may not read (GRA-1752)", async () => {
+      const [{ userId: holder }, { userId: outsider }] = await Promise.all([
+        signedInWithRole(idp, "user"),
+        signedInWithRole(idp, "user"),
+      ]);
+      const holdersTeam = await newTeam(holder);
+      const ownTeam = await newTeam(outsider);
+      const sharedWord = `s${unique()}`;
+      const markers = {
+        "a narrower version between two the outsider reads": markerWord(),
+        "a memory a re-check put out": markerWord(),
+        "a merged restatement": markerWord(),
+      };
+      // The model draws "Customer <name> is active" wherever the text says
+      // it, filed under no attribute, and the check supports it.
+      await answeringProvider((requests) => {
+        const body = JSON.stringify(requests.at(-1)?.body);
+        if (body.includes("You check statements")) {
+          return {
+            text: JSON.stringify({ supported: [0, 1, 2] }),
+            inputTokens: 10,
+            outputTokens: 10,
+          };
+        }
+        const names = [
+          ...body.matchAll(/Customer (?<name>\w+) is active/gu),
+        ].map(({ groups }) => groups?.name ?? "");
+        return {
+          text: JSON.stringify({
+            // A name of two words, which a later version of the same
+            // readers links to.
+            entities: [...new Set(names)].map((name) => ({
+              key: name,
+              kind: "customer",
+              names: [`${name} Group`],
+            })),
+            memories: [...new Set(names)].map((name) => ({
+              about: name,
+              type: "fact",
+              statement: `Customer ${name} is active.`,
+              quote: `Customer ${name} is active`,
+            })),
+          }),
+          inputTokens: 10,
+          outputTokens: 10,
+        };
+      });
+      const said = (name: string) =>
+        `${sharedWord}: Customer ${name} is active, says ${name} Group.`;
+      const version = async (
+        source: SourceRef,
+        text: string,
+        teamId: string,
+        drawn: boolean
+      ): Promise<void> => {
+        await addSource(env, {
+          source,
+          change: crypto.randomUUID(),
+          text,
+          readers: { kind: "team", teamId },
+          ...(drawn ? { said: saidNow({ kind: "outside" }) } : {}),
+        });
+      };
+      // Twins the outsider reads: one goes through a version for the
+      // holder's team alone that drops the line, the other never does.
+      const [nameA, nameB] = [
+        `a${unique().slice(0, 8)}`,
+        `b${unique().slice(0, 8)}`,
+      ];
+      const [twinA, twinB] = [newSource(), newSource()];
+      await version(twinA, said(nameA), ownTeam, true);
+      await version(twinB, said(nameB), ownTeam, true);
+      // The holder's team's: one whose line a newer version drops, and one
+      // a newer version says again.
+      const out = newSource();
+      const restated = newSource();
+      await version(
+        out,
+        said(markers["a memory a re-check put out"]),
+        holdersTeam,
+        true
+      );
+      await version(
+        restated,
+        said(markers["a merged restatement"]),
+        holdersTeam,
+        true
+      );
+      await workBrain(env, new Date(), noProducers);
+      const holderReader = { person: holder, groups: [`team:${holdersTeam}`] };
+      const outsiderReader = { person: outsider, groups: [`team:${ownTeam}`] };
+      const entityOf = async (reader: typeof holderReader, name: string) => {
+        const found = await brainStore().findEntities({
+          reader,
+          name: `${name} Group`,
+        });
+        return found.entities[0]?.id ?? "";
+      };
+      const [entityA, entityB, outEntity, restatedEntity] = await Promise.all([
+        entityOf(outsiderReader, nameA),
+        entityOf(outsiderReader, nameB),
+        entityOf(holderReader, markers["a memory a re-check put out"]),
+        entityOf(holderReader, markers["a merged restatement"]),
+      ]);
+      await version(
+        twinA,
+        `${markers["a narrower version between two the outsider reads"]} dropped.`,
+        holdersTeam,
+        false
+      );
+      await version(out, `Nothing of it ${unique()}.`, holdersTeam, false);
+      await version(
+        restated,
+        `${said(markers["a merged restatement"])} Again.`,
+        holdersTeam,
+        true
+      );
+      await workBrain(env, new Date(), noProducers);
+      await version(twinA, said(nameA), ownTeam, false);
+      await version(twinB, `${said(nameB)} `, ownTeam, false);
+      await workBrain(env, new Date(), noProducers);
+
+      /** What the outsider reads of a twin, its name and ids set aside. */
+      const twinAsOutsider = async (entity: string, name: string) => {
+        const page = await memoriesAs(env, outsider, {
+          entity: { store: "shared", id: entity },
+        });
+        const readable = await readableMemoriesAs(
+          env,
+          outsider,
+          page.memories.map(({ id }) => ({ store: "shared", memory: id }))
+        );
+        const recalled = await recallAs(env, outsider, {
+          personal: true,
+          question: name,
+          budget: { tokens: recallBudgetMax },
+        });
+        return JSON.stringify({
+          memories: page.memories.map(
+            ({ statement, endedAt, contested, confirmed, source }) => ({
+              statement,
+              endedAt,
+              contested,
+              confirmed,
+              version: source?.version,
+            })
+          ),
+          readable: readable.length,
+          next: page.next,
+          recalled: recalled.items.map(({ text }) => text),
+        }).replaceAll(name, "NAME");
+      };
+      const customers = await entitiesAs(env, outsider, { kind: "customer" });
+      const holderReads = async (entity: string) => {
+        const page = await memoriesAs(env, holder, {
+          entity: { store: "shared", id: entity },
+        });
+        const readable = await readableMemoriesAs(
+          env,
+          holder,
+          page.memories.map(({ id }) => ({ store: "shared", memory: id }))
+        );
+        return {
+          ended: page.memories.map(({ endedAt }) => endedAt !== null),
+          readable: readable.length,
+        };
+      };
+      const findings = await findingsOf(
+        "the outsider, around a narrower version",
+        {
+          personId: outsider,
+          reader: outsiderReader,
+          personal: true,
+          sharedWord,
+          markers: Object.values(markers),
+          hiddenVersions: everyVersionOf(out, restated),
+          hiddenInstructionFiles: [],
+          instructionGroups: ["company"],
+        },
+        markers
+      );
+
+      expect({
+        twin: await twinAsOutsider(entityA, nameA),
+        both: [entityA, entityB].every((id) => textOf(customers).includes(id)),
+        holder: {
+          out: await holderReads(outEntity),
+          restated: await holderReads(restatedEntity),
+        },
+        findings,
+      }).toStrictEqual({
+        // Exactly what the outsider reads of the twin that never had it.
+        twin: await twinAsOutsider(entityB, nameB),
+        both: true,
+        holder: {
+          // Out of its source's current version: history, readable no more.
+          out: { ended: [true], readable: 0 },
+          // Said again by its source: one current, the earlier history.
+          restated: { ended: [false, true], readable: 2 },
+        },
         findings: [],
       });
     });

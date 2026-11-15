@@ -88,8 +88,7 @@ export const visibleSql = (alias: string): string => `(
 )`;
 
 /**
- * Whether the memory `alias` was retired (by its writer, or by a re-check
- * of its source, recheck.ts) by the moment `at`
+ * Whether the memory `alias` was retired by its writer by the moment `at`
  * (an expression, milliseconds). A retired memory stays history, read
  * where history is asked for (`readMemories` with `history`), and gives
  * nothing to any other read: no name, no match of a name or identifier
@@ -99,6 +98,37 @@ export const visibleSql = (alias: string): string => `(
  */
 export const retiredSql = (alias: string, at: string): string =>
   `(${alias}.retired_at IS NOT NULL AND ${alias}.retired_at <= ${at})`;
+
+/**
+ * Whether a re-check (recheck.ts) judged, by the moment `at` (an
+ * expression; any time when none), that its source's current version no
+ * longer holds the quote of the memory `alias`: a judgment of a version
+ * counts only while that version is current, and not under erasure. So
+ * a version that says the quote again ends it, and a judgment of a
+ * version a newer one replaced counts for no one, as in a store that
+ * never held that version. Who it counts for is no one but those who may
+ * read that version: it is the source's current version, and a memory
+ * resting on a version is visible only to readers of its source's
+ * current version (`visibleSql`), so every statement that asks this of a
+ * memory it shows has checked it already. Out, a memory is read as a
+ * retired one is (`droppedSql`), its writer's `retired_at` untouched.
+ */
+export const outSql = (alias: string, at?: string): string => `EXISTS (
+    SELECT 1 FROM memory_rechecks AS judged
+    JOIN current_versions ON current_versions.source = judged.source
+    JOIN source_versions AS judging ON judging.row = current_versions.version_row
+    WHERE judged.memory = ${alias}.row AND judging.version = judged.version
+      ${at === undefined ? "" : `AND judged.at <= ${at}`}
+      AND judging.row NOT IN (SELECT version_row FROM erasing_versions)
+  )`;
+
+/**
+ * Whether the memory `alias` gives nothing but history by the moment
+ * `at`: retired by its writer (`retiredSql`), or out of its source's
+ * current version (`outSql`).
+ */
+export const droppedSql = (alias: string, at: string): string =>
+  `(${retiredSql(alias, at)} OR ${outSql(alias, at)})`;
 
 /**
  * The moment the dates a fact is true are judged at: `?20`, a read as of a
@@ -142,6 +172,7 @@ const newerSql = (
     AND newer.learned_at <= ${learned}
     AND ${startSql("newer")} <= ${valid}
     AND (newer.retired_at IS NULL OR newer.retired_at > ${learned})
+    AND NOT ${outSql("newer", learned)}
     ${visible ? `AND ${visibleSql("newer")}` : ""}`;
   return `
   SELECT ${startSql("newer")} AS at FROM memories AS newer
@@ -181,6 +212,13 @@ const extractedSql = (alias: string): string => `
  */
 export const endedAtSql = `max(m.learned_at, (SELECT min(at) FROM (
   SELECT m.retired_at AS at WHERE m.retired_at IS NOT NULL AND m.retired_at <= ?4
+  UNION ALL
+  SELECT judged.at AS at FROM memory_rechecks AS judged
+  JOIN current_versions ON current_versions.source = judged.source
+  JOIN source_versions AS judging ON judging.row = current_versions.version_row
+  WHERE judged.memory = m.row AND judging.version = judged.version
+    AND judged.at <= ?4
+    AND judging.row NOT IN (SELECT version_row FROM erasing_versions)
   UNION ALL${newerSql("m", "?4", validSql, true)}
   UNION ALL${extractedSql("m")}
 )))`;
@@ -686,7 +724,7 @@ SELECT DISTINCT m.source AS source, m.version AS version, m.id AS memory
 FROM json_each(?1) AS asked
 CROSS JOIN memory_confirmed_over AS over ON over.confirmation = asked.value
 CROSS JOIN memories AS m ON m.row = over.memory
-WHERE NOT ${retiredSql("m", "?2")}`;
+WHERE NOT ${droppedSql("m", "?2")}`;
 
 /**
  * `readMemories`, with every memory what the page says rests on
@@ -814,7 +852,7 @@ WITH ${readableSql}
 SELECT m.id AS id FROM json_each(?1) AS asked
 CROSS JOIN memories AS m ON m.id = asked.value
 WHERE m.learned_at <= ?4
-  AND (m.retired_at IS NULL OR m.retired_at > ?4)
+  AND NOT ${droppedSql("m", "?4")}
   AND ${visibleSql("m")}`;
 
 /**
