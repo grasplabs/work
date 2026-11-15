@@ -30,6 +30,14 @@ export type KeyState = "free" | "held" | "erased";
 export const erasedSource = "The Brain refused it: what this adds was erased";
 
 /**
+ * What an add to a removed source says (`Brain.removeSource`): it is out
+ * of use for good, its key closed while its history is kept, and the add
+ * is never tried again. Said only to the producer that adds it, which
+ * compares it whole.
+ */
+export const removedSource = "The Brain refused it: what this adds was removed";
+
+/**
  * What an add says whose change was added before with other text or
  * readers: nothing changed, and the version that change made stays. Said
  * only to the producer that adds it, which compares it whole.
@@ -1335,6 +1343,10 @@ export const sourceErasureSchema = z.strictObject({
   asGroup: z.literal(true).optional(),
 });
 export type SourceErasure = z.infer<typeof sourceErasureSchema>;
+
+/** A source to take out of use, keeping its history (`Brain.removeSource`). */
+export const sourceRemovalSchema = z.strictObject({ source: sourceIdSchema });
+export type SourceRemoval = z.infer<typeof sourceRemovalSchema>;
 
 /**
  * Whether `source` may be in `group`: its key is the group's, "/" and
@@ -2691,7 +2703,8 @@ export interface Brain {
   /**
    * What this store has of the key `source`, whoever may read it: `erased`
    * when an erasure closed it, `held` when a version of it is kept
-   * (current or history), `free` when it was never given it. For the host
+   * (current or history) or it was removed (`removeSource`), `free` when
+   * it was never given it. For the host
    * only, before it keeps a source in another store (one person's own):
    * a key lives in one store. A person's own store erased whole holds
    * nothing: `free`.
@@ -2822,6 +2835,19 @@ export interface Brain {
    * time it is repeated (`SourceErased`).
    */
   eraseSource: (request: SourceErasure) => Promise<SourceErased | undefined>;
+  /**
+   * Takes a source out of use for good and keeps its history (removal.ts):
+   * from when it returns, nothing of it is found, listed or read by
+   * anyone, history and memories drawn from it included, and nothing new
+   * is drawn from it. Its versions, memories and files stay, and nothing
+   * is written to the ledger. Its key is closed: an add to it, a retry of
+   * an earlier change included, is refused (`removedSource`), and nothing
+   * puts it back in use. An export holds it removed, and a restore brings
+   * it back so. `eraseSource` still erases it for good. Covers the key's
+   * own source alone, never a group's members. Safe to repeat, and
+   * answers alike whatever there was.
+   */
+  removeSource: (request: SourceRemoval) => Promise<void>;
   /**
    * Erases `person`'s own store whole, the one place what only they may
    * read is kept: everything it holds, and from then on every call is

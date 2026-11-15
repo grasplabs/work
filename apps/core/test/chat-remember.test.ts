@@ -32,7 +32,8 @@ import { signedInApi, unique } from "./sign-in.ts";
 // - The check given what the chat's tools read.
 // - A saved memory the person can't undo, or one that someone else can.
 // - A save where nobody sees a notice: a shared thread, a direct message
-//   on a chat platform, a turn nobody started.
+//   on a chat platform (the person's own chat, GRA-1821, but it shows
+//   neither the notice nor its Undo), a turn nobody started.
 
 const idp = mockIdp();
 

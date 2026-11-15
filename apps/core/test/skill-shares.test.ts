@@ -642,7 +642,7 @@ describe("writing and sharing skills", setUpTime, () => {
     });
   });
 
-  it("steers only the turns its person asks in their own web chat: never a woken turn, a chat app's direct chat, a thread others share, or anyone else's chat", async () => {
+  it("steers only the turns its person asks in their own chat, in Grasp or a chat app's direct message: never a woken turn, a thread others share, or anyone else's chat", async () => {
     const [author, other] = await Promise.all([
       signedInApi(idp, "user"),
       signedInApi(idp, "user"),
@@ -695,9 +695,8 @@ describe("writing and sharing skills", setUpTime, () => {
     };
     /**
      * A chat with the agent in `platform`, at `place`: what the person's
-     * own skills steer there. Not even a direct chat is theirs alone: the
-     * chat app keeps the message where its admins and exports reach it
-     * (GRA-1821).
+     * own skills steer there. A direct message is their own chat, as in
+     * Grasp (GRA-1821); a channel is read by all in it.
      */
     const askedIn = async (
       platform: string,
@@ -739,8 +738,14 @@ describe("writing and sharing skills", setUpTime, () => {
         selected: [`Returned:\nperson:${name}`, "Returned:\nnone"],
         listed: [true, true, false, false],
       },
-      teamsDirect: { selected: ["Returned:\nnone"], listed: [false, false] },
-      slackDirect: { selected: ["Returned:\nnone"], listed: [false, false] },
+      teamsDirect: {
+        selected: [`Returned:\nperson:${name}`],
+        listed: [true, true],
+      },
+      slackDirect: {
+        selected: [`Returned:\nperson:${name}`],
+        listed: [true, true],
+      },
       teamsChannel: { selected: ["Returned:\nnone"], listed: [false, false] },
       othersChat: {
         selected: ["Returned:\nnone"],
