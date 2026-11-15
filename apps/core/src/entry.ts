@@ -69,11 +69,6 @@ import { docsResponse } from "./docs.ts";
 import { errorReportResponse } from "./error-reports.ts";
 import { errorResponse } from "./errors.ts";
 import { guestResponse } from "./guests.ts";
-import {
-  brainExportPath,
-  brainExportResponse,
-} from "./knowledge/brain-export.ts";
-import { originalResponse } from "./knowledge/uploads.ts";
 import { mailIngressResponse } from "./mail-ingress.ts";
 import { hearResponse } from "./onboarding/hear.ts";
 import { interviewTurnResponse } from "./onboarding/interview.ts";
@@ -207,9 +202,6 @@ const frontendResponse = async (
     ? await docsResponse(request, env)
     : await pageResponse(pathname, request, env);
 };
-
-/** `/api/knowledge/uploads/<id>/original`: an upload's original. */
-const originalPath = /^\/api\/knowledge\/uploads\/(?<id>[\w-]+)\/original$/u;
 
 /**
  * The pages a link opens, which have no session: the link's secret in the
@@ -354,7 +346,6 @@ const pathHandlers: ReadonlyMap<
   (request: Request, env: Env, requestId: string) => Promise<Response>
 > = new Map([
   [auditExportPath, auditExportResponse],
-  [brainExportPath, brainExportResponse],
   [errorReportPath, errorReportResponse],
   [onboardingSummaryPath, onboardingSummaryResponse],
   [aiStatusReportPath, aiStatusReportResponse],
@@ -476,10 +467,6 @@ const route = async (
   const appCall = await appCallResponse(pathname, request, env, requestId);
   if (appCall !== undefined) {
     return appCall;
-  }
-  const original = originalPath.exec(pathname)?.groups?.id;
-  if (original !== undefined) {
-    return await originalResponse(request, env, original, requestId);
   }
   if (isUnder(pathname, "/api")) {
     return errorResponse(

@@ -1499,10 +1499,6 @@ msgstr "Un invitado escribió un mensaje"
 msgid "A JSON value"
 msgstr "Un valor JSON"
 
-#: src/dashboard/signals.tsx
-msgid "A Knowledge search from {about} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
-msgstr "Una búsqueda en Conocimiento desde {about} no encontró nada {searches, plural, one {una vez} other {# veces}}, por parte de {askers, plural, one {# persona} other {# personas}}."
-
 #: src/workflows/requests/request-plan.tsx
 msgid "A look-up"
 msgstr "Una consulta"
@@ -6136,10 +6132,6 @@ msgstr "Grasp comprueba qué hace falta para conectarla. La encuentras en Solici
 #: src/settings/ai-providers.tsx
 msgid "Grasp converts uploaded documents on this deployment: nothing is sent out."
 msgstr "Grasp convierte los documentos subidos en este despliegue: no se envía nada fuera."
-
-#: src/settings/ai-providers.tsx
-msgid "Grasp converts uploaded PDFs with {whereItRuns}, using Grasp's own key. Files in sensitive collections are converted on this deployment and never sent out."
-msgstr "Grasp convierte los PDF subidos con {whereItRuns}, usando la clave propia de Grasp. Los archivos de colecciones sensibles se convierten en este despliegue y nunca se envían fuera."
 
 #: src/chat/failure.ts
 msgid "Grasp could not be reached. Try again."
@@ -14769,10 +14761,6 @@ msgstr "Escribe qué falta, o sí"
 #: src/interview/page.tsx
 msgid "Type your answer"
 msgstr "Escribe tu respuesta"
-
-#: src/dashboard/signals.tsx
-msgid "Unanswered question"
-msgstr "Pregunta sin respuesta"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "Under 5"

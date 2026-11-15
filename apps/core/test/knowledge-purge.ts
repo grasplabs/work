@@ -1,3 +1,9 @@
+import type {
+  CommandOptions,
+  CommandReceipt,
+  RememberInput,
+} from "@grasp-os/brain/contract";
+import { remember } from "@grasp-os/brain/memories";
 import { rebuildSearchIndex } from "@grasp-os/brain/search-erasure";
 import type { PurgeInput } from "@grasp-os/shared/knowledge";
 import type { Role } from "@grasp-os/shared/roles";
@@ -5,6 +11,7 @@ import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 
 import { emailHashOf, emailKeyVersion } from "../src/erased-people.ts";
+import { brainOf } from "../src/knowledge/ports.ts";
 import type { Idp } from "./idp.ts";
 import { ownCollectionOf } from "./knowledge.ts";
 import { openRpc, signedInApi, unique } from "./sign-in.ts";
@@ -308,9 +315,27 @@ export const watchingPurge = async (
   return { api: core.authenticate(), written };
 };
 
+/**
+ * A memory of `person`'s own, kept by today's Brain as its remember left
+ * it, with its receipt: nothing in core remembers into it any more, and
+ * its purge still erases what it kept.
+ */
+export const seedMemory = async (
+  person: Person,
+  input: RememberInput,
+  options: CommandOptions
+): Promise<CommandReceipt> =>
+  await remember(
+    brainOf(env),
+    { type: "person", person: await person.api.whoami() },
+    input,
+    options
+  );
+
 /** Remembers `text` as `person`, under a key of its own. */
 export const rememberAs = async (person: Person, text: string) =>
-  await person.api.knowledge.remember(
+  await seedMemory(
+    person,
     { kind: "fact", text },
     { idempotencyKey: `purge-${unique()}-${unique()}` }
   );

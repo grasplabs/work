@@ -492,7 +492,7 @@ const requireApps = async (
  * personal collection: Apps and agents never read those (see
  * knowledge/access.ts), so nobody can be asked to grant one.
  *
- * Nor is an App given the Apps collection (knowledge/apps-collection.ts).
+ * Nor is an App given Knowledge's Apps collection.
  * It is open to everyone as a collection, but Knowledge shows each entry
  * only to whoever may open its App, and provenance (app-provenance.ts)
  * judges a collection by the collection's access alone. So an App that
