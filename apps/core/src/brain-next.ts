@@ -4638,8 +4638,9 @@ const codeCardSchema = z.strictObject({
  * own: the company alone (`company`), as an App, a workflow and a chat's
  * code anywhere but its person's own chat do; or its person's teams and
  * the company, as no person (`teams`), as a chat's code does in their own
- * chat in Grasp alone (agent-brain.ts), the reach its recall reads at
- * there. Set by core, never by the code.
+ * chat alone, in Grasp or their direct message on a chat app
+ * (agent-brain.ts), the reach its recall reads at there. Set by core,
+ * never by the code.
  */
 export type CodeReach = Extract<Reach, "teams" | "company">;
 
