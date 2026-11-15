@@ -114,13 +114,33 @@ export const sourceVersions = sqliteTable(
  * version whole (its chunks and their words), so recall never sees half
  * of one. The versions it no longer points at are history.
  */
-export const currentVersions = sqliteTable("current_versions", {
-  source: text().primaryKey(),
-  versionRow: integer("version_row")
-    .notNull()
-    .unique()
-    .references(() => sourceVersions.row),
-});
+export const currentVersions = sqliteTable(
+  "current_versions",
+  {
+    source: text().primaryKey(),
+    versionRow: integer("version_row")
+      .notNull()
+      .unique()
+      .references(() => sourceVersions.row),
+    /**
+     * The version the source's memories were last judged against
+     * (quotes.ts): its out memories (`memory_outs`) count only while this
+     * is `version_row`. Set with the pointer by an add; a path that moves
+     * the pointer without judging (a restore, an older release) leaves it
+     * behind, and the source's out memories then count for no one until it
+     * is judged again. Added by a later migration than the table's: null
+     * in a store made before it.
+     */
+    judgedRow: integer("judged_row"),
+  },
+  (table) => [
+    // The sources whose memories are not judged against their current
+    // version: what a catch-up walks.
+    index("current_versions_unjudged_idx")
+      .on(table.source)
+      .where(sql`judged_row IS NOT version_row`),
+  ]
+);
 
 /**
  * The changes each source was added with: a key its producer gives each
@@ -559,6 +579,12 @@ export const sourceSubjects = sqliteTable(
     source: text().primaryKey(),
     subject: text().notNull(),
     group: text("group_subject"),
+    /**
+     * Whether the source is a thread (`NewSource.thread`), for good: one
+     * version per message, each holding that message's words alone, so a
+     * later version never puts out or ends what an earlier one said.
+     */
+    thread: integer({ mode: "boolean" }).notNull().default(false),
   },
   (table) => [
     index("source_subjects_subject_idx").on(table.subject),
@@ -989,4 +1015,63 @@ export const memoryStamps = sqliteTable(
     latest: integer().notNull(),
   },
   () => [check("memory_stamps_one", sql.raw("id = 1"))]
+);
+
+// Quotes against the current version (quotes.ts). A memory resting on a
+// version before its source's current one is out when the current
+// version's text no longer holds its quote, word for word; judged in the
+// transaction that changes either, never on the queue. Neither table holds
+// content, and both go with their memory.
+
+/**
+ * A memory that is out: resting on a version before its source's current
+ * one, whose text lacks its quote. Read as ended at the current version's
+ * add (memories.ts `endedAtSql`), while that version is the one judged
+ * (`current_versions.judged_row`). `pair` is the first two words of its
+ * quote, folded (the one word of a quote of one; null for a quote of
+ * none): how a later version's add finds the out memories whose quote may
+ * be back, by its own text's words, never by reading them all.
+ */
+export const memoryOuts = sqliteTable(
+  "memory_outs",
+  {
+    memory: integer()
+      .primaryKey()
+      .references(() => memories.row, { onDelete: "cascade" }),
+    source: text().notNull(),
+    pair: text(),
+  },
+  (table) => [index("memory_outs_pair_idx").on(table.source, table.pair)]
+);
+
+/**
+ * A memory resting on a version before its source's current one, whose
+ * text holds its quote: what the next version's add judges, without
+ * stepping over the source's out memories. Never read by a read.
+ */
+export const memoryIns = sqliteTable(
+  "memory_ins",
+  {
+    memory: integer()
+      .primaryKey()
+      .references(() => memories.row, { onDelete: "cascade" }),
+    source: text().notNull(),
+  },
+  (table) => [index("memory_ins_source_idx").on(table.source)]
+);
+
+/**
+ * The highest memory (`memories.row`) up to which every memory was judged
+ * as it was added (quotes.ts): moved on by an add only when no memory lies
+ * between it and the add's first, so a memory an older release added
+ * unjudged keeps it behind, for a catch-up to find. One row; none before
+ * the first add.
+ */
+export const memoryJudged = sqliteTable(
+  "memory_judged",
+  {
+    id: integer().primaryKey(),
+    through: integer().notNull(),
+  },
+  () => [check("memory_judged_one", sql.raw("id = 1"))]
 );

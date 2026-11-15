@@ -106,6 +106,13 @@
       "when": 1794649597640,
       "tag": "0014_erasure_counts",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1794771995399,
+      "tag": "0015_memory_outs",
+      "breakpoints": true
     }
   ]
 }

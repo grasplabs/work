@@ -292,6 +292,15 @@ export const newSourceSchema = z.strictObject({
   access: accessSchema,
   extract: extractSchema.optional(),
   /**
+   * Whether the source is a thread: one version per message, each holding
+   * that message's own words alone (`extract`). Said with its first
+   * version and kept for good, as its group: an add saying otherwise is
+   * refused. A later version of a thread never puts out or ends what an
+   * earlier one said (memories.ts); a document's current version puts out
+   * a memory of an earlier one whose quote it no longer holds (quotes.ts).
+   */
+  thread: z.boolean().optional(),
+  /**
    * When the producer read this text from where it lives, in milliseconds
    * since the epoch, if it read it: an add of a text read before the
    * source's current version was read writes nothing (`AddedVersion`'s
@@ -329,7 +338,7 @@ export const instructionsTextSchema = wellFormedString()
 // a person over the version they saw (`after`), never a read that a later
 // one may hold off.
 export const newInstructionsSchema = newSourceSchema
-  .omit({ extract: true, group: true, readAt: true })
+  .omit({ extract: true, group: true, readAt: true, thread: true })
   .extend({
     text: instructionsTextSchema,
     /**

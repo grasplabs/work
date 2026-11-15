@@ -243,6 +243,8 @@ export const exportLineSchema = z.strictObject({
   current: z.boolean(),
   /** Whether its text is cut into chunks and indexed: an instruction file's isn't. */
   indexed: z.boolean(),
+  /** Its source is a thread (`NewSource.thread`): left out for one that isn't. */
+  thread: z.literal(true).optional(),
   /** The change keys its producer added it with. */
   changes: z.array(z.string()),
   text: z.string(),
@@ -493,6 +495,8 @@ interface Selected extends Record<string, SqlStorageValue> {
   changes: string;
   /** Its source's group's key as the ledger names it, if it was added in one. */
   group_subject: string | null;
+  /** 1 when its source is a thread. */
+  thread: number;
 }
 
 /**
@@ -536,7 +540,9 @@ SELECT source_versions.row AS row, source_versions.source AS source,
   (SELECT json_group_array(change) FROM source_changes
     WHERE source_changes.version_row = source_versions.row) AS changes,
   (SELECT group_subject FROM source_subjects
-    WHERE source_subjects.source = source_versions.source) AS group_subject
+    WHERE source_subjects.source = source_versions.source) AS group_subject,
+  coalesce((SELECT thread FROM source_subjects
+    WHERE source_subjects.source = source_versions.source), 0) AS thread
 FROM source_versions
 JOIN reader_sets ON reader_sets.id = source_versions.reader_set
 LEFT JOIN current_versions ON current_versions.source = source_versions.source
@@ -1420,6 +1426,7 @@ const linesOf = async (
         access,
         current: version.current === 1,
         indexed: version.indexed === 1,
+        ...(version.thread === 1 ? { thread: true as const } : {}),
         changes: z.array(z.string()).parse(JSON.parse(version.changes)),
         text,
       };

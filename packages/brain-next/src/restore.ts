@@ -302,6 +302,7 @@ const versionLineSchema = exportLineSchema.superRefine((line, context) => {
     change: "restore",
     text: line.text,
     access: line.access,
+    ...(line.thread === undefined ? {} : { thread: line.thread }),
   });
   if (
     !asAdd.success ||
@@ -567,7 +568,7 @@ const restoreVersion = async (
         line.readAt ?? null
       );
     }
-    keepSubject(sql, line.source, subject);
+    keepSubject(sql, line.source, subject, null, line.thread === true);
     // Never moves a pointer that is there.
     const pointed =
       line.current &&
