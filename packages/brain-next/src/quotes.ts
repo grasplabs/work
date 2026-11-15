@@ -242,9 +242,11 @@ export const judgeVersion = (
   }
   for (const { row, quote } of sql
     .exec<Judged>(
+      // The text's pairs first, each a seek of the index: never the
+      // source's out memories one by one.
       `SELECT m.row AS row, m.quote AS quote FROM json_each(?2) AS asked
-      JOIN memory_outs AS out ON out.source = ?1 AND out.pair = asked.value
-      JOIN memories AS m ON m.row = out.memory`,
+      CROSS JOIN memory_outs AS out ON out.source = ?1 AND out.pair = asked.value
+      CROSS JOIN memories AS m ON m.row = out.memory`,
       source,
       JSON.stringify(index().pairs())
     )
