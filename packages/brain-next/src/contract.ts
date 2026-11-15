@@ -2227,7 +2227,8 @@ export type EntitiesRequest = z.input<typeof entitiesRequestSchema>;
 /**
  * A page of entities, by when the first memory the reader may read that
  * mentions each was learned, then id; whether more follow, and where to
- * go on from.
+ * go on from. A memory its writer retired gives nothing to a find: no
+ * mention, no name or identifier asked.
  */
 export interface EntityPage {
   entities: Entity[];
@@ -2243,6 +2244,12 @@ export interface EntityPage {
    * to keep with what it hands on (a run's pins); never shown to anyone.
    */
   restsOn: SourceVersionRef[];
+  /**
+   * Every memory in a writer's own word (no source) what the page says
+   * rests on, by id, each once: of the same memories as `restsOn`, those
+   * it has no version for. For the host to keep as `restsOn`.
+   */
+  restsOnWords: MemoryId[];
 }
 
 /** An entity to read, for a reader. */
@@ -2254,9 +2261,12 @@ export type EntityRequest = z.infer<typeof entityRequestSchema>;
 
 /**
  * An entity as a reader sees it: its kind, and its earliest name a memory
- * the reader may read gave (by when that memory was learned, then its
- * id), or null. Every name and identifier they may see is read a page at
- * a time (`readEntityNames`).
+ * the reader may read, not retired by its writer, gave (by when that
+ * memory was learned, then its id), or null when only retired memories
+ * gave one. A retired memory stays history (`readMemories` with
+ * `history`) and gives nothing else: an entity only retired memories
+ * mention is not seen. Every name and identifier they may see is read a
+ * page at a time (`readEntityNames`).
  */
 export interface Entity {
   id: EntityId;
@@ -2411,6 +2421,12 @@ export interface Card {
    * anyone.
    */
   restsOn: SourceVersionRef[];
+  /**
+   * Every memory in a writer's own word (no source) what the card says
+   * rests on, by id, each once: of the same memories as `restsOn`, those
+   * it has no version for. For the host to keep as `restsOn`.
+   */
+  restsOnWords: MemoryId[];
 }
 
 // Memories in a recall's pack (recall-memories.ts, pack.ts).

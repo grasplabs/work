@@ -934,12 +934,19 @@ const EntityPanel = ({
     <Card render={<section aria-labelledby={heading} />} size="sm">
       <CardContent>
         {/* Named by its own read, as the person may read it now: one
-            they may no longer read is named as one there isn't. */}
+            they may no longer read is named as one there isn't. One whose
+            every memory they may read was forgotten names nothing, and
+            its memories still come as history (brain-next's
+            `retiredSql`): said so. */}
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="text-sm font-medium" id={heading}>
             {entity === null ? (
               <span className="text-muted-foreground">
-                <Trans>Nothing you can read</Trans>
+                {items.length > 0 ? (
+                  <Trans>Forgotten, kept as history</Trans>
+                ) : (
+                  <Trans>Nothing you can read</Trans>
+                )}
               </span>
             ) : null}
             {entity === undefined || entity === null ? null : (

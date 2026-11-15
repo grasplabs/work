@@ -539,6 +539,53 @@ describe("the Memories page's actions", () => {
     }).toStrictEqual({ before: "Acme", after: "Nothing you can read" });
   });
 
+  it("names an entity whose every memory was forgotten while open as forgotten, its history still shown", async () => {
+    let forgotten = false;
+    await shown({
+      contested: async () =>
+        await Promise.resolve(
+          forgotten ? { facts: [], next: null } : factPage()
+        ),
+      entities: async () =>
+        await Promise.resolve({
+          entities: forgotten ? [] : [acme],
+          next: null,
+        }),
+      memories: async () =>
+        await Promise.resolve({
+          entity: forgotten ? null : acme,
+          memories: [
+            memory(
+              "m-x",
+              "Acme",
+              "Renewing",
+              forgotten ? { endedAt: "2026-11-12T09:00:00.000Z" } : {}
+            ),
+          ],
+          next: null,
+        }),
+      confirm: async () => {
+        forgotten = true;
+        return await Promise.resolve("done");
+      },
+    });
+    await press(
+      [...document.querySelectorAll("section ul button")].find(
+        (each): each is HTMLButtonElement =>
+          each instanceof HTMLButtonElement && each.textContent === "Acme"
+      )
+    );
+    await press(buttons("This one is right")[0]);
+    const panel = document.querySelector("h3")?.closest("section");
+    expect({
+      heading: document.querySelector("h3")?.textContent,
+      history: panel?.textContent.includes("Acme is Renewing"),
+    }).toStrictEqual({
+      heading: "Forgotten, kept as history",
+      history: true,
+    });
+  });
+
   it("shows a correction's failure when its memory left the list while it saved", async () => {
     const confirmed = held<"done">();
     const saved = held<unknown>();

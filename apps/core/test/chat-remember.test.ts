@@ -194,7 +194,9 @@ describe("the agent remembering in a person's own chat", () => {
         undoneByOther: "nothing",
         // Undone twice, as a double click or a retry does.
         undone: ["done", "done"],
-        after: [[]],
+        // Its only memory forgotten, the customer gives no name to a find
+        // (it stays history, read with the entity's memories).
+        after: [],
         checkedTheirMessage: true,
         checkedTheSubject: true,
       });
