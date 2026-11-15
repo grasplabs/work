@@ -1,4 +1,4 @@
-import { collectionIdSchema, runIdSchema } from "@grasp-os/shared/ids";
+import { runIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { log } from "@grasp-os/shared/log";
 import { signalWindowDays } from "@grasp-os/shared/signals";
@@ -40,21 +40,17 @@ import {
   workflowResources,
 } from "./db/core/schema.ts";
 import { chunks, statementsWithin } from "./db/d1.ts";
-import { collectionsPerQuestion } from "./signal-tally.ts";
-import type { SignalTally } from "./signal-tally.ts";
 import { auditableCode } from "./workflows/host.ts";
 
 // Improvement signals, level 1: where to look to improve the Apps'
 // workflows (@grasp-os/shared/signals has what each one means). Each is a
-// query over runs, decisions and model usage (the core database) and the
-// audit log (Knowledge searches that found nothing), over the last
-// `signalWindowDays` days.
+// query over runs, decisions and model usage (the core database), over
+// the last `signalWindowDays` days.
 //
 // They're computed once a UTC day and kept in `improvement_signals`, so
 // reading them is a few indexed queries. The first run of the 15-minute
-// clock of a day that claims it (src/daily-claims.ts) computes
-// them, reading the audit log in the same pass as Knowledge's usage
-// signals (src/daily-signals.ts).
+// clock of a day that claims it (src/daily-claims.ts) computes them
+// (src/daily-signals.ts).
 //
 // A computation writes its signals under its own ID, in as many batches
 // as they take, and then finishes in one batch: it marks itself finished
@@ -71,11 +67,8 @@ import { auditableCode } from "./workflows/host.ts";
 // Computing again is idempotent: another row, the same signals.
 //
 // Every App and workflow is covered, reading all of their runs and
-// decisions a page at a time. Only unanswered questions are capped, at the
-// most asked `questionsPerScope` of each App's workflow (and of the
-// deployment's), as a search's words make a key of their own. Evidence
-// holds IDs and counts only (a few rows' worth each), well within D1's
-// row limit.
+// decisions a page at a time. Evidence holds IDs and counts only (a few
+// rows' worth each), well within D1's row limit.
 
 const dayMs = 24 * 60 * 60 * 1000;
 
@@ -97,9 +90,6 @@ const pageRows = 500;
 
 /** The runs, decisions or costliest runs a signal names as evidence. */
 const samples = 5;
-
-/** The most unanswered questions kept for each App workflow, or the deployment. */
-const questionsPerScope = 20;
 
 /** Inserts one batch writes. */
 const insertsPerBatch = 50;
@@ -639,114 +629,12 @@ const correctionSignals = async (
     );
 };
 
-/** What the audit log holds of the window, added up across its stretches. */
-export interface SignalTotals {
-  /** Each unanswered question, by App workflow (or none) and key. */
-  questions: Map<
-    string,
-    {
-      appId: string;
-      workflowId: string;
-      queryKey: string;
-      searches: number;
-      askers: Set<string>;
-      terms: number;
-      collections: Set<string>;
-      lastAt: string;
-    }
-  >;
-}
-
-/** Totals of nothing yet, to add stretches to. */
-export const noSignalTotals = (): SignalTotals => ({
-  questions: new Map(),
-});
-
-/** Adds a stretch's partial totals (`AuditLog.tallyStretch`) to `totals`. */
-export const addSignalTally = (
-  totals: SignalTotals,
-  tally: SignalTally
-): void => {
-  for (const question of tally.questions) {
-    const key = JSON.stringify([
-      question.appId,
-      question.workflowId,
-      question.queryKey,
-    ]);
-    const found = totals.questions.get(key) ?? {
-      appId: question.appId,
-      workflowId: question.workflowId,
-      queryKey: question.queryKey,
-      searches: 0,
-      askers: new Set<string>(),
-      terms: question.terms,
-      collections: new Set<string>(),
-      lastAt: question.lastAt,
-    };
-    found.searches += question.searches;
-    found.askers.add(question.asker);
-    for (const collection of question.collections) {
-      if (found.collections.size < collectionsPerQuestion) {
-        found.collections.add(collection);
-      }
-    }
-    // The latest of its askers': each asker's is its own latest.
-    found.lastAt =
-      question.lastAt > found.lastAt ? question.lastAt : found.lastAt;
-    totals.questions.set(key, found);
-  }
-};
-
-/**
- * Unanswered Knowledge questions: searches that found nothing the asker
- * could read, by their key (an HMAC of their words), for the App workflow
- * or App whose code asked, or the deployment for people and agents. The
- * most asked of each, at most `questionsPerScope`.
- */
-const unansweredSignals = ({ questions }: SignalTotals): SignalRow[] => {
-  const scopes = Map.groupBy(questions.values(), ({ appId, workflowId }) =>
-    workflowKey(appId, workflowId)
-  );
-  return [...scopes.values()].flatMap((scope) =>
-    scope
-      .toSorted(
-        (a, b) =>
-          b.searches - a.searches || a.queryKey.localeCompare(b.queryKey)
-      )
-      .slice(0, questionsPerScope)
-      .map((question) =>
-        signalRow(
-          "unanswered_question",
-          {
-            appId: question.appId,
-            workflowId: question.workflowId,
-            subject: question.queryKey,
-          },
-          question.searches,
-          {
-            searches: question.searches,
-            askers: question.askers.size,
-            terms: question.terms,
-            collections: [...question.collections].map((id) =>
-              collectionIdSchema.parse(id)
-            ),
-            lastAt: question.lastAt,
-          }
-        )
-      )
-  );
-};
-
-/** The days before `now` whose audit events the signals read. */
-export const signalsFrom = (now: Date): Date =>
+/** The first moment of the window the signals read, before `now`. */
+const signalsFrom = (now: Date): Date =>
   new Date(now.getTime() - signalWindowDays * dayMs);
 
 /** Every signal, as of `now`, over the window before it. */
-const computeSignals = async (
-  env: Env,
-  now: Date,
-  totals: SignalTotals
-): Promise<SignalRow[]> => {
+const computeSignals = async (env: Env, now: Date): Promise<SignalRow[]> => {
   const db = drizzle(env.DB);
   const window = { from: signalsFrom(now), to: now };
   const runs = await runsSince(db, window);
@@ -756,13 +644,7 @@ const computeSignals = async (
     correctionSignals(db, window.from),
     costSignals(db, window),
   ]);
-  return [
-    ...waiting,
-    ...failing,
-    ...corrections,
-    ...costs,
-    ...unansweredSignals(totals),
-  ];
+  return [...waiting, ...failing, ...corrections, ...costs];
 };
 
 /**
@@ -798,8 +680,8 @@ export const claimImprovementSignals = async (
 };
 
 /**
- * Computes the claimed day's signals from `totals` (what the audit log
- * holds of the window) and the databases, writes them, then finishes the
+ * Computes the claimed day's signals from the database, writes them,
+ * then finishes the
  * computation in one batch, with its audit event: marks it finished, and
  * deletes every computation started before the finished one before it,
  * with their signals, only if it is still there to mark. That previous
@@ -807,10 +689,9 @@ export const claimImprovementSignals = async (
  */
 export const storeImprovementSignals = async (
   env: Env,
-  computation: Computation,
-  totals: SignalTotals
+  computation: Computation
 ): Promise<void> => {
-  const rows = await computeSignals(env, computation.startedAt, totals);
+  const rows = await computeSignals(env, computation.startedAt);
   const db = drizzle(env.DB);
   const inserts = statementsWithin(rows, (part) =>
     db

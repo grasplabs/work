@@ -1,6 +1,3 @@
-import { sweepLinking } from "@grasp-os/brain/entities";
-import { sweepIndexing } from "@grasp-os/brain/indexing";
-import { sweepBrainReceipts } from "@grasp-os/brain/memories";
 import { sweepPayloads } from "@grasp-os/brain/payloads";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
@@ -16,7 +13,6 @@ import { sweepTestFixtures } from "./app-tests.ts";
 import { sweepAppVisitors } from "./app-visitors.ts";
 import { drainWebhookDeliveries } from "./app-webhooks.ts";
 import { auditLog } from "./audit-log.ts";
-import { reconcileConsolidation } from "./brain-consolidation.ts";
 import { workBrain } from "./brain-next.ts";
 import { producersOf, relayHandOvers } from "./brain-sources.ts";
 import { sweepChannelLinks } from "./channels/accounts.ts";
@@ -28,10 +24,9 @@ import { inJurisdiction } from "./durable-objects.ts";
 import { warmQuestionEmbedder } from "./embedder.ts";
 import { sweepGuestChats } from "./guests.ts";
 import { sweepHeldStartInputs } from "./held-starts.ts";
-import { indexApps } from "./knowledge/apps-collection.ts";
-import { advanceExports } from "./knowledge/brain-export.ts";
+import { expireBrainExports } from "./knowledge/export-expiry.ts";
 import { brainOf } from "./knowledge/ports.ts";
-import { sweepUploads } from "./knowledge/uploads.ts";
+import { sweepLeftUploads } from "./knowledge/uploads.ts";
 import { retryDisconnects } from "./members.ts";
 import { sweepModelUsage } from "./model-usage.ts";
 import { rescanPackages } from "./packages/rescan.ts";
@@ -70,14 +65,6 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   // Connect's events also tell people of the mailboxes and drives it
   // stopped hearing (src/connector-source-notices.ts).
   { name: "audit.drain", period: "minute", run: drainAuditOutboxesNoticing },
-  // Settled runs' outcomes the Brain doesn't have yet (src/brain-capture.ts).
-  // Scopes whose few new episodes waited long enough to be consolidated
-  // into lesson candidates (src/brain-consolidation.ts).
-  {
-    name: "brain.consolidation",
-    period: "minute",
-    run: reconcileConsolidation,
-  },
   // The new Brain's work queue: what is due, a few at a time
   // (src/brain-next.ts, @grasp-os/brain-next's work.ts), its hand-overs
   // read from core's producers (src/brain-sources.ts).
@@ -101,35 +88,26 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "minute",
     run: retryAccessRevocations,
   },
-  { name: "knowledge.uploads", period: "minute", run: sweepUploads },
-  // Exports of the company's Brain being written, and those past their
-  // window (src/knowledge/brain-export.ts).
-  { name: "brain.exports", period: "minute", run: advanceExports },
-  // Knowledge payloads no version refers to (src/knowledge/payloads.ts).
+  // Uploads into Knowledge left unended, and the originals due for
+  // deleting, a failure's before uploads stopped among them
+  // (src/knowledge/uploads.ts). Nothing uploads into Knowledge.
+  { name: "knowledge.uploads", period: "minute", run: sweepLeftUploads },
+  // Today's Brain's exports written before nothing could export any more:
+  // their files deleted once due, and those a purge ran after at the next
+  // minute, retried while R2 refuses (src/knowledge/export-expiry.ts). No
+  // export is written.
+  { name: "brain.exports", period: "minute", run: expireBrainExports },
+  // Knowledge payloads no version refers to, past their grace: what a
+  // Knowledge save that failed staged (packages/brain's payloads.ts). A
+  // purge collects them too, but only past their grace: this collects
+  // them after it, so an erasure is complete within minutes. Knowledge is
+  // still written (`env.knowledge`, the purge) until the cutover removes
+  // it, and this with it.
   {
     name: "knowledge.payloads",
     period: "minute",
     run: async (env, at) => {
       await sweepPayloads(brainOf(env), at);
-    },
-  },
-  // Documents whose indexing never started or ended unfinished, and failed
-  // ones due another run (src/knowledge/indexing.ts).
-  {
-    name: "knowledge.indexing",
-    period: "minute",
-    run: async (env, at) => {
-      await sweepIndexing(brainOf(env), at);
-    },
-  },
-  // Brain sources settled since their change, linking runs that ended
-  // unfinished, and failed ones due another run (packages/brain's
-  // entities.ts).
-  {
-    name: "knowledge.linking",
-    period: "minute",
-    run: async (env, at) => {
-      await sweepLinking(brainOf(env), at);
     },
   },
   // Deploys apply migrations first (CI's db:migrate, and the admin's
@@ -206,21 +184,6 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     name: "signals.daily",
     period: "quarterHour",
     run: refreshDailySignals,
-  },
-  {
-    name: "knowledge.apps",
-    period: "quarterHour",
-    run: async (env) => {
-      await indexApps(env);
-    },
-  },
-  // Brain command receipts past their retention (src/knowledge/memories.ts).
-  {
-    name: "knowledge.brain_receipts",
-    period: "quarterHour",
-    run: async (env, at) => {
-      await sweepBrainReceipts(brainOf(env), at);
-    },
   },
   {
     name: "email.kept",

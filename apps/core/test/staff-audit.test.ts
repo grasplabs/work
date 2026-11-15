@@ -10,7 +10,6 @@ import {
   pageLeaseHeader,
   pagePersonHeader,
 } from "@grasp-os/shared/page-limits";
-import { uploadOriginalPath } from "@grasp-os/shared/uploads";
 import { speechPath, transcriptionPath } from "@grasp-os/shared/voice";
 import { createExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -132,7 +131,6 @@ describe("Grasp staff's views, audited", () => {
     });
     const { session, api } = await staffOn();
     const { userId } = await api.whoami();
-    const uploadId = crypto.randomUUID();
     const app = crypto.randomUUID();
     const reads: [string, () => Promise<unknown>][] = [
       [
@@ -152,13 +150,6 @@ describe("Grasp staff's views, audited", () => {
         "audit.export",
         async () =>
           await routed(`${auditExportPath}?format=csv`, {
-            headers: { cookie: session },
-          }),
-      ],
-      [
-        "uploads.original",
-        async () =>
-          await routed(uploadOriginalPath(uploadId), {
             headers: { cookie: session },
           }),
       ],
@@ -297,8 +288,6 @@ describe("Grasp staff's views, audited", () => {
       document: all.find(
         ({ detail }) => detail.surface === "knowledge.getDocument"
       )?.provenance,
-      upload: all.find(({ detail }) => detail.surface === "uploads.original")
-        ?.provenance,
       content: JSON.stringify(all).includes(secret),
       // The client's admins read them in their own log.
       visible: all.every(({ id }) =>
@@ -307,7 +296,6 @@ describe("Grasp staff's views, audited", () => {
     }).toStrictEqual({
       actors: ["staff"],
       document: [noteId],
-      upload: [uploadId],
       content: false,
       visible: true,
     });

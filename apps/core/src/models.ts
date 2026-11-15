@@ -315,8 +315,8 @@ const sessionShape = {
        */
       z.strictObject({ onboarding: z.literal(true) }),
       /**
-       * Core's own upkeep of the Brain (knowledge/entities.ts): reading a
-       * source's text for the entities it names, for no one in particular,
+       * Core's own upkeep of the Brain (brain-next.ts `brainModel`): its
+       * background work reading a source's text, for no one in particular,
        * kept apart from onboarding in spend and audit (`platform` in its
        * events). Only core's own code makes such a call.
        */
