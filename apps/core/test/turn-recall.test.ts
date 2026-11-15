@@ -3026,20 +3026,20 @@ describe("two recalls merged into one pack", setUpTime, () => {
 });
 
 /**
- * Whether what `personId` recalls for `question` (`recallAs`, as their
- * teams may read, or as them with `personal`, as of `asOf` if given)
- * holds both `memories`, and the first above the second.
+ * Whether what `personId` recalls for `question` as themselves, as their
+ * own chat does (`recallAs` with `personal`), as of `asOf` if given, holds
+ * both `memories`, and the first above the second.
  */
 const placeIn = async (
   personId: string,
   question: string,
   [upper, lower]: readonly [string, string],
-  { personal = false, asOf }: { personal?: boolean; asOf?: Date } = {}
+  { asOf }: { asOf?: Date } = {}
 ): Promise<{ first: boolean; both: boolean }> => {
   const pack = await recallAs(env, personId, {
     question,
     budget: { tokens: 20_000 },
-    personal,
+    personal: true,
     ...(asOf === undefined ? {} : { asOf }),
   });
   const indexOf = (memory: string) =>
@@ -3062,14 +3062,32 @@ const ownMemory = async (personId: string, statement: string) => {
   return memory;
 };
 
+/**
+ * Whether the recall before the question in `body` (a request to the
+ * provider) handed the model both `memories`, the first above the second.
+ */
+const handedOrder = (
+  body: unknown,
+  [upper, lower]: readonly [string, string]
+): { first: boolean; both: boolean } => {
+  const handed = handedIn(body).memories.map(({ memory }) => memory);
+  return {
+    first:
+      handed.includes(upper) && handed.indexOf(upper) < handed.indexOf(lower),
+    both: handed.includes(upper) && handed.includes(lower),
+  };
+};
+
 // Fading (GRA-1753): a memory a recall as the person handed over in their
-// own chat is one they used, as the chat's run pinned it; among equals it
+// own chat is one they used, as their Workspace keeps it; among equals it
 // ranks above one they never used, for them alone, in the shared store
-// and in their own. From the ways it can fail: one person's use reorders
-// another's recall; a recall of the past is ordered by a use that came
-// later; a faded memory is lost; a failed lookup fails the recall.
+// and in their own, and only where the answer reaches them alone. From
+// the ways it can fail: one person's use reorders another's recall, or a
+// recall others read (a channel, a chat app, a turn they didn't start); a
+// recall of the past is ordered by a use that came later; a faded memory
+// is lost; a failed lookup fails the recall.
 describe("memories a person never uses fade for them", setUpTime, () => {
-  it("ranks the memories their chat used above equal ones, shared and their own, for them alone and from then on, and still finds the others when asked about them", async () => {
+  it("ranks the memories their chat used above equal ones, shared and their own, for them alone, from then on and only where the answer reaches them alone, and still finds the others when asked about them", async () => {
     const admin = await signedInApi(idp, "admin");
     const [ada, bea] = await Promise.all([
       signedInWithRole(idp, "user"),
@@ -3105,6 +3123,41 @@ describe("memories a person never uses fade for them", setUpTime, () => {
     const beforeTurn = new Date();
 
     await ask(`${monday}?`);
+    // The same question everywhere the answer reaches others: as the
+    // company, ordered as for someone who never used either memory.
+    const viaCompany = async (
+      asked: (agentId: string) => Promise<unknown>
+    ): Promise<{ first: boolean; both: boolean }> => {
+      const agentId = crypto.randomUUID();
+      await requestGranted(idp, admin, {
+        subject: { type: "agent", agentId },
+        object: { type: "platform" },
+        actions: ["brain"],
+        binding: "BRAIN",
+      });
+      const provider = await fakeProvider(says("Noted."));
+      await asked(agentId);
+      return handedOrder(provider.requests[0]?.body, [unused, used]);
+    };
+    const through = (inThread: boolean) => async (agentId: string) =>
+      await workspace(env, personalWorkspaceId(ada.userId)).askThrough(
+        ada.userId,
+        agentId,
+        "slack",
+        topic,
+        undefined,
+        inThread
+          ? {
+              thread: `C${unique()}`,
+              kind: "group",
+              audience: { members: [ada.userId], outsiders: false },
+            }
+          : { kind: "direct" }
+      );
+    const chatApp = await viaCompany(through(false));
+    const channel = await viaCompany(through(true));
+    const woken = await recallingChatOf(ada.userId, says("Noted."));
+    await woken.stub.askUnattended(woken.chat.id, { text: topic, model });
 
     expect({
       handed: handedIn(chats.provider.requests[0]?.body)
@@ -3112,12 +3165,14 @@ describe("memories a person never uses fade for them", setUpTime, () => {
         .filter((memory) => [used, unused, ownUsed, ownUnused].includes(memory))
         .toSorted(),
       ada: await placeIn(ada.userId, topic, [used, unused]),
-      adaOwn: await placeIn(ada.userId, ownTopic, [ownUsed, ownUnused], {
-        personal: true,
-      }),
+      adaOwn: await placeIn(ada.userId, ownTopic, [ownUsed, ownUnused]),
+      // Before its latest use, a memory ranks as one never used.
       adaBeforeTurn: await placeIn(ada.userId, topic, [unused, used], {
         asOf: beforeTurn,
       }),
+      chatApp,
+      channel,
+      woken: handedOrder(woken.provider.requests[0]?.body, [unused, used]),
       beaBefore,
       beaAfter: await placeIn(bea.userId, topic, [unused, used]),
       adaAsked: await placeIn(ada.userId, `${topic} ${friday}`, [unused, used]),
@@ -3126,9 +3181,43 @@ describe("memories a person never uses fade for them", setUpTime, () => {
       ada: { first: true, both: true },
       adaOwn: { first: true, both: true },
       adaBeforeTurn: { first: true, both: true },
+      chatApp: { first: true, both: true },
+      channel: { first: true, both: true },
+      woken: { first: true, both: true },
       beaBefore: { first: true, both: true },
       beaAfter: { first: true, both: true },
       adaAsked: { first: true, both: true },
+    });
+  });
+
+  it("passes over a use that doesn't name a memory's place, and still ranks by the others", async () => {
+    const dan = await signedInWithRole(idp, "user");
+    const topic = word();
+    const [older = ""] = await rememberedAbout("company", `Depot ${word()}`, [
+      { statement: `The ${topic} pallets go out early` },
+    ]);
+    const [newer = ""] = await rememberedAbout("company", `Depot ${word()}`, [
+      { statement: `The ${topic} pallets go out late` },
+    ]);
+    // An id the Brain would refuse beside a use of the older memory.
+    await runInDurableObject(
+      workspace(env, personalWorkspaceId(dan.userId)),
+      (_instance, state) => {
+        for (const memory of ["not-a-memory", older]) {
+          state.storage.sql.exec(
+            "INSERT INTO memory_uses (store, memory, used_at) VALUES ('shared', ?, ?)",
+            memory,
+            Date.now()
+          );
+        }
+      }
+    );
+
+    await expect(
+      placeIn(dan.userId, topic, [older, newer])
+    ).resolves.toStrictEqual({
+      first: true,
+      both: true,
     });
   });
 
@@ -3141,12 +3230,12 @@ describe("memories a person never uses fade for them", setUpTime, () => {
     const [newer = ""] = await rememberedAbout("company", `Depot ${word()}`, [
       { statement: `The ${topic} pallets go out late` },
     ]);
-    // Their Workspace can no longer read their pins.
+    // Their Workspace can no longer read what they used.
     await runInDurableObject(
       workspace(env, personalWorkspaceId(cara.userId)),
       (_instance, state) => {
         state.storage.sql.exec(
-          "ALTER TABLE chat_run_sources RENAME TO chat_run_sources_gone"
+          "ALTER TABLE memory_uses RENAME TO memory_uses_gone"
         );
       }
     );

@@ -2,20 +2,37 @@
 // one store's statements or its own cut of their lists, and in a merge of
 // several stores' lists (across.ts).
 
-const encoder = new TextEncoder();
+/** What UTF-8 writes for a surrogate with no partner: U+FFFD. */
+const replacement = 0xff_fd;
 
-/** `a` and `b` as SQLite orders text (BINARY: by their UTF-8 bytes). */
+/** The code point of `text` at `index`, a lone surrogate as UTF-8 writes it. */
+const codePointOf = (text: string, index: number): number => {
+  const point = text.codePointAt(index) ?? 0;
+  return point >= 0xd8_00 && point <= 0xdf_ff ? replacement : point;
+};
+
+/**
+ * `a` and `b` as SQLite orders text (BINARY: by their UTF-8 bytes): by
+ * code point, which is the same order, so nothing is encoded; a lone
+ * surrogate counts as the U+FFFD UTF-8 writes for it. On every tie of
+ * recall's orders, so it allocates nothing.
+ */
 export const byBytes = (a: string, b: string): number => {
-  const left = encoder.encode(a);
-  const right = encoder.encode(b);
-  const shorter = Math.min(left.length, right.length);
-  for (let index = 0; index < shorter; index += 1) {
-    const difference = (left[index] ?? 0) - (right[index] ?? 0);
-    if (difference !== 0) {
-      return difference;
-    }
+  if (a === b) {
+    return 0;
   }
-  return left.length - right.length;
+  let left = 0;
+  let right = 0;
+  while (left < a.length && right < b.length) {
+    const fromA = codePointOf(a, left);
+    const fromB = codePointOf(b, right);
+    if (fromA !== fromB) {
+      return fromA - fromB;
+    }
+    left += fromA > 0xff_ff ? 2 : 1;
+    right += fromB > 0xff_ff ? 2 : 1;
+  }
+  return Number(left < a.length) - Number(right < b.length);
 };
 
 /** A passage found by meaning, as both orders read it. */

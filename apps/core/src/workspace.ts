@@ -82,6 +82,7 @@ import {
   eq,
   gt,
   lt,
+  lte,
   inArray,
   isNotNull,
   isNull,
@@ -197,6 +198,7 @@ import {
   customWidgets,
   dashboardWidgets,
   dashboards,
+  memoryUses,
 } from "./db/workspace/schema.ts";
 import { chatWork } from "./drafts.ts";
 import { callObject, chatSession } from "./durable-objects.ts";
@@ -653,12 +655,20 @@ const runReadsSchema = z
 /**
  * The prefix of the pin of a memory a recall as the person handed over
  * (history-access.ts `brainMemoryRead`): what counts as their use of it
- * (`memoriesUsed`), and what `chat_run_sources_pinned` holds alone.
+ * (`memory_uses`). A recall as the company pins under another, and counts
+ * as nobody's use.
  */
 const memoryPinPrefix = "brain-memory:";
 
-/** A memory's pin after its prefix: its store and its id. */
-const memoryPinSchema = z.tuple([z.enum(["own", "shared"]), z.string().min(1)]);
+/**
+ * A memory's place as `memory_uses` keeps it: its store, and its id, a
+ * UUID as the Brain's are (its `memoryIdSchema`), which its recall takes
+ * only so: a row that isn't one is never handed to it.
+ */
+const memoryUseSchema = z.strictObject({
+  store: z.enum(["own", "shared"]),
+  memory: z.uuid(),
+});
 
 /** A memory this person used, by its store and id, and when they last did. */
 export interface MemoryUse {
@@ -666,6 +676,32 @@ export interface MemoryUse {
   memory: string;
   at: number;
 }
+
+/**
+ * The memory `source` pins as one a recall as the person handed over,
+ * if it is one (`memoryPinPrefix`, then its store and id as JSON); none
+ * for any other source, or a pin that doesn't name a memory's place.
+ */
+const memoryUseOf = (
+  source: string
+): z.infer<typeof memoryUseSchema> | undefined => {
+  if (!source.startsWith(memoryPinPrefix)) {
+    return undefined;
+  }
+  try {
+    const parsed = z
+      .tuple([z.unknown(), z.unknown()])
+      .safeParse(JSON.parse(source.slice(memoryPinPrefix.length)));
+    if (!parsed.success) {
+      return undefined;
+    }
+    const [store, memory] = parsed.data;
+    const place = memoryUseSchema.safeParse({ store, memory });
+    return place.success ? place.data : undefined;
+  } catch {
+    return undefined;
+  }
+};
 
 /** Most documents one read hands a chat's code: a page of hits or links. */
 const givenMaxPerRead = 1000;
@@ -3576,7 +3612,11 @@ export class Workspace extends DurableObject<Env> {
     return call;
   }
 
-  /** Keeps `sources` with run `runId`, each once, with when it read them. */
+  /**
+   * Keeps `sources` with run `runId`, each once, and, of the memories a
+   * recall as its person handed over among them (`memoryPinPrefix`), when
+   * they last used each (`memory_uses`), in one transaction.
+   */
   #keepRunSources(
     chatId: ChatId,
     runId: string,
@@ -3585,42 +3625,46 @@ export class Workspace extends DurableObject<Env> {
     if (sources.length === 0) {
       return;
     }
-    this.#db
-      .insert(chatRunSources)
-      .select(
-        sql`SELECT ${chatId}, ${runId}, value, NULL, ${Date.now()} FROM json_each(${JSON.stringify(sources)}) WHERE true`
-      )
-      .onConflictDoNothing()
-      .run();
+    const used = sources.flatMap((source) => memoryUseOf(source) ?? []);
+    this.ctx.storage.transactionSync(() => {
+      this.#db
+        .insert(chatRunSources)
+        .select(
+          sql`SELECT ${chatId}, ${runId}, value, NULL FROM json_each(${JSON.stringify(sources)}) WHERE true`
+        )
+        .onConflictDoNothing()
+        .run();
+      if (used.length > 0) {
+        const usedAt = new Date();
+        this.#db
+          .insert(memoryUses)
+          .values(used.map((place) => ({ ...place, usedAt })))
+          .onConflictDoUpdate({
+            target: [memoryUses.store, memoryUses.memory],
+            set: { usedAt: sql`max(${memoryUses.usedAt}, excluded.used_at)` },
+          })
+          .run();
+      }
+    });
   }
 
   /**
-   * Every memory a recall as this person handed over in their chats (a
-   * turn's recall in their own chat, in a turn they started, or their
-   * agent's code in it: `brain-memory:` pins, never a recall as the
-   * company), with when a run last pinned it, at or before `until`
-   * (milliseconds): their use, which their recall ranks memories by
-   * (brain-next.ts `recallAs`). Their own chats' pins alone, so one
-   * person's use never reaches another's recall. Read through
-   * `chat_run_sources_pinned`, which holds those pins alone.
+   * When this person last used each memory they used, at or before
+   * `until` (milliseconds): a memory a recall as them last handed over
+   * then (`memory_uses`), which their own recall ranks memories by
+   * (brain-next.ts `recallAs`). Theirs alone, so one person's use never
+   * reaches another's recall. One scan of their uses, a row a memory; a
+   * row that isn't a memory's place is passed over, never failing recall.
    */
   memoriesUsed(until: number): MemoryUse[] {
-    return this.ctx.storage.sql
-      .exec<{ source: string; at: number }>(
-        `SELECT source_id AS source, max(pinned_at) AS at
-        FROM chat_run_sources
-        WHERE source_id GLOB '${memoryPinPrefix}*' AND pinned_at <= ?
-        GROUP BY source_id`,
-        until
-      )
-      .toArray()
-      .flatMap(({ source, at }) => {
-        const pin = memoryPinSchema.safeParse(
-          JSON.parse(source.slice(memoryPinPrefix.length))
-        );
-        return pin.success
-          ? [{ store: pin.data[0], memory: pin.data[1], at }]
-          : [];
+    return this.#db
+      .select()
+      .from(memoryUses)
+      .where(lte(memoryUses.usedAt, new Date(until)))
+      .all()
+      .flatMap(({ store, memory, usedAt }) => {
+        const place = memoryUseSchema.safeParse({ store, memory });
+        return place.success ? [{ ...place.data, at: usedAt.getTime() }] : [];
       });
   }
 

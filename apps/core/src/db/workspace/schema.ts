@@ -210,9 +210,6 @@ export const chatDocuments = sqliteTable(
  * withholding is audited once; cleared once it is readable again. Kept
  * with the chat, not with the run's record (`chat_code_runs` keeps the
  * latest runs only), as long as the transcript holds the result.
- * `pinned_at` is when the run read it: of a memory a recall as the person
- * handed over, when they last used it (`memoriesUsed` in workspace.ts),
- * which their recall ranks memories by (brain-next.ts `recallAs`).
  */
 export const chatRunSources = sqliteTable(
   "chat_run_sources",
@@ -224,16 +221,29 @@ export const chatRunSources = sqliteTable(
     runId: text("run_id").notNull(),
     sourceId: text("source_id").notNull(),
     withheldAt: integer("withheld_at", { mode: "timestamp_ms" }),
-    pinnedAt: integer("pinned_at", { mode: "timestamp_ms" }),
   },
   (table) => [
     primaryKey({ columns: [table.chatId, table.runId, table.sourceId] }),
-    // The person's memory pins alone, when each was pinned: what
-    // `memoriesUsed` reads, by the same term (`memoryPinPrefix`).
-    index("chat_run_sources_pinned")
-      .on(table.sourceId, table.pinnedAt)
-      .where(sql`source_id GLOB 'brain-memory:*'`),
   ]
+);
+
+/**
+ * When this person last used each memory the Brain handed them: one row a
+ * memory, by the store it is in and that store's id for it, kept when a
+ * recall as them pins it (`brain-memory:`, history-access.ts) and moved
+ * on by each later one (workspace.ts `memoriesUsed`). Their own recall
+ * ranks memories by it (brain-next.ts `recallAs`), so one they never use
+ * fades. Theirs alone: no other person's recall reads it; erased with
+ * their Workspace. Outlives the chat that used it.
+ */
+export const memoryUses = sqliteTable(
+  "memory_uses",
+  {
+    store: text({ enum: ["own", "shared"] }).notNull(),
+    memory: text().notNull(),
+    usedAt: integer("used_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.store, table.memory] })]
 );
 
 // Unused since the App's one shared draft (drafts.ts) replaced each

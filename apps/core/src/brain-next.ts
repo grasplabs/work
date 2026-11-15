@@ -956,6 +956,18 @@ const meaningOf = async (
 };
 
 /**
+ * What a recall reads as: the person, with their own store (`person`),
+ * only with `personal` and not `company`: where its answer reaches them
+ * alone; their teams; or the company.
+ */
+const reachOf = ({ personal, company = false }: Recall): Reach => {
+  if (company) {
+    return "company";
+  }
+  return personal ? "person" : "teams";
+};
+
+/**
  * The Brain's request of a recall by the member `personId`, as core counts
  * them now: the question checked as the Brain checks it before the
  * embedder sees any of it, and embedded while their reader is read. With
@@ -966,13 +978,11 @@ const meaningOf = async (
 const recallRequestAs = async (
   env: BrainEnv & Pick<Env, "DB" | "EMBEDDER">,
   personId: string,
-  { question: asked, budget, asOf, personal, company = false, teams }: Recall
+  recall: Recall
 ): Promise<RecallRequest> => {
+  const { question: asked, budget, asOf, teams } = recall;
   const question = checked(questionSchema, asked);
-  let reach: Reach = personal ? "person" : "teams";
-  if (company) {
-    reach = "company";
-  }
+  const reach = reachOf(recall);
   const [reader, meaning] = await Promise.all([
     readerOf(env, personId, reach, teams),
     // As of a moment the Brain never searches by meaning: nothing to embed.
@@ -1103,9 +1113,15 @@ export const recallAs = async (
   personId: string,
   recall: Recall
 ): Promise<RecalledPack> => {
+  // Ranked by their use only where the answer reaches them alone: a
+  // recall as their teams or the company (a channel, a thread, a chat
+  // app, a turn they didn't start, code) is ordered as for anyone, and
+  // their Workspace isn't asked.
   const [request, used] = await Promise.all([
     recallRequestAs(env, personId, recall),
-    usedOf(env, personId, recall.asOf ?? new Date()),
+    reachOf(recall) === "person"
+      ? usedOf(env, personId, recall.asOf ?? new Date())
+      : undefined,
   ]);
   const findings = await findingsOf(env, request, "find", used);
   const { items, memories, contested, notFound, truncated } = packAcross(

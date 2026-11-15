@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "14193d87-54f0-440b-a0aa-e1d19b726300",
+  "id": "5bce9408-8dfd-4b22-8966-8dc6fa43ceb3",
   "prevId": "0ffa021e-2df8-4cdd-9989-c623882ed86a",
   "tables": {
     "audit_outbox": {
@@ -1087,26 +1087,9 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
-        },
-        "pinned_at": {
-          "name": "pinned_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         }
       },
-      "indexes": {
-        "chat_run_sources_pinned": {
-          "name": "chat_run_sources_pinned",
-          "columns": [
-            "source_id",
-            "pinned_at"
-          ],
-          "isUnique": false,
-          "where": "source_id GLOB 'brain-memory:*'"
-        }
-      },
+      "indexes": {},
       "foreignKeys": {
         "chat_run_sources_chat_id_chats_id_fk": {
           "name": "chat_run_sources_chat_id_chats_id_fk",
@@ -1578,6 +1561,45 @@
       "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "memory_uses": {
+      "name": "memory_uses",
+      "columns": {
+        "store": {
+          "name": "store",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "memory": {
+          "name": "memory",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "used_at": {
+          "name": "used_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "memory_uses_store_memory_pk": {
+          "columns": [
+            "store",
+            "memory"
+          ],
+          "name": "memory_uses_store_memory_pk"
+        }
+      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },

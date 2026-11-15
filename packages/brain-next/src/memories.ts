@@ -1181,7 +1181,7 @@ export interface MemoryFound extends Memory {
  * that hold the question's telling words in any form, best first, as
  * order.ts `byWordsFound` orders them: more of them, then more of them as
  * written, then confirmed, fresher for the reader (`used`), newer. At
- * most `limit` (`recallLimit` by default), cut in that order. For
+ * most `recallLimit`, cut in that order. For
  * recall's words way: each memory is scored on its own words alone, never
  * on how often a word is in what the reader may not read.
  *
@@ -1199,13 +1199,11 @@ export const memoriesByWords = (
     reader,
     at,
     used = new Map(),
-    limit = recallLimit,
   }: {
     question: string;
     reader: Reader;
     at: number;
     used?: UsedAt;
-    limit?: number;
   }
 ): MemoryFound[] => {
   const { telling } = termsOf(question);
@@ -1230,7 +1228,7 @@ export const memoriesByWords = (
       exact: candidate.exact,
     }))
     .toSorted(byWordsFound)
-    .slice(0, limit);
+    .slice(0, recallLimit);
   const counts = new Map(candidates.map((found) => [found.row, found]));
   return chosenMemories(
     sql,
