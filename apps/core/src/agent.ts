@@ -15,8 +15,8 @@ import { z } from "zod";
 
 import { docsSection } from "./agent-docs.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
-import { withoutLinks } from "./channels/stephen-rules.ts";
 import type { ChannelText } from "./channels/stephen-rules.ts";
+import { withoutLinks } from "./channels/without-links.ts";
 import { describeRun, runCode, sourceHash } from "./code-mode.ts";
 import type { CodeRun } from "./code-mode.ts";
 import type { CodeRunStatus } from "./code-run-statuses.ts";
@@ -876,24 +876,34 @@ export const withheldAssistant = (
   };
 };
 
-/**
- * `message` with no links in its text, as a chat platform's chat keeps
- * and shows the agent's own words (`withoutLinks`); others as they are.
- */
-export const inOwnWords = (message: Message): Message =>
-  message.role === "assistant"
-    ? {
-        ...message,
-        content: message.content.map((block) =>
-          block.type === "text"
-            ? { ...block, text: withoutLinks(block.text) }
-            : block
-        ),
-      }
-    : message;
-
 /** The text of an answer, its thinking and calls left out. */
 export const textOf = (message: AssistantMessage | undefined): string =>
   (message?.content ?? [])
     .flatMap((block) => (block.type === "text" ? [block.text] : []))
     .join("");
+
+/**
+ * `message`, an answer, with no links in its text, as a chat platform's
+ * chat keeps and shows the agent's own words, and sends them to the model
+ * again (`withoutLinks`). Its text is cleaned whole, as the answer is
+ * shown and posted whole (`textOf`), so a link split over two of its text
+ * blocks is cut too: the text stands where its first block stood.
+ */
+export const ownWordsOf = (message: AssistantMessage): AssistantMessage => {
+  const text = withoutLinks(textOf(message));
+  let placed = false;
+  const content: AssistantMessage["content"] = [];
+  for (const block of message.content) {
+    if (block.type !== "text") {
+      content.push(block);
+    } else if (!placed) {
+      placed = true;
+      content.push({ ...block, text });
+    }
+  }
+  return { ...message, content };
+};
+
+/** `message` in the agent's own words (`ownWordsOf`), if it is an answer. */
+export const inOwnWords = (message: Message): Message =>
+  message.role === "assistant" ? ownWordsOf(message) : message;

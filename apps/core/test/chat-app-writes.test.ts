@@ -3,10 +3,8 @@ import { workspaceIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  heldWriteRefusal,
-  withoutLinks,
-} from "../src/channels/stephen-rules.ts";
+import { heldWriteRefusal } from "../src/channels/stephen-rules.ts";
+import { withoutLinks } from "../src/channels/without-links.ts";
 import { workspace } from "../src/durable-objects.ts";
 import {
   codeResults,

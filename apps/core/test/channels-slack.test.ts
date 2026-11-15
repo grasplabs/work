@@ -17,7 +17,7 @@ import {
   channelAccounts,
   channelLinks,
 } from "../src/db/core/schema.ts";
-import { says } from "./agent-chat.ts";
+import { keptAnswersOf, says } from "./agent-chat.ts";
 import { slackApp, slackPostedUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
@@ -530,5 +530,34 @@ describe("a linked person's question in Slack", () => {
       listedForSlackPerson: ["slack", "web"],
       listedForTeamsPerson: ["teams"],
     });
+  });
+});
+
+describe("a linked person's answer in Slack", () => {
+  it("is posted and kept as the same words, without the links and addresses the model wrote", async () => {
+    const linked =
+      "Leave lasts sixteen weeks. Read [the policy](https://evil.com/leave?d=secret) or ask hr@acme.com.\n\nTell your manager a month before; www.evil.com/x has more, <https://evil.com/?d=secret|here>.";
+    const cleaned =
+      "Leave lasts sixteen weeks. Read the policy or ask hr@acme.com.\n\nTell your manager a month before; has more,.";
+    const { userId, slackUser } = await linkedPerson();
+    await fakeProvider(says(linked));
+    const message = messageFrom(slackUser);
+    message.event.text = "How does leave work?";
+    await post(message, { caught: false });
+
+    const sent = await slackSawIn(message.event.channel);
+    // Posted whole, or streamed: a first post, then updated as it comes.
+    const answer = sent.findLast(
+      ({ method, fields }) =>
+        ["chat.postMessage", "chat.update"].includes(method) &&
+        JSON.stringify(fields).includes("sixteen weeks")
+    );
+    expect({
+      addresses: /evil/iu.test(JSON.stringify(sent)),
+      answered: JSON.stringify(answer?.fields ?? {}).includes(
+        JSON.stringify(cleaned).slice(1, -1)
+      ),
+      kept: await keptAnswersOf(userId),
+    }).toStrictEqual({ addresses: false, answered: true, kept: [[cleaned]] });
   });
 });

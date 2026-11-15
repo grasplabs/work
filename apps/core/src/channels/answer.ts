@@ -258,41 +258,49 @@ const endedWithin = async (posting: Promise<unknown>, ms: number) => {
 
 /**
  * An answer streamed into `thread` as the model writes it, where the
- * platform streams (Teams, in a private chat): `onText` takes the text so
- * far; `finish` adds what the last update missed of `final` and waits for
- * the stream to end. Nothing is posted until the first words, so a turn
- * that fails before any leaves no empty message. A step's words before
- * the agent ran code, and the answer after, are told apart by a blank
- * line, as the person sees them in Grasp.
+ * platform streams (Teams, in a private chat): `onText` takes the turn's
+ * words so far, cleaned of links as they are kept (`turnWords` in
+ * workspace.ts), a step's words before the agent ran code and the answer
+ * after told apart by a blank line, as the person sees them in Grasp.
+ * Each update adds to the one before it; one that would change what was
+ * streamed stops the stream there, as a stream only grows. `finish` adds
+ * what the last update missed of the turn's words and waits for the
+ * stream to end. Nothing is posted until the first words, so a turn that
+ * fails before any leaves no empty message.
  */
 const streamInto = (thread: Thread, onFirst: () => void) => {
   const feed = textFeed();
   let posting: Promise<unknown> | undefined;
   let current = "";
   let finished = false;
+  let stopped = false;
   const tell = (text: string): void => {
-    if (finished || text === "" || text === current) {
+    if (finished || stopped || text === current) {
       return;
     }
-    let piece = text.startsWith(current)
-      ? text.slice(current.length)
-      : `\n\n${text}`;
+    if (!text.startsWith(current)) {
+      stopped = true;
+      return;
+    }
     if (posting === undefined) {
-      piece = piece.trimStart();
       onFirst();
       posting = thread.post(
         new StreamingPlan(feed.pieces, { aiGenerated: true })
       );
     }
+    const piece = text.slice(current.length);
     current = text;
     feed.push(piece);
   };
   return {
     onText: tell,
-    /** Whether anything was streamed, once the stream has ended. */
-    finish: async (final?: string): Promise<boolean> => {
-      if (posting !== undefined && final?.startsWith(current) === true) {
-        tell(final);
+    /**
+     * Whether the stream holds the turn's `words` whole, once it has
+     * ended; none for a turn that didn't answer.
+     */
+    finish: async (words?: string): Promise<boolean> => {
+      if (posting !== undefined && words !== undefined) {
+        tell(words);
       }
       finished = true;
       feed.end();
@@ -300,7 +308,7 @@ const streamInto = (thread: Thread, onFirst: () => void) => {
         return false;
       }
       await endedWithin(posting, streamEndMs);
-      return true;
+      return current === words;
     },
   };
 };
@@ -412,12 +420,14 @@ const answerOne = async (
     return;
   }
   stopTyping();
-  const { chatId, answer, calls } = asked;
+  const { chatId, answer, calls, words } = asked;
   const answered = answer.outcome === "answered";
   const final = shownText(answer.answer);
+  // A stream that doesn't hold the turn's words whole (one it had to stop)
+  // is followed by the answer, posted whole.
   let streamed = false;
   try {
-    streamed = (await streaming?.finish(answered ? final : undefined)) ?? false;
+    streamed = (await streaming?.finish(answered ? words : undefined)) ?? false;
   } catch (error) {
     log.warn("channel.stream_refused", { platform, ...errorFields(error) });
   }

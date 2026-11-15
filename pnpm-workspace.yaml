@@ -163,6 +163,11 @@ catalog:
   "@chat-adapter/slack": 4.43.0
   "@chat-adapter/teams": 4.43.0
   chat: 4.43.0
+  # What counts as an address in an answer posted to Teams or Slack, as a
+  # client would link it: markdown-it's linkifier, with IANA's list of
+  # top-level domains (apps/core/src/channels/stephen-rules.ts).
+  linkify-it: 6.1.0
+  tlds: 1.261.0
   # What the Teams and Slack adapters send through, on the version they
   # resolve; core types its hook on their requests with it
   # (apps/core/src/channels/through-connect.ts).
