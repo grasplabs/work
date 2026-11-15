@@ -676,10 +676,11 @@ const PreviewArea = ({
       {shown === undefined ? null : (
         <ReadOnlyBar draft={draft} onChanged={onChanged} shown={shown} />
       )}
-      {/* Once Grasp is done: the example data it speaks of is there then. */}
-      {shown === undefined && ready && !running ? (
-        <MadeTip app={app.id} />
-      ) : null}
+      {/* As the preview first shows, in the same step that fades it in,
+        never later: the person may use it while Grasp still works, and
+        a tip put over it then would push the page down under their
+        pointer, a click meant for the page landing on the tip. */}
+      {shown === undefined && ready ? <MadeTip app={app.id} /> : null}
       {staleAt === revision && shown === undefined && ready ? (
         <StaleTestData app={app.id} />
       ) : null}
