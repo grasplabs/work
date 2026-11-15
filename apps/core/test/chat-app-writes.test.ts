@@ -276,7 +276,7 @@ describe("a chat app's writes", setUpTime, () => {
 });
 
 describe("a chat app's answers", setUpTime, () => {
-  it("keep no link of the model's own, only its citations, and the mark of the text it answered by", async () => {
+  it("keep no link of the model's own, a note's neither, and the mark of the text it answered by", async () => {
     const set = await setUp(
       "teams",
       says(
@@ -294,8 +294,7 @@ describe("a chat app's answers", setUpTime, () => {
     );
     // The model was told the mark with the channel's rules.
     const [request] = set.provider.requests;
-    const shown =
-      "The figures are in the Q3 report and [Q3](grasp:note/doc-1), see.";
+    const shown = "The figures are in the Q3 report and Q3, see.";
     expect({
       answer: answer.answer,
       kept,
@@ -308,18 +307,14 @@ describe("a chat app's answers", setUpTime, () => {
 });
 
 describe("Stephen's own words", () => {
-  it("lose every link but a citation", () => {
+  it("lose every link, Grasp's own too, keeping each one's words", () => {
     expect(
       [
         "Open [it](https://evil.test) now.",
         "Mail <mailto:ben@acme.test> or www.evil.test today.",
         "![a picture](grasp:note/doc-1) of [Q3](grasp:note/doc-2)",
       ].map(withoutLinks)
-    ).toStrictEqual([
-      "Open it now.",
-      "Mail or today.",
-      "a picture of [Q3](grasp:note/doc-2)",
-    ]);
+    ).toStrictEqual(["Open it now.", "Mail or today.", "a picture of Q3"]);
   });
 
   it("are left as they are where there was no link", () => {

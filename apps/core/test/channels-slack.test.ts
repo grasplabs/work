@@ -491,10 +491,15 @@ describe("a press on a card in Slack", () => {
 
 describe("a linked person's question in Slack", () => {
   it("gets the same answer as the same question in Teams, in their own Slack chat, which their list says came through Slack", async () => {
-    const answer = "Parental leave lasts sixteen weeks.";
+    // A link of Grasp's own and one outside it, as a model may write them:
+    // each app shows only their words, as no sources follow the answer.
+    const written =
+      "Parental leave lasts sixteen weeks, as [the leave policy](grasp:note/doc-1) and [the HR page](https://evil.test/leave) say.";
+    const answer =
+      "Parental leave lasts sixteen weeks, as the leave policy and the HR page say.";
     const { slackUser, api } = await linkedPerson();
     // One provider for the organization: it answers both chats.
-    const provider = await fakeProvider(says(answer), says(answer));
+    const provider = await fakeProvider(says(written), says(written));
     const question = "How long is parental leave?";
     const fromSlack = messageFrom(slackUser);
     fromSlack.event.text = question;
@@ -520,12 +525,16 @@ describe("a linked person's question in Slack", () => {
           JSON.stringify(fields).includes(answer)
       ),
       teams: teamsAnswer.includes(answer),
+      links: [JSON.stringify(slackPosts), teamsAnswer].flatMap((posted) =>
+        ["grasp:", "evil.test"].filter((link) => posted.includes(link))
+      ),
       created: inGrasp.via,
       listedForSlackPerson: await viaOf(api),
       listedForTeamsPerson: await viaOf(inTeams.api),
     }).toStrictEqual({
       slack: true,
       teams: true,
+      links: [],
       created: "web",
       listedForSlackPerson: ["slack", "web"],
       listedForTeamsPerson: ["teams"],

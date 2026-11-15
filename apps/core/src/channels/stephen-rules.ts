@@ -21,8 +21,7 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 // traced: what it says is shown to the person on the card, whole.
 //
 // And in Stephen's own words there are no links: a link he writes could
-// lead anywhere, and the sources under an answer come from code (what the
-// chat read), not from the model.
+// lead anywhere. He names the source he answers from in words.
 
 /** Why a held write was refused before it was held, as `agentErrors` names it. */
 export type HeldWriteRefusal =
@@ -192,13 +191,9 @@ const markdownLink =
 /** One Markdown link, whole, as `markdownLink` finds it. */
 const oneLink = new RegExp(`^${markdownLink.source}$`, "u");
 
-/** What a Markdown link leaves of itself in Stephen's own words. */
-const linkLeft = (whole: string): string => {
-  const parts = oneLink.exec(whole)?.groups;
-  const citation =
-    parts?.image === "" && parts.to?.startsWith("grasp:") === true;
-  return citation ? whole : (parts?.label ?? "");
-};
+/** What a Markdown link leaves of itself in Stephen's own words: its label. */
+const linkLeft = (whole: string): string =>
+  oneLink.exec(whole)?.groups?.label ?? "";
 
 /**
  * An address written out, or between angle brackets, with the spaces
@@ -208,9 +203,9 @@ const bareLink =
   /[ \t]*<?\b(?:https?:\/\/|www\.|mailto:)(?:[^\s<>)]*[^\s<>).,;:!?'"])?>?/giu;
 
 /**
- * Stephen's own words without links: a Markdown link keeps its label, and
- * an address written out is dropped. Only a citation of what the chat
- * read (`grasp:`) stays, as code turns it into the answer's sources.
+ * Stephen's own words without links: a Markdown link, `grasp:` ones too,
+ * keeps its label, and an address written out is dropped. A chat app
+ * shows no sources under the answer, so nothing is kept for them.
  */
 export const withoutLinks = (text: string): string =>
   text.replaceAll(markdownLink, linkLeft).replaceAll(bareLink, "");
@@ -226,7 +221,7 @@ const chatAppText = `This chat is in a chat app, such as Microsoft Teams, where 
 - Say what a fact means for their work, not only the fact.
 - Speak of people by their role ("the finance lead"), never about a colleague as a person.
 - Sickness, harassment or a conflict with someone at work always goes to a person: don't advise on it or judge it, say whom to talk to by their role (their manager, HR, the confidential counsellor), and name no colleague.
-- Cite each document once, where you first use it. Write no other links: the sources under your answer come from what you read.
+- Name the source you answer from in words, where you first use it. Write no links.
 - A change waits for the person to press on a card. Ask for it only with what they said or what you read: their words for whom it goes to, IDs and values as you read them, no placeholders.`;
 
 /** One text the model is told, and its mark. */
