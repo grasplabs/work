@@ -484,10 +484,9 @@ export const newWorkState = (restart: () => void): WorkState => ({
  * in the same step: what such a handler still writes goes through the
  * store's own checks that what it works on is current, which an erased
  * source no longer is, and nothing of it is settled or run again. Its row
- * gone, a new item of the same key (a source others still add to, after a
- * person's erasure) may run beside a handler that ignores its signal: a
- * handler can't assume it is alone on its key. A listener of a signal
- * that throws is passed over, so the erasure goes on.
+ * gone, a new item of the same key may run beside a handler that ignores
+ * its signal: a handler can't assume it is alone on its key. A listener
+ * of a signal that throws is passed over, so the erasure goes on.
  */
 export const stopWorkOn = (state: WorkState, keys: readonly string[]): void => {
   for (const key of keys) {

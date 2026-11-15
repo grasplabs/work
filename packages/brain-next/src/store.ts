@@ -1128,7 +1128,6 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       await this.#readyToWrite();
       const covered = await erase(
         this.#erasures,
-        "source",
         source,
         reason,
         (stopped) => {
@@ -1141,23 +1140,15 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   }
 
   /**
-   * Erases what only one person may read (erasure.ts), as `eraseSource`
-   * erases a source. A person's own store erases itself whole, and only
-   * for that person (`#eraseWhole`).
+   * Erases this person's own store whole (`#eraseWhole`), and only for
+   * that person. The shared store refuses, before it reads or makes
+   * anything: it keeps nothing only one person may read (`#mayKeep`), so
+   * it has nothing of a person's to erase.
    */
   async erasePerson(request: PersonErasure): Promise<void> {
     const { person, reason } = checked(personErasureSchema, request);
-    if (this.#kind.kind === "person") {
-      if (person !== this.#kind.person) {
-        throw new Error(notTheirs);
-      }
-      await this.#eraseWhole(reason);
-      return;
-    }
-    await this.#ready();
-    await erase(this.#erasures, "person", person, reason, (sources) => {
-      stopWorkOn(this.#work, sources);
-    });
+    this.#ownOnly(person);
+    await this.#eraseWhole(reason);
   }
 
   /**
@@ -1259,9 +1250,9 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   }
 
   /**
-   * Whether a source or a person was erased, from this store's record of
-   * its ledger alone (erasure.ts `erasureStatusOf`, by the SHA-256 the
-   * ledger names it by). A read: it changes nothing and leaves no work.
+   * Whether a source was erased, from this store's record of its ledger
+   * alone (erasure.ts `erasureStatusOf`, by the SHA-256 the ledger names
+   * it by). A read: it changes nothing and leaves no work.
    * `unavailable` while the ledger can't be read or is being replayed (the
    * gate `#ready` throws for, answered instead).
    *
@@ -1281,17 +1272,15 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     if (this.#kind.kind === "person") {
       throw new Error(sharedOnly);
     }
-    const lookup = checked(erasureLookupSchema, request);
-    const subject = await subjectOf(
-      lookup.kind === "source" ? lookup.source : lookup.person
-    );
+    const { source } = checked(erasureLookupSchema, request);
+    const subject = await subjectOf(source);
     // Through, the shared store's schema is made (`#start`); the gate,
     // then the record, with no await between.
     const ledger = await this.#ledgerStep();
     if (ledger !== "through") {
       return { state: "unavailable" };
     }
-    return erasureStatusOf(this.ctx.storage.sql, lookup.kind, subject);
+    return erasureStatusOf(this.ctx.storage.sql, subject);
   }
 
   /**
@@ -1836,7 +1825,6 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       words: "current",
       erasures: {
         source: { written: 0, unwritten: 0 },
-        person: { written: 0, unwritten: 0 },
         byReason: { deleted: 0, retention: 0, person_erased: 0, withdrawn: 0 },
       },
       recall: recallOverviewOf(this.#recallCounts),

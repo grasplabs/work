@@ -10,6 +10,7 @@ import { z } from "zod";
 import { adminSnapshot } from "./admin-steering.ts";
 import { test } from "./csp.ts";
 import {
+  adding,
   answered,
   answerTo,
   back,
@@ -235,6 +236,8 @@ test("someone removes a line of theirs and takes out what was written from it, a
   // Back from the same tab to add something: what they add is written down
   // and kept, and what was erased doesn't come back.
   await page.getByRole("button", { name: "Add something" }).click();
+  // He asks what they'd like to add before they answer.
+  await expect(page.getByText(adding)).toBeVisible();
   const more = page.getByLabel("Your answer");
   await more.fill("Then I book it in Exact.");
   await more.press("Enter");
