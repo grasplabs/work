@@ -403,7 +403,9 @@ const hasSchema = (sql: SqlStorage): boolean =>
  * One class, two kinds of store, told apart by the object's name alone
  * (contract.ts `storeKindOf`):
  *
- * - The shared store (`brainOf`): what more than one person may read.
+ * - The shared store (`brainOf`): what more than one person may read. It
+ *   refuses what only one person may read (`#mayKeep`, `onlyInOwnStore`),
+ *   whoever calls, so none of it is ever there.
  * - A person's own store (`personalBrainOf`, named by their id): what
  *   only they may read. It keeps nothing anyone else may read, answers no
  *   other reader, keeps its files under a prefix of its own (bucket.ts),
