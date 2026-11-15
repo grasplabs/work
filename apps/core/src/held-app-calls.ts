@@ -59,9 +59,11 @@ import type { HeldAppCallRow } from "./workspace.ts";
 // - What the App answers never reaches the model: the agent is told
 //   how it ended alone (`heldAppCallDecided`), and reads the App again
 //   if it needs to, under the checks every read has.
-// Holding, confirming and declining are each audited in the write that
-// makes them (`chat.app_call.held`, `.confirmed`, `.declined`), and how a
-// confirmed one ended once it did (`.ended`, its outcome alone).
+// Holding is audited as the agent's call that holds it (`agent.call`,
+// naming the hold); confirming and declining each in the write that makes
+// them (`chat.app_call.confirmed`, `.declined`), and how a confirmed one
+// ended once it did (`.ended`, its outcome alone, taken from the App's
+// answer before anything after the call can fail).
 
 /** How long a confirmed write waits for the App's answer: as a chat's code does. */
 const functionCallMs = 30_000;
@@ -221,7 +223,8 @@ const memberNow = async (
 const runConfirmed = async (
   env: Env,
   person: Member,
-  row: HeldAppCallRow
+  row: HeldAppCallRow,
+  ran: (ok: boolean) => void
 ): Promise<FunctionAnswer> => {
   const scope = {
     workspaceId: personalWorkspaceId(person.userId),
@@ -256,6 +259,10 @@ const runConfirmed = async (
       chatId: scope.chatId,
     }
   );
+  // Whether it ran is the App's answer, taken before anything after the
+  // call (restricting the chat) can fail: a write that ran never reads as
+  // one that may not have.
+  ran(answer.result.ok);
   await carryAppRestricted(env, scope, app, answer);
   return answer;
 };
@@ -285,8 +292,9 @@ export const confirmHeldAppCall = async (
   );
   let ok = false;
   try {
-    const { result } = await runConfirmed(env, person, row);
-    ({ ok } = result);
+    const { result } = await runConfirmed(env, person, row, (ran) => {
+      ok = ran;
+    });
     if (!result.ok) {
       throw agentErrors.create("agent.held_call_failed", {
         code: result.error.code,

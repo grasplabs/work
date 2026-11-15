@@ -6482,10 +6482,6 @@ msgstr "Réécouter les deux"
 msgid "Heard from enough people"
 msgstr "Entendu de suffisamment de personnes"
 
-#: src/activity/audit-words.ts
-msgid "Held a write to an App for its person to confirm"
-msgstr "A retenu une modification dans une application jusqu’à ce que la personne la confirme"
-
 #: src/interview/words.ts
 msgid "Hello"
 msgstr "Bonjour"

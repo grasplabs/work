@@ -123,10 +123,6 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     text: msg`Used something only its person can read, so what it writes for others waits for them`,
   },
   {
-    action: "chat.app_call.held",
-    text: msg`Held a write to an App for its person to confirm`,
-  },
-  {
     action: "chat.app_call.confirmed",
     text: msg`Confirmed a write to an App`,
   },

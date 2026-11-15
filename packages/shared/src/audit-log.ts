@@ -224,11 +224,11 @@ const typeRules: readonly {
   // (`brain.source.*`).
   // A chat that handed its model or code something only its person may
   // read, so what it writes for others waits for them (core's
-  // private-reads.ts); and a write to an App held for them since, then
-  // confirmed or declined by them, how a confirmed one ended, or that it
-  // waited past its day unconfirmed (core's held-app-calls.ts).
+  // private-reads.ts); and a write to an App held for them since (held
+  // by the agent's own `agent.call`, which names the hold), confirmed or
+  // declined by them, how a confirmed one ended, or that it waited past
+  // its day unconfirmed (core's held-app-calls.ts).
   { action: "chat.private_read", type: "permission" },
-  { action: "chat.app_call.held", type: "action" },
   { action: "chat.app_call.ended", type: "action" },
   { action: "chat.app_call.lapsed", type: "action" },
   { action: "chat.app_call", type: "decision" },

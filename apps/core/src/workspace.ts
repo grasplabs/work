@@ -1863,11 +1863,10 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * Holds a write to an App the chat's agent asked for (held-app-calls.ts)
-   * for the chat's person, audited as the agent's for them
-   * (`chat.app_call.held`) in the same write: the same request still
-   * waiting in the chat is the same hold, so a call made again (a step a
-   * restart ran again) is held, and recorded, once. Refused for a chat
-   * that isn't `personId`'s.
+   * for the chat's person: the same request still waiting in the chat is
+   * the same hold, so a call made again (a step a restart ran again) is
+   * held once. The call that holds it records it (`agent.call`, with the
+   * hold's ID). Refused for a chat that isn't `personId`'s.
    */
   async holdAppCall(
     chatId: unknown,
@@ -1893,7 +1892,7 @@ export class Workspace extends DurableObject<Env> {
       if (waiting !== undefined) {
         return waiting;
       }
-      const row = this.#db
+      return this.#db
         .insert(heldAppCalls)
         .values({
           id: crypto.randomUUID(),
@@ -1905,22 +1904,7 @@ export class Workspace extends DurableObject<Env> {
         })
         .returning()
         .get();
-      this.#outboxEntry({
-        actor: delegateActorOf(
-          chatAuthority({ agentId: held.agentId, personId })
-        ),
-        action: "chat.app_call.held",
-        target: { type: "app", id: held.appId },
-        detail: {
-          workspace: this.ctx.id.name ?? null,
-          chat: chat.id,
-          held: row.id,
-          kind: held.kind,
-        },
-      });
-      return row;
     });
-    this.#deliverAudit();
     this.heldChanged(chat.id);
     return heldAppCallRowOf(kept);
   }

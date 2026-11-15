@@ -23,7 +23,12 @@ import { workspace } from "./durable-objects.ts";
 //   they may read is kept;
 // - an answer read through the person's own personal connection (their
 //   mailbox, their drive: agent-connections.ts), a call's or a confirmed
-//   held call's.
+//   held call's;
+// - an App's answer, when the App may read through a person's own
+//   connection (app-provenance.ts `sourcesOf`), as connect lets it for
+//   the person the chat acts for (agent-apps.ts).
+// Rows of an App's table only the person may read (an `owner` table, a
+// read row rule) don't mark yet: GRA-1932.
 // Their own instruction file, their own agent's instructions and
 // documents, their own skills and a file they attached mark nothing:
 // like their typed message, they are theirs, and nobody else can write
@@ -40,7 +45,8 @@ import { workspace } from "./durable-objects.ts";
 // would write for others. Which writes those are, from the code:
 // - A write to an App (`env.apps.call`, a mutation or an action): its
 //   data is read by the App's members. Held in the chat for its person
-//   (held-app-calls.ts) while the chat is marked.
+//   (held-app-calls.ts) while the chat is marked; refused in a chat app's
+//   conversation, which can't show the hold yet (GRA-1929).
 // - A request for a shared connection (`env.connections.request`): its
 //   reason is read by admins, and nothing holds it, so it is refused
 //   while the chat is marked (chat-connections.ts).
@@ -49,7 +55,7 @@ import { workspace } from "./durable-objects.ts";
 //   (connect's call.ts, held-starts.ts). A connection's reads are not:
 //   in a marked chat, what a read on a shared connection is asked with
 //   (a CRM search for recalled text) still leaves Grasp at once, allowed
-//   and audited by connect, a gap the issue names.
+//   and audited by connect: GRA-1928.
 // - Building an App or a workflow writes a draft its builders read:
 //   GRA-1918.
 

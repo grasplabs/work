@@ -1,6 +1,8 @@
+import { agentErrors } from "@grasp-os/shared/agent";
 import type { App, AppFiles, AppVersion } from "@grasp-os/shared/apps";
 import { functionErrors } from "@grasp-os/shared/functions";
 import { appIdSchema } from "@grasp-os/shared/ids";
+import type { AppId } from "@grasp-os/shared/ids";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
 import { z } from "zod";
 
@@ -9,6 +11,7 @@ import { admitEffect, chatAuthority, recordRunReads } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { callAppFunction } from "./app-functions.ts";
 import type { FunctionAnswer } from "./app-functions.ts";
+import { sourcesOf } from "./app-provenance.ts";
 import { cancelRequest, requestText } from "./app-requests.ts";
 import { appFor, listApps, listVersions, readFiles } from "./apps.ts";
 import {
@@ -20,7 +23,7 @@ import {
 import type { Held } from "./held-app-calls.ts";
 import { appRead } from "./history-access.ts";
 import { grantedPermissions } from "./permissions.ts";
-import { mustConfirmForOthers } from "./private-reads.ts";
+import { markPrivateRead, mustConfirmForOthers } from "./private-reads.ts";
 import { inTurn, runSessionOf } from "./run-sessions.ts";
 
 // Apps for a chat's code: `await env.apps.list()`. What the chat's person
@@ -45,6 +48,27 @@ const actionFor = (kind: string): "read" | "write" =>
 const requestKindSchema = z.looseObject({
   reference: z.looseObject({ kind: z.enum(["query", "mutation", "action"]) }),
 });
+
+/**
+ * Marks the chat of `scope` (private-reads.ts) before App `app`'s answer is
+ * handed over when the App may read through a person's own connection
+ * (their mailbox, their drive: `sourcesOf`, through what it calls too),
+ * as connect lets it for the person it acts for; or through a connection
+ * connect no longer names, failing closed.
+ */
+const markIfReadsPrivate = async (
+  env: Env,
+  scope: AgentScope,
+  app: AppId
+): Promise<void> => {
+  const { connections, unresolved } = await sourcesOf(env, app);
+  if (
+    connections.some(({ ownerUserId }) => ownerUserId !== null) ||
+    unresolved.some((source) => source.startsWith("connection:"))
+  ) {
+    await markPrivateRead(env, scope, "connection");
+  }
+};
 
 /** Apps, as a chat's code reads them. */
 export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
@@ -94,7 +118,7 @@ export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
     const id = appIdSchema.safeParse(app);
     const scope = this.ctx.props;
     let kind: string | null = null;
-    let heldCall = false;
+    let heldId: string | null = null;
     return await asPerson(this.env, scope, {
       allowed: id.success
         ? (permissions) =>
@@ -139,15 +163,23 @@ export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
                 // writes where the App's members read only once that
                 // person confirms it (private-reads.ts): held, nothing run.
                 if (await mustConfirmForOthers(this.env, scope)) {
+                  // Only Grasp's own chat shows the hold to confirm: in a
+                  // chat app's conversation it is refused, as a workflow's
+                  // start is, so nothing waits where nobody can decide it
+                  // (GRA-1929 adds the card that lifts this).
+                  if (scope.via !== undefined && scope.via !== "web") {
+                    throw agentErrors.create("agent.held_call_in_chat_app");
+                  }
                   await admitEffect(this.env, scope);
-                  heldCall = true;
-                  return await holdAppCall(
+                  const held = await holdAppCall(
                     this.env,
                     scope,
                     appId,
                     text,
                     kind ?? "mutation"
                   );
+                  heldId = held.held.id;
+                  return held;
                 }
                 await carryChatRestricted(this.env, scope, appId);
               }
@@ -185,6 +217,12 @@ export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
                 }
               );
               await carryAppRestricted(this.env, scope, appId, answer);
+              // An App that may read through its person's own connection
+              // (their mailbox: app-provenance.ts) hands over what only
+              // they may read: the chat is marked first (private-reads.ts).
+              if (answer.manifestHash !== null) {
+                await markIfReadsPrivate(this.env, scope, appId);
+              }
               // Recorded with the run before it is handed over: withheld
               // from the model once the agent or the person loses the App.
               // A refusal of the platform's own (no such App, no role, no
@@ -214,7 +252,7 @@ export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
       detail: () => ({
         app: id.success ? id.data : null,
         kind,
-        ...(heldCall ? { held: true } : {}),
+        ...(heldId === null ? {} : { held: heldId }),
       }),
       ended: (answer) =>
         "held" in answer || answer.result.ok

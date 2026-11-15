@@ -6482,10 +6482,6 @@ msgstr "Allebei nog eens horen"
 msgid "Heard from enough people"
 msgstr "Van genoeg mensen gehoord"
 
-#: src/activity/audit-words.ts
-msgid "Held a write to an App for its person to confirm"
-msgstr "Een wijziging in een app tegengehouden tot de persoon die bevestigt"
-
 #: src/interview/words.ts
 msgid "Hello"
 msgstr "Hallo"
