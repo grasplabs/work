@@ -99,6 +99,13 @@ const binaries = [
   path.join(import.meta.dirname, "node_modules/.bin"),
 ].join(path.delimiter);
 
+/**
+ * Wrangler's own log of core's dev server, every line of it, in
+ * Playwright's output folder: emptied as a run starts, before the servers
+ * do, and kept with the traces.
+ */
+const coreLog = path.join(import.meta.dirname, "test-results/core-dev.log");
+
 /** A `--var` for wrangler dev, quoted once for the shell. */
 const devVar = (name: string, value: string): string =>
   `--var '${name}:${value}'`;
@@ -299,9 +306,21 @@ export default defineConfig({
         CAPABILITY_SIGNING_KEY: testCapabilityKey,
         // Connect seals the AI provider keys the stack connects with it.
         TOKEN_ENCRYPTION_KEY: testTokenKey,
+        // Warnings and errors on the console (`stdout`, above); every line,
+        // at every level, the runtime's own among them, in wrangler's log,
+        // kept with the run's traces (CI uploads `test-results/`).
+        WRANGLER_LOG: "warn",
+        WRANGLER_LOG_PATH: coreLog,
       },
       port: corePort,
       reuseExistingServer: false,
+      // Its output too, not only its errors: miniflare says on stdout, as a
+      // warning, when the Workers runtime crashed and is being restarted,
+      // which is what a dropped request in a job's log most likely was
+      // (November 2026). The console shows warnings and errors only
+      // (`WRANGLER_LOG`, below): at info, a line for each request and
+      // core's info events added about 36,000 lines a minute.
+      stdout: "pipe",
       // Building the frontend and starting wrangler takes about 120 s on a
       // CI runner, so a runner a few seconds slower missed a 120 s limit
       // before any test ran.
