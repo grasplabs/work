@@ -3,7 +3,7 @@ import type {
   NewMemory,
   Reader,
 } from "@grasp-os/brain-next/contract";
-import { reset, runInDurableObject } from "cloudflare:test";
+import { reset } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -14,6 +14,7 @@ import {
 } from "../src/contract.ts";
 import { foldName } from "../src/entities.ts";
 import { audience, fact, readerOf, word } from "./entity-helpers.ts";
+import { countRowsRead } from "./rows-read.ts";
 
 // What reading memories costs the store, against what the question is not
 // about. Statements over memories (memories.ts `memoriesSql`) and the
@@ -31,46 +32,11 @@ import { audience, fact, readerOf, word } from "./entity-helpers.ts";
 // their exact names (linking.ts `linkedByName`): what it reads is the
 // same however many names the store holds.
 
-/** Rows the store's SQL read, counted at the store itself. */
-interface Counter {
-  rows: () => number;
-  reset: () => void;
-}
-
-/** The counters of the stores of this file, by their object's id. */
-const counters = new Map<string, Counter>();
-
 /** The shared store, from empty storage, its SQL's reads counted. */
 const countedStore = async () => {
   await reset();
   const stub = env.BRAIN_STORE.getByName("brain");
-  // The store woken and its SQL wrapped once: every cursor its statements
-  // open is kept, and their rows read summed when asked.
-  await runInDurableObject(stub, (_instance, state) => {
-    const { sql } = state.storage;
-    const cursors: SqlStorageCursor<Record<string, SqlStorageValue>>[] = [];
-    const exec = sql.exec.bind(sql);
-    Object.defineProperty(sql, "exec", {
-      value: (...args: Parameters<typeof sql.exec>) => {
-        const cursor = exec(...args);
-        cursors.push(cursor);
-        return cursor;
-      },
-    });
-    counters.set(stub.id.toString(), {
-      rows: () => cursors.reduce((sum, cursor) => sum + cursor.rowsRead, 0),
-      reset: () => {
-        cursors.length = 0;
-      },
-    });
-  });
-  /** The rows `ask` has the store's SQL read. */
-  const rowsReadBy = async (ask: () => Promise<unknown>): Promise<number> => {
-    const counter = counters.get(stub.id.toString());
-    counter?.reset();
-    await ask();
-    return counter?.rows() ?? Number.NaN;
-  };
+  const rowsReadBy = await countRowsRead(stub);
   return { stub, rowsReadBy };
 };
 
