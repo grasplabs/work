@@ -5,11 +5,16 @@ import type {
   PendingAction,
 } from "@grasp-os/shared/connect";
 import { failureText } from "@grasp-os/shared/errors";
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@grasp-os/ui/components/alert";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
-import { ClockIcon } from "lucide-react";
+import { ClockIcon, TriangleAlertIcon } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
@@ -467,6 +472,29 @@ export const HeldWrite = ({
   );
 };
 
+/** A held App write whose decision failed: which, and why, in core's words. */
+interface DecisionFailed {
+  what: string;
+  reason: string;
+}
+
+/**
+ * Why a held App write the person decided didn't go through, kept in the
+ * list after its card went (the hold ended either way): nothing was
+ * written. Until their next decision.
+ */
+const DecisionFailedAlert = ({ failed }: { failed: DecisionFailed }) => {
+  const { what, reason } = failed;
+  const { t } = useLingui();
+  return (
+    <Alert variant="destructive">
+      <TriangleAlertIcon />
+      <AlertTitle>{t`${what} didn't go through, so nothing was written.`}</AlertTitle>
+      <AlertDescription>{reason}</AlertDescription>
+    </Alert>
+  );
+};
+
 /**
  * A write to an App held because the chat used something only the person
  * can read (held-app-calls.ts in core): which function of which App, why
@@ -480,9 +508,14 @@ const HeldAppCallCard = ({
 }: {
   chatId: string;
   call: HeldAppCall;
-  onDecided: () => void;
+  /**
+   * Told once a decision ended, with why it failed if it did
+   * (`DecisionFailed`): deciding ends the hold either way, so the card
+   * goes, and only the list it was in can keep saying why.
+   */
+  onDecided: (failed?: DecisionFailed) => void;
 }) => {
-  const { busy, failure, run } = useCoreAction();
+  const { busy, run } = useCoreAction();
   const router = useRouter();
   const { t } = useLingui();
   const app = call.appName ?? call.appId;
@@ -494,8 +527,11 @@ const HeldAppCallCard = ({
   const decide = async (
     decision: (session: Session) => Promise<unknown>
   ): Promise<void> => {
-    await run(decision);
-    onDecided();
+    let reason: string | undefined;
+    await run(decision, (failed) => {
+      reason = failed;
+    });
+    onDecided(reason === undefined ? undefined : { what, reason });
     await router.invalidate();
   };
   return (
@@ -531,7 +567,6 @@ const HeldAppCallCard = ({
           }}
           shown={false}
         />
-        <ErrorText>{failure}</ErrorText>
       </div>
       <div className="flex flex-wrap gap-2">
         <Button
@@ -646,6 +681,9 @@ export const HeldWrites = ({
   const [held, setHeld] = useState<Held>({ state: "loading" });
   const core = useCore();
   const [reads, setReads] = useState(0);
+  // Why the person's last decision of a held App write failed, if it did:
+  // its card is gone, so the list keeps it until their next decision.
+  const [failed, setFailed] = useState<DecisionFailed>();
   const { t } = useLingui();
   useEffect(() => {
     let current = true;
@@ -665,21 +703,21 @@ export const HeldWrites = ({
   if (held.state === "refused") {
     return <ErrorText>{held.message}</ErrorText>;
   }
-  if (
-    held.state === "loading" ||
-    held.actions.length + held.calls.length === 0
-  ) {
+  const count =
+    held.state === "loading" ? 0 : held.actions.length + held.calls.length;
+  if (held.state === "loading" || (count === 0 && failed === undefined)) {
     return null;
   }
-  const count = held.actions.length + held.calls.length;
   return (
     <section aria-label={t`Waiting for you`} className="flex flex-col gap-2">
+      {failed === undefined ? null : <DecisionFailedAlert failed={failed} />}
       {count > 1 ? (
         <RejectAll
           actions={held.actions}
           calls={held.calls}
           chatId={chatId}
           onDecided={() => {
+            setFailed(undefined);
             setReads(reads + 1);
           }}
         />
@@ -689,7 +727,8 @@ export const HeldWrites = ({
           call={call}
           chatId={chatId}
           key={call.id}
-          onDecided={() => {
+          onDecided={(failure) => {
+            setFailed(failure);
             setReads(reads + 1);
           }}
         />
@@ -699,6 +738,7 @@ export const HeldWrites = ({
           action={action}
           key={action.id}
           onDecided={() => {
+            setFailed(undefined);
             setReads(reads + 1);
           }}
         />
