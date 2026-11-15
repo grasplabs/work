@@ -23,8 +23,7 @@ export type KeyState = "free" | "held" | "erased";
 
 /**
  * What an add says that an erasure closed: to an erased source, whose key
- * is closed for good, or for a person alone that began before that
- * person's erasure (erasure.ts). Said only to the producer that adds it,
+ * is closed for good (erasure.ts). Said only to the producer that adds it,
  * which never retries it: the message alone, so a producer tells it from
  * any other failure by comparing it whole.
  */
@@ -1102,21 +1101,21 @@ export const storeBytesMax = 10 * 1000 ** 3;
  */
 export type StaffActionOutcome = "done" | "nothing" | "unavailable";
 
-/** How many erasures of one kind are in the ledger, and how many not yet. */
+/** How many erasures are in the ledger, and how many not yet. */
 export interface ErasureCount {
   written: number;
   unwritten: number;
 }
 
 /**
- * The erasures the store applied, as counts only: by kind, written to the
- * ledger or not yet, and by reason. Never which, when, or the SHA-256 the
+ * The erasures of sources the store applied, as counts only: written to
+ * the ledger or not yet, and by reason. Never which, when, or the SHA-256 the
  * ledger names one by: an unsalted hash of an id confirms to anyone
  * holding the id that it was erased.
  */
 export interface ErasuresOverview {
   source: ErasureCount;
-  person: ErasureCount;
+  writer: ErasureCount;
   byReason: Record<ErasureReason, number>;
 }
 
@@ -1356,7 +1355,7 @@ export type SourceRemoval = z.infer<typeof sourceRemovalSchema>;
 export const isInGroup = (source: string, group: string): boolean =>
   source.length > group.length + 1 && source.startsWith(`${group}/`);
 
-/** A person whose own content to erase, and why. */
+/** A person whose own store to erase whole, and why. */
 export const personErasureSchema = z.strictObject({
   person: principalSchema,
   reason: z.enum(erasureReasons),
@@ -1364,13 +1363,37 @@ export const personErasureSchema = z.strictObject({
 export type PersonErasure = z.infer<typeof personErasureSchema>;
 
 /**
- * What staff look up in the store's record of its erasure ledger: a
- * source, by its key, or a person, by their id, as they were erased.
+ * A writer whose memories to erase (`Brain.eraseWriter`): the host's code
+ * as the App it runs (`app:<id>`), as an add names it, and why.
  */
-export const erasureLookupSchema = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("source"), source: sourceIdSchema }),
-  z.strictObject({ kind: z.literal("person"), person: principalSchema }),
-]);
+export const writerErasureSchema = z.strictObject({
+  writer: principalSchema,
+  reason: z.enum(erasureReasons),
+  /**
+   * The caller's key for this erasure, the same on each of its retries
+   * (one per store deletion, one per data reset): the same change answers
+   * the erasure it made, and erases nothing more; another is another.
+   */
+  change: changeKeySchema,
+});
+export type WriterErasure = z.infer<typeof writerErasureSchema>;
+
+/**
+ * What an erasure of a writer's memories answers: when it was recorded,
+ * and how many memories it covered then; the same on every repeat of its
+ * change (`Brain.eraseWriter`).
+ */
+export interface WriterErased {
+  erasedAt: Date;
+  memories: number;
+}
+
+/**
+ * What staff look up in the store's record of its erasure ledger: a
+ * source, by its key, as it was erased. A person's erasure is no entry of
+ * it: their own store is erased whole, and core keeps the record of that.
+ */
+export const erasureLookupSchema = z.strictObject({ source: sourceIdSchema });
 export type ErasureLookup = z.infer<typeof erasureLookupSchema>;
 
 /**
@@ -2225,12 +2248,24 @@ export const retireRequestSchema = z.strictObject({
   memory: memoryIdSchema,
   reader: readerSchema,
   writer: principalSchema,
+  /**
+   * The caller's key for this retirement, the same on each of its retries
+   * (an id minted per person and request, say): kept with the retirement,
+   * so a repeat tells the call that retired the memory from another.
+   */
+  change: changeKeySchema,
 });
 export type RetireRequest = z.infer<typeof retireRequestSchema>;
 
-/** A retired memory: when it was retired, as recorded, the same on every repeat. */
+/**
+ * A retired memory: when it was retired and by which change, as recorded,
+ * the same on every repeat, whoever repeats it. `change` is the stored
+ * one: a call whose own change differs did not retire it. Null for one
+ * retired before changes were kept.
+ */
 export interface RetiredMemory {
   retiredAt: Date;
+  change: string | null;
 }
 
 /** A memory the reader confirms, as their own word. */
@@ -2806,17 +2841,34 @@ export interface Brain {
    */
   removeSource: (request: SourceRemoval) => Promise<void>;
   /**
-   * Erases what only `person` may read, as `eraseSource` erases a source:
-   * every version readable by them alone, added up to now, and whole each
-   * source whose current version is such, and every memory readable by
-   * them alone, learned up to now, at once. A source others read now keeps
-   * their versions. Content added for them afterwards is new and kept.
-   * Answers alike whatever they held, and is safe to repeat.
+   * Erases `person`'s own store whole, the one place what only they may
+   * read is kept: everything it holds, and from then on every call is
+   * refused, also after a restore of its storage. Safe to repeat. A
+   * person's own store alone, and only for that person: the shared store
+   * holds nothing only one person may read (it refuses such an add), so it
+   * refuses this.
    */
   erasePerson: (request: PersonErasure) => Promise<void>;
   /**
-   * Whether a source or a person was erased, from the store's record of
-   * its ledger alone (`ErasureStatus`). For staff, who name what a client
+   * Erases every memory `writer` wrote (its lineage is the writer's),
+   * learned up to now, retired ones too, as `eraseSource` erases a source:
+   * recorded in the ledger and hidden from every read at once, deleted by
+   * the tick if not by the call, with every name, entity, link and
+   * confirmation that rests on them alone; a restore of an older copy or
+   * of an export can't bring them back. Nothing else is touched: no
+   * source, and no memory of anyone else, on the same entity or not. The
+   * writer isn't closed: what it adds afterwards is new and kept. Answers
+   * when it was recorded and how many memories it covered
+   * (`WriterErased`); repeated with the same change, the same again and
+   * nothing more erased, also after a restart or a restore, so a retry's
+   * answer is the first one's. Another change is another erasure. Returns only
+   * once the erasure is in the ledger: one that throws must be repeated.
+   * The shared store's alone: a person's own store refuses.
+   */
+  eraseWriter: (request: WriterErasure) => Promise<WriterErased>;
+  /**
+   * Whether a source was erased, from the store's record of its ledger
+   * alone (`ErasureStatus`). For staff, who name what a client
    * gave them: it reads nothing but that record, so what was never erased
    * answers as what never existed. The shared store's alone: a person's
    * own store refuses, as it does `handOver` (staff's lookup reads a
@@ -2938,9 +2990,12 @@ export interface Brain {
    * current, or ended by a newer one of the writer's. It stops being
    * current from now on, or can never become current again, and stays as
    * history. It no longer ends older memories, which may become current
-   * again unless retired too. Answers when it was retired, as recorded
-   * (`RetiredMemory`): one this writer already retired answers that same
-   * time again, so a retry never reads as not found nor gets a new time.
+   * again unless retired too. Answers when it was retired and by which
+   * change, as recorded (`RetiredMemory`): one this writer already retired
+   * answers that same time and change again, whatever change the call
+   * names, and changes nothing, so a retry never reads as not found nor
+   * gets a new time, and a call that didn't retire it can tell by the
+   * change.
    * Null alike when there is no such memory, when it is another writer's
    * (retired or not), when the reader may not read it, and when it
    * expired before it was retired: nothing tells another writer's memory

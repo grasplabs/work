@@ -15,7 +15,7 @@ import {
   linkedBy,
   mayName,
 } from "./entities.ts";
-import { subjectOf } from "./erasure.ts";
+import { subjectOf, writerSubjectOf } from "./erasure.ts";
 import { hashOf } from "./files.ts";
 import { linkedByName } from "./linking.ts";
 import {
@@ -242,6 +242,8 @@ interface Into {
   shared: boolean;
   /** Each source the add names, by its SHA-256 as the erasure ledger names it. */
   subjects: ReadonlyMap<string, string>;
+  /** Each writer the add names, by the SHA-256 of its lineage, as the ledger names it. */
+  writers: ReadonlyMap<string, string>;
   learnedAt: number;
   memo: WordMemo;
 }
@@ -290,6 +292,18 @@ const subjectOfSource = (
   return subject;
 };
 
+/** The SHA-256 of `writer`'s lineage, which the add hashed before its transaction. */
+const subjectOfWriter = (
+  writers: ReadonlyMap<string, string>,
+  writer: string
+): string => {
+  const subject = writers.get(writer);
+  if (subject === undefined) {
+    throw new Error("The Brain did not hash a writer it adds");
+  }
+  return subject;
+};
+
 /** Where a memory's basis puts it: its version, writer, lineage and place in that lineage. */
 const basisOf = (
   into: Into,
@@ -300,6 +314,7 @@ const basisOf = (
   version: number | null;
   subject: string | null;
   writer: string | null;
+  writerSubject: string | null;
   lineage: string;
   order: number;
 } => {
@@ -309,6 +324,7 @@ const basisOf = (
       version: null,
       subject: null,
       writer: basis.writer,
+      writerSubject: subjectOfWriter(into.writers, basis.writer),
       lineage: lineageOfWriter(basis.writer),
       order: 0,
     };
@@ -324,6 +340,7 @@ const basisOf = (
     version: basis.version,
     subject: subjectOfSource(into.subjects, basis.source),
     writer: null,
+    writerSubject: null,
     lineage: lineageOfSource(basis.source),
     order: basis.version,
   };
@@ -364,9 +381,9 @@ const writeMemory = (
     .exec<{ row: number }>(
       `INSERT INTO memories (id, entity, attribute, object, value, value_key,
         one_value, type, statement, quote, source, version, subject, writer,
-        lineage, lineage_order, speaker, valid_from, valid_until, learned_at,
-        readers)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        writer_subject, lineage, lineage_order, speaker, valid_from,
+        valid_until, learned_at, readers)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       RETURNING row`,
       id,
       aboutRow,
@@ -382,6 +399,7 @@ const writeMemory = (
       based.version,
       based.subject,
       based.writer,
+      based.writerSubject,
       based.lineage,
       based.order,
       JSON.stringify(memory.speaker),
@@ -432,6 +450,7 @@ export interface AddHashes {
   key: string;
   hash: string;
   subjects: ReadonlyMap<string, string>;
+  writers: ReadonlyMap<string, string>;
 }
 
 /** `adding`'s change key, content and sources, hashed: what its write needs, made before it. */
@@ -460,7 +479,18 @@ export const hashesOf = async (adding: Adding): Promise<AddHashes> => {
       )
     )
   );
-  return { key, hash, subjects };
+  const writers = new Map(
+    await Promise.all(
+      [
+        ...new Set(
+          adding.memories.flatMap(({ basis }) =>
+            basis.kind === "writer" ? [basis.writer] : []
+          )
+        ),
+      ].map(async (writer) => [writer, await writerSubjectOf(writer)] as const)
+    )
+  );
+  return { key, hash, subjects, writers };
 };
 
 /**
@@ -472,7 +502,7 @@ export const hashesOf = async (adding: Adding): Promise<AddHashes> => {
 export const writeAdd = (
   { storage, db, shared }: RememberStore,
   adding: Adding,
-  { key, hash, subjects }: AddHashes
+  { key, hash, subjects, writers }: AddHashes
 ): AddedMemories => {
   const planned = planOf(adding);
   const { sql } = storage;
@@ -513,6 +543,7 @@ export const writeAdd = (
       readers,
       shared,
       subjects,
+      writers,
       learnedAt: stampWrite(sql),
       memo: new Map(),
     };

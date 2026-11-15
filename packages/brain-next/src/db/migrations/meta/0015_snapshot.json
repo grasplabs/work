@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "bcfb39b0-f841-4868-bca3-2bb483bddc6f",
+  "id": "25016359-d8fb-468e-820c-2fd5d38de94a",
   "prevId": "19cd9d80-c60c-4473-8d33-8192da5eab32",
   "tables": {
     "chunks": {
@@ -520,6 +520,13 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "memories": {
+          "name": "memories",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -1018,6 +1025,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "writer_subject": {
+          "name": "writer_subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "lineage": {
           "name": "lineage",
           "type": "text",
@@ -1063,6 +1077,13 @@
         "retired_at": {
           "name": "retired_at",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "retired_change": {
+          "name": "retired_change",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -1137,6 +1158,14 @@
           "name": "memories_readers_idx",
           "columns": [
             "readers"
+          ],
+          "isUnique": false
+        },
+        "memories_writer_idx": {
+          "name": "memories_writer_idx",
+          "columns": [
+            "writer_subject",
+            "learned_at"
           ],
           "isUnique": false
         }
@@ -1571,66 +1600,6 @@
         }
       },
       "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "removed_sources": {
-      "name": "removed_sources",
-      "columns": {
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "subject": {
-          "name": "subject",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "version_row": {
-          "name": "version_row",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "removed_sources_version_row_unique": {
-          "name": "removed_sources_version_row_unique",
-          "columns": [
-            "version_row"
-          ],
-          "isUnique": true
-        },
-        "removed_sources_subject_idx": {
-          "name": "removed_sources_subject_idx",
-          "columns": [
-            "subject"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "removed_sources_version_row_source_versions_row_fk": {
-          "name": "removed_sources_version_row_source_versions_row_fk",
-          "tableFrom": "removed_sources",
-          "tableTo": "source_versions",
-          "columnsFrom": [
-            "version_row"
-          ],
-          "columnsTo": [
-            "row"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}

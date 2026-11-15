@@ -281,7 +281,12 @@ const retireOne = async ({
   const { id, writer } = pick(theirs);
   const reader = readers.find(({ person }) => person === writer);
   if (reader !== undefined) {
-    await shared().retireMemory({ memory: id, reader, writer: reader.person });
+    await shared().retireMemory({
+      memory: id,
+      reader,
+      writer: reader.person,
+      change: "retire",
+    });
   }
 };
 

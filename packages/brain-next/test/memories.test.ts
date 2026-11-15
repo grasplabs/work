@@ -677,6 +677,7 @@ describe("who may read a memory", () => {
         memory,
         reader: readerOf(writer, group),
         writer,
+        change: "retire",
       });
     };
     const name = unique("Acme");
@@ -844,6 +845,7 @@ describe("who may read a memory", () => {
         memory: memory ?? "",
         reader: readerOf(writer, group),
         writer,
+        change: "retire",
       });
     }
     const current = [
@@ -923,6 +925,7 @@ describe("who may read a memory", () => {
       memory: rival.memories[0] ?? "",
       reader: readerOf(second, theirs),
       writer: second,
+      change: "retire",
     });
     const afterRetired = new Date();
 
@@ -1291,7 +1294,12 @@ describe("ending a memory", () => {
       [fact({ kind: "writer", writer: app }, { statement: "Mine" })]
     );
     const retire = async (writer = app) =>
-      await shared().retireMemory({ memory: mine, reader, writer });
+      await shared().retireMemory({
+        memory: mine,
+        reader,
+        writer,
+        change: "retire",
+      });
 
     // Two retires by its writer and one by another, all at once.
     const [first, alongside, byOther] = await Promise.all([
@@ -1375,9 +1383,15 @@ describe("ending a memory", () => {
       memory: theirsRetired,
       reader,
       writer: other,
+      change: "retire",
     });
     const retire = async (memory: string, as: Reader = reader) =>
-      await shared().retireMemory({ memory, reader: as, writer: app });
+      await shared().retireMemory({
+        memory,
+        reader: as,
+        writer: app,
+        change: "retire",
+      });
 
     const outcomes = [
       await retire(theirs),
@@ -1853,6 +1867,7 @@ describe("what a reader sees of a retire and of an extraction", () => {
         memory: made.memories[0] ?? "",
         reader,
         writer,
+        change: "retire",
       });
       return retired !== null;
     };
@@ -1914,6 +1929,7 @@ describe("what a reader sees of a retire and of an extraction", () => {
         memory: id,
         reader: readerOf(person),
         writer: person,
+        change: "retire",
       }),
     ];
     const others = [
@@ -1937,6 +1953,7 @@ describe("what a reader sees of a retire and of an extraction", () => {
             memory: id,
             reader: other,
             writer: other.person,
+            change: "retire",
           })
       ),
     ];
@@ -2029,6 +2046,7 @@ describe("an instruction, a retire's repeat, and an extraction mark's readers", 
         memory: made.memories[0] ?? "",
         reader: readerOf(writer, group),
         writer,
+        change: "retire",
       })
     ).resolves.toBeNull();
   });
@@ -2245,6 +2263,7 @@ describe("pages, attributes, and a retired newer memory", () => {
       memory: newer.memories[0] ?? "",
       reader: writerReader,
       writer,
+      change: "retire",
     });
 
     expect({
@@ -2290,11 +2309,13 @@ describe("pages, attributes, and a retired newer memory", () => {
         memory: made.memories[0] ?? "",
         reader: writerReader,
         writer,
+        change: "retire",
       }),
       await shared().retireMemory({
         memory: newer.memories[0] ?? "",
         reader: writerReader,
         writer,
+        change: "retire",
       }),
     ].map((each) => each !== null);
 
@@ -2479,7 +2500,7 @@ describe("pages, attributes, and a retired newer memory", () => {
   });
 });
 
-/** The SHA-256 of `text`, in hex: how the erasure ledger names a person or a source. */
+/** The SHA-256 of `text`, in hex: how the erasure ledger names a source. */
 const subjectOf = async (text: string): Promise<string> =>
   [
     ...new Uint8Array(
@@ -2490,12 +2511,11 @@ const subjectOf = async (text: string): Promise<string> =>
     .join("");
 
 /**
- * An erasure recorded as a release before memories records it: the row,
- * and for a source, its versions deleted; nothing of memories touched.
- * `rowid` places it, when given.
+ * A source's erasure recorded as a release before memories records it:
+ * the row, and its versions deleted; nothing of memories touched. `rowid`
+ * places it, when given.
  */
 const recordAsOlderRelease = async (
-  kind: "person" | "source",
   subject: string,
   {
     rowid,
@@ -2509,10 +2529,9 @@ const recordAsOlderRelease = async (
       sql.exec("PRAGMA defer_foreign_keys = ON");
       sql.exec(
         `INSERT INTO erasures (rowid, key, kind, subject, reason, erased_at, confirmed)
-        VALUES (?, ?, ?, ?, 'deleted', ?, 1)`,
+        VALUES (?, ?, 'source', ?, 'deleted', ?, 1)`,
         rowid ?? null,
         key,
-        kind,
         subject,
         Date.now()
       );
@@ -2524,19 +2543,6 @@ const recordAsOlderRelease = async (
             version
           )
           .one();
-        if (kind === "person") {
-          sql.exec(
-            "INSERT INTO erased_versions (erasure, subject, version) VALUES (?, ?, ?)",
-            key,
-            sql
-              .exec<{ subject: string }>(
-                "SELECT subject FROM source_subjects WHERE source = ?",
-                source
-              )
-              .one().subject,
-            version
-          );
-        }
         sql.exec("DELETE FROM current_versions WHERE version_row = ?", row);
         sql.exec("DELETE FROM source_changes WHERE version_row = ?", row);
         sql.exec("DELETE FROM chunks WHERE version_row = ?", row);
@@ -2661,7 +2667,7 @@ describe("pages read at one moment, and what a start replays", () => {
           )
           .one().version
     );
-    await recordAsOlderRelease("source", await subjectOf(doc), {
+    await recordAsOlderRelease(await subjectOf(doc), {
       versions: [[doc, version]],
     });
     await runInDurableObject(shared(), (_instance, state) => {
@@ -2686,29 +2692,6 @@ describe("pages read at one moment, and what a start replays", () => {
 });
 
 describe("what a start replays and rebuilds", () => {
-  it("deletes, at start, the memories on a version an older release's person erasure hid", async () => {
-    const person = unique("p");
-    const group = unique("g");
-    const version = await addSource("Only Pat's", audience(group));
-    const made = await remember(
-      audience(group),
-      [customer()],
-      [
-        fact(
-          { kind: "source", ...version, quote: "Only Pat's" },
-          { statement: "Drawn" }
-        ),
-      ]
-    );
-    await recordAsOlderRelease("person", await subjectOf(person), {
-      versions: [[version.source, version.version]],
-    });
-    await kill(shared());
-    await shared().workOverview();
-
-    await expect(heldOf(made.memories)).resolves.toBe(0);
-  });
-
   it("deletes, at start, the memories of a source an older release erased", async () => {
     const group = unique("g");
     const version = await addSource("Acme is in Delft", audience(group));
@@ -2722,7 +2705,7 @@ describe("what a start replays and rebuilds", () => {
         ),
       ]
     );
-    await recordAsOlderRelease("source", await subjectOf(version.source), {
+    await recordAsOlderRelease(await subjectOf(version.source), {
       versions: [[version.source, version.version]],
     });
     await kill(shared());
@@ -3195,6 +3178,7 @@ describe("pages of one read, by the store's stamps (contract v10)", () => {
         memory: mine.memories[0] ?? "",
         reader,
         writer: person,
+        change: "retire",
       });
       return { retired, pages: await allPages(instance, entity, reader) };
     });
@@ -3803,7 +3787,12 @@ describe("which memories a reader may still read", () => {
       memories: asked,
       reader: readerOf(writer),
     });
-    await shared().retireMemory({ memory: mine, reader, writer });
+    await shared().retireMemory({
+      memory: mine,
+      reader,
+      writer,
+      change: "retire",
+    });
     const retired = await shared().readableMemories({
       memories: asked,
       reader,

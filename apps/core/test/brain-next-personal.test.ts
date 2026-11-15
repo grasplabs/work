@@ -805,22 +805,7 @@ describe("a person's own store failing", () => {
 });
 
 describe("erasing a person", () => {
-  it("as a withdrawal leaves their own store answering and taking adds", async () => {
-    const person = await member();
-    const word = markerWord();
-    const readers: SourceReaders = { kind: "owner", personId: person };
-    await add(newSource(), `Their own ${word}`, readers);
-
-    await erasePerson(env, { personId: person, reason: "withdrawn" });
-    await add(newSource(), `Added after ${word}`, readers);
-
-    const found = await textsFor(person, word, true);
-    expect(found.toSorted()).toStrictEqual(
-      [`Added after ${word}`, `Their own ${word}`].toSorted()
-    );
-  });
-
-  it("erases their own store whole after the shared store, stays pending while it is still deleting, and then answers them as nothing does", async () => {
+  it("erases their own store whole, stays pending while it is still deleting, and then answers them as nothing does", async () => {
     const person = await member();
     const team = await teamOf(person);
     const word = markerWord();
