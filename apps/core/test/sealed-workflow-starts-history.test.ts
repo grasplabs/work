@@ -26,6 +26,7 @@ import {
   passing,
   refusalOf,
   requestsApp,
+  settled,
   startedRuns,
 } from "./sealed-workflow-starts-harness.ts";
 import { unique } from "./sign-in.ts";
@@ -201,15 +202,6 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       }
       return z.object({ runId: z.string() }).parse(result.value).runId;
     };
-    const settled = async (runId: string) =>
-      await vi.waitFor(
-        async () => {
-          const run = await resourceRunFor(env, admin, workflow.id, runId);
-          expect(run.endedAt).not.toBeNull();
-          return run;
-        },
-        { timeout: 30_000, interval: 100 }
-      );
     const bobs = await kickOff(bob, "Bob");
     const carols = await kickOff(carol, "Carol");
     // Bob's run of the same version, through another App pinning it too.
@@ -218,7 +210,11 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       app: otherApp.app,
       release: otherApp.release,
     });
-    await Promise.all([settled(bobs), settled(carols), settled(throughOther)]);
+    await Promise.all(
+      [bobs, carols, throughOther].map(
+        async (id) => await settled(admin, workflow.id, id)
+      )
+    );
     // The owner's own start, not through the App: never the App's to tell.
     const direct = await startWorkflow(
       env,
@@ -412,7 +408,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
     await publishDefinition(env, owner, workflow.id, failingDefinition);
     const secret = `Secret-${unique()}`;
     const failed = await kickOff(bob, secret);
-    await settled(failed);
+    await settled(admin, workflow.id, failed);
     const throughOld = refusalOf(
       await ask(bob, { runId: failed, pagination: {} })
     );
@@ -518,13 +514,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       throw new Error(result.error.code);
     }
     const { runId } = z.object({ runId: z.string() }).parse(result.value);
-    await vi.waitFor(
-      async () => {
-        const run = await resourceRunFor(env, admin, workflow.id, runId);
-        expect(run.endedAt).not.toBeNull();
-      },
-      { timeout: 30_000, interval: 100 }
-    );
+    await settled(admin, workflow.id, runId);
     const { result: read } = await callAppFunction(
       env,
       bob,
