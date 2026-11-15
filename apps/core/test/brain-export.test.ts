@@ -2,12 +2,10 @@ import { ensureCollection } from "@grasp-os/brain/collections";
 import { collectionIdSchema } from "@grasp-os/shared/ids";
 import { onboardingDocumentsCollection } from "@grasp-os/shared/onboarding-documents";
 import { env } from "cloudflare:workers";
-import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { keepAudience } from "../src/chat-audiences.ts";
-import { collectionTeams, permissions } from "../src/db/core/schema.ts";
 import {
   advanceExports,
   brainExportPath,
@@ -438,30 +436,30 @@ describe("exporting the company's Brain", setUpTime, () => {
     }
     // Each read by a team, and granted to an agent: more rows of core's
     // parts than one page of them reads.
-    const db = drizzle(env.DB);
     const team = `team-${unique()}`;
-    const now = new Date();
-    const writes = ids.flatMap((id) => [
-      db.insert(collectionTeams).values({ collectionId: id, teamId: team }),
-      db.insert(permissions).values({
-        id: crypto.randomUUID(),
-        subjectType: "agent",
-        subjectId: `agent-${unique()}`,
-        objectType: "collection",
-        objectId: id,
-        actions: JSON.stringify(["read"]),
-        binding: "{}",
-        status: "active",
-        requestedBy: admin.userId,
-        requestedAt: now,
-        grantedBy: admin.userId,
-        grantedAt: now,
-      }),
-    ]);
-    const [first, ...rest] = writes;
-    if (first !== undefined) {
-      await db.batch([first, ...rest]);
-    }
+    const now = Date.now();
+    await env.DB.batch(
+      ids.flatMap((id) => [
+        env.DB.prepare(
+          "INSERT INTO collection_teams (collection_id, team_id) VALUES (?, ?)"
+        ).bind(id, team),
+        // A grant on a collection, left from before the Brain replaced
+        // Knowledge: the export keeps it as it was granted.
+        env.DB.prepare(
+          `INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id,
+            actions, binding, status, requested_by, requested_at, granted_by, granted_at)
+           VALUES (?, 'agent', ?, 'collection', ?, '["read"]', '{}', 'active', ?, ?, ?, ?)`
+        ).bind(
+          crypto.randomUUID(),
+          `agent-${unique()}`,
+          id,
+          admin.userId,
+          now,
+          admin.userId,
+          now
+        ),
+      ])
+    );
     const { token } = await admin.api.knowledge.prepareBrainExport();
     const { exportId } = await admin.api.knowledge.startBrainExport(token);
     const done = await finished(admin, exportId);

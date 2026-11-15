@@ -1,4 +1,3 @@
-import { collectionIdSchema, documentIdSchema } from "@grasp-os/shared/ids";
 import type { InstructionFileRef } from "@grasp-os/shared/instruction-files";
 import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
@@ -6,16 +5,12 @@ import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import { appKind } from "../src/apps.ts";
 import { installShippedSkills } from "../src/brain-skills.ts";
 import { keepMadeInChat } from "../src/drafts.ts";
-import { noteListedSkills } from "../src/knowledge/catalog.ts";
-import { brainOf } from "../src/knowledge/ports.ts";
 import { shippedSkills } from "../src/shipped-skills.ts";
 import { workflowKind } from "../src/workflow-resources.ts";
-import { chatOf, codeResults, codeStep, model, says } from "./agent-chat.ts";
+import { chatOf, model, says } from "./agent-chat.ts";
 import { allEvents } from "./audit-events.ts";
-import { actingFor } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import { keptAgent, saveInstructions } from "./instruction-saves.ts";
-import { newTeam, storedGrant } from "./knowledge.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
 // What a chat's agent reads before each question, and what its answer is
@@ -39,39 +34,6 @@ const systemOf = (body: unknown): string =>
     typeof body === "object" && body !== null && "system" in body
       ? body.system
       : null
-  );
-
-/**
- * More collections than one statement of a chat's SQLite could take a row
- * each of (its bound on values), each holding one document at `path`,
- * everyone's to read, and the agent `agentId`'s too.
- */
-const manyReadable = async (
-  admin: Awaited<ReturnType<typeof signedInApi>>,
-  agentId: string,
-  path: string,
-  text: (index: number) => string
-): Promise<string[]> =>
-  await Promise.all(
-    Array.from({ length: 40 }, async (_, index) => {
-      const { id } = await admin.api.knowledge.createCollection({
-        name: `Team ${index} ${unique()}`,
-        access: "everyone",
-      });
-      await admin.api.knowledge.saveDocument({
-        collectionId: id,
-        path,
-        text: text(index),
-        ifVersion: 0,
-      });
-      await storedGrant(
-        { type: "agent", id: agentId },
-        { type: "collection", id },
-        ["read"],
-        `TEAM_${index}`
-      );
-      return id;
-    })
   );
 
 /** Saves `text` as the next version of `file`, as `by` does from a page. */
@@ -158,7 +120,9 @@ describe("a chat's instructions", setUpTime, () => {
       // Grasp's own skills, from the Brain, without a grant: guidance
       // every member's chat gets.
       skills: first?.includes("- draw-a-workflow (grasp, version "),
-      builds: first?.includes("search the Apps collection"),
+      builds: first?.includes(
+        "list the person's Apps for one that already does the job"
+      ),
       // Nothing changed since: the same prompt as the turn before.
       unchanged: third === second,
     }).toStrictEqual({
@@ -372,54 +336,6 @@ describe("a chat's instructions", setUpTime, () => {
     }).toStrictEqual({ planted: false, escaped: true });
   });
 
-  it("restrict the chat before listing a skill of a sensitive collection", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const person = await signedInApi(idp, "user");
-    const teamId = await newTeam(admin, [person]);
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
-      name: `Payroll ${unique()}`,
-      access: "teams",
-      teams: [teamId],
-      sensitive: true,
-    });
-    const skill = await admin.api.knowledge.saveDocument({
-      collectionId,
-      path: "pay/SKILL.md",
-      text: "---\nname: run-payroll\ndescription: How we run payroll.\n---\n# Steps",
-      ifVersion: 0,
-    });
-    const { stub, agent, chat, id: workspaceId } = await chatOf(person.userId);
-    const authority = actingFor(agent, person.userId);
-    const context = { type: "chat", workspaceId, chatId: chat.id } as const;
-
-    // The catalog never lists a sensitive collection's skills; were one
-    // listed, the read that lists it restricts the chat first.
-    const provenance = await noteListedSkills(
-      brainOf(env),
-      { type: "delegate", authority, context },
-      [
-        {
-          documentId: documentIdSchema.parse(skill.id),
-          collectionId: collectionIdSchema.parse(collectionId),
-          name: "run-payroll",
-          description: "How we run payroll.",
-        },
-      ]
-    );
-
-    expect({
-      provenance,
-      restricted: await stub.isChatRestricted(chat.id),
-    }).toStrictEqual({
-      provenance: {
-        collectionIds: [collectionId],
-        sensitive: true,
-        restricted: true,
-      },
-      restricted: true,
-    });
-  });
-
   it("record the skills each turn lists, once a turn", async () => {
     const person = await signedInApi(idp, "user");
     const { ask, agent, chat } = await chatOf(
@@ -474,37 +390,5 @@ describe("a chat's instructions", setUpTime, () => {
       plain: plain.provenance.restricted,
       restricted: restricted.provenance.restricted,
     }).toStrictEqual({ plain: false, restricted: true });
-  });
-
-  it("carry every collection one read finds, however many at once", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const person = await signedInApi(idp, "user");
-    const marker = `plover${unique()}`;
-    const { ask, agent, stub, chat } = await chatOf(
-      person.userId,
-      codeStep(
-        `export default async (self, env) => (await env.knowledge.search(${JSON.stringify(marker)}, { limit: 50 })).hits.length;`
-      ),
-      says("Found them.")
-    );
-    // Notes, not skills: the turn lists none, and the search finds them all.
-    const collections = await manyReadable(
-      admin,
-      agent.agentId,
-      "note.md",
-      () => `# ${marker}`
-    );
-
-    const answer = await ask(`Where is ${marker}?`);
-
-    expect({
-      ran: await codeResults(stub, chat.id),
-      carried: collections.every((id) =>
-        answer.provenance.sources.includes(id)
-      ),
-    }).toStrictEqual({
-      ran: [{ isError: false, text: "Returned:\n40" }],
-      carried: true,
-    });
   });
 });

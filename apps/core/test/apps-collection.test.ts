@@ -1,4 +1,4 @@
-import type { KnowledgeApi, KnowledgeTools } from "@grasp-os/shared/knowledge";
+import type { KnowledgeApi } from "@grasp-os/shared/knowledge";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -6,13 +6,11 @@ import { z } from "zod";
 
 import { anyTeamGrant } from "../src/app-provenance.ts";
 import { indexApps } from "../src/knowledge/apps-collection.ts";
-import { commitApp, grantReviewed, release, requestGranted } from "./apps.ts";
-import { actingFor, envOf, knowledgeIn } from "./contexts.ts";
+import { commitApp, release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import {
   knowledgeRacing,
   newTeam,
-  readCollection,
   storedGrant,
   storedVersionTexts,
 } from "./knowledge.ts";
@@ -75,7 +73,7 @@ const releasedApp = async (
 
 /** The Apps `knowledge` finds `word` in, by entry path. */
 const entriesFound = async (
-  knowledge: Pick<KnowledgeTools, "search">,
+  knowledge: Pick<KnowledgeApi, "search">,
   word: string
 ): Promise<string[]> => {
   const { hits } = await knowledge.search(word);
@@ -86,7 +84,7 @@ const entriesFound = async (
 
 /** For each of `words`, the Apps `knowledge` finds it in. */
 const foundFor = async (
-  knowledge: Pick<KnowledgeTools, "search">,
+  knowledge: Pick<KnowledgeApi, "search">,
   ...words: string[]
 ): Promise<Record<string, string[]>> =>
   Object.fromEntries(
@@ -594,86 +592,6 @@ describe("who finds an App", setUpTime, () => {
     await expect(other.knowledge.backlinks(sharedEntry)).resolves.toMatchObject(
       { backlinks: [] }
     );
-  });
-
-  it("gives an agent the Apps of the person it acts for, and only under a grant", async () => {
-    const admin = await personOf("admin");
-    const owner = await personOf("builder");
-    const other = await personOf("builder");
-    const word = term();
-    const app = await releasedApp(owner, agentsMd(word));
-    const agent = { type: "agent" as const, agentId: `agent-${unique()}` };
-    const toolsFor = async (person: Person): Promise<KnowledgeTools> => {
-      const tools = knowledgeIn(await envOf(actingFor(agent, person.userId)));
-      if (!tools) {
-        throw new Error("No KNOWLEDGE binding");
-      }
-      return tools;
-    };
-
-    // No grant, no Knowledge tools at all.
-    expect(
-      knowledgeIn(await envOf(actingFor(agent, owner.userId)))
-    ).toBeUndefined();
-
-    await requestGranted(idp, admin, readCollection(agent, appsCollection));
-    await expect(
-      entriesFound(await toolsFor(owner), word)
-    ).resolves.toStrictEqual([entryPath(app.id)]);
-    await expect(
-      entriesFound(await toolsFor(other), word)
-    ).resolves.toStrictEqual([]);
-  });
-
-  it("is never given to an App, which would keep what it found for whoever it is shared with, nor written by an agent, which builds with no grant", async () => {
-    const admin = await personOf("admin");
-    const owner = await personOf("builder");
-    // Indexed, so the collection is there.
-    await releasedApp(owner, agentsMd(term()));
-    const { id: app } = await owner.api.apps.create({ name: `X ${term()}` });
-    const subject = { type: "app" as const, appId: app };
-    const agent = { type: "agent" as const, agentId: `agent-${unique()}` };
-    const writing = {
-      ...readCollection(agent, appsCollection),
-      actions: ["read", "write"],
-    };
-    // Asked for before requests were refused: the grant refuses it.
-    const old = await storedGrant(
-      { type: "app", id: app },
-      { type: "collection", id: appsCollection },
-      ["read"],
-      "APPS",
-      "requested"
-    );
-    const oldWrite = await storedGrant(
-      { type: "agent", id: agent.agentId },
-      { type: "collection", id: appsCollection },
-      ["read", "write"],
-      "APPS",
-      "requested"
-    );
-
-    await expect(
-      Promise.all([
-        outcome(
-          owner.api.permissions.request(readCollection(subject, appsCollection))
-        ),
-        outcome(grantReviewed(admin.api, old)),
-        outcome(owner.api.permissions.request(writing)),
-        outcome(grantReviewed(admin.api, oldWrite)),
-      ])
-    ).resolves.toStrictEqual([
-      "permission.invalid",
-      "permission.invalid",
-      "permission.invalid",
-      "permission.invalid",
-    ]);
-    await expect(admin.api.permissions.list(subject)).resolves.toMatchObject([
-      { id: old, status: "requested" },
-    ]);
-    await expect(admin.api.permissions.list(agent)).resolves.toMatchObject([
-      { id: oldWrite, status: "requested" },
-    ]);
   });
 
   it("keeps an App granted it before from being shared, as what it read there can't be placed", async () => {

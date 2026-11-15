@@ -1,9 +1,5 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { CollectionInput, KnowledgeApi } from "@grasp-os/shared/knowledge";
-import type {
-  PermissionRequest,
-  PermissionSubjectInput,
-} from "@grasp-os/shared/permissions";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
 
@@ -112,18 +108,6 @@ export const collectionWithNote = async (
   return { collectionId: collection.id, noteId: note.id };
 };
 
-/** A permission to read a collection, under `binding`. */
-export const readCollection = (
-  subject: PermissionSubjectInput,
-  collectionId: string,
-  binding = "HANDBOOK"
-): PermissionRequest => ({
-  subject,
-  object: { type: "collection", collectionId },
-  actions: ["read"],
-  binding,
-});
-
 /**
  * A permission stored as it is, past the checks a request and a grant
  * make, as a bug or an old record could leave one: active by default, for
@@ -132,7 +116,7 @@ export const readCollection = (
  */
 export const storedGrant = async (
   subject: { type: "app" | "agent"; id: string },
-  object: { type: "collection" | "connection"; id: string },
+  object: { type: "collection" | "connection" | "platform"; id: string },
   actions: string[],
   binding: string,
   status: "active" | "requested" = "active"

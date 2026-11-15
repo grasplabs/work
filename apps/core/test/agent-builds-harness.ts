@@ -8,7 +8,7 @@ import { readDraft } from "../src/drafts.ts";
 import { chatOf, setObjectEnv, toolStep } from "./agent-chat.ts";
 import type { WorkspaceStub } from "./agent-chat.ts";
 import { testApp } from "./app-definitions.ts";
-import { release, requestGranted } from "./apps.ts";
+import { release } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { createIdp } from "./fake-idp.ts";
 import type { ProviderReply } from "./model-provider.ts";
@@ -122,15 +122,7 @@ export const setUp = async (
     person.userId,
     ...(typeof replies === "function" ? replies(existing) : replies)
   );
-  const grant = async () => {
-    await requestGranted(idp, admin, {
-      subject: chat.agent,
-      object: { type: "collection", collectionId: "apps" },
-      actions: ["read"],
-      binding: "APP_LIBRARY",
-    });
-  };
-  return { admin, builder, person, existing, chat, grant };
+  return { admin, builder, person, existing, chat };
 };
 
 /**

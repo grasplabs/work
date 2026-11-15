@@ -115,14 +115,7 @@ const setUp = async (
   await release(builder, app, { "AGENTS.md": "# Ledger\n" });
   const person = role === "builder" ? builder : await signedInApi(idp, role);
   const chat = await chatOf(person.userId, ...replies);
-  const grant = async (): Promise<string> =>
-    await requestGranted(idp, admin, {
-      subject: chat.agent,
-      object: { type: "collection", collectionId: "apps" },
-      actions: ["read"],
-      binding: "APP_LIBRARY",
-    });
-  return { admin, builder, person, app, chat, grant };
+  return { admin, builder, person, app, chat };
 };
 
 const unavailable = workflowResourceErrors.create(
@@ -132,7 +125,7 @@ const unavailable = workflowResourceErrors.create(
 describe("the agent building an independent workflow", () => {
   it("drafts and test-runs a workflow as its person, recorded as the agent acting for them and as its chat's work, and never publishes it", async () => {
     const name = `summary-${unique()}`;
-    const { person, chat, grant } = await setUp([]);
+    const { person, chat } = await setUp([]);
     // Made as Build it makes one, and published once by the person: the
     // agent creates and publishes none.
     const made = await person.api.workflowResources.create(name);
@@ -165,7 +158,6 @@ describe("the agent building an independent workflow", () => {
       };
     };`;
     await fakeProvider(codeStep(build), says("Built."));
-    await grant();
 
     await chat.ask("Build me a summary workflow for Ledger");
 
@@ -237,7 +229,7 @@ describe("the agent building an independent workflow", () => {
 
   it("drafts a model step from the catalog it reads, one step at a time as the canvas does, which publishes as a catalog binding, not code", async () => {
     const name = `expenses-${unique()}`;
-    const { admin, person, chat, grant } = await setUp([]);
+    const { admin, person, chat } = await setUp([]);
     const made = await person.api.workflowResources.create(name);
     const judge = `judge-${unique()}`;
     await admin.api.workflowResources.publishContract({
@@ -295,7 +287,6 @@ describe("the agent building an independent workflow", () => {
       codeStep(build),
       says("Drafted.")
     );
-    await grant();
 
     await chat.ask("Build me a workflow that summarises expense claims");
 
@@ -373,7 +364,6 @@ describe("the agent building an independent workflow", () => {
       `theirs-${unique()}`
     );
     const asUser = await setUp([], "user");
-    await asUser.grant();
     await fakeProvider(codeStep(calls(theirs.id)), says("No."));
     await asUser.chat.ask("Work on that workflow");
 
@@ -392,7 +382,7 @@ describe("the agent building an independent workflow", () => {
   });
 
   it("does nothing to a workflow its person has no role in", async () => {
-    const { builder, chat, grant } = await setUp([]);
+    const { builder, chat } = await setUp([]);
     const other = await signedInApi(idp, "builder");
     const theirs = await other.api.workflowResources.create(
       `theirs-${unique()}`
@@ -409,7 +399,6 @@ describe("the agent building an independent workflow", () => {
       requestTheirs: `await env.workflowBuild.requestPermission(${id}, { object: { type: "workflow", workflowId: ${JSON.stringify(mine.id)} }, actions: ["start"], binding: "CHILD" })`,
     });
     await fakeProvider(codeStep(calls), says("No."));
-    await grant();
 
     await chat.ask("Change their workflow");
 
@@ -425,7 +414,7 @@ describe("the agent building an independent workflow", () => {
   });
 
   it("asks for a permission for the workflow alone, whatever subject the code names, and it grants nothing", async () => {
-    const { builder, chat, grant } = await setUp([]);
+    const { builder, chat } = await setUp([]);
     const mine = await builder.api.workflowResources.create(`asks-${unique()}`);
     const child = await builder.api.workflowResources.create(
       `child-${unique()}`
@@ -439,7 +428,6 @@ describe("the agent building an independent workflow", () => {
       })`,
     });
     await fakeProvider(codeStep(calls), says("Asked."));
-    await grant();
 
     await chat.ask("Ask for what the workflow needs");
 
