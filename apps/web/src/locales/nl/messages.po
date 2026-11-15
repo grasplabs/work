@@ -7121,8 +7121,8 @@ msgid "It is gone for good: it answers nobody, and its schedule and settings are
 msgstr "Hij is voorgoed weg: hij antwoordt niemand, en zijn schema en instellingen worden verwijderd. De chats die mensen met hem hadden, kunnen zij blijven lezen."
 
 #: src/apps/app-remove.tsx
-msgid "It is gone for good: its pages, versions and members, and what it was allowed. Its stores and their records stay, and so do the workflows it doesn’t own."
-msgstr "Hij is definitief weg: zijn pagina’s, versies en leden, en wat hij mocht. De opslag en de records erin blijven, net als de workflows die hij niet bezit."
+msgid "It is gone for good: its pages, versions and members, and what it was allowed. Its stores and their records stay, and so do what its code remembered in the Brain and the workflows it doesn’t own."
+msgstr "Hij is definitief weg: zijn pagina’s, versies en leden, en wat hij mocht. De opslag en de records erin blijven, net als wat zijn code in het Brein onthield en de workflows die hij niet bezit."
 
 #: src/apps/app-page.tsx
 msgid "It is kept as it was, and nobody works on it, until a builder restores it."
@@ -14217,6 +14217,10 @@ msgstr "Ze vinden het onder Workflows en voeren het uit zoals het nu is."
 msgid "Thinking"
 msgstr "Denkt na"
 
+#: src/apps/resource-bindings.tsx
+msgid "This App can save memories in the Brain in its own name, which everyone who uses the App reads through it, and only through it, and it can take its own back."
+msgstr "Deze app kan in eigen naam herinneringen in het Brein opslaan, die iedereen die de app gebruikt via de app leest, en alleen via de app, en ze kan haar eigen herinneringen weer terugnemen."
+
 #: src/apps/app-data.tsx
 msgid "This App changed. Reload to see its current version."
 msgstr "Deze app is gewijzigd. Laad opnieuw om de huidige versie te zien."
@@ -15656,6 +15660,10 @@ msgstr "Waarmee hij start"
 #: src/workflows/item-test.tsx
 msgid "What its calls answer"
 msgstr "Wat de aanroepen antwoorden"
+
+#: src/apps/app-reset.tsx
+msgid "What its code remembered in the Brain until now goes too; a call already running may still remember what it read before."
+msgstr "Wat haar code tot nu toe in het Brein onthield, gaat ook; een aanroep die al loopt, kan nog onthouden wat hij eerder las."
 
 #: src/workflows/kept-state.tsx
 msgid "What its steps keep for later runs, which each run reads as it starts. It uses {used} KB of {cap} KB."

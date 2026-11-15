@@ -72,6 +72,8 @@ export const brainOperations: readonly BrainOperation[] = [
   "skills.read",
   "entities.get",
   "entities.find",
+  "remember",
+  "forget",
 ];
 
 /** The operations a guests permission may declare. */

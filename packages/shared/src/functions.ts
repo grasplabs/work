@@ -97,6 +97,20 @@ export const functionErrors = defineErrorFamily({
     "What the permission reaches has no such item, or none the App may read for this person.",
   "permission.limit_reached":
     "The App used this permission as much as it may in one call, one minute, one hour or one day, holds as much of it open as it may at once, or made as deep, as round or as many calls between Apps as it may, so this request wasn't made. Its details name which.",
+  // Why an App's code may not write to the Brain (core's
+  // brain-app-writes.ts), for its builder to act on: each its own words.
+  "permission.brain_write_caller":
+    "This App writes to the Brain only when a person calls it from the App's own page, never when an agent, Code Mode or a workflow calls it. Its details name which called.",
+  "permission.brain_write_not_user":
+    "The person this call is for doesn't use this App now, so its code can't write to the Brain for them.",
+  "permission.brain_write_table":
+    "A table of the version that runs is read by fewer people than use this App, so its code can't write to the Brain. Let everyone who uses the App read the table, or remove it, and publish. Its details name the table.",
+  "permission.brain_write_builders_table":
+    "A table of the version that runs is read only by the App's builders, and the person this call is for builds the App, so its code can't write to the Brain for them. A call for someone who uses the App without building it can. Its details name the table.",
+  "permission.brain_write_reach":
+    "This App can reach something not everyone in the company may read: a personal connection, a collection, some teams' part of the Brain, or another App. So its code can't write to the Brain, for good: a grant once given still counts after it is revoked, since the App may still hold what it read. Its details name which.",
+  "permission.brain_write_unplaced":
+    "Grasp can't place everything this App can reach (a grant on something it can't find, or more Apps and workflows linked to it than one check follows), so its code can't write to the Brain now. Remove what it can't find, or the grants that link it so widely.",
   "contract.invalid_permission_result":
     "A permission's call answered something its contract doesn't allow.",
   "contract.invalid_args": "The arguments don't fit the function.",
@@ -156,6 +170,13 @@ const categories: Readonly<Record<string, ErrorCategory>> = {
   "permission.declined": "domain",
   "permission.idempotency_conflict": "contract",
   "permission.limit_reached": "operational",
+  "permission.brain_write_caller": "authorization",
+  "permission.brain_write_not_user": "authorization",
+  // The App's own definition and grants decide these, not the call.
+  "permission.brain_write_table": "source",
+  "permission.brain_write_builders_table": "authorization",
+  "permission.brain_write_reach": "source",
+  "permission.brain_write_unplaced": "source",
   "data.write_denied": "authorization",
   "data.conflict": "domain",
   "data.referenced": "domain",
