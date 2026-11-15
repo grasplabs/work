@@ -922,4 +922,109 @@ describe("a chat's code reading the Brain's entities", setUpTime, () => {
       },
     });
   });
+
+  it("keeps a fresh card confirmed over a rival its writer has since forgotten, and withholds the read that rested on that rival", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = await signedInWithRole(idp, "user");
+    const [rightWriter, wrongWriter] = [`w-${word()}`, `w-${word()}`];
+    const name = `Customer ${word()}`;
+    const status = async (value: string, writerOf: string, id?: string) =>
+      await shared().addMemories({
+        change: crypto.randomUUID(),
+        access: { kind: "audience", group: "company" },
+        ...(id === undefined
+          ? {}
+          : { reader: { person: writerOf, groups: ["company"] } }),
+        entities: [
+          {
+            key: "c",
+            kind: "customer",
+            ...(id === undefined ? {} : { id }),
+            names: [name],
+          },
+        ],
+        memories: [
+          {
+            about: "c",
+            attribute: "status",
+            value,
+            type: "fact",
+            statement: `${name} is ${value}`,
+            speaker: { kind: "system" },
+            basis: { kind: "writer", writer: writerOf },
+          },
+        ],
+      });
+    const right = await status("Active", rightWriter);
+    const entity = right.entities.c ?? "";
+    const wrong = await status("Paused", wrongWriter, entity);
+    // Confirmed over the rival by someone who reads them both.
+    await shared().confirmMemory({
+      memory: right.memories[0] ?? "",
+      reader: { person: `p-${word()}`, groups: ["company"] },
+    });
+    const chat = await ownChatOf(
+      admin,
+      person.userId,
+      cardsCode([entity]),
+      says("Read."),
+      cardsCode([entity]),
+      says("Read again."),
+      says("Last.")
+    );
+    await chat.ask(word());
+    await shared().retireMemory({
+      memory: wrong.memories[0] ?? "",
+      reader: { person: wrongWriter, groups: ["company"] },
+    });
+    const turn = await chat.ask(word()).then(() => "answered", String);
+    const [first, fresh] = await codeResults(chat.stub, chat.chat.id);
+    const at = chat.provider.requests.length;
+    await chat.ask(word());
+    const later = JSON.stringify(chat.provider.requests[at]?.body);
+    const statusOf = (text: string | undefined) =>
+      z
+        .array(
+          z.object({
+            attributes: z.array(
+              z.object({
+                memories: z.array(
+                  z.object({
+                    value: z.string().nullable(),
+                    confirmed: z.boolean(),
+                    contested: z.boolean(),
+                  })
+                ),
+              })
+            ),
+          })
+        )
+        .parse(returnedSchema.parse(text))
+        .flatMap(({ attributes }) =>
+          attributes.flatMap(({ memories }) => memories)
+        );
+
+    expect({
+      first: statusOf(first?.text),
+      turn,
+      fresh: statusOf(fresh?.text),
+      later: {
+        withheld: timesIn(later, withheldResult),
+        paused: later.includes(`${name} is Paused`),
+      },
+    }).toStrictEqual({
+      // Both sides, the right one confirmed.
+      first: [
+        { value: "Active", confirmed: true, contested: true },
+        { value: "Paused", confirmed: false, contested: true },
+      ],
+      // The rival forgotten: still confirmed, contested no more, and the
+      // turn goes on.
+      turn: "answered",
+      fresh: [{ value: "Active", confirmed: true, contested: false }],
+      // The first read rested on the forgotten rival: withheld; the fresh
+      // one stays.
+      later: { withheld: 1, paused: false },
+    });
+  });
 });

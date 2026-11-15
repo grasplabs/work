@@ -748,6 +748,120 @@ describe("who may read a memory", () => {
     });
   });
 
+  // The same rule for what a card says of its memories: a forgotten rival
+  // neither contests nor un-confirms, and a relation's other entity named
+  // only by a forgotten memory has no name; none of them is rested on.
+  it("rests a card on no memory its writer retired: a rival confirmed over, a rival, a relation's other entity's name, the memory past the page", async () => {
+    const group = unique("group");
+    const reader = readerOf(unique("reader"), group);
+    const [first, second, third] = [unique("w"), unique("w"), unique("w")];
+    const status = (writer: string, value: string) =>
+      fact(
+        { kind: "writer", writer },
+        { attribute: "status", value, statement: `Acme is ${value}` }
+      );
+    const right = await remember(
+      audience(group),
+      [customer({ names: [unique("Acme")] })],
+      [status(first, "Active")]
+    );
+    const entity = right.entities.c ?? "";
+    const add = async (entities: NewEntity[], memories: NewMemory[]) =>
+      await remember(
+        audience(group),
+        entities,
+        memories,
+        shared(),
+        crypto.randomUUID(),
+        reader
+      );
+    const wrong = await add(
+      [customer({ id: entity })],
+      [status(second, "Paused")]
+    );
+    // Confirmed over the rival; then a relation to a person only a
+    // memory since forgotten names, and a note, past a page of one.
+    await shared().confirmMemory({ memory: right.memories[0] ?? "", reader });
+    const owner = await add(
+      [{ key: "p", kind: "person", names: [unique("Ann")] }],
+      [
+        {
+          about: "p",
+          type: "fact",
+          statement: "Ann works here",
+          speaker: { kind: "system" },
+          basis: { kind: "writer", writer: third },
+        },
+      ]
+    );
+    const relation = await add(
+      [
+        customer({ id: entity }),
+        { key: "p", id: owner.entities.p ?? "", kind: "person" },
+      ],
+      [
+        fact(
+          { kind: "writer", writer: first },
+          {
+            attribute: "account_owner",
+            object: "p",
+            statement: "Ann owns Acme",
+          }
+        ),
+      ]
+    );
+    const card = async (limit?: number) => {
+      const read = await shared().readCard({
+        entity,
+        reader,
+        ...(limit === undefined ? {} : { limit }),
+      });
+      return {
+        statuses: read?.attributes.flatMap(({ memories }) =>
+          memories.map(({ value, confirmed, contested }) => ({
+            value,
+            confirmed: confirmed !== null,
+            contested,
+          }))
+        ),
+        owner: read?.relations.map(({ other }) => other.name),
+        words: read?.restsOnWords.toSorted(),
+      };
+    };
+    const before = await card();
+
+    for (const [writer, memory] of [
+      [second, wrong.memories[0]],
+      [third, owner.memories[0]],
+    ] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one retirement at a time
+      await shared().retireMemory({
+        memory: memory ?? "",
+        reader: readerOf(writer, group),
+      });
+    }
+    const current = [
+      right.memories[0] ?? "",
+      relation.memories[0] ?? "",
+    ].toSorted((a, b) => a.localeCompare(b));
+    const paged = await card(1);
+
+    expect({
+      before: before.words?.includes(wrong.memories[0] ?? ""),
+      after: await card(),
+      paged: paged.words?.every((id) => current.includes(id)),
+    }).toStrictEqual({
+      before: true,
+      after: {
+        // Still confirmed by the person; contested no more.
+        statuses: [{ value: "Active", confirmed: true, contested: false }],
+        owner: [null],
+        words: current,
+      },
+      paged: true,
+    });
+  });
+
   // Threat 3: a newer memory ends an older one only for those who may read it.
   it("stays current for a reader who can't read the memory that ended it", async () => {
     const left = unique("left");

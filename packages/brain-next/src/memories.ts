@@ -190,7 +190,10 @@ const rivalSql = `
  * The latest confirmation of `m` that counts for the reader, as JSON (its
  * row too, for what it rests on), or null: one made over memories they
  * may all read, and over every current rival they may read, so one made
- * without seeing a rival never ranks first for a reader who sees it.
+ * without seeing a rival never ranks first for a reader who sees it. A
+ * memory it was made over that its writer retired since gives nothing to
+ * the read (`retiredSql`): forgetting a wrong rival never un-confirms the
+ * right memory, as in a store without that rival.
  */
 const confirmationSql = `(
   SELECT json_object('by', confirmed.person, 'at', confirmed.at, 'row', confirmed.row)
@@ -199,7 +202,8 @@ const confirmationSql = `(
     AND NOT EXISTS (
       SELECT 1 FROM memory_confirmed_over AS overruled
       JOIN memories AS other ON other.row = overruled.memory
-      WHERE overruled.confirmation = confirmed.row AND NOT ${visibleSql("other")}
+      WHERE overruled.confirmation = confirmed.row
+        AND NOT ${retiredSql("other", "?4")} AND NOT ${visibleSql("other")}
     )
     AND NOT EXISTS (${rivalSql}
       AND rival.row NOT IN (
@@ -662,12 +666,17 @@ const heldOfRow = ({ source, version, id }: MemoryRow): HeldMemory => ({
   memory: id,
 });
 
-/** `?1` the confirmations' rows (JSON): the memories each was made over. */
+/**
+ * `?1` the confirmations' rows (JSON), `?2` the moment read at: the
+ * memories each was made over, but those their writer retired by then,
+ * which no longer decide whether it counts (`confirmationSql`).
+ */
 const overruledSql = `
 SELECT DISTINCT m.source AS source, m.version AS version, m.id AS memory
 FROM json_each(?1) AS asked
 CROSS JOIN memory_confirmed_over AS over ON over.confirmation = asked.value
-CROSS JOIN memories AS m ON m.row = over.memory`;
+CROSS JOIN memories AS m ON m.row = over.memory
+WHERE NOT ${retiredSql("m", "?2")}`;
 
 /**
  * `readMemories`, with every memory what the page says rests on
@@ -721,7 +730,7 @@ export const readMemoriesHeld = (
             source: string | null;
             version: number | null;
             memory: string;
-          }>(overruledSql, JSON.stringify(confirmations))
+          }>(overruledSql, JSON.stringify(confirmations), learned)
           .toArray()
           .map(({ source, version, memory }) => ({ source, version, memory }));
   return {
