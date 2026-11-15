@@ -1496,6 +1496,8 @@ describe("uploading a file straight into the Brain", () => {
         });
       }
       const [marked] = await rowsWith(removing.source.id);
+      // The Brain's removal was held: still owed when the admin erases.
+      expect(marked?.removalOwed).toBeTruthy();
       await admin.api.brainSources.deleteUpload(removing.source.id);
       await completeOwedRemovals(env);
 
@@ -1522,7 +1524,10 @@ describe("uploading a file straight into the Brain", () => {
       const removing = await sharedToRemove();
       const admin = await signedInApi(idp, "admin");
       const identity = await removing.uploader.api.whoami();
+      let removedAt: string | undefined;
       const erasing = interleaved(completing, async () => {
+        const [marked] = await rowsWith(removing.source.id);
+        removedAt = marked?.removedAt?.toISOString();
         await admin.api.brainSources.deleteUpload(removing.source.id);
       });
       const answered = await outcome(async () => {
@@ -1543,7 +1548,7 @@ describe("uploading a file straight into the Brain", () => {
           {
             action: "brain.upload.removed",
             by: removing.uploader.userId,
-            at: events[1]?.at,
+            at: removedAt,
           },
           {
             action: "brain.upload.deleted",
@@ -1564,26 +1569,28 @@ describe("uploading a file straight into the Brain", () => {
       const removing = await sharedToRemove();
       const admin = await signedInApi(idp, "admin");
       const adminIdentity = await admin.api.whoami();
-      const held = "removed_sources_test_holds_for_late_removal";
+      const uploaderIdentity = await removing.uploader.api.whoami();
       // Just before the admin's erase forgets the row it read in use, its
-      // uploader removes it, the Brain's part held: owed.
+      // uploader removes it, and their call stops right after their mark
+      // (its record of the Brain's removal fails): owed when the admin's
+      // erase reads the row again.
+      const stopsAfterMark = interleaved(completing, async () => {
+        await Promise.reject(new Error("Stopped after the mark, by the test"));
+      });
+      let marked: { removedAt?: string; owed?: boolean } = {};
       const removedMeanwhile = interleaved(forgetting, async () => {
-        await runInDurableObject(sharedStore(), (_store, state) => {
-          state.storage.sql.exec(
-            `CREATE TRIGGER ${held} BEFORE INSERT ON removed_sources BEGIN SELECT RAISE(ABORT, 'held by the test'); END`
+        await outcome(async () => {
+          await deleteBrainUpload(
+            stopsAfterMark,
+            uploaderIdentity,
+            removing.source.id
           );
         });
-        try {
-          await outcome(async () => {
-            await removing.uploader.api.brainSources.deleteUpload(
-              removing.source.id
-            );
-          });
-        } finally {
-          await runInDurableObject(sharedStore(), (_store, state) => {
-            state.storage.sql.exec(`DROP TRIGGER IF EXISTS ${held}`);
-          });
-        }
+        const [row] = await rowsWith(removing.source.id);
+        marked = {
+          removedAt: row?.removedAt?.toISOString(),
+          owed: row?.removalOwed,
+        };
       });
       await deleteBrainUpload(
         removedMeanwhile,
@@ -1591,18 +1598,19 @@ describe("uploading a file straight into the Brain", () => {
         removing.source.id
       );
       await completeOwedRemovals(env);
-      const events = await ledgerOf(removing.source.id);
 
       expect({
-        events,
+        owed: marked.owed,
+        events: await ledgerOf(removing.source.id),
         rows: await rowsWith(removing.source.id),
       }).toStrictEqual({
+        owed: true,
         events: [
           { action: "brain.upload.added", by: removing.uploader.userId },
           {
             action: "brain.upload.removed",
             by: removing.uploader.userId,
-            at: events[1]?.at,
+            at: marked.removedAt,
           },
           {
             action: "brain.upload.deleted",
