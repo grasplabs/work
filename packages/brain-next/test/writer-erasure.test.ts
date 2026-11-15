@@ -790,6 +790,9 @@ describe("a writer's erasure", () => {
   });
 
   describe("a store of the release before", () => {
+    /** How many migrations the release before had run: 0000 to 0014. */
+    const releaseBeforeMigrations = 15;
+
     // Migration 0016 makes `erasures` anew, which rows of `erased_versions`
     // point at: it must keep every erasure, and the store must start.
     it("keeps every erasure through the upgrade, also one rows point at, and takes a writer's erasure after it", async () => {
@@ -866,7 +869,9 @@ describe("a writer's erasure", () => {
                     .toSorted(
                       (a, b) => Number(a.created_at) - Number(b.created_at)
                     )
-                    .slice(0, -5),
+                    // The release before ran migrations 0000 to 0014: every
+                    // one after them runs again, not only this release's five.
+                    .slice(0, releaseBeforeMigrations),
                 };
               }
               default: {
@@ -878,7 +883,10 @@ describe("a writer's erasure", () => {
           (made) =>
             !made.includes("memories_writer_idx") &&
             !made.includes("erasures_writer_idx") &&
-            !made.includes("memory_erase_failures")
+            !made.includes("memory_erase_failures") &&
+            // Made by a migration after the release before's, as those are.
+            !made.includes("unembeddable_hash_idx") &&
+            !made.includes("work_items_key_idx")
         ),
       };
       expect(
