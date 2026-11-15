@@ -4,20 +4,12 @@ import {
   brainRecordsMaxPerType,
 } from "@grasp-os/shared/brain-records";
 import { purgedMarker } from "@grasp-os/shared/knowledge";
-import type { PurgeInput } from "@grasp-os/shared/knowledge";
 import type { RosterInput } from "@grasp-os/shared/onboarding";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { mockIdp } from "./idp.ts";
-import { ownCollectionOf } from "./knowledge.ts";
-import {
-  auditedDuring,
-  openRpc,
-  outcome,
-  signedInApi,
-  unique,
-} from "./sign-in.ts";
+import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
 
 // The brain's records (`brain.addRecords`, core's brain-records.ts), as
 // an admin adds them and every member reads them in `brain.read`. What
@@ -505,19 +497,6 @@ describe("the brain's records", { timeout: 120_000 }, () => {
   });
 });
 
-type Signed = Awaited<ReturnType<typeof signedInApi>>;
-
-/** Saves `text` as a note in `person`'s Personal collection. */
-const noteOf = async (person: Signed, text: string) => {
-  const personal = await ownCollectionOf(person);
-  return await person.api.knowledge.saveDocument({
-    collectionId: personal,
-    path: `notes/${unique()}.md`,
-    text,
-    ifVersion: 0,
-  });
-};
-
 /** A source naming `name`, a tool and a statement in its words. */
 const naming = (tag: string, name: string) => {
   const ids = {
@@ -553,154 +532,34 @@ const naming = (tag: string, name: string) => {
   return { ids, records };
 };
 
-/** A content purge of `terms` from a note naming them, prepared and run. */
-const purgeOf = async (admin: Signed, terms: string[]) => {
-  const note = await noteOf(admin, `# Handover\n${terms.join(" ")} leaves.`);
-  const input: PurgeInput = {
-    type: "content",
-    documentIds: [note.id],
-    terms,
-    reason: "erasure_request",
-  };
-  return { input, plan: await admin.api.knowledge.preparePurge(input) };
-};
+describe("a record an earlier release's term purge rewrote", () => {
+  it("stays as the purge left it when the same record is sent again", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const tag = unique();
+    const name = `Visser${tag}`;
+    const { ids, records } = naming(tag, name);
+    await admin.api.brain.addRecords(records);
+    // As the purge left it on a deployment: its words rewritten, marked.
+    const statement = records.find(({ type }) => type === "statement");
+    const purgedText = `${purgedMarker} types invoices over by hand.`;
+    await env.DB.prepare(
+      "UPDATE brain_records SET body = json_set(body, '$.text', ?), purged_at = ? WHERE id = ? AND type = 'statement'"
+    )
+      .bind(purgedText, Date.now(), ids.statement)
+      .run();
 
-describe(
-  "the Playbook's records under a content purge",
-  { timeout: 120_000 },
-  () => {
-    it("lose a purged term from their words, keep what they name, are audited without the term, and stay purged when sent again", async () => {
-      const admin = await signedInApi(idp, "admin");
-      const member = await signedInApi(idp, "user");
-      const tag = unique();
-      const name = `Visser${tag}`;
-      const { ids, records } = naming(tag, name);
-      await admin.api.brain.addRecords(records);
+    // The onboarding gives a team's intake again: the same records.
+    const again = await admin.api.brain.addRecords(records);
+    const read = await admin.api.brain.read();
 
-      const { input, plan } = await purgeOf(admin, [name]);
-      let stillFound: number | undefined;
-      const events = await auditedDuring(async () => {
-        ({ stillFound } = await admin.api.knowledge.purge(input, plan.token));
-      });
-      // The onboarding gives a team's intake again: the same records.
-      const again = await admin.api.brain.addRecords(records);
-      const read = await member.api.brain.read();
-
-      expect({
-        stillFound,
-        again,
-        source: read.sources.find(({ id }) => id === ids.source)?.title,
-        tool: read.tools.find(({ id }) => id === ids.tool),
-        statement: read.statements.find(({ id }) => id === ids.statement),
-        anywhere: JSON.stringify(read).includes(name),
-        purged: events
-          .filter(({ action }) => action === "brain.records.purged")
-          .map(({ target }) => String(target?.id))
-          .toSorted((a, b) => a.localeCompare(b)),
-        inAudit: JSON.stringify(events).includes(name),
-      }).toStrictEqual({
-        stillFound: 0,
-        again: { added: 0, unchanged: 3 },
-        source: `Interview with ${purgedMarker}`,
-        tool: {
-          id: ids.tool,
-          name: `${purgedMarker}'s sheet`,
-          teamIds: [],
-          sourceId: ids.source,
-          ai: "none",
-        },
-        statement: {
-          id: ids.statement,
-          kind: "blocker",
-          text: `${purgedMarker} types invoices over by hand.`,
-          sourceId: ids.source,
-          teamIds: [],
-          toolIds: [ids.tool],
-          pain: "high",
-        },
-        anywhere: false,
-        purged: [
-          `source:${ids.source}`,
-          `statement:${ids.statement}`,
-          `tool:${ids.tool}`,
-        ].toSorted((a, b) => a.localeCompare(b)),
-        inAudit: false,
-      });
+    expect({
+      sent: statement?.type,
+      again,
+      statement: read.statements.find(({ id }) => id === ids.statement)?.text,
+    }).toStrictEqual({
+      sent: "statement",
+      again: { added: 0, unchanged: 3 },
+      statement: purgedText,
     });
-
-    it("leave a record added after the purge read them to a run again, which rewrites it", async () => {
-      const admin = await signedInApi(idp, "admin");
-      const tag = unique();
-      const name = `Visser${tag}`;
-      const { ids, records } = naming(tag, name);
-      await admin.api.brain.addRecords(records);
-      const late: BrainRecordInput = {
-        type: "statement",
-        id: `st-${tag}-late`,
-        kind: "wish",
-        text: `${name} wants the numbers sooner.`,
-        sourceId: ids.source,
-      };
-      // Core's database adds a record holding the term just before the
-      // purge's batch rewrites the ones it read.
-      const real = env.DB;
-      let rewriting = false;
-      let added = false;
-      const db: D1Database = {
-        prepare: (query) => {
-          rewriting ||= query.startsWith('update "brain_records"');
-          return real.prepare(query);
-        },
-        batch: async <T>(statements: D1PreparedStatement[]) => {
-          if (rewriting && !added) {
-            added = true;
-            await admin.api.brain.addRecords([late]);
-          }
-          return await real.batch<T>(statements);
-        },
-        exec: async (query) => await real.exec(query),
-        // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
-        dump: async () => await real.dump(),
-        withSession: (constraint) => real.withSession(constraint),
-      };
-      const { core } = await openRpc(admin.session, {
-        coreEnv: { ...env, DB: db },
-      });
-      const racing = await core.authenticate();
-
-      const first = await purgeOf(admin, [name]);
-      await racing.knowledge.purge(first.input, first.plan.token);
-      const raced = await admin.api.brain.read();
-      const second = await purgeOf(admin, [name]);
-      await admin.api.knowledge.purge(second.input, second.plan.token);
-      const read = await admin.api.brain.read();
-
-      expect({
-        raced: raced.statements.find(({ id }) => id === late.id)?.text,
-        late: read.statements.find(({ id }) => id === late.id)?.text,
-      }).toStrictEqual({
-        raced: `${name} wants the numbers sooner.`,
-        late: `${purgedMarker} wants the numbers sooner.`,
-      });
-    });
-
-    it("keep a form the purge leaves on purpose, and its check counts only the documents named", async () => {
-      const admin = await signedInApi(idp, "admin");
-      const tag = unique();
-      const { ids, records } = naming(tag, `Rene${tag}`);
-      await admin.api.brain.addRecords(records);
-
-      const { input, plan } = await purgeOf(admin, [`René${tag}`]);
-      const result = await admin.api.knowledge.purge(input, plan.token);
-      const read = await admin.api.brain.read();
-
-      expect({
-        stillFound: result.stillFound,
-        statement: read.statements.find(({ id }) => id === ids.statement)?.text,
-      }).toStrictEqual({
-        stillFound: 0,
-        statement: `Rene${tag} types invoices over by hand.`,
-      });
-    });
-  }
-);
+  });
+});

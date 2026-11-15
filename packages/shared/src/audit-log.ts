@@ -183,6 +183,10 @@ const typeRules: readonly {
   // uploads to erase one, with how many.
   { action: "brain.upload.listed", type: "read" },
   { action: "brain.upload", type: "action" },
+  // A person's run results taken out of use in the Brain once they lost
+  // the workflow (core's brain-run-sources.ts): one event a loss, with the
+  // person and how many runs it covered, by IDs and a count alone.
+  { action: "brain.run_sources", type: "action" },
   // A Grasp staff member reading the client's Brain report, and asking for
   // an action on it and its outcome (core's brain-report.ts).
   { action: "admin.brain.read", type: "read" },

@@ -13007,6 +13007,10 @@ msgstr "Gestoppter Zeitplan"
 msgid "Stopped someone visiting an App"
 msgstr "Jemandem den Besuch einer App entzogen"
 
+#: src/activity/audit-words.ts
+msgid "Stopped the Brain using someone's workflow results, as they lost the workflow"
+msgstr "Die Workflow-Ergebnisse einer Person im Brain nicht mehr verwendet, da sie den Workflow verloren hat"
+
 #: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
 msgid "Stopped."

@@ -13007,6 +13007,10 @@ msgstr "Programación detenida"
 msgid "Stopped someone visiting an App"
 msgstr "Dejó de permitir que alguien visite una aplicación"
 
+#: src/activity/audit-words.ts
+msgid "Stopped the Brain using someone's workflow results, as they lost the workflow"
+msgstr "Dejó de usar en el Brain los resultados de flujo de trabajo de alguien, porque perdió el flujo de trabajo"
+
 #: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
 msgid "Stopped."

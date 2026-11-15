@@ -131,6 +131,10 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     action: "brain.capture.erased",
     text: msg`Erased what the Brain kept from a connection, as it was disconnected`,
   },
+  {
+    action: "brain.run_sources.removed",
+    text: msg`Stopped the Brain using someone's workflow results, as they lost the workflow`,
+  },
   { action: "agent.call", text: msg`The agent looked something up` },
   { action: "model.refused", text: msg`A model call was refused` },
   { action: "model", text: msg`Called a model` },
