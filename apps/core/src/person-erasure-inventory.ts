@@ -402,6 +402,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "workspace.chat_search_text": { erased: "workspace" },
   "workspace.chat_sources": { erased: "workspace" },
   "workspace.chat_tool_events": { erased: "workspace" },
+  "workspace.memory_uses": { erased: "workspace" },
   "workspace.preview_release_artifacts": { erased: "workspace" },
   "workspace.preview_releases": { erased: "workspace" },
   "workspace.preview_stores": { erased: "workspace" },
