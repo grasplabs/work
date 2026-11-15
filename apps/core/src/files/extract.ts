@@ -27,45 +27,13 @@ import { sessionHost } from "../sandboxed.ts";
 import { extractedPart, extractorAsset } from "./extractor/asset.ts";
 import type ExtractorWorker from "./extractor/worker.ts";
 
-// Extracting an uploaded file's text as Markdown, by one of two
-// extractors, which `extractorFor` picks:
-//
-// - Grasp's own document conversion (`platformConverter`) for a PDF in a
-//   normal collection: a model that reads the file itself, its text and
-//   each page as an image, so a scan is read too, by OpenAI's model at its
-//   EU data residency host (platform-ai.ts). A model call like any:
-//   through the model gateway (models.ts, `platformCall`), judged by the
-//   rules, metered on Grasp's own spend for the person who uploaded it and
-//   audited as metadata only, and through connect with Grasp's own key. It
-//   sends the file out of the deployment, to Grasp's project in the EU.
-// - The local extractor for everything else: a Word or Excel file, which
-//   it reads exactly, as their text is structured XML, for nothing; a
-//   WebVTT file, which only it reads as a transcript; a file in a
-//   sensitive collection;
-//   and every file while Grasp has no key for the conversion's provider
-//   (on-prem, a stack without Grasp's keys). So a sensitive file's content
-//   never leaves the deployment's own Workers.
-//
-// Threat model of the conversion, and how each is closed:
-// - A sensitive file sent out: routed to the local extractor before
-//   anything is read (`extractorFor`), and the gateway's rules judge the
-//   call as carrying sensitive data besides.
-// - Sent on a key that isn't Grasp's, or to a provider nobody chose: only
-//   `platformCall` with the conversion's provider (platform-ai.ts), whose
-//   key connect holds, at its EU host; without the key the file is read
-//   here, sent nowhere. One the gateway refuses fails as
-//   `upload.conversion_unavailable`.
-// - A file that runs up the bill: an upload is at most 10 MB, the
-//   provider refuses a request beyond the model's window, and what each
-//   conversion cost is recorded on Grasp's key (model-usage.ts).
-// - The file's own words taken as instructions: the answer is only ever
-//   the document's text, saved as its version, which a person reads; it
-//   is checked as the local extractor's is (`markdownMaxBytes`), and an
-//   answer cut short is never saved as the document: one cut off at the
-//   model's output cap is continued until it is whole (`platformConverter`),
-//   and fails the upload when it can't be within the size, the requests
-//   and the time a conversion has.
-//
+// Extracting an uploaded file's text as Markdown. Every upload core reads
+// now (into the Brain, a chat's files, the onboarding's documents) goes
+// through the local extractor (`localExtractor`), in a sandbox on the
+// deployment: nothing is sent out. Grasp's own document conversion by a
+// model (`platformConverter`, picked by `extractorFor`) has no caller any
+// more, since uploads into Knowledge went; GRA-1901 removes it.
+
 // The local extractor (extractor/worker.ts, with the parsers in
 // extractor/formats.ts) never runs in core's isolate: core starts a
 // Dynamic Worker for each extraction, with its code from core's static

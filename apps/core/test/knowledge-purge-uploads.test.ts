@@ -3,6 +3,7 @@ import { uploadTypes } from "@grasp-os/shared/uploads";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { cleanupsPerPage } from "../src/knowledge/uploads.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { erasing } from "./knowledge-purge.ts";
@@ -114,8 +115,8 @@ const storedOf = async (
   return stored.filter(Boolean).length;
 };
 
-/** Uploads more than one page of the cleanup's: 25. */
-const manyUploads = 25;
+/** Uploads more than one page of the cleanup's. */
+const manyUploads = cleanupsPerPage + 1;
 
 /** A person's personal purge, prepared and run by `admin` over `core`. */
 const personalPurge = async (

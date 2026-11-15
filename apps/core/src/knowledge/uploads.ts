@@ -17,7 +17,7 @@ import { inList } from "../db/d1.ts";
 // and its rerun deletes what is left. Nothing reads as erased before it is.
 
 /** Originals deleted at once: R2 deletes up to 1,000 keys in one call. */
-const cleanupsPerPage = 100;
+export const cleanupsPerPage = 100;
 
 /**
  * Deletes every original recorded for deleting whose upload is gone or
