@@ -148,3 +148,9 @@ export const brainEntitiesSchema = z.strictObject({
   entities: z.array(brainEntitySchema),
   next: z.string().nullable(),
 });
+
+/** What `remember` answers an App's code: the memory and its entity, by id. */
+export const brainRememberedSchema = z.strictObject({
+  memory: z.uuid(),
+  entity: z.uuid(),
+});

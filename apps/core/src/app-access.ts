@@ -18,6 +18,7 @@ import {
   unreadableBy,
   unreadableTeamsBy,
 } from "./app-provenance.ts";
+import type { AppSources } from "./app-provenance.ts";
 import { teamsOf } from "./auth/identity.ts";
 import { apps, appMembers, teamMembers } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
@@ -193,12 +194,22 @@ export const requireAppRole = async (
   by: Person,
   app: Pick<App, "id" | "owner"> & AppOpening,
   needed: MemberRole,
-  /**
-   * For what manages the App without reading its data (archive, restore,
-   * removal, a reset): its owner and admins outside a team its Brain
-   * grants name aren't refused it.
-   */
-  { managing = false }: { managing?: boolean } = {}
+  {
+    managing = false,
+    sources,
+  }: {
+    /**
+     * For what manages the App without reading its data (archive, restore,
+     * removal, a reset): its owner and admins outside a team its Brain
+     * grants name aren't refused it.
+     */
+    managing?: boolean;
+    /**
+     * What the App may have read, when the caller read it already for
+     * this same check (app-provenance.ts `holdingsOf`): not read again.
+     */
+    sources?: AppSources;
+  } = {}
 ): Promise<MemberRole> => {
   const found = await appRole(env, by, app);
   if (found === undefined) {
@@ -210,7 +221,7 @@ export const requireAppRole = async (
   }
   if (shared) {
     const unreadable = unreadableBy(
-      await sourcesOf(env, app.id),
+      sources ?? (await sourcesOf(env, app.id)),
       readerOf(
         by.userId,
         by.teams.map(({ id }) => id),

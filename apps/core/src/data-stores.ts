@@ -23,6 +23,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { requireAppRole, requireNotArchived } from "./app-access.ts";
+import { eraseAppMemories } from "./app-memory-erasure.ts";
 import { mayReadBrainTeamsOf } from "./app-provenance.ts";
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
@@ -319,7 +320,13 @@ export const appStoreFor = async (
  * Resets the data of App `app`'s store for `by` (`StoreHost.resetData`,
  * audited in the store's own transaction), applying `apply` to the empty
  * store in the same one: its store, if it has one that lives, or null.
- * Its caller decides who may.
+ * Its caller decides who may. What the App's code remembered goes with
+ * its data (app-memory-erasure.ts), whether or not it has a store (an App
+ * without tables never gets one, yet may remember): erased first, under
+ * one change for this request, so a reset that fails afterwards leaves
+ * data without memories, never memories without data. A call already
+ * running can still remember afterwards what it read before the reset:
+ * the next erasure of the App erases that, not this one.
  */
 export const resetAppStore = async (
   env: Env,
@@ -327,17 +334,20 @@ export const resetAppStore = async (
   app: AppId,
   reset: Pick<StoreReset, "apply">
 ): Promise<StoreId | null> => {
+  const actor = by.actor ?? actorOf(by);
+  await eraseAppMemories(env, {
+    app,
+    change: `app-data-reset:${crypto.randomUUID()}`,
+    actor,
+    cause: "data_reset",
+  });
   const store = await liveStoreOf(env, app);
   if (store === null) {
     return null;
   }
   await inJurisdiction(env, env.DATA_STORES)
     .getByName(store)
-    .resetData(store, {
-      ...reset,
-      actor: by.actor ?? actorOf(by),
-      app,
-    });
+    .resetData(store, { ...reset, actor, app });
   return store;
 };
 
