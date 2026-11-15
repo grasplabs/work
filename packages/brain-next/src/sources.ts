@@ -29,13 +29,10 @@ import {
 } from "./db/schema.ts";
 import { enqueueEmbedding } from "./embedding.ts";
 import {
-  erasuresSoFar,
   groupOfSource,
   isErased,
   isUnderErasedGroup,
   keepGroup,
-  lastErasedVersion,
-  isPersonErasedSince,
   keepSubject,
   subjectOf,
   subjectsOver,
@@ -99,13 +96,6 @@ interface Adding {
   readonly added: NewSource & { readonly after?: number | null };
   /** The source's key as the erasure ledger names it (erasure.ts). */
   readonly subject: string;
-  /**
-   * When readable by one person alone: that person as the erasure ledger
-   * names them, and where the record of erasures was as the add began,
-   * before its file was written: an erasure of them since may have missed
-   * it (`record`).
-   */
-  readonly onlyFor?: { subject: string; soFar: number };
   /** Its group's key as the erasure ledger names it: null for none. */
   readonly group: string | null;
   /** The keys its key lies under, as the ledger names them (`subjectsOver`). */
@@ -296,20 +286,13 @@ const record = (
   storage: DurableObjectStorage,
   adding: Adding
 ): AddedVersion | undefined => {
-  // Erased while this add wrote its file: closed for good. Or for one
-  // person alone, whose erasure came after it began and before this: it
-  // may have missed it, so it is refused, writing nothing (its file is
-  // left to the sweep). An add that begins after it is new, and kept.
-  // A restore is under way (restoring.ts): nothing is added meanwhile.
+  // Erased while this add wrote its file: closed for good, writing nothing
+  // (its file is left to the sweep). A restore is under way
+  // (restoring.ts): nothing is added meanwhile.
   if (isRestoring(storage.sql)) {
     throw new Error(restoringNow);
   }
-  const { onlyFor } = adding;
-  if (
-    isErased(storage.sql, adding.subject) ||
-    (onlyFor !== undefined &&
-      isPersonErasedSince(storage.sql, onlyFor.subject, onlyFor.soFar))
-  ) {
+  if (isErased(storage.sql, adding.subject)) {
     throw new Error(erasedSource);
   }
   refuseByGroup(storage.sql, adding);
@@ -338,14 +321,10 @@ const record = (
     .from(sourceVersions)
     .where(eq(sourceVersions.source, added.source))
     .get();
-  // Past every version erased too (erasure.ts): a number names one
-  // version for good, so nothing that holds an old one (a late vector put,
-  // a citation) ever meets new text under it.
-  const version =
-    Math.max(
-      last?.version ?? 0,
-      lastErasedVersion(storage.sql, adding.subject)
-    ) + 1;
+  // A number names one version for good, so nothing that holds an old
+  // one (a late vector put, a citation) ever meets new text under it: only
+  // an erasure deletes a version, and it closes the source's key.
+  const version = (last?.version ?? 0) + 1;
   const { row } = db
     .insert(sourceVersions)
     .values({
@@ -469,14 +448,10 @@ export const addVersion = async (
   added: Adding["added"],
   { indexed }: { indexed: boolean }
 ): Promise<AddedVersion> => {
-  const soFar = erasuresSoFar(storage.sql);
   const body = encoder.encode(added.text);
   const adding: Adding = {
     added,
     subject: await subjectOf(added.source),
-    ...(added.access.kind === "owner"
-      ? { onlyFor: { subject: await subjectOf(added.access.person), soFar } }
-      : {}),
     group: added.group === undefined ? null : await subjectOf(added.group),
     // The shared store holds no group: nothing under one to look up.
     over: groups ? await subjectsOver(added.source) : [],

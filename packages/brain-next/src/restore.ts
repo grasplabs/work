@@ -102,8 +102,7 @@ import type { WorkContext } from "./work.ts";
 //
 // The erasure ledger is applied as each version is written: it is left out
 // when the store's record of erasures names it (its source erased, so its
-// key is closed; or this version, named by a person's erasure), asked again
-// in the transaction that writes it; and so as each memory and mark resting
+// key is closed), asked again in the transaction that writes it; and so as each memory and mark resting
 // on one is. That record is the whole ledger: the
 // store answers nothing until it has read the ledger through (store.ts),
 // and an erasure that lands during the restore covers what was restored

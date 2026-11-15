@@ -2479,7 +2479,7 @@ describe("pages, attributes, and a retired newer memory", () => {
   });
 });
 
-/** The SHA-256 of `text`, in hex: how the erasure ledger names a person or a source. */
+/** The SHA-256 of `text`, in hex: how the erasure ledger names a source. */
 const subjectOf = async (text: string): Promise<string> =>
   [
     ...new Uint8Array(
@@ -2490,12 +2490,11 @@ const subjectOf = async (text: string): Promise<string> =>
     .join("");
 
 /**
- * An erasure recorded as a release before memories records it: the row,
- * and for a source, its versions deleted; nothing of memories touched.
- * `rowid` places it, when given.
+ * A source's erasure recorded as a release before memories records it:
+ * the row, and its versions deleted; nothing of memories touched. `rowid`
+ * places it, when given.
  */
 const recordAsOlderRelease = async (
-  kind: "person" | "source",
   subject: string,
   {
     rowid,
@@ -2509,10 +2508,9 @@ const recordAsOlderRelease = async (
       sql.exec("PRAGMA defer_foreign_keys = ON");
       sql.exec(
         `INSERT INTO erasures (rowid, key, kind, subject, reason, erased_at, confirmed)
-        VALUES (?, ?, ?, ?, 'deleted', ?, 1)`,
+        VALUES (?, ?, 'source', ?, 'deleted', ?, 1)`,
         rowid ?? null,
         key,
-        kind,
         subject,
         Date.now()
       );
@@ -2524,19 +2522,6 @@ const recordAsOlderRelease = async (
             version
           )
           .one();
-        if (kind === "person") {
-          sql.exec(
-            "INSERT INTO erased_versions (erasure, subject, version) VALUES (?, ?, ?)",
-            key,
-            sql
-              .exec<{ subject: string }>(
-                "SELECT subject FROM source_subjects WHERE source = ?",
-                source
-              )
-              .one().subject,
-            version
-          );
-        }
         sql.exec("DELETE FROM current_versions WHERE version_row = ?", row);
         sql.exec("DELETE FROM source_changes WHERE version_row = ?", row);
         sql.exec("DELETE FROM chunks WHERE version_row = ?", row);
@@ -2661,7 +2646,7 @@ describe("pages read at one moment, and what a start replays", () => {
           )
           .one().version
     );
-    await recordAsOlderRelease("source", await subjectOf(doc), {
+    await recordAsOlderRelease(await subjectOf(doc), {
       versions: [[doc, version]],
     });
     await runInDurableObject(shared(), (_instance, state) => {
@@ -2686,29 +2671,6 @@ describe("pages read at one moment, and what a start replays", () => {
 });
 
 describe("what a start replays and rebuilds", () => {
-  it("deletes, at start, the memories on a version an older release's person erasure hid", async () => {
-    const person = unique("p");
-    const group = unique("g");
-    const version = await addSource("Only Pat's", audience(group));
-    const made = await remember(
-      audience(group),
-      [customer()],
-      [
-        fact(
-          { kind: "source", ...version, quote: "Only Pat's" },
-          { statement: "Drawn" }
-        ),
-      ]
-    );
-    await recordAsOlderRelease("person", await subjectOf(person), {
-      versions: [[version.source, version.version]],
-    });
-    await kill(shared());
-    await shared().workOverview();
-
-    await expect(heldOf(made.memories)).resolves.toBe(0);
-  });
-
   it("deletes, at start, the memories of a source an older release erased", async () => {
     const group = unique("g");
     const version = await addSource("Acme is in Delft", audience(group));
@@ -2722,7 +2684,7 @@ describe("what a start replays and rebuilds", () => {
         ),
       ]
     );
-    await recordAsOlderRelease("source", await subjectOf(version.source), {
+    await recordAsOlderRelease(await subjectOf(version.source), {
       versions: [[version.source, version.version]],
     });
     await kill(shared());
