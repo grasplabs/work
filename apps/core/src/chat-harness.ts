@@ -137,8 +137,8 @@ export interface TurnRequest {
   /**
    * Whether the answer reaches the person alone, so the recall before the
    * question may hold what only they may read (their own store,
-   * turn-recall.ts): their own chat in Grasp, in a turn they started
-   * (workspace.ts, `answersAlone`).
+   * turn-recall.ts): their own chat, in Grasp or their direct message on
+   * a chat app, in a turn they started (workspace.ts, `answersAlone`).
    */
   personal: boolean;
   /** Whether the chat's agent holds the brain permission. */
@@ -1405,7 +1405,9 @@ export class ChatHarness {
       // Only in a person's own chat in Grasp's app, in a turn they started:
       // what they said there is the only word of theirs it may keep, and
       // only Grasp's app shows the notice and its Undo (agent-remember.ts).
-      // A turn nobody started (a wake) has no word of theirs.
+      // Not their direct message on a chat app, though it is their own
+      // chat too (`ownChat`): it shows neither (GRA-1821). A turn nobody
+      // started (a wake) has no word of theirs.
       ...(!request.shared && scope.unattended !== true && scope.via === "web"
         ? { remember: rememberTool(env, scope, request.question.text) }
         : {}),

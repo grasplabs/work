@@ -204,12 +204,22 @@ export const heardFrom = (calls: readonly ToolCall[]): Heard => {
 };
 
 /**
+ * Whether a request's outcome rests on whether his answer answered it: a
+ * turn that answered, did nothing for them and lacked nothing. Any other
+ * turn's own outcome says it (`outcomeOf`), with no model asked.
+ */
+export const answerDecides = (
+  ended: "answered" | "stopped" | "failed",
+  { worked, missing }: Pick<Heard, "worked" | "missing">
+): boolean => ended === "answered" && !worked && missing.length === 0;
+
+/**
  * How a request ended, from how its turn ended and what it did: a turn
  * that answered is `done`, unless all it came to was what he could not do
  * (`notPossible`), or he said he didn't know or asked something back
- * (`unanswered`, as its sorting read it). An answer and nothing else that
- * couldn't be sorted (no model may, or the call failed) is `unanswered`
- * too: billed only once it is known he answered.
+ * (`unanswered`, as its sorting judged it). An answer and nothing else
+ * that couldn't be judged (no model may, or the call failed) is
+ * `unanswered` too: billed only once it is known he answered.
  */
 export const outcomeOf = (
   ended: "answered" | "stopped" | "failed",
@@ -222,7 +232,7 @@ export const outcomeOf = (
   if (heard.missing.length > 0 && !heard.worked) {
     return "notPossible";
   }
-  if (!heard.worked && sorted?.answered !== true) {
+  if (answerDecides(ended, heard) && sorted?.answered !== true) {
     return "unanswered";
   }
   return "done";
