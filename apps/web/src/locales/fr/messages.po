@@ -3382,6 +3382,10 @@ msgstr "Majuscules, chiffres et tirets bas, en commençant par une lettre, par e
 msgid "Card"
 msgstr "Carte"
 
+#: src/activity/audit-words.ts
+msgid "Carried out a confirmed write to an App, or failed to"
+msgstr "A effectué une modification confirmée dans une application, ou n’y est pas parvenu"
+
 #: src/interview/page.tsx
 msgid "Carry on now"
 msgstr "Continuer maintenant"

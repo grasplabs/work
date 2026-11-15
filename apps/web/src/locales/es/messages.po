@@ -3382,6 +3382,10 @@ msgstr "Mayúsculas, dígitos y guiones bajos, empezando por una letra, como CRM
 msgid "Card"
 msgstr "Tarjeta"
 
+#: src/activity/audit-words.ts
+msgid "Carried out a confirmed write to an App, or failed to"
+msgstr "Llevó a cabo un cambio confirmado en una aplicación, o no lo logró"
+
 #: src/interview/page.tsx
 msgid "Carry on now"
 msgstr "Seguir ahora"

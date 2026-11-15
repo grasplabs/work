@@ -3382,6 +3382,10 @@ msgstr "Hoofdletters, cijfers en underscores, beginnend met een letter, zoals CR
 msgid "Card"
 msgstr "Kaart"
 
+#: src/activity/audit-words.ts
+msgid "Carried out a confirmed write to an App, or failed to"
+msgstr "Een bevestigde wijziging in een app uitgevoerd, of daarin gefaald"
+
 #: src/interview/page.tsx
 msgid "Carry on now"
 msgstr "Nu verdergaan"

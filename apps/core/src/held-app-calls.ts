@@ -57,7 +57,8 @@ import type { HeldAppCallRow } from "./workspace.ts";
 //   how it ended alone (`heldAppCallDecided`), and reads the App again
 //   if it needs to, under the checks every read has.
 // Holding, confirming and declining are each audited in the write that
-// makes them (`chat.app_call.held`, `.confirmed`, `.declined`).
+// makes them (`chat.app_call.held`, `.confirmed`, `.declined`), and how a
+// confirmed one ended once it did (`.ended`, its outcome alone).
 
 /** How long a confirmed write waits for the App's answer: as a chat's code does. */
 const functionCallMs = 30_000;
@@ -290,11 +291,13 @@ export const confirmHeldAppCall = async (
       await chats.heldAppCallDecided(
         row.chatId,
         person.userId,
-        { id: row.id, function: row.function },
+        row,
         ok ? "confirmed" : "failed"
       );
     } catch (error) {
       // The write stands either way; the agent learns of it from the App.
+      // Its outcome may then be unrecorded: a confirmation alone never
+      // says it ran.
       log.warn("chat.held_app_call_note_failed", errorFields(error));
     }
   }
@@ -319,10 +322,5 @@ export const declineHeldAppCall = async (
     { confirm: false },
     Date.now()
   );
-  await chats.heldAppCallDecided(
-    row.chatId,
-    identity.userId,
-    { id: row.id, function: row.function },
-    "declined"
-  );
+  await chats.heldAppCallDecided(row.chatId, identity.userId, row, "declined");
 };

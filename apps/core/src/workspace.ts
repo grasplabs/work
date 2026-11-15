@@ -2061,12 +2061,15 @@ export class Workspace extends DurableObject<Env> {
    * Tells the agent of `personId`'s own chat how a write to an App it had
    * held for them ended, as `heldDecided` does a connection's: a notice
    * for its turn under way or its next. Nothing of the App's answer: the
-   * agent reads the App again if it needs to.
+   * agent reads the App again if it needs to. A confirmed one's outcome
+   * (`chat.app_call.ended`, as the agent's for them: it ran, or failed or
+   * was refused) is recorded first, so the person's confirmation never
+   * stands alone for a write that was not done.
    */
   async heldAppCallDecided(
     chatId: unknown,
     personId: string,
-    held: { id: string; function: string },
+    held: { id: string; function: string; appId: string; agentId: string },
     outcome: Exclude<HeldOutcome, "expired" | "unknown">
   ): Promise<void> {
     const chat = this.#ownChat(chatId, personId);
@@ -2076,6 +2079,22 @@ export class Workspace extends DurableObject<Env> {
       .min(1)
       .max(maxHeldFunctionChars)
       .parse(held.function);
+    if (outcome !== "declined") {
+      this.#outboxEntry({
+        actor: delegateActorOf(
+          chatAuthority({ agentId: held.agentId, personId })
+        ),
+        action: "chat.app_call.ended",
+        target: { type: "app", id: held.appId },
+        detail: {
+          workspace: this.ctx.id.name ?? null,
+          chat: chat.id,
+          held: id,
+          outcome: outcome === "confirmed" ? "ok" : "failed",
+        },
+      });
+      this.#deliverAudit();
+    }
     await this.#note(
       chat.id,
       `The write to an App you asked for, "${name}" (held ID ${id}), was decided. ${heldOutcomes[outcome]}`

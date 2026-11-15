@@ -3382,6 +3382,10 @@ msgstr "Capital letters, digits and underscores, starting with a letter, such as
 msgid "Card"
 msgstr "Card"
 
+#: src/activity/audit-words.ts
+msgid "Carried out a confirmed write to an App, or failed to"
+msgstr "Carried out a confirmed write to an App, or failed to"
+
 #: src/interview/page.tsx
 msgid "Carry on now"
 msgstr "Carry on now"

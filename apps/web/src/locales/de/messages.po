@@ -3382,6 +3382,10 @@ msgstr "Großbuchstaben, Ziffern und Unterstriche, beginnend mit einem Buchstabe
 msgid "Card"
 msgstr "Karte"
 
+#: src/activity/audit-words.ts
+msgid "Carried out a confirmed write to an App, or failed to"
+msgstr "Eine bestätigte Änderung in einer App ausgeführt, oder es nicht geschafft"
+
 #: src/interview/page.tsx
 msgid "Carry on now"
 msgstr "Jetzt weitermachen"

@@ -228,40 +228,29 @@ describe("what a chat writes for others once it used something only its person m
       const someone = await signedInApi(idp, "builder");
       const [held] = await builder.api.chats.heldCalls(chat.id);
       const request = callOf(release, "notes.create", { title: marker });
+      const heldId = held?.id ?? "";
+      const hash = held?.requestHash ?? "";
+      /** `who` confirming the held call for the request of `requestHash`. */
+      const confirms = async (
+        who: Awaited<ReturnType<typeof signedInApi>>,
+        requestHash: string
+      ) =>
+        await outcome(
+          who.api.chats.confirmHeldCall(chat.id, heldId, requestHash)
+        );
       const before = await titles();
       const tries = {
-        someoneElse: await outcome(
-          someone.api.chats.confirmHeldCall(
-            chat.id,
-            held?.id ?? "",
-            held?.requestHash ?? ""
-          )
-        ),
-        anotherRequest: await outcome(
-          builder.api.chats.confirmHeldCall(
-            chat.id,
-            held?.id ?? "",
-            await sha256Hex(
-              callOf(release, "notes.create", { title: "Something else" })
-            )
+        someoneElse: await confirms(someone, hash),
+        anotherRequest: await confirms(
+          builder,
+          await sha256Hex(
+            callOf(release, "notes.create", { title: "Something else" })
           )
         ),
       };
       const afterTries = await titles();
-      const confirmed = await outcome(
-        builder.api.chats.confirmHeldCall(
-          chat.id,
-          held?.id ?? "",
-          held?.requestHash ?? ""
-        )
-      );
-      const replayed = await outcome(
-        builder.api.chats.confirmHeldCall(
-          chat.id,
-          held?.id ?? "",
-          held?.requestHash ?? ""
-        )
-      );
+      const confirmed = await confirms(builder, hash);
+      const replayed = await confirms(builder, hash);
       const own = personalBrainOf(
         inJurisdiction(env, env.BRAIN_STORE),
         builder.userId
@@ -315,6 +304,8 @@ describe("what a chat writes for others once it used something only its person m
       await eventsOf("chat.private_read", chat.id, 1);
       await eventsOf("chat.app_call.held", chat.id, 1);
       await eventsOf("chat.app_call.confirmed", chat.id, 1);
+      const [ended] = await eventsOf("chat.app_call.ended", chat.id, 1);
+      expect(ended?.detail.outcome).toBe("ok");
     }
   );
 
