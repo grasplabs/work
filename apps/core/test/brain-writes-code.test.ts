@@ -21,7 +21,7 @@ import {
   memoriesAs,
   recallAs,
 } from "../src/brain-next.ts";
-import { deleteStore } from "../src/data-stores.ts";
+import { deleteStore, liveStoreOf } from "../src/data-stores.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { StoreHost } from "../src/store-host.ts";
 import { allEvents } from "./audit-events.ts";
@@ -73,6 +73,9 @@ import { connectDb } from "./test-env.ts";
 
 /** Signing people in, sealing and granting can be slow on CI. */
 const setUpTime = { timeout: 180_000 };
+
+/** The shared store's object, as core reaches it. */
+const shared = () => inJurisdiction(env, env.BRAIN_STORE).getByName("brain");
 
 describe("an App's code remembers and forgets for its users", setUpTime, () => {
   it("remembers for the App's users, read back through its own code; nothing else finds it; forgets only its own; and a call made again is one memory and one event", async () => {
@@ -203,6 +206,16 @@ describe("an App's code remembers and forgets for its users", setUpTime, () => {
       written.memory,
       3
     );
+    // The change the store recorded as the one that retired it: what its
+    // one `done` is named by.
+    const retiredBy = await runInDurableObject(shared(), (_i, state) =>
+      state.storage.sql
+        .exec<{ change: string }>(
+          "SELECT retired_change AS change FROM memories WHERE id = ?",
+          written.memory
+        )
+        .one()
+    );
     expect({
       remembered: remembered.map(({ actor, target, detail }) => ({
         actor,
@@ -236,7 +249,11 @@ describe("an App's code remembers and forgets for its users", setUpTime, () => {
       // Cara's call and the same call made again: one event.
       forgotten: [
         {
-          id: someText,
+          id: uuidFromHash(
+            await sha256Hex(
+              JSON.stringify(["brain.memory.forgotten", retiredBy.change])
+            )
+          ),
           at: someText,
           detail: {
             onBehalfOf: cara.userId,
@@ -688,9 +705,6 @@ describe("an App's code remembers and forgets for its users", setUpTime, () => {
   });
 });
 
-/** The shared store's object, as core reaches it. */
-const shared = () => inJurisdiction(env, env.BRAIN_STORE).getByName("brain");
-
 /** How many memories `writer` wrote that the shared store still holds, hidden ones too. */
 const heldBy = async (writer: string): Promise<number> =>
   await runInDurableObject(
@@ -1036,7 +1050,7 @@ describe("an App's memories go with its data", setUpTime, () => {
     });
   });
 
-  it("erases what an App without a store remembered, when its data is reset and when it is removed for good", async () => {
+  it("erases what an App without a store remembered when its data is reset, and keeps what it remembered after, unreadable, once it is removed", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
     // As production makes an App with no tables: it never gets a store.
@@ -1052,86 +1066,104 @@ describe("an App's memories go with its data", setUpTime, () => {
       { entity: before.entity },
       app.app
     );
-    const later = rememberedSchema.parse(
-      await onPage(app, ada, "remember", fact(`Laterco ${unique()}`))
-    );
+    await onPage(app, ada, "remember", fact(`Laterco ${unique()}`));
     await setArchived(env, ada, app.app, true);
-    // The archive it removes, which its erasure's change names.
-    const archived = await env.DB.prepare(
-      "SELECT archived_at FROM apps WHERE id = ?"
-    )
-      .bind(app.app)
-      .first<{ archived_at: number }>();
     await removeApp(env, ada, app.app);
     await tick(shared());
     const events = await erasuresOf(app.app);
     expect({
       afterReset,
-      afterRemoval: await codeCardAs(
+      // Kept, as its data would be, and read by no one.
+      held: await heldBy(`app:${app.app}`),
+      readBy: await appUsersReadBy(env, {
+        app: app.app,
+        origin: "page",
+        personId: ada.userId,
+      }),
+      events: events.map(({ detail }) => detail),
+    }).toStrictEqual({
+      afterReset: null,
+      held: 1,
+      readBy: undefined,
+      events: [{ cause: "data_reset", memories: 1 }],
+    });
+  });
+
+  it("erases what an App remembered while it had no store when a store it gets later is reset, and when that store is deleted", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const app = await appOf(ada, admin, { store: false });
+    const storeless = rememberedSchema.parse(
+      await onPage(app, ada, "remember", fact(`Nostoreco ${unique()}`))
+    );
+    // A version with a table: its seal mints the App's store.
+    await published(app, 2, { notes: table("appMembers") });
+    await resetAppData(env, admin, app.app, "Accounts");
+    const afterReset = await codeCardAs(
+      env,
+      ada.userId,
+      "company",
+      { entity: storeless.entity },
+      app.app
+    );
+    const stored = rememberedSchema.parse(
+      await onPage(app, ada, "remember", fact(`Storedco ${unique()}`))
+    );
+    const store = await liveStoreOf(env, app.app);
+    if (store === null) {
+      throw new Error("The App got no store");
+    }
+    await freed({ ...app, store });
+    await deleteStore(env, ada, store);
+    const events = await erasuresOf(app.app);
+    expect({
+      afterReset,
+      afterDeletion: await codeCardAs(
         env,
         ada.userId,
         "company",
-        { entity: later.entity },
+        { entity: stored.entity },
         app.app
       ),
-      held: await heldBy(`app:${app.app}`),
-      events: events
-        .map(({ id, detail }) => ({ id, detail }))
-        .toSorted((one, other) =>
-          JSON.stringify(one.detail).localeCompare(JSON.stringify(other.detail))
-        ),
+      events: events.map(({ detail }) => detail),
     }).toStrictEqual({
       afterReset: null,
-      afterRemoval: null,
-      held: 0,
+      afterDeletion: null,
       events: [
-        {
-          id: await erasureIdOf(
-            `app-removed:${app.app}:${archived?.archived_at ?? 0}`
-          ),
-          detail: { cause: "app_removed", memories: 1 },
-        },
-        { id: someText, detail: { cause: "data_reset", memories: 1 } },
+        { cause: "data_reset", memories: 1 },
+        { cause: "store_deleted", memories: 1 },
       ],
     });
   });
 
-  it("erases again when a removal that erased was refused, the App restored, and it is removed once more after remembering anew", async () => {
+  it("keeps a removed App's memories with its store, and erases them when an admin deletes that store", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
-    const app = await appOf(ada, admin, { store: false });
-    await onPage(app, ada, "remember", fact(`Firstco ${unique()}`));
-    await setArchived(env, ada, app.app, true);
-    // Erased, then the removal's own write is cut off: still archived.
-    const cutOff = await failureOf(async () => {
-      await removeApp(firstBatchFailing(env), ada, app.app);
-    });
-    await setArchived(env, ada, app.app, false);
-    const anew = rememberedSchema.parse(
-      await onPage(app, ada, "remember", fact(`Anewco ${unique()}`))
-    );
+    const app = await appOf(ada, admin);
+    await onPage(app, ada, "remember", fact(`Removedco ${unique()}`));
     await setArchived(env, ada, app.app, true);
     await removeApp(env, ada, app.app);
+    const kept = await heldBy(`app:${app.app}`);
+    // A removed App's store is its admins' alone.
+    await freed(app);
+    await deleteStore(env, admin, storeOf(app));
     await tick(shared());
     const events = await erasuresOf(app.app);
     expect({
-      cutOff,
-      card: await codeCardAs(
-        env,
-        ada.userId,
-        "company",
-        { entity: anew.entity },
-        app.app
-      ),
+      kept,
       held: await heldBy(`app:${app.app}`),
-      events: events.map(({ detail }) => detail),
+      events: events.map(({ id, detail }) => ({
+        id,
+        detail,
+      })),
     }).toStrictEqual({
-      cutOff: "Error: The batch was cut off (a test's)",
-      card: null,
+      kept: 1,
       held: 0,
       events: [
-        { cause: "app_removed", memories: 1 },
-        { cause: "app_removed", memories: 1 },
+        {
+          id: await erasureIdOf(`app-store-deleted:${storeOf(app)}`),
+          detail: { cause: "store_deleted", memories: 1 },
+        },
       ],
     });
   });

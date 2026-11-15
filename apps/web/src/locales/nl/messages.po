@@ -7095,8 +7095,8 @@ msgid "It is gone for good: it answers nobody, and its schedule and settings are
 msgstr "Hij is voorgoed weg: hij antwoordt niemand, en zijn schema en instellingen worden verwijderd. De chats die mensen met hem hadden, kunnen zij blijven lezen."
 
 #: src/apps/app-remove.tsx
-msgid "It is gone for good: its pages, versions and members, and what it was allowed. Its stores and their records stay, and so do the workflows it doesn’t own."
-msgstr "Hij is definitief weg: zijn pagina’s, versies en leden, en wat hij mocht. De opslag en de records erin blijven, net als de workflows die hij niet bezit."
+msgid "It is gone for good: its pages, versions and members, and what it was allowed. Its stores and their records stay, and so do what its code remembered in the Brain and the workflows it doesn’t own."
+msgstr "Hij is definitief weg: zijn pagina’s, versies en leden, en wat hij mocht. De opslag en de records erin blijven, net als wat zijn code in het Brein onthield en de workflows die hij niet bezit."
 
 #: src/apps/app-page.tsx
 msgid "It is kept as it was, and nobody works on it, until a builder restores it."

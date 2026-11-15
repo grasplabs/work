@@ -28,13 +28,12 @@ import { appDefaultStores } from "./db/core/schema.ts";
 //   (data-stores.ts `resetAppStore`), erased before the store resets,
 //   whether or not the App has a store (an App without tables never gets
 //   one).
-// - An App removed for good while it has no store to delete
-//   (app-removal.ts): one change for the archive it removes
-//   (`app-removed:<id>:<archived at>`), so a retry of that removal is the
-//   same erasure, and an archive after a restore a new one; erased just
-//   before the removal is written. A removed App is never restored; one
-//   whose store lives keeps its memories, unreadable, until that store is
-//   deleted, as its data is kept.
+//
+// Removing an App erases nothing: it keeps its stores and their records,
+// and its memories with them, unreadable, as nobody may open a removed
+// App, until its data is deleted for good. Nothing in the product does
+// that yet (`deleteStore` has no caller but tests, and a removed App
+// without a store has none to delete): GRA-1935.
 //
 // What this doesn't close (the same for a reset and a store's deletion):
 // a call already running when the memories are erased can still write a
@@ -48,12 +47,8 @@ import { appDefaultStores } from "./db/core/schema.ts";
 // keeps the same event. What the App remembers afterwards is new, and
 // kept: the Brain never closes a writer.
 
-/**
- * Why an App's memories are erased, as its audit event says: its store
- * deleted, its data reset, or the App removed for good while it has no
- * store to delete.
- */
-type Cause = "store_deleted" | "data_reset" | "app_removed";
+/** Why an App's memories are erased, as its audit event says. */
+type Cause = "store_deleted" | "data_reset";
 
 /**
  * Erases every memory App `app`'s code wrote, under `change` (the same on
