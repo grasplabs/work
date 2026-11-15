@@ -24,6 +24,7 @@ import { inJurisdiction } from "./durable-objects.ts";
 import { warmQuestionEmbedder } from "./embedder.ts";
 import { sweepGuestChats } from "./guests.ts";
 import { sweepHeldStartInputs } from "./held-starts.ts";
+import { expireBrainExports } from "./knowledge/export-expiry.ts";
 import { brainOf } from "./knowledge/ports.ts";
 import { retryDisconnects } from "./members.ts";
 import { sweepModelUsage } from "./model-usage.ts";
@@ -86,6 +87,10 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "minute",
     run: retryAccessRevocations,
   },
+  // Today's Brain's exports written before nothing could export any more:
+  // their files deleted once due, or at once once a purge ran after them
+  // (src/knowledge/export-expiry.ts). No export is written.
+  { name: "brain.exports", period: "minute", run: expireBrainExports },
   // Knowledge payloads no version refers to, past their grace: what a
   // Knowledge save that failed staged (packages/brain's payloads.ts). A
   // purge collects them too, but only past their grace: this collects
