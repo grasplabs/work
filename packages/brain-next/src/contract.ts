@@ -2881,9 +2881,10 @@ export interface Brain {
    * (`RetiredMemory`): one this writer already retired answers that same
    * time again, so a retry never reads as not found nor gets a new time.
    * Null alike when there is no such memory, when it is another writer's
-   * (retired or not), when the reader may not read it, and when it is
-   * outside its time (expired): nothing tells another writer's memory from
-   * one there isn't.
+   * (retired or not), when the reader may not read it, and when it
+   * expired before it was retired: nothing tells another writer's memory
+   * from one there isn't. One this writer retired that expired afterwards
+   * still answers its time on a repeat.
    */
   retireMemory: (request: RetireRequest) => Promise<RetiredMemory | null>;
   /**

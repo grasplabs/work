@@ -1276,7 +1276,7 @@ describe("ending a memory", () => {
   });
 
   // Threat 9: only a writer's own, retired once, at one recorded time.
-  it("retires a writer's own memory for a reader of no person, gone from every read but history, and answers its recorded time on every repeat, a restart included", async () => {
+  it("retires a writer's own memory for a reader of no person, gone from every read but history, and answers its recorded time on every repeat, concurrent and after a restart included", async () => {
     const group = unique("group");
     const app = `app:${unique("a")}`;
     const reader: Reader = { person: null, groups: [group] };
@@ -1289,10 +1289,15 @@ describe("ending a memory", () => {
       [customer({ names: [name] })],
       [fact({ kind: "writer", writer: app }, { statement: "Mine" })]
     );
-    const retire = async () =>
-      await shared().retireMemory({ memory: mine, reader, writer: app });
+    const retire = async (writer = app) =>
+      await shared().retireMemory({ memory: mine, reader, writer });
 
-    const first = await retire();
+    // Two retires by its writer and one by another, all at once.
+    const [first, alongside, byOther] = await Promise.all([
+      retire(),
+      retire(),
+      retire(`app:${unique("b")}`),
+    ]);
     const again = await retire();
     await kill(shared());
     const restarted = await retire();
@@ -1304,7 +1309,9 @@ describe("ending a memory", () => {
     const found = await shared().findEntities({ reader, name });
 
     expect(first?.retiredAt).toBeInstanceOf(Date);
-    expect({ again, restarted }).toStrictEqual({
+    expect({ alongside, byOther, again, restarted }).toStrictEqual({
+      alongside: first,
+      byOther: null,
       again: first,
       restarted: first,
     });

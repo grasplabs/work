@@ -1005,7 +1005,7 @@ export const confirmMemory = (
  * retired answers its recorded time again, never a new one, so a retry
  * answers what the first try did (contract.ts `retireMemory`). Null alike
  * for no such memory, another writer's (retired or not), one the reader
- * may not read and one outside its time.
+ * may not read and one that expired before it was retired.
  */
 export const retireMemory = (
   sql: SqlStorage,
