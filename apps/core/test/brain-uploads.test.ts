@@ -1407,15 +1407,15 @@ describe("uploading a file straight into the Brain", () => {
           if (prototype === null || typeof prototype !== "object") {
             throw new TypeError("The store has no class");
           }
-          const taken: unknown = Reflect.get(prototype, "removeSource");
+          const taken: unknown = Reflect.get(prototype, "removeSources");
           if (typeof taken !== "function") {
             throw new TypeError("The store removes nothing");
           }
           Reflect.set(
             prototype,
-            "removeSource",
+            "removeSources",
             async function lost(this: object, request: unknown) {
-              Reflect.set(prototype, "removeSource", taken);
+              Reflect.set(prototype, "removeSources", taken);
               await Reflect.apply(taken, this, [request]);
               throw new Error("The answer was lost, by the test");
             }
@@ -1434,7 +1434,7 @@ describe("uploading a file straight into the Brain", () => {
         await runInDurableObject(sharedStore(), (instance) => {
           Reflect.set(
             Object.getPrototypeOf(instance),
-            "removeSource",
+            "removeSources",
             original
           );
         });

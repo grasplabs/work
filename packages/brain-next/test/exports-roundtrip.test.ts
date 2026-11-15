@@ -448,8 +448,8 @@ const madeBy = async (seed: number) => {
     text: `words of ${removed}`,
     access: pick(series.accesses),
   });
-  await shared().removeSource({ source: removed });
-  await shared().removeSource({ source: removedEarly });
+  await shared().removeSources({ sources: [removed] });
+  await shared().removeSources({ sources: [removedEarly] });
   for (let ticks = 0; ticks < 3; ticks += 1) {
     // oxlint-disable-next-line no-await-in-loop -- a tick at a time
     await tick(shared());
