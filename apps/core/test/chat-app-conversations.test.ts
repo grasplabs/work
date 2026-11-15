@@ -79,7 +79,6 @@ const answersFor = async (api: Api, chatId: string) => ({
     })
   ),
   removeFile: await outcome(api.chats.removeFile(chatId, "file")),
-  cited: await outcome(api.chats.cited(chatId, 1)),
   worked: await outcome(api.chats.worked(chatId)),
   packageRequests: await outcome(api.chats.packageRequests(chatId)),
   connectionRequests: await outcome(api.chats.connectionRequests(chatId)),

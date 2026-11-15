@@ -493,7 +493,6 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
       this.env,
       scope,
       [connectionId],
-      [],
       [
         connectionRead(
           connectionId,
@@ -591,7 +590,7 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
       throw forSandbox(error);
     }
     if (outcome.state === "done" || outcome.state === "failed") {
-      await recordSources(this.env, scope, [request.connectionId], [], [read]);
+      await recordSources(this.env, scope, [request.connectionId], [read]);
     }
     await recordToolCall(
       this.env,

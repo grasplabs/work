@@ -1,8 +1,4 @@
 import { appIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
-import type {
-  CollectionReader,
-  KnowledgeTools,
-} from "@grasp-os/shared/knowledge";
 import { authoritySchema } from "@grasp-os/shared/permissions";
 import type {
   Authority,
@@ -80,26 +76,4 @@ export const reached = "connect.connection_not_found";
 export const connectionIn = (
   bindings: Bindings,
   name: string
-): Fetcher<ConnectionBinding> | undefined =>
-  // SAFETY: the tests name a binding they granted for a connection, and
-  // `bindingsFor` gives a connection permission a `ConnectionBinding`.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  bindings[name] as Fetcher<ConnectionBinding> | undefined;
-
-/** A collection's stub in an env, as App or agent code calls it. */
-export const collectionIn = (
-  bindings: Bindings,
-  name: string
-): CollectionReader | undefined =>
-  // SAFETY: the tests name a binding they granted for a collection, and
-  // `bindingsFor` gives a collection permission a `CollectionBinding`, whose
-  // methods are those of `CollectionReader`.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  bindings[name] as CollectionReader | undefined;
-
-/** An agent's Knowledge tools in its env, if it may read any collection. */
-export const knowledgeIn = (bindings: Bindings): KnowledgeTools | undefined =>
-  // SAFETY: `bindingsFor` gives `KNOWLEDGE` a `KnowledgeBinding`, whose
-  // methods are those of `KnowledgeTools`.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  bindings.KNOWLEDGE as KnowledgeTools | undefined;
+): Fetcher<ConnectionBinding> | undefined => bindings[name];

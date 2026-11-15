@@ -126,10 +126,7 @@ const heardCall = (
       work: Partial<Record<ToolCall["outcome"], RequestKind>>;
     }
   | undefined => {
-  if (
-    call.method.startsWith("brain.") ||
-    call.method.startsWith("knowledge.")
-  ) {
+  if (call.method.startsWith("brain.")) {
     return { id: brainTool, work: {} };
   }
   if (call.method === "connections.call") {
@@ -174,13 +171,9 @@ export interface Heard {
  * what was off or missing, and the request's kind, the first that
  * applies (a workflow offered, a change held, a look-up, an answer). The
  * agent's own looking around (listing connections or workflows) is no
- * tool of the request's. An answer that cites the company's documents
- * read the brain, whether or not its code searched it.
+ * tool of the request's.
  */
-export const heardFrom = (
-  calls: readonly ToolCall[],
-  cited: boolean
-): Heard => {
+export const heardFrom = (calls: readonly ToolCall[]): Heard => {
   const tools: RequestToolCall[] = [];
   const missing: MissingTool[] = [];
   const did = new Set<RequestKind>();
@@ -202,9 +195,6 @@ export const heardFrom = (
     if (kind !== undefined) {
       did.add(kind);
     }
-  }
-  if (cited && !tools.some(({ id }) => id === brainTool)) {
-    tools.unshift({ id: brainTool, ok: true });
   }
   const kind =
     (["workflow", "changed", "lookedUp"] as const).find((each) =>
@@ -302,7 +292,6 @@ export interface Settled {
   chatId: string | null;
   ended: "answered" | "stopped" | "failed";
   calls: readonly ToolCall[];
-  cited: boolean;
   sorted: Sorted | null;
 }
 
@@ -316,9 +305,9 @@ export interface Settled {
 export const heardRequest = async (
   env: Env,
   id: string,
-  { calls, cited }: Pick<Settled, "calls" | "cited">
+  { calls }: Pick<Settled, "calls">
 ): Promise<void> => {
-  const heard = heardFrom(calls, cited);
+  const heard = heardFrom(calls);
   try {
     await drizzle(env.DB)
       .update(stephenRequests)
@@ -337,9 +326,9 @@ export const heardRequest = async (
 export const settleRequest = async (
   env: Env,
   id: string,
-  { chatId, ended, calls, cited, sorted }: Settled
+  { chatId, ended, calls, sorted }: Settled
 ): Promise<void> => {
-  const heard = heardFrom(calls, cited);
+  const heard = heardFrom(calls);
   try {
     const db = drizzle(env.DB);
     // A press on one of its cards may have come first: what it said of a

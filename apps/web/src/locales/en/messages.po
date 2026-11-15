@@ -1422,11 +1422,6 @@ msgstr "A change applies to runs that start after it: runs already going keep th
 
 #: src/apps/app-access-requests.tsx
 #: src/apps/draft-changes.tsx
-msgid "A collection"
-msgstr "A collection"
-
-#: src/apps/app-access-requests.tsx
-#: src/apps/draft-changes.tsx
 msgid "A connection"
 msgstr "A connection"
 
@@ -3879,10 +3874,6 @@ msgstr "Coins"
 #: src/onboarding/interviews-progress.tsx
 msgid "colleagues talked"
 msgstr "colleagues talked"
-
-#: src/activity/pending.tsx
-msgid "Collection {collectionId}"
-msgstr "Collection {collectionId}"
 
 #: src/chat/composer-menu.tsx
 #: src/chat/mentions.tsx
@@ -15147,8 +15138,8 @@ msgid "Version {version} declares no binding to approve."
 msgstr "Version {version} declares no binding to approve."
 
 #: src/inbox/items.ts
-msgid "Version {version} of {name} is live, but nothing starts it until an admin approves what it reaches: each model, connection, store or collection it calls."
-msgstr "Version {version} of {name} is live, but nothing starts it until an admin approves what it reaches: each model, connection, store or collection it calls."
+msgid "Version {version} of {name} is live, but nothing starts it until an admin approves what it reaches: each model and connection it calls, and the Brain."
+msgstr "Version {version} of {name} is live, but nothing starts it until an admin approves what it reaches: each model and connection it calls, and the Brain."
 
 #: src/brain/sources-page.tsx
 msgid "Version {version}, added {added}"

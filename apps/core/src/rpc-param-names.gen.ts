@@ -144,7 +144,6 @@ export const rpcParamNames: ParamNames = {
     "attachFile": ["chatId","file"],
     "build": ["chatId","build"],
     "cancel": ["chatId"],
-    "cited": ["chatId","messageId"],
     "connectionRequests": ["chatId"],
     "create": ["title","agentId","make"],
     "denyConnection": ["chatId","id"],
@@ -266,7 +265,6 @@ export const rpcParamNames: ParamNames = {
   },
   "KnowledgeRpc": {
     "backlinks": ["documentId","options"],
-    "catalog": [],
     "copySkill": ["input"],
     "createCollection": ["input"],
     "decideEntityMatch": ["input"],
@@ -285,9 +283,6 @@ export const rpcParamNames: ParamNames = {
     "memoriesGet": ["input"],
     "memoriesLineage": ["input"],
     "memoriesList": ["input"],
-    "memoriesProposeChange": ["input","options"],
-    "memoriesPublish": ["input","options"],
-    "memoriesRetire": ["input","options"],
     "preparePurge": ["input"],
     "purge": ["input","token","options"],
     "purgeStatus": ["purgeId"],
@@ -299,7 +294,6 @@ export const rpcParamNames: ParamNames = {
     "restoreVersion": ["input"],
     "saveDocument": ["input"],
     "search": ["query","options"],
-    "sharedChats": [],
     "skillCollections": [],
   },
   "MembersRpc": {

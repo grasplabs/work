@@ -1474,8 +1474,9 @@ describe("what code and triggers may learn and name", () => {
         ada,
         {
           subject: { type: "trigger", triggerId: trigger.id },
-          object: { type: "collection", collectionId: "c" },
-          actions: ["write"],
+          // Following a workflow's runs: not a start.
+          object: { type: "workflow", workflowId: shared.id },
+          actions: ["read"],
           binding: "NOTES",
         },
         rolesOf(ada)

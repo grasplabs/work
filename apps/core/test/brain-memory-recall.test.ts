@@ -1,4 +1,5 @@
 import type { MemoryPack, RecallInput } from "@grasp-os/brain/contract";
+import { memoriesRetire } from "@grasp-os/brain/memories";
 import { recallWithSources } from "@grasp-os/brain/recall";
 import { brainMemories } from "@grasp-os/brain/schema";
 import {
@@ -19,7 +20,7 @@ import type { WorkContext } from "../src/restricted.ts";
 import { requestGranted } from "./apps.ts";
 import { actingFor, newChat } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam } from "./knowledge.ts";
+import { asPerson, newTeam } from "./knowledge.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
 // Recall over the Brain's memory records (GRA-298, slice 3; the threat
@@ -415,7 +416,9 @@ describe("recalling the Brain's memory records", setUpTime, () => {
       .update(brainMemories)
       .set({ statement: `Remember ${after}.`, revision: 2 })
       .where(eq(brainMemories.id, corrected));
-    await admin.api.knowledge.memoriesRetire(
+    await memoriesRetire(
+      brainOf(env),
+      await asPerson(admin),
       { memoryId: retired },
       { idempotencyKey: `key-${unique()}`, expectedRevision: 1 }
     );
