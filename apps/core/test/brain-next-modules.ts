@@ -84,6 +84,13 @@ export const brainModules = {
   // memoryChoices, and hands on nothing it returns beyond what
   // brain-memories.ts's probes hold.
   "apps/core/src/agent-remember.ts": "core",
+  // Erases what an App's code remembered, with core's eraseWriter, as its
+  // store is deleted or its data reset (GRA-1883), and hands on only the
+  // count it answers, in that erasure's audit event.
+  "apps/core/src/app-memory-erasure.ts": "core",
+  // An App's code remembering and forgetting (GRA-1883): its own
+  // surface, each export probed through real Apps that remember.
+  "apps/core/src/brain-app-writes.ts": "appWrites",
   // Core's subclass of the store: its alarm's host, from core's
   // alarmHostOf, given to the store inside its own object; it adds no
   // method, so the store's probes are its own.

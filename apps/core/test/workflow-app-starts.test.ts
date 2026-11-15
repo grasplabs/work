@@ -534,6 +534,7 @@ const call = async (
 ): Promise<FunctionResult> => {
   const invocation = await invocationFor(options.runEnv ?? env, fx.release, {
     by,
+    origin: "page",
     requestId: crypto.randomUUID(),
     deadline: Date.now() + 30_000,
     ...(options.agent === undefined ? {} : { agent: options.agent }),

@@ -278,6 +278,7 @@ const call = async (
   await callWith(
     await invocationFor(options.runEnv ?? env, fx.release, {
       by,
+      origin: "page",
       requestId: crypto.randomUUID(),
       deadline: Date.now() + 30_000,
     }),

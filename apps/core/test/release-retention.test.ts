@@ -601,6 +601,7 @@ describe("revocation", { timeout: 120_000 }, () => {
     };
     const invocation = await invocationFor(env, second, {
       by: owner,
+      origin: "page",
       requestId: crypto.randomUUID(),
       deadline: Date.now() + 60_000,
     });
