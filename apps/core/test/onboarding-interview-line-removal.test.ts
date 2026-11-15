@@ -1,3 +1,4 @@
+import { addDays } from "@grasp-os/shared/admin/org-record";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import {
   erasedFact,
@@ -11,9 +12,10 @@ import type {
 import { speechPath } from "@grasp-os/shared/voice";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { closesOn } from "../src/onboarding/rules.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { platformAi } from "../src/platform-ai.ts";
 import { keepLine, keptLine } from "../src/speech-cache.ts";
@@ -588,8 +590,17 @@ describe("removing a line of an interview", { timeout: 60_000 }, () => {
     const theirs = markerOf();
     const taken = await takenOutFrom(theirs, { approved: false });
     const store = onboardingStore(env);
+    const { plan: running } = await store.view();
+    await noAlarm();
     await store.setPaused(true, system);
-    await alarmSet();
+    // Paused with the close ahead: the alarm waits for the day after it.
+    await expect
+      .poll(alarmSet, { timeout: 10_000 })
+      .toBe(
+        running === null
+          ? null
+          : Date.parse(`${addDays(closesOn(running), 1)}T00:00:00.000Z`)
+      );
     await noAlarm();
 
     // The interviews close while it is paused.
@@ -634,46 +645,64 @@ describe("removing a line of an interview", { timeout: 60_000 }, () => {
     });
   });
 
-  it("tries again an interview saved between the erasure's read and its write, by the alarm", async () => {
+  it("tries again, on the alarm's next run, an interview saved between the erasure's read and its write", async () => {
     const theirs = markerOf();
     const taken = await takenOutFrom(theirs, { approved: false });
     const store = onboardingStore(env);
     await store.savePlan(closedLongAgo(), system);
-    await alarmSet();
-    await noAlarm();
+    await expect.poll(alarmSet, { timeout: 10_000 }).not.toBeNull();
     const later = JSON.stringify({
       ...taken.out,
       lines: [...taken.out.lines, { from: "stephen", text: "And then?" }],
     });
+    // A save lands while the erasure hashes the words it read: the first
+    // time anything hashes them.
+    const storage = await runInDurableObject(
+      store,
+      (_instance, state) => state.storage
+    );
+    const digest = crypto.subtle.digest.bind(crypto.subtle);
+    let landed = false;
+    const hashing = vi
+      .spyOn(crypto.subtle, "digest")
+      .mockImplementation(async (algorithm, data) => {
+        const text = new TextDecoder().decode(
+          ArrayBuffer.isView(data) ? data : new Uint8Array(data)
+        );
+        if (!landed && text.includes(theirs)) {
+          landed = true;
+          storage.sql.exec(
+            "UPDATE interviews SET progress = ? WHERE person = ?",
+            later,
+            taken.person
+          );
+        }
+        return await digest(algorithm, data);
+      });
 
-    // A save lands while the erasure hashes what it read.
-    const erased = await runInDurableObject(store, async (instance, state) => {
-      const running = instance.eraseTakenOutAfterClose();
-      state.storage.sql.exec(
-        "UPDATE interviews SET progress = ? WHERE person = ?",
-        later,
-        taken.person
-      );
-      return await running;
-    });
+    const first = await runDurableObjectAlarm(store);
     const kept = await onboardingTablesWith(theirs);
     const set = await alarmSet();
-    const ran = await runDurableObjectAlarm(store);
+    const next = await runDurableObjectAlarm(store);
+    hashing.mockRestore();
     const left = await leftOf(theirs, taken);
 
     expect({
-      erased,
+      first,
+      landed,
       kept,
       set: set !== null,
-      ran,
+      next,
       onboarding: left.onboarding,
       cached: left.cached,
       facts: left.facts,
     }).toStrictEqual({
-      erased: 0,
+      first: true,
+      landed: true,
+      // Skipped: the copy it read was saved over.
       kept: ["interviews"],
       set: true,
-      ran: true,
+      next: true,
       onboarding: [],
       cached: undefined,
       facts: [erasedOf, taken.other],

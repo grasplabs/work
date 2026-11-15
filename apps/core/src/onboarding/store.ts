@@ -7373,7 +7373,8 @@ export class Onboarding extends DurableObject<Env> {
    * completing it erases it (`#erasing`). Run by the alarm, which is set
    * for it while anything taken out is left (`#armErasure`), paused or
    * not. Each interview is written only if it is still as read; one
-   * saved meanwhile is tried again on the next run, a moment later.
+   * saved meanwhile is tried again on the next run, which the alarm's own
+   * `#armErasure` sets a moment later while anything taken out is left.
    * Returns how many it erased in.
    */
   async eraseTakenOutAfterClose(
@@ -7384,7 +7385,6 @@ export class Onboarding extends DurableObject<Env> {
       return 0;
     }
     let erased = 0;
-    let skipped = false;
     for (const person of this.interviewPeople()) {
       const held = this.#storedProgress(person);
       const out = held === null ? [] : takenOut(held);
@@ -7428,14 +7428,9 @@ export class Onboarding extends DurableObject<Env> {
         return true;
       });
       erased += landed ? 1 : 0;
-      skipped ||= !landed;
     }
     if (erased > 0) {
       await this.forgetLinesNow();
-    }
-    if (skipped) {
-      // Saved meanwhile: tried again on the next run.
-      await this.#alarmBy(Date.now() + purgeRetryMs);
     }
     return erased;
   }
