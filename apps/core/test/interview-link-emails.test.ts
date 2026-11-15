@@ -421,7 +421,12 @@ describe("the interview link emails", () => {
       ({ action }) => action === "onboarding.mail.resent"
     );
     const afterAgain = await told();
-    const unfinished = { team: "Finance", fresh: true, out: true };
+    const unfinished = {
+      team: "Finance",
+      fresh: true,
+      out: true,
+      signsIn: true,
+    };
     expect({
       noAddress,
       // One event for both mails: no person, no kind, no count.
@@ -472,7 +477,9 @@ describe("the interview link emails", () => {
         ["uma", "reminder"],
         ["ute", "reminder"],
       ],
-      afterAgain: { ...unfinished, mailFailed: false },
+      // Her corrected address is at no domain the company's sign-in takes:
+      // the admin is told she can't open her interview with it.
+      afterAgain: { ...unfinished, mailFailed: false, signsIn: false },
     });
   });
 

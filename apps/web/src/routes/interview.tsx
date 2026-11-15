@@ -61,7 +61,12 @@ const opened = async (secret: string, core: CoreConnection): Promise<Page> => {
     // Kept in this tab while they are away signing in, and taken back as
     // the page opens again (`linkSecret`).
     keepWhileSigningIn(secret);
-    return { state: "sign_in", secret, options: signInOptions };
+    // Grasp's staff open nobody's interview: only the company's sign-in.
+    return {
+      state: "sign_in",
+      secret,
+      options: signInOptions.filter(({ staff }) => !staff),
+    };
   }
   // Back on the link after stopping, it carries on where it was.
   holdInterview({
