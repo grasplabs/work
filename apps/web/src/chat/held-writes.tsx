@@ -480,8 +480,8 @@ interface DecisionFailed {
 
 /**
  * Why a held App write the person decided didn't go through, kept in the
- * list after its card went (the hold ended either way): nothing was
- * written. Until their next decision.
+ * list after its card went (the hold ended either way), with core's
+ * reason. Until their next decision.
  */
 const DecisionFailedAlert = ({ failed }: { failed: DecisionFailed }) => {
   const { what, reason } = failed;
@@ -489,7 +489,7 @@ const DecisionFailedAlert = ({ failed }: { failed: DecisionFailed }) => {
   return (
     <Alert variant="destructive">
       <TriangleAlertIcon />
-      <AlertTitle>{t`${what} didn't go through, so nothing was written.`}</AlertTitle>
+      <AlertTitle>{t`${what} didn't go through.`}</AlertTitle>
       <AlertDescription>{reason}</AlertDescription>
     </Alert>
   );

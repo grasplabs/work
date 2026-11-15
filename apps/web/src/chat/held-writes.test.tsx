@@ -211,7 +211,7 @@ describe("a write to an App held for the person", () => {
       said: alert?.textContent,
     }).toStrictEqual({
       cards: 0,
-      said: `notes.create in Notes didn't go through, so nothing was written.${refusal.message}`,
+      said: `notes.create in Notes didn't go through.${refusal.message}`,
     });
   });
 });

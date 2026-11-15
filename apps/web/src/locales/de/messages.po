@@ -1302,8 +1302,8 @@ msgid "{waiting, plural, one {It uses # new kind of access. An admin approves th
 msgstr "{waiting, plural, one {Es nutzt # neue Art von Zugriff. Ein Admin genehmigt das einmal.} other {Es nutzt # neue Arten von Zugriff. Ein Admin genehmigt diese einmal.}}"
 
 #: src/chat/held-writes.tsx
-msgid "{what} didn't go through, so nothing was written."
-msgstr "{what} wurde nicht ausgeführt, daher wurde nichts geschrieben."
+msgid "{what} didn't go through."
+msgstr "{what} wurde nicht ausgeführt."
 
 #: src/apps/draft-changes.tsx
 msgid "{what}, as {binding} in its code: {actions}"
