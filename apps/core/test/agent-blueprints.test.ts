@@ -84,12 +84,11 @@ const setUp = async (
     person.userId,
     ...replies({ ledger: ledgerBlueprint, vault: vaultBlueprint })
   );
-  await requestGranted(idp, admin, {
-    subject: chat.agent,
-    object: { type: "collection", collectionId: "apps" },
-    actions: ["read"],
-    binding: "APP_LIBRARY",
-  });
+  await requestGranted(
+    idp,
+    admin,
+    readCollection(chat.agent, collectionId, "HANDBOOK")
+  );
   return { chat };
 };
 

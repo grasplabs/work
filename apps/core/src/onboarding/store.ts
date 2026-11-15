@@ -285,6 +285,14 @@ const storeName = "onboarding";
 const purgesKey = "purges";
 
 /**
+ * The KV key of the number the last key queued to go from the voice's
+ * cache was given (`#queueLines`): store-wide, and it only grows, so a
+ * row of `forget_lines` never carries a number it carried before, and a
+ * take-out deletes a row only as it read it (`forgetLinesNow`).
+ */
+const queuedKey = "forget_lines_queued";
+
+/**
  * The brain's records of the kickoff still owed (kickoff-records.ts):
  * `replaced` when a new kickoff's records must also retire the last
  * one's, `answered` when only an answer changed it. Set with the kickoff
@@ -7562,15 +7570,16 @@ export class Onboarding extends DurableObject<Env> {
   /** Keeps the voice's lines `keys` waiting to go, in the transaction it is called in. */
   #queueLines(keys: readonly string[]): void {
     for (const key of keys) {
-      // Queued again while it waits: counted, so a take-out already under
-      // way for it leaves it to be asked once more (`forgetLinesNow`).
+      // A number never given before (`queuedKey`), on a new row and on
+      // one queued again: a take-out already under way for the key, which
+      // read it with another, leaves it to be asked once more.
+      const held = this.ctx.storage.kv.get(queuedKey);
+      const queued = (typeof held === "number" ? held : 0) + 1;
+      this.ctx.storage.kv.put(queuedKey, queued);
       this.#db
         .insert(linesToForget)
-        .values({ key, queued: 1 })
-        .onConflictDoUpdate({
-          target: linesToForget.key,
-          set: { queued: sql`coalesce(${linesToForget.queued}, 0) + 1` },
-        })
+        .values({ key, queued })
+        .onConflictDoUpdate({ target: linesToForget.key, set: { queued } })
         .run();
     }
   }

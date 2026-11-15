@@ -1499,10 +1499,6 @@ msgstr "Een gast heeft een bericht geschreven"
 msgid "A JSON value"
 msgstr "Een JSON-waarde"
 
-#: src/dashboard/signals.tsx
-msgid "A Knowledge search from {about} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
-msgstr "Een zoekopdracht in Kennis vanuit {about} vond {searches, plural, one {één keer} other {# keer}} niets, bij {askers, plural, one {# vragensteller} other {# vragenstellers}}."
-
 #: src/interview/transcript.tsx
 msgid "A line of mine, removed."
 msgstr "Een beurt van mij, verwijderd."
@@ -6158,10 +6154,6 @@ msgstr "Grasp zoekt uit wat er nodig is om hem te koppelen. Je vindt hem onder A
 #: src/settings/ai-providers.tsx
 msgid "Grasp converts uploaded documents on this deployment: nothing is sent out."
 msgstr "Grasp zet geüploade documenten op deze omgeving zelf om: er wordt niets naar buiten gestuurd."
-
-#: src/settings/ai-providers.tsx
-msgid "Grasp converts uploaded PDFs with {whereItRuns}, using Grasp's own key. Files in sensitive collections are converted on this deployment and never sent out."
-msgstr "Grasp zet geüploade pdf's om met {whereItRuns}, met de eigen sleutel van Grasp. Bestanden in gevoelige collecties worden op deze omgeving zelf omgezet en nooit naar buiten gestuurd."
 
 #: src/chat/failure.ts
 msgid "Grasp could not be reached. Try again."
@@ -14816,10 +14808,6 @@ msgstr "Typ wat er ontbreekt, of ja"
 #: src/interview/page.tsx
 msgid "Type your answer"
 msgstr "Typ je antwoord"
-
-#: src/dashboard/signals.tsx
-msgid "Unanswered question"
-msgstr "Onbeantwoorde vraag"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "Under 5"

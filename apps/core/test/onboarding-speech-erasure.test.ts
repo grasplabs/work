@@ -372,4 +372,135 @@ describe("a line whose take-out fails", { timeout: 60_000 }, () => {
       after: { cached: false, noted: 1, waiting: 0 },
     });
   });
+
+  it("stays queued when a stalled take-out of it ends after the line was taken out, kept and queued anew", async () => {
+    const text = lineOf();
+    const taken = await interviewSaying(text);
+    await expect(sayOnLink(taken.link, text)).resolves.toBe(200);
+    const key = await storedKeyOf(text);
+    const store = onboardingStore(env);
+    const keptAgain = async () => {
+      await keepLine(
+        env,
+        {
+          text,
+          spoken: text,
+          voice: platformAi.speech.voices.stephen,
+          model: speechModelOf(),
+          language: "en",
+        },
+        JSON.stringify({ audio: "AAAA", mime: "audio/mpeg", words: [] })
+      );
+    };
+
+    // Inside the store: take-out A deletes the line from the cache and
+    // stalls before it answers. The line is kept again and queued again;
+    // take-out C takes it out and its row goes. The line is kept and
+    // queued once more; take-out D can't reach the cache. Then A ends: the
+    // row D left carries a number A never read, so it stays for A's next
+    // try, which takes the line out.
+    await runInDurableObject(store, async (instance) => {
+      const files: R2Bucket = env.FILES;
+      const remove = files.delete.bind(files);
+      const deleted = Promise.withResolvers<boolean>();
+      const answered = Promise.withResolvers<boolean>();
+      let calls = 0;
+      const cache = vi
+        .spyOn(files, "delete")
+        .mockImplementation(async (keys) => {
+          calls += 1;
+          if (calls === 3) {
+            throw new Error("The cache can't be reached.");
+          }
+          await remove(keys);
+          if (calls === 1) {
+            deleted.resolve(true);
+            await answered.promise;
+          }
+        });
+      try {
+        const first = instance.forgetSpoken([key]);
+        await deleted.promise;
+        await keptAgain();
+        await instance.forgetSpoken([key]);
+        await keptAgain();
+        await instance.forgetSpoken([key]);
+        answered.resolve(true);
+        await first;
+      } finally {
+        cache.mockRestore();
+      }
+    });
+
+    await expect(leftOf(text)).resolves.toStrictEqual({
+      cached: false,
+      noted: 1,
+      waiting: 0,
+    });
+  });
+
+  it("leaves what one call's tries don't cover to the alarm, until nothing is left", async () => {
+    // More lines waiting than one take-out's tries cover: 100 a try, 5 tries.
+    const count = 100 * 5 + 1;
+    const run = unique();
+    const texts = Array.from(
+      { length: count },
+      (_, at) => `Line ${at} of ${run}, waiting to go.`
+    );
+    const answer = JSON.stringify({ audio: "AAAA", mime: "audio/mpeg" });
+    const keys = await Promise.all(
+      texts.map(async (text) => {
+        await keepLine(
+          env,
+          {
+            text,
+            spoken: text,
+            voice: platformAi.speech.voices.stephen,
+            model: speechModelOf(),
+            language: "en",
+          },
+          answer
+        );
+        return await storedKeyOf(text);
+      })
+    );
+    const store = onboardingStore(env);
+    await runInDurableObject(store, async (_instance, state) => {
+      for (const [at, key] of keys.entries()) {
+        state.storage.sql.exec(
+          "INSERT INTO forget_lines (key, queued) VALUES (?, ?)",
+          key,
+          at + 1
+        );
+      }
+      await state.storage.deleteAlarm();
+    });
+
+    const gone = await store.forgetLinesNow();
+    const armed = (await alarmSet()) !== null;
+    // The alarm, run until it sets itself no more (at most a few times).
+    for (const _run of Array.from({ length: 10 })) {
+      // oxlint-disable-next-line no-await-in-loop -- one alarm after another
+      if (!(await runDurableObjectAlarm(store))) {
+        break;
+      }
+    }
+    const waiting = await runInDurableObject(
+      store,
+      (_instance, state) =>
+        state.storage.sql
+          .exec<{ n: number }>("SELECT count(*) AS n FROM forget_lines")
+          .one().n
+    );
+    const kept = await Promise.all(
+      [texts[0] ?? "", texts.at(-1) ?? ""].map(stillKept)
+    );
+
+    expect({ gone, armed, waiting, kept }).toStrictEqual({
+      gone: 500,
+      armed: true,
+      waiting: 0,
+      kept: [false, false],
+    });
+  });
 });

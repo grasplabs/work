@@ -3,12 +3,11 @@ import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import type { CollectionInput, KnowledgeApi } from "@grasp-os/shared/knowledge";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { createCollection } from "../src/knowledge/collection-rules.ts";
 import { allEvents } from "./audit-events.ts";
-import { platformOpenAiKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
 import {
@@ -16,11 +15,8 @@ import {
   waitingInOutbox,
   whileLogDown,
 } from "./maintenance.ts";
-import { plan } from "./platform-providers.ts";
-import { streamText } from "./provider-streams.ts";
 import {
   auditedDuring,
-  openRpc,
   outcome,
   signedInApi,
   unique,
@@ -656,76 +652,6 @@ describe("collections", () => {
     }).toStrictEqual({
       refused: ["knowledge.read_only", "knowledge.read_only"],
       listed: [{ writable: false }, { writable: false }],
-    });
-  });
-
-  it("take uploads from those who may change them", async () => {
-    const owner = await knowledgeOf("admin");
-    const reader = await knowledgeOf("user");
-    const { id: collectionId } = await owner.api.createCollection({
-      name: `Handbook ${unique()}`,
-      access: "everyone",
-    });
-    // OpenAI, Grasp's own conversion and the one outside system an upload
-    // reaches (behind connect): it converts the one upload taken, as the
-    // real one would.
-    await plan(platformOpenAiKey, [
-      {
-        sse: streamText("openai-responses", {
-          text: "# Travel\nBook trains.",
-          inputTokens: 1000,
-          outputTokens: 10,
-        }),
-      },
-    ]);
-    // What the collection offers, and what core does with an upload there
-    // that passes every other check, on the same connection: taken (`ok`)
-    // exactly where it is writable, and the one taken extracted to ready.
-    // (More of what becomes of one taken is in uploads.test.ts.)
-    const offered = async (session: string) => {
-      const { core } = await openRpc(session);
-      try {
-        const api = core.authenticate();
-        const listed = await api.knowledge.listCollections();
-        const collection = listed.find(({ id }) => id === collectionId);
-        let taken: string | undefined;
-        const upload = await outcome(
-          (async () => {
-            ({ id: taken } = await api.uploads.upload({
-              collectionId,
-              name: "a.pdf",
-              bytes: new TextEncoder().encode("%PDF-"),
-            }));
-          })()
-        );
-        const status =
-          taken === undefined
-            ? null
-            : await vi.waitFor(
-                async () => {
-                  const { status: now } = await api.uploads.get(taken ?? "");
-                  if (now !== "ready" && now !== "failed") {
-                    throw new Error(`The upload is ${now}`);
-                  }
-                  return now;
-                },
-                { timeout: 30_000, interval: 100 }
-              );
-        return { writable: collection?.writable, upload, status };
-      } finally {
-        core[Symbol.dispose]();
-      }
-    };
-    expect({
-      owner: await offered(owner.session),
-      reader: await offered(reader.session),
-    }).toStrictEqual({
-      owner: { writable: true, upload: "ok", status: "ready" },
-      reader: {
-        writable: false,
-        upload: "knowledge.forbidden",
-        status: null,
-      },
     });
   });
 

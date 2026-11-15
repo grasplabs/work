@@ -1167,14 +1167,45 @@ describe("erasing a person", () => {
     const other = await signedInApi(idp, "user");
     const theirs = await noteOf(person, "# Mine\nWhat only I wrote down.");
     const others = await noteOf(other, "# Theirs\nWhat someone else wrote.");
+    // A file they once uploaded into that collection, its original in R2.
+    const original = `knowledge/${theirs.collectionId}/${crypto.randomUUID()}`;
+    await env.FILES.put(original, "What only I uploaded.");
+    await env.DB.prepare(
+      `INSERT INTO uploads (id, collection_id, path, media_type, bytes, sha256,
+         uploaded_by, actor, status, document_id, version, created_at, updated_at)
+       VALUES (?, ?, ?, 'text/vtt', 21, ?, ?, ?, 'ready', ?, 1, ?, ?)`
+    )
+      .bind(
+        original.split("/").at(-1),
+        theirs.collectionId,
+        theirs.path,
+        "0".repeat(64),
+        person.userId,
+        JSON.stringify({ type: "person", userId: person.userId }),
+        theirs.id,
+        Date.now(),
+        Date.now()
+      )
+      .run();
     await admin.api.members.remove(person.userId);
 
-    await admin.api.members.erase(person.userId, String(person.person.name));
+    const erased = await admin.api.members.erase(
+      person.userId,
+      String(person.person.name)
+    );
 
+    // Done when the erasure answers, without the clock.
     expect({
+      done: typeof erased.completedAt,
       theirs: await inKnowledge(theirs.id),
       others: await inKnowledge(others.id),
-    }).toStrictEqual({ theirs: 0, others: 1 });
+      original: (await env.FILES.head(original)) !== null,
+    }).toStrictEqual({
+      done: "string",
+      theirs: 0,
+      others: 1,
+      original: false,
+    });
   });
 
   it("forgets their uploads into the Brain for themselves alone once the Brain erased them, and keeps what they uploaded for a team", async () => {
