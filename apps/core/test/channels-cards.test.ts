@@ -1,6 +1,7 @@
 import { cardToBlockKit } from "@chat-adapter/slack";
 import { cardToAdaptiveCard } from "@chat-adapter/teams/cards";
 import type { TeamsCardElement } from "@chat-adapter/teams/cards";
+import { convertEmojiPlaceholders } from "chat";
 import type { CardChild, CardElement, PostableCard } from "chat";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
@@ -621,6 +622,38 @@ describe("an answer in pieces", () => {
     ).toStrictEqual(answers.map(() => allRight));
   });
 
+  it("never cuts inside a character cluster, wherever the cluster falls against a section's end", () => {
+    const clusters = {
+      flag: "🇳🇱",
+      skinTone: "👍🏽",
+      family: "👨‍👩‍👧‍👦",
+      tagFlag: "🏴󠁧󠁢󠁳󠁣󠁴󠁿",
+    };
+    const graphemes = new Intl.Segmenter("en", { granularity: "grapheme" });
+    const cutsInside = Object.fromEntries(
+      Object.entries(clusters).map(([name, cluster]) => {
+        const inside: number[] = [];
+        for (let offset = 0; offset < cluster.length + 2; offset += 1) {
+          const text = `${"a".repeat(offset)}${cluster.repeat(2000)}`;
+          const boundaries = new Set(
+            Array.from(graphemes.segment(text), ({ index }) => index)
+          );
+          let at = 0;
+          for (const piece of piecesOf(text, "en").slice(0, -1)) {
+            at += piece.length;
+            if (!boundaries.has(at)) {
+              inside.push(offset);
+            }
+          }
+        }
+        return [name, inside];
+      })
+    );
+    expect(cutsInside).toStrictEqual(
+      Object.fromEntries(Object.keys(clusters).map((name) => [name, []]))
+    );
+  });
+
   it("cuts what a model may write to break it, each into pieces that join back to it", () => {
     const hostile = {
       stars: "*".repeat(64 * 1024),
@@ -645,6 +678,45 @@ describe("an answer in pieces", () => {
 });
 
 describe("Stephen's cards in Slack", () => {
+  it("posts no section that is only white space, and loses nothing else, where a cut falls before blank lines", () => {
+    const answers = {
+      blankLines: `${"a".repeat(2999)}\n\n\n${"b".repeat(3500)}`,
+      spaces: `start ${" ".repeat(4000)} end`,
+    };
+    const shown = Object.fromEntries(
+      Object.entries(answers).map(([name, text]) => {
+        const sections = answerCards({ locale: "en", text }).flatMap((card) =>
+          sectionTexts(card)
+        );
+        return [
+          name,
+          {
+            onlyWhiteSpace: sections.filter((section) => /^\s*$/u.test(section))
+              .length,
+            whole: ink(sections.join("")) === ink(text),
+          },
+        ];
+      })
+    );
+    expect(shown).toStrictEqual({
+      blankLines: { onlyWhiteSpace: 0, whole: true },
+      spaces: { onlyWhiteSpace: 0, whole: true },
+    });
+  });
+
+  it("measures an answer as Slack is sent it, emoji names and all, so none of it is cut", () => {
+    const text = "{{emoji:chart_up}} ".repeat((64 * 1024) / 19);
+    const sections = answerCards({ locale: "en", text }).flatMap((card) =>
+      sectionTexts(card)
+    );
+    expect({
+      lengthened: convertEmojiPlaceholders(text, "slack").length > text.length,
+      eachWithin: sections.every((section) => section.length <= 3000),
+      whole:
+        ink(sections.join("")) === ink(convertEmojiPlaceholders(text, "slack")),
+    }).toStrictEqual({ lengthened: true, eachWithin: true, whole: true });
+  });
+
   it("posts an answer too long for one message whole, across messages that each fit Teams and Slack, cut where a paragraph or sentence ends, its thumbs under the last", () => {
     const sentence = "Ein langer Satz über die Rechnungen des Quartals. ";
     const paragraphs = Array.from(

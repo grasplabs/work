@@ -1,4 +1,5 @@
 import {
+  convertEmojiPlaceholders,
   Actions,
   Button,
   Card,
@@ -41,7 +42,10 @@ const outsideBytes = 16 * 1024;
 /**
  * The most characters of text in one section of a card: Slack's limit for
  * a section's text in Block Kit, past which its adapter cuts it
- * (`SECTION_TEXT_MAX_CHARS`). Its conversions (bold, emoji) only shorten.
+ * (`SECTION_TEXT_MAX_CHARS`). Measured on what Slack is sent: its adapter
+ * names emoji in full (`{{emoji:chart_up}}` becomes
+ * `:chart_with_upwards_trend:`), which lengthens a text; its bold only
+ * shortens one.
  */
 const sectionChars = 3000;
 
@@ -163,8 +167,18 @@ const RateButtons = ({
       ];
 
 /** Whether a piece of an answer fits one section of a card. */
-const fitsSection = (piece: string): boolean =>
-  piece.length <= sectionChars && sizeOf(piece) <= outsideBytes;
+const fitsSection = (piece: string): boolean => {
+  const sent = convertEmojiPlaceholders(piece, "slack");
+  return (
+    sent.length <= sectionChars &&
+    sizeOf(sent) <= outsideBytes &&
+    sizeOf(piece) <= outsideBytes
+  );
+};
+
+/** What a piece costs a card, in bytes as JSON, as either platform is sent it. */
+const costOf = (piece: string): number =>
+  Math.max(sizeOf(piece), sizeOf(convertEmojiPlaceholders(piece, "slack")));
 
 /** Where UTF-16 keeps the second half of a surrogate pair. */
 const lowSurrogates = { from: 0xdc_00, to: 0xdf_ff };
@@ -175,6 +189,25 @@ const partsPair = (text: string, at: number): boolean => {
   const unit = text.codePointAt(at) ?? 0;
   return unit >= lowSurrogates.from && unit <= lowSurrogates.to;
 };
+
+/**
+ * An emoji placeholder, as the Chat SDK writes and converts one (its
+ * `EMOJI_PLACEHOLDER_REGEX`, which it doesn't export): never cut inside,
+ * or both halves show as text.
+ */
+const emojiPlaceholders = /\{\{emoji:[a-z0-9_]+\}\}/giu;
+
+/** For each position of `text`, whether a cut there would part a placeholder. */
+const insidePlaceholders = (text: string): Uint8Array => {
+  const inside = new Uint8Array(text.length + 1);
+  for (const match of text.matchAll(emojiPlaceholders)) {
+    inside.fill(1, match.index + 1, match.index + match[0].length);
+  }
+  return inside;
+};
+
+/** A piece of nothing but white space. */
+const onlyWhiteSpace = /^\s+$/u;
 
 /** Where a paragraph ends: a blank line, and any more after it. */
 const paragraphBreaks = /\n[^\S\n]*\n(?:[^\S\n]*\n)*/gu;
@@ -222,6 +255,8 @@ export const piecesOf = (text: string, locale: ChannelLocale): string[] => {
   const segmenters = (["sentence", "grapheme"] as const).map(
     (granularity) => new Intl.Segmenter(locale, { granularity })
   );
+  const parts = insidePlaceholders(text);
+  const whole = (cut: number) => parts[cut] !== 1;
   const pieces: string[] = [];
   let start = 0;
   let paragraph = 0;
@@ -245,18 +280,26 @@ export const piecesOf = (text: string, locale: ChannelLocale): string[] => {
       }
       byParagraph.push(cut);
     }
-    const bySegment = segmenters.map((segmenter) =>
-      Array.from(segmenter.segment(window), ({ index }) => from + index).filter(
-        (cut) => cut > from
-      )
-    );
+    // A stretch that ends before the text does may end inside a sentence
+    // or a character cluster, which then seems to start where it was
+    // parted: the last start found is the one the stretch's end can fake.
+    const truncated = from + window.length < text.length;
+    const bySegment = segmenters.map((segmenter) => {
+      const starts = Array.from(
+        segmenter.segment(window),
+        ({ index }) => from + index
+      );
+      return (truncated ? starts.slice(0, -1) : starts).filter(
+        (cut) => cut > from && whole(cut)
+      );
+    });
     // Never between the halves of a surrogate pair, which the stretch's
     // end may part.
     const byCodePoint: number[] = [];
     let at = from;
     for (const point of window) {
       at += point.length;
-      if (!partsPair(text, at)) {
+      if (!partsPair(text, at) && whole(at)) {
         byCodePoint.push(at);
       }
     }
@@ -286,7 +329,12 @@ export const answerCards = ({
   const cards: string[][] = [];
   let room = 0;
   for (const piece of piecesOf(text, locale)) {
-    const cost = sizeOf(piece);
+    // Only white space where a cut fell before blank lines: nothing to show,
+    // and a section of nothing else Slack may refuse.
+    if (onlyWhiteSpace.test(piece)) {
+      continue;
+    }
+    const cost = costOf(piece);
     const last = cards.at(-1);
     if (last === undefined || cost > room) {
       cards.push([piece]);
