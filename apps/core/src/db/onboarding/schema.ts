@@ -587,6 +587,23 @@ export const linesToForget = sqliteTable("forget_lines", {
 });
 
 /**
+ * The voice cache's key (speech-cache.ts `storedKeysOf`: a hash, never the
+ * words) of every text the voice was asked to say for someone, as it was
+ * asked (GRA-1897): `who` as the voice counts them (`link:<person>` for an
+ * interview, `admin:<user>` for an admin's onboarding). What erasing
+ * anything of theirs takes out of the cache, whole: what was said, as
+ * said, a sentence or a story at a time.
+ */
+export const spokenKeys = sqliteTable(
+  "spoken_keys",
+  {
+    who: text().notNull(),
+    key: text().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.who, table.key] })]
+);
+
+/**
  * Mail the onboarding sends (mail-outbox.ts), each once, by its key: a mail
  * queued again under a key it holds already is not sent again. A mail with
  * someone's link names whose (`fill`) and holds a slot for it, filled in

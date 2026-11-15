@@ -150,17 +150,6 @@ export const forgetStored = async (
 };
 
 /**
- * Deletes every way the lines `texts` were kept, whether or not any is:
- * what was said from someone's interview, once it is deleted.
- */
-export const forgetLines = async (
-  env: Pick<Env, "FILES">,
-  texts: readonly string[]
-): Promise<void> => {
-  await forgetStored(env, await storedKeysOf(texts));
-};
-
-/**
  * Deletes lines kept longer than a month, and any kept flat, from the
  * clock: in code, not a bucket rule, so it runs wherever core does. One page of the prefix a
  * run, from where the last run stopped. A line said again after it was

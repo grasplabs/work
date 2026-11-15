@@ -306,6 +306,13 @@ const say = async (
     model,
     language: asked.language,
   };
+  // Noted by its cache key, as it was asked, before anything is said or
+  // kept: erasing anything of theirs takes exactly what was said out of
+  // the cache, a sentence or a story at a time (GRA-1897).
+  await onboardingStore(env).noteSpoken(
+    listener.who,
+    await storedKeysOf([asked.text])
+  );
   const kept = await keptAnswer(env, key, requestId);
   if (kept !== undefined) {
     return answered(kept);

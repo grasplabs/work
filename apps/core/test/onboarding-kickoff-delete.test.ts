@@ -11,6 +11,7 @@ import { mockIdp } from "./idp.ts";
 import { d1ColumnsWith, onboardingTablesWith } from "./kept-where.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
+import { sayForAdmin, stillKept } from "./spoken.ts";
 
 // The admin deletes the kickoff (GRA-1897): its transcript, its reading,
 // the sponsor's answers, and everything drawn from it, for good. The ways
@@ -129,18 +130,24 @@ describe("deleting the kickoff", { timeout: 60_000 }, () => {
     // Staff answer again, so a vision is retired with the marker in it.
     await adminKickoff().answerKickoff("pain", `Ovens at ${marker} run hot.`);
 
+    // What /setup said of it, in the voice: the company as the kickoff read it.
+    const spoken = `You run ${marker} bakeries.`;
+    await sayForAdmin(admin.session, spoken);
+    const voicedBefore = await stillKept(spoken);
     const before = await reads(admin);
     const keptBefore = await keptWhere(marker);
     const events = await auditedDuring(async () => {
       await admin.api.onboarding.deleteKickoff();
     });
     const after = await reads(admin);
+    const voicedAfter = await stillKept(spoken);
     const kept = await onboardingStore(env).kickoff();
     const view = await admin.api.onboarding.view();
 
     expect({
       before: holding(before, marker),
       keptBefore,
+      voiced: { before: voicedBefore, after: voicedAfter },
       after: holding(after, marker),
       keptAfter: await keptWhere(marker),
       transcript: kept.transcript,
@@ -158,6 +165,7 @@ describe("deleting the kickoff", { timeout: 60_000 }, () => {
         core: ["brain_records.body"],
         onboarding: ["kickoff"],
       },
+      voiced: { before: true, after: false },
       after: [],
       keptAfter: { core: [], onboarding: [] },
       transcript: null,

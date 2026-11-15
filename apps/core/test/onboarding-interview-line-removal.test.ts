@@ -12,20 +12,19 @@ import type {
 import { speechPath } from "@grasp-os/shared/voice";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { closesOn } from "../src/onboarding/rules.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
-import { platformAi } from "../src/platform-ai.ts";
-import { keepLine, keptLine } from "../src/speech-cache.ts";
-import type { SpokenKey } from "../src/speech-cache.ts";
 import { platformElevenLabsKey } from "./connect-providers.ts";
+import { mockIdp } from "./idp.ts";
 import { approve, codeOf, onLink, openedFor } from "./interview-link.ts";
 import type { Device } from "./interview-link.ts";
 import { d1ColumnsWith, onboardingTablesWith } from "./kept-where.ts";
 import { carrying, plan, release } from "./platform-providers.ts";
-import { auditedDuring, routed, unique } from "./sign-in.ts";
+import { auditedDuring, routed, signedInWithRole, unique } from "./sign-in.ts";
+import { sayForAdmin, sayOnLink, stillKept } from "./spoken.ts";
 
 // Someone removes a line of their own interview (GRA-1897): only they
 // read what was said, so only they can say which words go, from their
@@ -33,23 +32,14 @@ import { auditedDuring, routed, unique } from "./sign-in.ts";
 // threat model on the issue:
 //
 // - The words left anywhere: the interview as kept, a mark, a file's name,
-//   a table, core's database, or the speech cache for a line of Stephen's.
+//   a table, core's database, or the speech cache: as the page says it, a
+//   sentence at a time, and the read-back in a story's words.
 // - The removal in the audit log, whose moment would tell the company's
 //   admin whose interview it was.
 // - A line marked removed that still holds words.
 // - A device's older copy, or a save landing alongside, bringing it back.
 
-/** The speech model lines are said in: the platform's default. */
-const speechModel = `${platformAi.speech.provider}/${platformAi.speech.model}`;
-
-/** A line as Stephen says it in English, as the speech cache keeps it. */
-const spokenKey = (text: string): SpokenKey => ({
-  text,
-  spoken: `[warm] ${text}`,
-  voice: platformAi.speech.voices.stephen,
-  model: speechModel,
-  language: "en",
-});
+const idp = mockIdp();
 
 /** A word only this test says, lower case as the scans look for it. */
 const markerOf = (): string => `zqline${unique()}`;
@@ -62,7 +52,7 @@ const progressOf = (stephen: string, theirs: string): InterviewProgress => ({
   lines: [
     {
       from: "stephen",
-      text: `So ${stephen} is where it starts?`,
+      text: `So ${stephen} is where it starts. Is that right?`,
       tone: "warm",
     },
     {
@@ -149,8 +139,8 @@ const erasedOf = { id: "f1", tag: "step", text: "", record: "", out: true };
 
 /**
  * An interview where they said `theirs`, written down as f1 beside f2,
- * both approved and their read-back lines in the voice cache; then the
- * line removed and f1 taken out, not completed yet.
+ * both approved; then the line removed and f1 taken out, not completed
+ * yet, and the read-back's story said after.
  */
 const takenOutFrom = async (
   theirs: string,
@@ -174,19 +164,19 @@ const takenOutFrom = async (
   if (approved) {
     await approve(link, written.facts);
   }
-  const audio = JSON.stringify({
-    audio: "AAAA",
-    mime: "audio/mpeg",
-    words: [],
-  });
-  await keepLine(env, spokenKey(fact.text), audio);
-  await keepLine(env, spokenKey(other.text), audio);
   const out: InterviewProgress = {
     ...removing(written, 1),
     facts: [{ ...fact, out: true }, other],
   };
   const { version: v2 } = await save(link, v1, out);
-  return { link, person, fact, other, audio, out, version: v2 };
+  // The read-back as the page says it: a story in words of its own, not
+  // the statement's; and a line said for an admin, elsewhere.
+  const story = `So it starts with ${theirs}, as you said.`;
+  await sayOnLink(link, story);
+  const { session } = await signedInWithRole(idp, "admin");
+  const elsewhere = `Welcome back, ${unique()}.`;
+  await sayForAdmin(session, elsewhere);
+  return { link, person, fact, other, story, elsewhere, out, version: v2 };
 };
 
 /** Where `theirs` is left, and the facts kept, after `taken`. */
@@ -198,8 +188,8 @@ const leftOf = async (
   return {
     onboarding: await onboardingTablesWith(theirs),
     core: await d1ColumnsWith(env.DB, theirs),
-    cached: await keptLine(env, spokenKey(taken.fact.text)),
-    other: await keptLine(env, spokenKey(taken.other.text)),
+    cached: await stillKept(taken.story),
+    other: await stillKept(taken.elsewhere),
     facts: kept !== null && "progress" in kept ? kept.progress.facts : null,
   };
 };
@@ -244,18 +234,19 @@ describe("removing a line of an interview", { timeout: 60_000 }, () => {
     const stephen = markerOf();
     const theirs = markerOf();
     const { link, person, progress, version } = await saying(stephen, theirs);
-    const audio = JSON.stringify({
-      audio: "AAAA",
-      mime: "audio/mpeg",
-      words: [],
-    });
-    const [said] = progress.lines;
+    // Stephen's line as the page says it: a sentence at a time.
+    const pieces = [`So ${stephen} is where it starts.`, "Is that right?"];
+    for (const piece of pieces) {
+      // oxlint-disable-next-line no-await-in-loop -- one sentence after another
+      await sayOnLink(link, piece);
+    }
+    const { session } = await signedInWithRole(idp, "admin");
     const elsewhere = `And after that? ${unique()}`;
-    await keepLine(env, spokenKey(said?.text ?? ""), audio);
-    await keepLine(env, spokenKey(elsewhere), audio);
+    await sayForAdmin(session, elsewhere);
     const before = {
       stephen: await onboardingTablesWith(stephen),
       theirs: await onboardingTablesWith(theirs),
+      said: await Promise.all(pieces.map(stillKept)),
     };
 
     let saved: z.output<typeof savedSchema> | undefined;
@@ -276,19 +267,23 @@ describe("removing a line of an interview", { timeout: 60_000 }, () => {
         ...(await d1ColumnsWith(env.DB, stephen)),
         ...(await d1ColumnsWith(env.DB, theirs)),
       ],
-      cached: await keptLine(env, spokenKey(said?.text ?? "")),
-      elsewhere: await keptLine(env, spokenKey(elsewhere)),
+      cached: await Promise.all(pieces.map(stillKept)),
+      elsewhere: await stillKept(elsewhere),
       lines: kept !== null && "progress" in kept ? kept.progress.lines : null,
       audited: events.map(({ action }) => action),
       noted: noted.filter((what) => what === "interview.line_removed"),
     }).toStrictEqual({
       saved: true,
-      // The positive control: both were kept before.
-      before: { stephen: ["interviews"], theirs: ["interviews"] },
+      // The positive control: both were kept before, and both sentences said.
+      before: {
+        stephen: ["interviews"],
+        theirs: ["interviews"],
+        said: [true, true],
+      },
       onboarding: [],
       core: [],
-      cached: undefined,
-      elsewhere: audio,
+      cached: [false, false],
+      elsewhere: true,
       lines: [
         { from: "stephen", text: "", removed: true },
         { from: "person", text: "", removed: true },
@@ -426,6 +421,7 @@ describe("removing a line of an interview", { timeout: 60_000 }, () => {
     const taken = await takenOutFrom(theirs);
     const approvedBefore = await approvalsOf(taken.person);
     const putBack = await onboardingTablesWith(theirs);
+    const voiced = await stillKept(taken.story);
 
     const { saved } = await save(taken.link, taken.version, {
       ...taken.out,
@@ -434,6 +430,7 @@ describe("removing a line of an interview", { timeout: 60_000 }, () => {
 
     expect({
       putBack,
+      voiced,
       approvedBefore,
       saved,
       ...(await leftOf(theirs, taken)),
@@ -441,12 +438,14 @@ describe("removing a line of an interview", { timeout: 60_000 }, () => {
     }).toStrictEqual({
       // Until it is completed, it can still be put back.
       putBack: ["interviews"],
+      // The read-back's story was said, and kept, until it was completed.
+      voiced: true,
       approvedBefore: ["f1", "f2"],
       saved: true,
       onboarding: [],
       core: [],
-      cached: undefined,
-      other: taken.audio,
+      cached: false,
+      other: true,
       facts: [erasedOf, taken.other],
       approved: ["f2"],
     });
@@ -471,8 +470,8 @@ describe("removing a line of an interview", { timeout: 60_000 }, () => {
       saved: true,
       onboarding: [],
       core: [],
-      cached: undefined,
-      other: taken.audio,
+      cached: false,
+      other: true,
       facts: [erasedOf, { ...taken.other, agreed: true }],
       approved: ["f2"],
     });
@@ -508,8 +507,8 @@ describe("removing a line of an interview", { timeout: 60_000 }, () => {
       putBack: false,
       onboarding: [],
       core: [],
-      cached: undefined,
-      other: taken.audio,
+      cached: false,
+      other: true,
       facts: [erasedOf, taken.other],
     });
   });
@@ -579,8 +578,8 @@ describe("removing a line of an interview", { timeout: 60_000 }, () => {
       older: false,
       onboarding: [],
       core: [],
-      cached: undefined,
-      other: taken.audio,
+      cached: false,
+      other: true,
       facts: [erasedOf, taken.other],
       approved: ["f2"],
     });
@@ -615,8 +614,8 @@ describe("removing a line of an interview", { timeout: 60_000 }, () => {
       ran: true,
       onboarding: [],
       core: [],
-      cached: undefined,
-      other: taken.audio,
+      cached: false,
+      other: true,
       facts: [erasedOf, taken.other],
       after: null,
     });
@@ -639,72 +638,8 @@ describe("removing a line of an interview", { timeout: 60_000 }, () => {
       ran: true,
       onboarding: [],
       core: [],
-      cached: undefined,
-      other: taken.audio,
-      facts: [erasedOf, taken.other],
-    });
-  });
-
-  it("tries again, on the alarm's next run, an interview saved between the erasure's read and its write", async () => {
-    const theirs = markerOf();
-    const taken = await takenOutFrom(theirs, { approved: false });
-    const store = onboardingStore(env);
-    await store.savePlan(closedLongAgo(), system);
-    await expect.poll(alarmSet, { timeout: 10_000 }).not.toBeNull();
-    const later = JSON.stringify({
-      ...taken.out,
-      lines: [...taken.out.lines, { from: "stephen", text: "And then?" }],
-    });
-    // A save lands while the erasure hashes the words it read: the first
-    // time anything hashes them.
-    const storage = await runInDurableObject(
-      store,
-      (_instance, state) => state.storage
-    );
-    const digest = crypto.subtle.digest.bind(crypto.subtle);
-    let landed = false;
-    const hashing = vi
-      .spyOn(crypto.subtle, "digest")
-      .mockImplementation(async (algorithm, data) => {
-        const text = new TextDecoder().decode(
-          ArrayBuffer.isView(data) ? data : new Uint8Array(data)
-        );
-        if (!landed && text.includes(theirs)) {
-          landed = true;
-          storage.sql.exec(
-            "UPDATE interviews SET progress = ? WHERE person = ?",
-            later,
-            taken.person
-          );
-        }
-        return await digest(algorithm, data);
-      });
-
-    const first = await runDurableObjectAlarm(store);
-    const kept = await onboardingTablesWith(theirs);
-    const set = await alarmSet();
-    const next = await runDurableObjectAlarm(store);
-    hashing.mockRestore();
-    const left = await leftOf(theirs, taken);
-
-    expect({
-      first,
-      landed,
-      kept,
-      set: set !== null,
-      next,
-      onboarding: left.onboarding,
-      cached: left.cached,
-      facts: left.facts,
-    }).toStrictEqual({
-      first: true,
-      landed: true,
-      // Skipped: the copy it read was saved over.
-      kept: ["interviews"],
-      set: true,
-      next: true,
-      onboarding: [],
-      cached: undefined,
+      cached: false,
+      other: true,
       facts: [erasedOf, taken.other],
     });
   });
