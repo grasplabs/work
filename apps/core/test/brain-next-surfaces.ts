@@ -41,6 +41,7 @@ import {
   readableCheckMax,
   readerGroupsMax,
   recallBudgetMax,
+  removalsMax,
   sourceTextMaxBytes,
   vectorModelNameOf,
   vectorSearchLimitMax,
@@ -3475,6 +3476,70 @@ export const coreProbes = {
       async () => await Promise.resolve(coreBrain.recallQuestionMaxLength)
     ),
   ],
+  // A number, the most sources one removal takes: the same for everyone.
+  removalsMax: async () => [
+    await answer(
+      "the most sources one removal takes",
+      async () => await Promise.resolve(coreBrain.removalsMax)
+    ),
+  ],
+  // A removal of some of one person's own sources, as `removeSource` (above):
+  // no reader, alike whether there was anything to remove, and no marker.
+  removeOwnSources: async ({ markers }) => {
+    const remove = async (
+      name: string,
+      removed: unknown,
+      about?: Answer["about"]
+    ) =>
+      await answer(
+        name,
+        async () => {
+          await coreBrain.removeOwnSources(env, unchecked(removed));
+        },
+        about
+      );
+    const personId = stranger();
+    const marked = missingSource();
+    await coreBrain.addSource(env, {
+      source: marked,
+      change: crypto.randomUUID(),
+      text: markedText(markers),
+      readers: { kind: "owner", personId },
+    });
+    return [
+      await remove(
+        "sources no one added",
+        { personId, sources: [missingSource(), missingSource()] },
+        "nothing"
+      ),
+      await remove(
+        "someone else's marked source, beside one no one added",
+        { personId, sources: [marked, missingSource()] },
+        "hidden"
+      ),
+      await remove(
+        "the same removal again",
+        { personId, sources: [marked] },
+        "hidden"
+      ),
+      await remove("no sources", { personId, sources: [] }),
+      await remove("a person named by the markers", {
+        personId: markers.join("\n"),
+        sources: [missingSource()],
+      }),
+      await remove("more sources than one removal takes", {
+        personId,
+        sources: Array.from({ length: coreBrain.removalsMax + 1 }, () =>
+          missingSource()
+        ),
+      }),
+      await remove("an unknown field", {
+        personId,
+        sources: [missingSource()],
+        extra: markers.join(" "),
+      }),
+    ];
+  },
   // The host of a store's own alarm: refused for any name but a person's
   // own store's; for the reader's own, its report kept and summed into
   // staff's totals, which hold numbers alone.
@@ -8285,7 +8350,7 @@ export const storeProbes = {
     ];
   },
   // As core's (above), through the contract itself.
-  removeSource: async ({ markers }) => {
+  removeSources: async ({ markers }) => {
     const remove = async (
       name: string,
       request: unknown,
@@ -8294,7 +8359,7 @@ export const storeProbes = {
       await answer(
         name,
         async () => {
-          await store().removeSource(unchecked(request));
+          await store().removeSources(unchecked(request));
         },
         about
       );
@@ -8308,16 +8373,26 @@ export const storeProbes = {
     return [
       await remove(
         "a source no one added",
-        { source: keyOf(missingSource()) },
+        { sources: [keyOf(missingSource())] },
         "nothing"
       ),
-      await remove("a marked source", { source: marked }, "hidden"),
-      await remove("the same removal again", { source: marked }, "hidden"),
+      await remove(
+        "a marked source, beside one no one added",
+        { sources: [marked, keyOf(missingSource())] },
+        "hidden"
+      ),
+      await remove("the same removal again", { sources: [marked] }, "hidden"),
+      await remove("no sources", { sources: [] }),
+      await remove("more sources than one removal takes", {
+        sources: Array.from({ length: removalsMax + 1 }, () =>
+          keyOf(missingSource())
+        ),
+      }),
       await remove("a source named by the markers, too long", {
-        source: markers.join("").repeat(300),
+        sources: [markers.join("").repeat(300)],
       }),
       await remove("an unknown field", {
-        source: keyOf(missingSource()),
+        sources: [keyOf(missingSource())],
         extra: markers.join(" "),
       }),
     ];
