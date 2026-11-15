@@ -19,6 +19,7 @@ import {
   saveOver,
   setUpTime,
   erasing,
+  seedMemory,
 } from "./knowledge-purge.ts";
 import type { Person } from "./knowledge-purge.ts";
 import {
@@ -314,7 +315,8 @@ describe("a purge of content's memory records", setUpTime, () => {
       `# Team\n${name} runs payroll.`
     );
     const key = `purge-${unique()}-${unique()}`;
-    const redacted = await leaver.api.knowledge.remember(
+    const redacted = await seedMemory(
+      leaver,
       { kind: "fact", text: `I report to ${name}.` },
       { idempotencyKey: key }
     );
@@ -332,7 +334,8 @@ describe("a purge of content's memory records", setUpTime, () => {
     });
     // A retry of the remember answers its receipt: it never stores the
     // statement again.
-    const retried = await leaver.api.knowledge.remember(
+    const retried = await seedMemory(
+      leaver,
       { kind: "fact", text: `I report to ${name}.` },
       { idempotencyKey: key }
     );

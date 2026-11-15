@@ -22,7 +22,6 @@ import type {
   MemoryRecord,
   ReceiptsGetInput,
   RecallInput,
-  RememberInput,
   LessonLineage,
   LessonSummary,
 } from "@grasp-os/brain/contract";
@@ -51,7 +50,6 @@ import {
   memoriesPublish,
   memoriesRetire,
   receiptsGet,
-  remember,
 } from "@grasp-os/brain/memories";
 import { memoriesLineage } from "@grasp-os/brain/memory-lineage";
 import { finishPurgeById, preparePurge, purge } from "@grasp-os/brain/purge";
@@ -258,16 +256,6 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     return await withPerson(
       this.#check,
       async (person) => await run({ type: "person", person })
-    );
-  }
-
-  async remember(
-    input: RememberInput,
-    options: CommandOptions
-  ): Promise<CommandReceipt> {
-    return await this.#asReader(
-      async (reader) =>
-        await remember(brainOf(this.#env), reader, input, options)
     );
   }
 
