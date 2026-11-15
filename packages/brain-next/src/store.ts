@@ -35,6 +35,7 @@ import {
   newInstructionsSchema,
   newMemoriesSchema,
   newSourceSchema,
+  onlyInOwnStore,
   ownExportFileRequestSchema,
   ownExportRequestSchema,
   ownExportStartSchema,
@@ -78,6 +79,7 @@ import type {
   NewMemories,
   ReadableMemoriesRequest,
   RetireRequest,
+  RetiredMemory,
   AskModel,
   ChangeRequest,
   CurrentRequest,
@@ -332,13 +334,6 @@ const notInstructions =
   "The Brain refused it: an instruction file or a skill is added with addInstructions";
 const onlyInstructions =
   "The Brain refused it: addInstructions takes only an instruction file's or a skill's key";
-/**
- * What the shared store answers memories or an instruction file only one
- * person may read: they are kept only in that person's own store.
- */
-const sharedNotOwn =
-  "The Brain refused it: what only one person may read is kept in that person's own store";
-
 /** What a read of memories under an attribute it can't have answers. */
 const noSuchAttribute =
   "The Brain refused it: the attribute is not one the entity's kind has";
@@ -409,7 +404,9 @@ const hasSchema = (sql: SqlStorage): boolean =>
  * One class, two kinds of store, told apart by the object's name alone
  * (contract.ts `storeKindOf`):
  *
- * - The shared store (`brainOf`): what more than one person may read.
+ * - The shared store (`brainOf`): what more than one person may read. It
+ *   refuses what only one person may read (`#mayKeep`, `onlyInOwnStore`),
+ *   whoever calls, so none of it is ever there.
  * - A person's own store (`personalBrainOf`, named by their id): what
  *   only they may read. It keeps nothing anyone else may read, answers no
  *   other reader, keeps its files under a prefix of its own (bucket.ts),
@@ -676,13 +673,22 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     }
   }
 
-  /** Refuses `access` on a person's own store unless it is that person's alone. */
+  /**
+   * Refuses `access` on a person's own store unless it is that person's
+   * alone, and on the shared store when it is one person's alone
+   * (`onlyInOwnStore`): what only one person may read is kept only where
+   * they alone can reach it, whoever calls. Every add checks it first,
+   * before it reads or writes anything.
+   */
   #mayKeep(access: Access): void {
     if (
       this.#kind.kind === "person" &&
       (access.kind !== "owner" || access.person !== this.#kind.person)
     ) {
       throw new Error(notTheirsAlone);
+    }
+    if (this.#kind.kind === "shared" && access.kind === "owner") {
+      throw new Error(onlyInOwnStore);
     }
   }
 
@@ -852,12 +858,6 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       throw new Error(onlyInstructions);
     }
     this.#mayKeep(adding.access);
-    // A person's own instruction file or skill lies only in their own
-    // store: never in the shared one, which the company's export carries
-    // and their erasure doesn't take whole.
-    if (this.#kind.kind === "shared" && adding.access.kind === "owner") {
-      throw new Error(sharedNotOwn);
-    }
     return await this.#changing(async () => {
       await this.#readyToWrite();
       return await this.#unlessErasedMeanwhile(async () => {
@@ -1079,7 +1079,9 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     const asked = checked(sourceListRequestSchema, request);
     this.#mayRead(asked.reader);
     return (await this.#readable())
-      ? listSources(this.ctx.storage.sql, asked)
+      ? listSources(this.ctx.storage.sql, asked, {
+          personal: this.#kind.kind === "person",
+        })
       : { sources: [], more: false };
   }
 
@@ -2017,10 +2019,6 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   async addMemories(memories: NewMemories): Promise<AddedMemories> {
     const adding = checked(newMemoriesSchema, memories);
     this.#mayKeep(adding.access);
-    // Content only one person may read lies only in their own store.
-    if (this.#kind.kind === "shared" && adding.access.kind === "owner") {
-      throw new Error(sharedNotOwn);
-    }
     if (adding.reader !== undefined) {
       this.#mayRead(adding.reader);
     }
@@ -2118,20 +2116,24 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       : [];
   }
 
-  /** Retires one of the reader's own memories (memories.ts). */
-  async retireMemory(request: RetireRequest): Promise<MemoryChangeOutcome> {
-    const { memory, reader } = checked(retireRequestSchema, request);
+  /** Retires one of the writer's own memories the reader may read (memories.ts). */
+  async retireMemory(request: RetireRequest): Promise<RetiredMemory | null> {
+    const { memory, reader, writer } = checked(retireRequestSchema, request);
     this.#mayRead(reader);
     return await this.#changing(async () => {
       if (!(await this.#readable())) {
-        return "nothing";
+        return null;
       }
       return this.ctx.storage.transactionSync(() => {
         // Refused while a restore runs, as an add is (restoring.ts).
         if (isRestoring(this.ctx.storage.sql)) {
           throw new Error(restoringNow);
         }
-        return retireMemory(this.ctx.storage.sql, { id: memory, reader });
+        return retireMemory(this.ctx.storage.sql, {
+          id: memory,
+          reader,
+          writer,
+        });
       });
     });
   }

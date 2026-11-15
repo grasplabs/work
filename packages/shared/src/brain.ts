@@ -175,14 +175,7 @@ export interface Tool {
   ai?: AiKind;
 }
 
-/**
- * Most Knowledge documents with a transcript `brain.read` lists as
- * sources, the newest saved first: each by how many turns it has, never
- * the turns, which `brain.transcript` reads when the source is opened.
- */
-export const brainTranscriptSourcesMax = 50;
-
-/** A source's id, as `brain.transcript` takes one. */
+/** A source's id, as the brain takes one. */
 export const sourceIdSchema = z.string().min(1).max(200);
 
 /** One turn, answer or passage in a transcript. */
@@ -230,15 +223,11 @@ export interface Source {
   teamIds?: string[];
   /** An interview written up as an article, paragraph by paragraph. */
   article?: string[];
-  /**
-   * How many turns its transcript has, when it has one: `brain.read` says
-   * only this; `brain.transcript(id)` reads the turns and chapters.
-   */
+  /** How many turns its transcript has, when it has one. */
   transcriptTurns?: number;
   /**
    * The whole conversation, word for word; its statements are highlights
-   * in it. Never sent by `brain.read`: the page puts here what
-   * `brain.transcript` read.
+   * in it. Never sent by `brain.read`.
    */
   transcript?: Transcript;
   /**
@@ -461,12 +450,6 @@ export interface BrainApi {
    * that serve it they may see.
    */
   goals: () => Promise<Goal[]>;
-  /**
-   * One source's transcript (`brain.transcript`), as the person may read it
-   * now, or null: alike when it has none and when they may not read it.
-   * A team's interviews have none, for anyone.
-   */
-  transcript: (sourceId: string) => Promise<Transcript | null>;
   /**
    * What changed in the brain since a moment (`brain.changes`), newest
    * first, a page at a time, as the person may read it.

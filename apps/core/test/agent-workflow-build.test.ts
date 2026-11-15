@@ -102,8 +102,8 @@ const definitionOf = (status = "done"): string =>
 
 /**
  * A chat of `role`'s person (a builder unless another is given) answered
- * by `replies`, with an App the builder released, and `grant`: the
- * agent's permission to build.
+ * by `replies`, with an App the builder released, and `grant`: a
+ * permission of the agent's own, to read a collection for everyone.
  */
 const setUp = async (
   replies: ProviderReply[],

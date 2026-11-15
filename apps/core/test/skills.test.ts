@@ -1,30 +1,28 @@
+import { ensureCollection } from "@grasp-os/brain/collections";
+import { writeVersion } from "@grasp-os/brain/documents";
 import type { PurgeInput } from "@grasp-os/shared/knowledge";
+import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   clientSkillsCollectionId,
-  graspSkills,
   graspSkillsCollectionId,
-  syncGraspSkills,
 } from "../src/knowledge/grasp-skills.ts";
-import type { GraspSkill } from "../src/knowledge/grasp-skills.ts";
+import { brainOf } from "../src/knowledge/ports.ts";
+import { shippedSkills } from "../src/shipped-skills.ts";
 import { mockIdp } from "./idp.ts";
-import { knowledgeRacing } from "./knowledge.ts";
 import { auditedDuring, outcome, refusal, signedInApi } from "./sign-in.ts";
 
-// Skills: the Grasp skills, which ship with each release and its install
-// syncs into their collection (builtins.test.ts tests when it runs), and
-// the client's own. These tests
-// start from the ways that can fail: a release's changed skill never
-// reaches the collection, or reaches it twice when two syncs run at once,
-// or a sync writes when nothing changed; someone, an admin too, changes a
-// Grasp skill through a save, a restore or a purge, which the next sync
-// would silently undo; a copy lands outside the client's skills, is made
-// by someone who can't write them, overwrites a skill the client already
-// has, or copies something that isn't a Grasp skill; and the catalog
-// leaves out one of the two collections.
+// Skills in Knowledge: the Grasp skills, as releases synced them into
+// their collection before Grasp's skills moved to the Brain, and the
+// client's own. These tests start from the ways that can fail: someone,
+// an admin too, changes a Grasp skill through a save, a restore or a
+// purge; a copy lands outside the client's skills, is made by someone who
+// can't write them, overwrites a skill the client already has, or copies
+// something that isn't a Grasp skill; and the catalog leaves out one of
+// the two collections.
 //
 // The tests of a file share their storage, so each copy test copies a
 // skill of its own.
@@ -46,9 +44,60 @@ const graspDocuments = async (person: Person) => {
   return documents;
 };
 
-/** The Grasp skill at `path`, synced from this release first. */
+/** The Grasp skills, each at `<name>/SKILL.md`. */
+const graspSkills = shippedSkills.map(({ name, text }) => ({
+  path: `${name}/SKILL.md`,
+  text,
+}));
+
+/**
+ * The Grasp skills' collection as releases synced it into Knowledge:
+ * Grasp's own, each skill written by Grasp as a sync, once.
+ */
+const graspSkillsInKnowledge = async (): Promise<void> => {
+  const actor = { type: "system" } as const;
+  const collection = await ensureCollection(
+    brainOf(env),
+    {
+      id: graspSkillsCollectionId,
+      name: "Grasp skills",
+      description: "How Grasp works: skills that ship with each release.",
+      owner: "grasp",
+      access: "everyone",
+      sensitive: false,
+      source: "grasp",
+      createdAt: new Date(),
+    },
+    actor
+  );
+  for (const { path, text } of graspSkills) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- a few skills, one at a time
+      await writeVersion(
+        brainOf(env),
+        { actor, userId: "grasp" },
+        {
+          collection,
+          path,
+          text,
+          ifVersion: 0,
+          message: "From the release",
+          restoredFrom: null,
+          sync: true,
+        }
+      );
+    } catch (error) {
+      // Written by an earlier test of the file.
+      if (knowledgeErrors.codeOf(error) !== "knowledge.conflict") {
+        throw error;
+      }
+    }
+  }
+};
+
+/** The Grasp skill at `path`, its collection written first. */
 const graspDocument = async (person: Person, path: string) => {
-  await syncGraspSkills(env);
+  await graspSkillsInKnowledge();
   const documents = await graspDocuments(person);
   const found = documents.find((document) => document.path === path);
   if (!found) {
@@ -63,128 +112,11 @@ const textOf = async (person: Person, documentId: string): Promise<string> => {
   return version.text;
 };
 
-/** This release's skills, with `path`'s text changed: another release. */
-const releaseChanging = (path: string, text: string): GraspSkill[] =>
-  graspSkills.map((skill) => (skill.path === path ? { path, text } : skill));
-
 const knowledgeActions = <Event extends { action: string }>(
   events: Event[]
 ): Event[] => events.filter(({ action }) => action.startsWith("knowledge."));
 
 describe("the Grasp skills", setUpTime, () => {
-  it("are every skill folder of the release, and only those", () => {
-    // Vite lists the folders at build time; the Worker imports each one.
-    const folders = Object.keys(import.meta.glob("../skills/*/SKILL.md")).map(
-      (file) => file.slice("../skills/".length)
-    );
-    expect(graspSkills.map(({ path }) => path).toSorted()).toStrictEqual(
-      folders.toSorted()
-    );
-  });
-
-  it("are this release's once synced, and a sync with nothing changed writes nothing", async () => {
-    const admin = await personOf("admin");
-    await syncGraspSkills(env);
-
-    const documents = await graspDocuments(admin);
-    expect(documents.map(({ path }) => path)).toStrictEqual(
-      graspSkills.map(({ path }) => path).toSorted()
-    );
-    const texts = await Promise.all(
-      documents.map(async ({ id }) => await textOf(admin, id))
-    );
-    expect(texts).toStrictEqual(
-      documents.map(
-        ({ path }) => graspSkills.find((skill) => skill.path === path)?.text
-      )
-    );
-    // Each is a skill named after its folder, as the catalog lists it.
-    expect(
-      documents.map(({ path, type, title }) => [path, type, title])
-    ).toStrictEqual(
-      documents.map(({ path }) => [
-        path,
-        "skill",
-        path.slice(0, -"/SKILL.md".length),
-      ])
-    );
-
-    const events = await auditedDuring(async () => {
-      await syncGraspSkills(env);
-    });
-    await expect(graspDocuments(admin)).resolves.toStrictEqual(documents);
-    expect(knowledgeActions(events)).toStrictEqual([]);
-  });
-
-  it("take a release's changed skill as its next version, written once when another sync gets there first", async () => {
-    const admin = await personOf("admin");
-    const [skill] = graspSkills;
-    if (!skill) {
-      throw new Error("This release ships no Grasp skills");
-    }
-    const changed = await graspDocument(admin, skill.path);
-    const before = await graspDocuments(admin);
-    const changedText = `${skill.text}\nOne more thing.\n`;
-    const next = releaseChanging(skill.path, changedText);
-
-    // The second sync reads the skill at the same version as the first,
-    // and writes only once the first has written it.
-    const events = await auditedDuring(async () => {
-      await syncGraspSkills(
-        {
-          ...env,
-          KNOWLEDGE: knowledgeRacing(async () => {
-            await syncGraspSkills(env, next);
-          }),
-        },
-        next
-      );
-    });
-
-    const after = await graspDocuments(admin);
-    expect(
-      after.map(({ path, currentVersion }) => [path, currentVersion])
-    ).toStrictEqual(
-      before.map(({ path, currentVersion }) => [
-        path,
-        path === skill.path ? currentVersion + 1 : currentVersion,
-      ])
-    );
-    const { version } = await admin.api.knowledge.getDocument(changed.id);
-    expect([
-      version.number,
-      version.author,
-      version.message,
-      version.text,
-    ]).toStrictEqual([
-      changed.currentVersion + 1,
-      "grasp",
-      "From the release",
-      changedText,
-    ]);
-    expect(
-      knowledgeActions(events).map(({ action, actor, target }) => ({
-        action,
-        actor,
-        target,
-      }))
-    ).toStrictEqual([
-      {
-        action: "knowledge.document.saved",
-        actor: { type: "system" },
-        target: { type: "document", id: changed.id },
-      },
-    ]);
-
-    // A rollback to this release puts its text back, as a version too.
-    await syncGraspSkills(env);
-    const rolledBack = await admin.api.knowledge.getDocument(changed.id);
-    expect([rolledBack.version.number, rolledBack.version.text]).toStrictEqual([
-      changed.currentVersion + 2,
-      skill.text,
-    ]);
-  });
-
   it("can't be changed by anyone, an admin neither: not saved, restored or purged", async () => {
     const admin = await personOf("admin");
     const [skill] = graspSkills;

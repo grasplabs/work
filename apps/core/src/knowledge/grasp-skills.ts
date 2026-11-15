@@ -6,16 +6,8 @@ import {
   versionText,
   writeVersion,
 } from "@grasp-os/brain/documents";
-import type { Writer } from "@grasp-os/brain/documents";
-import {
-  brainPayloads,
-  collections,
-  documents,
-  versions,
-} from "@grasp-os/brain/schema";
+import { collections } from "@grasp-os/brain/schema";
 import { actorOf } from "@grasp-os/shared/audit";
-import type { AuditActor } from "@grasp-os/shared/audit";
-import { sha256Hex } from "@grasp-os/shared/encoding";
 import { collectionIdSchema } from "@grasp-os/shared/ids";
 import type { CollectionId } from "@grasp-os/shared/ids";
 import {
@@ -27,14 +19,12 @@ import type {
   DocumentSummary,
   SkillCollections,
 } from "@grasp-os/shared/knowledge";
-import { errorFields, log } from "@grasp-os/shared/log";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { outboxed } from "../audit-outbox.ts";
-import { shippedSkills } from "../shipped-skills.ts";
 import { requireWritable } from "./collection-rules.ts";
 import { personWriter } from "./person-writes.ts";
 import { portsOf, brainOf } from "./ports.ts";
@@ -43,31 +33,12 @@ import { portsOf, brainOf } from "./ports.ts";
 // agent's once it is granted read of each, as for any collection (agents
 // start with access to nothing):
 //
-// - the Grasp skills: how Grasp works (a baseline, a workflow, a
-//   stakeholder interview, the board page), in apps/core/skills/, bundled
-//   with each release as text, and
-//   synced into their collection (source `grasp`) once per release, on
-//   the first request (builtins.ts). Nobody else writes them, admins
-//   neither (documents.ts `checkedText`), and a purge that names one is
-//   refused: they hold no personal data, and the sync would put their
-//   text back;
+// - the Grasp skills, as releases synced them into their collection
+//   (source `grasp`) until Grasp's skills moved to the Brain
+//   (brain-skills.ts): nobody writes them, admins neither (documents.ts
+//   `checkedText`), and a purge that names one is refused;
 // - the client's skills: a collection for everyone that its admins write,
 //   like any other, and where a Grasp skill is copied to be adapted.
-//
-// Each Grasp skill's frontmatter carries its manifest (GRA-310): the task
-// types it applies to, and the skills it builds on, named in this
-// collection (`grasp-skills`) so a copy adapted in the client's skills
-// still finds them. The copy, under the same name, takes the shipped
-// skill's place where both apply (the Brain's skills.ts).
-//
-// Each sync reads every Grasp skill's current text in one query and
-// writes only the ones that differ from the release, each as its next
-// version from the version it read: two syncs at once both try the same
-// version number, and the second is refused as a conflict (by the
-// version's primary key, when both got past the version check) and
-// writes nothing, so a change is written once. A rollback syncs the older
-// text back, as a version of its own. During a rollout the text changes
-// once, never back and forth: builtins.ts says why.
 
 /** The Grasp skills' collection, under this ID: no other has it. */
 export const graspSkillsCollectionId: CollectionId =
@@ -76,40 +47,6 @@ export const graspSkillsCollectionId: CollectionId =
 /** The client's skills collection, under this ID: no other has it. */
 export const clientSkillsCollectionId: CollectionId =
   collectionIdSchema.parse("skills");
-
-/** A Grasp skill as a release ships it: its path, and its text. */
-export interface GraspSkill {
-  path: string;
-  text: string;
-}
-
-/**
- * The Grasp skills this release ships (shipped-skills.ts), each at
- * `<name>/SKILL.md`. A skill removed from the release stays in the
- * collection as it was: Knowledge never deletes a document but through a
- * purge.
- */
-export const graspSkills: readonly GraspSkill[] = shippedSkills.map(
-  ({ name, text }) => ({ path: `${name}/SKILL.md`, text })
-);
-
-/** Who the sync is: Grasp itself, with no person behind it. */
-const graspActor: AuditActor = { type: "system" };
-
-/** The author and owner of the Grasp skills' versions. */
-const graspWriter: Writer = { actor: graspActor, userId: "grasp" };
-
-const graspSkillsRow = (): CollectionRow => ({
-  id: graspSkillsCollectionId,
-  name: "Grasp skills",
-  description:
-    "How Grasp works: skills that ship with each release, the same for every client. Read-only; copy one into your skills to adapt it.",
-  owner: "grasp",
-  access: "everyone",
-  sensitive: false,
-  source: "grasp",
-  createdAt: new Date(),
-});
 
 /** The client's skills collection, as the admin `ownerId` sets it up. */
 const clientSkillsRow = (ownerId: string): CollectionRow => ({
@@ -123,79 +60,6 @@ const clientSkillsRow = (ownerId: string): CollectionRow => ({
   source: "here",
   createdAt: new Date(),
 });
-
-/**
- * Writes each Grasp skill whose current text isn't the release's (`skills`,
- * this one's unless a test passes another) as its next version, creating
- * the collection first if it doesn't exist. A skill that fails, or that another sync wrote from the same
- * version first, is logged, and the others are still written; the next
- * sync compares it again. Resolves whether every skill is the release's.
- * The install on the first request calls it.
- */
-export const syncGraspSkills = async (
-  env: Env,
-  skills: readonly GraspSkill[] = graspSkills
-): Promise<boolean> => {
-  const db = drizzle(env.KNOWLEDGE);
-  const stored = await db
-    .select({
-      path: documents.path,
-      currentVersion: documents.currentVersion,
-      sha256: brainPayloads.sha256,
-    })
-    .from(documents)
-    .leftJoin(
-      versions,
-      and(
-        eq(versions.documentId, documents.id),
-        eq(versions.number, documents.currentVersion)
-      )
-    )
-    .leftJoin(brainPayloads, eq(brainPayloads.key, versions.payloadKey))
-    .where(eq(documents.collectionId, graspSkillsCollectionId));
-  const byPath = new Map(stored.map((row) => [row.path, row]));
-  // By hash: no payload is read to compare.
-  const hashes = await Promise.all(
-    skills.map(async (skill) => await sha256Hex(skill.text))
-  );
-  const changed = skills.filter(
-    (skill, index) => byPath.get(skill.path)?.sha256 !== hashes[index]
-  );
-  if (changed.length === 0) {
-    return true;
-  }
-  const collection = await ensureCollection(
-    brainOf(env),
-    graspSkillsRow(),
-    graspActor
-  );
-  let complete = true;
-  for (const skill of changed) {
-    try {
-      // oxlint-disable-next-line no-await-in-loop -- a few skills, one at a time
-      await writeVersion(brainOf(env), graspWriter, {
-        collection,
-        path: skill.path,
-        text: skill.text,
-        ifVersion: byPath.get(skill.path)?.currentVersion ?? 0,
-        message: "From the release",
-        restoredFrom: null,
-        sync: true,
-      });
-    } catch (error) {
-      complete = false;
-      // Another sync wrote it from the same version first: which text it
-      // wrote, the next sync compares.
-      if (knowledgeErrors.codeOf(error) !== "knowledge.conflict") {
-        log.error("skills.sync_failed", {
-          path: skill.path,
-          ...errorFields(error),
-        });
-      }
-    }
-  }
-  return complete;
-};
 
 /**
  * The client's skills collection, created by `person` if they are an

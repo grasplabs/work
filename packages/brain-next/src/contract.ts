@@ -55,6 +55,17 @@ export const changeReused =
 export const storeErased = "The Brain refused it: this store was erased";
 
 /**
+ * What the shared store answers an add only one person may read (`owner`
+ * access): a source, an instruction file or memories. That is kept only
+ * in that person's own store (`personalBrainOf`), so the shared store
+ * refuses it whoever calls, before it reads or writes anything. The
+ * message alone, naming no one, so a host tells it from any other failure
+ * by comparing it whole: for a host that routes by readers, it is a bug.
+ */
+export const onlyInOwnStore =
+  "The Brain refused it: what only one person may read is kept in that person's own store";
+
+/**
  * What an add with an expected current version (`NewInstructions.after`)
  * says when the source's current version is another by the time it would
  * write: nothing is written. The caller reads the source again and decides;
@@ -352,7 +363,7 @@ export type Reader = z.infer<typeof readerSchema>;
 
 /**
  * A reader who acts as their person, as a change made in their name (a
- * memory they retire or confirm) needs: never one with no person.
+ * memory they confirm) needs: never one with no person.
  */
 export const personReaderSchema = readerSchema.extend({
   person: principalSchema,
@@ -732,8 +743,9 @@ export type SourceListRequest = z.infer<typeof sourceListRequestSchema>;
  * A source, as a listing names it: its current version and when that was
  * added; the opening of its text (of its first passage, at most
  * `openingMaxLength` characters), for a title; whether it is the
- * reader's alone (its current version's readers are that one person); and
- * how many of its versions the reader may read.
+ * reader's alone (listed by their own store: the shared store keeps
+ * nothing one person alone may read); and how many of its versions the
+ * reader may read.
  */
 export interface ListedSource {
   source: SourceId;
@@ -2174,14 +2186,22 @@ export type ReadableMemoriesRequest = z.infer<
 >;
 
 /**
- * One of the reader's own memories to retire: its lineage is the reader's
- * person, as writer, as `confirmMemory` takes its person from the reader.
+ * A memory of `writer`'s own to retire (its lineage is that writer's), that
+ * the reader may read: a person forgetting their own word is both writer
+ * and reader; the host's code writes as the App it runs (`app:<id>`), with
+ * a reader of no person. The writer is the host's to decide, as an add's.
  */
 export const retireRequestSchema = z.strictObject({
   memory: memoryIdSchema,
-  reader: personReaderSchema,
+  reader: readerSchema,
+  writer: principalSchema,
 });
 export type RetireRequest = z.infer<typeof retireRequestSchema>;
+
+/** A retired memory: when it was retired, as recorded, the same on every repeat. */
+export interface RetiredMemory {
+  retiredAt: Date;
+}
 
 /** A memory the reader confirms, as their own word. */
 export const confirmRequestSchema = z.strictObject({
@@ -2864,16 +2884,21 @@ export interface Brain {
    */
   readableMemories: (request: ReadableMemoriesRequest) => Promise<MemoryId[]>;
   /**
-   * Retires one of the reader's own memories (its lineage is the reader's
-   * person, as writer) that they may read and that is not retired: current,
-   * or ended by a newer one of theirs. It stops being current from now on,
-   * or can never become current again, and stays as history. It no longer
-   * ends older memories, which may become current again unless retired
-   * too. One already retired answers `done` again, so a retry never reads
-   * as not found; one outside its time (expired) answers `nothing`, as one
-   * not theirs.
+   * Retires one of the writer's own memories (its lineage is the writer's,
+   * `RetireRequest`) that the reader may read and that is not retired:
+   * current, or ended by a newer one of the writer's. It stops being
+   * current from now on, or can never become current again, and stays as
+   * history. It no longer ends older memories, which may become current
+   * again unless retired too. Answers when it was retired, as recorded
+   * (`RetiredMemory`): one this writer already retired answers that same
+   * time again, so a retry never reads as not found nor gets a new time.
+   * Null alike when there is no such memory, when it is another writer's
+   * (retired or not), when the reader may not read it, and when it
+   * expired before it was retired: nothing tells another writer's memory
+   * from one there isn't. One this writer retired that expired afterwards
+   * still answers its time on a repeat.
    */
-  retireMemory: (request: RetireRequest) => Promise<MemoryChangeOutcome>;
+  retireMemory: (request: RetireRequest) => Promise<RetiredMemory | null>;
   /**
    * The reader confirms a current memory they may read, over the current
    * memories of other lineages they may read that say something else of

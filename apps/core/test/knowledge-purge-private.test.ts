@@ -3,7 +3,6 @@ import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { advanceExports } from "../src/knowledge/brain-export.ts";
 import { mockIdp } from "./idp.ts";
 import {
   apiWith,
@@ -149,8 +148,7 @@ const changesAStep = /^update "brain_purge_steps"/iu;
 
 /**
  * What `other` is told finishing `owner`'s one unfinished purge by its ID,
- * and whether that changed its steps, wrote to the audit log, or let an
- * export begin.
+ * and whether that changed its steps or wrote to the audit log.
  */
 const refusedToFinish = async (owner: Person, other: Person) => {
   const open = await env.KNOWLEDGE.prepare(
@@ -165,20 +163,12 @@ const refusedToFinish = async (owner: Person, other: Person) => {
     answer = await outcome(other.api.knowledge.finishPurge(purgeId));
   });
   const after = await other.api.knowledge.purgeStatus(purgeId);
-  const exportOpen = await outcome(
-    other.api.knowledge
-      .prepareBrainExport()
-      .then(
-        async ({ token }) => await other.api.knowledge.startBrainExport(token)
-      )
-  );
   return {
     answer,
     sameSteps:
       before.state !== "complete" &&
       JSON.stringify(before) === JSON.stringify(after),
     events: events.map(({ action }) => action),
-    exportOpen,
   };
 };
 
@@ -639,8 +629,7 @@ describe(
         message: notFound,
         details: { documentIds: ["<id>"] },
       };
-      // Left open, it would hold back every export after it: finished by
-      // its ID, as nobody can run it again.
+      // Left open, it is finished by its ID, as nobody can run it again.
       const open = await env.KNOWLEDGE.prepare(
         "SELECT id FROM brain_purges WHERE by = ? AND completed_at IS NULL"
       )
@@ -658,7 +647,7 @@ describe(
       });
     });
 
-    it("is finished by another admin by its ID alone once its owner left, so exports work again", async () => {
+    it("is finished by another admin by its ID alone once its owner left", async () => {
       const owner = await personOf("admin");
       const other = await personOf("admin");
       const member = await personOf("user");
@@ -709,14 +698,6 @@ describe(
       });
       const stuck = {
         prepare: await outcome(other.api.knowledge.preparePurge(input)),
-        exportOpen: await outcome(
-          other.api.knowledge
-            .prepareBrainExport()
-            .then(
-              async ({ token }) =>
-                await other.api.knowledge.startBrainExport(token)
-            )
-        ),
       };
       const refused = {
         member: await outcome(member.api.knowledge.finishPurge(purgeId)),
@@ -736,18 +717,6 @@ describe(
         await refusal(other.api.knowledge.finishPurge(unknownId)),
         unknownId
       );
-      const plan = await other.api.knowledge.prepareBrainExport();
-      const { exportId } = await other.api.knowledge.startBrainExport(
-        plan.token
-      );
-      let exported = "running";
-      for (let tick = 0; tick < 20 && exported === "running"; tick += 1) {
-        // oxlint-disable-next-line no-await-in-loop -- one clock tick after another
-        await advanceExports(env, new Date());
-        // oxlint-disable-next-line no-await-in-loop -- read after each tick
-        const now = await other.api.knowledge.brainExportStatus(exportId);
-        exported = now.state;
-      }
       const sharedTexts = await versionTexts(shared.id);
       expect({
         stuck,
@@ -761,11 +730,9 @@ describe(
         again,
         unknown,
         shared: sharedTexts.some((text) => text.includes(secret)),
-        exported,
       }).toStrictEqual({
         stuck: {
           prepare: "knowledge.not_found",
-          exportOpen: "knowledge.export_purge_open",
         },
         refused: {
           member: "role.forbidden",
@@ -790,7 +757,6 @@ describe(
         again: { code: "knowledge.not_found", message: notFound },
         unknown: { code: "knowledge.not_found", message: notFound },
         shared: false,
-        exported: "complete",
       });
     });
 
@@ -826,7 +792,6 @@ describe(
         answer: "knowledge.purge_needs_input",
         sameSteps: true,
         events: [],
-        exportOpen: "knowledge.export_purge_open",
         text: "# Pay\nAsk (removed).",
       });
     });
@@ -870,7 +835,6 @@ describe(
         answer: "knowledge.purge_needs_input",
         sameSteps: true,
         events: [],
-        exportOpen: "knowledge.export_purge_open",
         memory: false,
       });
     });
@@ -934,7 +898,6 @@ describe(
           answer: "knowledge.purge_needs_input",
           sameSteps: true,
           events: [],
-          exportOpen: "knowledge.export_purge_open",
           again: 0,
           latest: "# Pay\nAsk (removed) again.",
         }
@@ -955,7 +918,6 @@ describe(
         answer: "knowledge.purge_needs_input",
         sameSteps: true,
         events: [],
-        exportOpen: "knowledge.export_purge_open",
       });
     });
 

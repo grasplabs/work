@@ -18,7 +18,6 @@ import type { DependenciesApi } from "./dependencies.ts";
 import type { DraftsApi, VersionsApi } from "./drafts.ts";
 import type { HeldStartsApi } from "./held-starts.ts";
 import type { InstructionsApi } from "./instruction-files.ts";
-import type { KnowledgeSignalsApi } from "./knowledge-signals.ts";
 import type { KnowledgeApi } from "./knowledge.ts";
 import type { MembersApi } from "./members.ts";
 import type { ModelsApi } from "./models.ts";
@@ -36,7 +35,6 @@ import type { SessionsApi } from "./sign-in.ts";
 import type { SignalsApi } from "./signals.ts";
 import type { SkillsApi } from "./skills.ts";
 import type { StephenRequestsApi } from "./stephen-requests.ts";
-import type { UploadsApi } from "./uploads.ts";
 import type { WaitingApi } from "./waiting.ts";
 import type { WorkflowResourcesApi } from "./workflow-resources.ts";
 import type { WorkflowsApi } from "./workflows.ts";
@@ -131,18 +129,8 @@ export interface SessionApi {
    * undoing one there.
    */
   readonly brainMemories: BrainMemoriesApi;
-  /**
-   * Knowledge usage signals, computed daily: what's missing or stale in the
-   * collections the person owns.
-   */
-  readonly knowledgeSignals: KnowledgeSignalsApi;
   /** Instruction files, for those who may edit each. */
   readonly instructions: InstructionsApi;
-  /**
-   * Files uploaded into Knowledge: uploading one, and following its
-   * status as its text is extracted.
-   */
-  readonly uploads: UploadsApi;
   /**
    * Accounts connected through OAuth: the person's own, and shared ones
    * (which only admins connect and disconnect).

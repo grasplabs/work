@@ -13,7 +13,7 @@ import { outcome, signedInApi, unique } from "./sign-in.ts";
 
 // The Brain's recall (knowledge/recall.ts), through the boundaries callers
 // reach it by: a person's Knowledge RPC and a collection's stub; a chat's
-// own, `env.brain.recall`, is tested with the chat (agent-knowledge.test.ts).
+// own, `env.brain.recall`, is tested with the chat (chat-history.test.ts).
 // These tests start from the ways it can fail (GRA-296's threat note):
 // forged authority in the arguments, a filter wider than the caller's
 // reach, evidence from a collection the caller can't read, a binding kept

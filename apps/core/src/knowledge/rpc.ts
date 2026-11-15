@@ -22,7 +22,6 @@ import type {
   MemoryRecord,
   ReceiptsGetInput,
   RecallInput,
-  RememberInput,
   LessonLineage,
   LessonSummary,
 } from "@grasp-os/brain/contract";
@@ -40,11 +39,6 @@ import {
   entitySources,
 } from "@grasp-os/brain/entities";
 import {
-  exportStatus,
-  prepareExport,
-  startExport,
-} from "@grasp-os/brain/exports";
-import {
   lessonLineage,
   lessonsFor,
   lessonsRetire,
@@ -56,7 +50,6 @@ import {
   memoriesPublish,
   memoriesRetire,
   receiptsGet,
-  remember,
 } from "@grasp-os/brain/memories";
 import { memoriesLineage } from "@grasp-os/brain/memory-lineage";
 import { finishPurgeById, preparePurge, purge } from "@grasp-os/brain/purge";
@@ -87,7 +80,6 @@ import type {
   PurgePlan,
   PurgeResult,
   PurgeStatus,
-  ExportStatus,
   ReadOptions,
   RestoreInput,
   SaveInput,
@@ -116,8 +108,6 @@ import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
 import type { Reader } from "./access.ts";
-import { appsErasure } from "./apps-collection.ts";
-import { coreExport } from "./brain-export.ts";
 import { createCollection, listCollections } from "./collection-rules.ts";
 import { copySkill, skillCollections } from "./grasp-skills.ts";
 import { sharedChatsOf } from "./memory-publish.ts";
@@ -151,10 +141,9 @@ const allOf = (copies: readonly Copies[]): Copies => ({
 /**
  * What a purge reaches of core's own copies (purge.ts `OnErase`): the
  * brain's gap answers and records, the kickoff, the interviews and staff's
- * own text, the originals of uploaded files, the
+ * own text, the originals of uploaded files, and the
  * onboarding's readings of the documents shared in it with what was drawn
- * from them, the Apps collection's entries and each person's Personal
- * collection.
+ * from them.
  */
 export const coreErasure = (env: Env): OnErase => ({
   ...allOf([
@@ -182,12 +171,17 @@ export const coreErasure = (env: Env): OnErase => ({
     },
   ]),
   ...uploadErasure(env),
-  ...appsErasure(env),
   // No copy core keeps is a Knowledge document's by its place: the
   // onboarding's readings were the one, and their files are uploads in
   // the Brain since GRA-1889 (onboarding/document-erasure.ts).
   forgetDocuments: async () => {
     // Nothing to forget.
+  },
+  // Nothing of core's writes a document's text back after a purge: the
+  // Apps collection's entries were the one, made from each App, and core
+  // indexes Apps there no more.
+  requireRewritable: async () => {
+    // Nothing to require.
   },
 });
 
@@ -260,16 +254,6 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     return await withPerson(
       this.#check,
       async (person) => await run({ type: "person", person })
-    );
-  }
-
-  async remember(
-    input: RememberInput,
-    options: CommandOptions
-  ): Promise<CommandReceipt> {
-    return await this.#asReader(
-      async (reader) =>
-        await remember(brainOf(this.#env), reader, input, options)
     );
   }
 
@@ -527,48 +511,6 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
         coreErasure(this.#env)
       );
     });
-  }
-
-  async prepareBrainExport(): Promise<{
-    collections: number;
-    documents: number;
-    token: string;
-    expiresAt: string;
-  }> {
-    return await withPerson(
-      this.#check,
-      async (person) =>
-        await prepareExport(
-          brainOf(this.#env),
-          purgerOf(person),
-          coreExport(this.#env)
-        )
-    );
-  }
-
-  async startBrainExport(token: string): Promise<{ exportId: string }> {
-    return await withPerson(
-      this.#check,
-      async (person) =>
-        await startExport(
-          brainOf(this.#env),
-          purgerOf(person),
-          token,
-          coreExport(this.#env)
-        )
-    );
-  }
-
-  async brainExportStatus(exportId: string): Promise<ExportStatus> {
-    return await withPerson(
-      this.#check,
-      async (person) =>
-        await exportStatus(
-          brainOf(this.#env),
-          purgerOf(person),
-          knowledgeErrors.parse("knowledge.invalid", purgeIdSchema, exportId)
-        )
-    );
   }
 
   async purgeStatus(purgeId: string): Promise<PurgeStatus> {

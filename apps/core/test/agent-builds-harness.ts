@@ -95,9 +95,9 @@ export const tryEach = (calls: Record<string, string>, before = ""): string =>
 
 /**
  * A chat of `role`'s person (a builder unless another is given) answered
- * by `replies`, with an App a builder released so the Apps collection is
- * there, and `grant`: a permission of the agent's own on it, which
- * building doesn't need but whose revocation ends what the agent does.
+ * by `replies`, with an App a builder released, and `grant`: a permission
+ * of the agent's own, to read a collection for everyone, which building
+ * doesn't need but whose revocation ends what the agent does.
  */
 export const setUp = async (
   /** The model's replies, or those it gives about the released App. */

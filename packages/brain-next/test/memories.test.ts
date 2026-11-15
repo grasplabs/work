@@ -19,6 +19,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { memoriesByWords } from "../src/memories.ts";
+import { readerSetKeyOf } from "../src/reader-sets.ts";
 import type { BrainStore } from "../src/store.ts";
 import { copyOf, kill, restore } from "./store-copy.ts";
 
@@ -672,7 +673,11 @@ describe("who may read a memory", () => {
       };
     };
     const retire = async (writer: string, memory: string) => {
-      await shared().retireMemory({ memory, reader: readerOf(writer, group) });
+      await shared().retireMemory({
+        memory,
+        reader: readerOf(writer, group),
+        writer,
+      });
     };
     const name = unique("Acme");
     const ref = `ref:${unique("r")}`;
@@ -838,6 +843,7 @@ describe("who may read a memory", () => {
       await shared().retireMemory({
         memory: memory ?? "",
         reader: readerOf(writer, group),
+        writer,
       });
     }
     const current = [
@@ -916,6 +922,7 @@ describe("who may read a memory", () => {
     await shared().retireMemory({
       memory: rival.memories[0] ?? "",
       reader: readerOf(second, theirs),
+      writer: second,
     });
     const afterRetired = new Date();
 
@@ -1269,50 +1276,134 @@ describe("ending a memory", () => {
     ).resolves.toStrictEqual(["Anna is on leave"]);
   });
 
-  // Threat 9: only a writer's own, still believed, and answered alike otherwise.
-  it("retires a writer's own memory as history, and answers nothing for anyone else's", async () => {
+  // Threat 9: only a writer's own, retired once, at one recorded time.
+  it("retires a writer's own memory for a reader of no person, gone from every read but history, and answers its recorded time on every repeat, concurrent and after a restart included", async () => {
     const group = unique("group");
-    const writer = unique("writer");
+    const app = `app:${unique("a")}`;
+    const reader: Reader = { person: null, groups: [group] };
+    const name = unique("Acme");
+    const {
+      entities: { c: entity = "" },
+      memories: [mine = ""],
+    } = await remember(
+      audience(group),
+      [customer({ names: [name] })],
+      [fact({ kind: "writer", writer: app }, { statement: "Mine" })]
+    );
+    const retire = async (writer = app) =>
+      await shared().retireMemory({ memory: mine, reader, writer });
+
+    // Two retires by its writer and one by another, all at once.
+    const [first, alongside, byOther] = await Promise.all([
+      retire(),
+      retire(),
+      retire(`app:${unique("b")}`),
+    ]);
+    const again = await retire();
+    await kill(shared());
+    const restarted = await retire();
+    const { memories: history } = await shared().readMemories({
+      entity,
+      reader,
+      history: true,
+    });
+    const found = await shared().findEntities({ reader, name });
+
+    expect(first?.retiredAt).toBeInstanceOf(Date);
+    expect({ alongside, byOther, again, restarted }).toStrictEqual({
+      alongside: first,
+      byOther: null,
+      again: first,
+      restarted: first,
+    });
+    expect({
+      current: await statementsAbout(entity, reader),
+      found: found.entities.map(({ id }) => id),
+      card: await shared().readCard({ entity, reader }),
+      readable: await shared().readableMemories({ memories: [mine], reader }),
+      history: history.map(({ id, statement, endedAt }) => ({
+        id,
+        statement,
+        endedAt,
+      })),
+      // History only to who may read the memory.
+      outsider: await statementsAbout(entity, readerOf(unique("outsider")), {
+        history: true,
+      }),
+    }).toStrictEqual({
+      current: [],
+      found: [],
+      card: null,
+      readable: [],
+      history: [{ id: mine, statement: "Mine", endedAt: first?.retiredAt }],
+      outsider: [],
+    });
+  });
+
+  // Threat 9: anything not the writer's own answers alike and stays as it was.
+  it("answers another writer's memory, retired or not, a sourced one, one there isn't and one the reader may not read exactly alike, and changes none of them", async () => {
+    const group = unique("group");
+    const app = `app:${unique("a")}`;
+    const other = `app:${unique("b")}`;
+    const reader: Reader = { person: null, groups: [group] };
+    const member = readerOf(unique("member"), group);
     const version = await addSource("Acme is active", audience(group));
-    const { entities, memories } = await remember(
+    const {
+      entities: { c: entity = "" },
+      memories: [theirs = "", theirsRetired = "", sourced = "", mine = ""],
+    } = await remember(
       audience(group),
       [customer()],
       [
-        fact({ kind: "writer", writer }, { statement: "Mine" }),
+        // Of other attributes, so no memory of their lineage ends another.
+        fact(
+          { kind: "writer", writer: other },
+          { attribute: "status", value: "Active", statement: "Theirs" }
+        ),
+        fact(
+          { kind: "writer", writer: other },
+          { attribute: "industry", value: "Retail", statement: "Retired" }
+        ),
         fact(
           { kind: "source", ...version, quote: "Acme is active" },
           { statement: "Sourced" }
         ),
+        fact({ kind: "writer", writer: app }, { statement: "Mine" }),
       ]
     );
-    const [mine = "", sourced = ""] = memories;
+    const retiredByThem = await shared().retireMemory({
+      memory: theirsRetired,
+      reader,
+      writer: other,
+    });
+    const retire = async (memory: string, as: Reader = reader) =>
+      await shared().retireMemory({ memory, reader: as, writer: app });
 
-    const reader = readerOf(writer, group);
-    const other = readerOf(unique("other"), group);
     const outcomes = [
-      await shared().retireMemory({ memory: mine, reader: other }),
-      await shared().retireMemory({ memory: sourced, reader }),
-      await shared().retireMemory({ memory: mine, reader: readerOf(writer) }),
-      await shared().retireMemory({ memory: mine, reader }),
-      await shared().retireMemory({ memory: mine, reader }),
+      await retire(theirs),
+      await retire(theirsRetired),
+      await retire(sourced),
+      await retire(crypto.randomUUID()),
+      // Its own memory, by a reader who may not read it.
+      await retire(mine, { person: null, groups: [unique("elsewhere")] }),
     ];
-
-    // A retry of the same retire answers as the first did.
-    expect(outcomes).toStrictEqual([
-      "nothing",
-      "nothing",
-      "nothing",
-      "done",
-      "done",
-    ]);
-    await expect(
-      statementsAbout(entities.c ?? "", reader)
-    ).resolves.toStrictEqual(["Sourced"]);
-    // Both were learned in one add: compared without their order.
-    const history = await statementsAbout(entities.c ?? "", reader, {
+    const { memories: history } = await shared().readMemories({
+      entity,
+      reader: member,
       history: true,
     });
-    expect(history.toSorted()).toStrictEqual(["Mine", "Sourced"]);
+
+    const current = await statementsAbout(entity, member);
+
+    expect(outcomes).toStrictEqual([null, null, null, null, null]);
+    expect({
+      current: current.toSorted(),
+      // Their retired one keeps the time they retired it at.
+      retiredAt: history.find(({ id }) => id === theirsRetired)?.endedAt,
+    }).toStrictEqual({
+      current: ["Mine", "Sourced", "Theirs"],
+      retiredAt: retiredByThem?.retiredAt,
+    });
   });
 });
 
@@ -1362,44 +1453,6 @@ describe("erasure", () => {
     });
     await tick();
     await expect(left()).resolves.toBe(0);
-  });
-
-  it("deletes the memories drawn from a source a person's erasure takes whole, and keeps them gone after a restore", async () => {
-    const person = unique("person");
-    const group = unique("group");
-    // The source's current version is Pat's alone: Pat's erasure takes
-    // the whole source, its team version and what was drawn from it too.
-    const source = unique("doc");
-    const theirs = await addSource("Only Pat's", audience(group), source);
-    await addSource("Pat's now", { kind: "owner", person }, source);
-    const { entities } = await remember(
-      audience(group),
-      [customer({ names: [unique("Private")] })],
-      [
-        fact(
-          { kind: "source", ...theirs, quote: "Only Pat's" },
-          { statement: "Drawn from Pat's" }
-        ),
-        fact({ kind: "writer", writer: person }, { statement: "The team's" }),
-      ]
-    );
-    const reader = readerOf(person, group);
-    const backup = await copyOf(shared());
-
-    await shared().erasePerson({ person, reason: "person_erased" });
-    const erased = await statementsAbout(entities.c ?? "", reader, {
-      history: true,
-    });
-    await restore(shared(), backup);
-    await tick();
-    const restored = await statementsAbout(entities.c ?? "", reader, {
-      history: true,
-    });
-
-    expect({ erased, restored }).toStrictEqual({
-      erased: ["The team's"],
-      restored: ["The team's"],
-    });
   });
 });
 
@@ -1770,7 +1823,7 @@ describe("what a reader sees of a retire and of an extraction", () => {
     const group = unique("g");
     const writer = unique("app");
     const reader = readerOf(writer, group);
-    const outcome = async (withHidden: boolean): Promise<string> => {
+    const outcome = async (withHidden: boolean): Promise<boolean> => {
       const made = await remember(
         audience(group),
         [customer()],
@@ -1796,15 +1849,17 @@ describe("what a reader sees of a retire and of an extraction", () => {
           readerOf(unique("adder"), group)
         );
       }
-      return await shared().retireMemory({
+      const retired = await shared().retireMemory({
         memory: made.memories[0] ?? "",
         reader,
+        writer,
       });
+      return retired !== null;
     };
 
     expect([await outcome(false), await outcome(true)]).toStrictEqual([
-      "done",
-      "done",
+      true,
+      true,
     ]);
   });
 
@@ -1855,7 +1910,11 @@ describe("what a reader sees of a retire and of an extraction", () => {
       await store
         .listContested({ reader: readerOf(person) })
         .then(({ facts, more }) => ({ facts, more })),
-      await store.retireMemory({ memory: id, reader: readerOf(person) }),
+      await store.retireMemory({
+        memory: id,
+        reader: readerOf(person),
+        writer: person,
+      }),
     ];
     const others = [
       await refused(
@@ -1873,7 +1932,12 @@ describe("what a reader sees of a retire and of an extraction", () => {
         async () => await store.confirmMemory({ memory: id, reader: other })
       ),
       await refused(
-        async () => await store.retireMemory({ memory: id, reader: other })
+        async () =>
+          await store.retireMemory({
+            memory: id,
+            reader: other,
+            writer: other.person,
+          })
       ),
     ];
 
@@ -1881,7 +1945,7 @@ describe("what a reader sees of a retire and of an extraction", () => {
       empty: [
         { entities: [], more: false, restsOn: [], restsOnWords: [] },
         { facts: [], more: false },
-        "nothing",
+        null,
       ],
       others: Array.from({ length: 6 }, () => "refused"),
     });
@@ -1964,8 +2028,9 @@ describe("an instruction, a retire's repeat, and an extraction mark's readers", 
       shared().retireMemory({
         memory: made.memories[0] ?? "",
         reader: readerOf(writer, group),
+        writer,
       })
-    ).resolves.toBe("nothing");
+    ).resolves.toBeNull();
   });
 
   // Threat 10: a retry after an erasure answers what it added, and adds nothing back.
@@ -2179,6 +2244,7 @@ describe("pages, attributes, and a retired newer memory", () => {
     await shared().retireMemory({
       memory: newer.memories[0] ?? "",
       reader: writerReader,
+      writer,
     });
 
     expect({
@@ -2223,18 +2289,20 @@ describe("pages, attributes, and a retired newer memory", () => {
       await shared().retireMemory({
         memory: made.memories[0] ?? "",
         reader: writerReader,
+        writer,
       }),
       await shared().retireMemory({
         memory: newer.memories[0] ?? "",
         reader: writerReader,
+        writer,
       }),
-    ];
+    ].map((each) => each !== null);
 
     expect({
       retired,
       writer: await statementsAbout(entity, writerReader),
       third: await statementsAbout(entity, readerOf(unique("third"), group)),
-    }).toStrictEqual({ retired: ["done", "done"], writer: [], third: [] });
+    }).toStrictEqual({ retired: [true, true], writer: [], third: [] });
   });
 
   it("pages memories, contested facts and entities on their own order, one page after another, nothing skipped or repeated", async () => {
@@ -2788,14 +2856,11 @@ describe("a set dropped without an erasure, a fact's sides, and one millisecond"
   });
 
   // Threat 10: an erasure covers what was written in its own millisecond.
-  it("erases a memory written in the same millisecond as a read and the person's erasure", async () => {
-    const person = unique("p");
+  it("erases a memory written in the same millisecond as a read and the source's erasure", async () => {
     const group = unique("g");
-    // The source's current version is Pat's alone: Pat's erasure takes it whole.
     const source = unique("doc");
     const version = await addSource("Only Pat's", audience(group), source);
-    await addSource("Pat's now", { kind: "owner", person }, source);
-    const reader = readerOf(person, group);
+    const reader = readerOf(unique("r"), group);
     await shared().workOverview();
     const left = await runInDurableObject(
       shared(),
@@ -2830,7 +2895,7 @@ describe("a set dropped without an erasure, a fact's sides, and one millisecond"
               ),
             ],
           });
-          await instance.erasePerson({ person, reason: "person_erased" });
+          await instance.eraseSource({ source, reason: "deleted" });
           const { memories } = await instance.readMemories({
             entity: made.entities.c ?? "",
             reader,
@@ -3129,15 +3194,16 @@ describe("pages of one read, by the store's stamps (contract v10)", () => {
       const retired = await instance.retireMemory({
         memory: mine.memories[0] ?? "",
         reader,
+        writer: person,
       });
       return { retired, pages: await allPages(instance, entity, reader) };
     });
 
     expect({
-      retired: out.retired,
+      retired: out.retired !== null,
       pages: out.pages.toSorted((a, b) => a.localeCompare(b)),
     }).toStrictEqual({
-      retired: "done",
+      retired: true,
       pages: ["Other", "Third"],
     });
   });
@@ -3356,10 +3422,42 @@ describe("pages of one read, by the store's stamps (contract v10)", () => {
   });
 });
 
-describe("what the shared store keeps", () => {
-  it("refuses a memory or an extraction mark drawn from a version one person alone may read", async () => {
-    const person = unique("p");
-    const version = await addSource("Mine alone", { kind: "owner", person });
+/**
+ * The shared store's set of readers that is `group` alone made `key`, as
+ * a damaged row would hold. Reader sets are never updated (a trigger), so
+ * the damage lifts it for this one row and puts it back as it was.
+ */
+const damageReaders = async (group: string, key: string): Promise<void> => {
+  await runInDurableObject(shared(), (_instance, state) => {
+    const { sql } = state.storage;
+    state.storage.transactionSync(() => {
+      const [trigger] = sql
+        .exec<{ sql: string }>(
+          "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'reader_sets_no_update'"
+        )
+        .toArray();
+      sql.exec("DROP TRIGGER reader_sets_no_update");
+      sql.exec(
+        "UPDATE reader_sets SET key = ? WHERE key = ?",
+        key,
+        JSON.stringify([["group", group]])
+      );
+      sql.exec(trigger?.sql ?? "");
+    });
+  });
+};
+
+describe("what the shared store keeps, when a version's readers are damaged", () => {
+  // The shared store never takes what one person alone may read
+  // (personal.test.ts); a row damaged into one person's alone still gives
+  // nothing drawn from it to a group.
+  it("refuses a memory or an extraction mark drawn from a version damaged into one person's alone", async () => {
+    const group = unique("g");
+    const version = await addSource("Mine alone", audience(group));
+    await damageReaders(
+      group,
+      readerSetKeyOf({ kind: "owner", person: unique("p") })
+    );
     const outcome = async (adding: Parameters<BrainStore["addMemories"]>[0]) =>
       await shared()
         .addMemories(adding)
@@ -3384,32 +3482,12 @@ describe("what the shared store keeps", () => {
       }),
     ]).toStrictEqual(["refused", "refused"]);
   });
-});
 
-describe("what the shared store keeps, when it can't read a version's readers", () => {
   it("refuses a memory drawn from a version whose readers' key it can't read", async () => {
     const group = unique("g");
     const version = await addSource("Unreadable readers", audience(group));
-    // A key no add writes, as a damaged row would hold: one person's
-    // principal without an id. Reader sets are never updated (a trigger),
-    // so the damage lifts it for this one row and puts it back as it was.
-    await runInDurableObject(shared(), (_instance, state) => {
-      const { sql } = state.storage;
-      state.storage.transactionSync(() => {
-        const [trigger] = sql
-          .exec<{ sql: string }>(
-            "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'reader_sets_no_update'"
-          )
-          .toArray();
-        sql.exec("DROP TRIGGER reader_sets_no_update");
-        sql.exec(
-          "UPDATE reader_sets SET key = ? WHERE key = ?",
-          '[["person"]]',
-          JSON.stringify([["group", group]])
-        );
-        sql.exec(trigger?.sql ?? "");
-      });
-    });
+    // A key no add writes: one person's principal without an id.
+    await damageReaders(group, '[["person"]]');
     const outcome = await shared()
       .addMemories({
         change: crypto.randomUUID(),
@@ -3725,7 +3803,7 @@ describe("which memories a reader may still read", () => {
       memories: asked,
       reader: readerOf(writer),
     });
-    await shared().retireMemory({ memory: mine, reader });
+    await shared().retireMemory({ memory: mine, reader, writer });
     const retired = await shared().readableMemories({
       memories: asked,
       reader,
