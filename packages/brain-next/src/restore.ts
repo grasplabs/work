@@ -979,6 +979,10 @@ const restsOn = (
   if (line.kind === "memory" && line.source !== null && line.version !== null) {
     return { source: line.source, version: line.version };
   }
+  // A key held with no version: version 0, as the export recorded it.
+  if (line.kind === "removal") {
+    return { source: line.source, version: 0 };
+  }
   return undefined;
 };
 

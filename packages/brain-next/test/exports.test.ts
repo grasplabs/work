@@ -1359,6 +1359,24 @@ describe("exports and restores", () => {
       });
     });
 
+    it("is erased once the ledger erases a key it holds as removed before any version, its files deleted", async () => {
+      await putBack(shared(), emptyShared);
+      const removed = `test:${unique()}`;
+      await shared().removeSource({ source: removed });
+      const { id } = await shared().startExport("test");
+      const written = await settled(shared(), id);
+      await shared().eraseSource({ source: removed, reason: "deleted" });
+      const erased = await shared().exportStatus({ id });
+      await tick(shared());
+      await tick(shared());
+
+      expect({
+        written: written?.state,
+        erased: erased?.state,
+        files: await keysUnder(`exports/${id}/`),
+      }).toStrictEqual({ written: "done", erased: "erased", files: [] });
+    });
+
     it("restores when each version's text was read, so no earlier read replaces it after a restore; a version that never said restores with none", async () => {
       await putBack(shared(), emptyShared);
       const group = `team:${unique()}`;

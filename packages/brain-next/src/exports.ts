@@ -207,7 +207,9 @@ const partHoldsFileOf = (index: number): string =>
   exportPartNameOf(index, "holds.json");
 
 const holdsSchema = z.array(
-  z.tuple([z.string().regex(/^[0-9a-f]{64}$/u), z.int().positive()])
+  // Version 0 is a key held with no version (a removal line, `removals`):
+  // only an erasure of the key itself names it.
+  z.tuple([z.string().regex(/^[0-9a-f]{64}$/u), z.int().nonnegative()])
 );
 
 /**
@@ -758,12 +760,12 @@ LIMIT ?3`,
   // person's own key, is never null).
   removals:
     scope === "company"
-      ? `SELECT gone.rowid AS row, gone.source AS source
+      ? `SELECT gone.rowid AS row, gone.source AS source, gone.subject AS subject
 FROM removed_sources AS gone
 WHERE gone.rowid > ?1 AND gone.version_row IS NULL
 ORDER BY gone.rowid
 LIMIT ?3`
-      : `SELECT gone.rowid AS row, gone.source AS source
+      : `SELECT gone.rowid AS row, gone.source AS source, gone.subject AS subject
 FROM removed_sources AS gone
 WHERE gone.rowid > ?1 AND ?6 IS NULL
 ORDER BY gone.rowid
@@ -875,9 +877,12 @@ const memoriesLineOf = (
     };
   }
   if (phase === "removals") {
+    // Held as version 0 of its key, which only an erasure of the key
+    // itself names (`namedSql`): so erasing it makes the export stale, and
+    // no plain key outlives what it named in an export's files either.
     return {
       line: removalLineSchema.parse({ kind: "removal", source: row.source }),
-      held: undefined,
+      held: [textOf(row.subject), 0],
     };
   }
   if (phase === "extractions") {
