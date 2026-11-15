@@ -712,7 +712,7 @@ const restoreMemory = async (
         line.attribute,
         line.object === null ? null : (rows.get(line.object) ?? null),
         line.value,
-        valueKeyFor(rule, line.value, line.object),
+        valueKeyFor(rule, line),
         rule?.values === "one" ? 1 : 0,
         line.type,
         line.statement,

@@ -279,27 +279,20 @@ const jsonOf = (answer: string): unknown => {
   }
 };
 
-/** Whether `words` hold `run` as consecutive words. */
-const holdsRun = (
-  words: readonly string[],
-  run: readonly string[]
-): boolean => {
-  if (run.length === 0 || run.length > words.length) {
-    return false;
-  }
-  for (let start = 0; start + run.length <= words.length; start += 1) {
-    if (run.every((word, offset) => words[start + offset] === word)) {
-      return true;
-    }
-  }
-  return false;
-};
-
 /** The text the model saw, as the checks in code read it: its words, and the emails it writes. */
 interface Seen {
-  words: string[];
+  /**
+   * Its words in order, folded as search folds them (`sequenceOf`), each
+   * between two spaces: no word holds a space, so a run of words is in the
+   * text exactly when its words, so joined, are in this.
+   */
+  words: string;
   emails: ReadonlySet<string>;
 }
+
+/** `text`'s words as `Seen` holds them. */
+export const wordsSeen = (text: string): string =>
+  ` ${sequenceOf(text).join(" ")} `;
 
 /** What separates an email from the text around it: spaces, brackets, quotes and list marks. */
 const emailBounds = /[\s<>()[\]{}"'`,;]+/u;
@@ -316,9 +309,11 @@ const emailsOf = (text: string): Set<string> =>
       .filter((token) => emailPattern.test(token))
   );
 
-/** Whether `quote` is in the text, word for word as the Brain folds words. */
-export const isQuoted = (seen: Seen, quote: string): boolean =>
-  holdsRun(seen.words, sequenceOf(quote));
+/** Whether `quote` is in the text, word for word as the Brain folds words: at least one word. */
+export const isQuoted = (seen: Pick<Seen, "words">, quote: string): boolean => {
+  const run = sequenceOf(quote);
+  return run.length > 0 && seen.words.includes(` ${run.join(" ")} `);
+};
 
 /** Whether the text writes `email` as one of its own, compared without case. */
 const isWrittenEmail = (seen: Seen, email: string): boolean =>
@@ -744,7 +739,7 @@ const checkOn = async (
  * The version `source` `version`, if it is its source's current one and
  * no erasure is under way of it: its file and reader set's key.
  */
-const currentOf = (
+export const currentOf = (
   sql: SqlStorage,
   source: string,
   version: number
@@ -786,7 +781,7 @@ const addedBefore = async (sql: SqlStorage, change: string): Promise<boolean> =>
     .toArray().length > 0;
 
 /** The text of `file`, or null when it is gone: within the bucket's time and the item's. */
-const textOf = async (
+export const textOf = async (
   { bucket, signal }: WorkContext,
   file: string
 ): Promise<string | null> => {
@@ -1053,7 +1048,7 @@ const proposalOf = async (
   piece: Piece & { next: number }
 ): Promise<Checking> => {
   const seen: Seen = {
-    words: sequenceOf(piece.text),
+    words: wordsSeen(piece.text),
     emails: emailsOf(piece.text),
   };
   const proposal = candidatesOf(

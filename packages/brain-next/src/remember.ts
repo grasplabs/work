@@ -26,7 +26,7 @@ import {
 } from "./memories.ts";
 import { accessOfKey, readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
 import { isRestoring } from "./restoring.ts";
-import { indexMemoryWords } from "./words.ts";
+import { indexMemoryWords, sequenceOf } from "./words.ts";
 import type { WordMemo } from "./words.ts";
 
 // Adding memories (contract.ts `addMemories`): checked whole first, then
@@ -244,37 +244,54 @@ interface Into {
   memo: WordMemo;
 }
 
+/** What `valueKeyFor` keys a memory by: its filing, type and statement. */
+export interface Keyed {
+  value: string | null;
+  /** The id of the entity it relates to, if any. */
+  object: string | null;
+  type: string;
+  statement: string;
+}
+
 /**
- * What one-value attributes compare a memory by, under its attribute's
- * `rule`: its `value` folded, or the id of the entity a relation relates
- * to (`object`); none without an attribute. For an add and a restore
- * (restore.ts) alike.
+ * What a newer memory of its lineage must match to end it (memories.ts
+ * `newerSql`), under its attribute's `rule`. One-value attributes, and
+ * many-value ones per value, compare its `value` folded, or the id of the
+ * entity a relation relates to (`object`). A memory filed under no
+ * attribute is a restatement of another when it says the same, word for
+ * word as search folds words (words.ts `sequenceOf`), of the same type,
+ * related entity and value: so the same fact said again by its source or
+ * its writer ends what it said before, kept as history, and anything
+ * worded otherwise never does. For an add and a restore (restore.ts)
+ * alike.
  */
 export const valueKeyFor = (
   rule: AttributeRule | undefined,
-  value: string | null,
-  object: string | null
+  { value, object, type, statement }: Keyed
 ): string | null => {
   if (rule === undefined) {
-    return null;
+    return JSON.stringify([
+      type,
+      object,
+      foldName(value ?? ""),
+      sequenceOf(statement).join(" "),
+    ]);
   }
   return rule.relation === undefined ? foldName(value ?? "") : object;
 };
 
-/**
- * What one-value attributes compare a memory by: its value folded, or the
- * id of the entity a relation relates to; none without an attribute.
- */
+/** What a newer memory of its lineage must match to end `memory` (`valueKeyFor`). */
 const valueKeyOf = (
   { ids }: Into,
   memory: NewMemory,
   plan: Planned
 ): string | null =>
-  valueKeyFor(
-    plan.rule,
-    memory.value ?? null,
-    plan.object === undefined ? null : (ids[plan.object] ?? null)
-  );
+  valueKeyFor(plan.rule, {
+    value: memory.value ?? null,
+    object: plan.object === undefined ? null : (ids[plan.object] ?? null),
+    type: memory.type,
+    statement: memory.statement,
+  });
 
 /** The SHA-256 of `source`, which the add hashed before its transaction. */
 const subjectOfSource = (

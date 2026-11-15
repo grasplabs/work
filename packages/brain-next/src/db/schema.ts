@@ -783,9 +783,11 @@ export const entities = sqliteTable(
  * A memory (contract.ts `Memory`). Its lineage is the source it rests on
  * (`source:` and the source's key) or its writer (`writer:` and their
  * id); `lineage_order` orders a lineage's memories, the version number
- * for a source's, 0 for a writer's, then `row`. `value_key` is what
- * one-value attributes compare: the value folded, or the related entity's
- * id.
+ * for a source's, 0 for a writer's, then `row`. `value_key` is what a
+ * newer memory of its lineage must match to end it (remember.ts
+ * `valueKeyFor`): for an attribute, the value folded or the related
+ * entity's id; filed under none, the statement as words, with its type,
+ * related entity and value.
  */
 export const memories = sqliteTable(
   "memories",

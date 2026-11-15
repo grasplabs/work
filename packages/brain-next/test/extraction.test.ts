@@ -794,12 +794,14 @@ describe("extracting memories", () => {
     await tick();
     const reader = { person: unique("p"), groups: [group] };
     const before = await readAs(reader, name);
+    // Its history is read by the entity's id: the complaint, no longer in
+    // the text, is retired (recheck.ts), and gives no find the entity.
+    const [entity] = await entitiesNamed(reader, name);
     await added(`${token}: All settled with ${name}.`, audience(group), {
       extract: fromOutside(),
       source,
     });
     await tick();
-    const [entity] = await entitiesNamed(reader, name);
     const now = await readAs(reader, name);
     const history =
       entity === undefined ? [] : await memoriesAbout(entity.id, reader, true);
@@ -928,8 +930,14 @@ describe("extracting memories", () => {
         const current = await readAs(reader, name);
         seenDuringPieces.push(current.map(({ value }) => value ?? ""));
       }
-      const found = ["invoices", "deliveries"].filter((about) =>
-        request.input.includes(complaint(about))
+      // The newer version still says the first's complaint, so its re-check
+      // (recheck.ts) leaves it current and only the newer version's mark
+      // can end it: the model, asked of the newer version, proposes only
+      // what is new.
+      const found = ["invoices", "deliveries"].filter(
+        (about) =>
+          request.input.includes(complaint(about)) &&
+          (about === "deliveries" || !request.input.includes("Sentence"))
       );
       return answering({
         entities: [{ key: "c", kind: "customer", names: [name] }],
@@ -956,7 +964,7 @@ describe("extracting memories", () => {
     ).join(" ");
     // Every sentence holds the token, so the model knows each piece's answer.
     await added(
-      `${token}: ${filler} ${complaint("deliveries")} in ${token}.`,
+      `${token}: ${complaint("invoices")}. ${filler} ${complaint("deliveries")} in ${token}.`,
       audience(group),
       { extract: fromOutside(), source }
     );

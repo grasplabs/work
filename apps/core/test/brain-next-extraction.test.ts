@@ -29,6 +29,12 @@ const tick = async (): Promise<void> => {
 const ownStore = (person: string) =>
   inJurisdiction(env, env.BRAIN_STORE).getByName(`person:${person}`);
 
+/** How many model calls the audit log holds. */
+const modelCalls = async (): Promise<number> => {
+  const events = await allEvents();
+  return events.filter(({ action }) => action === "model.call").length;
+};
+
 /** The answer of a faked provider for extraction: `proposal` to the read, every statement supported to the check. */
 const extractionReply = (body: string, proposal: unknown) => ({
   text: body.includes("You check statements")
@@ -124,6 +130,83 @@ describe("extracting memories through core", () => {
       ],
       sent: true,
       memories: [{ value: "2026-11-13", speaker: { kind: "outside" } }],
+    });
+  });
+
+  it("retires a drawn memory once a newer version, not drawn from, no longer says it, asking no model", async () => {
+    const name = `Umbrella${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
+    const teamId = crypto.randomUUID();
+    const upload = { producer: "upload" as const, id: crypto.randomUUID() };
+    await answeringProvider((requests) => {
+      const body = JSON.stringify(requests.at(-1)?.body);
+      return {
+        text: body.includes("You check statements")
+          ? JSON.stringify({ supported: [0, 1] })
+          : JSON.stringify({
+              entities: [{ key: "c", kind: "customer", names: [name] }],
+              memories: [
+                {
+                  about: "c",
+                  attribute: "status",
+                  value: "active",
+                  type: "fact",
+                  statement: `${name} is active.`,
+                  quote: `${name} is active`,
+                },
+                {
+                  about: "c",
+                  type: "fact",
+                  statement: `${name} pays by card.`,
+                  quote: `${name} pays by card`,
+                },
+              ],
+            }),
+        inputTokens: 50,
+        outputTokens: 20,
+      };
+    });
+    const readers = { kind: "team" as const, teamId };
+    await addSource(env, {
+      source: upload,
+      change: crypto.randomUUID(),
+      text: `Notes: ${name} is active. ${name} pays by card.`,
+      readers,
+      said: {
+        by: { kind: "outside" },
+        at: new Date("2026-11-11T09:00:00Z"),
+        priority: "upload",
+      },
+    });
+    await tick();
+    const reader = { person: crypto.randomUUID(), groups: [`team:${teamId}`] };
+    const {
+      entities: [entity],
+    } = await store().findEntities({ reader, name });
+    const { memories: drawn } =
+      entity === undefined
+        ? { memories: [] }
+        : await store().readMemories({ entity: entity.id, reader });
+    const called = await modelCalls();
+    // A newer version that doesn't ask for memories, without the card.
+    await addSource(env, {
+      source: upload,
+      change: crypto.randomUUID(),
+      text: `Notes: ${name} is active.`,
+      readers,
+    });
+    await tick();
+    const ids = drawn.map(({ id }) => id);
+
+    expect({
+      drawn: drawn.map(({ statement }) => statement).toSorted(),
+      readable: await store().readableMemories({ memories: ids, reader }),
+      calls: (await modelCalls()) - called,
+    }).toStrictEqual({
+      drawn: [`${name} is active.`, `${name} pays by card.`],
+      readable: drawn
+        .filter(({ statement }) => statement === `${name} is active.`)
+        .map(({ id }) => id),
+      calls: 0,
     });
   });
 

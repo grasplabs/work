@@ -29,7 +29,9 @@ import { audience, fact, readerOf, word } from "./entity-helpers.ts";
 // way reads no further step once the nearer steps fill its list: facts
 // added two steps out cost it nothing either. An add links its names by
 // their exact names (linking.ts `linkedByName`): what it reads is the
-// same however many names the store holds.
+// same however many names the store holds. Re-checking a source's
+// memories as a newer version lands (recheck.ts) reads that source's
+// memories alone.
 
 /** Rows the store's SQL read, counted at the store itself. */
 interface Counter {
@@ -544,6 +546,79 @@ describe("what reading memories costs", () => {
       found: before.length,
     }).toStrictEqual({ after: before, flat: true, found: recallLimit });
   });
+
+  it("re-checks a source's memories as a newer version lands without reading other memories, readable or hidden", async () => {
+    const { stub, rowsReadBy } = await countedStore();
+    const group = `seen-${crypto.randomUUID()}`;
+    const source = `doc-${crypto.randomUUID()}`;
+    const name = word();
+    const said = `${name} renews in March. ${name} pays by card.`;
+    const version = await stub.addSource({
+      source,
+      change: crypto.randomUUID(),
+      text: said,
+      access: audience(group),
+    });
+    await add(
+      stub,
+      group,
+      [{ key: "c", kind: "customer", names: [name] }],
+      ["renews in March", "pays by card"].map((words) =>
+        fact("c", `${name} ${words}`, {
+          speaker: { kind: "outside" },
+          basis: { kind: "source", ...version, quote: `${name} ${words}` },
+        })
+      )
+    );
+    let clock = Date.now();
+    // A newer version, each a new text that still says both, and the
+    // queue's tick that re-checks the source against it.
+    const recheck = async () => {
+      await stub.addSource({
+        source,
+        change: crypto.randomUUID(),
+        text: `${said} ${word()}`,
+        access: audience(group),
+      });
+      clock = Math.max(clock + 60_000, Date.now());
+      await stub.work({
+        ask: async () => {
+          await Promise.resolve();
+          return { kind: "refused" };
+        },
+        at: new Date(clock),
+        embedders: {
+          model: null,
+          embed: async () => {
+            await Promise.resolve();
+            return { kind: "unavailable" };
+          },
+        },
+        handOvers: {
+          handOver: async () => {
+            await Promise.resolve();
+            return { kind: "nothing" };
+          },
+        },
+        contextTokens: null,
+      });
+    };
+    // Once first: the store's first tick reads what it keeps once.
+    await recheck();
+    const [alone, ...grown] = await rowsAsUnrelatedGrow(
+      stub,
+      rowsReadBy,
+      group,
+      recheck
+    );
+
+    expect(grown.map((rows) => flat(alone ?? 0, rows))).toStrictEqual([
+      true,
+      true,
+      true,
+    ]);
+    // Adding 20,000 memories, a hundred an add, takes its time.
+  }, 120_000);
 
   it("links an add's names without reading other names or memories, readable or hidden", async () => {
     const { stub, rowsReadBy } = await countedStore();

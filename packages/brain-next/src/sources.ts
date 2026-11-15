@@ -51,6 +51,7 @@ import {
   noteWrite,
 } from "./files.ts";
 import { readableSql, readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
+import { enqueueRecheck } from "./recheck.ts";
 import { isRestoring } from "./restoring.ts";
 import { removeVectorsOf } from "./vectors.ts";
 import { indexWords } from "./words.ts";
@@ -406,6 +407,9 @@ const record = (
     })
     .run();
   if (replaced !== undefined) {
+    // What was drawn from an earlier version is checked against this one:
+    // a memory whose quote it no longer holds is retired (recheck.ts).
+    enqueueRecheck(storage, added.source, version);
     // Their full vectors too, once no current chunk holds their text: the
     // sweep checks and deletes (files.ts).
     releaseVectors(

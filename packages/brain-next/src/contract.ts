@@ -1587,7 +1587,17 @@ export interface VectorsFound {
 // the one before, which stays as history; a memory of another lineage
 // that says something else makes the fact contested: both stay current
 // and are read together, each with its source. A memory with no listed
-// attribute never ends or contests another.
+// attribute never contests another, and ends only an earlier one of its
+// lineage that it restates: the same statement, word for word as search
+// folds words, about the same entity, of the same type, related entity
+// and value. So the same fact said twice by one source or writer is one
+// current memory, the earlier kept as history, merged only for readers of
+// the later one.
+//
+// Re-checked when its source changes: a memory drawn from an earlier
+// version of a source whose quote its current version no longer holds is
+// retired, through the work queue, as its writer would retire it; it
+// stays history and gives nothing to any other read.
 //
 // Who may read a memory: those in the reader set its caller gives
 // (`access`, as a source's), and, when it rests on a source version, only
@@ -1634,8 +1644,9 @@ export interface AttributeRule {
 /**
  * Every attribute a memory may be filed under, per kind of entity: the
  * fixed list. A memory about something not listed has no attribute
- * (`attribute` left out): it is kept and found, and never ends or
- * contests another.
+ * (`attribute` left out): it is kept and found, never contests another,
+ * and ends only an earlier memory of its lineage it restates word for
+ * word.
  */
 export const entityAttributes = {
   person: {
@@ -2227,7 +2238,8 @@ export type EntitiesRequest = z.input<typeof entitiesRequestSchema>;
 /**
  * A page of entities, by when the first memory the reader may read that
  * mentions each was learned, then id; whether more follow, and where to
- * go on from. A memory its writer retired gives nothing to a find: no
+ * go on from. A retired memory (by its writer, or by a re-check of its
+ * source) gives nothing to a find: no
  * mention, no name or identifier asked.
  */
 export interface EntityPage {
@@ -2261,7 +2273,7 @@ export type EntityRequest = z.infer<typeof entityRequestSchema>;
 
 /**
  * An entity as a reader sees it: its kind, and its earliest name a memory
- * the reader may read, not retired by its writer, gave (by when that
+ * the reader may read, not retired, gave (by when that
  * memory was learned, then its id), or null when only retired memories
  * gave one. A retired memory stays history (`readMemories` with
  * `history`) and gives nothing else: an entity only retired memories
@@ -2854,8 +2866,8 @@ export interface Brain {
   listContested: (request: ContestedRequest) => Promise<ContestedPage>;
   /**
    * Of the memories asked for, by id, those the reader may read now (as
-   * `readMemories` decides who may read one) and their writer has not
-   * retired, in the order asked and each once: what a host checks before
+   * `readMemories` decides who may read one) and not retired (by their
+   * writer, or by a re-check of their source), in the order asked and each once: what a host checks before
    * it sends again a memory it once recalled (a chat's earlier recall).
    * Each left out alike, whether it doesn't exist, was erased, rests on a
    * version the reader may no longer read, or was retired. One ended by a
