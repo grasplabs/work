@@ -1505,7 +1505,7 @@ msgstr "Eine Wissenssuche aus {about} hat {searches, plural, one {einmal} other 
 
 #: src/interview/transcript.tsx
 msgid "A line of mine, removed."
-msgstr "Ein Satz von mir, entfernt."
+msgstr "Ein Beitrag von mir, entfernt."
 
 #: src/workflows/requests/request-plan.tsx
 msgid "A look-up"
@@ -6739,8 +6739,8 @@ msgid "I couldn’t read this one"
 msgstr "Diese konnte ich nicht lesen"
 
 #: src/onboarding/forget-kickoff.tsx
-msgid "I delete what was said and everything I took from it: what I know about your company from it, and what your Brain learned from it. This can’t be undone."
-msgstr "Ich lösche, was gesagt wurde, und alles, was ich daraus entnommen habe: was ich dadurch über Ihr Unternehmen weiß und was Ihr Brain daraus gelernt hat. Das lässt sich nicht rückgängig machen."
+msgid "I delete what was said and everything I took from it: what I know about your company from it, and what your Brain learned from it. I then know less about your company, which can put off the day your Grasp opens. This can’t be undone."
+msgstr "Ich lösche, was gesagt wurde, und alles, was ich daraus entnommen habe: was ich dadurch über Ihr Unternehmen weiß und was Ihr Brain daraus gelernt hat. Ich weiß dann weniger über Ihr Unternehmen, und der Tag, an dem Ihr Grasp öffnet, kann sich verschieben. Das lässt sich nicht rückgängig machen."
 
 #: src/onboarding/about-story.tsx
 msgid "I do every interview myself. Here’s what that sounds like."
@@ -7393,10 +7393,6 @@ msgstr "Ihre URL nimmt nichts mehr an, und kein Workflow startet mehr bei ihren 
 #: src/workflows/item-test.tsx
 msgid "Its version"
 msgstr "Seine Version"
-
-#: src/interview/transcript.tsx
-msgid "Its words are deleted for good, and so is what I marked in them. What I wrote down from it stays in what I read back to you at the end, where you can take it out. This can’t be undone."
-msgstr "Die Worte werden endgültig gelöscht, ebenso das, was ich darin markiert habe. Was ich daraus notiert habe, bleibt in dem, was ich Ihnen am Ende vorlese; dort können Sie es herausnehmen. Das lässt sich nicht rückgängig machen."
 
 #: src/brain/brain-article/team-work.tsx
 msgid "Its work"
@@ -9955,6 +9951,10 @@ msgstr "Unsere E-Mail hat {names} nicht erreicht. Senden Sie den Link selbst üb
 msgid "Our first conversation gave me the big picture. Now I need the details."
 msgstr "Unser erstes Gespräch hat mir das große Bild gegeben. Jetzt brauche ich die Details."
 
+#: src/onboarding/forget-kickoff.tsx
+msgid "Our first conversation is deleted. I’m still erasing what I took from it, and I finish that by myself."
+msgstr "Unser erstes Gespräch ist gelöscht. Ich lösche noch, was ich daraus entnommen habe, und schließe das von selbst ab."
+
 #: src/apps/resource-bindings.tsx
 #: src/chat/thread.tsx
 msgid "Output"
@@ -10988,6 +10988,10 @@ msgstr "{what} aus dem Gehirn entfernen?"
 msgid "Remove {when}, for {person}"
 msgstr "{when}, für {person}, entfernen"
 
+#: src/interview/transcript.tsx
+msgid "Remove {who}’s line: {words}"
+msgstr "Beitrag von {who} entfernen: {words}"
+
 #: src/brain/brain-article/kern.tsx
 #: src/brain/forget.tsx
 msgid "Remove from the brain"
@@ -11030,12 +11034,12 @@ msgid "Remove this from the brain"
 msgstr "Dies aus dem Gehirn entfernen"
 
 #: src/interview/transcript.tsx
-msgid "Remove this line"
-msgstr "Diesen Satz entfernen"
+msgid "Remove this line?"
+msgstr "Diesen Beitrag entfernen?"
 
 #: src/interview/transcript.tsx
-msgid "Remove this line?"
-msgstr "Diesen Satz entfernen?"
+msgid "Remove your line: {words}"
+msgstr "Ihren Beitrag entfernen: {words}"
 
 #: src/settings/erasures.tsx
 msgid "Removed"
@@ -13784,6 +13788,10 @@ msgstr "Die Interviews sind noch nicht geplant. Sie planen sie am Ende Ihres Onb
 #: src/workflows/traces.tsx
 msgid "The latest runs, newest first."
 msgstr "Die letzten Läufe, die neuesten zuerst."
+
+#: src/interview/transcript.tsx
+msgid "The line is deleted now, and so is what I marked in it. What I wrote down from it is in what I read back to you at the end: take it out there, and it is deleted for good when our conversation is finished. This can’t be undone."
+msgstr "Der Beitrag wird jetzt gelöscht, ebenso das, was ich darin markiert habe. Was ich daraus notiert habe, steht in dem, was ich Ihnen am Ende vorlese: Nehmen Sie es dort heraus, dann wird es endgültig gelöscht, sobald unser Gespräch beendet ist. Das lässt sich nicht rückgängig machen."
 
 #: src/pages/page-links.ts
 msgid "The link wasn't opened."

@@ -6739,8 +6739,8 @@ msgid "I couldn’t read this one"
 msgstr "I couldn’t read this one"
 
 #: src/onboarding/forget-kickoff.tsx
-msgid "I delete what was said and everything I took from it: what I know about your company from it, and what your Brain learned from it. This can’t be undone."
-msgstr "I delete what was said and everything I took from it: what I know about your company from it, and what your Brain learned from it. This can’t be undone."
+msgid "I delete what was said and everything I took from it: what I know about your company from it, and what your Brain learned from it. I then know less about your company, which can put off the day your Grasp opens. This can’t be undone."
+msgstr "I delete what was said and everything I took from it: what I know about your company from it, and what your Brain learned from it. I then know less about your company, which can put off the day your Grasp opens. This can’t be undone."
 
 #: src/onboarding/about-story.tsx
 msgid "I do every interview myself. Here’s what that sounds like."
@@ -7393,10 +7393,6 @@ msgstr "Its URL takes nothing more, and no workflow starts on its events. This c
 #: src/workflows/item-test.tsx
 msgid "Its version"
 msgstr "Its version"
-
-#: src/interview/transcript.tsx
-msgid "Its words are deleted for good, and so is what I marked in them. What I wrote down from it stays in what I read back to you at the end, where you can take it out. This can’t be undone."
-msgstr "Its words are deleted for good, and so is what I marked in them. What I wrote down from it stays in what I read back to you at the end, where you can take it out. This can’t be undone."
 
 #: src/brain/brain-article/team-work.tsx
 msgid "Its work"
@@ -9955,6 +9951,10 @@ msgstr "Our email didn’t reach {names}. Send them their link yourself from Lin
 msgid "Our first conversation gave me the big picture. Now I need the details."
 msgstr "Our first conversation gave me the big picture. Now I need the details."
 
+#: src/onboarding/forget-kickoff.tsx
+msgid "Our first conversation is deleted. I’m still erasing what I took from it, and I finish that by myself."
+msgstr "Our first conversation is deleted. I’m still erasing what I took from it, and I finish that by myself."
+
 #: src/apps/resource-bindings.tsx
 #: src/chat/thread.tsx
 msgid "Output"
@@ -10988,6 +10988,10 @@ msgstr "Remove {what} from the brain?"
 msgid "Remove {when}, for {person}"
 msgstr "Remove {when}, for {person}"
 
+#: src/interview/transcript.tsx
+msgid "Remove {who}’s line: {words}"
+msgstr "Remove {who}’s line: {words}"
+
 #: src/brain/brain-article/kern.tsx
 #: src/brain/forget.tsx
 msgid "Remove from the brain"
@@ -11030,12 +11034,12 @@ msgid "Remove this from the brain"
 msgstr "Remove this from the brain"
 
 #: src/interview/transcript.tsx
-msgid "Remove this line"
-msgstr "Remove this line"
-
-#: src/interview/transcript.tsx
 msgid "Remove this line?"
 msgstr "Remove this line?"
+
+#: src/interview/transcript.tsx
+msgid "Remove your line: {words}"
+msgstr "Remove your line: {words}"
 
 #: src/settings/erasures.tsx
 msgid "Removed"
@@ -13784,6 +13788,10 @@ msgstr "The interviews aren’t planned yet. You plan them at the end of your on
 #: src/workflows/traces.tsx
 msgid "The latest runs, newest first."
 msgstr "The latest runs, newest first."
+
+#: src/interview/transcript.tsx
+msgid "The line is deleted now, and so is what I marked in it. What I wrote down from it is in what I read back to you at the end: take it out there, and it is deleted for good when our conversation is finished. This can’t be undone."
+msgstr "The line is deleted now, and so is what I marked in it. What I wrote down from it is in what I read back to you at the end: take it out there, and it is deleted for good when our conversation is finished. This can’t be undone."
 
 #: src/pages/page-links.ts
 msgid "The link wasn't opened."

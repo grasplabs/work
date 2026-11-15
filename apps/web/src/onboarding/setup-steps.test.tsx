@@ -60,7 +60,7 @@ const view = (
   context: OnboardingContext,
   mailSends: boolean,
   mailDomain: string | null,
-  kickoff: boolean
+  kickoff: OnboardingView["kickoff"]
 ): OnboardingView => ({
   roster: null,
   plan: { start: "2026-10-12", days: 14 },
@@ -90,8 +90,8 @@ interface Shown {
   ai?: AiReadiness | null;
   /** The domain core says its mail is from; a sender is set unless said. */
   mailDomain?: string | null;
-  /** Whether the kickoff is in: it is when it named a sponsor, unless said. */
-  kickoff?: boolean;
+  /** The kickoff: in when it named a sponsor, unless said. */
+  kickoff?: OnboardingView["kickoff"];
 }
 
 /** What Grasp's AI has to call: Anthropic offered, and connected once a model is `ready`. */
@@ -150,7 +150,7 @@ const drawn = (
     mailSends = true,
     ai = aiOf({ ready: true }),
     mailDomain = "mail.example.test",
-    kickoff = sponsor !== null,
+    kickoff = sponsor === null ? null : "in",
   }: Shown
 ): string => {
   if (seen) {
@@ -353,12 +353,25 @@ describe("the welcome", () => {
     }
   );
 
-  it("offers to forget the kickoff while it is in", () => {
+  it("offers to forget the kickoff while it is in, and says when its erasure finishes by itself", () => {
     const offer = "Forget our first conversation";
+    const erasing = "I’m still erasing what I took from it";
+    const shown = (kickoff: OnboardingView["kickoff"]) => {
+      const markup = drawn("welcome", { kickoff });
+      return {
+        offer: markup.includes(offer),
+        erasing: markup.includes(erasing),
+      };
+    };
     expect({
-      in: drawn("welcome", { kickoff: true }).includes(offer),
-      none: drawn("welcome", { kickoff: false }).includes(offer),
-    }).toStrictEqual({ in: true, none: false });
+      in: shown("in"),
+      erasing: shown("erasing"),
+      none: shown(null),
+    }).toStrictEqual({
+      in: { offer: true, erasing: false },
+      erasing: { offer: false, erasing: true },
+      none: { offer: false, erasing: false },
+    });
   });
 });
 

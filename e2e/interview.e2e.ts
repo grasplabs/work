@@ -2,6 +2,7 @@ import { writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { interviewTurnRequestSchema } from "@grasp-os/shared/interview-turn";
 import { expect } from "@playwright/test";
 import type { Page, Route } from "@playwright/test";
 import { z } from "zod";
@@ -10,6 +11,7 @@ import { adminSnapshot } from "./admin-steering.ts";
 import { test } from "./csp.ts";
 import {
   answered,
+  answerTo,
   back,
   changed,
   first,
@@ -142,7 +144,7 @@ test("someone has their interview by typing, carries on after stopping, and agre
   });
 });
 
-test("someone removes a line of theirs from the transcript, and it is kept removed and said to no one again", async ({
+test("someone removes a line of theirs and takes out what was written from it, and neither is said to anyone again", async ({
   page,
 }) => {
   const staff = await signInStaff();
@@ -150,14 +152,36 @@ test("someone removes a line of theirs from the transcript, and it is kept remov
   const person = `ria-${run}`;
   const link = await invited(staff, person, "Ria");
   const asked = await answered(page);
-  // What each turn tells core they said, to look for the removed words in.
+  const written = `You check ${run} in Exact.`;
+  // Their answer is written down with their words in it; every other turn
+  // as Stephen answers it.
+  await page.route("**/api/interview/turn", async (route: Route) => {
+    const turn = interviewTurnRequestSchema.parse(
+      route.request().postDataJSON()
+    );
+    const reply = answerTo(turn);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/x-ndjson",
+      body: streamed(
+        turn.event === "answer"
+          ? {
+              ...reply,
+              facts: reply.facts.map((fact, at) =>
+                at === 0 ? { ...fact, text: written, record: written } : fact
+              ),
+            }
+          : reply
+      ),
+    });
+  });
+  // What each turn tells core they said, to look for their words in.
   const told: string[] = [];
   page.on("request", (request) => {
     if (request.url().endsWith("/api/interview/turn")) {
       told.push(request.postData() ?? "");
     }
   });
-  const words = `Only Ria knows ${run}, in Exact.`;
 
   await page.goto(link);
   await page.getByRole("button", { name: "Continue" }).click();
@@ -167,15 +191,16 @@ test("someone removes a line of theirs from the transcript, and it is kept remov
     .click();
   await expect(page.getByText(first)).toBeVisible();
   const answer = page.getByLabel("Your answer");
-  await answer.fill(words);
+  await answer.fill(`Only Ria knows ${run}, in Exact.`);
   await answer.press("Enter");
   await expect(page.getByText(readBack)).toBeVisible();
 
   // Their own line, in the transcript only they read, removed once confirmed.
   await page.getByRole("button", { name: "Transcript" }).click();
   const transcript = page.getByRole("complementary", { name: "Transcript" });
-  const theirs = transcript.getByRole("listitem").filter({ hasText: run });
-  await theirs.getByRole("button", { name: "Remove this line" }).click();
+  await transcript
+    .getByRole("button", { name: `Remove your line: Only Ria knows ${run},` })
+    .click();
   await page
     .getByRole("alertdialog")
     .getByRole("button", { name: "Remove" })
@@ -189,8 +214,10 @@ test("someone removes a line of theirs from the transcript, and it is kept remov
   await expect(transcript.getByText("Removed.")).toBeVisible();
   await page.getByRole("button", { name: "Transcript" }).click();
 
-  // The next turn, asked as they put a line of the read-back right, doesn't carry it.
+  // What was written down from it is taken out of the read-back; the next
+  // turn, asked as they put another line right, carries neither.
   const before = told.length;
+  await page.getByRole("button", { name: `Take out: ${written}` }).click();
   await page
     .getByRole("button", { name: "Change: You send it to Sam." })
     .click();
@@ -198,12 +225,16 @@ test("someone removes a line of theirs from the transcript, and it is kept remov
   await field.fill("You send it to Kim.");
   await field.press("Enter");
   await expect(page.getByText(changed)).toBeVisible();
-  expect(told.length).toBeGreaterThan(before);
+  await page.getByRole("button", { name: "Yes, that’s correct" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Thank you, Ria." })
+  ).toBeVisible();
   expect({
+    asked: told.length > before,
     shown: await page.getByText(run).count(),
     told: told.slice(before).some((body) => body.includes(run)),
     refused: asked.refused,
-  }).toStrictEqual({ shown: 0, told: false, refused: [] });
+  }).toStrictEqual({ asked: true, shown: 0, told: false, refused: [] });
 });
 
 test("someone goes through the screens before the interview in Dutch, chooses Claire, and talks with her", async ({

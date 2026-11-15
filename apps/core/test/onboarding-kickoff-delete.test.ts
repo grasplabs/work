@@ -1,5 +1,6 @@
 import type { KickoffReading } from "@grasp-os/shared/kickoff";
 import type { RosterInput } from "@grasp-os/shared/onboarding";
+import { runDurableObjectAlarm } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -249,6 +250,39 @@ describe("deleting the kickoff", { timeout: 60_000 }, () => {
     }).toStrictEqual({
       kept: { core: [], onboarding: [] },
       brain: [],
+      deleted: [{ kickoff: 1, records: 4 }],
+    });
+  });
+
+  it("has the alarm finish a delete whose erasure failed, saying meanwhile that it is erasing, with one event", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const marker = markerOf();
+    await bringIn(marker);
+
+    const release = await holdRecordDeletes();
+    const events = await auditedDuring(async () => {
+      const first = await outcome(admin.api.onboarding.deleteKickoff());
+      const meanwhile = await admin.api.onboarding.view();
+      await release();
+      // Nobody asks again: the store's alarm, armed by the failure, finishes it.
+      const ran = await runDurableObjectAlarm(onboardingStore(env));
+      expect({ first, meanwhile: meanwhile.kickoff, ran }).toStrictEqual({
+        first: "onboarding.kickoff_unfinished",
+        meanwhile: "erasing",
+        ran: true,
+      });
+    });
+    const view = await admin.api.onboarding.view();
+
+    expect({
+      kept: await keptWhere(marker),
+      kickoff: view.kickoff,
+      deleted: events
+        .filter(({ action }) => action === "onboarding.kickoff.deleted")
+        .map(({ detail }) => detail),
+    }).toStrictEqual({
+      kept: { core: [], onboarding: [] },
+      kickoff: null,
       deleted: [{ kickoff: 1, records: 4 }],
     });
   });

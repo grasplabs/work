@@ -887,7 +887,7 @@ export class Onboarding extends DurableObject<Env> {
           : progressOf(roster, this.#interviews(), this.#counts(), now),
       agreed: agreementsIn(row.agreements, flowAgreementsOf(row.flow)),
       paused: row.pausedAt !== null,
-      kickoff: this.kickoff().transcript !== null,
+      kickoff: this.#kickoffState(),
       sponsor: this.#sponsor(),
       context: this.#context(),
       waiting: roster === null ? 0 : this.#waiting(roster),
@@ -906,6 +906,17 @@ export class Onboarding extends DurableObject<Env> {
         (unconfirmed.people.has(person.id) ||
           unconfirmed.teams.has(person.team))
     ).length;
+  }
+
+  /** Whether the kickoff is kept, or deleted with its records still being erased (`kickoffErasureOwedKey`). */
+  #kickoffState(): OnboardingView["kickoff"] {
+    const [row] = this.#db.select({ id: kickoff.id }).from(kickoff).all();
+    if (row !== undefined) {
+      return "in";
+    }
+    return this.ctx.storage.kv.get(kickoffErasureOwedKey) === undefined
+      ? null
+      : "erasing";
   }
 
   /** What the admin's onboarding knows of the company from the kickoff: read without its transcript. */
@@ -2003,15 +2014,6 @@ export class Onboarding extends DurableObject<Env> {
     progress: InterviewProgress,
     now: string = new Date().toISOString()
   ): Promise<LinkAnswer<InterviewSaved>> {
-    // Each fact's revision, from the save alone, before anything here is
-    // read: what an approval must name for the fact to count.
-    const revisions = new Map(
-      await Promise.all(
-        progress.facts.map(
-          async (fact) => [fact.id, await factRevision(fact)] as const
-        )
-      )
-    );
     const found = this.#onLink(secretMark, now, "save");
     if (!found.ok) {
       return found;
@@ -2031,16 +2033,18 @@ export class Onboarding extends DurableObject<Env> {
         progress: this.#forSpeaker(person.id, held),
       });
     }
-    const removing = await this.#removing(person.id, progress);
-    // Hashing let another save land: this one is an older copy now.
+    const erasing = await this.#erasing(person.id, progress);
+    // A copy that brings back a line they removed is an older one, whichever
+    // tab sends it; and hashing let another save land: an older copy now.
     const current = this.#versionOf(person.id);
-    if (current !== version) {
+    if (erasing === "unremoved" || current !== version) {
       return answered({
         saved: false,
         version: current ?? version,
         progress: this.#forSpeaker(person.id, this.#held(person.id)),
       });
     }
+    const { progress: keeping, revisions } = erasing;
     const next = link.version + 1;
     const [state] = this.#db
       .select()
@@ -2055,7 +2059,7 @@ export class Onboarding extends DurableObject<Env> {
     // (GRA-329), never what the page says it agreed to: an edit, or a fact
     // taken out, stops counting until it is approved as it is now.
     const before = this.#admittedKeys(person.id);
-    const after = this.#admittedKeys(person.id, progress, revisions);
+    const after = this.#admittedKeys(person.id, keeping, revisions);
     const lost = before.some((key) => !after.includes(key));
     const changed = admissionKey(before) !== admissionKey(after);
     this.ctx.storage.transactionSync(() => {
@@ -2065,7 +2069,7 @@ export class Onboarding extends DurableObject<Env> {
         .where(eq(links.person, person.id))
         .run();
       const kept = {
-        progress: JSON.stringify(progress),
+        progress: JSON.stringify(keeping),
         updatedAt: now,
         revisions: JSON.stringify(Object.fromEntries(revisions)),
       };
@@ -2092,14 +2096,9 @@ export class Onboarding extends DurableObject<Env> {
       if (changed) {
         this.#admissionChanged(person, after.length > 0, lost, now);
       }
-      if (removing.lines > 0) {
-        // Only in the onboarding's own log, as a delete from the link is:
-        // its moment would tell the admin whose interview it was.
-        this.#queueLines(removing.gone);
-        this.#noted(person.id, "interview.line_removed", now);
-      }
+      this.#keepErased(person.id, erasing, now);
     });
-    if (removing.gone.length > 0) {
+    if (erasing.gone.length > 0) {
       // Whatever the cache doesn't take now waits for the alarm.
       await this.forgetLinesNow();
     }
@@ -7215,31 +7214,113 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * The lines a save of `progress` removes of `person`'s interview as kept
-   * (GRA-1897): how many, and the stored keys of the voice's among them,
-   * which the speech cache may keep, hashed before anything is written,
-   * to go with the save.
+   * What a save of `progress` erases of `person`'s interview as kept
+   * (GRA-1897), or "unremoved" when it brings back a line they removed.
+   * The lines it removes, by how many; once the interview is completed,
+   * the statements they took out in the read-back, dropped from the copy
+   * kept (`progress`), by id; and the stored keys of the voice's lines
+   * among either, which the speech cache may keep, hashed before anything
+   * is written, to go with the save; and each kept fact's revision. Until it is completed, a statement
+   * taken out can be put back.
    */
-  async #removing(
+  async #erasing(
     person: string,
     progress: InterviewProgress
-  ): Promise<{ lines: number; gone: string[] }> {
+  ): Promise<
+    | {
+        progress: InterviewProgress;
+        revisions: Map<string, string>;
+        lines: number;
+        dropped: string[];
+        gone: string[];
+      }
+    | "unremoved"
+  > {
     const held = this.#storedProgress(person);
-    const removed = (held?.lines ?? []).filter(
+    const kept = held?.lines ?? [];
+    if (
+      kept.some(
+        (line, at) =>
+          line.removed === true && progress.lines[at]?.removed !== true
+      )
+    ) {
+      return "unremoved";
+    }
+    const removed = kept.filter(
       (line, at) =>
         line.removed !== true && progress.lines[at]?.removed === true
     );
-    const voiced = removed
-      .filter(({ from, text }) => from === "stephen" && text !== "")
-      .map(({ text }) => text);
-    const said = this.#saidIn(person, held);
+    const out =
+      progress.person === "completed"
+        ? progress.facts.filter((fact) => fact.out === true)
+        : [];
+    const voiced = [
+      ...removed
+        .filter(({ from, text }) => from === "stephen" && text !== "")
+        .map(({ text }) => text),
+      ...out.map(({ text }) => text),
+    ];
+    const said = this.#saidIn(person, held ?? progress);
+    const keeping =
+      out.length === 0
+        ? progress
+        : {
+            ...progress,
+            facts: progress.facts.filter((fact) => fact.out !== true),
+          };
     return {
+      progress: keeping,
+      // Each fact's revision as kept, from the save alone: what an
+      // approval must name for the fact to count.
+      revisions: new Map(
+        await Promise.all(
+          keeping.facts.map(
+            async (fact) => [fact.id, await factRevision(fact)] as const
+          )
+        )
+      ),
       lines: removed.length,
+      dropped: out.map(({ id }) => id),
       gone:
         voiced.length === 0 || said === null
           ? []
           : await spokenKeysOf({ ...said, texts: voiced }),
     };
+  }
+
+  /**
+   * Keeps what a save erases (`#erasing`), in the transaction it is called
+   * in: the approvals of the statements dropped, which are digests of
+   * their words; the voice's lines to go from the cache; and the purge
+   * mark moved on, so a line being voiced as it goes is taken out again
+   * once kept (speech.ts `keepUnlessPurged`) and a drawing under way keeps
+   * nothing, and is drawn again. A removed line is noted only in the
+   * onboarding's own log, as a delete from the link is: in the audit log
+   * its moment would tell the admin whose interview it was.
+   */
+  #keepErased(
+    person: string,
+    erasing: { lines: number; dropped: string[]; gone: string[] },
+    now: string
+  ): void {
+    if (erasing.dropped.length > 0) {
+      this.#db
+        .delete(approvals)
+        .where(
+          and(
+            eq(approvals.person, person),
+            inList(approvals.fact, erasing.dropped)
+          )
+        )
+        .run();
+    }
+    if (erasing.lines > 0 || erasing.dropped.length > 0) {
+      this.#queueLines(erasing.gone);
+      this.#purged();
+    }
+    if (erasing.lines > 0) {
+      this.#noted(person, "interview.line_removed", now);
+    }
   }
 
   /** The version of `person`'s link as kept now; null without one. */

@@ -1505,7 +1505,7 @@ msgstr "Une recherche dans Connaissances depuis {about} n’a rien trouvé {sear
 
 #: src/interview/transcript.tsx
 msgid "A line of mine, removed."
-msgstr "Une de mes phrases, supprimée."
+msgstr "Une de mes interventions, supprimée."
 
 #: src/workflows/requests/request-plan.tsx
 msgid "A look-up"
@@ -6739,8 +6739,8 @@ msgid "I couldn’t read this one"
 msgstr "Je n’ai pas pu lire celui-ci"
 
 #: src/onboarding/forget-kickoff.tsx
-msgid "I delete what was said and everything I took from it: what I know about your company from it, and what your Brain learned from it. This can’t be undone."
-msgstr "Je supprime ce qui a été dit et tout ce que j’en ai tiré : ce que je sais de votre entreprise grâce à lui, et ce que votre Brain en a appris. Cette action est irréversible."
+msgid "I delete what was said and everything I took from it: what I know about your company from it, and what your Brain learned from it. I then know less about your company, which can put off the day your Grasp opens. This can’t be undone."
+msgstr "Je supprime ce qui a été dit et tout ce que j’en ai tiré : ce que je sais de votre entreprise grâce à lui, et ce que votre Brain en a appris. J’en saurai moins sur votre entreprise, ce qui peut repousser le jour où votre Grasp ouvre. Cette action est irréversible."
 
 #: src/onboarding/about-story.tsx
 msgid "I do every interview myself. Here’s what that sounds like."
@@ -7393,10 +7393,6 @@ msgstr "Son URL n’accepte plus rien, et aucun workflow ne se lance sur ses év
 #: src/workflows/item-test.tsx
 msgid "Its version"
 msgstr "Sa version"
-
-#: src/interview/transcript.tsx
-msgid "Its words are deleted for good, and so is what I marked in them. What I wrote down from it stays in what I read back to you at the end, where you can take it out. This can’t be undone."
-msgstr "Ses mots sont supprimés pour de bon, tout comme ce que j’y ai marqué. Ce que j’en ai noté reste dans ce que je vous relis à la fin, où vous pouvez le retirer. Cette action est irréversible."
 
 #: src/brain/brain-article/team-work.tsx
 msgid "Its work"
@@ -9955,6 +9951,10 @@ msgstr "Notre e-mail n’est pas parvenu à {names}. Envoyez-leur vous-même leu
 msgid "Our first conversation gave me the big picture. Now I need the details."
 msgstr "Notre premier échange m’a donné une vue d’ensemble. J’ai maintenant besoin des détails."
 
+#: src/onboarding/forget-kickoff.tsx
+msgid "Our first conversation is deleted. I’m still erasing what I took from it, and I finish that by myself."
+msgstr "Notre premier échange est supprimé. J’efface encore ce que j’en ai tiré, et je termine cela de moi-même."
+
 #: src/apps/resource-bindings.tsx
 #: src/chat/thread.tsx
 msgid "Output"
@@ -10988,6 +10988,10 @@ msgstr "Retirer {what} du cerveau ?"
 msgid "Remove {when}, for {person}"
 msgstr "Retirer {when}, pour {person}"
 
+#: src/interview/transcript.tsx
+msgid "Remove {who}’s line: {words}"
+msgstr "Retirer l’intervention de {who} : {words}"
+
 #: src/brain/brain-article/kern.tsx
 #: src/brain/forget.tsx
 msgid "Remove from the brain"
@@ -11030,12 +11034,12 @@ msgid "Remove this from the brain"
 msgstr "Retirer ceci du cerveau"
 
 #: src/interview/transcript.tsx
-msgid "Remove this line"
-msgstr "Retirer cette phrase"
+msgid "Remove this line?"
+msgstr "Retirer cette intervention ?"
 
 #: src/interview/transcript.tsx
-msgid "Remove this line?"
-msgstr "Retirer cette phrase ?"
+msgid "Remove your line: {words}"
+msgstr "Retirer votre intervention : {words}"
 
 #: src/settings/erasures.tsx
 msgid "Removed"
@@ -13784,6 +13788,10 @@ msgstr "Les entretiens ne sont pas encore planifiés. Vous les planifiez à la f
 #: src/workflows/traces.tsx
 msgid "The latest runs, newest first."
 msgstr "Les dernières exécutions, les plus récentes en premier."
+
+#: src/interview/transcript.tsx
+msgid "The line is deleted now, and so is what I marked in it. What I wrote down from it is in what I read back to you at the end: take it out there, and it is deleted for good when our conversation is finished. This can’t be undone."
+msgstr "L’intervention est supprimée maintenant, tout comme ce que j’y ai marqué. Ce que j’en ai noté figure dans ce que je vous relis à la fin : retirez-le là, et il sera supprimé pour de bon une fois notre échange terminé. Cette action est irréversible."
 
 #: src/pages/page-links.ts
 msgid "The link wasn't opened."

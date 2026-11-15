@@ -1,4 +1,5 @@
 import type { InterviewLine } from "@grasp-os/shared/interview-links";
+import { interviewerNames } from "@grasp-os/shared/onboarding";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -15,6 +16,7 @@ import { useLingui } from "@lingui/react/macro";
 import { XIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { useInterviewer } from "./kept.ts";
 import { Marked, Own } from "./talk.tsx";
 import { useInterviewWords } from "./words.ts";
 
@@ -28,6 +30,16 @@ import { useInterviewWords } from "./words.ts";
 // so only they can say which words should go.
 
 export const transcriptId = "interview-transcript";
+
+/** How many words of a line its remove button names it by. */
+const namingWords = 6;
+
+/** The first words of `text`, to name its line by. */
+const startOf = (text: string): string => {
+  const words = text.trim().split(/\s+/u);
+  const start = words.slice(0, namingWords).join(" ");
+  return words.length > namingWords ? `${start}…` : start;
+};
 
 /** Removes a line of the transcript, once confirmed: it can't be undone. */
 const RemoveLine = ({
@@ -51,7 +63,7 @@ const RemoveLine = ({
         <AlertDialogHeader>
           <AlertDialogTitle>{t`Remove this line?`}</AlertDialogTitle>
           <AlertDialogDescription>
-            {t`Its words are deleted for good, and so is what I marked in them. What I wrote down from it stays in what I read back to you at the end, where you can take it out. This can’t be undone.`}
+            {t`The line is deleted now, and so is what I marked in it. What I wrote down from it is in what I read back to you at the end: take it out there, and it is deleted for good when our conversation is finished. This can’t be undone.`}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -114,6 +126,7 @@ export const Transcript = ({
 }) => {
   const { t } = useLingui();
   const [removing, setRemoving] = useState<number | null>(null);
+  const who = interviewerNames[useInterviewer()];
   const names = useInterviewWords().tag;
   const list = useRef<HTMLDivElement>(null);
   const count = lines.length;
@@ -148,31 +161,38 @@ export const Transcript = ({
           {lines.length === 0 ? (
             <li className="text-muted-foreground">{t`Nothing said yet.`}</li>
           ) : null}
-          {lines.map((line, at) => (
-            <li
-              className={cn(
-                "group/line flex items-start gap-1",
-                line.from === "stephen" ? "pr-6" : "flex-row-reverse"
-              )}
-              // The conversation only grows: a line's place is what it is.
-              key={at}
-            >
-              <Line line={line} names={names} />
-              {line.removed === true ? null : (
-                <Button
-                  aria-label={t`Remove this line`}
-                  className="flex-none"
-                  onClick={() => {
-                    setRemoving(at);
-                  }}
-                  size="icon-xs"
-                  variant="ghost"
-                >
-                  <XIcon />
-                </Button>
-              )}
-            </li>
-          ))}
+          {lines.map((line, at) => {
+            const words = startOf(line.text);
+            return (
+              <li
+                className={cn(
+                  "flex items-start gap-1",
+                  line.from === "stephen" ? "pr-6" : "flex-row-reverse"
+                )}
+                // The conversation only grows: a line's place is what it is.
+                key={at}
+              >
+                <Line line={line} names={names} />
+                {line.removed === true ? null : (
+                  <Button
+                    aria-label={
+                      line.from === "stephen"
+                        ? t`Remove ${who}’s line: ${words}`
+                        : t`Remove your line: ${words}`
+                    }
+                    className="flex-none"
+                    onClick={() => {
+                      setRemoving(at);
+                    }}
+                    size="icon-xs"
+                    variant="ghost"
+                  >
+                    <XIcon />
+                  </Button>
+                )}
+              </li>
+            );
+          })}
         </ol>
       </div>
       <RemoveLine
