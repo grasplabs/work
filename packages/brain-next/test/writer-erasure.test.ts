@@ -811,16 +811,18 @@ describe("a writer's erasure", () => {
       const erasure = typeof key === "string" ? key : "";
       // The store as the release before left it: `erasures` without a
       // writer's kind, its count, its change or its sweep, memories without the writer's subject or
-      // the retiring change, the last five migrations not yet run, and a row
+      // the retiring change, no removals (removal.ts, a later migration),
+      // every migration after the release before's not yet run, and a row
       // that points at the erasure.
       const before: Copy = {
         // The table of memories that failed to delete is the release's own,
-        // and so are the quotes' (migration 0021, quotes.ts).
+        // and so are the quotes' (migration 0022, quotes.ts).
         tables: now.tables
           .filter(
             ({ name }) =>
               ![
                 "memory_erase_failures",
+                "removed_sources",
                 "memory_outs",
                 "memory_ins",
                 "memory_judged",
@@ -913,6 +915,7 @@ describe("a writer's erasure", () => {
             !made.includes("memories_writer_idx") &&
             !made.includes("erasures_writer_idx") &&
             !made.includes("memory_erase_failures") &&
+            !made.includes("removed_sources") &&
             // Made by a migration after the release before's, as those are.
             !made.includes("unembeddable_hash_idx") &&
             !made.includes("work_items_key_idx") &&

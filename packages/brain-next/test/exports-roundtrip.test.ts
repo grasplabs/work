@@ -52,6 +52,8 @@ const features = [
   "more names for one entity from one memory than one entity of an add takes",
   "a source narrowed after its memories",
   "an erased source",
+  "a source removed with its history",
+  "a key removed before its first version",
 ] as const;
 type Feature = (typeof features)[number];
 
@@ -407,6 +409,12 @@ const featuresHeld = async (): Promise<Record<string, number>> =>
       JOIN source_versions ON source_versions.row = current_versions.version_row
       WHERE source_versions.version > memories.version`
       ),
+      "a source removed with its history": count(
+        "SELECT count(*) AS count FROM removed_sources WHERE version_row IS NOT NULL"
+      ),
+      "a key removed before its first version": count(
+        "SELECT count(*) AS count FROM removed_sources WHERE version_row IS NULL"
+      ),
     };
   });
 
@@ -428,6 +436,20 @@ const madeBy = async (seed: number) => {
     // oxlint-disable-next-line no-await-in-loop -- one operation at a time
     await operate(series, operation);
   }
+  // Removals (removal.ts), after the series, so its seeds make what they
+  // made before: a source with a version, removed with its history, and a
+  // key removed before any version was added under it. Both keys stay
+  // closed after a restore (`keys`, read by `everyRead`).
+  const removed = `test:${tag}-removed`;
+  const removedEarly = `test:${tag}-removed-early`;
+  await shared().addSource({
+    source: removed,
+    change: "1",
+    text: `words of ${removed}`,
+    access: pick(series.accesses),
+  });
+  await shared().removeSource({ source: removed });
+  await shared().removeSource({ source: removedEarly });
   for (let ticks = 0; ticks < 3; ticks += 1) {
     // oxlint-disable-next-line no-await-in-loop -- a tick at a time
     await tick(shared());
@@ -447,6 +469,7 @@ const madeBy = async (seed: number) => {
       emails,
       questions: [`status ${tag}`, "words of", "requires sso"],
       asOf: new Date(Date.now() + 60_000),
+      keys: [removed, removedEarly],
     },
   };
 };

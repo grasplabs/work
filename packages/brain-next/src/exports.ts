@@ -61,7 +61,13 @@ import type { WorkContext } from "./work.ts";
 // nothing else) and those no one is known to read (a set with no one in it:
 // an admin is not a reader of it), and every version of a source whose
 // current version is such or that has none (no one else may read its
-// history), left out in the statement that selects them; and the skills
+// history), left out in the statement that selects them. In the company's
+// export, a removed source (removal.ts) is held by the version that was
+// current when it was removed, as if that were current, and that version is
+// marked `removed`, so a restore brings it back removed; a key removed
+// before any version was added under it is a line of its own (`removals`,
+// the last step), so a restore closes it again; a person's own export
+// leaves both out, as no one reads them; and the skills
 // Grasp ships (contract.ts `shippedSkillsPrefix`), which each release adds
 // again. It holds the company's instruction files and its own skills. Of
 // memories and extraction marks, those one group reads (the shared store
@@ -206,7 +212,9 @@ const partHoldsFileOf = (index: number): string =>
   exportPartNameOf(index, "holds.json");
 
 const holdsSchema = z.array(
-  z.tuple([z.string().regex(/^[0-9a-f]{64}$/u), z.int().positive()])
+  // Version 0 is a key held with no version (a removal line, `removals`):
+  // only an erasure of the key itself names it.
+  z.tuple([z.string().regex(/^[0-9a-f]{64}$/u), z.int().nonnegative()])
 );
 
 /**
@@ -247,6 +255,11 @@ export const exportLineSchema = z.strictObject({
   access: accessSchema,
   /** Whether it was its source's current version. */
   current: z.boolean(),
+  /**
+   * Whether it was its source's current version when the source was
+   * removed (removal.ts): restored, the source comes back removed.
+   */
+  removed: z.boolean(),
   /** Whether its text is cut into chunks and indexed: an instruction file's isn't. */
   indexed: z.boolean(),
   /** Its source is a thread (`NewSource.thread`): left out for one that isn't. */
@@ -343,20 +356,35 @@ export const changeLineSchema = z.strictObject({
 });
 export type ChangeLine = z.infer<typeof changeLineSchema>;
 
-/** A line of a part past the versions: one of the memories' steps (`memoryPhases`). */
+/**
+ * A line of a key removed with no version to mark (removal.ts): one removed
+ * before anything was added under it. Its key alone, which a restore
+ * closes again, so an add that began before the removal never lands after
+ * a restore either. A removed key with a version is marked on that
+ * version's line instead (`ExportLine.removed`).
+ */
+export const removalLineSchema = z.strictObject({
+  kind: z.literal("removal"),
+  source: z.string(),
+});
+export type RemovalLine = z.infer<typeof removalLineSchema>;
+
+/** A line of a part past the versions: one of the memories' steps (`memoryPhases`), or a removal. */
 export type MemoriesLine =
   | MemoryLine
   | ConfirmationLine
   | ExtractionLine
-  | ChangeLine;
+  | ChangeLine
+  | RemovalLine;
 
 /**
  * The format of the exports this release writes, and the only one it
- * restores: format 2 holds memories, and an export of format 1 (versions
- * only) would come back as a Brain without them while reading as whole,
+ * restores: format 3 holds removed sources as removed (`removed`), and an
+ * export of an earlier format would come back without what it lacks
+ * (memories before format 2, removals before 3) while reading as whole,
  * so a restore refuses it (restore.ts) and the admin makes a new export.
  */
-export const exportFormat = 2;
+export const exportFormat = 3;
 
 /** An export's manifest, as written last. */
 export const manifestSchema = z.strictObject({
@@ -492,15 +520,28 @@ const keyOf = (id: string): string => `export:${id}`;
  * The versions an export selects. `unreadable` is every set one person
  * alone, or no one known, may read.
  */
-const selectedSql = `source_versions.reader_set NOT IN (SELECT id FROM unreadable)
+const selectedSqlOf = (
+  scope: ExportScope["kind"]
+): string => `source_versions.reader_set NOT IN (SELECT id FROM unreadable)
   AND substr(source_versions.source, 1, ${shippedSkillsPrefix.length})
     != '${shippedSkillsPrefix}'
-  AND EXISTS (
+  AND (EXISTS (
     SELECT 1 FROM current_versions AS now
     JOIN source_versions AS current ON current.row = now.version_row
     WHERE now.source = source_versions.source
       AND current.reader_set NOT IN (SELECT id FROM unreadable)
-  )`;
+  )${
+    // A person's own export hands them what they may read: a source
+    // removed from their store is read by no one, them included.
+    scope === "company"
+      ? ` OR EXISTS (
+    SELECT 1 FROM removed_sources AS gone
+    JOIN source_versions AS was ON was.row = gone.version_row
+    WHERE gone.source = source_versions.source
+      AND was.reader_set NOT IN (SELECT id FROM unreadable)
+  )`
+      : ""
+  })`;
 
 /** A version, as a run selects it for a part. */
 interface Selected extends Record<string, SqlStorageValue> {
@@ -512,6 +553,7 @@ interface Selected extends Record<string, SqlStorageValue> {
   read_at: number | null;
   readers: string;
   current: number;
+  removed: number;
   indexed: number;
   changes: string;
   /** Its source's group's key as the ledger names it, if it was added in one. */
@@ -557,6 +599,14 @@ SELECT source_versions.row AS row, source_versions.source AS source,
     )),
     0
   ) AS current,
+  coalesce(
+    removed_sources.version_row = source_versions.row
+    OR (removed_sources.version_row > ?2 AND source_versions.row = (
+      SELECT max(before.row) FROM source_versions AS before
+      WHERE before.source = source_versions.source AND before.row <= ?2
+    )),
+    0
+  ) AS removed,
   EXISTS (SELECT 1 FROM chunks WHERE chunks.version_row = source_versions.row) AS indexed,
   (SELECT json_group_array(change) FROM source_changes
     WHERE source_changes.version_row = source_versions.row) AS changes,
@@ -567,9 +617,10 @@ SELECT source_versions.row AS row, source_versions.source AS source,
 FROM source_versions
 JOIN reader_sets ON reader_sets.id = source_versions.reader_set
 LEFT JOIN current_versions ON current_versions.source = source_versions.source
+LEFT JOIN removed_sources ON removed_sources.source = source_versions.source
 WHERE source_versions.row > ?1 AND source_versions.row <= ?2
   AND source_versions.row NOT IN (SELECT version_row FROM erasing_versions)
-  AND ${selectedSql}
+  AND ${selectedSqlOf(scope)}
 ORDER BY source_versions.row
 LIMIT ?3`;
 
@@ -588,7 +639,20 @@ export const memoryPhases = [
   "confirmations",
   "extractions",
   "changes",
+  "removals",
 ] as const;
+
+/**
+ * How many bindings each step's statement names in the company's export
+ * (`memoryPhaseSqlOf`); a person's names all six.
+ */
+const companyBindings: Record<(typeof memoryPhases)[number], number> = {
+  memories: 4,
+  confirmations: 4,
+  extractions: 4,
+  changes: 5,
+  removals: 3,
+};
 
 /** Most rows one part of a step of memories reads; its bytes bound it first. */
 const memoryPartRows = 500;
@@ -711,6 +775,22 @@ WHERE changed.rowid > ?1 AND changed.rowid <= ?5
   )
 ORDER BY changed.rowid
 LIMIT ?3`,
+  // Keys removed with no version to mark. The company's export alone: a
+  // mark names no readers, only a key, and only a company export is ever
+  // restored (restore.ts), so a person's own export carries none (`?6`, the
+  // person's own key, is never null).
+  removals:
+    scope === "company"
+      ? `SELECT gone.rowid AS row, gone.source AS source, gone.subject AS subject
+FROM removed_sources AS gone
+WHERE gone.rowid > ?1 AND gone.version_row IS NULL
+ORDER BY gone.rowid
+LIMIT ?3`
+      : `SELECT gone.rowid AS row, gone.source AS source, gone.subject AS subject
+FROM removed_sources AS gone
+WHERE gone.rowid > ?1 AND ?6 IS NULL
+ORDER BY gone.rowid
+LIMIT ?3`,
 });
 
 const memoryPhaseSql = {
@@ -820,6 +900,15 @@ const memoriesLineOf = (
         over: jsonOf(row.over),
       }),
       held: undefined,
+    };
+  }
+  if (phase === "removals") {
+    // Held as version 0 of its key, which only an erasure of the key
+    // itself names (`namedSql`): so erasing it makes the export stale, and
+    // no plain key outlives what it named in an export's files either.
+    return {
+      line: removalLineSchema.parse({ kind: "removal", source: row.source }),
+      held: [textOf(row.subject), 0],
     };
   }
   if (phase === "extractions") {
@@ -1454,6 +1543,7 @@ const linesOf = async (
         ...(version.read_at === null ? {} : { readAt: version.read_at }),
         access,
         current: version.current === 1,
+        removed: version.removed === 1,
         indexed: version.indexed === 1,
         ...(version.thread === 1 ? { thread: true as const } : {}),
         changes: z.array(z.string()).parse(JSON.parse(version.changes)),
@@ -1801,7 +1891,7 @@ const memoriesPart = (
     const named =
       scope.kind === "person"
         ? [...bindings, ...ownKeyOf(scope)]
-        : bindings.slice(0, name === "changes" ? 5 : 4);
+        : bindings.slice(0, companyBindings[name]);
     const rows = sql
       .exec<PhaseRow>(memoryPhaseSql[scope.kind][name], ...named)
       .toArray();

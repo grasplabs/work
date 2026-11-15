@@ -15,6 +15,7 @@ import { drainWebhookDeliveries } from "./app-webhooks.ts";
 import { auditLog } from "./audit-log.ts";
 import { workBrain } from "./brain-next.ts";
 import { producersOf, relayHandOvers } from "./brain-sources.ts";
+import { completeOwedRemovals } from "./brain-uploads.ts";
 import { sweepChannelLinks } from "./channels/accounts.ts";
 import { sweepChannelSignals } from "./channels/signals.ts";
 import { sweepStephenRequests } from "./channels/stephen-requests.ts";
@@ -80,6 +81,13 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   { name: "brain.hand_overs", period: "minute", run: relayHandOvers },
   { name: "members.disconnects", period: "minute", run: retryDisconnects },
   { name: "members.erasures", period: "minute", run: retryErasures },
+  // Shared uploads their uploaders removed, whose removal from the Brain,
+  // or its record, is still owed (src/brain-uploads.ts).
+  {
+    name: "brain.upload_removals",
+    period: "minute",
+    run: completeOwedRemovals,
+  },
   // Decisions on the company's skills whose outcome the Brain hasn't given
   // yet (src/skill-shares.ts `reconcileSkills`).
   { name: "skills.reconcile", period: "minute", run: reconcileSkills },

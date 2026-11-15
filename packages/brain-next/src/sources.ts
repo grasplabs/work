@@ -50,6 +50,7 @@ import {
 } from "./files.ts";
 import { judgeVersion } from "./quotes.ts";
 import { readableSql, readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
+import { refuseRemoved } from "./removal.ts";
 import { isRestoring } from "./restoring.ts";
 import { removeVectorsOf } from "./vectors.ts";
 import { indexWords } from "./words.ts";
@@ -304,6 +305,8 @@ const record = (
   if (isErased(storage.sql, adding.subject)) {
     throw new Error(erasedSource);
   }
+  // Removed while this add wrote its file: closed, its history kept.
+  refuseRemoved(storage.sql, adding.added.source);
   refuseByGroup(storage.sql, adding);
   // The same change, or the same text and readers, added meanwhile.
   const before = madeBefore(db, storage, adding);
@@ -501,6 +504,9 @@ export const addVersion = async (
   if (isErased(storage.sql, adding.subject)) {
     throw new Error(erasedSource);
   }
+  // Before its change is looked up: a retry of an add made before the
+  // removal is refused too.
+  refuseRemoved(storage.sql, added.source);
   refuseByGroup(storage.sql, adding);
   if (isRestoring(storage.sql)) {
     throw new Error(restoringNow);

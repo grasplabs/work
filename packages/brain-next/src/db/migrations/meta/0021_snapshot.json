@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "9928aa95-2716-47f9-a6fd-09da6387e214",
+  "id": "0cf4ba64-6b2f-4fa4-a91c-43937c8d2c4b",
   "prevId": "e8d29f34-530d-4351-87c2-064a4a5560dd",
   "tables": {
     "chunks": {
@@ -95,13 +95,6 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
-        },
-        "judged_row": {
-          "name": "judged_row",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         }
       },
       "indexes": {
@@ -111,14 +104,6 @@
             "version_row"
           ],
           "isUnique": true
-        },
-        "current_versions_unjudged_idx": {
-          "name": "current_versions_unjudged_idx",
-          "columns": [
-            "source"
-          ],
-          "isUnique": false,
-          "where": "judged_row IS NOT version_row"
         }
       },
       "foreignKeys": {
@@ -1552,135 +1537,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "memory_ins": {
-      "name": "memory_ins",
-      "columns": {
-        "memory": {
-          "name": "memory",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "memory_ins_source_idx": {
-          "name": "memory_ins_source_idx",
-          "columns": [
-            "source"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "memory_ins_memory_memories_row_fk": {
-          "name": "memory_ins_memory_memories_row_fk",
-          "tableFrom": "memory_ins",
-          "tableTo": "memories",
-          "columnsFrom": [
-            "memory"
-          ],
-          "columnsTo": [
-            "row"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "memory_judged": {
-      "name": "memory_judged",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "through": {
-          "name": "through",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {
-        "memory_judged_one": {
-          "name": "memory_judged_one",
-          "value": "id = 1"
-        }
-      }
-    },
-    "memory_outs": {
-      "name": "memory_outs",
-      "columns": {
-        "memory": {
-          "name": "memory",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "pair": {
-          "name": "pair",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "memory_outs_pair_idx": {
-          "name": "memory_outs_pair_idx",
-          "columns": [
-            "source",
-            "pair"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "memory_outs_memory_memories_row_fk": {
-          "name": "memory_outs_memory_memories_row_fk",
-          "tableFrom": "memory_outs",
-          "tableTo": "memories",
-          "columnsFrom": [
-            "memory"
-          ],
-          "columnsTo": [
-            "row"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "memory_stamps": {
       "name": "memory_stamps",
       "columns": {
@@ -1807,6 +1663,66 @@
         }
       },
       "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "removed_sources": {
+      "name": "removed_sources",
+      "columns": {
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "subject": {
+          "name": "subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "version_row": {
+          "name": "version_row",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "removed_sources_version_row_unique": {
+          "name": "removed_sources_version_row_unique",
+          "columns": [
+            "version_row"
+          ],
+          "isUnique": true
+        },
+        "removed_sources_subject_idx": {
+          "name": "removed_sources_subject_idx",
+          "columns": [
+            "subject"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "removed_sources_version_row_source_versions_row_fk": {
+          "name": "removed_sources_version_row_source_versions_row_fk",
+          "tableFrom": "removed_sources",
+          "tableTo": "source_versions",
+          "columnsFrom": [
+            "version_row"
+          ],
+          "columnsTo": [
+            "row"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
@@ -1984,14 +1900,6 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
-        },
-        "thread": {
-          "name": "thread",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
         }
       },
       "indexes": {
