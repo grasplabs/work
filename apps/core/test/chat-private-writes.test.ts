@@ -401,10 +401,9 @@ describe("what a chat writes for others once it used something only its person m
         inJurisdiction(env, env.BRAIN_STORE),
         builder.userId
       );
-      const kept = await own.findEntities({
-        reader: { person: builder.userId, groups: [] },
-        identifier: { type: "ref", value: `grasp:person:${builder.userId}` },
-      });
+      const reader = { person: builder.userId, groups: [] };
+      const self = await own.ownEntity({ reader });
+      const kept = await own.readMemories({ entity: self ?? "", reader });
 
       expect({
         answers: await answers(chats.stub, chat.id),
@@ -423,7 +422,7 @@ describe("what a chat writes for others once it used something only its person m
         after: await titles(),
         waiting: await builder.api.chats.heldCalls(chat.id),
         // Their own memory was kept without a question.
-        remembered: kept.entities.length > 0,
+        remembered: kept.memories.length > 0,
       }).toStrictEqual({
         answers: ["held"],
         held: {
