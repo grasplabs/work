@@ -21,6 +21,7 @@ import {
   chatPlanSchema,
   chatPlatformSchema,
   chatToolEventsKept,
+  heldAppCallsPage,
 } from "@grasp-os/shared/chat";
 import type {
   ChatChannel,
@@ -88,6 +89,7 @@ import {
   isNotNull,
   isNull,
   ne,
+  or,
   sql,
 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/durable-sqlite";
@@ -185,11 +187,12 @@ import {
   customWidgets,
   dashboardWidgets,
   dashboards,
+  heldAppCalls,
   memoryUses,
 } from "./db/workspace/schema.ts";
 import { chatWork } from "./drafts.ts";
 import { callObject, chatSession } from "./durable-objects.ts";
-import { dropHeldStarts } from "./held-starts.ts";
+import { dropHeldStarts, heldStartMs } from "./held-starts.ts";
 import {
   brainMemoryOf,
   brainMemoryPrefix,
@@ -775,6 +778,47 @@ export type HeldOutcome =
   | "expired"
   | "unknown"
   | "failed";
+
+/** Most characters of a function's path a held App call keeps. */
+const maxHeldFunctionChars = 256;
+
+/** What holding a write to an App keeps (held-app-calls.ts). */
+export interface HeldAppCallInput {
+  agentId: string;
+  appId: string;
+  function: string;
+  kind: string;
+  request: string;
+  requestHash: string;
+}
+
+/** A held App call, as its Workspace keeps it, with when it lapses. */
+export interface HeldAppCallRow extends HeldAppCallInput {
+  id: string;
+  chatId: string;
+  personId: string;
+  heldAt: number;
+  expiresAt: number;
+}
+
+/** `row` as its callers read it: its request as it was held. */
+const heldAppCallRowOf = (
+  row: typeof heldAppCalls.$inferSelect
+): HeldAppCallRow => ({
+  id: row.id,
+  chatId: row.chatId,
+  personId: row.personId,
+  agentId: row.agentId,
+  appId: row.appId,
+  function: row.function,
+  kind: row.kind,
+  // Kept while it waits; decided in the write that empties it, and handed
+  // back from the read before it.
+  request: row.request ?? "",
+  requestHash: row.requestHash,
+  heldAt: row.heldAt.getTime(),
+  expiresAt: row.heldAt.getTime() + heldStartMs,
+});
 
 /** A held write, as its chat's agent knows it: the ID its call answered with. */
 const heldSchema = z.strictObject({
@@ -1805,6 +1849,319 @@ export class Workspace extends DurableObject<Env> {
       .where(eq(chats.id, chatId))
       .all();
     return chat?.restricted;
+  }
+
+  /**
+   * Whether the chat has handed its model or code something only its
+   * person may read (private-reads.ts); `undefined`: no such chat.
+   */
+  isChatPrivateRead(chatId: ChatId): boolean | undefined {
+    return this.#db
+      .select({ privateRead: chats.privateRead })
+      .from(chats)
+      .where(eq(chats.id, chatId))
+      .get()?.privateRead;
+  }
+
+  /**
+   * Marks the chat as having handed its model or code something only its
+   * person may read, for good (private-reads.ts), with `entry` in the
+   * audit outbox in the same write the first time: `true` then, `false`
+   * when it was marked already, `undefined` for no such chat.
+   */
+  markChatPrivateRead(chatId: ChatId, entry: AuditEntry): boolean | undefined {
+    const marked = this.ctx.storage.transactionSync(() => {
+      const chat = this.#db
+        .select({ privateRead: chats.privateRead })
+        .from(chats)
+        .where(eq(chats.id, chatId))
+        .get();
+      if (chat === undefined || chat.privateRead) {
+        return chat === undefined ? undefined : false;
+      }
+      this.#outboxEntry(entry);
+      this.#db
+        .update(chats)
+        .set({ privateRead: true })
+        .where(eq(chats.id, chatId))
+        .run();
+      return true;
+    });
+    if (marked === true) {
+      this.#deliverAudit();
+    }
+    return marked;
+  }
+
+  /**
+   * Holds a write to an App the chat's agent asked for (held-app-calls.ts)
+   * for the chat's person: the same request still waiting in the chat is
+   * the same hold, so a call made again (a step a restart ran again) is
+   * held once. The call that holds it records it (`agent.call`, with the
+   * hold's ID). Refused for a chat that isn't `personId`'s.
+   */
+  async holdAppCall(
+    chatId: unknown,
+    personId: string,
+    held: HeldAppCallInput,
+    now: number
+  ): Promise<HeldAppCallRow> {
+    const chat = this.#ownChat(chatId, personId);
+    await this.#lapseHeldAppCalls(chat.id, now);
+    const kept = this.ctx.storage.transactionSync(() => {
+      const waiting = this.#db
+        .select()
+        .from(heldAppCalls)
+        .where(
+          and(
+            eq(heldAppCalls.chatId, chat.id),
+            eq(heldAppCalls.status, "waiting"),
+            eq(heldAppCalls.appId, held.appId),
+            eq(heldAppCalls.requestHash, held.requestHash)
+          )
+        )
+        .get();
+      if (waiting !== undefined) {
+        return waiting;
+      }
+      return this.#db
+        .insert(heldAppCalls)
+        .values({
+          id: crypto.randomUUID(),
+          chatId: chat.id,
+          personId,
+          ...held,
+          heldAt: new Date(now),
+          status: "waiting",
+        })
+        .returning()
+        .get();
+    });
+    this.heldChanged(chat.id);
+    return heldAppCallRowOf(kept);
+  }
+
+  /**
+   * The App writes held for `personId` in their chat `chatId` that still
+   * wait, oldest first, a page of at most `heldAppCallsPage`: none past
+   * their day. A full page goes on `after` its last one's ID; an ID that
+   * names no hold of the chat starts from the first.
+   */
+  async heldAppCalls(
+    chatId: unknown,
+    personId: string,
+    now: number,
+    after?: string
+  ): Promise<HeldAppCallRow[]> {
+    const chat = this.#ownChat(chatId, personId);
+    await this.#lapseHeldAppCalls(chat.id, now);
+    const from =
+      after === undefined
+        ? undefined
+        : this.#db
+            .select({ id: heldAppCalls.id, heldAt: heldAppCalls.heldAt })
+            .from(heldAppCalls)
+            .where(
+              and(eq(heldAppCalls.id, after), eq(heldAppCalls.chatId, chat.id))
+            )
+            .get();
+    return this.#db
+      .select()
+      .from(heldAppCalls)
+      .where(
+        and(
+          eq(heldAppCalls.chatId, chat.id),
+          eq(heldAppCalls.personId, personId),
+          eq(heldAppCalls.status, "waiting"),
+          from === undefined
+            ? undefined
+            : or(
+                gt(heldAppCalls.heldAt, from.heldAt),
+                and(
+                  eq(heldAppCalls.heldAt, from.heldAt),
+                  gt(heldAppCalls.id, from.id)
+                )
+              )
+        )
+      )
+      .orderBy(asc(heldAppCalls.heldAt), asc(heldAppCalls.id))
+      .limit(heldAppCallsPage)
+      .all()
+      .map((row) => heldAppCallRowOf(row));
+  }
+
+  /**
+   * Decides held App call `id` of `personId`'s chat `chatId`, once: only
+   * while it waits, within its day, and, to confirm it, only for the
+   * request whose SHA-256 is `requestHash`, the one the person was shown.
+   * Its request is emptied in the same write, and handed back to run once
+   * confirmed. Anything else (another's, decided already, lapsed, another
+   * request) answers as none: `agent.held_call_not_found`.
+   */
+  async decideHeldAppCall(
+    chatId: unknown,
+    personId: string,
+    id: string,
+    decision: { confirm: true; requestHash: string } | { confirm: false },
+    now: number
+  ): Promise<HeldAppCallRow> {
+    const chat = this.#ownChat(chatId, personId);
+    await this.#lapseHeldAppCalls(chat.id, now);
+    const decided = this.ctx.storage.transactionSync(() => {
+      const row = this.#db
+        .select()
+        .from(heldAppCalls)
+        .where(
+          and(
+            eq(heldAppCalls.id, id),
+            eq(heldAppCalls.chatId, chat.id),
+            eq(heldAppCalls.personId, personId),
+            eq(heldAppCalls.status, "waiting")
+          )
+        )
+        .get();
+      const taken =
+        row !== undefined &&
+        (!decision.confirm || row.requestHash === decision.requestHash)
+          ? row
+          : undefined;
+      if (taken !== undefined) {
+        this.#db
+          .update(heldAppCalls)
+          .set({
+            status: decision.confirm ? "confirmed" : "declined",
+            request: null,
+          })
+          .where(eq(heldAppCalls.id, taken.id))
+          .run();
+        // The person's decision, recorded before anything runs of it.
+        this.#outboxEntry({
+          actor: { type: "person", userId: personId },
+          action: decision.confirm
+            ? "chat.app_call.confirmed"
+            : "chat.app_call.declined",
+          target: { type: "app", id: taken.appId },
+          detail: {
+            workspace: this.ctx.id.name ?? null,
+            chat: chat.id,
+            held: taken.id,
+            kind: taken.kind,
+          },
+        });
+      }
+      return taken;
+    });
+    if (decided === undefined) {
+      throw agentErrors.create("agent.held_call_not_found");
+    }
+    this.#deliverAudit();
+    this.heldChanged(chat.id);
+    return heldAppCallRowOf(decided);
+  }
+
+  /**
+   * Ends the App writes held in chat `chatId` that waited past their day
+   * (`heldStartMs`, as a held start's) at `now`, never run: each is
+   * `lapsed`, its request emptied and its end recorded
+   * (`chat.app_call.lapsed`) in one write, then its agent told. Done
+   * whenever the chat's held calls are next read, held or decided, so a
+   * lapsed one is never listed, confirmed or kept with its request past
+   * that read.
+   */
+  async #lapseHeldAppCalls(chatId: ChatId, now: number): Promise<void> {
+    const lapsed = this.ctx.storage.transactionSync(() => {
+      const rows = this.#db
+        .select()
+        .from(heldAppCalls)
+        .where(
+          and(
+            eq(heldAppCalls.chatId, chatId),
+            eq(heldAppCalls.status, "waiting"),
+            lte(heldAppCalls.heldAt, new Date(now - heldStartMs))
+          )
+        )
+        .all();
+      for (const row of rows) {
+        this.#db
+          .update(heldAppCalls)
+          .set({ status: "lapsed", request: null })
+          .where(eq(heldAppCalls.id, row.id))
+          .run();
+        this.#outboxEntry({
+          actor: { type: "system" },
+          action: "chat.app_call.lapsed",
+          target: { type: "app", id: row.appId },
+          detail: {
+            workspace: this.ctx.id.name ?? null,
+            chat: chatId,
+            held: row.id,
+            kind: row.kind,
+          },
+        });
+      }
+      return rows;
+    });
+    if (lapsed.length === 0) {
+      return;
+    }
+    this.#deliverAudit();
+    this.heldChanged(chatId);
+    for (const { id, function: name } of lapsed) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one note each, in order
+        await this.#note(
+          chatId,
+          `The write to an App you asked for, "${name}" (held ID ${id}), waited a day without the person confirming it, so it ended and was not carried out. If they still want it, ask for it afresh.`
+        );
+      } catch (error) {
+        // Ended either way: the agent finds it no longer waits.
+        log.warn("chat.held_app_call_lapse_note_failed", errorFields(error));
+      }
+    }
+  }
+
+  /**
+   * Tells the agent of `personId`'s own chat how a write to an App it had
+   * held for them ended, as `heldDecided` does a connection's: a notice
+   * for its turn under way or its next. Nothing of the App's answer: the
+   * agent reads the App again if it needs to. A confirmed one's outcome
+   * (`chat.app_call.ended`, as the agent's for them: it ran, or failed or
+   * was refused) is recorded first, so the person's confirmation never
+   * stands alone for a write that was not done.
+   */
+  async heldAppCallDecided(
+    chatId: unknown,
+    personId: string,
+    held: { id: string; function: string; appId: string; agentId: string },
+    outcome: Exclude<HeldOutcome, "expired" | "unknown">
+  ): Promise<void> {
+    const chat = this.#ownChat(chatId, personId);
+    const { id } = z.strictObject({ id: z.uuid() }).parse({ id: held.id });
+    const name = z
+      .string()
+      .min(1)
+      .max(maxHeldFunctionChars)
+      .parse(held.function);
+    if (outcome !== "declined") {
+      this.#outboxEntry({
+        actor: delegateActorOf(
+          chatAuthority({ agentId: held.agentId, personId })
+        ),
+        action: "chat.app_call.ended",
+        target: { type: "app", id: held.appId },
+        detail: {
+          workspace: this.ctx.id.name ?? null,
+          chat: chat.id,
+          held: id,
+          outcome: outcome === "confirmed" ? "ok" : "failed",
+        },
+      });
+      this.#deliverAudit();
+    }
+    await this.#note(
+      chat.id,
+      `The write to an App you asked for, "${name}" (held ID ${id}), was decided. ${heldOutcomes[outcome]}`
+    );
   }
 
   /** Puts the chat in restricted mode, for good; `false`: no such chat. */
@@ -4253,6 +4610,7 @@ export class Workspace extends DurableObject<Env> {
           .delete(brainCaptureIntents)
           .where(eq(brainCaptureIntents.evidenceId, id))
           .run();
+        this.#db.delete(heldAppCalls).where(eq(heldAppCalls.chatId, id)).run();
         // Before its messages: a file names the question that carried it.
         this.#db.delete(chatFiles).where(eq(chatFiles.chatId, id)).run();
         this.#db

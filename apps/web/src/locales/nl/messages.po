@@ -537,6 +537,10 @@ msgstr "{file} kon niet worden verwijderd"
 msgid "{file} removed"
 msgstr "{file} verwijderd"
 
+#: src/chat/held-writes.tsx
+msgid "{fn} in {app}"
+msgstr "{fn} in {app}"
+
 #. Earlier events on a timeline, folded away
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "{folded, plural, one {# earlier} other {# earlier}}"
@@ -1300,6 +1304,10 @@ msgstr "{waiting, plural, one {# workflow heeft je nodig} other {# workflows heb
 #: src/drafts/share-with-team.tsx
 msgid "{waiting, plural, one {It uses # new kind of access. An admin approves that once.} other {It uses # new kinds of access. An admin approves those once.}}"
 msgstr "{waiting, plural, one {Het gebruikt # nieuw soort toegang. Een beheerder keurt dat één keer goed.} other {Het gebruikt # nieuwe soorten toegang. Een beheerder keurt die één keer goed.}}"
+
+#: src/chat/held-writes.tsx
+msgid "{what} didn't go through."
+msgstr "{what} is niet uitgevoerd."
 
 #: src/apps/draft-changes.tsx
 msgid "{what}, as {binding} in its code: {actions}"
@@ -3382,6 +3390,10 @@ msgstr "Hoofdletters, cijfers en underscores, beginnend met een letter, zoals CR
 msgid "Card"
 msgstr "Kaart"
 
+#: src/activity/audit-words.ts
+msgid "Carried out a confirmed write to an App, or failed to"
+msgstr "Een bevestigde wijziging in een app uitgevoerd, of daarin gefaald"
+
 #: src/interview/page.tsx
 msgid "Carry on now"
 msgstr "Nu verdergaan"
@@ -3987,6 +3999,10 @@ msgctxt "a memory a person confirmed"
 msgid "Confirmed"
 msgstr "Bevestigd"
 
+#: src/activity/audit-words.ts
+msgid "Confirmed a write to an App"
+msgstr "Een wijziging in een app bevestigd"
+
 #: src/brain/brain.ts
 msgid "Confirmed by {person}"
 msgstr "Bevestigd door {person}"
@@ -4509,6 +4525,10 @@ msgstr "Starten van {name} weigeren"
 #: src/brain/skills-page.tsx
 msgid "Declined"
 msgstr "Afgewezen"
+
+#: src/activity/audit-words.ts
+msgid "Declined a write to an App"
+msgstr "Een wijziging in een app geweigerd"
 
 #: src/inbox/item-detail.tsx
 msgid "Declined: {name}."
@@ -5130,6 +5150,10 @@ msgstr "Rondleiding stoppen"
 #: src/workflows/run-detail.tsx
 msgid "Ended"
 msgstr "Beëindigd"
+
+#: src/activity/audit-words.ts
+msgid "Ended a held write to an App nobody confirmed within a day"
+msgstr "Een tegengehouden wijziging in een app beëindigd die niemand binnen een dag bevestigde"
 
 #: src/workflows/workflow-diagram.tsx
 msgid "Ends the workflow"
@@ -14492,6 +14516,10 @@ msgstr "De opgeslagen code van deze pagina komt niet meer overeen met de gepubli
 msgid "This upload was already made with another file, which is kept as it was. Choose the file again to upload it as a new upload, or add it as a new version."
 msgstr "Deze upload is al gedaan met een ander bestand, dat blijft zoals het was. Kies het bestand opnieuw om het als nieuwe upload te uploaden, of voeg het toe als nieuwe versie."
 
+#: src/chat/held-writes.tsx
+msgid "This uses something only you can read"
+msgstr "Dit gebruikt iets wat alleen jij kunt lezen"
+
 #: src/pages/frame-failure.tsx
 msgid "This version can't open"
 msgstr "Deze versie kan niet openen"
@@ -15074,6 +15102,10 @@ msgstr "Gebruikt door"
 #: src/apps/indexes-view.tsx
 msgid "Used by {queries}"
 msgstr "Gebruikt door {queries}"
+
+#: src/activity/audit-words.ts
+msgid "Used something only its person can read, so what it writes for others waits for them"
+msgstr "Heeft iets gebruikt wat alleen de eigen persoon kan lezen, dus wat hij voor anderen schrijft wacht op die persoon"
 
 #: src/labels.ts
 msgid "User"
