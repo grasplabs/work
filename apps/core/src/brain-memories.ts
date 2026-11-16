@@ -65,14 +65,14 @@ export const rememberFor = async (
  * Retires one of `caller`'s person's own memories (`forgetAs`): `done`,
  * again for one retired before; `nothing` for none (an erased one
  * included), another's, or an expired one. Audited as
- * `brain.memory.forgotten`, with `reason`, a short code, when it isn't
+ * `brain.memory.forgotten`, with `cause`, a short code, when it isn't
  * the person's own act (unseen-memories.ts).
  */
 export const forgetFor = async (
   env: Env,
   caller: MemoryCaller,
   memory: string,
-  reason?: string
+  cause?: string
 ) =>
   await audited(
     env,
@@ -80,7 +80,7 @@ export const forgetFor = async (
     "brain.memory.forgotten",
     {
       memory: auditedIdOf(memory),
-      ...(reason === undefined ? {} : { reason }),
+      ...(cause === undefined ? {} : { cause }),
     },
     async () => await forgetAs(env, caller.person, memory),
     (outcome) => ({ result: outcome })

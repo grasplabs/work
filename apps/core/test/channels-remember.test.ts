@@ -165,7 +165,7 @@ const forgottenBy = async (userId: string) => {
             actor,
             outcome: detail.outcome,
             result: detail.result,
-            reason: detail.reason,
+            cause: detail.cause,
           },
         ]
       : []
@@ -286,13 +286,13 @@ describe("the agent remembering in a person's Teams direct message", () => {
             actor: { type: "person", userId: ann.userId, via: "teams" },
             outcome: "attempted",
             result: undefined,
-            reason: undefined,
+            cause: undefined,
           },
           {
             actor: { type: "person", userId: ann.userId, via: "teams" },
             outcome: "done",
             result: "done",
-            reason: undefined,
+            cause: undefined,
           },
         ],
       });
@@ -381,11 +381,11 @@ describe("the agent remembering in a person's Teams direct message", () => {
         checks: checksSent(ann.provider),
         kept: await keptFor(ann.userId, `Depot ${depot}`),
         // Kept first, as the check passed, then retired.
-        forgotten: forgotten.map(({ actor, outcome, result, reason }) => [
+        forgotten: forgotten.map(({ actor, outcome, result, cause }) => [
           actor,
           outcome,
           result,
-          reason,
+          cause,
         ]),
         // The answer itself still came.
         answered: sent.some(
@@ -414,10 +414,10 @@ const retiredInLog = async (userId: string): Promise<unknown[]> =>
       const forgotten = await forgottenBy(userId);
       const done = forgotten.filter(({ outcome }) => outcome === "done");
       expect(done).not.toHaveLength(0);
-      return done.map(({ actor, result, reason }) => ({
+      return done.map(({ actor, result, cause }) => ({
         actor,
         result,
-        reason,
+        cause,
       }));
     },
     { timeout: 20_000 }
@@ -487,7 +487,7 @@ describe("a memory whose notice the person can't see in Teams", () => {
       }).toStrictEqual({
         checks: 1,
         retired: [
-          { actor: { type: "system" }, result: "done", reason: "card_refused" },
+          { actor: { type: "system" }, result: "done", cause: "card_refused" },
         ],
         kept: [],
       });
@@ -530,7 +530,7 @@ describe("a memory whose notice the person can't see in Teams", () => {
       failed: lines.includes(say("failed", "en")),
     }).toStrictEqual({
       retired: [
-        { actor: { type: "system" }, result: "done", reason: "turn_threw" },
+        { actor: { type: "system" }, result: "done", cause: "turn_threw" },
       ],
       kept: [],
       failed: true,
@@ -576,7 +576,7 @@ describe("a memory whose notice the person can't see in Teams", () => {
       }).toStrictEqual({
         checks: 1,
         retired: [
-          { actor: { type: "system" }, result: "done", reason: "no_asker" },
+          { actor: { type: "system" }, result: "done", cause: "no_asker" },
         ],
         kept: [],
       });
