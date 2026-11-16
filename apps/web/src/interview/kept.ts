@@ -34,6 +34,8 @@ interface Kept {
   progress: InterviewProgress;
   /** A save on its way, and whether a change came in meanwhile. */
   saving: boolean;
+  /** The save on its way, as this page named it (`save`). */
+  sending: string | undefined;
   again: boolean;
   /** Something changed that isn't kept yet. */
   dirty: boolean;
@@ -91,12 +93,16 @@ export const linkNow = (): { secret: string } | null =>
 const saveOnce = async (mine: Kept): Promise<void> => {
   mine.dirty = false;
   const sent = mine.progress;
+  const save = crypto.randomUUID();
+  mine.sending = save;
   const answer = await saveProgress({
     action: "save",
     secret: mine.secret,
     version: mine.version,
     progress: sent,
+    save,
   });
+  mine.sending = undefined;
   if (kept !== mine || mine.gone) {
     return;
   }
@@ -252,12 +258,18 @@ const onPageHide = (): void => {
     return;
   }
   mine.dirty = false;
+  // The save on its way may have landed already, and moved the version on
+  // past this page's: this one goes on from it, as core takes from the
+  // page that sent it (`after`). Cut off before it landed, this one is
+  // the next version itself.
   void saveProgress(
     {
       action: "save",
       secret: mine.secret,
       version: mine.version,
       progress: mine.progress,
+      save: crypto.randomUUID(),
+      ...(mine.sending === undefined ? {} : { after: mine.sending }),
     },
     { keepalive: true }
   );
@@ -281,6 +293,7 @@ export const holdInterview = ({
     version,
     progress: progress ?? freshProgress,
     saving: false,
+    sending: undefined,
     again: false,
     dirty: false,
     waiting: undefined,

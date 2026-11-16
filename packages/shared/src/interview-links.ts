@@ -313,6 +313,14 @@ export const interviewRequestSchema = z.discriminatedUnion("action", [
     /** The version this copy was saved as, 0 before it ever was. */
     version: z.int().min(0),
     progress: interviewProgressSchema,
+    /** This save, named by the page that sends it: what a later one goes on from (`after`). */
+    save: z.uuid().optional(),
+    /**
+     * The page's own save still on its way when it sent this one, as the
+     * page closed: if that one landed, and nothing since, this goes on
+     * from it, though its answer, the next version, never reached the page.
+     */
+    after: z.uuid().optional(),
   }),
   z.strictObject({
     action: z.literal("delete"),

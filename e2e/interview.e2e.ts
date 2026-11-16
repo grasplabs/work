@@ -166,6 +166,37 @@ test("someone has their interview by typing, carries on after stopping, and agre
 });
 
 /**
+ * Holds back core's answer to `page`'s next save, which core still takes:
+ * `taken` once it has, and `release` lets the answer go (to a page gone
+ * by then, which never hears it). As a save whose answer is lost when
+ * the page closes, or is still on its way.
+ */
+const holdNextSave = async (page: Page) => {
+  const taken = Promise.withResolvers<null>();
+  const released = Promise.withResolvers<null>();
+  let holding = true;
+  await page.route(`**${interviewApiPath}`, async (route: Route) => {
+    const body = route.request().postData() ?? "";
+    if (!holding || !body.includes('"action":"save"')) {
+      await route.fallback();
+      return;
+    }
+    holding = false;
+    const response = await route.fetch();
+    taken.resolve(null);
+    await released.promise;
+    // The page that asked is gone: nobody takes the answer.
+    await route.fulfill({ response }).catch(() => null);
+  });
+  return {
+    taken: taken.promise,
+    release: () => {
+      released.resolve(null);
+    },
+  };
+};
+
+/**
  * Core's answer that it kept a save of `page`'s whose progress holds
  * `holds`. The page keeps each change a moment after it, or as it goes,
  * and "Saved" shows until a save takes long: a reload before core kept
@@ -237,8 +268,12 @@ test("someone removes a line of theirs and takes out what was written from it, a
   await expect(page.getByText(first)).toBeVisible();
   const answer = page.getByLabel("Your answer");
   await answer.fill(`Only Ria knows ${run}, in Exact.`);
+  // The save after their answer lands in core, but its answer is still on
+  // its way when they remove their line and the page goes.
+  const lastSave = await holdNextSave(page);
   await answer.press("Enter");
   await expect(page.getByText(readBack)).toBeVisible();
+  await lastSave.taken;
 
   // Their own line, in the transcript only they read, removed once confirmed.
   await page.getByRole("button", { name: "Transcript" }).click();
@@ -246,7 +281,6 @@ test("someone removes a line of theirs and takes out what was written from it, a
   await transcript
     .getByRole("button", { name: `Remove your line: Only Ria knows ${run},` })
     .click();
-  const removed = keptWith(page, '"removed":true');
   await page
     .getByRole("alertdialog")
     .getByRole("button", { name: "Remove" })
@@ -254,9 +288,10 @@ test("someone removes a line of theirs and takes out what was written from it, a
   await expect(transcript.getByText("Removed.")).toBeVisible();
   await expect(transcript.getByText(run)).toHaveCount(0);
 
-  // Kept removed by core: after a reload, the transcript shows it removed.
-  await removed;
+  // Kept removed by core, though the page went before it heard of its last
+  // save: after a reload, the transcript shows it removed.
   await page.reload();
+  lastSave.release();
   await page.getByRole("button", { name: "Transcript" }).click();
   await expect(transcript.getByText("Removed.")).toBeVisible();
   await page.getByRole("button", { name: "Transcript" }).click();

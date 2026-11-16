@@ -631,6 +631,83 @@ describe("someone's own link", () => {
     );
   });
 
+  it("keeps what a page sent as it closed after its own save whose answer never reached it, and nobody else's (L4)", async () => {
+    const { secrets, me } = await running();
+    await opened(secrets.oli, me);
+    const chained = async (
+      version: number,
+      text: string,
+      after?: string,
+      named: string = crypto.randomUUID()
+    ) =>
+      await post(
+        {
+          action: "save",
+          secret: secrets.oli,
+          version,
+          progress: progress(text),
+          save: named,
+          ...(after === undefined ? {} : { after }),
+        },
+        me
+      );
+    // The page's save lands; its answer, version 1, never reaches it.
+    const own = crypto.randomUUID();
+    await chained(0, "Before the removal", undefined, own);
+    // Another tab of theirs at version 0, naming a save that isn't the
+    // one kept, and one naming none.
+    const elsewhere = await chained(0, "Elsewhere", crypto.randomUUID());
+    const unnamed = await chained(0, "Unnamed");
+    // The page closes with a line removed since: it goes on from its own.
+    const closing = await chained(0, "After the removal", own);
+    // The same again, now that the version moved on past its own save.
+    const again = await chained(0, "Again", own);
+    const kept = await opened(secrets.oli, me);
+    expect({
+      elsewhere: elsewhere.status,
+      unnamed: unnamed.status,
+      closing: await closing.json(),
+      again: again.status,
+      kept: kept.progress?.lines[1]?.text,
+    }).toStrictEqual({
+      elsewhere: 409,
+      unnamed: 409,
+      closing: { saved: true, version: 2 },
+      again: 409,
+      kept: "After the removal",
+    });
+  });
+
+  it("never lets a page that closed after its own save save it back over a delete (L4, D3)", async () => {
+    const { secrets, me } = await running();
+    await opened(secrets.oli, me);
+    const own = crypto.randomUUID();
+    await post(
+      {
+        action: "save",
+        secret: secrets.oli,
+        version: 0,
+        progress: progress(),
+        save: own,
+      },
+      me
+    );
+    await remove(secrets.oli, me);
+    const closing = await post(
+      {
+        action: "save",
+        secret: secrets.oli,
+        version: 0,
+        progress: progress(),
+        save: crypto.randomUUID(),
+        after: own,
+      },
+      me
+    );
+    await expect(codeOf(closing)).resolves.toBe("interview.deleted");
+    await expect(storeText()).resolves.not.toContain(sentinel);
+  });
+
   it("refuses a save with anything but an interview in it (P3)", async () => {
     const { secrets, me } = await running();
     await opened(secrets.oli, me);

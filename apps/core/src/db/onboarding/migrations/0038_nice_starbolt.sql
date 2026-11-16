@@ -1,0 +1,1 @@
+ALTER TABLE `links` ADD `saved_by` text;

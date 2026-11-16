@@ -267,6 +267,13 @@
       "when": 1794784509564,
       "tag": "0037_late_mongu",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1794838203241,
+      "tag": "0038_nice_starbolt",
+      "breakpoints": true
     }
   ]
 }

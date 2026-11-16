@@ -203,7 +203,8 @@ export const interviewResponse = async (
         secretMark,
         account,
         body.version,
-        body.progress
+        body.progress,
+        { save: body.save, after: body.after }
       );
       done(result);
       await settle(result);

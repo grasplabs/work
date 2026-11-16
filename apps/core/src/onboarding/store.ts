@@ -942,6 +942,21 @@ const countsOf = (progress: InterviewProgress): InterviewCounts => ({
   interviewer: progress.interviewer ?? null,
 });
 
+/**
+ * Whether a save over `version` goes on from the version `link` keeps:
+ * it is that version, or the page's own save `after` made it, straight
+ * from `version`, and nothing moved it since (a delete, another tab).
+ */
+const goesOnFromKept = (
+  link: { version: number; savedBy: string | null },
+  version: number,
+  after: string | undefined
+): boolean =>
+  version === link.version ||
+  (after !== undefined &&
+    link.savedBy === after &&
+    version + 1 === link.version);
+
 export class Onboarding extends DurableObject<Env> {
   readonly #db = drizzle(this.ctx.storage);
   #auditRetryMs = auditRetryMs.first;
@@ -1712,13 +1727,17 @@ export class Onboarding extends DurableObject<Env> {
    * Keeps where someone's interview is, for the account it belongs to. A save
    * from an older copy than the one kept is refused with the one kept, so
    * two tabs never quietly overwrite each other. Deleting moves the version
-   * on too: only a copy opened since the delete saves again.
+   * on too: only a copy opened since the delete saves again. One save goes
+   * on from the version before: the one a page sent as it closed, `after`
+   * its own save that made the version kept now, whose answer never
+   * reached it. It holds all that one did and what changed since.
    */
   async saveInterview(
     secretMark: string,
     account: string,
     version: number,
     progress: InterviewProgress,
+    { save, after: goesOnFrom }: { save?: string; after?: string } = {},
     now: string = new Date().toISOString()
   ): Promise<LinkActed<InterviewSaved>> {
     const found = this.#onLink(secretMark, { account }, now, "save");
@@ -1727,7 +1746,7 @@ export class Onboarding extends DurableObject<Env> {
     }
     const { person, link, roster } = found.value;
     const work = this.#linkWork(person.id);
-    if (version !== link.version) {
+    if (!goesOnFromKept(link, version, goesOnFrom)) {
       const held = this.#held(person.id);
       if (held === null && link.deletedAt !== null) {
         return acted(work, refused("interview.deleted"));
@@ -1745,7 +1764,7 @@ export class Onboarding extends DurableObject<Env> {
     // A copy that brings back a line they removed is an older one, whichever
     // tab sends it; and hashing let another save land: an older copy now.
     const current = this.#versionOf(person.id);
-    if (erasing === "unremoved" || current !== version) {
+    if (erasing === "unremoved" || current !== link.version) {
       return acted(
         work,
         answered({
@@ -1776,7 +1795,7 @@ export class Onboarding extends DurableObject<Env> {
     this.ctx.storage.transactionSync(() => {
       this.#db
         .update(links)
-        .set({ version: next })
+        .set({ version: next, savedBy: save ?? null })
         .where(eq(links.person, person.id))
         .run();
       const kept = {
@@ -4560,6 +4579,7 @@ export class Onboarding extends DurableObject<Env> {
       | "account"
       | "sentTo"
       | "brainMark"
+      | "savedBy"
     >[];
     interviews: AdminInterviewFacts[];
   } {
