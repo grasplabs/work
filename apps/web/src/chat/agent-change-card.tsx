@@ -1,0 +1,185 @@
+import type { Agent, AgentChangeDrafted } from "@grasp-os/shared/agents";
+import type { ChatMessage } from "@grasp-os/shared/chat";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@grasp-os/ui/components/card";
+import { Trans, useLingui } from "@lingui/react/macro";
+import type { ReactNode } from "react";
+
+import { useCoreRead } from "../apps/use-core-read.ts";
+import { classNames } from "../settings/stephen-settings.tsx";
+import { AudienceWords, DraftActions, Line } from "./agent-draft-card.tsx";
+import type { ThreadBuild } from "./build-progress.tsx";
+
+// A change to one of the person's agents that Grasp's chat drafted
+// (`draftAgentChange`), in the thread: what the agent is now and what it
+// becomes, only what changes, and nothing changed until they press
+// Change it, which changes it as the card shows it, by the agent page's
+// own checks (`ChatsApi.changeDraftedAgent`), then lands the person on its
+// page. What the model wrote is shown as text.
+
+/** The change waiting for the person: the latest reply's, while nothing runs and nothing was said since. */
+export const pendingAgentChange = (
+  messages: readonly ChatMessage[],
+  running: boolean
+): AgentChangeDrafted | undefined => {
+  if (running) {
+    return undefined;
+  }
+  const last = messages.findLast(({ role }) => role !== "result");
+  return last?.role === "assistant" ? last.agentChange : undefined;
+};
+
+/** The agent a change names, as it is now: among the person's own, or the company's for an admin. */
+const useAgentNow = (change: AgentChangeDrafted): Agent | undefined => {
+  const read = useCoreRead(
+    change.callId,
+    async (session) =>
+      change.whose === "own"
+        ? await session.connections.ownAgents()
+        : await session.connections.agents(),
+    change.callId
+  );
+  const key = change.agent.trim().toLowerCase();
+  return read?.state === "ready"
+    ? read.data.find(({ name }) => name.toLowerCase() === key)
+    : undefined;
+};
+
+/** What a part is now, and what it becomes. */
+const BeforeAfter = ({
+  now,
+  becomes,
+}: {
+  now: string | undefined;
+  becomes: ReactNode;
+}) => (
+  <span className="flex flex-col gap-1">
+    {now === undefined ? null : (
+      <span className="text-muted-foreground line-through decoration-1">
+        <span className="block max-h-32 overflow-y-auto whitespace-pre-wrap">
+          {now}
+        </span>
+      </span>
+    )}
+    <span className="block max-h-64 overflow-y-auto whitespace-pre-wrap">
+      {becomes}
+    </span>
+  </span>
+);
+
+/** The drafted change as a card, with `actions` while it waits. */
+export const AgentChangeCard = ({
+  change,
+  actions,
+}: {
+  change: AgentChangeDrafted;
+  actions?: ReactNode;
+}) => {
+  const { t, i18n } = useLingui();
+  const now = useAgentNow(change);
+  const {
+    agent: name,
+    job,
+    instructions,
+    addApps = [],
+    removeApps = [],
+    audience,
+    turnOn = [],
+    schedule,
+  } = change;
+  return (
+    <Card aria-label={t`A change to ${name}`} render={<section />}>
+      <CardHeader>
+        <CardTitle>
+          <h2 className="type-display">{t`Change ${name}`}</h2>
+        </CardTitle>
+        <CardDescription>
+          <Trans>
+            Nothing changes until you say Change it. You can change any of it
+            first.
+          </Trans>
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <dl className="flex flex-col gap-3">
+          {job === undefined ? null : (
+            <Line label={t`What it is for`}>
+              <BeforeAfter becomes={job} now={now?.job} />
+            </Line>
+          )}
+          {instructions === undefined ? null : (
+            <Line label={t`Its instructions`}>
+              <BeforeAfter becomes={instructions} now={now?.instructions} />
+            </Line>
+          )}
+          {addApps.length === 0 ? null : (
+            <Line label={t`Apps it gets`}>
+              {addApps.map((each) => each.name).join(", ")}
+            </Line>
+          )}
+          {removeApps.length === 0 ? null : (
+            <Line label={t`Apps taken off`}>
+              {removeApps.map((each) => each.name).join(", ")}
+            </Line>
+          )}
+          {audience === undefined ? null : (
+            <Line label={t`Who may ask it`}>
+              <AudienceWords audience={audience} />
+            </Line>
+          )}
+          {turnOn.length === 0 ? null : (
+            <Line label={t`What it may also do`}>
+              {turnOn.map((each) => i18n._(classNames[each])).join(", ")}
+            </Line>
+          )}
+          {schedule === undefined ? null : (
+            <Line label={t`Also works on its own`}>
+              <span className="font-mono text-xs">{schedule.cron}</span>
+              {" · "}
+              {schedule.timeZone ?? t`the company's time zone`}
+              {" · "}
+              {schedule.opening}
+            </Line>
+          )}
+        </dl>
+      </CardContent>
+      {actions === undefined ? null : <CardFooter>{actions}</CardFooter>}
+    </Card>
+  );
+};
+
+/**
+ * A drafted change in the thread: its card, and while it waits for the
+ * person (`waiting`, and the thread can ask: `build`), Change it.
+ */
+export const ThreadAgentChange = ({
+  chatId,
+  change,
+  waiting,
+  build,
+}: {
+  chatId: string;
+  change: AgentChangeDrafted;
+  waiting: boolean;
+  build: ThreadBuild | undefined;
+}) => (
+  <AgentChangeCard
+    actions={
+      waiting && build !== undefined ? (
+        <DraftActions
+          build={build}
+          callId={change.callId}
+          chatId={chatId}
+          press="change"
+        />
+      ) : undefined
+    }
+    change={change}
+  />
+);

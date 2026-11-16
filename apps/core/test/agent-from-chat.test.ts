@@ -81,6 +81,20 @@ const draftedChat = async (person: Person, draft: Record<string, unknown>) => {
   return { ...chats, chat, callId, messages };
 };
 
+/** Change it, on the change `callId` drafted in `chatId`. */
+const press = async (person: Person, chatId: string, callId?: string) =>
+  await person.api.chats.changeDraftedAgent(chatId, {
+    draft: callId ?? "",
+    text: "Change it",
+    model,
+  });
+
+/** The company's agent `id`, as an admin lists it. */
+const companyAgent = async (admin: Person, id: string) => {
+  const listed = await admin.api.connections.agents();
+  return listed.find((agent) => agent.id === id);
+};
+
 const hr = (name: string) => ({
   name,
   job: "Checks incoming mail for HR once a week.",
@@ -306,6 +320,154 @@ describe("an agent made from the chat", { timeout: 120_000 }, () => {
       unknown: "agent.draft_not_found",
       others: "agent.chat_not_found",
       made: false,
+    });
+  });
+
+  describe("a change to an agent drafted in the chat", () => {
+    /** A chat of `person`'s whose agent drafted `change`, answering on after. */
+    const changedChat = async (
+      person: Person,
+      change: Record<string, unknown>
+    ) => {
+      const chats = await personalChatsOf(
+        person.userId,
+        toolStep("draftAgentChange", change),
+        says("It's changed.")
+      );
+      const chat = await person.api.chats.create("A change");
+      await person.api.chats.send(chat.id, {
+        text: "Give it the calendar.",
+        model,
+      });
+      await idle(person, chat.id);
+      const messages = await messagesOf(chats.stub, chat.id, person.userId);
+      const drafted = messages.findLast(
+        (message) =>
+          message.role === "assistant" && message.agentChange !== undefined
+      );
+      const callId =
+        drafted?.role === "assistant" ? drafted.agentChange?.callId : undefined;
+      return { ...chats, chat, callId };
+    };
+
+    it("changes the company's agent for an admin as the card shows it, only on Change it, and only once", async () => {
+      const admin = await signedInApi(idp, "admin");
+      const name = `Claire ${unique()}`;
+      const made = await admin.api.connections.makeAgent({
+        ...hr(name),
+        face: "pen",
+        modelRole: null,
+      });
+      const { chat, callId } = await changedChat(admin, {
+        agent: name,
+        whose: "company",
+        instructions: "Also keep the HR calendar.",
+        addApps: [{ source: "native", provider: "google", name: "Google" }],
+        turnOn: ["read-own"],
+      });
+      const before = await companyAgent(admin, made.id);
+
+      await press(admin, chat.id, callId);
+      await idle(admin, chat.id);
+      const again = await outcome(press(admin, chat.id, callId));
+      const after = await companyAgent(admin, made.id);
+      const apps = await admin.api.connections.agentApps(made.id);
+      const settings = await admin.api.connections.agentSettings(made.id);
+
+      expect({
+        before: before?.instructions,
+        after: [after?.instructions, after?.job],
+        apps: apps.map(({ app, state }) => [app, state]),
+        on: settings.classes
+          .filter(({ audience: { who } }) => who !== "nobody")
+          .map(({ toolClass }) => toolClass),
+        // Who may ask it was on no card: unchanged.
+        audience: settings.audience,
+        again,
+      }).toStrictEqual({
+        before: hr(name).instructions,
+        after: ["Also keep the HR calendar.", hr(name).job],
+        apps: [["native:google", "on"]],
+        on: ["read-own"],
+        audience: { who: "nobody" },
+        again: "agent.draft_not_found",
+      });
+    });
+
+    it("changes nothing of an agent changed since the chat drafted the change", async () => {
+      const admin = await signedInApi(idp, "admin");
+      const name = `Stale ${unique()}`;
+      const made = await admin.api.connections.makeAgent({
+        ...hr(name),
+        face: "pen",
+        modelRole: null,
+      });
+      const { chat, callId } = await changedChat(admin, {
+        agent: name,
+        whose: "company",
+        instructions: "Drafted on what it was.",
+      });
+      await admin.api.connections.changeAgent(made.id, {
+        ...hr(name),
+        instructions: "Changed on its page meanwhile.",
+        face: "pen",
+        modelRole: null,
+      });
+
+      const tried = await outcome(press(admin, chat.id, callId));
+      const after = await companyAgent(admin, made.id);
+
+      expect({ tried, instructions: after?.instructions }).toStrictEqual({
+        tried: "agent.draft_stale",
+        instructions: "Changed on its page meanwhile.",
+      });
+    });
+
+    it("changes only an agent the person may change: their own, never another's or the company's", async () => {
+      const ann = await signedInApi(idp, "user");
+      const ben = await signedInApi(idp, "user");
+      const admin = await signedInApi(idp, "admin");
+      const bens = `Bens ${unique()}`;
+      await ben.api.connections.makeOwnAgent({
+        ...hr(bens),
+        face: "pen",
+        modelRole: null,
+      });
+      const companys = `Company ${unique()}`;
+      await admin.api.connections.makeAgent({
+        ...hr(companys),
+        face: "pen",
+        modelRole: null,
+      });
+      const others = await changedChat(ann, {
+        agent: bens,
+        whose: "own",
+        instructions: "Mine now.",
+      });
+      const company = await changedChat(ann, {
+        agent: companys,
+        whose: "company",
+        instructions: "Mine now.",
+      });
+
+      const triedOthers = await outcome(
+        press(ann, others.chat.id, others.callId)
+      );
+      const triedCompany = await outcome(
+        press(ann, company.chat.id, company.callId)
+      );
+      const bensNow = await ben.api.connections.ownAgents();
+
+      expect({
+        others: triedOthers,
+        // The tool refused it back to the model: no change the chat holds.
+        company: triedCompany,
+        bens: bensNow.map(({ instructions }) => instructions),
+      }).toStrictEqual({
+        others: "agent.unknown",
+        company: "agent.draft_not_found",
+        bens: [hr(bens).instructions],
+      });
     });
   });
 });

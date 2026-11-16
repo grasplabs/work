@@ -2,6 +2,7 @@ import { agentErrors } from "@grasp-os/shared/agent";
 import { agentAppOf } from "@grasp-os/shared/agents";
 import type {
   Agent,
+  AgentChangeDraft,
   AgentDraft,
   AgentDraftMade,
   AgentDraftMake,
@@ -44,6 +45,9 @@ import { z } from "zod";
 
 import { offeredApps, setAgentApp } from "./agent-app-access.ts";
 import {
+  changeAgent,
+  listAgents,
+  listOwnAgents,
   makeAgent,
   makeOwnAgent,
   setAgentReach,
@@ -76,7 +80,7 @@ import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { requireNotStaff } from "./sharing.ts";
-import { requireKnownTeams } from "./stephen-reach.ts";
+import { requireCompanyAdmin, requireKnownTeams } from "./stephen-reach.ts";
 import { Subscription } from "./subscription.ts";
 import {
   workflowKind,
@@ -650,6 +654,141 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   }
 
   /**
+   * Change it: the change to one of the person's agents the chat drafted,
+   * as its card showed it, by the agent page's own checks. The agent is
+   * the one by the card's name among those the person may change: one of
+   * the company's for an admin, else their own. Refused with nothing
+   * changed for one they may not change (`agent.unknown`), one changed
+   * since the chat drafted it (`agent.draft_stale`), and anything its page
+   * would refuse; then the draft is theirs to press again. Once something
+   * changed, the draft stays taken and a later failure says the change is
+   * unfinished.
+   */
+  async changeDraftedAgent(
+    chatId: string,
+    make: AgentDraftMake
+  ): Promise<AgentDraftMade> {
+    return await withPerson(this.#check, async (person) => {
+      const id = chatIdOf(chatId);
+      const parsed = draftMakeSchema.safeParse(make);
+      if (!parsed.success) {
+        throw agentErrors.create("agent.invalid_request");
+      }
+      const { draft: callId, ...asked } = parsed.data;
+      const chats = this.#chatsOf(person.userId);
+      const { change, at } = await chats.takeAgentChange(
+        id,
+        person.userId,
+        callId
+      );
+      let agent: Agent;
+      try {
+        agent = await this.#changedAgent(person, change, at);
+        await this.#checkDrafted({
+          ...(change.addApps === undefined ? {} : { apps: change.addApps }),
+          ...(change.audience === undefined
+            ? {}
+            : { audience: change.audience }),
+          ...(change.schedule === undefined
+            ? {}
+            : { schedule: change.schedule }),
+        });
+      } catch (error) {
+        await chats.releaseAgentChange(id, callId);
+        throw error;
+      }
+      try {
+        await this.#setChanged(person, agent, change);
+        await chats.send(id, person.userId, asked);
+      } catch (error) {
+        log.warn("agent.change_unfinished", errorFields(error));
+        return { id: agent.id, name: agent.name, unfinished: true };
+      }
+      return { id: agent.id, name: agent.name };
+    });
+  }
+
+  /**
+   * The agent a change names, among those `person` may change, as it is
+   * now: never one changed since `at`, when the chat drafted the change.
+   */
+  async #changedAgent(
+    person: Identity,
+    { agent: name, whose }: AgentChangeDraft,
+    at: Date
+  ): Promise<Agent> {
+    const among =
+      whose === "company"
+        ? await this.#companyAgentsFor(person)
+        : await listOwnAgents(this.#env, person.userId);
+    const key = name.trim().toLowerCase();
+    const agent = among.find((each) => each.name.toLowerCase() === key);
+    if (agent === undefined) {
+      throw agentErrors.create("agent.unknown");
+    }
+    if (agent.changedAt !== null && new Date(agent.changedAt) > at) {
+      throw agentErrors.create("agent.draft_stale");
+    }
+    return agent;
+  }
+
+  /** The company's agents, for its own admins alone. */
+  async #companyAgentsFor(person: Identity): Promise<Agent[]> {
+    requireCompanyAdmin(person);
+    return await listAgents(this.#env);
+  }
+
+  /** What a change's card said, set as on the agent's page. */
+  async #setChanged(
+    person: Identity,
+    agent: Agent,
+    {
+      job,
+      instructions,
+      addApps = [],
+      removeApps = [],
+      audience,
+      turnOn = [],
+      schedule,
+    }: AgentChangeDraft
+  ): Promise<void> {
+    if (job !== undefined || instructions !== undefined) {
+      await changeAgent(this.#env, person, agent.id, {
+        name: agent.name,
+        face: agent.face,
+        job: job ?? agent.job,
+        instructions: instructions ?? agent.instructions,
+        modelRole: agent.modelRole,
+        model: agent.model,
+      });
+    }
+    for (const [apps, on] of [
+      [addApps, true],
+      [removeApps, false],
+    ] as const) {
+      for (const { source, provider } of apps) {
+        // oxlint-disable-next-line no-await-in-loop -- one at a time, each audited
+        await setAgentApp(
+          this.#env,
+          person,
+          agent.id,
+          agentAppOf(source, provider),
+          on
+        );
+      }
+    }
+    await this.#setDrafted(person, agent.id, {
+      name: agent.name,
+      job: agent.job,
+      instructions: agent.instructions,
+      whose: agent.ownerId === null ? "company" : "own",
+      ...(audience === undefined ? {} : { audience }),
+      classes: turnOn,
+      ...(schedule === undefined ? {} : { schedule }),
+    });
+  }
+
+  /**
    * Refuses what a card said that the agent's page would refuse: an app
    * the company doesn't offer, and for a company agent teams it doesn't
    * have or a schedule no wake-up takes.
@@ -658,7 +797,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     apps = [],
     audience,
     schedule,
-  }: AgentDraft): Promise<void> {
+  }: Pick<AgentDraft, "apps" | "audience" | "schedule">): Promise<void> {
     if (apps.length > 0) {
       const offered = await offeredApps(this.#env);
       if (

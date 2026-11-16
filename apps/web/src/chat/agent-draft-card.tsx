@@ -55,7 +55,7 @@ const TeamsWords = ({ teams }: { teams: readonly string[] }) => {
 };
 
 /** Who may ask it, as the card says it. */
-const AudienceWords = ({
+export const AudienceWords = ({
   audience,
 }: {
   audience: ToolClassAudience | undefined;
@@ -70,7 +70,13 @@ const AudienceWords = ({
 };
 
 /** One line of the card: what it says, and of what. */
-const Line = ({ label, children }: { label: string; children: ReactNode }) => (
+export const Line = ({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) => (
   <div className="flex flex-col gap-0.5">
     <dt className="text-muted-foreground text-xs">{label}</dt>
     <dd className="text-sm">{children}</dd>
@@ -162,18 +168,24 @@ export const AgentDraftCard = ({
   );
 };
 
-/** Make it, which lands the person on the agent made, and Change something. */
-const DraftActions = ({
+/** Which press a card waits on: Make it for a drafted agent, Change it for a change. */
+export type DraftPress = "make" | "change";
+
+/** Make it or Change it, which lands the person on the agent, and Change something. */
+export const DraftActions = ({
   chatId,
-  draft,
+  callId,
+  press,
   build,
 }: {
   chatId: string;
-  draft: AgentDrafted;
+  callId: string;
+  press: DraftPress;
   build: ThreadBuild;
 }) => {
   const { t } = useLingui();
   const navigate = useNavigate();
+  const label = press === "make" ? t`Make it` : t`Change it`;
   const { busy, failure, run } = useCoreAction();
   const { model, effort } = build;
   return (
@@ -186,14 +198,16 @@ const DraftActions = ({
               return;
             }
             void (async () => {
-              const agent = await run(
-                async (session) =>
-                  await session.chats.makeDraftedAgent(chatId, {
-                    draft: draft.callId,
-                    text: t`Make it`,
-                    model,
-                    ...(effort === undefined ? {} : { effort }),
-                  })
+              const asked = {
+                draft: callId,
+                text: label,
+                model,
+                ...(effort === undefined ? {} : { effort }),
+              };
+              const agent = await run(async (session) =>
+                press === "make"
+                  ? await session.chats.makeDraftedAgent(chatId, asked)
+                  : await session.chats.changeDraftedAgent(chatId, asked)
               );
               if (agent !== undefined) {
                 void navigate({
@@ -205,7 +219,7 @@ const DraftActions = ({
           }}
           variant="highlight"
         >
-          <Trans>Make it</Trans>
+          {label}
         </Button>
         <Button
           onClick={() => {
@@ -239,7 +253,12 @@ export const ThreadAgentDraft = ({
   <AgentDraftCard
     actions={
       waiting && build !== undefined ? (
-        <DraftActions build={build} chatId={chatId} draft={draft} />
+        <DraftActions
+          build={build}
+          callId={draft.callId}
+          chatId={chatId}
+          press="make"
+        />
       ) : undefined
     }
     draft={draft}

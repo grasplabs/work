@@ -1,7 +1,10 @@
 import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
 import { agentErrors } from "@grasp-os/shared/agent";
-import { agentDraftSchema } from "@grasp-os/shared/agents";
-import type { AgentDraft } from "@grasp-os/shared/agents";
+import {
+  agentChangeDraftSchema,
+  agentDraftSchema,
+} from "@grasp-os/shared/agents";
+import type { AgentChangeDraft, AgentDraft } from "@grasp-os/shared/agents";
 import {
   actorOf,
   auditEventSchema,
@@ -780,6 +783,16 @@ const draftsOf = ({
     return undefined;
   }
   return role === "admin" ? "company" : "own";
+};
+
+/** Where a chat keeps the changes to agents Change it took, by call. */
+const changedKeyPrefix = "changed:";
+
+/** How each call a person's press takes is read again. */
+const takenSchemas = {
+  proposePlan: chatPlanSchema,
+  draftAgent: agentDraftSchema,
+  draftAgentChange: agentChangeDraftSchema,
 };
 
 /** Where a chat keeps the agents it drafted that Make it took, by call. */
@@ -4218,6 +4231,30 @@ export class Workspace extends DurableObject<Env> {
     return agentDraftSchema.parse(args);
   }
 
+  /**
+   * Takes the change to an agent `personId`'s chat `chatId` drafted with
+   * the call `callId` (`draftAgentChange`), to make once, and when it was
+   * drafted (`at`): refused as `takeAgentDraft` refuses.
+   * `releaseAgentChange` gives it back when Change it changed nothing.
+   */
+  takeAgentChange(
+    chatId: unknown,
+    personId: string,
+    callId: unknown
+  ): { change: AgentChangeDraft; at: Date } {
+    const { args, at } = this.#takeCall(chatId, personId, callId, {
+      tool: "draftAgentChange",
+      keyPrefix: changedKeyPrefix,
+      notFound: "agent.draft_not_found",
+    });
+    return { change: agentChangeDraftSchema.parse(args), at };
+  }
+
+  /** Gives back a change `takeAgentChange` took, of which Change it changed nothing. */
+  releaseAgentChange(chatId: ChatId, callId: string): void {
+    this.#releaseCall(`${changedKeyPrefix}${chatId}`, callId);
+  }
+
   /** Gives back a draft `takeAgentDraft` took, of which Make it made nothing. */
   releaseAgentDraft(chatId: ChatId, callId: string): void {
     this.#releaseCall(`${draftedKeyPrefix}${chatId}`, callId);
@@ -4239,11 +4276,11 @@ export class Workspace extends DurableObject<Env> {
       keyPrefix,
       notFound,
     }: {
-      tool: "proposePlan" | "draftAgent";
+      tool: keyof typeof takenSchemas;
       keyPrefix: string;
       notFound: "agent.plan_not_found" | "agent.draft_not_found";
     }
-  ): { chat: Chat; args: unknown } {
+  ): { chat: Chat; args: unknown; at: Date } {
     const chat = this.#graspChat(chatId, personId);
     const { id } = chat;
     // Its question would be refused: nothing is made for it.
@@ -4261,15 +4298,16 @@ export class Workspace extends DurableObject<Env> {
           : []
       )
     );
-    const call = transcript
-      .flatMap((message) =>
-        message.role === "assistant" ? message.content : []
-      )
-      .find(
-        (part) =>
-          part.type === "toolCall" && part.name === tool && part.id === callId
-      );
-    const schema = tool === "proposePlan" ? chatPlanSchema : agentDraftSchema;
+    const isCall = (part: { type: string; name?: string; id?: string }) =>
+      part.type === "toolCall" && part.name === tool && part.id === callId;
+    const response = transcript.find(
+      (message) => message.role === "assistant" && message.content.some(isCall)
+    );
+    const call =
+      response?.role === "assistant"
+        ? response.content.find(isCall)
+        : undefined;
+    const schema = takenSchemas[tool];
     const args =
       call?.type === "toolCall" && !refused.has(call.id)
         ? schema.safeParse(call.arguments)
@@ -4282,7 +4320,7 @@ export class Workspace extends DurableObject<Env> {
       throw agentErrors.create(notFound);
     }
     this.ctx.storage.kv.put(key, [...taken, callId]);
-    return { chat, args: args.data };
+    return { chat, args: args.data, at: new Date(response?.timestamp ?? 0) };
   }
 
   /** Gives back the call `callId` taken under `key`. */

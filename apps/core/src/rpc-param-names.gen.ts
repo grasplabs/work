@@ -143,6 +143,7 @@ export const rpcParamNames: ParamNames = {
     "attachFile": ["chatId","file"],
     "build": ["chatId","build"],
     "cancel": ["chatId"],
+    "changeDraftedAgent": ["chatId","make"],
     "confirmHeldCall": ["chatId","id","requestHash"],
     "connectionRequests": ["chatId"],
     "create": ["title","agentId","make"],
