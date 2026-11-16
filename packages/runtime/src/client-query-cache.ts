@@ -106,9 +106,14 @@ export class QueryCache {
       // Released once the task that let go of it ends without another
       // reader: React resubscribes a component within one commit, and
       // that keeps the subscription rather than follow the query anew.
+      // What it showed then is let go too: followed by no one, it may be
+      // old by the time a reader comes back (a form whose defaults come
+      // from it would open on a note saved over since), so that reader
+      // waits for core's first push instead.
       queueMicrotask(() => {
-        if (entry.listeners.size === 0) {
+        if (entry.listeners.size === 0 && entry.live !== undefined) {
           unfollow(entry);
+          show(entry, loading);
         }
       });
       this.release(entry);
@@ -213,7 +218,7 @@ export class QueryCache {
     for (const entry of this.#queries.values()) {
       entry.stale = true;
       entry.changes += 1;
-      // Kept for a remount but followed by no one: core pushes it
+      // Read once (`query()`) and followed by no one: core pushes it
       // nothing, so what it holds may be from before the change. The
       // next reader waits for it afresh, never starting from that (a
       // form whose defaults come from it would save an old revision).

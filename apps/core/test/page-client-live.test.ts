@@ -195,14 +195,14 @@ describe("live queries", { timeout: 120_000 }, () => {
     await eventually(() => {
       expect(note.now().value).toMatchObject({ title: "Second" });
     });
-    // Nobody follows the note now: the read sent before the push is still
-    // older than what it shows.
+    // Nobody follows the note now, so it shows nothing it kept, and the
+    // read sent before the push is still older than what it showed.
     note.stop();
     await scheduler.wait(0);
     open();
     await late;
 
-    expect(note.now().value).toMatchObject({ title: "Second" });
+    expect(note.now().value).toBeUndefined();
   });
 
   it("clears what a page shows once the person loses access, before anything more reaches it", async () => {

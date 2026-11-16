@@ -1262,6 +1262,49 @@ describe("the session client following a query", () => {
   });
 });
 
+describe("the session client reading a query again", () => {
+  it("shows a reader who comes back after nobody followed it nothing kept from before, only what core pushes then", async () => {
+    // Core's note, and the push each following gets: the note as it is.
+    let title = "Call Acme back";
+    const transport: ClientTransport = {
+      call: async () => await Promise.resolve(answered(null)),
+      watch: async (_request, onSnapshot) => {
+        await Promise.resolve();
+        const now = title;
+        queueMicrotask(() => {
+          onSnapshot({ revision: 1, ...answered({ title: now }) });
+        });
+        return { release: unheard };
+      },
+    };
+    const internals = clientInternals(new GraspClient(transport));
+    const reader = () => {
+      const entry = internals.entry(api.notes.get, { id: noteId });
+      const stop = internals.subscribe(entry, unheard);
+      return { entry, stop };
+    };
+
+    const first = reader();
+    await vi.waitFor(() => {
+      expect(first.entry.snapshot.value).toStrictEqual({
+        title: "Call Acme back",
+      });
+    });
+    first.stop();
+    // Let go once the task that stopped it ends.
+    await Promise.resolve();
+
+    // Saved elsewhere while nobody here followed it.
+    title = "My title";
+    const again = reader();
+    expect(again.entry.snapshot.value).toBeUndefined();
+    await vi.waitFor(() => {
+      expect(again.entry.snapshot.value).toStrictEqual({ title: "My title" });
+    });
+    again.stop();
+  });
+});
+
 describe("the session client and a streaming action's cancel", () => {
   it("resolves a cancel only once the host acknowledged it, and never takes a lost or refused one for one", async () => {
     expect({
