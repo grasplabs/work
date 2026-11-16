@@ -16,6 +16,7 @@ import { activeMember } from "../auth/auth.ts";
 import type { ToolCall } from "../chat-tool-events.ts";
 import {
   stephenRequestCards,
+  stephenRequestNeeds,
   stephenRequestProposals,
   stephenRequestQuestions,
   stephenRequestTopics,
@@ -532,8 +533,8 @@ export const rateRequest = async (
 /**
  * Deletes requests past their thirteen months, the questions and topics
  * nothing points at any more that are older than a day (a name just made
- * waits for the request that made it), and Grasp's proposals for a
- * question that is gone.
+ * waits for the request that made it), and Grasp's proposals for, and
+ * owners' statuses of, a question that is gone.
  */
 export const sweepStephenRequests = async (
   env: Env,
@@ -564,13 +565,21 @@ export const sweepStephenRequests = async (
           WHERE ${stephenRequestQuestions.topicId} = ${stephenRequestTopics.id})`
   );
   // Grasp's proposals for a question that is gone: what the model wrote
-  // from its wording (and its topic's name) goes with it. A quiet team's
-  // rests on no one's words.
-  await db.delete(stephenRequestProposals).where(
-    sql`${stephenRequestProposals.key} NOT LIKE 'quietTeam:%'
-        AND NOT EXISTS (SELECT 1 FROM ${stephenRequestQuestions}
-          WHERE ${stephenRequestQuestions.id} = substr(${stephenRequestProposals.key}, instr(${stephenRequestProposals.key}, ':') + 1))`
-  );
+  // from its wording (and its topic's name) goes with it; and what an
+  // owner set about it, which would otherwise keep Needs you reading
+  // requests back to its day. A quiet team's rests on no one's words. A
+  // need under five whose question is still kept keeps its status.
+  for (const [table, key] of [
+    [stephenRequestProposals, stephenRequestProposals.key],
+    [stephenRequestNeeds, stephenRequestNeeds.key],
+  ] as const) {
+    // oxlint-disable-next-line no-await-in-loop -- one table after the other
+    await db.delete(table).where(
+      sql`${key} NOT LIKE 'quietTeam:%'
+          AND NOT EXISTS (SELECT 1 FROM ${stephenRequestQuestions}
+            WHERE ${stephenRequestQuestions.id} = substr(${key}, instr(${key}, ':') + 1))`
+    );
+  }
   // Cards whose request is gone (swept or erased), a day on.
   await db.delete(stephenRequestCards).where(
     sql`${stephenRequestCards.createdAt} < ${now.getTime() - 86_400_000}

@@ -766,30 +766,35 @@ const firstDay = (
 };
 
 /**
- * Of the questions `ids`, those five or more different people asked, over
- * every request kept. A need that has a status but no longer comes out of
- * the report is listed only while that holds: an erasure or a withdrawal
- * that takes its question under five takes its wording and Grasp's
- * proposal (which may name its topic) off Needs you and the weekly
- * summary. Its status is kept, and shows again with a fifth person.
+ * The wording and role of the questions `ids` names that five or more
+ * different people asked, over every request kept, counted in the same
+ * statement as the wording is read, so no erasure falls between the two.
+ * A need that has a status but no longer comes out of the report is
+ * listed only while that holds: an erasure or a withdrawal that takes its
+ * question under five takes its wording and Grasp's proposal (which may
+ * name its topic) off Needs you and the weekly summary. Its status is
+ * kept, and shows again with a fifth person.
  */
 const askedByFive = async (
   env: Env,
   ids: readonly string[]
-): Promise<string[]> => {
-  if (ids.length === 0) {
-    return [];
-  }
-  const rows = await drizzle(env.DB)
-    .select({ question: stephenRequests.questionId })
-    .from(stephenRequests)
-    .where(inList(stephenRequests.questionId, [...new Set(ids)]))
-    .groupBy(stephenRequests.questionId)
-    .having(
-      sql`count(DISTINCT ${stephenRequests.personId}) >= ${fewestPeople}`
-    );
-  return rows.flatMap(({ question }) => (question === null ? [] : [question]));
-};
+): Promise<{ id: string; name: string; role: string | null }[]> =>
+  ids.length === 0
+    ? []
+    : await drizzle(env.DB)
+        .select({
+          id: stephenRequestQuestions.id,
+          name: stephenRequestQuestions.wording,
+          role: stephenRequestQuestions.role,
+        })
+        .from(stephenRequestQuestions)
+        .where(
+          and(
+            inList(stephenRequestQuestions.id, [...new Set(ids)]),
+            sql`(SELECT count(DISTINCT ${stephenRequests.personId}) FROM ${stephenRequests}
+              WHERE ${stephenRequests.questionId} = ${stephenRequestQuestions.id}) >= ${fewestPeople}`
+          )
+        );
 
 /**
  * The needs that have a status but no longer come out of the report,
@@ -1009,12 +1014,14 @@ const needsOf = async (
     .map(({ key }) => kindOfKey(key))
     .filter(({ kind }) => kind !== "quietTeam")
     .map(({ id }) => id);
-  const [stillAsked, topics] = await Promise.all([
+  const [inReport, stillAsked, topics] = await Promise.all([
+    questionsNamed(env, namedIn(report)),
     askedByFive(env, fromStatuses),
     topicsNamed(env, topicsIn(report)),
   ]);
-  const named = await questionsNamed(env, [...namedIn(report), ...stillAsked]);
-  const questions = new Map(named.map((row) => [row.id, row]));
+  const questions = new Map(
+    [...inReport, ...stillAsked].map((row) => [row.id, row])
+  );
   const roles = new Map([...questions].map(([id, row]) => [id, row.role]));
   const fromReport = needsIn(report, reach, roles);
   const found = [

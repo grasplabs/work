@@ -557,6 +557,33 @@ describe("a topic the sorter names", setUpTime, () => {
   });
 });
 
+describe("the sweep of what sorting named", setUpTime, () => {
+  afterEach(cleanUp);
+
+  it("keeps a topic past its day while a question just named under it waits for its request", async () => {
+    const now = Date.now();
+    const day = 86_400_000;
+    const [topic, question] = [crypto.randomUUID(), crypto.randomUUID()];
+    const name = `Workload ${unique()}`;
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO stephen_request_topics (id, name, created_at) VALUES (?, ?, ?)"
+      ).bind(topic, name, now),
+      // Named under it a day and a half later; its request not kept yet.
+      env.DB.prepare(
+        "INSERT INTO stephen_request_questions (id, topic_id, wording, role, created_at) VALUES (?, ?, ?, NULL, ?)"
+      ).bind(question, topic, "How do I cope with stress?", now + 1.5 * day),
+    ]);
+
+    await sweepStephenRequests(env, new Date(now + 2 * day));
+
+    await expect(namesKept()).resolves.toStrictEqual([
+      "How do I cope with stress?",
+      name,
+    ]);
+  });
+});
+
 describe("a request a card's press belongs to", setUpTime, () => {
   afterEach(cleanUp);
 
@@ -1170,8 +1197,12 @@ describe("Needs you after an erasure", setUpTime, () => {
       tools: [],
       missing: [{ id: "afas.leave", why: "actionOff" }],
     };
+    // One of the four who stay asked twice: four people, five requests.
+    const twice = `person-${crypto.randomUUID()}`;
     await seed(dayFrom(today, -3), [
-      ...people(4, asked),
+      ...people(3, asked),
+      { ...asked, person: twice },
+      { ...asked, person: twice },
       { ...asked, person: erased.userId },
     ]);
     await fakeProvider();
@@ -1203,14 +1234,16 @@ describe("Needs you after an erasure", setUpTime, () => {
     await owner.api.members.remove(erased.userId);
     await owner.api.members.erase(erased.userId, String(erased.person.name));
     const fourPeople = await shown();
+    // A sweep while its question is still kept keeps the owner's decision.
+    await sweepStephenRequests(env, new Date(Date.now() + 2 * 86_400_000));
     // A fifth person again: the owner's own decision was kept.
     await seed(today, people(1, asked));
     const [again] = await owner.api.stephenRequests.needs("en");
-    // Past the requests' thirteen months, the question and Grasp's
-    // proposal for it go at the sweep.
+    // Past the requests' thirteen months, the question, Grasp's proposal
+    // for it and the owner's status go at the sweep.
     await sweepStephenRequests(env, new Date(Date.now() + 800 * 86_400_000));
-    const { results: proposals } = await env.DB.prepare(
-      "SELECT key FROM stephen_request_proposals"
+    const { results: left } = await env.DB.prepare(
+      "SELECT key FROM stephen_request_proposals UNION ALL SELECT key FROM stephen_request_needs"
     ).all();
 
     /** Whether `text` holds the need's wording, and its proposal. */
@@ -1227,13 +1260,13 @@ describe("Needs you after an erasure", setUpTime, () => {
         status: again?.status?.status,
         proposal: again?.proposal,
       },
-      proposals,
+      left,
     }).toStrictEqual({
       topicToModel: true,
       fivePeople: { wording: true, proposal: true },
       fourPeople: { wording: false, proposal: false },
       again: { key: need?.key, status: "fixed", proposal },
-      proposals: [],
+      left: [],
     });
   });
 });
