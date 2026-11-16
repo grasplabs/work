@@ -1,4 +1,3 @@
-import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import type {
   InterviewApproval,
   InterviewFact,
@@ -23,11 +22,14 @@ import {
   opened,
   openedFor,
   participate,
+  postedOnLink,
   quick,
   revisionsOf,
+  signedInAs,
 } from "./interview-link.ts";
+import type { Device } from "./interview-link.ts";
 import type { ProviderReply } from "./model-provider.ts";
-import { routed } from "./sign-in.ts";
+import { unique } from "./sign-in.ts";
 
 // The read-back (src/onboarding/story.ts and the store's agreement): Stephen
 // tells a part of what he wrote down back as a short story, the person puts
@@ -60,14 +62,12 @@ const told = (sentences: StorySentence[]): ProviderReply => ({
   outputTokens: 60,
 });
 
-const tell = async (
-  link: { secret: string; key: string },
-  more: object = {}
-): Promise<Response> =>
-  await routed(interviewStoryPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ ...link, locale: "en", lines, ...more }),
+const tell = async (link: Device, more: object = {}): Promise<Response> =>
+  await postedOnLink(interviewStoryPath, {
+    ...link,
+    locale: "en",
+    lines,
+    ...more,
   });
 
 const fact = (
@@ -98,15 +98,11 @@ const progressOf = (
 });
 
 const save = async (
-  link: { secret: string; key: string },
+  link: Device,
   version: number,
   progress: InterviewProgress
 ): Promise<number> => {
-  const response = await routed(interviewApiPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "save", ...link, version, progress }),
-  });
+  const response = await onLink({ action: "save", ...link, version, progress });
   const saved: InterviewSaved = await response.json();
   if (!saved.saved) {
     throw new Error(`Not saved: version ${saved.version}`);
@@ -177,17 +173,18 @@ describe(
       expect(result.status).toBe(502);
     });
 
-    it("is refused to a link that isn't open, another device, and a page naming someone, with nothing sent", async () => {
+    it("is refused to a link that isn't open, anyone else signed in, and a page naming someone, with nothing sent", async () => {
       const link = await opened();
+      const someoneElse = await signedInAs(`someone-${unique()}@acme.test`);
       const { requests, result } = await answering([], async () => [
         await codeOf(await tell({ ...link, secret: "x".repeat(43) })),
-        await codeOf(await tell({ ...link, key: "y".repeat(43) })),
+        await codeOf(await tell({ ...link, cookie: someoneElse })),
         await codeOf(await tell(link, { name: "Someone else" })),
       ]);
       expect({ result, sent: requests.length }).toStrictEqual({
         result: [
           [404, "interview.link_invalid"],
-          [403, "interview.elsewhere"],
+          [404, "interview.link_invalid"],
           [400, "interview.invalid"],
         ],
         sent: 0,
@@ -249,29 +246,25 @@ describe("what counts of an interview", { timeout: 60_000 }, () => {
         },
       ],
       async () => {
-        const response = await routed(interviewTurnPath, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            ...link,
-            event: "readback",
-            locale: "en",
-            lines: [
-              {
-                from: "person",
-                text: "Change “Write the weight on the label.” to “Write the weight on the parcel.”",
-                typed: true,
-              },
-            ],
-            facts: [weigh, label].map(({ id, tag, text }) => ({
-              id,
-              tag,
-              text,
-            })),
-            phase: "readback",
-            minutes: 12,
-            reading: ["f1", "f2"],
-          }),
+        const response = await postedOnLink(interviewTurnPath, {
+          ...link,
+          event: "readback",
+          locale: "en",
+          lines: [
+            {
+              from: "person",
+              text: "Change “Write the weight on the label.” to “Write the weight on the parcel.”",
+              typed: true,
+            },
+          ],
+          facts: [weigh, label].map(({ id, tag, text }) => ({
+            id,
+            tag,
+            text,
+          })),
+          phase: "readback",
+          minutes: 12,
+          reading: ["f1", "f2"],
         });
         return turnEvents(`${await response.text()}\n`).events.flatMap(
           (event) => ("turn" in event ? event.turn.changes : [])
@@ -353,11 +346,7 @@ describe("what counts of an interview", { timeout: 60_000 }, () => {
     await save(link, 0, progressOf("completed", [weigh]));
     await approve(link, [weigh]);
     const before = await drawingOf(person);
-    await routed(interviewApiPath, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "delete", ...link }),
-    });
+    await onLink({ action: "delete", ...link });
     expect({ before, after: await drawingOf(person) }).toStrictEqual({
       before: { due: true, records: ["Weigh the parcel."] },
       after: { due: false, records: [] },

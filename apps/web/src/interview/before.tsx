@@ -387,7 +387,7 @@ export const Before = ({
     if (link === null) {
       return;
     }
-    const answer = await participate(link.secret, link.key);
+    const answer = await participate(link.secret);
     if (isRefused(answer)) {
       setRefusal(answer.message);
       return;

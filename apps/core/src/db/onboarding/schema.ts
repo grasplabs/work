@@ -115,9 +115,9 @@ export const links = sqliteTable("links", {
   openedAt: text("opened_at"),
   remindedAt: text("reminded_at"),
   /**
-   * The SHA-256 (hex) of the key of the device that opened the link
-   * first: only that device opens the interview after. None before any
-   * did, or since staff gave them a new start.
+   * No longer read or written: a link belongs to an account now
+   * (`account`), not to a device. Dropped in a later release, as a
+   * schema contracts only after the code that read it is gone.
    */
   keyMark: text("key_mark"),
   /** When they deleted their interview: a copy left open can't save it back. */
@@ -145,6 +145,29 @@ export const links = sqliteTable("links", {
    * matches again. A save from a copy of another version is refused.
    */
   version: integer().notNull().default(0),
+  /**
+   * The account the interview belongs to (GRA-1790): the one whose
+   * address, verified by the company's sign-in, it was sent to, when it
+   * first opened the link; from then on it alone opens it. The only reader
+   * of their interview in the Brain, and how core finds their team's
+   * claims for them. None before it was opened, and again after a new
+   * start or their erasure.
+   */
+  account: text("user_id").unique(),
+  /**
+   * The address, folded to lower case, the link (or a reminder carrying
+   * it) was last sent to while it belonged to no account, or the one it
+   * was opened under: only that address opens it the first time. None for
+   * a link no mail carried (the list's address counts then), and after
+   * their erasure.
+   */
+  sentTo: text("sent_to_email"),
+  /**
+   * When what the Brain holds of their interview was last decided
+   * (`interviewDueSql`, store.ts): it is decided again while this differs.
+   * None before it ever was.
+   */
+  brainMark: text("brain_mark"),
 });
 
 /**
@@ -162,7 +185,7 @@ export const linkCodes = sqliteTable("link_codes", {
 
 /**
  * What was said in each interview, as the person's page last saved it
- * (its version is the link's). Only the device the link opened on
+ * (its version is the link's). Only the account the link belongs to
  * reads it back, and Grasp's staff.
  */
 export const interviews = sqliteTable("interviews", {
@@ -636,4 +659,64 @@ export const mailOutbox = sqliteTable(
     messageId: text("message_id"),
   },
   (table) => [index("mail_outbox_due").on(table.state, table.nextAt)]
+);
+
+/**
+ * Each interview the Brain is to take as a source (GRA-1790), under an id
+ * minted here for one decision of it: the facts the person approved,
+ * readable by the account the interview belongs to alone, added by core
+ * (onboarding/new-brain.ts) as they are then. A decision that
+ * moves is a new source, and the old one is owed an erasure; a row stays
+ * until the Brain's erasure of it returned (`erase`), so no source is ever
+ * there without a row naming it.
+ */
+export const brainInterviews = sqliteTable(
+  "brain_interviews",
+  {
+    /** The source's id in the Brain (`interview:<source>`), minted here. */
+    source: text().primaryKey(),
+    person: text().notNull(),
+    /** The account that reads it. */
+    account: text("user_id").notNull(),
+    /**
+     * What it stands for (`#interviewWanted`, store.ts): the account and
+     * each approved fact at its revision, so a mark that moved makes a new
+     * one.
+     */
+    mark: text().notNull(),
+    /** Whether it is to be erased: set once, never cleared. */
+    erase: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * Whether core added it to the new Brain (onboarding/new-brain.ts):
+     * until then core adds it, right after the person's request and on its
+     * clock. Core adds it itself, not through the hand-over, whose audit
+     * events the company reads.
+     */
+    added: integer({ mode: "boolean" }).notNull().default(false),
+  },
+  (table) => [index("brain_interviews_person").on(table.person)]
+);
+
+/**
+ * Each team claim given to the Brain (GRA-1741): a claim five or more of
+ * the team's people back, as the intake counts them here (`brain_sent`,
+ * record `record`), given to the Brain as a source of its own
+ * (`claim:<source>`) under an id minted here each time it stands. Who
+ * backs it is counted here alone, never in the Brain. Once the recount
+ * drops it below five it is erased (`erase`), and the row goes once the
+ * Brain's erasure returned; a claim backed again later is a new source.
+ */
+export const brainClaims = sqliteTable(
+  "brain_claims",
+  {
+    /** The source's id in the Brain (`claim:<source>`), minted here. */
+    source: text().primaryKey(),
+    /** The intake's statement record it stands for. */
+    record: text().notNull(),
+    team: text().notNull(),
+    text: text().notNull(),
+    /** Whether it is to be erased: set once, never cleared. */
+    erase: integer({ mode: "boolean" }).notNull().default(false),
+  },
+  (table) => [index("brain_claims_record").on(table.record)]
 );

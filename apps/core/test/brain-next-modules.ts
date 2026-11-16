@@ -59,6 +59,11 @@ export const brainModules = {
   // Checks with core's readableVersionsAs that a run may still read what
   // it recalled, and hands on only a refusal.
   "apps/core/src/workflows/resource-reads.ts": "core",
+  // Gives the new Brain each interview (readable by its person) and each
+  // team claim enough people back (readable by that staff-list team), as
+  // sources, with core's addSource and eraseSource, and answers nothing of
+  // them.
+  "apps/core/src/onboarding/new-brain.ts": "core",
   // A chat's recall before its question: hands the model what core's
   // recallAs gave the chat's own person, passages and memories, two of its
   // packs merged at most (mergeRecalled, which only drops what both hold

@@ -43,6 +43,8 @@ export interface SignInOption {
   /** Passed to Better Auth's `POST /api/auth/sign-in/sso` as `providerId`. */
   providerId: string;
   label: string;
+  /** Grasp's staff's own sign-in: never for anyone's interview (GRA-1790). */
+  staff: boolean;
 }
 
 /** The signed-in person, as the server sees them right now. */

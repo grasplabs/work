@@ -101,8 +101,9 @@ export interface LiveTranscription {
 
 // `POST /api/speech`: a line of the onboarding said out loud, with when
 // each word is said, so the page lights the words up as they are said. On
-// someone's interview link, with the link's secret and the device's key;
-// or for an admin signed in, with the session alone.
+// someone's interview link, with the link's secret and the session of the
+// account the interview belongs to; or for an admin signed in, with the
+// session alone.
 
 /** Where the onboarding's pages have a line said. */
 export const speechPath = "/api/speech";
@@ -144,10 +145,8 @@ export const speechRequestSchema = z.strictObject({
   quick: z.boolean().default(false),
   /** How the line is said: one of the tones Stephen may use. */
   tone: z.enum(voiceTags).optional(),
-  /** Someone's interview link: its secret, and the device's key. */
-  link: z
-    .strictObject({ secret: interviewSecretSchema, key: interviewSecretSchema })
-    .optional(),
+  /** Someone's interview link: its secret (the session says whose it is). */
+  link: z.strictObject({ secret: interviewSecretSchema }).optional(),
 });
 export type SpeechRequestBody = z.input<typeof speechRequestSchema>;
 
@@ -174,8 +173,9 @@ export const speechErrors = defineErrorFamily({
 // `GET /api/transcription`: what someone says, written down as they say
 // it. A WebSocket on the page's own origin, which core relays to the
 // transcription upstream. On someone's interview link, with the link's
-// secret and the device's key in the first frame; or for an admin signed
-// in, with the session the upgrade carries. The frames are described where
+// secret in the first frame and the session of the account the interview
+// belongs to on the upgrade; or for an admin signed in, with the session
+// the upgrade carries. The frames are described where
 // core serves it (src/onboarding/transcription.ts).
 
 /** Where the onboarding's pages open a live transcription. */
@@ -201,10 +201,8 @@ export const transcriptionStartSchema = z.strictObject({
   language: interviewLocaleSchema,
   sampleRate: z.union(transcriptionSampleRates.map((rate) => z.literal(rate))),
   previousText: z.string().max(transcriptionPreviousTextMaxChars).optional(),
-  /** Someone's interview link: its secret, and the device's key. */
-  link: z
-    .strictObject({ secret: interviewSecretSchema, key: interviewSecretSchema })
-    .optional(),
+  /** Someone's interview link: its secret (the session says whose it is). */
+  link: z.strictObject({ secret: interviewSecretSchema }).optional(),
 });
 export type TranscriptionStart = z.input<typeof transcriptionStartSchema>;
 

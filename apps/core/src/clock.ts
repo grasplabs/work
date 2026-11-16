@@ -31,6 +31,7 @@ import { brainOf } from "./knowledge/ports.ts";
 import { sweepLeftUploads } from "./knowledge/uploads.ts";
 import { retryDisconnects } from "./members.ts";
 import { sweepModelUsage } from "./model-usage.ts";
+import { settleOnboardingBrain } from "./onboarding/new-brain.ts";
 import { rescanPackages } from "./packages/rescan.ts";
 import { sweepPageFrames } from "./page-frame.ts";
 import { sweepBuilds } from "./pages.ts";
@@ -80,6 +81,17 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   // What core noted to hand over to the new Brain, put on its work queue
   // (src/brain-hand-overs.ts, src/brain-sources.ts).
   { name: "brain.hand_overs", period: "minute", run: relayHandOvers },
+  // What the onboarding still owes the new Brain: interviews and team
+  // claims that no longer stand, each erased until it is, then each
+  // interview to add, added until it is (src/onboarding/new-brain.ts).
+  // A team claim is added by the hand-over.
+  {
+    name: "onboarding.brain_erasures",
+    period: "minute",
+    run: async (env) => {
+      await settleOnboardingBrain(env);
+    },
+  },
   // Run results of people who lost their workflow, taken out of use in the
   // new Brain (src/brain-run-sources.ts).
   {

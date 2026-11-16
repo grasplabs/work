@@ -1,6 +1,7 @@
 import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, redirect } from "@tanstack/react-router";
+import { z } from "zod";
 
 import { GraspBuddy } from "../buddy/grasp-buddy.tsx";
 import { forgetActiveChats } from "../chat/active-chat.ts";
@@ -38,12 +39,34 @@ const returnPathOf = (value: unknown): string =>
     ? value
     : "/";
 
+/** A session core made for someone's interview alone (GRA-1790), as Better Auth tells it. */
+const interviewSessionSchema = z.object({
+  session: z.object({ interview: z.literal(true) }),
+});
+
+/**
+ * Whether this browser is signed in for an interview alone: while the
+ * gate is closed, someone a link went to who signed in here gets such a
+ * session, which opens nothing but their interview. They are told Grasp
+ * isn't open yet, as anyone the gate turns away is, and where their link
+ * is, rather than asked to sign in again and again.
+ */
+const isInterviewOnly = async (): Promise<boolean> => {
+  try {
+    const response = await fetch("/api/auth/get-session");
+    const body: unknown = response.ok ? await response.json() : null;
+    return interviewSessionSchema.safeParse(body).success;
+  } catch {
+    return false;
+  }
+};
+
 /**
  * The page in the onboarding's frame (frame/onboarding-frame.tsx), with
  * Grasp's buddy.
  */
 const SignIn = () => {
-  const { connected, signInOptions } = Route.useLoaderData();
+  const { connected, signInOptions, interviewOnly } = Route.useLoaderData();
   const { error, returnTo } = Route.useSearch();
   const { t } = useLingui();
   return (
@@ -61,7 +84,7 @@ const SignIn = () => {
       </div>
       {connected ? (
         <SignInOptions
-          error={error}
+          error={error ?? (interviewOnly ? "not_open_yet" : undefined)}
           options={signInOptions}
           returnTo={returnTo}
         />
@@ -94,7 +117,7 @@ export const Route = createFileRoute("/sign-in")({
     if (status.connected) {
       forgetActiveChats();
     }
-    return status;
+    return { ...status, interviewOnly: await isInterviewOnly() };
   },
   component: SignIn,
 });

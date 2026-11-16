@@ -14,13 +14,17 @@ import { routed } from "./sign-in.ts";
 
 /** Asks for `text` to be said on someone's link, as the interview page does. */
 export const sayOnLink = async (
-  link: { secret: string; key: string },
+  { secret, cookie }: { secret: string; cookie: string },
   text: string
 ): Promise<number> => {
   const response = await routed(speechPath, {
     method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ text, language: "en", link }),
+    headers: {
+      "content-type": "application/json",
+      "sec-fetch-site": "same-origin",
+      cookie,
+    },
+    body: JSON.stringify({ text, language: "en", link: { secret } }),
   });
   await response.body?.cancel();
   return response.status;

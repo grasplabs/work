@@ -1,4 +1,3 @@
-import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import type {
   InterviewFact,
   InterviewProgress,
@@ -10,7 +9,6 @@ import type { SessionApi } from "@grasp-os/shared/rpc";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { allEvents } from "./audit-events.ts";
@@ -20,11 +18,14 @@ import {
   answeringWith as answeringWithRequests,
   approveAgreed,
   holdAlarm,
+  onLink,
+  openLinkAs,
+  signedInAs,
 } from "./interview-link.ts";
 import { d1ColumnsWith, onboardingTablesWith } from "./kept-where.ts";
 import type { Answer, ProviderReply } from "./model-provider.ts";
 import { alikeReply, intakeAlike } from "./onboarding-team.ts";
-import { routed, signedInApi, unique } from "./sign-in.ts";
+import { signedInApi, unique } from "./sign-in.ts";
 import { wordFile } from "./word-file.ts";
 
 // A document shared in the onboarding, whose reading goes when an admin
@@ -48,7 +49,6 @@ const idp = mockIdp();
 
 const dayMs = 24 * 60 * 60 * 1000;
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
-const sessionKey = z.object({ key: z.string().optional() });
 
 /** A word nobody else says, as one lower-case token: what must go. */
 // Letters only: a drawn part with a digit never reaches the brain (GRA-1084).
@@ -127,7 +127,7 @@ const team = async () => {
       id: ids[key],
       name: names[key][0],
       team: ids.team,
-      email: "",
+      email: `${ids[key]}@acme.test`,
       title: names[key][1],
       away: false,
     })),
@@ -145,17 +145,15 @@ const team = async () => {
 
 type Ids = Awaited<ReturnType<typeof team>>;
 
-/** Someone's link opened on a device: their secret and key. */
+/** Someone's link opened signed in as them: its secret and the session. */
 const openLink = async (person: string) => {
   const link = await onboardingStore(env).linkOf(person);
   const secret = link?.split("#")[1] ?? "";
-  const session = await routed(interviewApiPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "session", secret }),
-  });
-  const { key } = sessionKey.parse(await session.json());
-  return { secret, key: key ?? "" };
+  const { link: device } = await openLinkAs(
+    secret,
+    await signedInAs(`${person}@acme.test`)
+  );
+  return device;
 };
 
 /** A fact as agreed. */
@@ -187,10 +185,11 @@ const agree = async (
     adding: false,
     addedAt: 0,
   };
-  const response = await routed(interviewApiPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "save", ...link, version: 0, progress }),
+  const response = await onLink({
+    action: "save",
+    ...link,
+    version: 0,
+    progress,
   });
   const saved: InterviewSaved = await response.json();
   await approveAgreed(link, facts);

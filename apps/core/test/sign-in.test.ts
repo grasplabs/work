@@ -158,9 +158,9 @@ describe("signing in", () => {
   it("offers the configured IdPs, and none while sign-in isn't set up", async () => {
     const { core } = await openRpc();
     await expect(core.signInOptions()).resolves.toStrictEqual([
-      { providerId: "microsoft", label: "Microsoft" },
-      { providerId: "google", label: "Google" },
-      { providerId: "grasp-staff", label: "Grasp staff" },
+      { providerId: "microsoft", label: "Microsoft", staff: false },
+      { providerId: "google", label: "Google", staff: false },
+      { providerId: "grasp-staff", label: "Grasp staff", staff: true },
     ]);
     core[Symbol.dispose]();
 
@@ -532,7 +532,11 @@ describe("Grasp staff access", () => {
   });
 
   it("offers and allows no staff sign-in while no window is open", async () => {
-    const noStaff = { providerId: "grasp-staff", label: "Grasp staff" };
+    const noStaff = {
+      providerId: "grasp-staff",
+      label: "Grasp staff",
+      staff: true,
+    };
     const now = Date.now();
     const shut = [
       closedWindow,
@@ -583,6 +587,7 @@ describe("Grasp staff access", () => {
       await expect(core.signInOptions()).resolves.not.toContainEqual({
         providerId: "grasp-staff",
         label: "Grasp staff",
+        staff: true,
       });
     } finally {
       core[Symbol.dispose]();
