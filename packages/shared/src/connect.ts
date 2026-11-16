@@ -2383,6 +2383,8 @@ export const connectErrors = defineErrorFamily({
   "connect.catalog_entry_not_found": "There's no such entry in the catalog.",
   "connect.catalog_unavailable":
     "Composio's toolkits can't be listed right now. Try again shortly.",
+  "connect.agent_app_off":
+    "This agent doesn't have this app. Whoever manages it can add the app on its page.",
   "connect.class_off":
     "Your company hasn't turned this kind of action on for you, so it wasn't done. An admin can turn it on.",
   "connect.class_unknown":

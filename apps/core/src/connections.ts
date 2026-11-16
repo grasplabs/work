@@ -1,5 +1,7 @@
 import type {
   Agent,
+  AgentApp,
+  AgentAppsWorkedOut,
   AgentDocument,
   AgentSettings,
   AgentUsage,
@@ -52,6 +54,11 @@ import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import {
+  listAgentApps,
+  setAgentApp,
+  workOutAgentApps,
+} from "./agent-app-access.ts";
 import {
   changeAgent,
   listAgents,
@@ -827,6 +834,30 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
       requireAdmin(identity);
       return await ownAgentsUsage(this.#env, spendMonth(this.#env));
     });
+  }
+
+  async agentApps(agentId: unknown): Promise<AgentApp[]> {
+    return await withPerson(
+      this.#check,
+      async (identity) => await listAgentApps(this.#env, identity, agentId)
+    );
+  }
+
+  async setAgentApp(
+    agentId: unknown,
+    app: unknown,
+    on: unknown
+  ): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await setAgentApp(this.#env, identity, agentId, app, on);
+    });
+  }
+
+  async workOutAgentApps(agentId: unknown): Promise<AgentAppsWorkedOut> {
+    return await withPerson(
+      this.#check,
+      async (identity) => await workOutAgentApps(this.#env, identity, agentId)
+    );
   }
 
   async makeAgent(input: unknown): Promise<Agent> {

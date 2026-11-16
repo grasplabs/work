@@ -1,9 +1,11 @@
 import { z } from "zod";
 
 import type { ChatFileInput, ChatFileType } from "./chat.ts";
+import { companyToolClasses, toolClassAudienceSchema } from "./connect.ts";
 import type { CompanyToolClass, ToolClassAudience } from "./connect.ts";
 import { modelRoles } from "./deployment-config.ts";
 import type { ModelRole } from "./deployment-config.ts";
+import type { ModelEffort } from "./models.ts";
 import type { AppClassAudience } from "./stephen-reach.ts";
 
 // The company's agents, as its admins make and change them: each has its
@@ -121,6 +123,42 @@ export interface AgentDocument {
   addedAt: string;
 }
 
+/**
+ * An app an agent may use, by its catalog entry: `<source>:<id>`, such as
+ * `native:google` or `composio:hubspot` ({@link agentAppOf}).
+ */
+export interface AgentApp {
+  app: string;
+  /** Its name in the catalog when it was added. */
+  name: string;
+  /**
+   * `on`: the agent may use it. `removed`: someone took it off, and
+   * working the apps out from its instructions never adds it back.
+   */
+  state: "on" | "removed";
+  /** Who added it: worked out from its instructions, or a person by hand. */
+  source: "instructions" | "person";
+}
+
+/** An agent's app by a catalog entry's source and ID. */
+export const agentAppOf = (source: string, id: string): string =>
+  `${source}:${id}`;
+
+/** What working an agent's apps out from its instructions did. */
+export interface AgentAppsWorkedOut {
+  /** The apps it added, now on. */
+  added: AgentApp[];
+  /**
+   * Kinds of work its instructions call for that change or send things,
+   * which it doesn't have: never turned on by this, for a person to.
+   */
+  suggested: CompanyToolClass[];
+  /** Kinds of work that only read, turned on by this. */
+  turnedOn: CompanyToolClass[];
+  /** Apps its instructions name that the company doesn't offer. */
+  missing: string[];
+}
+
 /** Most characters a wake-up's opening line holds. */
 export const agentWakeOpeningMax = 2000;
 
@@ -214,6 +252,23 @@ export interface AgentsApi {
    * agent do for them. Up to {@link ownAgentsMax} a person.
    */
   makeOwnAgent: (input: AgentInput) => Promise<Agent>;
+  /**
+   * The apps an agent may use, by name. An agent with none listed uses any
+   * app its kinds of work allow, as before agents had apps.
+   */
+  agentApps: (agentId: string) => Promise<AgentApp[]>;
+  /**
+   * Gives an agent an app the company offers (`app`, `<source>:<id>`), or
+   * takes it off, for good: working its apps out never adds it back.
+   */
+  setAgentApp: (agentId: string, app: string, on: boolean) => Promise<void>;
+  /**
+   * Works out from an agent's name, job and instructions which of the
+   * company's apps it needs and adds them, and turns on the kinds of work
+   * that only read that they call for. What changes or sends things is
+   * only suggested. Never an app someone took off.
+   */
+  workOutAgentApps: (agentId: string) => Promise<AgentAppsWorkedOut>;
   /** Changes an agent's name, face, job, instructions or model role. */
   changeAgent: (agentId: string, input: AgentInput) => Promise<void>;
   /** Pauses an agent, which then takes no turn, or turns it back on. */
@@ -276,4 +331,69 @@ export interface AgentsApi {
   setAgentWakePaused: (wakeId: string, paused: boolean) => Promise<void>;
   /** Deletes a wake-up. The chat its turns were in stays its person's. */
   deleteAgentWake: (wakeId: string) => Promise<void>;
+}
+
+/**
+ * An agent Grasp's chat drafted for the person (`draftAgent`), shown as a
+ * card: nothing is made until they press Make it on it
+ * (`ChatsApi.makeDraftedAgent`), and then only what the card shows, by the
+ * same checks as the Agents page. One of the company's (`whose:
+ * "company"`) is for its admins alone, and only one of those says who may
+ * ask it (`audience`), what it may do (`classes`, each turned on as the
+ * company has it) and when it works on its own (`schedule`, for the
+ * person who made it); a person's own reaches only them and never wakes.
+ */
+export const agentDraftSchema = z
+  .strictObject({
+    name: agentInputSchema.shape.name,
+    job: agentInputSchema.shape.job,
+    instructions: z.string().trim().min(1).max(agentInstructionsMax),
+    whose: z.enum(["company", "own"]),
+    audience: toolClassAudienceSchema.optional(),
+    classes: z
+      .array(z.enum(companyToolClasses))
+      .max(companyToolClasses.length)
+      .optional(),
+    schedule: agentWakeInputSchema
+      .pick({ cron: true, timeZone: true, opening: true })
+      .optional(),
+  })
+  .refine(
+    ({ whose, audience, classes = [], schedule }) =>
+      whose === "company" ||
+      (audience === undefined &&
+        classes.length === 0 &&
+        schedule === undefined),
+    {
+      message:
+        "An agent of the person's own has no audience, classes or schedule: it reaches only them and never wakes.",
+    }
+  );
+export type AgentDraft = z.infer<typeof agentDraftSchema>;
+
+/** A drafted agent as the thread shows it, by the call that drafted it. */
+export interface AgentDrafted extends AgentDraft {
+  callId: string;
+}
+
+/** Make it, for an agent the chat drafted (`ChatsApi.makeDraftedAgent`). */
+export interface AgentDraftMake {
+  /** The draft, by the call that drafted it (`AgentDrafted.callId`). */
+  draft: string;
+  /** What the person said, in their words: their message in the chat. */
+  text: string;
+  /** One of `ChatsApi.models()`, as a question names it. */
+  model: string;
+  effort?: ModelEffort;
+}
+
+/** What Make it made: the agent, by its ID and name. */
+export interface AgentDraftMade {
+  id: string;
+  name: string;
+  /**
+   * Made, but what the card said beyond it (who may ask it, what it may
+   * do, when it wakes) couldn't all be set: its page says what it has.
+   */
+  unfinished?: true;
 }

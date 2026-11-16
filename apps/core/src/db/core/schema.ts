@@ -3539,6 +3539,27 @@ export const agentDocuments = sqliteTable(
 );
 
 /**
+ * The apps an agent may use (agent-apps.ts), by catalog entry
+ * (`<source>:<id>`). An agent with no row uses any app its classes allow,
+ * as before agents had apps; one with rows, only those `on`. A `removed`
+ * row keeps an app someone took off from coming back when its apps are
+ * worked out again. Gone with the agent.
+ */
+export const agentApps = sqliteTable(
+  "agent_apps",
+  {
+    agentId: text("agent_id").notNull(),
+    app: text().notNull(),
+    name: text().notNull(),
+    state: text({ enum: ["on", "removed"] }).notNull(),
+    source: text({ enum: ["instructions", "person"] }).notNull(),
+    changedBy: text("changed_by").notNull(),
+    changedAt: timestamp("changed_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.agentId, table.app] })]
+);
+
+/**
  * How an agent narrows a class of tools the company turned on
  * (agent-reach.ts): one row per agent and class an admin changed.
  * `asClass`: as the company has the class. It only narrows: the class
