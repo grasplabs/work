@@ -113,4 +113,13 @@ describe(storageOf, () => {
       migrationDirs: ["apps/core/src/db/core/migrations"],
     });
   });
+
+  it("reads a D1 migration folder outside the config's own by its path from the root", () => {
+    expect(
+      storageOf(
+        "apps/core/wrangler.jsonc",
+        `{ "d1_databases": [{ "binding": "KNOWLEDGE", "migrations_dir": "../../packages/brain/src/db/migrations" }] }`
+      ).migrationDirs
+    ).toStrictEqual(["packages/brain/src/db/migrations"]);
+  });
 });

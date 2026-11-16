@@ -4,20 +4,6 @@ import { identifierMaxLength } from "./identifier.ts";
 
 export { identifierMaxLength } from "./identifier.ts";
 
-// The Brain's own IDs, as the Brain defines them (@grasp-os/brain/ids).
-export {
-  brainReceiptIdSchema,
-  collectionIdSchema,
-  documentIdSchema,
-  memoryIdSchema,
-} from "@grasp-os/brain/ids";
-export type {
-  BrainReceiptId,
-  CollectionId,
-  DocumentId,
-  MemoryId,
-} from "@grasp-os/brain/ids";
-
 /** An identifier: non-empty, and at most {@link identifierMaxLength}. */
 export const identifierSchema = z.string().min(1).max(identifierMaxLength);
 
@@ -36,6 +22,10 @@ export const identifierSchema = z.string().min(1).max(identifierMaxLength);
 /* @__NO_SIDE_EFFECTS__ */
 // oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- the brand is type-only by design
 const idSchema = <Brand extends string>() => identifierSchema.brand<Brand>();
+
+/** A memory record in the Brain. */
+export const memoryIdSchema = idSchema<"MemoryId">();
+export type MemoryId = z.infer<typeof memoryIdSchema>;
 
 /**
  * A business store: its logical tables and records, independent of any

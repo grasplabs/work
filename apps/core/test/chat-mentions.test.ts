@@ -2,9 +2,9 @@ import type { ChatMention, ChatQuestion } from "@grasp-os/shared/chat";
 import { chatMentionsMax } from "@grasp-os/shared/chat";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { newTeam } from "./admin-teams.ts";
 import { model, personalChatsOf, says } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam } from "./knowledge.ts";
 import { answeringProvider } from "./model-provider.ts";
 import type { SentRequest } from "./model-provider.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";

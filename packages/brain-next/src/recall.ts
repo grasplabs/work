@@ -11,6 +11,7 @@ import type {
   Reader,
   RecallRequest,
 } from "./contract.ts";
+import { monthDayOf } from "./dates.ts";
 import { exactsOf } from "./exact.ts";
 import type { Exact } from "./exact.ts";
 import { readMoment, usedAtOf } from "./memories.ts";
@@ -26,7 +27,8 @@ import type { Terms } from "./words.ts";
 // in one statement that finds, checks and ranks, and a second for the
 // stop words alone when the first finds little; exact, in one statement
 // that finds the chunks holding every word of an exact part, whose order
-// is then checked in code (exact.ts). And a third when the host gives the
+// is then checked in code (exact.ts), or mentioning one of a date's days
+// (`chunk_days`, dates.ts). And a third when the host gives the
 // question's vector: meaning, the vector way's scan (vectors.ts), with
 // the access check inside it. The host embeds the question before it
 // calls, so what a store finds is one synchronous read of one snapshot
@@ -215,14 +217,17 @@ ORDER BY matched.stops DESC, length(chunks.text),
 LIMIT ?4`;
 
 /**
- * `?1` the exact parts (JSON: each its index as `part`, its `query` and
- * `near`, exact.ts), `?2`
+ * `?1` the exact parts (JSON: each its index as `part`, and a phrase's or
+ * an ID's `query` and `near`, or a date's `days`, each its `monthDay` and
+ * `year`, exact.ts), `?2`
  * the reader's person, `?3` their groups (JSON), `?4` the most to check of
  * each part: the chunks the reader may read that may hold one of them,
  * each with the parts (by index) within whose most it is (`parts`), and
  * those whose most it is the first past (`past`), which are capped. The
  * cap counts only what the reader may read, in the one statement that
- * checks access: `near` only orders what `found` holds.
+ * checks access: `near` only orders what `found` holds. A date's
+ * candidates are the chunks that mention one of its days (`chunk_days`):
+ * the same day, of the same year or of none written on either side.
  */
 const exactSql = (asOf: number | undefined): string => `
 WITH ${readableSql},
@@ -230,6 +235,12 @@ asked AS (
   SELECT value ->> '$.part' AS key, value ->> '$.query' AS query,
     value ->> '$.near' AS near
   FROM json_each(?1)
+  WHERE value ->> '$.query' IS NOT NULL
+),
+dated AS (
+  SELECT part.value ->> '$.part' AS key,
+    day.value ->> '$.monthDay' AS month_day, day.value ->> '$.year' AS year
+  FROM json_each(?1) AS part, json_each(part.value -> '$.days') AS day
 ),
 found AS (
   SELECT chunks.row AS row, asked.key AS part
@@ -237,6 +248,13 @@ found AS (
   CROSS JOIN chunk_words
   JOIN chunks ON chunks.row = chunk_words.rowid${searched(asOf)}
     AND chunk_words MATCH asked.query
+  UNION
+  SELECT chunks.row AS row, dated.key AS part
+  FROM dated
+  CROSS JOIN chunk_days
+  JOIN chunks ON chunks.row = chunk_days.chunk${searched(asOf)}
+    AND chunk_days.month_day = dated.month_day
+    AND (dated.year = 0 OR chunk_days.year IN (dated.year, 0))
 ),
 near AS (
   SELECT asked.key AS part, chunk_words.rowid AS row
@@ -380,7 +398,17 @@ const byExact = (
     .exec<Row & { parts: string; near_parts: string; past: string }>(
       exactSql(asOf.length > 0 ? 5 : undefined),
       JSON.stringify(
-        exacts.map(({ query, near }, part) => ({ part, query, near }))
+        exacts.map((exact, part) =>
+          exact.kind === "date"
+            ? {
+                part,
+                days: exact.days.map((day) => ({
+                  monthDay: monthDayOf(day),
+                  year: day.year,
+                })),
+              }
+            : { part, query: exact.query, near: exact.near }
+        )
       ),
       reader.person,
       JSON.stringify(reader.groups),
