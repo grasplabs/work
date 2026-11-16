@@ -17,6 +17,18 @@ import { say } from "./words.ts";
 
 const memorySchema = z.uuid();
 
+/** Posts `said` where `event` was pressed, logging a refusal. */
+const postInstead = async (
+  event: CardPress["event"],
+  said: ReturnType<typeof lineCard>
+): Promise<void> => {
+  try {
+    await event.adapter.postMessage(event.threadId, said);
+  } catch (error) {
+    log.warn("channel.undo_outcome_failed", errorFields(error));
+  }
+};
+
 /** The person pressing, through `platform`: their own act. */
 const presserOf = (userId: string, platform: string): MemoryCaller => ({
   person: userId,
@@ -61,13 +73,18 @@ export const pressUndo = async (
     await sayThere(event, "alreadyAnswered", locale);
     return;
   }
+  // What it did, on the card; where the platform refuses to update it, in
+  // a message of its own in the same conversation, so the person learns it
+  // either way. Stephen's own words, nothing a model wrote. If that is
+  // refused too, the memory is retired all the same, and their Memories
+  // page in Grasp says so.
+  const said = lineCard(
+    say(outcome === "done" ? "undone" : "nothingToUndo", locale)
+  );
   try {
-    await event.adapter.editMessage(
-      event.threadId,
-      event.messageId,
-      lineCard(say(outcome === "done" ? "undone" : "nothingToUndo", locale))
-    );
+    await event.adapter.editMessage(event.threadId, event.messageId, said);
   } catch (error) {
     log.warn("channel.card_edit_failed", errorFields(error));
+    await postInstead(event, said);
   }
 };

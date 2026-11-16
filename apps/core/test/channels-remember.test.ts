@@ -23,6 +23,7 @@ import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { breakOwnStore } from "./brain-next-own-store.ts";
 import { chatIdsOf } from "./code-step-trace.ts";
+import { botConnectorEditsUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { connectModels } from "./model-provider.ts";
 import type { FakeProvider } from "./model-provider.ts";
@@ -36,6 +37,7 @@ import {
   newGroup,
   onGroupRoster,
   post,
+  providers,
   reached,
   uninstalledFor,
   watched,
@@ -616,6 +618,57 @@ describe("an Undo that fails", () => {
         lines: [say("undoFailed", "en")],
         edits: [true],
         after: [],
+      });
+    }
+  );
+});
+
+describe("an Undo whose card can't be updated", () => {
+  it(
+    "says what it did in a message of its own, and a second press retires nothing more",
+    slow,
+    async () => {
+      const depot = `d${unique()}`;
+      const { said, saves } = depotSaid(depot, marker());
+      const ann = await member(idp, saves, checked(true), says("Noted."));
+      await post(messageFrom(ann.teams, { text: said }));
+      const { cardId, memory } = await noticeIn(ann.teams.conversation);
+      // Teams refuses every update of a message in her chat.
+      await providers().fetch(botConnectorEditsUrl, {
+        method: "POST",
+        body: JSON.stringify({
+          conversation: ann.teams.conversation,
+          count: 100,
+        }),
+      });
+
+      await post(undoFrom(ann.teams, cardId, memory));
+      const afterFirst = await reached(ann.teams.conversation);
+      await post(undoFrom(ann.teams, cardId, memory));
+      const { sent } = await reached(ann.teams.conversation);
+      const at = sent.findIndex(({ id }) => id === cardId);
+      const after = sent
+        .slice(at + 1)
+        .filter(
+          ({ activity }) =>
+            !JSON.stringify(activity).includes("/connect-microsoft")
+        );
+
+      expect({
+        kept: await keptFor(ann.userId, `Depot ${depot}`),
+        edits: afterFirst.sent.filter(({ editOf }) => editOf === cardId),
+        said: after.map(({ editOf, activity }) => ({
+          edit: editOf !== undefined,
+          undone: JSON.stringify(activity).includes(say("undone", "en")),
+          answered: activity.text === say("alreadyAnswered", "en"),
+        })),
+      }).toStrictEqual({
+        kept: [],
+        edits: [],
+        said: [
+          { edit: false, undone: true, answered: false },
+          { edit: false, undone: false, answered: true },
+        ],
       });
     }
   );
