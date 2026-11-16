@@ -4,6 +4,8 @@ import type {
   ToolResultMessage,
   Usage,
 } from "@earendil-works/pi-ai";
+import { agentDraftSchema } from "@grasp-os/shared/agents";
+import type { AgentDrafted } from "@grasp-os/shared/agents";
 import { chatSavedMemorySchema } from "@grasp-os/shared/brain-memories";
 import type { ChatSavedMemory } from "@grasp-os/shared/brain-memories";
 import {
@@ -177,6 +179,22 @@ const plannedOf = (message: AssistantMessage): ChatPlanned | undefined => {
 };
 
 /**
+ * The agent a response drafted (`draftAgent`), as the tool took it: its
+ * first call the schema takes; none when it drafted none.
+ */
+const draftedOf = (message: AssistantMessage): AgentDrafted | undefined => {
+  for (const part of message.content) {
+    if (part.type === "toolCall" && part.name === "draftAgent") {
+      const draft = agentDraftSchema.safeParse(part.arguments);
+      if (draft.success) {
+        return { callId: part.id, ...draft.data };
+      }
+    }
+  }
+  return undefined;
+};
+
+/**
  * What a response thought, as far as it has streamed in: each thinking
  * part the provider showed, joined. A redacted part holds only pi's own
  * placeholder, never the model's words, so it shows nothing.
@@ -288,6 +306,7 @@ export const chatMessageOf = (
     const reasoning = reasoningOf(message, thinkingMs);
     const asked = asking ? askedOf(message) : undefined;
     const planned = asking ? plannedOf(message) : undefined;
+    const agentDraft = asking ? draftedOf(message) : undefined;
     return {
       id,
       role: "assistant",
@@ -298,6 +317,7 @@ export const chatMessageOf = (
       ...(reasoning === undefined ? {} : { reasoning }),
       ...(asked === undefined ? {} : { asked }),
       ...(planned === undefined ? {} : { planned }),
+      ...(agentDraft === undefined ? {} : { agentDraft }),
       end: ends[message.stopReason],
       ...(message.stopReason === "error"
         ? { failure: modelFailureOf(message.errorMessage) }

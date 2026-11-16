@@ -1,5 +1,7 @@
 import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
 import { agentErrors } from "@grasp-os/shared/agent";
+import { agentDraftSchema } from "@grasp-os/shared/agents";
+import type { AgentDraft } from "@grasp-os/shared/agents";
 import {
   actorOf,
   auditEventSchema,
@@ -71,6 +73,7 @@ import {
 } from "@grasp-os/shared/permissions";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { redact } from "@grasp-os/shared/redact";
+import type { Role } from "@grasp-os/shared/roles";
 import { canBuild, roleSchema } from "@grasp-os/shared/roles";
 import { subjectSchema } from "@grasp-os/shared/subject";
 import type { Subject } from "@grasp-os/shared/subject";
@@ -756,6 +759,31 @@ const traceKeyPrefix = "trace:";
  * proposed them (`takePlan`), so each is made once.
  */
 const builtKeyPrefix = "built:";
+
+/**
+ * Which agents a turn may draft for its person (`TurnContext.drafts`):
+ * only one they asked for, in their own chat in Grasp; one of the
+ * company's for its admins, else one of their own.
+ */
+const draftsOf = ({
+  shared,
+  unattended,
+  via,
+  role,
+}: {
+  shared: boolean;
+  unattended: boolean;
+  via: ChatChannel;
+  role: Role | undefined;
+}): TurnContext["drafts"] => {
+  if (shared || unattended || via !== "web" || role === undefined) {
+    return undefined;
+  }
+  return role === "admin" ? "company" : "own";
+};
+
+/** Where a chat keeps the agents it drafted that Make it took, by call. */
+const draftedKeyPrefix = "drafted:";
 
 const builtSchema = z.array(z.string());
 
@@ -2434,7 +2462,7 @@ export class Workspace extends DurableObject<Env> {
         scope,
         authority,
         work,
-        { shared, personal },
+        { shared, personal, unattended },
         agent
       );
       // Refuses a model the deployment or its rules don't allow before
@@ -2771,7 +2799,11 @@ export class Workspace extends DurableObject<Env> {
     scope: Parameters<typeof auditAgentCall>[1],
     authority: Authority,
     work: Extract<WorkContext, { type: "chat" }>,
-    { shared, personal }: { shared: boolean; personal: boolean },
+    {
+      shared,
+      personal,
+      unattended,
+    }: { shared: boolean; personal: boolean; unattended: boolean },
     agent: Awaited<ReturnType<typeof turnAgent>>
   ): Promise<TurnContext> {
     const chat = this.#chat(work.chatId);
@@ -2841,6 +2873,8 @@ export class Workspace extends DurableObject<Env> {
     // included, needs a role that builds (app-access.ts).
     const role = await memberRole(this.env.DB, scope.personId);
     const builds = !shared && role !== undefined && canBuild(role);
+    // Who drafts an agent for its person to make (`draftAgent`).
+    const drafts = draftsOf({ shared, unattended, via, role });
     // The documents an admin gave the chat's agent, by name.
     const kept =
       agent === undefined ? [] : await documentsOf(this.env, agent.id);
@@ -2850,6 +2884,7 @@ export class Workspace extends DurableObject<Env> {
       skills,
       channel,
       builds,
+      ...(drafts === undefined ? {} : { drafts }),
       // The first agent as Grasp ships it, with no document, is told
       // nothing more.
       ...(agent === undefined ||
@@ -4125,15 +4160,71 @@ export class Workspace extends DurableObject<Env> {
     personId: string,
     callId: unknown
   ): { plan: ChatPlan; make: ChatMake | null } {
+    const { chat, args } = this.#takeCall(chatId, personId, callId, {
+      tool: "proposePlan",
+      keyPrefix: builtKeyPrefix,
+      notFound: "agent.plan_not_found",
+    });
+    const plan = chatPlanSchema.parse(args);
+    return { plan, make: makeOf(chat) };
+  }
+
+  /**
+   * Takes the agent `personId`'s chat `chatId` drafted with the call
+   * `callId` (`draftAgent`), as the call kept it, to make it once: a
+   * chat they don't hold, a draft the tool refused or none, or one taken
+   * already is `agent.draft_not_found`; while its agent works,
+   * `agent.busy`. `releaseAgentDraft` gives it back when Make it made
+   * nothing.
+   */
+  takeAgentDraft(
+    chatId: unknown,
+    personId: string,
+    callId: unknown
+  ): AgentDraft {
+    const { args } = this.#takeCall(chatId, personId, callId, {
+      tool: "draftAgent",
+      keyPrefix: draftedKeyPrefix,
+      notFound: "agent.draft_not_found",
+    });
+    return agentDraftSchema.parse(args);
+  }
+
+  /** Gives back a draft `takeAgentDraft` took, of which Make it made nothing. */
+  releaseAgentDraft(chatId: ChatId, callId: string): void {
+    this.#releaseCall(`${draftedKeyPrefix}${chatId}`, callId);
+  }
+
+  /**
+   * The arguments of the call `callId` to `tool` in `personId`'s chat
+   * `chatId`, as the tool took them, marked taken under `keyPrefix` so
+   * none is taken twice; `notFound` for a chat they don't hold, a call
+   * the tool refused, none, or one taken already, and `agent.busy` while
+   * the chat's agent works.
+   */
+  #takeCall(
+    chatId: unknown,
+    personId: string,
+    callId: unknown,
+    {
+      tool,
+      keyPrefix,
+      notFound,
+    }: {
+      tool: "proposePlan" | "draftAgent";
+      keyPrefix: string;
+      notFound: "agent.plan_not_found" | "agent.draft_not_found";
+    }
+  ): { chat: Chat; args: unknown } {
     const chat = this.#graspChat(chatId, personId);
     const { id } = chat;
     // Its question would be refused: nothing is made for it.
     if (this.#turns.has(id) || this.#isRunning(id)) {
       throw agentErrors.create("agent.busy");
     }
-    const key = `${builtKeyPrefix}${id}`;
+    const key = `${keyPrefix}${id}`;
     const kept = builtSchema.safeParse(this.ctx.storage.kv.get(key));
-    const built = kept.success ? kept.data : [];
+    const taken = kept.success ? kept.data : [];
     const transcript = this.#transcript(id);
     const refused = new Set(
       transcript.flatMap((message) =>
@@ -4148,28 +4239,26 @@ export class Workspace extends DurableObject<Env> {
       )
       .find(
         (part) =>
-          part.type === "toolCall" &&
-          part.name === "proposePlan" &&
-          part.id === callId
+          part.type === "toolCall" && part.name === tool && part.id === callId
       );
-    const plan =
+    const schema = tool === "proposePlan" ? chatPlanSchema : agentDraftSchema;
+    const args =
       call?.type === "toolCall" && !refused.has(call.id)
-        ? chatPlanSchema.safeParse(call.arguments)
+        ? schema.safeParse(call.arguments)
         : undefined;
     if (
       typeof callId !== "string" ||
-      plan?.success !== true ||
-      built.includes(callId)
+      args?.success !== true ||
+      taken.includes(callId)
     ) {
-      throw agentErrors.create("agent.plan_not_found");
+      throw agentErrors.create(notFound);
     }
-    this.ctx.storage.kv.put(key, [...built, callId]);
-    return { plan: plan.data, make: makeOf(chat) };
+    this.ctx.storage.kv.put(key, [...taken, callId]);
+    return { chat, args: args.data };
   }
 
-  /** Gives back a plan `takePlan` took, of which Build it made nothing. */
-  releasePlan(chatId: ChatId, callId: string): void {
-    const key = `${builtKeyPrefix}${chatId}`;
+  /** Gives back the call `callId` taken under `key`. */
+  #releaseCall(key: string, callId: string): void {
     const kept = builtSchema.safeParse(this.ctx.storage.kv.get(key));
     if (kept.success) {
       this.ctx.storage.kv.put(
@@ -4177,6 +4266,11 @@ export class Workspace extends DurableObject<Env> {
         kept.data.filter((each) => each !== callId)
       );
     }
+  }
+
+  /** Gives back a plan `takePlan` took, of which Build it made nothing. */
+  releasePlan(chatId: ChatId, callId: string): void {
+    this.#releaseCall(`${builtKeyPrefix}${chatId}`, callId);
   }
 
   /**
