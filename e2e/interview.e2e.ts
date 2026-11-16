@@ -2,6 +2,7 @@ import { writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import { interviewTurnRequestSchema } from "@grasp-os/shared/interview-turn";
 import { expect } from "@playwright/test";
 import type { Page, Route } from "@playwright/test";
@@ -27,6 +28,7 @@ import {
   wavOf,
 } from "./interview-turns.ts";
 import { signInStaff } from "./people.ts";
+import { origin } from "./stack.ts";
 
 // Someone's own interview, end to end (GRA-345, GRA-346, GRA-382,
 // GRA-1790): they open their link, sign in with the company's sign-in and
@@ -164,6 +166,85 @@ test("someone has their interview by typing, carries on after stopping, and agre
   });
 });
 
+/**
+ * Holds back core's answer to `page`'s next save, which core still takes:
+ * `taken` once it has, and `release` lets the answer go (to a page gone
+ * by then, which never hears it). As a save whose answer is lost when
+ * the page closes, or is still on its way.
+ */
+const holdNextSave = async (page: Page) => {
+  const taken = Promise.withResolvers<null>();
+  const released = Promise.withResolvers<null>();
+  let holding = true;
+  await page.route(`**${interviewApiPath}`, async (route: Route) => {
+    const body = route.request().postData() ?? "";
+    if (!holding || !body.includes('"action":"save"')) {
+      await route.fallback();
+      return;
+    }
+    holding = false;
+    const response = await route.fetch();
+    taken.resolve(null);
+    await released.promise;
+    // The page that asked is gone: nobody takes the answer.
+    await route.fulfill({ response }).catch(() => null);
+  });
+  return {
+    taken: taken.promise,
+    release: () => {
+      released.resolve(null);
+    },
+  };
+};
+
+/**
+ * Holds the next page's opening read (`session`) until `open`: the save
+ * the page sends as it goes leaves at `pagehide`, out of the test's sight,
+ * and the next page's read could reach core first.
+ */
+const holdOpening = async (page: Page): Promise<() => void> => {
+  const opened = Promise.withResolvers<null>();
+  await page.route(`**${interviewApiPath}`, async (route: Route) => {
+    if ((route.request().postData() ?? "").includes('"action":"session"')) {
+      await opened.promise;
+    }
+    await route.fallback();
+  });
+  return () => {
+    opened.resolve(null);
+  };
+};
+
+/** The interview core keeps on `link`, read as `page`'s person, as JSON. */
+const keptOn = async (page: Page, link: string): Promise<string> => {
+  const response = await page.request.post(`${origin}${interviewApiPath}`, {
+    data: { action: "session", secret: link.split("#")[1] ?? "" },
+    headers: { origin, "sec-fetch-site": "same-origin" },
+  });
+  return await response.text();
+};
+
+/**
+ * Core's answer that it kept a save of `page`'s whose progress holds
+ * `holds`. The page keeps each change a moment after it, or as it goes,
+ * and "Saved" shows until a save takes long: a reload before core kept
+ * the change races the page's last save against the next page's read.
+ */
+const keptWith = async (page: Page, holds: string): Promise<void> => {
+  await page.waitForResponse(async (response) => {
+    const request = response.request();
+    if (
+      new URL(response.url()).pathname !== interviewApiPath ||
+      request.method() !== "POST" ||
+      !(request.postData() ?? "").includes(holds)
+    ) {
+      return false;
+    }
+    const answer: unknown = await response.json();
+    return z.object({ saved: z.literal(true) }).safeParse(answer).success;
+  });
+};
+
 test("someone removes a line of theirs and takes out what was written from it, and neither is said to anyone again", async ({
   page,
 }) => {
@@ -215,8 +296,12 @@ test("someone removes a line of theirs and takes out what was written from it, a
   await expect(page.getByText(first)).toBeVisible();
   const answer = page.getByLabel("Your answer");
   await answer.fill(`Only Ria knows ${run}, in Exact.`);
+  // The save after their answer lands in core, but its answer is still on
+  // its way when they remove their line and the page goes.
+  const lastSave = await holdNextSave(page);
   await answer.press("Enter");
   await expect(page.getByText(readBack)).toBeVisible();
+  await lastSave.taken;
 
   // Their own line, in the transcript only they read, removed once confirmed.
   await page.getByRole("button", { name: "Transcript" }).click();
@@ -231,8 +316,16 @@ test("someone removes a line of theirs and takes out what was written from it, a
   await expect(transcript.getByText("Removed.")).toBeVisible();
   await expect(transcript.getByText(run)).toHaveCount(0);
 
-  // Kept removed by core: after a reload, the transcript shows it removed.
+  // Kept removed by core, though the page went before it heard of its last
+  // save: after a reload, the transcript shows it removed.
+  const open = await holdOpening(page);
   await page.reload();
+  lastSave.release();
+  // What the page sent as it went is kept: core's copy has the line removed.
+  await expect
+    .poll(async () => await keptOn(page, link))
+    .toContain('"removed":true');
+  open();
   await page.getByRole("button", { name: "Transcript" }).click();
   await expect(transcript.getByText("Removed.")).toBeVisible();
   await page.getByRole("button", { name: "Transcript" }).click();
@@ -260,10 +353,12 @@ test("someone removes a line of theirs and takes out what was written from it, a
   await expect(page.getByText(adding)).toBeVisible();
   const more = page.getByLabel("Your answer");
   await more.fill("Then I book it in Exact.");
+  const added = keptWith(page, "You check the invoice in Exact.");
   await more.press("Enter");
   await expect(page.getByText(readBack)).toBeVisible();
   await expect(page.getByText("You check the invoice in Exact.")).toBeVisible();
   await expect(page.getByText("Saved")).toBeVisible();
+  await added;
   await page.reload();
   await expect(page.getByText("You check the invoice in Exact.")).toBeVisible();
   expect({

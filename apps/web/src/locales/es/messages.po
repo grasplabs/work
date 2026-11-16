@@ -6858,8 +6858,8 @@ msgid "I hear you. Shall we start?"
 msgstr "Te oigo. ¿Empezamos?"
 
 #: src/onboarding/setup-steps.tsx
-msgid "I keep each file in your Brain, for you alone."
-msgstr "Guardo cada archivo en tu Brain, solo para ti."
+msgid "I keep each file in your Brain, for you alone. What I read in it, never the file itself, helps me in the interviews with the teams it is about, or with every team when it names none."
+msgstr "Guardo cada archivo en tu Brain, solo para ti. Lo que leo en él, nunca el archivo en sí, me ayuda en las entrevistas con los equipos de los que trata, o con todos los equipos cuando no nombra ninguno."
 
 #: src/interview/words.ts
 msgid "I lost the connection. Please check your internet. I have kept what you said, and I keep trying."
