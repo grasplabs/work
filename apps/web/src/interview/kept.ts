@@ -1,4 +1,7 @@
-import { factRevision } from "@grasp-os/shared/interview-links";
+import {
+  factRevision,
+  interviewSavesUnheard,
+} from "@grasp-os/shared/interview-links";
 import type { InterviewProgress } from "@grasp-os/shared/interview-links";
 import type { Interviewer } from "@grasp-os/shared/onboarding";
 import { useSyncExternalStore } from "react";
@@ -36,6 +39,12 @@ interface Kept {
   saving: boolean;
   /** The save on its way, as this page named it (`save`). */
   sending: string | undefined;
+  /**
+   * This page's saves since its last answered one whose answers were
+   * lost: core may have kept any of them, so the next save goes on from
+   * whichever did (`after`).
+   */
+  unheard: string[];
   again: boolean;
   /** Something changed that isn't kept yet. */
   dirty: boolean;
@@ -90,6 +99,10 @@ export const progressNow = (): InterviewProgress =>
 export const linkNow = (): { secret: string } | null =>
   kept === null ? null : { secret: kept.secret };
 
+/** What a save sends of this page's unheard saves (`after`): the latest. */
+const unheardOf = (saves: readonly string[]): { after?: string[] } =>
+  saves.length === 0 ? {} : { after: saves.slice(-interviewSavesUnheard) };
+
 const saveOnce = async (mine: Kept): Promise<void> => {
   mine.dirty = false;
   const sent = mine.progress;
@@ -101,6 +114,7 @@ const saveOnce = async (mine: Kept): Promise<void> => {
     version: mine.version,
     progress: sent,
     save,
+    ...unheardOf(mine.unheard),
   });
   mine.sending = undefined;
   if (kept !== mine || mine.gone) {
@@ -109,6 +123,11 @@ const saveOnce = async (mine: Kept): Promise<void> => {
   if (isRefused(answer)) {
     const passing =
       answer.status === 0 || answer.status === 429 || answer.status >= 500;
+    // Out of reach, or core failed: it may have kept this one all the same.
+    // Refused for the request budget, it kept nothing.
+    if (passing && answer.status !== 429) {
+      mine.unheard = [...mine.unheard, save].slice(-interviewSavesUnheard);
+    }
     if (passing) {
       // It waits here and is tried again, and the screen says so.
       mine.dirty = true;
@@ -121,6 +140,7 @@ const saveOnce = async (mine: Kept): Promise<void> => {
     return;
   }
   mine.failed = 0;
+  mine.unheard = [];
   mine.version = answer.version;
   if (answer.saved) {
     if (!mine.dirty) {
@@ -269,7 +289,11 @@ const onPageHide = (): void => {
       version: mine.version,
       progress: mine.progress,
       save: crypto.randomUUID(),
-      ...(mine.sending === undefined ? {} : { after: mine.sending }),
+      ...unheardOf(
+        mine.sending === undefined
+          ? mine.unheard
+          : [...mine.unheard, mine.sending]
+      ),
     },
     { keepalive: true }
   );
@@ -294,6 +318,7 @@ export const holdInterview = ({
     progress: progress ?? freshProgress,
     saving: false,
     sending: undefined,
+    unheard: [],
     again: false,
     dirty: false,
     waiting: undefined,

@@ -647,7 +647,7 @@ describe("someone's own link", () => {
           version,
           progress: progress(text),
           save: named,
-          ...(after === undefined ? {} : { after }),
+          ...(after === undefined ? {} : { after: [after] }),
         },
         me
       );
@@ -700,7 +700,7 @@ describe("someone's own link", () => {
         version: 0,
         progress: progress(),
         save: crypto.randomUUID(),
-        after: own,
+        after: [own],
       },
       me
     );

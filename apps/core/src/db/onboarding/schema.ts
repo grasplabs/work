@@ -146,11 +146,13 @@ export const links = sqliteTable("links", {
    */
   version: integer().notNull().default(0),
   /**
-   * The save that made `version`, as its page named it (`save`): a save
-   * its page sent while that one's answer was on its way, as it closed,
-   * goes on from it (`after`). None for a version anything else made.
+   * The save that last saved the interview, as its page named it (`save`),
+   * and the version it made (`savedVersion`): a save of that page's that
+   * never heard its answer goes on from it (`after`), while nothing else
+   * has moved the version since. None before a named save.
    */
   savedBy: text("saved_by"),
+  savedVersion: integer("saved_version"),
   /**
    * The account the interview belongs to (GRA-1790): the one whose
    * address, verified by the company's sign-in, it was sent to, when it

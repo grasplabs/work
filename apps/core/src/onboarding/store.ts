@@ -378,6 +378,19 @@ export type LinkActed<T> = LinkAnswer<T> & { work?: LinkWork };
 
 const refused = (code: LinkRefusal) => ({ ok: false, code }) as const;
 
+/** What a save keeps, and what it erases (`#erasing`). */
+interface SaveErasures {
+  progress: InterviewProgress;
+  revisions: Map<string, string>;
+  lines: number;
+  dropped: string[];
+}
+
+/** A save checked (`#savable`): the answer refusing it, or what it keeps. */
+type Savable =
+  | { answer: LinkAnswer<InterviewSaved> }
+  | { next: number; erasing: SaveErasures };
+
 /** `answer`, with the work core settles after it (`LinkActed`). */
 const acted = <T>(work: LinkWork, answer: LinkAnswer<T>): LinkActed<T> => ({
   ...answer,
@@ -944,18 +957,23 @@ const countsOf = (progress: InterviewProgress): InterviewCounts => ({
 
 /**
  * Whether a save over `version` goes on from the version `link` keeps:
- * it is that version, or the page's own save `after` made it, straight
- * from `version`, and nothing moved it since (a delete, another tab).
+ * it is that version, or one of the page's own saves it never heard the
+ * answer to (`after`) made it, and nothing moved it since (a delete,
+ * another tab).
  */
 const goesOnFromKept = (
-  link: { version: number; savedBy: string | null },
+  link: {
+    version: number;
+    savedBy: string | null;
+    savedVersion: number | null;
+  },
   version: number,
-  after: string | undefined
+  after: readonly string[] | undefined
 ): boolean =>
   version === link.version ||
-  (after !== undefined &&
-    link.savedBy === after &&
-    version + 1 === link.version);
+  (link.savedBy !== null &&
+    link.savedVersion === link.version &&
+    (after ?? []).includes(link.savedBy));
 
 export class Onboarding extends DurableObject<Env> {
   readonly #db = drizzle(this.ctx.storage);
@@ -1737,45 +1755,34 @@ export class Onboarding extends DurableObject<Env> {
     account: string,
     version: number,
     progress: InterviewProgress,
-    { save, after: goesOnFrom }: { save?: string; after?: string } = {},
+    {
+      save,
+      after: goesOnFrom,
+    }: { save?: string; after?: readonly string[] } = {},
     now: string = new Date().toISOString()
   ): Promise<LinkActed<InterviewSaved>> {
     const found = this.#onLink(secretMark, { account }, now, "save");
     if (!found.ok) {
       return found;
     }
-    const { person, link, roster } = found.value;
+    const { person, roster } = found.value;
     const work = this.#linkWork(person.id);
-    if (!goesOnFromKept(link, version, goesOnFrom)) {
-      const held = this.#held(person.id);
-      if (held === null && link.deletedAt !== null) {
-        return acted(work, refused("interview.deleted"));
-      }
-      return acted(
-        work,
-        answered({
-          saved: false,
-          version: link.version,
-          progress: this.#forSpeaker(person.id, held),
-        })
-      );
+    // Checked again whenever another save landed while this one's erasures
+    // were worked out; from that check to the write below nothing waits,
+    // so nothing lands between them.
+    let savable: Savable;
+    do {
+      // oxlint-disable-next-line no-await-in-loop -- one check after another
+      savable = await this.#savable(person.id, version, goesOnFrom, progress);
+    } while (
+      !("answer" in savable) &&
+      this.#versionOf(person.id) !== savable.next - 1
+    );
+    if ("answer" in savable) {
+      return acted(work, savable.answer);
     }
-    const erasing = await this.#erasing(person.id, progress);
-    // A copy that brings back a line they removed is an older one, whichever
-    // tab sends it; and hashing let another save land: an older copy now.
-    const current = this.#versionOf(person.id);
-    if (erasing === "unremoved" || current !== link.version) {
-      return acted(
-        work,
-        answered({
-          saved: false,
-          version: current ?? version,
-          progress: this.#forSpeaker(person.id, this.#held(person.id)),
-        })
-      );
-    }
+    const { next, erasing } = savable;
     const { progress: keeping, revisions } = erasing;
-    const next = link.version + 1;
     const [state] = this.#db
       .select()
       .from(interviewStates)
@@ -1795,7 +1802,7 @@ export class Onboarding extends DurableObject<Env> {
     this.ctx.storage.transactionSync(() => {
       this.#db
         .update(links)
-        .set({ version: next, savedBy: save ?? null })
+        .set({ version: next, savedBy: save ?? null, savedVersion: next })
         .where(eq(links.person, person.id))
         .run();
       const kept = {
@@ -4580,6 +4587,7 @@ export class Onboarding extends DurableObject<Env> {
       | "sentTo"
       | "brainMark"
       | "savedBy"
+      | "savedVersion"
     >[];
     interviews: AdminInterviewFacts[];
   } {
@@ -7735,15 +7743,7 @@ export class Onboarding extends DurableObject<Env> {
   async #erasing(
     person: string,
     progress: InterviewProgress
-  ): Promise<
-    | {
-        progress: InterviewProgress;
-        revisions: Map<string, string>;
-        lines: number;
-        dropped: string[];
-      }
-    | "unremoved"
-  > {
+  ): Promise<SaveErasures | "unremoved"> {
     const held = this.#storedProgress(person);
     if (held !== null && bringsBack(held, progress)) {
       return "unremoved";
@@ -7871,6 +7871,59 @@ export class Onboarding extends DurableObject<Env> {
     if (erasing.lines > 0) {
       this.#noted(person, "interview.line_removed", now);
     }
+  }
+
+  /**
+   * Whether `person`'s save over `version` (going on from their page's own
+   * save `goesOnFrom`, if named) goes on from the link as kept now, and
+   * what its erasures are: the version it makes, or the answer that
+   * refuses it. Hashing its erasures lets another save land meanwhile, so
+   * the caller asks again if one did (`saveInterview`): the closing save
+   * of a page whose own save landed meanwhile then goes on from it, and a
+   * copy that brings back a line they removed never does.
+   */
+  async #savable(
+    person: string,
+    version: number,
+    goesOnFrom: readonly string[] | undefined,
+    progress: InterviewProgress
+  ): Promise<Savable> {
+    const [link] = this.#db
+      .select({
+        version: links.version,
+        savedBy: links.savedBy,
+        savedVersion: links.savedVersion,
+        deletedAt: links.deletedAt,
+      })
+      .from(links)
+      .where(eq(links.person, person))
+      .all();
+    if (link === undefined || !goesOnFromKept(link, version, goesOnFrom)) {
+      const held = this.#held(person);
+      if (held === null && (link?.deletedAt ?? null) !== null) {
+        return { answer: refused("interview.deleted") };
+      }
+      return {
+        answer: answered({
+          saved: false,
+          version: link?.version ?? version,
+          progress: this.#forSpeaker(person, held),
+        }),
+      };
+    }
+    const erasing = await this.#erasing(person, progress);
+    // A copy that brings back a line they removed is an older one,
+    // whichever tab sends it.
+    if (erasing === "unremoved") {
+      return {
+        answer: answered({
+          saved: false,
+          version: this.#versionOf(person) ?? version,
+          progress: this.#forSpeaker(person, this.#held(person)),
+        }),
+      };
+    }
+    return { next: link.version + 1, erasing };
   }
 
   /** The version of `person`'s link as kept now; null without one. */

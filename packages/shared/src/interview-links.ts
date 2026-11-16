@@ -301,6 +301,12 @@ export type ApprovedFact = z.output<typeof approvedFactSchema>;
 /** The most one save may carry, as its request's bytes. */
 export const interviewRequestMaxBytes = 768 * 1024;
 
+/**
+ * The most saves a page names as unheard (`after`): the latest ones, as
+ * one goes after another while core is out of reach.
+ */
+export const interviewSavesUnheard = 32;
+
 /** What the interview's page sends. */
 export const interviewRequestSchema = z.discriminatedUnion("action", [
   z.strictObject({
@@ -316,11 +322,12 @@ export const interviewRequestSchema = z.discriminatedUnion("action", [
     /** This save, named by the page that sends it: what a later one goes on from (`after`). */
     save: z.uuid().optional(),
     /**
-     * The page's own save still on its way when it sent this one, as the
-     * page closed: if that one landed, and nothing since, this goes on
-     * from it, though its answer, the next version, never reached the page.
+     * The page's own saves since its last answered one whose answers it
+     * never heard: lost, or still on its way as the page closed. If one of
+     * them made the version kept, and nothing since, this goes on from it,
+     * though the version it made never reached the page.
      */
-    after: z.uuid().optional(),
+    after: z.array(z.uuid()).max(interviewSavesUnheard).optional(),
   }),
   z.strictObject({
     action: z.literal("delete"),

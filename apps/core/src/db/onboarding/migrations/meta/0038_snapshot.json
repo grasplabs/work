@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "ed6385eb-c14c-4ea2-a4e1-79bf39c480e3",
+  "id": "e97357fd-4429-41f2-8177-ad661e395f7a",
   "prevId": "eaf76982-24e1-4d7b-bd14-559463051fc6",
   "tables": {
     "approvals": {
@@ -978,6 +978,13 @@
         "saved_by": {
           "name": "saved_by",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "saved_version": {
+          "name": "saved_version",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

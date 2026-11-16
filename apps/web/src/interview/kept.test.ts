@@ -77,8 +77,54 @@ describe("what the interview page keeps", () => {
       first: { version: 3, named: "string" },
       last: {
         version: 3,
-        after: first?.body.save,
+        after: [first?.body.save],
         keepalive: true,
+        removed: true,
+      },
+    });
+  });
+
+  it("sends a change made after a save whose answer was lost, as the page goes, and its next save, on from that save", async () => {
+    vi.useFakeTimers();
+    const sent: Sent[] = [];
+    // Core takes the first save, but its answer is lost on the way.
+    let calls = 0;
+    const { promise: never } = Promise.withResolvers<Response>();
+    vi.stubGlobal("fetch", async (_path: string, init: RequestInit) => {
+      sent.push({ body: bodyOf(init), keepalive: init.keepalive === true });
+      calls += 1;
+      if (calls === 1) {
+        throw new TypeError("Failed to fetch");
+      }
+      return await never;
+    });
+    holdInterview({ secret: "s".repeat(43), version: 3, progress: said });
+
+    update((now) => ({ ...now, phase: "readback" }));
+    await vi.advanceTimersByTimeAsync(1000);
+    // Their line removed before it is tried again; then it is, and the
+    // page goes while that one is on its way.
+    update((now) => withoutLine(now, 1));
+    await vi.advanceTimersByTimeAsync(5000);
+    window.dispatchEvent(new Event("pagehide"));
+
+    const [lost, again, closing] = sent;
+    expect({
+      sent: sent.length,
+      again: { version: again?.body.version, after: again?.body.after },
+      closing: {
+        version: closing?.body.version,
+        after: closing?.body.after,
+        removed: JSON.stringify(closing?.body.progress).includes(
+          '"removed":true'
+        ),
+      },
+    }).toStrictEqual({
+      sent: 3,
+      again: { version: 3, after: [lost?.body.save] },
+      closing: {
+        version: 3,
+        after: [lost?.body.save, again?.body.save],
         removed: true,
       },
     });

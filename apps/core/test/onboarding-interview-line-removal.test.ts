@@ -438,6 +438,52 @@ describe("removing a line of an interview", { timeout: 60_000 }, () => {
     }
   );
 
+  it("keeps a closing page's removal after its own save, which landed while the removal was hashed", async () => {
+    const stephen = markerOf();
+    const { link, person, progress, version } = await saying(
+      stephen,
+      markerOf()
+    );
+    // The page's save, and the one it sends as it closes: that one again,
+    // with the voice's line removed since, going on from it.
+    const earlier: InterviewProgress = {
+      ...progress,
+      lines: [...progress.lines, { from: "stephen", text: "And then?" }],
+    };
+    const closing = removing(earlier, 0);
+    const own = crypto.randomUUID();
+    const secretMark = await sha256Hex(link.secret);
+    const keyMark = await accountOf(link);
+
+    // Both read the same version, the page's own save first; the closing
+    // one waits on hashing the voice's line, and the other lands meanwhile.
+    const [first, last] = await runInDurableObject(
+      onboardingStore(env),
+      async (instance) =>
+        await Promise.all([
+          instance.saveInterview(secretMark, keyMark, version, earlier, {
+            save: own,
+          }),
+          instance.saveInterview(secretMark, keyMark, version, closing, {
+            save: crypto.randomUUID(),
+            after: [own],
+          }),
+        ])
+    );
+    const kept = await keptOf(person);
+
+    expect({
+      saved: [first, last].map((answer) => answer.ok && answer.value.saved),
+      lines:
+        kept !== null && "progress" in kept ? kept.progress.lines : undefined,
+      voice: await onboardingTablesWith(stephen),
+    }).toStrictEqual({
+      saved: [true, true],
+      lines: closing.lines,
+      voice: [],
+    });
+  });
+
   it("refuses a copy that brings back a line they removed, at the version kept too", async () => {
     const theirs = markerOf();
     const { link, person, progress, version } = await saying(
