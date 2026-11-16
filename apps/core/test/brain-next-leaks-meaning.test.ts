@@ -17,14 +17,18 @@ import {
 } from "../src/brain-next-exports.ts";
 import {
   addInstructionFile,
+  addSource,
   brainWorkOverview,
   eraseSource,
+  memoriesAs,
+  readableMemoriesAs,
   recallAs,
   removeSource,
   workBrain,
 } from "../src/brain-next.ts";
 import type {
   InstructionFile,
+  Said,
   SourceReaders,
   SourceRef,
 } from "../src/brain-next.ts";
@@ -85,6 +89,7 @@ import {
 } from "./brain-next-surfaces.ts";
 import type { Answer, Probe, Probing } from "./brain-next-surfaces.ts";
 import { mockIdp } from "./idp.ts";
+import { addedSharedFile } from "./instruction-saves.ts";
 import { answeringProvider } from "./model-provider.ts";
 import { noProducers } from "./no-producers.ts";
 import { carrying } from "./platform-providers.ts";
@@ -98,9 +103,11 @@ import {
 
 // The marker test (brain-next-leaks.test.ts), by meaning and for memories:
 // answers that depend on a question's meaning, held to the same answers
-// before anything the reader may not read existed; a company's export
-// restored into an empty store; and memories out of use, which must reach
-// no reader as current through any surface.
+// before anything the reader may not read existed; what a model draws from
+// what a reader may not read, a memory restated for a team they aren't in,
+// and the company's instruction files to someone who isn't a member; a
+// company's export restored into an empty store; and memories out of use,
+// which must reach no reader as current through any surface.
 
 const idp = mockIdp();
 teamsWatched();
@@ -260,6 +267,17 @@ const version = async (
 ) => {
   await add(text, readers, world.source);
 };
+
+/** The Brain's one store, as the test reads what extraction drew. */
+const brainStore = () =>
+  inJurisdiction(env, env.BRAIN_STORE).getByName("brain");
+
+/** Words said now by `by`, to draw memories from first. */
+const saidNow = (by: Said["by"]): Said => ({
+  by,
+  at: new Date(),
+  priority: "asked",
+});
 
 describe(
   "the new Brain leaks nothing to a reader without access",
@@ -685,6 +703,297 @@ describe(
         holdersByMeaning: true,
         holdersByDay: true,
         joined: true,
+      });
+    });
+
+    it("gives a reader nothing a model drew from what they may not read, and prompts a model with one version's text at a time", async () => {
+      // Extraction sends restricted text to a model on purpose, so the
+      // rule for prompts is: no marker in a prompt made for a reader who
+      // may not read it. An extraction prompt is made for its version's
+      // readers alone, so it may hold that version's marker and no other.
+      // The model tells everything it is shown, and more: every marker it
+      // saw as names, statements, quotes and values, and every other
+      // marker as names it never saw.
+      const [{ userId: holder }, { userId: outsider }] = await Promise.all([
+        signedInWithRole(idp, "user"),
+        signedInWithRole(idp, "user"),
+      ]);
+      const secretTeam = await newTeam(holder);
+      const ownTeam = await newTeam(outsider);
+      const sharedWord = `s${unique()}`;
+      const markers = {
+        "the holder's own words": markerWord(),
+        "a team's source the outsider isn't in": markerWord(),
+        "a source nobody is known to read": markerWord(),
+      };
+      const all = Object.values(markers);
+      const provider = await answeringProvider((requests) => {
+        const body = JSON.stringify(requests.at(-1)?.body);
+        if (body.includes("You check statements")) {
+          return {
+            text: JSON.stringify({
+              supported: Array.from({ length: 10 }, (_, index) => index),
+            }),
+            inputTokens: 10,
+            outputTokens: 10,
+          };
+        }
+        const shown = all.filter((marker) => body.includes(marker));
+        return {
+          text: JSON.stringify({
+            entities: [
+              { key: "c", kind: "customer", names: [...shown, ...all] },
+              { key: "p", kind: "person", names: shown },
+            ],
+            memories: shown.flatMap((marker) => [
+              {
+                about: "c",
+                attribute: "status",
+                value: marker,
+                type: "fact",
+                statement: `Customer ${marker} is active`,
+                quote: `Customer ${marker} is active`,
+              },
+              {
+                about: "p",
+                type: "instruction",
+                statement: `Always ask ${marker}`,
+                quote: `Always ask ${marker}`,
+              },
+            ]),
+          }),
+          inputTokens: 10,
+          outputTokens: 10,
+        };
+      });
+      const textOfMarker = (marker: string) =>
+        `${sharedWord}: Customer ${marker} is active. Always ask ${marker}.`;
+      const addSaid = async (
+        marker: string,
+        readers: SourceReaders,
+        by: Said["by"]
+      ): Promise<SourceRef> => {
+        const source = newSource();
+        await addSource(env, {
+          source,
+          change: crypto.randomUUID(),
+          text: textOfMarker(marker),
+          readers,
+          said: saidNow(by),
+        });
+        return source;
+      };
+      const own = await addSaid(
+        markers["the holder's own words"],
+        { kind: "owner", personId: holder },
+        { kind: "person", personId: holder }
+      );
+      const team = await addSaid(
+        markers["a team's source the outsider isn't in"],
+        { kind: "team", teamId: secretTeam },
+        { kind: "outside" }
+      );
+      const none = await addSaid(
+        markers["a source nobody is known to read"],
+        { kind: "none" },
+        { kind: "outside" }
+      );
+      // The outsider's own, drawn from too.
+      await addSaid(
+        `own${unique()}`,
+        { kind: "team", teamId: ownTeam },
+        { kind: "outside" }
+      );
+      await workBrain(env, new Date(), noProducers);
+
+      // Drawn for those who may read them: the test holds only if the
+      // model's memories exist.
+      const holderReads: number[] = [];
+      for (const name of [
+        markers["the holder's own words"],
+        markers["a team's source the outsider isn't in"],
+      ]) {
+        // oxlint-disable-next-line no-await-in-loop -- one name at a time
+        const found = await brainStore().findEntities({
+          reader: { person: holder, groups: [`team:${secretTeam}`] },
+          name,
+        });
+        holderReads.push(found.entities.length);
+      }
+      const prompts = provider.requests.map(({ body }) =>
+        all.filter((marker) => JSON.stringify(body).includes(marker))
+      );
+      const findings = await findingsOf(
+        "the outsider, after extraction",
+        {
+          personId: outsider,
+          reader: { person: outsider, groups: [`team:${ownTeam}`] },
+          personal: true,
+          sharedWord,
+          markers: all,
+          hiddenVersions: everyVersionOf(own, team, none),
+          hiddenInstructionFiles: [],
+          instructionGroups: ["company"],
+        },
+        markers
+      );
+
+      expect({
+        holderReads,
+        // Two calls for the team's version; one for the outsider's own,
+        // where the model proposed nothing to check; none for the one
+        // nobody may read, nor for the holder's own: it is kept in the
+        // holder's own store, which draws from it on its own tick.
+        promptCount: prompts.length,
+        mixed: prompts.filter((held) => held.length > 1),
+        findings,
+      }).toStrictEqual({
+        // In the shared store: nothing of the holder's own source; of the
+        // team's, the customer alone, as the instruction the model proposed
+        // about a person is never drawn from a source.
+        holderReads: [0, 1],
+        promptCount: 3,
+        mixed: [],
+        findings: [],
+      });
+    });
+
+    it("gives a reader of a memory alone that memory current when its restatement lands for a team they aren't in, and a reader of both one current (GRA-1752)", async () => {
+      const [{ userId: holder }, { userId: outsider }] = await Promise.all([
+        signedInWithRole(idp, "user"),
+        signedInWithRole(idp, "user"),
+      ]);
+      // The outsider and the holder share a team; the holder alone is in
+      // the other.
+      const sharedTeam = await newTeam(outsider, holder);
+      const holdersTeam = await newTeam(holder);
+      const name = `Merge${unique().replaceAll("-", "").slice(0, 10)}`;
+      const said = {
+        about: "c",
+        type: "fact" as const,
+        statement: `${name} works from Delft.`,
+        speaker: { kind: "system" as const },
+        basis: { kind: "writer" as const, writer: holder },
+      };
+      const earlier = await brainStore().addMemories({
+        change: crypto.randomUUID(),
+        access: { kind: "audience", group: `team:${sharedTeam}` },
+        entities: [{ key: "c", kind: "customer", names: [`${name} Group`] }],
+        memories: [said],
+      });
+      const entity = earlier.entities.c ?? "";
+      // The same fact said again by the same writer, for the holder's team.
+      const later = await brainStore().addMemories({
+        change: crypto.randomUUID(),
+        access: { kind: "audience", group: `team:${holdersTeam}` },
+        reader: {
+          person: holder,
+          groups: [`team:${sharedTeam}`, `team:${holdersTeam}`],
+        },
+        entities: [{ key: "c", id: entity, kind: "customer", names: [] }],
+        memories: [said],
+      });
+      const ids = [...earlier.memories, ...later.memories];
+      /** What `personId` reads of the two through core: each one's state, and which they may read. */
+      const readBy = async (personId: string) => {
+        const page = await memoriesAs(env, personId, {
+          entity: { store: "shared", id: entity },
+        });
+        const readable = await readableMemoriesAs(
+          env,
+          personId,
+          ids.map((memory) => ({ store: "shared", memory }))
+        );
+        return ids.map((id) => {
+          const read = page.memories.find((memory) => memory.id === id);
+          let state = "unread";
+          if (read !== undefined) {
+            state = read.endedAt === null ? "current" : "ended";
+          }
+          return {
+            state,
+            readable: readable.some(({ memory }) => memory === id),
+          };
+        });
+      };
+
+      expect({
+        outsider: await readBy(outsider),
+        holder: await readBy(holder),
+      }).toStrictEqual({
+        // As in a store without the restatement: the earlier, current.
+        outsider: [
+          { state: "current", readable: true },
+          { state: "unread", readable: false },
+        ],
+        holder: [
+          { state: "ended", readable: true },
+          { state: "current", readable: true },
+        ],
+      });
+    });
+
+    it("gives someone who isn't a member, or was one, nothing of the company's instruction files", async () => {
+      await answeringProvider(() => {});
+      // Every member may read the company's files, so they are probed as
+      // someone who never was one, and someone an admin removed: the
+      // surfaces that load, read and recall them.
+      const [admin, former] = await Promise.all([
+        signedInApi(idp, "admin"),
+        signedInWithRole(idp, "user"),
+      ]);
+      await admin.api.members.remove(former.userId);
+      const marker = markerWord();
+      const companyFiles: Extract<InstructionFile, { scope: "company" }>[] = [
+        { scope: "company", name: "instructions" },
+        { scope: "company", name: "facts" },
+      ];
+      for (const file of companyFiles) {
+        // oxlint-disable-next-line no-await-in-loop -- one file at a time
+        await addedSharedFile(
+          file,
+          `Company instructions ${marker}`,
+          admin.userId
+        );
+      }
+      const forbidden = { "the company's instruction files": marker };
+      const findings: Finding[] = [];
+      for (const [pass, personId] of [
+        ["someone who never was a member", `stranger-${crypto.randomUUID()}`],
+        ["someone an admin removed", former.userId],
+      ] as const) {
+        findings.push(
+          // oxlint-disable-next-line no-await-in-loop -- one pass at a time
+          ...(await findingsOf(
+            pass,
+            {
+              personId,
+              reader: { person: personId, groups: [] },
+              personal: true,
+              sharedWord: `s${unique()}`,
+              markers: [marker],
+              hiddenVersions: [],
+              hiddenInstructionFiles: companyFiles,
+              instructionGroups: ["company"],
+            },
+            forbidden,
+            {
+              among: surfaces.filter(([name]) =>
+                [
+                  "instructions instructionFilesFor",
+                  "store readCurrent",
+                  "store recall",
+                ].includes(name)
+              ),
+            }
+          ))
+        );
+      }
+      const prompted = await carrying(marker);
+
+      expect({ findings, prompted }).toStrictEqual({
+        findings: [],
+        prompted: [],
       });
     });
 
