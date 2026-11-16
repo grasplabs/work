@@ -1793,6 +1793,13 @@
       "when": 1794787120840,
       "tag": "0255_eager_korg",
       "breakpoints": true
+    },
+    {
+      "idx": 256,
+      "version": "6",
+      "when": 1794819439291,
+      "tag": "0256_quick_goliath",
+      "breakpoints": true
     }
   ]
 }

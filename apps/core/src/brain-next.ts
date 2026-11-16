@@ -128,6 +128,8 @@ import { modelErrors } from "@grasp-os/shared/models";
 import type { ModelErrorCode } from "@grasp-os/shared/models";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { skillErrors } from "@grasp-os/shared/skills";
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { memberOf } from "./auth/identity.ts";
@@ -138,6 +140,7 @@ import {
   ownStoresTotals,
 } from "./brain-own-stores.ts";
 import type { OwnStoreHealth } from "./brain-own-stores.ts";
+import { interviewTeams } from "./db/core/schema.ts";
 import { inJurisdiction, workspace } from "./durable-objects.ts";
 import {
   embedInBulk,
@@ -149,7 +152,6 @@ import { promptTextOf } from "./instructions-text.ts";
 import { parseModelRef } from "./model-catalog.ts";
 import { brainSpendByPurpose, spendMonth } from "./model-spend.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
-import { onboardingStoreName } from "./onboarding/store-name.ts";
 import { organizationTimeZone } from "./organization.ts";
 import { personalWorkspaceId } from "./personal-workspace.ts";
 import { shippedSkills } from "./shipped-skills.ts";
@@ -219,8 +221,8 @@ const rosterTeamIdSchema = wellFormedString()
   .min(1)
   .max(principalMaxLength - interviewsPrefix.length);
 
-/** What reading as a member needs: core's records and the onboarding's. */
-type ReaderEnv = Pick<Env, "DB" | "ONBOARDING" | "DURABLE_OBJECT_JURISDICTION">;
+/** What reading as a member needs: core's records. */
+type ReaderEnv = Pick<Env, "DB">;
 
 /** A person's or a team's ID, as core passes it: never empty. */
 const idSchema = wellFormedString()
@@ -757,37 +759,30 @@ export type Reach = "person" | "teams" | "company";
 
 /**
  * The staff-list team whose claims `personId` reads (GRA-1741): that of
- * the interview they took part in under their own account, while they are
- * on the list in it (the store's `interviewTeamOf`). Asked of the
- * onboarding's object at every read, beside core's own records, so a move
- * or a removal holds from the next question on. A failure there drops only
- * that group, so the onboarding can't take the Brain down with it: the
- * reader then reads less, never more. It has no timeout of its own: a slow
- * onboarding object holds the read up to the platform's own RPC limits,
- * and a throw fails closed as above.
+ * the interview their account holds, while its person is on the list in
+ * it, as the onboarding keeps it in core's own records (`interview_teams`,
+ * GRA-1942), so a read never asks the onboarding's object. Whether a
+ * claim may be read is the Brain's alone, inside its statement: a claim
+ * that stops standing (under five backers, or its team under seven) is
+ * out of use in the shared store before the change that drops it commits
+ * (GRA-1946), so a group with nothing standing behind it reads nothing.
  */
 const interviewTeamOf = async (
-  env: ReaderEnv,
+  database: D1Database,
   personId: string
 ): Promise<string | null> => {
-  try {
-    return await inJurisdiction(env, env.ONBOARDING)
-      .getByName(onboardingStoreName)
-      .interviewTeamOf(personId);
-  } catch (error) {
-    log.error("brain.interview_team_failed", {
-      error: error instanceof Error ? error.name : "unknown",
-    });
-    return null;
-  }
+  const [row] = await drizzle(database)
+    .select({ team: interviewTeams.team })
+    .from(interviewTeams)
+    .where(eq(interviewTeams.userId, personId));
+  return row?.team ?? null;
 };
 
 /**
  * The member `personId` as the Brain's reader: the person, their teams as
  * core counts them now, the staff-list team whose claims they read
  * (`interviewTeamOf`), and the company. Refused once they have no current
- * membership. Without `interviews`, never the staff-list team: the
- * onboarding's object isn't asked.
+ * membership. Without `interviews`, never the staff-list team.
  */
 const personReaderOf = async (
   env: ReaderEnv,
@@ -797,7 +792,7 @@ const personReaderOf = async (
   const id = checked(idSchema, personId);
   const [member, interviewTeam] = await Promise.all([
     memberOf(env.DB, id),
-    interviews ? interviewTeamOf(env, id) : null,
+    interviews ? interviewTeamOf(env.DB, id) : null,
   ]);
   if (member === undefined) {
     throw permissionErrors.create("permission.person_inactive");
@@ -1769,6 +1764,29 @@ export const removeSource = async (
   const store =
     readers.kind === "owner" ? ownBrain(env, readers.personId) : brain(env);
   await store.removeSources({ sources: [sourceKeyOf(source)] });
+};
+
+const sharedRemovalSchema = z.array(sourceRefSchema);
+
+/**
+ * Takes `sources`, each one the shared store holds, out of use there as
+ * `removeSource` takes one: each batch of up to `removalsMax` (the store's
+ * own bound) in one call and one transaction of the store. Safe to repeat.
+ * For the onboarding's team claims that stop standing, before the change
+ * that drops them commits (GRA-1946).
+ */
+export const removeSharedSources = async (
+  env: BrainEnv,
+  sources: readonly SourceRef[]
+): Promise<void> => {
+  const keys = checked(sharedRemovalSchema, sources).map((source) =>
+    sourceKeyOf(source)
+  );
+  const store = brain(env);
+  for (let at = 0; at < keys.length; at += removalsMax) {
+    // oxlint-disable-next-line no-await-in-loop -- one batch at a time
+    await store.removeSources({ sources: keys.slice(at, at + removalsMax) });
+  }
 };
 
 const ownRemovalSchema = z.strictObject({

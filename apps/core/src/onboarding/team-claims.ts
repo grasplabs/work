@@ -67,6 +67,12 @@ export const teamMayClaim = (
   floor: number = minTeamShown
 ): boolean => interviewed >= floor + 2;
 
+/** A team claim's source in the new Brain, by the onboarding's id for it (`claim:<id>`). */
+export const claimSource = (id: string): { producer: "claim"; id: string } => ({
+  producer: "claim",
+  id,
+});
+
 /** What a team's claims are put together from. */
 export interface ClaimBrief {
   /** Everyone on the staff list, by name: none reaches the model or the brain. */

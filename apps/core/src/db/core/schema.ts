@@ -522,6 +522,22 @@ export const teamMembers = sqliteTable(
 );
 
 /**
+ * The onboarding's staff-list team whose claims each account reads in
+ * the Brain (GRA-1741, GRA-1942): that of the interview it holds, while
+ * its person is on the list in that team. Written by the onboarding's
+ * object alone (`syncInterviewTeams`) after each change of it, so a
+ * Brain read finds it beside the member's own teams, without asking the
+ * onboarding. Whether a claim may be read is the Brain's: one that stops
+ * standing is out of use there before the change that drops it commits.
+ */
+export const interviewTeams = sqliteTable("interview_teams", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  team: text().notNull(),
+});
+
+/**
  * Part of the SSO plugin's model, and stays empty: sign-in providers come
  * only from deployment config, and registering one in-product is refused.
  */

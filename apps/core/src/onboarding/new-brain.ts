@@ -6,6 +6,7 @@ import { addSource, eraseSource } from "../brain-next.ts";
 import type { Handed, SourceRef } from "../brain-next.ts";
 import { onboardingStore } from "./store.ts";
 import type { OwedErasure } from "./store.ts";
+import { claimSource } from "./team-claims.ts";
 
 // What the onboarding gives the new Brain (GRA-1790, GRA-1741), and takes
 // back. The onboarding's store decides what stands, from its own records:
@@ -26,6 +27,10 @@ import type { OwedErasure } from "./store.ts";
 //   for the hand-over (brain-hand-overs.ts), which reads it here
 //   (`claimOf`) when it runs: a team's, never a person's.
 //
+// A claim that stops standing is out of use in the shared store before the
+// change that drops it commits (the store's `#claimsFirst`), so no read
+// after that change finds it (GRA-1946); its erasure follows.
+//
 // What no longer stands is erased with `eraseSource`, directly: at once
 // after anything that takes an interview out (links.ts, admin-command.ts,
 // person-erasure.ts), and on core's clock until done
@@ -35,12 +40,6 @@ import type { OwedErasure } from "./store.ts";
 /** An interview's source, by the store's id for it. */
 export const interviewSource = (id: string): SourceRef => ({
   producer: "interview",
-  id,
-});
-
-/** A team claim's source, by the store's id for it. */
-export const claimSource = (id: string): SourceRef => ({
-  producer: "claim",
   id,
 });
 
@@ -154,17 +153,27 @@ export const eraseOwedOnboardingSources = async (
 
 /**
  * Settles what the onboarding owes the new Brain: every erasure owed
- * first, then every interview to add (`addOwedInterviews`). Core's clock
- * runs it every minute.
+ * first, then every interview to add (`addOwedInterviews`), then core's
+ * record of whose team's claims each account reads, after a change whose
+ * own sync failed (`syncInterviewTeams`). Core's clock runs it every
+ * minute.
  */
 export const settleOnboardingBrain = async (env: Env): Promise<void> => {
   await eraseOwedOnboardingSources(env);
   await addOwedInterviews(env);
+  try {
+    await onboardingStore(env).syncInterviewTeams();
+  } catch (error) {
+    log.error("onboarding.interview_teams_failed", {
+      error: error instanceof Error ? error.name : "unknown",
+    });
+  }
 };
 
 /**
  * Erases every interview the Brain holds under `account` that no longer
- * stands, whoever's link it came from, then throws while any is still
+ * stands, whoever's link it came from, and core's record of the team whose
+ * claims it read (`interview_teams`), then throws while any is still
  * owed: for core's erasure of that account, which lets go only once none
  * is (person-erasure.ts). Keyed by the account alone, so it never reaches
  * the interview of whoever holds that link now.
@@ -173,6 +182,10 @@ export const eraseOnboardingAccount = async (
   env: Env,
   account: string
 ): Promise<void> => {
+  // Whose team's claims the account reads goes from core's records with
+  // the link it no longer holds (`syncInterviewTeams`); failing, this
+  // throws, and the erasure is tried again.
+  await onboardingStore(env).syncInterviewTeams();
   await eraseOwedOnboardingSources(env, { account });
   const owed = await onboardingStore(env).owedErasures({ account });
   if (owed.length > 0) {

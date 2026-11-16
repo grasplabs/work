@@ -37,7 +37,8 @@ import {
 } from "./brain-run-sources.ts";
 import { brainHandOvers, workflowStartReceipts } from "./db/core/schema.ts";
 import { workspace } from "./durable-objects.ts";
-import { claimOf, claimSource } from "./onboarding/new-brain.ts";
+import { claimOf } from "./onboarding/new-brain.ts";
+import { claimSource } from "./onboarding/team-claims.ts";
 import { personalWorkspaceId } from "./personal-workspace.ts";
 import { resultOf, runOf } from "./workflows/resource-runs.ts";
 import { detailsRemoved } from "./workflows/retention.ts";

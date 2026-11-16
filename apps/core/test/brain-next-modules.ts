@@ -64,6 +64,10 @@ export const brainModules = {
   // sources, with core's addSource and eraseSource, and answers nothing of
   // them.
   "apps/core/src/onboarding/new-brain.ts": "core",
+  // The onboarding's object as the Worker runs it: takes team claims that
+  // stop standing out of use with core's removeSharedSources, and hands
+  // nothing of the Brain on.
+  "apps/core/src/onboarding/object.ts": "core",
   // A chat's recall before its question: hands the model what core's
   // recallAs gave the chat's own person, passages and memories, two of its
   // packs merged at most (mergeRecalled, which only drops what both hold

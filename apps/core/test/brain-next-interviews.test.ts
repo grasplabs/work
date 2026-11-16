@@ -127,10 +127,14 @@ const signsIn = async (
 };
 
 /**
- * Core's env with the Brain's store held at each add of a source `holds`
- * picks: `arrived` once one is in flight, which waits for `release`.
+ * Core's env with the Brain's stores held at each call of `method` whose
+ * argument `holds` names (what `arrived` then gives): `arrived` once one is
+ * in flight, which waits for `release`.
  */
-const holdingAdds = (holds: (source: string) => boolean) => {
+const holdingCalls = (
+  method: string,
+  holds: (argument: unknown) => string | undefined
+) => {
   const released = Promise.withResolvers<boolean>();
   const arrived = Promise.withResolvers<string>();
   const stubOf = <T extends object>(stub: T): T =>
@@ -142,16 +146,19 @@ const holdingAdds = (holds: (source: string) => boolean) => {
         }
         // An RPC stub's members are its own: called with Reflect, never
         // through `call` or `bind`, which it would take for methods.
-        if (name !== "addSource") {
+        if (name !== method) {
           return (...given: unknown[]): unknown =>
             Reflect.apply(member, target, given);
         }
-        return async (added: { source: string }): Promise<unknown> => {
-          if (holds(added.source)) {
-            arrived.resolve(added.source);
+        return async (argument: unknown): Promise<unknown> => {
+          const named = holds(argument);
+          if (named !== undefined) {
+            arrived.resolve(named);
             await released.promise;
           }
-          const answer: unknown = await Reflect.apply(member, target, [added]);
+          const answer: unknown = await Reflect.apply(member, target, [
+            argument,
+          ]);
           return answer;
         };
       },
@@ -185,6 +192,32 @@ const holdingAdds = (holds: (source: string) => boolean) => {
     },
   };
 };
+
+/** Core's env with the Brain's stores held at each add of a source `holds` picks (`holdingCalls`). */
+const holdingAdds = (holds: (source: string) => boolean) =>
+  holdingCalls("addSource", (added) => {
+    const { source } = z.object({ source: z.string() }).parse(added);
+    return holds(source) ? source : undefined;
+  });
+
+/**
+ * Core's env with the Brain's shared store held at its first search for a
+ * read (`find`): the reader is decided, its statement not run yet.
+ */
+const holdingFinds = () => {
+  let first = true;
+  return holdingCalls("find", () => {
+    const now = first;
+    first = false;
+    return now ? "find" : undefined;
+  });
+};
+
+/** The staff-list team whose claims `userId` reads, as core keeps it (`interview_teams`). */
+const interviewTeamIn = async (userId: string): Promise<string | null> =>
+  await env.DB.prepare("SELECT team FROM interview_teams WHERE user_id = ?")
+    .bind(userId)
+    .first<string>("team");
 
 /**
  * Core's env with every erasure in the Brain's stores failing, as when the
@@ -599,7 +632,7 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
     expect({
       done: completed !== null,
       kept: await keptIn(key, lea),
-      team: await store.interviewTeamOf(lea),
+      team: await interviewTeamIn(lea),
       reopened: reopened.ok ? "open" : reopened.code,
       owed: await store.owedErasures({ person: ids.lea }),
     }).toStrictEqual({
@@ -652,7 +685,7 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
             .toArray().length
       ),
       backs: await store.sentFor(ids.lea),
-      team: await store.interviewTeamOf(lea),
+      team: await interviewTeamIn(lea),
       kept: await keptIn(key, lea),
     }).toStrictEqual({
       interview: 0,
@@ -1080,7 +1113,7 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     const outsider = await signsIn(`outsider-${unique()}@acme.test`);
     const listed = await claimsOf(max);
     expect({
-      team: await onboardingStore(env).interviewTeamOf(max),
+      team: await interviewTeamIn(max),
       max: await recalled(max, "Zendesk", "claim"),
       listed: listed.map(({ versions }) => versions),
       fourCite: await recalled(max, "sends", "claim"),
@@ -1308,7 +1341,7 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
 
   /** What `max` can read of the team's claims now: the group core gives them, recall and listing. */
   const readableBy = async (max: string) => ({
-    group: await onboardingStore(env).interviewTeamOf(max),
+    group: await interviewTeamIn(max),
     recalled: await recalled(max, "Zendesk", "claim"),
     listed: await claimsOf(max),
   });
@@ -1518,7 +1551,7 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
       type: "system",
     });
     await expect(readableBy(max)).resolves.toStrictEqual({
-      group: null,
+      group: ids.team,
       recalled: [],
       listed: [],
     });
@@ -1530,7 +1563,7 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     await handOverNow();
     await onLink({ action: "withdraw", ...(await openLink(ids.rik)) });
     await expect(readableBy(max)).resolves.toStrictEqual({
-      group: null,
+      group: ids.team,
       recalled: [],
       listed: [],
     });
@@ -1546,6 +1579,115 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     expect({ before, now: await readableBy(max) }).toStrictEqual({
       before: [zendeskClaim.text],
       now: { group: ids.team, recalled: [], listed: [] },
+    });
+  });
+
+  it("are unreadable to a read already under way when a backer's withdrawal leaves four behind one: its reader decided before, its statement run after, the request's own erasures failing", async () => {
+    const { ids, max } = await drawnTeam({ eight: true });
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const before = await recalled(max, "Zendesk", "claim");
+    // Max's read: who reads (his groups) is decided, and it is held just
+    // before the shared store's statement runs.
+    const held = holdingFinds();
+    const reading = recallAs(held.env, max, {
+      question: "Zendesk",
+      budget: { tokens: 2000 },
+      personal: true,
+    });
+    await held.arrived;
+    // Pim, who backs the claim, withdraws, and the request's own erasures
+    // fail: what the Brain still has of it is the store's doing alone.
+    const answer = await onLink(
+      { action: "withdraw", ...(await openLink(ids.pim)) },
+      erasuresFailing()
+    );
+    held.release();
+    const { items } = await reading;
+    expect({
+      before,
+      withdrew: answer.ok,
+      during: items
+        .filter(({ source }) => source.producer === "claim")
+        .map(({ text }) => text),
+    }).toStrictEqual({
+      before: [zendeskClaim.text],
+      withdrew: true,
+      during: [],
+    });
+  });
+
+  it("are read without asking the onboarding: a person's recall makes no call to it, out of reach, and finds their team's claim", async () => {
+    const { ids, max } = await drawnTeam();
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    let calls = 0;
+    const unreachable = new Proxy(env.ONBOARDING, {
+      get: () => {
+        calls += 1;
+        throw new Error("The onboarding is out of reach.");
+      },
+    });
+    const outOfReach: Env = { ...env, ONBOARDING: unreachable };
+    const { items } = await recallAs(outOfReach, max, {
+      question: "Zendesk",
+      budget: { tokens: 2000 },
+      personal: true,
+    });
+    expect({
+      calls,
+      recalled: items
+        .filter(({ source }) => source.producer === "claim")
+        .map(({ text }) => text),
+    }).toStrictEqual({ calls: 0, recalled: [zendeskClaim.text] });
+  });
+
+  it("hold a backer's withdrawal back, made of nothing, while the Brain can't take the claim it drops out of use, and let it through once it can", async () => {
+    const { ids, max } = await drawnTeam({ eight: true });
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const device = await openLink(ids.pim);
+    // The shared store refuses removals while a restore runs.
+    const shared = inJurisdiction(env, env.BRAIN_STORE).getByName("brain");
+    const restore = `restore-${unique()}`;
+    await runInDurableObject(shared, (_, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO restores (export, checked, part, restored, state, started_at) VALUES (?, 0, 0, 0, 'running', ?)",
+        restore,
+        Date.now()
+      );
+    });
+    const refused = await onLink({ action: "withdraw", ...device });
+    const whileRestoring = {
+      ok: refused.ok,
+      withdrawn: await runInDurableObject(
+        onboardingStore(env),
+        (_, state) =>
+          state.storage.sql
+            .exec(
+              "SELECT 1 FROM participations WHERE person = ? AND withdrawn_at IS NOT NULL",
+              ids.pim
+            )
+            .toArray().length
+      ),
+      read: await recalled(max, "Zendesk", "claim"),
+    };
+    await runInDurableObject(shared, (_, state) => {
+      state.storage.sql.exec("DELETE FROM restores WHERE export = ?", restore);
+    });
+    const answer = await onLink({ action: "withdraw", ...device });
+    expect({
+      whileRestoring,
+      withdrew: answer.ok,
+      after: await recalled(max, "Zendesk", "claim"),
+    }).toStrictEqual({
+      whileRestoring: {
+        ok: false,
+        withdrawn: 0,
+        read: [zendeskClaim.text],
+      },
+      withdrew: true,
+      after: [],
     });
   });
 
@@ -1617,7 +1759,7 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     const listed = await claimsOf(max);
     expect({
       first: first === undefined,
-      group: await onboardingStore(env).interviewTeamOf(max),
+      group: await interviewTeamIn(max),
       oldKey: listed.some(({ source }) => source.id === first?.source.id),
       recalled: await recalled(max, "Zendesk", "claim"),
     }).toStrictEqual({
@@ -1656,7 +1798,7 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     }).toStrictEqual({
       before: [zendeskClaim.text],
       owed: true,
-      now: { group: null, recalled: [], listed: [] },
+      now: { group: ids.team, recalled: [], listed: [] },
     });
   });
 
@@ -1680,7 +1822,7 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     }).toStrictEqual({
       first: false,
       oldKey: false,
-      now: { group: null, recalled: [], listed: [] },
+      now: { group: ids.team, recalled: [], listed: [] },
     });
   });
 
@@ -1704,7 +1846,7 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
       now: await readableBy(max),
     }).toStrictEqual({
       owed: true,
-      now: { group: null, recalled: [], listed: [] },
+      now: { group: ids.team, recalled: [], listed: [] },
     });
   });
 
