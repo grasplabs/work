@@ -12,7 +12,7 @@ import { rememberName } from "./agent-messages.ts";
 import { chatAuthority, chatContext } from "./agent-scope.ts";
 import type { AgentScope } from "./agent-scope.ts";
 import { rememberFor } from "./brain-memories.ts";
-import { memoryChoices, ownEntityAs } from "./brain-next.ts";
+import { memoryChoices, ownEntityAs, ownEntityIdAs } from "./brain-next.ts";
 import type { Remembered } from "./brain-next.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
 
@@ -210,12 +210,19 @@ export const statedByThem = async (
 const unknownEntity =
   "Not saved: no entity of theirs has that id. Name who or what it is about instead.";
 
+/** The person themselves, as the Brain takes it: their own entity alone. */
+const ownSubject = {
+  subject: { self: true },
+  entity: { kind: "person", own: true },
+} as const;
+
 /**
  * What `about` is, as the check and the notice name it, and as the Brain
- * takes it: the person themselves; an entity of theirs by its id, named
- * as their own store holds it (never as the model names it); or another
- * by its kind and name. Null for an id they can't read, or one the store
- * holds no name for.
+ * takes it: the person themselves, their own entity (brain-next.ts
+ * `ownEntityIdAs`: never one a name or an email finds), by "me" or by its
+ * id; an entity of theirs by its id, named as their own store holds it
+ * (never as the model names it); or another by its kind and name. Null
+ * for an id they can't read, or one the store holds no name for.
  */
 const subjectOf = async (
   env: Env,
@@ -225,12 +232,8 @@ const subjectOf = async (
   subject: Subject;
   entity: Remembered["about"];
 } | null> => {
-  const self = { type: "ref" as const, value: `grasp:person:${personId}` };
   if (about === "me") {
-    return {
-      subject: { self: true },
-      entity: { kind: "person", identifiers: [self] },
-    };
+    return ownSubject;
   }
   if (about.id === undefined) {
     return {
@@ -238,23 +241,18 @@ const subjectOf = async (
       entity: { kind: about.kind, names: [about.name] },
     };
   }
-  const held = await ownEntityAs(env, personId, about.id);
-  if (held === null) {
-    return null;
+  const [held, own] = await Promise.all([
+    ownEntityAs(env, personId, about.id),
+    ownEntityIdAs(env, personId),
+  ]);
+  if (about.id === own) {
+    return ownSubject;
   }
-  const entity = { id: about.id, kind: held.kind };
-  if (
-    held.identifiers.some(
-      ({ type, value }) => type === self.type && value === self.value
-    )
-  ) {
-    return { subject: { self: true }, entity };
-  }
-  return held.name === null
+  return held === null || held.name === null
     ? null
     : {
         subject: { kind: held.kind, name: held.name, names: held.names },
-        entity,
+        entity: { id: about.id, kind: held.kind },
       };
 };
 

@@ -28,6 +28,7 @@ import {
   lineageOfWriter,
   stampWrite,
 } from "./memories.ts";
+import { ownEntityRow } from "./own-entity.ts";
 import { CurrentTextsNeededError, heldIn, judgeLate } from "./quotes.ts";
 import type { CurrentText, CurrentTexts, Written } from "./quotes.ts";
 import { accessOfKey, readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
@@ -142,7 +143,9 @@ export interface RememberStore {
 const encoder = new TextEncoder();
 
 /**
- * The entities of an add as rows: each known `id` (of its kind), else
+ * The entities of an add as rows: the store's own entity for one named
+ * `own` (own-entity.ts, made by the first; refused in the shared store),
+ * each known `id` (of its kind), else
  * the first holding one of its identifiers, or another entity of the add
  * with one of them, else, given no identifier, the one entity of its kind
  * holding one of its names by memories of exactly the add's readers
@@ -151,7 +154,8 @@ const encoder = new TextEncoder();
 const entityRowsOf = (
   sql: SqlStorage,
   { entities, reader }: Adding,
-  readers: string
+  readers: string,
+  shared: boolean
 ): number[] => {
   const linked = new Map<string, number>();
   return entities.map((entity, index) => {
@@ -159,7 +163,16 @@ const entityRowsOf = (
       JSON.stringify([entity.kind, id.type, foldIdentifier(id)])
     );
     let row: number | undefined;
-    if (entity.id === undefined) {
+    if (entity.own === true) {
+      // Its person, in their own store alone: never one a name or an
+      // identifier finds, and never in the shared store.
+      if (shared) {
+        throw refused(
+          `entity ${index} names a person's own, which only their own store holds`
+        );
+      }
+      row = ownEntityRow(sql);
+    } else if (entity.id === undefined) {
       row =
         keys
           .map((key) => linked.get(key))
@@ -626,7 +639,7 @@ export const writeAdd = (
     // by its key alone, never its row id.
     readerSetOf(db, adding.access);
     const readers = readerSetKeyOf(adding.access);
-    const rows = entityRowsOf(sql, adding, readers);
+    const rows = entityRowsOf(sql, adding, readers, shared);
     const ids = rows.map(
       (row) =>
         sql

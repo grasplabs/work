@@ -1007,6 +1007,23 @@ export const entityNames = sqliteTable(
 );
 
 /**
+ * The entity a person's own store's person is (contract.ts "The store's
+ * own entity"): one row at most, made by the first add naming it `own`,
+ * never an entity a name or an identifier found. Deleting memories never deletes
+ * it (forget.ts); erasing the store whole does. Empty in the shared store.
+ */
+export const ownEntity = sqliteTable(
+  "own_entity",
+  {
+    id: integer().primaryKey(),
+    entity: integer()
+      .notNull()
+      .references(() => entities.row),
+  },
+  () => [check("own_entity_one", sql.raw("id = 1"))]
+);
+
+/**
  * A person's confirmation of a memory, as their own word, over the
  * memories (`memory_confirmed_over`) that said something else then: seen
  * only by readers who may read the memory and each of those.

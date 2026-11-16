@@ -907,6 +907,8 @@ describe("a writer's erasure", () => {
                 "memory_ins",
                 "memory_judging",
                 "memory_judging_places",
+                // A person's own entity (migration 0024, own-entity.ts).
+                "own_entity",
               ].includes(name)
           )
           .map((table) => {
