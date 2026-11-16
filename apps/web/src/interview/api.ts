@@ -121,14 +121,14 @@ export type CallKind =
 
 // One gate for every answer (GRA-1943). The interview's calls of one
 // session are one epoch: it begins as the page holds the interview
-// (`beginCalls`), and ends the moment any of its calls finds the session
-// ended (core answers 401 only as `interview.sign_in` on these routes), or
-// as the page lets the interview go (`endCalls`). Ending it aborts every
-// call on its way, and whatever any call of an ended epoch answers, or
-// fails with, is dropped here, before any of the page's code sees it: the
-// call simply never comes back. A call asked for while no epoch runs is
-// never sent; it tells the page as a 401 would, so a delete or withdrawal
-// pressed then is known not to have happened.
+// (`beginCalls`), which ends the one before, and ends the moment any of
+// its calls finds the session ended (core answers 401 only as
+// `interview.sign_in` on these routes). Ending it aborts every call on its
+// way, and whatever any call of an ended epoch answers, or fails with, is
+// dropped here, before any of the page's code sees it: the call simply
+// never comes back. A call asked for while no epoch runs is never sent; it
+// tells the page as a 401 would, so a delete or withdrawal pressed then is
+// known not to have happened.
 
 /** The current epoch's calls; none while the page holds no live session. */
 let epoch: AbortController | null = null;
@@ -146,21 +146,16 @@ export const onSessionEnded = (
   };
 };
 
-/** The page holds an interview on a live session: its calls begin a new epoch. */
+/** The page holds an interview on a live session: its calls begin a new epoch, and the one before ends. */
 export const beginCalls = (): void => {
   epoch?.abort();
   epoch = new AbortController();
 };
 
-/** The epoch ends: every call on its way is aborted, and its answer dropped. */
-export const endCalls = (): void => {
+/** The session is found ended by a call of `by`: the epoch ends, every call on its way aborted, and the page is told. */
+const sessionEnded = (by: CallKind): void => {
   epoch?.abort();
   epoch = null;
-};
-
-/** The session is found ended by a call of `by`: the epoch ends, and the page is told. */
-const sessionEnded = (by: CallKind): void => {
-  endCalls();
   for (const listener of endings) {
     listener(by);
   }

@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { beginCalls, endCalls } from "./api.ts";
+import { beginCalls } from "./api.ts";
 import { openEar } from "./ear.ts";
 import type { EarEvent } from "./ear.ts";
 
@@ -153,7 +153,6 @@ const recordingsReady = async (): Promise<void> => {
 
 describe("an ear writing a stretch down from its recording", () => {
   afterEach(() => {
-    endCalls();
     room.speaking = false;
     stopping.length = 0;
     asked.length = 0;

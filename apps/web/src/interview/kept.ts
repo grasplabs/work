@@ -11,13 +11,7 @@ import type { Interviewer } from "@grasp-os/shared/onboarding";
 import { useSyncExternalStore } from "react";
 import { z } from "zod";
 
-import {
-  approveFacts,
-  beginCalls,
-  endCalls,
-  isRefused,
-  saveProgress,
-} from "./api.ts";
+import { approveFacts, beginCalls, isRefused, saveProgress } from "./api.ts";
 import type { CallKind } from "./api.ts";
 import { freshProgress, notYetApproved, resumed } from "./progress.ts";
 
@@ -669,7 +663,6 @@ export const releaseInterview = (): void => {
   if (kept !== null) {
     window.clearTimeout(kept.waiting);
   }
-  endCalls();
   kept = null;
   lostNow = null;
   undoneNow = null;

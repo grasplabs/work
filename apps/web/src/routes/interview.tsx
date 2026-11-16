@@ -176,8 +176,6 @@ const onEnded = (
 ): (() => void) => {
   let current = true;
   let ended = false;
-  /** The latest sign-in page asked for: only its answer is shown. */
-  let asked = 0;
   const stopListening = onSessionEnded((by) => {
     const first = !ended;
     if (first) {
@@ -189,11 +187,10 @@ const onEnded = (
     if (!setAside(by) && !first) {
       return;
     }
-    asked += 1;
-    const mine = asked;
+    // Each reads what waits once core answers it: the last shown is right.
     const again = async (): Promise<void> => {
       const next = await opened(secret, core);
-      if (current && mine === asked) {
+      if (current) {
         then(next);
       }
     };
