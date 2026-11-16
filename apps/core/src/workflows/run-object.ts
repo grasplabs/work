@@ -318,11 +318,9 @@ export class WorkflowRuns extends WorkflowRun<Env> {
   readonly #aiCalls: AiCalls = newAiCalls();
 
   /**
-   * The run's status as the object reads it for itself, from its journal:
-   * never through `status`, the RPC entry point core's lookups call
-   * (engine.ts). Only a lookup over RPC can fail to get an answer, so a
-   * stand-in for that failure on `status` (a test's) reaches core's
-   * lookups alone, never a notification the object takes meanwhile.
+   * The run's status as the object reads it for itself, from its own
+   * journal. `status` is the RPC entry point core's lookups call
+   * (engine.ts), and the object never goes through it.
    */
   #live(): ReturnType<WorkflowRun<Env>["status"]> {
     return super.status();
