@@ -134,7 +134,11 @@ export const ChatStart = ({
   // The agent the address names, mentioned in the box once the person's
   // agents are read: only one they may ask, and only into an empty box.
   const mentioned = useRef(false);
-  const { text: typed, onText, onMentions } = composer;
+  const { text: typed, onText, onMentions, mentions } = composer;
+  // The agents the box mentions now: who a starting question goes to, and
+  // whose model the box shows (the first one's, else the first agent's).
+  const agentsMentioned = mentions.filter(({ kind }) => kind === "agent");
+  const answering = agentsMentioned.at(0)?.id ?? agents.at(0)?.id;
   useEffect(() => {
     if (named === undefined || mentioned.current || typed !== "") {
       return;
@@ -192,7 +196,7 @@ export const ChatStart = ({
             </div>
             <Composer
               actions={<RecentsButton />}
-              agentModel={agentModelOf(agents, named?.id)}
+              agentModel={agentModelOf(agents, answering)}
               running={false}
               {...composer}
             />
@@ -208,7 +212,10 @@ export const ChatStart = ({
               <StartingQuestions
                 disabled={composer.busy || (composer.models?.length ?? 0) === 0}
                 onPick={(question) => {
-                  void ask(question);
+                  const prefix = agentsMentioned
+                    .map(({ label }) => `@${label} `)
+                    .join("");
+                  void ask(`${prefix}${question}`, [], agentsMentioned);
                 }}
               />
             )}

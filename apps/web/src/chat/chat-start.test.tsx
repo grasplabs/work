@@ -294,10 +294,32 @@ describe("Chat's page from Make something", () => {
       // A chip, which shows the agent's name.
       prefilled: "Claire ",
       asked: [
-        "create @Claire Which invoices are late? null",
+        "create @Claire Which invoices are late? null with agent-2",
         'send chat-1 @Claire Which invoices are late? [{"kind":"agent","id":"agent-2"}]',
       ],
     });
+  });
+
+  it("asks a starting question of the agent the box mentions, in a chat made with it", async () => {
+    const { asked } = await shown(undefined, undefined, {
+      agents: [agent("organization", "Grasp"), agent("agent-2", "Claire")],
+      named: "agent-2",
+    });
+
+    await act(async () => {
+      document
+        .querySelector<HTMLButtonElement>(
+          '[aria-label="What waits on me today?"]'
+        )
+        ?.click();
+      await Promise.resolve();
+    });
+    await settled();
+
+    expect(asked).toStrictEqual([
+      "create @Claire What waits on me today? null with agent-2",
+      'send chat-1 @Claire What waits on me today? [{"kind":"agent","id":"agent-2"}]',
+    ]);
   });
 
   it("mentions nobody for an agent the person may not talk to", async () => {
