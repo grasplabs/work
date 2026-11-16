@@ -50,9 +50,21 @@ import { freshProgress, notYetApproved, resumed } from "./progress.ts";
 //   is never sent by itself afterwards. They see the read-back again and
 //   agree again. An approval names the facts as they stood when they
 //   agreed (`Approval`), so core refuses it once any of them changed.
+// - Repeating what can't be undone: a delete or a withdrawal that met the
+//   ended session didn't happen and is never repeated by itself; nothing
+//   unsaved is kept back before they can press it again, and the page
+//   says it didn't happen (`useUndone`).
 // - Kept anywhere but this tab: never in `localStorage`, the address, or
-//   what the sign-in keeps; the tab's storage goes with the tab. Where the
-//   tab refuses storage, the sign-in says what isn't saved is lost.
+//   what the sign-in keeps. The tab's storage outlives the tab in places:
+//   reopening a closed tab or restoring a session brings it back, and
+//   duplicating the tab copies it. What waits is the whole interview, the
+//   lines core already holds included, not only what isn't kept: a delta
+//   could be rebuilt onto the version it was taken at, but would have to
+//   say removals, fact edits and read-back progress as well as new lines,
+//   a second save format. So it waits only while something isn't kept,
+//   and is forgotten as soon as it can't be kept or core answered for it.
+//   Where the tab refuses storage, the sign-in says what isn't saved is
+//   lost.
 // - Audio: none is ever kept (ear.ts). What was written down of what they
 //   said is in the interview already; a stretch said as it ended is lost,
 //   and the sign-in says so before they speak again (`talking`).
@@ -101,7 +113,15 @@ interface Kept {
   restoring: boolean;
   /** What is typed in the box and not sent. */
   typed: string;
+  /** A delete or a withdrawal that met the ended session, and didn't happen. */
+  undone: Undone | null;
 }
+
+/** What they asked for as their session ended, and didn't happen. */
+export type Undone = "delete" | "withdraw";
+
+/** Why what waited in this tab couldn't be kept: the interview changed, or closed. */
+export type Lost = "changed" | "closed";
 
 /** What waits in this tab while their session is ended, until the link opens again. */
 const asideSchema = z.object({
@@ -112,6 +132,7 @@ const asideSchema = z.object({
   typed: z.string(),
   /** They were talking: a stretch said as it ended is lost. */
   talking: z.boolean(),
+  undone: z.enum(["delete", "withdraw"]).nullable(),
 });
 type Aside = z.output<typeof asideSchema>;
 
@@ -154,6 +175,7 @@ const keepAside = (mine: Kept): void => {
     progress: mine.dirty ? mine.progress : null,
     typed: mine.typed,
     talking: mine.progress.mode === "talk",
+    undone: mine.undone,
   };
   try {
     sessionStorage.setItem(mine.draft, JSON.stringify(aside));
@@ -175,8 +197,10 @@ export const retryAfter = (failed: number): number =>
 
 let kept: Kept | null = null;
 let saveState: SaveState = { state: "saved" };
-/** What waited in this tab couldn't be kept: the interview changed meanwhile. */
-let lostNow = false;
+/** Why what waited in this tab couldn't be kept, if it couldn't. */
+let lostNow: Lost | null = null;
+/** What they asked for as their session ended, and didn't happen. */
+let undoneNow: Undone | null = null;
 let showingSaving: number | undefined;
 const listeners = new Set<() => void>();
 /** Told when the copy kept elsewhere took the place of this one. */
@@ -275,7 +299,7 @@ const saveOnce = async (mine: Kept): Promise<void> => {
     mine.progress = resumed(answer.progress ?? freshProgress);
     mine.dirty = false;
     mine.typed = "";
-    lostNow = true;
+    lostNow = "changed";
     notify();
     for (const taker of takers) {
       taker();
@@ -314,9 +338,12 @@ const approveOnce = async (mine: Kept): Promise<void> => {
     mine.approval = null;
     return;
   }
-  const answer = await approveFacts(mine.secret, facts);
   if (kept !== mine || mine.gone || mine.aside) {
-    // Their session ended meanwhile: never sent again by itself (`setAside`).
+    // Their session ended while it was made: never sent (`setAside`).
+    return;
+  }
+  const answer = await approveFacts(mine.secret, facts);
+  if (kept !== mine || mine.gone) {
     return;
   }
   if (isRefused(answer)) {
@@ -446,29 +473,33 @@ const onPageHide = (): void => {
  * The interview core holds for this link, at `version`, from now on held
  * here. Back after their session ended, what waited in this tab under
  * `draft` is held instead and kept at once, but only onto the version it
- * was taken at, and only while the interview takes saves (`settled`: it
- * was withdrawn, or is over). Otherwise core's copy is the interview, and
- * the page says what waited couldn't be kept. Back on the link after
- * stopping, either carries on where it was.
+ * was taken at, and only while the interview takes saves (not `withdrawn`,
+ * not `closed`). Otherwise core's copy is the interview, and the page says
+ * what waited couldn't be kept. Whatever isn't held is forgotten, also
+ * what no longer reads as a kept copy. Back on the link after stopping,
+ * either carries on where it was.
  */
 export const holdInterview = ({
   secret,
   draft,
   version,
   progress,
-  settled,
+  withdrawn,
+  closed,
 }: {
   secret: string;
   draft: string;
   version: number;
   progress: InterviewProgress | null;
-  settled: boolean;
+  withdrawn: boolean;
+  closed: boolean;
 }): void => {
   if (kept !== null) {
     window.clearTimeout(kept.waiting);
   }
   const aside = asideAt(draft);
-  const usable = aside !== null && aside.version === version && !settled;
+  const unchanged = aside !== null && aside.version === version;
+  const usable = unchanged && !withdrawn && !closed;
   const unsaved = usable ? aside.progress : null;
   const mine: Kept = {
     secret,
@@ -486,20 +517,28 @@ export const holdInterview = ({
     unkept: false,
     restoring: unsaved !== null,
     typed: usable ? aside.typed : "",
+    undone: null,
   };
   kept = mine;
-  lostNow =
+  const dropped =
     aside !== null &&
     !usable &&
     (aside.progress !== null || aside.typed !== "");
+  lostNow = null;
+  if (dropped) {
+    lostNow = closed ? "closed" : "changed";
+  }
+  // What they asked for didn't happen, unless the interview changed since.
+  undoneNow = unchanged ? aside.undone : null;
   saveState = { state: "saved" };
   window.removeEventListener("pagehide", onPageHide);
   window.addEventListener("pagehide", onPageHide);
   notify();
   if (mine.dirty) {
     void save(mine);
-  } else if (aside !== null) {
-    // Nothing to keep, or it can't be: only what was typed, in the box again.
+  } else {
+    // Nothing to keep, it can't be, or it no longer reads as a kept copy:
+    // only what was typed, in the box again.
     forgetAside(draft);
   }
 };
@@ -530,17 +569,18 @@ export const setAside = (): void => {
 };
 
 /**
- * They asked to delete their interview just as their session ended:
- * nothing of it waits to be kept again, so signing in again can't add to
- * what they asked to delete. They delete it again once back.
+ * They asked to delete their interview, or to withdraw, just as their
+ * session ended: it didn't happen, and nothing unsaved waits to be kept
+ * again before they can ask again once back, where the page says so.
  */
-export const forgetUnsaved = (): void => {
+export const forgetUnsaved = (asked: Undone): void => {
   const mine = kept;
   if (mine === null || !mine.aside) {
     return;
   }
   mine.dirty = false;
   mine.typed = "";
+  mine.undone = asked;
   keepAside(mine);
 };
 
@@ -569,7 +609,8 @@ export const releaseInterview = (): void => {
     window.clearTimeout(kept.waiting);
   }
   kept = null;
-  lostNow = false;
+  lostNow = null;
+  undoneNow = null;
   window.removeEventListener("pagehide", onPageHide);
   notify();
 };
@@ -648,9 +689,13 @@ export const useSaveState = (): SaveState =>
 export const useTyped = (): string =>
   useSyncExternalStore(subscribe, () => kept?.typed ?? "");
 
-/** What waited in this tab while their session was ended couldn't be kept. */
-export const useLost = (): boolean =>
+/** Why what waited in this tab while their session was ended couldn't be kept, if it couldn't. */
+export const useLost = (): Lost | null =>
   useSyncExternalStore(subscribe, () => lostNow);
+
+/** A delete or a withdrawal that met their ended session, and didn't happen. */
+export const useUndone = (): Undone | null =>
+  useSyncExternalStore(subscribe, () => undoneNow);
 
 /** Who holds the interview: whoever they chose, Stephen while nobody was chosen. */
 export const useInterviewer = (): Interviewer =>

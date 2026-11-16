@@ -116,7 +116,8 @@ const shown = async (
     draft: "grasp.interview.test.draft",
     version: 1,
     progress: finished,
-    settled: false,
+    withdrawn: false,
+    closed: false,
   });
   const rootRoute = createRootRoute({ component: Outlet });
   const page = createRoute({

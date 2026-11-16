@@ -233,6 +233,11 @@ export const openEar = async (options: EarOptions): Promise<Ear | null> => {
       return;
     }
     const blob = recorded === null ? null : await recorded;
+    // Closed meanwhile (the conversation stopped, or their session ended):
+    // nothing of it is sent to be written down any more.
+    if (closed) {
+      return;
+    }
     if (blob === null || blob.size === 0) {
       tell({ type: "unheard", stretch: closing.number, reason: "failed" });
       return;

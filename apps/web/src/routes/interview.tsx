@@ -139,7 +139,8 @@ const opened = async (secret: string, core: CoreConnection): Promise<Page> => {
     draft,
     version: answer.version,
     progress: answer.progress,
-    settled: answer.withdrawn || answer.closed,
+    withdrawn: answer.withdrawn,
+    closed: answer.closed,
   });
   return { state: "open", secret, session: answer };
 };

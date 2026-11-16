@@ -39,6 +39,7 @@ import {
   useInterviewer,
   useLost,
   useProgress,
+  useUndone,
 } from "./kept.ts";
 import {
   sendTyped,
@@ -542,7 +543,7 @@ const useDeleting = () => {
       if (answer.status === 401) {
         // Their session ended as they asked: nothing of it waits to be
         // kept again once they are back, where they delete it again.
-        forgetUnsaved();
+        forgetUnsaved("delete");
       }
       setDeleted("no");
       setDeleteFailed(answer.message);
@@ -573,17 +574,43 @@ const Failed = ({ message }: { message: string | null }) =>
   );
 
 /**
- * What waited in this tab while their session was ended couldn't be kept:
- * the interview changed meanwhile (a new start, a delete, a withdrawal, or
- * another window that went on). Said, never dropped without a word.
+ * Back after their session ended (GRA-1943): what waited in this tab
+ * couldn't be kept, because the interview changed meanwhile (a new start,
+ * a delete, a withdrawal, another window that went on) or closed; or a
+ * delete or a withdrawal they asked for as it ended didn't happen. Said,
+ * never dropped without a word, and nothing is asked again for them.
  */
-const Lost = () => {
+const SignedOutNotes = () => {
   const { t } = useLingui();
-  return useLost() ? (
-    <output className="text-status-attention block pt-4 text-sm text-balance">
-      {t`What you hadn't saved when your sign-in ended couldn't be kept, because your interview changed while you were away.`}
+  const lost = useLost();
+  const undone = useUndone();
+  const notes: string[] = [];
+  if (lost === "changed") {
+    notes.push(
+      t`What you hadn't saved when your sign-in ended couldn't be kept, because your interview changed while you were away.`
+    );
+  } else if (lost === "closed") {
+    notes.push(
+      t`What you hadn't saved when your sign-in ended couldn't be kept, because your interview has closed.`
+    );
+  }
+  if (undone === "delete") {
+    notes.push(
+      t`Your sign-in had ended, so your interview wasn't deleted: delete it again if you still want to.`
+    );
+  } else if (undone === "withdraw") {
+    notes.push(
+      t`Your sign-in had ended, so you didn't withdraw: withdraw again if you still want to.`
+    );
+  }
+  return notes.map((note) => (
+    <output
+      className="text-status-attention block pt-4 text-sm text-balance"
+      key={note}
+    >
+      {note}
     </output>
-  ) : null;
+  ));
 };
 
 /** Withdrawing is offered while they take part and haven't withdrawn. */
@@ -611,6 +638,11 @@ const useWithdrawing = (session: OpenSession) => {
     }
     const answer = await withdrawInterview(link.secret);
     if (isRefused(answer)) {
+      if (answer.status === 401) {
+        // Their session ended as they asked: as for a delete, nothing of it
+        // waits to be kept again once they are back, where they ask again.
+        forgetUnsaved("withdraw");
+      }
       setWithdrawFailed(answer.message);
       return;
     }
@@ -743,7 +775,7 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
         />
       </div>
       <Failed message={deleteFailed ?? withdrawFailed} />
-      <Lost />
+      <SignedOutNotes />
       <Transcript
         alone={away}
         lines={progress.lines}
