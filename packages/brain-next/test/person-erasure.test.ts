@@ -396,134 +396,225 @@ describe("a person's erasure in the shared store", () => {
     });
   });
 
-  it("on an entity that also holds another identifier, takes only the memories that gave theirs", async () => {
+  it("takes only their address from a team, a project or a shared desk, keeps every fact others wrote about them, and keeps later writes about them", async () => {
     const group = unique("g");
-    const reader: Reader = { person: unique("p"), groups: [group] };
+    // The desk is another group's: one add of one group would join it to
+    // the team on her address, as exact evidence.
+    const desks = unique("g");
+    const bob = unique("bob-");
     const anna = unique("anna-");
+    const reader: Reader = { person: bob, groups: [group, desks] };
     const local = word();
     const desk = word();
+    const carl = word();
     const marker = word();
+    const crm = (about: string, statement: string): NewMemory => ({
+      about,
+      type: "fact",
+      statement,
+      speaker: { kind: "internal", person: bob },
+      basis: { kind: "writer", writer: "app:crm" },
+    });
+    // A team and a project whose only contact address was hers, and a
+    // desk that holds hers beside its own.
     const { entities } = await remember(
       group,
       [
         {
-          key: "box",
+          key: "team",
           kind: "team",
-          names: [`Finance desk ${marker}`],
-          identifiers: [email(local), email(desk)],
+          names: [`Finance team ${marker}`],
+          identifiers: [email(local)],
+        },
+        {
+          key: "proj",
+          kind: "project",
+          names: [`Project Phoenix ${marker}`],
+          identifiers: [email(local)],
         },
       ],
       [
-        {
-          about: "box",
-          type: "fact",
-          statement: `The desk answers within a day ${marker}`,
-          speaker: { kind: "system" },
-          basis: { kind: "writer", writer: "app:desk" },
-        },
+        crm("team", `The Finance team closes the books on day 5 ${marker}`),
+        crm("proj", `Phoenix budget is 2M ${marker}`),
       ]
     );
-    const box = entities.box ?? "";
+    const { entities: deskEntities } = await remember(
+      desks,
+      [
+        {
+          key: "desk",
+          kind: "team",
+          names: [`Finance desk ${marker}`],
+          identifiers: [email(desk), email(local)],
+        },
+      ],
+      [
+        crm("desk", `Desk answers within a day ${marker}`),
+        crm("desk", `Desk is open 9 to 5 ${marker}`),
+      ]
+    );
+    const team = entities.team ?? "";
+    const proj = entities.proj ?? "";
+    const box = deskEntities.desk ?? "";
     await remember(
       group,
       [
         {
-          key: "box",
-          id: box,
+          key: "team",
+          id: team,
           kind: "team",
-          names: [`Desk ${marker}`],
-          identifiers: [email(desk)],
+          names: [`Finance team ${marker}`],
         },
       ],
-      [
-        {
-          about: "box",
-          type: "fact",
-          statement: `The desk sits in Utrecht ${marker}`,
-          speaker: { kind: "system" },
-          basis: { kind: "writer", writer: "app:desk" },
-        },
-      ]
+      [crm("team", `The Finance team approves invoices over 10k ${marker}`)]
     );
 
     await erase(anna, [email(local)]);
-    const names = await shared().readEntityNames({ entity: box, reader });
+    // Later: a fact about the team by its id, and an App's re-sync that
+    // still lists her address on the desk, beside a new colleague.
+    const later = await refused(
+      async () =>
+        await remember(
+          group,
+          [{ key: "team", id: team, kind: "team", names: [] }],
+          [crm("team", `The Finance team moved ${marker}`)]
+        )
+    );
+    const resync = await refused(
+      async () =>
+        await remember(
+          desks,
+          [
+            {
+              key: "desk",
+              kind: "team",
+              names: [`Finance desk ${marker}`],
+              identifiers: [email(desk), email(local)],
+            },
+            {
+              key: "carl",
+              kind: "person",
+              names: [`Carl ${marker}`],
+              identifiers: [email(carl)],
+            },
+          ],
+          [
+            crm("desk", `Desk moves to Utrecht ${marker}`),
+            crm("carl", `Carl joins sales ${marker}`),
+          ]
+        )
+    );
+    const namesOf = async (entity: string) => {
+      const read = await shared().readEntityNames({ entity, reader });
+      return read.names.map(({ value }) => value).toSorted();
+    };
+    const byAddress = async (local_: string) => {
+      const found = await shared().findEntities({
+        reader,
+        identifier: email(local_),
+      });
+      return found.entities.map(({ id }) => id);
+    };
 
     expect({
-      statements: await statementsOf(box, reader),
-      names: names.names.map(({ value }) => value).toSorted(),
+      later,
+      resync,
+      team: await statementsOf(team, reader),
+      proj: await statementsOf(proj, reader),
+      desk: await statementsOf(box, reader),
+      names: {
+        team: await namesOf(team),
+        proj: await namesOf(proj),
+        desk: await namesOf(box),
+      },
+      hers: await byAddress(local),
+      desksAddress: await byAddress(desk),
+      carl: await byAddress(carl).then((found) => found.length),
     }).toStrictEqual({
-      statements: [`The desk sits in Utrecht ${marker}`],
-      names: [`Desk ${marker}`, `${desk}@acme.test`].toSorted(),
+      later: "added",
+      resync: "added",
+      team: [
+        `The Finance team approves invoices over 10k ${marker}`,
+        `The Finance team closes the books on day 5 ${marker}`,
+        `The Finance team moved ${marker}`,
+      ],
+      proj: [`Phoenix budget is 2M ${marker}`],
+      desk: [
+        `Desk answers within a day ${marker}`,
+        `Desk is open 9 to 5 ${marker}`,
+        `Desk moves to Utrecht ${marker}`,
+      ],
+      names: {
+        team: [`Finance team ${marker}`],
+        proj: [`Project Phoenix ${marker}`],
+        desk: [`${desk}@acme.test`, `Finance desk ${marker}`].toSorted(),
+      },
+      hers: [],
+      desksAddress: [box],
+      carl: 1,
     });
   });
 
-  it("refuses an add naming their identifier, their entity or their word, and adds a colleague's with their first name", async () => {
+  it("answers an App's write naming an erased member's address as one naming an address it never saw, and refuses one in their word", async () => {
     const at = await annaAndBob();
     await erase(at.anna, [email(at.local)]);
-    const fact = (person: string): NewMemory => ({
-      about: "p",
-      type: "fact",
-      statement: `Again ${at.marker}`,
-      speaker: { kind: "internal", person },
-      basis: { kind: "writer", writer: "app:hr" },
-    });
+    const fresh = word();
+    /** An App's write of a fact about a person named `name` with address `local`: what it answers, shaped. */
+    const write = async (name: string, local_: string) => {
+      const added = await remember(
+        at.group,
+        [
+          {
+            key: "p",
+            kind: "person",
+            names: [name],
+            identifiers: [email(local_)],
+          },
+        ],
+        [
+          {
+            about: "p",
+            type: "fact",
+            statement: `${name} joins sales ${at.marker}`,
+            speaker: { kind: "agent", agent: "app:hr" },
+            basis: { kind: "writer", writer: "app:hr" },
+          },
+        ]
+      );
+      const found = await shared().findEntities({ reader: at.reader, name });
+      return {
+        memories: added.memories.length,
+        entities: Object.keys(added.entities),
+        found: found.entities.length,
+      };
+    };
     expect({
-      identifier: await refused(
-        async () =>
-          await remember(
-            at.group,
-            [
-              {
-                key: "p",
-                kind: "person",
-                names: [at.name],
-                identifiers: [email(at.local)],
-              },
-            ],
-            [fact(at.bob)]
-          )
-      ),
-      entity: await refused(
-        async () =>
-          await remember(
-            at.group,
-            [{ key: "p", id: at.entities.anna, kind: "person", names: [] }],
-            [fact(at.bob)]
-          )
-      ),
+      erased: await write(`Sam ${word()}`, at.local),
+      neverSeen: await write(`Sam ${word()}`, fresh),
       word: await refused(
         async () =>
           await remember(
             at.group,
             [{ key: "p", kind: "project", names: [`Orion ${at.marker}`] }],
-            [fact(at.anna)]
-          )
-      ),
-      colleague: await refused(
-        async () =>
-          await remember(
-            at.group,
             [
               {
-                key: "p",
-                kind: "person",
-                names: [`${at.name.split(" ")[0]} Visser`],
-                identifiers: [email(word())],
+                about: "p",
+                type: "fact",
+                statement: `Orion starts ${at.marker}`,
+                speaker: { kind: "internal", person: at.anna },
+                basis: { kind: "writer", writer: "app:hr" },
               },
-            ],
-            [fact(at.bob)]
+            ]
           )
       ),
     }).toStrictEqual({
-      identifier: "refused",
-      entity: "refused",
+      erased: { memories: 1, entities: ["p"], found: 1 },
+      neverSeen: { memories: 1, entities: ["p"], found: 1 },
       word: "refused",
-      colleague: "added",
     });
   });
 
-  it("replays after an older copy of the store comes back: what it took stays hidden, the confirmer stays replaced, and the identifier stays closed", async () => {
+  it("replays after an older copy of the store comes back: what it took stays hidden, the confirmer stays replaced, and the address stays closed", async () => {
     const at = await annaAndBob();
     const before = await copyOf(shared());
     await erase(at.anna, [email(at.local)]);
@@ -567,6 +658,11 @@ describe("a person's erasure in the shared store", () => {
         () => "added",
         () => "refused"
       );
+    // Kept, but never with her address: it stays closed.
+    const byAddress = await shared().findEntities({
+      reader: at.reader,
+      identifier: email(at.local),
+    });
     await tick(shared());
     expect({
       seen: [at.name, `${at.local}@acme.test`, at.anna].filter((needle) =>
@@ -574,11 +670,13 @@ describe("a person's erasure in the shared store", () => {
       ),
       by: atlas.memories.map(({ confirmed }) => confirmed?.by ?? null),
       again,
+      byAddress: byAddress.entities.length,
       left: await rowsHolding(at.anna),
     }).toStrictEqual({
       seen: [],
       by: [erasedConfirmer],
-      again: "refused",
+      again: "added",
+      byAddress: 0,
       left: {},
     });
     // Repeating it is the same erasure: nothing more, nothing failed.
@@ -659,6 +757,93 @@ describe("a person's erasure in the shared store", () => {
         });
       })()
     ).rejects.toThrow("only the shared store takes this");
+  });
+
+  it("leaves every earlier export when it changed nothing, and makes it stale when it did", async () => {
+    const at = await annaAndBob();
+    const { id } = await shared().startExport("test");
+    await expect(exportSettled(shared, id)).resolves.toBe("done");
+
+    await erase(unique("nobody-"), [email(word())]);
+    const untouched = await statusOf(id);
+    await erase(at.anna, [email(at.local)]);
+    const touched = await statusOf(id);
+
+    expect({
+      untouched: untouched?.state,
+      touched: touched?.state,
+    }).toStrictEqual({ untouched: "done", touched: "erased" });
+  });
+
+  // It restores the store from empty, as the last test does.
+  it("keeps an address closed until it is opened again, and a restore of an export from before the erasure ends in the same state", async () => {
+    const at = await annaAndBob();
+    const { id: older } = await shared().startExport("test");
+    await expect(exportSettled(shared, older)).resolves.toBe("done");
+    await erase(at.anna, [email(at.local)]);
+    /** A new hire's card, written with her old address: whether it is found by the address. */
+    const hireFound = async () => {
+      await remember(
+        at.group,
+        [
+          {
+            key: "n",
+            kind: "person",
+            names: [`Noor ${word()}`],
+            identifiers: [email(at.local)],
+          },
+        ],
+        [
+          {
+            about: "n",
+            type: "fact",
+            statement: `Noor joins finance ${at.marker}`,
+            speaker: { kind: "agent", agent: "app:hr" },
+            basis: { kind: "writer", writer: "app:hr" },
+          },
+        ]
+      );
+      const found = await shared().findEntities({
+        reader: at.reader,
+        identifier: email(at.local),
+      });
+      return found.entities.length;
+    };
+    const closed = await hireFound();
+    const opened = await shared().reopenIdentifiers({
+      identifiers: [email(at.local)],
+    });
+    const again = await shared().reopenIdentifiers({
+      identifiers: [email(at.local)],
+    });
+    const open = await hireFound();
+
+    // The store's storage lost, the bucket kept (no tick since the export:
+    // its files are still there): the ledger replays the erasure, then its
+    // opening, and the export from before writes nothing of her card.
+    const state = await restoredAfterLoss(shared, older, empty);
+    const seen = await everything(at.reader, [], [at.name], []);
+    const restoredOpen = await hireFound();
+
+    expect({
+      closed,
+      opened,
+      again,
+      open,
+      state,
+      seen: [at.name, `${at.local}@acme.test`].filter((needle) =>
+        seen.includes(needle)
+      ),
+      restoredOpen,
+    }).toStrictEqual({
+      closed: 0,
+      opened: { opened: 1 },
+      again: { opened: 0 },
+      open: 1,
+      state: "done",
+      seen: [],
+      restoredOpen: 1,
+    });
   });
 
   // Last: it restores the store from empty.

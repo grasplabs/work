@@ -912,6 +912,7 @@ describe("a writer's erasure", () => {
                 "chunk_days",
                 "person_erasure_subjects",
                 "person_erasure_memories",
+                "person_erasure_reopens",
               ].includes(name)
           )
           .map((table) => {
@@ -1009,7 +1010,9 @@ describe("a writer's erasure", () => {
             !made.includes("memory_ins") &&
             !made.includes("current_versions_unjudged_idx") &&
             !made.includes("chunk_days_chunk_idx") &&
-            !made.includes("person_erasure_subjects")
+            !made.includes("person_erasure_subjects") &&
+            !made.includes("memories_speaker_idx") &&
+            !made.includes("memory_confirmations_person_idx")
         ),
       };
       expect(

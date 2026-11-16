@@ -3428,6 +3428,10 @@ msgstr "Capital letters, digits and underscores, starting with a letter, such as
 msgid "Card"
 msgstr "Card"
 
+#: src/settings/erasures.tsx
+msgid "Cards built only from documents that name them without their work address can remain. An admin removes them by deleting those documents."
+msgstr "Cards built only from documents that name them without their work address can remain. An admin removes them by deleting those documents."
+
 #: src/activity/audit-words.ts
 msgid "Carried out a confirmed write to an App, or failed to"
 msgstr "Carried out a confirmed write to an App, or failed to"
@@ -15945,8 +15949,8 @@ msgid "What the brain kept of it"
 msgstr "What the brain kept of it"
 
 #: src/settings/erasures.tsx
-msgid "What the Brain learned about them, and what they said, where others may read it"
-msgstr "What the Brain learned about them, and what they said, where others may read it"
+msgid "What the Brain learned about them under their work address, and what they said, where others may read it"
+msgstr "What the Brain learned about them under their work address, and what they said, where others may read it"
 
 #: src/brain/memories-page.tsx
 msgid "What the Brain learns from sources and from what you tell it shows here."

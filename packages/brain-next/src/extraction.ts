@@ -32,7 +32,7 @@ import type {
 } from "./contract.ts";
 import { bucketCallMs } from "./embedding.ts";
 import { fileKeyOf, hashOf } from "./files.ts";
-import { isClosed, namingOf } from "./people.ts";
+import { isErasedPerson, namingOf, strippedOf } from "./people.ts";
 import type { Naming } from "./people.ts";
 import { accessOfKey } from "./reader-sets.ts";
 import { hashesOf, writeAdd } from "./remember.ts";
@@ -953,48 +953,41 @@ const pieceTokensOf = (contextTokens: number | null): number | null => {
  * add without `said`), so none sends a version that asks followed by one
  * that doesn't.
  */
-/** What each entity and memory of `adding` names, hashed (people.ts), in its order. */
-interface PieceNaming {
-  entities: Naming[];
-  speakers: Naming[];
-}
-
-const pieceNamingOf = async (adding: Candidates): Promise<PieceNaming> => ({
-  entities: await Promise.all(
-    adding.entities.map(async (entity) => await namingOf([entity], []))
-  ),
-  speakers: await Promise.all(
-    adding.memories.map(async ({ speaker }) => await namingOf([], [speaker]))
-  ),
-});
+/** What `adding`'s entities and memories name, hashed (people.ts), in its order. */
+const pieceNamingOf = async (adding: Candidates): Promise<Naming> =>
+  await namingOf(
+    adding.entities,
+    adding.memories.map(({ speaker }) => speaker)
+  );
 
 /**
- * `adding` without what names what a person's erasure closed (people.ts):
- * the entities naming one of their identifiers or entities, the memories
- * about or relating to one, and those in their word. Their sources stay,
- * so nothing drawn from them again makes their card or their word again.
+ * `adding` as a person's erasure leaves it (people.ts): an entity of kind
+ * `person` all of whose identifiers are closed is that person, left out
+ * with the memories about it or relating to it; so are the memories in
+ * their word; every other entity only loses a closed identifier. Their
+ * sources stay, so nothing drawn from them again makes their card or
+ * their word again, and nothing else of them is lost.
  */
 const leavingOutClosed = (
   sql: SqlStorage,
   adding: Candidates,
-  naming: PieceNaming
+  naming: Naming
 ): Candidates => {
-  const closed = new Set(
-    adding.entities.flatMap(({ key }, index) => {
-      const named = naming.entities[index];
-      return named !== undefined && isClosed(sql, named) ? [key] : [];
-    })
+  const { entities, erased } = strippedOf(
+    sql,
+    adding.entities,
+    naming.identifiers
   );
   return keeping(
-    adding.entities,
-    adding.memories.filter((memory, index) => {
-      const said = naming.speakers[index];
-      return !(
-        closed.has(memory.about) ||
-        (memory.object !== undefined && closed.has(memory.object)) ||
-        (said !== undefined && isClosed(sql, said))
-      );
-    })
+    entities,
+    adding.memories.filter(
+      (memory, index) =>
+        !(
+          erased.has(memory.about) ||
+          (memory.object !== undefined && erased.has(memory.object)) ||
+          isErasedPerson(sql, naming.speakers[index])
+        )
+    )
   );
 };
 
@@ -1033,9 +1026,7 @@ const writePiece = async (
   const whole = addOf(adding);
   const full = addOf(kept);
   const wholeHashes = await hashesOf(whole);
-  const leftOut =
-    kept.memories.length !== adding.memories.length ||
-    kept.entities.length !== adding.entities.length;
+  const leftOut = JSON.stringify(kept) !== JSON.stringify(adding);
   const hashes = leftOut ? await hashesOf(full) : wholeHashes;
   const store = {
     storage,
@@ -1057,10 +1048,7 @@ const writePiece = async (
         return "written";
       }
       const now = leavingOutClosed(sql, adding, naming);
-      if (
-        now.memories.length !== kept.memories.length ||
-        now.entities.length !== kept.entities.length
-      ) {
+      if (JSON.stringify(now) !== JSON.stringify(kept)) {
         throw new WorkError("failed");
       }
       // Nothing left to write: no add, unless it marks the version.

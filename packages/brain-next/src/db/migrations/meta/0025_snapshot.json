@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "2438ecac-5d33-4a7b-a530-0f1a65109386",
+  "id": "5a40f146-a102-466d-8e25-5a0676964800",
   "prevId": "6998d3be-8a4f-4ec9-a751-3a9da7c21e45",
   "tables": {
     "chunk_days": {
@@ -1275,6 +1275,14 @@
             "learned_at"
           ],
           "isUnique": false
+        },
+        "memories_speaker_idx": {
+          "name": "memories_speaker_idx",
+          "columns": [
+            "(speaker ->> 'person')"
+          ],
+          "isUnique": false,
+          "where": "speaker ->> 'kind' = 'internal'"
         }
       },
       "foreignKeys": {
@@ -1377,6 +1385,13 @@
           "name": "memory_confirmations_memory_idx",
           "columns": [
             "memory"
+          ],
+          "isUnique": false
+        },
+        "memory_confirmations_person_idx": {
+          "name": "memory_confirmations_person_idx",
+          "columns": [
+            "person"
           ],
           "isUnique": false
         }
@@ -1879,6 +1894,30 @@
           "onUpdate": "no action"
         }
       },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "person_erasure_reopens": {
+      "name": "person_erasure_reopens",
+      "columns": {
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "at": {
+          "name": "at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
@@ -3107,6 +3146,14 @@
     "columns": {}
   },
   "internal": {
-    "indexes": {}
+    "indexes": {
+      "memories_speaker_idx": {
+        "columns": {
+          "(speaker ->> 'person')": {
+            "isExpression": true
+          }
+        }
+      }
+    }
   }
 }

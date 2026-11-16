@@ -13,26 +13,35 @@ import { hashOf } from "./files.ts";
 //
 // Which entity is theirs is decided on exact evidence alone: an
 // identifier the host verified as theirs, which a memory gave the entity
-// (entities.ts), never a name. An entity every identifier of which is
-// theirs is theirs alone: every memory about it or relating to it is
-// covered, so the entity goes with its names. One that also holds another
-// identifier (a shared mailbox, a card two people were joined on) keeps
-// all but the memories that gave one of theirs: the strictest that takes
-// nothing of anyone else's. Every memory in their own word (its speaker
-// is them) is covered too, whatever it is about. Covered memories are
-// hidden at once (memories.ts `unerasedSql`, by `person_erasure_memories`)
-// and deleted by the tick. A confirmation of theirs stands, its confirmer
-// replaced by `erasedConfirmer`. Every export started before it is stale.
+// (entities.ts), never a name. Only an entity of kind `person`, every
+// identifier of which is theirs, is theirs alone: every memory about it
+// or relating to it is covered, so the entity goes with its names. Any
+// other entity holding one of theirs (a team, a project or a customer
+// whose contact address was theirs, a shared mailbox, a card two people
+// were joined on) loses only that identifier: nothing else of it goes,
+// so no one can take a team's or a project's knowledge with them by
+// giving it their address. Every memory in their own word (its speaker is
+// them) is covered too, whatever it is about. Covered memories are hidden
+// at once (memories.ts `unerasedSql`, by `person_erasure_memories`) and
+// deleted by the tick. A confirmation of theirs stands, its confirmer
+// replaced by `erasedConfirmer`. Every export started before it is stale,
+// if it changed anything (it holds what changed).
 //
 // What it closed stays closed (`person_erasure_subjects`, and the
-// erasure's own record for the person): an add naming one of their
-// identifiers or entities, or in their word, is refused, and extraction
-// and a restore leave out what names one, so nothing drawn again from a
-// source that stays makes their card again.
+// erasure's own record for the person), until the host says the address
+// is verified again for a member (`reopenIdentifiers`): any add strips a
+// closed identifier and writes the rest, answering as it would for an
+// identifier it holds nowhere; extraction also leaves out an entity of
+// kind `person` all of whose identifiers are closed, with what is about it
+// or relates to it, and what is in their word, so nothing drawn again from
+// a source that stays makes their card again; a restore of an export
+// passes over what rests on their entities or is in their word, and
+// keeps none of their identifiers.
 //
-// The store and the ledger keep these as SHA-256 hashes, never plain: the
-// person by their id (as the erasure's subject), an identifier as
-// `identifier:<type>:<folded>`, an entity as `entity:<id>`.
+// The store and the ledger keep a person and an identifier as SHA-256
+// hashes, never plain: the person by their id (as the erasure's subject),
+// an identifier as `identifier:<type>:<folded>`. An entity is closed by
+// its id (`entity:<id>`), the store's own UUID, no one's personal data.
 
 const encoder = new TextEncoder();
 
@@ -51,77 +60,127 @@ export const identifierSubjectOf = async (
     `identifier:${identifier.type}:${foldIdentifier(identifier)}`
   );
 
-/** The SHA-256 a person's erasure closes an entity by. */
-export const entitySubjectOf = async (id: string): Promise<string> =>
-  await subjectOfText(`entity:${id}`);
+/** What a person's erasure closes an entity by: its id. */
+export const entityClosureOf = (id: string): string => `entity:${id}`;
 
 /** The person whose word `speaker` is, if an internal person's. */
 const personOf = (speaker: Speaker): string | undefined =>
   speaker.kind === "internal" ? speaker.person : undefined;
 
-/** What a write is checked against what erasures closed (`isClosed`). */
+/**
+ * What a write names, as a person's erasure closes it, made before its
+ * transaction: each entity's identifiers' subjects, in its order, and the
+ * subject of the person whose word each memory is (null for anyone else).
+ */
 export interface Naming {
-  /** SHA-256 of identifiers and entity ids (`identifierSubjectOf`, `entitySubjectOf`). */
-  subjects: string[];
-  /** SHA-256 of the people whose word it is (`personSubjectOf`). */
-  people: string[];
+  identifiers: string[][];
+  speakers: (string | null)[];
 }
 
-/** What `entities` and `speakers` name, hashed, for `isClosed`. */
+/** What `entities` and `speakers` name (`Naming`). */
 export const namingOf = async (
-  entities: readonly { id?: string; identifiers: readonly Identifier[] }[],
+  entities: readonly { identifiers?: readonly Identifier[] | undefined }[],
   speakers: readonly Speaker[]
 ): Promise<Naming> => ({
-  subjects: await Promise.all([
-    ...entities.flatMap(({ identifiers }) =>
-      identifiers.map(
-        async (identifier) => await identifierSubjectOf(identifier)
-      )
-    ),
-    ...entities.flatMap(({ id }) =>
-      id === undefined ? [] : [entitySubjectOf(id)]
-    ),
-  ]),
-  people: await Promise.all(
-    speakers.flatMap((speaker) => {
+  identifiers: await Promise.all(
+    entities.map(
+      async ({ identifiers = [] }) =>
+        await Promise.all(
+          identifiers.map(
+            async (identifier) => await identifierSubjectOf(identifier)
+          )
+        )
+    )
+  ),
+  speakers: await Promise.all(
+    speakers.map(async (speaker) => {
       const person = personOf(speaker);
-      return person === undefined ? [] : [personSubjectOf(person)];
+      return person === undefined ? null : await personSubjectOf(person);
     })
   ),
 });
 
-/** Whether a person's erasure closed anything `naming` names: one or two seeks each. */
-export const isClosed = (
+/** Of `subjects`, those a person's erasure closed: one seek each. */
+export const closedOf = (
   sql: SqlStorage,
-  { subjects, people }: Naming
+  subjects: readonly string[]
+): Set<string> =>
+  subjects.length === 0
+    ? new Set()
+    : new Set(
+        sql
+          .exec<{ subject: string }>(
+            `SELECT subject FROM person_erasure_subjects
+            WHERE subject IN (SELECT value FROM json_each(?))`,
+            JSON.stringify(subjects)
+          )
+          .toArray()
+          .map(({ subject }) => subject)
+      );
+
+/** Whether a person's erasure took the person whose subject is `person`. */
+export const isErasedPerson = (
+  sql: SqlStorage,
+  person: string | null | undefined
 ): boolean =>
-  (subjects.length > 0 || people.length > 0) &&
+  person !== null &&
+  person !== undefined &&
   sql
     .exec(
-      `SELECT 1 FROM person_erasure_subjects
-      WHERE subject IN (SELECT value FROM json_each(?1))
-      UNION ALL SELECT 1 FROM erasures
-      WHERE kind = 'person' AND subject IN (SELECT value FROM json_each(?2))
-      LIMIT 1`,
-      JSON.stringify(subjects),
-      JSON.stringify(people)
+      "SELECT 1 FROM erasures WHERE kind = 'person' AND subject = ? LIMIT 1",
+      person
     )
     .toArray().length > 0;
+
+/**
+ * `entities` (`naming.identifiers` theirs, in order) as an add writes
+ * them: every identifier a person's erasure closed stripped; and the keys
+ * of those of kind `person` that held identifiers and only closed ones:
+ * the erased person themselves, by exact evidence.
+ */
+export const strippedOf = <
+  Entity extends {
+    kind: string;
+    key: string;
+    identifiers?: readonly Identifier[] | undefined;
+  },
+>(
+  sql: SqlStorage,
+  entities: readonly Entity[],
+  identifiers: readonly string[][]
+): { entities: Entity[]; erased: Set<string> } => {
+  const closed = closedOf(sql, identifiers.flat());
+  const erased = new Set<string>();
+  const stripped = entities.map((entity, index) => {
+    const given = entity.identifiers ?? [];
+    const subjects = identifiers[index] ?? [];
+    const kept = given.filter(
+      (_identifier, at) => !closed.has(subjects[at] ?? "")
+    );
+    if (entity.kind === "person" && given.length > 0 && kept.length === 0) {
+      erased.add(entity.key);
+    }
+    return kept.length === given.length
+      ? entity
+      : { ...entity, identifiers: kept };
+  });
+  return { entities: stripped, erased };
+};
 
 /** An identifier as the store keeps it on a name (`entity_names`): its type and folded value. */
 export type HeldIdentifier = readonly [type: string, folded: string];
 
-/** An entity a person's erasure takes: theirs alone, or also holding another identifier (`shared`). */
+/**
+ * An entity holding one of a person's identifiers: theirs alone (kind
+ * `person`, and no identifier but theirs), or one that only loses theirs.
+ */
 export interface HeldEntity {
   row: number;
   id: string;
-  shared: boolean;
+  alone: boolean;
 }
 
-/**
- * The entities holding one of `identifiers` (above), in one statement:
- * each with its id, and whether it holds another identifier too.
- */
+/** The entities holding one of `identifiers` (above), in one statement. */
 export const entitiesHolding = (
   sql: SqlStorage,
   identifiers: readonly HeldIdentifier[]
@@ -129,9 +188,9 @@ export const entitiesHolding = (
   identifiers.length === 0
     ? []
     : sql
-        .exec<{ row: number; id: string; shared: number }>(
+        .exec<{ row: number; id: string; alone: number }>(
           `SELECT DISTINCT entities.row AS row, entities.id AS id,
-            EXISTS (
+            entities.kind = 'person' AND NOT EXISTS (
               SELECT 1 FROM entity_names AS other
               WHERE other.entity = entities.row AND other.type <> 'name'
                 AND NOT EXISTS (
@@ -139,7 +198,7 @@ export const entitiesHolding = (
                   WHERE given.value ->> 0 = other.type
                     AND given.value ->> 1 = other.folded
                 )
-            ) AS shared
+            ) AS alone
           FROM json_each(?1) AS given
           CROSS JOIN entity_names
             ON entity_names.type = given.value ->> 0
@@ -149,39 +208,44 @@ export const entitiesHolding = (
           JSON.stringify(identifiers)
         )
         .toArray()
-        .map(({ row, id, shared }) => ({ row, id, shared: shared === 1 }));
+        .map(({ row, id, alone }) => ({ row, id, alone: alone === 1 }));
 
-/** Whether two finds of `entitiesHolding` are the same. */
-export const sameEntities = (
-  one: readonly HeldEntity[],
-  other: readonly HeldEntity[]
-): boolean => JSON.stringify(one) === JSON.stringify(other);
-
-/** What a person's erasure applies: found in the store, or given by the host. */
+/** What a person's erasure applies to: as the host gave it, or as a replay found it. */
 export interface PersonFound {
-  /** The person's ids as memories and confirmations hold them (one, or none in a store that holds nothing of theirs). */
+  /** The person's id as memories and confirmations hold it (none in a store that holds nothing of theirs). */
   people: string[];
   /** Their identifiers as names hold them. */
   identifiers: HeldIdentifier[];
-  /** The entities holding one (`entitiesHolding`), as found before the transaction. */
-  entities: HeldEntity[];
-  /** What the erasure closes: its identifiers' and its entities' subjects. */
+  /** What the erasure closes besides their entities: its identifiers' subjects (and, from a ledger entry, the entities it closed). */
   subjects: string[];
 }
 
 /**
  * Applies a person's erasure `key` to what `found` names, in the caller's
- * transaction (above): what it closed recorded, the memories it covers
- * hidden, their confirmations' confirmer replaced, and every export
- * started before it made stale (exports.ts `namedSql`, by a row naming
- * the erasure's subject). Safe to repeat.
+ * transaction (above): what it closes recorded; on each entity of theirs
+ * alone, every memory about it or relating to it hidden and the entity
+ * closed; on any other entity, their identifiers' names deleted; the
+ * memories in their word hidden; their confirmations' confirmer
+ * replaced; and, when any of that changed something, every export started
+ * before it made stale (exports.ts `namedSql`, by a row naming the
+ * erasure's subject). Each statement seeks by an index: the names by
+ * identifier, the memories by entity, by object and by the person whose
+ * word they are, the confirmations by person. Answers how many rows it
+ * changed; the same again changes none.
  */
 export const applyPerson = (
   sql: SqlStorage,
   { key, subject }: { key: string; subject: string },
-  { people, identifiers, entities, subjects }: PersonFound
-): void => {
-  for (const closed of subjects) {
+  { people, identifiers, subjects }: PersonFound
+): number => {
+  let changed = 0;
+  const entities = entitiesHolding(sql, identifiers);
+  for (const closed of [
+    ...subjects,
+    ...entities.flatMap(({ id, alone }) =>
+      alone ? [entityClosureOf(id)] : []
+    ),
+  ]) {
     sql.exec(
       "INSERT OR IGNORE INTO person_erasure_subjects (subject, erasure) VALUES (?, ?)",
       closed,
@@ -189,50 +253,50 @@ export const applyPerson = (
     );
   }
   const given = JSON.stringify(identifiers);
-  for (const { row, shared } of entities) {
-    if (shared) {
-      sql.exec(
-        `INSERT OR IGNORE INTO person_erasure_memories (memory, erasure)
-        SELECT DISTINCT entity_names.memory, ?2 FROM json_each(?3) AS given
-        CROSS JOIN entity_names
-          ON entity_names.entity = ?1
-          AND entity_names.type = given.value ->> 0
-          AND entity_names.folded = given.value ->> 1`,
-        row,
-        key,
-        given
-      );
-    } else {
-      sql.exec(
-        `INSERT OR IGNORE INTO person_erasure_memories (memory, erasure)
-        SELECT row, ?2 FROM memories WHERE entity = ?1
-        UNION SELECT row, ?2 FROM memories WHERE object = ?1`,
-        row,
-        key
-      );
-    }
+  for (const { row, alone } of entities) {
+    changed += alone
+      ? sql.exec(
+          `INSERT OR IGNORE INTO person_erasure_memories (memory, erasure)
+          SELECT row, ?2 FROM memories WHERE entity = ?1
+          UNION SELECT row, ?2 FROM memories WHERE object = ?1`,
+          row,
+          key
+        ).rowsWritten
+      : sql.exec(
+          `DELETE FROM entity_names
+          WHERE entity = ?1 AND type <> 'name'
+            AND EXISTS (
+              SELECT 1 FROM json_each(?2) AS given
+              WHERE given.value ->> 0 = entity_names.type
+                AND given.value ->> 1 = entity_names.folded
+            )`,
+          row,
+          given
+        ).rowsWritten;
   }
   const theirs = JSON.stringify(people);
-  // Every memory in their word: one scan of the memories, once.
-  sql.exec(
+  changed += sql.exec(
     `INSERT OR IGNORE INTO person_erasure_memories (memory, erasure)
     SELECT row, ?2 FROM memories
     WHERE speaker ->> 'kind' = 'internal'
       AND speaker ->> 'person' IN (SELECT value FROM json_each(?1))`,
     theirs,
     key
-  );
-  sql.exec(
+  ).rowsWritten;
+  changed += sql.exec(
     `UPDATE memory_confirmations SET person = ?2
     WHERE person IN (SELECT value FROM json_each(?1))`,
     theirs,
     erasedConfirmer
-  );
-  sql.exec(
-    `INSERT OR IGNORE INTO export_sources (export, subject, version, written)
-    SELECT id, ?1, 0, 1 FROM exports`,
-    subject
-  );
+  ).rowsWritten;
+  if (changed > 0) {
+    sql.exec(
+      `INSERT OR IGNORE INTO export_sources (export, subject, version, written)
+      SELECT id, ?1, 0, 1 FROM exports`,
+      subject
+    );
+  }
+  return changed;
 };
 
 /**
@@ -275,10 +339,5 @@ export const foundForReplay = async (
       identifiers.push([type, folded]);
     }
   }
-  return {
-    people,
-    identifiers,
-    entities: entitiesHolding(sql, identifiers),
-    subjects: [...subjects],
-  };
+  return { people, identifiers, subjects: [...subjects] };
 };

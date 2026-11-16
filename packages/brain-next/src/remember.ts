@@ -28,7 +28,7 @@ import {
   lineageOfWriter,
   stampWrite,
 } from "./memories.ts";
-import { isClosed, namingOf } from "./people.ts";
+import { isErasedPerson, namingOf, strippedOf } from "./people.ts";
 import type { Naming } from "./people.ts";
 import { CurrentTextsNeededError, heldIn, judgeLate } from "./quotes.ts";
 import type { CurrentText, CurrentTexts, Written } from "./quotes.ts";
@@ -153,7 +153,9 @@ const encoder = new TextEncoder();
 const entityRowsOf = (
   sql: SqlStorage,
   { entities, reader }: Adding,
-  readers: string
+  readers: string,
+  /** Which entities the add gave identifiers, before any was left out (`writeAdd`): only the others link by name. */
+  identified: readonly boolean[]
 ): number[] => {
   const linked = new Map<string, number>();
   return entities.map((entity, index) => {
@@ -167,9 +169,9 @@ const entityRowsOf = (
           .map((key) => linked.get(key))
           .find((found) => found !== undefined) ??
         linkedBy(sql, entity.kind, entity.identifiers, readers) ??
-        (entity.identifiers.length === 0
-          ? linkedByName(sql, entity.kind, entity.names, readers)
-          : undefined);
+        (identified[index] === true
+          ? undefined
+          : linkedByName(sql, entity.kind, entity.names, readers));
     } else {
       const known = entityRowOf(sql, entity.id);
       // An id the add may not name is refused in the words of an unknown
@@ -606,11 +608,11 @@ export const hashesOf = async (adding: Adding): Promise<AddHashes> => {
  */
 export const writeAdd = (
   { storage, db, shared }: Omit<RememberStore, "bucket">,
-  adding: Adding,
+  asked: Adding,
   { key, hash, subjects, writers, restatements, naming }: AddHashes,
   texts: CurrentTexts = new Map()
 ): AddedMemories => {
-  const planned = planOf(adding);
+  const planned = planOf(asked);
   const { sql } = storage;
   {
     // Nothing is added while a restore runs (restoring.ts): it writes a
@@ -630,19 +632,29 @@ export const writeAdd = (
       }
       return answerSchema.parse(JSON.parse(before.answer));
     }
-    // A person's erasure closed what it names (people.ts): nothing drawn
-    // again makes their card or their word again. A repeat of an add made
-    // before answers above, as it was.
-    if (isClosed(sql, naming)) {
-      throw refused(
-        "it names a person's identifier, entity or word an erasure took"
-      );
+    // An identifier a person's erasure closed (people.ts) is left out,
+    // and the rest written: answered as for an identifier the store holds
+    // nowhere, so an add learns nothing of an erasure. Only extraction
+    // speaks for an internal person in the shared store, and it leaves out
+    // what is in an erased person's word before it writes: one here is a
+    // host's fault. A repeat of an add made before answers above, as it was.
+    if (naming.speakers.some((person) => isErasedPerson(sql, person))) {
+      throw refused("it is in the word of a person an erasure took");
     }
+    const adding: Adding = {
+      ...asked,
+      entities: strippedOf(sql, asked.entities, naming.identifiers).entities,
+    };
     // The set is stored (read sets match readers by it); memories name it
     // by its key alone, never its row id.
     readerSetOf(db, adding.access);
     const readers = readerSetKeyOf(adding.access);
-    const rows = entityRowsOf(sql, adding, readers);
+    const rows = entityRowsOf(
+      sql,
+      adding,
+      readers,
+      asked.entities.map(({ identifiers }) => identifiers.length > 0)
+    );
     const ids = rows.map(
       (row) =>
         sql

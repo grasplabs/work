@@ -35,6 +35,7 @@ import { eraseGapAnswerer } from "./brain-gaps.ts";
 import {
   erasePerson as eraseFromBrain,
   erasePersonShared,
+  reopenAddress,
   stillDeletingTooLong,
 } from "./brain-next.ts";
 import { endHandOversOf } from "./brain-sources.ts";
@@ -338,14 +339,11 @@ const brainShared: ErasureStep = {
       .select({ email: users.email })
       .from(users)
       .where(eq(users.id, userId));
-    if (person === undefined) {
-      return;
-    }
+    // No user row (none to erase by address): their word and their
+    // confirmations still go, by their ID.
     await erasePersonShared(env, {
       personId: userId,
-      // Erased already (an erasure from before this area): no address left
-      // to go by, and their word and confirmations still go.
-      email: person.email === erasedEmail(userId) ? null : person.email,
+      email: person?.email ?? null,
     });
     await completed(db, userId, "brain_shared");
   },
@@ -1101,8 +1099,9 @@ export const erasePerson = async (
  * Lets the address `email` in again, as one of the client's admins asked:
  * the company gave the address that was an erased person's to someone
  * else. Only the hash goes, while the admin still is one, recorded with
- * the erased person's ID only, never the address. Answers whether an
- * erased person's address it was.
+ * the erased person's ID only, never the address; and the Brain keeps the
+ * address again (`reopenAddress`), so the person it now belongs to has a
+ * card. Answers whether an erased person's address it was.
  */
 export const releaseAddress = async (
   env: Env,
@@ -1122,6 +1121,14 @@ export const releaseAddress = async (
   if (erased === undefined) {
     return { released: false };
   }
+  // The Brain opens it first (brain-next.ts `reopenAddress`): the erasure
+  // closed it there, so nothing drawn again from documents that stay made
+  // the erased person's card again, and the company now gives it to
+  // someone, who can only sign in with it once it is released here. One
+  // that fails releases nothing: the admin asks again. Opened in the Brain
+  // with the release still to land (the admin stopped being one) is the
+  // address kept out at sign-in all the same.
+  await reopenAddress(env, email);
   const [released] = await auditedBatch(env, db, [
     db
       .update(personErasures)

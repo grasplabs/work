@@ -64,7 +64,7 @@ const areaLabels: Record<string, MessageDescriptor> = {
   runs: msg`Unfinished runs (stopped) and decision confirmations`,
   interview: msg`Onboarding interview`,
   brain_sources: msg`What the Brain keeps that only they may read`,
-  brain_shared: msg`What the Brain learned about them, and what they said, where others may read it`,
+  brain_shared: msg`What the Brain learned about them under their work address, and what they said, where others may read it`,
 };
 
 /** How far an area got, in the page's language. */
@@ -158,6 +158,13 @@ const WhatErasingDoes = ({ areas }: { areas: readonly string[] }) => {
           </li>
           <li>
             <Trans>An admin can still delete a specific document.</Trans>
+          </li>
+          <li>
+            <Trans>
+              Cards built only from documents that name them without their work
+              address can remain. An admin removes them by deleting those
+              documents.
+            </Trans>
           </li>
         </ul>
       </div>

@@ -2766,6 +2766,28 @@ export const coreProbes = {
       }),
     ];
   },
+  // No reader: core names an address an admin released. It answers
+  // whether an erasure closed it, and nothing of what it held.
+  reopenAddress: async ({ markers }) => {
+    const reopen = async (name: string, email: unknown) =>
+      await answer(
+        name,
+        async () => await coreBrain.reopenAddress(env, unchecked(email))
+      );
+    const closed = `${stranger()}@example.test`;
+    await store().erasePersonShared(
+      unchecked(sharedErasureOf(stranger(), [{ type: "email", value: closed }]))
+    );
+    return [
+      await reopen("an address an erasure closed", closed),
+      await reopen("the same address again", closed),
+      await reopen(
+        "an address named by the markers",
+        `${markers.join("")}@example.test`
+      ),
+      await reopen("no address, named by the markers", markers.join(" ")),
+    ];
+  },
   // No reader: core names the writer (an App's own id). What it answers is
   // a time and a count; nothing of what was erased.
   eraseWriter: async ({ markers }) => {
@@ -8628,6 +8650,32 @@ export const storeProbes = {
         ...of(stranger(), []),
         reason: markers.join(" "),
       }),
+    ];
+  },
+  // No reader either: the host names identifiers. It answers how many an
+  // erasure had closed, and nothing of what they named.
+  reopenIdentifiers: async ({ markers }) => {
+    const reopen = async (name: string, request: unknown) =>
+      await answer(
+        name,
+        async () => await store().reopenIdentifiers(unchecked(request))
+      );
+    const closed = { type: "email", value: `${stranger()}@example.test` };
+    await store().erasePersonShared(
+      unchecked(sharedErasureOf(stranger(), [closed]))
+    );
+    return [
+      await reopen("an identifier an erasure closed", {
+        identifiers: [closed],
+      }),
+      await reopen("the same identifier again", { identifiers: [closed] }),
+      await reopen("an identifier named by the markers", {
+        identifiers: [{ type: "ref", value: `x:${markers.join("")}` }],
+      }),
+      await reopen("no identifier, named by the markers", {
+        identifiers: [{ type: "email", value: markers.join(" ") }],
+      }),
+      await reopen("none", { identifiers: [] }),
     ];
   },
   // No reader either: the host names the writer. Its answer is a time and

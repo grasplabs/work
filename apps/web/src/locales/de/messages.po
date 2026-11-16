@@ -3428,6 +3428,10 @@ msgstr "Großbuchstaben, Ziffern und Unterstriche, beginnend mit einem Buchstabe
 msgid "Card"
 msgstr "Karte"
 
+#: src/settings/erasures.tsx
+msgid "Cards built only from documents that name them without their work address can remain. An admin removes them by deleting those documents."
+msgstr "Karten, die nur aus Dokumenten entstanden sind, die sie ohne ihre Arbeitsadresse nennen, können bleiben. Ein Admin entfernt sie, indem er diese Dokumente löscht."
+
 #: src/activity/audit-words.ts
 msgid "Carried out a confirmed write to an App, or failed to"
 msgstr "Eine bestätigte Änderung in einer App ausgeführt, oder es nicht geschafft"
@@ -15945,8 +15949,8 @@ msgid "What the brain kept of it"
 msgstr "Was das Gehirn davon behalten hat"
 
 #: src/settings/erasures.tsx
-msgid "What the Brain learned about them, and what they said, where others may read it"
-msgstr "Was das Brain über sie gelernt hat und was sie gesagt haben, wo andere es lesen dürfen"
+msgid "What the Brain learned about them under their work address, and what they said, where others may read it"
+msgstr "Was das Brain unter ihrer Arbeitsadresse über sie gelernt hat und was sie gesagt haben, wo andere es lesen dürfen"
 
 #: src/brain/memories-page.tsx
 msgid "What the Brain learns from sources and from what you tell it shows here."

@@ -3428,6 +3428,10 @@ msgstr "Majuscules, chiffres et tirets bas, en commençant par une lettre, par e
 msgid "Card"
 msgstr "Carte"
 
+#: src/settings/erasures.tsx
+msgid "Cards built only from documents that name them without their work address can remain. An admin removes them by deleting those documents."
+msgstr "Les fiches construites uniquement à partir de documents qui la nomment sans son adresse professionnelle peuvent rester. Un administrateur les supprime en supprimant ces documents."
+
 #: src/activity/audit-words.ts
 msgid "Carried out a confirmed write to an App, or failed to"
 msgstr "A effectué une modification confirmée dans une application, ou n’y est pas parvenu"
@@ -15945,8 +15949,8 @@ msgid "What the brain kept of it"
 msgstr "Ce que le cerveau en a gardé"
 
 #: src/settings/erasures.tsx
-msgid "What the Brain learned about them, and what they said, where others may read it"
-msgstr "Ce que le Brain a appris sur cette personne et ce qu’elle a dit, là où d’autres peuvent le lire"
+msgid "What the Brain learned about them under their work address, and what they said, where others may read it"
+msgstr "Ce que le Brain a appris sur cette personne sous son adresse professionnelle et ce qu’elle a dit, là où d’autres peuvent le lire"
 
 #: src/brain/memories-page.tsx
 msgid "What the Brain learns from sources and from what you tell it shows here."

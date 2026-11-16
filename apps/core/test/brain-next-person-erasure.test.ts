@@ -3,6 +3,7 @@
 // derived about them and what is in their own word goes; the documents
 // stay, also where their text names them.
 import { brainOf, recallBudgetMax } from "@grasp-os/brain-next/contract";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
@@ -22,6 +23,7 @@ import { inJurisdiction } from "../src/durable-objects.ts";
 import { finishedByTheClock } from "./brain-next-own-store.ts";
 import { copyOfStore, restoreStore } from "./brain-next-store-copy.ts";
 import { mockIdp } from "./idp.ts";
+import { runMinuteTasks } from "./maintenance.ts";
 import { noProducers } from "./no-producers.ts";
 import { signedInApi } from "./sign-in.ts";
 
@@ -254,6 +256,104 @@ describe(
         derived: [],
         documents: true,
       });
+    });
+
+    it("keeps their address until the Brain took what it derived by it, though the Brain failed the first time", async () => {
+      const at = await annaAndBob();
+      const question = `${at.marker} finance leave Atlas`;
+      const brainStore = inJurisdiction(env, env.BRAIN_STORE).getByName(
+        "brain"
+      );
+      const holding = async (held: boolean) => {
+        await runInDurableObject(brainStore, (_instance, state) => {
+          state.storage.sql.exec(
+            held
+              ? `CREATE TRIGGER IF NOT EXISTS test_hold_person BEFORE INSERT ON erasures
+                WHEN NEW.kind = 'person'
+                BEGIN SELECT RAISE(ABORT, 'held by the test'); END`
+              : "DROP TRIGGER IF EXISTS test_hold_person"
+          );
+        });
+      };
+      await holding(true);
+      let meanwhile:
+        | Awaited<ReturnType<typeof at.admin.api.members.erasure>>
+        | undefined;
+      try {
+        await at.admin.api.members.remove(at.anna.userId);
+        await at.admin.api.members.erase(
+          at.anna.userId,
+          String(at.anna.person.name)
+        );
+        meanwhile = await at.admin.api.members.erasure(at.anna.userId);
+      } finally {
+        await holding(false);
+      }
+      await finishedByTheClock(at.anna.userId);
+      await runMinuteTasks();
+      const done = await at.admin.api.members.erasure(at.anna.userId);
+      const bob = await seenBy(at.bob.userId, question);
+
+      expect({
+        meanwhile: meanwhile?.erasure?.areas.filter(({ area }) =>
+          ["brain_shared", "identity"].includes(area)
+        ),
+        done: done.erasure?.completedAt !== null,
+        herEntity: bob.people.includes(at.name),
+        herMemories: bob.memories.filter((statement) =>
+          statement.includes(at.name)
+        ),
+      }).toStrictEqual({
+        meanwhile: [
+          { area: "brain_shared", state: "pending" },
+          { area: "identity", state: "pending" },
+        ],
+        done: true,
+        herEntity: false,
+        herMemories: [],
+      });
+    });
+
+    it("keeps their address again once an admin releases it to someone else", async () => {
+      const at = await annaAndBob();
+      await erased(at.admin, at.anna);
+      /** Whether a card written now with her old address is found by it. */
+      const keptByAddress = async () => {
+        const team = `team:${crypto.randomUUID()}`;
+        await shared().addMemories({
+          change: crypto.randomUUID(),
+          access: { kind: "audience", group: team },
+          entities: [
+            {
+              key: "n",
+              kind: "person",
+              names: [`Noor ${word()}`],
+              identifiers: [{ type: "email", value: at.address }],
+            },
+          ],
+          memories: [
+            {
+              about: "n",
+              type: "fact",
+              statement: `Noor joins finance ${at.marker}`,
+              speaker: { kind: "agent", agent: "app:hr" },
+              basis: { kind: "writer", writer: "app:hr" },
+            },
+          ],
+        });
+        const found = await shared().findEntities({
+          reader: { person: crypto.randomUUID(), groups: [team] },
+          identifier: { type: "email", value: at.address },
+        });
+        return found.entities.length;
+      };
+      const closed = await keptByAddress();
+      const released = await at.admin.api.members.releaseAddress(at.address);
+      expect({
+        closed,
+        released,
+        open: await keptByAddress(),
+      }).toStrictEqual({ closed: 0, released: { released: true }, open: 1 });
     });
 
     it("stays erased once an older copy of the shared store comes back", async () => {

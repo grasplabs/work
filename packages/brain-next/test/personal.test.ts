@@ -1632,6 +1632,7 @@ const leavingNone = [
   // The shared store's alone: a person's own store refuses them.
   "erasePersonShared",
   "eraseWriter",
+  "reopenIdentifiers",
   "erasureStatus",
   "exportFile",
   "exportStatus",

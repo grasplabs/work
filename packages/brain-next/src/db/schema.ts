@@ -995,6 +995,11 @@ export const memories = sqliteTable(
     // A writer's memories learned before its erasure: what the erasure
     // deletes, a batch at a time (erasure.ts `eraseWriterBatch`).
     index("memories_writer_idx").on(table.writerSubject, table.learnedAt),
+    // The memories in a person's word: what a person's erasure hides
+    // (people.ts `applyPerson`), and the people a replay hashes, a seek.
+    index("memories_speaker_idx")
+      .on(sql`(speaker ->> 'person')`)
+      .where(sql`speaker ->> 'kind' = 'internal'`),
   ]
 );
 
@@ -1044,7 +1049,11 @@ export const memoryConfirmations = sqliteTable(
     person: text().notNull(),
     at: integer().notNull(),
   },
-  (table) => [index("memory_confirmations_memory_idx").on(table.memory)]
+  (table) => [
+    index("memory_confirmations_memory_idx").on(table.memory),
+    // A person's confirmations: what their erasure takes them off.
+    index("memory_confirmations_person_idx").on(table.person),
+  ]
 );
 
 /** A memory a confirmation was made over. */
@@ -1244,11 +1253,13 @@ export const memoryJudgingPlaces = sqliteTable("memory_judging_places", {
 // goes; the sources stay.
 
 /**
- * What a person's erasure closed, by SHA-256 (people.ts): each identifier
- * the host gave as theirs (`identifier:<type>:<folded>`) and each entity
- * that was theirs alone (`entity:<id>`). An add naming one is refused, and
- * extraction and a restore leave out what names one, so nothing drawn
- * from a source that stays makes their card again. Never deleted.
+ * What a person's erasure closed (people.ts): each identifier the host gave
+ * as theirs, by the SHA-256 of `identifier:<type>:<folded>`, and each
+ * entity that was theirs alone, by `entity:<id>`. An add strips a closed
+ * identifier; extraction and a restore leave out what rests on a closed
+ * entity or one of kind `person` all of whose identifiers are closed. An
+ * identifier is deleted here once the host says it is verified again for a
+ * member (`person_erasure_reopens`).
  */
 export const personErasureSubjects = sqliteTable(
   "person_erasure_subjects",
@@ -1271,4 +1282,14 @@ export const personErasureMemories = sqliteTable("person_erasure_memories", {
     .references(() => memories.row, { onDelete: "cascade" }),
   /** The erasure that hid it (`erasures.key`). */
   erasure: text().notNull(),
+});
+
+/**
+ * An identifier a person's erasure closed, opened again (erasure.ts
+ * `reopenIdentifiers`), by its ledger entry's key and time: so a replay
+ * applies each once, and the next erasure's time is past it.
+ */
+export const personErasureReopens = sqliteTable("person_erasure_reopens", {
+  key: text().primaryKey(),
+  at: integer().notNull(),
 });

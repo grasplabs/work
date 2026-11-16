@@ -41,6 +41,7 @@ import {
   ownExportRequestSchema,
   ownExportStartSchema,
   personErasureSchema,
+  identifiersReopenSchema,
   sharedPersonErasureSchema,
   writerErasureSchema,
   readableMemoriesRequestSchema,
@@ -112,6 +113,7 @@ import type {
   StoreKind,
   NewSource,
   PersonErasure,
+  IdentifiersReopen,
   SharedPersonErasure,
   WriterErasure,
   WriterErased,
@@ -152,6 +154,7 @@ import {
   erasePersonShared,
   eraseWriter,
   eraseWriterBatch,
+  reopenIdentifiers,
   erasureStatusOf,
   erasuresOverview,
   erasureDue,
@@ -1295,6 +1298,26 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     await this.#changing(async () => {
       await this.#readyToWrite();
       await erasePersonShared(this.#erasures, { person, identifiers, reason });
+    });
+  }
+
+  /**
+   * Opens again identifiers a person's erasure closed (erasure.ts
+   * `reopenIdentifiers`), once the host verified each again for a member.
+   * The shared store's alone.
+   */
+  async reopenIdentifiers(
+    request: IdentifiersReopen
+  ): Promise<{ opened: number }> {
+    const { identifiers } = checked(identifiersReopenSchema, request);
+    if (this.#kind.kind === "person") {
+      throw new Error(sharedOnly);
+    }
+    return await this.#changing(async () => {
+      await this.#readyToWrite();
+      return {
+        opened: await reopenIdentifiers(this.#erasures, identifiers),
+      };
     });
   }
 

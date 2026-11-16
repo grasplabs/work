@@ -71,7 +71,14 @@ import {
   lineageOfWriter,
   writerErasedAfterSql,
 } from "./memories.ts";
-import { isClosed, namingOf, personSubjectOf } from "./people.ts";
+import {
+  closedOf,
+  entityClosureOf,
+  isErasedPerson,
+  namingOf,
+  personSubjectOf,
+  strippedOf,
+} from "./people.ts";
 import type { Naming } from "./people.ts";
 import { readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
 import { planOf, restatementOf, valueKeyFor } from "./remember.ts";
@@ -707,9 +714,15 @@ const passesOverMemory = (
 ): boolean =>
   sql.exec("SELECT 1 FROM memories WHERE id = ?", line.id).toArray().length >
     0 ||
-  // About, relating to, or giving an identifier of what a person's
-  // erasure closed, or in their word (people.ts), as an add is refused.
-  isClosed(sql, naming) ||
+  // In the word of a person an erasure took, or about or relating to an
+  // entity that was theirs alone (people.ts).
+  isErasedPerson(sql, naming.speakers[0]) ||
+  closedOf(
+    sql,
+    [line.about, ...(line.object === null ? [] : [line.object])].map((id) =>
+      entityClosureOf(id)
+    )
+  ).size > 0 ||
   (line.source !== null &&
     (subject === null ||
       line.version === null ||
@@ -799,7 +812,13 @@ const restoreMemory = async (
       )
       .one();
     indexMemoryWords(sql, row, line.statement, new Map());
-    for (const { id, names, identifiers } of line.entities) {
+    // Without an identifier a person's erasure closed, as an add keeps it.
+    const kept = strippedOf(
+      sql,
+      line.entities.map((entity) => ({ ...entity, key: entity.id })),
+      naming.identifiers
+    ).entities;
+    for (const { id, names, identifiers } of kept) {
       const entity = rows.get(id);
       if (entity !== undefined) {
         keepNames(sql, entity, row, names, identifiers);
@@ -820,13 +839,12 @@ const restoreConfirmation = async (
   storage: DurableObjectStorage,
   line: ConfirmationLine
 ): Promise<void> => {
-  const confirmer = {
-    subjects: [],
-    people: [await personSubjectOf(line.person)],
-  };
+  const confirmer = await personSubjectOf(line.person);
   storage.transactionSync(() => {
     const { sql } = storage;
-    const person = isClosed(sql, confirmer) ? erasedConfirmer : line.person;
+    const person = isErasedPerson(sql, confirmer)
+      ? erasedConfirmer
+      : line.person;
     const named = [line.memory, ...line.over];
     const rows = sql
       .exec<{ id: string; row: number }>(
