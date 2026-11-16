@@ -38,6 +38,7 @@ import {
   instructions,
   filesNoteText,
   makeQuestionsLeft,
+  draftAgent,
   proposePlan,
   readApi,
   resultRunId,
@@ -643,6 +644,11 @@ export const chatAgent = (agent: ChatAgent): Extension => {
       ? [askQuestions(asksLeft)]
       : []),
     ...(plans ? [proposePlan()] : []),
+    // An agent drafted for the person, only in a turn they asked for in
+    // their own chat in Grasp (`TurnContext.drafts`).
+    ...(agent.context.drafts === undefined
+      ? []
+      : [draftAgent(agent.context.drafts)]),
   ];
   return defineExtension({
     name: chatAgentName(scope.chatId),
