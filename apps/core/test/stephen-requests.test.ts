@@ -163,6 +163,16 @@ const named = async (wording: string, role: string | null = null) => {
   return { topic, question };
 };
 
+/** The name sorting gave topic `id`. */
+const topicName = async (id: string): Promise<string> => {
+  const row = await env.DB.prepare(
+    "SELECT name FROM stephen_request_topics WHERE id = ?"
+  )
+    .bind(id)
+    .first<{ name: string }>();
+  return row?.name ?? "";
+};
+
 /** `n` people asking the same, each once. */
 const people = (n: number, request: Omit<Seeded, "person">): Seeded[] =>
   Array.from({ length: n }, () => ({
@@ -498,36 +508,48 @@ describe("a topic the sorter names", setUpTime, () => {
     });
   });
 
-  it("goes, with its question, at the sweep after the one person whose requests it rested on is erased", async () => {
+  it("goes, with its question, at the sweep after the one person whose requests it rested on is erased, once a day old", async () => {
     const admin = await signedInApi(idp, "admin");
     const ann = await member(
       idp,
       says("Take a break."),
+      says("Ask your manager."),
       says("Sixteen weeks.")
     );
     const ben = await memberAnsweredBy(idp, ann.provider);
-    const [annTopic, benTopic] = [`Workload ${unique()}`, `Leave ${unique()}`];
+    const [annTopic, overtime, benTopic] = [
+      `Workload ${unique()}`,
+      `Overtime ${unique()}`,
+      `Leave ${unique()}`,
+    ];
     stephenRequestReplies.push(
       sorting({
         newTopic: annTopic,
         newQuestion: "How do I cope with stress?",
       }),
+      // A topic no question points at: only its own day keeps it.
+      sorting({ newTopic: overtime }),
       sorting({ newTopic: benTopic, newQuestion: "How long is leave?" })
     );
     await post(messageFrom(ann.teams, { text: "I'm burning out." }));
+    await post(messageFrom(ann.teams, { text: "Is overtime paid?" }));
     await post(messageFrom(ben.teams, { text: "How long is my leave?" }));
     const before = await namesKept();
 
     await admin.api.members.remove(ann.userId);
     await admin.api.members.erase(ann.userId, String(ann.person.name));
     // A name just made waits a day for the request that made it.
+    await sweepStephenRequests(env, new Date());
+    const young = await namesKept();
     await sweepStephenRequests(env, new Date(Date.now() + 2 * 86_400_000));
 
-    expect({ before, after: await namesKept() }).toStrictEqual({
+    expect({ before, young, after: await namesKept() }).toStrictEqual({
+      young: before,
       before: [
         "How do I cope with stress?",
         "How long is leave?",
         benTopic,
+        overtime,
         annTopic,
       ],
       after: ["How long is leave?", benTopic],
@@ -705,6 +727,29 @@ describe("the requests report", setUpTime, () => {
       questions: ["How do I report sick?"],
       byPerson: null,
       tooFew: false,
+    });
+  });
+
+  it("names a topic the span before shows from five people, never one it shows from four", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const today = await companyDay(env);
+    const [many, few] = [
+      await named("Where is my payslip?"),
+      await named("Who signs the lease?"),
+    ];
+    await seed(spanBefore("month", today)?.from ?? today, [
+      ...people(5, many),
+      ...people(4, few),
+    ]);
+
+    const page = await admin.api.stephenRequests.report({ range: "month" });
+
+    expect({
+      before: page.before?.byTopic.map(({ key }) => key),
+      topics: page.topics,
+    }).toStrictEqual({
+      before: [many.topic, "elsewhere"],
+      topics: [{ id: many.topic, name: await topicName(many.topic) }],
     });
   });
 
@@ -1105,6 +1150,90 @@ describe("Needs you", setUpTime, () => {
       status: "fixed",
       since: { requests: 2, done: 0, up: 0, down: 0, people: null },
       proposalAgain: "Turn on Request leave in AFAS in Settings › Stephen.",
+    });
+  });
+});
+
+describe("Needs you after an erasure", setUpTime, () => {
+  afterEach(cleanUp);
+
+  it("tells the proposing model the topic five or more asked about, and stops listing a fixed need, its wording and its proposal, in Needs you and the weekly summary once an erasure takes it under five", async () => {
+    const owner = await signedInApi(idp, "admin");
+    const erased = await signedInApi(idp, "user");
+    const today = await companyDay(env);
+    const leave = await named("Request leave for next week");
+    const topic = await topicName(leave.topic);
+    const asked = {
+      ...leave,
+      kind: "changed",
+      outcome: "notPossible",
+      tools: [],
+      missing: [{ id: "afas.leave", why: "actionOff" }],
+    };
+    await seed(dayFrom(today, -3), [
+      ...people(4, asked),
+      { ...asked, person: erased.userId },
+    ]);
+    await fakeProvider();
+    const proposal = `Turn on Request leave under ${topic}.`;
+    stephenRequestReplies.push({
+      text: JSON.stringify({ proposal }),
+      inputTokens: 10,
+      outputTokens: 10,
+    });
+    await owner.api.stephenRequests.needs("en");
+    const need = await vi.waitFor(
+      async () => {
+        const [now] = await owner.api.stephenRequests.needs("en");
+        expect(now?.proposal).toBeTypeOf("string");
+        return now;
+      },
+      { timeout: 30_000, interval: 200 }
+    );
+    const proposing = JSON.stringify(stephenRequestCalls.at(-1));
+    await owner.api.stephenRequests.setNeedStatus(need?.key ?? "", "fixed");
+    /** Needs you and the weekly summary, as the owner reads them. */
+    const shown = async () =>
+      JSON.stringify([
+        await owner.api.stephenRequests.needs("en"),
+        await owner.api.stephenRequests.summary(),
+      ]);
+    const fivePeople = await shown();
+
+    await owner.api.members.remove(erased.userId);
+    await owner.api.members.erase(erased.userId, String(erased.person.name));
+    const fourPeople = await shown();
+    // A fifth person again: the owner's own decision was kept.
+    await seed(today, people(1, asked));
+    const [again] = await owner.api.stephenRequests.needs("en");
+    // Past the requests' thirteen months, the question and Grasp's
+    // proposal for it go at the sweep.
+    await sweepStephenRequests(env, new Date(Date.now() + 800 * 86_400_000));
+    const { results: proposals } = await env.DB.prepare(
+      "SELECT key FROM stephen_request_proposals"
+    ).all();
+
+    /** Whether `text` holds the need's wording, and its proposal. */
+    const holds = (text: string) => ({
+      wording: text.includes("Request leave for next week"),
+      proposal: text.includes(proposal),
+    });
+    expect({
+      topicToModel: proposing.includes(topic),
+      fivePeople: holds(fivePeople),
+      fourPeople: holds(fourPeople),
+      again: {
+        key: again?.key,
+        status: again?.status?.status,
+        proposal: again?.proposal,
+      },
+      proposals,
+    }).toStrictEqual({
+      topicToModel: true,
+      fivePeople: { wording: true, proposal: true },
+      fourPeople: { wording: false, proposal: false },
+      again: { key: need?.key, status: "fixed", proposal },
+      proposals: [],
     });
   });
 });

@@ -1,0 +1,1 @@
+CREATE INDEX `stephen_requests_topic_idx` ON `stephen_requests` (`topic_id`);

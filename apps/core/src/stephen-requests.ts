@@ -766,8 +766,35 @@ const firstDay = (
 };
 
 /**
+ * Of the questions `ids`, those five or more different people asked, over
+ * every request kept. A need that has a status but no longer comes out of
+ * the report is listed only while that holds: an erasure or a withdrawal
+ * that takes its question under five takes its wording and Grasp's
+ * proposal (which may name its topic) off Needs you and the weekly
+ * summary. Its status is kept, and shows again with a fifth person.
+ */
+const askedByFive = async (
+  env: Env,
+  ids: readonly string[]
+): Promise<string[]> => {
+  if (ids.length === 0) {
+    return [];
+  }
+  const rows = await drizzle(env.DB)
+    .select({ question: stephenRequests.questionId })
+    .from(stephenRequests)
+    .where(inList(stephenRequests.questionId, [...new Set(ids)]))
+    .groupBy(stephenRequests.questionId)
+    .having(
+      sql`count(DISTINCT ${stephenRequests.personId}) >= ${fewestPeople}`
+    );
+  return rows.flatMap(({ question }) => (question === null ? [] : [question]));
+};
+
+/**
  * The needs that have a status but no longer come out of the report,
- * still listed, so what their fix did can be said.
+ * still listed, so what their fix did can be said: only those whose
+ * question is named (`askedByFive`).
  */
 const statusedOnly = (
   keys: readonly string[],
@@ -978,17 +1005,15 @@ const needsOf = async (
     perPerson: false,
     reach: reach.byTeam,
   });
-  const questionIds = [
-    ...namedIn(report),
-    ...statuses
-      .map(({ key }) => kindOfKey(key))
-      .filter(({ kind }) => kind !== "quietTeam")
-      .map(({ id }) => id),
-  ];
-  const [named, topics] = await Promise.all([
-    questionsNamed(env, questionIds),
+  const fromStatuses = statuses
+    .map(({ key }) => kindOfKey(key))
+    .filter(({ kind }) => kind !== "quietTeam")
+    .map(({ id }) => id);
+  const [stillAsked, topics] = await Promise.all([
+    askedByFive(env, fromStatuses),
     topicsNamed(env, topicsIn(report)),
   ]);
+  const named = await questionsNamed(env, [...namedIn(report), ...stillAsked]);
   const questions = new Map(named.map((row) => [row.id, row]));
   const roles = new Map([...questions].map(([id, row]) => [id, row.role]));
   const fromReport = needsIn(report, reach, roles);

@@ -16,6 +16,7 @@ import { activeMember } from "../auth/auth.ts";
 import type { ToolCall } from "../chat-tool-events.ts";
 import {
   stephenRequestCards,
+  stephenRequestProposals,
   stephenRequestQuestions,
   stephenRequestTopics,
   stephenRequests,
@@ -529,9 +530,10 @@ export const rateRequest = async (
 };
 
 /**
- * Deletes requests past their thirteen months, and the questions and
- * topics nothing points at any more that are older than a day (a name
- * just made waits for the request that made it).
+ * Deletes requests past their thirteen months, the questions and topics
+ * nothing points at any more that are older than a day (a name just made
+ * waits for the request that made it), and Grasp's proposals for a
+ * question that is gone.
  */
 export const sweepStephenRequests = async (
   env: Env,
@@ -549,13 +551,25 @@ export const sweepStephenRequests = async (
   );
   // The topics, likewise, once no question points at them either: a name
   // rests on one person's message, so it goes with the last request that
-  // points at it, swept or erased (GRA-1923).
+  // points at it, swept or erased (GRA-1923). An older topic that just lost
+  // its last request and is sorted into again within the same quarter
+  // hour can go before the new request is kept with its id: that one
+  // request then points at a topic that is gone, which no page names, so
+  // it is counted under "Other topics". Harmless, and never a name shown.
   await db.delete(stephenRequestTopics).where(
     sql`${stephenRequestTopics.createdAt} < ${now.getTime() - 86_400_000}
         AND NOT EXISTS (SELECT 1 FROM ${stephenRequests}
           WHERE ${stephenRequests.topicId} = ${stephenRequestTopics.id})
         AND NOT EXISTS (SELECT 1 FROM ${stephenRequestQuestions}
           WHERE ${stephenRequestQuestions.topicId} = ${stephenRequestTopics.id})`
+  );
+  // Grasp's proposals for a question that is gone: what the model wrote
+  // from its wording (and its topic's name) goes with it. A quiet team's
+  // rests on no one's words.
+  await db.delete(stephenRequestProposals).where(
+    sql`${stephenRequestProposals.key} NOT LIKE 'quietTeam:%'
+        AND NOT EXISTS (SELECT 1 FROM ${stephenRequestQuestions}
+          WHERE ${stephenRequestQuestions.id} = substr(${stephenRequestProposals.key}, instr(${stephenRequestProposals.key}, ':') + 1))`
   );
   // Cards whose request is gone (swept or erased), a day on.
   await db.delete(stephenRequestCards).where(
