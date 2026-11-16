@@ -18,7 +18,7 @@ const audience = (group: string): Access => ({ kind: "audience", group });
 
 /** The queue's clock: a minute on per tick. */
 let clock = Date.now();
-const tick = async (): Promise<void> => {
+export const tick = async (): Promise<void> => {
   clock = Math.max(clock + 60_000, Date.now());
   await shared().work({
     ask: async () => {
@@ -102,7 +102,7 @@ interface Kept {
 }
 
 /** A source as a sequence makes it: the store as it is, or a twin. */
-interface Side {
+export interface Side {
   source: string;
   name: string;
   /**
@@ -509,7 +509,7 @@ const stretched = (seen: Surfaces, count: number): Surfaces => {
  * A reader of a run: the groups they are in, by place, and their twin:
  * none for a reader of every group, whose twin is the store as it is.
  */
-interface Reading {
+export interface Reading {
   places: number[];
   reader: PersonReader;
   twin: Side | undefined;
@@ -528,11 +528,13 @@ const differencesOf = async (
     every,
     before,
     label,
+    withOracle = true,
   }: {
     count: number;
     every: boolean;
     before: Surfaces | undefined;
     label: string;
+    withOracle?: boolean;
   }
 ): Promise<string[]> => {
   const got = await surfaces(real, count, reader, every);
@@ -554,7 +556,7 @@ const differencesOf = async (
       : [
           `${who} twin: ${JSON.stringify(got)} against ${JSON.stringify(want)}`,
         ]),
-    ...(JSON.stringify(got.states) === JSON.stringify(expected)
+    ...(!withOracle || JSON.stringify(got.states) === JSON.stringify(expected)
       ? []
       : [
           `${who} oracle: ${JSON.stringify(got.states)} against ${JSON.stringify(expected)}`,
@@ -682,4 +684,65 @@ export const series = (random: () => number): Event[] => {
     }
   }
   return events;
+};
+
+/**
+ * Runs `events` against the store as it is and a twin for each subset of
+ * `groups`' readers, then `disrupt` (a change to the whole store, as a
+ * restore or a release rolled back makes; it answers how many events the
+ * sides now hold), then compares every reader with their twin (`before`:
+ * until a source is judged, what a reader reads of it depends on nothing
+ * they can't read either), then `settle` (the catch-up), then compares
+ * every reader with their twin and the oracle (`after`).
+ */
+export const runAround = async (
+  groups: readonly string[],
+  events: readonly Event[],
+  {
+    disrupt,
+    settle,
+    compareBefore = true,
+  }: {
+    disrupt: (
+      real: Side,
+      readings: readonly Reading[],
+      at: number
+    ) => Promise<number>;
+    settle: () => Promise<void>;
+    compareBefore?: boolean;
+  }
+): Promise<{ before: string[]; after: string[] }> => {
+  const readings: Reading[] = subsetsOf(groups.length).map((places) => ({
+    places,
+    reader: {
+      person: unique("p"),
+      groups: places.map((place) => groups[place] ?? ""),
+    },
+    twin: places.length === groups.length ? undefined : sideOf(),
+  }));
+  const real = sideOf();
+  for (const [at, event] of events.entries()) {
+    // oxlint-disable-next-line no-await-in-loop -- one event at a time
+    await applyAll(real, readings, at, event, groups);
+  }
+  const count = await disrupt(real, readings, events.length);
+  const label = JSON.stringify(events);
+  const compare = async (withOracle: boolean, when: string) => {
+    const found: string[] = [];
+    for (const reading of readings) {
+      // oxlint-disable-next-line no-await-in-loop -- one reader at a time
+      const differ = await differencesOf(real, reading, {
+        count,
+        every: true,
+        before: undefined,
+        label: `${label} ${when}`,
+        withOracle,
+      });
+      found.push(...differ);
+    }
+    return found;
+  };
+  const before = compareBefore ? await compare(false, "before") : [];
+  await settle();
+  return { before, after: await compare(true, "after") };
 };
