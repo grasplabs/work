@@ -738,6 +738,10 @@ msgstr "{name} (optioneel)"
 msgid "{name} (team)"
 msgstr "{name} (team)"
 
+#: src/agents/agent-apps-card.tsx
+msgid "{name} also needs “{kind}”, which changes or sends things."
+msgstr "{name} heeft ook „{kind}” nodig, dat dingen wijzigt of verstuurt."
+
 #: src/brain/skills-page.tsx
 msgid "{name} and every version of it are deleted for good, with a share of it that waits. You can't use its name again."
 msgstr "{name} en alle versies ervan worden definitief verwijderd, net als een openstaand deelverzoek ervoor. Je kunt de naam niet opnieuw gebruiken."
@@ -749,10 +753,6 @@ msgstr "{name} antwoordt"
 #: src/chat/agent-choice.tsx
 msgid "{name} answers in this chat"
 msgstr "{name} antwoordt in deze chat"
-
-#: src/chat/agent-choice.tsx
-msgid "{name} answers. Change agent"
-msgstr "{name} antwoordt. Agent wijzigen"
 
 #: src/settings/teams.tsx
 msgid "{name} couldn't be deleted. Try again."
@@ -826,6 +826,14 @@ msgstr "{name} is nog niet klaar"
 msgid "{name} logo"
 msgstr "Logo van {name}"
 
+#: src/agents/agent-apps-card.tsx
+msgid "{name} may use any app its kinds of work allow. Give it apps, and it uses only those."
+msgstr "{name} mag elke app gebruiken die zijn soorten werk toestaan. Geef het apps, en het gebruikt alleen die."
+
+#: src/agents/agent-apps-card.tsx
+msgid "{name} may use no app: each was taken off. Give one back, or add one."
+msgstr "{name} mag geen app gebruiken: elke is weggehaald. Geef er een terug, of voeg er een toe."
+
 #: src/connections/tool-choice.tsx
 msgid "{name} may write. Change to Read"
 msgstr "{name} mag schrijven. Wijzigen naar Lezen"
@@ -845,6 +853,10 @@ msgstr "{name} heeft een eerdere stand hersteld"
 #: src/onboarding/setup-steps.tsx
 msgid "{name} takes part"
 msgstr "{name} doet mee"
+
+#: src/agents/agent-apps-card.tsx
+msgid "{name} uses only these apps, as far as its kinds of work allow."
+msgstr "{name} gebruikt alleen deze apps, voor zover zijn soorten werk dat toestaan."
 
 #: src/apps/app-workspace.tsx
 msgid "{name}, as your team sees it"
@@ -1852,6 +1864,7 @@ msgstr "Activiteit: bekijk alles in Traces"
 msgid "Actor ID"
 msgstr "Actor-ID"
 
+#: src/agents/agent-apps-card.tsx
 #: src/apps/indexes-view.tsx
 #: src/chat/chat-bar.tsx
 #: src/chat/composer-menu.tsx
@@ -2010,10 +2023,22 @@ msgstr "Een lid aan een app toegevoegd"
 msgid "Added a webhook to an App"
 msgstr "Heeft een webhook aan een app toegevoegd"
 
+#: src/agents/agent-apps-card.tsx
+msgid "Added by hand"
+msgstr "Met de hand toegevoegd"
+
 #: src/apps/app-integrations.tsx
 msgctxt "why an integration is one of an App's"
 msgid "Added by hand"
 msgstr "Met de hand toegevoegd"
+
+#: src/agents/agent-apps-card.tsx
+msgid "Added from its instructions"
+msgstr "Toegevoegd uit zijn instructies"
+
+#: src/agents/agent-apps-card.tsx
+msgid "Added from its instructions: {added}."
+msgstr "Toegevoegd uit zijn instructies: {added}."
 
 #: src/connections/http-connections.tsx
 msgid "Added on"
@@ -2301,6 +2326,10 @@ msgstr "Een agent voor het bedrijf, of een die alleen jij gebruikt."
 msgid "An agent of your own, for a job you do often. Only you see and ask it, in Grasp's chat."
 msgstr "Een eigen agent, voor een taak die je vaak doet. Alleen jij ziet hem en stelt hem vragen, in de chat van Grasp."
 
+#: src/chat/agent-draft-card.tsx
+msgid "An agent to make: {name}"
+msgstr "Een agent om te maken: {name}"
+
 #: src/chat/thread.tsx
 msgid "An agent you can no longer ask"
 msgstr "Een agent die je niet meer iets kunt vragen"
@@ -2324,6 +2353,10 @@ msgstr "Een App"
 #: src/apps/app-start.tsx
 msgid "An App that… (what it shows, and for whom)"
 msgstr "Een App die… (wat ze laat zien, en voor wie)"
+
+#: src/agents/agent-apps-card.tsx
+msgid "An app to give {name}"
+msgstr "Een app om {name} te geven"
 
 #: src/apps/app-status.tsx
 msgid "An archived App is kept as it is and goes offline: nobody opens its pages, its triggers stop and its unfinished runs are cancelled. A builder can restore it later."
@@ -2696,6 +2729,7 @@ msgstr "Met goedkeuring vervangt hij de eigen skill {name} van het bedrijf voor 
 msgid "Approving it replaces the team {team}'s own skill {name} for its members."
 msgstr "Met goedkeuring vervangt hij de eigen skill {name} van het team {team} voor de leden ervan."
 
+#: src/agents/agent-apps-card.tsx
 #: src/apps/apps-overview.tsx
 #: src/chat/mentions.tsx
 #: src/dashboard/widget-board.tsx
@@ -3447,6 +3481,10 @@ msgstr "Abonnement wijzigen"
 msgid "Change project"
 msgstr "Project wijzigen"
 
+#: src/chat/agent-draft-card.tsx
+msgid "Change something"
+msgstr "Iets wijzigen"
+
 #: src/chat/chat-panel.tsx
 msgid "Change something about the plan"
 msgstr "Iets aan het plan veranderen"
@@ -3741,6 +3779,10 @@ msgstr "Kies een bron."
 #: src/apps/app-workflows.tsx
 msgid "Choose a workflow"
 msgstr "Kies een workflow"
+
+#: src/agents/agent-apps-card.tsx
+msgid "Choose an app"
+msgstr "Kies een app"
 
 #: src/onboarding/place-picker.tsx
 msgid "Choose documents"
@@ -5354,6 +5396,10 @@ msgstr "Iedereen in een project waar je niet in zit"
 msgid "Everyone in it · {shownRole}"
 msgstr "Iedereen erin · {shownRole}"
 
+#: src/chat/agent-draft-card.tsx
+msgid "Everyone in the company"
+msgstr "Iedereen in het bedrijf"
+
 #: src/settings/team-members-dialog.tsx
 msgid "Everyone in the organization is in this team."
 msgstr "Iedereen in de organisatie zit in dit team."
@@ -6056,9 +6102,17 @@ msgctxt "programme stage"
 msgid "Getting ready"
 msgstr "In voorbereiding"
 
+#: src/agents/agent-apps-card.tsx
+msgid "Give {app} back"
+msgstr "{app} teruggeven"
+
 #: src/apps/data-model-changes.tsx
 msgid "Give a value"
 msgstr "Geef een waarde"
+
+#: src/agents/agent-apps-card.tsx
+msgid "Give back"
+msgstr "Teruggeven"
 
 #: src/connections/http-connections.tsx
 msgid "Give it a name of at most {longest} characters."
@@ -7334,6 +7388,10 @@ msgstr "De apps en workflows erin worden niet verwijderd, en niets erin is met h
 msgid "Its apps and workflows aren’t deleted, but they stop being shared with everyone in it: {who} lose access to them, unless they are shared with them another way."
 msgstr "De apps en workflows erin worden niet verwijderd, maar niet meer met iedereen erin gedeeld: {who} verliezen er toegang toe, tenzij ze op een andere manier met hen gedeeld zijn."
 
+#: src/agents/agent-apps-card.tsx
+msgid "Its apps couldn't be loaded. Reload the page."
+msgstr "Zijn apps konden niet worden geladen. Laad de pagina opnieuw."
+
 #: src/workflows/binding-approvals.tsx
 #: src/workflows/files-and-apps.tsx
 msgid "Its bindings"
@@ -7363,6 +7421,14 @@ msgstr "Gegevens"
 #: src/apps/app-settings.tsx
 msgid "Its definition to keep or move, and a blueprint others can start from."
 msgstr "De definitie om te bewaren of te verhuizen, en een blauwdruk waarmee anderen kunnen beginnen."
+
+#: src/chat/agent-draft-card.tsx
+msgid "Its instructions"
+msgstr "Zijn instructies"
+
+#: src/agents/agent-apps-card.tsx
+msgid "Its instructions name apps your company doesn't offer: {missing}."
+msgstr "Zijn instructies noemen apps die jullie bedrijf niet aanbiedt: {missing}."
 
 #: src/settings/ai-providers.tsx
 msgid "Its key is deleted, and calls stop using it at once. Models of this provider are no longer used, even as a fallback."
@@ -8021,6 +8087,10 @@ msgstr "Maak een App van de blueprint {name}: {description}"
 #: src/make/make-ideas.tsx
 msgid "Make an App from the {name} blueprint."
 msgstr "Maak een App van de blueprint {name}."
+
+#: src/chat/agent-draft-card.tsx
+msgid "Make it"
+msgstr "Maken"
 
 #: src/agents/agents-overview.tsx
 msgid "Make one for a job, such as chasing unpaid invoices, and say who may ask it."
@@ -8756,6 +8826,10 @@ msgstr "Er is nog geen model gekozen."
 msgid "No model is set up for this deployment yet."
 msgstr "Er is nog geen model ingesteld voor deze omgeving."
 
+#: src/agents/agent-apps-card.tsx
+msgid "No new app from its instructions."
+msgstr "Geen nieuwe app uit zijn instructies."
+
 #: src/people/person-picker.tsx
 msgid "No owner yet"
 msgstr "Nog geen eigenaar"
@@ -8978,6 +9052,10 @@ msgstr "Nog niemand"
 #: src/agents/agent-page.tsx
 msgid "Nobody yet, until you choose."
 msgstr "Nog niemand, tot u kiest."
+
+#: src/chat/agent-draft-card.tsx
+msgid "Nobody yet: you say who on its page"
+msgstr "Nog niemand: wie, bepaal je op zijn pagina"
 
 #: src/brain/skills-page.tsx
 msgid "Nobody's agents use {name} from then on. Its versions stay as history, and a new approved share of its name brings it back."
@@ -9290,6 +9368,10 @@ msgstr "Er wordt nog niets bewaard."
 msgid "Nothing is made until you say Build it. You can change any of it first."
 msgstr "Er wordt niets gemaakt tot je op Bouwen klikt. Je kunt eerst alles aanpassen."
 
+#: src/chat/agent-draft-card.tsx
+msgid "Nothing is made until you say Make it. You can change any of it first."
+msgstr "Er wordt niets gemaakt tot je op Maken drukt. Je kunt eerst alles wijzigen."
+
 #: src/inbox/items.ts
 msgid "Nothing is sent or changed on {connection} until you approve it, with exactly what is shown."
 msgstr "Er wordt niets verzonden of gewijzigd op {connection} totdat je het goedkeurt, met precies wat wordt getoond."
@@ -9375,6 +9457,10 @@ msgstr "Er is niets toegevoegd. Corrigeer deze rijen en probeer het opnieuw."
 #: src/brain/brain.ts
 msgid "Nothing yet"
 msgstr "Nog niets"
+
+#: src/chat/agent-draft-card.tsx
+msgid "Nothing yet: you turn it on on its page"
+msgstr "Nog niets: je zet het aan op zijn pagina"
 
 #: src/brain/memories-page.tsx
 msgid "Nothing you can read"
@@ -9597,6 +9683,10 @@ msgstr "Een moment"
 #: src/apps/field-kinds.tsx
 msgid "One of a list of options"
 msgstr "Eén uit een lijst met opties"
+
+#: src/chat/agent-draft-card.tsx
+msgid "One of the company's agents"
+msgstr "Een van de agents van het bedrijf"
 
 #: src/interview/words.ts
 msgid "One real case"
@@ -10282,6 +10372,10 @@ msgstr "Mensen doen “{name}” op twee manieren"
 msgid "People heard"
 msgstr "Gehoorde mensen"
 
+#: src/chat/agent-draft-card.tsx
+msgid "People in these teams: {named}"
+msgstr "Mensen in deze teams: {named}"
+
 #: src/agents/agent-page.tsx
 msgid "People it worked for"
 msgstr "Mensen voor wie hij werkte"
@@ -10786,6 +10880,10 @@ msgstr "Teruglezen"
 #: src/inbox/items.ts
 msgid "Reading it kept failing, so your triggers there start nothing new for now. Grasp keeps trying; if it doesn't come back, check the connection."
 msgstr "Het lezen bleef mislukken, dus je triggers daar starten voorlopig niets nieuws. Grasp blijft het proberen; als het niet terugkomt, controleer dan de verbinding."
+
+#: src/agents/agent-apps-card.tsx
+msgid "Reading its instructions…"
+msgstr "Leest zijn instructies…"
 
 #: src/people/people-teams-picker.tsx
 #: src/people/share-picker.tsx
@@ -13117,6 +13215,10 @@ msgstr "Tabelnaam"
 msgid "Tables"
 msgstr "Tabellen"
 
+#: src/agents/agent-apps-card.tsx
+msgid "Take {app} off"
+msgstr "{app} weghalen"
+
 #: src/apps/app-integrations.tsx
 msgid "Take {integrationName} off {appName}"
 msgstr "{integrationName} van {appName} afhalen"
@@ -13140,6 +13242,10 @@ msgstr "{name} uit het project halen"
 #: src/settings/team-members-dialog.tsx
 msgid "Take {who} off {name}"
 msgstr "{who} uit {name} halen"
+
+#: src/agents/agent-apps-card.tsx
+msgid "Take off"
+msgstr "Weghalen"
 
 #: src/dashboard/widget-board.tsx
 msgid "Take off the dashboard"
@@ -13169,6 +13275,10 @@ msgstr "Rondleiding opnieuw volgen"
 #: src/workflows/definition-editor.tsx
 msgid "Take theirs"
 msgstr "Die van hen overnemen"
+
+#: src/agents/agent-apps-card.tsx
+msgid "Taken off: never added back from its instructions"
+msgstr "Weggehaald: nooit opnieuw toegevoegd uit zijn instructies"
 
 #: src/chat/package-requests.tsx
 msgid "Takes out"
@@ -13722,6 +13832,10 @@ msgstr "De regels van het bedrijf voor elke agent."
 #: src/brain/skills-page.tsx
 msgid "The company's skills"
 msgstr "Skills van het bedrijf"
+
+#: src/chat/agent-draft-card.tsx
+msgid "the company's time zone"
+msgstr "tijdzone van het bedrijf"
 
 #: src/inbox/items.ts
 msgid "The connection stopped working. Workflows that use it wait until someone signs in again."
@@ -14830,6 +14944,7 @@ msgctxt "turn a trigger off"
 msgid "Turn off"
 msgstr "Uitzetten"
 
+#: src/agents/agent-apps-card.tsx
 #: src/workflows/workflow-triggers.tsx
 msgid "Turn on"
 msgstr "Aanzetten"
@@ -14845,6 +14960,10 @@ msgstr "Geluid uitzetten"
 #: src/voice/sound-controls.tsx
 msgid "Turn sound on"
 msgstr "Geluid aanzetten"
+
+#: src/agents/agent-apps-card.tsx
+msgid "Turned on, as it only reads: {turned}."
+msgstr "Aangezet, omdat het alleen leest: {turned}."
 
 #: src/onboarding/about-story.tsx
 msgid "Twenty minutes each, easily. About fifteen a week."
@@ -15695,6 +15814,7 @@ msgid "What it is bound to has changed since the binding was approved. Bind it a
 msgstr "Waaraan hij gekoppeld is, is veranderd sinds de koppeling is goedgekeurd. Koppel hem opnieuw zodra je hebt gecontroleerd dat het nog past."
 
 #: src/agents/agent-form.tsx
+#: src/chat/agent-draft-card.tsx
 msgid "What it is for"
 msgstr "Waar hij voor is"
 
@@ -15704,6 +15824,7 @@ msgid "What it is for"
 msgstr "Waarvoor hij is"
 
 #: src/agents/agent-page.tsx
+#: src/chat/agent-draft-card.tsx
 msgid "What it may do"
 msgstr "Wat hij mag doen"
 
@@ -15980,6 +16101,7 @@ msgid "When it was added"
 msgstr "Wanneer het is toegevoegd"
 
 #: src/agents/agent-wakes.tsx
+#: src/chat/agent-draft-card.tsx
 msgid "When it works on its own"
 msgstr "Wanneer hij uit zichzelf werkt"
 
@@ -16125,10 +16247,6 @@ msgstr "Terwijl Stephen met je team praat: hoe ver de interviews zijn, team voor
 msgid "Who"
 msgstr "Wie"
 
-#: src/chat/agent-choice.tsx
-msgid "Who answers"
-msgstr "Wie antwoordt"
-
 #: src/workflows/binding-approvals.tsx
 msgid "Who answers {alias}"
 msgstr "Wie {alias} beantwoordt"
@@ -16178,6 +16296,10 @@ msgstr "Voor wie hij is"
 msgid "Who leads it?"
 msgstr "Wie leidt het?"
 
+#: src/chat/agent-draft-card.tsx
+msgid "Who may ask it"
+msgstr "Wie het mag vragen"
+
 #: src/brain/sources-page.tsx
 msgctxt "a file uploaded into the Brain"
 msgid "Who may read it"
@@ -16226,6 +16348,10 @@ msgstr "Wie is wie in je bedrijf?"
 #: src/apps/draft-changes.tsx
 msgid "whoever added the row"
 msgstr "wie de rij heeft toegevoegd"
+
+#: src/chat/agent-draft-card.tsx
+msgid "Whose it is"
+msgstr "Van wie het is"
 
 #: src/apps/release-controls.tsx
 #: src/workflows/requests/request-table.tsx
@@ -16314,6 +16440,10 @@ msgstr "Woorden en zinnen"
 #: src/interview/words.ts
 msgid "Work of the team"
 msgstr "Werk van het team"
+
+#: src/agents/agent-apps-card.tsx
+msgid "Work out from its instructions"
+msgstr "Afleiden uit zijn instructies"
 
 #: src/chat/thread.tsx
 msgid "Worked for {time}"
@@ -16990,6 +17120,10 @@ msgstr "Van jou"
 #: src/agents/agent-page.tsx
 msgid "Yours alone: nobody else sees or asks it"
 msgstr "Alleen van jou: niemand anders ziet hem of stelt hem vragen"
+
+#: src/chat/agent-draft-card.tsx
+msgid "Yours alone: only you ask it"
+msgstr "Alleen van jou: alleen jij vraagt het"
 
 #: src/brain/atlas-overlays.tsx
 #: src/workflows/workflow-flow.tsx

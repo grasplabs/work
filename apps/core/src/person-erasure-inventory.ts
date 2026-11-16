@@ -146,6 +146,8 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // company's agents, and what an admin gave them, stay the company's.
   "core.agents": { erased: "workspace" },
   "core.agent_documents": { erased: "workspace" },
+  // Their own agents' apps; a company agent's, which a person set, stay.
+  "core.agent_apps": { erased: "workspace" },
   "core.agent_reach": { company: "settings an admin changed" },
   "core.agent_wakes": { erased: "workspace" },
   "core.agent_places": { company: "settings an admin changed" },
@@ -601,6 +603,7 @@ export const reviewedPersonColumns: Readonly<
   "core.agent_held_starts": ["person_id"],
   "core.agents": ["changed_by", "made_by", "owner_id"],
   "core.agent_documents": ["added_by"],
+  "core.agent_apps": ["changed_by"],
   "core.agent_places": ["changed_by"],
   "core.agent_reach": ["changed_by"],
   "core.agent_wakes": ["changed_by", "made_by", "person_id"],
