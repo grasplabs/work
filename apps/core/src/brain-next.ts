@@ -1214,7 +1214,7 @@ const usedOf = async (
  * nor handed to the model, code or a page.
  */
 export const recallOwnedAs = async (
-  env: BrainEnv & Pick<Env, "DB" | "EMBEDDER" | "WORKSPACES">,
+  env: BrainEnv & ReaderEnv & Pick<Env, "EMBEDDER" | "WORKSPACES">,
   personId: string,
   recall: Recall
 ): Promise<{ pack: RecalledPack; fromOwn: boolean }> => {
