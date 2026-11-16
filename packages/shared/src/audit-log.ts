@@ -90,6 +90,10 @@ const typeRules: readonly {
   { action: "agent.offered", type: "config" },
   { action: "agent.adopted", type: "config" },
   { action: "agent.declined", type: "config" },
+  // An agent's apps: one added or taken off by hand, and those worked out
+  // from its instructions (core's src/agent-apps.ts).
+  { action: "agent.app.changed", type: "config" },
+  { action: "agent.apps.worked_out", type: "config" },
   { action: "agent.reach.changed", type: "config" },
   { action: "agent.class.changed", type: "config" },
   // An admin giving an agent a document to answer from, or taking one

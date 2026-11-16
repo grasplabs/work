@@ -30,6 +30,9 @@ export const agentErrors = defineErrorFamily({
     "This agent isn't offered to the company, or its owner took the offer back.",
   "agent.own_off":
     "Your company has turned off agents of people's own. An admin can turn them back on.",
+  "agent.app_unknown": "That isn't an app your company offers.",
+  "agent.apps_unread":
+    "The apps it needs couldn't be worked out just now: no AI model answered. Add them by hand, or try again.",
   "agent.first_stays":
     "The company's first agent can't be deleted. Pause it to stop it answering.",
   "agent.model_unknown":

@@ -1797,8 +1797,15 @@
     {
       "idx": 256,
       "version": "6",
-      "when": 1794816467723,
-      "tag": "0256_agent_offered",
+      "when": 1794817340314,
+      "tag": "0256_agent_apps",
+      "breakpoints": true
+    },
+    {
+      "idx": 257,
+      "version": "6",
+      "when": 1794822005009,
+      "tag": "0257_agent_offered",
       "breakpoints": true
     }
   ]
