@@ -12,6 +12,18 @@
  * are every surface a person reaches the Brain's memories and sources
  * through, filtered to the world, as text a twin world's can be compared
  * with once each world's own names are replaced by roles.
+ *
+ * Each time is named by the event of the world it falls at or after (a
+ * version's add, or a memory's learning, of those both worlds have) and
+ * how long after it: so a hidden memory that moved an end time shows as a
+ * difference, as one that moved an order does, lists being compared in
+ * order, but for recall's, whose ties break by ids of each world's own.
+ *
+ * Two things the harness deliberately doesn't hold an out memory to:
+ * exports carry the store's raw records, every memory with what it rests
+ * on, and make no claim about what is current (a restore judges again);
+ * and the entities and names an out memory made stay, as they do once a
+ * memory ends any other way.
  */
 import { recallBudgetMax } from "@grasp-os/brain-next/contract";
 import type { Reader } from "@grasp-os/brain-next/contract";
@@ -22,7 +34,10 @@ import { env } from "cloudflare:workers";
 import {
   codeCardAs,
   codeEntitiesAs,
+  confirmAs,
   contestedAs,
+  correctAs,
+  forgetAs,
   listVersionsAs,
   memoriesAs,
   readableMemoriesAs,
@@ -50,14 +65,29 @@ import { noProducers } from "./no-producers.ts";
 export const outWord = (prefix: string): string =>
   `${prefix}${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`;
 
-/** The two quotes a world's versions hold or drop. */
-export type QuoteName = "out" | "keep";
+/**
+ * The quotes a world's versions hold or drop: `out` and `keep`, and
+ * `gone`, which no version after the first says again.
+ */
+export type QuoteName = "out" | "keep" | "gone";
 
 /** The words of quote `name` of the customer named by `depot`. */
-const quoteOf = (depot: string, name: QuoteName): string =>
-  name === "out"
-    ? `the ${depot} contract renews every April`
-    : `the ${depot} office opens on weekdays`;
+const quoteOf = (depot: string, name: QuoteName): string => {
+  switch (name) {
+    case "out": {
+      return `the ${depot} contract renews every April`;
+    }
+    case "keep": {
+      return `the ${depot} office opens on weekdays`;
+    }
+    case "gone": {
+      return `the ${depot} buyer left in May`;
+    }
+    default: {
+      throw new Error("No such quote");
+    }
+  }
+};
 
 /** A version's text that says the quotes `held`, and nothing marked. */
 export const textHolding = (depot: string, ...held: QuoteName[]): string =>
@@ -87,6 +117,8 @@ export interface OutWorld {
   memories: Record<string, string>;
   /** The groups its memories were planted for, which see its customer. */
   groups: string[];
+  /** The people its relations name, by key: each one's entity. */
+  others: Record<string, string>;
 }
 
 /** A store of the Brain by name, as core reaches it. */
@@ -112,28 +144,61 @@ export const newWorld = (
   markers: Object.fromEntries(names.map((name) => [name, outWord("m")])),
   memories: {},
   groups: [],
+  others: {},
 });
 
 /**
- * Memories resting on `version` of `world`'s source, each by name with the
- * quote it cites, for `group` (`team:<id>`, `company`) or, in a person's
- * own store, its person alone. Each states its marker and nothing else
- * worth a question but the customer.
+ * What a planted memory says: resting on a quote of the source, or, with
+ * none, a writer's word; filed under the customer's one-value `status`
+ * (its marker the value), or as a `contact` relation to a person of that
+ * key, or about that person (`about`); or under no attribute.
+ */
+export type Planted =
+  | QuoteName
+  | { quote?: QuoteName; attribute: "status" }
+  | { quote: QuoteName; contact: string }
+  | { quote: QuoteName; about: string };
+
+/**
+ * Names of memories a reader reaches only along a relation, so their
+ * markers are left out of every question (`outReadsOf`): a fact of a
+ * person the customer's contact relation names.
+ */
+const reachedOnly = (name: string): boolean => name.startsWith("reached ");
+
+/**
+ * Memories of `world`'s customer, each by name as `planted` says it, for
+ * `group` (`team:<id>`, `company`) or, in a person's own store, its person
+ * alone, those resting on the source on its `version`. Each states its
+ * marker and nothing else worth a question but the customer.
  */
 export const remember = async (
   world: OutWorld,
   group: string,
   version: number,
-  cited: Readonly<Record<string, QuoteName>>
+  planted: Readonly<Record<string, Planted>>
 ): Promise<void> => {
   const person = world.storeName.replace(/^person:/u, "");
+  const contacts = [
+    ...new Set(
+      Object.values(planted).flatMap((each) => {
+        if (typeof each !== "object") {
+          return [];
+        }
+        if ("contact" in each) {
+          return [each.contact];
+        }
+        return "about" in each ? [each.about] : [];
+      })
+    ),
+  ];
   const added = await storeNamed(world.storeName).addMemories({
     change: crypto.randomUUID(),
     access:
       world.place === "shared"
         ? { kind: "audience", group }
         : { kind: "owner", person },
-    // A customer's id is taken only as someone who sees it.
+    // An entity's id is taken only as someone who sees it.
     ...(world.entity === "" || world.place === "own"
       ? {}
       : {
@@ -143,26 +208,72 @@ export const remember = async (
           },
         }),
     entities: [
-      world.entity === ""
-        ? { key: "c", kind: "customer", names: [`Depot ${world.depot}`] }
-        : { key: "c", id: world.entity, kind: "customer", names: [] },
+      // The customer, unless every memory is about someone else.
+      ...(Object.values(planted).every(
+        (each) => typeof each === "object" && "about" in each
+      )
+        ? []
+        : [
+            world.entity === ""
+              ? {
+                  key: "c",
+                  kind: "customer" as const,
+                  names: [`Depot ${world.depot}`],
+                }
+              : {
+                  key: "c",
+                  id: world.entity,
+                  kind: "customer" as const,
+                  names: [],
+                },
+          ]),
+      ...contacts.map((contact) => {
+        const id = world.others[contact];
+        return id === undefined
+          ? {
+              key: contact,
+              kind: "person" as const,
+              names: [`Contact ${world.depot} ${contact}`],
+            }
+          : { key: contact, id, kind: "person" as const, names: [] };
+      }),
     ],
-    memories: Object.entries(cited).map(([name, quote]) => ({
-      about: "c",
-      type: "fact" as const,
-      statement: `Depot ${world.depot} ${world.markers[name] ?? ""}`,
-      speaker: { kind: "system" as const },
-      basis: {
-        kind: "source" as const,
-        source: world.key,
-        version,
-        quote: quoteOf(world.depot, quote),
-      },
-    })),
+    memories: Object.entries(planted).map(([name, each]) => {
+      const marker = world.markers[name] ?? "";
+      const said = typeof each === "string" ? { quote: each } : each;
+      return {
+        about: "about" in said ? said.about : "c",
+        type: "fact" as const,
+        // Reached only along a relation: nothing a question names.
+        statement:
+          "about" in said
+            ? `Reached ${marker}`
+            : `Depot ${world.depot} ${marker}`,
+        ...("attribute" in said
+          ? { attribute: said.attribute, value: marker }
+          : {}),
+        ...("contact" in said
+          ? { attribute: "contact", object: said.contact }
+          : {}),
+        speaker: { kind: "system" as const },
+        basis:
+          said.quote === undefined
+            ? { kind: "writer" as const, writer: `crm-${world.depot}` }
+            : {
+                kind: "source" as const,
+                source: world.key,
+                version,
+                quote: quoteOf(world.depot, said.quote),
+              },
+      };
+    }),
   });
   world.entity ||= added.entities.c ?? "";
+  for (const contact of contacts) {
+    world.others[contact] ??= added.entities[contact] ?? "";
+  }
   world.groups.push(group);
-  for (const [index, name] of Object.keys(cited).entries()) {
+  for (const [index, name] of Object.keys(planted).entries()) {
     world.memories[name] = added.memories[index] ?? "";
   }
 };
@@ -300,7 +411,10 @@ export const outReadsOf = async (
   world: OutWorld,
   versions: number
 ): Promise<Reads> => {
-  const question = `Depot ${world.depot} ${Object.values(world.markers).join(" ")}`;
+  const asked = Object.entries(world.markers).flatMap(([name, marker]) =>
+    reachedOnly(name) ? [] : [marker]
+  );
+  const question = `Depot ${world.depot} ${asked.join(" ")}`;
   const budget = { tokens: recallBudgetMax };
   const entity = { store: world.place, id: world.entity };
   const ref = world.source;
@@ -498,44 +612,123 @@ export const ownMemorySurfaces = [
   "recall ranked by their use",
 ];
 
-/**
- * Times, which differ between twins built a moment apart: ISO 8601, a
- * date as text, and epoch milliseconds.
- */
+/** A time as text: ISO 8601, or epoch milliseconds. */
 const times =
-  /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z|[A-Z][a-z]{2} [A-Z][a-z]{2} \d{2} \d{4} \d{2}:\d{2}:\d{2} GMT[+-]\d{4} \([^)]*\)|(?<![\d.])1\d{12}(?![\d.])/gu;
+  /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z|(?<![\d.])1\d{12}(?![\d.])/gu;
 
 /**
- * `value` with each string of it in roles (`role`), and every list in
- * the order of its items' text: a twin's memories tie with one another as
- * the world's do, but break the tie by ids of their own.
+ * The surfaces whose lists are ranked by recall, where a world's memories
+ * tie with one another as its twin's do but break the tie by ids of each
+ * world's own: compared in the order of their items' text. Every other
+ * list is compared in its order (a memory page and a card order by when
+ * each was learned, which differs in every world).
  */
-const inRoles = (value: unknown, role: (text: string) => string): unknown => {
+const rankedSurfaces = new Set([
+  "recall in their own chat",
+  "recall as their teams",
+  "recall with the stores it found in",
+  "recall of passages, as code's",
+  "the Brain page's search",
+  "recall ranked by their use",
+]);
+
+/** A world's events, by name, with when each was: what its times are named by. */
+type Events = readonly (readonly [string, number])[];
+
+/**
+ * `world`'s events of `names` (its memories' learning) and of each of its
+ * versions' adds, as its store keeps them, in the order they happened.
+ */
+const eventsOf = async (
+  world: OutWorld,
+  names: readonly string[]
+): Promise<Events> =>
+  await inStoreOf(world.storeName, (sql) =>
+    [
+      ...sql
+        .exec<{ version: number; added_at: number }>(
+          "SELECT version, added_at FROM source_versions WHERE source = ?",
+          world.key
+        )
+        .toArray()
+        .map(({ version, added_at }): [string, number] => [
+          `version ${version} added`,
+          added_at,
+        ]),
+      ...names.flatMap((name): [string, number][] =>
+        sql
+          .exec<{ learned_at: number }>(
+            "SELECT learned_at FROM memories WHERE id = ?",
+            world.memories[name] ?? ""
+          )
+          .toArray()
+          .map(({ learned_at }) => [`${name} learned`, learned_at])
+      ),
+    ].toSorted(([a, at], [b, bt]) => at - bt || a.localeCompare(b))
+  );
+
+/**
+ * `ms` named by the last of `events` at or before it and how long after
+ * it, or the first and how long before: the same for the same moment of
+ * a world and its twin.
+ */
+const timeRole = (ms: number, events: Events): string => {
+  const [name, at] = events.findLast(([, each]) => each <= ms) ??
+    events[0] ?? ["the start", 0];
+  return `<${name} ${ms - at >= 0 ? "+" : ""}${ms - at} ms>`;
+};
+
+/**
+ * `value` with each string of it in roles (`role`), each time named by
+ * the world's `events` (`timeRole`), and, with `sort`, every list in the
+ * order of its items' text.
+ */
+const inRoles = (
+  value: unknown,
+  role: (text: string) => string,
+  events: Events,
+  sort: boolean
+): unknown => {
   if (typeof value === "string") {
     return role(value);
   }
   if (value instanceof Date) {
-    return "<time>";
+    return timeRole(value.getTime(), events);
+  }
+  if (typeof value === "number" && value > 1e12 && value < 2e12) {
+    return timeRole(value, events);
   }
   if (Array.isArray(value)) {
-    return value
-      .map((each) => inRoles(each, role))
-      .toSorted((one, other) => textOf(one).localeCompare(textOf(other)));
+    const each = value.map((item) => inRoles(item, role, events, sort));
+    return sort
+      ? each.toSorted((one, other) => textOf(one).localeCompare(textOf(other)))
+      : each;
   }
   if (typeof value === "object" && value !== null) {
     return Object.fromEntries(
-      Object.entries(value).map(([key, each]) => [key, inRoles(each, role)])
+      Object.entries(value).map(([key, item]) => [
+        key,
+        inRoles(item, role, events, sort),
+      ])
     );
   }
   return value;
 };
 
-/** `reads` as text, each of `world`'s own names replaced by its role. */
-const asRoles = (world: OutWorld, reads: Reads): Record<string, string> => {
+/** `reads` as text, each of `world`'s own names replaced by its role and each time by its `events`. */
+const asRoles = (
+  world: OutWorld,
+  reads: Reads,
+  events: Events
+): Record<string, string> => {
   const names: [string, string][] = [
     [world.source.id, "<source>"],
     [world.entity, "<entity>"],
     [world.depot, "<depot>"],
+    ...Object.entries(world.others).map(([key, id]): [string, string] => [
+      id,
+      `<${key}>`,
+    ]),
     ...Object.entries(world.markers).map(([name, marker]): [string, string] => [
       marker,
       `<${name}>`,
@@ -546,7 +739,9 @@ const asRoles = (world: OutWorld, reads: Reads): Record<string, string> => {
     ]),
   ];
   const role = (text: string): string => {
-    let roled = text.replaceAll(times, "<time>");
+    let roled = text.replaceAll(times, (time) =>
+      timeRole(time.includes("T") ? Date.parse(time) : Number(time), events)
+    );
     for (const [name, each] of names) {
       if (name !== "") {
         roled = roled.replaceAll(name, each);
@@ -557,7 +752,7 @@ const asRoles = (world: OutWorld, reads: Reads): Record<string, string> => {
   return Object.fromEntries(
     Object.entries(reads).map(([surface, read]) => [
       surface,
-      textOf(inRoles(read, role)),
+      textOf(inRoles(read, role, events, rankedSurfaces.has(surface))),
     ])
   );
 };
@@ -567,14 +762,19 @@ const asRoles = (world: OutWorld, reads: Reads): Record<string, string> => {
  * are replaced by roles: each surface with both texts. None when the
  * twin, lacking what the reader may not read, answers alike.
  */
-export const unlikeTwin = (
+export const unlikeTwin = async (
   world: OutWorld,
   reads: Reads,
   twin: OutWorld,
   twinReads: Reads
-): { surface: string; world: string; twin: string }[] => {
-  const ours = asRoles(world, reads);
-  const theirs = asRoles(twin, twinReads);
+): Promise<{ surface: string; world: string; twin: string }[]> => {
+  // What both worlds hold: a time named by a memory the twin lacks would
+  // tell the twins apart by the naming alone.
+  const shared = Object.keys(world.memories).filter(
+    (name) => name in twin.memories
+  );
+  const ours = asRoles(world, reads, await eventsOf(world, shared));
+  const theirs = asRoles(twin, twinReads, await eventsOf(twin, shared));
   return Object.keys({ ...ours, ...theirs }).flatMap((surface) =>
     ours[surface] === theirs[surface]
       ? []
@@ -724,3 +924,49 @@ export const wordRulesOf = async (): Promise<number> =>
         )
         .one().version
   );
+
+/** What each write a person may make of a memory answers, by the memory's name. */
+export type Writes = Record<
+  string,
+  { confirm: unknown; correct: unknown; forget: unknown }
+>;
+
+/**
+ * What `personId` gets confirming, correcting and forgetting each memory
+ * of `world` that `names` lists, and a memory nobody holds: a write that
+ * answered `done` for an out memory would tell them it is current. Run
+ * last in a case: a correction adds a memory of their own.
+ */
+export const writesOf = async (
+  personId: string,
+  world: OutWorld,
+  names: readonly string[]
+): Promise<Writes> => {
+  const writes: Writes = {};
+  const asked: [string, string][] = [
+    ...names.map((name): [string, string] => [
+      name,
+      world.memories[name] ?? "",
+    ]),
+    ["nobody's", crypto.randomUUID()],
+  ];
+  for (const [name, memory] of asked) {
+    const place = { store: world.place, memory };
+    writes[name] = {
+      // oxlint-disable-next-line no-await-in-loop -- one memory at a time
+      confirm: await settled(async () => await confirmAs(env, personId, place)),
+      // oxlint-disable-next-line no-await-in-loop -- one memory at a time
+      correct: await settled(async () => {
+        const corrected = await correctAs(env, personId, {
+          wrong: { ...place, entity: world.entity },
+          right: "Something else",
+          change: crypto.randomUUID(),
+        });
+        return corrected === null ? null : "corrected";
+      }),
+      // oxlint-disable-next-line no-await-in-loop -- one memory at a time
+      forget: await settled(async () => await forgetAs(env, personId, memory)),
+    };
+  }
+  return writes;
+};

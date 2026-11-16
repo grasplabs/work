@@ -13,7 +13,14 @@ import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
+import {
+  beforeAll,
+  describe,
+  expect,
+  it,
+  onTestFinished,
+  vi,
+} from "vite-plus/test";
 import { z } from "zod";
 
 import { appFor } from "../src/apps.ts";
@@ -88,6 +95,7 @@ import {
   tick,
   unlikeTwin,
   wordRulesOf,
+  writesOf,
 } from "./brain-next-out-reads.ts";
 import type { OutWorld } from "./brain-next-out-reads.ts";
 import { ageOwnErasure } from "./brain-next-own-store.ts";
@@ -4191,9 +4199,30 @@ describe(
      * still says, does (brain-next-out-reads.ts). A reader of a team's
      * source reads alike in a world with what they may not read (a team's
      * memories of the same source, or its version) and in its twin
-     * without.
+     * without, the two written on one clock.
      */
-    const outNames = ["out", "keep", "hidden out", "hidden keep"];
+    const outNames = [
+      "out",
+      "keep",
+      "hidden out",
+      "hidden keep",
+      "rival",
+      "out contact",
+      "keep contact",
+      "reached by out contact",
+      "reached by keep contact",
+    ];
+
+    /** The memories a reader of the team may read, as a rich world plants them. */
+    const visibleNames = [
+      "out",
+      "keep",
+      "rival",
+      "out contact",
+      "keep contact",
+      "reached by out contact",
+      "reached by keep contact",
+    ];
 
     /** A reader in a team, someone in that team and a hidden one, and how the Brain reads each. */
     const outReaders = async () => {
@@ -4208,6 +4237,7 @@ describe(
         both,
         team,
         hiddenTeam,
+        teamReaders: { kind: "team", teamId: team } satisfies SourceReaders,
         readerReads: { person: reader, groups: [`team:${team}`, "company"] },
         bothReads: {
           person: both,
@@ -4216,21 +4246,32 @@ describe(
       };
     };
 
-    /** A world on a new source of a team's, and its twin. */
+    type OutReaders = Awaited<ReturnType<typeof outReaders>>;
+
+    /** A world on a new source of a team's, and its twin, on one clock. */
     const worldAndTwin = () =>
       [
         newWorld("shared", newSource(), outNames),
         newWorld("shared", newSource(), outNames),
       ] as const;
 
+    /** Adds `text` as `world`'s next version. */
+    const version = async (
+      world: OutWorld,
+      text: string,
+      readers: SourceReaders
+    ) => {
+      await add(text, readers, world.source);
+    };
+
     /**
      * What `readers.reader` and the one in both teams read of `world` and
      * of `twin`, `versions` versions each: where each marker is current,
-     * where it shows at all, and how the reader's reads differ from the
-     * twin's.
+     * where the out one shows at all, and how the reader's reads differ
+     * from the twin's.
      */
     const outcomeOf = async (
-      readers: Awaited<ReturnType<typeof outReaders>>,
+      readers: OutReaders,
       world: OutWorld,
       twin: OutWorld,
       versions: number
@@ -4254,18 +4295,24 @@ describe(
         versions
       );
       const marked = (name: string) => world.markers[name] ?? "";
+      // The memories planted that state a marker of their own.
+      const planted = Object.keys(world.memories).filter(
+        (name) => name in world.markers
+      );
       return {
         reader: {
           current: Object.fromEntries(
-            ["out", "keep"].map((name) => [name, currentIn(ours, marked(name))])
+            visibleNames
+              .filter((name) => planted.includes(name))
+              .map((name) => [name, currentIn(ours, marked(name))])
           ),
           hidden: ["hidden out", "hidden keep"].flatMap((name) =>
             shownIn(ours, marked(name))
           ),
-          unlikeTwin: unlikeTwin(world, ours, twin, theirs),
+          unlikeTwin: await unlikeTwin(world, ours, twin, theirs),
         },
         both: Object.fromEntries(
-          outNames.map((name) => [name, currentIn(both, marked(name))])
+          planted.map((name) => [name, currentIn(both, marked(name))])
         ),
         history: shownIn(ours, marked("out")),
       };
@@ -4274,29 +4321,144 @@ describe(
     /** Where a memory that is out shows to a reader of it: as history alone. */
     const historySurfaces = ["memories", "the Brain page's memories"];
 
-    /** A world's first two versions for `team`: both quotes, then the out one dropped, with its memories. */
-    const outWorldOf = async (
-      readers: Awaited<ReturnType<typeof outReaders>>,
-      world: OutWorld,
-      { hidden }: { hidden: boolean }
+    /**
+     * The first version of each world for the team, saying both quotes,
+     * and its memories, each in an add of its own, so a page or a card
+     * orders them by when each was learned alone: the out one and its
+     * control, and in a world with `hidden` a hidden team's two, with
+     * `rich` a rival of the out one's one-value status in a writer's word
+     * (which stays current), two contact relations, one out for good
+     * (its quote no later version says) and one kept,
+     * and a fact of each contact, which a reader reaches only along its
+     * relation. Step by step, each step for every world before the next, so
+     * the worlds' events come in the same order.
+     */
+    const plantFirst = async (
+      readers: OutReaders,
+      worlds: readonly { world: OutWorld; hidden: boolean }[],
+      { rich = false }: { rich?: boolean } = {}
     ) => {
-      const teamReaders: SourceReaders = { kind: "team", teamId: readers.team };
-      await add(
-        textHolding(world.depot, "out", "keep"),
-        teamReaders,
-        world.source
-      );
-      await remember(world, `team:${readers.team}`, 1, {
-        out: "out",
-        keep: "keep",
-      });
-      if (hidden) {
-        await remember(world, `team:${readers.hiddenTeam}`, 1, {
-          "hidden out": "out",
-          "hidden keep": "keep",
-        });
+      const group = `team:${readers.team}`;
+      const hiddenGroup = `team:${readers.hiddenTeam}`;
+      const steps: ((world: OutWorld, hidden: boolean) => Promise<void>)[] = [
+        async (world) => {
+          await version(
+            world,
+            textHolding(world.depot, "out", "keep", "gone"),
+            readers.teamReaders
+          );
+        },
+        async (world) => {
+          await remember(world, group, 1, {
+            out: rich ? { quote: "out", attribute: "status" } : "out",
+          });
+        },
+        async (world) => {
+          await remember(world, group, 1, { keep: "keep" });
+        },
+        async (world, hidden) => {
+          if (hidden) {
+            await remember(world, hiddenGroup, 1, { "hidden out": "out" });
+          }
+        },
+        async (world, hidden) => {
+          if (hidden) {
+            await remember(world, hiddenGroup, 1, { "hidden keep": "keep" });
+          }
+        },
+        async (world) => {
+          if (rich) {
+            await remember(world, group, 1, {
+              rival: { attribute: "status" },
+            });
+          }
+        },
+        async (world) => {
+          if (rich) {
+            await remember(world, group, 1, {
+              "out contact": { quote: "gone", contact: "p1" },
+            });
+          }
+        },
+        async (world) => {
+          if (rich) {
+            await remember(world, group, 1, {
+              "keep contact": { quote: "keep", contact: "p2" },
+            });
+          }
+        },
+        async (world) => {
+          if (rich) {
+            await remember(world, group, 1, {
+              "reached by out contact": { quote: "keep", about: "p1" },
+            });
+            await remember(world, group, 1, {
+              "reached by keep contact": { quote: "keep", about: "p2" },
+            });
+          }
+        },
+      ];
+      for (const write of steps) {
+        for (const { world, hidden } of worlds) {
+          // oxlint-disable-next-line no-await-in-loop -- a step at a time, every world in it
+          await write(world, hidden);
+        }
       }
-      await add(textHolding(world.depot, "keep"), teamReaders, world.source);
+    };
+
+    /** Each world's second version, at step 10: the out quote dropped. */
+    const dropOut = async (readers: OutReaders, ...worlds: OutWorld[]) => {
+      for (const world of worlds) {
+        // oxlint-disable-next-line no-await-in-loop -- one world at a time
+        await version(
+          world,
+          textHolding(world.depot, "keep"),
+          readers.teamReaders
+        );
+      }
+    };
+
+    /** Each world's first two versions and its memories (`plantFirst`, `dropOut`). */
+    const outWorldOf = async (
+      readers: OutReaders,
+      worlds: readonly { world: OutWorld; hidden: boolean }[],
+      options: { rich?: boolean } = {}
+    ) => {
+      await plantFirst(readers, worlds, options);
+      await dropOut(readers, ...worlds.map(({ world }) => world));
+    };
+
+    /**
+     * Two worlds whose memories are drawn from their first version once
+     * the second is current, step by step: the out one and its control,
+     * and the first world's hidden two.
+     */
+    const lateWorlds = async (
+      readers: OutReaders,
+      world: OutWorld,
+      twin: OutWorld
+    ) => {
+      const group = `team:${readers.team}`;
+      const hiddenGroup = `team:${readers.hiddenTeam}`;
+      for (const each of [world, twin]) {
+        // oxlint-disable-next-line no-await-in-loop -- a step at a time
+        await version(
+          each,
+          textHolding(each.depot, "out", "keep"),
+          readers.teamReaders
+        );
+      }
+      await dropOut(readers, world, twin);
+      for (const each of [world, twin]) {
+        // oxlint-disable-next-line no-await-in-loop -- a step at a time
+        await remember(each, group, 1, { out: "out" });
+      }
+      for (const each of [world, twin]) {
+        // oxlint-disable-next-line no-await-in-loop -- a step at a time
+        await remember(each, group, 1, { keep: "keep" });
+      }
+      await remember(world, hiddenGroup, 1, { "hidden out": "out" });
+      await remember(world, hiddenGroup, 1, { "hidden keep": "keep" });
     };
 
     /** What every case expects once its memory is out: nothing current of it, its control current everywhere. */
@@ -4315,62 +4477,128 @@ describe(
       history: historySurfaces,
     };
 
-    it("gives no reader a memory current once its source's current version drops its quote, and every reader it again once a later one says it, whatever they may not read", async () => {
+    it("gives no reader a memory current once its source's current version drops its quote, not as a contested value or a relation either, and every reader it again once a later one says it, whatever they may not read", async () => {
       const readers = await outReaders();
       const [world, twin] = worldAndTwin();
-      await outWorldOf(readers, world, { hidden: true });
-      await outWorldOf(readers, twin, { hidden: false });
+      await plantFirst(
+        readers,
+        [
+          { world, hidden: true },
+          { world: twin, hidden: false },
+        ],
+        { rich: true }
+      );
+      // Before: the out one's status contests its rival's.
+      const before = await outReadsOf(
+        readers.reader,
+        readers.readerReads,
+        world,
+        1
+      );
+      await dropOut(readers, world, twin);
       const once = await outcomeOf(readers, world, twin, 2);
-      const teamReaders: SourceReaders = { kind: "team", teamId: readers.team };
       for (const each of [world, twin]) {
         // oxlint-disable-next-line no-await-in-loop -- one world at a time
-        await add(
+        await version(
+          each,
           textHolding(each.depot, "out", "keep"),
-          teamReaders,
-          each.source
+          readers.teamReaders
         );
       }
       const again = await outcomeOf(readers, world, twin, 3);
       // What the whole company may read, through an App's read too.
       const company = newWorld("shared", newSource(), outNames);
       const everyone: SourceReaders = { kind: "everyone" };
-      await add(
+      await version(
+        company,
         textHolding(company.depot, "out", "keep"),
-        everyone,
-        company.source
+        everyone
       );
-      await remember(company, "company", 1, { out: "out", keep: "keep" });
-      await add(textHolding(company.depot, "keep"), everyone, company.source);
+      await remember(company, "company", 1, { out: "out" });
+      await remember(company, "company", 1, { keep: "keep" });
+      await version(company, textHolding(company.depot, "keep"), everyone);
       const companyReads = await outReadsOf(
         readers.reader,
         readers.readerReads,
         company,
         2
       );
+      const marked = (name: string) => world.markers[name] ?? "";
+      // Where a fact of a person reached along a current relation shows:
+      // what recall finds by walking from the customer it names.
+      const walkSurfaces = memorySurfaces.filter(
+        (name) =>
+          name.startsWith("recall") || name === "the Brain page's search"
+      );
+      // Where a current memory shows when it contests another, besides.
+      const contestedToo = [
+        ...memorySurfaces.slice(0, -1),
+        "contested",
+        ...memorySurfaces.slice(-1),
+      ];
 
       expect({
+        contestedBefore: ["out", "rival"].map((name) =>
+          currentIn({ contested: before.contested }, marked(name))
+        ),
         company: ["out", "keep"].map((name) =>
           currentIn(companyReads, company.markers[name] ?? "")
         ),
         once,
         again,
       }).toStrictEqual({
+        contestedBefore: [["contested"], ["contested"]],
         company: [[], companyMemorySurfaces],
-        once: outcomeOnceOut,
+        once: {
+          ...outcomeOnceOut,
+          reader: {
+            ...outcomeOnceOut.reader,
+            current: {
+              out: [],
+              keep: memorySurfaces,
+              rival: memorySurfaces,
+              "out contact": [],
+              "keep contact": memorySurfaces,
+              "reached by out contact": [],
+              "reached by keep contact": walkSurfaces,
+            },
+          },
+          both: {
+            ...outcomeOnceOut.both,
+            rival: memorySurfaces,
+            "out contact": [],
+            "keep contact": memorySurfaces,
+            "reached by out contact": [],
+            "reached by keep contact": walkSurfaces,
+          },
+        },
         again: {
           reader: {
-            current: { out: memorySurfaces, keep: memorySurfaces },
+            current: {
+              out: contestedToo,
+              keep: memorySurfaces,
+              rival: contestedToo,
+              "out contact": [],
+              "keep contact": memorySurfaces,
+              "reached by out contact": [],
+              "reached by keep contact": walkSurfaces,
+            },
             hidden: [],
             unlikeTwin: [],
           },
           both: {
-            out: memorySurfaces,
+            out: contestedToo,
             keep: memorySurfaces,
             "hidden out": memorySurfaces,
             "hidden keep": memorySurfaces,
+            rival: contestedToo,
+            "out contact": [],
+            "keep contact": memorySurfaces,
+            "reached by out contact": [],
+            "reached by keep contact": walkSurfaces,
           },
           // Current again, and so where every current memory shows.
-          history: memorySurfaces,
+          history: contestedToo,
         },
       });
     });
@@ -4378,31 +4606,21 @@ describe(
     it("gives a reader nothing of a source whose current version they may not read, alike whether that version drops a quote, and its readers the memory out", async () => {
       const readers = await outReaders();
       const [world, twin] = worldAndTwin();
-      const teamReaders: SourceReaders = { kind: "team", teamId: readers.team };
       const hiddenReaders: SourceReaders = {
         kind: "team",
         teamId: readers.hiddenTeam,
       };
-      for (const each of [world, twin]) {
-        // oxlint-disable-next-line no-await-in-loop -- one world at a time
-        await add(
-          textHolding(each.depot, "out", "keep"),
-          teamReaders,
-          each.source
-        );
-        // oxlint-disable-next-line no-await-in-loop -- one world at a time
-        await remember(each, `team:${readers.team}`, 1, {
-          out: "out",
-          keep: "keep",
-        });
-      }
+      await plantFirst(readers, [
+        { world, hidden: false },
+        { world: twin, hidden: false },
+      ]);
       // The current version, for a team the reader isn't in: the world's
       // drops the out quote, the twin's says it still.
-      await add(textHolding(world.depot, "keep"), hiddenReaders, world.source);
-      await add(
+      await version(world, textHolding(world.depot, "keep"), hiddenReaders);
+      await version(
+        twin,
         textHolding(twin.depot, "out", "keep"),
-        hiddenReaders,
-        twin.source
+        hiddenReaders
       );
       const readerReads = async (each: OutWorld) =>
         await outReadsOf(readers.reader, readers.readerReads, each, 2);
@@ -4417,10 +4635,10 @@ describe(
         await bothReads(twin),
       ];
       // Said again for the reader's team: theirs again, and current.
-      await add(
+      await version(
+        world,
         textHolding(world.depot, "out", "keep"),
-        teamReaders,
-        world.source
+        readers.teamReaders
       );
       const said = await readerReads(world);
 
@@ -4428,7 +4646,7 @@ describe(
         nothing: ["out", "keep"].flatMap((name) =>
           shownIn(ours, world.markers[name] ?? "")
         ),
-        unlikeTwin: unlikeTwin(world, ours, twin, theirs),
+        unlikeTwin: await unlikeTwin(world, ours, twin, theirs),
         both: {
           world: currentIn(bothOurs, world.markers.out ?? ""),
           twin: currentIn(bothTheirs, twin.markers.out ?? ""),
@@ -4450,9 +4668,10 @@ describe(
       ]);
       const world = newWorld("own", newSource(), outNames, holder);
       const theirs: SourceReaders = { kind: "owner", personId: holder };
-      await add(textHolding(world.depot, "out", "keep"), theirs, world.source);
-      await remember(world, "", 1, { out: "out", keep: "keep" });
-      await add(textHolding(world.depot, "keep"), theirs, world.source);
+      await version(world, textHolding(world.depot, "out", "keep"), theirs);
+      await remember(world, "", 1, { out: "out" });
+      await remember(world, "", 1, { keep: "keep" });
+      await version(world, textHolding(world.depot, "keep"), theirs);
       const marked = (name: string) => world.markers[name] ?? "";
       const own = await outReadsOf(
         holder,
@@ -4482,19 +4701,23 @@ describe(
       });
     });
 
-    it("hands a person's chat no memory out of use before a question, and the memory its version still says", async () => {
+    it("sends the model no memory out of use in what a person's chat recalls before a question, and the memory its version still says", async () => {
+      // What the turn sends the model, through a Teams direct message:
+      // not the chat's stored copy of it, which keeps what a turn handed
+      // over while it was current, as it keeps what was narrowed since.
       await chatAgentReadsBrain();
       const ann = await teamsMember(idp, says("Noted."));
       const team = await newTeam(ann.userId);
       const world = newWorld("shared", newSource(), outNames);
       const teamReaders: SourceReaders = { kind: "team", teamId: team };
-      await add(
+      await version(
+        world,
         textHolding(world.depot, "out", "keep"),
-        teamReaders,
-        world.source
+        teamReaders
       );
-      await remember(world, `team:${team}`, 1, { out: "out", keep: "keep" });
-      await add(textHolding(world.depot, "keep"), teamReaders, world.source);
+      await remember(world, `team:${team}`, 1, { out: "out" });
+      await remember(world, `team:${team}`, 1, { keep: "keep" });
+      await version(world, textHolding(world.depot, "keep"), teamReaders);
       const before = ann.provider.requests.length;
       await post(
         messageFrom(ann.teams, { text: `What about depot ${world.depot}?` })
@@ -4510,69 +4733,51 @@ describe(
       }).toStrictEqual({ answered: true, out: false, keep: true });
     });
 
-    it("judges a late memory on an earlier version as it is added, for every reader alike", async () => {
+    it("judges a late memory on an earlier version as it is added, for every reader alike, and confirms, corrects or forgets it as a memory nobody holds", async () => {
       const readers = await outReaders();
       const [world, twin] = worldAndTwin();
-      const teamReaders: SourceReaders = { kind: "team", teamId: readers.team };
-      for (const each of [world, twin]) {
-        // oxlint-disable-next-line no-await-in-loop -- one world at a time
-        await add(
-          textHolding(each.depot, "out", "keep"),
-          teamReaders,
-          each.source
-        );
-        // oxlint-disable-next-line no-await-in-loop -- one world at a time
-        await add(textHolding(each.depot, "keep"), teamReaders, each.source);
-        // Drawn from the first version once the second is current.
-        // oxlint-disable-next-line no-await-in-loop -- one world at a time
-        await remember(each, `team:${readers.team}`, 1, {
-          out: "out",
-          keep: "keep",
-        });
-      }
-      await remember(world, `team:${readers.hiddenTeam}`, 1, {
-        "hidden out": "out",
-        "hidden keep": "keep",
-      });
+      await lateWorlds(readers, world, twin);
+      const outcome = await outcomeOf(readers, world, twin, 2);
+      // Last: a correction adds a memory of the reader's own.
+      const writes = await writesOf(readers.reader, world, ["out", "keep"]);
 
-      await expect(outcomeOf(readers, world, twin, 2)).resolves.toStrictEqual(
-        outcomeOnceOut
-      );
+      expect({
+        outcome,
+        out: writes.out,
+        keep: writes.keep,
+      }).toStrictEqual({
+        outcome: outcomeOnceOut,
+        // Confirmed and forgotten as nobody's memory. A correction takes
+        // any memory the reader may read, an ended one included
+        // (`correctAs`), so it answers for the out one as for a current
+        // one: it tells them nothing a read doesn't.
+        out: {
+          confirm: writes["nobody's"]?.confirm,
+          correct: "corrected",
+          forget: writes["nobody's"]?.forget,
+        },
+        keep: { confirm: "done", correct: "corrected", forget: "nothing" },
+      });
     });
 
     it("gives no reader a memory current once the catch-up judges what an older release's version and late memory left, an unfinished pass's included, and every reader alike before", async () => {
       const readers = await outReaders();
-      const teamReaders: SourceReaders = { kind: "team", teamId: readers.team };
+      const group = `team:${readers.team}`;
+      const hiddenGroup = `team:${readers.hiddenTeam}`;
       const [versionWorld, versionTwin] = worldAndTwin();
       const [lateWorld, lateTwin] = worldAndTwin();
       const [passWorld, passTwin] = worldAndTwin();
       // An older release's version: the second, on the twins.
-      await outWorldOf(readers, versionWorld, { hidden: true });
-      await outWorldOf(readers, versionTwin, { hidden: false });
+      await outWorldOf(readers, [
+        { world: versionWorld, hidden: true },
+        { world: versionTwin, hidden: false },
+      ]);
       for (const each of [versionWorld, versionTwin]) {
         // oxlint-disable-next-line no-await-in-loop -- one world at a time
         await asIfOlderVersion(each, 1);
       }
       // An older release's late memories on the first version.
-      for (const each of [lateWorld, lateTwin]) {
-        // oxlint-disable-next-line no-await-in-loop -- one world at a time
-        await add(
-          textHolding(each.depot, "out", "keep"),
-          teamReaders,
-          each.source
-        );
-        // oxlint-disable-next-line no-await-in-loop -- one world at a time
-        await add(textHolding(each.depot, "keep"), teamReaders, each.source);
-        // oxlint-disable-next-line no-await-in-loop -- one world at a time
-        await remember(each, `team:${readers.team}`, 1, {
-          out: "out",
-          keep: "keep",
-        });
-      }
-      await remember(lateWorld, `team:${readers.hiddenTeam}`, 1, {
-        "hidden out": "out",
-        "hidden keep": "keep",
-      });
+      await lateWorlds(readers, lateWorld, lateTwin);
       for (const each of [lateWorld, lateTwin]) {
         for (const name of Object.keys(each.memories)) {
           // oxlint-disable-next-line no-await-in-loop -- one memory at a time
@@ -4581,39 +4786,50 @@ describe(
       }
       // A pass under way past the second version's first memory, then an
       // older release's late memory on the first: behind the pass's place.
-      for (const each of [passWorld, passTwin]) {
-        // oxlint-disable-next-line no-await-in-loop -- one world at a time
-        await add(
+      const pass = [passWorld, passTwin];
+      const eachOf = async (write: (world: OutWorld) => Promise<void>) => {
+        for (const world of pass) {
+          // oxlint-disable-next-line no-await-in-loop -- a step at a time
+          await write(world);
+        }
+      };
+      await eachOf(async (each) => {
+        await version(
+          each,
           textHolding(each.depot, "out", "keep"),
-          teamReaders,
-          each.source
+          readers.teamReaders
         );
-        // oxlint-disable-next-line no-await-in-loop -- one world at a time
-        await remember(each, `team:${readers.team}`, 1, { keep: "keep" });
-        // oxlint-disable-next-line no-await-in-loop -- one world at a time
-        await add(
-          `${textHolding(each.depot, "out", "keep")} Revised.`,
-          teamReaders,
-          each.source
-        );
-        // oxlint-disable-next-line no-await-in-loop -- one world at a time
-        await remember(each, `team:${readers.team}`, 2, {
-          "keep on the second": "keep",
-          "keep after": "keep",
-        });
-        // oxlint-disable-next-line no-await-in-loop -- one world at a time
-        await add(textHolding(each.depot, "keep"), teamReaders, each.source);
-        // oxlint-disable-next-line no-await-in-loop -- one world at a time
-        await midPass(each, "keep on the second", 2);
-        // oxlint-disable-next-line no-await-in-loop -- one world at a time
-        await remember(each, `team:${readers.team}`, 1, { out: "out" });
-        // oxlint-disable-next-line no-await-in-loop -- one world at a time
-        await asIfOlderLate(each, "out");
-      }
-      await remember(passWorld, `team:${readers.hiddenTeam}`, 1, {
-        "hidden out": "out",
-        "hidden keep": "keep",
       });
+      await eachOf(async (each) => {
+        await remember(each, group, 1, { keep: "keep" });
+      });
+      await eachOf(async (each) => {
+        await version(
+          each,
+          `${textHolding(each.depot, "out", "keep")} Revised.`,
+          readers.teamReaders
+        );
+      });
+      await eachOf(async (each) => {
+        await remember(each, group, 2, { "keep on the second": "keep" });
+      });
+      await eachOf(async (each) => {
+        await remember(each, group, 2, { "keep after": "keep" });
+      });
+      await eachOf(async (each) => {
+        await version(
+          each,
+          textHolding(each.depot, "keep"),
+          readers.teamReaders
+        );
+        await midPass(each, "keep on the second", 2);
+      });
+      await eachOf(async (each) => {
+        await remember(each, group, 1, { out: "out" });
+        await asIfOlderLate(each, "out");
+      });
+      await remember(passWorld, hiddenGroup, 1, { "hidden out": "out" });
+      await remember(passWorld, hiddenGroup, 1, { "hidden keep": "keep" });
       await asIfOlderLate(passWorld, "hidden out");
       await asIfOlderLate(passWorld, "hidden keep");
       const cases = {
@@ -4657,15 +4873,39 @@ describe(
       });
     });
 
-    it("judges again after new word rules start part-way through a pass, and after `memories` is made anew, for every reader alike", async () => {
+    it("judges again after new word rules, a judged source and one part-way through a pass both, and after `memories` is made anew, for every reader alike", async () => {
       const readers = await outReaders();
       const [world, twin] = worldAndTwin();
-      await outWorldOf(readers, world, { hidden: true });
-      await outWorldOf(readers, twin, { hidden: false });
-      for (const each of [world, twin]) {
+      const [passWorld, passTwin] = worldAndTwin();
+      for (const [one, other] of [
+        [world, twin],
+        [passWorld, passTwin],
+      ] as const) {
+        // oxlint-disable-next-line no-await-in-loop -- one pair at a time
+        await outWorldOf(readers, [
+          { world: one, hidden: true },
+          { world: other, hidden: false },
+        ]);
+      }
+      for (const each of [passWorld, passTwin]) {
         // oxlint-disable-next-line no-await-in-loop -- one world at a time
         await midPass(each, "keep", 1);
       }
+      // The judged pair's judging held, so what the new rules leave of it
+      // shows before the catch-up judges it again.
+      const hold = "leaks_test_holds_the_judged";
+      await inStoreOf("brain", (sql) => {
+        sql.exec(
+          `CREATE TRIGGER ${hold} BEFORE UPDATE OF judged_row ON current_versions
+          WHEN NEW.source IN ('${world.key}', '${twin.key}') AND NEW.judged_row IS NOT NULL
+          BEGIN SELECT RAISE(ABORT, 'held by the test'); END`
+        );
+      });
+      onTestFinished(async () => {
+        await inStoreOf("brain", (sql) => {
+          sql.exec(`DROP TRIGGER IF EXISTS ${hold}`);
+        });
+      });
       // A release with new word rules: the rebuild starts on the next tick.
       await inStoreOf("brain", (sql) => {
         sql.exec(
@@ -4681,8 +4921,16 @@ describe(
       }
       // The rules are set again only once a rebuild is done (words.ts).
       const rebuilt = (await wordRulesOf()) > 0;
-      await caughtUp(world, twin);
-      const rules = await outcomeOf(readers, world, twin, 2);
+      // Judged by the rules before: no judgment counts, for anyone alike.
+      const between = await outcomeOf(readers, world, twin, 2);
+      await inStoreOf("brain", (sql) => {
+        sql.exec(`DROP TRIGGER ${hold}`);
+      });
+      await caughtUp(world, twin, passWorld, passTwin);
+      const rules = {
+        judged: await outcomeOf(readers, world, twin, 2),
+        pass: await outcomeOf(readers, passWorld, passTwin, 2),
+      };
       // A migration that makes `memories` anew: the cascade takes every in
       // and out row, and the migration clears every `judged_row`.
       await inStoreOf("brain", (sql) => {
@@ -4694,10 +4942,20 @@ describe(
       await caughtUp(world, twin);
       const anew = await outcomeOf(readers, world, twin, 2);
 
-      expect({ words, rebuilt, rules, anew }).toStrictEqual({
+      expect({
+        words,
+        rebuilt,
+        between: {
+          out: between.reader.current.out,
+          unlikeTwin: between.reader.unlikeTwin,
+        },
+        rules,
+        anew,
+      }).toStrictEqual({
         words: "current",
         rebuilt: true,
-        rules: outcomeOnceOut,
+        between: { out: memorySurfaces, unlikeTwin: [] },
+        rules: { judged: outcomeOnceOut, pass: outcomeOnceOut },
         anew: outcomeOnceOut,
       });
     });
@@ -4706,7 +4964,6 @@ describe(
       const readers = await outReaders();
       const uploader = await signedInApi(idp, "user");
       await join(readers.team, uploader.userId);
-      const teamReaders: SourceReaders = { kind: "team", teamId: readers.team };
       const [turnHeld, passHeld] = [
         newWorld("shared", newSource(), outNames),
         newWorld("shared", newSource(), outNames),
@@ -4714,25 +4971,25 @@ describe(
       const [rest, restTwin] = worldAndTwin();
       for (const each of [turnHeld, passHeld]) {
         // oxlint-disable-next-line no-await-in-loop -- one world at a time
-        await outWorldOf(readers, each, { hidden: false });
+        await outWorldOf(readers, [{ world: each, hidden: false }]);
       }
-      await outWorldOf(readers, rest, { hidden: true });
-      await outWorldOf(readers, restTwin, { hidden: false });
+      await outWorldOf(readers, [
+        { world: rest, hidden: true },
+        { world: restTwin, hidden: false },
+      ]);
       // An upload of the team's, with memories on its first version.
       const uploadDepot = outWord("d");
       const { source: uploaded } = await uploader.api.brainSources.upload(
         transcriptOf(textHolding(uploadDepot, "out", "keep")),
-        teamReaders,
+        readers.teamReaders,
         crypto.randomUUID()
       );
       const upload = {
         ...newWorld("shared", uploaded, outNames),
         depot: uploadDepot,
       };
-      await remember(upload, `team:${readers.team}`, 1, {
-        out: "out",
-        keep: "keep",
-      });
+      await remember(upload, `team:${readers.team}`, 1, { out: "out" });
+      await remember(upload, `team:${readers.team}`, 1, { keep: "keep" });
       await uploader.api.brainSources.uploadVersion(
         uploaded.id,
         transcriptOf(textHolding(uploadDepot, "keep")),
@@ -4751,12 +5008,12 @@ describe(
       });
       await eraseSource(env, {
         source: turnHeld.source,
-        readers: teamReaders,
+        readers: readers.teamReaders,
         reason: "deleted",
       });
       await eraseSource(env, {
         source: passHeld.source,
-        readers: teamReaders,
+        readers: readers.teamReaders,
         reason: "deleted",
       });
       await uploader.api.brainSources.deleteUpload(uploaded.id);
@@ -4807,7 +5064,10 @@ describe(
       const readers = await outReaders();
       const group = `team:${readers.team}`;
       const thread = newWorld("shared", newSource(), outNames);
-      for (const held of [["out", "keep"], ["keep"]] as const) {
+      for (const [step, held] of [
+        [1, ["out", "keep"]],
+        [10, ["keep"]],
+      ] as const) {
         // oxlint-disable-next-line no-await-in-loop -- one message at a time
         await sharedStore().addSource({
           source: thread.key,
@@ -4816,9 +5076,11 @@ describe(
           access: { kind: "audience", group },
           thread: true,
         });
-        if (held.length === 2) {
+        if (step === 1) {
           // oxlint-disable-next-line no-await-in-loop -- once, on the first
-          await remember(thread, group, 1, { out: "out", keep: "keep" });
+          await remember(thread, group, 1, { out: "out" });
+          // oxlint-disable-next-line no-await-in-loop -- once, on the first
+          await remember(thread, group, 1, { keep: "keep" });
         }
       }
       const threadReads = await outReadsOf(
@@ -4845,7 +5107,8 @@ describe(
         text: textHolding(whole.depot, "out", "keep"),
         after: 0,
       });
-      await remember(whole, "", 1, { out: "out", keep: "keep" });
+      await remember(whole, "", 1, { out: "out" });
+      await remember(whole, "", 1, { keep: "keep" });
       await addInstructionFile(env, {
         file,
         change: crypto.randomUUID(),
@@ -4898,15 +5161,19 @@ describe(
       ) {
         throw new Error("Five worlds");
       }
-      for (const [world, hidden] of [
-        [first, true],
-        [firstTwin, false],
-        [gate, false],
-        [last, true],
-        [lastTwin, false],
-      ] as const) {
-        // oxlint-disable-next-line no-await-in-loop -- one world at a time
-        await outWorldOf(readers, world, { hidden });
+      for (const worlds of [
+        [
+          { world: first, hidden: true },
+          { world: firstTwin, hidden: false },
+        ],
+        [{ world: gate, hidden: false }],
+        [
+          { world: last, hidden: true },
+          { world: lastTwin, hidden: false },
+        ],
+      ]) {
+        // oxlint-disable-next-line no-await-in-loop -- one clock at a time
+        await outWorldOf(readers, worlds);
       }
       const { id = "" } = await adminRequest(
         admin.session,
@@ -4934,6 +5201,13 @@ describe(
           WHEN NEW.source = '${gate.key}' AND NEW.judged_row IS NOT NULL
           BEGIN SELECT RAISE(ABORT, 'held by the test'); END`
         );
+      });
+      // Gone whatever ends the test: a hold left would stop the shared
+      // store's catch-up for every test after.
+      onTestFinished(async () => {
+        await inStoreOf("brain", (sql) => {
+          sql.exec(`DROP TRIGGER IF EXISTS ${hold}`);
+        });
       });
       const pairs = {
         first: [first, firstTwin],
