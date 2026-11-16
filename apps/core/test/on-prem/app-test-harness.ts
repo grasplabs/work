@@ -119,12 +119,12 @@ export const supervisor = (): Fetcher => {
 const noPlace = "no place";
 
 /**
- * How often `heldPlace` asks for a place, each ask waiting its while for
- * one: together far longer than a process takes to go and a new one to
- * start (scripts/workerd-sandbox.ts, `startupMs`). A place that never
- * frees fails with its refusal, not at the file's timeout.
+ * How often `heldPlace` asks for a place, each ask waiting about 3 s for
+ * one: a minute in all, far longer than a process takes to go and a new
+ * one to start (scripts/workerd-sandbox.ts, `startupMs`), and well inside
+ * the file's timeout, so a place that never frees fails with its refusal.
  */
-const placeAsks = 10;
+const placeAsks = 20;
 
 /**
  * Holds one of `owner`'s places in the sandbox with a session that spins,
