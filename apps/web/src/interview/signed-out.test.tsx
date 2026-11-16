@@ -535,7 +535,7 @@ const callsSince = (core: FakeCore, from: number) =>
     who,
   }));
 
-/** What waits in the tab, read as the page writes it: its version, the copy and the box. */
+/** What waits in the tab under the link's draft name, as the page writes it: its version, the copy and the box. */
 const asideSchemaOf = (raw: string) => {
   const parsed = z
     .object({
@@ -543,7 +543,7 @@ const asideSchemaOf = (raw: string) => {
       progress: z.unknown(),
       typed: z.string(),
     })
-    .parse(JSON.parse(raw.slice(raw.indexOf("=") + 1)));
+    .parse(JSON.parse(raw));
   return {
     version: parsed.version,
     progress: parsed.progress,
@@ -1314,7 +1314,9 @@ describe("the interview page when its session ends mid-interview", () => {
     await act(async () => {
       await Promise.resolve();
     });
-    const waiting = asideSchemaOf(stored());
+    const waiting = asideSchemaOf(
+      sessionStorage.getItem(await draftName(secret)) ?? "null"
+    );
     expect(waiting).toStrictEqual({
       version: core.version,
       progress: null,
@@ -1357,7 +1359,9 @@ describe("the interview page when its session ends mid-interview", () => {
     );
     const whilePaused = stored().includes("Said before the pause.");
     core.paused = false;
-    await backSignedIn();
+    // They open their link again once the interviews go on.
+    leave();
+    await load(`#${secret}`);
     await until(
       () =>
         linesKept(core).some((said) => said.includes("Said before the pause.")),
@@ -1422,11 +1426,20 @@ describe("the interview page when its session ends mid-interview", () => {
     const loops = countLoopStarts();
     await inConversation();
     core.who = "nobody";
-    const reopen = hold(core, "session");
+    // They sign in again in another tab the moment it ended, before this
+    // page asks for the link again.
+    const inner = globalThis.fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string, init?: RequestInit) => {
+        const answer = await inner(input, init);
+        if (input.endsWith("/api/interview/hear")) {
+          core.who = "them";
+        }
+        return answer;
+      })
+    );
     await heard();
-    // They signed in again in another tab meanwhile.
-    core.who = "them";
-    reopen();
     await until(() => loops.count > 1, "the conversation, again");
     await until(() => answerBox() !== null, "the answer box");
     const before = core.calls.length;
