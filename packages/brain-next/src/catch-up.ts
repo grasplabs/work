@@ -212,17 +212,28 @@ const takeTurn = (sql: SqlStorage): string | undefined => {
       )
       .toArray()
       .at(0)?.turn ?? null;
-  const firstAfter = (after: string | null): string | undefined =>
+  // Two statements, each a seek of the unjudged index: one form for both
+  // (`?1 IS NULL OR source > ?1`) scans it from its start every turn.
+  const firstAfter = (after: string): string | undefined =>
     sql
       .exec<{ source: string }>(
         `SELECT source FROM current_versions
-        WHERE judged_row IS NOT version_row AND (?1 IS NULL OR source > ?1)
+        WHERE judged_row IS NOT version_row AND source > ?1
         ORDER BY source LIMIT 1`,
         after
       )
       .toArray()
       .at(0)?.source;
-  const source = firstAfter(turn) ?? firstAfter(null);
+  const first = (): string | undefined =>
+    sql
+      .exec<{ source: string }>(
+        `SELECT source FROM current_versions
+        WHERE judged_row IS NOT version_row
+        ORDER BY source LIMIT 1`
+      )
+      .toArray()
+      .at(0)?.source;
+  const source = (turn === null ? undefined : firstAfter(turn)) ?? first();
   if (source === undefined) {
     // Nothing left: no key kept.
     sql.exec("UPDATE memory_judging SET turn = NULL WHERE id = 1");
@@ -301,44 +312,60 @@ const judgePage = (
   const steps = index?.steps() ?? 0;
   let judged = 0;
   let last = from;
-  // The source's index by version (`memories_version_idx`), its rows in
-  // order: read as written, never sorted, and no memory written meanwhile.
-  for (const { row, version, quote } of sql.exec<Judged>(
-    `SELECT row, version, quote FROM memories
-    WHERE source = ?1 AND version < ?2
-      AND (version > ?3 OR (version = ?3 AND row > ?4))
-    ORDER BY version, row`,
-    source,
-    current.version,
-    from.version,
-    from.row
-  )) {
-    const spentSteps = (index?.steps() ?? 0) - steps;
-    if (
-      judged > 0 &&
-      (spent.memories + judged >= limits.memories ||
-        spent.steps + spentSteps >= limits.steps)
-    ) {
-      spent.memories += judged;
-      spent.steps += spentSteps;
-      sql.exec(
-        `INSERT INTO memory_judging_places (source, version_row, after_version, after_row)
+  // The source's index by version (`memories_version_idx`, its rows in
+  // order after the version): read as written, never sorted, and no memory
+  // written meanwhile. Two seeks, the rest of the place's version past its
+  // row, then the versions after it: one statement for both (an `OR`, or a
+  // row value) seeks only to the version and reads its earlier rows again.
+  const seeks = [
+    () =>
+      sql.exec<Judged>(
+        `SELECT row, version, quote FROM memories
+        WHERE source = ?1 AND version = ?2 AND row > ?3
+        ORDER BY row`,
+        source,
+        from.version,
+        from.row
+      ),
+    () =>
+      sql.exec<Judged>(
+        `SELECT row, version, quote FROM memories
+        WHERE source = ?1 AND version > ?2 AND version < ?3
+        ORDER BY version, row`,
+        source,
+        from.version,
+        current.version
+      ),
+  ];
+  for (const seek of seeks) {
+    for (const { row, version, quote } of seek()) {
+      const spentSteps = (index?.steps() ?? 0) - steps;
+      if (
+        judged > 0 &&
+        (spent.memories + judged >= limits.memories ||
+          spent.steps + spentSteps >= limits.steps)
+      ) {
+        spent.memories += judged;
+        spent.steps += spentSteps;
+        sql.exec(
+          `INSERT INTO memory_judging_places (source, version_row, after_version, after_row)
         VALUES (?1, ?2, ?3, ?4)
         ON CONFLICT (source) DO UPDATE SET version_row = ?2, after_version = ?3, after_row = ?4`,
-        source,
-        current.row,
-        last.version,
-        last.row
-      );
-      return;
+          source,
+          current.row,
+          last.version,
+          last.row
+        );
+        return;
+      }
+      if (index !== null && isHeld(index, quote)) {
+        putIn(sql, row, source);
+      } else {
+        putOut(sql, row, source, quote);
+      }
+      judged += 1;
+      last = { version, row };
     }
-    if (index !== null && isHeld(index, quote)) {
-      putIn(sql, row, source);
-    } else {
-      putOut(sql, row, source, quote);
-    }
-    judged += 1;
-    last = { version, row };
   }
   spent.memories += judged;
   spent.steps += (index?.steps() ?? 0) - steps;
