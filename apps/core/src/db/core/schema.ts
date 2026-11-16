@@ -6172,6 +6172,7 @@ export const stephenRequests = sqliteTable(
     index("stephen_requests_day_idx").on(table.day),
     index("stephen_requests_person_idx").on(table.personId, table.chatId),
     index("stephen_requests_question_idx").on(table.questionId),
+    index("stephen_requests_topic_idx").on(table.topicId),
   ]
 );
 
