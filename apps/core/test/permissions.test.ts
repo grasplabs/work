@@ -822,7 +822,6 @@ describe("permissions", () => {
     // Test-only bindings aside, every name in core's env is the platform's.
     const testOnly = new Set([
       "CORE_MIGRATIONS",
-      "KNOWLEDGE_MIGRATIONS",
       "CONNECT_DB",
       "CONNECT_MIGRATIONS",
       "CONNECT_PROVIDERS",
