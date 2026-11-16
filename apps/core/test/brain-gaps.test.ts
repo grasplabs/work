@@ -4,7 +4,6 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { mockIdp } from "./idp.ts";
-import { purged } from "./knowledge-purge.ts";
 import {
   auditedDuring,
   openRpc,
@@ -783,7 +782,8 @@ describe("the brain's gap answers", { timeout: 120_000 }, () => {
     const readBefore = await admin.api.brain.read();
     const before = readBefore.gaps.find(({ id }) => id === ids.gap);
 
-    await purged(admin, leaver.userId);
+    await admin.api.members.remove(leaver.userId);
+    await admin.api.members.erase(leaver.userId, String(leaver.person.name));
     const readAfter = await admin.api.brain.read();
     const after = readAfter.gaps.find(({ id }) => id === ids.gap);
 

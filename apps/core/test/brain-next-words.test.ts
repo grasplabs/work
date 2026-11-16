@@ -466,6 +466,12 @@ describe(
         `De facturen van maart ${mark}`,
         await ownedBy(reader)
       );
+      // A passage mentioning a day: the rebuild rewrites its days with its
+      // words (dates.ts), and finds it by that day written otherwise.
+      const signed = await add(
+        `Signed March 14th, 2098 ${mark}`,
+        await ownedBy(reader)
+      );
       const street = await add(
         `Die Straße ist gesperrt ${mark}`,
         await ownedBy(reader)
@@ -486,6 +492,7 @@ describe(
         invoice: await recalledAs(reader, "factuur"),
         street: await recalledAs(reader, "strasse"),
         other: await recalledAs(other, "strasse"),
+        signed: await recalledAs(reader, "le 14 mars"),
         // The first rules' rows went: none is left beside the new ones.
         firstRules: await chunksFoundBy(mark, "straße"),
       }).toStrictEqual({
@@ -494,6 +501,7 @@ describe(
         invoice: [invoices],
         street: [street],
         other: [],
+        signed: [signed],
         firstRules: 0,
       });
     });

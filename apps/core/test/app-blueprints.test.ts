@@ -8,7 +8,6 @@ import { createFromBlueprint } from "../src/app-blueprints.ts";
 import { testApp, withFiles } from "./app-definitions.ts";
 import { commitApp, outlook, release, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
-import { storedGrant } from "./knowledge.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { racingDb } from "./racing-db.ts";
 import { calledAs } from "./sealed-apps.ts";
@@ -21,6 +20,7 @@ import {
   staffPerson,
   unique,
 } from "./sign-in.ts";
+import { storedGrant } from "./stored-grants.ts";
 import { connectDb } from "./test-env.ts";
 
 // Blueprints: a builder marks a version of an App as a blueprint, and

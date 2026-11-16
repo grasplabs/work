@@ -43,6 +43,14 @@ import { workflowResourceIdSchema } from "./ids.ts";
 // its record. The kickoff and the roster are sources of the new Brain
 // (GRA-1748), never records here.
 
+/**
+ * What the term purge, gone since GRA-1911, wrote in place of what it
+ * removed. Rows it rewrote before then may still hold it, so a team named
+ * with it is never joined by name (core's brain-rpc.ts); S7 of GRA-1735
+ * removes the guard with those rows.
+ */
+export const purgedMarker = "(removed)";
+
 /** Most records one `brain.addRecords` call adds, each named in its audit event. */
 export const brainRecordsMaxPerCall = 50;
 

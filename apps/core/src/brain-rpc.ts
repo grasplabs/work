@@ -15,14 +15,16 @@ import type {
   Vision,
   Workspace,
 } from "@grasp-os/shared/brain";
-import { onboardingIdPrefix } from "@grasp-os/shared/brain-records";
+import {
+  onboardingIdPrefix,
+  purgedMarker,
+} from "@grasp-os/shared/brain-records";
 import type {
   BrainRecordInput,
   BrainRecordsAdded,
 } from "@grasp-os/shared/brain-records";
 import type { ConnectionSource } from "@grasp-os/shared/connect";
 import type { KickoffView } from "@grasp-os/shared/kickoff";
-import { purgedMarker } from "@grasp-os/shared/knowledge";
 import { minTeamShown } from "@grasp-os/shared/onboarding";
 import type { OnboardingView } from "@grasp-os/shared/onboarding";
 import type { OnboardingDocument } from "@grasp-os/shared/onboarding-documents";
